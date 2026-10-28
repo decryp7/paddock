@@ -102,6 +102,9 @@ pub struct JobSpec {
     /// Set while the job cannot be interrupted (the OS prompt is the user's to answer): Cancel is off for the whole job
     /// and the events carry this reason.
     pub not_cancellable: Option<String>,
+    /// The body reports its own progress (bytes, items): the one-second count of a job with an unknown total is off, so it
+    /// cannot mix into the body's numbers.
+    pub own_progress: bool,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -267,6 +270,7 @@ where
     let id = ctx.id().0;
     let jobs = jobs.clone();
     // Declared before the job starts, so its very first event already says Cancel is off.
+    let own_progress = spec.own_progress;
     let guard = spec.not_cancellable.as_deref().map(|why| ctx.uncancellable(why));
     ctx.reporter().start();
     ctx.phase(Phase::discovering("work", &spec.phase));
@@ -278,7 +282,7 @@ where
         let joined = loop {
             tokio::select! {
                 r = &mut work => break r,
-                _ = tick.tick() => ctx.add(1),
+                _ = tick.tick(), if !own_progress => ctx.add(1),
             }
         };
         let result = joined.unwrap_or_else(|e| {
@@ -333,6 +337,7 @@ mod tests {
             title: "Loading the model".into(),
             phase: "Loading weights".into(),
             not_cancellable: not_cancellable.map(str::to_string),
+            own_progress: false,
         }
     }
 
@@ -387,6 +392,33 @@ mod tests {
             })
         );
         assert_eq!(kinds(&events).iter().filter(|k| *k == "done").count(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_job_that_reports_its_own_progress_is_not_mixed_with_the_seconds_count() {
+        let (sink, events) = collector();
+        let jobs = jobs();
+        let mut own = spec(None);
+        own.own_progress = true;
+        start(&jobs, own, sink, |ctx| async move {
+            ctx.set(1000);
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            Ok(Outcome::Done(Value::Null))
+        });
+        settle().await;
+        tokio::time::advance(Duration::from_secs(5)).await;
+        settle().await;
+        let done: Vec<u64> = lock(&events)
+            .iter()
+            .filter_map(|e| match e {
+                JobEvent::Progress { done, .. } => Some(*done),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            done.iter().all(|d| *d == 0 || *d == 1000),
+            "no seconds added to the body's count: {done:?}"
+        );
     }
 
     #[tokio::test(start_paused = true)]

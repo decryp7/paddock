@@ -142,7 +142,7 @@ impl Validate for PlaygroundRequest {
 pub async fn forward(client: &dyn ServerClient, method: &str, args: Value) -> Result<Value, CommandError> {
     let timeout = timeout_for(method);
     // The transport has its own timeout; this one also covers a client that never returns.
-    match tokio::time::timeout(timeout + Duration::from_secs(2), client.call(method, args, timeout)).await {
+    match tokio::time::timeout(timeout + Duration::from_secs(2), client.call(method, args, Some(timeout))).await {
         Ok(r) => r,
         Err(_) => Err(crate::server_client::timed_out(timeout)),
     }
@@ -569,7 +569,7 @@ mod tests {
     async fn forward_gives_up_when_a_client_never_answers() {
         struct Never;
         impl ServerClient for Never {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Duration) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(&'a self, _: &'a str, _: Value, _: Option<Duration>) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(std::future::pending())
             }
             fn open_stream<'a>(
@@ -661,7 +661,7 @@ mod tests {
         }
         struct Client;
         impl ServerClient for Client {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Duration) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(&'a self, _: &'a str, _: Value, _: Option<Duration>) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(async { Ok(Value::Null) })
             }
             fn open_stream<'a>(
@@ -696,7 +696,7 @@ mod tests {
         }
         struct Client;
         impl ServerClient for Client {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Duration) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(&'a self, _: &'a str, _: Value, _: Option<Duration>) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(async { Ok(Value::Null) })
             }
             fn open_stream<'a>(
@@ -734,7 +734,7 @@ mod tests {
         }
         struct Client(Arc<AtomicBool>);
         impl ServerClient for Client {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Duration) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(&'a self, _: &'a str, _: Value, _: Option<Duration>) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(async { Ok(Value::Null) })
             }
             fn open_stream<'a>(

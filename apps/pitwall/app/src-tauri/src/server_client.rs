@@ -27,8 +27,9 @@ pub const START_HINT: &str = "Use Repair service (Settings, Background service) 
 
 /// One request/response call per management method.
 pub trait ServerClient: Send + Sync {
-    /// Calls `method` with JSON `args` (camelCase) and waits at most `timeout`.
-    fn call<'a>(&'a self, method: &'a str, args: Value, timeout: Duration) -> BoxFuture<'a, Result<Value, CommandError>>;
+    /// Calls `method` with JSON `args` (camelCase) and waits at most `timeout`; `None` waits for as long as the connection
+    /// lives (a job's long operation): it ends when the server answers or the connection closes.
+    fn call<'a>(&'a self, method: &'a str, args: Value, timeout: Option<Duration>) -> BoxFuture<'a, Result<Value, CommandError>>;
 
     /// Opens a server-sent event stream: `GET path` without a body, or `POST path` with one. The head must arrive
     /// within `open_timeout`.
@@ -151,16 +152,21 @@ impl LoopbackClient {
         candidate_ports_with(text.as_deref(), self.try_default_port.then_some(DEFAULT_PORT))
     }
 
-    async fn call_once(&self, method: &str, args: &Value, timeout: Duration, key: Option<String>) -> Result<Value, CommandError> {
+    async fn call_once(&self, method: &str, args: &Value, timeout: Option<Duration>, key: Option<String>) -> Result<Value, CommandError> {
         let path = format!("/mgmt/v1/rpc/{method}");
         let mut last = unavailable();
         for port in self.ports() {
             let client = Client::new(port, key.clone());
-            match client.json("POST", &path, Some(args), timeout).await {
+            let sent = match timeout {
+                Some(t) => client.json("POST", &path, Some(args), t).await,
+                None => client.json_no_deadline("POST", &path, Some(args)).await,
+            };
+            match sent {
                 Ok((status, body)) if (200..300).contains(&status) => return Ok(body),
                 Ok((status, body)) => return Err(error_from_response(status, &body)),
                 Err(LoopbackError::Connect(..)) => last = unavailable(),
-                Err(e) => return Err(map_loopback_error(&e, timeout)),
+                // Only the connect timeout can fire without a deadline of the caller's own.
+                Err(e) => return Err(map_loopback_error(&e, timeout.unwrap_or(Duration::from_secs(3)))),
             }
         }
         Err(last)
@@ -168,7 +174,7 @@ impl LoopbackClient {
 }
 
 impl ServerClient for LoopbackClient {
-    fn call<'a>(&'a self, method: &'a str, args: Value, timeout: Duration) -> BoxFuture<'a, Result<Value, CommandError>> {
+    fn call<'a>(&'a self, method: &'a str, args: Value, timeout: Option<Duration>) -> BoxFuture<'a, Result<Value, CommandError>> {
         Box::pin(async move {
             if !valid_method(method) {
                 return Err(CommandError::new(ErrorCode::BadRequest, "not a management method"));
@@ -328,7 +334,7 @@ pub mod fake {
     }
 
     impl ServerClient for FakeServer {
-        fn call<'a>(&'a self, method: &'a str, args: Value, timeout: Duration) -> BoxFuture<'a, Result<Value, CommandError>> {
+        fn call<'a>(&'a self, method: &'a str, args: Value, timeout: Option<Duration>) -> BoxFuture<'a, Result<Value, CommandError>> {
             Box::pin(async move {
                 self.calls
                     .lock()
@@ -339,9 +345,14 @@ pub mod fake {
                     Some(Reply::Ok(v)) => Ok(v),
                     Some(Reply::Err(e)) => Err(e),
                     Some(Reply::Hang) => {
-                        // A real transport enforces its own timeout; the fake does the same.
-                        tokio::time::sleep(timeout).await;
-                        Err(timed_out(timeout))
+                        // A real transport enforces its own timeout (none: it waits for the connection); the fake does the same.
+                        match timeout {
+                            Some(t) => {
+                                tokio::time::sleep(t).await;
+                                Err(timed_out(t))
+                            }
+                            None => std::future::pending().await,
+                        }
                     }
                     None => Ok(Value::Null),
                 }
@@ -466,7 +477,7 @@ mod tests {
         let (port, seen) = serve_once(200, "application/json", r#"{"ok":true}"#.into()).await;
         let (_d, c) = client_for(port, "sekrit-key");
         let v = c
-            .call("set_serving", json!({"paused": true}), Duration::from_secs(5))
+            .call("set_serving", json!({"paused": true}), Some(Duration::from_secs(5)))
             .await
             .unwrap();
         assert_eq!(v, json!({"ok": true}));
@@ -480,7 +491,10 @@ mod tests {
     async fn the_servers_error_body_reaches_the_caller() {
         let (port, _h) = serve_once(409, "application/json", r#"{"code":"conflict","message":"already loaded"}"#.into()).await;
         let (_d, c) = client_for(port, "k");
-        let e = c.call("load_model", json!({"id": "m"}), Duration::from_secs(5)).await.unwrap_err();
+        let e = c
+            .call("load_model", json!({"id": "m"}), Some(Duration::from_secs(5)))
+            .await
+            .unwrap_err();
         assert_eq!((e.code, e.message.as_str()), (ErrorCode::Conflict, "already loaded"));
     }
 
@@ -494,7 +508,7 @@ mod tests {
         let (_d, c) = client_for(port, "k");
         // Hermetic: an installed Pitwall may listen on the well-known port, so only the discovery port is tried.
         let c = c.discovery_port_only();
-        let e = c.call("overview", Value::Null, Duration::from_secs(5)).await.unwrap_err();
+        let e = c.call("overview", Value::Null, Some(Duration::from_secs(5))).await.unwrap_err();
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
         assert!(e.message.contains("Repair service"));
         let e = c.open_stream("/mgmt/v1/live", None, Duration::from_secs(5)).await.err().unwrap();
@@ -512,7 +526,7 @@ mod tests {
         });
         let (_d, c) = client_for(port, "k");
         let started = std::time::Instant::now();
-        let e = c.call("overview", Value::Null, Duration::from_millis(300)).await.unwrap_err();
+        let e = c.call("overview", Value::Null, Some(Duration::from_millis(300))).await.unwrap_err();
         assert!(started.elapsed() < Duration::from_secs(10));
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
         assert!(e.message.contains("Retry"), "{}", e.message);
@@ -532,7 +546,7 @@ mod tests {
     #[tokio::test]
     async fn an_unknown_method_never_leaves_the_app() {
         let (_d, c) = client_for(11436, "k");
-        let e = c.call("../etc", Value::Null, Duration::from_secs(1)).await.unwrap_err();
+        let e = c.call("../etc", Value::Null, Some(Duration::from_secs(1))).await.unwrap_err();
         assert_eq!(e.code, ErrorCode::BadRequest);
     }
 
@@ -542,11 +556,14 @@ mod tests {
         let f = FakeServer::new();
         f.reply("overview", Reply::Ok(json!({"a": 1}))).reply("slow", Reply::Hang);
         assert_eq!(
-            f.call("overview", Value::Null, Duration::from_secs(1)).await.unwrap(),
+            f.call("overview", Value::Null, Some(Duration::from_secs(1))).await.unwrap(),
             json!({"a": 1})
         );
-        assert_eq!(f.call("other", Value::Null, Duration::from_secs(1)).await.unwrap(), Value::Null);
-        let e = f.call("slow", Value::Null, Duration::from_millis(20)).await.unwrap_err();
+        assert_eq!(
+            f.call("other", Value::Null, Some(Duration::from_secs(1))).await.unwrap(),
+            Value::Null
+        );
+        let e = f.call("slow", Value::Null, Some(Duration::from_millis(20))).await.unwrap_err();
         assert!(e.message.contains("Retry"));
         assert_eq!(f.calls().len(), 3);
         assert!(f.open_stream("/x", None, Duration::from_secs(1)).await.is_err());

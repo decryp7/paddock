@@ -201,7 +201,7 @@ mod tests {
         // A server whose stop never answers (an engine that will not die); the call's own timeout is far away.
         struct NeverStops;
         impl ServerClient for NeverStops {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: std::time::Duration) -> BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(&'a self, _: &'a str, _: Value, _: Option<std::time::Duration>) -> BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(std::future::pending())
             }
             fn open_stream<'a>(

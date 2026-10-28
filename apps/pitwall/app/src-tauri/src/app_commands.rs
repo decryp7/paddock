@@ -6,6 +6,7 @@ use crate::commands::{forward, SharedClient};
 use crate::jobs::{self, JobEvent, JobSink, JobSpec, Jobs, Outcome};
 use crate::service_install::{self, ServiceInstall};
 use crate::updater::{self, AppUpdateStatus, UpdateInfo};
+use paddock_jobs::{Phase, Unit};
 use pitwall_core::mgmt::{CommandError, ErrorCode};
 use serde_json::Value;
 use std::sync::Arc;
@@ -135,7 +136,7 @@ pub async fn check_app_update(app: AppHandle) -> Result<Option<UpdateInfo>, Comm
 /// Installs the update found by the last check, then restarts the app.
 #[tauri::command]
 pub async fn install_app_update(app: AppHandle) -> Result<(), CommandError> {
-    updater::install(&app).await
+    updater::install(&app, |_| {}).await
 }
 
 // Long operations as jobs (ER-17..19) on the shared executor. Each `start_*` returns the job id at once and reports on
@@ -153,67 +154,96 @@ fn spec(kind: &'static str, title: &str, phase: &str) -> JobSpec {
         title: title.into(),
         phase: phase.into(),
         not_cancellable: None,
+        own_progress: false,
     }
 }
 
-/// A job's call to the server has no deadline: a model load may take as long as the weights need. Whether the server is
-/// still there is [`server_gone`]'s question, not a clock's. (A year: far beyond any load, within every timer's range.)
-const NO_DEADLINE: Duration = Duration::from_secs(365 * 24 * 3600);
-/// How often a running job asks the server whether it is still alive.
-const LIVENESS_PERIOD: Duration = Duration::from_secs(5);
-/// How many pings in a row must go unanswered before the server counts as gone (a busy server may miss one).
-const LIVENESS_MISSES: u32 = 3;
+/// How long the server gets to stop the work after `cancel_op` was acknowledged. Not a limit on the operation (that has
+/// none): only on the server honouring a cancel. Past it the job says Cancel did not take effect.
+const CANCEL_GRACE: Duration = Duration::from_secs(15);
+/// What the job shows once Cancel did not take effect.
+const CANCEL_FAILED: &str = "The server did not stop this. It is still working and cannot be cancelled again from here.";
 
-/// Resolves, with the reason, once the server stopped answering: `LIVENESS_MISSES` pings in a row that could not reach it
-/// (refused, closed or unanswered within the ping's own short timeout). A server that answers with any error is alive.
-/// Together with the work call failing when its connection closes, this ends a job whose server died or hung, promptly
-/// and without a deadline on the operation itself.
-async fn server_gone(client: &SharedClient) -> CommandError {
-    let mut missed = 0;
-    loop {
-        tokio::time::sleep(LIVENESS_PERIOD).await;
-        match forward(client.as_ref(), "overview", Value::Null).await {
-            Err(e) if e.code == ErrorCode::ServerUnavailable => {
-                missed += 1;
-                if missed >= LIVENESS_MISSES {
-                    return CommandError::new(
-                        ErrorCode::ServerUnavailable,
-                        "Pitwall's server stopped answering while this was running, so it did not finish. Restart the background service and try again.",
-                    );
-                }
-            }
-            _ => missed = 0,
+/// A random per-run token for operation ids. Job ids restart at 1 on every launch of the app while the server keeps
+/// running, so an id made of the job number alone could meet a stale cancel stored for an earlier run's job.
+fn run_nonce() -> &'static str {
+    static NONCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NONCE.get_or_init(|| {
+        let mut b = [0u8; 8];
+        if getrandom::fill(&mut b).is_err() {
+            // No system randomness: the clock and the process id still differ between runs.
+            let t = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos() as u64);
+            b = (t ^ (u64::from(std::process::id()) << 32)).to_le_bytes();
         }
-    }
+        b.iter().map(|x| format!("{x:02x}")).collect()
+    })
 }
 
-/// Runs one server method as a cancellable job with no deadline. The call carries an `opId`; on Cancel the app sends
-/// `cancel_op` with it and the server stops the work and undoes it (a half-loaded model is not left behind, a benchmark
-/// stores nothing), then answers `{"cancelled": true}`, which ends the job as cancelled. If the server answers something
-/// else first, the work had finished and the job reports that. If the server dies or hangs, the job fails with that reason.
-fn server_job(jobs: &Arc<Jobs>, client: SharedClient, sink: JobSink, spec: JobSpec, method: &'static str, mut args: Value) -> u64 {
+/// The id the server knows an operation by: method, this run of the app and the job.
+fn op_id(nonce: &str, method: &str, job: u64) -> String {
+    format!("{method}-{nonce}-{job}")
+}
+
+/// Cancel did not take effect: say so, and stop offering Cancel (it cannot be repeated). Held until the job ends.
+fn cancel_failed(ctx: &paddock_jobs::JobContext) -> paddock_jobs::UncancellableGuard {
+    ctx.phase(Phase::discovering("cancel-failed", "Could not cancel"));
+    ctx.uncancellable(CANCEL_FAILED)
+}
+
+/// Runs one server method as a cancellable job with no deadline. The call carries an `opId`; on Cancel the job shows
+/// "Cancelling" and the app sends `cancel_op` with it, and the server stops the work and undoes it (a half-loaded model is
+/// not left behind, a benchmark stores nothing), then answers `{"cancelled": true}`, which ends the job as cancelled. If
+/// the server answers something else first, the work had finished and the job reports that. If the server refuses the
+/// cancel or does not stop within [`CANCEL_GRACE`], the job says so and goes on.
+///
+/// No liveness polling (ADR 0024 rule 2): the call is one connection, and a server that dies closes it, which fails the
+/// call and so the job at once.
+fn server_job(
+    jobs: &Arc<Jobs>,
+    client: SharedClient,
+    sink: JobSink,
+    spec: JobSpec,
+    nonce: &str,
+    method: &'static str,
+    mut args: Value,
+) -> u64 {
+    let nonce = nonce.to_string();
     jobs::start(jobs, spec, sink, move |ctx| async move {
-        // Unique per job and per run of the app; the server forgets it when the work ends.
-        let op_id = format!("{method}-{}", ctx.id().0);
+        let op_id = op_id(&nonce, method, ctx.id().0);
         args["opId"] = Value::String(op_id.clone());
-        let work = client.call(method, args, NO_DEADLINE);
+        let work = client.call(method, args, None);
         tokio::pin!(work);
         let cancel = jobs::cancelled(ctx.cancel_token());
         tokio::pin!(cancel);
-        let gone = server_gone(&client);
-        tokio::pin!(gone);
         let mut asked = false;
+        let mut grace: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
+        let mut failed_guard = None;
         let reply = loop {
             tokio::select! {
                 r = &mut work => break r,
-                e = &mut gone => break Err(e),
                 () = &mut cancel, if !asked => {
                     asked = true;
-                    // Best effort: when the server cannot be reached the work call fails too, which ends the job.
-                    let _ = forward(client.as_ref(), "cancel_op", serde_json::json!({ "opId": op_id })).await;
+                    ctx.phase(Phase::discovering("cancel", "Cancelling"));
+                    match forward(client.as_ref(), "cancel_op", serde_json::json!({ "opId": op_id })).await {
+                        Ok(_) => grace = Some(Box::pin(tokio::time::sleep(CANCEL_GRACE))),
+                        // Refused or unreachable (an unreachable server also fails the work call, which ends the job).
+                        Err(_) => failed_guard = Some(cancel_failed(&ctx)),
+                    }
+                }
+                () = async {
+                    match grace.as_mut() {
+                        Some(g) => g.await,
+                        None => std::future::pending().await,
+                    }
+                }, if grace.is_some() => {
+                    grace = None;
+                    failed_guard = Some(cancel_failed(&ctx));
                 }
             }
         }?;
+        drop(failed_guard);
         Ok(if reply.get("cancelled") == Some(&Value::Bool(true)) {
             Outcome::Cancelled
         } else {
@@ -237,6 +267,7 @@ pub async fn start_load_model(
         client.inner().clone(),
         channel_sink(on_event),
         spec,
+        run_nonce(),
         "load_model",
         serde_json::json!({ "id": id }),
     ))
@@ -257,6 +288,7 @@ pub async fn start_benchmark(
         client.inner().clone(),
         channel_sink(on_event),
         spec,
+        run_nonce(),
         "run_benchmark",
         serde_json::json!({ "modelId": model_id }),
     ))
@@ -320,16 +352,39 @@ async fn state_json(client: &SharedClient) -> Result<Value, CommandError> {
 }
 
 /// Downloads and installs the update in the background (`install_app_update` as a job); the app restarts when it is done.
-/// Cancel drops the download, which leaves the installed version untouched.
+/// The download reports bytes. Cancel drops the download, which leaves the installed version untouched and the found update
+/// in place for another try.
 #[tauri::command]
 pub async fn start_app_update(app: AppHandle, jobs: State<'_, Arc<Jobs>>, on_event: Channel<JobEvent>) -> Result<u64, CommandError> {
-    let spec = spec("app-update", "Updating Pitwall", "Downloading and installing the update");
+    let mut spec = spec("app-update", "Updating Pitwall", "Downloading the update");
+    spec.own_progress = true;
     Ok(jobs::start(jobs.inner(), spec, channel_sink(on_event), move |ctx| async move {
+        ctx.phase(Phase {
+            id: "download".into(),
+            label: "Downloading the update".into(),
+            unit: Unit::Bytes,
+            total: None,
+        });
+        let progress = ctx.clone();
+        let report = move |p| apply_install_progress(&progress, p);
         tokio::select! {
-            r = updater::install(&app) => r.map(|()| Outcome::Done(Value::Null)),
+            r = updater::install(&app, report) => r.map(|()| Outcome::Done(Value::Null)),
             () = jobs::cancelled(ctx.cancel_token()) => Ok(Outcome::Cancelled),
         }
     }))
+}
+
+/// Shows an install's progress on its job: bytes (and the size when known) while downloading, then the install phase.
+fn apply_install_progress(ctx: &paddock_jobs::JobContext, p: updater::InstallProgress) {
+    match p {
+        updater::InstallProgress::Downloading { done, total } => {
+            if let Some(t) = total {
+                ctx.set_total(t);
+            }
+            ctx.set(done);
+        }
+        updater::InstallProgress::Installing => ctx.phase(Phase::discovering("install", "Installing the update")),
+    }
 }
 
 /// Cancels a job. `true` when the request was made; `false` for an unknown or finished job, or one in a step that cannot
@@ -345,30 +400,132 @@ mod tests {
     use crate::server_client::{BoxFuture, FrameStream, ServerClient};
     use pitwall_core::mgmt::ErrorCode;
     use std::sync::Mutex;
-    use tokio::sync::Notify;
+    use tokio::sync::{watch, Notify};
 
-    /// A server whose long methods run until `cancel_op` arrives, then answer as the real one does: `{"cancelled": true}`.
-    #[derive(Default)]
+    /// Only a bound on how long a broken test waits, in virtual time; a passing test never reaches it.
+    const GUARD: Duration = Duration::from_secs(24 * 3600);
+    const NONCE: &str = "00aa11bb22cc33dd";
+
+    /// The events a job sent, with a way to wait for a condition on them instead of yielding a fixed number of times.
+    struct Events {
+        log: Mutex<Vec<JobEvent>>,
+        changed: watch::Sender<usize>,
+    }
+
+    impl Events {
+        fn all(&self) -> Vec<JobEvent> {
+            self.log.lock().unwrap().clone()
+        }
+        fn last(&self) -> Option<JobEvent> {
+            self.log.lock().unwrap().last().cloned()
+        }
+        async fn until(&self, what: &str, pred: impl Fn(&[JobEvent]) -> bool) {
+            let mut rx = self.changed.subscribe();
+            let waited = tokio::time::timeout(GUARD, async {
+                loop {
+                    if pred(&self.log.lock().unwrap()) {
+                        return;
+                    }
+                    rx.changed().await.unwrap();
+                }
+            })
+            .await;
+            assert!(waited.is_ok(), "never happened: {what}; events: {:?}", self.all());
+        }
+        async fn until_terminal(&self) {
+            self.until("the job ended", |e| {
+                e.iter()
+                    .any(|e| matches!(e, JobEvent::Done { .. } | JobEvent::Failed { .. } | JobEvent::Cancelled { .. }))
+            })
+            .await;
+        }
+    }
+
+    fn collector() -> (JobSink, Arc<Events>) {
+        let (changed, _) = watch::channel(0);
+        let events = Arc::new(Events {
+            log: Mutex::default(),
+            changed,
+        });
+        let e2 = events.clone();
+        (
+            Arc::new(move |e| {
+                e2.log.lock().unwrap().push(e);
+                e2.changed.send_modify(|n| *n += 1);
+            }),
+            events,
+        )
+    }
+
+    fn progress_phase(e: &JobEvent) -> Option<&str> {
+        match e {
+            JobEvent::Progress { phase, .. } => Some(phase),
+            _ => None,
+        }
+    }
+
+    /// A server whose long methods run until `cancel_op` arrives (and is honoured), then answer as the real one does:
+    /// `{"cancelled": true}`.
     struct CancelAware {
         calls: Mutex<Vec<(String, Value)>>,
+        called: watch::Sender<usize>,
         cancel: Notify,
         /// Finish the long methods with this instead of waiting for a cancel.
         finish_with: Mutex<Option<Value>>,
+        /// What `cancel_op` answers.
+        cancel_reply: Mutex<Result<Value, CommandError>>,
+        /// Whether `cancel_op` really stops the work.
+        honours_cancel: bool,
+        /// Lets an ignored-cancel work finish.
+        release: Notify,
+    }
+
+    impl CancelAware {
+        fn new() -> CancelAware {
+            CancelAware {
+                calls: Mutex::default(),
+                called: watch::channel(0).0,
+                cancel: Notify::new(),
+                finish_with: Mutex::default(),
+                cancel_reply: Mutex::new(Ok(Value::Null)),
+                honours_cancel: true,
+                release: Notify::new(),
+            }
+        }
+        fn calls(&self) -> Vec<(String, Value)> {
+            self.calls.lock().unwrap().clone()
+        }
+        /// Resolves once the server has received `n` calls.
+        async fn received(&self, n: usize) {
+            let mut rx = self.called.subscribe();
+            tokio::time::timeout(GUARD, rx.wait_for(|c| *c >= n))
+                .await
+                .expect("the call arrives")
+                .unwrap();
+        }
     }
 
     impl ServerClient for CancelAware {
-        fn call<'a>(&'a self, method: &'a str, args: Value, _timeout: Duration) -> BoxFuture<'a, Result<Value, CommandError>> {
+        fn call<'a>(&'a self, method: &'a str, args: Value, _timeout: Option<Duration>) -> BoxFuture<'a, Result<Value, CommandError>> {
             Box::pin(async move {
                 self.calls.lock().unwrap().push((method.to_string(), args));
+                self.called.send_modify(|n| *n += 1);
                 if method == "cancel_op" {
-                    self.cancel.notify_one();
-                    return Ok(Value::Null);
+                    if self.honours_cancel {
+                        self.cancel.notify_one();
+                    }
+                    return self.cancel_reply.lock().unwrap().clone();
                 }
                 if let Some(v) = self.finish_with.lock().unwrap().clone() {
                     return Ok(v);
                 }
-                self.cancel.notified().await;
-                Ok(serde_json::json!({ "cancelled": true }))
+                if self.honours_cancel {
+                    self.cancel.notified().await;
+                    Ok(serde_json::json!({ "cancelled": true }))
+                } else {
+                    self.release.notified().await;
+                    Ok(serde_json::json!({ "loaded": true }))
+                }
             })
         }
 
@@ -382,34 +539,22 @@ mod tests {
         }
     }
 
-    fn collector() -> (JobSink, Arc<Mutex<Vec<JobEvent>>>) {
-        let events: Arc<Mutex<Vec<JobEvent>>> = Arc::default();
-        let e2 = events.clone();
-        (Arc::new(move |e| e2.lock().unwrap().push(e)), events)
-    }
-
-    async fn settle() {
-        for _ in 0..16 {
-            tokio::task::yield_now().await;
-        }
-    }
-
     fn jobs() -> Arc<Jobs> {
         Arc::new(Jobs::with_clock(Arc::new(paddock_jobs::FakeClock::new()), 0))
     }
 
     /// Starts the job, cancels it and checks what the app told the server and the UI.
     async fn cancelling(method: &'static str, args: Value, kind: &'static str) {
-        let server = Arc::new(CancelAware::default());
+        let server = Arc::new(CancelAware::new());
         let client: SharedClient = server.clone();
         let (sink, events) = collector();
         let jobs = jobs();
-        let id = server_job(&jobs, client, sink, spec(kind, "t", "p"), method, args);
-        settle().await;
+        let id = server_job(&jobs, client, sink, spec(kind, "t", "p"), NONCE, method, args);
+        server.received(1).await;
         assert_eq!(jobs.running(), 1, "still working, no timeout");
         assert!(jobs.cancel(id));
-        settle().await;
-        let calls = server.calls.lock().unwrap().clone();
+        events.until_terminal().await;
+        let calls = server.calls();
         let work_op = calls[0].1["opId"].as_str().unwrap().to_string();
         assert_eq!(calls[0].0, method);
         assert_eq!(
@@ -418,9 +563,13 @@ mod tests {
             "the server is told to undo it"
         );
         assert_eq!(jobs.running(), 0);
-        let ev = events.lock().unwrap();
+        let ev = events.all();
         assert_eq!(ev.last(), Some(&JobEvent::Cancelled { job_id: id }));
         assert_eq!(ev.iter().filter(|e| matches!(e, JobEvent::Cancelled { .. })).count(), 1);
+        assert!(
+            ev.iter().any(|e| progress_phase(e) == Some("Cancelling")),
+            "the job shows it is cancelling"
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -435,7 +584,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn work_that_finished_before_the_cancel_arrived_reports_its_result() {
-        let server = Arc::new(CancelAware::default());
+        let server = Arc::new(CancelAware::new());
         *server.finish_with.lock().unwrap() = Some(serde_json::json!({ "genTps": 5.0 }));
         let client: SharedClient = server.clone();
         let (sink, events) = collector();
@@ -445,18 +594,84 @@ mod tests {
             client,
             sink,
             spec("benchmark", "t", "p"),
+            NONCE,
             "run_benchmark",
             serde_json::json!({ "modelId": "m" }),
         );
-        settle().await;
+        events.until_terminal().await;
         assert_eq!(
-            events.lock().unwrap().last(),
-            Some(&JobEvent::Done {
+            events.last(),
+            Some(JobEvent::Done {
                 job_id: id,
                 result: serde_json::json!({ "genTps": 5.0 })
             })
         );
         assert!(!jobs.cancel(id), "nothing left to cancel");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_server_that_ignores_the_cancel_makes_the_job_say_so_instead_of_leaving_cancel_on() {
+        let mut server = CancelAware::new();
+        server.honours_cancel = false;
+        let server = Arc::new(server);
+        let client: SharedClient = server.clone();
+        let (sink, events) = collector();
+        let jobs = jobs();
+        let id = server_job(
+            &jobs,
+            client,
+            sink,
+            spec("load-model", "t", "p"),
+            NONCE,
+            "load_model",
+            serde_json::json!({ "id": "m" }),
+        );
+        server.received(1).await;
+        assert!(jobs.cancel(id));
+        events
+            .until("it shows Cancelling", |e| e.iter().any(|e| progress_phase(e) == Some("Cancelling")))
+            .await;
+        // The server acknowledged but never stops: after the grace the job says Cancel did not take effect.
+        events
+            .until("it says the cancel failed", |e| {
+                matches!(e.last(), Some(JobEvent::Progress { phase, cancellable: false, not_cancellable_reason: Some(_), .. }) if phase == "Could not cancel")
+            })
+            .await;
+        assert_eq!(jobs.running(), 1, "the work goes on and is still reported");
+        assert!(!jobs.cancel(id), "Cancel is off, not silently enabled");
+        // The work finishing later still ends the job with its result.
+        server.release.notify_one();
+        events.until_terminal().await;
+        assert!(matches!(events.last(), Some(JobEvent::Done { .. })), "{:?}", events.last());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_server_that_refuses_the_cancel_makes_the_job_say_so_at_once() {
+        let mut server = CancelAware::new();
+        server.honours_cancel = false;
+        *server.cancel_reply.lock().unwrap() = Err(CommandError::new(ErrorCode::NotFound, "no such method"));
+        let server = Arc::new(server);
+        let client: SharedClient = server.clone();
+        let (sink, events) = collector();
+        let jobs = jobs();
+        let id = server_job(
+            &jobs,
+            client,
+            sink,
+            spec("load-model", "t", "p"),
+            NONCE,
+            "load_model",
+            serde_json::json!({ "id": "m" }),
+        );
+        server.received(1).await;
+        assert!(jobs.cancel(id));
+        events
+            .until(
+                "it says the cancel failed",
+                |e| matches!(e.last(), Some(JobEvent::Progress { phase, cancellable: false, .. }) if phase == "Could not cancel"),
+            )
+            .await;
+        assert_eq!(jobs.running(), 1);
     }
 
     #[tokio::test(start_paused = true)]
@@ -474,12 +689,13 @@ mod tests {
             client,
             sink,
             spec("load-model", "t", "p"),
+            NONCE,
             "load_model",
             serde_json::json!({ "id": "m" }),
         );
-        settle().await;
+        events.until_terminal().await;
         assert!(matches!(
-            events.lock().unwrap().last(),
+            events.last(),
             Some(JobEvent::Failed { error, .. }) if error.code == ErrorCode::InsufficientMemory
         ));
     }
@@ -491,29 +707,48 @@ mod tests {
         assert!(spec("load-model", "t", "p").not_cancellable.is_none());
     }
 
-    /// A server that answers pings (`overview`) at once and works for `work_takes` on the (paused) clock, or never answers
-    /// the work and, from `dies_after` calls to `overview`, no longer answers pings either.
+    /// Two runs of the app both start their first job as number 1 while the server keeps running: the operation ids must
+    /// differ, or a cancel stored for the earlier run's job would stop the later run's.
+    #[tokio::test(start_paused = true)]
+    async fn operation_ids_differ_between_runs_of_the_app_even_when_the_job_numbers_repeat() {
+        async fn first_op_id(nonce: &str) -> String {
+            let server = Arc::new(CancelAware::new());
+            let client: SharedClient = server.clone();
+            let (sink, _events) = collector();
+            let jobs = jobs();
+            let id = server_job(
+                &jobs,
+                client,
+                sink,
+                spec("load-model", "t", "p"),
+                nonce,
+                "load_model",
+                serde_json::json!({ "id": "m" }),
+            );
+            assert_eq!(id, 1, "job numbers restart with each run");
+            server.received(1).await;
+            server.calls()[0].1["opId"].as_str().unwrap().to_string()
+        }
+        let (a, b) = (first_op_id("1111111111111111").await, first_op_id("2222222222222222").await);
+        assert_ne!(a, b);
+        assert!(a.starts_with("load_model-1111111111111111-"), "{a}");
+        // This run's own token is random, stable within the run and made of hex digits only.
+        let n = run_nonce();
+        assert_eq!(n, run_nonce());
+        assert_eq!(n.len(), 16);
+        assert!(n.bytes().all(|b| b.is_ascii_hexdigit()));
+    }
+
+    /// A server that works for `work_takes` on the (paused) clock, or never answers the work.
     struct Timed {
         work_takes: Option<Duration>,
-        alive_pings: Mutex<Option<u32>>,
-        timeouts: Mutex<Vec<(String, Duration)>>,
+        calls: Mutex<Vec<(String, Option<Duration>)>>,
     }
 
     impl ServerClient for Timed {
-        fn call<'a>(&'a self, method: &'a str, _args: Value, timeout: Duration) -> BoxFuture<'a, Result<Value, CommandError>> {
+        fn call<'a>(&'a self, method: &'a str, _args: Value, timeout: Option<Duration>) -> BoxFuture<'a, Result<Value, CommandError>> {
             Box::pin(async move {
-                self.timeouts.lock().unwrap().push((method.to_string(), timeout));
-                if method == "overview" {
-                    let mut left = self.alive_pings.lock().unwrap();
-                    return match left.as_mut() {
-                        Some(0) => Err(crate::server_client::unavailable()),
-                        Some(n) => {
-                            *n -= 1;
-                            Ok(Value::Null)
-                        }
-                        None => Ok(Value::Null),
-                    };
-                }
+                self.calls.lock().unwrap().push((method.to_string(), timeout));
                 match self.work_takes {
                     Some(d) => {
                         tokio::time::sleep(d).await;
@@ -534,20 +769,22 @@ mod tests {
         }
     }
 
-    /// Moves the fake clock forward `secs` seconds, one second at a time so every timer fires in order.
-    async fn run_for(secs: u64) {
-        for _ in 0..secs {
-            tokio::time::advance(Duration::from_secs(1)).await;
-            settle().await;
-        }
+    fn seconds_counted(e: &[JobEvent]) -> u64 {
+        e.iter()
+            .filter_map(|e| match e {
+                // One tick a second while the total is unknown.
+                JobEvent::Progress { done, .. } => Some(*done),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_load_that_takes_longer_than_the_old_600_second_limit_still_completes() {
+    async fn a_load_that_takes_longer_than_the_old_600_second_limit_still_completes_with_no_deadline_and_no_polling() {
         let server = Arc::new(Timed {
             work_takes: Some(Duration::from_secs(1500)),
-            alive_pings: Mutex::new(None),
-            timeouts: Mutex::default(),
+            calls: Mutex::default(),
         });
         let client: SharedClient = server.clone();
         let (sink, events) = collector();
@@ -557,34 +794,31 @@ mod tests {
             client,
             sink,
             spec("load-model", "t", "p"),
+            NONCE,
             "load_model",
             serde_json::json!({ "id": "m" }),
         );
-        run_for(700).await;
+        events.until("past 700 s", |e| seconds_counted(e) >= 700).await;
         assert_eq!(jobs.running(), 1, "past 600 s and still working");
-        run_for(801).await;
+        events.until_terminal().await;
         assert_eq!(
-            events.lock().unwrap().last(),
-            Some(&JobEvent::Done {
+            events.last(),
+            Some(JobEvent::Done {
                 job_id: id,
                 result: serde_json::json!({ "loaded": true })
             })
         );
-        let t = server.timeouts.lock().unwrap();
-        assert!(
-            t.iter().any(|(m, d)| m == "load_model" && *d > Duration::from_secs(3600)),
-            "the work call has no practical deadline"
-        );
+        // One call, no deadline, and nothing else asked of the server meanwhile (ADR 0024: no polling).
+        assert_eq!(*server.calls.lock().unwrap(), vec![("load_model".to_string(), None)]);
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_server_that_dies_mid_load_fails_the_job_within_a_few_pings() {
+    async fn a_job_waiting_for_a_silent_server_for_hours_makes_no_other_call() {
         let server = Arc::new(Timed {
             work_takes: None,
-            alive_pings: Mutex::new(Some(2)),
-            timeouts: Mutex::default(),
+            calls: Mutex::default(),
         });
-        let client: SharedClient = server;
+        let client: SharedClient = server.clone();
         let (sink, events) = collector();
         let jobs = jobs();
         server_job(
@@ -592,16 +826,13 @@ mod tests {
             client,
             sink,
             spec("load-model", "t", "p"),
+            NONCE,
             "load_model",
             serde_json::json!({ "id": "m" }),
         );
-        // Two answered pings, then three missed ones: 5 pings, 5 seconds apart.
-        run_for(30).await;
-        assert_eq!(jobs.running(), 0, "ended long before any 600 s limit");
-        assert!(matches!(
-            events.lock().unwrap().last(),
-            Some(JobEvent::Failed { error, .. }) if error.code == ErrorCode::ServerUnavailable && error.message.contains("stopped answering")
-        ));
+        events.until("three hours", |e| seconds_counted(e) >= 3 * 3600).await;
+        assert_eq!(jobs.running(), 1, "still working, never timed out");
+        assert_eq!(server.calls.lock().unwrap().len(), 1, "no overview or ping");
     }
 
     #[tokio::test(start_paused = true)]
@@ -619,10 +850,59 @@ mod tests {
             client,
             sink,
             spec("load-model", "t", "p"),
+            NONCE,
             "load_model",
             serde_json::json!({ "id": "m" }),
         );
-        settle().await;
-        assert!(matches!(events.lock().unwrap().last(), Some(JobEvent::Failed { .. })));
+        events.until_terminal().await;
+        assert!(matches!(events.last(), Some(JobEvent::Failed { error, .. }) if error.code == ErrorCode::ServerUnavailable));
+    }
+
+    #[test]
+    fn an_install_reports_bytes_then_the_install_phase() {
+        let jobs = jobs();
+        let (sink, events) = collector();
+        let spec = {
+            let mut s = spec("app-update", "t", "Downloading the update");
+            s.own_progress = true;
+            s
+        };
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .start_paused(true)
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            jobs::start(&jobs, spec, sink, |ctx| async move {
+                ctx.phase(Phase {
+                    id: "download".into(),
+                    label: "Downloading the update".into(),
+                    unit: Unit::Bytes,
+                    total: None,
+                });
+                apply_install_progress(&ctx, updater::InstallProgress::Downloading { done: 100, total: None });
+                apply_install_progress(
+                    &ctx,
+                    updater::InstallProgress::Downloading {
+                        done: 400,
+                        total: Some(1000),
+                    },
+                );
+                apply_install_progress(&ctx, updater::InstallProgress::Installing);
+                Ok(Outcome::Done(Value::Null))
+            });
+            events.until_terminal().await;
+        });
+        let all = events.all();
+        let bytes: Vec<(u64, Option<u64>)> = all
+            .iter()
+            .filter_map(|e| match e {
+                JobEvent::Progress { phase, done, total, .. } if phase == "Downloading the update" => Some((*done, *total)),
+                _ => None,
+            })
+            .collect();
+        assert!(bytes.contains(&(100, None)) && bytes.contains(&(400, Some(1000))), "{bytes:?}");
+        assert!(bytes.windows(2).all(|w| w[0].0 <= w[1].0), "never backwards: {bytes:?}");
+        assert!(all.iter().any(|e| progress_phase(e) == Some("Installing the update")));
     }
 }
