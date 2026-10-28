@@ -639,6 +639,7 @@ jobs:
           app-id: ${{ matrix.app }}
           processes: ${{ matrix.processes }}
           process-patterns: ${{ matrix.process_patterns }}
+          temp-prefix: ${{ matrix.app }}-it-
 
       # The kept build folder stays within its cap (this job's own folder only, after the builds).
       - uses: ./.gitea/actions/prune-build-folder

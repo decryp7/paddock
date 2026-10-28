@@ -10,6 +10,9 @@ inputs:
   process-patterns:
     description: "Patterns for `pkill -f`, one per line. Scope each to the app's own temp path (e.g. the $TMPDIR/pitcrew- prefix): a loose pattern kills other jobs' processes, and never `gitea-runner`, which is the real runner."
     default: ""
+  temp-prefix:
+    description: "Start of the temp folders to remove ($TMPDIR/<prefix>*). Empty: <app-id>-. A kit app passes <app-id>-it-: only folders its tests create, never the installed product's own scratch folders."
+    default: ""
   build-outputs:
     description: "'true' also removes dist, the target folder's dist and debug, and the app's dist and coverage."
     default: "false"
@@ -21,6 +24,7 @@ runs:
         APP_ID: ${{ inputs.app-id }}
         PROCESSES: ${{ inputs.processes }}
         PATTERNS: ${{ inputs.process-patterns }}
+        TEMP_PREFIX: ${{ inputs.temp-prefix }}
         BUILD_OUTPUTS: ${{ inputs.build-outputs }}
       run: |
         args=(--id "$APP_ID")
@@ -28,5 +32,6 @@ runs:
         while IFS= read -r pat; do
           if [ -n "$pat" ]; then args+=(--process-pattern "$pat"); fi
         done <<< "$PATTERNS"
+        if [ -n "$TEMP_PREFIX" ]; then args+=(--temp-prefix "$TEMP_PREFIX"); fi
         if [ "$BUILD_OUTPUTS" = true ]; then args+=(--build-outputs); fi
         bash "${{ github.action_path }}/../../../tools/host-cleanup.sh" "${args[@]}" || true

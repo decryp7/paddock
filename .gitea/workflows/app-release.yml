@@ -249,6 +249,7 @@ jobs:
         if: always() && runner.os != 'Linux'
         with:
           app-id: ${{ inputs.app-id }}
+          temp-prefix: ${{ inputs.app-id }}-it-
 
       # The kept build folder stays within its cap; the installers are already in the artifact.
       - uses: ./.paddock/.gitea/actions/prune-build-folder

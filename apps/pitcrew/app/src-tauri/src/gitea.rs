@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn a_damaged_cache_starts_over_and_masked_jobs_are_not_looked_up() {
-        let f = std::env::temp_dir().join(format!("pitcrew-jobcache-{}.json", std::process::id()));
+        let f = std::env::temp_dir().join(format!("pitcrew-it-jobcache-{}.json", std::process::id()));
         std::fs::write(&f, "{broken").unwrap();
         let job = FinishedJob {
             info: JobInfo {

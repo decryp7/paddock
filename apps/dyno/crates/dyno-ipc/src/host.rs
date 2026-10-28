@@ -284,7 +284,7 @@ mod tests {
             format!(r"\\.\pipe\dyno-test-fixed-{id}")
         } else {
             std::env::temp_dir()
-                .join(format!("dyno-fx-{id}.sock"))
+                .join(format!("dyno-it-fx-{id}.sock"))
                 .to_string_lossy()
                 .into_owned()
         }

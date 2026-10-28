@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { executableIn, platformId } from '../ci/install-test-browser.mjs';
@@ -1021,6 +1021,41 @@ test('every host job that keeps a build folder caps it at the end, with the shar
   assert.ok(rel.indexOf('actions/prune-build-folder') > rel.indexOf('actions/upload-artifact'), 'only after the installers are uploaded');
   const action = read(join(ACTIONS, 'prune-build-folder', 'action.yml'));
   assert.match(action, /dir="\$\{PADDOCK_BUILD_FOLDER:-\}"/, 'only the job\'s own build folder');
-  assert.match(action, /prune-build-folders\.sh" "\$dir" "\$MAX_GB"/);
+  assert.match(action, /prune-ci-build-folder\.sh" "\$dir" "\$MAX_GB"/, 'through the guard that accepts only target-* in the CI home');
   assert.match(action, /default: "20"/, 'the cap the old Dyno workflow had');
+});
+
+// host-cleanup removes $TMPDIR/<prefix>* on a user's Mac: a kit app's prefix must name only what its tests create.
+function runtimeTempPrefixes(app) {
+  const found = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === 'target' || e.name === 'node_modules' || e.name === 'tests') continue;
+      const f = join(dir, e.name);
+      if (e.isDirectory()) walk(f);
+      else if (e.name.endsWith('.rs') && !/(^|_)tests?\.rs$/.test(e.name)) {
+        let text = read(f);
+        const at = text.search(/#\[cfg\(test\)\]|#\[cfg\(all\(test[^\]]*\]|^mod tests \{/m);
+        if (at >= 0) text = text.slice(0, at); // test modules close the file
+        for (const m of text.matchAll(/temp_dir\(\)[\s\S]{0,40}?\.join\(\s*(?:format!\()?"([A-Za-z][\w-]*)/g)) found.push([relative(PADDOCK, f), m[1]]);
+        for (const m of text.matchAll(/\.prefix\(\s*(?:&format!\()?"([\w-]+)/g)) found.push([relative(PADDOCK, f), m[1]]);
+        for (const m of text.matchAll(/\.join\(format!\("([A-Za-z][\w]*-[\w-]*)/g)) found.push([relative(PADDOCK, f), m[1]]);
+      }
+    }
+  };
+  walk(join(PADDOCK, 'apps', app));
+  return found;
+}
+
+test("a kit app's host-cleanup temp sweep is <app>-it- and is a prefix of no temp folder its product creates at run time", () => {
+  assert.match(read(join(WORKFLOWS, 'ci.yml')), /uses: \.\/\.gitea\/actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ matrix\.app \}\}-it-\n/, 'ci.yml sweeps <app>-it-');
+  assert.match(read(join(WORKFLOWS, 'app-release.yml')), /actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ inputs\.app-id \}\}-it-\n/, 'app-release.yml sweeps <app>-it-');
+  const dyno = runtimeTempPrefixes('dyno').map(([, p]) => p);
+  assert.ok(dyno.includes('dyno-bench-') && dyno.some((p) => p === 'dyno-'), `the scan finds Dyno's own scratch folders (${dyno})`);
+  for (const app of KIT_APPS) {
+    const sweep = `${app}-it-`;
+    for (const [file, prefix] of runtimeTempPrefixes(app)) {
+      assert.ok(!prefix.startsWith(sweep), `${file}: the product creates ${prefix}*, which the sweep ${sweep}* would delete on a user's machine`);
+    }
+  }
 });
