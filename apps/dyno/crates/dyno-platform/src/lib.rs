@@ -18,6 +18,7 @@ pub mod inventory;
 pub mod issues;
 pub mod links;
 pub mod network;
+pub mod nt;
 pub mod parse;
 pub mod process;
 pub mod processes;

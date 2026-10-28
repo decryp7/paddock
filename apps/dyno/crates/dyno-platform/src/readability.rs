@@ -3,6 +3,7 @@
 //! Some sources report `0` for a value the OS refused (another user's process, a protected one). A `0` is never passed on:
 //! [`measure`] turns it into [`Measured::Unavailable`] with the reason, and only keeps the numbers that were read.
 
+use crate::nt::NtReading;
 use dyno_core::process::{Measured, Owner, UnavailableReason};
 use dyno_core::time::Timestamp;
 
@@ -133,6 +134,43 @@ pub struct Measures {
     pub started: Measured<Timestamp>,
 }
 
+/// Fills `raw` from the system process list for a process the handle-based source could not open (its working set is
+/// `0` and it is not Dyno's own). Dyno's own and openable processes keep what their handles gave, including the path and
+/// the owner. Returns whether the list supplied the values.
+pub fn apply_nt(raw: &mut Raw, owner: Owner, reading: Option<&NtReading>) -> bool {
+    let Some(r) = reading.filter(|_| owner != Owner::Own && raw.memory == 0) else {
+        return false;
+    };
+    raw.cpu = r.cpu;
+    raw.memory = r.memory;
+    raw.disk_read = r.read_bps;
+    raw.disk_write = r.write_bps;
+    if raw.start_secs == 0 {
+        raw.start_secs = r.start_secs;
+    }
+    true
+}
+
+/// The reason for values that only the undocumented process list could give, once it is switched off for the session: they
+/// are not supported rather than in need of administrator rights.
+pub fn as_not_supported(m: Measures) -> Measures {
+    fn swap<T>(v: Measured<T>) -> Measured<T> {
+        match v {
+            Measured::Unavailable {
+                reason: UnavailableReason::NeedsAdmin,
+            } => Measured::unavailable(UnavailableReason::NotSupported),
+            other => other,
+        }
+    }
+    Measures {
+        cpu: swap(m.cpu),
+        memory: swap(m.memory),
+        disk_read: swap(m.disk_read),
+        disk_write: swap(m.disk_write),
+        ..m
+    }
+}
+
 /// Decides which of `raw` was read. `started` converts the start seconds to a timestamp.
 pub fn measure(os: Os, owner: Owner, raw: &Raw, started: impl Fn(u64) -> Timestamp) -> Measures {
     let refused = os.refused();
@@ -253,6 +291,50 @@ mod tests {
         assert_eq!(m.disk_read.reason(), Some(UnavailableReason::NotPermitted));
         assert_eq!(m.disk_write.reason(), Some(UnavailableReason::NotPermitted));
         assert_eq!(m.user, Measured::Value("other".into()));
+    }
+
+    #[test]
+    fn the_process_list_fills_in_what_a_handle_could_not_open_and_never_overrides_dynos_own() {
+        let r = NtReading {
+            cpu: 7.0,
+            memory: 9,
+            read_bps: 1.0,
+            write_bps: 2.0,
+            start_secs: 55,
+            session: 3,
+        };
+        let mut zero = Raw {
+            start_secs: 0,
+            user: None,
+            ..raw(0)
+        };
+        assert!(apply_nt(&mut zero, Owner::Other, Some(&r)));
+        let m = measure(Os::Windows, Owner::Other, &zero, ts);
+        assert_eq!(
+            (m.cpu, m.memory, m.disk_read, m.disk_write),
+            (Measured::Value(7.0), Measured::Value(9), Measured::Value(1.0), Measured::Value(2.0))
+        );
+        assert_eq!(m.started, Measured::Value(Timestamp(55_000)));
+        let mut opened = raw(5);
+        assert!(
+            !apply_nt(&mut opened, Owner::Other, Some(&r)),
+            "an opened process keeps its handle values"
+        );
+        assert_eq!(opened, raw(5));
+        let mut own = raw(0);
+        assert!(!apply_nt(&mut own, Owner::Own, Some(&r)));
+        assert!(!apply_nt(&mut raw(0), Owner::Other, None));
+    }
+
+    #[test]
+    fn once_the_process_list_is_off_what_needed_it_is_not_supported() {
+        let m = as_not_supported(measure(Os::Windows, Owner::Other, &raw(0), ts));
+        for r in [m.cpu.reason(), m.memory.reason(), m.disk_read.reason(), m.disk_write.reason()] {
+            assert_eq!(r, Some(UnavailableReason::NotSupported));
+        }
+        let kept = as_not_supported(measure(Os::Macos, Owner::Other, &raw(0), ts));
+        assert_eq!(kept.cpu.reason(), Some(UnavailableReason::NotPermitted), "other reasons stay");
+        assert_eq!(kept.started, Measured::Value(Timestamp(100_000)));
     }
 
     #[test]

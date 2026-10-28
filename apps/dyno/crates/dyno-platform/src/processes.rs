@@ -2,12 +2,15 @@
 //! path and user are read once per process). Details refresh one process with its command line and working
 //! directory, and an OS-specific [`DetailsProbe`] adds priority, modules, connections, signature and so on.
 
+use crate::nt::{ApiCounters, NtError, NtProcess, NtState, NtTracker};
 use crate::parse::time::{same_start, started_from_unix_secs};
+#[cfg(windows)]
+use crate::readability::classify_session;
 #[cfg(windows)]
 use crate::readability::classify_sid;
 #[cfg(unix)]
 use crate::readability::classify_uid;
-use crate::readability::{first_user_uid, measure, Os, Raw};
+use crate::readability::{apply_nt, as_not_supported, first_user_uid, measure, Os, Raw};
 use crate::sensors::rate;
 use dyno_core::ports::{PlatformError, ProcessSource};
 use dyno_core::process::Owner;
@@ -59,6 +62,19 @@ const MAX_PARENT_DEPTH: usize = 64;
 /// The user list is re-read at most this often when an unknown user id shows up.
 const USERS_REFRESH: Duration = Duration::from_secs(60);
 
+/// Where the system process list comes from (`NtQuerySystemInformation` on Windows; a fake in tests).
+pub trait NtSource: Send {
+    /// One snapshot of every process.
+    fn snapshot(&mut self) -> Result<Vec<NtProcess>, NtError>;
+    /// Dyno's own process as the documented per-process APIs report it, for the start-up self-check.
+    fn own_counters(&mut self) -> Option<ApiCounters>;
+}
+
+struct NtDriver {
+    source: Box<dyn NtSource>,
+    tracker: NtTracker,
+}
+
 /// The common process source.
 pub struct SysinfoProcesses {
     sys: System,
@@ -70,6 +86,7 @@ pub struct SysinfoProcesses {
     #[cfg_attr(windows, allow(dead_code))]
     first_user: u32,
     probe: Box<dyn DetailsProbe>,
+    nt: Option<NtDriver>,
 }
 
 impl SysinfoProcesses {
@@ -87,7 +104,18 @@ impl SysinfoProcesses {
             own_user: None,
             first_user: first_user_uid(Os::this(), login_defs().as_deref()),
             probe,
+            nt: None,
         }
+    }
+
+    /// Adds the system process list: it supplies the values of processes this user cannot open, once its fields pass the
+    /// self-check against the documented APIs.
+    pub fn with_nt(mut self, source: Box<dyn NtSource>) -> Self {
+        self.nt = Some(NtDriver {
+            source,
+            tracker: NtTracker::new(std::process::id()),
+        });
+        self
     }
 
     fn tick_kind() -> ProcessRefreshKind {
@@ -115,6 +143,11 @@ impl SysinfoProcesses {
         }
         #[cfg(windows)]
         {
+            if let Some(nt) = &self.nt {
+                if let (Some(own), Some(session)) = (nt.tracker.own_session(), nt.tracker.session_of(p.pid().as_u32())) {
+                    return classify_session(session, own);
+                }
+            }
             let sid = p.user_id().map(|u| u.to_string());
             classify_sid(sid.as_deref(), self.own_user.as_deref())
         }
@@ -122,7 +155,7 @@ impl SysinfoProcesses {
 
     fn sample_of(&self, p: &Process, secs: f64) -> ProcessSample {
         let disk = p.disk_usage();
-        let raw = Raw {
+        let mut raw = Raw {
             cpu: normalise_cpu(p.cpu_usage(), self.cores),
             memory: p.memory(),
             disk_read: rate(disk.read_bytes, secs),
@@ -131,7 +164,14 @@ impl SysinfoProcesses {
             user: self.user_name(p),
         };
         let owner = self.owner_of(p);
-        let m = measure(Os::this(), owner, &raw, started_from_unix_secs);
+        let mut from_list = false;
+        if let Some(nt) = &self.nt {
+            from_list = apply_nt(&mut raw, owner, nt.tracker.reading(p.pid().as_u32()));
+        }
+        let mut m = measure(Os::this(), owner, &raw, started_from_unix_secs);
+        if !from_list && matches!(self.nt.as_ref().map(|n| n.tracker.state()), Some(NtState::Disabled(_))) {
+            m = as_not_supported(m);
+        }
         ProcessSample {
             pid: p.pid().as_u32(),
             parent: p.parent().map(|pp| pp.as_u32()),
@@ -179,6 +219,15 @@ impl ProcessSource for SysinfoProcesses {
         self.last = Some(now);
         self.sys
             .refresh_processes_specifics(ProcessesToUpdate::All, true, Self::tick_kind());
+        if let Some(nt) = &mut self.nt {
+            let snapshot = nt.source.snapshot();
+            let api = (*nt.tracker.state() == NtState::Unchecked)
+                .then(|| nt.source.own_counters())
+                .flatten();
+            if let Some(message) = nt.tracker.update(snapshot, secs, self.cores, api) {
+                eprintln!("{message}");
+            }
+        }
         let unknown_user = self
             .sys
             .processes()
@@ -285,6 +334,67 @@ pub fn well_known_account(sid: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A process list that answers with a fixed table.
+    struct FixedList {
+        table: Result<Vec<NtProcess>, NtError>,
+        api: Option<ApiCounters>,
+    }
+
+    impl NtSource for FixedList {
+        fn snapshot(&mut self) -> Result<Vec<NtProcess>, NtError> {
+            self.table.clone()
+        }
+        fn own_counters(&mut self) -> Option<ApiCounters> {
+            self.api
+        }
+    }
+
+    fn own_record(ws: u64) -> NtProcess {
+        NtProcess {
+            pid: std::process::id(),
+            parent: 1,
+            session: 1,
+            create_time: 1,
+            user_time: 0,
+            kernel_time: 0,
+            working_set: ws,
+            private_bytes: ws,
+            read_bytes: 0,
+            write_bytes: 0,
+        }
+    }
+
+    #[test]
+    fn the_system_process_list_is_checked_against_the_documented_counters_before_it_is_used() {
+        let api = ApiCounters {
+            cpu_time: 0,
+            working_set: 1 << 20,
+            read_bytes: 0,
+            write_bytes: 0,
+        };
+        let mut good = SysinfoProcesses::new(Box::new(NoDetails)).with_nt(Box::new(FixedList {
+            table: Ok(vec![own_record(1 << 20)]),
+            api: Some(api),
+        }));
+        let listed = good.processes();
+        assert!(!listed.is_empty());
+        assert_eq!(good.nt.as_ref().unwrap().tracker.state(), &NtState::Active);
+        let mut bad = SysinfoProcesses::new(Box::new(NoDetails)).with_nt(Box::new(FixedList {
+            table: Ok(vec![own_record(1 << 40)]),
+            api: Some(api),
+        }));
+        let listed = bad.processes();
+        assert!(matches!(bad.nt.as_ref().unwrap().tracker.state(), NtState::Disabled(_)));
+        let mine = listed.iter().find(|p| p.pid == std::process::id()).unwrap();
+        assert!(mine.memory.copied().is_some(), "Dyno's own values come from its handle either way");
+        let mut failing = SysinfoProcesses::new(Box::new(NoDetails)).with_nt(Box::new(FixedList {
+            table: Err(NtError::Malformed),
+            api: None,
+        }));
+        assert!(!failing.processes().is_empty());
+        assert!(matches!(failing.nt.as_ref().unwrap().tracker.state(), NtState::Disabled(_)));
+    }
 
     #[test]
     fn mappings() {

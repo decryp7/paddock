@@ -5,6 +5,7 @@ pub mod activity;
 pub mod counters;
 pub mod elevate;
 pub mod net;
+pub mod nt_query;
 pub mod pdh;
 pub mod topology;
 pub mod traffic;
@@ -21,7 +22,7 @@ pub fn platform() -> Platform {
     let f = fake.platform();
     Platform {
         sensors: Box::new(SysinfoSensors::new(Box::new(pdh::WinProbe::new()))),
-        processes: Box::new(SysinfoProcesses::new(Box::new(NoDetails))),
+        processes: Box::new(SysinfoProcesses::new(Box::new(NoDetails)).with_nt(Box::new(nt_query::NtQuery::load()))),
         activity: Box::new(activity::WinActivity),
         issues: crate::issues::os_sources(),
         links: Box::new(crate::links::OsLinks::new()),
