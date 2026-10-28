@@ -6,9 +6,8 @@ the AI worker and plugins reach it through Debrief's own IPC)? ADR 0010 §"Later
 to migrate once 2.0 is released, duckdb-rs supports it and the server mode is stable on all three platforms. This note
 checks those conditions and measures the server mode against today's design.
 
-**Answer: don't adopt Quack as the store architecture (today's design stays); revisit at DuckDB 2.1 with the checklist
-in §6.** ADR 0010's "migrate to it" should become "do not migrate; revisit when the checklist passes" (a decision for the
-user, §7).
+**Answer: don't adopt Quack as the store architecture; today's design stays.** Decided by the user on 2026-10-29 (§7):
+ADR 0010 now says "do not migrate", and Debrief stays local only, so there is no revisit checklist.
 
 Key numbers (3M synthetic events, macOS arm64, release builds, three interleaved rounds, medians):
 
@@ -219,9 +218,8 @@ thing it does better, bulk transfer, is cheaper to get inside today's IPC. Ranke
    Numbers: 4.4M events/s on the write path against 115k/s for one Quack writer; identical interactive latency (within
    1.5 ms on every typical query); IPC client under 20 MB against about 700 MB for a Quack client; a private socket
    against a TCP port open to every local account.
-2. **Fallback, if a remote or multi-machine store is ever wanted** (not a current requirement; Debrief is local-only per
-   ADR 0010): a read-only Quack endpoint on a copy or export of a store, behind the ADR 0030 lock, for a separate
-   "share this workspace" feature, never as the app's own store path. Re-evaluate only then.
+2. ~~Fallback, if a remote or multi-machine store is ever wanted~~: not needed. The user decided on 2026-10-29 that
+   Debrief stays local only and a shared or remote workspace is not a goal.
 3. **Rejected**: the ADR 0010 plan (worker replaced by DuckDB's server, supervised like `llama-server`). It fails three
    of its own preconditions today: Quack is not stable (secondary tier, pre-release README), duckdb-rs does not support
    it (prepared statements fail after `CONNECT`), and nothing shows it stable on Windows (TCP only; not measured).
@@ -230,33 +228,25 @@ Risks of not adopting: low. DuckDB 2.0 itself (async I/O, spill, progress) is ad
 independently of Quack. If DuckDB later drops features Debrief uses in favour of the server mode (no sign of that in
 the sources), the `LogStore` port keeps the change an adapter change, as ADR 0010 says.
 
-## 6. Revisit checklist (DuckDB 2.1 or later)
+## 6. Revisit checklist: not needed
 
-Re-run `harness/bench.sh` (all phases) when a DuckDB release notes any of these; reconsider only if all pass:
-
-1. Quack serves on a Unix domain socket / named pipe (#233) and is a primary-tier or built-in extension of the
-   prebuilt library.
-2. duckdb-rs prepared statements work after `CONNECT` (the harness's `probe` with `QH_STYLE=connect`).
-3. Client interrupt and client disconnect cancel the server's query (#283, #257): `bench.sh cancel` shows cancel within
-   100 ms and no server CPU afterwards; progress reaches the client.
-4. A per-connection or per-server memory cap that holds: server peak footprint within 1.5× `memory_limit` during
-   `bench.sh import` and `query`.
-5. Authorization that clients cannot change (#325) and a built-in read-only or statement-type allowlist.
-6. A write path within 2× of today's Parquet path at the 192 MB limit.
+Dropped on 2026-10-29: Debrief stays local only (decision D2), so Quack's one strength, several writers from several
+processes or machines, has no use here. The harness stays in `2026-10-28-duckdb-server-mode/harness/` as the record of
+the measurements.
 
 ## 7. Work packages and decisions
 
 | WP | What | Files | Size | Depends on |
 |---|---|---|---|---|
-| Q1 | Amend ADR 0010 §"Later: DuckDB 2.0 and its server mode": from "migrate to it" to "do not migrate; revisit with the checklist of this note" | `apps/debrief/docs/adr/0010-persistent-store.md` | XS (docs) | user decision D1 |
+| Q1 | **Done 2026-10-29**: ADR 0010 §"DuckDB 2.0 and its server mode: do not migrate" | `apps/debrief/docs/adr/0010-persistent-store.md` | XS (docs) | D1 |
 | Q2 | Measure the real `debrief-ipc` bulk path (the model needs 213 ms per 100k rows against 118 ms over Quack and 85 ms in process): batch DuckDB's 2,048-row vectors into larger IPC items (one schema per stream, not per batch) and measure `rows()`/export over the real peer | `crates/debrief-store-client/src/arrow_wire.rs`, the worker's scan handler; a bench in `debrief-store-worker` | S (research + small change) | none |
-| Q3 | Keep the harness for the revisit: move `harness/` under the research folder as committed (done here), add a line to the DuckDB upgrade checklist to re-run it | this note's folder; `docs/research/2026-10-duckdb-2-and-large-data.md` follow-ups | XS | Q1 |
+| Q3 | ~~Keep the harness for a revisit~~: not needed (D2) | — | — | — |
 
-Decisions for the user:
+Decisions (the user, 2026-10-29):
 
-- **D1**: accept "don't adopt" and amend ADR 0010 (Q1)? Recommended: yes.
-- **D2**: is a shared or remote workspace (the fallback in §5.2) a goal at all? If not, the revisit checklist can be
-  dropped too.
+- **D1**: do not migrate to the server mode; ADR 0010 is amended (Q1).
+- **D2**: Debrief stays local only; a shared or remote workspace is not a goal. The fallback (§5.2) and the revisit
+  checklist (§6) are dropped.
 
 
 ## 8. Sources (read 2026-10-28)
