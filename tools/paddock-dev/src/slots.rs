@@ -14,10 +14,16 @@
 //! - frees the slot at once if it is killed or crashes, because the kernel drops the lock.
 //!
 //! No stale lock can exist, so nothing is ever reclaimed and two jobs cannot hold one slot.
+//!
+//! # Work on an idle slot
+//!
+//! `idle-run --slot sN -- <command>` runs a command only while no job holds slot `sN`, and holds that slot's lock until the
+//! command ends, so no job can take the slot while the command deletes its kept folders (the CI kit's disk sweep). A busy
+//! slot is skipped (exit 0, `"ran": false`). The command sees `PADDOCK_CI_IDLE_SLOT=sN`.
 
 use clap::Args;
 use paddock_cli::{CliError, Report};
-use paddock_slots::{Announcement, FsLocks, SlotError, SlotId, release as release_slot, slot_states};
+use paddock_slots::{Announcement, FsLocks, SlotError, SlotId, release as release_slot, slot_states, with_idle};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -71,6 +77,20 @@ pub struct StatusArgs {
     /// The CI home that holds `slots/`.
     #[arg(long)]
     root: PathBuf,
+}
+
+/// `idle-run`'s arguments.
+#[derive(Args)]
+pub struct IdleRunArgs {
+    /// The slot that must be idle (`s1`...).
+    #[arg(long)]
+    slot: String,
+    /// The CI home that holds `slots/`.
+    #[arg(long)]
+    root: PathBuf,
+    /// The command and its arguments, after `--`.
+    #[arg(last = true, required = true)]
+    command: Vec<String>,
 }
 
 /// `hold`'s arguments (the holder process).
@@ -275,6 +295,39 @@ pub fn release(a: &ReleaseArgs) -> Result<Report, CliError> {
         json!({"slot": id.to_string(), "released": true}),
         format!("{id} released"),
     ))
+}
+
+/// The variable that tells an `idle-run` command which slot it holds.
+pub const IDLE_SLOT_VAR: &str = "PADDOCK_CI_IDLE_SLOT";
+
+/// `dev ci slot idle-run`.
+pub fn idle_run(a: &IdleRunArgs) -> Result<Report, CliError> {
+    let id: SlotId = a.slot.parse().map_err(failure)?;
+    let Some((program, args)) = a.command.split_first() else {
+        return Err(CliError::usage("Give the command to run after --.")
+            .with_hint("For example: idle-run --slot s3 --root <home> -- bash sweep.sh"));
+    };
+    let locks = FsLocks::new(&a.root);
+    let ran = with_idle(&locks, id, || {
+        paddock_proc::command(program)
+            .args(args)
+            .env(IDLE_SLOT_VAR, id.to_string())
+            .stdin(Stdio::null())
+            .status()
+    })
+    .map_err(failure)?;
+    match ran {
+        None => Ok(Report::new(
+            json!({"slot": id.to_string(), "ran": false}),
+            format!("{id} busy: skipped"),
+        )),
+        Some(Ok(status)) if status.success() => Ok(Report::new(json!({"slot": id.to_string(), "ran": true}), format!("{id} idle: ran"))),
+        Some(Ok(status)) => {
+            Err(CliError::failure(format!("The command run on idle slot {id} failed ({status})."))
+                .with_hint("Its own output above says why."))
+        }
+        Some(Err(e)) => Err(CliError::failure(format!("{program} could not be started: {e}.")).with_hint("Check the command after --.")),
+    }
 }
 
 /// `dev ci slot status`.

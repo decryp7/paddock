@@ -5,7 +5,8 @@
 //! so there is no stale lock to reclaim and therefore no reclaim race: two holders of one slot cannot exist.
 //!
 //! - [`SlotId`]: the typed `sN` name.
-//! - [`SlotLocks`] (a port) and [`acquire_first`] (pure): take the first free slot; [`slot_states`] reads which are busy.
+//! - [`SlotLocks`] (a port) and [`acquire_first`] (pure): take the first free slot; [`slot_states`] reads which are busy;
+//!   [`with_idle`] runs work on an idle slot while holding its lock (deleting its kept folders without a check-then-act race).
 //! - [`acquire_retry`]: [`acquire_first`] that tries a few times when everything looked busy (a status probe holds a lock for
 //!   an instant).
 //! - Tokens: a holder has a [`fresh_token`]; `release` presents it, and a holder honours only its own, so a slow release can
@@ -26,4 +27,6 @@ pub use hold::{
     ACQUIRE_ATTEMPTS, Announcement, HoldEnd, HoldProbe, fresh_token, hold, hold_until, release,
     wait_free,
 };
-pub use slot::{SlotId, SlotLocks, SlotState, acquire_first, acquire_retry, slot_states};
+pub use slot::{
+    SlotId, SlotLocks, SlotState, acquire_first, acquire_retry, slot_states, with_idle,
+};
