@@ -16,7 +16,7 @@ use paddock_log::Redact;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
