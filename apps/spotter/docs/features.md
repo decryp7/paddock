@@ -16,8 +16,6 @@ is kept in the system credential store. "Send test" sends a message through the 
 what to check (server unreachable, secure connection refused, account not accepted, address refused, no answer in
 time). Mail is sent for new releases of watches that have the channel; failures appear in the journal as "notify" failures.
 
-![Settings: the e-mail form](screenshots/settings-email-light.png)
-
 ## Safer address checks
 A watch that is not marked local cannot reach this computer or its local link even if a name changes its answer between
 the check and the connection (DNS rebinding).

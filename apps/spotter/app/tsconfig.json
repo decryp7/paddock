@@ -16,6 +16,7 @@
     "paths": {
       "@decryp7/paddock-ui": ["../../../ui/dist/paddock-ui"],
       "@decryp7/paddock-ui/*": ["../../../ui/dist/paddock-ui/*"],
+      // TODO: drop this path once @decryp7/paddock-e2e resolves as a workspace package (then `build:e2e` goes from paddock.ci.json too).
       "@decryp7/paddock-e2e": ["../../../ui/dist/paddock-e2e"]
     }
   },

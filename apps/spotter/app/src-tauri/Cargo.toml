@@ -60,6 +60,9 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dw
 
 [dev-dependencies]
 tempfile.workspace = true
+# The capabilities are resolved through Tauri's own ACL in the tests.
+tauri-utils = "2.10"
+toml = "0.9"
 # The shell plugin on Tauri's mock runtime (no window, no user folders).
 tauri = { version = "2.12.4", features = ["test"] }
 paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray", "mock-runtime"] }

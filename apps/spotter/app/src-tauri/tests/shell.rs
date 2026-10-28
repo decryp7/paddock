@@ -53,3 +53,126 @@ fn the_uis_command_names_are_generated_from_the_table() {
 fn every_command_is_async() {
     paddock_commands::testing::assert_async(&COMMANDS, &[&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")]);
 }
+
+// --- Capabilities per window class, resolved through Tauri's own ACL ---
+
+use paddock_shell::PLUGIN_NAME;
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use tauri_utils::acl::capability::Capability;
+use tauri_utils::acl::manifest::{Manifest, PermissionFile};
+use tauri_utils::acl::resolved::Resolved;
+
+fn capability_files() -> Vec<Capability> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .collect();
+    files.sort();
+    files
+        .iter()
+        .map(|p| serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", p.display())))
+        .collect()
+}
+
+/// The plugin's permission files, as its build step lists them (`DEP_PADDOCK_SHELL_PERMISSION_FILES_PATH`, see build.rs).
+fn plugin_permissions() -> Vec<PermissionFile> {
+    let list = std::fs::read_to_string(env!("PADDOCK_SHELL_PERMISSION_FILES")).unwrap();
+    let paths: Vec<PathBuf> = serde_json::from_str(&list).unwrap();
+    assert!(
+        paths.iter().any(|p| p.ends_with("window-classes.toml")),
+        "the plugin lists its window-class sets: {paths:?}"
+    );
+    paths
+        .iter()
+        .map(|p| toml::from_str(&std::fs::read_to_string(p).unwrap()).unwrap_or_else(|e| panic!("{e}")))
+        .collect()
+}
+
+/// Every capability resolves against the plugin's permissions (a permission the plugin does not have fails here). Core
+/// permissions are left out: the mock runtime has no core plugins to resolve them against.
+#[test]
+fn the_capabilities_resolve_against_the_shell_plugins_permissions() {
+    let acl = BTreeMap::from([(PLUGIN_NAME.to_string(), Manifest::new(plugin_permissions(), None))]);
+    let caps: BTreeMap<String, Capability> = capability_files()
+        .into_iter()
+        .map(|c| {
+            let mut v = serde_json::to_value(&c).unwrap();
+            let perms: Vec<Value> = v["permissions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|p| !p.as_str().is_some_and(|s| s.starts_with("core:")))
+                .cloned()
+                .collect();
+            v["permissions"] = Value::Array(perms);
+            (c.identifier.clone(), serde_json::from_value(v).unwrap())
+        })
+        .collect();
+    Resolved::resolve(&acl, caps, tauri_utils::platform::Target::current()).unwrap();
+}
+
+/// Each window class gets exactly the shell's set for it, and nothing of its own.
+#[test]
+fn each_window_class_gets_exactly_the_shells_set_for_it() {
+    let classes: BTreeMap<String, (Vec<String>, Vec<String>)> = capability_files()
+        .into_iter()
+        .map(|c| {
+            let v = serde_json::to_value(&c).unwrap();
+            let list = |k: &str| {
+                v[k].as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|w| w.as_str().unwrap().to_string())
+                    .collect::<Vec<_>>()
+            };
+            (c.identifier.clone(), (list("windows"), list("permissions")))
+        })
+        .collect();
+    let owned = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        classes,
+        BTreeMap::from([
+            (
+                "shell-dialog".to_string(),
+                (owned(&["d-*"]), owned(&["core:event:default", "paddock-shell:dialog"]))
+            ),
+            (
+                "shell-main".to_string(),
+                (
+                    owned(&["main", "w-*"]),
+                    // Dragging by the overlay title bar (macOS) needs these two window permissions.
+                    owned(&[
+                        "core:event:default",
+                        "core:window:allow-start-dragging",
+                        "core:window:allow-internal-toggle-maximize",
+                        "paddock-shell:main"
+                    ])
+                )
+            ),
+            (
+                "shell-tray".to_string(),
+                (owned(&["tray", "tray-*"]), owned(&["core:event:default", "paddock-shell:tray"]))
+            ),
+        ])
+    );
+}
+
+/// The update feed is the moving release that spotter-release.yml publishes latest.json on (installed copies read it).
+#[test]
+fn the_update_feed_is_the_release_the_workflow_publishes_latest_json_on() {
+    let workflow =
+        std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../.gitea/workflows/spotter-release.yml"))
+            .unwrap();
+    let tag = workflow
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("latest-tag:"))
+        .map(|t| t.trim().to_string())
+        .expect("the workflow names the moving release");
+    assert_eq!(
+        spotter_app_lib::UPDATE_FEED,
+        format!("https://dev.decryptology.net/decryp7/spotter/releases/download/{tag}/latest.json")
+    );
+}

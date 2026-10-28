@@ -32,7 +32,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Where the releases are (About's "Release notes", Updates' "Open the releases page").
 pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/spotter/releases";
 /// The feed the updater reads.
-pub const UPDATE_FEED: &str = "https://dev.decryptology.net/decryp7/spotter/releases/download/latest/latest.json";
+pub const UPDATE_FEED: &str = "https://dev.decryptology.net/decryp7/spotter/releases/download/spotter-latest/latest.json";
 /// The generated dialog contracts and manifest, written by the UI's specs from its registry.
 pub const DIALOG_CONTRACTS: &str = include_str!("../../dialog-contracts.json");
 /// The manifest of the UI's contributions, compared by the tests.
