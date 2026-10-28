@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, Injectable, signal, viewChild } from '@angular/core';
+import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem } from '@angular/cdk/menu';
+import { ChangeDetectionStrategy, Component, effect, inject, Injectable, signal, untracked, viewChild } from '@angular/core';
 import { copyText } from './clipboard';
 
 /** The open Copy menu: where, and what it copies. */
@@ -36,20 +37,26 @@ export class PdCopyMenu {
   }
 }
 
-/** Draws the Copy menu at the pointer; Escape, a click elsewhere or losing focus closes it. */
+/**
+ * Draws the Copy menu at the pointer as a CDK context menu: it focuses Copy, and Escape, a click elsewhere or losing focus
+ * closes it (the CDK menu's own behaviour).
+ */
 @Component({
   selector: 'pd-copy-menu',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(document:keydown.escape)': 'menu.close()', '(document:mousedown)': 'outside($event)' },
+  imports: [CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
   template: `
-    @if (menu.state(); as s) {
-      <div class="pd-menu" role="menu" [style.left.px]="s.x" [style.top.px]="s.y">
-        <button #item type="button" role="menuitem" class="pd-item" (click)="menu.copy()" (blur)="menu.close()">{{ label }}</button>
+    <span class="pd-anchor" [cdkContextMenuTriggerFor]="panel" (cdkContextMenuClosed)="menu.close()"></span>
+    <ng-template #panel>
+      <div cdkMenu class="pd-menu" [attr.aria-label]="label">
+        <button type="button" cdkMenuItem class="pd-item" (cdkMenuItemTriggered)="menu.copy()">{{ label }}</button>
       </div>
-    }
+    </ng-template>
   `,
   styles: `
-    .pd-menu { position: fixed; z-index: var(--pd-z-toast); min-width: 112px; padding: var(--pd-space-1); border: 1px solid var(--pd-border-strong); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); box-shadow: var(--pd-shadow-2); }
+    .pd-anchor { display: none; }
+    .pd-menu { min-width: 112px; padding: var(--pd-space-1); border: 1px solid var(--pd-border-strong); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); box-shadow: var(--pd-shadow-2); }
+    .pd-menu:focus { outline: none; }
     .pd-item { display: block; width: 100%; padding: var(--pd-space-1) var(--pd-space-3); border: 0; border-radius: var(--pd-radius-tag); background: transparent; color: var(--pd-text); font: inherit; text-align: start; cursor: pointer; }
     .pd-item:hover { background: var(--pd-hover); }
     .pd-item:focus-visible { background: var(--pd-hover); outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
@@ -57,16 +64,22 @@ export class PdCopyMenu {
 })
 export class PdCopyMenuHost {
   protected readonly menu = inject(PdCopyMenu);
-  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   protected readonly label = $localize`:@@pd.copyMenu.copy:Copy`;
-  private readonly item = viewChild<ElementRef<HTMLButtonElement>>('item');
+  private readonly trigger = viewChild.required(CdkContextMenuTrigger);
 
   constructor() {
-    // Focus is the one thing outside the signal graph this does: the item takes it when the menu opens.
-    effect(() => this.item()?.nativeElement.focus());
-  }
-
-  protected outside(e: MouseEvent): void {
-    if (this.menu.state() && !(e.target instanceof Node && this.host.contains(e.target))) this.menu.close();
+    // The service's state is the one truth: the CDK menu is opened and closed to follow it (a DOM overlay is outside the signal graph).
+    effect(() => {
+      const s = this.menu.state();
+      const trigger = this.trigger();
+      untracked(() => {
+        if (!s) {
+          trigger.close();
+          return;
+        }
+        trigger.open({ x: s.x, y: s.y });
+        (trigger as unknown as { childMenu?: CdkMenu }).childMenu?.focusFirstItem('program');
+      });
+    });
   }
 }

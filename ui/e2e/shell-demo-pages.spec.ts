@@ -25,7 +25,7 @@ test.describe('pages frame (plan S14)', () => {
     await expect(app.frame.heading).toHaveText('Overview');
     await expect(page).toHaveTitle('Overview – Paddock Shell Demo');
     await expect(app.sidebar.link('Overview')).toHaveAttribute('aria-current', 'page');
-    await expect(app.sidebar.links).toHaveText([/^Overview$/, /^Runners/, /^Local AI$/, /^Dialogs$/, /^Schedules$/, /^Files$/, /^Keyboard$/, /^Activity$/, /^About$/]);
+    await expect(app.sidebar.links).toHaveText([/^Overview$/, /Runners$/, /^Local AI$/, /^Dialogs$/, /^Schedules$/, /^Files$/, /^Keyboard$/, /^Activity$/, /^About$/]);
 
     await app.sidebar.link('Keyboard').click();
     await expect(app.frame.heading).toHaveText('Keyboard');
@@ -92,7 +92,10 @@ test.describe('pages frame (plan S14)', () => {
     // The table's words, exceptions only; the badge counts the same exception and says so (review R3-1).
     await expect(bar.getByTestId('runners-status')).toHaveText('1 offline · 1 updating');
     await expect(bar.getByTestId('runners-status')).toHaveAttribute('aria-label', '2 of 4 runners online, 1 updating, 1 offline');
-    await expect(app.sidebar.badges).toHaveAttribute('title', '1 runner offline');
+    await expect(app.sidebar.badges).toHaveText('1');
+    await expect(app.sidebar.link('Runners')).toHaveAttribute('aria-label', 'Runners, 1 runner offline');
+    await app.sidebar.link('Runners').hover();
+    await expect(page.locator('.mat-mdc-tooltip')).toHaveText('1 runner offline');
     await expect(app.statusBar.items('end')).toHaveCount(3);
     expect(await app.statusBar.ids('end')).toEqual(['pd.health', 'pd.jobs', 'pd.notifications']);
     await expect(bar.getByRole('button', { name: 'Jobs' })).toBeVisible();
@@ -196,7 +199,8 @@ test.describe('pages frame (plan S14)', () => {
     await expect(app.frame.toggle).toHaveAttribute('aria-label', 'Collapse sidebar');
     await app.frame.toggle.click();
     await expect.poll(() => app.frame.sidebarMode()).toBe('rail');
-    await expect(app.sidebar.link('Keyboard')).toHaveAttribute('title', 'Keyboard');
+    await app.sidebar.link('Keyboard').hover();
+    await expect(page.locator('.mat-mdc-tooltip')).toHaveText('Keyboard');
     await page.reload();
     await expect(app.frame.heading).toBeVisible();
     await expect.poll(() => app.frame.sidebarMode()).toBe('rail');
@@ -278,11 +282,12 @@ test.describe('pages frame (plan S14)', () => {
     await expect(app.menus.bar).toBeVisible();
   });
 
-  test('the toggle keeps its glyph and the app name stays (truncated, with a tooltip) when narrow', async ({ app, page }) => {
+  test('the toggle keeps its glyph and the app name stays (a tooltip only when truncated) when narrow', async ({ app, page }) => {
     await page.setViewportSize({ width: 320, height: 640 });
     await app.frame.open();
     await expect(app.frame.appName).toBeVisible();
-    await expect(app.frame.appName).toHaveAttribute('title', 'Paddock Shell Demo');
+    // The name's full text is a matTooltip of the path text, shown only when it is cut (here it fits), never a native title.
+    await expect(app.frame.appName).not.toHaveAttribute('title', /./);
     const glyph = () => app.frame.toggle.locator('pd-icon').evaluate((el) => el.innerHTML);
     const narrow = await glyph();
     await page.setViewportSize({ width: 1280, height: 800 });

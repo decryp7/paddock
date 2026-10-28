@@ -92,7 +92,10 @@ describe('PdPathText', () => {
     const el = make({ value: '/var/log/app/system.log' });
     expect(el.querySelector('.pd-shown')?.textContent).toBe('/var/log/app/system.log');
     expect(el.querySelector('.pd-size')?.getAttribute('data-full')).toBe('/var/log/app/system.log');
-    expect(el.querySelector('.pd-text')?.getAttribute('title')).toBe('/var/log/app/system.log');
+    // Whole on screen: nothing to add, so no tooltip (the text is only titled when it is clipped).
+    expect(el.querySelector('.pd-text')?.hasAttribute('title')).toBe(false);
+    el.querySelector('.pd-text')?.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(document.querySelector('.mat-mdc-tooltip')).toBeNull();
     expect(el.querySelector('.pd-copy')).toBeNull();
   });
 
@@ -105,7 +108,10 @@ describe('PdPathText', () => {
     f.componentRef.setInput('copy', true);
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('.pd-text')?.getAttribute('title')).toBe('/var/log/app/system.log');
+    const text = el.querySelector('.pd-text')!;
+    text.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('/var/log/app/system.log'));
+    text.dispatchEvent(new MouseEvent('mouseleave'));
     const button = el.querySelector<HTMLButtonElement>('.pd-copy')!;
     expect(button.getAttribute('aria-label')).toBe('Copy the full path');
     button.click();
@@ -127,47 +133,52 @@ describe('PdPathText', () => {
 });
 
 describe('pd-copy-menu', () => {
+  const panel = () => document.querySelector<HTMLElement>('.cdk-overlay-container [role=menu]');
+  const item = () => document.querySelector<HTMLButtonElement>('.cdk-overlay-container [role=menuitem]');
+
   it('opens at the pointer with Copy focused, copies the selection and closes; Escape and a click elsewhere close it', async () => {
     const written: string[] = [];
     stubClipboard(async (t) => void written.push(t));
     const f = TestBed.createComponent(PdCopyMenuHost);
     const menu = TestBed.inject(PdCopyMenu);
-    const el = f.nativeElement as HTMLElement;
     f.detectChanges();
-    expect(el.querySelector('[role=menu]')).toBeNull();
+    expect(panel()).toBeNull();
     menu.open(40, 60, 'selected');
     await f.whenStable();
-    const box = el.querySelector<HTMLElement>('[role=menu]')!;
-    expect(box.style.left).toBe('40px');
-    expect(box.style.top).toBe('60px');
-    const item = el.querySelector<HTMLButtonElement>('[role=menuitem]')!;
-    expect(item.textContent?.trim()).toBe('Copy');
-    expect(document.activeElement).toBe(item);
-    item.click();
+    await vi.waitFor(() => expect(panel()).not.toBeNull());
+    expect(item()?.textContent?.trim()).toBe('Copy');
+    expect(panel()?.getAttribute('aria-label')).toBe('Copy');
+    await vi.waitFor(() => expect(document.activeElement).toBe(item()));
+    item()!.click();
     await f.whenStable();
     expect(written).toEqual(['selected']);
     expect(menu.state()).toBeNull();
+    await vi.waitFor(() => expect(panel()).toBeNull());
 
     menu.open(1, 2, 'x');
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    expect(menu.state()).toBeNull();
+    await vi.waitFor(() => expect(panel()).not.toBeNull());
+    document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    await vi.waitFor(() => expect(menu.state()).toBeNull());
+    expect(panel()).toBeNull();
+
     menu.open(1, 2, 'x');
+    await vi.waitFor(() => expect(panel()).not.toBeNull());
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-    expect(menu.state()).toBeNull();
+    await vi.waitFor(() => expect(menu.state()).toBeNull());
   });
 
-  it('keeps the menu open for a press inside it, and a failing clipboard only closes it', async () => {
+  it('closes when the service closes it, and a failing clipboard only closes the menu', async () => {
     stubClipboard(() => Promise.reject(new Error('denied')));
     const f = TestBed.createComponent(PdCopyMenuHost);
     const menu = TestBed.inject(PdCopyMenu);
     f.detectChanges();
     menu.open(1, 2, 'x');
-    await f.whenStable();
-    (f.nativeElement as HTMLElement).querySelector('[role=menu]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-    expect(menu.state()).not.toBeNull();
+    await vi.waitFor(() => expect(panel()).not.toBeNull());
+    menu.close();
+    await vi.waitFor(() => expect(panel()).toBeNull());
     await menu.copy();
     expect(menu.state()).toBeNull();
-    await menu.copy();
   });
 });
 

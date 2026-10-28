@@ -75,7 +75,7 @@ export class ShellSidebar {
     return this.nav.getByRole('link', { name });
   }
   get badges(): Locator {
-    return this.nav.getByTestId('page-badge');
+    return this.nav.locator('.mat-badge-content');
   }
 }
 

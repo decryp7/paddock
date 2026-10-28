@@ -1,6 +1,8 @@
 import { CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMenuTrigger } from '@angular/cdk/menu';
 import type { ConnectedPosition } from '@angular/cdk/overlay';
 import { NgTemplateOutlet } from '@angular/common';
+import { MatBadge } from '@angular/material/badge';
+import { MatTooltip } from '@angular/material/tooltip';
 import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, inject, signal } from '@angular/core';
 import { PdIcon } from '@decryp7/paddock-ui/shell';
 import { ariaKeyShortcuts, Keymap } from '@decryp7/paddock-ui/shell/menu';
@@ -21,7 +23,7 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
 @Component({
   selector: 'pd-activity-bar',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdIcon, NgTemplateOutlet, CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMenuTrigger],
+  imports: [PdIcon, NgTemplateOutlet, CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMenuTrigger, MatBadge, MatTooltip],
   template: `
     @for (item of shown(); track item.id) {
       <ng-container *ngTemplateOutlet="button; context: { $implicit: item }" />
@@ -32,7 +34,7 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
         class="pd-act"
         data-activity-id="pd.more"
         [attr.aria-label]="t.more"
-        [title]="t.more"
+        [matTooltip]="t.more" matTooltipPosition="right"
         [cdkMenuTriggerFor]="more"
         [cdkMenuPosition]="positions"
         #moreTrigger="cdkMenuTriggerFor"
@@ -54,7 +56,12 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
           class="pd-act"
           [attr.data-activity-id]="item.id"
           [attr.aria-label]="ariaLabel(item)"
-          [title]="tooltip(item)"
+          [matTooltip]="tooltip(item)"
+          matTooltipPosition="right"
+          [matBadge]="items.badge(item) ?? ''"
+          [matBadgeHidden]="items.badge(item) === null"
+          matBadgeSize="small"
+          [attr.data-tone]="items.badgeTone(item)"
           [attr.aria-keyshortcuts]="keys(item)"
           [cdkMenuTriggerFor]="flyout"
           [cdkMenuTriggerData]="{ $implicit: item }"
@@ -72,7 +79,12 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
           class="pd-act"
           [attr.data-activity-id]="item.id"
           [attr.aria-label]="ariaLabel(item)"
-          [title]="tooltip(item)"
+          [matTooltip]="tooltip(item)"
+          matTooltipPosition="right"
+          [matBadge]="items.badge(item) ?? ''"
+          [matBadgeHidden]="items.badge(item) === null"
+          matBadgeSize="small"
+          [attr.data-tone]="items.badgeTone(item)"
           [attr.aria-keyshortcuts]="keys(item)"
           [attr.aria-pressed]="item.toggle ? items.isActive(item) : null"
           [attr.aria-disabled]="items.disabledReason(item) ? 'true' : null"
@@ -91,9 +103,6 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
       }
       @if (items.pulse(item)) {
         <span class="pd-act-pulse" aria-hidden="true"></span>
-      }
-      @if (items.badge(item); as badge) {
-        <span class="pd-act-badge" aria-hidden="true" [attr.data-tone]="items.badgeTone(item)">{{ badge }}</span>
       }
     </ng-template>
 
@@ -131,7 +140,8 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
               [cdkMenuItemChecked]="items.isActive(item)"
               [cdkMenuItemDisabled]="!!items.disabledReason(item)"
               [cdkMenuitemTypeaheadLabel]="item.title.text"
-              [title]="tooltip(item)"
+              [matTooltip]="tooltip(item)"
+              matTooltipPosition="right"
               (cdkMenuItemTriggered)="items.activate(item)"
             >
               <ng-container *ngTemplateOutlet="entryFace; context: { $implicit: asEntry(item), checked: items.isActive(item) }" />
@@ -177,11 +187,21 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
     .pd-act-pulse { position: absolute; top: 6px; inset-inline-end: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--pd-accent); animation: pd-act-pulse 1.6s ease-in-out infinite; }
     @keyframes pd-act-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.7); } }
     @media (prefers-reduced-motion: reduce) { .pd-act-pulse { animation: none; } }
-    .pd-act-badge { position: absolute; top: 1px; inset-inline-end: 0; box-shadow: 0 0 0 1.5px var(--pd-surface-1); min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: 7px; background: var(--pd-surface-3); color: var(--pd-text); font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); line-height: 14px; text-align: center; }
-    /* Navigation counts are neutral; a count of problems takes its status tint (design guide, Badges; review 2 P3-10). */
-    .pd-act-badge[data-tone='info'] { background: var(--pd-info-tint); color: var(--pd-text); }
-    .pd-act-badge[data-tone='warning'] { background: var(--pd-warning-tint); color: var(--pd-text); box-shadow: 0 0 0 1.5px var(--pd-surface-1), inset 0 0 0 1px var(--pd-warning); }
-    .pd-act-badge[data-tone='danger'] { background: var(--pd-danger-tint); color: var(--pd-text); box-shadow: 0 0 0 1.5px var(--pd-surface-1), inset 0 0 0 1px var(--pd-danger); }
+    /* The count is a Material badge on the button, aria-hidden by the directive: the count is already in the button's name. Neutral
+       unless the item gives a tone (design guide, Badges; review 2 P3-10); the tokens carry the colours. */
+    .pd-act {
+      --mat-badge-background-color: var(--pd-surface-3);
+      --mat-badge-text-color: var(--pd-text);
+      --mat-badge-container-size: 14px;
+      --mat-badge-container-small-size: 14px;
+      --mat-badge-small-size-text-size: var(--pd-text-caption);
+      --mat-badge-container-shape: 7px;
+      --mat-badge-container-offset: -3px 0;
+      --mat-badge-container-overlap-offset: -3px;
+    }
+    .pd-act[data-tone='info'] { --mat-badge-background-color: var(--pd-info-tint); }
+    .pd-act[data-tone='warning'] { --mat-badge-background-color: var(--pd-warning-tint); }
+    .pd-act[data-tone='danger'] { --mat-badge-background-color: var(--pd-danger-tint); }
     .pd-act-menu { min-width: 220px; max-width: min(360px, calc(100vw - 16px)); max-height: calc(100vh - 32px); overflow-y: auto; overscroll-behavior: contain; }
     .pd-act-menu:focus { outline: none; }
     .pd-act-check { color: var(--pd-accent); }

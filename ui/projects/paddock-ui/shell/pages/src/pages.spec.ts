@@ -335,7 +335,7 @@ describe('pd-shell-frame with provideShellPages', () => {
     count.set(3);
     await settle();
     await fixture.whenStable();
-    expect(el.querySelector('[data-page-link="t.two"] [data-testid="page-badge"]')?.textContent).toBe('3');
+    expect(el.querySelector('[data-page-link="t.two"] .mat-badge-content')?.textContent).toBe('3');
     expect(el.querySelector('[data-page-link="t.lab"]')).not.toBeNull();
     await router.navigateByUrl('/two');
     await settle();
@@ -399,7 +399,9 @@ describe('pd-shell-frame with provideShellPages', () => {
     expect(frame.dataset['sidebar']).toBe('rail');
     expect(toggle.getAttribute('aria-label')).toBe('Expand sidebar');
     expect(el.querySelector('[data-page-link="t.one"]')?.getAttribute('aria-label')).toBe('One');
-    expect(el.querySelector('[data-page-link="t.one"]')?.getAttribute('title')).toBe('One');
+    expect(el.querySelector('[data-page-link="t.one"]')?.getAttribute('title')).toBeNull();
+    el.querySelector('[data-page-link="t.one"]')?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('One'));
     toggle.click();
     await fixture.whenStable();
     expect(frame.dataset['sidebar']).toBe('expanded');
@@ -488,7 +490,9 @@ describe('pd-shell-frame with provideShellPages', () => {
     const links = [...el.querySelectorAll<HTMLAnchorElement>('nav a.pd-item')];
     const key = (from: HTMLElement, k: string) => {
       from.focus();
-      const e = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
+      // The CDK key manager reads keyCode, which a real keyboard always sets.
+      const keyCode = { ArrowDown: 40, ArrowUp: 38, Home: 36, End: 35 }[k] ?? 65;
+      const e = new KeyboardEvent('keydown', { key: k, keyCode, bubbles: true, cancelable: true });
       from.dispatchEvent(e);
       return e;
     };
@@ -501,6 +505,13 @@ describe('pd-shell-frame with provideShellPages', () => {
     key(links[0] as HTMLElement, 'End');
     expect(document.activeElement).toBe(links.at(-1));
     expect(key(links[0] as HTMLElement, 'a').defaultPrevented).toBe(false);
+    // A key from the sidebar that is not on a link (the footer slot) is left alone.
+    const foot = el.querySelector<HTMLElement>('nav [slot="sidebar"], nav .pd-slot')!;
+    foot.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', keyCode: 40, bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(links[0]);
+    // Expanded, the names are drawn, so a link has no tooltip of its own.
+    links[0]?.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(document.querySelector('.mat-mdc-tooltip')).toBeNull();
   });
 
   it('the native menu bar waits for ready; the recovery and checkpoint are wired', async () => {

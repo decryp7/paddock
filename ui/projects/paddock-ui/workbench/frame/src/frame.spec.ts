@@ -311,11 +311,20 @@ describe('pd-workbench with provideShellWorkbench', () => {
     expect(ids).toEqual(['wd.act.files', 'wd.act.problems', 'wd.act.build', 'wd.act.menu', 'wd.act.settings']);
     const problemsButton = element.querySelector('[data-activity-id="wd.act.problems"]')!;
     expect(problemsButton.getAttribute('aria-label')).toBe('Problems, 3');
+    expect(problemsButton.querySelector('.mat-badge-content')?.textContent?.trim()).toBe('3');
+    expect(problemsButton.querySelector('.mat-badge-content')?.getAttribute('aria-hidden')).toBe('true');
     expect(element.querySelector('[data-activity-id="wd.act.build"]')?.getAttribute('aria-label')).toBe('Build, x');
-    expect(element.querySelector('[data-activity-id="wd.act.build"]')?.getAttribute('title')).toBe('Build (Ctrl+Shift+B)');
+    const build = element.querySelector('[data-activity-id="wd.act.build"]')!;
+    const tip = async (text: string) => {
+      build.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe(text));
+      build.dispatchEvent(new MouseEvent('mouseleave'));
+    };
+    expect(build.hasAttribute('title')).toBe(false);
+    await tip('Build (Ctrl+Shift+B)');
     problems.set(9);
     await settle();
-    expect(element.querySelector('[data-activity-id="wd.act.build"]')?.getAttribute('title')).toBe('Build (Ctrl+Shift+B) — Too many problems');
+    await tip('Build (Ctrl+Shift+B) — Too many problems');
     expect(element.querySelector('[data-activity-id="wd.act.build"]')?.getAttribute('aria-disabled')).toBe('true');
   });
 
@@ -470,6 +479,6 @@ describe('review 2', () => {
     menuButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
     await settle(fixture);
     expect(menuButton.classList.contains('pd-open')).toBe(true);
-    expect(element.querySelector('[data-activity-id="wd.act.problems"] .pd-act-badge')?.getAttribute('data-tone')).toBe('neutral');
+    expect(element.querySelector('[data-activity-id="wd.act.problems"]')?.getAttribute('data-tone')).toBe('neutral');
   });
 });
