@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `pd-sunburst` in `@decryp7/paddock-ui/chart` (docs/plans/pd-sunburst.md)
+- New `PdSunburst` (`pd-sunburst`) and `PdSunburstCentre`, a drillable ring chart for hierarchies (first consumer: Dyno's disk map) and the pure
+  `sunburstLayout`: SVG with tree semantics (`treeitem`, `aria-level`, `aria-setsize`, `aria-posinset`, `aria-expanded`), colour by branch over
+  the ring-ordered chart tokens, hatched hidden space and a dashed "not counted yet" ghost, folding by angle and count with a segment cap,
+  a live mode that coalesces updates to four per second, the tree keyboard model, and loading, empty and error states. Exports are one
+  declared line each in `chart/public-api.ts`; a gallery section shows every state. The tween between centres is a 100 to 180 ms cross-fade
+  (`tweenLayouts` is not built yet); `pd-table` tree rows (spec section 7) are a separate change.
+
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,
   Chromium e2e in two shards, WebKit e2e) and releases through the shared `app-release.yml` from a thin `dyno-release.yml` (nightly
