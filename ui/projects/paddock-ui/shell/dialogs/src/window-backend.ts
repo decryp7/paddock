@@ -13,11 +13,23 @@ export function parseResult(p: unknown): DialogResult | null {
   return isRecord(p) && typeof p['label'] === 'string' && typeof p['dialogId'] === 'string' ? { label: p['label'], dialogId: p['dialogId'], result: p['result'] } : null;
 }
 
+/** A shown event of the dialog layer; `null` when malformed. */
+export function parseShown(p: unknown): { label: string; dialogId: string } | null {
+  return isRecord(p) && typeof p['label'] === 'string' && typeof p['dialogId'] === 'string' ? { label: p['label'], dialogId: p['dialogId'] } : null;
+}
+
 /** A closed event of the dialog layer; `null` when malformed. */
 export function parseClosed(p: unknown): DialogClosed | null {
   if (!isRecord(p) || typeof p['label'] !== 'string' || typeof p['dialogId'] !== 'string') return null;
   const r = p['remembered'];
   return { label: p['label'], dialogId: p['dialogId'], remembered: isRememberedPlace(r) ? { dx: r.dx, dy: r.dy, width: r.width, height: r.height } : null };
+}
+
+/** The app's resolved theme: its `data-theme`, else the system's colour scheme (a dialog window's background before its page paints). */
+export function currentTheme(): 'light' | 'dark' {
+  const set = document.documentElement.dataset['theme'];
+  if (set === 'light' || set === 'dark') return set;
+  return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
 
 /** What a dialog window is opened with: its id, title and input, and what was remembered. Its size is the Rust contract's. */
@@ -30,12 +42,15 @@ export function windowRequest(request: DialogShowRequest, remembered = loadDialo
     input: request.inputs,
     // Where it goes is Rust's decision (on the parent's monitor); the kind's floor applies to a remembered size.
     remembered: remembered ? raiseToKindMinimum(def.kind, remembered) : undefined,
+    theme: currentTheme(),
   };
 }
 
 interface Pending {
   readonly dialogId: string;
   readonly resolve: (r: DialogOutcome<unknown>) => void;
+  /** The window is on screen. */
+  readonly shown: () => void;
   /** What the dialog closed with, on the wire (`null`: dismissed, also when Rust closed a page that did not answer). */
   result: unknown;
 }
@@ -51,12 +66,16 @@ export class WindowDialogBackend extends DialogPresenter {
   private readonly io = inject(DIALOG_IO);
   private readonly inPage = inject(InPageDialogBackend);
   private readonly pending = new Map<string, Pending>();
+  /** Windows shown before `open` returned to this side (the event can overtake the reply). */
+  private readonly shownEarly = new Set<string>();
   private listening: Promise<void> | null = null;
   readonly windowed = true;
 
   show(request: DialogShowRequest): DialogSession {
     let resolve!: (r: DialogOutcome<unknown>) => void;
     const closed = new Promise<DialogOutcome<unknown>>((r) => (resolve = r));
+    let shown!: () => void;
+    const onScreen = new Promise<void>((r) => (shown = r));
     let label: string | null = null;
     let open = true;
     let fallback: DialogSession | null = null;
@@ -66,16 +85,22 @@ export class WindowDialogBackend extends DialogPresenter {
         await this.listen();
         const info = await this.io.open(sent);
         label = info.label;
-        this.pending.set(info.label, { dialogId: request.def.id, resolve, result: null });
+        this.pending.set(info.label, { dialogId: request.def.id, resolve, shown, result: null });
+        if (info.existing || this.shownEarly.delete(info.label)) shown();
       } catch (e) {
         console.warn(`[paddock-dialogs] the window of dialog ${request.def.id} could not open; shown in the page: ${errorText(e)}`);
         fallback = this.inPage.show(request);
+        shown();
         void fallback.closed.then(resolve);
       }
     })();
-    void closed.then(() => (open = false));
+    void closed.then(() => {
+      open = false;
+      shown();
+    });
     return {
       closed,
+      shown: onScreen,
       isOpen: () => open,
       // Opening it again focuses the window Rust has open for it.
       focus: () => void opened.then(() => (fallback ? fallback.focus() : label ? this.io.open(sent).then(() => undefined, () => undefined) : undefined)),
@@ -90,11 +115,19 @@ export class WindowDialogBackend extends DialogPresenter {
         const entry = e && this.pending.get(e.label);
         if (e && entry) entry.result = e.result ?? null;
       }),
+      this.io.listen(DIALOG_EVENTS.shown, (p) => {
+        const e = parseShown(p);
+        if (!e) return;
+        const entry = this.pending.get(e.label);
+        if (entry) entry.shown();
+        else this.shownEarly.add(e.label);
+      }),
       this.io.listen(DIALOG_EVENTS.closed, (p) => {
         const e = parseClosed(p);
         const entry = e && this.pending.get(e.label);
         if (!e || !entry) return;
         this.pending.delete(e.label);
+        this.shownEarly.delete(e.label);
         if (e.remembered) rememberDialogBounds(entry.dialogId, e.remembered);
         entry.resolve(decodeOutcome(entry.result));
       }),

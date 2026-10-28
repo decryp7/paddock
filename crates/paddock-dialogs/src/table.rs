@@ -14,7 +14,7 @@
 //!   compile error naming the rule).
 
 use crate::contract::{Kind, MAX_COMMANDS, MAX_DIALOGS, MAX_NAME_LEN, MAX_SIDE, Modality};
-use paddock_commands::DialogCallable;
+use paddock_commands::{DialogCallable, DialogCallableKind};
 
 /// Kind and modality as one value: only the pairs ADR 0009 §1 allows can be written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -302,8 +302,8 @@ impl DialogTable {
             .iter()
             .flat_map(|e| e.commands.iter())
             .chain(self.base.iter())
-            .filter_map(|c| match *c {
-                DialogCallable::Plugin { plugin, command } => Some((plugin, command)),
+            .filter_map(|c| match c.kind() {
+                DialogCallableKind::Plugin { plugin, command } => Some((plugin, command)),
                 _ => None,
             })
             .collect()
@@ -555,7 +555,7 @@ mod tests {
             assert!(std::panic::catch_unwind(|| DialogTable::new(leaked, &[])).is_err());
         }
         static MANY: [DialogCallable; MAX_COMMANDS + 1] =
-            [DialogCallable::Command("x"); MAX_COMMANDS + 1];
+            [DialogCallable::__command("x"); MAX_COMMANDS + 1];
         let busy = [Entry {
             commands: &MANY,
             ..entry("a", Shape::Tool)
@@ -579,23 +579,15 @@ mod tests {
         static ENTRIES: [Entry; 2] = [
             Entry {
                 commands: &[
-                    DialogCallable::Command("app_status"),
-                    DialogCallable::Plugin {
-                        plugin: "dialog",
-                        command: "open",
-                    },
+                    DialogCallable::__command("app_status"),
+                    paddock_commands::plugin("dialog", "open"),
                 ],
                 ..Entry::new("a.one", Shape::Tool)
             },
             Entry::new("a.two", Shape::Decision),
         ];
-        static T: DialogTable = DialogTable::new(
-            &ENTRIES,
-            &[DialogCallable::Plugin {
-                plugin: "log",
-                command: "log",
-            }],
-        );
+        static T: DialogTable =
+            DialogTable::new(&ENTRIES, &[paddock_commands::plugin("log", "log")]);
         assert_eq!(T.entries().len(), 2);
         assert_eq!(T.get("a.two").map(|e| e.shape), Some(Shape::Decision));
         assert!(T.get("a.three").is_none());
@@ -606,7 +598,7 @@ mod tests {
     }
 
     crate::dialogs! {
-        static WRITTEN, base &[paddock_commands::DialogCallable::Command("window_ready")];
+        static WRITTEN, base &[paddock_commands::DialogCallable::__command("window_ready")];
         /// A doc comment on an entry is allowed.
         "t.decision" => Decision { instanced: true },
         "t.form" => Form(Modeless) { width: Some(Wide) },
@@ -623,6 +615,6 @@ mod tests {
         assert_eq!(e[1].width_px(), 720.0);
         assert_eq!((e[2].width_px(), e[2].height_px()), (820.0, Some(640.0)));
         assert_eq!(e[3], Entry::new("t.viewer", Shape::Viewer));
-        assert_eq!(WRITTEN.base(), [DialogCallable::Command("window_ready")]);
+        assert_eq!(WRITTEN.base(), [DialogCallable::__command("window_ready")]);
     }
 }

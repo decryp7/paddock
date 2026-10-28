@@ -184,12 +184,9 @@ const fn last_segment(path: &'static str) -> &'static str {
     path.split_at(start).1
 }
 
-/// A command a dialog contract may name (ADR 0026 §3). [`command_table!`](crate::command_table) emits one marker per
-/// command open to dialogs (`dialog_callable::<name>`, a [`DialogCallable::Command`]); a contract names the marker, so a
-/// misspelt command, a removed one or one closed to dialogs is an unresolved name: a compile error that names it.
-/// [`prefix`] and [`plugin`] build the two other forms.
+/// What a [`DialogCallable`] names (see [`DialogCallable::kind`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DialogCallable {
+pub enum DialogCallableKind {
     /// One command of a table, open to dialogs.
     Command(&'static str),
     /// Every command of a table whose name starts with this (`settings_*`); at least one is open to dialogs.
@@ -202,14 +199,47 @@ pub enum DialogCallable {
     },
 }
 
+/// A command a dialog contract may name (ADR 0026 §3). [`command_table!`](crate::command_table) emits one marker per
+/// command open to dialogs (`dialog_callable::<name>`); a contract names the marker, so a misspelt command, a removed
+/// one or one closed to dialogs is an unresolved name: a compile error that names it. [`prefix`] and [`plugin`] build
+/// the two other forms. The fields are private, so a value cannot be made by hand (a string literal would bypass the
+/// compile-time check):
+///
+/// ```compile_fail
+/// let _ = paddock_commands::DialogCallable::Command("x");
+/// ```
+///
+/// ```compile_fail
+/// let _ = paddock_commands::DialogCallable(paddock_commands::DialogCallableKind::Command("x"));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DialogCallable(DialogCallableKind);
+
 impl DialogCallable {
+    /// What this entry names.
+    pub const fn kind(&self) -> DialogCallableKind {
+        self.0
+    }
+
     /// The entry as the run-time contract lists it: the command, `prefix*`, or `plugin:<plugin>|<command>`.
     pub fn wire(&self) -> String {
-        match self {
-            DialogCallable::Command(c) => (*c).to_string(),
-            DialogCallable::Prefix(p) => format!("{p}*"),
-            DialogCallable::Plugin { plugin, command } => format!("plugin:{plugin}|{command}"),
+        match self.0 {
+            DialogCallableKind::Command(c) => c.to_string(),
+            DialogCallableKind::Prefix(p) => format!("{p}*"),
+            DialogCallableKind::Plugin { plugin, command } => format!("plugin:{plugin}|{command}"),
         }
+    }
+
+    /// For [`command_table!`](crate::command_table) and tests only: a command marker.
+    #[doc(hidden)]
+    pub const fn __command(name: &'static str) -> DialogCallable {
+        DialogCallable(DialogCallableKind::Command(name))
+    }
+
+    /// For tests only: a prefix entry without the compile-time check of [`prefix`].
+    #[doc(hidden)]
+    pub const fn __prefix(prefix: &'static str) -> DialogCallable {
+        DialogCallable(DialogCallableKind::Prefix(prefix))
     }
 }
 
@@ -232,7 +262,7 @@ pub const fn prefix(callable: &[&str], prefix: &'static str) -> DialogCallable {
     let mut k = 0;
     while k < callable.len() {
         if starts_with(callable[k], prefix) {
-            return DialogCallable::Prefix(prefix);
+            return DialogCallable(DialogCallableKind::Prefix(prefix));
         }
         k += 1;
     }
@@ -246,7 +276,7 @@ pub const fn plugin(plugin: &'static str, command: &'static str) -> DialogCallab
         !plugin.is_empty() && !command.is_empty(),
         "dialog contract: a plugin command needs a plugin and a command"
     );
-    DialogCallable::Plugin { plugin, command }
+    DialogCallable(DialogCallableKind::Plugin { plugin, command })
 }
 
 const fn starts_with(name: &str, prefix: &str) -> bool {

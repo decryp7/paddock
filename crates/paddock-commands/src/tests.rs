@@ -1042,7 +1042,7 @@ fn a_leaf_table_marks_exactly_the_commands_open_to_dialogs() {
     );
     assert_eq!(
         marked::dialog_callable::app_legal,
-        DialogCallable::Command("app_legal")
+        DialogCallable::__command("app_legal")
     );
     assert_eq!(marked::dialog_callable::tray_fit.wire(), "tray_fit");
     assert_eq!(prefix(marked::dialog_callable::ALL, "app_").wire(), "app_*");

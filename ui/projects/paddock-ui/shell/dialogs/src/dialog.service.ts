@@ -58,10 +58,23 @@ export class DialogService {
     const ref: DialogHandle = { closed: session.closed, dismiss: () => session.dismiss() };
     if (single) this.open_.set(key, { ref, session });
     const modal = def.modality === 'modal';
-    if (modal) this.gate.enter();
+    // A windowed modal blocks its parent once its window is on screen, not when it is asked for; one closed before
+    // that never entered.
+    let ended = false;
+    let entered = false;
+    const enter = () => {
+      if (ended || entered) return;
+      entered = true;
+      this.gate.enter();
+    };
+    if (modal) {
+      if (this.presenter.windowed && session.shown) void session.shown.then(enter);
+      else enter();
+    }
     void session.closed.then(() => {
+      ended = true;
       if (this.open_.get(key)?.ref === ref) this.open_.delete(key);
-      if (modal) this.gate.leave();
+      if (entered) this.gate.leave();
       if (opener?.isConnected && opener !== document.body) opener.focus();
     });
     return ref;

@@ -42,7 +42,7 @@ paddock_commands::command_table! {
 fn contracts() -> Arc<Contracts> {
     use crate::table::{Entry, Shape};
     const STATUS: &[paddock_commands::DialogCallable] =
-        &[paddock_commands::DialogCallable::Command("app_status")];
+        &[paddock_commands::DialogCallable::__command("app_status")];
     let form = Shape::Form(crate::Modality::Modeless);
     let entry = |id: &'static str, shape: Shape| Entry {
         commands: STATUS,
@@ -144,6 +144,7 @@ fn request(id: &str) -> DialogRequest {
         title: "Set up the assistant".into(),
         input: Some(json!({ "modelId": "m1" })),
         remembered: None,
+        theme: None,
     }
 }
 
@@ -452,6 +453,7 @@ fn measure(content_h: f64, min_h: f64) -> Measure {
     Measure {
         content: size(720.0, content_h),
         min_content: size(400.0, min_h),
+        viewport_height: None,
     }
 }
 
@@ -563,7 +565,7 @@ fn a_dialog_is_not_shown_before_its_page_is_ready_and_is_shown_focused_once_it_i
         );
         // The page reports: the window is sized, shown and focused, once.
         let dialog = os_window(&app, &info.label);
-        ready(&h, &dialog, measure(400.0, 150.0), os, show_mechanism(os)).unwrap();
+        ready(&h, &dialog, measure(400.0, 150.0), os).unwrap();
         assert!(!state(&app).is_pending(&info.label));
         let seen = native_since(mark);
         assert!(
@@ -573,7 +575,7 @@ fn a_dialog_is_not_shown_before_its_page_is_ready_and_is_shown_focused_once_it_i
         );
         // A second ready (a late one) fits but does not show again; the deadline finds it shown.
         let before = native_since(mark).len();
-        ready(&h, &dialog, measure(420.0, 150.0), os, show_mechanism(os)).unwrap();
+        ready(&h, &dialog, measure(420.0, 150.0), os).unwrap();
         timer.deadline_passes();
         assert_eq!(native_since(mark).len(), before, "{os}");
     }
@@ -595,14 +597,7 @@ fn a_page_that_never_reports_is_shown_at_the_deadline_and_a_late_ready_fits_it_o
     assert_eq!(shown, [format!("show:{}", info.label)]);
     // The page wakes up late: it is fitted, not shown again.
     let dialog = os_window(&app, &info.label);
-    ready(
-        &h,
-        &dialog,
-        measure(300.0, 120.0),
-        "linux",
-        show_mechanism("linux"),
-    )
-    .unwrap();
+    ready(&h, &dialog, measure(300.0, 120.0), "linux").unwrap();
     assert_eq!(
         native_since(mark)
             .iter()
@@ -624,20 +619,14 @@ fn showing_what_is_gone_does_nothing() {
     let h = app.handle().clone();
     let mark = native_mark();
     // Unknown label; a record without a window (its webview never reached the manager); no dialogs state at all.
-    show(&h, "d-main-9", "linux", ShowMechanism::ReadyThenShow, true);
+    show(&h, "d-main-9", "linux", true);
     let about = state(&app).contracts().get("about").unwrap().clone();
     let orphan = state(&app)
         .reserve(OpenDialog::new("main", "main", "about", &about))
         .unwrap();
-    show(&h, &orphan, "linux", ShowMechanism::ReadyThenShow, false);
+    show(&h, &orphan, "linux", false);
     let bare = app_with(None);
-    show(
-        bare.handle(),
-        "d-main-1",
-        "linux",
-        ShowMechanism::ReadyThenShow,
-        true,
-    );
+    show(bare.handle(), "d-main-1", "linux", true);
     assert!(native_since(mark).is_empty());
 }
 
@@ -681,15 +670,86 @@ fn the_parent_stays_enabled_until_the_dialog_is_shown() {
         assert!(!disabled(mark), "{os}");
         // Shown: now it is (never on macOS, where the UI's scrim does it).
         let info = open_on(&h, "main", request("confirm-x"), os).unwrap();
-        ready(
-            &h,
-            &os_window(&app, &info.label),
-            measure(200.0, 100.0),
-            os,
-            show_mechanism(os),
-        )
-        .unwrap();
+        ready(&h, &os_window(&app, &info.label), measure(200.0, 100.0), os).unwrap();
         assert_eq!(disabled(mark), os != "macos", "{os}");
+    }
+}
+
+#[test]
+fn the_opener_is_told_when_the_window_is_shown_once_not_when_it_is_opened() {
+    let (app, timer) = manual_app();
+    let h = app.handle().clone();
+    let shown = recorder(&window(&app, "main"), SHOWN_EVENT);
+    let info = open(&h, "main", request("unsaved-changes")).unwrap();
+    assert!(shown.lock().unwrap().is_empty(), "opening shows nothing");
+    ready(
+        &h,
+        &os_window(&app, &info.label),
+        measure(200.0, 100.0),
+        "linux",
+    )
+    .unwrap();
+    // The deadline passing afterwards, and a second ready, show nothing again.
+    timer.deadline_passes();
+    ready(
+        &h,
+        &os_window(&app, &info.label),
+        measure(200.0, 100.0),
+        "linux",
+    )
+    .unwrap();
+    let seen = shown.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert!(
+        seen[0].contains(&info.label) && seen[0].contains("unsaved-changes"),
+        "{seen:?}"
+    );
+}
+
+#[test]
+fn only_shown_modals_hold_the_parent_and_the_last_shown_one_releases_it() {
+    for os in ["windows", "linux"] {
+        let (app, timer) = manual_app();
+        let h = app.handle().clone();
+        let mark = native_mark();
+        let a = open_on(&h, "main", request("unsaved-changes"), os).unwrap();
+        let b = open_on(&h, "main", request("confirm-x"), os).unwrap();
+        let ops = || {
+            native_since(mark)
+                .into_iter()
+                .filter(|o| o.ends_with(":main"))
+                .collect::<Vec<_>>()
+        };
+        // Only A is shown (B is still pending): A closing releases the parent although B is open.
+        ready(&h, &os_window(&app, &a.label), measure(200.0, 100.0), os).unwrap();
+        on_destroyed_on(&h, &a.label, os);
+        assert_eq!(ops(), ["disable:main", "enable:main"], "{os}");
+        // B's deadline passes after that: it shows and holds the parent again; closing it releases it.
+        timer.deadline_passes();
+        on_destroyed_on(&h, &b.label, os);
+        assert_eq!(
+            ops(),
+            ["disable:main", "enable:main", "disable:main", "enable:main"],
+            "{os}"
+        );
+    }
+}
+
+#[test]
+fn a_deadline_that_arrives_after_the_close_never_locks_the_parent() {
+    for os in ["windows", "linux"] {
+        let (app, timer) = manual_app();
+        let h = app.handle().clone();
+        let mark = native_mark();
+        let a = open_on(&h, "main", request("unsaved-changes"), os).unwrap();
+        on_destroyed_on(&h, &a.label, os);
+        timer.deadline_passes();
+        let ops = native_since(mark);
+        assert!(
+            !ops.iter()
+                .any(|o| o == "disable:main" || o == "enable:main"),
+            "{os}: {ops:?}"
+        );
     }
 }
 
@@ -719,44 +779,11 @@ fn opening_a_pending_dialog_again_creates_no_window_and_does_not_show_it_early()
         &os_window(&app, &first.label),
         measure(300.0, 100.0),
         "linux",
-        show_mechanism("linux"),
     )
     .unwrap();
     let mark = native_mark();
     assert!(open(&h, "main", request("ai-setup")).unwrap().existing);
     assert_eq!(native_since(mark), [format!("focus:{}", first.label)]);
-}
-
-#[test]
-fn the_offscreen_mechanism_waits_off_screen_and_moves_into_place_when_shown() {
-    let (app, _timer) = manual_app();
-    let h = app.handle().clone();
-    let mark = native_mark();
-    let info = open_with(
-        &h,
-        "main",
-        request("ai-setup"),
-        "windows",
-        ShowMechanism::OffscreenThenShow,
-    )
-    .unwrap();
-    assert!(!native_since(mark).iter().any(|o| o.starts_with("place")));
-    ready(
-        &h,
-        &os_window(&app, &info.label),
-        measure(300.0, 100.0),
-        "windows",
-        ShowMechanism::OffscreenThenShow,
-    )
-    .unwrap();
-    let seen = native_since(mark);
-    let place = seen
-        .iter()
-        .position(|o| o == &format!("place:{}", info.label));
-    let show = seen
-        .iter()
-        .position(|o| o == &format!("show:{}", info.label));
-    assert!(place.is_some() && place < show, "{seen:?}");
 }
 
 #[test]
@@ -779,7 +806,6 @@ fn macos_attaches_an_owned_dialog_to_its_parent_when_it_shows_never_when_it_is_b
         &os_window(&app, &modal.label),
         measure(300.0, 200.0),
         "macos",
-        ShowMechanism::ReadyThenShow,
     )
     .unwrap();
     ready(
@@ -787,7 +813,6 @@ fn macos_attaches_an_owned_dialog_to_its_parent_when_it_shows_never_when_it_is_b
         &os_window(&app, &modeless.label),
         measure(300.0, 200.0),
         "macos",
-        ShowMechanism::ReadyThenShow,
     )
     .unwrap();
     let seen = native_since(mark);
@@ -810,7 +835,6 @@ fn macos_attaches_an_owned_dialog_to_its_parent_when_it_shows_never_when_it_is_b
         &os_window(&app, &linux.label),
         measure(300.0, 200.0),
         "linux",
-        ShowMechanism::ReadyThenShow,
     )
     .unwrap();
     assert!(native_since(mark).iter().all(|o| !o.starts_with("attach")));
@@ -829,14 +853,7 @@ fn a_scale_change_refits_a_dialog_from_its_last_measure() {
     // Nothing reported yet: nothing to refit, and nothing fails.
     scale_changed(&dialog);
     assert!(state(&app).get(&info.label).unwrap().measure.is_none());
-    ready(
-        &h,
-        &dialog,
-        measure(300.0, 100.0),
-        "linux",
-        show_mechanism("linux"),
-    )
-    .unwrap();
+    ready(&h, &dialog, measure(300.0, 100.0), "linux").unwrap();
     scale_changed(&dialog);
     // A window that is not a dialog has nothing to refit.
     scale_changed(&os_window(&app, "main"));
@@ -850,6 +867,7 @@ fn a_scale_change_refits_a_dialog_from_its_last_measure() {
         Measure {
             content: bad,
             min_content: bad,
+            viewport_height: None,
         },
     );
     scale_changed(&dialog);

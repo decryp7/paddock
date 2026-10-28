@@ -16,6 +16,10 @@ use std::fmt;
 pub const RESULT_EVENT: &str = "paddock://dialog-result";
 /// To the window that opened the dialog: it is gone (with or without a result). Payload: [`DialogClosed`].
 pub const CLOSED_EVENT: &str = "paddock://dialog-closed";
+/// To the window that opened the dialog: its window is on screen now (shown on ready, or at the show deadline). The
+/// opener's in-app scrim over a macOS parent (which the OS does not disable) starts here, not at open. Payload:
+/// [`DialogShown`].
+pub const SHOWN_EVENT: &str = "paddock://dialog-shown";
 /// To the dialog: the user asked to close it (Cmd/Ctrl+W, a window-manager close); the dialog decides and calls
 /// `dialog_close`. No payload.
 pub const CLOSE_REQUESTED_EVENT: &str = "paddock://dialog-close-requested";
@@ -53,6 +57,20 @@ pub struct DialogRequest {
     #[serde(default)]
     #[cfg_attr(test, ts(optional))]
     pub remembered: Option<Remembered>,
+    /// The opener's resolved theme (its `data-theme`): the window's background before the page paints is that theme's
+    /// `--pd-surface-2`. Without it the parent window's OS theme is used.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub theme: Option<Theme>,
+}
+
+/// A colour scheme of the app (`data-theme`).
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DialogTheme"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    Light,
+    Dark,
 }
 
 /// A dialog window as the opener sees it.
@@ -90,6 +108,15 @@ pub struct DialogResult {
     pub dialog_id: String,
     #[cfg_attr(test, ts(type = "unknown"))]
     pub result: Option<Value>,
+}
+
+/// The payload of [`SHOWN_EVENT`].
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DialogShown {
+    pub label: String,
+    pub dialog_id: String,
 }
 
 /// The payload of [`CLOSED_EVENT`].
@@ -279,9 +306,6 @@ pub struct WindowConfig {
     /// Logical px (see [`ScreenPosition`]).
     pub position: (f64, f64),
     pub min_inner: (f64, f64),
-    /// Visible when built: only for [`ShowMechanism::OffscreenThenShow`] (off-screen); otherwise created hidden and
-    /// shown by the lifecycle ([`ShowMechanism::ReadyThenShow`]).
-    pub visible: bool,
     /// The background before the page paints ([`window_surface`]).
     pub background: (u8, u8, u8),
     pub resizable: bool,
@@ -293,6 +317,23 @@ pub struct WindowConfig {
     pub minimizable: bool,
     /// The native zoom / maximise button: none.
     pub maximizable: bool,
+    /// Run in the page before the app ([`platform_script`]).
+    pub init_script: String,
+}
+
+/// The script run in a dialog page before the app: `<html data-platform>` is the OS the window was built for (`macos`,
+/// `windows` or `linux`; any other OS counts as Linux), so the shell's platform-dependent layout (the footer's button
+/// order) does not depend on the user agent. Set at once, or when the document element appears.
+pub fn platform_script(os: &str) -> String {
+    let os = match os {
+        "macos" => "macos",
+        "windows" => "windows",
+        _ => "linux",
+    };
+    format!(
+        "(function(){{var set=function(){{var d=document.documentElement;if(!d)return false;d.dataset.platform='{os}';return true;}};\
+if(!set()){{var o=new MutationObserver(function(){{if(set())o.disconnect();}});o.observe(document,{{childList:true}});}}}})();"
+    )
 }
 
 /// The title-bar buttons of a dialog window: (closable, minimizable, maximizable). None, for every kind: a dialog closes
@@ -312,10 +353,8 @@ pub struct WindowSpec<'a> {
     pub modality: Modality,
     /// The OS (`std::env::consts::OS`).
     pub os: &'a str,
-    /// How the window is kept unseen until it is fitted ([`show_mechanism`]).
-    pub mechanism: ShowMechanism,
-    /// The parent's colour scheme, for the background ([`window_surface`]).
-    pub dark: bool,
+    /// The colour scheme, for the background ([`window_surface`]).
+    pub theme: Theme,
 }
 
 /// The builder configuration of a dialog at `place` with logical minimum `min`.
@@ -334,12 +373,9 @@ pub fn window_config(
         url: dialog_url(spec.route, spec.dialog_id, spec.host, spec.label),
         title: spec.title.to_string(),
         inner: (w, h),
-        position: match spec.mechanism {
-            ShowMechanism::ReadyThenShow => at.logical,
-            ShowMechanism::OffscreenThenShow => OFFSCREEN,
-        },
-        visible: spec.mechanism == ShowMechanism::OffscreenThenShow,
-        background: window_surface(spec.dark),
+        position: at.logical,
+        background: window_surface(spec.theme),
+        init_script: platform_script(spec.os),
         min_inner: (min.0.min(w), min.1.min(h)),
         resizable: true,
         owned: Parenting::of(spec.modality, spec.os) == Parenting::Owned,
@@ -356,6 +392,27 @@ pub fn window_config(
 pub struct Measure {
     pub content: Size,
     pub min_content: Size,
+    /// The page's `window.innerHeight` (CSS px), when the page sends it. A webview can be shorter than the window's
+    /// inner height (the 1.1-0 spike measured 32 px on a Mac whose outer and inner sizes were equal): the fit adds the
+    /// difference ([`viewport_delta`]) to the content and minimum content heights so the footer is not cut off.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub viewport_height: Option<f64>,
+}
+
+/// The most a viewport delta can be, logical px (a bigger gap is a wrong report, not a webview inset).
+pub const MAX_VIEWPORT_DELTA: f64 = 400.0;
+
+/// The part of a window's inner height the page's viewport does not see: `inner_height` less the page's reported
+/// `viewport_height`, clamped to `0..=`[`MAX_VIEWPORT_DELTA`] (a page that is taller than the window has no delta). 0
+/// when the page did not report one.
+pub fn viewport_delta(inner_height: f64, viewport_height: Option<f64>) -> f64 {
+    match viewport_height {
+        Some(v) if v.is_finite() && inner_height.is_finite() => {
+            (inner_height - v).clamp(0.0, MAX_VIEWPORT_DELTA)
+        }
+        _ => 0.0,
+    }
 }
 
 impl Measure {
@@ -367,7 +424,10 @@ impl Measure {
                 .iter()
                 .all(|v| v.is_finite() && *v > 0.0 && *v <= MAX_SIDE)
         };
-        if sane(self.content) && sane(self.min_content) {
+        let viewport_ok = self
+            .viewport_height
+            .is_none_or(|v| v.is_finite() && (1.0..=MAX_SIDE).contains(&v));
+        if sane(self.content) && sane(self.min_content) && viewport_ok {
             Ok(self)
         } else {
             Err(DialogError::new(
@@ -385,30 +445,21 @@ impl Measure {
 pub enum ShowMechanism {
     /// Method d: the window is created hidden and shown on `dialog_ready` (or at the show deadline).
     ReadyThenShow,
-    /// Method b: the window is created visible and off-screen (unfocused), moved into place on `dialog_ready` (or at
-    /// the show deadline).
-    OffscreenThenShow,
 }
 
-/// The ONE place the show mechanism is chosen per OS (`std::env::consts::OS`). Measured on macOS and Linux: method d.
-/// Windows is pending; if it disagrees, return [`ShowMechanism::OffscreenThenShow`] for `"windows"` here and nowhere
-/// else.
+/// The ONE place the show mechanism is chosen per OS (`std::env::consts::OS`). The 1.1-0 spike measured method d on
+/// macOS, Linux and Windows, so it is the same everywhere.
 pub fn show_mechanism(os: &str) -> ShowMechanism {
     let _ = os;
     ShowMechanism::ReadyThenShow
 }
 
-/// Where an off-screen window waits (logical px, far outside any display arrangement).
-pub const OFFSCREEN: (f64, f64) = (-30_000.0, -30_000.0);
-
-/// The background of a dialog window before its page paints, RGB: the dialog shell's own surface (`--pd-surface-2` of
-/// `_tokens.scss`, dark `#1b1e23`, light `#f0f2f5`), so the window never flashes another colour. The scheme is the parent
-/// window's theme, since the request carries none.
-pub const fn window_surface(dark: bool) -> (u8, u8, u8) {
-    if dark {
-        (0x1b, 0x1e, 0x23)
-    } else {
-        (0xf0, 0xf2, 0xf5)
+/// The background of a dialog window before its page paints, RGB: the dialog shell's own surface, `--pd-surface-2` of
+/// `_tokens.scss` for `theme` (a test compares these values with the file), so the window never flashes another colour.
+pub const fn window_surface(theme: Theme) -> (u8, u8, u8) {
+    match theme {
+        Theme::Dark => (0x1b, 0x1e, 0x23),
+        Theme::Light => (0xf0, 0xf2, 0xf5),
     }
 }
 
@@ -496,16 +547,17 @@ pub fn plan_fit(
     let (avail_w, avail_h) = work.map_or((MAX_SIDE, MAX_SIDE), |(w, h)| {
         ((w - decor.width).max(1.0), (h - decor.height).max(1.0))
     });
+    let delta = viewport_delta(current.height, measure.viewport_height);
     let min = Size {
         width: measure.min_content.width.min(avail_w),
-        height: measure.min_content.height.min(avail_h),
+        height: (measure.min_content.height + delta).min(avail_h),
     };
     let width = current.width.max(min.width);
     let height = if kind.policy().fits_content {
         let cap = work.map_or(MAX_SIDE, |(_, h)| h * CAP_FRACTION - decor.height);
         fit_target(
             kind,
-            measure.content.height,
+            measure.content.height + delta,
             cap,
             min.height,
             floor,
@@ -571,6 +623,7 @@ mod tests {
             title: "Set up".into(),
             input: Some(json!({ "modelId": "m1" })),
             remembered: None,
+            theme: None,
         }
     }
 
@@ -584,6 +637,7 @@ mod tests {
                 width: mw,
                 height: mh,
             },
+            viewport_height: None,
         }
     }
 
@@ -601,8 +655,85 @@ mod tests {
         }
     }
 
+    /// The `--pd-surface-2` of the `@mixin dark` or `@mixin light` block of `_tokens.scss`, as RGB.
+    fn token_surface(mixin: &str) -> (u8, u8, u8) {
+        let scss = include_str!("../../../ui/projects/paddock-ui/scss/_tokens.scss");
+        let block = scss
+            .split(&format!("@mixin {mixin} {{"))
+            .nth(1)
+            .expect("the mixin exists");
+        let line = block
+            .lines()
+            .find(|l| l.trim_start().starts_with("--pd-surface-2:"))
+            .expect("the block sets --pd-surface-2");
+        let hex = line.split('#').nth(1).unwrap().trim_end_matches(';').trim();
+        let n = u32::from_str_radix(hex, 16).unwrap();
+        ((n >> 16) as u8, (n >> 8) as u8, n as u8)
+    }
+
+    #[test]
+    fn the_window_surfaces_are_the_tokens_surface_2_of_each_theme() {
+        assert_eq!(window_surface(Theme::Dark), token_surface("dark"));
+        assert_eq!(window_surface(Theme::Light), token_surface("light"));
+    }
+
+    #[test]
+    fn a_dialog_page_is_told_its_platform_before_the_app_runs() {
+        for (os, platform) in [
+            ("macos", "macos"),
+            ("windows", "windows"),
+            ("linux", "linux"),
+            ("freebsd", "linux"),
+        ] {
+            let script = platform_script(os);
+            assert!(
+                script.contains(&format!("d.dataset.platform='{platform}'")),
+                "{os}: {script}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_viewport_delta_is_the_inner_height_less_the_pages_and_clamped() {
+        assert_eq!(viewport_delta(332.0, Some(300.0)), 32.0);
+        assert_eq!(viewport_delta(300.0, Some(332.0)), 0.0);
+        assert_eq!(viewport_delta(900.0, Some(100.0)), MAX_VIEWPORT_DELTA);
+        assert_eq!(viewport_delta(332.0, None), 0.0);
+        assert_eq!(viewport_delta(332.0, Some(f64::NAN)), 0.0);
+    }
+
+    #[test]
+    fn a_viewport_short_of_the_window_adds_its_delta_to_content_and_minimum() {
+        let cur = size(400.0, 332.0);
+        let none = plan_fit(
+            Kind::Form,
+            measure(400.0, 300.0, 300.0, 150.0),
+            0.0,
+            &around(cur, size(0.0, 0.0), None, "macos"),
+        )
+        .unwrap();
+        let mut m = measure(400.0, 300.0, 300.0, 150.0);
+        m.viewport_height = Some(300.0);
+        let fit = plan_fit(
+            Kind::Form,
+            m,
+            0.0,
+            &around(cur, size(0.0, 0.0), None, "macos"),
+        )
+        .unwrap();
+        assert_eq!(fit.size.height, none.size.height + 32.0);
+        assert_eq!(fit.min.height, none.min.height + 32.0);
+    }
+
     #[test]
     fn a_measure_must_be_a_real_size() {
+        let mut v = measure(400.0, 300.0, 300.0, 150.0);
+        for bad in [Some(0.0), Some(f64::NAN), Some(MAX_SIDE + 1.0)] {
+            v.viewport_height = bad;
+            assert_eq!(v.checked().unwrap_err().code, DialogErrorCode::Invalid);
+        }
+        v.viewport_height = Some(300.0);
+        assert!(v.checked().is_ok());
         assert!(measure(400.0, 300.0, 300.0, 150.0).checked().is_ok());
         for bad in [
             measure(f64::NAN, 300.0, 300.0, 150.0),
@@ -628,8 +759,8 @@ mod tests {
         for os in ["macos", "windows", "linux"] {
             assert_eq!(show_mechanism(os), ShowMechanism::ReadyThenShow, "{os}");
         }
-        assert_eq!(window_surface(true), (0x1b, 0x1e, 0x23));
-        assert_eq!(window_surface(false), (0xf0, 0xf2, 0xf5));
+        assert_eq!(window_surface(Theme::Dark), (0x1b, 0x1e, 0x23));
+        assert_eq!(window_surface(Theme::Light), (0xf0, 0xf2, 0xf5));
     }
 
     #[test]
@@ -932,8 +1063,7 @@ mod tests {
                 title: "Set up",
                 modality,
                 os,
-                mechanism: ShowMechanism::ReadyThenShow,
-                dark: true,
+                theme: Theme::Dark,
             };
             let at = placement::screen_position(&place, os);
             let c = window_config(&spec, &at, &place, (680.0, 300.0));
@@ -952,21 +1082,17 @@ mod tests {
             assert_eq!(c.min_inner, (500.0, 300.0));
             assert_eq!(c.title, "Set up");
             // Created unseen, on the dialog shell's own surface.
-            assert!(!c.visible);
-            assert_eq!(c.background, window_surface(true));
-            // The off-screen mechanism waits far from every display and is visible.
-            let off = window_config(
+            assert_eq!(c.background, window_surface(Theme::Dark));
+            let light = window_config(
                 &WindowSpec {
-                    mechanism: ShowMechanism::OffscreenThenShow,
-                    dark: false,
+                    theme: Theme::Light,
                     ..spec
                 },
                 &at,
                 &place,
                 (680.0, 300.0),
             );
-            assert!(off.visible && off.position == OFFSCREEN);
-            assert_eq!(off.background, window_surface(false));
+            assert_eq!(light.background, window_surface(Theme::Light));
         }
     }
 
