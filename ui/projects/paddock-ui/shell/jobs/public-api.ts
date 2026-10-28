@@ -8,7 +8,7 @@
  * and announces every job's end as a notice, so an app listener (or a success toast of its own for the same job) says
  * it twice. Start the work with `JobFollow.run(start, owner)` (or `JobsStore.follow(id)`) and act on the terminal snapshot
  * it resolves with; show no extra "done" toast for it, and none at all for a trivial action. Only paddock-ui may name
- * `JOBS_EVENT`; conformance check C40 fails an app that does.
+ * `JOBS_EVENT`; conformance check C44 fails an app that does.
  */
 export { JOBS_EVENT, parseJobSnapshot, parseJobSnapshots, isActiveJob, isFinishedJob } from './src/wire';
 export { JobsBackend, TauriJobsBackend, MemoryJobsBackend, type JobsIpc, type Unlisten } from './src/jobs-backend';

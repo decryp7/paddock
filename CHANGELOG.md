@@ -12,7 +12,7 @@ Conventional Commits; one semver tag for the whole repo.
   `cdk-virtual-scroll-viewport`). Tested against fixture pages in `selftest/capture.spec.ts`.
 - `pd-page-host` is a flex column that fills `<main>` (`height: 100%`, `min-height: 0`), and the loaded page's box is a shrinkable
   flex item, so `height: 100%` inside a routed page resolves instead of collapsing to 0.
-- Conformance C40: an app TypeScript file must not name `paddock://jobs` / `JOBS_EVENT`; apps wait for jobs through
+- Conformance C44: an app TypeScript file must not name `paddock://jobs` / `JOBS_EVENT`; apps wait for jobs through
   `JobFollow` / `JobsStore.follow` (documented in `shell/jobs`), which avoids doubled announcements.
 - New [docs/plans/shell-adoption-checklist.md](docs/plans/shell-adoption-checklist.md), linked from AGENTS.md.
 

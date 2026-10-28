@@ -49,7 +49,7 @@ Finding: a dialog's primary button was clipped because the footer sat inside the
 Findings: success toasts for trivial actions, and double announcements (the app's own job listener plus the shell's
 `JobsStore`).
 
-- [ ] No `paddock://jobs` listener in the app. **(checked: conformance C40)** Start work with `JobFollow.run(...)` or
+- [ ] No `paddock://jobs` listener in the app. **(checked: conformance C44)** Start work with `JobFollow.run(...)` or
       `JobsStore.follow(id)` from `@decryp7/paddock-ui/shell/jobs` and act on its result; the shell announces the end.
 - [ ] No toast for a trivial, instant, visible action (a copy, a toggle, a rename that the UI shows). A toast is for an
       outcome the user could miss: a background job's end, an error with a next step.

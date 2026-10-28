@@ -7,7 +7,7 @@ import { JobsStore } from './jobs.store';
  * goes on and its end is announced as a notice. Nothing here times out (ADR 0008 §4): a quiet job shows "Still working".
  *
  * This is how an app waits for a job: never with its own `paddock://jobs` listener (the shell's notice would be doubled;
- * conformance C40), and without a second success toast for the same job.
+ * conformance C44), and without a second success toast for the same job.
  */
 @Injectable()
 export class JobFollow {
