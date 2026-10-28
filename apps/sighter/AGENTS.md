@@ -111,7 +111,7 @@ development and UI tests only; features are not done until they work against the
 
 - Match the surrounding code; Rust uses `rustfmt.toml` (max_width 140). Doc comments on public items.
 - UI: standalone components, signals, OnPush, CSS custom properties for theme tokens (dark and light, plus high
-  contrast), accessible markup. Use Angular CDK for behaviour and Angular Material selectively; icons through
+  contrast), accessible markup. Use Angular CDK for behaviour and Angular Material first (rule 47); icons through
   `MatIconRegistry` with Sighter's own SVGs, no icon fonts or runtime icon URLs.
 - Status and review colours always come with words; validate palettes for contrast and colour-vision deficiency.
 

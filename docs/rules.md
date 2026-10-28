@@ -5,8 +5,9 @@ decision or a lesson; the reasons are in [lessons.md](lessons.md). Each app's `A
 changes here, every app's copy is updated in the same change.
 
 ## Way of working
-1. **One large app at a time.** Finish the current large app before starting another; parallel agents only within that
-   app. Small, independent releases (separate app folders, serialized tags) may run alongside it (amended 2026-10-28).
+1. **One release at a time.** Release-critical work comes first. Other apps may progress in parallel only while load and
+   CI capacity allow, and only if they don't change shared code (`crates/`, `ui/`) the release depends on; tags stay
+   serialized (amended twice on 2026-10-28; ER-1).
 2. **Every agent works in its own git worktree** with its own `CARGO_TARGET_DIR` and its own e2e port; the main checkout
    stays on `main` for the coordinator.
 3. **Tests in a branch: only the affected ones** (touched crates, touched specs, related Playwright files), with
@@ -130,6 +131,13 @@ changes here, every app's copy is updated in the same change.
     8 GB model to name 2,000 log names after every import), its answers change with the model and cannot be explained, and
     rules, packs and the logs' own metadata were measured as good or better for the same job.
 
+## Components (user, 2026-10-28)
+47. **Material first.** Use Angular Material components wherever one fits (tables, menus, tooltips, tabs, selects,
+    toggles, chips, steppers, trees, progress, snack bars…), and Angular CDK for behaviour Material doesn't cover;
+    hand-roll only what neither provides, with the reason in the component's doc comment. Material is themed through the
+    `--pd-*` tokens (one shared theme), CSP-safe. *Why:* Material is widely used and tested; hand-rolled components cost
+    bugs it already solves.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:
@@ -144,5 +152,5 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
   try is fine but is never published. Never tag a `[skip ci]` commit.
 - **Rules 39 and 42:** shared code is moved to `crates/` or `ui/` and adopted by the app **in the same change**; there is
   no publish-and-consume step. "Consume the published version" becomes "use the in-tree version".
-- Rule 1 is about attention and load, not repos (amended 2026-10-28: one large app at a time; small, independent releases
-  may run alongside it).
+- Rule 1 is about attention, load, CI capacity and shared-code conflicts, not repos (amended 2026-10-28: one release at a
+  time; other apps only within those limits).
