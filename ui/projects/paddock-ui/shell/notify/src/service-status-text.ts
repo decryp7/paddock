@@ -56,6 +56,13 @@ const CAUSE_WORDS: Readonly<Record<string, () => string>> = {
   'sd.engine.stopped': () => $localize`:@@pd.health.state.stopped:stopped`,
   'sd.index.damaged': () => $localize`:@@pd.health.state.stopped:stopped`,
   'sd.index.rebuild': () => $localize`:@@pd.health.state.stopped:stopped`,
+  'sp.sources.unreachable': () => $localize`:@@pd.health.state.unavailable:not available`,
+  'sp.sources.proxy': () => $localize`:@@pd.health.state.limited:limited`,
+  'sp.renderer.missing': () => $localize`:@@pd.health.state.not-installed:not installed`,
+  'sp.renderer.not-found': () => $localize`:@@pd.health.state.stopped:stopped`,
+  'sp.renderer.cancelled': () => $localize`:@@pd.health.state.stopped:stopped`,
+  'sp.renderer.install': () => $localize`:@@pd.health.state.stopped:stopped`,
+  'sp.scheduler.stopped': () => $localize`:@@pd.health.state.stopped:stopped`,
 };
 
 /** The cause codes that have their own words (the spec over the Rust sources checks this list against what Rust emits). */
