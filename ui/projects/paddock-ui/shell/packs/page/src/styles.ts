@@ -22,5 +22,6 @@ export const PACKS_STYLES = `
   .pd-packs__notice { display: flex; flex-direction: column; gap: var(--pd-space-1); padding: var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); min-width: 0; }
   .pd-packs__title { font-weight: var(--pd-weight-medium); }
   mat-progress-bar { width: 100%; }
+  .pd-packs__head button pd-glyph { margin-inline-end: var(--pd-space-1); }
   @container (max-width: 420px) { .pd-packs__head button { flex: 1 1 100%; justify-content: center; } }
 `;
