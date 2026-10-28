@@ -1,4 +1,4 @@
-import { axeViolations, dialogContracts, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
+import { axeViolations, dialogContracts, dialogFitProblems, measureDialogWindow, openEveryDialog, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
 
 // The shell demo is the reference consumer of @decryp7/paddock-ui/shell (ADR 0012 §7); each work package adds its checks.
 // It uses only the test kit (@decryp7/paddock-e2e, plan S16); the static source checks are in shell/testing's specs.
@@ -472,7 +472,10 @@ test.describe('notifications and service health (plan S4)', () => {
 // Dialogs as windows (plan S6, ADR 0009). The browser build opens a dialog window's route by URL, so every dialog of the
 // contract file (generated from the registry, not a hand-kept list) boots with only its window's providers and is checked
 // per kind; the main window shows the same dialogs in the page.
-const CONTRACTS = dialogContracts('projects/shell-demo/dialog-contracts.json');
+const CONTRACTS = dialogContracts(
+  'projects/shell-demo/src/app/generated/dialog-contracts.ts',
+  ...['about', 'channels', 'confirm', 'diagnostics', 'mcp', 'setup', 'storage'].map((p) => `projects/paddock-ui/shell/${p}/generated/dialog-contracts.ts`),
+);
 
 test.describe('dialogs (plan S6)', () => {
   test('the contract file has every kind', () => {
@@ -493,7 +496,7 @@ test.describe('dialogs (plan S6)', () => {
           await expect(d.shell.getByRole('button', { name: 'Formal' })).toBeVisible();
           expect(await d.result()).toBeNull();
           await d.shell.getByRole('button', { name: 'Formal' }).click();
-          await d.expectResult('{"result":"formal"}');
+          await d.expectResult('{"result":{"answered":true,"value":"formal"}}');
           return;
         }
         await expect(d.wayOut).toBeVisible();
@@ -518,9 +521,9 @@ test.describe('dialogs (plan S6)', () => {
     });
   }
 
-  test('a viewer opens at 680x560 with the shell’s Close in view; axe finds nothing in a dialog window', async ({ app, page }) => {
-    expect(CONTRACTS['sd.about']?.minSize).toEqual({ width: 680, height: 560 });
-    await page.setViewportSize({ width: 680, height: 560 });
+  test('a viewer opens at 720x560 with the shell’s Close in view; axe finds nothing in a dialog window', async ({ app, page }) => {
+    expect([CONTRACTS['sd.about']?.width, CONTRACTS['sd.about']?.height]).toEqual([720, 560]);
+    await page.setViewportSize({ width: 720, height: 560 });
     await app.dialogs.openWindow('sd.about');
     const close = app.dialogs.shellClose;
     await expect(close).toHaveText('Close');
@@ -530,9 +533,105 @@ test.describe('dialogs (plan S6)', () => {
     expect(await axeViolations(page, { idsOnly: true })).toEqual([]);
   });
 
+  test.describe('a window that is not sized yet (ADR 0026 §4, method d)', () => {
+    // A hidden window may lay its page out at any width, even 0 (WebKitGTK under Xvfb): the frame measures at the contract's.
+    test.use({ viewport: { width: 1, height: 700 } });
+    test('sd.rename is measured at its contract width, not the 1 px viewport', async ({ app, page }) => {
+      await app.dialogs.openWindow('sd.rename', { current: 'Old name' });
+      await expect(page.locator('html')).toHaveAttribute('data-dialog-ready', 'true');
+      const html = page.locator('html');
+      await expect(html).toHaveAttribute('data-content-width', String(CONTRACTS['sd.rename']!.width));
+      expect(Number(await html.getAttribute('data-fitted-height'))).toBeLessThan(400);
+      await expect(page.locator('pd-dialog-frame')).not.toHaveClass(/pd-frame--pinned/);
+    });
+  });
+
+  test.describe('the frame keeps its footer in view (ADR 0026 §2, package 1.2a)', () => {
+    test.use({ deviceScaleFactor: 1.5, viewport: { width: 1366, height: 768 } });
+    test('sd.rename at 1.5x: the footer is hit after the content grows by 400 px and shrinks back, with a gap of at most 24 px', async ({ app, page }) => {
+      const width = CONTRACTS['sd.rename']!.width;
+      await app.dialogs.openWindow('sd.rename', { current: 'Old name' });
+      await app.dialogs.loaded();
+      await expect(page.locator('html')).toHaveAttribute('data-dialog-ready', 'true');
+      const fitted = async () => Number(await page.locator('html').getAttribute('data-fitted-height'));
+      // The window system sizes the window to what the frame asked; the footer must then be in view and on top.
+      const check = async () => {
+        const height = await fitted();
+        await page.setViewportSize({ width, height });
+        for (const id of ['dismiss', 'rename']) {
+          const box = (await app.dialogs.action(id).boundingBox())!;
+          const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('[data-testid]')?.getAttribute('data-testid') ?? null, [box.x + box.width / 2, box.y + box.height / 2]);
+          expect(hit, `${id} at ${height} px`).toBe(`dialog-action-${id}`);
+          expect(box.y + box.height).toBeLessThanOrEqual(height);
+          expect(height - (box.y + box.height), `the gap below ${id}`).toBeLessThanOrEqual(24);
+        }
+      };
+      await check();
+      const before = await fitted();
+      await page.evaluate(() => {
+        const tall = document.createElement('div');
+        tall.id = 'grow';
+        tall.style.height = '400px';
+        document.querySelector('.pd-frame-content')!.append(tall);
+      });
+      await expect.poll(fitted).toBeGreaterThanOrEqual(before + 400);
+      await check();
+      await page.evaluate(() => document.getElementById('grow')!.remove());
+      await expect.poll(fitted).toBe(before);
+      await check();
+    });
+  });
+
+  test('the save prompt asks an ordinary question: info icon, Save has the focus, Don’t save is outlined', async ({ app, page }) => {
+    await app.dialogs.openWindow('sd.unsaved', {}, { title: 'Save changes' });
+    await expect(page.getByTestId('dialog-icon')).toHaveAttribute('data-tone', 'info');
+    await expect(page.getByTestId('dialog-action-save')).toBeFocused();
+  });
+
+  test('a refused answer refits the window with the alert and its margins: the body does not scroll and keeps its bottom padding', async ({ app, page }) => {
+    await page.setViewportSize({ width: 400, height: 600 });
+    await app.dialogs.openWindow('pd.channels.secret', { channelId: 'slack', label: 'Team Slack', kind: 'token' }, { title: 'Token', query: '?channels-secret=refuse' });
+    await page.getByTestId('channel-secret-input').fill('s3cret-token');
+    await page.getByTestId('dialog-action-save').click();
+    await expect(page.getByTestId('dialog-alert')).toBeVisible();
+    // The alert refits the window once: wait for that second height, then lay the page out at it.
+    await expect.poll(() => app.dialogs.fitHistory()).toHaveLength(2);
+    const fitted = (await app.dialogs.fitHistory())[1]!;
+    await page.setViewportSize({ width: 400, height: fitted });
+    const body = await page.getByTestId('dialog-body').evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+    expect(body.scroll).toBeLessThanOrEqual(body.client);
+  });
+
+  test('every dialog opens by its window URL and sends its ready handshake (ADR 0026 §6; the nightly check reads the list)', async ({ page }) => {
+    const out = process.env['PADDOCK_DIALOGS_VISITED'];
+    const { visited, problems } = await openEveryDialog(page, CONTRACTS, { inputs: { 'pd.confirm': { heading: 'Forget?', message: 'It goes.', confirm: { label: 'Forget greetings' } } }, out });
+    expect(problems).toEqual([]);
+    expect(visited).toEqual(Object.keys(CONTRACTS).sort());
+    // The real-window helper reads the same page.
+    const m = await measureDialogWindow(page);
+    expect(m.gap).not.toBeNull();
+  });
+
+  test('every dialog fits at 1, 1.25 and 1.5 on 1920x1080 and 1366x768: its footer in view, on top, no gap (ADR 0026 §6)', async ({ browser, baseURL }) => {
+    test.setTimeout(600_000);
+    const fixtures: Record<string, unknown[]> = {
+      'pd.channels.secret': [{ channelId: 'slack', label: 'Team Slack', kind: 'token' }],
+      'pd.channels.remove': [{ channelId: 'slack', name: 'Team Slack' }],
+      'pd.mcp.revoke': [{ keyId: 1, client: 'Pitwall' }],
+      'pd.storage.confirm': [{ what: 'Logs', bytes: 5000000, data: true }],
+      'pd.confirm': [
+        { heading: 'Forget?', message: 'It goes.', confirm: { label: 'Forget greetings', destructive: true } },
+        { heading: 'Forget the greetings?', message: 'The greeting count and the log go back to empty. '.repeat(12), details: Array.from({ length: 12 }, (_, i) => `Greeting ${i + 1}`), confirm: { label: 'Forget greetings', destructive: true } },
+      ],
+    };
+    const problems: string[] = [];
+    for (const [id, contract] of Object.entries(CONTRACTS)) problems.push(...(await dialogFitProblems(browser, id, contract, { baseURL: baseURL!, inputs: fixtures[id] ?? [{}] })));
+    expect(problems).toEqual([]);
+  });
+
   test('the tool window loads its own providers and asks the engine', async ({ app, page }) => {
     await app.dialogs.openWindow('sd.inspector');
-    await expect(page.getByTestId('engine-status')).toContainText('running');
+    await expect(page.getByTestId('engine-state')).toHaveText('Running');
   });
 
   test('a form takes its input and answers on Enter', async ({ app, page }) => {
@@ -541,7 +640,7 @@ test.describe('dialogs (plan S6)', () => {
     await expect(field).toHaveValue('Old name');
     await field.fill('New name');
     await field.press('Enter');
-    await app.dialogs.expectResult('{"result":"New name"}');
+    await app.dialogs.expectResult('{"result":{"answered":true,"value":"New name"}}');
   });
 
   test('in the page: a modal blocks behind a backdrop, a modeless one leaves the page usable and opens once', async ({ app, page }) => {
@@ -550,10 +649,10 @@ test.describe('dialogs (plan S6)', () => {
     // A modeless dialog may sit over the buttons (it opens in the middle of the window): the button is clicked as itself.
     const open = (id: string) => page.locator(`[data-dialog-open="${id}"]`).dispatchEvent('click');
     await open('sd.confirm-reset');
-    const modal = d.inPage('Reset greetings?');
+    const modal = d.inPage('Reset the greetings?');
     await expect(modal).toHaveAttribute('aria-modal', 'true');
     await expect(d.backdrop).toBeVisible();
-    await modal.getByRole('button', { name: 'Reset' }).click();
+    await modal.getByRole('button', { name: 'Reset greetings' }).click();
     await expect(page.getByTestId('dialog-answer')).toHaveText('Reset greetings?: true');
     await expect(d.backdrop).toHaveCount(0);
 
@@ -571,7 +670,7 @@ test.describe('dialogs (plan S6)', () => {
     await expect(page.getByTestId('dialog-answer')).toHaveText('About the shell demo: dismissed');
 
     await open('sd.choose-style');
-    const choice = d.inPage('Choose a greeting style');
+    const choice = d.inPage('How should the demo greet you?');
     await page.keyboard.press('Escape');
     await expect(choice).toBeVisible();
     await choice.getByRole('button', { name: 'Casual' }).click();
@@ -584,7 +683,7 @@ test.describe('dialogs (plan S6)', () => {
 
     await open('sd.inspector');
     const inspector = d.inPage('Engine inspector');
-    await expect(inspector.getByTestId('engine-status')).toContainText('running');
+    await expect(inspector.getByTestId('engine-state')).toHaveText('Running');
     // A modeless dialog answers Escape from inside it only: from the page it stays open.
     await page.locator('[data-dialog-open="sd.rename"]').focus();
     await page.keyboard.press('Escape');

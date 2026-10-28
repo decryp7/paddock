@@ -1,6 +1,6 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { SuStatusPill } from '@decryp7/paddock-ui';
-import { SetupStore, statusView } from '@decryp7/paddock-ui/shell/setup';
+import { SetupStore, statusView, type ItemView } from '@decryp7/paddock-ui/shell/setup';
 import { SETUP_STYLES } from './styles';
 
 /**
@@ -36,11 +36,15 @@ import { SETUP_STYLES } from './styles';
                 <h3>{{ item.title }}</h3>
                 <pd-status-pill [status]="v.status" [label]="v.label" [attr.data-testid]="'setup-status-' + item.id" />
               </div>
-              <p class="pd-setup__muted">{{ item.detail }}</p>
+              <!-- A step that needs the local AI says so in its own sentence, which already names Pitwall: the general
+                   description would say the same twice. -->
+              @if (item.needsAi && item.status !== 'done') {
+                <p class="pd-setup__muted" [attr.data-testid]="'setup-detail-' + item.id">{{ item.needsAi.message }}</p>
+              } @else {
+                <p class="pd-setup__muted">{{ item.detail }}</p>
+              }
               @if (item.message && item.status !== 'done') {
                 <p [attr.data-testid]="'setup-message-' + item.id">{{ item.message }}</p>
-              } @else if (item.needsAi && item.status !== 'done') {
-                <p [attr.data-testid]="'setup-message-' + item.id">{{ item.needsAi.message }}</p>
               }
               @if (item.hint) {
                 <p class="pd-setup__title" [attr.data-testid]="'setup-hint-' + item.id">{{ item.hint }}</p>
@@ -52,9 +56,9 @@ import { SETUP_STYLES } from './styles';
             </div>
             <div class="pd-setup__actions" role="group" [attr.aria-label]="item.title">
               @if (item.status === 'problem') {
-                <button type="button" class="pd-setup__btn pd-setup__btn--primary" [attr.data-testid]="'setup-repair-' + item.id" [disabled]="working" (click)="store.repair(item.id)">{{ t.repair }}</button>
+                <button type="button" class="pd-setup__btn" [class.pd-setup__btn--primary]="item.id === lead()" [attr.data-testid]="'setup-repair-' + item.id" [disabled]="working" (click)="store.repair(item.id)">{{ t.repair }}</button>
               } @else if (item.status === 'todo') {
-                <button type="button" class="pd-setup__btn" [class.pd-setup__btn--primary]="!item.skipped" [attr.data-testid]="'setup-act-' + item.id" [disabled]="working" (click)="store.act(item.id)">{{ item.action }}</button>
+                <button type="button" class="pd-setup__btn" [class.pd-setup__btn--primary]="item.id === lead()" [attr.data-testid]="'setup-act-' + item.id" [disabled]="working" (click)="store.act(item.id)">{{ actionLabel(item) }}</button>
               }
               @if (item.status !== 'done') {
                 <button type="button" class="pd-setup__btn pd-setup__btn--quiet" [attr.data-testid]="'setup-skip-' + item.id" [disabled]="working" (click)="store.skip(item.id, !item.skipped)">{{ item.skipped ? t.unskip : t.skip }}</button>
@@ -80,6 +84,11 @@ import { SETUP_STYLES } from './styles';
 export class PdSetupChecklist {
   protected readonly store = inject(SetupStore);
 
+  /** The step's button: a step that needs a Pitwall that is not installed offers to get it; the others say what the engine says. */
+  protected actionLabel(item: ItemView): string {
+    return item.needsAi?.reason.kind === 'notInstalled' ? this.t.getPitwall : item.action;
+  }
+
   protected readonly t = {
     lede: $localize`:@@pd.setup.lede:A few things the app can set up for you. Each is optional, you can skip any of them, and you can come back to this list later in Settings.`,
     settled: $localize`:@@pd.setup.settled:Everything is set up or skipped. You can change any of it later in Settings.`,
@@ -87,6 +96,7 @@ export class PdSetupChecklist {
     loading: $localize`:@@pd.setup.loading:Looking at what is set up…`,
     noState: $localize`:@@pd.setup.no-state-title:The set-up steps could not be asked.`,
     retry: $localize`:@@pd.setup.retry:Retry`,
+    getPitwall: $localize`:@@pd.setup.get-pitwall:Get Pitwall`,
     repair: $localize`:@@pd.setup.repair:Repair`,
     skip: $localize`:@@pd.setup.skip:Skip for now`,
     unskip: $localize`:@@pd.setup.unskip:Take it up again`,
@@ -97,4 +107,10 @@ export class PdSetupChecklist {
   };
 
   protected readonly view = statusView;
+
+  /** The one step with the filled button: the first broken step (Repair), else the first still to do and not skipped. */
+  protected readonly lead = computed(() => {
+    const items = this.store.setup()?.items ?? [];
+    return (items.find((i) => i.status === 'problem') ?? items.find((i) => i.status === 'todo' && !i.skipped))?.id ?? null;
+  });
 }

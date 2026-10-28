@@ -45,7 +45,7 @@ test.describe('set-up checklist (plan X19)', () => {
 
   test('every step can be skipped and taken up again, and Pitwall is optional', async ({ app, page }) => {
     await app.dialogs.openWindow('pd.setup', {}, { title: 'Set-up', query: '?setup=fresh' });
-    await expect(page.getByTestId('setup-message-pitwall')).toContainText('not installed');
+    await expect(page.getByTestId('setup-detail-pitwall')).toContainText('not installed');
     await page.getByTestId('setup-skip-pitwall').click();
     await expect(page.getByTestId('setup-status-pitwall')).toContainText('Skipped');
     await expect(page.getByTestId('setup-skip-pitwall')).toHaveText('Take it up again');
@@ -67,7 +67,7 @@ test.describe('set-up checklist (plan X19)', () => {
     const dialog = page.getByRole('dialog', { name: 'Set-up' });
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveAttribute('aria-modal', 'false');
-    await dialog.getByTestId('dialog-close').click();
+    await dialog.getByTestId('dialog-action-dismiss').click();
     await expect(dialog).toHaveCount(0);
     await page.reload();
     await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');

@@ -92,7 +92,7 @@ describe('provideShellNotify', () => {
     notifyBed();
     const mine = TestBed.inject(SHELL_PORTS);
     mine.showPage('p');
-    await expect(mine.openDialog('d')).resolves.toBeUndefined();
+    await expect(mine.openDialog('d')).resolves.toEqual({ kind: 'dismissed' });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('cannot show page p'));
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('cannot open dialog d'));
     warn.mockRestore();

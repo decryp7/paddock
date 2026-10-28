@@ -1,20 +1,25 @@
 import { ChangeDetectionStrategy, Component, computed, inject, linkedSignal, resource, signal } from '@angular/core';
 import { FormField } from '@angular/forms/signals';
 import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
+import { SuEmptyState } from '@decryp7/paddock-ui';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
-import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import { DIALOG_REF, type DialogAction, type DialogContent, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
 import { DOCK_OPTIONS, storagePrefix } from './dock-options';
 import { DOCK_LAYOUT_STORE } from './dock-store';
 import { layoutNameForm } from './layout-name-form';
 import { cleanLayoutName, type NamedLayout, parseNamedLayouts, removeLayout, renameLayout, serializeNamedLayouts } from './named-layouts';
 
-/** What the manage dialog resolves: the layout to apply (the dialog closes), absent when it was just closed. */
+/**
+ * What the manage dialog resolves: the layout to apply, or `save` (the user asked to save the current layout: the dock
+ * runs its Save layout flow). Both close the dialog; the result is empty when it was just closed.
+ */
 export interface LayoutManageResult {
   readonly apply?: string;
+  readonly save?: true;
 }
 
 /**
- * "Manage layouts" (a modeless tool window, ADR 0009): the named layouts with Apply, Rename and Delete. Edits are written
+ * "Manage layouts" (a modeless form window that fits its list, ADR 0009): the named layouts with Apply, Rename and Delete. Edits are written
  * to the layout store as they are made (the window may be closed any way), so the host reads the list again when the window
  * closes. Delete has no confirmation: the row goes and an Undo strip puts it back (until another change is made or the window
  * closes). Apply resolves `{ apply: name }` and closes the window. The window reads and writes the layout document of the
@@ -23,13 +28,15 @@ export interface LayoutManageResult {
 @Component({
   selector: 'pd-layout-manage-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdField, PdFieldControl, FormField, PdGlyph],
+  imports: [PdField, PdFieldControl, FormField, PdGlyph, SuEmptyState],
   template: `
     <div class="pd-lmd">
       @if (loaded.status() === 'loading') {
         <p class="pd-lmd__note" data-testid="layout-manage-loading">{{ t.loading }}</p>
       } @else if (layouts().length === 0) {
-        <p class="pd-lmd__note" data-testid="layout-manage-empty">{{ t.empty }}</p>
+        <pd-empty-state data-testid="layout-manage-empty" icon="layers" [heading]="t.emptyHeading" [description]="t.empty">
+          <button slot="action" type="button" class="pd-lmd__btn pd-lmd__btn--primary" data-testid="layout-manage-save-empty" (click)="saveCurrent()">{{ t.saveCurrent }}</button>
+        </pd-empty-state>
       } @else {
         <ul class="pd-lmd__list" data-testid="layout-manage-list">
           @for (layout of layouts(); track layout.name) {
@@ -68,9 +75,6 @@ export interface LayoutManageResult {
           <button type="button" class="pd-lmd__btn" data-testid="layout-manage-undo-button" (click)="restore()">{{ t.undo }}</button>
         </div>
       }
-      <div class="pd-lmd__actions">
-        <button type="button" class="pd-lmd__btn" data-dialog-close data-testid="layout-manage-close" (click)="ref.close()">{{ t.close }}</button>
-      </div>
     </div>
   `,
   styles: `
@@ -85,27 +89,28 @@ export interface LayoutManageResult {
     .pd-lmd__input { box-sizing: border-box; width: 100%; min-height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
     .pd-lmd__input[aria-invalid='true'] { border-color: var(--pd-danger); }
     .pd-lmd__btn { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-button-height, 28px); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
+    .pd-lmd__btn--primary { background: var(--pd-accent-fill); border-color: var(--pd-accent-fill); color: var(--pd-on-accent); }
     .pd-lmd__btn--danger { color: var(--pd-danger-text, var(--pd-danger)); }
     .pd-lmd__btn:focus-visible, .pd-lmd__input:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-lmd__undo { display: flex; align-items: center; justify-content: space-between; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-surface-3); }
-    .pd-lmd__actions { display: flex; justify-content: flex-end; }
   `,
 })
-export class PdLayoutManageDialog {
+export class PdLayoutManageDialog implements DialogContent<LayoutManageResult> {
   protected readonly ref = inject<DialogRef<LayoutManageResult>>(DIALOG_REF);
   private readonly store = inject(DOCK_LAYOUT_STORE);
   private readonly key = `${storagePrefix(inject(DOCK_OPTIONS))}.layouts`;
 
   protected readonly t = {
     loading: $localize`:@@pd.wb.dock.layout.manage-loading:Loading layouts…`,
-    empty: $localize`:@@pd.wb.dock.layout.manage-empty:No saved layouts yet. Save the current arrangement from the Window menu.`,
+    emptyHeading: $localize`:@@pd.wb.dock.layout.manage-empty-heading:No saved layouts yet`,
+    empty: $localize`:@@pd.wb.dock.layout.manage-empty:Save the current arrangement of your panels to come back to it later.`,
+    saveCurrent: $localize`:@@pd.wb.dock.layout.manage-save-current:Save current layout`,
     apply: $localize`:@@pd.wb.dock.layout.manage-apply:Apply`,
     rename: $localize`:@@pd.wb.dock.layout.manage-rename:Rename`,
     renameLabel: $localize`:@@pd.wb.dock.layout.manage-rename-label:New name`,
     cancel: $localize`:@@pd.wb.dock.layout.manage-cancel:Cancel`,
     delete: $localize`:@@pd.wb.dock.layout.manage-delete:Delete`,
     undo: $localize`:@@pd.wb.dock.layout.manage-undo:Undo`,
-    close: $localize`:@@pd.wb.dock.layout.manage-close:Close`,
     applyLabel: (name: string) => $localize`:@@pd.wb.dock.layout.manage-apply-for:Apply layout ${name}:name:`,
     renameFor: (name: string) => $localize`:@@pd.wb.dock.layout.manage-rename-for:Rename layout ${name}:name:`,
     deleteFor: (name: string) => $localize`:@@pd.wb.dock.layout.manage-delete-for:Delete layout ${name}:name:`,
@@ -132,8 +137,19 @@ export class PdLayoutManageDialog {
     void this.store.save(this.key, serializeNamedLayouts(list)).catch(() => undefined);
   }
 
+  /** Save current layout at the leading edge once there are layouts (the empty state carries its own button); the frame adds Close. */
+  readonly dialogActions = computed<readonly DialogAction<LayoutManageResult>[]>(() =>
+    this.loaded.status() === 'loading' || this.layouts().length === 0
+      ? []
+      : [{ kind: 'answer', id: 'save', label: this.t.saveCurrent, role: 'secondary', lead: true, answer: () => ({ save: true }) }],
+  );
+
+  protected saveCurrent(): void {
+    this.ref.answer({ save: true });
+  }
+
   protected apply(name: string): void {
-    this.ref.close({ apply: name });
+    this.ref.answer({ apply: name });
   }
 
   protected startRename(name: string): void {

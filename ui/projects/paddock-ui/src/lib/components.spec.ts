@@ -245,6 +245,15 @@ describe('SuEmptyState', () => {
     expect(el.querySelector('.pd-description')?.textContent).toBe('Register one.');
     expect(el.querySelector('svg')).not.toBeNull();
   });
+  it('keeps a single word off the description’s last line (text-wrap: pretty)', () => {
+    const f = TestBed.createComponent(SuEmptyState);
+    f.componentRef.setInput('heading', 'No saved layouts yet');
+    f.componentRef.setInput('description', 'Save the current arrangement of your panels to come back to it later.');
+    f.detectChanges();
+    const p = (f.nativeElement as HTMLElement).querySelector('.pd-description')!;
+    const cs = getComputedStyle(p);
+    expect(cs.getPropertyValue('text-wrap') || cs.getPropertyValue('text-wrap-style')).toContain('pretty');
+  });
   it('omits the description when empty', () => {
     const f = TestBed.createComponent(SuEmptyState);
     f.componentRef.setInput('heading', 'Nothing');

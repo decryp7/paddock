@@ -1,3 +1,4 @@
+import { answered, DISMISSED } from '@decryp7/paddock-ui/shell';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
@@ -16,7 +17,7 @@ class FakeDialogs {
   answer: boolean | undefined = true;
   open(id: string, options: { inputs?: Record<string, unknown> } = {}) {
     this.opened.push({ id, inputs: options.inputs ?? {} });
-    return { closed: Promise.resolve(this.answer), close: () => undefined };
+    return { closed: Promise.resolve(this.answer === undefined ? DISMISSED : answered(this.answer)), dismiss: () => undefined };
   }
 }
 
