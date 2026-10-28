@@ -62,6 +62,16 @@ describe('the graph of this tree', () => {
     assert.ok(!run('ui/projects/paddock-ui/shell/src/public-api.ts').crates);
   });
 
+  test("an app's Cargo.toml and capabilities run conformance (C48 reads them), other app files do not", () => {
+    for (const f of ['apps/shell-demo/src-tauri/capabilities/dialog.json', 'apps/shell-demo/src-tauri/Cargo.toml', 'apps/debrief/app/src-tauri/capabilities/dialog.json']) {
+      const r = run(f);
+      assert.ok(r.conformance, f);
+      assert.deepEqual(r.apps, [f.split('/')[1]], f);
+    }
+    assert.ok(!run('apps/shell-demo/src-tauri/src/lib.rs').conformance);
+    assert.ok(!run('apps/shell-demo/README.md').conformance);
+  });
+
   test("ui's ESLint config reaches ../eslint, so a preset change runs ui's lint", () => {
     const r = run('eslint/src/preset.cjs');
     assert.ok(r.eslint && r.ui);
