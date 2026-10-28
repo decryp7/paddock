@@ -15,7 +15,9 @@
     "module": "preserve",
     "paths": {
       "@decryp7/paddock-ui": ["../../../ui/dist/paddock-ui"],
-      "@decryp7/paddock-ui/*": ["../../../ui/dist/paddock-ui/*"]
+      "@decryp7/paddock-ui/*": ["../../../ui/dist/paddock-ui/*"],
+      "@decryp7/paddock-e2e": ["../../../ui/dist/paddock-e2e"],
+      "@decryp7/paddock-e2e/*": ["../../../ui/dist/paddock-e2e/*"]
     }
   },
   "angularCompilerOptions": {

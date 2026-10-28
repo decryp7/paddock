@@ -38,7 +38,9 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   the Windows linker) from the current folder upwards.
 - **npm.** One workspace and one `package-lock.json` at the root: `npm ci` there, never in a package folder; add a
   dependency with `npm install <pkg> -w <workspace>`. Apps use `@decryp7/paddock-ui` from `ui/dist` (built with
-  `npm run build -w ui`). Name styles and assets in `angular.json` by package path, never `node_modules/...`.
+  `npm run build -w ui`); the same for `@decryp7/paddock-e2e` (`npm run build:e2e -w ui`): map both packages and their
+  subpaths in the app's `tsconfig.json` `paths` to `../../../ui/dist/<package>` (Playwright honours them), no per-config
+  aliases. Name styles and assets in `angular.json` by package path, never `node_modules/...`.
 - **Affected tests (rule 3).** `node scripts/affected.mjs origin/main --explain` lists the projects a change reaches (the
   Cargo and npm graphs, Tauri `frontendDist`, `tsconfig`/`angular.json`/ESLint config paths, declared doc inputs). Run
   those, plus the touched specs. CI runs the same plan; nightly.yml runs everything.
