@@ -76,8 +76,7 @@ shows this only for your own processes*. System processes (uid below `UID_MIN` i
 by one; other accounts' processes are one **Other users** row with the number of processes and CPU. With `hidepid=1` or `2` the
 list says in one line that the system hides other accounts' processes. DMI memory details need root and say so.
 
-**Run as administrator** (session only) asks for your password through polkit (`pkexec`), which needs an authentication agent in
-your session, and restarts the agent as root until you quit Dyno. Nothing is installed.
+Dyno 1.0 runs only with your own rights; elevation is planned for 1.1 (ADR 0022).
 
 ## Removing Dyno
 

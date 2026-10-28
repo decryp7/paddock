@@ -89,13 +89,6 @@ so a reused pid is never mistaken for it. The findings are what Dyno tells the o
 The app subscribes once; the sampler measures at adaptive intervals; the agent pushes each `LiveUpdate` to every
 subscriber at its detail level, dropping frames for a slow subscriber.
 
-### Run as administrator
-
-![Run as administrator](../diagrams/svg/uml-seq-run-as-administrator.svg)
-
-Dyno 1.0 has no helper. On a click the app asks the OS (UAC, the password dialog or `pkexec`) to start the agent elevated; the
-old agent exits, the elevated one serves the app until Dyno quits, and nothing is installed or registered.
-
 ### Agent restart after an update
 
 ![Agent restart](../diagrams/svg/uml-seq-agent-restart.svg)

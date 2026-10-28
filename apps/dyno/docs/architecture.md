@@ -90,15 +90,8 @@ totals the OS allows (by session on Windows, by uid on macOS and Linux). On Wind
 `NtQuerySystemInformation` and trusts its undocumented CPU and I/O fields only when a start-up self-check against the documented
 calls agrees.
 
-**Run as administrator** is a session-only elevation. On the user's click the app asks the OS to start the agent elevated
-(`dyno_platform::elevate`: `osascript` on macOS, `pkexec` on Linux, `ShellExecuteExW runas` on Windows) and the elevated agent
-serves the app until Dyno quits; nothing is installed or registered, and the next start is unprivileged.
-
-The elevated agent keeps its data in an `elevated-session` folder inside the user's own Dyno data folder. The folder is passed to
-it explicitly and is never resolved from root's `HOME`. On macOS and Linux the elevated agent re-owns everything it creates to the
-invoking user's uid and gid (at start, every 5 seconds and at exit, never following symlinks), so no root-owned file is left in
-the user's folder. On Windows, UAC elevation keeps the same account's profile, so nothing needs re-owning. Starting as
-administrator at login and the read-only helper are planned for 1.1.
+Elevation (a read-only helper and starting as administrator at login) is planned for 1.1 under ADR 0022; Dyno 1.0 has no way to run
+elevated.
 
 Plugins are out-of-process Rust programs speaking `dyno-ipc` that add sensors; the agent starts the host on
 first use of the plugins page (`Request::Plugins`) and the host guards them (timeouts, memory cap, quarantine).
@@ -168,7 +161,7 @@ working in memory.
   again. Open only what the user chose.
 - **Never trust another process.** Frames are bounded; the handshake needs the per-launch token (constant-time compare)
   and, where the OS tells, the peer pid. The discovery file is owner-only.
-- **Least privilege.** Nothing Dyno runs is elevated unless the user chooses Run as administrator, and then only until Dyno quits; Dyno changes nothing on the machine and installs no service or helper. Tauri capabilities grant only events and window dragging; the CSP has no `unsafe-eval` and no remote
+- **Least privilege.** Nothing Dyno runs is elevated; Dyno changes nothing on the machine and installs no service or helper. Tauri capabilities grant only events and window dragging; the CSP has no `unsafe-eval` and no remote
   origin; `scripts/check-capabilities.mjs` enforces it in CI.
 - **Contain failures.** Per-request and per-tick panics are caught, locks recover from poisoning, plugins are guarded and
   quarantined, a failing sensor is an unavailable reading, the app restarts a dead agent and an agent without an app keeps

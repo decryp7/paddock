@@ -72,7 +72,7 @@ concept: Dyno has no way to act on any process.
 
 
 **Network traffic per program** (Network page, process details): macOS from `nettop`, Linux from the kernel's per-socket TCP byte
-counters (no root; other users' programs are not attributed), Windows needs administrator rights for the OS's per-connection counters, so the page says so, and shows them after **Run as administrator** (this session only). Where it cannot be read the page shows the reason instead of zeros.
+counters (no root; other users' programs are not attributed), Windows needs administrator rights for the OS's per-connection counters, so the page says so. Where it cannot be read the page shows the reason instead of zeros.
 
 ## Why is it slow?
 
@@ -201,9 +201,8 @@ Dyno's own Copy menu, no browser keys.
 
 **Built.** Dyno does not end, suspend, cap, delete, move or tune anything ([ADR 0021](adr/0021-monitoring-only.md)). Dyno 1.0
 has no privileged helper: the agent runs with your own rights, and a figure the OS withholds says *Unavailable* with the reason
-(user guide, [Running with your own rights](user-guide.md#running-with-your-own-rights)). **Run as administrator** restarts the
-agent elevated for one session; it changes what Dyno can read, not what Dyno does. Starting as administrator at login and a
-read-only helper are planned for 1.1 (ADR 0022). Tests act only on processes and folders they create.
+(user guide, [Running with your own rights](user-guide.md#running-with-your-own-rights)). Elevation (a
+read-only helper and starting as administrator at login) is planned for 1.1 (ADR 0022). Tests act only on processes and folders they create.
 
 ## Extensibility
 

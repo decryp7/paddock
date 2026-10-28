@@ -59,7 +59,7 @@ function column(d, x, w, y0, H, list) {
   d.node('core', ax, r(g2, 0), aw, NH, 'core', { name: 'dyno-core', tech: 'Rust library, pure', desc: 'Model, grouping, diagnosis, alarms, health, protocol. No I/O, no clock.' });
   d.node('platform', ax, r(g2, 1), aw, NH, 'accent', { name: 'dyno-platform', tech: 'Rust library', desc: 'Adapters per OS behind the core\'s ports, plus fakes for tests.' });
   d.node('db', ax, r(g2, 2), aw, NH, 'process', { name: 'Data folder', tech: 'SQLite dyno.db + JSON', desc: 'History, alarms, snapshots; settings, agent.json.' });
-  d.node('agent', bx, r(g2, 0), bw, NH * 3 + 64, 'accent', { name: 'dyno-agent', tech: 'Rust binary', desc: 'Sampler, ipc server, request handlers, alarms, issues, flight recorder, history writer. The single writer of Dyno\'s data. Run as administrator restarts it elevated for one session.' });
+  d.node('agent', bx, r(g2, 0), bw, NH * 3 + 64, 'accent', { name: 'dyno-agent', tech: 'Rust binary', desc: 'Sampler, ipc server, request handlers, alarms, issues, flight recorder, history writer. The single writer of Dyno\'s data.' });
   d.node('os', lx, r(g2, 1), LW, NH, 'process', { name: 'Operating system', tech: 'Windows · macOS · Linux', desc: 'Counters, /proc, Mach, OS logs, launchd, systemd.' });
   d.node('plugins', rx, r(g2, 0), aw, NH, 'plugin', { name: 'Plugins', tech: 'Rust, out of process', desc: 'Vendor sensors. Depend on dyno-plugin-api only; guarded by dyno-plugin-host.' });
   d.node('bench', rx, r(g2, 1), aw, NH, 'process', { name: 'dyno-bench', tech: 'Rust binary, child process', desc: 'CPU, memory and disk benchmarks, one at a time, killed on timeout.' });

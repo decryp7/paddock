@@ -30,8 +30,7 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 
 A per-user **agent** measures and keeps the history whether or not the window is open; an unprivileged **app** (window
 and tray) shows it and sends requests over one local IPC; a pure Rust **core** holds every rule (grouping, diagnosis,
-alarms, health, forecasts); thin **adapters** per OS read the counters. Everything runs with your own rights: what the OS shows only to administrators is marked *Unavailable* with the reason, and a session-only **Run as
-administrator** shows more. There is no privileged helper in 1.0. Details: [architecture](docs/architecture.md) and every diagram in
+alarms, health, forecasts); thin **adapters** per OS read the counters. Everything runs with your own rights: what the OS shows only to administrators is marked *Unavailable* with the reason. There is no privileged helper in 1.0. Details: [architecture](docs/architecture.md) and every diagram in
 [docs/design.md](docs/design.md).
 
 ## Why Dyno
@@ -107,8 +106,7 @@ of a `dyno-v*` tag or the nightly run.
 
 Run the NSIS installer (`Dyno_<version>_x64-setup.exe`; per-user, no administrator rights). Dyno registers its agent as
 a per-user **Run** entry (not a service: a service lives in session 0 and cannot see your idle time, foreground window
-or per-user settings, [ADR 0010](docs/adr/0010-platforms-and-services.md)). Dyno never needs administrator rights to install or to run. Figures Windows shows only to administrators are marked *Unavailable*; **Run as administrator**
-(UAC prompt, for this session only) shows more.
+or per-user settings, [ADR 0010](docs/adr/0010-platforms-and-services.md)). Dyno never needs administrator rights to install or to run. Figures Windows shows only to administrators are marked *Unavailable* with the reason.
 
 ### macOS (13 or newer)
 
@@ -131,7 +129,7 @@ status-notifier host (GNOME: the AppIndicator extension). Details: [docs/linux.m
 | Agent | Sampling loop, SQLite history with rollups, alarms, issues, flight recorder, weekly report, disk usage, benchmarks, startup list (view), plugin host (sensors), service install/ensure. |
 | Platform adapters | macOS and Linux: sensors, details, locks, startup, facts, user activity (macOS tested on a real Mac, Linux in a container with `scripts/linux-verify.sh`). Windows: sensors and user activity; details, locks, startup and facts are not wired yet. |
 | App | Dashboard, processes, why slow, alarms, issues, reports, counters, extras, benchmarks, network, settings, tray, command palette, native feel against the real agent through the shell. |
-| Privileges | Dyno 1.0 has no privileged helper. Everything runs with your own rights; unreadable figures say why, other users' processes are one "Other users" row, and **Run as administrator** restarts the agent elevated until you quit (ADR 0022: the helper and "start as administrator at login" are planned for 1.1). |
+| Privileges | Dyno 1.0 has no privileged helper. Everything runs with your own rights; unreadable figures say why, other users' processes are one "Other users" row, and elevation (the helper and "start as administrator at login") is planned for 1.1 (ADR 0022). |
 | Installers | CI builds NSIS, `.dmg`, `.deb` and AppImage on `dyno-v*` tags, nightly and manual runs. Not yet published. |
 
 ## Roadmap
@@ -186,7 +184,7 @@ Read [AGENTS.md](AGENTS.md) first: design principles, safety, security and robus
   validated in Rust; the IPC is local only, token-authenticated and bounded.
 - Dyno does not change your machine: no process actions, no deletes, no settings changes. It writes only its own data
   ([ADR 0021](docs/adr/0021-monitoring-only.md)).
-- Nothing runs elevated unless you choose **Run as administrator**; then the agent restarts elevated, after the OS's own prompt (UAC, password dialog or `pkexec`), until you quit Dyno. Dyno 1.0 installs no privileged helper or service.
+- Nothing runs elevated: Dyno 1.0 runs only with your own rights and installs no privileged helper or service.
 - Tauri capabilities are least-privilege (checked in CI by `scripts/check-capabilities.mjs`) and the CSP has no
   `unsafe-eval` and no remote origins. Logs never contain file contents or command lines. No telemetry.
 - Found a vulnerability? Please report it privately to the maintainers rather than in a public issue.

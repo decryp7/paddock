@@ -23,7 +23,7 @@ Status words are honest: **built** (code and tests committed), **in progress** (
 
 | WP | Feature | Status |
 | --- | --- | --- |
-| WP-01 | Privileged helper (read-only) | planned for 1.1, not in 1.0 (ADR 0022); 1.0 runs with the user's rights, marks unreadable figures *Unavailable* with a reason, shows an "Other users" row and has a session-only **Run as administrator**. The code from before the decision is removed from 1.0 by separate changes |
+| WP-01 | Privileged helper (read-only) | planned for 1.1, not in 1.0 (ADR 0022); 1.0 runs with the user's rights, marks unreadable figures *Unavailable* with a reason, shows an "Other users" row and has no way to run elevated. The code from before the decision is removed from 1.0 by separate changes |
 | WP-02 | CPU taming screen and profiles | dropped ([ADR 0021](adr/0021-monitoring-only.md)) |
 | WP-03 | Health score and startup items (view only) | built: Health page with reasons and the startup list; fix buttons and startup changes are dropped (ADR 0021) |
 | WP-05 | Tuning catalogue | dropped ([ADR 0021](adr/0021-monitoring-only.md)) |
@@ -35,7 +35,7 @@ Status words are honest: **built** (code and tests committed), **in progress** (
 | WP-10 | Watched folders with keep-for times | dropped ([ADR 0021](adr/0021-monitoring-only.md)) |
 | WP-11 | Benchmarks on click | built: CPU, memory and disk (GPU reported unavailable), out of process with a timeout, load stored, before/after comparison, results page (ADR 0015) |
 | WP-12 | Performance counters browser | built: Counters page (objects, search, instances), chart any counter with the app's events marked, pinned counters and saved sets in settings, "Add to the dashboard" as a counter widget, `dyno counters`; Windows PDH (`PdhEnumObjectsW`, `PdhEnumObjectItemsW`, one persistent query; type-checked and linted from macOS, run by the Windows runner), macOS `vm_stat`/`netstat -inb`/`iostat -Id`/`sysctl`, Linux `/proc`; IOKit per-device statistics are not read |
-| WP-37 | Network: open ports and connections per process, Look up IP | built: listeners, connections, filters, grouping, new-listener/host activity entries, browser lookup (ADR 0015); reverse DNS on request, per-program traffic (macOS `nettop`; Linux `sock_diag` byte counters + `/proc/<pid>/fd`, no admin; Windows per-connection TCP statistics, which need administrator rights, so it says so and shows them after Run as administrator), row context menu, process-details Network tab, alarms for new exposed listeners and new remote hosts |
+| WP-37 | Network: open ports and connections per process, Look up IP | built: listeners, connections, filters, grouping, new-listener/host activity entries, browser lookup (ADR 0015); reverse DNS on request, per-program traffic (macOS `nettop`; Linux `sock_diag` byte counters + `/proc/<pid>/fd`, no admin; Windows per-connection TCP statistics, which need administrator rights, so it says so), row context menu, process-details Network tab, alarms for new exposed listeners and new remote hosts |
 | WP-13 | Extras (what changed, sleep, boot, network and energy, inventory, GPU per process, file finder, maintenance windows) | built (feat/wp13-14-36): the Extras page with eight tabs over pure parsers with fixtures ([ADR 0020](adr/0020-extras-backup-checks-and-taming-proof.md)). Verified by fixtures only: the Windows and Linux readers. Not built: per-app network and energy are not stored as app-minute columns (shown live, macOS only for energy), and Linux GPU per process needs NVIDIA's tool |
 | WP-14 | Backup health checks | built (feat/wp13-14-36): Time Machine, Windows Backup, File History, restic and Borg judged against a stale limit, alarm per tool, login-shell `PATH` resolver (G11). Duplicati is detected but not readable yet; the detectors are built in until WP-15's packs exist; Windows event IDs are fixture-verified only |
 | WP-15 | Declarative TOML packs | planned, Later (after 1.0) |
@@ -62,7 +62,7 @@ Status words are honest: **built** (code and tests committed), **in progress** (
 ## Still open in v1
 
 - The disk map screen (the engine is built): the clickable ring chart with drill-down, breadcrumb, live scan with Cancel and the table view. The largest, oldest and duplicate-hint tabs and the hidden-space breakdown are for 1.1.
-- Dyno 1.0 without the helper (ADR 0022): "Unavailable" with a reason for every unreadable figure, the "Other users" row, and the session-only **Run as administrator** (testing-manual P1-P8). No system service is installed and nothing runs elevated unless you choose Run as administrator.
+- Dyno 1.0 without the helper (ADR 0022): "Unavailable" with a reason for every unreadable figure, the "Other users" row. No system service is installed and nothing runs elevated.
 - Parts of built packages: the weekly OS notification (needs an agent-to-shell push), score recording in the sampler (the trend only
   fills while the app asks for health), engine-stored diagnosis history, Windows IPv6 traffic, and the Windows adapters for
   details, locks, startup and facts (G8).
@@ -116,12 +116,10 @@ bounds. The target is at most about 1 % of the machine. See [architecture.md](ar
 Not in Dyno 1.0 (decided 2026-10-28; ADR 0022 holds the design, the per-OS table of what 1.0 cannot show, and the 1.1 plan).
 
 - **1.0 instead.** Everything runs with the user's rights; no system service is installed. A figure the OS withholds is *Unavailable*
-  with a plain reason, never 0. Other accounts' processes are one "Other users" row. **Run as administrator** restarts the agent
-  elevated for one session (UAC, the macOS password dialog or `pkexec`) and installs nothing.
+  with a plain reason, never 0. Other accounts' processes are one "Other users" row.
 - **1.1.** The read-only helper installed with the app from a protected folder, **start as administrator at login**, all
   processes and administrator-only counters on all three OS, and the helper installing Dyno's own signed updates.
-- **Acceptance (1.0).** No administrator prompt at install or start; declining **Run as administrator** leaves Dyno fully
-  working; nothing runs elevated after Dyno quits (testing-manual P1-P8).
+- **Acceptance (1.0).** No administrator prompt at install or start; nothing runs elevated; unreadable figures say why.
 
 ## WP-02 CPU taming screen and profiles
 
@@ -316,7 +314,7 @@ Each is small and independent; all are core logic plus an adapter plus a card or
 
 - **Scope.** The installed memory modules (size, type, speed, slot, manufacturer) drawn as slots: Windows through WMI, macOS
   through `system_profiler` (including Apple Silicon's unified memory, drawn as one package), Linux through DMI tables, which
-  need root and are read only on a click (Run as administrator; the helper in 1.1).
+  need root and are read only on a click (needs root; the helper in 1.1).
 - **Acceptance.** Empty slots are drawn empty; an unreadable source says why; an unreadable Linux read says it needs root and the app works without it.
 - **Depends on.** Nothing in 1.0 (the Linux read waits for the helper in 1.1). **Touches.** `dyno-platform/**`, a facts type in the core, a memory detail page.
 

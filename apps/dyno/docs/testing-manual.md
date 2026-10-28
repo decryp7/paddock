@@ -42,21 +42,18 @@ Record: date, OS and version, Dyno version, load average at the time, result per
 | 23 | `kill` the agent | It comes back within seconds (macOS, Linux); on Windows the app starts it |
 | 24 | Updater with a signed test release | Verified, installed, restarted; a tampered `.sig` is refused |
 
-## Privileges and Run as administrator
+## Privileges
 
-Dyno 1.0 has no privileged helper, so nothing is installed with elevated rights. These checks run once per OS on the release
-build, with a standard (non-administrator) account and, for P5 to P7, an administrator account.
+Dyno 1.0 has no privileged helper and no way to run elevated. These checks run once per OS on the release build, with a
+standard (non-administrator) account.
 
 | # | Steps | Expected |
 | --- | --- | --- |
-| P1 | Install as a standard user; start Dyno | No administrator prompt appears at install or at start; the agent runs as you |
+| P1 | Install as a standard user; start Dyno | No administrator prompt appears at install or at start (Linux `.deb`: only `apt` asks for root); the agent runs as you |
 | P2 | Open Processes | Your own and the system's processes are listed one by one; other accounts' processes are one **Other users** row (a second account logged in, or fast user switching, makes it appear) |
 | P3 | Look at a system process's path, owner, CPU, memory and disk (per the OS table in ADR 0022) | Every figure the OS withholds says *Unavailable* with a plain reason; none shows 0 |
 | P4 | Linux: remount `/proc` with `hidepid=2` (a VM) | The list says in one line that the system hides other accounts' processes |
-| P5 | Choose **Run as administrator** and cancel the OS prompt (UAC, macOS password dialog, `pkexec`) | Dyno keeps running with your rights and says the prompt was cancelled |
-| P6 | Choose **Run as administrator** and approve | The agent restarts elevated (check the process owner); more figures appear (Windows: per-program network traffic); nothing is installed or registered (no service, no LaunchDaemon, no systemd unit) |
-| P7 | Quit Dyno and start it again | It runs with your own rights again |
-| P8 | Linux over SSH with no desktop | **Run as administrator** says why it cannot ask (no polkit agent) |
+| P5 | Check the process owner of `dyno-agent` and the app, and look for services, LaunchDaemons and systemd units named Dyno | The agent runs as you; no service or daemon exists |
 
 ## Window, tray, native feel
 

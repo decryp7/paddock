@@ -148,10 +148,8 @@ Processes are grouped three ways. Yours and the system's are listed one by one. 
 users** row with whatever totals the OS allows. On Linux, a system that hides other accounts' processes (`hidepid`) says so
 in one line above the list.
 
-For one session you can choose **Run as administrator**. Dyno asks the OS (a UAC prompt on Windows, the password dialog on
-macOS, `pkexec` on Linux) and restarts the agent elevated until you quit Dyno. The next start is back to your own rights.
-Nothing is installed or registered. Starting as administrator at login, and a read-only helper that gives the same readings
-without a prompt each time, are planned for Dyno 1.1.
+Dyno 1.0 runs only with your own rights, so there is nothing to approve and nothing to install. Elevation (a read-only helper
+that gives the readings Dyno cannot get today, and starting as administrator at login) is planned for Dyno 1.1.
 
 ## Troubleshooting
 
@@ -159,8 +157,7 @@ without a prompt each time, are planned for Dyno 1.1.
 | --- | --- |
 | The window shows an error with **Retry** | The agent did not answer in 15 s. Retry; if it persists run `dyno-agent status`, then `dyno-agent run` in a terminal to see why |
 | No history after a reboot | The agent was not registered to start at login: turn on Launch at login |
-| A tile or column says "Unavailable" | Read the reason: the OS or hardware does not provide it (no battery, no sensor), or shows it only to administrators or to the owner of a process. **Run as administrator** (this session only) can show more |
-| **Run as administrator** does nothing, or the prompt is refused | Dyno keeps running with your own rights. On Linux `pkexec` needs a polkit authentication agent in your session |
+| A tile or column says "Unavailable" | Read the reason: the OS or hardware does not provide it (no battery, no sensor), or shows it only to administrators or to the owner of a process. |
 | macOS: the agent does not start after an update | Dyno registers it again by itself; or `dyno-agent service ensure`; see macos.md |
 | Linux: no tray icon | Install a status-notifier host (GNOME: the AppIndicator extension) |
 | Windows: details, locks and startup are empty | Those adapters are not built yet (roadmap G8) |

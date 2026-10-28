@@ -32,8 +32,8 @@ live and history, alarms, a disk map and benchmarks."
    `CleanupProvider` and `ActionProvider`; the CLI's `end`, `cap` and `undo`.
 4. **Any privileged helper is read-only, and there is none in 1.0.** Decided 2026-10-28: Dyno 1.0.0 ships without the helper.
    It runs with the user's own rights and installs per user; a figure the OS withholds is `Unavailable` with a plain reason,
-   other accounts' processes are one "Other users" row, and **Run as administrator** restarts the agent elevated for one
-   session (UAC, the macOS password dialog, `pkexec`) without installing anything. The helper (Info, Traffic, Audit and the
+   other accounts' processes are one "Other users" row, and there is no way to run elevated (the user dropped a
+   session-only Run as administrator on 2026-10-28 after a security review). The helper (Info, Traffic, Audit and the
    rest of ADR 0016's read-only requests), "start as administrator at login" and the planned process start and exit events
    (Linux proc connector, Windows ETW; user, 2026-10-27) come in Dyno 1.1 under ADR 0022. When it comes back, nothing it
    accepts can change the machine, apart from installing or removing itself and, as ADR 0022 decides, installing a signed,

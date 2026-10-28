@@ -38,6 +38,6 @@ useCases('uml-use-cases-observe', {
 });
 useCases('uml-use-cases-setup', {
   title: 'Use cases — run and set up', desc: 'What the PC owner runs or sets up. Benchmarks start only on a click; Explain this (Pitwall) is planned after 1.0. None of it changes the machine; Dyno writes only its own data.', owner: 'PC owner',
-  rows: [['Acknowledge, mute or note an alarm'], ['Run a benchmark and compare'], ['Explain this in Pitwall (redacted summary)', true], ['Save the flight recorder'], ['Map the disk and drill into folders'], ['Export a diagnostics bundle'], ['Search the web or a hash in the browser'], ['Use the dyno command line'], ['Export the inventory report'], ['Set tray metric, theme, sampling'], ['Start the agent at login'], ['Run as administrator (this session)']],
+  rows: [['Acknowledge, mute or note an alarm'], ['Run a benchmark and compare'], ['Explain this in Pitwall (redacted summary)', true], ['Save the flight recorder'], ['Map the disk and drill into folders'], ['Export a diagnostics bundle'], ['Search the web or a hash in the browser'], ['Use the dyno command line'], ['Export the inventory report'], ['Set tray metric, theme, sampling'], ['Start the agent at login']],
   ext: { name: 'OS (login)', row: 10 },
 });

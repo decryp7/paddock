@@ -58,8 +58,7 @@ Dyno 1.0.0 only watches ([ADR 0021](docs/adr/0021-monitoring-only.md)). Therefor
 - **Reads are bounded.** External tools and OS calls run with timeouts; a missing tool or right is an unavailable reading with a
   reason, never an exception.
 - **No privileged helper in 1.0** (ADR 0021 point 4, ADR 0022 for 1.1). The app and the agent run with the user's rights and
-  never elevate themselves; the only elevation is the user's session-only **Run as administrator**, which restarts the agent
-  elevated until Dyno quits and installs nothing. A reading the OS withholds is `Reading::Unavailable` with a plain reason,
+  never elevate themselves; there is no way to run elevated in 1.0 (elevation is planned for 1.1). A reading the OS withholds is `Reading::Unavailable` with a plain reason,
   never 0; other accounts' processes are one "Other users" row. Any helper that comes back in 1.1 is read-only, validates every
   frame again and audits every call.
 - **Plugins are sensors only.** There is no cleanup or action provider.

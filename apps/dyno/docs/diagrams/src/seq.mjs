@@ -46,32 +46,6 @@ seq('uml-seq-agent-restart', {
   ],
 });
 
-seq('uml-seq-run-as-administrator', {
-  title: 'Run as administrator, for one session',
-  desc: 'Dyno 1.0 has no privileged helper. On a click the app asks the OS to start the agent elevated; the elevated agent serves the app until Dyno quits. Nothing is installed or registered, and the next start uses the user\'s own rights.',
-  parts: [['ui', 'Angular UI', 'Settings', 'ui'], ['sh', 'Tauri shell', 'user process', 'accent'], ['os', 'OS prompt', 'UAC · password · polkit', 'process'], ['old', 'Agent', 'user rights', 'accent'], ['new', 'Agent (elevated)', 'until Dyno quits', 'accent', true]],
-  script: [
-    ['m', 'ui', 'sh', 'Run as administrator'],
-    ['m', 'sh', 'os', 'ask to start the agent elevated (`runas`, password dialog, `pkexec`)'],
-    ['m', 'os', 'sh', 'the owner answers the prompt', 1],
-    ['o', 'alt', 'approved'],
-    ['m', 'sh', 'old', '`Request::Shutdown`'],
-    ['s', 'old', 'flush history; remove `agent.json`'],
-    ['x', 'old'],
-    ['C', 'os', 'new', 'start `dyno-agent run` elevated'],
-    ['s', 'new', 'listen'],
-    ['m', 'sh', 'new', 'connect and `Subscribe`'],
-    ['m', 'new', 'ui', 'readings only administrators can see, in `Push(LiveUpdate)`', 1],
-    ['m', 'sh', 'new', 'Dyno quits: `Request::Shutdown`'],
-    ['x', 'new'],
-    ['e', 'declined or cancelled'],
-    ['r', 'old'],
-    ['s', 'old', 'keeps running with the user\'s rights'],
-    ['m', 'sh', 'ui', 'Dyno goes on with the user\'s rights; unreadable figures stay Unavailable', 1],
-    ['c'],
-  ],
-});
-
 seq('uml-seq-history-rollup', {
   title: 'History: raw points, rollups and a range query',
   desc: 'Raw points every 5 seconds; closed buckets become minute, 15-minute and hour rows with min, average and max, so a short spike stays visible at every zoom level.',
