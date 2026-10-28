@@ -368,8 +368,8 @@ test('no script sits between cargo and rustc: RUSTC_WRAPPER is sccache itself, w
 // key (every CARGO_* variable is hashed), a --config flag does not reach `tauri build`, and app copies drift (rule 43).
 test('every job that builds Rust on a host sets its build folder with the build-folder action, in a stable checkout', () => {
   const uses = [];
-  // Still on CARGO_TARGET_DIR, to move next: the release and smoke workflows of the reference apps. No other workflow may join them.
-  const notYet = ['service-smoke.yml', 'shell-demo-release.yml', 'workbench-demo-release.yml'];
+  // Still on CARGO_TARGET_DIR, to move next: the release workflows of the reference apps. No other workflow may join them.
+  const notYet = ['shell-demo-release.yml', 'workbench-demo-release.yml'];
   for (const file of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
     const text = read(join(WORKFLOWS, file));
     const body = text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');

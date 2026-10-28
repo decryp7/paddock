@@ -27,6 +27,7 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 | C14 | tests run hermetically (`run --`); workflows that run tests without it are warned | |
 | C15 | no test or script uses the installed Chrome; CI requires the test browser | |
 | C16 | no spec or mock hard-codes the current app version | |
+| C21 | the update smoke is a local tool: where `scripts/shell-demo/smoke-service-update.sh` exists, `tools/vm-smoke.sh` exists, `docs/release-checklist.md` asks for it, and no workflow runs it (CI has no VMs) | |
 | C23 | commit messages (no Co-Authored-By, no AI attribution); `commit-lint` CLI. With `--paddock`: the shared doc blocks of `AGENTS.md` (rules and the common sections), `docs/suite-lessons.md`, `docs/releasing.md` equal `docs/blocks` | a git checkout; `--paddock` for the blocks |
 | C24 | every image under `docs/screenshots` matches its `hashes.json` entry (written by `captureDocScreens`) and has a `REVIEWED.md` row (`\| image \| sha256 \| reviewer \| date \|`) with the current hash; images under `docs/images` need the row in `docs/images/REVIEWED.md`. A regenerated image that changed fails until it is reviewed again (rule 22) | |
 | C28 | the repo baseline (`.editorconfig`, `rustfmt.toml`, licences, `deny.toml` tables, `cliff.toml`, `lefthook.yml`, Renovate preset, tsconfig, Cargo profiles, ...) equals `templates/repo` | `--paddock` |

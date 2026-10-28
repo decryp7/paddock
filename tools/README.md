@@ -9,6 +9,7 @@ a bad option and never touches anything outside what it names.
 | `bootstrap.sh --name Pitcrew [--check]` | check the prerequisites (macOS or Linux), `npm ci`, build the installers, print where they are and the next steps | Pitcrew `macos-bootstrap.sh`, `linux-bootstrap.sh`; Pitwall `linux-bootstrap.sh` |
 | `verify-installed.sh --name Pitcrew --label ... --unit ... --service ...` | read-only check of an installed app: bundle, launchd agent or systemd user unit, socket, service answer, log tail | Pitcrew/Pitwall `macos-verify.sh`, `linux-verify.sh`; Dyno `linux-verify.sh` |
 | `linux-container.sh --id dyno --packages dyno-platform` | cargo test and clippy in a Linux container; labelled containers and volumes only; `--clean` | Dyno `linux-container.sh`; Pitwall `linux-container-verify.sh` |
+| `vm-smoke.sh macos|linux` | build N and N+1 of the shell demo and run the update smoke in a local VM with one command (before a release; CI has no VMs) | the service-smoke workflow |
 | `macos-vm-smoke.sh --old <N> --new <N+1> [--guest macos\|linux]` | run a smoke that registers real services (launch agent, systemd user unit) in a fresh, always-deleted Tart VM from a pinned image; disk, load and one-VM-at-a-time checks | the C21 service-after-update smoke (rule 7) |
 | `prune-build-folders.sh <folder> <max-gb>` | keep a persistent CI build folder under a cap (incremental caches first, then the folder) | Dyno `ci-prune.sh` |
 | `prune-build-folders.ps1 -App debrief [-Remove -Keep 6c]` | list and remove build folders of finished worktrees (Windows) | Debrief `clean-build-dirs.ps1` |
@@ -35,3 +36,10 @@ then stop and delete the VM from a trap (success, failure, Ctrl-C, timeout). It 
 are arm64) or Windows (Tart has no Windows guests); the Windows service path stays on the Windows runner.
 `--guest linux` gives a real `systemd --user` session (`scripts/shell-demo/smoke-service-update-linux.sh`); a tray or
 notification smoke on a desktop session is not written yet.
+
+## vm-smoke.sh
+
+`bash tools/vm-smoke.sh macos|linux` is the one local entry point for tests that need a throwaway OS (login tests, services, installs, updates, system settings; the candidates are listed in the release checklist). Its first case is the update smoke (C21): it builds the shell demo as N and
+N+1 (`scripts/shell-demo/build-macos-n-n1.sh`, `build-linux-arm64.sh`) and runs `macos-vm-smoke.sh` on them. VM storage
+defaults to `TART_HOME=/Volumes/d7sst7/ci-tart`; it fails fast when Tart, Docker (linux) or the disk is missing. CI has no
+VMs (user decision, 2026-10-28), so this is run by hand before a release, see [the release checklist](../docs/release-checklist.md).

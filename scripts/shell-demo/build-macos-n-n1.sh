@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the shell demo's .app twice on the macOS host for the update smoke (service-smoke.yml, conformance C21): build N
+# Builds the shell demo's .app twice on the macOS host for the update smoke (tools/vm-smoke.sh, conformance C21): build N
 # (the version in Cargo.toml) and build N+1 (its patch number plus one, for the app and its agent, so the agent has a new
 # ad-hoc cdhash and its heartbeat reports the new version).
 #   scripts/shell-demo/build-macos-n-n1.sh <out>    -> <out>/n/<App>.app, <out>/n1/<App>.app, <out>/versions ("N N+1")

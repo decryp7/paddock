@@ -1,4 +1,4 @@
-// scripts/shell-demo/build-macos-n-n1.sh (service-smoke.yml's N and N+1 builds), run in a scratch git repo with a fake
+// scripts/shell-demo/build-macos-n-n1.sh (the local update smoke's N and N+1 builds), run in a scratch git repo with a fake
 // bundler: nothing is compiled and nothing on the machine is touched.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

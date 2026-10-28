@@ -529,3 +529,10 @@ Debrief's background "Learning human names" ran the local model over up to 2,000
 8 GB on the Mac and made a Windows PC sluggish for the whole run, for a result that rules, a names pack and the logs' own
 metadata match or beat. **Rule:** work over many items never calls an LLM automatically or once per item; it uses
 deterministic rules, TOML packs and static embeddings, and an LLM only answers bounded requests the user starts (rule 46).
+
+## No VMs in CI (user decision, 2026-10-28)
+The nightly `service-smoke` workflow ran the update smoke in Tart VMs on the Mac runner. It failed for reasons of the setup
+(images on the wrong disk, a check reading the wrong line) more often than for product bugs, and a VM per run is heavy on a
+shared runner. **Rule:** VMs (Tart macOS, OrbStack Linux, the Windows 11 VM) are for local testing only; the update smoke runs
+locally in a VM before a release (`tools/vm-smoke.sh macos|linux`, a step of docs/release-checklist.md), and C21 checks that
+tool and that step instead of a workflow.
