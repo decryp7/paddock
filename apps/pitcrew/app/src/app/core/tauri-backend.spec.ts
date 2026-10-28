@@ -243,18 +243,16 @@ describe('TauriBackend.navigations', () => {
 });
 
 describe('TauriBackend jobs (long work never times out, rule 12)', () => {
-  /** A backend whose job command answers with `id`, and a way to send job snapshots as the shell does. */
+  /** A backend whose job command answers with `id`; `end` resolves the job the way the shell's jobs store does. */
   function jobSetup(id: number, result: unknown) {
-    const handlers: ((e: { payload: unknown }) => void)[] = [];
-    const unlisten = vi.fn();
-    const listen = vi.fn(async (_event: string, h: (e: { payload: unknown }) => void) => {
-      handlers.push(h);
-      return unlisten;
-    });
+    const stop = vi.fn();
+    let end!: (job: unknown) => void;
+    const finished = new Promise((r) => (end = r));
+    const follow = vi.fn(() => ({ finished, stop }));
+    const listen = vi.fn(async () => vi.fn());
     const call = vi.fn(async (cmd: string) => (cmd === 'job_result' ? result : id));
-    const backend = new TauriBackend(call as unknown as CommandCall, listen as unknown as EventListen);
-    const send = (payload: unknown) => handlers.forEach((h) => h({ payload }));
-    return { backend, call, listen, send, unlisten };
+    const backend = new TauriBackend(call as unknown as CommandCall, listen as unknown as EventListen, follow as never);
+    return { backend, call, follow, listen, end };
   }
   const flush = () => new Promise((r) => setTimeout(r));
 
@@ -265,64 +263,37 @@ describe('TauriBackend jobs (long work never times out, rule 12)', () => {
     ['register', (b) => b.register({ runner: 'x' } as RegisterRequest), 'register_runner', { request: { runner: 'x' } }],
   ];
 
-  it.each(jobs)('%s starts a job, waits for its end and reads its result', async (_name, fn, cmd, args) => {
-    const { backend, call, send, unlisten } = jobSetup(7, 'the result');
-    const done = fn(backend);
+  it.each(jobs)('%s starts a job, follows it through the shell and reads its result', async (_name, fn, cmd, args) => {
+    const { backend, call, follow, listen, end } = jobSetup(7, 'the result');
+    let settled = false;
+    const done = fn(backend).then((r) => ((settled = true), r));
     await flush();
     expect(call).toHaveBeenCalledWith(cmd, args);
-    // Other jobs and progress do not end it.
-    send({ id: 8, state: 'done' });
-    send({ id: 7, state: 'running', phase: null });
-    await flush();
-    let settled = false;
-    void done.then(() => (settled = true));
-    await flush();
+    expect(follow).toHaveBeenCalledWith(7);
+    // The app listens to no job events of its own: the shell's jobs store is the one reader.
+    expect(listen).not.toHaveBeenCalled();
     expect(settled).toBe(false);
-    send({ id: 7, state: 'done' });
+    end({ id: 7, state: 'done' });
     expect(await done).toBe('the result');
     expect(call).toHaveBeenCalledWith('job_result', { id: 7 });
-    expect(unlisten).toHaveBeenCalled();
-  });
-
-  it('keeps a job that ended before its id arrived', async () => {
-    const { backend, send } = jobSetup(3, 'r');
-    const handlersReady = flush();
-    const done = backend.cleanDisk('r');
-    await handlersReady;
-    send({ id: 3, state: 'done' });
-    expect(await done).toBe('r');
   });
 
   it('rejects with the reason when the job failed or was cancelled', async () => {
     const failed = jobSetup(1, null);
     const a = failed.backend.cleanDisk('r');
     await flush();
-    failed.send({ id: 1, state: 'failed', message: 'the disk is gone' });
+    failed.end({ id: 1, state: 'failed', message: 'the disk is gone' });
     await expect(a).rejects.toEqual({ code: 'internal', message: 'the disk is gone' });
     const cancelled = jobSetup(2, null);
     const b = cancelled.backend.cleanDisk('r');
     await flush();
-    cancelled.send({ id: 2, state: 'cancelled', reason: 'user' });
+    cancelled.end({ id: 2, state: 'cancelled', reason: 'user' });
     await expect(b).rejects.toMatchObject({ code: 'cancelled' });
   });
 
-  it('waits through the shell\'s job follow, so the shell does not announce the end a second time', async () => {
-    const stop = vi.fn();
-    let finish!: (job: unknown) => void;
-    const follow = vi.fn(() => ({ finished: new Promise((r) => (finish = r)), stop }));
-    const listen = vi.fn(async () => vi.fn());
-    const call = vi.fn(async (cmd: string) => (cmd === 'job_result' ? 'the result' : 9));
-    const backend = new TauriBackend(call as unknown as CommandCall, listen as unknown as EventListen, follow as never);
-    const done = backend.cleanDisk('r');
-    await flush();
-    expect(follow).toHaveBeenCalledWith(9);
-    expect(listen).not.toHaveBeenCalledWith('paddock://jobs', expect.anything());
-    finish({ id: 9, state: 'done' });
-    expect(await done).toBe('the result');
-    const failed = new TauriBackend(call as unknown as CommandCall, listen as unknown as EventListen, (() => ({ finished: Promise.resolve({ id: 9, state: 'failed', message: 'no disk' }), stop })) as never);
-    await expect(failed.cleanDisk('r')).rejects.toEqual({ code: 'internal', message: 'no disk' });
-    const cancelled = new TauriBackend(call as unknown as CommandCall, listen as unknown as EventListen, (() => ({ finished: Promise.resolve({ id: 9, state: 'cancelled', reason: 'user' }), stop })) as never);
-    await expect(cancelled.cleanDisk('r')).rejects.toMatchObject({ code: 'cancelled' });
+  it('refuses long work when there is no jobs list to follow it in', async () => {
+    const backend = new TauriBackend(vi.fn() as unknown as CommandCall, vi.fn() as unknown as EventListen);
+    await expect(backend.cleanDisk('r')).rejects.toMatchObject({ code: 'internal' });
   });
 
   it('parses job payloads, never trusting them', () => {

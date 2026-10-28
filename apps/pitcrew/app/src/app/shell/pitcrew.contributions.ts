@@ -73,7 +73,8 @@ export const REGISTER_DIALOG = defineDialog({
   width: 660,
   height: 640,
   result: type<boolean>(),
-  commands: ['register_runner', 'runner_status', 'connection_state', 'platform_name'],
+  commands: ['register_runner', 'runner_status', 'connection_state', 'platform_name', 'job_result', 'jobs_snapshot', 'job_cancel'],
+  providers: () => import('./register-window').then((m) => m.REGISTER_WINDOW_PROVIDERS),
   load: () => import('../features/register/register-wizard').then((m) => m.RegisterWizard),
 });
 

@@ -26,6 +26,9 @@
       "instanced": false,
       "commands": [
         "connection_state",
+        "job_cancel",
+        "job_result",
+        "jobs_snapshot",
         "platform_name",
         "register_runner",
         "runner_status"

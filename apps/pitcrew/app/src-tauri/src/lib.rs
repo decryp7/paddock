@@ -51,10 +51,10 @@ paddock_commands::command_table! {
     /// (`dialog-contracts.json`) narrows a dialog to the few it needs.
     pub static COMMANDS, macro handler;
     Query [MAIN | DIALOG] => commands::platform_name,
-    Query [MAIN | DIALOG] => commands::take_pending_navigation,
+    Query [MAIN] => commands::take_pending_navigation,
     Query [MAIN | DIALOG] => commands::runner_status,
     Query [MAIN | DIALOG] => commands::connection_state,
-    Mutation [MAIN | DIALOG] => commands::runner_action,
+    Mutation [MAIN] => commands::runner_action,
     Mutation [MAIN] => commands::skip_version,
     Mutation [MAIN] => commands::pin_version,
     Quiet [MAIN] => commands::runner_logs,
@@ -88,7 +88,7 @@ paddock_commands::command_table! {
     Mutation [MAIN | DIALOG] => commands::export_diagnostics,
     Mutation [MAIN | DIALOG] => commands::open_url,
     Mutation [MAIN] => commands::reveal_logs,
-    Query [MAIN] => jobs::job_result,
+    Query [MAIN | DIALOG] => jobs::job_result,
     Query [MAIN] => ops::fleet_insights,
     Query [MAIN] => ops::engine_report,
     Query [MAIN] => ops::engine_prune_preview,

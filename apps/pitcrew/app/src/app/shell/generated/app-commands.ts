@@ -23,7 +23,7 @@ export const APP_COMMANDS = {
   get_settings: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
   has_api_token: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
   install_service: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
-  job_result: { kind: 'query', windows: ['main'], limit: 262144 },
+  job_result: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
   machine_metrics: { kind: 'quiet', windows: ['main'], limit: 262144 },
   notification_channels_get: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
   notification_channels_save: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
@@ -37,7 +37,7 @@ export const APP_COMMANDS = {
   repair_service: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   reveal_logs: { kind: 'mutation', windows: ['main'], limit: 262144 },
   run_details: { kind: 'query', windows: ['main'], limit: 262144 },
-  runner_action: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
+  runner_action: { kind: 'mutation', windows: ['main'], limit: 262144 },
   runner_activity: { kind: 'query', windows: ['main'], limit: 262144 },
   runner_config_get: { kind: 'query', windows: ['main'], limit: 262144 },
   runner_config_preview: { kind: 'query', windows: ['main'], limit: 262144 },
@@ -54,7 +54,7 @@ export const APP_COMMANDS = {
   set_api_token: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   set_autostart: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   skip_version: { kind: 'mutation', windows: ['main'], limit: 262144 },
-  take_pending_navigation: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
+  take_pending_navigation: { kind: 'query', windows: ['main'], limit: 262144 },
   uninstall_service: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
 } as const;
 

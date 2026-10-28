@@ -337,15 +337,11 @@ export class TauriBackend implements PitcrewBackend {
     }
   }
 
-  /**
-   * Long work is a job (rule 10-12): the command registers it and answers with its id at once; its progress and Cancel are
-   * the shell's Jobs list. This waits for the job's end on `paddock://jobs` and reads its result. It never gives up on the
-   * job (no timeout); a cancelled or failed job rejects with the reason.
-   */
   // TODO(quiet jobs): per-job `quiet_on_success` (shared paddock-jobs, on spotter/shell-1.0) for jobs whose result the page already shows;
   // adopt it once that lands (Pitcrew's job kinds then say which are quiet, as Spotter's do).
   /**
-   * Starts the job and waits for it through the shell's follow (the jobs store then counts it as waited for, so the shell
+   * Long work is a job (rules 10-12): the command registers it and answers with its id at once; its progress and Cancel are
+   * the shell's Jobs list. This starts the job and waits for it through the shell's follow (the jobs store then counts it as waited for, so the shell
    * does not announce its end: the page shows its own result). The job itself runs on; nothing here times out (rule 12).
    */
   private async followedJob<T>(cmd: string, args: Record<string, unknown>, follow: (id: number) => { readonly finished: Promise<SuJobSnapshot> }): Promise<T> {
@@ -360,32 +356,11 @@ export class TauriBackend implements PitcrewBackend {
     }
   }
 
-  private async job<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
-    if (this.follow) return this.followedJob<T>(cmd, args, this.follow);
-    const ended = new Map<number, JobEnd>();
-    let waiting: { id: number; resolve: (end: JobEnd) => void } | null = null;
-    const unlisten = await this.listenTo<unknown>(JOBS_EVENT, (e) => {
-      const end = jobEnd(e.payload);
-      if (!end) return;
-      ended.set(end.id, end);
-      if (waiting?.id === end.id) waiting.resolve(end);
-    });
-    try {
-      const id = await this.run<number>(cmd, args);
-      const end = ended.get(id) ?? (await new Promise<JobEnd>((resolve) => (waiting = { id, resolve })));
-      if (end.state === 'failed') throw toCommandError({ code: 'internal', message: end.message });
-      if (end.state === 'cancelled') throw toCommandError({ code: 'cancelled', message: 'Cancelled.' });
-      return (await this.run<T | null>('job_result', { id })) as T;
-    } catch (e) {
-      throw toCommandError(e);
-    } finally {
-      unlisten();
-    }
+  private job<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
+    if (!this.follow) return Promise.reject(toCommandError({ code: 'internal', message: 'Long work needs the window\'s jobs list, which is not available here.' }));
+    return this.followedJob<T>(cmd, args, this.follow);
   }
 }
-
-/** The event every job snapshot arrives on (the shell's `paddock://jobs`). */
-export const JOBS_EVENT = 'paddock://jobs';
 
 /** How a job ended, from its last snapshot. */
 export type JobEnd = { id: number; state: 'done' } | { id: number; state: 'failed'; message: string } | { id: number; state: 'cancelled' };
