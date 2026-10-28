@@ -8,6 +8,32 @@ Conventional Commits; one semver tag for the whole repo.
 - New token `--pd-page-footer-safe` (56 px). `pd-notification-host` now sits above the status bar plus this safe area, so a toast no
   longer covers a page footer's primary action (a wizard's Next); the status-bar fallback is 24 px like the token.
 
+### One shared Material theme (WP-0 of the Material migration, rule 47)
+- `css/material.css` (`scss/entry-material.scss`) is now the whole Material look: one Material 3 `mat.theme` (density -3) whose system
+  and component tokens all resolve to `--pd-*`, so theme, accent, contrast and density follow our tokens and an app carries no
+  Material theme of its own. New bridge tokens: table, sort header, paginator, tree, button toggle, badge, list, expansion, timepicker,
+  slider, chips, tabs, progress bar and every `matButton` variant (filled = primary, outlined = secondary with the surface-2 fill, text,
+  tonal, elevated; danger is the class `pd-button-danger` on any of them; no ripple).
+- New secondary entry `@decryp7/paddock-ui/material`: `providePaddockMaterial()` makes every `mat-form-field` `appearance="outline"` with
+  `floatLabel="always"` and turns ripples off. `@angular/material` is an optional peer dependency (`^22.2.3`) of `@decryp7/paddock-ui`.
+- `npm run test:tokens` measures the contrast of every bridged Material component in light and dark for all accents (text 4.5:1,
+  icons, borders and indicators 3:1). It found the snack bar action (accent on the inverse surface, 1.9:1 to 2.4:1): it now takes the
+  surface ink. `npm run build:css` resolves `@angular/material` from the repo's `node_modules`.
+- Gallery: a "Material controls" section shows every bridged component (`e2e/material.spec.ts`: axe, token checks, real overlays).
+
+### Form controls on Material (WP-1 of the Material migration, rule 47)
+- `pd-select` is a `mat-select` in an outline `mat-form-field` (keys, typeahead and ARIA are Material's; closed, the arrow keys now
+  choose the next option and Enter or Space opens the list). A `<label for>` that names it through `inputId` is wired as `aria-labelledby`.
+- `pd-field` keeps its inputs and `pdFieldControl`, and is an outline `mat-form-field` with the label always floated in the notch
+  (design rule 11, D1), `mat-hint` and `mat-error`; the control no longer needs the `pd-input` class (it is neutralised inside the field).
+  `PdField.describedBy` is now a signal fed by Material.
+- `pd-segmented-control` is a single `mat-button-toggle-group`: Home and End no longer jump (Material has no such key) and the
+  `nextEnabled` helper is removed from the public API.
+- `pd-day-picker` is a multiple `mat-button-toggle-group`; the schedule editor's mode and interval presets are button toggles too.
+- The schedule and pause editors use `mat-timepicker` instead of `type="time"`: the engine still gets `"HH:MM"`, converted at the edge on
+  a fixed reference day (`time-value.ts`, tested across midnight, DST and half-hour zones). Buttons are `matButton`/`matIconButton`,
+  tooltips `matTooltip`.
+
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,
   Chromium e2e in two shards, WebKit e2e) and releases through the shared `app-release.yml` from a thin `dyno-release.yml` (nightly
