@@ -43,27 +43,109 @@ impl Rng {
 }
 
 const SERVICES: &[&str] = &[
-    "OrderService", "PaymentGateway", "HikariPool", "InventoryClient", "AuthTokenValidator", "SessionCache", "HttpClientFactory",
-    "BlobUploader", "ReportScheduler", "MailSender", "SearchIndexer", "UserRepository", "CircuitBreaker", "KafkaConsumer",
-    "GrpcChannel", "LdapAuthenticator", "ThumbnailWorker", "BillingService", "ShipmentTracker", "ConfigWatcher",
-    "MetricsExporter", "DnsResolver", "TlsHandshake", "WebSocketHub", "FeatureFlagClient", "RateLimiter", "AuditLogger",
-    "PdfRenderer", "CacheWarmer", "QueueDispatcher",
+    "OrderService",
+    "PaymentGateway",
+    "HikariPool",
+    "InventoryClient",
+    "AuthTokenValidator",
+    "SessionCache",
+    "HttpClientFactory",
+    "BlobUploader",
+    "ReportScheduler",
+    "MailSender",
+    "SearchIndexer",
+    "UserRepository",
+    "CircuitBreaker",
+    "KafkaConsumer",
+    "GrpcChannel",
+    "LdapAuthenticator",
+    "ThumbnailWorker",
+    "BillingService",
+    "ShipmentTracker",
+    "ConfigWatcher",
+    "MetricsExporter",
+    "DnsResolver",
+    "TlsHandshake",
+    "WebSocketHub",
+    "FeatureFlagClient",
+    "RateLimiter",
+    "AuditLogger",
+    "PdfRenderer",
+    "CacheWarmer",
+    "QueueDispatcher",
 ];
 const VERBS: &[&str] = &[
-    "started", "stopped", "completed", "failed", "retrying", "timed out", "rejected", "accepted", "connected", "disconnected",
-    "opened", "closed", "flushed", "evicted", "throttled", "scheduled", "cancelled", "received", "sent", "skipped",
+    "started",
+    "stopped",
+    "completed",
+    "failed",
+    "retrying",
+    "timed out",
+    "rejected",
+    "accepted",
+    "connected",
+    "disconnected",
+    "opened",
+    "closed",
+    "flushed",
+    "evicted",
+    "throttled",
+    "scheduled",
+    "cancelled",
+    "received",
+    "sent",
+    "skipped",
 ];
 const NOUNS: &[&str] = &[
-    "request", "connection", "transaction", "batch", "message", "session", "job", "upload", "query", "lease", "token",
-    "handshake", "checkpoint", "snapshot", "subscription", "partition", "worker", "pool", "channel", "file",
+    "request",
+    "connection",
+    "transaction",
+    "batch",
+    "message",
+    "session",
+    "job",
+    "upload",
+    "query",
+    "lease",
+    "token",
+    "handshake",
+    "checkpoint",
+    "snapshot",
+    "subscription",
+    "partition",
+    "worker",
+    "pool",
+    "channel",
+    "file",
 ];
 const REASONS: &[&str] = &[
-    "Connection reset by peer", "No space left on device", "operation timed out", "pool exhausted", "token expired",
-    "access denied", "certificate has expired", "host unreachable", "deadlock detected", "too many open files",
-    "invalid argument", "broken pipe", "service unavailable", "quota exceeded", "checksum mismatch",
+    "Connection reset by peer",
+    "No space left on device",
+    "operation timed out",
+    "pool exhausted",
+    "token expired",
+    "access denied",
+    "certificate has expired",
+    "host unreachable",
+    "deadlock detected",
+    "too many open files",
+    "invalid argument",
+    "broken pipe",
+    "service unavailable",
+    "quota exceeded",
+    "checksum mismatch",
 ];
 const USERS: usize = 5_000;
-const HOSTS: &[&str] = &["web-01", "web-02", "api-eu-1", "api-us-2", "db-primary", "db-replica-3", "batch-7", "edge-cdn-4"];
+const HOSTS: &[&str] = &[
+    "web-01",
+    "web-02",
+    "api-eu-1",
+    "api-us-2",
+    "db-primary",
+    "db-replica-3",
+    "batch-7",
+    "edge-cdn-4",
+];
 
 /// A template: its literal words and the kinds of the values it holds.
 #[derive(Clone)]
@@ -74,10 +156,27 @@ struct Template {
 
 /// About 600 templates: service × verb × noun with value slots, so message words repeat like real logs.
 fn templates(rng: &mut Rng) -> Vec<Template> {
-    let slots = ["{Guid}", "{Ms} ms", "{Path}", "{Ip}", "{User}", "0x{Hex}", "{Count}", "{Url}", "status {Status}", "{Host}"];
+    let slots = [
+        "{Guid}",
+        "{Ms} ms",
+        "{Path}",
+        "{Ip}",
+        "{User}",
+        "0x{Hex}",
+        "{Count}",
+        "{Url}",
+        "status {Status}",
+        "{Host}",
+    ];
     (0..600)
         .map(|_| {
-            let mut t = format!("{}: {} {} {}", rng.pick(SERVICES), rng.pick(NOUNS), slots[rng.below(slots.len())], rng.pick(VERBS));
+            let mut t = format!(
+                "{}: {} {} {}",
+                rng.pick(SERVICES),
+                rng.pick(NOUNS),
+                slots[rng.below(slots.len())],
+                rng.pick(VERBS)
+            );
             for _ in 0..rng.below(3) {
                 t.push_str(&format!(" {} {}", rng.pick(NOUNS), slots[rng.below(slots.len())]));
             }
@@ -138,7 +237,15 @@ impl Events {
         let _ = match slot {
             "Guid" => {
                 let (a, b) = (r.next(), r.next());
-                write!(out, "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}", a >> 32, (a >> 16) & 0xffff, a & 0xffff, b >> 48, b & 0xffff_ffff_ffff)
+                write!(
+                    out,
+                    "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+                    a >> 32,
+                    (a >> 16) & 0xffff,
+                    a & 0xffff,
+                    b >> 48,
+                    b & 0xffff_ffff_ffff
+                )
             }
             "Ms" => write!(out, "{}.{}", r.below(5000), r.below(10)),
             "Path" => write!(
@@ -152,8 +259,17 @@ impl Events {
             "User" => write!(out, "user{}", r.below(USERS)),
             "Hex" => write!(out, "{:08X}", r.next() as u32),
             "Count" => write!(out, "{}", r.below(1_000_000)),
-            "Url" => write!(out, "https://api.example.test/v2/{}/{}", NOUNS[r.below(NOUNS.len())], r.below(1_000_000)),
-            "Status" => write!(out, "{}", [200, 201, 204, 301, 400, 401, 403, 404, 409, 429, 500, 502, 503][r.below(13)]),
+            "Url" => write!(
+                out,
+                "https://api.example.test/v2/{}/{}",
+                NOUNS[r.below(NOUNS.len())],
+                r.below(1_000_000)
+            ),
+            "Status" => write!(
+                out,
+                "{}",
+                [200, 201, 204, 301, 400, 401, 403, 404, 409, 429, 500, 502, 503][r.below(13)]
+            ),
             _ => write!(out, "{}", HOSTS[r.below(HOSTS.len())]),
         };
     }
@@ -176,7 +292,14 @@ impl Events {
         let svc = self.rng.pick(SERVICES);
         let mut x = format!(
             "System.{}Exception: {}\n",
-            ["InvalidOperation", "Timeout", "IO", "Http.HttpRequest", "Net.Sockets.Socket", "ObjectDisposed"][self.rng.below(6)],
+            [
+                "InvalidOperation",
+                "Timeout",
+                "IO",
+                "Http.HttpRequest",
+                "Net.Sockets.Socket",
+                "ObjectDisposed"
+            ][self.rng.below(6)],
             self.rng.pick(REASONS)
         );
         for _ in 0..6 + self.rng.below(14) {
@@ -190,7 +313,6 @@ impl Events {
         }
         x
     }
-
 }
 
 impl Iterator for Events {
@@ -307,7 +429,9 @@ pub(crate) const QUERIES: &[&str] = &[
 #[ignore = "benchmark: run with --ignored and DEBRIEF_FTS_BENCH_DOCS"]
 fn index_build_and_queries() {
     let docs: u64 = env("DEBRIEF_FTS_BENCH_DOCS").unwrap_or(200_000);
-    let base: PathBuf = std::env::var("DEBRIEF_FTS_BENCH_DIR").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir());
+    let base: PathBuf = std::env::var("DEBRIEF_FTS_BENCH_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
     let dir = base.join(format!("debrief-fts-bench-{docs}"));
     let keep = std::env::var_os("DEBRIEF_FTS_BENCH_KEEP").is_some();
     let default = WriterBudget::default();
@@ -369,7 +493,8 @@ fn index_build_and_queries() {
         while events.peek().is_some() {
             let t = Instant::now();
             for e in events.by_ref().take(per_commit as usize) {
-                bytes += (e.message.len() + e.exception.as_ref().map_or(0, String::len) + e.template.as_ref().map_or(0, String::len)) as u64;
+                bytes +=
+                    (e.message.len() + e.exception.as_ref().map_or(0, String::len) + e.template.as_ref().map_or(0, String::len)) as u64;
                 let mut d = doc!(
                     fts.f.id => e.id,
                     fts.f.source => e.source as u64,
@@ -420,9 +545,18 @@ fn index_build_and_queries() {
     let t = Instant::now();
     let (fts, recreated) = Fts::open_or_create(&dir, 1, budget).unwrap();
     assert!(!recreated);
-    eprintln!("open: {:.1} ms, {} docs in {} segments, footprint {before} -> {} MB", t.elapsed().as_secs_f64() * 1e3, fts.docs(), fts.segments(), footprint() >> 20);
+    eprintln!(
+        "open: {:.1} ms, {} docs in {} segments, footprint {before} -> {} MB",
+        t.elapsed().as_secs_f64() * 1e3,
+        fts.docs(),
+        fts.segments(),
+        footprint() >> 20
+    );
     let runs = env("DEBRIEF_FTS_BENCH_RUNS").unwrap_or(30usize);
-    eprintln!("{:<24} {:>10} {:>9} {:>9} {:>9} | {:>10} {:>9} {:>9}", "query", "hits", "first ms", "p50 ms", "p95 ms", "all_ids", "p50 ms", "p95 ms");
+    eprintln!(
+        "{:<24} {:>10} {:>9} {:>9} {:>9} | {:>10} {:>9} {:>9}",
+        "query", "hits", "first ms", "p50 ms", "p95 ms", "all_ids", "p50 ms", "p95 ms"
+    );
     for text in QUERIES {
         let q = WordQuery::parse(text);
         let t = Instant::now();

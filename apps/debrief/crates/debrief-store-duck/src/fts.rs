@@ -802,7 +802,18 @@ mod tests {
         let (fts, _) = Fts::open_or_create(&dir, 1, WriterBudget::default()).unwrap();
         let ts = fts.index.schema().get_field("ts").unwrap();
         let mut w = fts.writer().unwrap();
-        let texts = ["conn", "connection reset", "Connector", "cone", "con", "conné ÉTAT", "conn\u{e9}xion", "zzz", "c0nn", "co"];
+        let texts = [
+            "conn",
+            "connection reset",
+            "Connector",
+            "cone",
+            "con",
+            "conné ÉTAT",
+            "conn\u{e9}xion",
+            "zzz",
+            "c0nn",
+            "co",
+        ];
         for (i, t) in texts.iter().enumerate() {
             w.add_document(doc!(fts.f.id => i as u64, fts.f.source => 1u64, fts.f.seg => 1u64, ts => i as i64, fts.f.text => *t))
                 .unwrap();
