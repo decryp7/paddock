@@ -52,6 +52,23 @@ Conventional Commits; one semver tag for the whole repo.
 - The package bin `paddock-check-dialog-commands` and `npm run check:dialogs` are deleted (ADR 0026 §3: the compiler checks
   that a command exists and is open to dialogs; the invoke-layer recorder of package 1.2b replaces the rest).
 
+### Shared dialog API, part 3: the window lifecycle (package 1.1b)
+- **Breaking.** `dialog_fit_height` is gone: a dialog window reports `dialog_ready { measure }` once and `dialog_fit { measure }`
+  after that, with `measure = { content, minContent }` (the dialog's own inner logical size; the wire type `DialogMeasureWire`
+  in `shell/generated/dialogs.ts`). `tauriDialogIo.ready` and `.fit` send them. `BASE_COMMANDS` lists `dialog_ready` and
+  `dialog_fit`; apps list the two commands in their table instead of `dialog_fit_height`.
+- A dialog window is created hidden (pending), at the placed size, on the dialog shell's surface colour, and shown and
+  focused when its page is ready, so the user never sees the 520 px guess or the jump. If the page has not reported within
+  `Dialogs::show_deadline` (1 s, `with_show_deadline`; `paddock-startup` `Config::dialog_show_deadline`) it is shown at the
+  placed size and a late ready fits it once. The deadline runs through an injectable `Scheduler`.
+- The show mechanism per OS is chosen in one function, `paddock_dialogs::show_mechanism(os)`: method d (hidden, show on ready)
+  everywhere today, from the 1.1-0 spike (macOS and Linux measured; a Windows result flips one line to the off-screen method).
+- The minimum content becomes the OS minimum. The size cap is 75 % of the work area less the dialog window's own
+  outer-minus-inner decorations, applies to the preferred size only and never pushes below the minimum content. Physical
+  sizes are rounded up once. A decision keeps its offset only, a form its width and offset, a viewer and a tool their size.
+- A modal's parent is disabled when the dialog is shown, not when it is created; opening a dialog that is still pending
+  creates no window and does not show it early. A scale-factor change refits the window from its last measure.
+
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,
   Chromium e2e in two shards, WebKit e2e) and releases through the shared `app-release.yml` from a thin `dyno-release.yml` (nightly

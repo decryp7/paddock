@@ -12,13 +12,14 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-/// The commands every dialog window may call whatever it shows (taking its input, answering, sizing itself, and, as every
+/// The commands every dialog window may call whatever it shows (taking its input, answering, sizing and showing itself, and, as every
 /// window, posting a notice to the engine's centre and reading its host's list: ADR 0010, rule 34): the kind adds them,
 /// a contract never lists them. An app adds its own base set in its table's head (`base &[...]`).
-pub const BASE_COMMANDS: [&str; 5] = [
+pub const BASE_COMMANDS: [&str; 6] = [
     "dialog_take_input",
     "dialog_close",
-    "dialog_fit_height",
+    "dialog_ready",
+    "dialog_fit",
     "notifications_post",
     "notifications_list",
 ];

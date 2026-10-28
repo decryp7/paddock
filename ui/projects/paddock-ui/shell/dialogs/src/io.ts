@@ -60,9 +60,9 @@ export interface TauriBridge {
 /**
  * The dialog layer over Tauri: the `paddock_dialogs::tauri` commands and its events.
  *
- * The seam of package 1.1b (ADR 0026 §4): `ready` and `fit` are the only calls that size or show a dialog window.
- * Until Rust serves `dialog_ready`/`dialog_fit { content, minContent }`, both send the measured height to
- * `dialog_fit_height`, as before; the show mechanism per OS lives in Rust alone.
+ * The seam of package 1.1b (ADR 0026 §4): `ready` and `fit` are the only calls that size or show a dialog window. They
+ * send the measure (`dialog_ready { measure }`, `dialog_fit { measure }`, the wire type `DialogMeasureWire`); Rust makes
+ * `minContent` the OS minimum, sizes, and shows the window on ready. The show mechanism per OS lives in Rust alone.
  */
 export function tauriDialogIo(tauri: TauriBridge): DialogIo {
   return {
@@ -71,8 +71,8 @@ export function tauriDialogIo(tauri: TauriBridge): DialogIo {
     close: (result) => tauri.invoke<void>('dialog_close', { result: result === undefined ? null : result }),
     listen: (event, handler) => tauri.listen(event, (e) => handler(e.payload)),
     requestClose: (label) => tauri.emitTo(label, DIALOG_EVENTS.closeRequested, null),
-    ready: (m) => tauri.invoke<void>('dialog_fit_height', { content: m.content.height }),
-    fit: (m) => tauri.invoke<void>('dialog_fit_height', { content: m.content.height }),
+    ready: (measure) => tauri.invoke<void>('dialog_ready', { measure }),
+    fit: (measure) => tauri.invoke<void>('dialog_fit', { measure }),
     ...(tauri.setWindowTitle ? { setTitle: (title: string) => tauri.setWindowTitle!(title) } : {}),
   };
 }

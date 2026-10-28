@@ -27,8 +27,8 @@ describe('tauriDialogIo', () => {
       ['dialog_take_input', undefined],
       ['dialog_close', { result: null }],
       ['dialog_close', { result: { ok: 1 } }],
-      ['dialog_fit_height', { content: 321 }],
-      ['dialog_fit_height', { content: 330 }],
+      ['dialog_ready', { measure: { content: { width: 400, height: 321 }, minContent: { width: 300, height: 150 } } }],
+      ['dialog_fit', { measure: { content: { width: 400, height: 330 }, minContent: { width: 300, height: 150 } } }],
       ['emitTo', 'd-main-1', DIALOG_EVENTS.closeRequested, null],
       ['listen', DIALOG_EVENTS.result],
     ]);
