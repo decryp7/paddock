@@ -226,7 +226,11 @@ pub(super) fn button_down_for<R: Runtime>(_w: &Window<R>) -> Option<bool> {
     primary_button_down()
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(all(
+    unix,
+    not(target_os = "macos"),
+    not(any(test, feature = "mock-runtime"))
+))]
 pub(super) fn button_down_for<R: Runtime>(w: &Window<R>) -> Option<bool> {
     use gtk::gdk::ModifierType;
     use gtk::gdk::prelude::SeatExt;
@@ -237,7 +241,28 @@ pub(super) fn button_down_for<R: Runtime>(w: &Window<R>) -> Option<bool> {
     Some(mask.contains(ModifierType::BUTTON1_MASK))
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
+/// The mock runtime has no native windows (on Linux its `gtk_window` is unimplemented and panics): the pointer is
+/// unreadable and the opacity unsupported there, which the callers already handle.
+#[cfg(all(unix, not(target_os = "macos"), any(test, feature = "mock-runtime")))]
+pub(super) fn button_down_for<R: Runtime>(_w: &Window<R>) -> Option<bool> {
+    None
+}
+
+#[cfg(all(unix, not(target_os = "macos"), any(test, feature = "mock-runtime")))]
+pub(super) fn set_window_opacity<R: Runtime>(
+    _w: &Window<R>,
+    _opacity: f64,
+) -> Result<(), OpacityError> {
+    Err(OpacityError::Unsupported(
+        "the mock runtime has no native windows".into(),
+    ))
+}
+
+#[cfg(all(
+    unix,
+    not(target_os = "macos"),
+    not(any(test, feature = "mock-runtime"))
+))]
 pub(super) fn set_window_opacity<R: Runtime>(
     w: &Window<R>,
     opacity: f64,
