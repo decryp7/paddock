@@ -322,6 +322,24 @@ fn a_first_navigation_whose_events_left_the_log_counts_as_settled() {
     assert!(f.fake.calls().iter().any(|c| c == "Page.navigate"));
 }
 
+/// Without a frame tree the main frame is the target id (as in Chrome): the running navigation is still found and
+/// waited for. (With a frame tree the fake's main frame `F` differs from every target id, so the other tests show the
+/// frame tree's id is the one used.)
+#[test]
+fn without_a_frame_tree_the_target_id_names_the_main_frame() {
+    let f = Fixture::new(Mode::Obey, 1);
+    let b = f.launch();
+    f.fake.act(UserAction::SlowStartPage).unwrap();
+    f.fake.act(UserAction::NoFrameTree).unwrap();
+    let p = b.new_page().unwrap();
+    let e = p.navigate("https://a.test/", Duration::from_millis(200));
+    assert!(matches!(e, Err(Error::Timeout(_))), "{e:?}");
+    assert!(!f.fake.calls().iter().any(|c| c == "Page.navigate"));
+    f.fake.act(UserAction::FinishStartPage).unwrap();
+    p.navigate("https://a.test/", Duration::from_secs(20))
+        .unwrap();
+}
+
 #[test]
 fn closing_the_window_ends_the_wait_for_the_tabs_first_navigation() {
     let f = Fixture::new(Mode::Obey, 1);

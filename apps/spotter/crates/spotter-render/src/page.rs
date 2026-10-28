@@ -283,7 +283,11 @@ fn replaced_by(e: &crate::cdp::Event, session: &str, reply: &Value) -> Option<St
         && e.session.as_deref() == Some(session)
         && p.get("frameId") == reply.get("frameId")
         && p.get("loaderId") != reply.get("loaderId"))
-    .then(|| p.get("url").and_then(Value::as_str).unwrap_or("another address").to_string())
+    .then(|| {
+        p.get("url")
+            .and_then(Value::as_str)
+            .map_or_else(|| "another address".to_string(), brief_url)
+    })
 }
 
 /// Why `Page.navigate` answered with `error` (its `errorText`) instead of a page. Chrome reports every navigation it
@@ -376,17 +380,23 @@ fn trace(events: &[(u64, Event)], navigate: u64, session: &str) -> String {
 }
 
 /// An address cut to its scheme, host and path: no user name, password, query or fragment (the trace ends up in error
-/// messages and logs). An address without a host keeps only its scheme, except `about:` pages.
+/// messages and logs). An address that is not hierarchical (no `//` right after the scheme: `data:`, `javascript:`,
+/// `blob:`) keeps only its scheme, except `about:` pages; text without a scheme is left out.
 fn brief_url(url: &str) -> String {
     let url = url.find(['?', '#']).map_or(url, |i| &url[..i]);
-    match url.split_once("://") {
-        Some((scheme, rest)) => {
+    let Some((scheme, rest)) = url.split_once(':') else {
+        return String::new();
+    };
+    if scheme == "about" {
+        return url.to_string();
+    }
+    match rest.strip_prefix("//") {
+        Some(rest) => {
             let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
             let host = authority.rsplit('@').next().unwrap_or(authority);
             format!("{scheme}://{host}{path}")
         }
-        None if url.starts_with("about:") => url.to_string(),
-        None => url.split_once(':').map_or_else(String::new, |(scheme, _)| format!("{scheme}:...")),
+        None => format!("{scheme}:"),
     }
 }
 
@@ -607,7 +617,11 @@ mod tests {
         assert_eq!(brief_url("http://a.test"), "http://a.test");
         assert_eq!(brief_url("http://a.test#x"), "http://a.test");
         assert_eq!(brief_url("about:blank"), "about:blank");
-        assert_eq!(brief_url("data:text/html,<p>secret</p>"), "data:...");
+        assert_eq!(brief_url("data:text/html,<p>secret</p>"), "data:");
+        // A `://` later in the text does not make it hierarchical.
+        assert_eq!(brief_url("data:text/html,<a href=http://x/secret>"), "data:");
+        assert_eq!(brief_url("javascript:fetch('https://x.test/steal')"), "javascript:");
+        assert_eq!(brief_url("no scheme here"), "");
         assert_eq!(brief_url(""), "");
         let e = ev(
             "Network.requestWillBeSent",
@@ -634,14 +648,21 @@ mod tests {
         ws.send(tungstenite::Message::text(v.to_string())).is_ok()
     }
 
-    fn fake_session(mut ws: Ws, slow_start: bool, flood: bool, fin: &AtomicBool, log: &std::sync::Mutex<Vec<String>>) {
+    fn fake_session(mut ws: Ws, script: Script, fin: &AtomicBool, log: &std::sync::Mutex<Vec<String>>) {
+        let Script {
+            slow_start,
+            flood,
+            frame_tree,
+        } = script;
+        // The main frame: `F` from the frame tree, or (when the frame tree fails) the target id, as Chrome uses it.
+        let main = if frame_tree { "F" } else { "T1" };
         let mut told = false;
         loop {
             if slow_start && fin.load(Ordering::SeqCst) && !told {
                 told = true;
                 send(
                     &mut ws,
-                    json!({"method": "Page.frameStoppedLoading", "sessionId": "S1", "params": {"frameId": "F"}}),
+                    json!({"method": "Page.frameStoppedLoading", "sessionId": "S1", "params": {"frameId": main}}),
                 );
             }
             let t = match ws.read() {
@@ -657,7 +678,7 @@ mod tests {
             log.lock().unwrap_or_else(|e| e.into_inner()).push(method.clone());
             let starting = slow_start && !fin.load(Ordering::SeqCst);
             if method == "Page.enable" && starting {
-                for (frame, loader) in [("C", "LC"), ("F", "L0")] {
+                for (frame, loader) in [("C", "LC"), (main, "L0")] {
                     let p = json!({"frameId": frame, "loaderId": loader, "url": "about:blank", "navigationType": "differentDocument"});
                     send(
                         &mut ws,
@@ -674,11 +695,19 @@ mod tests {
                 }
             }
             let result = match method.as_str() {
-                "Target.createTarget" => json!({"targetId": "F"}),
+                "Target.createTarget" => json!({"targetId": "T1"}),
                 "Target.attachToTarget" => json!({"sessionId": "S1"}),
+                "Page.getFrameTree" if !frame_tree => {
+                    let mut reply = json!({"id": req["id"], "error": {"code": -32000, "message": "no frame tree"}});
+                    if let Some(s) = req.get("sessionId") {
+                        reply["sessionId"] = s.clone();
+                    }
+                    send(&mut ws, reply);
+                    continue;
+                }
                 "Page.getFrameTree" => json!({"frameTree": {"frame": {"id": "F"}}}),
-                "Page.navigate" if starting => json!({"frameId": "F", "loaderId": "L1", "errorText": "net::ERR_ABORTED"}),
-                "Page.navigate" => json!({"frameId": "F", "loaderId": "L1"}),
+                "Page.navigate" if starting => json!({"frameId": main, "loaderId": "L1", "errorText": "net::ERR_ABORTED"}),
+                "Page.navigate" => json!({"frameId": main, "loaderId": "L1"}),
                 _ => json!({}),
             };
             let mut reply = json!({"id": req["id"], "result": result});
@@ -692,8 +721,23 @@ mod tests {
         }
     }
 
+    /// What the scripted endpoint does (see [`FakeCdp`]).
+    #[derive(Clone, Copy)]
+    struct Script {
+        slow_start: bool,
+        flood: bool,
+        /// `Page.getFrameTree` answers (main frame `F`, distinct from the target id `T1`); false: it fails.
+        frame_tree: bool,
+    }
+
+    const SLOW: Script = Script {
+        slow_start: true,
+        flood: false,
+        frame_tree: true,
+    };
+
     impl FakeCdp {
-        fn start(slow_start: bool, flood: bool) -> FakeCdp {
+        fn start(script: Script) -> FakeCdp {
             let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let port = l.local_addr().unwrap().port();
             let finish = Arc::new(AtomicBool::new(false));
@@ -703,7 +747,7 @@ mod tests {
                 let Ok((stream, _)) = l.accept() else { return };
                 let _ = stream.set_read_timeout(Some(Duration::from_millis(10)));
                 if let Ok(ws) = tungstenite::accept(stream) {
-                    fake_session(ws, slow_start, flood, &fin, &log);
+                    fake_session(ws, script, &fin, &log);
                 }
             });
             FakeCdp { port, finish, calls }
@@ -726,7 +770,7 @@ mod tests {
     /// navigation still ran, came back `net::ERR_ABORTED`. The first load now waits for that navigation to settle.
     #[test]
     fn the_first_load_waits_until_the_tabs_own_first_navigation_has_settled() {
-        let f = FakeCdp::start(true, false);
+        let f = FakeCdp::start(SLOW);
         let p = f.page();
         // While it runs, the load is not even sent (the driver before the fix sent it and got ERR_ABORTED back).
         let e = p.navigate("http://a.test/", Duration::from_millis(200));
@@ -746,16 +790,30 @@ mod tests {
     /// as settled instead of waiting out the whole timeout for an event it can no longer see.
     #[test]
     fn a_first_navigation_whose_events_left_the_log_counts_as_settled() {
-        let f = FakeCdp::start(true, true);
+        let f = FakeCdp::start(Script { flood: true, ..SLOW });
         let p = f.page();
         let e = p.navigate("http://a.test/", Duration::from_secs(20));
         assert!(matches!(&e, Err(Error::Protocol(m)) if m.contains("net::ERR_ABORTED")), "{e:?}");
         assert!(f.navigated());
     }
 
+    /// Without a frame tree the main frame is the target id (as in Chrome): the running navigation is still found and
+    /// waited for.
+    #[test]
+    fn without_a_frame_tree_the_target_id_names_the_main_frame() {
+        let f = FakeCdp::start(Script { frame_tree: false, ..SLOW });
+        let p = f.page();
+        let e = p.navigate("http://a.test/", Duration::from_millis(200));
+        assert!(matches!(e, Err(Error::Timeout(_))), "{e:?}");
+        assert!(!f.navigated());
+        f.finish.store(true, Ordering::SeqCst);
+        p.navigate("http://a.test/", Duration::from_secs(20)).unwrap();
+        assert!(f.navigated());
+    }
+
     #[test]
     fn a_tab_with_nothing_running_loads_at_once() {
-        let f = FakeCdp::start(false, false);
+        let f = FakeCdp::start(Script { slow_start: false, ..SLOW });
         f.page().navigate("http://a.test/", Duration::from_secs(10)).unwrap();
         assert!(f.navigated());
     }
@@ -793,6 +851,11 @@ mod tests {
         assert_eq!(replaced_by(&same, "S", &r), None);
         same.params["navigationType"] = json!("historySameDocument");
         assert_eq!(replaced_by(&same, "S", &r), None);
+        // The address that replaced the load is named without its query or fragment (error text reaches the logs).
+        assert_eq!(
+            replaced_by(&started("S", "F", "L4", "http://a.test/next?token=abc#f"), "S", &r).as_deref(),
+            Some("http://a.test/next")
+        );
         // A replacement without an address still counts.
         let mut e = started("S", "F", "L3", "");
         e.params.as_object_mut().unwrap().remove("url");

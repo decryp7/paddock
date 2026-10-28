@@ -490,8 +490,7 @@ fn replaced_by(e: &Event, session: &str, reply: &Value) -> Option<String> {
     .then(|| {
         p.get("url")
             .and_then(Value::as_str)
-            .unwrap_or("another address")
-            .to_string()
+            .map_or_else(|| "another address".to_string(), brief_url)
     })
 }
 
@@ -602,19 +601,23 @@ fn trace(events: &[(u64, Event)], navigate: u64, session: &str) -> String {
 }
 
 /// An address cut to its scheme, host and path: no user name, password, query or fragment (the trace ends up in error
-/// messages and logs). An address without a host keeps only its scheme, except `about:` pages.
+/// messages and logs). An address that is not hierarchical (no `//` right after the scheme: `data:`, `javascript:`,
+/// `blob:`) keeps only its scheme, except `about:` pages; text without a scheme is left out.
 fn brief_url(url: &str) -> String {
     let url = url.find(['?', '#']).map_or(url, |i| &url[..i]);
-    match url.split_once("://") {
-        Some((scheme, rest)) => {
+    let Some((scheme, rest)) = url.split_once(':') else {
+        return String::new();
+    };
+    if scheme == "about" {
+        return url.to_string();
+    }
+    match rest.strip_prefix("//") {
+        Some(rest) => {
             let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
             let host = authority.rsplit('@').next().unwrap_or(authority);
             format!("{scheme}://{host}{path}")
         }
-        None if url.starts_with("about:") => url.to_string(),
-        None => url
-            .split_once(':')
-            .map_or_else(String::new, |(scheme, _)| format!("{scheme}:...")),
+        None => format!("{scheme}:"),
     }
 }
 
@@ -896,7 +899,17 @@ mod tests {
         assert_eq!(brief_url("http://a.test"), "http://a.test");
         assert_eq!(brief_url("http://a.test#x"), "http://a.test");
         assert_eq!(brief_url("about:blank"), "about:blank");
-        assert_eq!(brief_url("data:text/html,<p>secret</p>"), "data:...");
+        assert_eq!(brief_url("data:text/html,<p>secret</p>"), "data:");
+        // A `://` later in the text does not make it hierarchical.
+        assert_eq!(
+            brief_url("data:text/html,<a href=http://x/secret>"),
+            "data:"
+        );
+        assert_eq!(
+            brief_url("javascript:fetch('https://x.test/steal')"),
+            "javascript:"
+        );
+        assert_eq!(brief_url("no scheme here"), "");
         assert_eq!(brief_url(""), "");
         let e = ev(
             "Network.requestWillBeSent",
@@ -1035,6 +1048,16 @@ mod tests {
         assert_eq!(replaced_by(&same, "S", &r), None);
         same.params["navigationType"] = json!("historySameDocument");
         assert_eq!(replaced_by(&same, "S", &r), None);
+        // The address that replaced the load is named without its query or fragment (error text reaches the logs).
+        assert_eq!(
+            replaced_by(
+                &started("S", "F", "L4", "http://a.test/next?token=abc#f"),
+                "S",
+                &r
+            )
+            .as_deref(),
+            Some("http://a.test/next")
+        );
         // A replacement without an address still counts.
         let mut e = started("S", "F", "L3", "");
         e.params.as_object_mut().unwrap().remove("url");

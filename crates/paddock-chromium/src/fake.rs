@@ -47,6 +47,9 @@ pub enum UserAction {
     SlowStartPage,
     /// The first navigation of [`UserAction::SlowStartPage`] stops loading (`Page.frameStoppedLoading`).
     FinishStartPage,
+    /// `Page.getFrameTree` fails from now on, and the page's main frame is reported under its target id (as Chrome
+    /// names a page target's main frame); otherwise the main frame is `F`, unlike any target id.
+    NoFrameTree,
 }
 
 impl UserAction {
@@ -58,6 +61,7 @@ impl UserAction {
             UserAction::StallLoads => "stall-loads",
             UserAction::SlowStartPage => "slow-start-page",
             UserAction::FinishStartPage => "finish-start-page",
+            UserAction::NoFrameTree => "no-frame-tree",
         }
     }
 }
@@ -234,6 +238,18 @@ static CONNECTION_DROPPED: AtomicBool = AtomicBool::new(false);
 static LOADS_STALLED: AtomicBool = AtomicBool::new(false);
 static START_PAGE_SLOW: AtomicBool = AtomicBool::new(false);
 static START_PAGE_FINISHED: AtomicBool = AtomicBool::new(false);
+static NO_FRAME_TREE: AtomicBool = AtomicBool::new(false);
+/// The number of the last page opened over DevTools (its target id is `T<n>`).
+static LAST_TARGET: AtomicUsize = AtomicUsize::new(0);
+
+/// The id of the page's main frame (see [`UserAction::NoFrameTree`]).
+fn main_frame() -> String {
+    if NO_FRAME_TREE.load(Ordering::SeqCst) {
+        format!("T{}", LAST_TARGET.load(Ordering::SeqCst))
+    } else {
+        "F".into()
+    }
+}
 /// Pages opened over DevTools (`Target.createTarget`), besides the ones the browser started with.
 static CREATED: AtomicUsize = AtomicUsize::new(0);
 
@@ -269,6 +285,7 @@ fn apply_control() {
             "stall-loads" => LOADS_STALLED.store(true, Ordering::SeqCst),
             "slow-start-page" => START_PAGE_SLOW.store(true, Ordering::SeqCst),
             "finish-start-page" => START_PAGE_FINISHED.store(true, Ordering::SeqCst),
+            "no-frame-tree" => NO_FRAME_TREE.store(true, Ordering::SeqCst),
             "quit" => std::process::exit(0),
             _ => {}
         }
@@ -300,7 +317,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
             && !told_finished
         {
             told_finished = true;
-            let ev = json!({"method": "Page.frameStoppedLoading", "sessionId": "S1", "params": {"frameId": "F"}});
+            let ev = json!({"method": "Page.frameStoppedLoading", "sessionId": "S1", "params": {"frameId": main_frame()}});
             if ws.send(Message::text(ev.to_string())).is_err() {
                 return false;
             }
@@ -363,7 +380,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
             START_PAGE_SLOW.load(Ordering::SeqCst) && !START_PAGE_FINISHED.load(Ordering::SeqCst);
         if method == "Page.enable" && starting {
             // A child frame's navigation first: only the main frame's (frame `F`, see `Page.getFrameTree`) is waited for.
-            for (frame, loader) in [("C", "LC"), ("F", "L0")] {
+            for (frame, loader) in [("C".to_string(), "LC"), (main_frame(), "L0")] {
                 let ev = json!({"method": "Page.frameStartedNavigating", "sessionId": "S1", "params": {
                     "frameId": frame, "loaderId": loader, "url": "about:blank", "navigationType": "differentDocument"}});
                 if ws.send(Message::text(ev.to_string())).is_err() {
@@ -373,13 +390,16 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
         }
         let url = || std::fs::read_to_string(url_file).unwrap_or_else(|_| "about:blank".into());
         let on_page = req.get("sessionId").is_some() || method == "Target.getTargetInfo";
-        let mut reply = if closed && on_page {
+        let mut reply = if method == "Page.getFrameTree" && NO_FRAME_TREE.load(Ordering::SeqCst) {
+            json!({"id": req["id"], "error": {"code": -32000, "message": "no frame tree"}})
+        } else if closed && on_page {
             // The window is gone: its page answers no more, as Chrome answers for a closed target.
             json!({"id": req["id"], "error": {"code": -32001, "message": "No session or target with given id found"}})
         } else {
             let result = match method {
                 "Target.createTarget" => {
                     let n = tabs + CREATED.fetch_add(1, Ordering::SeqCst) + 1;
+                    LAST_TARGET.store(n, Ordering::SeqCst);
                     json!({"targetId": format!("T{n}")})
                 }
                 "Target.attachToTarget" => json!({"sessionId": "S1"}),
@@ -416,7 +436,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
                     json!({"currentIndex": 1, "entries": [{"id": 1}, {"id": 2}]})
                 }
                 "Page.navigate" if starting => {
-                    json!({"frameId": "F", "loaderId": "L1", "errorText": "net::ERR_ABORTED", "isDownload": false})
+                    json!({"frameId": main_frame(), "loaderId": "L1", "errorText": "net::ERR_ABORTED", "isDownload": false})
                 }
                 "Page.navigate"
                     if req["params"]["url"]
