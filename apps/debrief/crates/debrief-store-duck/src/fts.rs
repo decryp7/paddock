@@ -26,12 +26,13 @@ use duckdb::{params, Connection};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ProjectionMask;
 use std::collections::HashSet;
+use std::ops::Bound;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 use tantivy::collector::{Collector, Count, SegmentCollector, TopDocs};
-use tantivy::query::{BooleanQuery, EmptyQuery, Occur, Query, RegexQuery, TermQuery};
+use tantivy::query::{BooleanQuery, EmptyQuery, Occur, Query, RangeQuery, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, FAST, INDEXED};
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 use tantivy::{doc, DocId, Index, IndexReader, IndexWriter, Order, ReloadPolicy, Score, SegmentReader, Term};
@@ -88,33 +89,56 @@ pub const MAX_FILTER_HITS: usize = 2_000_000;
 /// The name the words tokenizer is registered under.
 const TOKENIZER: &str = "debrief_words";
 
-/// [`debrief_core::words::words`] as a Tantivy tokenizer.
+/// [`debrief_core::words::words`] as a Tantivy tokenizer. Each indexing thread has its own copy, whose tokens (and
+/// their strings) are reused from one text to the next: no allocation per word once they have grown.
 #[derive(Clone, Default)]
-struct WordsTokenizer;
-
-struct WordsStream {
+struct WordsTokenizer {
     tokens: Vec<Token>,
+}
+
+struct WordsStream<'a> {
+    tokens: &'a mut [Token],
     at: usize,
 }
 
+/// Tokens a tokenizer keeps for reuse at most (a long stack trace has a few hundred words).
+const MAX_KEPT_TOKENS: usize = 4096;
+
 impl Tokenizer for WordsTokenizer {
-    type TokenStream<'a> = WordsStream;
-    fn token_stream<'a>(&'a mut self, text: &'a str) -> WordsStream {
-        let mut tokens = Vec::new();
-        debrief_core::words::words(text, &mut |w| {
-            tokens.push(Token {
-                offset_from: 0,
-                offset_to: 0,
-                position: tokens.len(),
-                text: w,
-                position_length: 1,
-            })
+    type TokenStream<'a> = WordsStream<'a>;
+    fn token_stream<'a>(&'a mut self, text: &'a str) -> WordsStream<'a> {
+        let tokens = &mut self.tokens;
+        let mut n = 0;
+        debrief_core::words::words_ref(text, &mut |w| {
+            match tokens.get_mut(n) {
+                Some(t) => {
+                    t.text.clear();
+                    t.text.push_str(w);
+                    t.position = n;
+                }
+                None => tokens.push(Token {
+                    offset_from: 0,
+                    offset_to: 0,
+                    position: n,
+                    text: w.to_string(),
+                    position_length: 1,
+                }),
+            }
+            n += 1;
         });
-        WordsStream { tokens, at: 0 }
+        // A huge text grows the buffer once; it is not kept beyond a typical event's worth.
+        if tokens.len() > MAX_KEPT_TOKENS && n <= MAX_KEPT_TOKENS {
+            tokens.truncate(MAX_KEPT_TOKENS);
+            tokens.shrink_to_fit();
+        }
+        WordsStream {
+            tokens: &mut self.tokens[..n],
+            at: 0,
+        }
     }
 }
 
-impl TokenStream for WordsStream {
+impl TokenStream for WordsStream<'_> {
     fn advance(&mut self) -> bool {
         self.at += 1;
         self.at <= self.tokens.len()
@@ -163,6 +187,18 @@ impl SegmentCollector for SegmentIds {
             if let Some(id) = self.col.first(doc) {
                 self.ids.push(id);
             }
+        }
+    }
+    /// Blocks of hits (unscored queries hand them over this way): one vectorised read of the column per block.
+    fn collect_block(&mut self, docs: &[DocId]) {
+        if self.ids.len() > self.cap {
+            return;
+        }
+        let mut vals = [None; tantivy::COLLECT_BLOCK_BUFFER_LEN];
+        for chunk in docs.chunks(tantivy::COLLECT_BLOCK_BUFFER_LEN) {
+            let out = &mut vals[..chunk.len()];
+            self.col.first_vals(chunk, out);
+            self.ids.extend(out.iter().flatten());
         }
     }
     fn harvest(self) -> Vec<u64> {
@@ -216,6 +252,16 @@ const LAYOUT: u32 = 4;
 
 fn payload(epoch: u64) -> String {
     format!("fts_epoch={epoch};layout={LAYOUT}")
+}
+
+/// The words of `field` that start with `prefix`, as the term range `[prefix, prefix + U+10FFFF)`: a walk of the term
+/// dictionary between two keys, with no regular expression to compile per search. Words are letters and digits, and
+/// U+10FFFF (the last code point, a noncharacter) is neither, so every word with the prefix sorts below the bound.
+fn prefix_query(field: Field, prefix: &str) -> RangeQuery {
+    RangeQuery::new(
+        Bound::Included(Term::from_field_text(field, prefix)),
+        Bound::Excluded(Term::from_field_text(field, &format!("{prefix}\u{10FFFF}"))),
+    )
 }
 
 /// An opened index.
@@ -298,9 +344,7 @@ impl Fts {
             clauses.push((Occur::Must, Box::new(TermQuery::new(term, IndexRecordOption::Basic))));
         }
         for p in &q.prefixes {
-            // Words are letters and digits only: nothing in them needs escaping.
-            let re = RegexQuery::from_pattern(&format!("{p}.*"), self.f.text)?;
-            clauses.push((Occur::Must, Box::new(re)));
+            clauses.push((Occur::Must, Box::new(prefix_query(self.f.text, p))));
         }
         Ok(Box::new(BooleanQuery::new(clauses)))
     }
@@ -312,9 +356,14 @@ impl Fts {
         let query = self.query(q)?;
         let top = TopDocs::with_limit(limit.clamp(1, MAX_HITS.max(MAX_VERIFY))).order_by_fast_field::<i64>("ts", Order::Asc);
         let (count, hits) = searcher.search(&*query, &(Count, top))?;
+        // The id column of each segment, opened once (not once per hit).
+        let mut cols: Vec<Option<tantivy::fastfield::Column<u64>>> = vec![None; searcher.segment_readers().len()];
         let mut ids = Vec::with_capacity(hits.len());
         for (_ts, addr) in hits {
-            let col = searcher.segment_reader(addr.segment_ord).fast_fields().u64("id")?;
+            let col = match &mut cols[addr.segment_ord as usize] {
+                Some(c) => c,
+                slot => slot.insert(searcher.segment_reader(addr.segment_ord).fast_fields().u64("id")?),
+            };
             if let Some(id) = col.first(addr.doc_id) {
                 ids.push(EventId(id));
             }
@@ -742,6 +791,34 @@ mod bench;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tantivy::query::RegexQuery;
+
+    /// The prefix range finds exactly the words the regular expression `prefix.*` found, including words with
+    /// letters beyond ASCII and a word equal to the prefix.
+    #[test]
+    fn a_prefix_range_finds_the_words_a_prefix_regex_finds() {
+        let dir = std::env::temp_dir().join(format!("debrief-fts-prefix-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (fts, _) = Fts::open_or_create(&dir, 1, WriterBudget::default()).unwrap();
+        let ts = fts.index.schema().get_field("ts").unwrap();
+        let mut w = fts.writer().unwrap();
+        let texts = ["conn", "connection reset", "Connector", "cone", "con", "conné ÉTAT", "conn\u{e9}xion", "zzz", "c0nn", "co"];
+        for (i, t) in texts.iter().enumerate() {
+            w.add_document(doc!(fts.f.id => i as u64, fts.f.source => 1u64, fts.f.seg => 1u64, ts => i as i64, fts.f.text => *t))
+                .unwrap();
+        }
+        fts.commit(&mut w, 1).unwrap();
+        let searcher = fts.reader.searcher();
+        for p in ["conn", "con", "c", "co", "conné", "z", "x", "connection"] {
+            let regex = RegexQuery::from_pattern(&format!("{p}.*"), fts.f.text).unwrap();
+            let by_regex = searcher.search(&regex, &Ids(100)).unwrap();
+            let by_range = searcher.search(&prefix_query(fts.f.text, p), &Ids(100)).unwrap();
+            assert!(!by_regex.is_empty() || p == "x", "prefix {p} finds something");
+            assert_eq!(by_range, by_regex, "prefix {p}");
+        }
+        drop((w, searcher, fts));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn segment_keys_differ_and_the_tokenizer_gives_the_words() {
@@ -765,6 +842,13 @@ mod tests {
             ]
         );
         assert!(!WordsTokenizer::default().token_stream("").advance());
+        // A reused tokenizer gives the next text's words only, at fresh positions.
+        let mut stream = t.token_stream("a.b");
+        let mut again = Vec::new();
+        while stream.advance() {
+            again.push((stream.token().text.clone(), stream.token().position));
+        }
+        assert_eq!(again, [("a".to_string(), 0), ("b".to_string(), 1), ("ab".to_string(), 2)]);
         // A reused tokenizer gives the next text's words only, at fresh positions.
         let mut stream = t.token_stream("a.b");
         let mut again = Vec::new();

@@ -28,6 +28,144 @@ pub const MAX_RUN: usize = 64;
 
 /// Words of `text`, in order (with repeats): every run and, for a run with inner boundaries, its parts.
 pub fn words(text: &str, out: &mut dyn FnMut(String)) {
+    words_ref(text, &mut |w| out(w.to_string()));
+}
+
+/// [`words`] as borrowed strings: the same words in the same order, without a `String` per word. ASCII text (most log
+/// lines) takes a path that lower-cases the text once and hands out slices of it; any other text takes the general path.
+/// The full-text indexer's tokenizer uses this (its words were 70% of indexing time, mostly allocation).
+pub fn words_ref(text: &str, out: &mut dyn FnMut(&str)) {
+    if text.is_ascii() {
+        ascii::words(text.as_bytes(), out);
+    } else {
+        words_general(text, &mut |w| out(&w));
+    }
+}
+
+/// The ASCII path of [`words_ref`]: byte ranges into the lower-cased text instead of owned strings. Lower-casing ASCII
+/// keeps every byte where it is, so a range of the text is the same range of its lower-cased copy.
+mod ascii {
+    use super::{MAX_JOIN_PARTS, MAX_JOIN_UNITS, MAX_RUN};
+    use std::ops::Range;
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Class {
+        Lower,
+        Upper,
+        Digit,
+    }
+
+    fn class(b: u8) -> Class {
+        if b.is_ascii_digit() {
+            Class::Digit
+        } else if b.is_ascii_uppercase() {
+            Class::Upper
+        } else {
+            Class::Lower
+        }
+    }
+
+    /// The parts of the run `text[run]` (see [`super::parts`]), appended to `out`.
+    fn parts(text: &[u8], run: Range<usize>, out: &mut Vec<Range<usize>>) {
+        let mut start = run.start;
+        for i in run.start + 1..run.end {
+            let (prev, cur) = (class(text[i - 1]), class(text[i]));
+            let boundary = match (prev, cur) {
+                (Class::Lower, Class::Upper) => true,
+                (Class::Upper, Class::Upper) => i + 1 < run.end && class(text[i + 1]) == Class::Lower,
+                (Class::Digit, Class::Lower | Class::Upper) | (Class::Lower | Class::Upper, Class::Digit) => true,
+                _ => false,
+            };
+            if boundary {
+                out.push(start..i);
+                start = i;
+            }
+        }
+        out.push(start..run.end);
+    }
+
+    fn str_of(lower: &[u8], r: Range<usize>) -> &str {
+        // ASCII bytes are always valid UTF-8; the fallback is never taken.
+        std::str::from_utf8(&lower[r]).unwrap_or_default()
+    }
+
+    pub(super) fn words(text: &[u8], out: &mut dyn FnMut(&str)) {
+        let lower = text.to_ascii_lowercase();
+        let mut runs: Vec<Range<usize>> = Vec::new();
+        let mut i = 0;
+        while i < text.len() {
+            if text[i].is_ascii_alphanumeric() {
+                let s = i;
+                while i < text.len() && text[i].is_ascii_alphanumeric() {
+                    i += 1;
+                }
+                runs.push(s..i);
+            } else {
+                i += 1;
+            }
+        }
+        let mut parts_buf: Vec<Range<usize>> = Vec::new();
+        for run in &runs {
+            parts_buf.clear();
+            parts(text, run.clone(), &mut parts_buf);
+            if run.len() <= MAX_RUN {
+                out(str_of(&lower, run.clone()));
+            }
+            if parts_buf.len() > 1 {
+                for p in &parts_buf {
+                    if p.len() <= MAX_RUN {
+                        out(str_of(&lower, p.clone()));
+                    }
+                }
+            }
+        }
+        joins(text, &lower, &runs, &mut parts_buf, out);
+    }
+
+    /// The joins of [`super::joins`] over the runs found by [`words`].
+    fn joins(text: &[u8], lower: &[u8], runs: &[Range<usize>], parts_buf: &mut Vec<Range<usize>>, out: &mut dyn FnMut(&str)) {
+        // The current name: its runs and its letter parts (`None` for a part with digits, which splits the joins).
+        let mut name_runs: Vec<Range<usize>> = Vec::new();
+        let mut units: Vec<Option<Range<usize>>> = Vec::new();
+        let mut joined = String::new();
+        let mut flush = |name_runs: &mut Vec<Range<usize>>, units: &mut Vec<Option<Range<usize>>>| {
+            for group in units.split(Option::is_none) {
+                let group = &group[..group.len().min(MAX_JOIN_UNITS)];
+                for n in 2..=MAX_JOIN_PARTS {
+                    for w in group.windows(n) {
+                        joined.clear();
+                        for u in w.iter().flatten() {
+                            joined.push_str(str_of(lower, u.clone()));
+                        }
+                        if joined.len() <= MAX_RUN && !name_runs.iter().any(|r| &lower[r.clone()] == joined.as_bytes()) {
+                            out(&joined);
+                        }
+                    }
+                }
+            }
+            name_runs.clear();
+            units.clear();
+        };
+        let mut last_end = 0;
+        for (k, run) in runs.iter().enumerate() {
+            let connected = k > 0 && run.start == last_end + 1 && matches!(text[last_end], b'.' | b'_' | b'-' | b'/' | b'\\' | b':');
+            if !connected {
+                flush(&mut name_runs, &mut units);
+            }
+            last_end = run.end;
+            name_runs.push(run.clone());
+            parts_buf.clear();
+            parts(text, run.clone(), parts_buf);
+            for p in parts_buf.iter() {
+                units.push(text[p.clone()].iter().all(u8::is_ascii_alphabetic).then(|| p.clone()));
+            }
+        }
+        flush(&mut name_runs, &mut units);
+    }
+}
+
+/// [`words`] for any text (the reference the ASCII path must equal).
+fn words_general(text: &str, out: &mut dyn FnMut(String)) {
     for run in runs(text) {
         let parts = parts(run);
         if run.chars().count() <= MAX_RUN {
@@ -417,5 +555,41 @@ mod tests {
         assert_eq!(p, ["builder  failed"]);
         assert!(w.contains("Builder  Failed") && w.starts_with('x') && w.ends_with('y'), "{w}");
         assert_eq!(split_phrases("unbalanced \"quote"), ("unbalanced  quote".to_string(), vec![]));
+    }
+
+    fn general(text: &str) -> Vec<String> {
+        let mut v = Vec::new();
+        words_general(text, &mut |w| v.push(w));
+        v
+    }
+
+    #[test]
+    fn the_ascii_path_gives_the_general_words() {
+        for text in [
+            "",
+            "System.TimeoutException at CompanyA.Graphic.Builder.exe",
+            "HTTPServer v2beta 0x3F2A9C1E user4217 /var/lib/app-data/file_123.log",
+            "a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p",
+            "ID:ABC-def_GHI/jkl\\Mno::pqr",
+            &"x".repeat(70),
+            &format!("{}Tail.Name", "A".repeat(70)),
+        ] {
+            assert_eq!(all(text), general(text), "{text:?}");
+        }
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(2000))]
+        /// Log-like ASCII (names, separators, digits, case changes, long runs) gives exactly the general path's words.
+        #[test]
+        fn ascii_words_equal_the_general_words(text in "([A-Za-z0-9]{0,70}[ ._/:\\\\-]{0,2}){0,12}") {
+            proptest::prop_assert_eq!(all(&text), general(&text));
+        }
+
+        /// Any ASCII, printable or not.
+        #[test]
+        fn any_ascii_equals_the_general_words(text in "[\\x00-\\x7f]{0,200}") {
+            proptest::prop_assert_eq!(all(&text), general(&text));
+        }
     }
 }
