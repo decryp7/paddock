@@ -88,6 +88,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     .faint { color: var(--text-3); font-size: var(--fs-sm); }
     ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); align-self: stretch; }
     li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: 4px var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); }
+    pd-select { width: 11rem; flex: none; }
     .spacer { flex: 1; } .short { width: 84px; } .grab { cursor: grab; }
     .cdk-drag-preview { box-shadow: var(--shadow-3); border-radius: var(--r-md); background: var(--overlay-bg); display: flex; align-items: center; gap: var(--sp-2); padding: 4px var(--sp-2); }
     .cdk-drag-placeholder { opacity: 0.35; }
