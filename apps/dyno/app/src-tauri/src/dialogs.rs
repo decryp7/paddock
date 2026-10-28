@@ -16,7 +16,7 @@ paddock_dialogs::dialogs! {
     // The settings commands, and the engine for Dyno's page of the window (its settings, the tray items, the plugins).
     "pd.settings" => Tool {
         width: Some(Px(880)),
-        height: Some(640),
+        height: Some(700),
         commands: &[prefix(shell::settings::ALL, "settings_"), app::dyno],
     },
     // Adding or changing an alert rule: validated by the engine on save.

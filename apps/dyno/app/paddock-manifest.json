@@ -162,7 +162,7 @@
       "instanced": false,
       "requiredChoice": false,
       "width": 880,
-      "height": 640,
+      "height": 700,
       "commands": [
         "dyno",
         "settings_*"

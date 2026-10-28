@@ -8,7 +8,7 @@ export const DIALOG_CONTRACTS = {
     modality: 'modeless',
     width: 880,
     widthStep: null,
-    height: 640,
+    height: 700,
     instanced: false,
     requiredChoice: false,
     commands: ['dyno', 'settings_*'],
