@@ -1,8 +1,10 @@
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
 import type { AppContextFactory } from '@decryp7/paddock-ui/shell';
-import { BACKEND } from '../core/backend';
+import { ClockService } from '../core/clock.service';
+import { SettingsStore } from '../state/settings.store';
 import { WatchesStore } from '../state/watches.store';
+import { isPaused } from './paused-status';
 
 /** Spotter's part of the shell context: small and purpose-built (interface segregation). */
 export interface SpotterContext {
@@ -16,6 +18,8 @@ export interface SpotterContext {
   markAllSeen(): Promise<void>;
   /** Opens the wizard for a new watch. */
   addWatch(): Promise<void>;
+  /** Whether notifications are paused now (Resume and the status item depend on it). */
+  readonly notificationsPaused: () => boolean;
   /** Pauses notifications for `minutes`; `null` resumes. */
   pauseNotifications(minutes: number | null): Promise<void>;
 }
@@ -23,14 +27,16 @@ export interface SpotterContext {
 /** Built once, in the root injection context, when the shell first needs the context. */
 export const spotterContext: AppContextFactory<SpotterContext> = () => {
   const watches = inject(WatchesStore);
-  const backend = inject(BACKEND);
   const router = inject(Router);
+  const settings = inject(SettingsStore);
+  const clock = inject(ClockService);
   return {
+    notificationsPaused: () => isPaused(settings.settings().value?.notificationsPausedUntilMs, clock.now()),
     unseen: () => watches.unseen().length,
     hasWatches: () => watches.watches().length > 0,
     addWatch: async () => void (await router.navigateByUrl('/watches/new')),
     checkAll: async () => void (await watches.checkNow(null)),
     markAllSeen: () => watches.acknowledgeAll(),
-    pauseNotifications: async (minutes) => void (await backend.pauseNotifications(minutes)),
+    pauseNotifications: (minutes) => settings.pauseNotifications(minutes),
   };
 };

@@ -24,5 +24,7 @@ export function createBackend(): SpotterBackend {
     jobStepMs: engines.mockJobs ? Number(params.get('jobStepMs') ?? 350) : 350,
     jobs: engines.mockJobs,
   });
+  // Browser development and UI tests only: the tray lives in another window there, so tests ask this one to show a page.
+  (globalThis as { __spotterMock?: { navigate(route: string): void } }).__spotterMock = { navigate: (r) => (browser as MockBackend).navigate(r) };
   return browser;
 }

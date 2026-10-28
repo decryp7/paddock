@@ -21,6 +21,7 @@ use paddock_shell::{AppIdentity, Builder};
 use paddock_updater::tauri::UpdatesBuilder;
 use paddock_window::tauri::{FixedPrefs, WindowConfig, Windows};
 use paddock_window::{OnClose, OpenFilesIn};
+use std::sync::Arc;
 use tauri::{Manager, Runtime};
 
 /// The app's id (the shell's `AppIdentity`, its folders and its log target).
@@ -30,9 +31,9 @@ pub const APP_NAME: &str = "Spotter";
 /// The app's version: the workspace's (`tauri.conf.json` repeats it for the bundles).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Where the releases are (About's "Release notes", Updates' "Open the releases page").
-pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/spotter/releases";
+pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/paddock/releases?q=spotter-v";
 /// The feed the updater reads.
-pub const UPDATE_FEED: &str = "https://dev.decryptology.net/decryp7/spotter/releases/download/spotter-latest/latest.json";
+pub const UPDATE_FEED: &str = "https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json";
 /// The generated dialog contracts and manifest, written by the UI's specs from its registry.
 pub const DIALOG_CONTRACTS: &str = include_str!("../../dialog-contracts.json");
 /// The manifest of the UI's contributions, compared by the tests.
@@ -144,12 +145,19 @@ pub enum Place {
 /// The shell plugin with Spotter's parts.
 pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>) -> Builder<R> {
     let attach = hub.clone();
+    let Net {
+        downloader,
+        proxy,
+        problem,
+    } = net(&place);
+    hub.note_proxy_problem(problem);
     let mut builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))
-        .downloader(downloader())
+        .downloader(downloader)
         .app_commands(&COMMANDS)
         .dialog_contracts(DIALOG_CONTRACTS)
         .health(hub.services())
         .setup(move |app| {
+            app.manage(ProxyChoice(proxy.clone()));
             attach.attach(app);
             Ok(())
         });
@@ -166,15 +174,79 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>) -> Builder<R> {
     }
 }
 
-/// The app's one downloader (segmented Range downloads, 4 connections per host across all downloads, 429 back-off,
-/// resume, hash while writing, the free-space check): the updater's downloads and Spotter's own share it.
-fn downloader() -> paddock_download::Downloader {
-    let config = paddock_download::HttpConfig {
+/// How long the system's proxy settings may take to read (the OS lookups poll `scutil`, `reg` or `netsh`) before the
+/// downloader starts without them.
+const PROXY_DETECT_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn http_config(proxy: paddock_download::ProxyMode) -> paddock_download::HttpConfig {
+    paddock_download::HttpConfig {
         user_agent: format!("Spotter/{VERSION}"),
+        proxy,
         ..Default::default()
+    }
+}
+
+/// The app's network: its one downloader (segmented Range downloads, 4 connections per host across all downloads, 429
+/// back-off, resume, hash while writing, the free-space check; the updater's downloads and Spotter's own share it), the
+/// proxy decision it was built with (the metadata client takes the same one) and, when the system's proxy settings could
+/// not be used, why.
+pub struct Net {
+    /// The shared downloader.
+    pub downloader: paddock_download::Downloader,
+    /// Which proxy, if any, each request goes through.
+    pub proxy: Arc<paddock_download::ProxyRules>,
+    /// Why the system's proxy settings are not in use (`None`: they are, or there are none).
+    pub problem: Option<String>,
+}
+
+/// The state the shell's setup puts in the app: the proxy decision for the metadata client.
+pub struct ProxyChoice(pub Arc<paddock_download::ProxyRules>);
+
+/// Builds the [`Net`]. `detect` reads the proxy settings (the system's in the app; none in tests, rule 7). It runs on its
+/// own thread and may take at most `budget`; a setting Spotter cannot use (a `socks5://` address, say) or a lookup that
+/// hangs must not stop the app from starting, so the downloader then connects directly and `problem` says why (shown as a
+/// degraded connection in the status bar).
+pub fn net_with<D>(detect: D, budget: std::time::Duration) -> Net
+where
+    D: FnOnce() -> Result<paddock_download::ProxyRules, paddock_download::DownloadError> + Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(detect());
+    });
+    let why = match rx.recv_timeout(budget) {
+        Ok(Ok(rules)) => {
+            let rules = Arc::new(rules);
+            match paddock_download::Downloader::http(http_config(paddock_download::ProxyMode::Rules((*rules).clone()))) {
+                Ok(downloader) => {
+                    return Net {
+                        downloader,
+                        proxy: rules,
+                        problem: None,
+                    }
+                }
+                Err(e) => e.to_string(),
+            }
+        }
+        Ok(Err(e)) => e.to_string(),
+        Err(_) => "reading the system's proxy settings took too long".to_string(),
     };
-    // The config is fixed and has no proxy, which is the only thing the constructor can refuse.
-    paddock_download::Downloader::http(config).unwrap_or_else(|e| unreachable!("the fixed download config is valid: {e}"))
+    log::warn!("the system proxy settings cannot be used, downloads go direct: {why}");
+    // Direct has no proxy to refuse, which is the only thing the constructor can reject.
+    let downloader = paddock_download::Downloader::http(http_config(paddock_download::ProxyMode::Direct))
+        .unwrap_or_else(|e| unreachable!("the fixed direct download config is valid: {e}"));
+    Net {
+        downloader,
+        proxy: Arc::new(paddock_download::ProxyRules::none()),
+        problem: Some(why),
+    }
+}
+
+fn net(place: &Place) -> Net {
+    match place {
+        Place::Installed => net_with(paddock_download::ProxyRules::detect, PROXY_DETECT_BUDGET),
+        Place::Test { .. } => net_with(|| Ok(paddock_download::ProxyRules::none()), PROXY_DETECT_BUDGET),
+    }
 }
 
 /// Updates, About and What's New. Without the CI's updater key the build cannot update itself and says so ("Updates
@@ -184,7 +256,7 @@ fn updater(test_dir: Option<std::path::PathBuf>) -> UpdatesBuilder {
         .channel("stable", "Stable", UPDATE_FEED)
         .public_key(option_env!("TAURI_UPDATER_PUBKEY"))
         .releases_page(RELEASES_PAGE)
-        .homepage("https://dev.decryptology.net/decryp7/spotter")
+        .homepage("https://dev.decryptology.net/decryp7/paddock")
         .changelog(include_str!("../../../CHANGELOG.md"))
         .legal("licence-mit", "MIT licence", include_str!("../../../LICENSE-MIT"))
         .legal("licence-apache", "Apache licence 2.0", include_str!("../../../LICENSE-APACHE"))
@@ -236,7 +308,7 @@ pub fn run() {
         paddock_window::tauri::start(app, &launch)?;
         Ok(())
     });
-    let result = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // First: a second launch shows the running app's window instead of starting another engine.
         .plugin(tauri_plugin_single_instance::init(paddock_window::tauri::second_instance))
         .plugin(tauri_plugin_notification::init())
@@ -247,9 +319,11 @@ pub fn run() {
             Some(vec!["--hidden"]),
         ))
         .plugin(shell.build())
-        .invoke_handler(invoke_handler())
-        .on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated)
-        .run(tauri::generate_context!());
+        .invoke_handler(invoke_handler());
+    // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    let builder = builder.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated);
+    let result = builder.run(tauri::generate_context!());
     if let Err(e) = result {
         applog::write(&format!("Spotter could not start: {e}"));
         std::process::exit(1);

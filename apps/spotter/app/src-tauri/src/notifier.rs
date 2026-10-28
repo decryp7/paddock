@@ -256,8 +256,14 @@ mod tests {
 
     fn test_downloads() -> Downloads {
         let registry = Arc::new(paddock_jobs::JobRegistry::new(Arc::new(NoEvents)));
-        let downloader = Arc::new(paddock_download::Downloader::http(paddock_download::HttpConfig::default()).unwrap());
-        Downloads::new(registry, downloader, spotter_sources::http::Http::new("test").unwrap())
+        let downloader = Arc::new(
+            paddock_download::Downloader::http(paddock_download::HttpConfig {
+                proxy: paddock_download::ProxyMode::Direct,
+                ..Default::default()
+            })
+            .unwrap(),
+        );
+        Downloads::new(registry, downloader, spotter_sources::http::Http::direct("test").unwrap())
     }
 
     struct NoEvents;

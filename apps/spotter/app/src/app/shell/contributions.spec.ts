@@ -11,7 +11,9 @@ import { spotterContext } from './context';
 import { DIALOG_BASE_COMMANDS } from './dialog-base';
 import { APP_COMMANDS } from '../generated/app-commands';
 import { BACKEND } from '../core/backend';
+import { ClockService } from '../core/clock.service';
 import { MockBackend } from '../core/mock-backend';
+import { SettingsStore } from '../state/settings.store';
 import { WatchesStore } from '../state/watches.store';
 import { provideRouter } from '@angular/router';
 
@@ -43,7 +45,11 @@ function configure(contributions = [CONTRIBUTIONS]): void {
 }
 
 describe('Spotter contributions', () => {
-  beforeEach(() => configure());
+  beforeEach(() => {
+    configure();
+    // The mock backend's clock and the app's clock agree.
+    TestBed.inject(ClockService).set(new Date(2026, 9, 22, 12).getTime());
+  });
 
   it('pass assertContributionsValid', () => {
     expect(() => assertContributionsValid(TestBed.inject(Injector))).not.toThrow();
@@ -54,9 +60,19 @@ describe('Spotter contributions', () => {
     const watches = TestBed.inject(WatchesStore);
     await watches.load();
     await expect(commands.run('sp.check-all')).resolves.toBe(true);
+    await TestBed.inject(SettingsStore).loadSettings();
     await expect(commands.run('sp.pause-notifications')).resolves.toBe(true);
     await expect(commands.run('sp.resume-notifications')).resolves.toBe(true);
     expect(shellPorts().messages().length).toBeGreaterThan(0);
+  });
+
+  it('offer Resume notifications only while they are paused', async () => {
+    const commands = TestBed.inject(CommandService);
+    await TestBed.inject(SettingsStore).loadSettings();
+    await expect(commands.run('sp.resume-notifications')).resolves.toBe(false);
+    await commands.run('sp.pause-notifications');
+    await expect(commands.run('sp.resume-notifications')).resolves.toBe(true);
+    await expect(commands.run('sp.resume-notifications')).resolves.toBe(false);
   });
 
   it('do not offer Mark all as seen when nothing is unseen', async () => {

@@ -71,7 +71,14 @@ fn shell() -> (Arc<Downloader>, JobContext, Arc<Phases>, Arc<JobRegistry>) {
         disk_reserve: 0,
         ..Config::default()
     };
-    let downloader = Arc::new(Downloader::http(HttpConfig::default()).unwrap().with_config(config));
+    let downloader = Arc::new(
+        Downloader::http(HttpConfig {
+            proxy: paddock_download::ProxyMode::Direct,
+            ..Default::default()
+        })
+        .unwrap()
+        .with_config(config),
+    );
     let phases = Arc::new(Phases::default());
     let registry = Arc::new(JobRegistry::new(phases.clone()));
     let ctx = registry.register("sp.install-renderer", "Installing the browser", None);

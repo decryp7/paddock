@@ -150,3 +150,32 @@ test.describe('Check schedule', () => {
     await expect(page.getByText('Cron 0 9 * * 1-5')).toBeVisible();
   });
 });
+
+test.describe('Pages the tray asks for', () => {
+  test('a route sent by the tray or a toast is shown by the main window, an unknown one is not', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
+    await page.evaluate(() => (globalThis as unknown as { __spotterMock: { navigate(r: string): void } }).__spotterMock.navigate('/watches/w-3'));
+    await expect(page).toHaveURL(/#?\/?watches\/w-3$/);
+    await page.evaluate(() => (globalThis as unknown as { __spotterMock: { navigate(r: string): void } }).__spotterMock.navigate('/settings'));
+    await expect(page).toHaveURL(/watches\/w-3$/);
+  });
+});
+
+test.describe('Native feel', () => {
+  test('right-clicking selected code opens the shell’s Copy menu, and not the browser’s', async ({ page }) => {
+    await page.goto('/');
+    // Text is selectable where it is code or a text field (the app chrome is not); a command line is the usual case.
+    await page.evaluate(() => {
+      const pre = document.createElement('pre');
+      pre.id = 'sample-command';
+      pre.textContent = 'npm install lumen@3.6.5';
+      pre.style.cssText = 'position:fixed;top:120px;left:400px;z-index:9999;background:white;color:black;padding:8px';
+      document.body.append(pre);
+    });
+    const sample = page.locator('#sample-command');
+    await sample.click({ clickCount: 3 });
+    await sample.click({ button: 'right' });
+    await expect(page.getByRole('menuitem', { name: 'Copy' })).toBeVisible();
+  });
+});

@@ -179,12 +179,8 @@ pub async fn check_now<R: Runtime>(app: AppHandle<R>, state: State<'_, Shared>, 
             result?;
         }
         None => {
-            let op = begin_job(&app, Kind::CheckAll, "Checking every watch", None)?;
-            let engine = state.engine.clone();
-            tauri::async_runtime::spawn(async move {
-                let result = engine.check_now_job(None, &op.job).await;
-                op.end(result.is_ok(), &result.as_ref().err().map(ToString::to_string).unwrap_or_default());
-            });
+            let registry = jobs::registry(&app).ok_or_else(|| CommandError::internal("The shell's jobs are not set up."))?;
+            jobs::spawn_check_all(&registry, state.engine.clone());
         }
     }
     Ok(())

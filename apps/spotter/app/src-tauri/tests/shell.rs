@@ -173,6 +173,37 @@ fn the_update_feed_is_the_release_the_workflow_publishes_latest_json_on() {
         .expect("the workflow names the moving release");
     assert_eq!(
         spotter_app_lib::UPDATE_FEED,
-        format!("https://dev.decryptology.net/decryp7/spotter/releases/download/{tag}/latest.json")
+        format!("https://dev.decryptology.net/decryp7/paddock/releases/download/{tag}/latest.json")
     );
+}
+
+/// An unusable system proxy (a `socks5://` address) must not stop Spotter from starting: the downloader goes direct and
+/// says why. A lookup that hangs is bounded the same way.
+#[test]
+fn an_unusable_system_proxy_means_a_direct_downloader_and_a_reason() {
+    use paddock_download::ProxyRules;
+    let socks = |name: &str| (name == "ALL_PROXY").then(|| "socks5://proxy.example:1080".to_string());
+    let why = spotter_app_lib::net_with(move || ProxyRules::from_env_with(&socks), std::time::Duration::from_secs(5)).problem;
+    let why = why.expect("the proxy was refused, so the downloader says why");
+    assert!(why.to_lowercase().contains("socks"), "{why}");
+
+    let why = spotter_app_lib::net_with(
+        || {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            Ok(ProxyRules::none())
+        },
+        std::time::Duration::from_millis(50),
+    )
+    .problem;
+    assert!(why.is_some_and(|w| w.contains("too long")));
+
+    let why = spotter_app_lib::net_with(|| Ok(ProxyRules::none()), std::time::Duration::from_secs(5)).problem;
+    assert_eq!(why, None);
+}
+
+/// Services' degraded cause for the proxy names the supported forms.
+#[test]
+fn the_proxy_degradation_tells_the_user_what_to_fix() {
+    let cause = spotter_app_lib::health::proxy_cause("socks");
+    assert!(format!("{cause:?}").contains("http://host:port"));
 }

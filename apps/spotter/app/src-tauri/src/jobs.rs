@@ -45,6 +45,8 @@ pub struct Operation {
     ctx: JobContext,
     /// The handle the engine reports to and polls.
     pub job: Job,
+    /// Set once the operation was ended on purpose; a drop without it ends the job (see [`Drop`]).
+    ended: bool,
 }
 
 /// The stable slug of a phase (tests and translations).
@@ -92,7 +94,7 @@ pub fn begin(registry: &JobRegistry, kind: Kind, title: &str, subject: Option<&s
         }
         sink_ctx.set(p.done);
     });
-    Operation { ctx, job }
+    Operation { ctx, job, ended: false }
 }
 
 impl Operation {
@@ -114,7 +116,8 @@ impl Operation {
 
     /// As [`end`](Self::end), with the caller saying whether the user cancelled (a download learns it from the shell's
     /// token inside `paddock-download`).
-    pub fn end_as(self, ok: bool, cancelled: bool, message: &str) {
+    pub fn end_as(mut self, ok: bool, cancelled: bool, message: &str) {
+        self.ended = true;
         self.ctx.reporter().flush();
         let state = if ok {
             JobState::Done
@@ -129,6 +132,40 @@ impl Operation {
         };
         self.ctx.reporter().finish(state);
     }
+}
+
+/// An operation that is dropped without being ended (its task was aborted, or it panicked) must not stay "running" in the Jobs
+/// list for ever: it ends as cancelled when the user asked for that, else as failed.
+impl Drop for Operation {
+    fn drop(&mut self) {
+        if self.ended {
+            return;
+        }
+        let state = if self.job.is_cancelled() {
+            JobState::Cancelled {
+                reason: CancelReason::User,
+            }
+        } else {
+            JobState::Failed {
+                message: if std::thread::panicking() {
+                    "Spotter hit an internal error.".to_string()
+                } else {
+                    "The operation stopped before it finished.".to_string()
+                },
+            }
+        };
+        self.ctx.reporter().finish(state);
+    }
+}
+
+/// Checks every watch in the background as a shell job (progress "n of m" and Cancel in the Jobs list). The tray menu, the
+/// Sources repair and the check command share it.
+pub fn spawn_check_all(registry: &JobRegistry, engine: spotter_engine::Engine) {
+    let op = begin(registry, Kind::CheckAll, "Checking every watch", None);
+    tauri::async_runtime::spawn(async move {
+        let result = engine.check_now_job(None, &op.job).await;
+        op.end(result.is_ok(), &result.as_ref().err().map(ToString::to_string).unwrap_or_default());
+    });
 }
 
 /// Downloads as shell jobs: the job registry, the app's one downloader (its per-host caps hold across every download, the
@@ -207,6 +244,46 @@ mod tests {
             JobRegistry::with_clock(rec.clone(), Arc::new(paddock_jobs::FakeClock::new()), 0),
             rec,
         )
+    }
+
+    #[test]
+    fn a_dropped_operation_does_not_stay_running() {
+        let (registry, rec) = registry_with_recorder();
+        drop(begin(&registry, Kind::Check, "Checking a", None));
+        let last = rec.0.lock().unwrap().last().cloned().unwrap();
+        assert!(matches!(last.state, JobState::Failed { .. }), "{:?}", last.state);
+
+        let cancelled = begin(&registry, Kind::Check, "Checking b", None);
+        registry.cancel(cancelled.id());
+        drop(cancelled);
+        let last = rec.0.lock().unwrap().last().cloned().unwrap();
+        assert!(matches!(last.state, JobState::Cancelled { .. }), "{:?}", last.state);
+    }
+
+    #[test]
+    fn a_panicking_operation_ends_as_failed() {
+        let (registry, rec) = registry_with_recorder();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _op = begin(&registry, Kind::Check, "Checking c", None);
+            panic!("boom");
+        }));
+        assert!(result.is_err());
+        let last = rec.0.lock().unwrap().last().cloned().unwrap();
+        assert!(
+            matches!(&last.state, JobState::Failed { message } if message.contains("internal")),
+            "{:?}",
+            last.state
+        );
+    }
+
+    #[test]
+    fn an_ended_operation_is_not_ended_twice() {
+        let (registry, rec) = registry_with_recorder();
+        begin(&registry, Kind::Check, "Checking d", None).end(true, "");
+        let n = rec.0.lock().unwrap().len();
+        let last = rec.0.lock().unwrap().last().cloned().unwrap();
+        assert!(matches!(last.state, JobState::Done));
+        assert!(n >= 2);
     }
 
     #[test]

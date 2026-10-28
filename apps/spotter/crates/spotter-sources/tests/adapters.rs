@@ -66,7 +66,7 @@ async fn registry_token_failures_are_explained() {
         _ => reply(200, "", "ok"),
     })
     .await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     for p in ["/v2/a", "/v2/b", "/v2/c"] {
         let e = http.get(&HttpRequest::get(format!("{base}{p}")), None, 1024).await.unwrap_err();
         assert!(!e.message().is_empty(), "{p}: {e:?}");
@@ -92,7 +92,7 @@ async fn download_failures_leave_nothing_looking_finished() {
         }
     })
     .await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let dest = tempfile::tempdir().unwrap();
     let part = |n: &str| dest.path().join(format!("{n}.part"));
 
@@ -120,7 +120,7 @@ async fn download_failures_leave_nothing_looking_finished() {
 
 #[tokio::test]
 async fn copies_check_their_source_and_digests() {
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let src = tempfile::tempdir().unwrap();
     let dest = tempfile::tempdir().unwrap();
     let file = src.path().join("app-1.0.0.zip");
@@ -174,7 +174,7 @@ async fn copies_check_their_source_and_digests() {
 
 #[tokio::test]
 async fn checkers_are_built_for_every_plan() {
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let dir = tempfile::tempdir().unwrap();
     for n in ["app-1.0.0.zip", "app-1.1.0.zip", "readme.txt"] {
         std::fs::write(dir.path().join(n), b"x").unwrap();
@@ -261,7 +261,7 @@ async fn oversized_answers_are_refused_before_and_while_reading() {
         _ => reply(404, "", ""),
     })
     .await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let dest = tempfile::tempdir().unwrap();
     let e = download(&http, &release(&format!("{base}/huge")), dest.path(), false)
         .await
@@ -300,7 +300,7 @@ async fn transport_failures_say_what_to_expect() {
 
 #[tokio::test]
 async fn a_huge_local_checksum_file_means_unverified_and_a_huge_source_is_refused() {
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let src = tempfile::tempdir().unwrap();
     let dest = tempfile::tempdir().unwrap();
     let file = src.path().join("app-1.0.0.zip");
@@ -349,7 +349,7 @@ async fn registry_and_request_failures_are_messages() {
         _ => reply(404, "", ""),
     })
     .await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     for path in ["/v2/bad-token", "/v2/dead-realm", "/v2/huge-token"] {
         let e = http
             .get(&HttpRequest::get(format!("{base}{path}")), None, 1 << 20)
@@ -378,7 +378,7 @@ async fn downloads_survive_a_dead_server_a_cut_connection_and_unwritable_places(
         _ => reply(404, "", ""),
     })
     .await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let dest = tempfile::tempdir().unwrap();
     let get = |loc: String, verify: bool| {
         let (http, dest) = (http.clone(), dest.path().to_path_buf());
@@ -414,7 +414,7 @@ async fn downloads_survive_a_dead_server_a_cut_connection_and_unwritable_places(
 async fn parts_that_cannot_be_read_or_written_are_reported() {
     use std::os::unix::fs::PermissionsExt;
     let base = serve(|_, _, _| reply(200, "", "payload")).await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let dest = tempfile::tempdir().unwrap();
 
     // A folder where the partial file belongs: the download refuses and delivers nothing.
@@ -472,7 +472,7 @@ async fn parts_that_cannot_be_read_or_written_are_reported() {
 async fn an_answer_cut_off_mid_body_is_a_transport_message() {
     // Announces 100 bytes, sends 5 and closes.
     let base = serve(|_, _, _| "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nhello".to_string()).await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let e = http.get(&HttpRequest::get(format!("{base}/cut")), None, 1024).await.unwrap_err();
     assert!(
         matches!(
