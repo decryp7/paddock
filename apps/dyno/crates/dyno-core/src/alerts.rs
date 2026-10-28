@@ -124,7 +124,7 @@ impl Alerts {
                     AlertKind::LowDisk,
                     sev,
                     format!("{} is almost full", d.name),
-                    format!("{} free ({free:.0}%). Cleanup can free space safely.", bytes(d.free)),
+                    format!("{} free ({free:.0}%).", bytes(d.free)),
                 );
             }
         }
@@ -192,7 +192,7 @@ impl Alerts {
                     "{} has used over {HIGH_CPU:.0}% CPU for {} minutes",
                     g.name, st.long_high_cpu_minutes
                 ),
-                "A rule can tame it automatically next time (CPU taming).".into(),
+                "Check the task manager to see what it is doing.".into(),
             );
         }
         self.since.retain(|k, _| live.contains(k));

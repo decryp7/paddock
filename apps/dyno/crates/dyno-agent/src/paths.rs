@@ -49,16 +49,6 @@ impl Dirs {
         self.root.join("settings.json")
     }
 
-    /// The user's rules and protected list.
-    pub fn rules(&self) -> PathBuf {
-        self.root.join("rules.json")
-    }
-
-    /// What process control applied (so a crashed run can be undone).
-    pub fn process_control(&self) -> PathBuf {
-        self.root.join("process-control.json")
-    }
-
     /// The benchmark run history.
     pub fn benchmarks(&self) -> PathBuf {
         self.root.join("benchmarks.json")
@@ -90,7 +80,7 @@ mod tests {
         assert_eq!(d.database(), Path::new("/x/dyno/dyno.db"));
         assert_eq!(d.discovery(), Path::new("/x/dyno/agent.json"));
         assert_eq!(d.root(), Path::new("/x/dyno"));
-        for p in [d.settings(), d.rules(), d.process_control(), d.logs(), d.plugins()] {
+        for p in [d.settings(), d.logs(), d.plugins()] {
             assert!(p.starts_with("/x/dyno"));
         }
     }

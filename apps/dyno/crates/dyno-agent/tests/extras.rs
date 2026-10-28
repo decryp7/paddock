@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! The extras (WP-13), backup health (WP-14) and taming proof (WP-36) end to end over the fake platform: scripted tools
+//! The extras (WP-13), backup health (WP-14) end to end over the fake platform: scripted tools
 //! (no real `tmutil`, `pmset` or `restic` is run), a real IPC connection and a SQLite file in a temp folder.
 
 use dyno_agent::cli::{ask, ask_within, connect};
@@ -11,7 +11,6 @@ use dyno_core::extras::changes::{ChangeKind, ChangesQuery};
 use dyno_core::extras::files::{FinderMode, FinderQuery};
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{Message, Reply, Request};
-use dyno_core::rules::{Command, RuleSet};
 use dyno_core::time::{Timestamp, HOUR};
 use dyno_ipc::Peer;
 use dyno_platform::fake::{process, Fake};
@@ -366,66 +365,6 @@ fn maintenance_windows_are_validated_and_reported() {
         dirs: vec!["relative".into()],
     }];
     assert!(ask(&peer, Request::SaveSettings { settings }).unwrap_err().contains("restic"));
-}
-
-#[test]
-fn a_temporary_rule_switches_itself_off_and_says_so() {
-    let h = Harness::start();
-    let peer = h.client();
-    let Reply::Rules(mut set) = ask(&peer, Request::Rules).unwrap() else {
-        panic!("rules")
-    };
-    let r = &mut set.rules[0];
-    r.enabled = true;
-    r.expires_at = Some(real_now().minus(1000));
-    let id = r.id.clone();
-    let set: RuleSet = *set;
-    ask(&peer, Request::SaveRules { rules: set }).unwrap();
-    let mut gone = false;
-    for _ in 0..100 {
-        let Reply::Rules(now_set) = ask(&peer, Request::Rules).unwrap() else {
-            panic!("rules")
-        };
-        let rule = now_set.rules.iter().find(|r| r.id == id).unwrap();
-        if !rule.enabled && rule.expires_at.is_none() {
-            gone = true;
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    assert!(gone, "the expired rule is switched off");
-    let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
-        panic!("activity")
-    };
-    assert!(
-        log.iter().any(|e| e.title.contains("temporary rule") && e.title.contains("ended")),
-        "{log:?}"
-    );
-}
-
-#[test]
-fn a_measured_effect_is_written_to_the_activity_log() {
-    let h = Harness::start();
-    let s = h.shared();
-    dyno_agent::sampler::apply_commands(
-        &s,
-        vec![Command::Measured {
-            rule_id: "r".into(),
-            rule_name: "Calm builds".into(),
-            app: "Chrome".into(),
-            before: 78.0,
-            after: 31.0,
-            after_secs: 21,
-            description: "lowered its priority".into(),
-        }],
-        real_now(),
-    );
-    let Reply::Activities(log) = ask(&h.client(), Request::Activity { limit: 20 }).unwrap() else {
-        panic!("activity")
-    };
-    let e = log.iter().find(|e| e.title.starts_with("Measured")).unwrap();
-    assert_eq!(e.title, "Measured: Chrome used 78% CPU before and 31% after 21 s");
-    assert!(e.detail.contains("It helped"));
 }
 
 #[test]

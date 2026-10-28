@@ -5,7 +5,7 @@
 use super::paths::{read_text, HostPaths};
 use super::sys::effective_uid;
 use crate::parse::linux_proc::{dev_major_minor, locks};
-use crate::unix_control::started_of;
+use crate::unix_proc::started_of;
 use dyno_core::ports::{FileLocks, PlatformError};
 use dyno_core::process::{Locker, ProcessRef};
 use std::collections::BTreeMap;

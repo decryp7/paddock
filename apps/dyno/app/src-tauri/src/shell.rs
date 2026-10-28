@@ -53,7 +53,6 @@ pub struct Shell {
     updates: AtomicU64,
     /// `launchAtLogin` as last applied (None until the agent has told us).
     launch_at_login: Mutex<Option<bool>>,
-    paused: Mutex<bool>,
     /// The last agent status, replayed to windows that opened after it was pushed.
     status: Mutex<Option<AgentStatus>>,
     /// `notifications` as last read from the settings (desktop notifications for new alarms).
@@ -70,7 +69,6 @@ impl Shell {
             throttle: Mutex::new(Throttle::new(TRAY_INTERVAL)),
             updates: AtomicU64::new(0),
             launch_at_login: Mutex::new(None),
-            paused: Mutex::new(false),
             status: Mutex::new(None),
             notifications: std::sync::atomic::AtomicBool::new(true),
         })
@@ -89,11 +87,6 @@ impl Shell {
     /// How many live updates arrived (for the log and tests).
     pub fn updates(&self) -> u64 {
         self.updates.load(Ordering::SeqCst)
-    }
-
-    /// Whether the rules are paused, as of the last update.
-    pub fn rules_paused(&self) -> bool {
-        *self.paused.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// The agent's settings are known (at connect, and after every save): the tray follows them, and a changed
@@ -154,7 +147,6 @@ impl Sink for Shell {
                 update.processes.as_ref().map_or(0, Vec::len)
             ));
         }
-        *self.paused.lock().unwrap_or_else(|e| e.into_inner()) = update.rules_paused;
         if self.throttle.lock().unwrap_or_else(|e| e.into_inner()).allow(Instant::now()) {
             let frames = self
                 .tray
@@ -162,7 +154,7 @@ impl Sink for Shell {
                 .unwrap_or_else(|e| e.into_inner())
                 .frames(&update, crate::tray::dark_taskbar());
             for (id, frame) in frames {
-                crate::tray::paint(&self.app, &id, &frame, update.rules_paused);
+                crate::tray::paint(&self.app, &id, &frame);
             }
         }
         // With no window open nothing listens: skip serialising a (large) update for nobody.

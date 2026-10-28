@@ -401,20 +401,10 @@ mod tests {
             parse_request(json!({"rescanIssues": {"query": {"days": 7}}})).unwrap(),
             Request::RescanIssues { .. }
         ));
-        assert_eq!(
-            parse_request(json!({"unusual": {"includeIgnored": true}})).unwrap(),
-            Request::Unusual { include_ignored: true }
-        );
-        assert!(matches!(
-            parse_request(json!({"unusualAct": {"key": "/a/b", "action": "protect"}})).unwrap(),
-            Request::UnusualAct {
-                action: dyno_core::unusual::baseline::UnusualAction::Protect,
-                ..
-            }
-        ));
+        assert_eq!(parse_request(json!("unusual")).unwrap(), Request::Unusual);
         assert_eq!(parse_request(json!("forgetBaseline")).unwrap(), Request::ForgetBaseline);
-        // A forged action is refused at the edge.
-        assert!(parse_request(json!({"unusualAct": {"key": "k", "action": "delete"}})).is_err());
+        // The ignore and protect actions are gone.
+        assert!(parse_request(json!({"unusualAct": {"key": "k", "action": "protect"}})).is_err());
     }
 
     #[test]

@@ -359,7 +359,6 @@ mod tests {
     use dyno_core::grouping::AppGroup;
     use dyno_core::metrics::{NetworkSample, Reading};
     use dyno_core::protocol::{LiveUpdate, Overhead};
-    use dyno_core::rules::ProfileId;
     use dyno_core::time::Timestamp;
     use dyno_core::widgets::TrayItem;
     use dyno_platform::fake::quiet_sample;
@@ -378,9 +377,6 @@ mod tests {
             top_cpu: vec![],
             top_memory: vec![],
             overhead: Overhead::default(),
-            profile: ProfileId::Normal,
-            rules_paused: false,
-            active_actions: vec![],
             processes: None,
             groups: None,
         }

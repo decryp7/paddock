@@ -14,10 +14,8 @@
 use crate::Platform;
 use dyno_core::facts::SystemFacts;
 use dyno_core::metrics::{CpuSample, DiskIo, MemoryPressure, MemorySample, Reading, SystemSample};
-use dyno_core::ports::{
-    FactsSource, FileLocks, NetworkLinks, PlatformError, ProcessControl, ProcessSource, StartupItems, SystemSensors, UserActivity,
-};
-use dyno_core::process::{ListOrReason, Locker, Pid, ProcessAction, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo};
+use dyno_core::ports::{FactsSource, FileLocks, NetworkLinks, PlatformError, ProcessSource, StartupItems, SystemSensors, UserActivity};
+use dyno_core::process::{ListOrReason, Locker, Pid, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo};
 use dyno_core::startup::StartupEntry;
 use dyno_core::time::Timestamp;
 use std::collections::{HashMap, VecDeque};
@@ -29,8 +27,6 @@ use std::sync::{Arc, Mutex, MutexGuard};
 pub enum FakeOp {
     /// [`ProcessSource::details`].
     Details,
-    /// [`ProcessControl::apply`].
-    Apply,
     /// [`FileLocks::lockers`].
     Lockers,
     /// [`StartupItems::list`].
@@ -48,10 +44,6 @@ pub struct FakeState {
     pub processes: Vec<ProcessSample>,
     /// Details by process; missing ones are built from the table.
     pub details: HashMap<ProcessRef, ProcessDetails>,
-    /// Every action applied successfully, in order.
-    pub actions: Vec<(ProcessRef, ProcessAction)>,
-    /// How often `release_all` was called.
-    pub release_all_calls: u32,
     /// Lockers by path.
     pub lockers: HashMap<PathBuf, Vec<Locker>>,
     /// Startup entries (`set_state` changes them).
@@ -140,17 +132,11 @@ impl Fake {
         self.lock().failures.clear();
     }
 
-    /// The actions applied so far.
-    pub fn actions(&self) -> Vec<(ProcessRef, ProcessAction)> {
-        self.lock().actions.clone()
-    }
-
     /// A [`Platform`] whose ports are these fakes.
     pub fn platform(&self) -> Platform {
         Platform {
             sensors: Box::new(self.clone()),
             processes: Box::new(self.clone()),
-            control: Box::new(self.clone()),
             locks: Box::new(self.clone()),
             startup: Box::new(self.clone()),
             facts: Box::new(self.clone()),
@@ -200,28 +186,6 @@ impl ProcessSource for Fake {
             return Ok(d.clone());
         }
         Ok(details_of(st.processes[idx].clone()))
-    }
-}
-
-impl ProcessControl for Fake {
-    fn apply(&mut self, target: ProcessRef, action: &ProcessAction) -> Result<(), PlatformError> {
-        let mut st = self.lock();
-        st.failure(FakeOp::Apply)?;
-        let idx = st.live(target)?;
-        match action {
-            ProcessAction::End => {
-                st.processes.remove(idx);
-            }
-            ProcessAction::Suspend => st.processes[idx].state = RunState::Suspended,
-            ProcessAction::Resume => st.processes[idx].state = RunState::Running,
-            _ => {}
-        }
-        st.actions.push((target, action.clone()));
-        Ok(())
-    }
-
-    fn release_all(&mut self) {
-        self.lock().release_all_calls += 1;
     }
 }
 
@@ -334,7 +298,6 @@ pub fn details_of(process: ProcessSample) -> ProcessDetails {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dyno_core::process::Priority;
     use dyno_core::startup::{ImpactRating, StartupImpact, StartupLocation};
 
     fn entry(id: &str, location: StartupLocation) -> StartupEntry {
@@ -368,49 +331,15 @@ mod tests {
     }
 
     #[test]
-    fn control_records_and_checks_identity() {
-        let fake = Fake::new();
-        fake.add_process(process(1, "a.exe", 50.0));
-        fake.add_process(process(2, "b.exe", 1.0));
-        let mut p = fake.platform();
-        let a = p.processes.processes()[0].reference();
-        p.control.apply(a, &ProcessAction::Suspend).unwrap();
-        assert_eq!(fake.with(|s| s.processes[0].state), RunState::Suspended);
-        p.control.apply(a, &ProcessAction::Resume).unwrap();
-        p.control.apply(a, &ProcessAction::SetPriority(Priority::Idle)).unwrap();
-        assert_eq!(fake.actions().len(), 3);
-        let reused = ProcessRef {
-            pid: 1,
-            started: Timestamp(99),
-        };
-        assert!(matches!(
-            p.control.apply(reused, &ProcessAction::End),
-            Err(PlatformError::NotFound(_))
-        ));
-        p.control.apply(a, &ProcessAction::End).unwrap();
-        assert_eq!(p.processes.processes().len(), 1);
-        assert!(matches!(p.processes.details(a), Err(PlatformError::NotFound(_))));
-        p.control.release_all();
-        assert_eq!(fake.with(|s| s.release_all_calls), 1);
-        let b = p.processes.processes()[0].reference();
-        assert_eq!(p.processes.details(b).unwrap().process.name, "b.exe");
-        let mut custom = details_of(process(2, "b.exe", 1.0));
-        custom.threads = Some(9);
-        fake.with(|s| s.details.insert(b, custom));
-        assert_eq!(p.processes.details(b).unwrap().threads, Some(9));
-    }
-
-    #[test]
     fn failures_are_injectable() {
         let fake = Fake::new();
         fake.add_process(process(1, "a.exe", 50.0));
         let mut p = fake.platform();
         let a = p.processes.processes()[0].reference();
-        fake.fail_times(FakeOp::Apply, PlatformError::AccessDenied("denied".into()), 2);
-        fake.fail_times(FakeOp::Details, PlatformError::Timeout("slow".into()), 0);
-        assert!(p.control.apply(a, &ProcessAction::Suspend).is_err());
-        assert!(p.control.apply(a, &ProcessAction::Suspend).is_err());
-        assert!(p.control.apply(a, &ProcessAction::Suspend).is_ok());
+        fake.fail_times(FakeOp::Details, PlatformError::AccessDenied("denied".into()), 2);
+        assert!(p.processes.details(a).is_err());
+        assert!(p.processes.details(a).is_err());
+        assert!(p.processes.details(a).is_ok());
         fake.fail(FakeOp::Lockers, PlatformError::Failed("x".into()));
         assert!(p.locks.lockers(Path::new("a")).is_err());
         assert!(p.locks.lockers(Path::new("a")).is_err());

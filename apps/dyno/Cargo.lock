@@ -1159,7 +1159,6 @@ dependencies = [
  "dyno-ipc",
  "postcard",
  "serde",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1167,7 +1166,6 @@ name = "dyno-plugin-example"
 version = "0.1.0"
 dependencies = [
  "dyno-plugin-api",
- "tempfile",
 ]
 
 [[package]]
@@ -1178,7 +1176,6 @@ dependencies = [
  "dyno-plugin-api",
  "serde",
  "tempfile",
- "thiserror 2.0.21",
  "toml 1.1.8+spec-1.1.0",
 ]
 

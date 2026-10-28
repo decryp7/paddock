@@ -1,4 +1,4 @@
-//! The agent's shared state: the ports to the OS, the store, the user's settings and rules, the latest measurement
+//! The agent's shared state: the ports to the OS, the store, the user's settings, the latest measurement
 //! and the subscribers. [`Sampler`](crate::sampler) feeds it; [`handlers`](crate::handlers) answer the app's requests
 //! from it. Locks are short and never held across a call into the OS, except process control (which must be serial).
 
@@ -8,19 +8,18 @@ use crate::helper_link::{ElevatedTraffic, HelperLink, IpcHelperLink};
 use crate::paths::Dirs;
 use crate::rollup::HistoryWriter;
 use crate::store::Store;
-use dyno_core::activity::{ActivityEntry, ActivityKind, UndoRecord, UndoState};
+use dyno_core::activity::{ActivityEntry, ActivityKind};
 use dyno_core::alerts::Alerts;
 use dyno_core::facts::SystemFacts;
 use dyno_core::grouping::AppGroup;
 use dyno_core::metrics::SystemSample;
-use dyno_core::ports::{FactsSource, FileLocks, PlatformError, ProcessControl, ProcessSource, StartupItems, UserActivity};
-use dyno_core::process::{Priority, ProcessRef, ProcessSample};
+use dyno_core::ports::{FactsSource, FileLocks, PlatformError, ProcessSource, StartupItems, UserActivity};
+use dyno_core::process::ProcessSample;
 use dyno_core::protocol::{LiveDetail, LiveUpdate, Message};
-use dyno_core::rules::{Engine, RuleSet};
 use dyno_core::settings::Settings;
 use dyno_core::time::Timestamp;
 use dyno_platform::Platform;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::SyncSender;
@@ -84,10 +83,6 @@ pub struct Core {
     pub store: Store,
     /// The user's settings.
     pub settings: Settings,
-    /// The user's rules.
-    pub rules: RuleSet,
-    /// The rules engine's state.
-    pub engine: Engine,
     /// Alert evaluation state.
     pub alerts: Alerts,
     /// Custom alert rule evaluation state.
@@ -98,8 +93,6 @@ pub struct Core {
     pub recent: VecDeque<SystemSample>,
     /// History writer state.
     pub writer: HistoryWriter,
-    /// Priorities rules replaced, so the undo restores them.
-    pub previous_priority: HashMap<ProcessRef, Priority>,
     /// Facts and when they were read.
     pub facts: Option<(std::time::Instant, SystemFacts)>,
     /// Activity ids made this run.
@@ -122,46 +115,24 @@ impl Core {
         format!("{}-{}", at.millis(), self.counter)
     }
 
-    /// Saves settings and rules to disk (best effort: a read-only data folder must not stop the agent).
+    /// Saves settings to disk (best effort: a read-only data folder must not stop the agent).
     pub fn save_settings(&self, dirs: &Dirs) {
         if let Err(e) = files::save(&dirs.settings(), &self.settings) {
             eprintln!("dyno-agent: could not save settings: {e}");
         }
     }
 
-    /// Saves the rules.
-    pub fn save_rules(&self, dirs: &Dirs) {
-        if let Err(e) = files::save(&dirs.rules(), &self.rules) {
-            eprintln!("dyno-agent: could not save rules: {e}");
-        }
-    }
-
-    /// Records an entry in the activity log and returns it with its undo state filled in.
-    pub fn log(
-        &mut self,
-        at: Timestamp,
-        kind: ActivityKind,
-        title: String,
-        detail: String,
-        undo: UndoRecord,
-        bytes: Option<u64>,
-    ) -> ActivityEntry {
+    /// Records an entry in the activity log and returns it.
+    pub fn log(&mut self, at: Timestamp, kind: ActivityKind, title: String, detail: String) -> ActivityEntry {
         let id = self.next_id(at);
-        let state = match &undo {
-            UndoRecord::None => UndoState::NotUndoable,
-            UndoRecord::Process { actions, .. } if actions.is_empty() => UndoState::NotUndoable,
-            _ => UndoState::Available,
-        };
         let entry = ActivityEntry {
             id,
             at,
             kind,
             title,
             detail,
-            undo: state,
-            bytes,
         };
-        if let Err(e) = self.store.put_activity(&entry, &undo) {
+        if let Err(e) = self.store.put_activity(&entry) {
             eprintln!("dyno-agent: could not record activity: {e}");
         }
         entry
@@ -170,8 +141,6 @@ impl Core {
 
 /// The ports that talk to the OS, each behind its own lock.
 pub struct Ports {
-    /// Acting on processes.
-    pub control: Mutex<Box<dyn ProcessControl>>,
     /// File locks.
     pub locks: Mutex<Box<dyn FileLocks>>,
     /// Process details (slow calls).
@@ -236,7 +205,7 @@ pub struct Shared {
 }
 
 impl Shared {
-    /// Builds the state: opens the store (moving a damaged one aside), loads settings and rules (falling back to
+    /// Builds the state: opens the store (moving a damaged one aside), loads settings (falling back to
     /// defaults with a note in the activity log). Returns the sampler's two ports separately. `details` is a second
     /// process source used only for on-demand details, so a slow `lsof` never delays a sampling tick.
     pub fn build(dirs: Dirs, platform: Platform, details: Box<dyn ProcessSource>, reveal: Reveal) -> Result<Built, String> {
@@ -261,30 +230,15 @@ impl Shared {
         let (settings, warn) = files::load(&dirs.settings(), dyno_core::settings::parse);
         notes.extend(warn);
         let settings = settings.unwrap_or_default().normalised();
-        let (rules, warn) = files::load(&dirs.rules(), |text| {
-            let (set, w) = files::json_or_default::<RuleSet>(text);
-            match set.validate() {
-                Ok(valid) => (valid, w),
-                Err(e) => (
-                    RuleSet::default(),
-                    Some(format!("The saved rules were not valid ({e}); Dyno uses its defaults.")),
-                ),
-            }
-        });
-        notes.extend(warn);
-        let rules = rules.unwrap_or_default();
         let alarms = crate::alarms::AlarmCentre::load(&store, settings.alarms);
         let mut core = Core {
             store,
             settings,
-            rules,
-            engine: Engine::new(),
             alerts: Alerts::new(),
             custom: dyno_core::alarms::custom::CustomEvaluator::new(),
             latest: Latest::default(),
             recent: VecDeque::new(),
             writer: HistoryWriter::default(),
-            previous_priority: HashMap::new(),
             facts: None,
             counter: 0,
             inventory: None,
@@ -293,14 +247,7 @@ impl Shared {
             crash_loops: Vec::new(),
         };
         for n in notes {
-            core.log(
-                t,
-                ActivityKind::System,
-                "Dyno started with a clean slate".into(),
-                n,
-                UndoRecord::None,
-                None,
-            );
+            core.log(t, ActivityKind::System, "Dyno started with a clean slate".into(), n);
         }
         let (bench, bench_note) = crate::bench::BenchCentre::load(
             dirs.benchmarks(),
@@ -308,7 +255,7 @@ impl Shared {
             Box::new(crate::bench::ProcessLauncher::beside_agent()),
         );
         if let Some(n) = bench_note {
-            core.log(t, ActivityKind::System, "Benchmark history reset".into(), n, UndoRecord::None, None);
+            core.log(t, ActivityKind::System, "Benchmark history reset".into(), n);
         }
         let unusual = crate::unusual::UnusualCentre::load(&core.store);
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
@@ -336,7 +283,6 @@ impl Shared {
         let Platform {
             sensors,
             processes,
-            control,
             locks,
             startup,
             facts,
@@ -349,7 +295,6 @@ impl Shared {
             dirs,
             core: Mutex::new(core),
             ports: Ports {
-                control: Mutex::new(control),
                 locks: Mutex::new(locks),
                 details: Mutex::new(details),
                 facts: Mutex::new(facts),

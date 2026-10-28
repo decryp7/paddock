@@ -5,9 +5,7 @@
 use dyno_agent::cli::{ask, ask_within, connect};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
-use dyno_core::activity::UndoState;
 use dyno_core::history::HistoryRange;
-use dyno_core::process::{Priority, ProcessAction};
 use dyno_core::protocol::{ErrorCode, LiveDetail, LiveUpdate, Message, Reply, Request};
 use dyno_core::time::Timestamp;
 use dyno_ipc::{Client, Peer, PeerOptions};
@@ -69,10 +67,6 @@ impl Drop for Harness {
     }
 }
 
-fn target(pid: u32) -> dyno_core::process::ProcessRef {
-    process(pid, "x", 0.0).reference()
-}
-
 #[test]
 fn a_subscriber_gets_live_updates_with_processes_only_when_it_asks() {
     let h = Harness::start();
@@ -103,71 +97,6 @@ fn settings_round_trip_and_survive_a_restart() {
     assert!(back.launch_at_login && back.sampling.interval_ms == 700);
     let saved = std::fs::read_to_string(h.dirs.settings()).unwrap();
     assert!(saved.contains("\"launchAtLogin\": true"));
-}
-
-#[test]
-fn a_click_acts_logs_and_undoes_and_protected_processes_are_refused() {
-    let h = Harness::start();
-    let (peer, rx) = h.subscriber(LiveDetail::Processes);
-    rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    let Reply::Activity(entry) = ask(
-        &peer,
-        Request::Act {
-            target: target(100),
-            action: ProcessAction::SetPriority(Priority::Idle),
-        },
-    )
-    .unwrap() else {
-        panic!("activity")
-    };
-    assert!(entry.title.contains("busy"));
-    assert_eq!(h.fake.actions().len(), 1);
-    let Reply::Activities(list) = ask(&peer, Request::Activity { limit: 10 }).unwrap() else {
-        panic!("list")
-    };
-    assert_eq!(list[0].id, entry.id);
-    assert_eq!(list[0].undo, UndoState::Available);
-    let Reply::Activity(undone) = ask(
-        &peer,
-        Request::Undo {
-            activity_id: entry.id.clone(),
-        },
-    )
-    .unwrap() else {
-        panic!("undo")
-    };
-    assert_eq!(undone.undo, UndoState::Undone);
-    assert_eq!(h.fake.actions().len(), 2);
-    assert!(ask(&peer, Request::Undo { activity_id: entry.id }).unwrap_err().contains("already"));
-    // launchd is on the protected list.
-    let err = ask(
-        &peer,
-        Request::Act {
-            target: target(102),
-            action: ProcessAction::End,
-        },
-    )
-    .unwrap_err();
-    assert!(err.contains("protected"), "{err}");
-    assert_eq!(h.fake.actions().len(), 2, "nothing was done to the protected process");
-    // A pid that is not in the table is not found, and an invalid action is a bad request.
-    assert!(ask(
-        &peer,
-        Request::Act {
-            target: target(999),
-            action: ProcessAction::End
-        }
-    )
-    .is_err());
-    assert!(ask(
-        &peer,
-        Request::Act {
-            target: target(100),
-            action: ProcessAction::SetCpuCap(Some(0))
-        }
-    )
-    .unwrap_err()
-    .contains("CPU cap"));
 }
 
 #[test]

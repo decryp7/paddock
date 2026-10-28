@@ -12,9 +12,8 @@ use crate::grouping::AppGroup;
 use crate::health::HealthReport;
 use crate::history::{Consumer, HistoryPoint, HistoryRange};
 use crate::metrics::{MemoryPressure, SystemSample};
-use crate::process::{Locker, ProcessAction, ProcessDetails, ProcessRef, ProcessSample};
+use crate::process::{Locker, ProcessDetails, ProcessRef, ProcessSample};
 use crate::report::WeeklyReport;
-use crate::rules::{ActiveAction, ProfileId, RuleSet};
 use crate::settings::Settings;
 use crate::snapshot::{SnapshotDiff, SnapshotInfo};
 use crate::startup::StartupEntry;
@@ -48,20 +47,6 @@ pub enum Request {
     ProcessDetails {
         /// The process.
         target: ProcessRef,
-    },
-    /// Act on a process.
-    Act {
-        /// The process.
-        target: ProcessRef,
-        /// What to do.
-        action: ProcessAction,
-    },
-    /// Act on every process of an app.
-    ActOnGroup {
-        /// The group id.
-        group_id: String,
-        /// What to do.
-        action: ProcessAction,
     },
     /// Who holds a file open.
     Lockers {
@@ -102,33 +87,6 @@ pub enum Request {
     Activity {
         /// At most this many.
         limit: u32,
-    },
-    /// Undo an activity entry.
-    Undo {
-        /// The entry.
-        activity_id: String,
-    },
-    /// Release what rules are doing to a process now.
-    ReleaseAction {
-        /// The process.
-        target: ProcessRef,
-    },
-    /// The rule set.
-    Rules,
-    /// Save the rule set.
-    SaveRules {
-        /// The new set.
-        rules: RuleSet,
-    },
-    /// Switch profile.
-    SetProfile {
-        /// The profile.
-        profile: ProfileId,
-    },
-    /// Pause or resume all rules.
-    PauseRules {
-        /// Paused.
-        paused: bool,
     },
     /// The size tree of a folder (the system disk when absent).
     DiskUsage {
@@ -350,17 +308,7 @@ pub enum Request {
         days: u32,
     },
     /// New and unusual programs. A query. Appended.
-    Unusual {
-        /// Also list the programs the user ignored or protected.
-        include_ignored: bool,
-    },
-    /// Ignores, protects or restores a program on the list; answers the list. Appended.
-    UnusualAct {
-        /// The program's key from the list.
-        key: String,
-        /// What to do.
-        action: crate::unusual::baseline::UnusualAction,
-    },
+    Unusual,
     /// Forgets the baseline of programs; learning starts again. Appended.
     ForgetBaseline,
 
@@ -459,12 +407,6 @@ pub struct LiveUpdate {
     pub top_memory: Vec<AppGroup>,
     /// Dyno's cost.
     pub overhead: Overhead,
-    /// Active profile.
-    pub profile: ProfileId,
-    /// Rules paused.
-    pub rules_paused: bool,
-    /// What rules are doing now.
-    pub active_actions: Vec<ActiveAction>,
     /// Every process, when a subscriber asked for them.
     pub processes: Option<Vec<ProcessSample>>,
     /// Every group, likewise.
@@ -487,12 +429,6 @@ pub struct TimelineEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TimelineEventKind {
-    /// A rule lowered priority or turned on efficiency mode.
-    Throttle,
-    /// A rule capped CPU.
-    Cap,
-    /// A rule released an app.
-    Release,
     /// An alert.
     Alert,
     /// The machine started.
@@ -582,7 +518,7 @@ pub struct PluginInfo {
     pub state: PluginState,
     /// The last error.
     pub error: Option<String>,
-    /// What it contributes ("sensors", "cleanup", "actions").
+    /// What it contributes ("sensors").
     pub contributes: Vec<String>,
 }
 
@@ -612,8 +548,6 @@ pub enum Reply {
     Anomalies(Vec<Anomaly>),
     /// History.
     History(Box<History>),
-    /// The rule set.
-    Rules(Box<RuleSet>),
     /// A size tree.
     SizeTree(Box<SizeNode>),
     /// The health report.
@@ -747,7 +681,6 @@ impl Reply {
             Reply::Diagnosis(x) => v(x),
             Reply::Anomalies(x) => v(x),
             Reply::History(x) => v(x),
-            Reply::Rules(x) => v(x),
             Reply::SizeTree(x) => v(x),
             Reply::Health(x) => v(x),
             Reply::Startup(x) => v(x),
@@ -811,8 +744,6 @@ pub enum ErrorCode {
     AccessDenied,
     /// Not possible here.
     Unsupported,
-    /// The process is protected.
-    Protected,
     /// The request is invalid.
     BadRequest,
     /// It took too long.
@@ -881,7 +812,6 @@ mod tests {
     use super::*;
     use crate::metrics::fixtures::sample;
     use crate::ports::PlatformError;
-    use crate::process::Priority;
 
     fn round(m: &Message) -> Message {
         postcard::from_bytes(&postcard::to_stdvec(m).unwrap()).unwrap()
@@ -889,18 +819,6 @@ mod tests {
 
     #[test]
     fn requests_have_the_json_shape_of_api_types() {
-        let j = serde_json::to_value(Request::Act {
-            target: ProcessRef {
-                pid: 4,
-                started: Timestamp(9),
-            },
-            action: ProcessAction::SetPriority(Priority::Idle),
-        })
-        .unwrap();
-        assert_eq!(
-            j,
-            serde_json::json!({"act": {"target": {"pid": 4, "started": 9}, "action": {"setPriority": "idle"}}})
-        );
         assert_eq!(serde_json::to_value(Request::WhySlow).unwrap(), "whySlow");
         let r: Request = serde_json::from_value(serde_json::json!({"weeklyReport": {"weeksAgo": 2}})).unwrap();
         assert_eq!(r, Request::WeeklyReport { weeks_ago: 2 });
@@ -946,18 +864,14 @@ mod tests {
             top_cpu: vec![],
             top_memory: vec![],
             overhead: Overhead::default(),
-            profile: ProfileId::Gaming,
-            rules_paused: false,
-            active_actions: vec![],
             processes: None,
             groups: Some(vec![]),
         };
         for m in [
             Message::Request(Box::new(Request::SaveSettings { settings: Box::default() })),
-            Message::Request(Box::new(Request::SaveRules { rules: RuleSet::default() })),
             Message::Live(Box::new(live)),
             Message::Reply(Box::new(Ok(Reply::Settings(Box::default())))),
-            Message::Reply(Box::new(Err(AgentError::new(ErrorCode::Protected, "no")))),
+            Message::Reply(Box::new(Err(AgentError::new(ErrorCode::Busy, "no")))),
         ] {
             assert_eq!(round(&m), m);
         }
@@ -983,7 +897,6 @@ mod tests {
                 crate::inventory::MemoryLayout::unified(1, Default::default(), None),
                 vec![],
             ))),
-            Reply::Rules(Box::default()),
             Reply::Alarms(vec![]),
             Reply::AlarmStats(Box::default()),
             Reply::AlarmChanges(vec![]),

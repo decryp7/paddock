@@ -1,15 +1,14 @@
 //! The agent's look at new and unusual programs (WP-07): every half minute it compares the process table with the
 //! baseline kept in the store, checks the signature of programs it has never seen (a few at a time, off the sampler),
-//! and writes one activity line for a program that just became unusual. Observe-only: it explains, it never acts; the
-//! user's "protect" adds the program to the protected list (so rules leave it alone), "ignore" hides it.
+//! and writes one activity line for a program that just became unusual. Observe-only: it explains and never acts.
 
 use crate::agent::{lock, now, Shared};
-use dyno_core::activity::{ActivityKind, UndoRecord};
+use dyno_core::activity::ActivityKind;
 use dyno_core::os::Os;
 use dyno_core::process::ProcessSample;
 use dyno_core::protocol::{AgentError, ErrorCode, Message};
 use dyno_core::startup::StartupState;
-use dyno_core::unusual::baseline::{Baseline, Observed, StartupObs, UnusualAction, UnusualOverview};
+use dyno_core::unusual::baseline::{Baseline, Observed, StartupObs, UnusualOverview};
 use dyno_core::unusual::{program_key, Signing};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -23,6 +22,18 @@ const STARTUP_TTL: Duration = Duration::from_secs(5 * 60);
 const MAX_SIGNATURE_CHECKS: usize = 3;
 /// Activity lines written per look (a burst of new programs must not flood the log).
 const MAX_LINES_PER_LOOK: usize = 3;
+
+/// Dyno's own executables: never listed as unusual.
+const DYNO_OWN: &[&str] = &[
+    "dyno.exe",
+    "dyno",
+    "dyno-app.exe",
+    "dyno-app",
+    "dyno-agent.exe",
+    "dyno-agent",
+    "dyno-helper.exe",
+    "dyno-helper",
+];
 
 /// The OS this build runs on, for the pure rules that depend on path conventions.
 pub fn current_os() -> Os {
@@ -102,7 +113,7 @@ impl UnusualCentre {
         if let Err(e) = core.store.apply_baseline(&outcome.changes) {
             eprintln!("dyno-agent: could not store the program baseline: {e}");
         }
-        let overview = lock(&self.state).baseline.overview(t, &settings, false);
+        let overview = lock(&self.state).baseline.overview(t, &settings);
         for key in outcome.newly_unusual.iter().take(MAX_LINES_PER_LOOK) {
             let Some(item) = overview.items.iter().find(|i| &i.key == key) else {
                 continue;
@@ -116,8 +127,6 @@ impl UnusualCentre {
                     item.name,
                     item.reasons.join(", ")
                 ),
-                UndoRecord::None,
-                None,
             );
             shared.broadcast(&Message::Activity(entry));
         }
@@ -145,33 +154,9 @@ impl UnusualCentre {
     }
 
     /// The page's data.
-    pub fn overview(&self, shared: &Shared, include_ignored: bool) -> UnusualOverview {
+    pub fn overview(&self, shared: &Shared) -> UnusualOverview {
         let settings = lock(&shared.core).settings.unusual;
-        lock(&self.state).baseline.overview(now(), &settings, include_ignored)
-    }
-
-    /// Ignores, protects or restores a program. Protecting also adds it to the protected list.
-    pub fn act(&self, shared: &Shared, key: &str, action: UnusualAction) -> Result<UnusualOverview, AgentError> {
-        let entry = lock(&self.state)
-            .baseline
-            .act(key, action)
-            .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "Dyno no longer lists that program."))?;
-        let mut core = lock(&shared.core);
-        core.store
-            .apply_baseline(&[dyno_core::unusual::baseline::Change::Entry(entry.clone())])
-            .map_err(|e| AgentError::new(ErrorCode::Internal, e.to_string()))?;
-        if action == UnusualAction::Protect {
-            let target = entry.exe.clone().unwrap_or_else(|| entry.name.clone());
-            if !core.rules.protected.iter().any(|p| p.eq_ignore_ascii_case(&target)) {
-                let mut rules = core.rules.clone();
-                rules.protected.push(target);
-                core.rules = rules.validate().map_err(|m| AgentError::new(ErrorCode::BadRequest, m))?;
-                core.save_rules(&shared.dirs);
-            }
-        }
-        let settings = core.settings.unusual;
-        drop(core);
-        Ok(lock(&self.state).baseline.overview(now(), &settings, false))
+        lock(&self.state).baseline.overview(now(), &settings)
     }
 
     /// Forgets the baseline (learning starts again at the next look).
@@ -183,7 +168,7 @@ impl UnusualCentre {
         lock(&self.state).baseline.forget();
         let settings = core.settings.unusual;
         drop(core);
-        Ok(lock(&self.state).baseline.overview(now(), &settings, false))
+        Ok(lock(&self.state).baseline.overview(now(), &settings))
     }
 }
 
@@ -198,7 +183,7 @@ pub fn observed(processes: &[ProcessSample], connections: &HashMap<u32, u32>) ->
     }
     let mut by_key: HashMap<String, Observed> = HashMap::new();
     for p in processes {
-        if dyno_core::protect::DYNO_PROTECTED.contains(&p.name.to_lowercase().as_str()) || p.name.is_empty() {
+        if DYNO_OWN.contains(&p.name.to_lowercase().as_str()) || p.name.is_empty() {
             continue;
         }
         let key = program_key(&p.name, p.exe.as_deref());

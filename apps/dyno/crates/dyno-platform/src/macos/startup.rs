@@ -189,7 +189,6 @@ mod tests {
         std::fs::write(system.join("s.plist"), plist("com.vendor.s", true)).unwrap();
         let fake = Fake {
             disabled_text: "disabled services = {\n\t\"com.example.b\" => disabled\n\t\"com.example.a\" => enabled\n}".into(),
-            ..Fake::default()
         };
         let la = LaunchAgents::with(Some(user), Some(system), Box::new(fake.clone()));
         (dir, fake, la)

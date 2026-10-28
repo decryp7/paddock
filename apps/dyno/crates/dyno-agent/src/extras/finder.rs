@@ -1,8 +1,5 @@
 //! The large and duplicate file finder: walks a folder the user chose (bounded in entries and time, never following
-//! links), hashes only files that share a size, and keeps the result for an hour so a removal can refer to it. Finding
-//! deletes nothing. Removal re-checks every file against the cleanup policy's admission (the file must still be a plain
-//! file inside the chosen folder, not in a personal folder the user did not pick, unchanged since the scan, and not in
-//! use) before it goes to the Trash or the quarantine.
+//! links), hashes only files that share a size. It lists and deletes nothing.
 
 use crate::disk::walk::{modified, Budget};
 use dyno_core::extras::files::{duplicate_groups, largest, same_size_groups, FinderMode, FinderQuery, FinderResult, Walked, MAX_SCANNED};

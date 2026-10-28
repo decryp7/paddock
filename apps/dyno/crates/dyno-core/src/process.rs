@@ -106,66 +106,6 @@ impl Priority {
             _ => Priority::High,
         }
     }
-
-    /// One step lower, if any.
-    pub fn lower(self) -> Option<Priority> {
-        match self {
-            Priority::Idle => None,
-            Priority::BelowNormal => Some(Priority::Idle),
-            Priority::Normal => Some(Priority::BelowNormal),
-            Priority::AboveNormal => Some(Priority::Normal),
-            Priority::High => Some(Priority::AboveNormal),
-        }
-    }
-}
-
-/// What a user (or a rule) can do to a process.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ProcessAction {
-    /// Ask it to exit, then terminate it.
-    End,
-    /// Suspend every thread.
-    Suspend,
-    /// Resume after a suspend.
-    Resume,
-    /// Change the priority class.
-    SetPriority(Priority),
-    /// Restrict to the logical cores whose bits are set (bit 0 = core 0). Must not be 0.
-    SetAffinity(u64),
-    /// Windows EcoQoS / macOS background task policy: on or off.
-    SetEfficiencyMode(bool),
-    /// Hard-cap its CPU to this percentage of the machine (1–100); `None` releases the cap.
-    SetCpuCap(Option<u8>),
-}
-
-impl ProcessAction {
-    /// Short past-tense wording for the activity log, e.g. "Lowered priority to Below normal".
-    pub fn describe(&self) -> String {
-        match self {
-            ProcessAction::End => "Ended".into(),
-            ProcessAction::Suspend => "Suspended".into(),
-            ProcessAction::Resume => "Resumed".into(),
-            ProcessAction::SetPriority(p) => format!("Set priority to {}", priority_name(*p)),
-            ProcessAction::SetAffinity(mask) => format!("Limited to {} core(s)", mask.count_ones()),
-            ProcessAction::SetEfficiencyMode(true) => "Turned on efficiency mode".into(),
-            ProcessAction::SetEfficiencyMode(false) => "Turned off efficiency mode".into(),
-            ProcessAction::SetCpuCap(Some(pct)) => format!("Capped CPU at {pct}%"),
-            ProcessAction::SetCpuCap(None) => "Released CPU cap".into(),
-        }
-    }
-
-    /// Checks the action's own arguments (the agent re-checks; the UI may check early).
-    pub fn validate(&self, logical_cores: usize) -> Result<(), String> {
-        match self {
-            ProcessAction::SetAffinity(0) => Err("Choose at least one core.".into()),
-            ProcessAction::SetAffinity(mask) if logical_cores < 64 && mask >> logical_cores != 0 => {
-                Err(format!("This machine has {logical_cores} logical cores."))
-            }
-            ProcessAction::SetCpuCap(Some(pct)) if *pct == 0 || *pct > 100 => Err("A CPU cap is between 1% and 100%.".into()),
-            _ => Ok(()),
-        }
-    }
 }
 
 /// The user-facing name of a priority class.
@@ -329,39 +269,6 @@ mod tests {
             assert_eq!(Priority::from_nice(p.nice()), p);
         }
         assert_eq!(Priority::from_nice(-20), Priority::High);
-        assert_eq!(Priority::High.lower(), Some(Priority::AboveNormal));
-        assert_eq!(Priority::AboveNormal.lower(), Some(Priority::Normal));
-        assert_eq!(Priority::Normal.lower(), Some(Priority::BelowNormal));
-        assert_eq!(Priority::BelowNormal.lower(), Some(Priority::Idle));
-        assert_eq!(Priority::Idle.lower(), None);
-    }
-
-    #[test]
-    fn actions_describe_and_validate() {
-        let all = [
-            (ProcessAction::End, "Ended"),
-            (ProcessAction::Suspend, "Suspended"),
-            (ProcessAction::Resume, "Resumed"),
-            (ProcessAction::SetPriority(Priority::Idle), "Set priority to Low"),
-            (ProcessAction::SetPriority(Priority::High), "Set priority to High"),
-            (ProcessAction::SetPriority(Priority::AboveNormal), "Set priority to Above normal"),
-            (ProcessAction::SetPriority(Priority::Normal), "Set priority to Normal"),
-            (ProcessAction::SetPriority(Priority::BelowNormal), "Set priority to Below normal"),
-            (ProcessAction::SetAffinity(0b101), "Limited to 2 core(s)"),
-            (ProcessAction::SetEfficiencyMode(true), "Turned on efficiency mode"),
-            (ProcessAction::SetEfficiencyMode(false), "Turned off efficiency mode"),
-            (ProcessAction::SetCpuCap(Some(20)), "Capped CPU at 20%"),
-            (ProcessAction::SetCpuCap(None), "Released CPU cap"),
-        ];
-        for (a, text) in all {
-            assert_eq!(a.describe(), text);
-            assert_eq!(a.validate(8), Ok(()));
-        }
-        assert!(ProcessAction::SetAffinity(0).validate(8).is_err());
-        assert!(ProcessAction::SetAffinity(1 << 9).validate(8).is_err());
-        assert_eq!(ProcessAction::SetAffinity(u64::MAX).validate(64), Ok(()));
-        assert!(ProcessAction::SetCpuCap(Some(0)).validate(8).is_err());
-        assert!(ProcessAction::SetCpuCap(Some(101)).validate(8).is_err());
     }
 
     #[test]

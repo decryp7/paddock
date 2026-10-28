@@ -24,10 +24,6 @@ pub fn json<T: Serialize>(v: &T) -> String {
 pub struct StatusJson {
     /// The agent.
     pub agent: AgentJson,
-    /// The active profile.
-    pub profile: dyno_core::rules::ProfileId,
-    /// Whether rules are paused.
-    pub rules_paused: bool,
     /// CPU load, percent of the machine.
     pub cpu_percent: f32,
     /// Memory in use, bytes.
@@ -97,8 +93,6 @@ pub fn status_data(u: &LiveUpdate, agent: &AgentInfo) -> StatusJson {
             version: agent.version.clone(),
             protocol: agent.protocol,
         },
-        profile: u.profile,
-        rules_paused: u.rules_paused,
         cpu_percent: s.cpu.total,
         memory_used_bytes: s.memory.used,
         memory_total_bytes: s.memory.total,
@@ -164,7 +158,6 @@ pub fn status_text(u: &LiveUpdate, agent: &AgentInfo) -> String {
         out += &format!("Battery   {:.0}%\n", b.charge);
     }
     out += &format!("Uptime    {}\n", duration(s.uptime_secs));
-    out += &format!("Profile   {:?}{}\n", u.profile, if u.rules_paused { " (rules paused)" } else { "" });
     out += &format!("Dyno      {:.1}% CPU, {}\n", u.overhead.agent_cpu, bytes(u.overhead.agent_memory));
     out
 }
@@ -323,7 +316,6 @@ mod tests {
     use super::*;
     use dyno_core::counters::{CounterInfo, CounterKind, CounterObjectSummary};
     use dyno_core::protocol::Overhead;
-    use dyno_core::rules::{ActiveAction, ProfileId};
     use dyno_platform::fake::quiet_sample as sample;
 
     fn live() -> LiveUpdate {
@@ -345,9 +337,6 @@ mod tests {
             }],
             top_memory: vec![],
             overhead: Overhead::default(),
-            profile: ProfileId::Gaming,
-            rules_paused: true,
-            active_actions: Vec::<ActiveAction>::new(),
             processes: None,
             groups: None,
         }
@@ -366,12 +355,9 @@ mod tests {
         let text = status_text(&live(), &info());
         assert!(text.contains("CPU       34%"));
         assert!(text.contains("Memory    2.0 GB of 8.0 GB (25%)"));
-        assert!(text.contains("rules paused"));
         let j: serde_json::Value = serde_json::from_str(&json(&status_data(&live(), &info()))).unwrap();
         assert_eq!(j["agent"]["pid"], 42);
         assert_eq!(j["memoryTotalBytes"], 8u64 << 30);
-        assert_eq!(j["rulesPaused"], true);
-        assert_eq!(j["profile"], "gaming");
         assert!(j["cpuPercent"].is_number() && j["disks"].is_array());
     }
 

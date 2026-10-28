@@ -1,17 +1,13 @@
-//! The sampling loop (ADR 0002): measures, writes history, lets the rules and alerts react, and pushes a live update
+//! The sampling loop (ADR 0002): measures, writes history, lets the alerts react, and pushes a live update
 //! to every subscriber. One thread; a panic in a tick is caught and the loop goes on.
 
 use crate::agent::{lock, now, Shared, RECENT_SAMPLES};
-use crate::handlers::situation;
-use dyno_core::activity::{ActivityKind, UndoRecord};
 use dyno_core::grouping::{group, AppGroup};
 use dyno_core::metrics::{derive_pressure, MemoryPressure, PowerSource, SystemSample};
 use dyno_core::ports::{ProcessSource, SystemSensors};
-use dyno_core::process::{ProcessAction, ProcessSample};
-use dyno_core::protect::Protection;
+use dyno_core::process::ProcessSample;
 use dyno_core::protocol::{LiveDetail, LiveUpdate, Message, Overhead, TimelineEvent, TimelineEventKind};
 use dyno_core::recorder::system_interval_ms;
-use dyno_core::rules::{Command, StepAction, Tick};
 use dyno_core::sampling::{intervals, Intervals, Load};
 use dyno_core::time::Timestamp;
 use std::sync::Arc;
@@ -45,7 +41,7 @@ impl Sampler {
         }
     }
 
-    /// Runs until the agent is stopped, then releases everything rules and clicks applied.
+    /// Runs until the agent is stopped.
     pub fn run(mut self, shared: &Arc<Shared>) {
         while !shared.stopped() {
             let started = Instant::now();
@@ -66,18 +62,16 @@ impl Sampler {
                     .max(Duration::from_millis(50)),
             );
         }
-        shutdown(shared);
     }
 
     /// One tick: returns the intervals to use next.
     pub fn tick(&mut self, shared: &Arc<Shared>) -> Intervals {
         let t = now();
-        let (settings, recorder_on, rules_active, on_battery) = {
+        let (settings, recorder_on, on_battery) = {
             let core = lock(&shared.core);
             (
                 core.settings.sampling,
                 core.settings.flight_recorder,
-                core.rules.rules.iter().any(|r| r.enabled) && !core.rules.paused,
                 core.recent
                     .back()
                     .and_then(|s| s.battery.value())
@@ -89,7 +83,6 @@ impl Sampler {
             settings,
             Load {
                 watching,
-                rules_active,
                 on_battery,
                 own_cpu: self.own_cpu,
             },
@@ -123,11 +116,10 @@ impl Sampler {
         };
         // Throttling is judged here (an external tool may be read, so never under the core lock).
         let (throttle_events, throttle_confidence) = shared.hardware.on_sample(&sample);
-        let commands = self.record(shared, &sample, table, overhead, t);
+        self.record(shared, &sample, table, overhead, t);
         if !throttle_events.is_empty() {
             crate::hardware::handle_events(shared, throttle_events, throttle_confidence, t);
         }
-        apply_commands(shared, commands, t);
         self.read_pinned_counters(shared, t);
         self.ticks += 1;
         iv
@@ -165,42 +157,8 @@ impl Sampler {
         table: Option<(Vec<ProcessSample>, Vec<AppGroup>)>,
         overhead: Overhead,
         t: Timestamp,
-    ) -> Vec<Command> {
+    ) {
         let fresh = table.is_some();
-        let mut commands = Vec::new();
-        let (rules_run, power, ended) = {
-            let mut core = lock(&shared.core);
-            // Temporary rules whose time has come are switched off first; the engine then releases what they did.
-            let expired = core.rules.expire(t);
-            let ended: Vec<_> = if expired.is_empty() {
-                Vec::new()
-            } else {
-                core.save_rules(&shared.dirs);
-                expired
-                    .into_iter()
-                    .map(|name| {
-                        core.log(
-                            t,
-                            ActivityKind::System,
-                            format!("The temporary rule \"{name}\" ended"),
-                            "Everything it did has been given back and the rule is switched off.".into(),
-                            UndoRecord::None,
-                            None,
-                        )
-                    })
-                    .collect()
-            };
-            (
-                (core.rules.rules.iter().any(|r| r.enabled) || !core.engine.is_idle()) && fresh,
-                sample.battery.value().map(|b| b.source),
-                ended,
-            )
-        };
-        for entry in ended {
-            shared.broadcast(&Message::Activity(entry));
-        }
-        // Foreground and idle time are OS calls: only when a rule might use them and the table is fresh.
-        let sit = rules_run.then(|| situation(shared, power));
         let mut core = lock(&shared.core);
         if let Some((procs, groups)) = table {
             core.latest.processes = procs;
@@ -222,21 +180,6 @@ impl Sampler {
             let _ = core.writer.record_disks(&core.store, sample);
         }
         let _ = core.writer.prune(&core.store, core.settings.retention, t);
-        if let (true, Some(sit)) = (fresh, sit) {
-            let own = [std::process::id()];
-            let protection = Protection::new(&core.rules.protected, &own);
-            let rules = core.rules.clone();
-            commands = core.engine.tick(
-                &rules,
-                &protection,
-                &Tick {
-                    now: t,
-                    groups: &core.latest.groups,
-                    processes: &core.latest.processes,
-                    situation: sit,
-                },
-            );
-        }
         let settings = core.settings.alerts;
         let groups = core.latest.groups.clone();
         let new_alerts = core.alerts.tick(&settings, sample, &groups, &[]);
@@ -277,9 +220,6 @@ impl Sampler {
             top_cpu: top(&core.latest.groups, |g| f64::from(g.cpu)),
             top_memory: top(&core.latest.groups, |g| g.memory as f64),
             overhead,
-            profile: core.rules.profile,
-            rules_paused: core.rules.paused,
-            active_actions: core.engine.active(&core.rules),
             processes: Some(core.latest.processes.clone()),
             groups: Some(core.latest.groups.clone()),
         };
@@ -287,7 +227,6 @@ impl Sampler {
         drop_pressure_unused(pressure);
         drop(groups);
         push_live(shared, &live);
-        commands
     }
 }
 
@@ -322,153 +261,4 @@ fn push_live(shared: &Shared, live: &LiveUpdate) {
             let _ = s.tx.try_send(Message::Live(Box::new(for_detail(live.clone(), d))));
         }
     }
-}
-
-/// Carries out what the rules engine decided and logs it. A failure is logged, never retried in a tight loop: the
-/// engine asks again on its next tick if the condition still holds.
-pub fn apply_commands(shared: &Arc<Shared>, commands: Vec<Command>, t: Timestamp) {
-    for c in commands {
-        match c {
-            Command::Apply {
-                rule_id,
-                app,
-                target,
-                step,
-            } => {
-                let Some(action) = step.apply() else { continue };
-                let name = process_name(shared, target.pid);
-                let previous = previous_priority(shared, target);
-                let result = lock(&shared.ports.control).apply(target, &action);
-                let mut core = lock(&shared.core);
-                match result {
-                    Ok(()) => {
-                        if let ProcessAction::SetPriority(_) = action {
-                            if let Some(p) = previous {
-                                core.previous_priority.insert(target, p);
-                            }
-                        }
-                        let undo = action_undo(&action, previous);
-                        let entry = core.log(
-                            t,
-                            ActivityKind::Rule,
-                            format!("A rule {} for {name}", step.describe()),
-                            format!("Rule \"{rule_id}\" acted because the app stayed busy. Undo it here or turn the rule off in Rules."),
-                            UndoRecord::Process {
-                                target,
-                                actions: undo,
-                                rule: Some((rule_id.clone(), app.clone())),
-                            },
-                            None,
-                        );
-                        let kind = if matches!(step, StepAction::CpuCap(_)) {
-                            TimelineEventKind::Cap
-                        } else {
-                            TimelineEventKind::Throttle
-                        };
-                        let _ = core.store.put_event(&TimelineEvent {
-                            at: t,
-                            kind,
-                            label: format!("{name}: {}", step.describe()),
-                        });
-                        drop(core);
-                        shared.broadcast(&Message::Activity(entry));
-                    }
-                    Err(e) => eprintln!("dyno-agent: rule step on {name} failed: {e}"),
-                }
-            }
-            Command::Undo { target, step, .. } => {
-                let previous = lock(&shared.core).previous_priority.remove(&target);
-                let Some(action) = step.undo(previous) else { continue };
-                if lock(&shared.ports.control).apply(target, &action).is_ok() {
-                    let name = process_name(shared, target.pid);
-                    let core = lock(&shared.core);
-                    let _ = core.store.put_event(&TimelineEvent {
-                        at: t,
-                        kind: TimelineEventKind::Release,
-                        label: format!("{name}: released"),
-                    });
-                }
-            }
-            Command::Measured {
-                rule_id,
-                rule_name,
-                app,
-                before,
-                after,
-                after_secs,
-                description,
-            } => {
-                let verdict = if after + 1.0 < before {
-                    "It helped."
-                } else {
-                    "It made little difference."
-                };
-                let entry = lock(&shared.core).log(
-                    t,
-                    ActivityKind::Rule,
-                    format!("Measured: {app} used {before:.0}% CPU before and {after:.0}% after {after_secs} s"),
-                    format!("Rule \"{rule_name}\" ({rule_id}) {description}. {verdict}"),
-                    UndoRecord::None,
-                    None,
-                );
-                shared.broadcast(&Message::Activity(entry));
-            }
-            Command::Notify { rule_name, app, cpu } => {
-                let mut core = lock(&shared.core);
-                let changes = {
-                    let core = &mut *core;
-                    core.alarms.rule_notify(&core.store, &rule_name, &app, t)
-                };
-                push_alarm_changes(shared, changes);
-                let entry = core.log(
-                    t,
-                    ActivityKind::Alert,
-                    format!("{app} is using {cpu:.0}% CPU"),
-                    format!("Rule \"{rule_name}\" asked Dyno to tell you."),
-                    UndoRecord::None,
-                    None,
-                );
-                drop(core);
-                shared.broadcast(&Message::Activity(entry));
-            }
-        }
-    }
-}
-
-fn action_undo(action: &ProcessAction, previous: Option<dyno_core::process::Priority>) -> Vec<ProcessAction> {
-    dyno_core::activity::inverse(
-        action,
-        dyno_core::activity::Previous {
-            priority: previous,
-            ..Default::default()
-        },
-    )
-    .into_iter()
-    .collect()
-}
-
-fn previous_priority(shared: &Shared, target: dyno_core::process::ProcessRef) -> Option<dyno_core::process::Priority> {
-    lock(&shared.ports.details).details(target).ok().and_then(|d| d.priority)
-}
-
-fn process_name(shared: &Shared, pid: u32) -> String {
-    lock(&shared.core)
-        .latest
-        .processes
-        .iter()
-        .find(|p| p.pid == pid)
-        .map(|p| p.name.clone())
-        .unwrap_or_else(|| format!("process {pid}"))
-}
-
-/// Releases everything rules and clicks applied (also what a crashed earlier run left).
-fn shutdown(shared: &Arc<Shared>) {
-    let (commands, t) = {
-        let mut core = lock(&shared.core);
-        let rules = core.rules.clone();
-        let procs = core.latest.processes.clone();
-        (core.engine.release_all(&rules, &procs), now())
-    };
-    apply_commands(shared, commands, t);
-    lock(&shared.ports.control).release_all();
 }

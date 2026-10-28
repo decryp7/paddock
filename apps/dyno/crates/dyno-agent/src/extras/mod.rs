@@ -1,7 +1,6 @@
 //! The extras (WP-13) and backup health (WP-14) on the agent side: runs the read-only OS tools behind a [`ToolRunner`],
 //! keeps the few results worth caching, records the changes the "What changed" timeline needs, and answers the requests.
-//! Everything is observe-only: the one thing that moves files is removing the finder results the user selected, and that
-//! goes through the cleanup policy's admission and the Trash or the quarantine ([`finder`]).
+//! Everything is observe-only: nothing here moves or removes a file ([`finder`] only lists).
 
 pub mod backup_check;
 pub mod finder;

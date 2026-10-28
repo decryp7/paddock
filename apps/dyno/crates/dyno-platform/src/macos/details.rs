@@ -4,7 +4,7 @@
 use crate::parse::lsof::parse_fields;
 use crate::parse::mac_tools::parse_codesign;
 use crate::processes::DetailsProbe;
-use crate::unix_control::get_nice;
+use crate::unix_proc::get_nice;
 use dyno_core::process::{ListOrReason, Priority, ProcessDetails, ProcessRef, SignatureInfo};
 use std::path::Path;
 use std::time::Duration;
@@ -44,7 +44,7 @@ impl DetailsProbe for MacDetails {
             .ok()
             .and_then(|p| get_nice(p).ok())
             .map(Priority::from_nice);
-        details.efficiency_mode = super::control::is_background(pid);
+        details.efficiency_mode = super::background::is_background(pid);
         details.affinity = None;
         details.signature = match exe {
             Some(e) => signature(e),

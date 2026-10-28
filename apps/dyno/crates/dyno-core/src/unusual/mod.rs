@@ -8,7 +8,6 @@ pub mod baseline;
 use crate::grouping::file_name;
 use crate::os::Os;
 use crate::process::SignatureInfo;
-use crate::protect::{MACOS_PROTECTED, WINDOWS_PROTECTED};
 use serde::{Deserialize, Serialize};
 
 pub use baseline::{Baseline, Change, Entry, Learning, Observed, Outcome, StartupObs, Status, UnusualItem, UnusualOverview};
@@ -364,6 +363,50 @@ const LINUX_SYSTEM: &[&str] = &[
     "networkmanager",
     "systemd-journald",
     "systemd-logind",
+];
+
+/// Critical Windows processes (the OS's own) (lower-case file names).
+const WINDOWS_PROTECTED: &[&str] = &[
+    "system",
+    "registry",
+    "secure system",
+    "memory compression",
+    "smss.exe",
+    "csrss.exe",
+    "wininit.exe",
+    "winlogon.exe",
+    "services.exe",
+    "lsass.exe",
+    "lsaiso.exe",
+    "svchost.exe",
+    "dwm.exe",
+    "fontdrvhost.exe",
+    "audiodg.exe",
+    "msmpeng.exe",
+    "mpdefendercoreservice.exe",
+    "nissrv.exe",
+    "securityhealthservice.exe",
+    "sgrmbroker.exe",
+    "wudfhost.exe",
+    "spoolsv.exe",
+];
+
+/// Critical macOS processes.
+const MACOS_PROTECTED: &[&str] = &[
+    "kernel_task",
+    "launchd",
+    "windowserver",
+    "loginwindow",
+    "coreaudiod",
+    "logd",
+    "securityd",
+    "opendirectoryd",
+    "syspolicyd",
+    "xprotect",
+    "trustd",
+    "configd",
+    "powerd",
+    "endpointsecurityd",
 ];
 
 /// The system program `name` is or nearly is on `os`.

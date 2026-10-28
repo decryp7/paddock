@@ -4,21 +4,14 @@ use crate::processes::{NoDetails, SysinfoProcesses};
 use crate::sensors::{NoProbe, SysinfoSensors};
 use crate::Platform;
 use dyno_core::facts::SystemFacts;
-use dyno_core::ports::{FactsSource, FileLocks, PlatformError, ProcessControl, StartupItems, UserActivity};
-use dyno_core::process::{Locker, Pid, ProcessAction, ProcessRef};
+use dyno_core::ports::{FactsSource, FileLocks, PlatformError, StartupItems, UserActivity};
+use dyno_core::process::{Locker, Pid};
 use dyno_core::startup::{StartupEntry, StartupState};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const NOT_YET: &str = "Not supported on this OS yet.";
 
 struct Unsupported;
-
-impl ProcessControl for Unsupported {
-    fn apply(&mut self, _target: ProcessRef, _action: &ProcessAction) -> Result<(), PlatformError> {
-        Err(PlatformError::Unsupported(NOT_YET.into()))
-    }
-    fn release_all(&mut self) {}
-}
 
 impl FileLocks for Unsupported {
     fn lockers(&mut self, _path: &Path) -> Result<Vec<Locker>, PlatformError> {
@@ -48,11 +41,10 @@ impl UserActivity for Unsupported {
 }
 
 /// The ports for this OS.
-pub fn platform(_state_file: PathBuf) -> Platform {
+pub fn platform() -> Platform {
     Platform {
         sensors: Box::new(SysinfoSensors::new(Box::new(NoProbe))),
         processes: Box::new(SysinfoProcesses::new(Box::new(NoDetails))),
-        control: Box::new(Unsupported),
         locks: Box::new(Unsupported),
         startup: Box::new(Unsupported),
         facts: Box::new(Unsupported),

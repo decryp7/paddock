@@ -8,7 +8,7 @@
 
 use crate::facts::SystemFacts;
 use crate::metrics::SystemSample;
-use crate::process::{Locker, ProcessAction, ProcessDetails, ProcessRef, ProcessSample};
+use crate::process::{Locker, ProcessDetails, ProcessRef, ProcessSample};
 use crate::startup::StartupEntry;
 use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -83,15 +83,6 @@ pub trait ProcessSource: Send {
     fn processes(&mut self) -> Vec<ProcessSample>;
     /// The details of one process (slow: command line, modules, connections, signature).
     fn details(&mut self, target: ProcessRef) -> Result<ProcessDetails, PlatformError>;
-}
-
-/// Acting on processes. Every method checks [`ProcessRef::started`] first.
-pub trait ProcessControl: Send {
-    /// Carries out an action (already validated by the core and checked against the protected list).
-    fn apply(&mut self, target: ProcessRef, action: &ProcessAction) -> Result<(), PlatformError>;
-    /// Releases everything Dyno applied to processes that is not undone by process exit (CPU-cap jobs, duty
-    /// cycles, suspended processes Dyno suspended). Called when the agent stops; must be idempotent.
-    fn release_all(&mut self);
 }
 
 /// "What is locking this file?"
