@@ -17,7 +17,7 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 
 > **Status: v0.1.0, unreleased.** The agent (sampling, history, process actions with undo, rules engine, diagnosis,
 > health, startup list, service registration), the dashboard, processes, settings and tray are built and tested. CPU
-> taming, Health and Cleanup screens may still be placeholders in the UI; cleanup, tuning and the privileged helper are not built. [docs/features.md](docs/features.md) says exactly what is real and
+> taming, Health and Cleanup screens may still be placeholders in the UI; cleanup and tuning are not built. [docs/features.md](docs/features.md) says exactly what is real and
 > [docs/roadmap.md](docs/roadmap.md) lists what is left.
 
 ![The dashboard](docs/screenshots/dashboard-dark.png)
@@ -100,8 +100,7 @@ of a `v*` tag or the nightly run.
 
 Run the NSIS installer (`Dyno_<version>_x64-setup.exe`; per-user, no administrator rights). Dyno registers its agent as
 a per-user **Run** entry (not a service: a service lives in session 0 and cannot see your idle time, foreground window
-or per-user settings, [ADR 0010](docs/adr/0010-platforms-and-services.md)). Windows asks for administrator rights only
-when you first approve a change that needs them (the helper, planned).
+or per-user settings, [ADR 0010](docs/adr/0010-platforms-and-services.md)). Dyno runs with your own rights.
 
 ### macOS (13 or newer)
 
@@ -124,7 +123,6 @@ status-notifier host (GNOME: the AppIndicator extension). Details: [docs/linux.m
 | Agent | Sampling loop, SQLite history with rollups, process actions with undo, rules, startup list, plugin host, service install/ensure, `bench`. Cleanup, tuning, disk usage and the weekly report answer "not built yet". |
 | Platform adapters | macOS and Linux: sensors, process control, details, locks, startup, facts, user activity (macOS tested on a real Mac, Linux in a container with `scripts/linux-verify.sh`). Windows: sensors, process control and user activity; details, locks, startup and facts are not wired yet. |
 | App | Dashboard, processes, settings, tray, command palette, native feel against the real agent through the shell. |
-| Helper | Action types and validation exist in the core; the executable is a stub. |
 | Installers | CI builds NSIS, `.dmg`, `.deb` and AppImage on tags, nightly and manual runs. Not yet published. |
 
 ## Roadmap
@@ -179,7 +177,7 @@ Read [AGENTS.md](AGENTS.md) first: design principles, safety, security and robus
   validated in Rust; the IPC is local only, token-authenticated and bounded.
 - Dyno changes your machine only through an enabled rule or an explicit click, logs it and keeps an undo; deletes go to
   the Trash or a quarantine. The protected list is absolute.
-- Nothing runs elevated except the optional helper (planned), installed on first use after the OS's own prompt.
+- Dyno runs with your own rights; it installs nothing and asks for no administrator rights.
 - Tauri capabilities are least-privilege (checked in CI by `scripts/check-capabilities.mjs`) and the CSP has no
   `unsafe-eval` and no remote origins. Logs never contain file contents or command lines. No telemetry.
 - Found a vulnerability? Please report it privately to the maintainers rather than in a public issue.

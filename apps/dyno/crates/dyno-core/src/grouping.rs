@@ -7,7 +7,7 @@
 //! 3. its executable path (case-insensitive on Windows paths);
 //! 4. its name, when the path is unreadable.
 
-use crate::process::{Pid, ProcessSample};
+use crate::process::{Measured, Pid, ProcessSample, Total};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -23,12 +23,32 @@ pub struct AppGroup {
     pub exe: Option<String>,
     /// Every process in the group; the root process first.
     pub pids: Vec<Pid>,
-    /// Sum of the members' CPU, percent of the machine.
-    pub cpu: f32,
-    /// Sum of the members' resident memory in bytes.
-    pub memory: u64,
-    /// Sum of the members' disk throughput in bytes per second.
-    pub disk_bps: f64,
+    /// Sum of the readable members' CPU, percent of the machine; unavailable when no member's could be read.
+    pub cpu: Measured<f32>,
+    /// Sum of the readable members' resident memory in bytes; unavailable when no member's could be read.
+    pub memory: Measured<u64>,
+    /// Sum of the readable members' disk throughput in bytes per second; unavailable when no member's could be read.
+    pub disk_bps: Measured<f64>,
+    /// Whether some member's CPU, memory or disk throughput could not be read, so the sums are lower than the real totals.
+    pub partial: bool,
+}
+
+impl AppGroup {
+    /// The CPU sum for analysis (ranking, alerts, history): only what was read, so `0` when no member's CPU was readable.
+    /// Never shown as a reading; the UI shows [`AppGroup::cpu`].
+    pub fn cpu_read(&self) -> f32 {
+        self.cpu.copied().unwrap_or(0.0)
+    }
+
+    /// The memory sum for analysis: only what was read (see [`AppGroup::cpu_read`]).
+    pub fn memory_read(&self) -> u64 {
+        self.memory.copied().unwrap_or(0)
+    }
+
+    /// The disk throughput sum for analysis: only what was read (see [`AppGroup::cpu_read`]).
+    pub fn disk_read(&self) -> f64 {
+        self.disk_bps.copied().unwrap_or(0.0)
+    }
 }
 
 /// Parents whose children are never pulled into their group: shells, launchers, service hosts.
@@ -171,12 +191,13 @@ pub fn group(processes: &[ProcessSample]) -> Vec<AppGroup> {
         keys.insert(p.pid, key);
     }
     let mut groups: BTreeMap<String, AppGroup> = BTreeMap::new();
+    let mut members: HashMap<String, Vec<&ProcessSample>> = HashMap::new();
     // Roots (whose parent is not in the same group) first, so the group's exe and name come from its root.
     let mut ordered: Vec<&ProcessSample> = processes.iter().collect();
     ordered.sort_by_key(|p| {
         let key = &keys[&p.pid];
         let is_child = p.parent.and_then(|pp| keys.get(&pp)).is_some_and(|k| k == key);
-        (is_child, p.started, p.pid)
+        (is_child, p.started.copied(), p.pid)
     });
     for p in ordered {
         let key = keys[&p.pid].clone();
@@ -185,17 +206,40 @@ pub fn group(processes: &[ProcessSample]) -> Vec<AppGroup> {
             name: display_name(p),
             exe: p.exe.clone(),
             pids: Vec::new(),
-            cpu: 0.0,
-            memory: 0,
-            disk_bps: 0.0,
+            cpu: Measured::Value(0.0),
+            memory: Measured::Value(0),
+            disk_bps: Measured::Value(0.0),
+            partial: false,
         });
         g.pids.push(p.pid);
-        g.cpu += p.cpu;
-        g.memory += p.memory;
-        g.disk_bps += p.disk_read_bps + p.disk_write_bps;
+        members.entry(g.id.clone()).or_default().push(p);
     }
     let mut out: Vec<AppGroup> = groups.into_values().collect();
-    out.sort_by(|a, b| b.cpu.total_cmp(&a.cpu).then(b.memory.cmp(&a.memory)).then(a.name.cmp(&b.name)));
+    for g in &mut out {
+        let ms = &members[&g.id];
+        let cpu = Total::of(ms.iter().map(|p| &p.cpu));
+        let memory = Total::of(ms.iter().map(|p| &p.memory));
+        let disk = Total::of(ms.iter().map(|p| &p.disk_read_bps));
+        let write = Total::of(ms.iter().map(|p| &p.disk_write_bps));
+        g.cpu = cpu.sum;
+        g.memory = memory.sum;
+        g.disk_bps = match (disk.sum, write.sum) {
+            (Measured::Value(r), Measured::Value(w)) => Measured::Value(r + w),
+            (Measured::Value(x), Measured::Unavailable { .. }) | (Measured::Unavailable { .. }, Measured::Value(x)) => Measured::Value(x),
+            (Measured::Unavailable { reason }, _) => Measured::Unavailable { reason },
+        };
+        g.partial = cpu.partial || memory.partial || disk.partial || write.partial;
+    }
+    out.sort_by(|a, b| {
+        // Groups whose CPU was not readable go last.
+        b.cpu
+            .is_unavailable()
+            .cmp(&a.cpu.is_unavailable())
+            .reverse()
+            .then(b.cpu_read().total_cmp(&a.cpu_read()))
+            .then(b.memory_read().cmp(&a.memory_read()))
+            .then(a.name.cmp(&b.name))
+    });
     out
 }
 
@@ -210,7 +254,10 @@ fn resolve_key(p: &ProcessSample, by_pid: &HashMap<Pid, &ProcessSample>, cache: 
     }
     if let Some(parent) = p.parent.filter(|pp| *pp != p.pid).and_then(|pp| by_pid.get(&pp)) {
         // A parent started after the child is a reused pid, not the real parent.
-        let real = parent.started <= p.started;
+        let real = match (parent.started.copied(), p.started.copied()) {
+            (Some(a), Some(b)) => a <= b,
+            _ => true,
+        };
         let adopts = !NEVER_ADOPT.contains(&parent.name.to_lowercase().as_str());
         if real && adopts && lives_under(p, parent) {
             let k = resolve_key(parent, by_pid, cache, depth + 1);
@@ -250,8 +297,8 @@ mod tests {
         assert_eq!(g[0].name, "Google Chrome");
         assert_eq!(g[0].pids.len(), 40);
         assert_eq!(g[0].pids[0], 10, "the root comes first");
-        assert!((g[0].cpu - 44.0).abs() < 1e-3);
-        assert_eq!(g[0].memory, (100 + 39 * 50) << 20);
+        assert!((g[0].cpu_read() - 44.0).abs() < 1e-3);
+        assert_eq!(g[0].memory, Measured::Value((100 + 39 * 50) << 20));
         assert_eq!(g[1].name, "Notepad");
     }
 
@@ -282,10 +329,10 @@ mod tests {
     fn reused_parent_pids_and_cycles_are_ignored() {
         let mut parent = with_exe(proc(5, Some(6), "app.exe", 0.0, 1), Some("C:\\A\\app.exe"));
         let mut child = with_exe(proc(6, Some(5), "helper.exe", 0.0, 1), Some("C:\\A\\sub\\helper.exe"));
-        parent.started = Timestamp(100);
-        child.started = Timestamp(50); // the "parent" started later: a reused pid
+        parent.started = Measured::Value(Timestamp(100));
+        child.started = Measured::Value(Timestamp(50)); // the "parent" started later: a reused pid
         assert_eq!(group(&[parent.clone(), child.clone()]).len(), 2);
-        child.started = Timestamp(200);
+        child.started = Measured::Value(Timestamp(200));
         let g = group(&[parent, child]);
         assert_eq!(g.len(), 1);
         let self_parent = with_exe(proc(9, Some(9), "x.exe", 0.0, 1), Some("C:\\X\\x.exe"));

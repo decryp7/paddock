@@ -1,4 +1,4 @@
-//! Small JSON state files (settings, rules, tuning state): written atomically with a backup, read tolerantly
+//! Small JSON state files (settings, benchmark history): written atomically with a backup, read tolerantly
 //! (the file, else its backup, else the defaults).
 
 use serde::de::DeserializeOwned;

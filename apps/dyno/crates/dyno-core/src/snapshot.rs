@@ -1,6 +1,6 @@
 //! Snapshots of the whole process table and the diff between two ("what changed since this morning?").
 
-use crate::process::{ProcessRef, ProcessSample};
+use crate::process::{Measured, ProcessRef, ProcessSample};
 use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -44,12 +44,12 @@ pub struct ProcessSummary {
     /// Executable.
     pub exe: Option<String>,
     /// CPU.
-    pub cpu: f32,
+    pub cpu: Measured<f32>,
     /// Memory.
-    pub memory: u64,
+    pub memory: Measured<u64>,
 }
 
-/// A process in both snapshots whose use changed noticeably.
+/// A process in both snapshots whose use changed noticeably (only when both values were readable in both snapshots).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessChange {
@@ -102,7 +102,7 @@ fn summary(p: &ProcessSample) -> ProcessSummary {
 
 /// Builds a snapshot (keeping at most [`MAX_PROCESSES`], the biggest by memory).
 pub fn take(id: String, at: Timestamp, label: &str, memory_used: u64, cpu: f32, mut processes: Vec<ProcessSample>) -> Snapshot {
-    processes.sort_by_key(|p| std::cmp::Reverse(p.memory));
+    processes.sort_by_key(|p| std::cmp::Reverse(p.memory.copied()));
     processes.truncate(MAX_PROCESSES);
     let label: String = label.trim().chars().take(100).collect();
     Snapshot {
@@ -139,21 +139,23 @@ pub fn diff(a: &Snapshot, b: &Snapshot) -> SnapshotDiff {
         .iter()
         .filter_map(|p| {
             let old = before.get(&p.reference())?;
-            let dm = p.memory.abs_diff(old.memory);
-            let mem = dm >= 10 << 20 && dm as f64 >= old.memory as f64 * 0.1;
-            let cpu = (p.cpu - old.cpu).abs() >= 5.0;
+            let (cpu_before, cpu_after) = (old.cpu.copied()?, p.cpu.copied()?);
+            let (memory_before, memory_after) = (old.memory.copied()?, p.memory.copied()?);
+            let dm = memory_after.abs_diff(memory_before);
+            let mem = dm >= 10 << 20 && dm as f64 >= memory_before as f64 * 0.1;
+            let cpu = (cpu_after - cpu_before).abs() >= 5.0;
             (mem || cpu).then(|| ProcessChange {
                 pid: p.pid,
                 name: p.name.clone(),
-                cpu_before: old.cpu,
-                cpu_after: p.cpu,
-                memory_before: old.memory,
-                memory_after: p.memory,
+                cpu_before,
+                cpu_after,
+                memory_before,
+                memory_after,
             })
         })
         .collect();
-    added.sort_by_key(|x| std::cmp::Reverse(x.memory));
-    removed.sort_by_key(|x| std::cmp::Reverse(x.memory));
+    added.sort_by_key(|x| std::cmp::Reverse(x.memory.copied()));
+    removed.sort_by_key(|x| std::cmp::Reverse(x.memory.copied()));
     changed.sort_by_key(|c| std::cmp::Reverse(c.memory_after.abs_diff(c.memory_before)));
     SnapshotDiff {
         before: a.info.clone(),
@@ -216,7 +218,7 @@ mod tests {
     fn a_reused_pid_is_a_new_process_and_snapshots_are_bounded() {
         let a = take("a".into(), Timestamp(0), "x", 0, 0.0, vec![proc(1, None, "a.exe", 0.0, 1)]);
         let mut reused = proc(1, None, "b.exe", 0.0, 1);
-        reused.started = Timestamp(999_999);
+        reused.started = Measured::Value(Timestamp(999_999));
         let b = take("b".into(), Timestamp(1), "y", 0, 0.0, vec![reused]);
         let d = diff(&a, &b);
         assert_eq!((d.added.len(), d.removed.len()), (1, 1));

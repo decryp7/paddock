@@ -174,32 +174,25 @@ impl MemoryArray {
     }
 }
 
-/// Why the memory detail is not available, and whether the privileged helper could fix that.
+/// Why the memory detail is not available.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Unavailable {
     /// A sentence for the user.
     pub reason: String,
-    /// Reading it needs the privileged helper (a later work package); the UI offers to install it.
-    pub needs_helper: bool,
 }
 
 impl Unavailable {
     /// Linux: the DMI tables are root-only.
-    pub fn linux_dmi_needs_helper() -> Unavailable {
+    pub fn linux_dmi_root_only() -> Unavailable {
         Unavailable {
-            reason: "Linux only lets an administrator read the memory slot table. Dyno shows the total; allow the Dyno helper to read the sticks."
-                .into(),
-            needs_helper: true,
+            reason: "Linux only lets an administrator read the memory slot table. Dyno shows the total only.".into(),
         }
     }
 
     /// Reading failed for another reason.
     pub fn failed(reason: impl Into<String>) -> Unavailable {
-        Unavailable {
-            reason: reason.into(),
-            needs_helper: false,
-        }
+        Unavailable { reason: reason.into() }
     }
 }
 
@@ -701,12 +694,16 @@ mod tests {
         assert_eq!(kinds(&u.hints()), vec![HintKind::NotUpgradeable]);
         let t = MemoryLayout::TotalOnly {
             total: 8 << 30,
-            reason: Unavailable::linux_dmi_needs_helper(),
+            reason: Unavailable::linux_dmi_root_only(),
         };
         assert_eq!(t.total(), 8 << 30);
         assert_eq!(kinds(&t.hints()), vec![HintKind::Unknown]);
-        assert!(!Unavailable::failed("x").needs_helper);
-        assert!(Unavailable::linux_dmi_needs_helper().needs_helper);
+        let linux = Unavailable::linux_dmi_root_only();
+        assert!(linux.reason.contains("administrator") && linux.reason.contains("total only"));
+        assert!(
+            !linux.reason.to_lowercase().contains("helper"),
+            "the helper cannot read it, so the text must not offer it"
+        );
         let s = MemoryLayout::Slots(array(2, vec![module("ChannelA-DIMM0", 8, 3200, 3200)]));
         assert_eq!(s.total(), 8 << 30);
         assert!(!s.hints().is_empty());

@@ -11,11 +11,6 @@ export interface EventStyle {
 }
 
 export const EVENT_STYLE: Record<TimelineEventKind, EventStyle> = {
-  throttle: { symbol: 'triangle', color: (t) => t.chart[1]! },
-  cap: { symbol: 'rect', color: (t) => t.chart[4]! },
-  release: { symbol: 'circle', color: (t) => t.chart[2]! },
-  cleanup: { symbol: 'diamond', color: (t) => t.chart[0]! },
-  tuning: { symbol: 'roundRect', color: (t) => t.chart[5]! },
   alert: { symbol: 'pin', color: (t) => t.bad },
   boot: { symbol: 'arrow', color: (t) => t.chart[3]! },
   network: { symbol: 'emptyCircle', color: (t) => t.chart[6]! },
@@ -49,7 +44,7 @@ function tooltipTime(at: number, range: History['range']): string {
 }
 
 /**
- * CPU and memory over time (lines with the peak band for CPU), with the rule actions, cleanups, tuning and alerts of
+ * CPU and memory over time (lines with the peak band for CPU), with the alerts, restarts and network changes of
  * the range marked on the CPU line as points and as faint vertical lines, a zoom slider and mouse-wheel zoom.
  * `kinds` hides events whose kind the legend switched off.
  */

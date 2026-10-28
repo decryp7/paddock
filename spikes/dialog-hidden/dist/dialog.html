@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Probe dialog</title>
+<style>
+  html, body { margin: 0; background: #1b1e23; color: #e8ebef; }
+  /* A dialog frame: header, body, footer; its natural height is what the window is fitted to. */
+  #frame { height: auto; display: flex; flex-direction: column; font: 15px/1.5 ProbeSans, monospace; }
+  header { padding: 16px 20px 8px; font-size: 18px; font-weight: 600; }
+  main { padding: 0 20px; }
+  main p { margin: 0 0 10px; }
+  footer { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; }
+  button { font: inherit; padding: 6px 14px; }
+</style>
+<script src="probe.js"></script>
+</head>
+<body>
+<div id="frame">
+  <header id="head">Remove the channel "Nightly builds"?</header>
+  <main id="body"></main>
+  <footer id="foot"><button>Cancel</button><button>Remove channel</button></footer>
+</div>
+</body>
+</html>

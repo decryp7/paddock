@@ -34,8 +34,7 @@ pub fn timeout_for(request: &Request) -> Duration {
         | Request::AppUsage
         | Request::SoftwareInventory
         | Request::SaveInventoryReport { .. }
-        | Request::FindFiles { .. }
-        | Request::RemoveFoundFiles { .. } => EXTRAS_TIMEOUT,
+        | Request::FindFiles { .. } => EXTRAS_TIMEOUT,
         _ => REQUEST_TIMEOUT,
     }
 }
@@ -757,8 +756,8 @@ mod tests {
         // The agent's own errors keep their code.
         let err = r
             .link
-            .call(Request::RestoreQuarantine {
-                id: "does-not-exist".into(),
+            .call(Request::DiskUsage {
+                path: Some("relative".into()),
             })
             .unwrap_err();
         assert_ne!(err.code, ErrorCode::AgentUnavailable);

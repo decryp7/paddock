@@ -174,9 +174,9 @@ export function seedUnusual(): UnusualItem[] {
 }
 
 /** The unusual page for `items` at `now` (offsets in the seeds become times). */
-export function mockUnusual(items: UnusualItem[], now: number, includeIgnored: boolean, extraIgnored: number): UnusualOverview {
+export function mockUnusual(items: UnusualItem[], now: number, extraKnown: number): UnusualOverview {
   const shown = items
-    .filter((i) => i.status === 'new' || (includeIgnored && (i.status === 'ignored' || i.status === 'protected')))
+    .filter((i) => i.status === 'new')
     .map((i) => ({ ...i, firstSeen: now + i.firstSeen, lastSeen: i.running ? now - MIN : now + i.lastSeen }))
     .sort((a, b) => Number(a.status !== 'new') - Number(b.status !== 'new') || b.score - a.score || b.firstSeen - a.firstSeen);
   return {
@@ -184,8 +184,7 @@ export function mockUnusual(items: UnusualItem[], now: number, includeIgnored: b
     enabled: true,
     learning: { active: false, until: now - 5 * DAY },
     learningDays: 7,
-    known: 412,
-    ignored: extraIgnored + items.filter((i) => i.status === 'ignored' || i.status === 'protected').length,
+    known: 412 + extraKnown,
     items: shown,
   };
 }

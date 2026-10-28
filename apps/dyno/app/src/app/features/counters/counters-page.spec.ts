@@ -55,7 +55,7 @@ describe('CountersPage', () => {
     const table = el.querySelector('[aria-label="Charted counters"][role="table"]')!;
     expect(table.textContent).toContain('Pages/sec');
     expect(table.querySelector('.r.num b')!.textContent).toMatch(/\d/);
-    expect(el.textContent).toContain('Cleanup');
+    expect(el.textContent).toContain('Network');
     await click('button[aria-label="Stop charting Pages/sec"]');
     expect(el.textContent).toContain('Nothing charted yet');
   });

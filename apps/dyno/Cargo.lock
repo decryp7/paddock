@@ -1027,7 +1027,6 @@ name = "dyno-agent"
 version = "0.1.0"
 dependencies = [
  "dyno-core",
- "dyno-helper",
  "dyno-ipc",
  "dyno-platform",
  "dyno-plugin-host",
@@ -1040,8 +1039,6 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
- "toml 1.1.8+spec-1.1.0",
- "trash",
  "zip",
 ]
 
@@ -1104,22 +1101,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
- "toml 1.1.8+spec-1.1.0",
-]
-
-[[package]]
-name = "dyno-helper"
-version = "0.1.0"
-dependencies = [
- "dyno-core",
- "dyno-ipc",
- "dyno-platform",
- "libc",
- "serde",
- "serde_json",
- "tempfile",
- "windows",
- "windows-service",
 ]
 
 [[package]]
@@ -1162,7 +1143,6 @@ dependencies = [
  "dyno-ipc",
  "postcard",
  "serde",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1170,7 +1150,6 @@ name = "dyno-plugin-example"
 version = "0.1.0"
 dependencies = [
  "dyno-plugin-api",
- "tempfile",
 ]
 
 [[package]]
@@ -1181,7 +1160,6 @@ dependencies = [
  "dyno-plugin-api",
  "serde",
  "tempfile",
- "thiserror 2.0.21",
  "toml 1.1.8+spec-1.1.0",
 ]
 
@@ -5271,24 +5249,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trash"
-version = "5.2.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be89b3fe156965d29ac4f8522f3a640c655affdd9f21cb4f36857f0c92c00317"
-dependencies = [
- "chrono",
- "libc",
- "log",
- "objc2",
- "objc2-foundation",
- "once_cell",
- "percent-encoding",
- "scopeguard",
- "urlencoding",
- "windows",
-]
-
-[[package]]
 name = "tray-icon"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5391,12 +5351,6 @@ dependencies = [
  "serde",
  "serde_derive",
 ]
-
-[[package]]
-name = "urlencoding"
-version = "2.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "urlpattern"
@@ -5698,12 +5652,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "widestring"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
-
-[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5851,17 +5799,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5"
 dependencies = [
  "windows-link",
-]
-
-[[package]]
-name = "windows-service"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "857224b3b211c6f3616921f081ee54721ee3ad2ace2fac6a6337e032f7b4dcf2"
-dependencies = [
- "bitflags 2.13.2",
- "widestring",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

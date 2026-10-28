@@ -37,7 +37,6 @@ describe('extras model', () => {
     expect(changeTone('removed')).toBe('info');
     expect(changeTone('startupRemoved')).toBe('info');
     expect(changeTone('updated')).toBe('muted');
-    expect(changeTone('setting')).toBe('muted');
   });
 
   it('says since when Dyno watches, and what it cannot know', () => {
