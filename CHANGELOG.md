@@ -12,6 +12,12 @@ Conventional Commits; one semver tag for the whole repo.
 - New `app-release.yml` input `bundle-check`: an app's own script run on Linux and macOS after the installers are built, with the bundle
   folder as its argument (Dyno's run-path check; on macOS the bundled `dyno-agent` measures once, which replaces the old Rust-leg step).
 
+### Dialog boot harness waits on the dialog's load, not on a turn budget
+- `bootDialog`/`assertDialogBoots` (`@decryp7/paddock-ui/shell/testing`) wait for `whenStable` (the shell's start is a
+  pending task), with no turn budget: a slow first `import()` on a busy runner no longer reads as "never leaves
+  Loading" (CI run 6563). `DialogHarnessOptions.maxTurns` is removed; a loader that never answers is now reported by the
+  runner's test timeout.
+
 ### paddock-proc: watchers read one pid, never the process table (ADR 0024 rule 4)
 - New public API: `ProcessSource` (the port: `memory`, `children`, `table`), `OsSource` (the OS as a source; make one per walk),
   `tree_memory_from` / `tree_memory_of` (a tree or a job's member list, read pid by pid), `MAX_TREE` (the most processes a walk
