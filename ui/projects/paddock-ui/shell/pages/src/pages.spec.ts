@@ -589,6 +589,25 @@ describe('pd-page-host and the title strategy alone', () => {
     expect(router.url).toBe('/one');
   });
 
+  it('gives the routed page a definite height: a flex column that fills <main> (a page’s height: 100% resolves)', async () => {
+    TestBed.configureTestingModule({
+      providers: [provideZonelessChangeDetection(), provideContributions({ pages: [PAGES[0] as PageDef] }), provideRouter([{ path: 'one', component: PdPageHost, data: { [PAGE_DATA]: 't.one' } }])],
+    });
+    const { RouterTestingHarness } = await import('@angular/router/testing');
+    const harness = await RouterTestingHarness.create();
+    await harness.navigateByUrl('/one');
+    await settle();
+    // jsdom has no layout: the contract is the stylesheet the component ships.
+    const css = [...document.head.querySelectorAll('style')].map((s) => s.textContent ?? '').join('\n');
+    const rule = (selector: string) => new RegExp(`${selector}[^{]*\\{([^}]*)\\}`).exec(css)?.[1] ?? '';
+    const host = rule('\\[_nghost-[^\\]]*\\]');
+    expect(host).toMatch(/display:\s*flex/);
+    expect(host).toMatch(/flex-direction:\s*column/);
+    expect(host).toMatch(/height:\s*100%/);
+    expect(host).toMatch(/min-height:\s*0/);
+
+  });
+
   it('a route without a title is titled with the app’s name', () => {
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), PagesTitleStrategy, provideRouter([])] });
     const strategy = TestBed.inject(PagesTitleStrategy);

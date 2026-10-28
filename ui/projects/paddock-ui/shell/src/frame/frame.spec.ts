@@ -232,6 +232,17 @@ describe('pd-part-outlet', () => {
     return { fixture, outlet };
   }
 
+  it('a page’s box is a shrinkable flex column that fills pd-page-host (so a page’s height: 100% resolves)', async () => {
+    await mount({ load: () => Promise.resolve(PartA) });
+    // jsdom has no layout: the contract is the stylesheet the component ships.
+    const css = [...document.head.querySelectorAll('style')].map((s) => s.textContent ?? '').join('\n');
+    const rule = /\.pd-page\)?[^{]*\{([^}]*)\}/.exec(css.replace(/\/\*[\s\S]*?\*\//g, ''))?.[1] ?? '';
+    expect(rule).toMatch(/display:\s*flex/);
+    expect(rule).toMatch(/flex-direction:\s*column/);
+    expect(rule).toMatch(/flex:\s*1 1 auto/);
+    expect(rule).toMatch(/min-height:\s*0/);
+  });
+
   it('shows a skeleton while loading, then the component in an injector with the part’s providers', async () => {
     let resolve!: (t: Type<unknown>) => void;
     const { fixture, outlet } = await mount({ load: () => new Promise((r) => (resolve = r)), providers: () => Promise.resolve([{ provide: TOKEN, useValue: 'scoped' }]) });

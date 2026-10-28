@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { THEMES, type Theme } from './axe.ts';
 import { DOC_SCREEN_VIEWPORT, isOn } from './config.ts';
-import { waitForStableFrame } from './screenshot.ts';
+import { captureScreen, FRAME_MAX_HEIGHT } from './capture.ts';
 
 /**
  * The documentation screenshot runner (plan X39): a table of screens × both themes, at 1440 x 900 (the project sets
@@ -25,10 +25,6 @@ export interface DocScreen {
   readonly frame?: 'page';
   /** Steps after the page has loaded (open a menu, fill a field, advance the fake clock) until the screen shows what it documents. */
   readonly ready?: (page: Page, theme: Theme) => Promise<void>;
-  /** Photograph one element instead of the window (scrolled into view; it wins over `clip`). */
-  readonly element?: (page: Page, theme: Theme) => Locator;
-  /** The area to keep (default: the whole window). */
-  readonly clip?: (page: Page, theme: Theme) => Promise<{ x: number; y: number; width: number; height: number } | undefined>;
   /** Themes this screen is taken in (default: all). */
   readonly themes?: readonly Theme[];
 }
@@ -58,12 +54,14 @@ export interface DocScreensOptions {
   readonly warmupMs?: number;
   /** A selector that must be visible before `ready` runs (the shell element). */
   readonly appSelector?: string;
+  /** The page's main scroller (default the shell's `[data-pd-region=main]`, then the document). */
+  readonly mainSelector?: string;
   /** The environment (default `process.env`). */
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
 /** The tallest window a framed page may grow to. */
-export const FRAME_MAX_HEIGHT = 4000;
+export { FRAME_MAX_HEIGHT };
 
 /** The default time every screen's clock starts at: 2026-10-22 14:30:00 UTC. */
 export const FROZEN_AT = Date.UTC(2026, 9, 22, 14, 30, 0);
@@ -145,17 +143,9 @@ export function captureDocScreens(options: DocScreensOptions): void {
         if (options.appSelector) await expect(page.locator(options.appSelector).first()).toBeVisible();
         if (options.warmupMs) await page.clock.runFor(options.warmupMs);
         await screen.ready?.(page, theme);
-        if (screen.frame === 'page') {
-          const full = await page.evaluate(() => document.documentElement.scrollHeight);
-          await page.setViewportSize({ width, height: Math.min(Math.max(height, full), FRAME_MAX_HEIGHT) });
-        }
-        await waitForStableFrame(page);
-        const clip = await screen.clip?.(page, theme);
-        const element = screen.element?.(page, theme);
-        const bytes = element ? await element.screenshot() : await page.screenshot(clip ? { clip } : {});
+        // Through captureScreen: settled, not cut, not scrolled, no cover. A long page is framed whole (grown up to FRAME_MAX_HEIGHT).
         const path = join(out, file);
-        mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(path, bytes);
+        const bytes = await captureScreen(page, path, { fullPage: screen.frame === 'page' ? 'main' : 'viewport', main: options.mainSelector });
         recordHashes(join(out, HASHES_FILE), { [file]: sha256(bytes) });
       });
     }

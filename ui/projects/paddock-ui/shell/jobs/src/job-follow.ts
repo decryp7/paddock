@@ -5,6 +5,9 @@ import { JobsStore } from './jobs.store';
 /**
  * Work a dialog or page starts as a job: follow it while the owner lives. Closing the owner only stops following; the job
  * goes on and its end is announced as a notice. Nothing here times out (ADR 0008 §4): a quiet job shows "Still working".
+ *
+ * This is how an app waits for a job: never with its own `paddock://jobs` listener (the shell's notice would be doubled;
+ * conformance C44), and without a second success toast for the same job.
  */
 @Injectable()
 export class JobFollow {

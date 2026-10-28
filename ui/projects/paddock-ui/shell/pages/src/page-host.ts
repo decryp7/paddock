@@ -20,7 +20,12 @@ import { PAGE_DATA, ShellPages } from './pages';
       <pd-error-state [heading]="t.missing" [cause]="t.choose" [retryLabel]="t.home" (retry)="home()" />
     }
   `,
-  styles: `:host { display: block; min-width: 0; }`,
+  // A definite height for the routed page (ADR 0012): the host fills <main> as a flex column, so a page's own `height: 100%`
+  // (a CDK virtual viewport, a split pane) resolves instead of collapsing to 0. A page that is taller than <main> still
+  // scrolls <main>; a page that wants less keeps its natural height. The loaded page's box (pd-part-outlet.pd-page) is a
+  // flex item that fills the rest (its own :host(.pd-page) rule). A page with `height: 100%` and `overflow: hidden` is now
+  // clipped to the host instead of growing <main>'s scroll: give it `overflow: auto` or no fixed height.
+  styles: `:host { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }`,
 })
 export class PdPageHost {
   /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
