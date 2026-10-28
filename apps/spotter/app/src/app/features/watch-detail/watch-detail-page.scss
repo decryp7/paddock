@@ -286,6 +286,10 @@
 .code {
   font-family: var(--pd-font-mono);
   font-size: var(--pd-text-caption);
+  /* A long location wraps at its separators (zero-width spaces), never inside a name. */
+  overflow-wrap: normal;
+  word-break: normal;
+  min-width: 0;
 }
 .copyable {
   display: flex;

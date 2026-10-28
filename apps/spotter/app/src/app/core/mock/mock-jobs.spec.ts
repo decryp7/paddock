@@ -23,6 +23,18 @@ describe('MockJobs', () => {
     expect(seen).toHaveLength(3);
   });
 
+  it('asks for no announcement of the success of a source test or a check, like the Rust side', async () => {
+    const jobs = new MockJobs(0);
+    const seen: SuJobSnapshot[] = [];
+    jobs.connect((s) => seen.push(s));
+    for (const kind of ['sp.test-source', 'sp.check', 'sp.check-all', 'sp.download']) await jobs.run(kind, 'Work', async () => 'ok');
+    const quiet = (kind: string): boolean[] => seen.filter((s) => s.kind === kind && s.state === 'done').map((s) => s.quietOnSuccess === true);
+    expect(quiet('sp.test-source')).toEqual([true]);
+    expect(quiet('sp.check')).toEqual([true]);
+    expect(quiet('sp.check-all')).toEqual([false]);
+    expect(quiet('sp.download')).toEqual([false]);
+  });
+
   it('ends as cancelled when cancelled between steps and as failed when the work throws', async () => {
     const jobs = new MockJobs(0);
     const seen: SuJobSnapshot[] = [];
