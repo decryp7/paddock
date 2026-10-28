@@ -15,6 +15,10 @@ Conventional Commits; one semver tag for the whole repo.
 - `npm run test:tokens` measures the contrast of every bridged Material component in light and dark for all accents (text 4.5:1,
   icons, borders and indicators 3:1). It found the snack bar action (accent on the inverse surface, 1.9:1 to 2.4:1): it now takes the
   surface ink. `npm run build:css` resolves `@angular/material` from the repo's `node_modules`.
+- Review fixes: keyboard focus is Material's strong indicator in `--pd-focus-ring` (2 px, 2 px outside; no more hidden rings), the shape
+  rules win over Material's own CSS (28 px menu items and options, 4 px panel padding, popover radius), form fields get a 12 px floated
+  label, a centred input and room for the suffix icons; type scale without tracking and with the family's line heights, family font
+  stack; muted hints; segmented-look button toggle; `@angular/material` and `@angular/cdk` are 22.2.4 in every workspace.
 - Gallery: a "Material controls" section shows every bridged component (`e2e/material.spec.ts`: axe, token checks, real overlays).
 
 ### Dyno on the shared CI kit (WP-C4)

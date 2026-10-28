@@ -155,9 +155,9 @@ const RUNS: Run[] = [
           <mat-radio-button value="json">JSON</mat-radio-button>
         </mat-radio-group>
         <mat-button-toggle-group aria-label="Time range" [(ngModel)]="range">
-          <mat-button-toggle value="1h">1 h</mat-button-toggle>
-          <mat-button-toggle value="24h">24 h</mat-button-toggle>
-          <mat-button-toggle value="7d">7 days</mat-button-toggle>
+          <mat-button-toggle value="1h">Last hour</mat-button-toggle>
+          <mat-button-toggle value="24h">Last day</mat-button-toggle>
+          <mat-button-toggle value="7d">Last week</mat-button-toggle>
         </mat-button-toggle-group>
         <mat-slider min="0" max="100" step="5" discrete>
           <input matSliderThumb aria-label="Limit" [(ngModel)]="limit" />
@@ -168,7 +168,7 @@ const RUNS: Run[] = [
       <div class="gal-row gal-row--center">
         <mat-chip-set aria-label="Applied filters">
           <mat-chip>Errors</mat-chip>
-          <mat-chip>Last 24 h</mat-chip>
+          <mat-chip>Past day</mat-chip>
         </mat-chip-set>
         <mat-chip-listbox aria-label="Scope" [(ngModel)]="scope">
           <mat-chip-option value="all">All</mat-chip-option>
@@ -192,8 +192,8 @@ const RUNS: Run[] = [
             <td mat-cell *matCellDef="let r">{{ r.status }}</td>
           </ng-container>
           <ng-container matColumnDef="duration">
-            <th mat-header-cell *matHeaderCellDef mat-sort-header>Seconds</th>
-            <td mat-cell *matCellDef="let r">{{ r.duration }}</td>
+            <th mat-header-cell *matHeaderCellDef mat-sort-header class="gal-num-col">Seconds</th>
+            <td mat-cell *matCellDef="let r" class="gal-num-col">{{ r.duration }}</td>
           </ng-container>
           <tr mat-header-row *matHeaderRowDef="columns"></tr>
           <tr mat-row *matRowDef="let row; columns: columns"></tr>
@@ -218,11 +218,13 @@ const RUNS: Run[] = [
           </mat-selection-list>
         </div>
         <div class="gal-box">
-          <mat-tree [dataSource]="tree" [childrenAccessor]="children" aria-label="Folders">
-            <mat-nested-tree-node *matTreeNodeDef="let node"><div class="mat-tree-node">{{ node.name }}</div></mat-nested-tree-node>
+          <mat-tree class="gal-tree" [dataSource]="tree" [childrenAccessor]="children" aria-label="Folders">
+            <mat-nested-tree-node *matTreeNodeDef="let node"><div class="mat-tree-node gal-tree-leaf">{{ node.name }}</div></mat-nested-tree-node>
             <mat-nested-tree-node *matTreeNodeDef="let node; when: hasChild">
               <div class="mat-tree-node">
-                <button matIconButton matTreeNodeToggle [attr.aria-label]="'Toggle ' + node.name">+</button>
+                <button matIconButton matTreeNodeToggle [attr.aria-label]="'Toggle ' + node.name">
+                  <svg class="gal-chevron" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                </button>
                 {{ node.name }}
               </div>
               <div role="group">

@@ -7,8 +7,9 @@ import { contrast, parseColor } from './color';
 import { ACCENTS, readRules, resolve, type Scheme } from './css';
 
 const scss = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'projects', 'paddock-ui', 'scss');
-const nodeModules = join(scss, '..', '..', '..', '..', 'node_modules');
-const compiled = (entry: string): string => compile(join(scss, entry), { style: 'expanded', loadPaths: [nodeModules] }).css;
+// @angular/material is installed under the ui workspace (npm nests it there), or at the repo root.
+const nodeModules = [join(scss, '..', '..', '..', 'node_modules'), join(scss, '..', '..', '..', '..', 'node_modules')];
+const compiled = (entry: string): string => compile(join(scss, entry), { style: 'expanded', loadPaths: nodeModules }).css;
 const controls = compiled('entry-controls.scss');
 /** The bridge alone (our rules, every value a --pd-* token) and the whole sheet apps load (Material's own `mat.theme` first). */
 const material = compileString("@use 'material';", { style: 'expanded', loadPaths: [scss] }).css;
@@ -59,7 +60,7 @@ describe('control styles and the Material bridge (plan X37)', () => {
     }
     // Every value is a token reference, a sized token expression or a keyword: nothing hard-coded.
     for (const m of material.matchAll(/(--mat-[\w-]+)\s*:\s*([^;]+);/g)) {
-      expect(m[2], m[1]).toMatch(/^(var\(--pd-[\w-]+\)|calc\(var\(--pd-[\w-]+\) \/ [\d.]+\)|none|transparent|currentcolor|0px)$/);
+      expect(m[2], m[1]).toMatch(/^(var\(--pd-[\w-]+\)|calc\(var\(--pd-[\w-]+\) \/ [\d.]+\)|calc\(2px \/ 0\.75\)|none|transparent|currentcolor|block|0px|0)$/);
     }
   });
 
@@ -193,7 +194,7 @@ describe('control styles and the Material bridge (plan X37)', () => {
       ['datepicker-calendar-date-selected-state-text-color', 'datepicker-calendar-date-selected-state-background-color', 4.5],
       ['button-filled-label-text-color', 'button-filled-container-color', 4.5],
       ['button-outlined-label-text-color', 'sys-surface-container', 4.5],
-      // The secondary button's border (border-strong) is decoration by design (guide section 9); its label identifies it.
+      // The secondary button's border (border-strong) is decoration by design (guide section 8, Buttons); its label identifies it.
       ['button-text-label-text-color', 'sys-surface', 4.5],
       ['button-tonal-label-text-color', 'button-tonal-container-color', 4.5],
       ['button-protected-label-text-color', 'button-protected-container-color', 4.5],

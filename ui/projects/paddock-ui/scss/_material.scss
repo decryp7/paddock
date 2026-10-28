@@ -85,6 +85,34 @@
   --mat-sys-title-large-font: var(--pd-font-sans);
   --mat-sys-title-large-size: var(--pd-text-subtitle);
 
+  // ---- Type scale: no tracking, the family's line heights (the Material scale adds letter-spacing and 1.5 line heights).
+  --mat-sys-body-large-tracking: 0;
+  --mat-sys-body-medium-tracking: 0;
+  --mat-sys-body-small-tracking: 0;
+  --mat-sys-label-large-tracking: 0;
+  --mat-sys-label-medium-tracking: 0;
+  --mat-sys-label-small-tracking: 0;
+  --mat-sys-title-large-tracking: 0;
+  --mat-sys-title-medium-tracking: 0;
+  --mat-sys-title-small-tracking: 0;
+  --mat-sys-headline-large-tracking: 0;
+  --mat-sys-headline-medium-tracking: 0;
+  --mat-sys-headline-small-tracking: 0;
+  --mat-sys-display-large-tracking: 0;
+  --mat-sys-display-medium-tracking: 0;
+  --mat-sys-display-small-tracking: 0;
+  --mat-sys-body-large-line-height: var(--pd-lh-body-lg);
+  --mat-sys-body-medium-line-height: var(--pd-lh-body);
+  --mat-sys-body-small-line-height: var(--pd-lh-label);
+  --mat-sys-label-large-line-height: var(--pd-lh-body);
+  --mat-sys-label-medium-line-height: var(--pd-lh-label);
+  --mat-sys-label-small-line-height: var(--pd-lh-caption);
+  --mat-sys-title-medium-line-height: var(--pd-lh-body-lg);
+  --mat-sys-title-large-line-height: var(--pd-lh-subtitle);
+  --mat-form-field-outlined-label-text-populated-size: var(--pd-text-label);
+  --mat-focus-indicator-border-color: var(--pd-focus-ring);
+  --mat-focus-indicator-display: block;
+
   // ---- Tooltip: the inverse surface, 12 px text.
   --mat-tooltip-container-color: var(--pd-text);
   --mat-tooltip-supporting-text-color: var(--pd-surface-1);
@@ -254,7 +282,7 @@
   --mat-table-header-headline-font: var(--pd-font-sans);
   --mat-table-header-headline-size: var(--pd-text-label);
   --mat-table-header-headline-line-height: var(--pd-lh-label);
-  --mat-table-header-container-height: var(--pd-row-height);
+  --mat-table-header-container-height: var(--pd-control-height);
   --mat-table-row-item-label-text-color: var(--pd-text);
   --mat-table-row-item-label-text-font: var(--pd-font-sans);
   --mat-table-row-item-label-text-size: var(--pd-text-body);
@@ -441,13 +469,14 @@
 
   // ---- matButton, every variant (the user's decision 2026-10-28: matButton everywhere).
   // filled = primary (accent fill), outlined = secondary (surface-2 + strong border), text = ghost, tonal = accent tint,
-  // elevated ("protected") = a raised secondary. Danger is a class on any of them (below). Hover and press use the state layer
+  // elevated ("protected") = a raised secondary. Tonal and elevated are bridged so they do not fall back to Material's blue, but they
+  // are not part of the family's set (design guide, Material): an app uses filled, outlined, text and the danger class. Danger is a class on any of them (below). Hover and press use the state layer
   // (Material state layers in the text colour, close to the guide's 7 % hover mix); there is no ripple (see providePaddockMaterial).
   --mat-button-filled-container-color: var(--pd-accent-fill);
   --mat-button-filled-label-text-color: var(--pd-on-accent);
   --mat-button-filled-state-layer-color: var(--pd-on-accent);
   --mat-button-filled-ripple-color: transparent;
-  --mat-button-filled-disabled-container-color: var(--pd-surface-3);
+  --mat-button-filled-disabled-container-color: var(--pd-pressed);
   --mat-button-filled-disabled-label-text-color: var(--pd-text-subtle);
   --mat-button-filled-progress-active-indicator-color: var(--pd-on-accent);
   --mat-button-outlined-label-text-color: var(--pd-text);
@@ -464,7 +493,7 @@
   --mat-button-tonal-label-text-color: var(--pd-text);
   --mat-button-tonal-state-layer-color: var(--pd-text);
   --mat-button-tonal-ripple-color: transparent;
-  --mat-button-tonal-disabled-container-color: var(--pd-surface-3);
+  --mat-button-tonal-disabled-container-color: var(--pd-pressed);
   --mat-button-tonal-disabled-label-text-color: var(--pd-text-subtle);
   --mat-button-protected-container-color: var(--pd-surface-2);
   --mat-button-protected-label-text-color: var(--pd-text);
@@ -474,8 +503,13 @@
   --mat-button-protected-hover-container-elevation-shadow: var(--pd-shadow-2);
   --mat-button-protected-focus-container-elevation-shadow: var(--pd-shadow-1);
   --mat-button-protected-pressed-container-elevation-shadow: var(--pd-shadow-1);
-  --mat-button-protected-disabled-container-color: var(--pd-surface-3);
+  --mat-button-protected-disabled-container-color: var(--pd-pressed);
   --mat-button-protected-disabled-label-text-color: var(--pd-text-subtle);
+  --mat-button-filled-label-text-transform: none;
+  --mat-button-outlined-label-text-transform: none;
+  --mat-button-text-label-text-transform: none;
+  --mat-button-tonal-label-text-transform: none;
+  --mat-button-protected-label-text-transform: none;
   --mat-button-filled-container-height: var(--pd-button-height);
   --mat-button-outlined-container-height: var(--pd-button-height);
   --mat-button-text-container-height: var(--pd-button-height);
@@ -531,6 +565,8 @@
 .mat-mdc-slide-toggle {
   zoom: 0.75;
   --mat-slide-toggle-label-text-size: calc(var(--pd-text-body) / 0.75);
+  // The scale shrinks the ring too: widen it so it still draws 2 px on screen.
+  --mat-focus-indicator-border-width: calc(2px / 0.75);
 }
 
 // Icons in Material parts are the family's 16 px; a mat-icon in a button or a chip follows its parent.
@@ -550,17 +586,34 @@
   background: var(--pd-scrim);
 }
 
-.mat-mdc-select-panel,
-.mat-mdc-autocomplete-panel,
-.mat-mdc-menu-panel,
-.mat-datepicker-content {
+// Material's component CSS is injected after this sheet with the same specificity, so the rules below carry an `html` prefix
+// (one type selector more) to win whatever the order. Rendered sizes are asserted in e2e/material.spec.ts.
+html .mat-mdc-select-panel,
+html .mat-mdc-autocomplete-panel,
+html .mat-mdc-menu-panel,
+html .mat-datepicker-content,
+html .mat-timepicker-panel {
   border: 1px solid var(--pd-hairline);
+  border-radius: var(--pd-radius-popover);
   box-shadow: var(--pd-shadow-2);
 }
 
-// Options and menu items are 28 px rows with the 6 px radius of the shell's menus.
-.mat-mdc-option,
-.mat-mdc-menu-item {
+html div.mat-mdc-select-panel,
+html .mat-mdc-select-panel-above div.mat-mdc-select-panel {
+  border-radius: var(--pd-radius-popover);
+}
+
+// Panels pad 4 px (the shell's menus), options and menu items are 28 px rows with the 6 px radius.
+html .mat-mdc-menu-content,
+html div.mat-mdc-select-panel,
+html .mat-mdc-autocomplete-panel,
+html .mat-timepicker-panel {
+  padding-block: var(--pd-space-1);
+  padding-inline: var(--pd-space-1);
+}
+
+html .mat-mdc-option,
+html .mat-mdc-menu-item {
   min-height: var(--pd-control-height);
   border-radius: var(--pd-radius-control);
 }
@@ -575,7 +628,72 @@
   display: none;
 }
 
-// The keyboard ring is the global one; Material's own focus rings and state layers stay off.
-.mat-mdc-focus-indicator::before {
-  display: none;
+html .mat-calendar-period-button,
+html .mat-calendar-body-label {
+  text-transform: none;
+}
+
+// The slide toggle's label keeps a 8 px gap to the switch after the 0.75 scale.
+html .mat-mdc-slide-toggle .mdc-label {
+  padding-inline-start: calc(var(--pd-space-2) / 0.75);
+}
+
+// A field with the keyboard in it shows the family ring around the box (as pd-input does).
+html .mat-mdc-form-field:has(:focus-visible) .mat-mdc-text-field-wrapper {
+  outline: 2px solid var(--pd-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--pd-radius-input);
+}
+
+html .mat-mdc-form-field-hint {
+  color: var(--pd-text-muted);
+}
+
+// Outlined field: the input text is centred in the 28 px box, the floated label is the 12 px label size, and a suffix icon
+// (datepicker, timepicker) is a 16 px glyph with room from the border.
+html .mat-mdc-form-field .mat-mdc-form-field-infix {
+  display: flex;
+  align-items: center;
+  min-height: var(--pd-control-height);
+  padding-block: 0;
+}
+
+html .mat-mdc-form-field input.mat-mdc-input-element {
+  line-height: var(--pd-lh-body);
+  height: auto;
+  padding: 0;
+}
+
+html .mat-mdc-form-field .mat-mdc-form-field-icon-suffix {
+  padding-inline: var(--pd-space-1) var(--pd-space-2);
+}
+
+html .mat-mdc-form-field .mat-mdc-form-field-icon-suffix .mat-mdc-icon-button {
+  --mat-icon-button-state-layer-size: var(--pd-control-height);
+  --mat-icon-button-icon-size: var(--pd-space-4);
+  padding: 0;
+  width: var(--pd-control-height);
+  height: var(--pd-control-height);
+}
+
+// The selected button toggle is the segmented control's look (guide section 6): accent tint, a 1 px accent ring, 600 label.
+html .mat-button-toggle-checked {
+  box-shadow: inset 0 0 0 1px var(--pd-accent);
+}
+
+html .mat-button-toggle-checked .mat-button-toggle-label-content {
+  font-weight: var(--pd-weight-semibold);
+}
+
+// The snack bar action is a 600 label.
+html .mat-mdc-snack-bar-action {
+  font-weight: var(--pd-weight-semibold);
+}
+
+// ---- Keyboard focus (SC 2.4.7, 2.4.13). Material's strong focus indicator (mat.strong-focus-indicators in entry-material.scss)
+// draws a 2 px --pd-focus-ring border 2 px outside the control (each component offsets its own `.mat-focus-indicator` child); the slide toggle's track is ringed as well (its zoom thins
+// the indicator).
+html .mat-mdc-slide-toggle:has(.mdc-switch:focus-visible) .mdc-switch__track {
+  outline: calc(2px / 0.75) solid var(--pd-focus-ring);
+  outline-offset: 2px;
 }
