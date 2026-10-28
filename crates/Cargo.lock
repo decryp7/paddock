@@ -3287,7 +3287,6 @@ dependencies = [
 name = "paddock-dialogs"
 version = "0.2.0"
 dependencies = [
- "glob",
  "log",
  "objc2-app-kit",
  "paddock-commands",
@@ -3296,6 +3295,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-runtime",
+ "toml 0.9.12+spec-1.1.0",
  "ts-rs",
 ]
 

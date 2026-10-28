@@ -607,13 +607,16 @@ apps and the shared shell had it (ADR 0027 lists them); none showed with the moc
 actions) and an opaque background; C43 checks every instance and `expectHeaderOnTop` checks a grid at run time (ADR 0027,
 rule 40).
 
-
 ## 2026-10-29: a harness that stands in for a plugin must stand in for its routing and its ACL
 
 The ADR 0026 real-window probe ended "no report within 90s: the dialog page never became ready" on macOS, and it looked like
 a product fault (a hidden window that never readies). It was the harness: the page sends the shell's commands as
 `plugin:paddock-shell|dialog_take_input`, but the probe registered them as bare app commands and had no ACL, so Tauri
 refused every call ("paddock-shell.window_pong not allowed. Plugin not found") before the probe's handler saw it. The page
-booted fine (the DOM was there; the product's method d readied in about 10 ms once the calls arrived). **Rule:** a probe or
-test that replaces the app's plugin registers a plugin of the same name and an ACL for the windows under test, and prints
-every call it receives, with its time, and the calls seen when it gives up, so "refused" and "never made" are told apart.
+booted fine (the DOM was there, and the ready of ADR 0026 §4.2 took about 10 ms once the calls arrived). "Refused" was told
+from "never made" only by silence in the probe's own log, and confirmed by calling a command from the webview by hand; the
+probe could not tell them apart. **Rule (guidance):** a probe or test that replaces the app's plugin registers a plugin of
+the same name and an ACL resolved from the app's real capability file, so a wrong capability fails it; it prints every call
+it receives, with its time, and the calls seen when it gives up. A refusal itself shows only in the webview console or as a
+`RuntimeAuthority` check, so a harness that needs to name it asks the authority, not the log. C48 checks the capability file
+of every app on the shared shell.
