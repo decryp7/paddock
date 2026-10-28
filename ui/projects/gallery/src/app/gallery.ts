@@ -128,6 +128,9 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
             <button slot="action" type="button" class="gal-btn gal-btn--primary">Register runner</button>
           </pd-empty-state>
         </div>
+        <div class="gal-box" data-testid="empty-default">
+          <pd-empty-state heading="Nothing here yet" description="The default empty state draws the inbox glyph." />
+        </div>
       </section>
 
       <section class="gal-section" data-testid="error-state" aria-labelledby="h-error">
