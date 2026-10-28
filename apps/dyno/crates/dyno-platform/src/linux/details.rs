@@ -178,7 +178,7 @@ impl DetailsProbe for LinuxDetails {
 mod tests {
     use super::super::tools::fake::FakeTools;
     use super::*;
-    use dyno_core::process::{ProcessSample, RunState, SignatureInfo};
+    use dyno_core::process::{Measured, ProcessSample, RunState, SignatureInfo};
     use dyno_core::time::Timestamp;
     use std::os::unix::fs::symlink;
 
@@ -189,12 +189,12 @@ mod tests {
                 parent: None,
                 name: "x".into(),
                 exe: None,
-                user: None,
-                cpu: 0.0,
-                memory: 0,
-                disk_read_bps: 0.0,
-                disk_write_bps: 0.0,
-                started: Timestamp(0),
+                user: Measured::Value(String::new()),
+                cpu: Measured::Value(0.0),
+                memory: Measured::Value(0),
+                disk_read_bps: Measured::Value(0.0),
+                disk_write_bps: Measured::Value(0.0),
+                started: Measured::Value(Timestamp(0)),
                 state: RunState::Running,
             },
             command_line: vec![],
@@ -271,7 +271,7 @@ mod tests {
         p.enrich(
             ProcessRef {
                 pid: 4242,
-                started: Timestamp(0),
+                started: Some(Timestamp(0)),
             },
             Some(Path::new("/usr/bin/app")),
             &mut det,
@@ -321,7 +321,7 @@ mod tests {
         p.enrich(
             ProcessRef {
                 pid: 77,
-                started: Timestamp(0),
+                started: Some(Timestamp(0)),
             },
             None,
             &mut det,
@@ -339,7 +339,7 @@ mod tests {
         p.enrich(
             ProcessRef {
                 pid: 78,
-                started: Timestamp(0),
+                started: Some(Timestamp(0)),
             },
             None,
             &mut det,
@@ -364,7 +364,7 @@ mod tests {
         probe(d.path(), vec![], Arc::new(FakeTools::default())).enrich(
             ProcessRef {
                 pid: 9,
-                started: Timestamp(0),
+                started: Some(Timestamp(0)),
             },
             None,
             &mut det,
@@ -413,7 +413,7 @@ mod tests {
         p.enrich(
             ProcessRef {
                 pid: std::process::id(),
-                started: Timestamp(0),
+                started: Some(Timestamp(0)),
             },
             Some(&exe),
             &mut det,

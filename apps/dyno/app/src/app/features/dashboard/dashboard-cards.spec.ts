@@ -243,7 +243,7 @@ describe('TopApps', () => {
   it('lists at most seven apps with values and process counts, and opens one in the task manager', () => {
     const { mock, navigate } = env();
     const update = mock.liveUpdate('summary');
-    const many = Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, name: `App${i}`, exe: null, pids: i === 0 ? [1, 2, 3] : [i + 10], cpu: 90 - i * 10, memory: 1024 * 1024 * (i + 1), diskBps: 0 }));
+    const many = Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, name: `App${i}`, exe: null, pids: i === 0 ? [1, 2, 3] : [i + 10], cpu: { value: 90 - i * 10 }, memory: { value: 1024 * 1024 * (i + 1) }, diskBps: { value: 0 }, partial: false }));
     TestBed.inject(LiveStore).receive({ ...update, topCpu: many, topMemory: many });
     const f = TestBed.createComponent(TopApps);
     f.detectChanges();

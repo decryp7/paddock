@@ -3,9 +3,10 @@
 //! directory, and an OS-specific [`DetailsProbe`] adds priority, modules, connections, signature and so on.
 
 use crate::parse::time::{same_start, started_from_unix_secs};
+use crate::readability::{measure, Os, Owner, Raw};
 use crate::sensors::rate;
 use dyno_core::ports::{PlatformError, ProcessSource};
-use dyno_core::process::{ListOrReason, ParentLink, Pid, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo};
+use dyno_core::process::{ListOrReason, Measured, ParentLink, Pid, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo};
 use std::path::Path;
 use std::time::{Duration, Instant};
 use sysinfo::{CpuRefreshKind, Process, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System, UpdateKind, Users};
@@ -36,6 +37,7 @@ pub struct SysinfoProcesses {
     users_read: Instant,
     last: Option<Instant>,
     cores: f32,
+    own_uid: Option<sysinfo::Uid>,
     probe: Box<dyn DetailsProbe>,
 }
 
@@ -51,6 +53,7 @@ impl SysinfoProcesses {
             users_read: Instant::now(),
             last: None,
             cores,
+            own_uid: None,
             probe,
         }
     }
@@ -73,19 +76,41 @@ impl SysinfoProcesses {
             .or_else(|| well_known_account(&uid.to_string()).map(str::to_string))
     }
 
+    fn owner_of(&self, p: &Process) -> Owner {
+        match (p.user_id(), self.own_uid.as_ref()) {
+            (Some(u), Some(own)) => {
+                if u == own {
+                    Owner::Own
+                } else {
+                    Owner::Other
+                }
+            }
+            _ => Owner::Unknown,
+        }
+    }
+
     fn sample_of(&self, p: &Process, secs: f64) -> ProcessSample {
         let disk = p.disk_usage();
+        let raw = Raw {
+            cpu: normalise_cpu(p.cpu_usage(), self.cores),
+            memory: p.memory(),
+            disk_read: rate(disk.read_bytes, secs),
+            disk_write: rate(disk.written_bytes, secs),
+            start_secs: p.start_time(),
+            user: self.user_name(p),
+        };
+        let m = measure(Os::this(), self.owner_of(p), &raw, started_from_unix_secs);
         ProcessSample {
             pid: p.pid().as_u32(),
             parent: p.parent().map(|pp| pp.as_u32()),
             name: p.name().to_string_lossy().into_owned(),
             exe: p.exe().map(|e| e.to_string_lossy().into_owned()).filter(|e| !e.is_empty()),
-            user: self.user_name(p),
-            cpu: normalise_cpu(p.cpu_usage(), self.cores),
-            memory: p.memory(),
-            disk_read_bps: rate(disk.read_bytes, secs),
-            disk_write_bps: rate(disk.written_bytes, secs),
-            started: started_from_unix_secs(p.start_time()),
+            user: m.user,
+            cpu: m.cpu,
+            memory: m.memory,
+            disk_read_bps: m.disk_read,
+            disk_write_bps: m.disk_write,
+            started: m.started,
             state: run_state(p.status()),
         }
     }
@@ -131,6 +156,12 @@ impl ProcessSource for SysinfoProcesses {
             self.users.refresh();
             self.users_read = Instant::now();
         }
+        if self.own_uid.is_none() {
+            self.own_uid = sysinfo::get_current_pid()
+                .ok()
+                .and_then(|me| self.sys.process(me))
+                .and_then(|p| p.user_id().cloned());
+        }
         let mut out: Vec<ProcessSample> = self.sys.processes().values().map(|p| self.sample_of(p, secs)).collect();
         out.sort_by_key(|p| p.pid);
         out
@@ -148,12 +179,18 @@ impl ProcessSource for SysinfoProcesses {
         self.sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, kind);
         let p = self.sys.process(pid).ok_or_else(|| gone(target.pid))?;
         // sysinfo lists Linux threads as processes; a thread id is never a target.
-        if p.thread_kind().is_some() || !same_start(started_from_unix_secs(p.start_time()), target.started) {
+        if p.thread_kind().is_some()
+            || target
+                .started
+                .is_some_and(|t| !same_start(started_from_unix_secs(p.start_time()), t))
+        {
             return Err(gone(target.pid));
         }
         let mut sample = self.sample_of(p, 0.0);
         // Keep the last tick's rates rather than zeros.
-        sample.cpu = normalise_cpu(p.cpu_usage(), self.cores);
+        if sample.cpu.copied().is_some() {
+            sample.cpu = Measured::Value(normalise_cpu(p.cpu_usage(), self.cores));
+        }
         let exe = p.exe().map(Path::to_path_buf);
         let not_here = || "Not available on this OS".to_string();
         let mut details = ProcessDetails {
@@ -240,10 +277,10 @@ mod tests {
         assert!(first.len() > 3);
         let me = std::process::id();
         let mine = first.iter().find(|p| p.pid == me).expect("own process listed");
-        assert!(mine.started.0 > 0);
+        assert!(mine.started.copied().unwrap().0 > 0);
         assert!(mine.exe.is_some());
         let second = s.processes();
-        assert!(second.iter().all(|p| (0.0..=100.0).contains(&p.cpu)));
+        assert!(second.iter().all(|p| p.cpu.copied().is_none_or(|c| (0.0..=100.0).contains(&c))));
         let d = s.details(mine.reference()).unwrap();
         assert_eq!(d.process.pid, me);
         assert!(!d.command_line.is_empty());
@@ -251,12 +288,12 @@ mod tests {
         // A reused pid (another start time) is not this process.
         let wrong = ProcessRef {
             pid: me,
-            started: mine.started.plus(60_000),
+            started: mine.started.copied().map(|t| t.plus(60_000)),
         };
         assert!(matches!(s.details(wrong), Err(PlatformError::NotFound(_))));
         let missing = ProcessRef {
             pid: u32::MAX - 7,
-            started: mine.started,
+            started: mine.started.copied(),
         };
         assert!(matches!(s.details(missing), Err(PlatformError::NotFound(_))));
     }

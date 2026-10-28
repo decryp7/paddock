@@ -15,7 +15,7 @@ use crate::Platform;
 use dyno_core::facts::SystemFacts;
 use dyno_core::metrics::{CpuSample, DiskIo, MemoryPressure, MemorySample, Reading, SystemSample};
 use dyno_core::ports::{FactsSource, FileLocks, NetworkLinks, PlatformError, ProcessSource, StartupItems, SystemSensors, UserActivity};
-use dyno_core::process::{ListOrReason, Locker, Pid, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo};
+use dyno_core::process::{ListOrReason, Locker, Measured, Pid, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo};
 use dyno_core::startup::StartupEntry;
 use dyno_core::time::Timestamp;
 use std::collections::{HashMap, VecDeque};
@@ -264,12 +264,12 @@ pub fn process(pid: Pid, name: &str, cpu: f32) -> ProcessSample {
         parent: None,
         name: name.into(),
         exe: Some(format!("C:\\Fake\\{name}")),
-        user: Some("tester".into()),
-        cpu,
-        memory: 100 << 20,
-        disk_read_bps: 0.0,
-        disk_write_bps: 0.0,
-        started: Timestamp(i64::from(pid) * 1000),
+        user: Measured::Value("tester".into()),
+        cpu: Measured::Value(cpu),
+        memory: Measured::Value(100 << 20),
+        disk_read_bps: Measured::Value(0.0),
+        disk_write_bps: Measured::Value(0.0),
+        started: Measured::Value(Timestamp(i64::from(pid) * 1000)),
         state: RunState::Running,
     }
 }

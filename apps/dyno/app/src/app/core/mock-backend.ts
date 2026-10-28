@@ -1,3 +1,5 @@
+import type { Measured } from './api.types';
+import { readValue } from './measured';
 import type {
   Alarm,
   AlarmChange,
@@ -165,6 +167,9 @@ export function applyMockPlatform(search: string, root: HTMLElement): void {
  * build`. Live values are a deterministic function of the clock; the few requests that change anything (settings,
  * snapshots, benchmarks) change the mock's state so those flows can be exercised. It mimics the contract; it is never the reference for behaviour.
  */
+/** A mock reading as a plain number: the mock reads everything. */
+const num = (m: Measured<number>): number => readValue(m) ?? 0;
+
 export class MockBackend implements DynoBackend {
   private readonly machine: MockMachine;
   private readonly latencyMs: number;
@@ -287,8 +292,8 @@ export class MockBackend implements DynoBackend {
     const samples = this.samplesAt(t);
     const groups = groupSamples(this.processes, samples);
     const system = this.system(t, samples);
-    const byCpu = [...groups].sort((a, b) => b.cpu - a.cpu).slice(0, 8);
-    const byMemory = [...groups].sort((a, b) => b.memory - a.memory).slice(0, 8);
+    const byCpu = [...groups].sort((a, b) => num(b.cpu) - num(a.cpu)).slice(0, 8);
+    const byMemory = [...groups].sort((a, b) => num(b.memory) - num(a.memory)).slice(0, 8);
     return {
       system,
       pressure: system.memory.used / system.memory.total > 0.85 ? 'critical' : system.memory.used / system.memory.total > 0.7 ? 'elevated' : 'normal',
@@ -310,7 +315,7 @@ export class MockBackend implements DynoBackend {
   }
 
   private system(t: number, samples: ProcessSample[]): SystemSample {
-    const processCpu = samples.reduce((a, s) => a + s.cpu, 0);
+    const processCpu = samples.reduce((a, s) => a + num(s.cpu), 0);
     const total = clamp(processCpu + 1.4 + 0.6 * wobble(t, 500, 3), 0, 100);
     const perCore = Array.from({ length: this.profile.cores }, (_, i) => {
       const weight = this.kinds[i] === 'efficiency' ? 0.5 : this.kinds[i] === 'performance' ? 1.2 : 1;
@@ -325,10 +330,10 @@ export class MockBackend implements DynoBackend {
     const memTotal = this.profile.memoryTotal;
     // A slow swell on top of the processes' own memory (caches, compression) so the live line moves like a real machine's.
     const swell = (0.8 + 0.7 * wobble(t, 810, 22)) * GB + 0.18 * GB * wobble(t, 811, 3);
-    const memUsed = Math.min(memTotal - 1.2 * GB, samples.reduce((a, s) => a + s.memory, 0) + 2.9 * GB + swell);
-    const diskRead = samples.reduce((a, s) => a + s.diskReadBps, 0);
-    const diskWrite = samples.reduce((a, s) => a + s.diskWriteBps, 0);
-    const building = samples.some((s) => s.name === this.profile.names.rustc && s.cpu > 1);
+    const memUsed = Math.min(memTotal - 1.2 * GB, samples.reduce((a, s) => a + num(s.memory), 0) + 2.9 * GB + swell);
+    const diskRead = samples.reduce((a, s) => a + num(s.diskReadBps), 0);
+    const diskWrite = samples.reduce((a, s) => a + num(s.diskWriteBps), 0);
+    const building = samples.some((s) => s.name === this.profile.names.rustc && num(s.cpu) > 1);
     const laptop = this.machine === 'laptop';
     return {
       at: t * 1000,
@@ -521,7 +526,7 @@ export class MockBackend implements DynoBackend {
       const summary = (s: ProcessSample) => ({ pid: s.pid, name: s.name, exe: s.exe, cpu: s.cpu, memory: s.memory });
       const changed = y
         .filter((s) => xs.has(s.pid))
-        .map((s) => ({ pid: s.pid, name: s.name, cpuBefore: xs.get(s.pid)!.cpu, cpuAfter: s.cpu, memoryBefore: xs.get(s.pid)!.memory, memoryAfter: s.memory }))
+        .map((s) => ({ pid: s.pid, name: s.name, cpuBefore: num(xs.get(s.pid)!.cpu), cpuAfter: num(s.cpu), memoryBefore: num(xs.get(s.pid)!.memory), memoryAfter: num(s.memory) }))
         .filter((c) => Math.abs(c.memoryAfter - c.memoryBefore) >= 10 * MB || Math.abs(c.cpuAfter - c.cpuBefore) >= 5)
         .sort((p, q) => Math.abs(q.memoryAfter - q.memoryBefore) - Math.abs(p.memoryAfter - p.memoryBefore));
       const sum = (l: ProcessSample[], f: (s: ProcessSample) => number) => l.reduce((acc, s) => acc + f(s), 0);
@@ -531,8 +536,8 @@ export class MockBackend implements DynoBackend {
         added: y.filter((s) => !xs.has(s.pid)).map(summary),
         removed: x.filter((s) => !ys.has(s.pid)).map(summary),
         changed,
-        memoryUsedDelta: Math.round(sum(y, (s) => s.memory) - sum(x, (s) => s.memory)),
-        cpuDelta: round(sum(y, (s) => s.cpu) - sum(x, (s) => s.cpu), 1),
+        memoryUsedDelta: Math.round(sum(y, (s) => num(s.memory)) - sum(x, (s) => num(s.memory))),
+        cpuDelta: round(sum(y, (s) => num(s.cpu)) - sum(x, (s) => num(s.cpu)), 1),
       };
     });
   }
@@ -545,7 +550,7 @@ export class MockBackend implements DynoBackend {
       const t = Math.floor(now / 1000);
       const samples = this.samplesAt(t);
       const rustc = samples.filter((s) => s.name === this.profile.names.rustc);
-      const rustcCpu = rustc.reduce((a, s) => a + s.cpu, 0);
+      const rustcCpu = rustc.reduce((a, s) => a + num(s.cpu), 0);
       const io = this.system(t, samples).diskIo;
       const queue = 'available' in io.queue ? io.queue.available : 0;
       if (rustc.length === 0 || rustcCpu < 5) {

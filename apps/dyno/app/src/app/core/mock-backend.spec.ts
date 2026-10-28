@@ -1,10 +1,11 @@
+import { readValue } from './measured';
 import type { Alert, ProcessSample } from './api.types';
 import { MockBackend, type MockOptions, applyMockPlatform, mockOptionsFromUrl } from './mock-backend';
 
 const NOW = 1_700_000_000_000;
 const make = (o: MockOptions = {}) => new MockBackend({ latencyMs: 0, now: () => NOW, ...o });
 const proc = (b: MockBackend, name: string): ProcessSample => b.liveUpdate('processes').processes!.find((p) => p.name === name)!;
-const ref = (p: ProcessSample) => ({ pid: p.pid, started: p.started });
+const ref = (p: ProcessSample) => ({ pid: p.pid, started: readValue(p.started) });
 
 describe('mockOptionsFromUrl', () => {
   it('defaults to a macOS laptop with latency', () => {

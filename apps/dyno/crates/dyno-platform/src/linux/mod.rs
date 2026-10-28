@@ -68,8 +68,7 @@ mod tests {
 
     #[test]
     fn the_linux_platform_runs_end_to_end_on_this_machine() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut p = platform(dir.path().join("state.json"));
+        let mut p = platform();
         let _ = p.sensors.sample(Timestamp(1));
         let s = p.sensors.sample(Timestamp(2));
         assert!(s.memory.total > 0);
@@ -94,7 +93,7 @@ mod tests {
         let tid = *tids.iter().find(|t| **t != std::process::id()).unwrap();
         let as_thread = dyno_core::process::ProcessRef {
             pid: tid,
-            started: me.started,
+            started: me.started.copied(),
         };
         assert!(p.processes.details(as_thread).is_err(), "details of a thread id must be refused");
         let facts = p.facts.facts();

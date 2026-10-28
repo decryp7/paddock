@@ -225,6 +225,7 @@ pub fn run(shared: &Shared) {
 mod tests {
     use super::*;
     use dyno_core::process::RunState;
+    use dyno_core::process::{Measured, UnavailableReason};
     use dyno_core::time::Timestamp;
 
     fn p(pid: u32, parent: Option<u32>, name: &str, exe: &str) -> ProcessSample {
@@ -233,12 +234,12 @@ mod tests {
             parent,
             name: name.into(),
             exe: Some(exe.into()),
-            user: None,
-            cpu: 0.0,
-            memory: 0,
-            disk_read_bps: 0.0,
-            disk_write_bps: 0.0,
-            started: Timestamp(0),
+            user: Measured::unavailable(UnavailableReason::NotPermitted),
+            cpu: Measured::Value(0.0),
+            memory: Measured::Value(0),
+            disk_read_bps: Measured::Value(0.0),
+            disk_write_bps: Measured::Value(0.0),
+            started: Measured::Value(Timestamp(0)),
             state: RunState::Running,
         }
     }

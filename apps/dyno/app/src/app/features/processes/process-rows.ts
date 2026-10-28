@@ -1,4 +1,5 @@
-import type { AppGroup, ProcessRef, ProcessSample } from '../../core/api.types';
+import type { AppGroup, Measured, ProcessRef, ProcessSample } from '../../core/api.types';
+import { readValue, unavailableText } from '../../core/measured';
 
 export type ViewMode = 'groups' | 'tree' | 'flat';
 export type SortKey = 'name' | 'cpu' | 'memory' | 'disk' | 'user' | 'pid';
@@ -15,9 +16,14 @@ export interface Row {
   name: string;
   /** Processes in a group (1 for a process). */
   count: number;
-  cpu: number;
-  memory: number;
-  disk: number;
+  /** `null` when the value could not be read (never `0`): see `unavailable`. */
+  cpu: number | null;
+  memory: number | null;
+  disk: number | null;
+  /** Per column, why the value is unavailable (tooltip and aria text), or null when it was read. */
+  unavailable: Record<'cpu' | 'memory' | 'disk', string | null>;
+  /** Some members' values could not be read, so the group's sums are lower than the real totals. */
+  partial: boolean;
   user: string | null;
   pid: number | null;
   ref: ProcessRef | null;
@@ -27,23 +33,41 @@ export interface Row {
   suspended: boolean;
 }
 
-const disk = (p: ProcessSample) => p.diskReadBps + p.diskWriteBps;
+/** Disk read plus write of a process; the readable half alone when the other could not be read. */
+function diskOf(p: ProcessSample): Measured<number> {
+  const r = readValue(p.diskReadBps);
+  const w = readValue(p.diskWriteBps);
+  if (r === null && w === null) return p.diskReadBps;
+  return { value: (r ?? 0) + (w ?? 0) };
+}
 
-function value(r: Pick<Row, SortKey>, key: SortKey): string | number {
+const unavailableOf = (cpu: Measured<number>, memory: Measured<number>, disk: Measured<number>): Row['unavailable'] => ({
+  cpu: unavailableText(cpu),
+  memory: unavailableText(memory),
+  disk: unavailableText(disk),
+});
+
+function value(r: Pick<Row, SortKey>, key: SortKey): string | number | null {
   switch (key) {
     case 'name':
       return r.name.toLowerCase();
     case 'user':
       return (r.user ?? '').toLowerCase();
+    case 'pid':
+      return r.pid ?? 0;
     default:
-      return r[key] ?? 0;
+      return r[key];
   }
 }
 
-/** Orders rows by `sort`; ties by name so the order is stable while values wobble. */
+/** Orders rows by `sort`; rows whose value is unavailable go last in either direction; ties by name so the order is stable. */
 export function compareRows(a: Row, b: Row, sort: Sort): number {
   const x = value(a, sort.key);
   const y = value(b, sort.key);
+  if (x === null || y === null) {
+    if (x === y) return a.name.localeCompare(b.name) || (a.pid ?? 0) - (b.pid ?? 0);
+    return x === null ? 1 : -1;
+  }
   const c = x < y ? -1 : x > y ? 1 : 0;
   return (sort.dir === 'asc' ? c : -c) || a.name.localeCompare(b.name) || (a.pid ?? 0) - (b.pid ?? 0);
 }
@@ -55,12 +79,14 @@ function processRow(p: ProcessSample, depth: number, expandable = false, expande
     depth,
     name: p.name,
     count: 1,
-    cpu: p.cpu,
-    memory: p.memory,
-    disk: disk(p),
-    user: p.user,
+    cpu: readValue(p.cpu),
+    memory: readValue(p.memory),
+    disk: readValue(diskOf(p)),
+    unavailable: unavailableOf(p.cpu, p.memory, diskOf(p)),
+    partial: false,
+    user: readValue(p.user),
     pid: p.pid,
-    ref: { pid: p.pid, started: p.started },
+    ref: { pid: p.pid, started: readValue(p.started) },
     groupId: null,
     expandable,
     expanded,
@@ -72,7 +98,7 @@ function processRow(p: ProcessSample, depth: number, expandable = false, expande
 export function matches(p: ProcessSample, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  return p.name.toLowerCase().includes(q) || (p.user ?? '').toLowerCase().includes(q) || String(p.pid) === q || (p.exe ?? '').toLowerCase().includes(q);
+  return p.name.toLowerCase().includes(q) || (readValue(p.user) ?? '').toLowerCase().includes(q) || String(p.pid) === q || (p.exe ?? '').toLowerCase().includes(q);
 }
 
 export interface RowInput {
@@ -106,10 +132,12 @@ export function buildRows(input: RowInput): Row[] {
         depth: 0,
         name: g.name,
         count: g.pids.length,
-        cpu: g.cpu,
-        memory: g.memory,
-        disk: g.diskBps,
-        user: members.length === 1 ? members[0]!.user : null,
+        cpu: readValue(g.cpu),
+        memory: readValue(g.memory),
+        disk: readValue(g.diskBps),
+        unavailable: unavailableOf(g.cpu, g.memory, g.diskBps),
+        partial: g.partial,
+        user: members.length === 1 ? readValue(members[0]!.user) : null,
         pid: null,
         ref: null,
         groupId: g.id,

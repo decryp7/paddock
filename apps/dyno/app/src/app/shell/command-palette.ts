@@ -3,6 +3,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signa
 import { Router } from '@angular/router';
 import type { AppGroup } from '../core/api.types';
 import { BACKEND } from '../core/backend';
+import { readValue } from '../core/measured';
 import { PlatformService } from '../core/platform';
 import { formatBytes, formatPercent } from '../shared/format';
 import { Icon } from '../shared/icon';
@@ -155,12 +156,12 @@ export class CommandPalette {
       },
     ];
     const apps: PaletteItem[] = [...this.groups()]
-      .sort((a, b) => b.cpu - a.cpu)
+      .sort((a, b) => (readValue(b.cpu) ?? -1) - (readValue(a.cpu) ?? -1))
       .map((g) => ({
         id: `app-${g.id}`,
         section: 'Apps',
         label: g.pids.length > 1 ? `${g.name} · ${g.pids.length}` : g.name,
-        hint: `${formatPercent(g.cpu)} · ${formatBytes(g.memory)}`,
+        hint: `${formatPercent(readValue(g.cpu))} · ${formatBytes(readValue(g.memory))}`,
         icon: 'processes',
         keywords: g.exe?.split('\\').pop() ?? '',
         run: () => void this.router.navigate(['/processes'], { queryParams: { q: g.name } }),

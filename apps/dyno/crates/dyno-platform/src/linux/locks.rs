@@ -94,7 +94,7 @@ impl FileLocks for LinuxLocks {
                 .map(|c| c.trim().to_string())
                 .filter(|c| !c.is_empty());
             out.push(Locker {
-                process: ProcessRef { pid, started },
+                process: ProcessRef { pid, started: Some(started) },
                 name: name.unwrap_or_else(|| format!("Process {pid}")),
                 kind: Some(kind(&f)),
             });

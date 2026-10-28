@@ -108,9 +108,27 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                     <span class="badge" data-tone="warn">Suspended</span>
                   }
                 </span>
-                <span role="gridcell" class="r num heat" [style.background]="bar(r.cpu, 40, sortKey() === 'cpu')">{{ pct(r.cpu) }}</span>
-                <span role="gridcell" class="r num heat" [style.background]="bar(r.memory, 2147483648, sortKey() === 'memory')">{{ bytes(r.memory) }}</span>
-                <span role="gridcell" class="r num heat" [style.background]="bar(r.disk, 52428800, sortKey() === 'disk')">{{ rate(r.disk) }}</span>
+                <span role="gridcell" class="r num heat" [style.background]="bar(r.cpu ?? 0, 40, sortKey() === 'cpu')">
+                  @if (r.cpu === null) {
+                    <span class="na" [title]="r.unavailable.cpu" [attr.aria-label]="r.unavailable.cpu">Unavailable</span>
+                  } @else {
+                    <span [title]="r.partial ? 'Partial: some values could not be read' : ''">{{ pct(r.cpu) }}{{ r.partial ? ' (partial)' : '' }}</span>
+                  }
+                </span>
+                <span role="gridcell" class="r num heat" [style.background]="bar(r.memory ?? 0, 2147483648, sortKey() === 'memory')">
+                  @if (r.memory === null) {
+                    <span class="na" [title]="r.unavailable.memory" [attr.aria-label]="r.unavailable.memory">Unavailable</span>
+                  } @else {
+                    <span [title]="r.partial ? 'Partial: some values could not be read' : ''">{{ bytes(r.memory) }}{{ r.partial ? ' (partial)' : '' }}</span>
+                  }
+                </span>
+                <span role="gridcell" class="r num heat" [style.background]="bar(r.disk ?? 0, 52428800, sortKey() === 'disk')">
+                  @if (r.disk === null) {
+                    <span class="na" [title]="r.unavailable.disk" [attr.aria-label]="r.unavailable.disk">Unavailable</span>
+                  } @else {
+                    <span [title]="r.partial ? 'Partial: some values could not be read' : ''">{{ rate(r.disk) }}{{ r.partial ? ' (partial)' : '' }}</span>
+                  }
+                </span>
                 <span role="gridcell" class="truncate faint">{{ r.user ?? '' }}</span>
                 <span role="gridcell" class="r num faint">{{ pid(r) }}</span>
                 <span role="gridcell" class="act">
@@ -177,6 +195,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
     .chev dy-icon { --icon-size: 14px; } .chev-space { width: 18px; flex: none; }
     .heat { border-radius: 0; }
     .faint { color: var(--text-3); }
+    .na { color: var(--text-3); font-style: italic; }
     .act { padding: 0 !important; display: grid; place-items: center; }
     .skeletons { display: grid; gap: var(--sp-2); padding: var(--sp-4); } .skeleton { height: 20px; }
     .empty { display: grid; justify-items: center; gap: var(--sp-2); padding: var(--sp-10); color: var(--text-2); }

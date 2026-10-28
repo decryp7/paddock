@@ -1,3 +1,4 @@
+import { showMeasured } from '../../core/measured';
 import { DOCUMENT } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject } from '@angular/core';
 import { MatTooltip } from '@angular/material/tooltip';
@@ -61,7 +62,7 @@ import { SettingsStore } from '../../state/settings.store';
           <span class="eyebrow">Top apps by CPU</span>
           <ol>
             @for (g of top(); track g.id) {
-              <li><span class="truncate">{{ g.name }}</span><span class="num">{{ pct(g.cpu) }}</span><span class="num faint">{{ bytes(g.memory) }}</span></li>
+              <li><span class="truncate">{{ g.name }}</span><span class="num">{{ show(g.cpu, pct) }}</span><span class="num faint">{{ show(g.memory, bytes) }}</span></li>
             } @empty {
               <li class="faint">Waiting for the first reading…</li>
             }
@@ -119,6 +120,7 @@ export class Tray implements OnInit, OnDestroy {
   private readonly root = inject(DOCUMENT).documentElement;
 
   protected readonly pct = formatPercent;
+  protected readonly show = showMeasured;
   protected readonly rate = formatRate;
   protected readonly bytes = formatBytes;
   protected readonly score = (v: number) => Math.round(v).toString();

@@ -282,7 +282,7 @@ impl TrayItems {
             }),
             Metric::Battery => s.battery.value().map(|b| percent(b.charge)),
             Metric::Process(name) => Some(percent(
-                u.top_cpu.iter().find(|g| g.name.eq_ignore_ascii_case(name)).map_or(0.0, |g| g.cpu),
+                u.top_cpu.iter().find(|g| g.name.eq_ignore_ascii_case(name)).map_or(0.0, |g| g.cpu_read()),
             )),
             Metric::Fan | Metric::PerfCounter(_) => None,
         }
@@ -563,9 +563,10 @@ mod tests {
             name: "Chrome".into(),
             exe: None,
             pids: vec![],
-            cpu: 33.0,
-            memory: 0,
-            disk_bps: 0.0,
+            cpu: dyno_core::process::Measured::Value(33.0),
+            memory: dyno_core::process::Measured::Value(0),
+            disk_bps: dyno_core::process::Measured::Value(0.0),
+            partial: false,
         }];
         let mut m = TrayItems::new(vec![item("p", Metric::Process("chrome".into()), Glyph::Number)], 32);
         assert!(m.frames(&u, true)[0].1.tooltip.contains("chrome 33%"));

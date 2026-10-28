@@ -267,13 +267,13 @@ pub fn diagnose(input: &Input<'_>) -> Diagnosis {
 
 fn cpu_causes(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &mut Vec<Cause>) {
     let total = avg(input.samples, |s| s.cpu.total);
-    let Some(top) = input.groups.iter().max_by(|a, b| a.cpu.total_cmp(&b.cpu)) else {
+    let Some(top) = input.groups.iter().max_by(|a, b| a.cpu_read().total_cmp(&b.cpu_read())) else {
         return;
     };
-    if total < 50.0 || top.cpu < 20.0 {
+    if total < 50.0 || top.cpu_read() < 20.0 {
         return;
     }
-    let confidence = ((total - 40.0) / 50.0).clamp(0.0, 1.0) * (top.cpu / 50.0).clamp(0.2, 1.0);
+    let confidence = ((total - 40.0) / 50.0).clamp(0.0, 1.0) * (top.cpu_read() / 50.0).clamp(0.2, 1.0);
     let mut evidence = vec![
         Evidence::new("CPU (last minute)", pct(total)),
         Evidence::new(
@@ -283,16 +283,16 @@ fn cpu_causes(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &mu
                 top.pids.len(),
                 if top.pids.len() == 1 { "" } else { "es" }
             ),
-            pct(top.cpu),
+            pct(top.cpu_read()),
         ),
     ];
     if let Some(second) = input
         .groups
         .iter()
         .filter(|g| g.id != top.id)
-        .max_by(|a, b| a.cpu.total_cmp(&b.cpu))
+        .max_by(|a, b| a.cpu_read().total_cmp(&b.cpu_read()))
     {
-        evidence.push(Evidence::new(format!("Next: {}", second.name), pct(second.cpu)));
+        evidence.push(Evidence::new(format!("Next: {}", second.name), pct(second.cpu_read())));
     }
     let (kind, title, explanation, mut hints) = match app_kind(top, by_pid) {
         Some(CauseKind::OsUpdate) => (
@@ -322,7 +322,7 @@ fn cpu_causes(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &mu
         ),
         _ => (
             CauseKind::CpuHog,
-            format!("{} is using {} of your CPU", top.name, pct(top.cpu)),
+            format!("{} is using {} of your CPU", top.name, pct(top.cpu_read())),
             format!(
                 "{} takes most of the processor, so everything else waits. Closing it or giving it less to do keeps the rest \
                  responsive.",
@@ -339,7 +339,7 @@ fn cpu_causes(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &mu
         confidence,
         evidence,
         hints,
-        involved: involved(input.groups, |g| g.cpu, |v| format!("{} CPU", pct(v))),
+        involved: involved(input.groups, |g| g.cpu_read(), |v| format!("{} CPU", pct(v))),
     });
 }
 
@@ -367,8 +367,8 @@ fn memory_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
         evidence.push(Evidence::new("Swap / page file in use", bytes(last.memory.swap_used)));
     }
     let mut hints = vec![];
-    if let Some(top) = input.groups.iter().max_by_key(|g| g.memory) {
-        evidence.push(Evidence::new(format!("Biggest: {}", top.name), bytes(top.memory)));
+    if let Some(top) = input.groups.iter().max_by_key(|g| g.memory_read()) {
+        evidence.push(Evidence::new(format!("Biggest: {}", top.name), bytes(top.memory_read())));
     }
     hints.push(Hint::open("Open the task manager", HintLink::TaskManager));
     out.push(Cause {
@@ -384,7 +384,7 @@ fn memory_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
         confidence,
         evidence,
         hints,
-        involved: involved(input.groups, |g| g.memory as f32, |v| bytes(v as u64)),
+        involved: involved(input.groups, |g| g.memory_read() as f32, |v| bytes(v as u64)),
     });
 }
 
@@ -405,12 +405,12 @@ fn disk_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
     if let Some(top) = input
         .groups
         .iter()
-        .filter(|g| g.disk_bps > 0.0)
-        .max_by(|a, b| a.disk_bps.total_cmp(&b.disk_bps))
+        .filter(|g| g.disk_read() > 0.0)
+        .max_by(|a, b| a.disk_read().total_cmp(&b.disk_read()))
     {
         evidence.push(Evidence::new(
             format!("Busiest: {}", top.name),
-            format!("{}/s", bytes(top.disk_bps as u64)),
+            format!("{}/s", bytes(top.disk_read() as u64)),
         ));
     }
     out.push(Cause {
@@ -422,7 +422,7 @@ fn disk_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
         confidence,
         evidence,
         hints: vec![Hint::open("Open the task manager", HintLink::TaskManager)],
-        involved: involved(input.groups, |g| g.disk_bps as f32, |v| format!("{}/s", bytes(v as u64))),
+        involved: involved(input.groups, |g| g.disk_read() as f32, |v| format!("{}/s", bytes(v as u64))),
     });
 }
 
@@ -651,7 +651,7 @@ mod tests {
             s.disk_io.queue = Reading::Available(4.2);
             s.disk_io.busy = Reading::Available(99.0);
         });
-        c.procs[0].disk_write_bps = 50e6;
+        c.procs[0].disk_write_bps = crate::process::Measured::Value(50e6);
         let d = c.run();
         assert_eq!(d.causes[0].kind, CauseKind::DiskQueue);
         assert!(d.causes[0].evidence.iter().any(|e| e.label == "Busiest: Google Chrome"));

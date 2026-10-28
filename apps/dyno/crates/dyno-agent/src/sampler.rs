@@ -145,8 +145,8 @@ impl Sampler {
     /// Own CPU as a share of one core, and resident memory, from the process table.
     fn measure_self(&mut self, procs: &[ProcessSample], cores: usize) {
         if let Some(me) = procs.iter().find(|p| p.pid == std::process::id()) {
-            self.own_cpu = me.cpu * cores as f32;
-            self.own_memory = me.memory;
+            self.own_cpu = me.cpu.copied().unwrap_or(0.0) * cores as f32;
+            self.own_memory = me.memory.copied().unwrap_or(0);
         }
     }
 
@@ -217,8 +217,8 @@ impl Sampler {
         let live = LiveUpdate {
             system: sample.clone(),
             pressure,
-            top_cpu: top(&core.latest.groups, |g| f64::from(g.cpu)),
-            top_memory: top(&core.latest.groups, |g| g.memory as f64),
+            top_cpu: top(&core.latest.groups, |g| f64::from(g.cpu_read())),
+            top_memory: top(&core.latest.groups, |g| g.memory_read() as f64),
             overhead,
             processes: Some(core.latest.processes.clone()),
             groups: Some(core.latest.groups.clone()),

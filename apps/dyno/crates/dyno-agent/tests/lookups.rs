@@ -136,7 +136,7 @@ fn a_file_hash_is_computed_here_and_the_virustotal_address_holds_only_the_hash()
     // A process that is not running (a reused pid) is not found.
     let gone = ProcessRef {
         pid: 100,
-        started: Timestamp(1),
+        started: Some(Timestamp(1)),
     };
     assert!(ask(
         &peer,

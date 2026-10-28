@@ -173,9 +173,9 @@ pub fn top_rows(u: &LiveUpdate, by: TopBy, count: usize) -> Vec<TopJson> {
         .map(|g| TopJson {
             name: g.name.clone(),
             processes: g.pids.len(),
-            cpu_percent: g.cpu,
-            memory_bytes: g.memory,
-            disk_bps: g.disk_bps,
+            cpu_percent: g.cpu_read(),
+            memory_bytes: g.memory_read(),
+            disk_bps: g.disk_read(),
         })
         .collect()
 }
@@ -331,9 +331,10 @@ mod tests {
                 name: "Compiler".into(),
                 exe: None,
                 pids: vec![1, 2],
-                cpu: 40.0,
-                memory: 1 << 30,
-                disk_bps: 0.0,
+                cpu: dyno_core::process::Measured::Value(40.0),
+                memory: dyno_core::process::Measured::Value(1 << 30),
+                disk_bps: dyno_core::process::Measured::Value(0.0),
+                partial: false,
             }],
             top_memory: vec![],
             overhead: Overhead::default(),

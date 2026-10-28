@@ -1,3 +1,4 @@
+import { readValue } from '../core/measured';
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../core/backend';
 import { MockBackend } from '../core/mock-backend';
@@ -130,7 +131,7 @@ describe('ProcessesStore: selection', () => {
     const { mock, store } = setup();
     feed(mock, store);
     const p = mock.liveUpdate('processes').processes![0]!;
-    const promise = store.select({ pid: p.pid, started: p.started });
+    const promise = store.select({ pid: p.pid, started: readValue(p.started) });
     expect(store.detailsLoading()).toBe(true);
     expect(store.details()).toBeNull();
     await promise;
@@ -140,7 +141,7 @@ describe('ProcessesStore: selection', () => {
   it('select(null) clears everything', async () => {
     const { mock, store } = setup();
     const p = mock.liveUpdate('processes').processes![0]!;
-    await store.select({ pid: p.pid, started: p.started });
+    await store.select({ pid: p.pid, started: readValue(p.started) });
     await store.select(null);
     expect(store.selected()).toBeNull();
     expect(store.details()).toBeNull();
@@ -158,9 +159,9 @@ describe('ProcessesStore: selection', () => {
     const real = mock.processDetails.bind(mock);
     let release!: (d: ProcessDetails) => void;
     vi.spyOn(mock, 'processDetails').mockImplementationOnce(() => new Promise((r) => (release = r))).mockImplementation(real);
-    const first = store.select({ pid: a!.pid, started: a!.started });
-    await store.select({ pid: b!.pid, started: b!.started });
-    release(await real({ pid: a!.pid, started: a!.started }));
+    const first = store.select({ pid: a!.pid, started: readValue(a!.started) });
+    await store.select({ pid: b!.pid, started: readValue(b!.started) });
+    release(await real({ pid: a!.pid, started: readValue(a!.started) }));
     await first;
     expect(store.details()?.process.pid).toBe(b!.pid);
   });
@@ -169,8 +170,8 @@ describe('ProcessesStore: selection', () => {
     const [a, b] = mock.liveUpdate('processes').processes!;
     let fail!: (e: unknown) => void;
     vi.spyOn(mock, 'processDetails').mockImplementationOnce(() => new Promise((_r, rej) => (fail = rej)));
-    const first = store.select({ pid: a!.pid, started: a!.started });
-    await store.select({ pid: b!.pid, started: b!.started });
+    const first = store.select({ pid: a!.pid, started: readValue(a!.started) });
+    await store.select({ pid: b!.pid, started: readValue(b!.started) });
     fail({ code: 'internal', message: 'late' });
     await first;
     expect(store.detailsError()).toBeNull();
@@ -202,10 +203,10 @@ describe('ProcessesStore: requests', () => {
     const { mock, store } = setup();
     const p = mock.liveUpdate('processes').processes!;
     const withExe = p.find((x) => x.exe)!;
-    await store.openLocation({ pid: withExe.pid, started: withExe.started });
+    await store.openLocation({ pid: withExe.pid, started: readValue(withExe.started) });
     expect(store.actionError()).toBeNull();
     const kernel = p.find((x) => !x.exe)!;
-    await store.openLocation({ pid: kernel.pid, started: kernel.started });
+    await store.openLocation({ pid: kernel.pid, started: readValue(kernel.started) });
     expect(store.actionError()?.code).toBe('unsupported');
   });
 });

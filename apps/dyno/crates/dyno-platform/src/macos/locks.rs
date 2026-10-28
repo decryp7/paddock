@@ -27,7 +27,7 @@ impl FileLocks for LsofLocks {
             .filter_map(|(pid, name)| {
                 let started = started_of(pid)?;
                 Some(Locker {
-                    process: ProcessRef { pid, started },
+                    process: ProcessRef { pid, started: Some(started) },
                     name,
                     kind: Some("Application".into()),
                 })

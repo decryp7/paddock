@@ -1,3 +1,5 @@
+import { readValue } from '../measured';
+const num = (m: Parameters<typeof readValue<number>>[0]): number => readValue(m) ?? 0;
 import { type AppSpec, APP_SPECS, buildProcesses, groupSamples, round, sampleProcess } from './processes';
 import { osProfile } from './os';
 
@@ -52,18 +54,18 @@ describe('sampleProcess', () => {
   it('stays within bounds and respects the CPU scale', () => {
     for (let t = 0; t < 60; t++) {
       const s = sampleProcess(p!, t, null, 1);
-      expect(s.cpu).toBeGreaterThanOrEqual(0);
-      expect(s.cpu).toBeLessThanOrEqual(100);
+      expect(num(s.cpu)).toBeGreaterThanOrEqual(0);
+      expect(num(s.cpu)).toBeLessThanOrEqual(100);
     }
-    const avg = (scale: number) => Array.from({ length: 60 }, (_, t) => sampleProcess(p!, t, null, scale).cpu).reduce((a, b) => a + b, 0) / 60;
+    const avg = (scale: number) => Array.from({ length: 60 }, (_, t) => num(sampleProcess(p!, t, null, scale).cpu)).reduce((a, b) => a + b, 0) / 60;
     expect(avg(2)).toBeGreaterThan(avg(1));
   });
   it('a cap limits the CPU', () => {
-    for (let t = 0; t < 30; t++) expect(sampleProcess(p!, t, 2, 1).cpu).toBeLessThanOrEqual(2);
+    for (let t = 0; t < 30; t++) expect(num(sampleProcess(p!, t, 2, 1).cpu)).toBeLessThanOrEqual(2);
   });
   it('a suspended process uses nothing', () => {
     const s = sampleProcess({ ...p!, state: 'suspended' }, 5, null, 1);
-    expect(s).toMatchObject({ cpu: 0, diskReadBps: 0, diskWriteBps: 0, state: 'suspended' });
+    expect(s).toMatchObject({ cpu: { value: 0 }, diskReadBps: { value: 0 }, diskWriteBps: { value: 0 }, state: 'suspended' });
   });
   it('an idle process is sleeping, a busy one running', () => {
     expect(sampleProcess({ ...p!, cpu: 0 }, 5, null, 1).state).toBe('sleeping');
@@ -71,7 +73,7 @@ describe('sampleProcess', () => {
       });
   it('splits disk throughput 35/65', () => {
     const s = sampleProcess(p!, 5, null, 1);
-    expect(s.diskWriteBps).toBeGreaterThanOrEqual(s.diskReadBps);
+    expect(num(s.diskWriteBps)).toBeGreaterThanOrEqual(num(s.diskReadBps));
   });
 });
 
@@ -83,9 +85,9 @@ describe('groupSamples', () => {
     expect(groups.map((g) => g.id)).toEqual(['a', 'b']);
     const a = groups[0]!;
     expect(a.pids).toEqual([samples[0]!.pid, samples[1]!.pid]);
-    expect(a.cpu).toBeCloseTo(samples[0]!.cpu + samples[1]!.cpu, 1);
-    expect(a.memory).toBe(samples[0]!.memory + samples[1]!.memory);
-    expect(a.diskBps).toBe(samples.slice(0, 2).reduce((x, s) => x + s.diskReadBps + s.diskWriteBps, 0));
+    expect(num(a.cpu)).toBeCloseTo(num(samples[0]!.cpu) + num(samples[1]!.cpu), 1);
+    expect(num(a.memory)).toBe(num(samples[0]!.memory) + num(samples[1]!.memory));
+    expect(num(a.diskBps)).toBe(samples.slice(0, 2).reduce((x, s) => x + num(s.diskReadBps) + num(s.diskWriteBps), 0));
     expect(a.name).toBe('A');
   });
   it('round rounds to digits', () => {

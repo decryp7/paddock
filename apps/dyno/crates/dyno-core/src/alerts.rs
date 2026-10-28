@@ -177,7 +177,7 @@ impl Alerts {
             );
         }
         let sustain = i64::from(st.long_high_cpu_minutes) * MINUTE;
-        for g in groups.iter().filter(|g| g.cpu > HIGH_CPU) {
+        for g in groups.iter().filter(|g| g.cpu_read() > HIGH_CPU) {
             let key = format!("cpu:{}", g.id);
             live.push(key.clone());
             self.maybe(
@@ -244,9 +244,10 @@ mod tests {
             name: "Hog".into(),
             exe: None,
             pids: vec![1],
-            cpu,
-            memory: 0,
-            disk_bps: 0.0,
+            cpu: crate::process::Measured::Value(cpu),
+            memory: crate::process::Measured::Value(0),
+            disk_bps: crate::process::Measured::Value(0.0),
+            partial: false,
         }
     }
 

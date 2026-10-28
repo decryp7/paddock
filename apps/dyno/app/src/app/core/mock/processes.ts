@@ -1,4 +1,5 @@
 import type { AppGroup, ProcessSample, RunState } from '../api.types';
+import { measured, readValue } from '../measured';
 import { clamp, hash01, seedOf, wobble } from './noise';
 
 const GB = 1024 ** 3;
@@ -148,32 +149,41 @@ export function sampleProcess(p: MockProcess, t: number, cap: number | null, cpu
     parent: p.parent,
     name: p.name,
     exe: p.exe,
-    user: p.user,
-    cpu: round(clamp(cpu, 0, 100), 2),
-    memory: Math.round(memory),
-    diskReadBps: Math.round(disk * 0.35),
-    diskWriteBps: Math.round(disk * 0.65),
-    started: p.started,
+    user: measured(p.user),
+    cpu: measured(round(clamp(cpu, 0, 100), 2)),
+    memory: measured(Math.round(memory)),
+    diskReadBps: measured(Math.round(disk * 0.35)),
+    diskWriteBps: measured(Math.round(disk * 0.65)),
+    started: measured(p.started),
     state: suspended ? 'suspended' : cpu < 0.05 ? 'sleeping' : 'running',
   };
 }
 
 /** Groups samples by app as the engine does (the mock knows each process's group; the engine derives it). */
 export function groupSamples(processes: MockProcess[], samples: ProcessSample[]): AppGroup[] {
-  const groups = new Map<string, AppGroup>();
+  const sums = new Map<string, { id: string; name: string; exe: string | null; pids: number[]; cpu: number; memory: number; disk: number }>();
   samples.forEach((s, i) => {
     const p = processes[i]!;
-    let g = groups.get(p.group);
+    let g = sums.get(p.group);
     if (!g) {
-      g = { id: p.group, name: p.groupName, exe: p.exe, pids: [], cpu: 0, memory: 0, diskBps: 0 };
-      groups.set(p.group, g);
+      g = { id: p.group, name: p.groupName, exe: p.exe, pids: [], cpu: 0, memory: 0, disk: 0 };
+      sums.set(p.group, g);
     }
     g.pids.push(s.pid);
-    g.cpu += s.cpu;
-    g.memory += s.memory;
-    g.diskBps += s.diskReadBps + s.diskWriteBps;
+    g.cpu += readValue(s.cpu) ?? 0;
+    g.memory += readValue(s.memory) ?? 0;
+    g.disk += (readValue(s.diskReadBps) ?? 0) + (readValue(s.diskWriteBps) ?? 0);
   });
-  return [...groups.values()].map((g) => ({ ...g, cpu: round(g.cpu, 2) }));
+  return [...sums.values()].map((g) => ({
+    id: g.id,
+    name: g.name,
+    exe: g.exe,
+    pids: g.pids,
+    cpu: measured(round(g.cpu, 2)),
+    memory: measured(g.memory),
+    diskBps: measured(g.disk),
+    partial: false,
+  }));
 }
 
 export function round(v: number, digits: number): number {

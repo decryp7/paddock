@@ -1,11 +1,26 @@
-import type { AppGroup, ProcessSample } from '../../core/api.types';
+import type { AppGroup, Measured, ProcessSample } from '../../core/api.types';
 import { type Row, type RowInput, type Sort, buildRows, compareRows, matches } from './process-rows';
 
-const sample = (pid: number, name: string, extra: Partial<ProcessSample> = {}): ProcessSample => ({
-  pid, parent: null, name, exe: `/bin/${name}`, user: 'alex', cpu: 1, memory: 100, diskReadBps: 0, diskWriteBps: 0,
-  started: 1000 + pid, state: 'running', ...extra,
+type SampleOver = Partial<Omit<ProcessSample, 'user' | 'cpu' | 'memory' | 'diskReadBps' | 'diskWriteBps' | 'started'>> & {
+  user?: string | null;
+  cpu?: number | Measured<number>;
+  memory?: number;
+  diskReadBps?: number;
+  diskWriteBps?: number;
+};
+const num = (v: number | Measured<number>): Measured<number> => (typeof v === 'number' ? { value: v } : v);
+const sample = (pid: number, name: string, extra: SampleOver = {}): ProcessSample => {
+  const { user = 'alex', cpu = 1, memory = 100, diskReadBps = 0, diskWriteBps = 0, ...rest } = extra;
+  return {
+    pid, parent: null, name, exe: `/bin/${name}`, state: 'running',
+    user: user === null ? { unavailable: { reason: 'notPermitted' } } : { value: user },
+    cpu: num(cpu), memory: num(memory), diskReadBps: num(diskReadBps), diskWriteBps: num(diskWriteBps),
+    started: { value: 1000 + pid }, ...rest,
+  };
+};
+const group = (id: string, name: string, pids: number[], cpu = 0, memory = 0): AppGroup => ({
+  id, name, exe: null, pids, cpu: { value: cpu }, memory: { value: memory }, diskBps: { value: 0 }, partial: false,
 });
-const group = (id: string, name: string, pids: number[], cpu = 0, memory = 0): AppGroup => ({ id, name, exe: null, pids, cpu, memory, diskBps: 0 });
 const input = (over: Partial<RowInput>): RowInput => ({
   mode: 'groups', processes: [], groups: [], sort: { key: 'cpu', dir: 'desc' }, query: '', expanded: new Set(), ...over,
 });
@@ -34,7 +49,7 @@ describe('matches', () => {
 
 describe('compareRows', () => {
   const row = (name: string, extra: Partial<Row> = {}): Row => ({
-    key: name, kind: 'process', depth: 0, name, count: 1, cpu: 0, memory: 0, disk: 0, user: null, pid: null, ref: null,
+    key: name, kind: 'process', depth: 0, name, count: 1, cpu: 0, memory: 0, disk: 0, unavailable: { cpu: null, memory: null, disk: null }, partial: false, user: null, pid: null, ref: null,
     groupId: null, expandable: false, expanded: false, suspended: false, ...extra,
   });
   it('sorts numerically in both directions', () => {
@@ -46,6 +61,15 @@ describe('compareRows', () => {
   it('sorts names and users case-insensitively, a missing user as empty', () => {
     expect(compareRows(row('apple'), row('Banana'), { key: 'name', dir: 'asc' })).toBeLessThan(0);
     expect(compareRows(row('a', { user: 'Zed' }), row('b', { user: null }), { key: 'user', dir: 'asc' })).toBeGreaterThan(0);
+  });
+  it('puts rows whose value is unavailable last in either direction', () => {
+    const na = row('na', { cpu: null });
+    const some = row('some', { cpu: 3 });
+    for (const dir of ['asc', 'desc'] as const) {
+      expect(compareRows(na, some, { key: 'cpu', dir })).toBeGreaterThan(0);
+      expect(compareRows(some, na, { key: 'cpu', dir })).toBeLessThan(0);
+    }
+    expect(compareRows(row('b', { cpu: null }), row('a', { cpu: null }), { key: 'cpu', dir: 'asc' })).toBeGreaterThan(0);
   });
   it('breaks ties by name, then pid', () => {
     const sort: Sort = { key: 'cpu', dir: 'desc' };
@@ -70,6 +94,19 @@ describe('buildRows: flat', () => {
     const rows = buildRows(input({ mode: 'flat', processes: [sample(1, 'x', { diskReadBps: 3, diskWriteBps: 4 })], query: 'x' }));
     expect(rows[0]!.disk).toBe(7);
     expect(buildRows(input({ mode: 'flat', processes, query: 'zzz' }))).toEqual([]);
+  });
+});
+
+describe('buildRows: values that were not read', () => {
+  it('shows null with the reason, never 0, and a partial group says so', () => {
+    const hidden = sample(1, 'sys', { cpu: { unavailable: { reason: 'needsAdmin' } } });
+    const rows = buildRows(input({ mode: 'flat', processes: [hidden, sample(2, 'mine', { cpu: 4 })] }));
+    expect(rows.map((r) => r.name)).toEqual(['mine', 'sys']);
+    expect(rows[1]).toMatchObject({ cpu: null });
+    expect(rows[1]!.unavailable.cpu).toContain('administrator');
+    expect(rows[1]!.unavailable.memory).toBeNull();
+    const g = { ...group('g', 'G', [1, 2], 4), partial: true };
+    expect(buildRows(input({ processes: [hidden, sample(2, 'mine', { cpu: 4 })], groups: [g] }))[0]).toMatchObject({ partial: true, cpu: 4 });
   });
 });
 

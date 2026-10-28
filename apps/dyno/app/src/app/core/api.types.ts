@@ -110,25 +110,38 @@ export interface SystemSample {
 
 export type RunState = 'running' | 'sleeping' | 'suspended' | 'other';
 
+/** Why a per-process value was not read. */
+export type UnavailableReason = 'needsAdmin' | 'notPermitted' | 'notSupported' | 'residentMemoryOnly';
+
+/** A value that was read, or why it was not. A value that was not read is never `0`. */
+export type Measured<T> = { value: T } | { unavailable: { reason: UnavailableReason } };
+
+/** A sum over per-process values: only the readable ones are added up. */
+export interface PartialSum<T> {
+  sum: Measured<T>;
+  partial: boolean;
+}
+
 export interface ProcessSample {
   pid: number;
   parent: number | null;
   name: string;
   exe: string | null;
-  user: string | null;
+  user: Measured<string>;
   /** Percent of the whole machine, 0–100. */
-  cpu: number;
-  memory: number;
-  diskReadBps: number;
-  diskWriteBps: number;
-  started: Timestamp;
+  cpu: Measured<number>;
+  memory: Measured<number>;
+  diskReadBps: Measured<number>;
+  diskWriteBps: Measured<number>;
+  started: Measured<Timestamp>;
   state: RunState;
 }
 
 /** A pid plus its start time: actions never hit a reused pid. */
 export interface ProcessRef {
   pid: number;
-  started: Timestamp;
+  /** Absent when the OS did not give the start time; the pid alone identifies the process then. */
+  started: Timestamp | null;
 }
 
 export type Priority = 'idle' | 'belowNormal' | 'normal' | 'aboveNormal' | 'high';
@@ -178,9 +191,11 @@ export interface AppGroup {
   name: string;
   exe: string | null;
   pids: number[];
-  cpu: number;
-  memory: number;
-  diskBps: number;
+  cpu: Measured<number>;
+  memory: Measured<number>;
+  diskBps: Measured<number>;
+  /** Some member's value could not be read, so the sums are lower than the real totals. */
+  partial: boolean;
 }
 
 export interface SnapshotInfo {
@@ -194,8 +209,8 @@ export interface ProcessSummary {
   pid: number;
   name: string;
   exe: string | null;
-  cpu: number;
-  memory: number;
+  cpu: Measured<number>;
+  memory: Measured<number>;
 }
 
 export interface ProcessChange {

@@ -1067,7 +1067,7 @@ mod search_watch_tests {
             Request::FileHash {
                 source: crate::weblinks::HashSource::Process(ProcessRef {
                     pid: 3,
-                    started: Timestamp(4),
+                    started: Some(Timestamp(4)),
                 }),
             },
             Request::VirusTotalUrl { sha256: "0".repeat(64) },
