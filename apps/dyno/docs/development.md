@@ -77,9 +77,9 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny --workspace check
-node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-capabilities.test.mjs app/scripts/check-index.test.mjs
+node --test scripts/check-capabilities.test.mjs
 node scripts/check-capabilities.mjs
-(cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && node scripts/check-index.mjs && npx ng test --watch=false)
+(cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && node ../../../conformance/ci/check-index.mjs dist/dyno-app/browser/index.html && npx ng test --watch=false)
 ```
 
 Coverage: `dyno-core` at least 99 % lines (`cargo llvm-cov -p dyno-core --summary-only`, with a private `CARGO_TARGET_DIR`);
@@ -97,21 +97,20 @@ revert the family icon. To change the icon, change it in Paddock (`icons/tools/i
 
 ## CI/CD
 
-`.gitea/workflows/dyno.yml (repo root)` (see the header comment for the runner labels):
+Dyno is on Paddock's shared CI kit (WP-C4): its gates are legs of `.gitea/workflows/ci.yml` (`apps/dyno/paddock.ci.json`, run by
+`.gitea/actions/app-gates`), its installers and release are `.gitea/workflows/dyno-release.yml` through `app-release.yml`.
 
-| Job | Runner | What it checks |
+| Leg | Runner | What it checks |
 | --- | --- | --- |
-| `rust-lint` | Linux container | `cargo fmt --check`, clippy `-D warnings`, clippy for the Windows and macOS targets |
-| `rust-test` | Linux container and Windows | `cargo test --workspace`; on Linux also the `dyno-platform` Linux and parser tests against the container's real `/proc` |
-| `macos` | macOS host runner | clippy and tests for real, `dyno-agent once`; tests act only on dummies they spawn |
-| `licences` | Linux container | commit messages (PRs), script tests, the capability/CSP guard, `cargo deny` |
-| `frontend` | Linux container | `npm ci`, `npm audit`, lint, build, `check-index.mjs`, unit tests with coverage, once more under another time zone |
-| `e2e` | Linux container | Playwright against the mock, Chromium and WebKit, one worker |
-| `bundle` | Windows, macOS, Linux | on `v*` tags, nightly and manual runs: `tauri build` (NSIS, `.dmg`, `.deb` + AppImage), the run-path and seal check (`scripts/check-bundle.sh`), artifacts |
-| `release` | Linux container | on `v*` tags: release notes (git-cliff), `latest.json`, the Gitea release |
+| `app dyno (ubuntu-latest)` | Linux container | the capability/CSP guard and its tests; `cargo fmt --check`, clippy `-D warnings`, nextest (the Linux adapters and parsers against the container's real `/proc` included), doc tests, `cargo deny`; then `npm audit`, lint, build, the `index.html` check, unit tests with coverage and once more under another time zone |
+| `app dyno (windows-latest)`, `(macos-latest)` | host runners | clippy (also on Windows: `windowsClippy`), nextest, doc tests for the OS adapters; tests act only on dummies they spawn; a kept build folder, host clean-up of this job's test programs |
+| `e2e-1`, `e2e-2` | Linux container | Playwright against the mock, Chromium, two shards, one worker each |
+| `e2e-webkit` | Linux container | Playwright, WebKit: main, tags, the nightly and a manual run with `webkit` |
+| `bundle` (`dyno-release.yml`) | Windows, macOS, Linux | on a push to main, `dyno-v*` tags, nightly and manual runs: `tauri build` (NSIS, `.dmg`, `.deb` + AppImage), the run-path check (`scripts/check-bundle.sh`; on macOS the agent also measures once from the built app), the seal check and the start of every sidecar (`macos-verify`), artifacts |
+| `release` | Linux container | on `dyno-v*` tags: release notes (git-cliff), `latest.json`, the Gitea release |
 
-Host runners keep a persistent build folder outside the workspace and prune it (`scripts/ci-prune.sh`), so nothing piles up. CI
-could not be run when the workflow was written; see roadmap G15.
+Host runners keep a persistent build folder outside the workspace (`.paddock-ci/target-dyno-app`), which the shared
+`tools/prune-build-folders.sh` caps, so nothing piles up. CI could not be run when the workflow was written; see roadmap G15.
 
 ## Architecture documents and diagrams
 
