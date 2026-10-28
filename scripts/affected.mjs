@@ -65,6 +65,12 @@ export function appOfWorkflow(path, appNames) {
   return hits[0] ?? null;
 }
 
+/**
+ * Files every app's playwright.config.ts imports by relative path (the e2e port and build guard of @decryp7/paddock-e2e): no
+ * npm or tsconfig edge says so, so a change to one re-runs the UI half of every app.
+ */
+export const E2E_GUARD_INPUTS = /^ui\/projects\/paddock-e2e\/src\/(env|build-guard)\.ts$/;
+
 /** Editor and VCS metadata: marks nothing. */
 export const META = [/(^|\/)\.gitignore$/, /^\.editorconfig$/, /(^|\/)\.DS_Store$/, /^lefthook\.yml$/];
 
@@ -301,6 +307,12 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     if (GLOBAL.some((r) => r.test(f))) {
       markAll(`global ${f}`);
       continue;
+    }
+    if (E2E_GUARD_INPUTS.test(f)) {
+      for (const name of apps.keys()) {
+        mark(`app:${name}`, `e2e guard ${f}`);
+        kind(`app:${name}`, 'ui');
+      }
     }
     if (f === 'package-lock.json') {
       for (const ws of lockDiff(lockBefore, lockAfter)) {

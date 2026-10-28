@@ -1,11 +1,17 @@
 import { defineConfig, devices } from '@playwright/test';
+import { resolve } from 'node:path';
+import { appBuildGuard, reuseServer } from '../../../ui/projects/paddock-e2e/src/build-guard.ts';
+import { e2ePortOrCiDefault } from '../../../ui/projects/paddock-e2e/src/env.ts';
+
+// Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
+appBuildGuard(resolve(__dirname, './'), resolve(__dirname, '../../../ui'));
 
 /**
  * Browser end-to-end flows against `ng serve` with the mock backend (`npx playwright test --workers=1`), and the
  * documentation screenshots (`SCREENSHOTS=1 npx playwright test --project=screenshots`, written to ../docs/screenshots).
  * Port 4370, never the default 4200.
  */
-const PORT = Number(process.env['PW_PORT'] ?? 4370);
+const PORT = e2ePortOrCiDefault('PW_PORT', 4370);
 
 export default defineConfig({
   testDir: './e2e',
@@ -32,7 +38,7 @@ export default defineConfig({
   webServer: {
     command: `npx ng serve --port ${PORT}`,
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: true,
+    reuseExistingServer: reuseServer(),
     timeout: 180_000,
   },
 });
