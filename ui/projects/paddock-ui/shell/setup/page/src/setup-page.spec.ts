@@ -63,8 +63,8 @@ describe('the Set-up page', () => {
     expect(q('setup-act-service')!.className).toContain('mat-mdc-unelevated-button');
     expect(text(q('setup-act-login')!)).toBe('Turn on');
     // One filled button for the list (the first step to do); the others are outlined.
-    expect(q('setup-act-login')!.className).not.toContain('pd-setup__btn--primary');
-    expect(el.querySelectorAll('.pd-setup__btn--primary')).toHaveLength(1);
+    expect(q('setup-act-login')!.className).not.toContain('mat-mdc-unelevated-button');
+    expect(el.querySelectorAll('.pd-setup__actions .mat-mdc-unelevated-button')).toHaveLength(1);
     // Pitwall is optional: the shared needs-AI sentence explains, Skip is there.
     // The sentence says it once: the step's general description gives way to it.
     expect(text(q('setup-detail-pitwall')!)).toContain('not installed');
