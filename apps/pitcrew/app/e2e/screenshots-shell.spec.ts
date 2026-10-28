@@ -1,11 +1,10 @@
-import { expect, test } from '@decryp7/paddock-e2e';
-import { loaded } from './loaded';
+import { captureScreen, expect, test } from '@decryp7/paddock-e2e';
 
 /**
  * The shell surfaces of Pitcrew for review (`SCREENSHOTS=1 SHOTS_OUT=<folder> npx playwright test --project=screenshots`): the
  * whole 1440x900 window at 2x, in both themes, never cropped. The shell's parts (the Jobs list with the disk clean-up, a service chip that is down with its Restart, the notification centre) and the dialog windows (Settings with
- * Pitcrew's pages beside Appearance, About, Updates, What's new, the confirm and the stop-process decisions). Every shot waits
- * for loaded content: no skeleton, no splash, fonts and images decoded, the layout still.
+ * Pitcrew's pages beside Appearance, About, Updates, What's new, the confirm and the stop-process decisions). Every image is
+ * taken with `captureScreen` (loaded content, nothing cut, nothing covered).
  */
 const OUT = process.env['SHOTS_OUT'] ?? '../docs/screenshots';
 const NOW = new Date('2026-10-22T14:40:00');
@@ -19,9 +18,8 @@ for (const theme of ['dark', 'light'] as const) {
       await page.emulateMedia({ reducedMotion: 'reduce' });
     });
 
-    const shoot = async (page: import('@playwright/test').Page, name: string) => {
-      await loaded(page);
-      await page.screenshot({ path: `${OUT}/${theme}/shell-${name}.png` });
+    const shoot = async (page: import('@playwright/test').Page, name: string, fullPage: 'viewport' | 'main' = 'viewport') => {
+      await captureScreen(page, `${OUT}/${theme}/shell-${name}.png`, { fullPage });
     };
 
     test('jobs list with the disk clean-up', async ({ page, app }) => {
@@ -29,7 +27,8 @@ for (const theme of ['dark', 'light'] as const) {
       await page.getByRole('button', { name: /Clean up now|Clean now/ }).first().click();
       await app.statusBar.jobs.click();
       await expect(app.jobs.list).toContainText('Cleaning up the disk');
-      await shoot(page, 'jobs');
+      // A page with a long table: taken whole, with the Jobs list open over it.
+      await shoot(page, 'jobs', 'main');
     });
 
     test('a service that is down, with its Restart', async ({ page, app }) => {

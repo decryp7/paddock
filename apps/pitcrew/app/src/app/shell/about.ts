@@ -35,7 +35,18 @@ export function aboutBackend(): AboutBackend {
       updatesAvailable: fakeServer() !== 'unavailable',
     },
     { 'licence-mit': 'MIT License (the browser build shows a stand-in; the app carries the real licences).' },
-    { version: BROWSER_VERSION, release: null },
+    {
+      version: BROWSER_VERSION,
+      // The browser build's sample notes (the app shows its CHANGELOG.md).
+      release: {
+        version: BROWSER_VERSION,
+        date: '2026-10-22',
+        groups: [
+          { title: 'Changed', items: ['Pitcrew runs on the Paddock app shell: one frame, notifications and service health with Restart, and jobs with progress and Cancel.', 'Cleaning a disk, registering a runner and trimming the Actions cache run as jobs that can be cancelled.'] },
+          { title: 'Fixed', items: ['The log viewer fills the page.'] },
+        ],
+      },
+    },
   );
   return about;
 }

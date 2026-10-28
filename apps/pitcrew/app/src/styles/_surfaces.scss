@@ -369,13 +369,3 @@ a.badge {
   --mat-tooltip-supporting-text-size: var(--text-sm);
   --mat-tooltip-container-shape: var(--radius-sm);
 }
-
-// The shell's page wrappers (pd-page-host, pd-part-outlet) are auto-height; the log viewer must fill the page, so the
-// wrappers above it take the page's height. Pitcrew's other pages flow and scroll in the page area as before.
-// TODO: replace with the shell's full-height page option once it has one (reported as a shell gap).
-pd-page-host:has(pc-logs-page),
-pd-part-outlet:has(> pc-logs-page) {
-  display: block;
-  height: 100%;
-  min-height: 0;
-}

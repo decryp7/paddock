@@ -1,4 +1,4 @@
-import { axeViolations, expect, test, THEMES } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, expectPageFillsHost, test, THEMES } from '@decryp7/paddock-e2e';
 import type { Page } from '@playwright/test';
 
 // The browser build with the mock backend; `simulate=0` keeps the demo still (no pushed toasts mid-test).
@@ -231,6 +231,7 @@ test.describe('native feel (ADR 0008)', () => {
       await expect(viewport).toBeVisible();
       await expect.poll(async () => (await viewport.boundingBox())?.height ?? 0, { message: path }).toBeGreaterThanOrEqual(400);
       await expect(page.locator('[role=log] .line .msg').first()).toBeVisible();
+      await expectPageFillsHost(page, { page: 'pc-logs-page' });
     }
   });
 
@@ -247,6 +248,7 @@ test.describe('native feel (ADR 0008)', () => {
     await app.dialogs.loaded();
     const save = page.getByRole('button', { name: 'Save and apply' });
     await expect(save).toBeVisible();
+    // TODO: expectFullyVisible(save) once it tests the corners inside the rounding (it reports a rounded button as covered by its own footer).
     const box = (await save.boundingBox())!;
     expect(box.y + box.height).toBeLessThanOrEqual(560);
     expect(box.x + box.width).toBeLessThanOrEqual(720);
@@ -264,6 +266,7 @@ test.describe('native feel (ADR 0008)', () => {
     await app.dialogs.loaded();
     const dialog = page.locator('pd-dialog-shell');
     const buttonsInside = async (name: RegExp) => {
+      // TODO: expectFullyVisible(...) once it tests the corners inside the rounding (see the config diff test).
       const b = (await dialog.getByRole('button', { name }).last().boundingBox())!;
       expect(b.y + b.height, `${name}`).toBeLessThanOrEqual(640);
     };
