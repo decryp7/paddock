@@ -26,6 +26,9 @@
       <trans-unit id="pd.about.open" datatype="html">
         <source>About</source>
       </trans-unit>
+      <trans-unit id="pd.about.open-failed" datatype="html">
+        <source>The releases page could not be opened:</source>
+      </trans-unit>
       <trans-unit id="pd.about.releases" datatype="html">
         <source>Releases</source>
       </trans-unit>
@@ -331,6 +334,9 @@
       </trans-unit>
       <trans-unit id="pd.channels.secret-missing" datatype="html">
         <source>No secret yet</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret-saving" datatype="html">
+        <source>Saving…</source>
       </trans-unit>
       <trans-unit id="pd.channels.secret-stored" datatype="html">
         <source>Secret stored</source>
@@ -998,6 +1004,9 @@
       <trans-unit id="pd.mcp.dismiss" datatype="html">
         <source>Dismiss</source>
       </trans-unit>
+      <trans-unit id="pd.mcp.key-creating" datatype="html">
+        <source>Creating…</source>
+      </trans-unit>
       <trans-unit id="pd.mcp.key.client" datatype="html">
         <source>Client name</source>
       </trans-unit>
@@ -1026,7 +1035,10 @@
         <source>Key</source>
       </trans-unit>
       <trans-unit id="pd.mcp.key.lede" datatype="html">
-        <source>Name the program that will connect, for example &quot;Pitwall&quot;. It gets its own key, which you can revoke at any time.</source>
+        <source>Name the program that will connect, for example “Pitwall”. It gets its own key, which you can revoke at any time.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.limit" datatype="html">
+        <source><x id="max"/> keys are in use. Revoke one you no longer need first.</source>
       </trans-unit>
       <trans-unit id="pd.mcp.key.not-copied" datatype="html">
         <source>The clipboard is not available. Select the key and copy it with the keyboard.</source>
@@ -1808,6 +1820,9 @@
       <trans-unit id="pd.setup.failed" datatype="html">
         <source>That did not work.</source>
       </trans-unit>
+      <trans-unit id="pd.setup.get-pitwall" datatype="html">
+        <source>Get Pitwall</source>
+      </trans-unit>
       <trans-unit id="pd.setup.lede" datatype="html">
         <source>A few things the app can set up for you. Each is optional, you can skip any of them, and you can come back to this list later in Settings.</source>
       </trans-unit>
@@ -2022,10 +2037,10 @@
         <source>Delete <x id="what"/>?</source>
       </trans-unit>
       <trans-unit id="pd.storage.confirm-yes" datatype="html">
-        <source>Clear cache</source>
+        <source>Clear <x id="what"/></source>
       </trans-unit>
       <trans-unit id="pd.storage.confirm-yes-data" datatype="html">
-        <source>Delete data</source>
+        <source>Delete <x id="what"/></source>
       </trans-unit>
       <trans-unit id="pd.storage.confirm.title" datatype="html">
         <source>Clear storage</source>
