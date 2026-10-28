@@ -19,12 +19,15 @@ out=${GITHUB_ENV:?GITHUB_ENV is not set}
 ld_before=${LD_LIBRARY_PATH:-}
 dyld_before=${DYLD_LIBRARY_PATH:-}
 
-# MAJOR.MINOR.PATCH from duckdb.h (DUCKDB_API_VERSION_*), or nothing.
+# MAJOR.MINOR.PATCH of the library: duckdb_v2.h (DUCKDB_V2_API_VERSION_*, DuckDB 2.x; its duckdb.h still says 1.5.6, the
+# stable C API's version), else duckdb.h (DUCKDB_API_VERSION_*, DuckDB 1.x), or nothing.
 header_version() {
-  local h="$1/duckdb.h" v=
-  [ -f "$h" ] || return 0
+  local dir="$1" h prefix v=
+  if [ -f "$dir/duckdb_v2.h" ]; then h="$dir/duckdb_v2.h" prefix=DUCKDB_V2_API_VERSION
+  elif [ -f "$dir/duckdb.h" ]; then h="$dir/duckdb.h" prefix=DUCKDB_API_VERSION
+  else return 0; fi
   for part in MAJOR MINOR PATCH; do
-    v="$v${v:+.}$(sed -n "s/^#define DUCKDB_API_VERSION_$part \([0-9][0-9]*\).*/\1/p" "$h" | head -n 1)"
+    v="$v${v:+.}$(sed -n "s/^#define ${prefix}_$part \([0-9][0-9]*\).*/\1/p" "$h" | head -n 1)"
   done
   echo "$v"
 }

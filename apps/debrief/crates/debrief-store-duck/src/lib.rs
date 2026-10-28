@@ -173,9 +173,7 @@ fn classify(message: String) -> StoreError {
             .nth(1)
             .map(|rest| rest.chars().take_while(char::is_ascii_digit).collect::<String>())
             .filter(|n| !n.is_empty())
-            .map_or(String::new(), |n| {
-                format!(" (database format {n}; this Debrief reads up to {STORAGE_VERSION})")
-            });
+            .map_or(String::new(), |n| format!(" (database format {n})"));
         StoreError::Invalid(format!(
             "this project was saved by a newer Debrief{found}; update Debrief to open it"
         ))
@@ -1272,7 +1270,8 @@ mod tests {
 
     #[test]
     fn a_new_catalog_is_written_in_the_storage_format_the_previous_release_reads() {
-        let dir = std::env::temp_dir().join(format!("debrief-storage-pin-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("pin");
         let conn = open_db(&dir, &StoreOptions::default()).unwrap();
         conn.execute_batch("CREATE TABLE t(x INTEGER); INSERT INTO t VALUES (1); CHECKPOINT")
             .unwrap();
@@ -1318,7 +1317,8 @@ mod tests {
 
     #[test]
     fn async_threads_follow_the_chosen_threads_instead_of_four_per_core() {
-        let dir = std::env::temp_dir().join(format!("debrief-async-threads-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("async");
         let opts = StoreOptions {
             duck_threads: 3,
             ..StoreOptions::default()

@@ -118,3 +118,99 @@ fn compaction_reports_progress_and_stops_between_groups_when_cancelled() {
     assert!(p.total > 0 && p.done == p.total, "{p:?}");
     assert_ne!(segment_files(&conn), files_before);
 }
+
+/// Rewrites a segment in place the way Debrief 1.1 (Arrow 58) wrote it: the `extra` map's entry fields are `keys` and
+/// `values` where Arrow 60 says `key` and `value`. Only the field names differ; the rows and the catalog entry stay.
+fn rewrite_as_arrow_58(path: &Path) -> usize {
+    use duckdb::arrow::array::{Array, ArrayRef, MapArray, StructArray};
+    use duckdb::arrow::datatypes::{DataType, Field, Fields, Schema};
+    use duckdb::arrow::record_batch::RecordBatch;
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    use parquet::arrow::ArrowWriter;
+    let file = std::fs::File::open(path).unwrap();
+    let reader = ParquetRecordBatchReaderBuilder::try_new(file).unwrap().build().unwrap();
+    let old_entries = Field::new(
+        "entries",
+        DataType::Struct(Fields::from(vec![
+            Field::new("keys", DataType::Utf8, false),
+            Field::new("values", DataType::Utf8, true),
+        ])),
+        false,
+    );
+    let mut batches = Vec::new();
+    let mut rows = 0;
+    for batch in reader {
+        let batch = batch.unwrap();
+        rows += batch.num_rows();
+        let at = batch.schema().index_of("extra").unwrap();
+        let map = batch.column(at).as_any().downcast_ref::<MapArray>().unwrap();
+        let entries = map.entries();
+        let old_struct = StructArray::try_new(
+            Fields::from(vec![
+                Field::new("keys", DataType::Utf8, false),
+                Field::new("values", DataType::Utf8, true),
+            ]),
+            entries.columns().to_vec(),
+            None,
+        )
+        .unwrap();
+        let old_map = MapArray::try_new(
+            Arc::new(old_entries.clone()),
+            map.offsets().clone(),
+            old_struct,
+            map.nulls().cloned(),
+            false,
+        )
+        .unwrap();
+        let mut columns: Vec<ArrayRef> = batch.columns().to_vec();
+        columns[at] = Arc::new(old_map);
+        let mut fields: Vec<Field> = batch.schema().fields().iter().map(|f| f.as_ref().clone()).collect();
+        fields[at] = Field::new(
+            "extra",
+            DataType::Map(Arc::new(old_entries.clone()), false),
+            fields[at].is_nullable(),
+        );
+        batches.push(RecordBatch::try_new(Arc::new(Schema::new(fields)), columns).unwrap());
+    }
+    let out = std::fs::File::create(path).unwrap();
+    let mut writer = ArrowWriter::try_new(out, batches[0].schema(), None).unwrap();
+    for b in &batches {
+        writer.write(b).unwrap();
+    }
+    writer.close().unwrap();
+    rows
+}
+
+#[test]
+fn segments_written_by_arrow_58_and_60_read_and_compact_together() {
+    let dir = Dir::new("arrow-58-60");
+    let store = with_garbage(&dir);
+    let conn = store.inner.conn().unwrap();
+    let files = segment_files(&conn);
+    assert!(files.len() >= 2, "{files:?}");
+    let seg_dir = store.inner.dir.join(crate::segments::SEGMENTS_DIR);
+    // The first segment becomes a 1.x one, the others stay new ones.
+    let old_rows = rewrite_as_arrow_58(&seg_dir.join(&files[0]));
+    assert!(old_rows > 0);
+    let total = |conn: &Connection| -> i64 {
+        conn.query_row("SELECT count(*) FROM events WHERE source IN (SELECT id FROM sources)", [], |r| {
+            r.get(0)
+        })
+        .unwrap()
+    };
+    let with_extra = |conn: &Connection| -> i64 {
+        conn.query_row(
+            "SELECT count(*) FROM events WHERE source IN (SELECT id FROM sources) AND cardinality(extra) > 0",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    let (before, extra_before) = (total(&conn), with_extra(&conn));
+    assert!(before > 0 && extra_before > 0, "the fixture has events with extra fields");
+    // Compaction rewrites segments of both shapes into new ones, losing no event and no extra field.
+    store.inner.maintain(&conn, Some(&ImportProgress::default()));
+    assert_ne!(segment_files(&conn), files, "the garbage segments were rewritten");
+    assert_eq!((total(&conn), with_extra(&conn)), (before, extra_before));
+    assert_eq!(store.positioned().unwrap(), before as u64);
+}

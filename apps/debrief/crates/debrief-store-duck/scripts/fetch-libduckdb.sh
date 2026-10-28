@@ -8,7 +8,7 @@
 # prints `export DUCKDB_LIB_DIR=... DUCKDB_INCLUDE_DIR=...` (and PATH on Windows, where the
 # executable needs duckdb.dll next to it or on PATH). The version must match the `duckdb` crate:
 # duckdb-rs 1.20000.x = DuckDB 2.0.0. Checksums are the GitHub release API digests of v2.0.0. macOS is Apple silicon
-# only (osx-arm64): Intel Macs are not supported (CHANGELOG, DuckDB 2.1 drops them too).
+# only (osx-arm64): Intel Macs are not supported (CHANGELOG; DuckDB 2.1 drops them too).
 set -eu
 
 VERSION=2.0.0
@@ -26,7 +26,7 @@ case "$(uname -s)-$(uname -m)" in
   Darwin-arm64)
     ASSET=duckdb-shared-libs-osx-arm64.tar.gz; SHA=c35d60080b31ba5d11a3ce505a6831be784f003b4c575d32a4c2badb3b41cdf0 ;;
   Darwin-x86_64)
-    echo "Intel Macs are not supported: Debrief needs DuckDB 2.0, which Debrief ships for Apple silicon only" >&2; exit 1 ;;
+    echo "Intel Macs are not supported: Debrief supports Apple silicon Macs only (DuckDB ships an osx-amd64 library, but Debrief does not build or test for it)" >&2; exit 1 ;;
   *) echo "no pinned libduckdb for $(uname -s)-$(uname -m)" >&2; exit 1 ;;
 esac
 
@@ -44,7 +44,8 @@ if [ ! -f "$DIR/.verified" ]; then
   rm -rf "$DIR"
   mkdir -p "$DIR"
   # A fresh, empty directory; only the library, import library and headers are used.
-  tar -xzf "$ARCHIVE" -C "$DIR"
+  # Git for Windows' GNU tar takes `C:` in a path for a remote host: --force-local (bsdtar has no such option).
+  if tar --version 2>/dev/null | grep -q 'GNU tar'; then tar --force-local -xzf "$ARCHIVE" -C "$DIR"; else tar -xzf "$ARCHIVE" -C "$DIR"; fi
   touch "$DIR/.verified"
 fi
 

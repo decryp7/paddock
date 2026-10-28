@@ -876,8 +876,9 @@ The store runs on DuckDB 2.0.0 (released 2026-10-21, an LTS release) through duc
 `docs/research/2026-10-duckdb-2-and-large-data.md` (family docs). Decisions:
 
 - **Arrow and Parquet 60** (duckdb-rs 2.0 links Arrow 60); Arrow 60 names the entries of a map `key` and `value` (58 used `keys`
-  and `values`), so `debrief-batch`'s `extra` field says so. Old Parquet segments are unaffected: DuckDB reads Parquet maps by
-  their Parquet names. This also removes zstd 0.13 and zstd-safe 7, so the three RUSTSEC ignores in `deny.toml` are gone.
+  and `values`), so `debrief-batch`'s `extra` field says so. Segments of both kinds exist in a user's store after the upgrade: DuckDB
+  reads them together (`union_by_name`) and compaction rewrites them together;
+  `segments_written_by_arrow_58_and_60_read_and_compact_together` rewrites a segment with the old names and checks that. This also removes zstd 0.13 and zstd-safe 7, so the three RUSTSEC ignores in `deny.toml` are gone.
 - **`default-features = false` stays**: the pinned, checksummed prebuilt library is the only one linked. The release assets are
   now `duckdb-shared-libs-<platform>.tar.gz` (the fetch script, `libduckdb.mjs` and `cargo xtask libduckdb` read the pins from
   `fetch-libduckdb.sh`). No extension is bundled and none is loaded (the console sandbox forbids it).
@@ -893,3 +894,13 @@ The store runs on DuckDB 2.0.0 (released 2026-10-21, an LTS release) through duc
 - **Not needed**: the console guard still works on the 2.0 syntax tree (a test now runs it on trees from the real parser); the
   generated SQL used no changed syntax. The duckdb-rs Arrow-scan insert measured in the R2b bake-off no longer exists in the
   crate; that variant was rejected on speed.
+- **Memory, measured 2026-10-28 (macOS, Apple silicon, 2.0.0).** `cargo test --release -p debrief-store-duck --test analysis_memory`
+  (1M events, DuckDB limit 64 MB): anomalies +48 MB, Moment +6 MB, compare +14 MB over the RSS before each (the growth limit is
+  64 + 50 = 114 MB, so all three pass; an independent review measured 2.0 at +6 to +33 MB peak against 1.5.6 at the same
+  limit). The test's absolute 300 MB check does not hold on macOS: the process already holds about 1,026 MB of RSS before the
+  first analysis (the corpus is generated in the same process, and macOS RSS counts pages the allocator keeps; rule 26 and
+  `paddock-proc` measure the real footprint), so the absolute budget is a Linux-CI measurement, as the test's header says.
+  The worker budgets (`cargo nextest run -p debrief-store-worker`, debug): importing 356 MB against 768, querying 219 MB
+  against 630 (macOS), low-memory importing 268 MB against 400; all pass. Aggregates that spill are not re-tested here; the
+  ORDER BY ... LIMIT/OFFSET out-of-memory at the 183 MB limit is still present in 2.0, and the catalogue-memory work on
+  `debrief/d0-catalogue-memory` covers it, so this change does not touch it.

@@ -20,7 +20,8 @@ export function parsePins(script) {
 /** The pinned asset for a Node `platform` and `arch`, or an error naming what is pinned. */
 export function assetFor(pins, platform, arch) {
   const cpu = { x64: 'amd64', arm64: 'arm64' }[arch];
-  // macOS is Apple silicon only: DuckDB 2.1 drops Intel Macs and Debrief does not ship for them.
+  // macOS is Apple silicon only (a product decision; DuckDB 2.0 still ships osx-amd64 and 2.1 drops it).
+  if (platform === 'darwin' && arch !== 'arm64') throw new Error(`Intel Macs are not supported: Debrief supports Apple silicon Macs only (this is ${platform}-${arch})`);
   const name =
     platform === 'darwin' && arch === 'arm64'
       ? 'duckdb-shared-libs-osx-arm64.tar.gz'

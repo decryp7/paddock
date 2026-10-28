@@ -12,8 +12,8 @@
 // libduckdb.dylib already has the install name `@rpath/libduckdb.dylib`, so it is copied as is.
 //
 // Run by the release build (`npx tauri build --config src-tauri/tauri.sidecars.conf.json` chains it after the
-// UI build). Tauri passes the target in TAURI_ENV_TARGET_TRIPLE. macOS is Apple silicon only: DuckDB 2.x ships no
-// Intel library for Debrief, so Intel and universal macOS targets are refused.
+// UI build). Tauri passes the target in TAURI_ENV_TARGET_TRIPLE. macOS is Apple silicon only: Debrief supports Apple
+// silicon Macs only (a product decision, not a DuckDB limit), so Intel and universal macOS targets are refused.
 // Usage: node scripts/build-sidecars.mjs [--target <triple>] [--debug]
 // DEBRIEF_CARGO_PROFILE names another cargo profile (e.g. `dist` for releases); it must match the app's `--profile`.
 import { execFileSync } from 'node:child_process';

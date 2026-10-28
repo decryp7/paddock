@@ -9,7 +9,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 - **Database engine:** Debrief now runs on DuckDB 2.0. Searches for text in messages use about half the processor time and queries need less memory. The database of an existing project keeps its format, and a new project is written in a format the previous Debrief can still open. A project saved by a newer Debrief than yours now says so and asks you to update, instead of showing a database error
 - **SQL console:** DuckDB 2.0 changed some SQL rules that affect your own queries: `~` and `!~` match anywhere in the text (a partial match), `!` binds tighter than other operators, `X'...'` and `B'...'` are binary and bit-string literals, integer division and remainder by zero are errors, and `SHOW name` prints a setting when no table has that name
-- **macOS:** Debrief supports Apple silicon Macs only; DuckDB 2.1 drops Intel Macs and Debrief follows it. Intel Macs stay on Debrief 1.1.1
+- **macOS:** Debrief now supports Apple silicon Macs only (DuckDB drops Intel Macs in 2.1 and Debrief follows it). Intel Macs can keep using Debrief 1.1.1, which no longer receives updates
 - **Updates:** Debrief now updates from the Paddock repository's releases, signed with the Paddock family's update key. A copy installed before this release cannot update itself to it: download this release once by hand and install it over the old one; later releases update as usual
 
 ## 1.1.1 (2026-10-24)

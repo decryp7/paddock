@@ -30,7 +30,7 @@ test('each platform gets its own asset; an unpinned one is an error that names t
   assert.equal(assetFor(pins, 'linux', 'x64').asset, 'duckdb-shared-libs-linux-amd64.tar.gz');
   assert.equal(assetFor(pins, 'darwin', 'arm64').asset, 'duckdb-shared-libs-osx-arm64.tar.gz');
   // Intel Macs are not supported (DuckDB 2.1 drops them): no asset, and the error names what is pinned.
-  assert.throws(() => assetFor(pins, 'darwin', 'x64'), /no pinned libduckdb for darwin-x64 \(pinned: duckdb-shared-libs-/);
+  assert.throws(() => assetFor(pins, 'darwin', 'x64'), /Intel Macs are not supported/);
   assert.throws(() => assetFor(pins, 'freebsd', 'x64'), /no pinned libduckdb for freebsd-x64 \(pinned: duckdb-shared-libs-/);
   assert.throws(() => parsePins('nothing here'), /no VERSION/);
 });
