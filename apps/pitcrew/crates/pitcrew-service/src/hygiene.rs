@@ -417,7 +417,7 @@ mod tests {
     use pitcrew_core::hygiene::CacheReason;
 
     fn temp(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("pitcrew-hyg-{name}-{}", std::process::id()));
+        let p = std::env::temp_dir().join(format!("pitcrew-it-hyg-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p

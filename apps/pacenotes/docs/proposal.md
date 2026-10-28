@@ -939,7 +939,7 @@ Added 2026-10-23 (sections 20-26):
 22. ~~Vector store~~ **Decided 2026-10-23: SQLite is the source of truth, the ANN index is derived data behind a `VectorIndex` port; the engine is chosen by the
     spike among hannoy (preferred, low RAM), libSQL, usearch and sqlite-vec, LanceDB as fallback (sections 21.3-21.4).** Still open: should the vector index later also supply candidates for requirement traceability, or stay code-search only?
 23. ~~Tier 3 and the hard rule~~ **Decided 2026-10-23: tier 3 language servers that may run build scripts (rust-analyzer build.rs and proc macros, MSBuild, Gradle) are opt-in per repository through an explicit "Trust this repository" (off by default). Untrusted repositories use a pre-built SCIP index or tiers 1-2.** Trust is local, stored per repository on this machine, never inferred (not from git remotes, owners, file contents or a shared config) and never synced or shipped in a project file; it can be revoked at any time (section 20.4).
-24. ~~Embeddings source~~ **Decided 2026-10-23: Pitwall's Qwen3-Embedding (llama.cpp `/v1/embeddings`), else a small code-embedding model downloaded on the user's
+24. ~~Embeddings source~~ **Decided 2026-10-23 (amended 2026-10-28: Model2Vec + BM25 is the default, Qwen re-ranks and is an opt-in deep index; ADR 0001): Pitwall's Qwen3-Embedding (llama.cpp `/v1/embeddings`), else a small code-embedding model downloaded on the user's
     click, else text and structure only (section 21.2).** Still open: which small model after a benchmark (`CodeRankEmbed` or `jina-embeddings-v2-base-code`),
     the per-repository cap defaults (500k chunks / 2 GB), and whether semantic search is off by default.
 25. **MCP host**: should Pacenotes also be an MCP client for deterministic flows (Sighter run after a drafted plan), with every non-read-only call behind a click?
@@ -1181,6 +1181,8 @@ is unaffected; the two apps share no index.
 
 ### 21.2 Where the embeddings come from (decided, user, 2026-10-23)
 
+> **Amended 2026-10-28 (ADR 0001):** the order below is superseded. Default indexing is Model2Vec + BM25 on the CPU (no Pitwall, no GPU); Qwen through Pitwall only re-ranks a query's top ~50 hits and runs as the opt-in per-repository "Deep index with Qwen" job (confirmed, with a time and size estimate; family rule 46). Item (b) below, per-chunk one-line summaries, is dropped: summaries are generated on click. Shared parts planned in the family crate `paddock-embed`.
+
 An `Embedder` port with three implementations, chosen in this order:
 
 1. **Pitwall** (optional, preferred when present): its llama.cpp `/v1/embeddings` endpoint with **Qwen3-Embedding** (Apache-2.0, 0.6B for modest
@@ -1193,8 +1195,7 @@ An `Embedder` port with three implementations, chosen in this order:
 
 **Chat LLMs are not used to make embeddings**: retrieval quality is worse than a purpose-trained embedding model and they are far too slow and heavy
 for hundreds of thousands of chunks. They are used for three other jobs, all optional and all through Pitwall: (a) **reranking** the top 20-50 hits
-(a chat LLM as judge, or a small dedicated reranker, below); (b) **one-line summaries of important chunks**, embedded together with the code to help
-concept queries; (c) the **cited answer** built from the retrieved chunks.
+(a chat LLM as judge, or a small dedicated reranker, below); (b) ~~one-line summaries of important chunks~~ (dropped 2026-10-28: summaries on click only); (c) the **cited answer** built from the retrieved chunks.
 
 Reranker model: Qwen3-Reranker (Apache-2.0) exists in sizes 0.6B/4B/8B and **is servable by llama.cpp**: `llama-server` documents a `/v1/rerank`
 endpoint that needs a reranker model and `--reranking` (or `--embedding --pooling rank`). Caveat: many community GGUF conversions of Qwen3-Reranker
@@ -1251,8 +1252,7 @@ or a side file), so RAM holds only the small vectors. **Default: the smallest se
 spike measures recall@10 per setting (including rescoring cost) on the real corpus. A disk-backed index (hannoy on LMDB, libSQL DiskANN) lets the
 operating system page vectors in and out instead of holding the whole index resident.
 
-**Pitwall side.** The embedding model is small (Qwen3-Embedding 0.6B is about 0.6 GB at Q8 (estimate)). Indexing runs in **batches when Pitwall is
-idle, or at low priority through its queue**, and Pitwall's idle release unloads the model afterwards. The chat model is loaded only to answer or
+**Pitwall side.** The embedding model is small (Qwen3-Embedding 0.6B is about 0.6 GB at Q8 (estimate)). Qwen indexing is **only the opt-in deep index** (a visible, cancellable job, amended 2026-10-28); the default indexer does not use Pitwall. Pitwall's idle release unloads the model afterwards. The chat model is loaded only to answer or
 re-rank, never for indexing.
 
 **Language servers are usually the largest consumers** (rust-analyzer, jdtls and clangd on big repositories can take several GB each): a per-server memory cap
