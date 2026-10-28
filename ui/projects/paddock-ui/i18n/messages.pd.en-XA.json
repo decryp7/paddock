@@ -255,6 +255,8 @@
     "pd.health.retry": "⟦Ŕééţŕý⟧",
     "pd.health.see-what-happened": "⟦Šéééé ŵĥááţ ĥáþþééñééð⟧",
     "pd.health.state.degraded": "⟦ļîîɱîîţééð⟧",
+    "pd.health.state.network": "⟦çááñ'ţ ŕééááçĥ ţĥé ñééţŵööŕķ⟧",
+    "pd.health.state.not-installed": "⟦ñööţ îîñšţááļļéð⟧",
     "pd.health.state.quarantined": "⟦šŵîîţçĥééð ööƒƒ⟧",
     "pd.health.state.repairing": "⟦ŕééþááîîŕîñĝ⟧",
     "pd.health.state.stopped": "⟦šţööþþééð⟧",

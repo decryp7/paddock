@@ -33,7 +33,7 @@ let nextId = 0;
     </button>
     @if (open()) {
       <div class="pd-popover" role="region" [attr.aria-label]="t.popover" [id]="panelId">
-        <pd-jobs-list />
+        <pd-jobs-list [flat]="true" />
       </div>
     }
   `,
@@ -94,7 +94,7 @@ export class PdJobsStatus {
   });
   /** The lead's share on a known scale (0..100), for the ring; null for the spinner. */
   protected readonly percent = computed(() => this.leadView()?.percent ?? null);
-  protected readonly progress = computed(() => jobsStatusProgress(this.leadView()));
+  protected readonly progress = computed(() => jobsStatusProgress(this.leadView(), this.store.lead()?.title ?? null));
   protected readonly text = computed(() => jobsStatusText(this.store.activeCount(), this.store.lead()?.title ?? null));
   protected readonly detail = computed(() => {
     const lead = this.store.lead();

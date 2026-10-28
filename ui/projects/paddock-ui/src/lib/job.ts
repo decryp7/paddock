@@ -10,7 +10,7 @@ import { jobView, type SuJobSnapshot } from './job-view';
 @Component({
   selector: 'pd-job',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '[class]': '"pd-job pd-job--" + view().tone', '[attr.data-state]': 'job().state' },
+  host: { '[class]': '"pd-job pd-job--" + view().tone + (flat() ? " pd-job--flat" : "")', '[attr.data-state]': 'job().state' },
   template: `
     <div class="pd-head">
       <span class="pd-title">{{ view().title }}</span>
@@ -24,7 +24,9 @@ import { jobView, type SuJobSnapshot } from './job-view';
       } @else if (view().tone === 'danger') {
         <svg class="pd-state pd-state--bad" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" /></svg>
       }
-      <span class="pd-headline">{{ view().headline }}</span>
+      @if (!repeatsTitle()) {
+        <span class="pd-headline">{{ view().headline }}</span>
+      }
       @if (view().count) {
         <span class="pd-count">{{ view().count }}</span>
       }
@@ -71,6 +73,8 @@ import { jobView, type SuJobSnapshot } from './job-view';
   `,
   styles: `
     :host { display: flex; flex-direction: column; gap: var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); background: var(--pd-surface-1); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); font-size: var(--pd-text-body); line-height: var(--pd-lh-body); }
+    /* Flat: a row of a list inside a bordered container, no card of its own. */
+    :host(.pd-job--flat) { padding: var(--pd-space-3) 0; background: transparent; border: 0; border-radius: 0; }
     .pd-head { display: flex; align-items: baseline; gap: var(--pd-space-2); min-width: 0; }
     .pd-title { font-weight: var(--pd-weight-semibold); }
     .pd-subject { color: var(--pd-text-muted); font-size: var(--pd-text-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -117,6 +121,8 @@ export class SuJob {
   readonly stalled = input(false);
   /** The job's running time now (ms), when the caller tracks it between events: the count of an unknown step grows. */
   readonly elapsedMs = input<number | null>(null);
+  /** A flat row (no border, background or radius) for a list inside a bordered container; the default is a card. */
+  readonly flat = input(false);
   /** Offers Retry on a failed job (the host owns the retry; without it no button is shown). */
   readonly retryable = input(false);
   /** Emits the job id when Cancel is pressed. */
@@ -128,6 +134,9 @@ export class SuJob {
   protected readonly inProgress = $localize`:@@pd.ui.job.in-progress:In progress`;
 
   protected readonly view = computed(() => jobView(this.job(), this.stalled(), this.elapsedMs() ?? this.job().elapsedMs));
+
+  /** The phase has the title's name ("Downloading" twice): it is said once. */
+  protected readonly repeatsTitle = computed(() => this.view().headline.trim().toLowerCase() === this.view().title.trim().toLowerCase());
 
   protected round(v: number | null): number | null {
     return v === null ? null : Math.round(v);

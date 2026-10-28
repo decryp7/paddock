@@ -4,6 +4,16 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shell: About, health chip, notices and jobs popover fixes
+- About, Updates and What's new are styled again: `ABOUT_STYLES` selected the pre-`pd-` class names (b88a387a1). A new spec
+  (`shell/testing/src/template-classes.spec.ts`) checks that every class a shell template uses has a selector in its styles, so the
+  rename drift cannot come back unnoticed.
+- The service health chip is sentence-cased for labels such as "your sources" and says what is wrong: "Can't reach the network" (a
+  cause code naming the network) or "not installed" (repair `install`) instead of always "stopped". `stateWord` takes the cause and repair.
+- Notification centre titles wrap (two lines, full text in the tooltip) instead of cutting at one line, and the hover buttons no longer reserve room.
+- Jobs: `pd-job` has a `flat` input (a row without border or background) and `pd-jobs-list` a `flat` input, which the status popover
+  uses (no card in a card); a phase named like the job's title is not said twice ("Downloading" in the card and the status item).
+
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,
   Chromium e2e in two shards, WebKit e2e) and releases through the shared `app-release.yml` from a thin `dyno-release.yml` (nightly

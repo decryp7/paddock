@@ -764,6 +764,12 @@
       <trans-unit id="pd.health.state.degraded" datatype="html">
         <source>limited</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.network" datatype="html">
+        <source>can't reach the network</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.not-installed" datatype="html">
+        <source>not installed</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.quarantined" datatype="html">
         <source>switched off</source>
       </trans-unit>

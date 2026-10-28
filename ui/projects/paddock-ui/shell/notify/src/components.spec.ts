@@ -18,7 +18,7 @@ import type { ServiceHealthSnapshot } from './wire.types';
 describe('chip text', () => {
   it('names one service and its state, or counts several', () => {
     expect(shortName('the log store')).toBe('Log store');
-    expect((['down', 'degraded', 'quarantined', 'repairing'] as const).map(stateWord)).toEqual(['stopped', 'limited', 'switched off', 'repairing']);
+    expect((['down', 'degraded', 'quarantined', 'repairing'] as const).map((s) => stateWord(s))).toEqual(['stopped', 'limited', 'switched off', 'repairing']);
     expect(chipText([{ label: 'the log store', state: 'down' }])).toBe('Log store: stopped');
     expect(chipText([{ label: 'a', state: 'down' }, { label: 'b', state: 'degraded' }])).toBe('2 services need attention');
     // The compact form of a narrow status bar.
@@ -39,6 +39,26 @@ describe('chip text', () => {
     // The compact word starts the text: a plain lower-case one takes a capital, a name keeps its own.
     expect(chipCompactText([{ label: 'the iPhone link', state: 'down' }])).toBe('link stopped'.replace('link', 'Link'));
     expect(chipCompactText([{ label: 'the sync iPhone', state: 'down' }])).toBe('iPhone stopped');
+  });
+});
+
+describe('chip text, sentence case and accurate state words', () => {
+  const cause = (code: string | null) => ({ message: 'm', hint: null, detail: null, code, raiseCap: null, settings: null });
+
+  it('starts with a capital when the label opens with a possessive or determiner', () => {
+    expect(shortName('your sources')).toBe('Your sources');
+    expect(shortName('my sync')).toBe('My sync');
+    expect(chipText([{ label: 'your sources', state: 'down' }])).toBe('Your sources: stopped');
+    expect(chipCompactText([{ label: 'your sources', state: 'down' }])).toBe('Sources stopped');
+  });
+
+  it('says what is wrong when the cause or repair says so', () => {
+    const net = { label: 'your sources', state: 'down' as const, cause: cause('sources.network-unreachable'), repair: 'retry' as const };
+    expect(chipText([net])).toBe("Your sources: can't reach the network");
+    expect(chipCompactText([net])).toBe("Sources can't reach the network");
+    expect(chipText([{ label: 'the index', state: 'down', cause: cause('index.missing'), repair: 'install' }])).toBe('Index: not installed');
+    expect(chipText([{ label: 'the index', state: 'down', cause: cause('index.crashed'), repair: 'restart' }])).toBe('Index: stopped');
+    expect(stateWord('down', cause('x.offline'), null)).toBe("can't reach the network");
   });
 });
 
@@ -345,6 +365,26 @@ describe('the notification centre', () => {
     await settle();
     await f.whenStable();
     expect((one(el, '[data-testid=notices-mark-all]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('a long title uses the width it has: it wraps (two lines at most) and the hidden row buttons reserve no room', async () => {
+    const { centre } = bed();
+    const f = TestBed.createComponent(PdNotificationsPanel);
+    const title = 'Some of your places in the log sources could not be read because the folder moved';
+    const n = centre.post({ cause: 'long:1', source: 'update', severity: 'warning', title });
+    await settle();
+    await f.whenStable();
+    const el: HTMLElement = f.nativeElement;
+    document.body.appendChild(el);
+    try {
+      const heading = one(el, `[data-testid=notice-${n.id}] .pd-title`);
+      const style = getComputedStyle(heading);
+      expect(style.whiteSpace).not.toBe('nowrap');
+      expect(heading.getAttribute('title')).toBe(title);
+      expect(getComputedStyle(one(el, `[data-testid=notice-${n.id}] .pd-row-actions`)).position).toBe('absolute');
+    } finally {
+      el.remove();
+    }
   });
 
   it('a failed action says why; the Unread filter; an error with Retry', async () => {

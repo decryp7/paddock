@@ -192,3 +192,24 @@ describe('SuJob', () => {
     expect(el.querySelector('button.pd-cancel')).not.toBeNull();
   });
 });
+
+describe('pd-job, a card or a flat row', () => {
+  it('does not say the title twice when the phase has the same name', () => {
+    const f = render(running({ id: 'dl', label: 'Downloading', unit: 'bytes', total: 100, done: 40 }, { title: 'Downloading' }));
+    const shown = [...f.nativeElement.querySelectorAll('.pd-head, .pd-line')].map((e) => text(e)).join(' ');
+    expect((shown.match(/Downloading/g) ?? []).length).toBe(1);
+    expect(f.nativeElement.querySelector('.pd-headline')).toBeNull();
+    const other = render(running({ id: 'dl', label: 'Reading', unit: 'items', total: 100, done: 40 }, { title: 'Downloading' }));
+    expect(other.nativeElement.querySelector('.pd-headline')?.textContent).toBe('Reading');
+  });
+
+  it('is a flat row (no border of its own) when asked, so a list inside a bordered popover has no card in a card', () => {
+    const f = TestBed.createComponent(SuJob);
+    f.componentRef.setInput('job', discovering);
+    f.componentRef.setInput('flat', true);
+    f.detectChanges();
+    expect(f.nativeElement.classList.contains('pd-job--flat')).toBe(true);
+    expect(getComputedStyle(f.nativeElement).borderTopWidth).toBe('0px');
+    expect(render(discovering).nativeElement.classList.contains('pd-job--flat')).toBe(false);
+  });
+});
