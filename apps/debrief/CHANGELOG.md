@@ -5,6 +5,10 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ## Unreleased
 
+### Added
+
+- **Names:** Searching for an abbreviation of a program name now finds it: "gfxbldr" finds Graphic Builder and "rptbldr" finds Report Builder, with the reason "abbreviation: letters of graphic builder", without any AI model
+
 ### Removed
 
 - **Names:** Debrief no longer asks the AI model for human names in the background. "Learning human names" after an import, and the Settings ▸ AI switch "AI aliases for names", are gone, so opening logs no longer loads or runs a model. Aliases an earlier version already learned stay, labelled AI-generated, and you can still remove any of them
