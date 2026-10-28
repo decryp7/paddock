@@ -1,5 +1,5 @@
 //! Linux adapters: sensors beyond sysinfo (PSI, diskstats, hwmon, GPU), process details from `/proc`, file locks,
-//! autostart and systemd user units, facts, user activity, and process control on top of the shared Unix control.
+//! autostart and systemd user units, facts, user activity.
 //!
 //! Everything reads `/proc` and `/sys` through [`paths::HostPaths`] and runs tools through [`tools::Tools`], so the
 //! adapters are tested against temporary trees and scripted tools, and the real thing in a Linux container
@@ -11,7 +11,6 @@ mod facts;
 mod gpu;
 mod hwmon;
 mod locks;
-mod os_control;
 mod packages;
 pub mod paths;
 mod sensors;
@@ -22,10 +21,9 @@ pub mod traffic;
 
 use crate::processes::SysinfoProcesses;
 use crate::sensors::SysinfoSensors;
-use crate::unix_control::UnixControl;
 use crate::Platform;
 use dyno_core::ports::PlatformError;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -33,7 +31,7 @@ use std::time::Duration;
 const LOCK_SCAN_BUDGET: Duration = Duration::from_secs(5);
 
 /// The ports for Linux.
-pub fn platform(state_file: PathBuf) -> Platform {
+pub fn platform() -> Platform {
     let tools: Arc<dyn tools::Tools> = Arc::new(tools::SystemTools);
     let paths = paths::HostPaths::host();
     Platform {
@@ -46,7 +44,6 @@ pub fn platform(state_file: PathBuf) -> Platform {
             details::LinuxDetails::default_autostart_dirs(),
             tools.clone(),
         )))),
-        control: Box::new(UnixControl::new(state_file, Box::new(os_control::LinuxControl::new(paths.clone())))),
         locks: Box::new(locks::LinuxLocks::new(paths.clone(), LOCK_SCAN_BUDGET)),
         startup: Box::new(startup::LinuxStartup::for_this_user(tools.clone())),
         facts: Box::new(facts::LinuxFacts::new(paths, facts::FactPaths::host(), tools.clone())),
@@ -71,8 +68,7 @@ mod tests {
 
     #[test]
     fn the_linux_platform_runs_end_to_end_on_this_machine() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut p = platform(dir.path().join("state.json"));
+        let mut p = platform();
         let _ = p.sensors.sample(Timestamp(1));
         let s = p.sensors.sample(Timestamp(2));
         assert!(s.memory.total > 0);
@@ -97,13 +93,12 @@ mod tests {
         let tid = *tids.iter().find(|t| **t != std::process::id()).unwrap();
         let as_thread = dyno_core::process::ProcessRef {
             pid: tid,
-            started: me.started,
+            started: me.started.copied(),
         };
         assert!(p.processes.details(as_thread).is_err(), "details of a thread id must be refused");
         let facts = p.facts.facts();
         assert!(!facts.os.is_empty());
         let _ = p.activity.idle_secs();
         let _ = p.startup.list();
-        p.control.release_all();
     }
 }

@@ -11,8 +11,5 @@ publish = false
 [dependencies]
 dyno-plugin-api.workspace = true
 
-[dev-dependencies]
-tempfile.workspace = true
-
 [lints]
 workspace = true

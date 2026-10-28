@@ -1,9 +1,8 @@
-//! "What changed": a timeline of installs, updates, removals, new startup items and setting changes, so a slowdown can be
-//! put next to what happened just before it. Software and startup items are compared snapshot against snapshot; settings
-//! and cleanups come from Dyno's own activity log (everything Dyno changed is already recorded there).
+//! "What changed": a timeline of installs, updates, removals and new or gone startup items, so a slowdown can be put next
+//! to what happened just before it. Software and startup items are compared snapshot against snapshot. Dyno itself
+//! changes nothing, so nothing here is its own doing.
 
 use super::software::SoftwareItem;
-use crate::activity::{ActivityEntry, ActivityKind};
 use crate::time::{Timestamp, HOUR};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -27,10 +26,6 @@ pub enum ChangeKind {
     StartupAdded,
     /// A startup item went away.
     StartupRemoved,
-    /// A setting changed (tuning, startup state).
-    Setting,
-    /// A cleanup ran.
-    Cleanup,
 }
 
 /// One change.
@@ -157,26 +152,6 @@ pub fn diff_startup(previous: &[(String, String)], current: &[(String, String)],
     out
 }
 
-/// The activity entries that are changes to the machine (startup, tuning, cleanups).
-pub fn from_activity(entries: &[ActivityEntry]) -> Vec<Change> {
-    entries
-        .iter()
-        .filter_map(|e| {
-            let kind = match e.kind {
-                ActivityKind::Startup | ActivityKind::Tuning => ChangeKind::Setting,
-                ActivityKind::Cleanup => ChangeKind::Cleanup,
-                _ => return None,
-            };
-            Some(Change {
-                at: e.at,
-                kind,
-                title: e.title.clone(),
-                detail: e.detail.clone(),
-            })
-        })
-        .collect()
-}
-
 /// Merges changes into the timeline for `query`: inside the window, newest first, capped.
 pub fn timeline(query: &ChangesQuery, now: Timestamp, watching_since: Option<Timestamp>, mut all: Vec<Change>) -> ChangeTimeline {
     let (from, to) = query.window(now);
@@ -194,7 +169,6 @@ pub fn timeline(query: &ChangesQuery, now: Timestamp, watching_since: Option<Tim
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::activity::UndoState;
 
     fn sw(n: &str, v: &str) -> SoftwareItem {
         SoftwareItem {
@@ -228,32 +202,6 @@ mod tests {
         assert_eq!(d[1].kind, ChangeKind::StartupRemoved);
     }
 
-    fn entry(kind: ActivityKind, at: i64) -> ActivityEntry {
-        ActivityEntry {
-            id: format!("e{at}"),
-            at: Timestamp(at),
-            kind,
-            title: format!("t{at}"),
-            detail: String::new(),
-            undo: UndoState::NotUndoable,
-            bytes: None,
-        }
-    }
-
-    #[test]
-    fn only_machine_changes_come_from_the_activity_log() {
-        let list = [
-            entry(ActivityKind::Startup, 1),
-            entry(ActivityKind::Tuning, 2),
-            entry(ActivityKind::Cleanup, 3),
-            entry(ActivityKind::Rule, 4),
-            entry(ActivityKind::Manual, 5),
-        ];
-        let c = from_activity(&list);
-        assert_eq!(c.len(), 3);
-        assert_eq!(c[2].kind, ChangeKind::Cleanup);
-    }
-
     #[test]
     fn the_window_is_around_a_moment_or_back_from_now() {
         let now = Timestamp(100 * HOUR);
@@ -282,7 +230,7 @@ mod tests {
         let now = Timestamp(100 * HOUR);
         let mk = |h: i64| Change {
             at: Timestamp(h * HOUR),
-            kind: ChangeKind::Setting,
+            kind: ChangeKind::Installed,
             title: format!("c{h}"),
             detail: String::new(),
         };

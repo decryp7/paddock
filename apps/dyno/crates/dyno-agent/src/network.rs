@@ -3,7 +3,7 @@
 //! activity entries. Observe-only: nothing here closes a connection or touches a firewall.
 
 use crate::agent::{lock, now, Shared};
-use dyno_core::activity::{ActivityKind, UndoRecord};
+use dyno_core::activity::ActivityKind;
 use dyno_core::network::{build, NetEvent, NetworkQuery, NetworkSnapshot, SocketRow, Tracker};
 use dyno_core::network_names::{clean_name, parse_addresses, HostName};
 use dyno_core::network_traffic::{TrafficRow, TrafficTracker};
@@ -247,7 +247,7 @@ fn record(shared: &Shared, events: &[NetEvent]) {
                 NetEvent::NewListener { .. } => "New listener",
                 NetEvent::NewRemoteHost { .. } => "New remote host",
             };
-            core.log(t, ActivityKind::System, title.into(), e.describe(), UndoRecord::None, None);
+            core.log(t, ActivityKind::System, title.into(), e.describe());
         }
         if notable.len() > MAX_EVENTS_PER_LOOK {
             core.log(
@@ -258,8 +258,6 @@ fn record(shared: &Shared, events: &[NetEvent]) {
                     "{} more new listeners or hosts appeared at the same time.",
                     notable.len() - MAX_EVENTS_PER_LOOK
                 ),
-                UndoRecord::None,
-                None,
             );
         }
         let rules = core.settings.network_alerts;

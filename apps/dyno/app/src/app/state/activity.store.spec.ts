@@ -2,18 +2,17 @@ import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../core/backend';
 import { MockBackend } from '../core/mock-backend';
 import type { ActivityEntry } from '../core/api.types';
-import { Notifier } from '../shared/notifier';
 import { ActivityStore, mergeEntry } from './activity.store';
 
 const NOW = 1_700_000_000_000;
 const entry = (id: string, at: number, extra: Partial<ActivityEntry> = {}): ActivityEntry => ({
-  id, at, kind: 'manual', title: id, detail: '', undo: 'notUndoable', bytes: null, ...extra,
+  id, at, kind: 'system', title: id, detail: '', ...extra,
 });
 
 function setup() {
   const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
   TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }] });
-  return { mock, store: TestBed.inject(ActivityStore), notifier: TestBed.inject(Notifier) };
+  return { mock, store: TestBed.inject(ActivityStore) };
 }
 
 describe('mergeEntry', () => {
@@ -52,25 +51,9 @@ describe('ActivityStore', () => {
     const { store, mock } = setup();
     await store.load();
     const before = store.entries().length;
-    await mock.setProfile('gaming'); // logs an entry and emits it
+    mock.log('system', 'A note', 'Pushed to the subscribers.');
     await Promise.resolve();
     expect(store.entries().length).toBe(before + 1);
-  });
-  it('undo marks the original undone, adds the result and toasts', async () => {
-    const { store, notifier } = setup();
-    await store.load(100);
-    const undoable = store.entries().find((e) => e.undo === 'available')!;
-    expect(await store.undo(undoable.id)).toBe(true);
-    expect(store.entries().find((e) => e.id === undoable.id)?.undo).toBe('undone');
-    expect(store.entries()[0]!.title).toContain('Undid');
-    expect(store.undoing()).toEqual([]);
-    expect(notifier.toasts().at(-1)?.text).toContain('Undid');
-  });
-  it('undo failure shows an error toast and clears the busy flag', async () => {
-    const { store, notifier } = setup();
-    expect(await store.undo('missing')).toBe(false);
-    expect(store.undoing()).toEqual([]);
-    expect(notifier.toasts().at(-1)).toMatchObject({ tone: 'bad' });
   });
   it('unsubscribes on destroy', () => {
     const mock = new MockBackend({ latencyMs: 0 });

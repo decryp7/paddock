@@ -45,7 +45,6 @@ pub fn run() {
             commands::save_diagnostics,
             commands::save_report,
             commands::save_issues,
-            commands::add_watched_folder,
             commands::pick_folder,
             commands::save_inventory_report,
         ])

@@ -54,12 +54,7 @@ pub fn collect(shared: &Shared) -> Result<DiagnosticsBundle, String> {
             ),
             core.alarms.stats(t),
             core.store.alarm_events(None, RECENT).unwrap_or_default(),
-            core.store
-                .activity(RECENT)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(e, _, _)| e)
-                .collect::<Vec<_>>(),
+            core.store.activity(RECENT).unwrap_or_default().into_iter().collect::<Vec<_>>(),
             core.store.alerts(RECENT).unwrap_or_default(),
             core.recorder.snapshot(CaptureReason::Manual, t),
         )

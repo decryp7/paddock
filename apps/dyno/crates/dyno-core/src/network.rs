@@ -199,7 +199,7 @@ impl<'de> Deserialize<'de> for Owner {
 }
 
 const UNKNOWN_REASON: &str =
-    "The OS did not say which program owns this. It may belong to another user or the system; Dyno never runs elevated, the helper can look it up.";
+    "The OS did not say which program owns this. It may belong to another user or the system; Dyno does not run with administrator rights.";
 
 fn owner_of(pid: Option<u32>, names: &HashMap<u32, (&str, Option<&str>)>) -> Owner {
     match pid {
@@ -575,12 +575,13 @@ mod tests {
             parent: None,
             name: name.into(),
             exe: Some(format!("/apps/{name}")),
-            user: None,
-            cpu: 0.0,
-            memory: 0,
-            disk_read_bps: 0.0,
-            disk_write_bps: 0.0,
-            started: Timestamp(1),
+            user: crate::process::Measured::unavailable(crate::process::UnavailableReason::NotPermitted),
+            cpu: crate::process::Measured::Value(0.0),
+            memory: crate::process::Measured::Value(0),
+            disk_read_bps: crate::process::Measured::Value(0.0),
+            disk_write_bps: crate::process::Measured::Value(0.0),
+            started: crate::process::Measured::Value(Timestamp(1)),
+            owner: crate::process::Owner::Own,
             state: RunState::Running,
         }
     }
