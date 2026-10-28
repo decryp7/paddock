@@ -1,0 +1,27 @@
+### round 1
+## h cancel-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/store/segments (load 39.66)
+  CANCEL inproc progress_samples=37 max_progress_pct=0.1 cancel_ms=8 result=error(INTERRUPT Error: Interrupted!)
+serving Text("quack:127.0.0.1:38840") (start 3.6 ms)
+## h cancel-quack 38840 d6f864cc3fb639570abd1ea059e117ca (load 39.59)
+  CANCEL quack-query progress_samples=0 max_progress_pct=-1.0 cancel_ms=>30000 result=still running after interrupt
+  STATS quack-query peak_rss_mb=49 peak_footprint_mb=19 footprint_mb=19 rss_now_mb=49 cpu_s=0.28
+  server CPU in the 5 s after the client's cancel returned: 19.78 s
+  server: STATS quack-server peak_rss_mb=77 peak_footprint_mb=36 footprint_mb=36 rss_now_mb=77 cpu_s=111.42
+### round 2
+## h cancel-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/store/segments (load 37.79)
+  CANCEL inproc progress_samples=37 max_progress_pct=0.1 cancel_ms=102 result=error(INTERRUPT Error: Interrupted!)
+serving Text("quack:127.0.0.1:38840") (start 4.0 ms)
+## h cancel-quack 38840 d6f864cc3fb639570abd1ea059e117ca (load 37.32)
+  CANCEL quack-query progress_samples=0 max_progress_pct=-1.0 cancel_ms=>30000 result=still running after interrupt
+  STATS quack-query peak_rss_mb=48 peak_footprint_mb=19 footprint_mb=19 rss_now_mb=48 cpu_s=0.25
+  server CPU in the 5 s after the client's cancel returned: 4.73 s
+  server: STATS quack-server peak_rss_mb=72 peak_footprint_mb=35 footprint_mb=35 rss_now_mb=72 cpu_s=35.38
+### round 3
+## h cancel-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/store/segments (load 36.35)
+  CANCEL inproc progress_samples=37 max_progress_pct=0.1 cancel_ms=1 result=error(INTERRUPT Error: Interrupted!)
+serving Text("quack:127.0.0.1:38840") (start 5.0 ms)
+## h cancel-quack 38840 d6f864cc3fb639570abd1ea059e117ca (load 36.35)
+  CANCEL quack-query progress_samples=0 max_progress_pct=-1.0 cancel_ms=>30000 result=still running after interrupt
+  STATS quack-query peak_rss_mb=49 peak_footprint_mb=20 footprint_mb=20 rss_now_mb=49 cpu_s=0.30
+  server CPU in the 5 s after the client's cancel returned: 19.44 s
+  server: STATS quack-server peak_rss_mb=81 peak_footprint_mb=42 footprint_mb=39 rss_now_mb=81 cpu_s=125.50
