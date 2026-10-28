@@ -5,8 +5,8 @@
 use crate::activity::ActivityEntry;
 use crate::alerts::Alert;
 use crate::anomaly::Anomaly;
-use crate::cleanup::{CleanupCategory, CleanupOutcome, CleanupScan, DeleteMode, QuarantineEntry, SizeNode};
 use crate::diagnosis::Diagnosis;
+use crate::disk::SizeNode;
 use crate::forecast::DiskTrend;
 use crate::grouping::AppGroup;
 use crate::health::HealthReport;
@@ -129,29 +129,6 @@ pub enum Request {
     PauseRules {
         /// Paused.
         paused: bool,
-    },
-    /// Cleanup categories.
-    CleanupCategories,
-    /// Scan categories.
-    ScanCleanup {
-        /// Category ids.
-        categories: Vec<String>,
-    },
-    /// Delete items of a scan.
-    RunCleanup {
-        /// The scan.
-        scan_id: String,
-        /// The items.
-        item_ids: Vec<String>,
-        /// Recycle Bin or quarantine.
-        mode: DeleteMode,
-    },
-    /// Quarantines.
-    Quarantine,
-    /// Restore a quarantine.
-    RestoreQuarantine {
-        /// Its id.
-        id: String,
     },
     /// The size tree of a folder (the system disk when absent).
     DiskUsage {
@@ -416,47 +393,6 @@ pub enum Request {
         /// What to hide.
         filter: crate::startup::StartupFilter,
     },
-    /// The watched folders. A query. Appended.
-    WatchedFolders,
-    /// Adds a watched folder, switched off until its preview was shown. Sent only by the shell, after the person chose the
-    /// folder in the OS dialog (the webview's own requests for it are refused). Answers the list. Appended.
-    AddWatchedFolder {
-        /// The folder the person chose.
-        path: String,
-        /// A template to start from.
-        template: Option<String>,
-        /// How long files may stay, seconds.
-        keep_for_secs: u32,
-        /// Include subfolders.
-        recursive: bool,
-    },
-    /// Changes a watched folder; turning one on needs its preview first. Answers the list. Appended.
-    SetWatchedFolder {
-        /// The folder.
-        id: String,
-        /// A new keep-for time, seconds.
-        keep_for_secs: Option<u32>,
-        /// Turn sweeping on or off.
-        enabled: Option<bool>,
-        /// Include subfolders or not.
-        recursive: Option<bool>,
-    },
-    /// Stops watching a folder; its files are left alone. Answers the list. Appended.
-    RemoveWatchedFolder {
-        /// The folder.
-        id: String,
-    },
-    /// What a sweep of the folder would move right now (a dry run; changes nothing except remembering the preview).
-    /// Appended.
-    PreviewWatchedFolder {
-        /// The folder.
-        id: String,
-    },
-    /// Sweeps the folder now, after its preview. Answers the list. Appended.
-    SweepWatchedFolder {
-        /// The folder.
-        id: String,
-    },
     // ---- extras, backup health and taming proof (WP-13, WP-14, WP-36) ----
     /// "What changed": installs, updates, new startup items and setting changes in a window. A query. Appended.
     Changes {
@@ -485,16 +421,6 @@ pub enum Request {
     FindFiles {
         /// What and where.
         query: crate::extras::files::FinderQuery,
-    },
-    /// Removes files of a finder result the user selected, through the cleanup policy (re-checked, to the Trash or the
-    /// quarantine). Answers the outcome. Appended.
-    RemoveFoundFiles {
-        /// The finder result.
-        scan_id: String,
-        /// The selected files.
-        ids: Vec<String>,
-        /// Where they go.
-        mode: DeleteMode,
     },
     /// The maintenance windows' state now. A query. Appended.
     Maintenance,
@@ -567,8 +493,6 @@ pub enum TimelineEventKind {
     Cap,
     /// A rule released an app.
     Release,
-    /// A cleanup ran.
-    Cleanup,
     /// An alert.
     Alert,
     /// The machine started.
@@ -690,14 +614,6 @@ pub enum Reply {
     History(Box<History>),
     /// The rule set.
     Rules(Box<RuleSet>),
-    /// Cleanup categories.
-    Categories(Vec<CleanupCategory>),
-    /// A scan.
-    Scan(Box<CleanupScan>),
-    /// A cleanup's outcome.
-    Outcome(CleanupOutcome),
-    /// Quarantines.
-    Quarantines(Vec<QuarantineEntry>),
     /// A size tree.
     SizeTree(Box<SizeNode>),
     /// The health report.
@@ -782,10 +698,6 @@ pub enum Reply {
     FileHash(crate::weblinks::FileHashInfo),
     /// The filtered startup list. Appended.
     StartupOverview(Box<crate::startup::StartupOverview>),
-    /// The watched folders. Appended.
-    Watched(Box<crate::watch::WatchOverview>),
-    /// A dry run of a sweep. Appended.
-    WatchPreview(Box<crate::watch::WatchPreview>),
     // ---- extras, backup health and taming proof (WP-13, WP-14, WP-36) ----
     /// What changed. Appended.
     Changes(Box<crate::extras::changes::ChangeTimeline>),
@@ -836,10 +748,6 @@ impl Reply {
             Reply::Anomalies(x) => v(x),
             Reply::History(x) => v(x),
             Reply::Rules(x) => v(x),
-            Reply::Categories(x) => v(x),
-            Reply::Scan(x) => v(x),
-            Reply::Outcome(x) => v(x),
-            Reply::Quarantines(x) => v(x),
             Reply::SizeTree(x) => v(x),
             Reply::Health(x) => v(x),
             Reply::Startup(x) => v(x),
@@ -877,8 +785,6 @@ impl Reply {
             Reply::SearchSeed(x) => v(x),
             Reply::FileHash(x) => v(x),
             Reply::StartupOverview(x) => v(x),
-            Reply::Watched(x) => v(x),
-            Reply::WatchPreview(x) => v(x),
             Reply::Changes(x) => v(x),
             Reply::Sleep(x) => v(x),
             Reply::Boot(x) => v(x),
@@ -1007,15 +913,6 @@ mod tests {
                 ..
             }
         ));
-        let r: Request =
-            serde_json::from_value(serde_json::json!({"runCleanup": {"scanId": "s", "itemIds": ["a"], "mode": "quarantine"}})).unwrap();
-        assert!(matches!(
-            r,
-            Request::RunCleanup {
-                mode: DeleteMode::Quarantine,
-                ..
-            }
-        ));
         let r: Request = serde_json::from_value(serde_json::json!({"history": {"range": "week", "end": null}})).unwrap();
         assert_eq!(
             r,
@@ -1076,8 +973,6 @@ mod tests {
             Reply::Lockers(vec![]),
             Reply::Snapshots(vec![]),
             Reply::Anomalies(vec![]),
-            Reply::Categories(vec![]),
-            Reply::Quarantines(vec![]),
             Reply::Startup(vec![]),
             Reply::Alerts(vec![]),
             Reply::Plugins(vec![]),
@@ -1210,15 +1105,6 @@ mod tests {
         let r: Request = serde_json::from_value(serde_json::json!({"findFiles": {"query": {"folder": "/x", "minBytes": 5}}})).unwrap();
         assert!(matches!(r, Request::FindFiles { query } if query.mode == crate::extras::files::FinderMode::Both));
         let r: Request =
-            serde_json::from_value(serde_json::json!({"removeFoundFiles": {"scanId": "s", "ids": ["a"], "mode": "recycleBin"}})).unwrap();
-        assert!(matches!(
-            r,
-            Request::RemoveFoundFiles {
-                mode: DeleteMode::RecycleBin,
-                ..
-            }
-        ));
-        let r: Request =
             serde_json::from_value(serde_json::json!({"saveInventoryReport": {"path": "/r.md", "format": "markdown"}})).unwrap();
         assert!(matches!(r, Request::SaveInventoryReport { .. }));
     }
@@ -1292,16 +1178,6 @@ mod search_watch_tests {
             }),
             serde_json::json!({"startupOverview": {"filter": {"hideOs": true, "hideSigned": false}}})
         );
-        assert_eq!(j(Request::WatchedFolders), serde_json::json!("watchedFolders"));
-        assert_eq!(
-            j(Request::SetWatchedFolder {
-                id: "w-1".into(),
-                keep_for_secs: Some(600),
-                enabled: None,
-                recursive: None
-            }),
-            serde_json::json!({"setWatchedFolder": {"id": "w-1", "keepForSecs": 600, "enabled": null, "recursive": null}})
-        );
         assert_eq!(serde_json::to_value(TimelineEventKind::Network).unwrap(), "network");
     }
 
@@ -1320,22 +1196,6 @@ mod search_watch_tests {
             Request::StartupOverview {
                 filter: Default::default(),
             },
-            Request::WatchedFolders,
-            Request::AddWatchedFolder {
-                path: "/x".into(),
-                template: Some("installers".into()),
-                keep_for_secs: 600,
-                recursive: true,
-            },
-            Request::SetWatchedFolder {
-                id: "w-1".into(),
-                keep_for_secs: None,
-                enabled: Some(true),
-                recursive: Some(false),
-            },
-            Request::RemoveWatchedFolder { id: "w-1".into() },
-            Request::PreviewWatchedFolder { id: "w-1".into() },
-            Request::SweepWatchedFolder { id: "w-1".into() },
         ];
         for r in reqs {
             assert_eq!(round(&r), r);
@@ -1346,11 +1206,5 @@ mod search_watch_tests {
         });
         assert_eq!(round(&seed), seed);
         assert_eq!(seed.into_json().unwrap()["removed"][0], "1 IP address");
-        let watched = Reply::Watched(Box::new(crate::watch::WatchOverview {
-            folders: vec![],
-            templates: crate::watch::template_infos(),
-        }));
-        assert_eq!(round(&watched), watched);
-        assert_eq!(watched.into_json().unwrap()["templates"][0]["id"], "installers");
     }
 }

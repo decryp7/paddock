@@ -19,8 +19,6 @@ pub fn parse_request(value: Value) -> Result<Request, CommandError> {
     match request {
         // Only the app's own shutdown path may stop the agent.
         Request::Shutdown => Err(CommandError::bad("The window may not stop the agent.")),
-        // A watched folder is added only through `add_watched_folder`, which asks the person in the OS folder dialog.
-        Request::AddWatchedFolder { .. } => Err(CommandError::bad("A folder to watch is chosen in the folder dialog.")),
         // The report goes only where the OS save dialog said (`save_inventory_report`), never to a path the webview names.
         Request::SaveInventoryReport { .. } => Err(CommandError::bad("Use the Export button: it asks where to save the report.")),
         r => Ok(r),
@@ -292,40 +290,6 @@ pub async fn save_issues(app: AppHandle, link: State<'_, Arc<AgentLink>>, days: 
     .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
 }
 
-/// "Add folder" on the Watched folders page: the OS folder dialog (so the folder is one the person chose, never one the
-/// webview named), then the agent adds it switched off. `null` when they cancel.
-#[tauri::command]
-pub async fn add_watched_folder(
-    app: AppHandle,
-    link: State<'_, Arc<AgentLink>>,
-    template: Option<String>,
-    keep_for_secs: u32,
-    recursive: bool,
-) -> Result<Value, CommandError> {
-    let link = link.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        use tauri_plugin_dialog::DialogExt;
-        let Some(chosen) = app.dialog().file().set_title("Choose the folder to watch").blocking_pick_folder() else {
-            return Ok(Value::Null);
-        };
-        let path = chosen
-            .into_path()
-            .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
-        let path = path.to_string_lossy().into_owned();
-        let reply = link.call(Request::AddWatchedFolder {
-            path,
-            template,
-            keep_for_secs,
-            recursive,
-        })?;
-        reply
-            .into_json()
-            .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
-    })
-    .await
-    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
-}
-
 /// The tray dropdown's "Open Dyno".
 #[tauri::command]
 pub async fn tray_open_main(app: AppHandle) -> Result<(), CommandError> {
@@ -425,11 +389,6 @@ mod tests {
             parse_request(json!({"changes": {"query": {"hours": 24}}})).unwrap(),
             Request::Changes { query } if query.hours == 24
         ));
-        assert!(matches!(
-            parse_request(json!({"removeFoundFiles": {"scanId": "s", "ids": ["a"], "mode": "quarantine"}})).unwrap(),
-            Request::RemoveFoundFiles { .. }
-        ));
-        assert!(parse_request(json!({"removeFoundFiles": {"scanId": "s", "ids": ["a"], "mode": "shred"}})).is_err());
     }
 
     #[test]
@@ -456,34 +415,6 @@ mod tests {
         assert_eq!(parse_request(json!("forgetBaseline")).unwrap(), Request::ForgetBaseline);
         // A forged action is refused at the edge.
         assert!(parse_request(json!({"unusualAct": {"key": "k", "action": "delete"}})).is_err());
-    }
-
-    #[test]
-    fn a_watched_folder_cannot_be_added_by_the_webview_but_the_other_watch_requests_parse() {
-        let add = json!({"addWatchedFolder": {"path": "/x", "template": null, "keepForSecs": 600, "recursive": false}});
-        assert!(parse_request(add).unwrap_err().message.contains("folder dialog"));
-        assert!(matches!(parse_request(json!("watchedFolders")).unwrap(), Request::WatchedFolders));
-        assert!(matches!(
-            parse_request(json!({"setWatchedFolder": {"id": "w-1", "keepForSecs": 600, "enabled": true, "recursive": null}})).unwrap(),
-            Request::SetWatchedFolder { enabled: Some(true), .. }
-        ));
-        assert!(matches!(
-            parse_request(json!({"previewWatchedFolder": {"id": "w-1"}})).unwrap(),
-            Request::PreviewWatchedFolder { .. }
-        ));
-        assert!(matches!(
-            parse_request(json!({"webSearch": {"query": "q"}})).unwrap(),
-            Request::WebSearch { .. }
-        ));
-        assert!(matches!(
-            parse_request(json!({"fileHash": {"source": {"path": "/a"}}})).unwrap(),
-            Request::FileHash { .. }
-        ));
-        assert!(parse_request(json!({"fileHash": {"source": {"pid": 1}}})).is_err());
-        assert!(matches!(
-            parse_request(json!({"startupOverview": {"filter": {"hideOs": true, "hideSigned": false}}})).unwrap(),
-            Request::StartupOverview { .. }
-        ));
     }
 
     #[test]

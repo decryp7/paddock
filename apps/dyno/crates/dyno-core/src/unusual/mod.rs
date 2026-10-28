@@ -5,8 +5,8 @@
 
 pub mod baseline;
 
-use crate::cleanup::Os;
 use crate::grouping::file_name;
+use crate::os::Os;
 use crate::process::SignatureInfo;
 use crate::protect::{MACOS_PROTECTED, WINDOWS_PROTECTED};
 use serde::{Deserialize, Serialize};

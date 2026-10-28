@@ -7,7 +7,6 @@ use dyno_agent::cli::{ask, ask_within, connect};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_core::backup::{BackupState, BackupTool};
-use dyno_core::cleanup::DeleteMode;
 use dyno_core::extras::changes::{ChangeKind, ChangesQuery};
 use dyno_core::extras::files::{FinderMode, FinderQuery};
 use dyno_core::ports::PlatformError;
@@ -192,7 +191,7 @@ fn write(dir: &std::path::Path, name: &str, byte: u8, len: usize) -> std::path::
 }
 
 #[test]
-fn the_finder_lists_removes_to_the_quarantine_and_never_removes_every_copy() {
+fn the_finder_lists_large_files_and_duplicates_and_moves_nothing() {
     let h = Harness::start();
     let peer = h.client();
     let t = tempfile::tempdir().unwrap();
@@ -211,52 +210,12 @@ fn the_finder_lists_removes_to_the_quarantine_and_never_removes_every_copy() {
     };
     assert_eq!(r.large[0].bytes, 4 * MB as u64);
     assert_eq!(r.duplicates.len(), 1);
-    let ids: Vec<String> = r.duplicates[0].files.iter().map(|f| f.id.clone()).collect();
-
-    // Removing both copies is refused as a whole; nothing moves.
-    let both = Request::RemoveFoundFiles {
-        scan_id: r.scan_id.clone(),
-        ids: ids.clone(),
-        mode: DeleteMode::Quarantine,
-    };
-    let err = ask(&peer, both).unwrap_err();
-    assert!(err.contains("every copy"), "{err}");
-    assert!(a.exists() && b.exists());
-
-    // An unknown result is refused.
-    assert!(ask(
-        &peer,
-        Request::RemoveFoundFiles {
-            scan_id: "nope".into(),
-            ids: ids.clone(),
-            mode: DeleteMode::Quarantine
-        }
-    )
-    .is_err());
-
-    // One copy goes to the quarantine, is logged, and can be put back from Activity's quarantine.
-    let one = Request::RemoveFoundFiles {
-        scan_id: r.scan_id.clone(),
-        ids: vec![ids[1].clone()],
-        mode: DeleteMode::Quarantine,
-    };
-    let Reply::Outcome(o) = ask(&peer, one).unwrap() else {
-        panic!("outcome")
-    };
-    assert_eq!(o.deleted, 1, "{:?}", o.failed);
-    let q = o.quarantine_id.unwrap();
-    let remaining = [&a, &b].iter().filter(|p| p.exists()).count();
-    assert_eq!(remaining, 1);
-    let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
-        panic!("activity")
-    };
-    assert!(log.iter().any(|e| e.title.starts_with("Removed 1 file")), "{log:?}");
-    assert!(ask(&peer, Request::RestoreQuarantine { id: q }).is_ok());
-    assert!(a.exists() && b.exists());
+    assert_eq!(r.duplicates[0].files.len(), 2);
+    assert!(a.exists() && b.exists(), "finding moves nothing");
 }
 
 #[test]
-fn the_finder_refuses_a_folder_that_is_not_there_and_stale_selections() {
+fn the_finder_refuses_a_folder_that_is_not_there() {
     let h = Harness::start();
     let peer = h.client();
     let missing = std::env::temp_dir().join("dyno-definitely-not-here");
@@ -268,15 +227,6 @@ fn the_finder_refuses_a_folder_that_is_not_there_and_stale_selections() {
     assert!(ask(&peer, Request::FindFiles { query: q })
         .unwrap_err()
         .contains("cannot be opened"));
-    assert!(ask(
-        &peer,
-        Request::RemoveFoundFiles {
-            scan_id: "x".into(),
-            ids: vec![],
-            mode: DeleteMode::RecycleBin
-        }
-    )
-    .is_err());
 }
 
 fn backup_report(peer: &Peer<Message>, refresh: bool) -> dyno_core::backup::BackupReport {

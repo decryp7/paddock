@@ -1,7 +1,7 @@
 //! The activity log: every action Dyno took (by a rule or a click), with what is needed to undo it.
 
 use crate::process::{Priority, ProcessAction, ProcessRef};
-use crate::time::{Timestamp, DAY};
+use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 /// What kind of activity.
@@ -14,8 +14,6 @@ pub enum ActivityKind {
     Release,
     /// The user acted on a process.
     Manual,
-    /// A cleanup ran.
-    Cleanup,
     /// An alert fired.
     Alert,
     /// Dyno itself (started, profile switched, rules paused).
@@ -32,7 +30,7 @@ pub enum UndoState {
     Available,
     /// Was undone.
     Undone,
-    /// No longer possible (the process exited, the quarantine expired).
+    /// No longer possible (the process exited).
     Expired,
 }
 
@@ -71,13 +69,6 @@ pub enum UndoRecord {
         /// (rule id, app group id) when a rule did it.
         rule: Option<(String, String)>,
     },
-    /// Restore a quarantined cleanup.
-    Quarantine {
-        /// Quarantine id.
-        id: String,
-        /// Until when it can be restored.
-        expires: Timestamp,
-    },
 }
 
 /// A process's settings before an action, so it can be put back.
@@ -103,8 +94,8 @@ pub fn inverse(action: &ProcessAction, previous: Previous) -> Option<ProcessActi
     }
 }
 
-/// The undo state of a record now: process undo needs the process alive; quarantine undo expires.
-pub fn undo_state(record: &UndoRecord, undone: bool, now: Timestamp, alive: impl Fn(ProcessRef) -> bool) -> UndoState {
+/// The undo state of a record now: process undo needs the process alive.
+pub fn undo_state(record: &UndoRecord, undone: bool, _now: Timestamp, alive: impl Fn(ProcessRef) -> bool) -> UndoState {
     if undone {
         return UndoState::Undone;
     }
@@ -112,17 +103,8 @@ pub fn undo_state(record: &UndoRecord, undone: bool, now: Timestamp, alive: impl
         UndoRecord::None => UndoState::NotUndoable,
         UndoRecord::Process { actions, .. } if actions.is_empty() => UndoState::NotUndoable,
         UndoRecord::Process { target, .. } if !alive(*target) => UndoState::Expired,
-        UndoRecord::Quarantine { expires, .. } if now >= *expires => UndoState::Expired,
         _ => UndoState::Available,
     }
-}
-
-/// How long quarantined files are kept before they are deleted for good.
-pub const QUARANTINE_DAYS: i64 = 7;
-
-/// When a quarantine made at `at` expires.
-pub fn quarantine_expiry(at: Timestamp) -> Timestamp {
-    at.plus(QUARANTINE_DAYS * DAY)
 }
 
 /// The most entries the agent keeps.
@@ -192,12 +174,6 @@ mod tests {
         };
         assert_eq!(undo_state(&empty, false, now, |_| true), UndoState::NotUndoable);
         assert_eq!(undo_state(&UndoRecord::None, false, now, |_| true), UndoState::NotUndoable);
-        let q = UndoRecord::Quarantine {
-            id: "q".into(),
-            expires: quarantine_expiry(Timestamp(0)),
-        };
-        assert_eq!(undo_state(&q, false, now, |_| true), UndoState::Available);
-        assert_eq!(undo_state(&q, false, Timestamp(8 * DAY), |_| true), UndoState::Expired);
         const { assert!(MAX_ENTRIES > 100) };
     }
 }

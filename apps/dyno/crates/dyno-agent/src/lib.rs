@@ -6,18 +6,16 @@ pub mod agent;
 pub mod alarms;
 pub mod baselines;
 pub mod bench;
-pub mod cleanup;
 pub mod cli;
 pub mod counters;
 pub mod diagnostics;
 pub mod discovery;
+pub mod disk;
 pub mod extras;
 pub mod filehash;
 pub mod files;
 pub mod handlers;
-pub mod handlers_cleanup;
 pub mod handlers_search;
-pub mod handlers_watch;
 pub mod hardware;
 pub mod helper_centre;
 pub mod helper_link;
@@ -33,7 +31,6 @@ pub mod server;
 pub mod service;
 pub mod store;
 pub mod unusual;
-pub mod watch;
 
 use agent::Shared;
 use std::sync::Arc;
@@ -117,13 +114,6 @@ impl Running {
                 .name("dyno-netwatch".into())
                 .spawn(move || netwatch::run(&s))
                 .map_err(|e| format!("could not start the network change watcher: {e}"))?,
-        );
-        let s = shared.clone();
-        threads.push(
-            std::thread::Builder::new()
-                .name("dyno-watched".into())
-                .spawn(move || handlers_watch::run(&s))
-                .map_err(|e| format!("could not start the watched folders sweeper: {e}"))?,
         );
         let s = shared.clone();
         threads.push(

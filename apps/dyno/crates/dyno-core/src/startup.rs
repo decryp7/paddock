@@ -151,8 +151,8 @@ fn norm_path(s: &str) -> String {
 }
 
 /// Whether the entry is part of the operating system `os` (by its label or the folder it runs from).
-pub fn is_os_owned(entry: &StartupEntry, os: crate::cleanup::Os) -> bool {
-    use crate::cleanup::Os;
+pub fn is_os_owned(entry: &StartupEntry, os: crate::os::Os) -> bool {
+    use crate::os::Os;
     let exe = entry.exe.as_deref().map(norm_path).unwrap_or_default();
     let name = norm_path(&entry.name);
     let under = |prefixes: &[&str]| prefixes.iter().any(|p| exe.starts_with(p));
@@ -185,7 +185,7 @@ pub fn is_os_owned(entry: &StartupEntry, os: crate::cleanup::Os) -> bool {
 }
 
 /// Classifies an entry: the OS's own first, then signed (a publisher is known), else other.
-pub fn origin(entry: &StartupEntry, os: crate::cleanup::Os) -> StartupOrigin {
+pub fn origin(entry: &StartupEntry, os: crate::os::Os) -> StartupOrigin {
     if is_os_owned(entry, os) {
         StartupOrigin::Os
     } else if entry.publisher.as_deref().is_some_and(|p| !p.trim().is_empty()) {
@@ -220,7 +220,7 @@ pub struct StartupOverview {
 }
 
 /// Applies `filter` to `entries`.
-pub fn overview(entries: Vec<StartupEntry>, filter: StartupFilter, os: crate::cleanup::Os) -> StartupOverview {
+pub fn overview(entries: Vec<StartupEntry>, filter: StartupFilter, os: crate::os::Os) -> StartupOverview {
     let total = entries.len() as u32;
     let (mut os_count, mut signed_count) = (0, 0);
     let kept = entries
@@ -317,7 +317,7 @@ mod tests {
 mod filter_tests {
     use super::fixtures::entry;
     use super::*;
-    use crate::cleanup::Os;
+    use crate::os::Os;
 
     fn signed(name: &str, exe: &str, publisher: &str) -> StartupEntry {
         let mut e = entry(name, exe, ImpactRating::Low);

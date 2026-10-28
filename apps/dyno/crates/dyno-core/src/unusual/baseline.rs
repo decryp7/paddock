@@ -3,7 +3,7 @@
 //! number of days (nothing is flagged), then lists programs it has not seen as new, with reasons when they are unusual.
 
 use super::{assess, program_key, Assessment, Facts, Level, Reason, Signing, UnusualSettings, UNUSUAL_SCORE};
-use crate::cleanup::Os;
+use crate::os::Os;
 use crate::time::{Timestamp, DAY, MINUTE};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};

@@ -220,10 +220,6 @@ pub struct Shared {
     pub extras: crate::extras::ExtrasCentre,
     /// Benchmark runs (only on the user's click).
     pub bench: crate::bench::BenchCentre,
-    /// Cleanup: categories, scans and the quarantine (deletes only on the user's confirmed click).
-    pub cleanup: crate::cleanup::centre::CleanupCentre,
-    /// Watched folders with keep-for times (WP-10): files move to the quarantine only in folders the user set up.
-    pub watch: crate::watch::WatchCentre,
     /// Network change events on the timeline (WP-35).
     pub netwatch: crate::netwatch::NetWatchCentre,
     /// SHA-256 of program files for the VirusTotal search (WP-33); nothing is uploaded.
@@ -314,33 +310,6 @@ impl Shared {
         if let Some(n) = bench_note {
             core.log(t, ActivityKind::System, "Benchmark history reset".into(), n, UndoRecord::None, None);
         }
-        let (cleanup, cleanup_notes) = crate::cleanup::centre::CleanupCentre::load(
-            &dirs,
-            crate::cleanup::roots::Env::current(),
-            Box::new(crate::cleanup::trash::OsTrash),
-            t,
-        );
-        for n in cleanup_notes {
-            core.log(
-                t,
-                ActivityKind::System,
-                "A cleanup pack was ignored".into(),
-                n,
-                UndoRecord::None,
-                None,
-            );
-        }
-        let (watch, watch_note) = crate::watch::WatchCentre::load(dirs.watched_folders());
-        if let Some(n) = watch_note {
-            core.log(
-                t,
-                ActivityKind::System,
-                "Watched folders were reset".into(),
-                n,
-                UndoRecord::None,
-                None,
-            );
-        }
         let unusual = crate::unusual::UnusualCentre::load(&core.store);
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         // One link to the helper (if it is installed) serves the traffic wrapper and the lifecycle.
@@ -392,8 +361,6 @@ impl Shared {
             subs: Mutex::new(Vec::new()),
             reveal,
             bench,
-            cleanup,
-            watch,
             netwatch: crate::netwatch::NetWatchCentre::new(),
             hasher: crate::filehash::FileHasher::new(),
             counters: crate::counters::CounterCentre::new(Arc::new(dyno_platform::counters::OsCounters)),

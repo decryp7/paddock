@@ -1,7 +1,6 @@
 //! The user's settings: versioned, every key optional (defaults fill the gaps), damaged files fall back to defaults.
 
 use crate::alerts::AlertSettings;
-use crate::cleanup::{CleanupSchedule, DeleteMode};
 use crate::history::Retention;
 use serde::{Deserialize, Serialize};
 
@@ -88,31 +87,6 @@ impl Default for Tray {
     }
 }
 
-/// Cleanup preferences.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct CleanupSettings {
-    /// Scheduled runs.
-    pub schedule: CleanupSchedule,
-    /// Categories scheduled runs include (the user enabled them).
-    pub categories: Vec<String>,
-    /// Where deleted items go.
-    pub mode: DeleteMode,
-    /// Projects untouched this many days offer their build output (7–365).
-    pub dev_project_age_days: u32,
-}
-
-impl Default for CleanupSettings {
-    fn default() -> Self {
-        CleanupSettings {
-            schedule: CleanupSchedule::Off,
-            categories: Vec::new(),
-            mode: DeleteMode::RecycleBin,
-            dev_project_age_days: 30,
-        }
-    }
-}
-
 /// The optional local web page / API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -153,8 +127,6 @@ pub struct Settings {
     pub tray: Tray,
     /// Alerts.
     pub alerts: AlertSettings,
-    /// Cleanup.
-    pub cleanup: CleanupSettings,
     /// Local web API.
     pub web_api: WebApi,
     /// The dashboard's widgets and presets.
@@ -216,7 +188,6 @@ impl Default for Settings {
             retention: Retention::default(),
             tray: Tray::default(),
             alerts: AlertSettings::default(),
-            cleanup: CleanupSettings::default(),
             web_api: WebApi::default(),
             dashboard: Default::default(),
             tray_items: Default::default(),
@@ -254,9 +225,6 @@ impl Settings {
         }
         self.alerts = self.alerts.clamped();
         self.baselines = self.baselines.clamped();
-        self.cleanup.dev_project_age_days = self.cleanup.dev_project_age_days.clamp(7, 365);
-        self.cleanup.categories.retain(|c| !c.is_empty() && c.len() <= 64);
-        self.cleanup.categories.truncate(100);
         self.web_api.port = self.web_api.port.max(1024);
         self.dashboard = self.dashboard.normalised();
         self.tray_items = self.tray_items.normalised();
@@ -349,21 +317,16 @@ mod tests {
             TrayMetric::Gpu,
             TrayMetric::Network,
         ];
-        s.cleanup.dev_project_age_days = 1;
-        s.cleanup.categories = vec![String::new(), "userTemp".into()];
         s.web_api.port = 80;
         let n = s.normalised();
         assert_eq!((n.sampling.interval_ms, n.sampling.process_interval_ms), (500, 30_000));
         assert_eq!(n.tray.metrics, vec![TrayMetric::Cpu, TrayMetric::Disk, TrayMetric::Gpu]);
-        assert_eq!(n.cleanup.dev_project_age_days, 7);
-        assert_eq!(n.cleanup.categories, vec!["userTemp".to_string()]);
         assert_eq!(n.web_api.port, 1024);
         let mut e = Settings::default();
         e.tray.metrics.clear();
         assert_eq!(e.normalised().tray.metrics, Tray::default().metrics);
         let j = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(j["webApi"]["port"], 47_800);
-        assert_eq!(j["cleanup"]["mode"], "recycleBin");
     }
 
     #[test]

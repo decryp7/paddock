@@ -16,7 +16,7 @@ use dyno_core::process::{Pid, ProcessAction, ProcessRef, ProcessSample};
 use dyno_core::protect::Protection;
 use dyno_core::protocol::{AgentError, ErrorCode, History, LiveDetail, Message, PluginInfo, PluginState, Reply, Request};
 use dyno_core::recorder::CaptureReason;
-use dyno_core::report::{self, ReportChange, ReportDisk, ReportFormat, ReportInput, ReportIssue, SavedReport, ScorePoint, WeeklyReport};
+use dyno_core::report::{self, ReportDisk, ReportFormat, ReportInput, ReportIssue, SavedReport, ScorePoint, WeeklyReport};
 use dyno_core::rules::{Command as RuleCommand, Situation};
 use dyno_core::snapshot;
 use dyno_core::time::{Timestamp, DAY, HOUR};
@@ -300,23 +300,14 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             Ok(Reply::Lifespan(Box::new(shared.hardware.lifespan_overview(&core.store, now()))))
         }
         Request::Baselines => Ok(Reply::Baselines(Box::new(shared.baselines.overview(shared)))),
-        r @ (Request::CleanupCategories
-        | Request::ScanCleanup { .. }
-        | Request::RunCleanup { .. }
-        | Request::Quarantine
-        | Request::RestoreQuarantine { .. }
-        | Request::DiskUsage { .. }) => crate::handlers_cleanup::handle(shared, r),
+        Request::DiskUsage { path } => crate::disk::disk_usage(path.as_deref())
+            .map(|n| Reply::SizeTree(Box::new(n)))
+            .map_err(bad),
         r @ (Request::SearchSeed { .. }
         | Request::WebSearch { .. }
         | Request::FileHash { .. }
         | Request::VirusTotalUrl { .. }
         | Request::StartupOverview { .. }) => crate::handlers_search::handle(shared, r),
-        r @ (Request::WatchedFolders
-        | Request::AddWatchedFolder { .. }
-        | Request::SetWatchedFolder { .. }
-        | Request::RemoveWatchedFolder { .. }
-        | Request::PreviewWatchedFolder { .. }
-        | Request::SweepWatchedFolder { .. }) => crate::handlers_watch::handle(shared, r),
         r @ (Request::Changes { .. }
         | Request::SleepBlockers
         | Request::BootAnalysis
@@ -325,7 +316,6 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         | Request::SoftwareInventory
         | Request::SaveInventoryReport { .. }
         | Request::FindFiles { .. }
-        | Request::RemoveFoundFiles { .. }
         | Request::Maintenance
         | Request::Backup
         | Request::RefreshBackup) => crate::extras::handle(shared, r),
@@ -551,7 +541,6 @@ fn undo(shared: &Arc<Shared>, id: &str) -> Result<ActivityEntry, AgentError> {
                 let _ = core.engine.snooze(&rules, rule_id, app, &procs);
             }
         }
-        UndoRecord::Quarantine { id: q, .. } => crate::handlers_cleanup::restore(shared, q)?,
         UndoRecord::None => return Err(bad("That cannot be undone here yet.")),
     }
     let core = lock(&shared.core);
@@ -761,35 +750,8 @@ fn weekly_report(shared: &Shared, weeks_ago: u32) -> Result<WeeklyReport, AgentE
     let points = s.points(Tier::QuarterHour, from, to).map_err(internal)?;
     let top_apps = top_consumers(&s.app_minutes(from, to).map_err(internal)?, 5);
     let score = live_score.or(s.score_at(to).map_err(internal)?);
-    // (from, to]: a change made in the very millisecond the report is built still counts, and adjacent weeks never share one.
+    // (from, to]: an alert raised in the very millisecond the report is built still counts, and adjacent weeks never share one.
     let in_week = |at: Timestamp| at > from && at <= to;
-    let activity: Vec<ActivityEntry> = s
-        .activity(1_000)
-        .map_err(internal)?
-        .into_iter()
-        .map(|(e, _, _)| e)
-        .filter(|e| in_week(e.at))
-        .collect();
-    let rule_actions = activity.iter().filter(|e| e.kind == ActivityKind::Rule).count() as u32;
-    let cleaned_bytes = activity
-        .iter()
-        .filter(|e| e.kind == ActivityKind::Cleanup)
-        .filter_map(|e| e.bytes)
-        .sum();
-    let changes = activity
-        .iter()
-        .filter(|e| {
-            !matches!(
-                e.kind,
-                ActivityKind::Rule | ActivityKind::Alert | ActivityKind::System | ActivityKind::Release
-            )
-        })
-        .map(|e| ReportChange {
-            at: e.at,
-            title: e.title.clone(),
-            detail: e.detail.clone(),
-        })
-        .collect();
     let issues: Vec<ReportIssue> = s
         .alerts(1_000)
         .map_err(internal)?
@@ -824,8 +786,6 @@ fn weekly_report(shared: &Shared, weeks_ago: u32) -> Result<WeeklyReport, AgentE
         top_apps,
         score,
         score_before: s.score_at(from).map_err(internal)?,
-        rule_actions,
-        cleaned_bytes,
         crashes,
         alerts: issues.len() as u32,
         score_trend: s
@@ -836,7 +796,6 @@ fn weekly_report(shared: &Shared, weeks_ago: u32) -> Result<WeeklyReport, AgentE
             .collect(),
         disks,
         issues,
-        changes,
         hardware: dyno_core::report::hardware_lines(
             &s.throttle_episodes(from, MAX_HARDWARE_EPISODES).map_err(internal)?,
             from,

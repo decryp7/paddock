@@ -1,12 +1,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! Right-click search, hash search, startup filter, watched folders and network change events end to end over the fake
+//! Right-click search, hash search, startup filter and network change events end to end over the fake
 //! platform: a real IPC connection and a real SQLite file in a temp folder. Files are created only in temp folders.
 
 use dyno_agent::cli::{ask, connect};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
-use dyno_core::activity::UndoState;
 use dyno_core::history::HistoryRange;
 use dyno_core::netchange::{Link, LinkKind, NetState};
 use dyno_core::process::ProcessRef;
@@ -16,7 +15,7 @@ use dyno_core::time::Timestamp;
 use dyno_core::weblinks::HashSource;
 use dyno_ipc::Peer;
 use dyno_platform::fake::{process, Fake};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -65,15 +64,6 @@ impl Drop for Harness {
             r.stop();
         }
     }
-}
-
-fn old_file(dir: &Path, name: &str) -> PathBuf {
-    let p = dir.join(name);
-    std::fs::write(&p, name.as_bytes()).unwrap();
-    let f = std::fs::OpenOptions::new().write(true).open(&p).unwrap(); // Windows needs write access to set times
-    f.set_modified(std::time::SystemTime::now() - Duration::from_secs(5 * 86_400))
-        .unwrap();
-    p
 }
 
 #[test]
@@ -308,178 +298,4 @@ fn network_changes_land_on_the_timeline() {
     // A machine that cannot be read is skipped quietly and keeps the baseline.
     h.fake.with(|s| s.net = None);
     assert!(shared.netwatch.look(&shared).is_empty());
-}
-
-fn watched(peer: &Peer<Message>) -> dyno_core::watch::WatchOverview {
-    let Reply::Watched(o) = ask(peer, Request::WatchedFolders).unwrap() else {
-        panic!("watched")
-    };
-    *o
-}
-
-#[test]
-fn a_watched_folder_is_off_until_previewed_and_only_then_sweeps_into_an_undoable_quarantine() {
-    let h = Harness::start(|_| {});
-    let peer = h.client();
-    let dir = h.folder("downloads");
-    let old = old_file(&dir, "installer.dmg");
-    let keep = old_file(&dir, "notes.txt");
-    let outside = old_file(&h.folder("elsewhere"), "other.dmg");
-    // Adding switches nothing on.
-    let Reply::Watched(o) = ask(
-        &peer,
-        Request::AddWatchedFolder {
-            path: dir.to_string_lossy().into_owned(),
-            template: Some("installers".into()),
-            keep_for_secs: 86_400,
-            recursive: false,
-        },
-    )
-    .unwrap() else {
-        panic!("add")
-    };
-    let id = o.folders[0].folder.id.clone();
-    assert!(!o.folders[0].folder.enabled);
-    // Turning on or cleaning without a preview is refused.
-    let on = Request::SetWatchedFolder {
-        id: id.clone(),
-        keep_for_secs: None,
-        enabled: Some(true),
-        recursive: None,
-    };
-    assert!(ask(&peer, on.clone()).unwrap_err().contains("preview first"));
-    assert!(ask(&peer, Request::SweepWatchedFolder { id: id.clone() })
-        .unwrap_err()
-        .contains("preview first"));
-    assert!(old.exists(), "nothing moved before the person agreed");
-    let Reply::WatchPreview(p) = ask(&peer, Request::PreviewWatchedFolder { id: id.clone() }).unwrap() else {
-        panic!("preview")
-    };
-    assert_eq!(p.id, id);
-    assert!(old.exists(), "a preview moves nothing");
-    ask(&peer, on).unwrap();
-    assert!(watched(&peer).folders[0].folder.enabled);
-    // A sweep (creation times are ignored, as temp files made a moment ago would otherwise never be due).
-    let folder = watched(&peer).folders[0].folder.clone();
-    dyno_agent::handlers_watch::sweep_one(&h.shared(), &folder, false).unwrap();
-    assert!(
-        !old.exists() && keep.exists() && outside.exists(),
-        "only the matching old file of the watched folder moved"
-    );
-    let last = watched(&peer).folders[0].folder.last_sweep.clone().unwrap();
-    assert_eq!((last.moved, last.failed), (1, 0));
-    let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
-        panic!("activity")
-    };
-    let entry = log
-        .iter()
-        .find(|a| a.title.contains("old file"))
-        .expect("the sweep is in the activity log");
-    assert_eq!(entry.undo, UndoState::Available);
-    ask(
-        &peer,
-        Request::Undo {
-            activity_id: entry.id.clone(),
-        },
-    )
-    .unwrap();
-    assert!(old.exists(), "undo put the file back");
-    // Stopping the watch leaves the folder alone.
-    ask(&peer, Request::RemoveWatchedFolder { id }).unwrap();
-    assert!(watched(&peer).folders.is_empty() && old.exists());
-}
-
-#[test]
-fn unsafe_and_overlapping_folders_are_refused_with_a_reason() {
-    let h = Harness::start(|_| {});
-    let peer = h.client();
-    let add = |path: String| {
-        ask(
-            &peer,
-            Request::AddWatchedFolder {
-                path,
-                template: None,
-                keep_for_secs: 600,
-                recursive: false,
-            },
-        )
-    };
-    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();
-    for bad in [
-        "/".to_string(),
-        home,
-        h.dirs.root().to_string_lossy().into_owned(),
-        "relative".to_string(),
-        "/no/such/folder".to_string(),
-    ] {
-        let e = add(bad.clone()).unwrap_err();
-        assert!(!e.is_empty(), "{bad}");
-    }
-    let dir = h.folder("a");
-    add(dir.to_string_lossy().into_owned()).unwrap();
-    std::fs::create_dir_all(dir.join("inner")).unwrap();
-    assert!(add(dir.join("inner").to_string_lossy().into_owned())
-        .unwrap_err()
-        .contains("overlap"));
-    assert!(ask(
-        &peer,
-        Request::SetWatchedFolder {
-            id: "w-none".into(),
-            keep_for_secs: Some(600),
-            enabled: None,
-            recursive: None
-        }
-    )
-    .is_err());
-    let id = watched(&peer).folders[0].folder.id.clone();
-    assert!(ask(
-        &peer,
-        Request::SetWatchedFolder {
-            id,
-            keep_for_secs: Some(5),
-            enabled: None,
-            recursive: None
-        }
-    )
-    .unwrap_err()
-    .contains("between 10 minutes and 10 days"));
-}
-
-#[test]
-fn the_list_survives_an_agent_restart_and_a_damaged_file_starts_empty() {
-    let tmp = tempfile::tempdir().unwrap();
-    let dirs = Dirs::at(tmp.path().join("data"));
-    let dir = std::fs::canonicalize(tmp.path()).unwrap().join("watched");
-    std::fs::create_dir_all(&dir).unwrap();
-    let start = |dirs: &Dirs| {
-        let fake = Fake::new();
-        fake.add_process(process(1, "calm", 1.0));
-        Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap()
-    };
-    let r = start(&dirs);
-    let peer = connect(&dirs).unwrap().0;
-    ask(
-        &peer,
-        Request::AddWatchedFolder {
-            path: dir.to_string_lossy().into_owned(),
-            template: None,
-            keep_for_secs: 600,
-            recursive: false,
-        },
-    )
-    .unwrap();
-    drop(peer);
-    r.stop();
-    let r = start(&dirs);
-    let peer = connect(&dirs).unwrap().0;
-    assert_eq!(watched(&peer).folders.len(), 1);
-    drop(peer);
-    r.stop();
-    std::fs::write(dirs.watched_folders(), "{broken").unwrap();
-    let _ = std::fs::remove_file(dirs.watched_folders().with_extension("json.bak"));
-    let r = start(&dirs);
-    let peer = connect(&dirs).unwrap().0;
-    assert!(watched(&peer).folders.is_empty());
-    drop(peer);
-    r.stop();
 }

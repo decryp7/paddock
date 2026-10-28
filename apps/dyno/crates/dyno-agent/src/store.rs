@@ -87,7 +87,6 @@ fn kind_text(k: TimelineEventKind) -> &'static str {
         TimelineEventKind::Throttle => "throttle",
         TimelineEventKind::Cap => "cap",
         TimelineEventKind::Release => "release",
-        TimelineEventKind::Cleanup => "cleanup",
         TimelineEventKind::Alert => "alert",
         TimelineEventKind::Boot => "boot",
         TimelineEventKind::Network => "network",
@@ -99,7 +98,6 @@ fn kind_from(s: &str) -> Option<TimelineEventKind> {
         "throttle" => TimelineEventKind::Throttle,
         "cap" => TimelineEventKind::Cap,
         "release" => TimelineEventKind::Release,
-        "cleanup" => TimelineEventKind::Cleanup,
         "alert" => TimelineEventKind::Alert,
         "boot" => TimelineEventKind::Boot,
         "network" => TimelineEventKind::Network,
@@ -376,27 +374,6 @@ impl Store {
             .collect())
     }
 
-    /// Activity entries of a kind since `from` (for counts in reports).
-    pub fn count_activity(&self, kind: &str, from: Timestamp) -> Result<u32> {
-        let pattern = format!("%\"kind\":\"{kind}\"%");
-        let n: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM activity WHERE at >= ?1 AND entry LIKE ?2",
-            params![from.millis(), pattern],
-            |r| r.get(0),
-        )?;
-        Ok(n.max(0) as u32)
-    }
-
-    /// Bytes freed by cleanups since `from`.
-    pub fn cleaned_bytes(&self, from: Timestamp) -> Result<u64> {
-        Ok(self
-            .activity(1_000)?
-            .into_iter()
-            .filter(|(e, _, _)| e.at >= from && e.kind == dyno_core::activity::ActivityKind::Cleanup)
-            .filter_map(|(e, _, _)| e.bytes)
-            .sum())
-    }
-
     /// Stores an alert.
     pub fn put_alert(&self, a: &Alert) -> Result<()> {
         self.conn.execute(
@@ -602,7 +579,7 @@ mod tests {
         };
         s.put_event(&e).unwrap();
         assert_eq!(s.events(Timestamp(0), Timestamp(10)).unwrap(), vec![e]);
-        for k in ["throttle", "cap", "release", "cleanup", "alert", "boot"] {
+        for k in ["throttle", "cap", "release", "alert", "boot"] {
             assert_eq!(kind_from(k).map(kind_text), Some(k));
         }
         assert!(kind_from("x").is_none());
@@ -651,7 +628,7 @@ mod tests {
         let s = Store::memory().unwrap();
         let undo = UndoRecord::None;
         s.put_activity(&entry("a", 1, ActivityKind::Rule, None), &undo).unwrap();
-        s.put_activity(&entry("b", 2, ActivityKind::Cleanup, Some(500)), &UndoRecord::None)
+        s.put_activity(&entry("b", 2, ActivityKind::System, None), &UndoRecord::None)
             .unwrap();
         let all = s.activity(10).unwrap();
         assert_eq!(all[0].0.id, "b");
@@ -659,8 +636,6 @@ mod tests {
         s.mark_undone("a").unwrap();
         assert!(s.activity_entry("a").unwrap().unwrap().2);
         assert!(s.activity_entry("zzz").unwrap().is_none());
-        assert_eq!(s.count_activity("cleanup", Timestamp(0)).unwrap(), 1);
-        assert_eq!(s.cleaned_bytes(Timestamp(0)).unwrap(), 500);
         let alert = Alert {
             id: "x".into(),
             at: Timestamp(3),

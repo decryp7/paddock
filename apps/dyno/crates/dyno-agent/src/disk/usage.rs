@@ -2,7 +2,7 @@
 //! time; never follows links; on Unix stays on the starting volume. When a bound is hit the tree says so.
 
 use super::walk::Budget;
-use dyno_core::cleanup::{prune, SizeNode};
+use dyno_core::disk::{has_dot_segment, prune, SizeNode};
 use std::path::{Path, PathBuf};
 
 /// Levels of children returned.
@@ -17,7 +17,7 @@ pub const MAX_SECS: u64 = 5;
 /// Why a path cannot be mapped.
 pub fn check(path: &str) -> Result<PathBuf, String> {
     let p = Path::new(path);
-    if !p.is_absolute() || dyno_core::cleanup::has_dot_segment(p) {
+    if !p.is_absolute() || has_dot_segment(p) {
         return Err("Give the full path of a folder.".into());
     }
     let real = std::fs::canonicalize(p).map_err(|_| "That folder does not exist or cannot be read.".to_string())?;

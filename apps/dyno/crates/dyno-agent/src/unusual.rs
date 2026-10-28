@@ -5,7 +5,7 @@
 
 use crate::agent::{lock, now, Shared};
 use dyno_core::activity::{ActivityKind, UndoRecord};
-use dyno_core::cleanup::Os;
+use dyno_core::os::Os;
 use dyno_core::process::ProcessSample;
 use dyno_core::protocol::{AgentError, ErrorCode, Message};
 use dyno_core::startup::StartupState;
