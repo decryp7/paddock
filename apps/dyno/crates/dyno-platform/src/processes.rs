@@ -57,6 +57,42 @@ fn login_defs() -> Option<String> {
     }
 }
 
+/// What macOS still gives for a process whose full BSD info was refused.
+#[derive(Debug, Default, Clone, Copy)]
+struct BsdFallback {
+    uid: Option<u32>,
+    parent: Option<u32>,
+    start_secs: u64,
+}
+
+/// For macOS, the short BSD info and the sysctl start time of a process sysinfo could not describe (another user's); other
+/// systems have nothing to add.
+fn bsd_fallback(p: &Process) -> BsdFallback {
+    #[cfg(target_os = "macos")]
+    {
+        let pid = p.pid().as_u32();
+        let missing = p.user_id().is_none() || p.parent().is_none() || p.start_time() == 0;
+        if !missing {
+            return BsdFallback::default();
+        }
+        let short = crate::macos::procinfo::short_info(pid);
+        BsdFallback {
+            uid: short.map(|s| s.uid),
+            parent: short.map(|s| s.parent).filter(|pp| *pp != 0),
+            start_secs: if p.start_time() == 0 {
+                crate::macos::procinfo::start_secs(pid).unwrap_or(0)
+            } else {
+                0
+            },
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = p;
+        BsdFallback::default()
+    }
+}
+
 /// The deepest parent chain reported (guards against cycles from reused pids).
 const MAX_PARENT_DEPTH: usize = 64;
 /// The user list is re-read at most this often when an unknown user id shows up.
@@ -136,13 +172,24 @@ impl SysinfoProcesses {
             .or_else(|| well_known_account(&uid.to_string()).map(str::to_string))
     }
 
-    fn owner_of(&self, p: &Process) -> Owner {
+    #[cfg(unix)]
+    fn user_name_of_uid(&self, uid: u32) -> Option<String> {
+        self.users.list().iter().find(|u| **u.id() == uid).map(|u| u.name().to_string())
+    }
+
+    #[cfg(windows)]
+    fn user_name_of_uid(&self, _uid: u32) -> Option<String> {
+        None
+    }
+
+    fn owner_of(&self, p: &Process, fallback_uid: Option<u32>) -> Owner {
         #[cfg(unix)]
         {
-            classify_uid(p.user_id().map(|u| **u), self.own_user, self.first_user)
+            classify_uid(p.user_id().map(|u| **u).or(fallback_uid), self.own_user, self.first_user)
         }
         #[cfg(windows)]
         {
+            let _ = fallback_uid;
             if let Some(nt) = &self.nt {
                 if let (Some(own), Some(session)) = (nt.tracker.own_session(), nt.tracker.session_of(p.pid().as_u32())) {
                     return classify_session(session, own);
@@ -163,7 +210,14 @@ impl SysinfoProcesses {
             start_secs: p.start_time(),
             user: self.user_name(p),
         };
-        let owner = self.owner_of(p);
+        let extra = bsd_fallback(p);
+        if raw.start_secs == 0 {
+            raw.start_secs = extra.start_secs;
+        }
+        if raw.user.is_none() {
+            raw.user = extra.uid.and_then(|uid| self.user_name_of_uid(uid));
+        }
+        let owner = self.owner_of(p, extra.uid);
         let mut from_list = false;
         if let Some(nt) = &self.nt {
             from_list = apply_nt(&mut raw, owner, nt.tracker.reading(p.pid().as_u32()));
@@ -174,7 +228,7 @@ impl SysinfoProcesses {
         }
         ProcessSample {
             pid: p.pid().as_u32(),
-            parent: p.parent().map(|pp| pp.as_u32()),
+            parent: p.parent().map(|pp| pp.as_u32()).or(extra.parent),
             name: p.name().to_string_lossy().into_owned(),
             exe: p.exe().map(|e| e.to_string_lossy().into_owned()).filter(|e| !e.is_empty()),
             user: m.user,
