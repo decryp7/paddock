@@ -11,6 +11,7 @@ use paddock_pitwall::testing::{
 };
 use paddock_pitwall::*;
 use paddock_secrets::{MemorySecrets, Name, Secrets};
+use paddock_testkit::net::HeldPort;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -424,14 +425,28 @@ fn overload_is_retried_with_the_servers_retry_after_and_other_errors_are_not() {
     assert_eq!(rec2.0.lock().unwrap().len(), 3);
 }
 
+/// A connector where nothing listens.
+struct Refuses;
+
+impl loopback::Connector for Refuses {
+    fn connect(
+        &self,
+        _: std::net::SocketAddr,
+        _: std::time::Duration,
+    ) -> std::io::Result<std::net::TcpStream> {
+        Err(std::io::ErrorKind::ConnectionRefused.into())
+    }
+}
+
 #[test]
 fn the_server_gone_is_not_running_and_a_foreign_listener_is_a_protocol_error() {
-    let port = {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap().port()
-    };
+    // Nothing listens: a connector that refuses, on a held port (a port read off a dropped listener could be given to
+    // another process's server, ADR 0023).
+    let held = HeldPort::hang_up();
     let rec = Arc::new(Recorder::default());
-    let c = Client::new(port, app()).with_sleeper(rec.clone());
+    let c = Client::new(held.port(), app())
+        .with_connector(Arc::new(Refuses))
+        .with_sleeper(rec.clone());
     assert_eq!(c.health().unwrap_err(), PitwallError::NotRunning);
     assert!(rec.0.lock().unwrap().is_empty(), "a probe is not retried");
     let c = c.with_key(Some(paddock_secrets::Secret::new(KEY).unwrap()));
@@ -1453,14 +1468,13 @@ fn a_link_that_has_not_seen_pitwall_says_what_is_missing() {
         PitwallError::NeedsPairing
     );
     // Found only through the fallback port, with no data folder.
-    let free = {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap().port()
-    };
+    // A held port, not one read off a dropped listener: another process's Pitwall (on CI, a concurrent test's fake) could
+    // be given that one, and the probe would find it running (ADR 0023).
+    let foreign = HeldPort::hang_up();
     let nowhere = tempfile::tempdir().unwrap().path().join("gone");
     let link = Link::new(LinkConfig::new(
         app(),
-        Locator::in_dir(&nowhere, Some(free), Arc::new(|_| false)),
+        Locator::in_dir(&nowhere, Some(foreign.port()), Arc::new(|_| false)),
         Arc::new(MemorySecrets::new("Debrief")),
     ));
     assert_eq!(link.probe().found, FoundKind::Absent);

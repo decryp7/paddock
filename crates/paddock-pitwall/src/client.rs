@@ -4,7 +4,7 @@
 //! [`PitwallError`]s that say what to do.
 
 use crate::error::{PitwallError, status_error};
-use crate::loopback::{self, Request, Timeouts};
+use crate::loopback::{self, Connector, Request, Tcp, Timeouts};
 use crate::model::{CallOptions, ModelSel};
 use crate::request::{ChatRequest, EmbedRequest, Keep, Task};
 use crate::retry::{self, Policy, Sleeper, ThreadSleeper};
@@ -118,6 +118,7 @@ pub struct Client {
     retry: Option<Policy>,
     quick: Timeouts,
     chat: Timeouts,
+    connector: Arc<dyn Connector>,
 }
 
 impl std::fmt::Debug for Client {
@@ -141,6 +142,7 @@ impl Client {
             retry: None,
             quick: Timeouts::QUICK,
             chat: Timeouts::CHAT,
+            connector: Arc::new(Tcp),
         }
     }
 
@@ -153,6 +155,12 @@ impl Client {
     /// The same client with another way to wait between retries (tests record instead of sleeping).
     pub fn with_sleeper(mut self, sleeper: Arc<dyn Sleeper>) -> Client {
         self.sleeper = sleeper;
+        self
+    }
+
+    /// The same client with another way to reach the port (tests: a connector that refuses).
+    pub fn with_connector(mut self, connector: Arc<dyn Connector>) -> Client {
+        self.connector = connector;
         self
     }
 
@@ -211,7 +219,14 @@ impl Client {
                 _ => Request::get(path),
             };
             req = self.decorate(req, o, auth);
-            let r = loopback::send_as(self.port, &self.user_agent(), &req, t, Some(&o.cancel))?;
+            let r = loopback::send_via(
+                self.connector.as_ref(),
+                self.port,
+                &self.user_agent(),
+                &req,
+                t,
+                Some(&o.cancel),
+            )?;
             let status = r.status;
             let retry_after = r.header("retry-after").map(str::to_string);
             let provenance = Provenance::from_response(&r);
@@ -588,8 +603,14 @@ impl Client {
                 let r = self
                     .decorate(Request::post("/v1/chat/completions", body.clone()), o, true)
                     .header("Accept", "text/event-stream");
-                let resp =
-                    loopback::send_as(self.port, &self.user_agent(), &r, t, Some(&o.cancel))?;
+                let resp = loopback::send_via(
+                    self.connector.as_ref(),
+                    self.port,
+                    &self.user_agent(),
+                    &r,
+                    t,
+                    Some(&o.cancel),
+                )?;
                 if !(200..300).contains(&resp.status) {
                     let (status, retry_after) =
                         (resp.status, resp.header("retry-after").map(str::to_string));

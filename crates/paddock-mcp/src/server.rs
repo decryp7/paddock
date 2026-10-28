@@ -621,29 +621,46 @@ impl Server {
                 abandoned.fetch_sub(1, Ordering::SeqCst);
             }
         });
-        let stop = match rx.recv_timeout(timeout) {
-            Ok(m) => match settled(m) {
-                Some(done) => return done,
-                None => Run::Cancelled,
-            },
-            Err(_) => Run::TimedOut,
-        };
-        self.abandoned.fetch_add(1, Ordering::SeqCst);
-        if state
-            .compare_exchange(RUNNING, ABANDONED, Ordering::SeqCst, Ordering::SeqCst)
-            .is_ok()
-        {
-            cancel.cancel_with(CancelReason::Deadline);
-            return stop;
-        }
-        // It finished in the instant between the stop and now: take its answer.
-        self.abandoned.fetch_sub(1, Ordering::SeqCst);
-        rx.iter().find_map(settled).unwrap_or(Run::Panicked)
+        wait(&rx, &state, &cancel, &self.abandoned, timeout)
     }
 
     /// The calendar time the server's clock reports.
     pub fn now(&self) -> SystemTime {
         self.clock.wall()
+    }
+}
+
+/// Waits for a running call to end, be cancelled by the client, or pass its time limit. `state` is shared with the handler's
+/// thread, which sets it to `FINISHED` when it ends; a call stopped first is marked `ABANDONED` and counted in `abandoned` until
+/// its thread ends.
+fn wait(
+    rx: &mpsc::Receiver<Msg>,
+    state: &AtomicU8,
+    cancel: &CancelToken,
+    abandoned: &AtomicUsize,
+    timeout: Duration,
+) -> Run {
+    let stop = match rx.recv_timeout(timeout) {
+        Ok(m) => match settled(m) {
+            Some(done) => return done,
+            None => Run::Cancelled,
+        },
+        Err(_) => Run::TimedOut,
+    };
+    abandoned.fetch_add(1, Ordering::SeqCst);
+    if state
+        .compare_exchange(RUNNING, ABANDONED, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        cancel.cancel_with(CancelReason::Deadline);
+        return stop;
+    }
+    // It finished in the instant between the stop and now. A call past its time limit takes the answer; a call the client
+    // cancelled stays unanswered, because the cancel was read first (MCP: the receiver does not answer a cancelled request).
+    abandoned.fetch_sub(1, Ordering::SeqCst);
+    match stop {
+        Run::Cancelled => Run::Cancelled,
+        _ => rx.iter().find_map(settled).unwrap_or(Run::Panicked),
     }
 }
 
@@ -745,5 +762,45 @@ mod tests {
             ),
             ("ok", true, true)
         );
+    }
+
+    /// The interleaving behind CI run 6487's flake: the client's cancel is queued, then the tool finishes (and marks itself
+    /// finished) before the waiting call looks at the state. The cancel came first, so the call stays unanswered.
+    #[test]
+    fn a_call_cancelled_before_its_tool_finished_stays_cancelled() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(Msg::Cancelled).unwrap();
+        tx.send(Msg::Done(Ok(Ok(ToolOutput::text("late")))))
+            .unwrap();
+        let (state, abandoned) = (AtomicU8::new(FINISHED), AtomicUsize::new(0));
+        let run = wait(
+            &rx,
+            &state,
+            &CancelToken::new(),
+            &abandoned,
+            Duration::from_secs(60),
+        );
+        assert!(
+            matches!(run, Run::Cancelled),
+            "a call the client cancelled got its tool's answer"
+        );
+        assert_eq!(
+            abandoned.load(Ordering::SeqCst),
+            0,
+            "a finished call is not abandoned"
+        );
+    }
+
+    #[test]
+    fn a_call_that_times_out_as_its_tool_ends_without_an_answer_is_a_panic() {
+        let (tx, rx) = mpsc::channel();
+        drop(tx);
+        let (state, abandoned) = (AtomicU8::new(FINISHED), AtomicUsize::new(0));
+        let run = wait(&rx, &state, &CancelToken::new(), &abandoned, Duration::ZERO);
+        assert!(
+            matches!(run, Run::Panicked),
+            "a tool that ended without an answer counts as a panic"
+        );
+        assert_eq!(abandoned.load(Ordering::SeqCst), 0);
     }
 }

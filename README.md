@@ -125,13 +125,15 @@ paddock-jobs = { version = "0.1", registry = "decryp7" }
 
 ## Status and roadmap
 
-Debrief 1.1.1, Pitwall 1.0.3 and Pitcrew 1.0.1 are released. The order of work:
+Debrief 1.1.1, Pitwall 1.0.3 and Pitcrew 1.0.1 are released. The order of work (2026-10-28):
 
-1. Debrief 1.2 (in progress).
-2. The shared Paddock crates: the plugin platform and `paddock-pitwall`.
-3. Spotter and Dyno finish.
-4. Pitcrew 1.1: local autoscaling.
-5. Pacenotes and Sighter implementation.
+1. CI consolidation.
+2. Dyno 1.0.0 (monitoring only) and Spotter 1.0.0, in parallel.
+3. Pitwall 1.1.
+4. Debrief 1.2.
+5. Pacenotes and Sighter implementation, after Debrief has stabilised.
+
+Pitcrew's next release is paused.
 
 Paddock itself is pre-1.0: a minor bump may change tokens or component APIs, and removed things are deleted rather than
 deprecated.
