@@ -51,6 +51,57 @@ fn self_hash_prints_one_object_with_the_hash_and_the_compiler() {
 }
 
 #[test]
+fn graph_affected_prints_the_plan_for_the_repository_it_runs_in_or_is_pointed_at() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .unwrap()
+        .display()
+        .to_string();
+    for args in [
+        vec![
+            "--json",
+            "graph",
+            "affected",
+            "--files",
+            "crates/paddock-cli/src/lib.rs",
+            "--explain",
+        ],
+        vec![
+            "--json",
+            "graph",
+            "affected",
+            "--root",
+            &root,
+            "--files",
+            "crates/paddock-cli/src/lib.rs",
+        ],
+    ] {
+        let (code, out, _) = dev(&args);
+        assert_eq!(code, 0);
+        let v: Value = serde_json::from_str(out.trim()).unwrap();
+        assert_eq!(
+            (v["ok"].clone(), v["crates"].clone(), v["all"].clone()),
+            (true.into(), true.into(), false.into())
+        );
+        assert_eq!(v.get("why").is_some(), args.contains(&"--explain"));
+    }
+    let (code, out, _) = dev(&["graph", "affected", "--all"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("\"all\":true"));
+}
+
+#[test]
+fn graph_affected_outside_a_repository_fails_with_exit_1_and_names_the_problem() {
+    let d = tempfile::tempdir().unwrap();
+    let (code, out, err) = dev(&["--json", "graph", "affected", "--root", d.path().to_str().unwrap(), "--files", "a"]);
+    assert_eq!(code, 1);
+    let v: Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(v["ok"], false);
+    assert!(err.contains("git repository"), "{err}");
+}
+
+#[test]
 fn graph_affected_with_nothing_to_plan_is_usage() {
     let (code, _, err) = dev(&["graph", "affected"]);
     assert_eq!(code, 2);

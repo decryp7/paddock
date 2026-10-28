@@ -624,6 +624,80 @@ mod tests {
         assert_eq!(apps_of(&files), BTreeSet::from(["a".to_string(), "d".to_string()]));
     }
 
+    /// A history of one commit range that changed the lockfile, with files that are not on disk.
+    struct Tracked(Vec<String>);
+
+    impl History for Tracked {
+        fn tracked_files(&self) -> Result<Vec<String>, GraphError> {
+            Ok(self.0.clone())
+        }
+        fn changed_files(&self, base: &str, head: &str) -> Result<Vec<String>, GraphError> {
+            assert_eq!((base, head), ("old", "new"));
+            Ok(vec!["package-lock.json".into()])
+        }
+        fn file_at(&self, rev: &str, path: &str) -> Result<Option<String>, GraphError> {
+            assert_eq!(path, "package-lock.json");
+            let version = if rev == "old" { "1" } else { "2" };
+            Ok(Some(format!(
+                r#"{{"packages":{{"ui":{{"dependencies":{{"x":"1"}}}},"node_modules/x":{{"version":"{version}"}}}}}}"#
+            )))
+        }
+        fn log(&self, _: &str, _: usize) -> Result<Vec<paddock_repo_graph::Commit>, GraphError> {
+            Ok(vec![])
+        }
+    }
+
+    fn request(base: Option<&str>) -> Request {
+        Request {
+            files: vec!["x".into()],
+            all: false,
+            explain: false,
+            root: None,
+            base: base.map(String::from),
+            head: "new".into(),
+        }
+    }
+
+    #[test]
+    fn a_tracked_file_missing_on_disk_is_a_typed_read_error_naming_the_file() {
+        let d = tempfile::tempdir().unwrap();
+        let err = plan_for(d.path(), &Tracked(vec!["ui/package.json".into()]), &request(None))
+            .err()
+            .unwrap();
+        assert!(matches!(err, GraphError::Read { .. }) && err.to_string().contains("ui/package.json"));
+        let ok = plan_for(d.path(), &Tracked(vec!["apps/a/paddock.ci.json".into()]), &request(None)).unwrap();
+        assert_eq!(
+            ok["all"], true,
+            "an unknown root file plans everything, with the app list read from the tracked files"
+        );
+        assert_eq!(ok["apps"], json!(["a"]));
+    }
+
+    #[test]
+    fn a_base_revision_plans_the_changed_files_and_reads_the_lock_at_both_ends() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("ui")).unwrap();
+        std::fs::write(d.path().join("ui/package.json"), r#"{"name":"ui"}"#).unwrap();
+        let history = Tracked(vec!["ui/package.json".into()]);
+        let plan = plan_for(d.path(), &history, &request(Some("old"))).unwrap();
+        assert_eq!(
+            (plan["ui"].clone(), plan["all"].clone()),
+            (true.into(), false.into()),
+            "the lock change reaches the ui workspace only"
+        );
+        assert!(history.log("new", 1).unwrap().is_empty());
+        let none = plan_for(
+            d.path(),
+            &history,
+            &Request {
+                all: true,
+                ..request(Some("old"))
+            },
+        )
+        .unwrap();
+        assert_eq!(none["all"], true, "--all ignores the base");
+    }
+
     #[test]
     fn a_request_needs_something_to_plan() {
         let req = Request {

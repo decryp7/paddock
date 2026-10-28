@@ -82,7 +82,13 @@ impl Fixture {
             .env_remove("RUSTC")
             .env_remove("CARGO_BUILD_RUSTC");
         cmd.envs(env.iter().cloned());
+        // Tests never touch the user's cache: the wrapper's home is a scratch folder too.
+        cmd.env("PADDOCK_DEV_HOME", self.cargo_home.path().join("dev-home"));
         let out = cmd.output().unwrap();
+        assert!(
+            !self.cargo_home.path().join("dev-home").exists(),
+            "--wrapper-hash must not create the cache"
+        );
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         let text = String::from_utf8_lossy(&out.stdout).into_owned();
         let mut lines = text.lines();
