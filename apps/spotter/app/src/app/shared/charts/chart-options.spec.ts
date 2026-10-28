@@ -47,7 +47,8 @@ describe('chart options', () => {
     expect(o.series[0]?.stack).toBeUndefined();
     expect(o.xAxis.data.length).toBe(3);
     expect(o.yAxis.min).toBe(0);
-    expect(o.yAxis.name).toBe('Releases per day');
-    expect((releasesOption({ ...d, range: '1y' }) as { yAxis: { name: string } }).yAxis.name).toBe('Releases per week');
+    // The section's heading already says "Releases per day": the axis does not repeat it.
+    expect(o.yAxis.name).toBeUndefined();
+    expect((releasesOption({ ...d, range: '1y' }) as { yAxis: { name?: string } }).yAxis.name).toBeUndefined();
   });
 });

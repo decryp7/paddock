@@ -33,16 +33,15 @@ export function releaseTotals(d: Dashboard): number[] {
 }
 
 /**
- * The ECharts option for the releases chart: one series of bars from zero in the accent colour, the unit on the axis
+ * The ECharts option for the releases chart: one series of bars from zero in the accent colour, no axis title (the section heading names the unit)
  * and the day (or week) in the tooltip. Fonts and the axis colours come from the paddock theme.
  */
 export function releasesOption(d: Dashboard, _series?: readonly ReleaseSeries[]): Record<string, unknown> {
-  const unit = d.range === '1y' ? 'week' : 'day';
   return {
     grid: { left: 36, right: 8, top: 24, bottom: 24 },
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     xAxis: { type: 'category', data: d.bucketsMs.map(bucketLabel), axisTick: { show: false } },
-    yAxis: { type: 'value', minInterval: 1, min: 0, name: `Releases per ${unit}`, nameTextStyle: { align: 'left' } },
+    yAxis: { type: 'value', minInterval: 1, min: 0 },
     series: [{ name: 'Releases', type: 'bar', data: releaseTotals(d), barMaxWidth: 18, emphasis: { focus: 'series' } }],
   };
 }
