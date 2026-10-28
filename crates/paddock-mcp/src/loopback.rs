@@ -12,7 +12,7 @@ use crate::server::{Server, Session};
 use serde_json::{Value, json};
 use std::io::{self, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -68,6 +68,28 @@ impl Read for Watched {
 }
 
 type Conns = Arc<Mutex<Vec<(TcpStream, JoinHandle<()>)>>>;
+
+/// One of the `max_connections` places, held by a connection's thread and given back when it is dropped, which the thread
+/// does before it ends the connection: a client that has seen its connection end can connect again at once. (Counting
+/// finished threads instead freed the place only some time after the client saw the end, so a prompt reconnect was
+/// refused with "too many".)
+struct Place(Arc<AtomicUsize>);
+
+impl Place {
+    /// Takes a place if fewer than `max` are taken. Only the accept loop takes places, so the check and the take cannot race.
+    fn take(taken: &Arc<AtomicUsize>, max: usize) -> Option<Place> {
+        (taken.load(Ordering::SeqCst) < max).then(|| {
+            taken.fetch_add(1, Ordering::SeqCst);
+            Place(taken.clone())
+        })
+    }
+}
+
+impl Drop for Place {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 /// A running loopback server. Dropping it (or [`Serving::stop`]) closes the listener and every connection and joins every thread.
 pub struct Serving {
@@ -169,6 +191,7 @@ pub fn serve_loopback(
     check_loopback(&addr)?;
     let stop = Arc::new(AtomicBool::new(false));
     let conns: Conns = Arc::default();
+    let taken = Arc::new(AtomicUsize::new(0));
     let (stop2, conns2) = (stop.clone(), conns.clone());
     let accept = std::thread::spawn(move || {
         for stream in listener.incoming() {
@@ -189,10 +212,10 @@ pub fn serve_loopback(
             for (_, h) in done {
                 let _ = h.join();
             }
-            if list.len() >= max_connections {
+            let Some(place) = Place::take(&taken, max_connections) else {
                 refuse(&mut stream, "too many MCP clients are connected");
                 continue;
-            }
+            };
             let Ok(kept) = stream.try_clone() else {
                 continue;
             };
@@ -205,6 +228,8 @@ pub fn serve_loopback(
                             serve_lines(&server, &Session::new(&client), &mut reader, &mut stream);
                     }
                 }
+                // Give the place back before the client can see the end of its connection.
+                drop(place);
                 // The accept loop keeps a second handle to the socket, so closing this one is not enough to end the connection.
                 let _ = stream.shutdown(Shutdown::Both);
             });
