@@ -191,7 +191,7 @@ mod tests {
     use std::cell::RefCell;
 
     fn temp(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("pitcrew-handoff-{name}-{}", std::process::id()));
+        let p = std::env::temp_dir().join(format!("pitcrew-it-handoff-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p

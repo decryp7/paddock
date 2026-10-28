@@ -99,7 +99,7 @@ mod tests {
     use super::*;
 
     fn dir(test: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("pitcrew-files-{test}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("pitcrew-it-files-{test}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

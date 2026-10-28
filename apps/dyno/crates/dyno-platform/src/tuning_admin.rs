@@ -386,7 +386,10 @@ mod tests {
     }
 
     fn temp(name: &str) -> tempfile::TempDir {
-        tempfile::Builder::new().prefix(&format!("dyno-admin-{name}-")).tempdir().unwrap()
+        tempfile::Builder::new()
+            .prefix(&format!("dyno-it-admin-{name}-"))
+            .tempdir()
+            .unwrap()
     }
 
     fn startup(location: MachineStartup, name: &str, enabled: bool) -> HelperAction {

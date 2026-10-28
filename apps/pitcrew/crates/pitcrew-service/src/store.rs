@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn writes_atomically_with_a_backup_and_sets_damage_aside() {
-        let d = std::env::temp_dir().join(format!("pitcrew-store-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("pitcrew-it-store-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         let f = d.join("pitcrew.toml");
         assert_eq!(read_bounded(&f, 10).unwrap(), None);

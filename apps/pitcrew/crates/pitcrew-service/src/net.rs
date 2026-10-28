@@ -205,7 +205,7 @@ pub(crate) mod tests {
         assert!(http.text(&format!("{base}/v.json"), 1024, Some("t")).unwrap().contains("5.2.0"));
         assert!(http.text(&format!("{base}/v.json"), 5, None).unwrap_err().contains("more than"));
         assert!(http.text(&format!("{base}/gone"), 5, None).unwrap_err().contains("HTTP 500"));
-        let dest = std::env::temp_dir().join(format!("pitcrew-dl-{}", std::process::id()));
+        let dest = std::env::temp_dir().join(format!("pitcrew-it-dl-{}", std::process::id()));
         let d = http.download(&format!("{base}/bin"), &dest, 10_000).unwrap();
         assert_eq!(d, Sha256Digest::of_bytes(&[7u8; 5000]));
         assert_eq!(file_digest(&dest).unwrap(), d);
