@@ -183,6 +183,14 @@ impl<W: WindowOpacity> Controller<W> {
         Some(want)
     }
 
+    /// Applies the translucent look again when it is the one in force: the windowing layer may rewrite a window's style on
+    /// a state change (maximise, snap, always on top) and drop the opacity with it. Does nothing in any other look.
+    pub fn reassert(&mut self) {
+        if let Appearance::Translucent(o) = self.applied {
+            self.apply(o.get());
+        }
+    }
+
     /// Ends the drag: the window is opaque again.
     pub fn end(&mut self, cause: EndCause) -> Option<Appearance> {
         self.update(DragState::Ended(cause))
@@ -218,17 +226,23 @@ impl<W: WindowOpacity> Drop for Controller<W> {
 pub const SAMPLE_MS: u64 = 33;
 /// Without a readable mouse button (Linux), the drag is over when the window has not moved for this long.
 pub const SETTLE_MS: u64 = 500;
+/// While translucent the opacity is applied again every this many samples (about 200 ms), see [`Controller::reassert`].
+pub const REASSERT_SAMPLES: u64 = 6;
 /// Samples with the button up in a row that end a drag (one stray reading is not an end).
 const UP_SAMPLES: u32 = 2;
 /// A drag is followed for at most this many samples (10 minutes): nothing unbounded, a stuck watcher gives the window back.
 pub const MAX_SAMPLES: u64 = 10 * 60 * 1000 / SAMPLE_MS;
 
-/// An axis-aligned rectangle in physical screen px.
+/// An axis-aligned rectangle in physical screen px (the host window's content area).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Bounds {
+    /// Left edge.
     pub x: f64,
+    /// Top edge.
     pub y: f64,
+    /// Width.
     pub width: f64,
+    /// Height.
     pub height: f64,
 }
 
@@ -244,9 +258,9 @@ pub fn pointer_over(host: Bounds, x: f64, y: f64) -> bool {
 }
 
 /// Should a window move start the follow-up: the primary button is held (or cannot be read) and the pointer is over the
-/// host, and none is running for this window.
-pub fn should_start(button_down: Option<bool>, over_host: bool, tracking: bool) -> bool {
-    !tracking && over_host && button_down != Some(false)
+/// host. (That none runs for the window yet is the adapter's registry.)
+pub fn should_start(button_down: Option<bool>, over_host: bool) -> bool {
+    over_host && button_down != Some(false)
 }
 
 /// One look at the world while a pop-out window is dragged.
@@ -254,6 +268,7 @@ pub fn should_start(button_down: Option<bool>, over_host: bool, tracking: bool) 
 pub struct Sample {
     /// The primary mouse button; `None` when the platform cannot tell.
     pub button_down: Option<bool>,
+    /// The pointer is over the host window.
     pub over_host: bool,
     /// The pop-out window and its host still exist.
     pub windows_alive: bool,
@@ -269,6 +284,8 @@ pub struct Tracker {
 }
 
 impl Tracker {
+    /// The drag's state after one more sample: ended when a window is gone, the button was up in two samples in a row (or
+    /// the window stopped moving where the button cannot be read), or the drag outlasted [`MAX_SAMPLES`].
     pub fn next(&mut self, s: Sample) -> DragState {
         self.samples += 1;
         if !s.windows_alive {
@@ -310,7 +327,9 @@ pub fn track<W: WindowOpacity, P: Probe>(
     mut pause: impl FnMut(),
 ) {
     let mut tracker = Tracker::default();
+    let mut n = 0u64;
     loop {
+        n += 1;
         let state = tracker.next(probe.sample());
         if let Some(look) = ctl.update(state) {
             probe.announce(look);
@@ -318,6 +337,9 @@ pub fn track<W: WindowOpacity, P: Probe>(
         // Already opaque by `update`; a failed restore is retried by the controller's drop guard.
         if matches!(state, DragState::Ended(_)) {
             return;
+        }
+        if n.is_multiple_of(REASSERT_SAMPLES) {
+            ctl.reassert();
         }
         pause();
     }
@@ -662,6 +684,27 @@ mod tests {
     }
 
     #[test]
+    fn a_translucent_window_gets_its_opacity_again_now_and_then() {
+        let samples: Vec<Sample> = (0..REASSERT_SAMPLES * 2)
+            .map(|_| sample(Some(true), true))
+            .chain([sample(Some(false), true), sample(Some(false), true)])
+            .collect();
+        let (_, calls) = run(samples, Environment::default());
+        // Applied on entering, again at samples 6 and 12, restored at the end.
+        assert_eq!(calls, [0.5, 0.5, 0.5, 1.0]);
+    }
+
+    #[test]
+    fn reasserting_does_nothing_unless_translucent() {
+        let fake = Fake::default();
+        let (mut c, _) = ctl(&fake, Environment::default());
+        c.reassert();
+        c.update(AWAY);
+        c.reassert();
+        assert!(fake.calls().is_empty());
+    }
+
+    #[test]
     fn pointer_over_the_host() {
         let host = Bounds {
             x: 100.0,
@@ -686,13 +729,12 @@ mod tests {
 
     #[test]
     fn a_follow_up_starts_once_over_the_host_with_the_button_held_or_unreadable() {
-        assert!(should_start(Some(true), true, false));
-        assert!(should_start(None, true, false));
+        assert!(should_start(Some(true), true));
+        assert!(should_start(None, true));
         assert!(
-            !should_start(Some(false), true, false),
+            !should_start(Some(false), true),
             "moved without the button: snapping, not a drag"
         );
-        assert!(!should_start(Some(true), false, false));
-        assert!(!should_start(Some(true), true, true));
+        assert!(!should_start(Some(true), false));
     }
 }

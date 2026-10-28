@@ -102,6 +102,7 @@ pub struct PanelsBuilder {
     route: String,
     bounds_file: Option<PathBuf>,
     redock_opacity: Opacity,
+    windows_translucency: bool,
 }
 
 impl PanelsBuilder {
@@ -124,6 +125,14 @@ impl PanelsBuilder {
         self
     }
 
+    /// Lets a pop-out dragged over its host turn translucent on Windows (default off: a layered window over WebView2 is not
+    /// verified on a real desktop yet, see `apps/workbench-demo/docs/testing-manual.md`; off, the dock guides draw an outline
+    /// instead). Other systems ignore it.
+    pub fn windows_translucency(mut self, on: bool) -> Self {
+        self.windows_translucency = on;
+        self
+    }
+
     /// The managed state: `app.manage(builder.build())`.
     pub fn build(self) -> Panels {
         Panels {
@@ -137,6 +146,7 @@ impl PanelsBuilder {
             exiting: AtomicBool::new(false),
             redock: redock::State::default(),
             redock_opacity: self.redock_opacity,
+            redock_windows: self.windows_translucency,
             started: Instant::now(),
         }
     }
@@ -152,6 +162,7 @@ pub struct Panels {
     exiting: AtomicBool,
     pub(crate) redock: redock::State,
     pub(crate) redock_opacity: Opacity,
+    pub(crate) redock_windows: bool,
     started: Instant,
 }
 
@@ -162,6 +173,7 @@ impl Panels {
             route: DEFAULT_ROUTE.to_string(),
             bounds_file: None,
             redock_opacity: Opacity::default(),
+            windows_translucency: false,
         }
     }
 

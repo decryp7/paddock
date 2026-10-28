@@ -158,30 +158,102 @@ pub(super) fn set_window_opacity<R: Runtime>(
     w: &Window<R>,
     opacity: f64,
 ) -> Result<(), OpacityError> {
-    use windows::Win32::Foundation::COLORREF;
+    use windows::Win32::Foundation::{COLORREF, GetLastError, HWND, SetLastError, WIN32_ERROR};
+    use windows::Win32::Graphics::Gdi::{
+        RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE, RedrawWindow,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
         GWL_EXSTYLE, GetWindowLongPtrW, LWA_ALPHA, SetLayeredWindowAttributes, SetWindowLongPtrW,
         WS_EX_LAYERED,
     };
+
+    /// Sets the extended style; SetWindowLongPtrW answers the old value, so 0 is an error only when the last error is set.
+    ///
+    /// # Safety
+    /// `hwnd` is a live window of this process.
+    unsafe fn set_style(hwnd: HWND, style: isize) -> Result<(), OpacityError> {
+        // SAFETY: as the function's contract says; the last-error calls take no pointers.
+        unsafe {
+            SetLastError(WIN32_ERROR(0));
+            let old = SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style);
+            let error = GetLastError();
+            if old == 0 && error.0 != 0 {
+                return Err(OpacityError::Failed(format!(
+                    "SetWindowLongPtrW failed with error {}",
+                    error.0
+                )));
+            }
+        }
+        Ok(())
+    }
+
     let hwnd = w.hwnd().map_err(|e| OpacityError::Failed(e.to_string()))?;
     let layered = WS_EX_LAYERED.0 as isize;
-    // SAFETY: the handle is the live window's; these calls only change its extended style and alpha.
+    // SAFETY: the handle is the live window's; these calls only change its extended style, alpha and repaint it.
     unsafe {
         let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         if opacity >= 1.0 {
-            // Back to a plain window (a layered window costs the compositor more than an ordinary one).
-            if style & layered != 0 {
-                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style & !layered);
+            if style & layered == 0 {
+                return Ok(());
             }
+            // "Using Layered Windows": make it fully opaque first, then drop the style, then repaint everything so no
+            // stale layered surface is left (frame, children and the WebView2 child included).
+            SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA)
+                .map_err(|e| OpacityError::Failed(e.to_string()))?;
+            set_style(hwnd, style & !layered)?;
+            let _ = RedrawWindow(
+                Some(hwnd),
+                None,
+                None,
+                RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN,
+            );
             return Ok(());
         }
         if style & layered == 0 {
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | layered);
+            set_style(hwnd, style | layered)?;
         }
         let alpha = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
         SetLayeredWindowAttributes(hwnd, COLORREF(0), alpha, LWA_ALPHA)
             .map_err(|e| OpacityError::Failed(e.to_string()))
     }
+}
+
+/// Whether this build lets a window be made translucent on this OS. Windows is off unless the app turns it on
+/// (`PanelsBuilder::windows_translucency`): a layered window over WebView2 is not yet verified on a real desktop
+/// (`apps/workbench-demo/docs/testing-manual.md`), so the guides outline instead.
+#[cfg(windows)]
+pub(super) fn translucency_allowed(enabled: bool) -> Result<(), OpacityError> {
+    if enabled {
+        Ok(())
+    } else {
+        Err(OpacityError::Unsupported(
+            "translucent pop-outs are off on Windows until verified on a real desktop".into(),
+        ))
+    }
+}
+
+#[cfg(not(windows))]
+pub(super) fn translucency_allowed(_enabled: bool) -> Result<(), OpacityError> {
+    Ok(())
+}
+
+/// The primary mouse button as the drag follower reads it, on the main thread with the dragged pop-out `w`. macOS and
+/// Windows read it system-wide; X11 asks GDK for the pointer's button state through the window. Wayland tells a client
+/// nothing about the pointer outside its own surfaces: there the cursor position fails too and the feature never starts.
+#[cfg(any(target_os = "macos", windows))]
+pub(super) fn button_down_for<R: Runtime>(_w: &Window<R>) -> Option<bool> {
+    primary_button_down()
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+pub(super) fn button_down_for<R: Runtime>(w: &Window<R>) -> Option<bool> {
+    use gtk::gdk::ModifierType;
+    use gtk::gdk::prelude::SeatExt;
+    use gtk::prelude::WidgetExt;
+    let gdk_window = w.gtk_window().ok()?.window()?;
+    let pointer = gtk::gdk::Display::default()?.default_seat()?.pointer()?;
+    let (_, _, _, mask) = gdk_window.device_position(&pointer);
+    Some(mask.contains(ModifierType::BUTTON1_MASK))
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]

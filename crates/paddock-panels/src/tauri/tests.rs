@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-fn app_with(panels: Option<Panels>) -> ::tauri::App<MockRuntime> {
+pub(super) fn app_with(panels: Option<Panels>) -> ::tauri::App<MockRuntime> {
     let guard = Guard::new(&crate::COMMANDS);
     let app = mock_builder()
         .invoke_handler(guard.wrap(invoke_handler()))
@@ -35,11 +35,11 @@ fn app_with(panels: Option<Panels>) -> ::tauri::App<MockRuntime> {
     app
 }
 
-fn app() -> ::tauri::App<MockRuntime> {
+pub(super) fn app() -> ::tauri::App<MockRuntime> {
     app_with(Some(Panels::builder().build()))
 }
 
-fn window(app: &::tauri::App<MockRuntime>, label: &str) -> WebviewWindow<MockRuntime> {
+pub(super) fn window(app: &::tauri::App<MockRuntime>, label: &str) -> WebviewWindow<MockRuntime> {
     app.get_webview_window(label).unwrap_or_else(|| {
         WebviewWindowBuilder::new(app, label, WebviewUrl::default())
             .build()
@@ -51,7 +51,7 @@ fn os_window(app: &::tauri::App<MockRuntime>, label: &str) -> Window<MockRuntime
     window(app, label).as_ref().window()
 }
 
-fn recorder(w: &WebviewWindow<MockRuntime>, event: &str) -> Arc<Mutex<Vec<Value>>> {
+pub(super) fn recorder(w: &WebviewWindow<MockRuntime>, event: &str) -> Arc<Mutex<Vec<Value>>> {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let s = seen.clone();
     w.listen(event, move |e| {

@@ -11,7 +11,7 @@ resolver = "2"
 # The platforms the crates are built and tested on (CI: Linux, Windows, macOS; the Mac mini).
 platforms = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 
-# Tauri stays out: the libraries take it without a runtime (wry) on purpose, and unifying its features would build the
+# Tauri (and the GTK binding paddock-panels uses beside it) stays out: the libraries take it without a runtime (wry) on purpose, and unifying its features would build the
 # webview stack into every crate, the pure cores included.
 [traversal-excludes]
 third-party = [
@@ -19,5 +19,6 @@ third-party = [
     { name = "tauri-utils" },
     { name = "tauri-runtime-wry" },
     { name = "wry" },
+    { name = "gtk" },
     { name = "ts-rs" },
 ]

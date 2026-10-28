@@ -7,8 +7,9 @@ Conventional Commits; one semver tag for the whole repo.
 ### A pop-out dragged back over its window turns translucent
 - While a pop-out window is dragged over the window it came from, it becomes translucent (default 50 %, `PanelsBuilder::redock_opacity`,
   kept between 25 % and 90 %) so the dock's drop guides show through; it is opaque again when it leaves the window or the drag
-  ends (drop, Escape, the window closing, an error). macOS uses `NSWindow.alphaValue`, Windows a layered window, Linux
-  `gtk_widget_set_opacity`; without a compositor, or with the system's reduce-transparency setting (macOS, Windows), the window
+  ends (drop, the window closing, an error). macOS uses `NSWindow.alphaValue`, Linux (X11) `gtk_widget_set_opacity`, Windows a
+  layered window that is OFF until verified on a real desktop (`PanelsBuilder::windows_translucency`, default false; the manual
+  check is the gate); without a compositor, or with the system's reduce-transparency setting (macOS, Windows), the window
   stays opaque and the guides draw a clear outline instead (`data-redock="outline"`).
 - `paddock-panels`: the pure core `redock` (`desired`, `Controller`, the `WindowOpacity` port, `track`), the wire event
   `PanelsEvent::Redock { look }` and its TypeScript. `@decryp7/paddock-ui`: `PanelWindowsPort.onRedock` and `RedockLook`
