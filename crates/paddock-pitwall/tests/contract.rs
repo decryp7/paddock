@@ -7,7 +7,8 @@ use paddock_pitwall::engine::{EngineChoice, Routed, Session, run_or_fallback};
 use paddock_pitwall::health::{Fallback, SERVICE_ID, report, service_spec};
 use paddock_pitwall::retry::{Policy, Sleeper};
 use paddock_pitwall::testing::{
-    ChatScript, Failure, FakeModel, FakePitwall, FakeState, PITWALL_ROUTES, PairMode, matches_route,
+    ChatScript, Failure, FakeModel, FakePitwall, FakeState, PITWALL_ROUTES, PairMode, hang_up_port,
+    matches_route,
 };
 use paddock_pitwall::*;
 use paddock_secrets::{MemorySecrets, Name, Secrets};
@@ -1453,14 +1454,13 @@ fn a_link_that_has_not_seen_pitwall_says_what_is_missing() {
         PitwallError::NeedsPairing
     );
     // Found only through the fallback port, with no data folder.
-    let free = {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap().port()
-    };
+    // Not a released port: another process's Pitwall (on CI, a concurrent test's fake) could be handed that one.
+    let foreign = hang_up_port();
+    assert!(FakePitwall::try_start_on(foreign, keyed()).is_err());
     let nowhere = tempfile::tempdir().unwrap().path().join("gone");
     let link = Link::new(LinkConfig::new(
         app(),
-        Locator::in_dir(&nowhere, Some(free), Arc::new(|_| false)),
+        Locator::in_dir(&nowhere, Some(foreign), Arc::new(|_| false)),
         Arc::new(MemorySecrets::new("Debrief")),
     ));
     assert_eq!(link.probe().found, FoundKind::Absent);
