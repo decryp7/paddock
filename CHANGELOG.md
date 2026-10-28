@@ -4,13 +4,20 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
-### Shell About, Updates and the undo toast on Material (WP-W2, WP-W3, rule 47)
-- Updates: its checkboxes are `mat-checkbox` and the download progress is `mat-progress-bar` (a phase without a total is indeterminate).
-  The dialog needs `providePaddockMaterial()` and `css/material.css`, in the main window and in the dialog windows.
+### Updates and the undo toast on Material (WP-W2, WP-W3, rule 47)
+- Updates (the About dialog itself did not change): its checkboxes are `mat-checkbox` and the download progress is `mat-progress-bar` (a
+  phase without a total is indeterminate; with reduced motion it is a full, still bar, not a frozen partial one). The dialog needs
+  `providePaddockMaterial()` and `css/material.css`, in the main window and in the dialog windows. The shell demo's `?hold` keeps a
+  download running and `window.sdUpdatesDownload.progress()` plays the engine's job events (e2e and screenshots).
+- Material checkboxes line up with the form column: one shared rule in `_material.scss` pulls the box back over the touch-target padding.
 - Breaking (shell/undo): `pd-undo-toast` draws nothing itself now and opens a `MatSnackBar` ("Done: ...", Undo action, close button;
-  polite announcement, no focus, the store's clock keeps the timeout, reduced motion follows Material and the global rule). Place it
-  once in the shell and drop any wrapper that positioned it. It keeps the toast safe area (status bar and `--pd-page-footer-safe`):
-  `.pd-undo-snack` in `_material.scss`. The apps' shells need `providePaddockMaterial()` and `css/material.css` (the shell demo has both).
+  polite live region, no focus, the store's clock keeps the timeout, reduced motion follows Material and the global rule). Place it once
+  in the shell and drop any wrapper that positioned it. MatSnackBar shows one at a time: another snack bar replaces the undo toast and the
+  store then drops its toast (the edit stays undoable).
+- One toast area: new `ToastArea` (`@decryp7/paddock-ui/shell`). The undo snack bar is bottom right, 360 px, on the notification host's
+  baseline (status bar + `--pd-page-footer-safe`) and styled like a notification (surface-3, hairline, shadow; every Material snack bar is
+  now, with the action in the accent colour). It reports its height and `pd-notification-host` lifts itself above it, so the two never
+  overlap at any width. The apps' shells need `providePaddockMaterial()` and `css/material.css` (the shell demo has both).
 
 ### One shared Material theme (WP-0 of the Material migration, rule 47)
 - `css/material.css` (`scss/entry-material.scss`) is now the whole Material look: one Material 3 `mat.theme` (density -3) whose system

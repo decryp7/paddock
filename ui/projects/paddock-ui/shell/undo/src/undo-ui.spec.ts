@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
-import type { ShellContext } from '@decryp7/paddock-ui/shell';
+import { ToastArea, type ShellContext } from '@decryp7/paddock-ui/shell';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
+import { MatSnackBar } from '@angular/material/snack-bar';
 import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 import { describe, expect, it, vi } from 'vitest';
 import { UNDO_TOAST_MS } from './undo-config';
@@ -85,6 +86,39 @@ describe('pd-undo-toast (a Material snack bar)', () => {
     await gone(t);
   });
 
+  it('drops the store’s toast when another snack bar replaces it (MatSnackBar shows one at a time)', async () => {
+    const t = mount();
+    announce(t.store, 'x');
+    await settle();
+    expect(t.store.toast()).not.toBeNull();
+    TestBed.inject(MatSnackBar).open('Something else');
+    await vi.waitFor(() => expect(t.store.toast()).toBeNull());
+    expect(t.store.canUndo()).toBe(true);
+  });
+
+  it('reports its height to the toast area, so the notification host stacks above it, and clears it when gone', async () => {
+    const observed: (() => void)[] = [];
+    vi.stubGlobal('ResizeObserver', class { constructor(cb: () => void) { observed.push(cb); } observe(): void {} disconnect(): void {} });
+    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(48);
+    try {
+      const t = mount();
+      const area = TestBed.inject(ToastArea);
+      expect(area.lift()).toBe(0);
+      announce(t.store, 'x');
+      await settle();
+      await vi.waitFor(() => expect(area.lift()).toBe(48));
+      height.mockReturnValue(72);
+      observed.forEach((cb) => cb());
+      expect(area.lift()).toBe(72);
+      t.store.dismissToast();
+      await settle();
+      await vi.waitFor(() => expect(area.lift()).toBe(0));
+    } finally {
+      height.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('closes with its component', async () => {
     const t = mount();
     announce(t.store, 'x');
@@ -101,11 +135,12 @@ describe('pd-undo-toast (a Material snack bar)', () => {
     expect(Number(t.toast()!.querySelector('pd-glyph svg')!.getAttribute('width'))).toBeGreaterThanOrEqual(14);
   });
 
-  it('keeps the page-footer safe area above the status bar, from tokens, so it never covers a footer action', async () => {
+  it('sits on the notification host’s baseline (bottom right, 360 px), above the status bar and the page footer, from tokens', async () => {
     const MATERIAL_SCSS = (await nodeFs()).readFileSync('projects/paddock-ui/scss/_material.scss', 'utf8');
     // jsdom has no layout: the rule is read from the stylesheet source; e2e/shell-demo-undo.spec.ts measures it in a browser.
     const rule = /\.mat-mdc-snack-bar-container\.pd-undo-snack \{([^}]*)\}/.exec(MATERIAL_SCSS)?.[1]?.replace(/\s+/g, ' ') ?? '';
-    expect(rule).toMatch(/margin-bottom: calc\(var\(--pd-statusbar-height[^)]*\) \+ var\(--pd-page-footer-safe[^)]*\) \+ var\(--pd-space-2\)\)/);
+    expect(rule).toMatch(/margin: 0 var\(--pd-space-4\) calc\(var\(--pd-statusbar-height[^)]*\) \+ var\(--pd-page-footer-safe[^)]*\) \+ var\(--pd-space-2\)\)/);
+    expect(MATERIAL_SCSS).toMatch(/pd-undo-snack \.mat-mdc-snackbar-surface \{[^}]*width: 360px/);
     expect(UNDO_SNACK_CLASS).toBe('pd-undo-snack');
   });
 });

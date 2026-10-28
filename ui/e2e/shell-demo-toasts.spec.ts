@@ -27,3 +27,38 @@ test('a toast does not overlap a primary button in the page footer', async ({ ap
   const overlap = t!.x < b!.x + b!.width && b!.x < t!.x + t!.width && t!.y < b!.y + b!.height && b!.y < t!.y + t!.height;
   expect(overlap, `toast ${JSON.stringify(t)} covers Next ${JSON.stringify(b)}`).toBe(false);
 });
+
+// One toast area: the undo snack bar and the notification toasts stack bottom right and never overlap, at any width (design guide,
+// Toasts). The snack bar sits on the host's baseline and the host lifts itself by the snack bar's height (`ToastArea`).
+for (const width of [640, 1000, 1280]) {
+  test(`the undo toast and the notification toasts do not overlap at ${width} px`, async ({ app, page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await app.frame.open();
+    await page.getByRole('button', { name: 'Notify three times' }).click();
+    await page.getByRole('button', { name: 'Say hello' }).click();
+    const snack = page.locator('.mat-mdc-snack-bar-container.pd-undo-snack');
+    await expect(snack).toBeVisible();
+    await expect(page.getByTestId('notification').first()).toBeVisible();
+    // The host's lift follows the snack bar (a resize observer), so wait for the layout to settle before measuring.
+    await expect
+      .poll(async () => {
+        const s = (await snack.boundingBox())!;
+        const toasts = page.getByTestId('notification');
+        for (let i = 0; i < (await toasts.count()); i++) {
+          const t = (await toasts.nth(i).boundingBox())!;
+          if (t.x < s.x + s.width && s.x < t.x + t.width && t.y < s.y + s.height && s.y < t.y + t.height) return `toast ${i} ${JSON.stringify(t)} overlaps ${JSON.stringify(s)}`;
+        }
+        return 'none';
+      })
+      .toBe('none');
+    // Bottom right: the snack bar's right edge is on the notifications' (16 px gutter) and it is at most 360 px wide.
+    // (The snack bar scales in for 150 ms, so measure once it has settled.)
+    await expect
+      .poll(async () => {
+        const s = (await snack.locator('.mat-mdc-snackbar-surface').boundingBox())!;
+        const t = (await page.getByTestId('notification').first().boundingBox())!;
+        return [Math.round(Math.abs(s.x + s.width - (t.x + t.width))), Math.round(s.width)];
+      })
+      .toEqual([0, 360]);
+  });
+}

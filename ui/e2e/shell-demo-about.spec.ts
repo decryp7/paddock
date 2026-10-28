@@ -71,6 +71,31 @@ test('the Updates preferences are Material checkboxes and pass axe in both theme
   }
 });
 
+test('the download shows a determinate Material progress bar, and an indeterminate one without a total', async ({ app, page }) => {
+  await page.goto('/?updates=release&hold=1');
+  await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
+  await (await app.menus.open('Help')).getByRole('menuitem', { name: 'Check for updates…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Updates' });
+  await dialog.getByRole('button', { name: 'Check now' }).click();
+  await dialog.getByRole('button', { name: 'Download' }).click();
+  await expect(dialog.getByTestId('updates-phase')).toContainText('Downloading version 99.0.0');
+  const bar = dialog.getByRole('progressbar');
+  await expect(bar).toHaveCount(0);
+  await page.evaluate(() => (window as unknown as { sdUpdatesDownload: { progress(d: number, t: number | null): void } }).sdUpdatesDownload.progress(20_500_000, 41_000_000));
+  await expect(bar).toHaveAttribute('aria-valuenow', '50');
+  await expect(bar).toHaveAccessibleName('Downloading: 20 MB of 39 MB');
+  expect(await axeViolations(page, { idsOnly: true })).toEqual([]);
+  await page.evaluate(() => (window as unknown as { sdUpdatesDownload: { progress(d: number, t: number | null): void } }).sdUpdatesDownload.progress(1000, null));
+  await expect(dialog.locator('mat-progress-bar')).toHaveAttribute('mode', 'indeterminate');
+  await expect(bar).not.toHaveAttribute('aria-valuenow', /.+/);
+  // With reduced motion it is a full, still bar, not a frozen partial one that reads as a value.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const widths = await dialog.locator('.mdc-linear-progress__primary-bar').evaluate((e) => [e.getBoundingClientRect().width, e.parentElement!.getBoundingClientRect().width]);
+  expect(Math.abs(widths[0]! - widths[1]!)).toBeLessThanOrEqual(1);
+  await page.evaluate(() => (window as unknown as { sdUpdatesDownload: { finish(): void } }).sdUpdatesDownload.finish());
+  await expect(dialog.getByTestId('updates-phase')).toContainText('downloaded and its signature verified');
+});
+
 test('a build without an update key says updates are not available, with nothing to press but Close', async ({ app, page }) => {
   await app.dialogs.openWindow('pd.updates', {}, { query: '?updates=unavailable' });
   await expect(page.getByTestId('updates-phase')).toHaveText('Updates are not available in this build.');

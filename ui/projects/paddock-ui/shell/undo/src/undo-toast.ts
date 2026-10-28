@@ -28,7 +28,11 @@ export class PdUndoToast {
       const toast = this.store.toast();
       untracked(() => this.show(toast?.label ?? null));
     });
-    inject(DestroyRef).onDestroy(() => this.snackBar.dismiss());
+    inject(DestroyRef).onDestroy(() => {
+      const ref = this.ref;
+      this.ref = null;
+      ref?.dismiss();
+    });
   }
 
   /** Opens the snack bar for `label` (it replaces an older one), or closes it when there is no toast. */
@@ -39,13 +43,20 @@ export class PdUndoToast {
       return;
     }
     const data: UndoToastData = { label, undo: () => void this.store.undo(), dismiss: () => this.store.dismissToast() };
-    this.ref = this.snackBar.openFromComponent(PdUndoToastContent, {
+    const ref = this.snackBar.openFromComponent(PdUndoToastContent, {
       data,
       duration: 0,
       politeness: 'polite',
-      horizontalPosition: 'center',
+      horizontalPosition: 'end',
       verticalPosition: 'bottom',
       panelClass: UNDO_SNACK_CLASS,
+    });
+    this.ref = ref;
+    // MatSnackBar shows one at a time: when another one replaces this (not our own newer toast), the store drops its toast too.
+    ref.afterDismissed().subscribe(() => {
+      if (this.ref !== ref) return;
+      this.ref = null;
+      this.store.dismissToast();
     });
   }
 }

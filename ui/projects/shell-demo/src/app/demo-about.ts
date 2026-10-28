@@ -1,7 +1,9 @@
+import { inject } from '@angular/core';
 import { MemoryAboutBackend, MemoryUpdatesBackend, TauriAboutBackend, TauriUpdatesBackend, type AboutBackend, type FakeServer, type UpdatesBackend } from '@decryp7/paddock-ui/shell/about';
 import shellPackage from '../../../paddock-ui/package.json';
 import { APP_NAME } from './demo-name';
 import { tauriIpc } from './demo-ipc';
+import { DemoJobsEngine } from './demo-jobs';
 
 /** The demo's version: the shell's own (its single source, rule 6; the e2e reads the same file). */
 export const DEMO_VERSION: string = shellPackage.version;
@@ -13,6 +15,9 @@ export function fakeServer(search: string = globalThis.location?.search ?? ''): 
   const wanted = new URLSearchParams(search).get('updates');
   return SERVERS.find((s) => s === wanted) ?? 'release';
 }
+
+/** `?hold`, read when the module loads: the router replaces the URL (and its query) once the window is up. */
+const HOLD = new URLSearchParams(globalThis.location?.search ?? '').has('hold');
 
 let about: AboutBackend | null = null;
 let updates: UpdatesBackend | null = null;
@@ -59,11 +64,30 @@ export function demoAboutBackend(): AboutBackend {
   return about;
 }
 
-/** The updater over Tauri in the desktop build; in the browser, the fake update server of `?updates=`. */
+/** What `?hold` puts on `window.sdUpdatesDownload`: step the held download by hand (the e2e and the screenshots). */
+export interface HeldDownload {
+  /** Sends the download job's phase to the window's Jobs (a total of `null` is a count that has no end yet). */
+  progress(done: number, total: number | null): void;
+  /** Lets the download finish (the signature check and the result). */
+  finish(): void;
+}
+
+/**
+ * The updater over Tauri in the desktop build; in the browser, the fake update server of `?updates=`. With `?hold` (browser
+ * only) the download stays running until `window.sdUpdatesDownload.finish()`, and `progress(done, total)` plays the engine's
+ * job events, so the progress bar can be seen and tested.
+ */
 export function demoUpdatesBackend(): UpdatesBackend {
   const ipc = tauriIpc();
   if (ipc) return new TauriUpdatesBackend(ipc);
-  updates ??= new MemoryUpdatesBackend({
+  if (updates) return updates;
+  const hold = HOLD;
+  const jobs = hold ? inject(DemoJobsEngine).backend : null;
+  const held: (() => void)[] = [];
+  let downloadJob = -1;
+  let downloading = false;
+  let seq = 0;
+  const memory = new MemoryUpdatesBackend({
     currentVersion: DEMO_VERSION,
     server: fakeServer(),
     release: { version: '99.0.0', notes: 'A sample release of the fake update server.', pubDate: null, size: 41_000_000 },
@@ -71,6 +95,32 @@ export function demoUpdatesBackend(): UpdatesBackend {
       { id: 'stable', label: 'Stable' },
       { id: 'beta', label: 'Beta' },
     ],
+    schedule: (step) => (hold && downloading ? held.push(step) : queueMicrotask(step)),
   });
+  if (jobs) {
+    void memory.listen((status) => {
+      downloading = status.phase.kind === 'downloading';
+      if (status.phase.kind === 'downloading') downloadJob = status.phase.job ?? -1;
+    });
+    const api: HeldDownload = {
+      progress: (done, total) =>
+        jobs.emit({
+          id: downloadJob,
+          kind: 'update-download',
+          title: 'Downloading the update',
+          subject: '99.0.0',
+          seq: ++seq,
+          elapsedMs: 0,
+          etaMs: null,
+          cancellable: true,
+          notCancellableReason: null,
+          state: 'running',
+          phase: { id: 'download', label: 'Downloading', unit: 'bytes', total, done },
+        }),
+      finish: () => held.splice(0).forEach((step) => step()),
+    };
+    (globalThis as { sdUpdatesDownload?: HeldDownload }).sdUpdatesDownload = api;
+  }
+  updates = memory;
   return updates;
 }
