@@ -1,0 +1,17 @@
+[package]
+name = "sighter-match"
+version = "0.0.0"
+description = "Sighter's template layer (SG3): zero-mean normalised cross-correlation of a saved crop against a frame region, scored through the core's calibration and margin rule."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sighter-core.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true
