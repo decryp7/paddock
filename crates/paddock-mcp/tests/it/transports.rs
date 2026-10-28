@@ -5,7 +5,7 @@ use crate::common;
 use common::*;
 use paddock_mcp::{KeyStore, Limits, client, jsonrpc, serve_loopback, serve_stdio};
 use serde_json::{Value, json};
-use std::io::{BufRead, BufReader, Cursor, Write};
+use std::io::{BufRead, BufReader, Cursor, ErrorKind, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 
@@ -143,6 +143,9 @@ struct Conn {
 impl Conn {
     fn open(addr: std::net::SocketAddr) -> Conn {
         let s = TcpStream::connect(addr).unwrap();
+        // A hang guard only: every reply and every end comes at once, so a missing one fails the test in seconds
+        // instead of stalling the runner (see `next`).
+        s.set_read_timeout(Some(HANG_GUARD)).unwrap();
         Conn {
             reader: BufReader::new(s.try_clone().unwrap()),
             writer: s,
@@ -163,12 +166,23 @@ impl Conn {
         while self.next().is_some() {}
     }
 
-    /// The next line, or `None` at end of stream.
+    /// The next line, or `None` once the connection has ended: at the end of the stream, and also on a read error such as
+    /// a reset, since a closed connection can end either way. Neither a line nor an end within [`HANG_GUARD`] fails.
     fn next(&mut self) -> Option<Value> {
         let mut l = String::new();
-        (self.reader.read_line(&mut l).unwrap_or(0) > 0).then(|| serde_json::from_str(&l).unwrap())
+        match self.reader.read_line(&mut l) {
+            Ok(0) => None,
+            Ok(_) => Some(serde_json::from_str(&l).unwrap()),
+            Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                panic!("neither a line nor the end of the connection within {HANG_GUARD:?}")
+            }
+            Err(_) => None,
+        }
     }
 }
+
+/// How long a test client waits for a line or the end of its connection before failing.
+const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(10);
 
 fn listener() -> TcpListener {
     TcpListener::bind("127.0.0.1:0").unwrap()
@@ -308,6 +322,26 @@ fn a_client_that_saw_its_connection_end_gets_the_place_back_at_once() {
         assert_eq!(reply["ok"], true, "round {round}: {reply}");
         c.leave();
     }
+}
+
+/// Regression: on macOS `shutdown` fails (ENOTCONN) on a socket whose peer has already sent its FIN, and the server kept a
+/// second handle to every connection for `stop`, so a client that half-closed never saw its connection end.
+#[test]
+fn a_client_that_half_closes_sees_the_end_of_its_connection() {
+    let r = rig();
+    let keys = Arc::new(KeyStore::new());
+    let (_, key) = keys.issue("a", 1).unwrap();
+    let serving = serve_loopback(r.server.clone(), keys, listener(), 2).unwrap();
+    let mut c = Conn::open(serving.addr());
+    c.send(&json!({"key": key}).to_string());
+    assert_eq!(c.next().unwrap()["ok"], true);
+    c.send(&client::ping(1));
+    c.writer.shutdown(std::net::Shutdown::Write).unwrap();
+    assert!(
+        c.next().unwrap()["result"].is_object(),
+        "the request sent before the half-close is answered"
+    );
+    assert!(c.next().is_none(), "the connection ends");
 }
 
 #[test]
