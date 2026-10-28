@@ -45,7 +45,8 @@ mechanism, a check that covers every instance, and the list of today's instances
 **Mechanism.** One priority model: ADR 0020's `Class` (`Interactive`, `User`, `Background`, `Idle`) and its two OS tiers.
 No second enum. ADR 0020's `priority::apply_current(Class)` sets the current thread; this ADR adds the same `Class` to
 child-process launch (`paddock_proc::command(...).class(c)`), so a launch site states its class like a task does. (If the
-dependency direction needs it, `Class` moves to the lower crate and `paddock-jobs` re-exports it; it stays one type.)
+dependency direction needs it, `Class` moves to `paddock-proc` (`paddock_proc::Class`), the lower of the two crates, and
+`paddock-jobs` re-exports it; it stays one type.)
 
 **Which class a child gets.** A process that serves interactive requests (the store worker answering UI queries, an
 inference server answering chat) is **never launched below `User`**; it tiers its work per thread, as ADR 0020 decides
@@ -63,8 +64,13 @@ at `User` with bounded threads.
 | Windows | `BELOW_NORMAL_PRIORITY_CLASS` (`Background`) or `IDLE_PRIORITY_CLASS` (`Idle`) at `CreateProcess`, then `SetProcessInformation(child, ProcessMemoryPriority, MEMORY_PRIORITY_LOW / VERY_LOW)` and `SetProcessInformation(child, ProcessPowerThrottling, EXECUTION_SPEED)` (EcoQoS) | `SetThreadPriority(THREAD_MODE_BACKGROUND_BEGIN)` | memory priority as set; I/O priority of *another* process has no public API |
 
 `PROCESS_MODE_BACKGROUND_BEGIN` applies only to the calling process, so it cannot be set on llama-server or any other
-third-party child; our own Rust children that do only background work may call it on themselves at start (through
-`apply_current`'s process variant), which also lowers their I/O priority.
+third-party child. Our own Rust children may enter it on themselves, which also lowers their I/O priority, but only
+through `paddock_proc::priority::enter_background_self()`, and only when they were **launched** at `Background` or
+`Idle`: the launch passes the class to the child (`PADDOCK_LAUNCH_CLASS`, set by `paddock_proc::command(...).class(c)`),
+and the function refuses (a typed error, no OS call) for any other launch class, so a process launched to serve
+interactive requests can never lower itself. It lives in `paddock-proc` because C40 allows `SetPriorityClass` and its
+peers only there (`apply_current` is in `paddock-jobs` today). Test: launched at `User`, the call returns the refusal and
+`GetPriorityClass` is unchanged; launched at `Background`, it succeeds.
 
 **Thread counts** come from one function, `paddock_proc::threads(kind, class)`, which counts cores by kind, never logical
 CPUs (SMT siblings share the core the user is typing on):
@@ -152,8 +158,10 @@ with the same key). Requests read the last finished result and never wait for a 
 ADR 0020's mode-3 lease kinds (pipe readers, lifelines, OS consumers) with a dated waiver of kind `lease`; every job kind
 registered with the jobs registry declares its key function and its phases (a registry test enumerates kinds and
 asserts both); a PR test per kind submits the same request twice and gets one id. **Inline work on request threads** is
-caught by counting, not by the lint: each request command that reads a derived table (Debrief's `find_values` and chat
-turn reading the name table) has a test with a counting store and a stale table that asserts the command returns the
+caught by counting, not by the lint. A derived table (Debrief's name table) is registered once with the commands that
+read it (`DerivedTable { name, readers: &[command ids], rebuild_job }` in the app's registry); a test walks the app's
+command table and fails when a command calls a derived table's read API without being listed as a reader, so the set is
+enumerable. Each listed reader (Debrief's `find_values` and the chat turn) has a test with a counting store and a stale table that asserts the command returns the
 last table, makes **0 rebuild calls** itself, and that exactly one rebuild job is queued.
 
 **Instances today.** Raw grep of thread spawns in non-test paths: shared 71, Debrief 127, Dyno 49, Pitcrew 24, Spotter
@@ -249,7 +257,7 @@ move to `paddock-repo-rules` in its rules phase. The measurement scripts committ
 | Risk | Mitigation |
 |---|---|
 | Windows background mode can starve a background job on a busy machine for a long time | jobs show "Still working"; a user-started job is `User`, never `Background`; a test of progress under load on the Windows runner |
-| `PRIO_DARWIN_BG` throttles GPU work too (Metal inference for a confirmed batch job) | measured on the Mac runner when the first background inference job lands; the class is per request, so chat is unaffected |
+| `PRIO_DARWIN_BG` throttles GPU work too (Metal inference for a confirmed batch job) | not applied to inference servers: they serve chat and are launched at `User` (section 1); measured on the Mac runner before any other GPU-using child is launched at `Background` |
 | The tree probe misses grandchildren that re-parent (daemonising helpers) | Windows: the job object holds them; macOS and Linux: children of supervised processes are not allowed to daemonise (contain), tested |
 | Lints flood with legitimate instances | warning mode first, dated waivers with reasons and expiry, a ratchet that only lets counts fall, errors per app only when its findings are fixed or waived |
 
