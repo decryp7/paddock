@@ -20,15 +20,18 @@ pub struct Work {
     results: Arc<Mutex<Results>>,
 }
 
+/// The one kind of job a dialog window starts and may read the result of (the register window's).
+pub const DIALOG_JOB_KIND: &str = "pitcrew.register-runner";
+
 #[derive(Default)]
 struct Results {
-    by_id: HashMap<u64, serde_json::Value>,
+    by_id: HashMap<u64, (String, serde_json::Value)>,
     order: VecDeque<u64>,
 }
 
 impl Results {
-    fn put(&mut self, id: u64, value: serde_json::Value) {
-        self.by_id.insert(id, value);
+    fn put(&mut self, id: u64, kind: &str, value: serde_json::Value) {
+        self.by_id.insert(id, (kind.to_string(), value));
         self.order.push_back(id);
         while self.order.len() > KEEP_RESULTS {
             if let Some(old) = self.order.pop_front() {
@@ -49,11 +52,16 @@ impl Default for Work {
 }
 
 impl Work {
-    /// The result of a finished job (once), `None` when it has none or was already read.
-    pub fn take_result(&self, id: u64) -> Option<serde_json::Value> {
+    /// The result of a finished job (once), `None` when it has none, was already read, or the reader may not have it: a dialog
+    /// window may only read the result of the kind of job a dialog starts ([`DIALOG_JOB_KIND`]); the result stays for the
+    /// window that may.
+    pub fn take_result(&self, id: u64, from_dialog: bool) -> Option<serde_json::Value> {
         let mut r = self.results.lock().unwrap_or_else(|p| p.into_inner());
+        if from_dialog && r.by_id.get(&id).is_some_and(|(kind, _)| kind != DIALOG_JOB_KIND) {
+            return None;
+        }
         r.order.retain(|i| *i != id);
-        r.by_id.remove(&id)
+        r.by_id.remove(&id).map(|(_, v)| v)
     }
 
     /// Registers a job and queues `body` on the pool; returns the id at once. `body` runs the (blocking) request; it is
@@ -66,6 +74,7 @@ impl Work {
         let ctx = jobs.register(kind, title, subject);
         let id = ctx.id().0;
         let results = self.results.clone();
+        let kind_owned = kind.to_string();
         self.pool
             .spawn_job(ctx, move |ctx: &JobContext| {
                 ctx.phase(Phase::discovering("service", "Waiting for the service"));
@@ -73,7 +82,7 @@ impl Work {
                 let _guard = ctx.uncancellable("The service is already doing this");
                 let out = body().map_err(|e| JobError::Failed(e.message))?;
                 if let Ok(v) = serde_json::to_value(out) {
-                    results.lock().unwrap_or_else(|p| p.into_inner()).put(id, v);
+                    results.lock().unwrap_or_else(|p| p.into_inner()).put(id, &kind_owned, v);
                 }
                 Ok(())
             })
@@ -95,10 +104,14 @@ pub fn registry<R: Runtime>(app: &AppHandle<R>) -> Result<Arc<JobRegistry>, Comm
         .ok_or_else(|| CommandError::internal("the job registry is not set up"))
 }
 
-/// `job_result`: what a finished job produced (once).
+/// `job_result`: what a finished job produced (once). A dialog window (`d-...`) only gets the result of the job kind a dialog starts.
 #[tauri::command]
-pub async fn job_result<R: Runtime>(app: AppHandle<R>, id: u64) -> Result<Option<serde_json::Value>, CommandError> {
-    Ok(app.state::<Work>().take_result(id))
+pub async fn job_result<R: Runtime>(
+    app: AppHandle<R>,
+    window: tauri::WebviewWindow<R>,
+    id: u64,
+) -> Result<Option<serde_json::Value>, CommandError> {
+    Ok(app.state::<Work>().take_result(id, window.label().starts_with("d-")))
 }
 
 #[cfg(test)]
@@ -109,7 +122,7 @@ mod tests {
     fn results_are_read_once_and_bounded() {
         let mut r = Results::default();
         for i in 0..(KEEP_RESULTS as u64 + 5) {
-            r.put(i, serde_json::json!(i));
+            r.put(i, DIALOG_JOB_KIND, serde_json::json!(i));
         }
         assert_eq!(r.by_id.len(), KEEP_RESULTS);
         assert!(!r.by_id.contains_key(&0));
@@ -117,7 +130,22 @@ mod tests {
             pool: JobPool::new(Workers::new(1)),
             results: Arc::new(Mutex::new(r)),
         };
-        assert_eq!(w.take_result(36), Some(serde_json::json!(36)));
-        assert_eq!(w.take_result(36), None);
+        assert_eq!(w.take_result(36, false), Some(serde_json::json!(36)));
+        assert_eq!(w.take_result(36, false), None);
+    }
+
+    #[test]
+    fn a_dialog_reads_only_the_result_of_the_job_kind_a_dialog_starts() {
+        let mut r = Results::default();
+        r.put(1, "pitcrew.clean-disk", serde_json::json!("report"));
+        r.put(2, DIALOG_JOB_KIND, serde_json::json!("registered"));
+        let w = Work {
+            pool: JobPool::new(Workers::new(1)),
+            results: Arc::new(Mutex::new(r)),
+        };
+        // Not its job's kind: refused, and the result stays for the main window.
+        assert_eq!(w.take_result(1, true), None);
+        assert_eq!(w.take_result(1, false), Some(serde_json::json!("report")));
+        assert_eq!(w.take_result(2, true), Some(serde_json::json!("registered")));
     }
 }

@@ -192,7 +192,11 @@ pub async fn take_pending_navigation(pending: State<'_, crate::events::PendingNa
 /// route is checked against the known screens, and the main window opens it as it does the tray's (it may not listen yet, so the
 /// route is kept until it asks).
 #[tauri::command]
-pub async fn open_page<R: Runtime>(app: AppHandle<R>, pending: State<'_, crate::events::PendingNav>, route: String) -> Result<(), CommandError> {
+pub async fn open_page<R: Runtime>(
+    app: AppHandle<R>,
+    pending: State<'_, crate::events::PendingNav>,
+    route: String,
+) -> Result<(), CommandError> {
     let route = crate::events::open_page_route(&route).ok_or_else(|| CommandError::bad("That is not a screen Pitcrew can open."))?;
     pending.set(route.to_string());
     let _ = app.emit(crate::events::NAVIGATE, route);

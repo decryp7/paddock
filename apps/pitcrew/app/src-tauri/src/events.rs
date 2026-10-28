@@ -268,7 +268,16 @@ mod nav_tests {
     fn a_window_can_ask_for_a_known_screen_and_nothing_else() {
         assert_eq!(open_page_route("/updates"), Some("/updates"));
         assert_eq!(open_page_route("/"), Some("/"));
-        for bad in ["", "updates", "//evil.example", "https://evil.example", "/settings", "/runners/../x", "/updates?x=1", "/logs/a b"] {
+        for bad in [
+            "",
+            "updates",
+            "//evil.example",
+            "https://evil.example",
+            "/settings",
+            "/runners/../x",
+            "/updates?x=1",
+            "/logs/a b",
+        ] {
             assert_eq!(open_page_route(bad), None, "{bad}");
         }
     }
