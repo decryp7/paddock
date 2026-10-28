@@ -19,7 +19,7 @@ describe('the storage confirm dialog', () => {
   });
 
   it('says the cache is rebuilt, and answers true for Clear cache and is dismissed by Keep', async () => {
-    const a = await open({ what: 'the cache', bytes: 10, data: false });
+    const a = await open({ what: 'Cache', bytes: 10, data: false });
     expect(a.q('storage-confirm-data')).toBeNull();
     expect(text(a.el)).toContain('rebuilds it');
     expect(a.action('clear')!.textContent!.trim()).toBe('Clear cache');
@@ -27,7 +27,7 @@ describe('the storage confirm dialog', () => {
     await a.press('clear');
     expect(a.outcome()).toEqual({ kind: 'answered', value: true });
     TestBed.resetTestingModule();
-    const b = await open({ what: 'the cache', bytes: 10 });
+    const b = await open({ what: 'Cache', bytes: 10 });
     await b.press('keep');
     expect(b.outcome()).toEqual({ kind: 'dismissed' });
   });
