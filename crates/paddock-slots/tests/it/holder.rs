@@ -1,6 +1,6 @@
 use paddock_slots::{
-    Announcement, FsLocks, HoldEnd, OwnerInfo, SlotError, SlotId, SlotLocks, acquire_first,
-    acquire_retry, fresh_token, hold, release, slot_states, wait_free,
+    Announcement, FsLocks, HoldEnd, OwnerInfo, ReleaseLocks, SlotError, SlotId, SlotLocks,
+    acquire_first, acquire_retry, fresh_token, hold, release, slot_states, wait_free,
 };
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -453,29 +453,48 @@ fn a_release_request_that_cannot_be_written_is_a_typed_error() {
     ));
 }
 
-#[cfg(unix)]
+/// A store whose slot is held until a release is requested, after which looking at the lock fails.
+struct FailingAfterRequest {
+    requested: std::cell::Cell<bool>,
+}
+
+impl SlotLocks for FailingAfterRequest {
+    type Guard = ();
+
+    fn try_lock(&self, _id: SlotId) -> Result<Option<()>, SlotError> {
+        if self.requested.get() {
+            Err(SlotError::Io {
+                path: PathBuf::from("s1.lock"),
+                source: std::io::Error::other("disk gone"),
+            })
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl ReleaseLocks for FailingAfterRequest {
+    fn read_owner(&self, _id: SlotId) -> Option<OwnerInfo> {
+        Some(OwnerInfo {
+            owner: PathBuf::from("job"),
+            pid: 1,
+            token: "mine".into(),
+        })
+    }
+    fn request_release(&self, _id: SlotId, _token: &str) -> Result<(), SlotError> {
+        self.requested.set(true);
+        Ok(())
+    }
+    fn withdraw_release(&self, _id: SlotId, _token: &str) {}
+}
+
 #[test]
 fn a_lock_that_becomes_unusable_while_waiting_for_a_release_is_a_typed_error() {
-    let _gate = crate::share_gate();
-    let dir = tempfile::tempdir().unwrap();
-    let locks = FsLocks::new(dir.path());
-    let (_, _guard) = acquire_first(&locks, 1).unwrap().unwrap();
-    let info = OwnerInfo {
-        owner: PathBuf::from("job"),
-        pid: 1,
-        token: "mine".into(),
+    let locks = FailingAfterRequest {
+        requested: std::cell::Cell::new(false),
     };
-    locks.write_owner(id(1), &info).unwrap();
-    let result = std::thread::scope(|s| {
-        // As soon as the request is made, the lock path turns into a folder, so the next look at the slot fails.
-        s.spawn(|| {
-            while !locks.release_requested(id(1), "mine") {
-                std::thread::yield_now();
-            }
-            std::fs::remove_file(dir.path().join("slots/s1.lock")).unwrap();
-            std::fs::create_dir(dir.path().join("slots/s1.lock")).unwrap();
-        });
-        release(&locks, id(1), "mine", LONG, POLL)
-    });
-    assert!(matches!(result, Err(SlotError::Io { .. })));
+    assert!(matches!(
+        release(&locks, id(1), "mine", LONG, POLL),
+        Err(SlotError::Io { .. })
+    ));
 }

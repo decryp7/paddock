@@ -23,7 +23,7 @@ mod slot;
 pub use error::SlotError;
 pub use fs::{FsGuard, FsLocks, OwnerInfo};
 pub use hold::{
-    ACQUIRE_ATTEMPTS, Announcement, HoldEnd, HoldProbe, fresh_token, hold, hold_until, release,
-    wait_free,
+    ACQUIRE_ATTEMPTS, Announcement, HoldEnd, HoldProbe, ReleaseLocks, fresh_token, hold,
+    hold_until, release, wait_free,
 };
 pub use slot::{SlotId, SlotLocks, SlotState, acquire_first, acquire_retry, slot_states};

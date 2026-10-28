@@ -153,9 +153,32 @@ pub fn hold(
     Ok(Some((id, end)))
 }
 
+/// The release protocol's side of a lock store: who holds a slot and the request channel to the holder. A port, so
+/// [`release`] can be tested with a store whose locks fail on demand.
+pub trait ReleaseLocks: SlotLocks {
+    /// Who holds the slot, if its record is readable.
+    fn read_owner(&self, id: SlotId) -> Option<OwnerInfo>;
+    /// Asks the holder with `token` to let go.
+    fn request_release(&self, id: SlotId, token: &str) -> Result<(), SlotError>;
+    /// Takes back a request carrying `token`.
+    fn withdraw_release(&self, id: SlotId, token: &str);
+}
+
+impl ReleaseLocks for FsLocks {
+    fn read_owner(&self, id: SlotId) -> Option<OwnerInfo> {
+        FsLocks::read_owner(self, id)
+    }
+    fn request_release(&self, id: SlotId, token: &str) -> Result<(), SlotError> {
+        FsLocks::request_release(self, id, token)
+    }
+    fn withdraw_release(&self, id: SlotId, token: &str) {
+        FsLocks::withdraw_release(self, id, token);
+    }
+}
+
 /// Waits (up to `timeout`) until slot `id` can be locked, that is, its holder is gone. Returns whether it is free.
 pub fn wait_free(
-    locks: &FsLocks,
+    locks: &impl SlotLocks,
     id: SlotId,
     timeout: Duration,
     poll: Duration,
@@ -175,14 +198,14 @@ pub fn wait_free(
 /// Lets go of the slot held under `token` and waits until it is free. It returns at once when the slot is free, and also
 /// when the slot is now held by somebody else (another token): that holder is not the caller's to release.
 pub fn release(
-    locks: &FsLocks,
+    locks: &impl ReleaseLocks,
     id: SlotId,
     token: &str,
     timeout: Duration,
     poll: Duration,
 ) -> Result<(), SlotError> {
-    let ours = |locks: &FsLocks| locks.read_owner(id).is_some_and(|o| o.token == token);
-    if wait_free(locks, id, Duration::ZERO, poll)? || !ours(locks) {
+    let ours = || locks.read_owner(id).is_some_and(|o| o.token == token);
+    if wait_free(locks, id, Duration::ZERO, poll)? || !ours() {
         return Ok(());
     }
     locks.request_release(id, token)?;
@@ -192,7 +215,7 @@ pub fn release(
             locks.withdraw_release(id, token);
             return Ok(());
         }
-        if !ours(locks) {
+        if !ours() {
             // Our holder ended by itself and the slot was taken again meanwhile: the request is stale.
             locks.withdraw_release(id, token);
             return Ok(());
