@@ -1,9 +1,12 @@
 # Search performance: Tantivy and Model2Vec (2026-10-28)
 
 Question (user): "improve tantivy and model2vec for best performance". Method: measure first, profile, then change only
-what the numbers support. Status: **partly measured.** The machine's load stayed between 14 and 220 all session (other
-agents' builds and tests), so the timed before/after runs are scheduled for an unattended window; the commands are in
-[Reproduction](#reproduction). Numbers marked *(load n)* were taken under that load and are indications only.
+what the numbers support. Status: **measured** on 2026-10-29 between 04:53 and 05:17 in the unattended window, every run started at 1-minute load
+below 12 (the load before and after each run is in the results blocks). The load still moved during runs (6 to 17, other
+agents' checks), so single numbers carry about 10 to 15% noise; read ranges and A/B pairs. The commands are in
+[Reproduction](#reproduction). The recorded blocks are also in `apps/debrief/docs/performance.md`
+([2026-10-29, search performance](../performance.md#2026-10-29-search-performance-tantivy-steps-writer-grid-end-to-end-and-model2vec-branch-debriefsearch-perf)).
+Earlier numbers marked *(load n)* were taken under heavy load and are indications only.
 
 Machine: Mac mini M4 Pro, 14 cores, 64 GB. Branch `debrief/search-perf` from `origin/main` at `cd13d2355`. No user data:
 the Tantivy benchmark generates its events (ER-14); the Model2Vec set is the 505 events and 36 labelled queries derived
@@ -65,12 +68,12 @@ are the tokenizer's allocations and the writer's thread count; merges, commits a
 
 | Commit | Change | Held by | Measured |
 |---|---|---|---|
-| `e9a65e6b9` | `words_ref`: ASCII text lower-cased once, words handed out as slices, no `String` per word; other text takes the old path (`words_general`), so index and oracle still share one implementation | proptests (2,256 cases) and fixed cases: ASCII path = general path | window |
-| `e9a65e6b9` | Tokenizer reuses its tokens between texts (at most 4,096 kept) | unit test | window |
-| `e9a65e6b9` | Prefix = term range `[p, p + U+10FFFF)` instead of a regex compiled per search | test: same hits as `p.*` on ASCII and accented words | window |
-| `e9a65e6b9` | `search` opens the id column once per segment, not per hit; `all_ids` reads blocks of 64 hits (`collect_block`, `first_vals`) | search and differential integration tests | window |
-| `69b35c28a` | Words without counts or fieldnorms, `source`/`seg` without fieldnorms (nothing is scored); layout 5, existing indexes rebuild once | unit and integration tests | **pending** |
-| `dcb70b699` | The `debrief-fts` thread runs at background priority; Tantivy's indexing and merge threads start from it and inherit it (macOS QoS, Linux nice) | | |
+| `e9a65e6b9` | `words_ref`: ASCII text lower-cased once, words handed out as slices, no `String` per word; other text takes the old path (`words_general`), so index and oracle still share one implementation | proptests (2,256 cases) and fixed cases: ASCII path = general path | Tokenizer 220k to 501k events/s; build 144k/168k to 203k docs/s (10M docs, 2 threads x 64 MB) |
+| `e9a65e6b9` | Tokenizer reuses its tokens between texts (at most 4,096 kept) | unit test | included in the line above (the two were measured together) |
+| `e9a65e6b9` | Prefix = term range `[p, p + U+10FFFF)` instead of a regex compiled per search | test: same hits as `p.*` on ASCII and accented words | No measurable change: prefix `pa` p50 16.6 ms (before) vs 16.1 ms (after) |
+| `e9a65e6b9` | `search` opens the id column once per segment, not per hit; `all_ids` reads blocks of 64 hits (`collect_block`, `first_vals`) | search and differential integration tests | Term queries p50 15 to 17 ms to 0.7 to 2.5 ms; prefix `pa`/`conn` 30/29 ms to 16.6/14.9 ms; build 203k to 217k docs/s |
+| `69b35c28a` | Words without counts or fieldnorms, `source`/`seg` without fieldnorms (nothing is scored); layout 5, existing indexes rebuild once | unit and integration tests | Build 218k to 308k docs/s; index 537 to 428 MB (53.7 to 42.8 bytes/doc); build peak footprint 313 to 203 MB; no query got slower (see the conclusions) |
+| `dcb70b699` | The `debrief-fts` thread runs at background priority; Tantivy's indexing and merge threads start from it and inherit it (macOS QoS, Linux nice) | | Build speed unchanged by it: head 309k and 305k docs/s vs 308k for the build before it |
 
 Not changed, with reason: the merge policy (final merges were 1.5 s per 1M docs and 5 segments remained; revisit only if the
 10M run shows many segments slowing prefixes); mmap vs RAM directory (searches are already sub-millisecond on mmap and the
@@ -78,12 +81,32 @@ OS cache, and a RAM copy would add the index to the process's real memory); the 
 field is what the grid needs); the doc store codec (empty). Dropping the `lz4-compression` feature would only shrink the
 binary; not worth a change by itself.
 
-### Writer budget (pending the grid)
+### Writer budget
 
 Tokenizing runs inside Tantivy's indexing threads, so build speed should scale with writer threads until the feeder or
-Parquet reading limits it. Tantivy needs at least 15 MB per thread; ADR 0014's budget is 64 MB. The proposal waits for the
-grid (2/4/8/13 threads × 64/128/256 MB, docs/s and peak footprint at 10M docs). The default will come from
-`debrief_core::threads::threads(WorkKind::Cpu)` (cores − 1, ER-20) bounded by a per-thread heap, not a new constant.
+Parquet reading limits it. Tantivy needs at least 15 MB per thread; ADR 0014's budget is 64 MB. Grid on the head
+binary, 10M docs, one build per cell (docs/s, peak footprint; load in brackets). A cell was skipped where heap per thread
+would be under 15 MB.
+
+| Threads | 64 MB | 128 MB | 256 MB |
+|---|---|---|---|
+| 2 | 312.7k, 193 MB (6.9) | 360.4k, 259 MB (6.8) | 361.5k, 254 MB (6.6) |
+| 4 | 291.5k, 282 MB (5.9) | 357.4k, 435 MB (6.6 to 9.8) | 297.0k, 408 MB (9.5 to 14.9) |
+| 8 | skipped | 284.2k, 415 MB (12.0 to 13.6) | **448.7k, 501 MB** (10.9 to 10.4) |
+| 13 | skipped | skipped | 396.1k, 615 MB (9.9 to 13.0) |
+
+Segments after the build: 12 to 19 for 2 threads, 10 to 24 for 4, 6 to 13 for 8, 16 for 13. The 4-thread/256 MB and
+8-thread/128 MB cells ran while the load rose to 13 to 15, so they are likely low; the grid is one build per cell and is
+indicative, not a ranking of neighbours. What is robust: (a) heap per thread matters more than thread count: every cell
+with at least 32 MB per thread reached 313k to 449k docs/s, the cells at 15 to 20 MB per thread were slower or equal to 2
+threads at 64 MB (284k to 396k); (b) more threads cost footprint (193 MB to 615 MB) for at most 1.4x speed.
+
+**Proposal.** Writer heap of **32 MB per thread** (twice Tantivy's minimum), threads = `min(threads(WorkKind::Cpu), 8)`
+(cores - 1, ER-20, capped at 8 because 13 threads were slower than 8 and cost 120 MB more). On this machine: 8 threads x
+32 MB = 256 MB heap, 449k docs/s (+45% over today's 2 x 32 MB = 64 MB at 309k), peak footprint about 500 MB at 10M docs
+(today 205 MB). Small machines (2 to 4 cores) get 64 to 128 MB. This is provisional: before adopting it, repeat the
+t=8/256, t=4/128 and t=2/128 cells twice, interleaved, at load below 8. If the +300 MB peak is not acceptable for the
+background indexer, the fallback is 2 threads x 64 MB (128 MB heap): 360k docs/s (+16%) at 259 MB.
 
 ### Found on the way
 
@@ -133,9 +156,35 @@ Every metric is the same for f16 and int8 (one MRR differs in the third decimal)
 quarter of the memory**. Events in Japanese tokenise to unknown tokens only and get a zero vector in every precision (the
 models are English; that is what Qwen3 through Pitwall is for). RRF of two top-100 lists: about 6 µs per query.
 
-Pending in the window: encode throughput (model2vec-rs vs lean f32/f16/int8, 1 and 13 threads, share of tokenizing),
-load time and footprint; exact top-100 search (naive, 8-lane, parallel, int8, int8 + f32 rescore) vs usearch HNSW (f32,
-i8) and hnsw_rs at 1k, 10k, 100k and 1M vectors of 256 dimensions (latency, recall@10, build time, memory).
+### Encode and search speed (measured 2026-10-29, load 8 to 12)
+
+Encode, 100,000 templates of 61 bytes (texts/s; "tokenizing" is the share of time in the tokenizer):
+
+| Model | Threads | model2vec-rs | lean f32 | lean f16 | lean i8 |
+|---|---|---|---|---|---|
+| potion-code-16M-v2 | 1 | 58.5k | 76.5k (94% tokenizing) | 71.3k | 77.9k (96%) |
+| potion-code-16M-v2 | 13 | 133k | 348k | 350k | 364k (99%) |
+| potion-retrieval-32M | 1 | 54.3k | 68.7k (92%) | 61.1k | 70.2k (92%) |
+| potion-retrieval-32M | 13 | 115k | 303k | 303k | 332k (93%) |
+
+Memory (peak above start): model2vec-rs +231 MB (16M) and +482 MB (32M); lean i8 +16 MB and +31 MB; lean f32 +160 MB
+(16M, 1 thread). Load time 30 to 50 ms for lean, 77 to 167 ms for model2vec-rs. Tokenizing is 90 to 99% of the lean
+encoder, so the table precision hardly changes the speed and int8 is free. The lean encoder is 1.3x faster than
+model2vec-rs on one thread and 2.6x on 13. Quality is unchanged from the earlier run (re-run `m2v-spike quality`: same
+recall, hit and MRR in f32, f16 and i8; min cosine to f32 0.9999 for i8).
+
+Exact top-k search, 256 dimensions, p50 ms (recall@10):
+
+| Vectors | f32 8-lane | f32 parallel (13) | int8 | int8 + f32 rescore | usearch HNSW f32 | hnsw_rs |
+|---|---|---|---|---|---|---|
+| 1,000 | 0.038 | 0.053 | 0.023 (0.964) | 0.058 (1.000) | 0.076 (0.956) | 0.146 (1.000) |
+| 10,000 | 0.212 | 0.231 | 0.107 (0.862) | 0.203 (1.000) | 0.071 (0.996) | 0.164 (1.000) |
+| 100,000 | 1.842 | 0.570 | 0.823 (0.818) | 1.052 (1.000) | 0.290 (0.996), build 2.3 s | 0.380 (0.908), build 4.2 s |
+| 1,000,000 | 17.3 | 5.5 | 8.8 (0.818) | 8.2 (1.000) | 0.858 (0.772), build 96 s, +1.2 GB | 1.242 (0.656), build 99 s, +2.9 GB |
+
+At the expected size (thousands to tens of thousands of distinct templates) exact search is 0.04 to 0.2 ms, so no index
+is needed. At 1M vectors exact int8 with f32 rescore takes 8 ms at full recall, while HNSW is 10x faster but loses 23 to
+34% recall and takes 96 s and 1.2 GB to build.
 
 ### Plan (decided by the coordinator 2026-10-28: after the current release order)
 
@@ -144,7 +193,7 @@ A shared crate **`paddock-embed`** (rule 42), used by Debrief's template search 
 1. **Core** (pure, no I/O): `Embedder` port (`encode(&[&str]) -> Result<Vectors>`, `model_id`, `dim`); `StaticEmbedder`, the
    lean encoder with an f16 or int8 table chosen at load, a bounded rayon pool passed in (ER-20), no panics, texts cut at
    512 tokens; `VectorSet` (contiguous int8 or f32 rows plus ids) with exact top-k (8-lane dot, parallel over chunks, ties
-   by id so results are deterministic) and int8 search with f32 rescoring if the window shows it pays; `rrf(lists, k = 60)`.
+   by id so results are deterministic) and int8 search with f32 rescoring (pays from about 100,000 vectors: 1.05 ms vs 1.84 ms single-threaded f32; at 10,000 f32 is as fast); `rrf(lists, k = 60)`.
    Model files checked by SHA-256; the index records model id, hash and dimension, and vectors of different models never mix.
 2. **Debrief adapter**: embed **distinct templates** only (the mined or `@mt` templates and distinct messages of the
    catalogue), not rows: 505 events stood for 44k lines in the sample set. Vectors are cached in the store (a DuckDB
@@ -154,12 +203,45 @@ A shared crate **`paddock-embed`** (rule 42), used by Debrief's template search 
    language router (`debrief/nl-search`) sends identifier-like questions to names + BM25 (embeddings lost there in the
    October set) and plain-language questions to the fusion. Qwen3-Embedding through Pitwall is a second `Embedder` when
    Pitwall runs, with its own vectors.
-3. **Index choice**: exact search unless the window shows it too slow at the expected sizes. Distinct templates are
-   thousands to tens of thousands even for large log sets, where an exact int8 scan is expected to stay well under a
-   millisecond (pending measurement); HNSW adds a C++ build (usearch) or a large dependency for no gain at that size.
+3. **Index choice**: exact search (measured too slow nowhere in range: 1M vectors take 8 ms at full recall). Distinct templates are
+   thousands to tens of thousands even for large log sets, where an exact int8 scan stays well under a
+   millisecond (0.1 ms at 10,000, 1 ms at 100,000); HNSW adds a C++ build (usearch) or a large dependency for no gain at that size.
 4. **Checks**: the 36-query set (and the nl-search evaluation set) as a regression test with a floor; a test that the
    encoder never panics on arbitrary bytes; licence clarify entry for model2vec's licence file if the crate is used at all
    (the lean encoder needs only `tokenizers`, `safetensors`, `half`).
+
+## Results and conclusions
+
+A/B on 10M generated events, 2 threads x 64 MB, release build with mimalloc, binaries interleaved (baseline `e8b60ea24`;
+each step adds one change; head `eb8b0acb7`). Build docs/s and index size, then p50 ms.
+
+| Step | Build docs/s | Index MB | Peak MB | `timeout` | `orderservice` | `pa` (prefix) | `t` (prefix) | `a3f` |
+|---|---|---|---|---|---|---|---|---|
+| baseline (mean of 2) | 143.8k, 168.5k | 537 | 309, 307 | 16.2 | 17.1 | 30.6 | 66.4 | 81.2 |
+| + tokenizer | 203.1k | 537 | 310 | 15.1 | 16.3 | 30.3 | 66.3 | 107.4 |
+| + id column, blocks | 217.3k | 537 | 336 | 1.24 | 2.53 | 16.6 | 51.9 | 67.9 |
+| + prefix range | 217.8k | 537 | 313 | 1.10 | 2.29 | 16.1 | 52.9 | 65.5 |
+| + no counts (layout 5) | 307.5k | 428 | 203 | 0.96 | 2.20 | 16.1 | 51.8 | 70.0 |
+| head, two runs | 309.4k, 305.4k | 427 | 208, 202 | 0.90, 0.94 | 2.16 | 16.2, 16.5 | 51.3, 51.4 | 68.6, 68.7 |
+
+(`timeout` here is the bare term; `all_ids` p50 is within noise at every step, e.g. `orderservice` 4.7 to 4.0 ms; `t` and
+`pa` `all_ids` are over the cap.) The baseline pair differs by 17% (load 10.7 vs 8.2), the head pair by 1%. The
+`+ tokenizer` row's slow prefix numbers (`conn` 45 ms, `a3f` 107 ms) were taken at load 13.9 and are noise. End to end
+(2M events, whole import and index pipeline, two interleaved pairs): index 5.3 s and 6.4 s at baseline, 3.0 s and 3.2 s at
+head (380k/312k to 672k/617k docs/s, about 1.9x); phrase total + 100 ids 54/51 ms to 12/12 ms; text total + 100 ids 5/4 ms
+to 1/0 ms; the index on disk 63/67 MB to 45/55 MB; the import is unchanged (457k/808k vs 816k/774k events/s, the baseline
+pair differs by 1.8x, so import is noise-limited). The cold `timeline 1000 buckets` query still misses its 500 ms budget at
+both ends (863, 783, 809, 779 ms; not part of this work).
+
+**Conclusion 1, writer budget:** 32 MB per thread, threads = `min(threads(WorkKind::Cpu), 8)`; 256 MB and 449k docs/s on
+this machine (details and the fallback under [Writer budget](#writer-budget)). To be confirmed with a repeated, interleaved
+run of the three cells named there before the default changes.
+
+**Conclusion 2, no-counts layout: keep it.** Against the step before it (`+ prefix range`) it builds 41% faster (218k to
+308k docs/s), the index is 20% smaller (537 to 428 MB, 53.7 to 42.8 bytes/doc), the build's peak footprint is 35% lower
+(313 to 203 MB), and no query got slower (term 1.10 to 0.96 ms,
+prefix 16.1 to 16.1 ms, `all_ids` unchanged). Nothing is scored, so counts and fieldnorms are never read. The cost is
+the one-time rebuild of existing indexes (layout 5), which the build speed makes cheaper (10M docs in 32 s).
 
 ## Reproduction
 
