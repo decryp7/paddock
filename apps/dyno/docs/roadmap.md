@@ -62,7 +62,7 @@ Status words are honest: **built** (code and tests committed), **in progress** (
 ## Still open in v1
 
 - The disk map screen (the engine is built): the clickable ring chart with drill-down, breadcrumb, live scan with Cancel and the table view. The largest, oldest and duplicate-hint tabs and the hidden-space breakdown are for 1.1.
-- Dyno 1.0 without the helper (ADR 0022): "Unavailable" with a reason for every unreadable figure, the "Other users" row, and the session-only **Run as administrator** (testing-manual P1-P8). Per-user install on every OS.
+- Dyno 1.0 without the helper (ADR 0022): "Unavailable" with a reason for every unreadable figure, the "Other users" row, and the session-only **Run as administrator** (testing-manual P1-P8). No system service is installed and nothing runs elevated unless you choose Run as administrator.
 - Parts of built packages: the weekly OS notification (needs an agent-to-shell push), score recording in the sampler (the trend only
   fills while the app asks for health), engine-stored diagnosis history, Windows IPv6 traffic, and the Windows adapters for
   details, locks, startup and facts (G8).
@@ -96,7 +96,7 @@ What the code does today, read from the code on 2026-10-22. Each is a small task
 | G5 | Plugins are wired minimally: the agent starts the host on first `Request::Plugins` and lists plugins; sensor contributions are not yet connected to the sampler (plugins are sensors only, ADR 0021) | `crates/dyno-agent/src/handlers.rs`, `sampler.rs`, `crates/dyno-plugin-host` | Connect sensor contributions through guarded adapters (ADR 0007) and remove the cleanup and action providers from the host |
 | G6 | Superseded: the helper is not in 1.0 (planned for 1.1, ADR 0022) | `crates/dyno-helper` | superseded |
 | G7 | `DiskUsage` and the weekly report are built (WP-04, WP-08); no request answers `Unsupported` for being unbuilt any more | `crates/dyno-agent/src/handlers.rs` | done |
-| G8 | Windows wires sensors (PDH), process control and user activity only. Process details use `NoDetails`; file locks (Restart Manager), startup entries and facts are the in-memory fakes | `crates/dyno-platform/src/windows/mod.rs` | Windows details probe (command line, modules, connections, signature), Restart Manager locks, registry / Startup folder / scheduled-task startup, facts (disk health, updates, power plan); verify on the Windows CI runner |
+| G8 | Windows wires sensors (PDH) and user activity only. Process details use `NoDetails`; file locks (Restart Manager), startup entries and facts are the in-memory fakes | `crates/dyno-platform/src/windows/mod.rs` | Windows details probe (command line, modules, connections, signature), Restart Manager locks, registry / Startup folder / scheduled-task startup, facts (disk health, updates, power plan); verify on the Windows CI runner |
 | G9 | The doc comments on `Overhead::agent_cpu` and `Load::own_cpu` say "percent of the machine", but the sampler multiplies by the core count: the value is a share of one core (ADR 0002 section 4) | `crates/dyno-core/src/protocol.rs`, `sampling.rs` | Fix the comments (and the UI label) or change the unit; keep the budget comparison consistent |
 | G10 | Done for the kept screens. Was: placeholders for CPU taming, Cleanup and Health screens; taming and cleanup are dropped (ADR 0021) | | done |
 | G11 | Done in WP-14 (`dyno_platform::toolpath`, ADR 0020). Was: the login-shell `PATH` resolver did not exist; nothing started user tools | `crates/dyno-platform/src/toolpath.rs` | done: bounded, timed out, cached, with a validated per-tool override; WP-15 reuses it |
@@ -115,7 +115,7 @@ bounds. The target is at most about 1 % of the machine. See [architecture.md](ar
 
 Not in Dyno 1.0 (decided 2026-10-28; ADR 0022 holds the design, the per-OS table of what 1.0 cannot show, and the 1.1 plan).
 
-- **1.0 instead.** Everything runs with the user's rights and installs per user. A figure the OS withholds is *Unavailable*
+- **1.0 instead.** Everything runs with the user's rights; no system service is installed. A figure the OS withholds is *Unavailable*
   with a plain reason, never 0. Other accounts' processes are one "Other users" row. **Run as administrator** restarts the agent
   elevated for one session (UAC, the macOS password dialog or `pkexec`) and installs nothing.
 - **1.1.** The read-only helper installed with the app from a protected folder, **start as administrator at login**, all

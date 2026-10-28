@@ -1,8 +1,8 @@
 import { P, save, link, hub } from './common.mjs';
 
 function deployment(file, os, o) {
-  const d = P({ title: `Dyno — deployment on ${os.name}`, kind: 'UML · Deployment diagram', w: 1200, desc: o.desc });
-  const NH = 128, CW = 280, G = 120, gx = 48, c0 = gx + 24, c1 = c0 + CW + G, c2 = c1 + CW + G, y0 = 144;
+  const d = P({ title: `Dyno — deployment on ${os.name}`, kind: 'UML · Deployment diagram', w: 1260, desc: o.desc });
+  const NH = 128, CW = 280, G = 150, gx = 48, c0 = gx + 24, c1 = c0 + CW + G, c2 = c1 + CW + G, y0 = 144;
   const r = (i) => y0 + 40 + i * (NH + 32);
   const gw = 24 + 3 * CW + 2 * G + 24, gh = 40 + 2 * NH + 32 + 24;
   d.group('m', gx, y0, gw, gh, `${os.name} [${os.ver}]`);
@@ -14,8 +14,8 @@ function deployment(file, os, o) {
   hub(d, 'agent', 'L', 'app', 'R', { rev: true, label: 'Requests' });
   hub(d, 'agent', 'L', 'sm', 'R', { rev: true, label: 'Starts' });
   hub(d, 'agent', 'R', 'data', 'L', { label: 'Reads, writes' });
-  hub(d, 'agent', 'R', 'elevate', 'L', { label: 'Restarted by', dash: true });
-  d.legend([{ kind: 'accent', label: 'Dyno artefact' }, { kind: 'process', label: 'OS facility · data · process' }, { kind: 'line', label: 'Communication' }]);
+  hub(d, 'elevate', 'L', 'agent', 'R', { label: 'Restarts elevated', dash: true });
+  d.legend([{ kind: 'accent', label: 'Dyno artefact' }, { kind: 'process', label: 'OS facility · data · process' }, { kind: 'line', label: 'Communication' }, { kind: 'dashline', label: 'Optional, one session' }]);
   save(file, d, y0 + gh);
 }
 

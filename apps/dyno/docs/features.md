@@ -147,8 +147,7 @@ observe; nothing here changes a setting.
 
 ## Disk map
 
-**Planned for 1.0 (engine built, screen in progress).** A clickable map of where the space went
-: a ring chart of a volume (internal, external or network) or a folder, where
+**In progress for 1.0 (the engine is built; the screen is being built).** A clickable map of where the space went: a ring chart of a volume (internal, external or network) or a folder, where
 each ring is one folder level. Click a segment to make that folder the centre, use the breadcrumb or the centre to go back,
 hover for name, size and share. The scan is a live job with phases and Cancel, bounded in depth, entries and time. A table view
 lists the same level with the keyboard. It is a map to look at: Dyno deletes, moves and renames nothing; the only actions are

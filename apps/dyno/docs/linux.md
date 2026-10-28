@@ -51,8 +51,9 @@ any command in the same container; `--clean-volumes` deletes its two named volum
 ## What Dyno can see and do
 
 - Sensors: sysinfo plus PSI (`/proc/pressure`), `/proc/diskstats`, hwmon temperatures and fans, GPU where exposed.
-- Process details from `/proc` (command line, working directory, open files, autostart origin); other users' processes are out
-  of sight without root.
+- Process details from `/proc` (command line, working directory, open files, autostart origin) for your own processes. With
+  `hidepid=0` other accounts' and system processes still show name, owner and CPU; their path and disk I/O are *Unavailable*, and
+  they are one **Other users** row (see "What Dyno can read without root" below).
 - Network traffic per program: cumulative TCP bytes per socket from the kernel's `sock_diag` (`tcp_info`, kernel 4.1 or later, any
   user may ask) matched to programs through `/proc/<pid>/fd`. Other users' programs are not attributed without root; UDP has no
   byte counters; bytes of a connection that closed between two reads are not counted. Without netlink access the Network page says so.

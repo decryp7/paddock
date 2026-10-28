@@ -22,8 +22,8 @@ ADR 0021 removed. They are retaken after Dyno moves onto the shared shell ([rele
 ![System context](../diagrams/svg/c4-1-context.svg)
 
 The PC owner uses Dyno; Dyno reads the operating system through ports and checks Dyno's own release host for opt-in
-updates. Debrief (open a time window), Pitwall (explain on click) and backup tools (health checks) are planned
-integrations and never get data unless the user clicks.
+updates. Debrief (open a time window) and Pitwall (explain on click) are planned integrations and never get data unless the user
+clicks; Dyno also checks that backup tools ran (built, read-only).
 
 ### Level 2 — containers
 
@@ -68,8 +68,8 @@ unit, a per-user `Run` entry on Windows), the agent process and the data folder.
 
 ![Use cases: run and set up](../diagrams/svg/uml-use-cases-setup.svg)
 
-What the owner runs or sets up; benchmarks and Explain this start only on a click. Dyno only watches (ADR 0021): none of
-these changes the machine. The disk map is in scope for 1.0.
+What the owner runs or sets up. Benchmarks start only on a click; Explain this in Pitwall is planned for after 1.0 (dashed). Dyno
+only watches (ADR 0021): none of these changes the machine. The disk map is in scope for 1.0.
 
 ## Domain model
 
@@ -88,6 +88,13 @@ so a reused pid is never mistaken for it. The findings are what Dyno tells the o
 
 The app subscribes once; the sampler measures at adaptive intervals; the agent pushes each `LiveUpdate` to every
 subscriber at its detail level, dropping frames for a slow subscriber.
+
+### Run as administrator
+
+![Run as administrator](../diagrams/svg/uml-seq-run-as-administrator.svg)
+
+Dyno 1.0 has no helper. On a click the app asks the OS (UAC, the password dialog or `pkexec`) to start the agent elevated; the
+old agent exits, the elevated one serves the app until Dyno quits, and nothing is installed or registered.
 
 ### Agent restart after an update
 

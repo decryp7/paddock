@@ -138,7 +138,7 @@ disappeared shows *Unavailable* with the reason. Rates (per second) need two rea
 
 ## Running with your own rights
 
-Dyno 1.0 has no privileged helper. The app and the agent run with your own rights, install per user, and never need
+Dyno 1.0 has no privileged helper. The app and the agent run with your own rights, register no system service, and never need
 administrator rights to install or to run. What the OS shows only to administrators, or only to the account that owns a
 process, is never guessed and never shown as zero: the figure says *Unavailable* with a plain reason (for example "Windows
 shows this only to administrators").

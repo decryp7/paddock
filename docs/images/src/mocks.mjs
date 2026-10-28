@@ -42,7 +42,7 @@ function alarmRow(x, y, w, title, detail, state, on, cw = 108) {
 function dynoHero() {
   return sidebar(['Dashboard', 'Processes', 'Why slow', 'Alarms', 'Issues', 'Counters', 'Benchmarks', 'Reports'], 0) +
     t(232, 48, 'Dashboard', 'mh') + t(232, 70, 'Watching this PC · read-only', 'mm') + r(820, 34, 108, 26, 'mact', 13) + `<circle class="maccf" cx="838" cy="47" r="4"/>` + t(850, 52, 'Monitoring', 'mta') +
-    tile(232, 88, 204, 'CPU', '76', '%', CPU) + tile(446, 88, 210, 'Memory', '52', '%', MEM) + tile(672, 88, 123, 'Disk', '236', 'MB/s', DSK) + tile(805, 88, 123, 'Network', '1.2', 'MB/s', NET) +
+    tile(232, 88, 207, 'CPU', '76', '%', CPU) + tile(449, 88, 207, 'Memory', '52', '%', MEM) + tile(672, 88, 123, 'Disk', '236', 'MB/s', DSK) + tile(805, 88, 123, 'Network', '1.2', 'MB/s', NET) +
     r(232, 222, 424, 330, 'mc', 10) + t(252, 254, 'Likeliest cause', 'mm') + t(252, 284, 'A build is using most of the CPU', 'mt2') +
     t(252, 312, 'cargo runs 6 compilers in parallel; the rest waits.', 'mm') +
     [['CPU total', '76%'], ['For', '6 min'], ['Confidence', '86%']].map(([a, b], i) => r(252 + i * 128, 330, 118, 52, 'mfield', 8) + t(264 + i * 128, 350, a, 'mm') + t(264 + i * 128, 372, b, 'mt')).join('') +
@@ -51,7 +51,7 @@ function dynoHero() {
     r(672, 222, 256, 330, 'mc', 10) + t(692, 254, 'Alarms', 'mt') + t(908, 254, '2 active', 'mm', 'end') +
     alarmRow(692, 276, 216, 'Disk 78% full', 'Full in about 41 days', 'Active', true, 64) +
     alarmRow(692, 340, 216, 'CPU ran hot', '6 min above 90 °C', 'Active', true, 64) +
-    alarmRow(692, 404, 216, 'Backup is old', 'Last run 9 days ago', 'Seen', false, 64) +
+    alarmRow(692, 404, 216, 'Backup late', 'Last run 9 days ago', 'Acknowledged', false, 100) +
     r(692, 470, 216, 1, 'mrule', 0) + t(692, 500, 'Health 74 of 100', 'mt') + t(692, 522, 'Reasons, no fixes', 'mm');
 }
 function dynoPanel(kind) {
@@ -74,7 +74,7 @@ function dynoPanel(kind) {
     return r(40, 24, 592, 232, 'mc', 12) +
       alarmRow(64, 48, 544, 'Docker backend keeps restarting', '6 restarts in 2 hours · critical', 'Active', true) +
       alarmRow(64, 108, 544, 'Macintosh HD is 78% full', 'Full in about 41 days', 'Active', true) +
-      alarmRow(64, 168, 544, 'Backup has not run for 9 days', 'Time Machine · acknowledged', 'Seen', false);
+      alarmRow(64, 168, 544, 'Backup has not run for 9 days', 'Time Machine · acknowledged', 'Acknowledged', false);
   }
   // bench
   const rows = [['Processor', 0.62, 0.69, '+11%'], ['Memory', 0.7, 0.78, '+11%'], ['Disk', 0.48, 0.54, '+12%']];

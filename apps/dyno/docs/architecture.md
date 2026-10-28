@@ -25,7 +25,7 @@ code.
 
 ### Core
 
-`dyno_core` holds the model (`metrics`, `process`), `grouping` (ADR 0003), `protect` (the absolute protected list),
+`dyno_core` holds the model (`metrics`, `process`), `grouping` (ADR 0003), 
 `diagnosis`, `anomaly`, `forecast`, `health`, `history` (tiers and min/avg/max downsampling), `sampling` (adaptive intervals), `startup` (view), `alerts`,
 `report`, `issues` (OS problem events, the stability score), `unusual` (the baseline of programs), `extras` (parsers for the sleep, boot, energy, GPU, software, changes and file-finder views, and maintenance windows), `backup` (backup health judgement) and `toolpath` (the search list for the user's tools), `snapshot`, `settings` (versioned), `tray` and `units` (pure formatting), and `protocol` (the app-agent
 contract, `PROTOCOL_VERSION`). The ports are in `ports.rs`: `SystemSensors`, `ProcessSource`,
@@ -83,7 +83,7 @@ implementation calls the shell's one `dyno` command and whose mock serves the br
 ### Privileges and plugins
 
 Dyno 1.0 has no privileged helper (ADR 0021; the helper design is ADR 0022, planned for 1.1). The app and the agent run with the
-user's own rights and install per user. A reading the OS gives only to administrators or to a process's owner is a
+user's own rights; Dyno registers no system service (its files and agent are per user; on Linux the .deb itself is an ordinary system package). A reading the OS gives only to administrators or to a process's owner is a
 `Reading::Unavailable` with a plain reason, never a zero. The platform adapters tell three groups apart: the user's own
 processes and the system's are listed one by one, and every other account's processes form one **Other users** row with whatever
 totals the OS allows (by session on Windows, by uid on macOS and Linux). On Windows the adapter reads

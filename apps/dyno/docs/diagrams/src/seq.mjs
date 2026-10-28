@@ -1,10 +1,10 @@
 import { P, save, sequence } from './common.mjs';
 
-/** parts: [id, name, tech, role]; script items: ['m', a, b, text, reply?] ['s', p, text] ['o', kind, cond] ['e', cond] ['c'] ['n', p, text, w?] */
+/** parts: [id, name, tech, role]; script items: ['m', a, b, text, reply?] ['s', p, text] ['o', kind, cond] ['e', cond] ['c'] ['n', p, text, w?] ['C', from, id, text] creates a late part (5th field true) ['x', id] ends its lifeline */
 function seq(file, { title, desc, parts, script, pw = 168, gap = 40 }) {
   const w = 96 + parts.length * pw + (parts.length - 1) * gap;
   const d = P({ title, kind: 'UML · Sequence diagram', desc, w });
-  const s = sequence(d, parts.map(([id, name, tech, role]) => ({ id, name, tech, role })), { pw, gap });
+  const s = sequence(d, parts.map(([id, name, tech, role, late]) => ({ id, name, tech, role, late })), { pw, gap });
   for (const [k, ...a] of script) {
     if (k === 'm') s.msg(a[0], a[1], a[2], { reply: !!a[3] });
     else if (k === 's') s.self(a[0], a[1]);
@@ -12,6 +12,8 @@ function seq(file, { title, desc, parts, script, pw = 168, gap = 40 }) {
     else if (k === 'e') s.else(a[0]);
     else if (k === 'c') s.close();
     else if (k === 'n') s.note(a[0], a[1], a[2]);
+    else if (k === 'C') s.create(a[0], a[1], a[2]);
+    else if (k === 'x') s.end(a[0]);
   }
   const y = s.done();
   const names = { ui: 'Angular UI', accent: 'Dyno', core: 'Pure core', process: 'Process · OS · data', plugin: 'Plugin', external: 'External' };
@@ -46,7 +48,7 @@ seq('uml-seq-agent-restart', {
 seq('uml-seq-run-as-administrator', {
   title: 'Run as administrator, for one session',
   desc: 'Dyno 1.0 has no privileged helper. On a click the app asks the OS to start the agent elevated; the elevated agent serves the app until Dyno quits. Nothing is installed or registered, and the next start uses the user\'s own rights.',
-  parts: [['ui', 'Angular UI', 'Settings', 'ui'], ['sh', 'Tauri shell', 'user process', 'accent'], ['os', 'OS prompt', 'UAC · password · polkit', 'process'], ['old', 'Agent', 'user rights', 'accent'], ['new', 'Agent (elevated)', 'until Dyno quits', 'accent']],
+  parts: [['ui', 'Angular UI', 'Settings', 'ui'], ['sh', 'Tauri shell', 'user process', 'accent'], ['os', 'OS prompt', 'UAC · password · polkit', 'process'], ['old', 'Agent', 'user rights', 'accent'], ['new', 'Agent (elevated)', 'until Dyno quits', 'accent', true]],
   script: [
     ['m', 'ui', 'sh', 'Run as administrator'],
     ['m', 'sh', 'os', 'ask to start the agent elevated (`runas`, password dialog, `pkexec`)'],
@@ -54,10 +56,13 @@ seq('uml-seq-run-as-administrator', {
     ['o', 'alt', 'approved'],
     ['m', 'sh', 'old', '`Request::Shutdown`'],
     ['s', 'old', 'flush history; remove `agent.json`'],
-    ['m', 'os', 'new', 'start `dyno-agent run` with elevated rights'],
-    ['s', 'new', 'open store; listen'],
+    ['x', 'old'],
+    ['C', 'os', 'new', 'start `dyno-agent run` elevated'],
+    ['s', 'new', 'listen'],
     ['m', 'sh', 'new', 'connect and `Subscribe`'],
     ['m', 'new', 'ui', 'readings only administrators can see, in `Push(LiveUpdate)`', 1],
+    ['m', 'sh', 'new', 'Dyno quits: `Request::Shutdown`'],
+    ['x', 'new'],
     ['e', 'declined or cancelled'],
     ['m', 'sh', 'ui', 'Dyno goes on with the user\'s rights; unreadable figures stay Unavailable', 1],
     ['c'],

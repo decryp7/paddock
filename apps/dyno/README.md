@@ -13,7 +13,7 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 
 </div>
 
-![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=4d09c9e3)
+![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=30f110dd)
 
 
 > **Status: 1.0.0 in preparation, unreleased.** Dyno 1.0.0 is a monitor: live and history, processes and why it is slow,
@@ -51,7 +51,7 @@ does the second:
 
 ## Key features
 
-![Dyno features](docs/images/dyno-features.svg?v=b013fdfd)
+![Dyno features](docs/images/dyno-features.svg?v=6a7c546d)
 
 ![How Dyno works](docs/images/dyno-how-it-works.svg?v=a478bd02)
 
@@ -70,7 +70,7 @@ Every feature, with its state, is in [docs/features.md](docs/features.md). Built
    ([ADR 0013](docs/adr/0013-alarms-lifecycle.md)); crashes and errors from the OS logs with a stability score
    ([ADR 0017](docs/adr/0017-issues-and-the-program-baseline.md)); a report for any of the last 52 weeks.
 6. **Health and startup items,** with reasons only: Dyno shows, it does not fix.
-7. **Disk map, counters, extras and backup health.** A clickable disk map (a ring chart of a volume or folder: click a segment to drill in, with a live scan you can cancel), a performance-counter browser, what changed,
+7. **Disk map, counters, extras and backup health.** A disk map (in progress for 1.0: the engine is built and the screen is being built; a ring chart of a volume or folder where a click drills in, with a live scan you can cancel), a performance-counter browser, what changed,
    sleep, boot, GPU, inventory, find files (view only) and backup checks
    ([ADR 0020](docs/adr/0020-extras-backup-checks-and-taming-proof.md)).
 8. **Benchmarks on click,** network view, IP lookup, web and VirusTotal search (they only open your browser), the flight

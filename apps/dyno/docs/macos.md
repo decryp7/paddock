@@ -62,8 +62,6 @@ routes on one machine.
 - Dyno 1.0 installs no helper and no LaunchDaemon. **Run as administrator** asks for your password once (the macOS authorisation dialog) and restarts the agent as root until you quit Dyno; it installs nothing.
 - Efficiency mode is the Darwin background policy (`setpriority` with `PRIO_DARWIN_BG`); CPU caps are a 100 ms SIGSTOP/SIGCONT
   duty cycle; there is no CPU affinity on macOS.
-- The protected list covers `kernel_task`, `launchd`, `WindowServer`, `loginwindow`, `coreaudiod`, `logd`, `securityd`,
-  `syspolicyd`, XProtect and more, plus Dyno itself.
 
 ## After updating Dyno
 

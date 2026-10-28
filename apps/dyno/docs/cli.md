@@ -34,5 +34,5 @@ Human output has no command lines or file contents.
 
 ## Exit codes
 
-`0` done, `1` failed (the message says why), `2` wrong usage or `--yes` missing, `3` this `dyno` and the running Dyno speak different
+`0` done, `1` failed (the message says why), `2` wrong usage, `3` this `dyno` and the running Dyno speak different
 protocol versions (update the older one), `4` Dyno is not running.
