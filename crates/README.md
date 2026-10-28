@@ -114,6 +114,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
 | `paddock-files` | user files: path grants (open only paths the user chose, canonicalised), validated open/save pickers behind a port, recent lists (recorded only after a granted open, re-granted on use), reveal, open with the default program (never what runs on open) and web addresses (plan X31; from Debrief `paths.rs`, `recent.rs`, `opener.rs`) | yes (all apps; Pacenotes and Sighter from their first commit); built |
 | `paddock-storage` | what an app keeps on disk and clearing it safely: declared categories (cache the app can rebuild, the user's data), a bounded size walk (entries, time on an injected clock, depth, no links, one volume), a preview that is measured first, a re-check before every delete, confirmation for data, nothing outside the app's own folders, as jobs with progress and Cancel (plan X32; from Debrief `storage/`, Dyno `cleanup/{walk,guard}.rs`, Pitwall `leftovers.rs`, Pitcrew cache clean) | yes (all apps); built |
+| `paddock-units` | the one definition of byte sizes (ER-21, 2026-10-28): `format_bytes(n, Kind)`, `format_whole`, `parse_size`, `exact_bytes`; `Kind::Storage` is decimal (files, disks, downloads, caches, imports, logs, network), `Kind::Memory` binary under the same labels (RAM, process memory, heap, GPU memory); `cases.json` is the table its TypeScript twin (`@decryp7/paddock-ui/format`) is tested against | yes (all apps); built |
 | `paddock-live` | the live feed (plan X29): `Hub<S: LiveState>` holds the state and a sequence number, queues `Frame`s (snapshot, delta `from..=seq`, link) for bounded `Subscription`s (latest-wins merging, a slow consumer is given a snapshot), `run` keeps a `Source` connected with `Backoff` on the shared `Clock` and announces the `Link`; the `tauri` feature emits `paddock://live/<channel>` and answers `live_snapshot` | yes (Pitwall, Dyno, Pitcrew, Spotter, Debrief); built |
 | `paddock-metrics` | tiered metrics store and machine sampler (plan X30): generic `TieredStore<P: Series>` with a checked `Retention` (Pitwall's 4-tier table by default, Pitcrew's sparse table), `MachineSample` series (CPU, memory, free disk, own memory), `Sampler` on the shared `Clock`, free space of a path's volume, bounded `folder_size`, `StoreFile` persistence through paddock-env | yes (Pitcrew, Pitwall, Dyno, Debrief agent); built |
 | `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
@@ -1847,3 +1848,16 @@ let answer = plugin.invoke("collector", "start", json!({ "folder": path }))?;   
 - **Not here:** Debrief's profile/document importers, dumps, the old `PluginRequest` enum (it becomes the `debrief.*`
   contract bodies, ADR 0003 phase 2), the elevated *process* (the app starts it and runs `Invoke` with the `elevated` role),
   the OS sandbox. The author's tool is `cargo-paddock-plugin` (below).
+
+## `paddock-units` (ER-21)
+
+The only place Rust decides how a byte size is written or read. Every call site picks a `Kind`: `Storage` (files, disks,
+downloads, caches, imports, logs, network transfer; 1 KB = 1000 bytes, as the Finder) or `Memory` (RAM, process memory, working
+set, heap, GPU memory; 1 KB = 1024 bytes under the same labels, as Activity Monitor: 16 GiB is "16 GB"). A rate follows its quantity.
+
+- `format_bytes(bytes, kind)`: "12 bytes", "1.5 KB", "16 GB"; one decimal below 10, none above, grouped.
+- `format_whole(bytes, kind)`: the largest whole unit ("8 MB"), for limits in messages and settings.
+- `parse_size(text, kind)`: `512`, `64k`, `10MB`, `2 GiB` (an explicit `...iB` is always binary), with an error that says what to write.
+- `exact_bytes(bytes)`: "1,234,567 bytes".
+- Limit constants of a storage limit are written in decimal (`8_000_000`), never `8 * 1024 * 1024`.
+- `cases.json` is read by this crate's tests and by `ui/projects/paddock-ui/format/src/format.spec.ts` and each app's formatter spec.

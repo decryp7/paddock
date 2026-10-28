@@ -5,6 +5,7 @@
  */
 export {
   NONE,
+  byteStep,
   TransferMeter,
   formatBytes,
   formatCompact,
@@ -19,6 +20,9 @@ export {
   formatPercent,
   formatRate,
   formatRelativeTime,
+  formatWholeBytes,
+  parseSize,
+  type ByteKind,
   formatTime,
   percent,
   share,

@@ -1,9 +1,12 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { PSEUDO_LOCALE, setActiveLocale, SOURCE_LOCALE } from '@decryp7/paddock-ui/shell/i18n';
 import {
   NONE,
   TransferMeter,
+  byteStep,
   formatBytes,
+  formatWholeBytes,
+  parseSize,
   formatCompact,
   formatCount,
   formatDateTime,
@@ -23,6 +26,38 @@ import {
 import { DEFAULT_KEEP_TAIL, ELLIPSIS, fitEnd, fitPath, middleEllipsis, splitForEllipsis, splitPath } from './middle-ellipsis';
 
 afterEach(() => setActiveLocale(SOURCE_LOCALE));
+
+describe('the case table shared with Rust (crates/paddock-units/cases.json)', () => {
+  type Table = Record<string, { in: never; out: unknown }[] | string[]>;
+  // Read from disk (the spec runs in `ui/`); the dynamic import keeps the Node types out of the browser build.
+  const load = async (): Promise<Table> => {
+    const fs = (await import(/* @vite-ignore */ ['node', 'fs'].join(':'))) as { readFileSync(path: string, encoding: 'utf8'): string };
+    return JSON.parse(fs.readFileSync('../crates/paddock-units/cases.json', 'utf8')) as Table;
+  };
+  let table: Table;
+  beforeAll(async () => {
+    table = await load();
+  });
+  const each = (key: string, f: (v: never) => unknown) => {
+    const cases = table[key] as { in: never; out: unknown }[];
+    expect(cases.length).toBeGreaterThan(0);
+    for (const c of cases) expect(f(c.in), `${key}(${String(c.in)})`).toBe(c.out);
+  };
+  it('formats, writes limits and reads sizes exactly as the Rust side does', () => {
+    each('storage', (v: number) => formatBytes(v, 'storage'));
+    each('memory', (v: number) => formatBytes(v, 'memory'));
+    each('wholeStorage', (v: number) => formatWholeBytes(v, 'storage'));
+    each('wholeMemory', (v: number) => formatWholeBytes(v, 'memory'));
+    each('parseStorage', (v: string) => parseSize(v, 'storage'));
+    each('parseMemory', (v: string) => parseSize(v, 'memory'));
+    for (const bad of table['parseBad'] as string[]) expect(parseSize(bad, 'storage'), bad).toBeNull();
+  });
+  it('shows memory like the OS and storage like the Finder', () => {
+    expect(formatBytes(16 * 1024 ** 3, 'memory')).toBe('16 GB');
+    expect(formatBytes(16 * 1024 ** 3)).toBe('17 GB');
+    expect(byteStep('memory')).toBe(1024);
+  });
+});
 
 describe('bytes', () => {
   it('uses decimal steps (1 KB = 1000 bytes) and rounds up across a boundary', () => {

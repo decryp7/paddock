@@ -1,0 +1,14 @@
+[package]
+name = "paddock-units"
+version = "0.1.0"
+description = "The one definition of how byte sizes are written and read in the Paddock apps: decimal steps for files and disks (Kind::Storage), binary steps labelled like the OS for RAM and process memory (Kind::Memory), with the case table shared with the TypeScript twin in @decryp7/paddock-ui/format."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[dependencies]
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+serde_json = "1"
