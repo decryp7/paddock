@@ -281,10 +281,19 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
         // Give up on it once it has read the whole file (the SDK stops reads at a cancel itself): what is checked
         // is that the importer's own work ends.
         let read_before = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed);
-        let waiting = Instant::now();
-        while p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed) - read_before < content.len() as u64
-            && waiting.elapsed() < Duration::from_secs(10)
-        {
+        // Gives up on a read that makes no progress for 10 s, not on a slow one: a loaded machine reads the file
+        // late, and cancelling before the importer has it all ends the read (not the importer's own work).
+        let mut progress = (0, Instant::now());
+        loop {
+            let read = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed) - read_before;
+            if read >= content.len() as u64 {
+                break;
+            }
+            if read != progress.0 {
+                progress = (read, Instant::now());
+            } else if progress.1.elapsed() >= Duration::from_secs(10) {
+                break;
+            }
             if let Ok(StreamEvent::Done(_)) = stream.next(Some(Duration::from_millis(20))) {
                 return Ok("the import ended before it could be cancelled".into());
             }

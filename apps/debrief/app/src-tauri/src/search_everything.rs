@@ -103,6 +103,17 @@ fn corpus<R: Runtime>(app: &AppHandle<R>, win: &WindowState) -> Corpus {
     Corpus { notes, knowledge }
 }
 
+/// How long a search may run. Under test it is effectively unbounded: the budget is wall clock, so a loaded machine
+/// would otherwise cut the notes search short and make the result depend on load (the budget itself is tested in
+/// `debrief_core::search_all`).
+fn budget() -> std::time::Duration {
+    if cfg!(test) {
+        std::time::Duration::from_secs(3600)
+    } else {
+        search_all::BUDGET
+    }
+}
+
 /// Searches the window's everything for `request`; `null` when the text has no words or a newer search of the
 /// window replaced this one.
 #[tauri::command]
@@ -119,7 +130,7 @@ pub async fn search_everything<R: Runtime>(
         let label = label.clone();
         crate::sync::blocking("search everything", move || {
             let replaced = move || !is_newest(&label, id);
-            match search_all::run(store.as_ref(), &corpus, &request, &Control::new(search_all::BUDGET, &replaced)) {
+            match search_all::run(store.as_ref(), &corpus, &request, &Control::new(budget(), &replaced)) {
                 Ok(reply) => Ok(reply),
                 Err(SearchAllError::Cancelled) => Ok(None),
                 Err(e @ SearchAllError::Invalid(_)) => Err(CmdError::new(ErrorCode::Invalid, e.to_string())),
@@ -195,6 +206,7 @@ mod tests {
         let found = search(&app, "timeout").unwrap().expect("words");
         assert!(found.events.total > 0, "the samples log timeouts");
         assert!(found.events.items.iter().all(|e| e.snippet.iter().any(|p| p.mark)));
+        assert_eq!(found.notes.outcome, KindOutcome::Complete, "the search ran out of its budget");
         assert_eq!(found.notes.total, 1);
         assert_eq!(found.notes.items[0].title, "Gateway timeouts");
         assert_eq!(found.notes.items[0].event, None);
