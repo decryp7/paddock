@@ -8,7 +8,7 @@ Build and bundle
 - Anchor ignore rules (`/logs/`, not `logs/`): an unanchored rule silently kept `app/src/app/features/logs/` out of git.
 - Angular production build: `"inlineCritical": false` (optimization.styles). Tauri adds a CSP nonce for inline
   `<style>`/`<script>`, which makes the webview ignore `'unsafe-inline'` and blocks Angular's runtime component styles.
-  Add a bundle-time check that index.html has no inline elements (Pitcrew scripts/check-index.mjs).
+  Add a bundle-time check that index.html has no inline elements (`conformance/ci/check-index.mjs`).
 - macOS: `signingIdentity: "-"` (ad-hoc seal) when there is no Developer ID — SMAppService/launch agents refuse a
   linker-signed bundle (-67056). Put `macos-private-api` in the main tauri feature list AND `macOSPrivateApi: true` in
   the shared tauri.conf.json (tauri-build checks both ways per target).

@@ -58,7 +58,7 @@ mod tests {
 
     #[test]
     fn lines_are_appended_bounded_and_rotated() {
-        let dir = std::env::temp_dir().join(format!("pitcrew-applog-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("pitcrew-it-applog-{}", std::process::id()));
         let p = dir.join("app.log");
         append(&p, "first\nwith a newline");
         append(&p, "second");
