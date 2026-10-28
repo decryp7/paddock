@@ -90,7 +90,7 @@ pub struct AppState {
     /// Count of running engine installs' cancel flags.
     pub install_cancel: Mutex<std::collections::BTreeMap<String, crate::egress::CancelFlag>>,
     /// Cancellable operations by the caller's `opId` (a load or a benchmark): `cancel_op` notifies, the operation stops.
-    pub ops: Mutex<std::collections::BTreeMap<String, Arc<tokio::sync::Notify>>>,
+    pub ops: Mutex<crate::ops::Ops>,
     /// Benchmark results of this session.
     pub benchmarks: Mutex<Vec<mgmt::BenchmarkResult>>,
     /// Secrets of just-created apps, handed over once to the UI.

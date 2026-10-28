@@ -67,9 +67,6 @@ fn arg<T: DeserializeOwned>(a: &Value, name: &str) -> R<T> {
         .map_err(|e| err(mgmt::ErrorCode::BadRequest, format!("argument \"{name}\": {e}")))
 }
 
-/// Most pending cancel marks kept (see `cancel_op`).
-const MAX_OPS: usize = 256;
-
 /// Runs `work` as an operation the caller can cancel with `cancel_op`, named by the optional `opId` argument. `None`
 /// when it was cancelled (the work is dropped); without an `opId` it runs to the end as before.
 async fn cancellable<T>(st: &AppState, a: &Value, work: impl std::future::Future<Output = R<T>>) -> R<Option<T>> {
@@ -79,14 +76,23 @@ async fn cancellable<T>(st: &AppState, a: &Value, work: impl std::future::Future
     struct Forget<'a>(&'a AppState, String);
     impl Drop for Forget<'_> {
         fn drop(&mut self) {
-            lock(&self.0.ops).remove(&self.1);
+            lock(&self.0.ops).end(&self.1);
         }
     }
-    let notify = lock(&st.ops).entry(op.clone()).or_default().clone();
+    let notify = lock(&st.ops).begin(&op, now_ms());
     let _forget = Forget(st, op);
     tokio::select! {
         r = work => r.map(Some),
         () = notify.notified() => Ok(None),
+    }
+}
+
+/// After a load was cancelled: the half-started engine went with the dropped load. A model this very call finished loading
+/// in the same instant is unloaded, so a cancelled load never leaves behind a model it started; one that another request or
+/// job loaded (or is using: `unload` refuses a busy model) is left alone.
+pub fn undo_cancelled_load(st: &AppState, id: &ModelId, loaded_here: bool) {
+    if loaded_here {
+        st.serving.unload(id, pitwall_core::memory::ReleaseReason::Manual);
     }
 }
 
@@ -267,39 +273,36 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "load_model" => {
             let id = model(a, "id")?;
             st.serving.retry(&id);
-            let was_loaded = st.serving.is_loaded(&id);
+            // Set only when this call's own `ensure` started the engine.
+            let loaded_here = std::sync::atomic::AtomicBool::new(false);
             let load = async {
-                st.serving.ensure(&id).await.map(|_| ()).map_err(|e| {
-                    err(
-                        if e.kind == ErrorKind::InsufficientMemory {
-                            mgmt::ErrorCode::InsufficientMemory
-                        } else {
-                            mgmt::ErrorCode::NotAvailable
-                        },
-                        e.message,
-                    )
-                })
+                st.serving
+                    .ensure(&id)
+                    .await
+                    .map(|(_busy, cold)| loaded_here.store(cold.is_some(), std::sync::atomic::Ordering::SeqCst))
+                    .map_err(|e| {
+                        err(
+                            if e.kind == ErrorKind::InsufficientMemory {
+                                mgmt::ErrorCode::InsufficientMemory
+                            } else {
+                                mgmt::ErrorCode::NotAvailable
+                            },
+                            e.message,
+                        )
+                    })
             };
             match cancellable(st, a, load).await? {
                 Some(()) => ok(()),
                 None => {
-                    // The half-started engine went with the dropped load; one that finished in the same instant is
-                    // unloaded, so a cancelled load never leaves a model behind that was not there before.
-                    if !was_loaded {
-                        st.serving.unload(&id, pitwall_core::memory::ReleaseReason::Manual);
-                    }
+                    undo_cancelled_load(st, &id, loaded_here.load(std::sync::atomic::Ordering::SeqCst));
                     ok(json!({ "cancelled": true }))
                 }
             }
         }
         "cancel_op" => {
             let op: String = arg(a, "opId")?;
-            let mut ops = lock(&st.ops);
-            // A cancel can arrive before its operation does; the stored permit stops it as it starts. Bounded.
-            if ops.len() >= MAX_OPS {
-                ops.clear();
-            }
-            ops.entry(op).or_default().notify_one();
+            // A cancel can arrive before its operation does: a short-lived permit stops it as it starts (see `Ops`).
+            lock(&st.ops).cancel(&op, now_ms());
             ok(())
         }
         "unload_model" => {
