@@ -138,7 +138,7 @@ test.describe('processes', () => {
 test.describe('settings', () => {
   test('the theme switch applies at once and Save stores it', async ({ page }) => {
     await page.goto(url('/settings'));
-    await expect(page.getByText(/Dyno measures first/)).toBeVisible();
+    await expect(page.getByText(/Dyno only looks/)).toBeVisible();
     await page.getByRole('radio', { name: 'Dark' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await page.getByRole('radio', { name: 'Light' }).click();
