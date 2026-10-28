@@ -6,7 +6,7 @@ import { SuEmptyState } from '@decryp7/paddock-ui';
 import type { CheckRecord, Product, Release, WatchAction } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
 import { Clipboard } from '../../shared/clipboard';
-import { formatBytes, formatDateTime, formatDuration, formatShortDateTime, mebibytes } from '../../shared/format';
+import { formatBytes, formatDateTime, formatDuration, formatShortDateTime, megabytes } from '../../shared/format';
 import { kindIcon, SCHEME_OPTIONS } from '../../shared/labels';
 import { middleEllipsis } from '../../shared/identity';
 import { AgoPipe, AgoShortPipe } from '../../shared/ui/ago.pipe';
@@ -51,7 +51,7 @@ export class WatchDetailPage {
   protected readonly bytes = formatBytes;
   protected readonly dateTime = formatDateTime;
   protected readonly duration = formatDuration;
-  protected readonly mib = mebibytes;
+  protected readonly mb = megabytes;
   protected readonly glyph = kindIcon;
   protected readonly middle = (text: string) => middleEllipsis(text, 38);
   private readonly clock = inject(ClockService);

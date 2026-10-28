@@ -147,7 +147,7 @@ describe('monitor charts model', () => {
     expect(humanValue(512, 'MB')).toBe('512 MB');
     expect(humanValue(1536, 'MB')).toBe('1.5 GB');
     expect(humanValue(2048, 'B')).toBe('2 KB');
-    expect(humanValue(5 * 1024 ** 2, 'B/s')).toBe('5 MB/s');
+    expect(humanValue(5 * 1000 ** 2, 'B/s')).toBe('5 MB/s');
     expect(humanValue(0, 'B/s')).toBe('0 bytes/s');
     expect(humanValue(42.46, '%')).toBe('42.5%');
     expect(humanValue(1500, '/s')).toBe('1500/s');

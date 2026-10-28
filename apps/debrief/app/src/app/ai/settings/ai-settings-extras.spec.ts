@@ -41,7 +41,7 @@ describe('AiSettingsExtras', () => {
     q('ai-settings-models')!.click();
     expect(launcher.openSetup).toHaveBeenCalled();
     expect(launcher.openModels).toHaveBeenCalled();
-    expect(q('ai-settings-status')!.textContent).toContain('Model: Qwen3.5-4B-Q4_K_M.gguf · Vulkan · 3.2 GB in memory');
+    expect(q('ai-settings-status')!.textContent).toContain('Model: Qwen3.5-4B-Q4_K_M.gguf · Vulkan · 3.4 GB in memory');
     expect(q('ai-settings-server')!.textContent).toContain(
       'llama-server b0-mock · 8192 tokens of context · reads images · image marker <__media_mock__>',
     );

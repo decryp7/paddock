@@ -13,7 +13,7 @@ import type {
 } from '../api.types';
 import { DAY, GB, HOUR, MINUTE } from './mock-data';
 
-const MB = 1024 * 1024;
+const MB = 1000 * 1000;
 
 /** A small deterministic noise in 0..1 so the demo charts look alive but never change between runs. */
 function noise(n: number): number {

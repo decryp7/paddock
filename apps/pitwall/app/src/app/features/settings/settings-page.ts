@@ -19,8 +19,8 @@ import { UpdatesStore } from '../updates/updates.store';
 import { injectNow } from '../../shared/now';
 import { SettingsStore } from './settings.store';
 
-const GB = 1024 ** 3;
-const MB = 1024 ** 2;
+const GB = 1000 ** 3;
+const MB = 1000 ** 2;
 const PRESETS: Exclude<Preset, 'custom'>[] = ['lowMemory', 'balanced', 'performance'];
 
 const SECTIONS = [

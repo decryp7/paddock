@@ -12,7 +12,7 @@ import { settle } from '../../../testing/render';
 
 import { StatTiles } from './stat-tiles';
 
-const GiB = 1024 ** 3;
+const GiB = 1000 ** 3;
 const gpu = (over: Partial<GpuSample> = {}): GpuSample => ({ name: 'NVIDIA GeForce RTX 4070', vramTotal: 12 * GiB, vramUsed: 6 * GiB, utilisation: 40, unified: false, ...over });
 const mem = (over: Partial<MemorySample> = {}): MemorySample => ({
   at: 0,

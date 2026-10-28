@@ -64,7 +64,7 @@ describe('WatchDetailPage', () => {
     expect(releaseRows(f)).toHaveLength(36);
     expect(text(q(f, '#hist-h'))).toBe('Releases');
     expect(text(q(f, 'section[aria-labelledby=hist-h] .help'))).toBe('36 found');
-    expect(byText(f.nativeElement, 'th', 'Size (MiB)')).not.toBeNull();
+    expect(byText(f.nativeElement, 'th', 'Size (MB)')).not.toBeNull();
     expect(text(releaseRows(f)[0]!.querySelector('td.num'))).toMatch(/^\d+(\.\d+)?$/);
     expect(releaseRows(f).filter((r) => r.querySelector('.installed'))).toHaveLength(1);
     const settings = text(q(f, 'dl.kv'));

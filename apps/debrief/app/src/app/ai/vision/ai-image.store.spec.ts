@@ -167,7 +167,7 @@ describe('AiImageStore', () => {
     await store.findRelated(img.id);
     expect(start).not.toHaveBeenCalled();
     expect(store.noVision()).toBe(true);
-    expect((await store.loadActiveModel())?.projectorDownloadBytes).toBe(640 * 1024 * 1024);
+    expect((await store.loadActiveModel())?.projectorDownloadBytes).toBe(640 * 1000 * 1000);
     const install = vi.spyOn(backend, 'installProjector');
     await store.installProjector();
     expect(install).toHaveBeenCalledWith('Qwen3.5-4B-Q4_K_M.gguf');

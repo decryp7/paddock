@@ -102,7 +102,7 @@ describe('tail status', () => {
     await settle(fixture);
     expect(all(fixture, '[data-testid=tail-file]').length).toBe(6);
     const t = text(fixture);
-    for (const s of ['6 files', '1 tailing', '1 with errors', '4.8 MB', '12.5 lines/s', '1,234 events', 'Polling', 'Off', 'Whole file', 'Rotated', 'access denied', '240', 'just now']) expect(t).toContain(s);
+    for (const s of ['6 files', '1 tailing', '1 with errors', '5 MB', '12.5 lines/s', '1,234 events', 'Polling', 'Off', 'Whole file', 'Rotated', 'access denied', '240', 'just now']) expect(t).toContain(s);
 
     const toggle = buttonByText(fixture, 'Live tail off');
     toggle.click();

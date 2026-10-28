@@ -20,11 +20,11 @@ describe('buildFeed', () => {
     expect(feed.map((f) => f.undoId)).toEqual(['1', null]);
   });
   it('adds freed bytes to the detail', () => {
-    const [item] = buildFeed([act('1', 1, { bytes: 1024 ** 3 })], [], 5);
+    const [item] = buildFeed([act('1', 1, { bytes: 1000 ** 3 })], [], 5);
     expect(item!.detail).toBe('did it · freed 1 GB');
   });
   it('drops the leading separator when the detail is empty', () => {
-    const [item] = buildFeed([act('1', 1, { bytes: 2048, detail: '' })], [], 5);
+    const [item] = buildFeed([act('1', 1, { bytes: 2000, detail: '' })], [], 5);
     expect(item!.detail).toBe('freed 2 KB');
   });
   it('maps tones and icons', () => {

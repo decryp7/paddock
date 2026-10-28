@@ -122,7 +122,7 @@ export function humanValue(v: unknown, unit: string): string {
   if (typeof v !== 'number' || !Number.isFinite(v)) return '—';
   switch (unit) {
     case 'MB':
-      return formatBytes(v * 1024 * 1024);
+      return formatBytes(v * 1000 * 1000);
     case 'B':
       return formatBytes(v);
     case 'B/s':

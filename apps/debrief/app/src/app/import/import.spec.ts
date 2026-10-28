@@ -14,8 +14,8 @@ import { WorkspaceStatusStore } from '../core/workspace/status.store';
 import { ImportStatus, ImportToast, PartialImportBanner } from './import-ui';
 
 /** Sizes in the units the UI formats (1024-based). */
-const MB = (n: number) => Math.round(n * 1024 ** 2);
-const GB = (n: number) => Math.round(n * 1024 ** 3);
+const MB = (n: number) => Math.round(n * 1000 ** 2);
+const GB = (n: number) => Math.round(n * 1000 ** 3);
 
 const p = (patch: Partial<ImportProgress> = {}): ImportProgress => ({
   running: true,
@@ -39,7 +39,7 @@ describe('import formatting', () => {
     expect(percent(p())).toBe(30);
     expect(percent(p({ bytesTotal: 0 }))).toBe(25);
     expect(percent(p({ bytesTotal: 0, total: 0 }))).toBe(0);
-    expect(progressLine(p())).toBe('3 of 12 files · 23 MB of 76 MB · less than a minute left');
+    expect(progressLine(p())).toBe('3 of 12 files · 24 MB of 80 MB · less than a minute left');
     expect(progressLine(p({ total: 1, done: 0, bytesTotal: 0, etaMs: null }))).toBe('0 of 1 file');
     // Before the engine counted the files there is no "0 of 0 files" (E1).
     expect(importStatusText(p({ total: 0, done: 0 }))).toBe('Scanning for files…');
@@ -200,7 +200,7 @@ describe('ImportProgressService and its widgets', () => {
     // The job's progress (debrief://jobs) drives the widgets: no import_progress polling while it runs.
     jobs.apply({ jobs: [importJob(5, { done: 1 }, { kind: 'export', title: 'Export' }), importJob(7)], paused: [] });
     status.detectChanges();
-    expect(text(status)).toContain('Importing 3 of 12 files · 23 MB of 76 MB · less than a minute left');
+    expect(text(status)).toContain('Importing 3 of 12 files · 24 MB of 80 MB · less than a minute left');
     expect(text(status)).toContain('app.log');
     const bar = status.nativeElement.querySelector('[role=progressbar]') as HTMLElement;
     expect(bar.getAttribute('aria-valuenow')).toBe('30');

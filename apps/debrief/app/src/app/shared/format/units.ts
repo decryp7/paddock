@@ -97,14 +97,14 @@ function roundSize(value: number): number {
   return value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
 }
 
-/** "12 bytes", "1 byte", "850 KB", "1.2 GB". 1023.9 KB rounds up to "1 MB", not "1,024 KB". */
+/** "12 bytes", "1 byte", "850 KB", "1.2 GB" (decimal steps). 999.9 KB rounds up to "1 MB", not "1,000 KB". */
 export function formatBytes(bytes: number | null | undefined): string {
   if (!usable(bytes)) return NONE;
-  if (bytes < 1024) return plainBytes(Math.round(bytes));
-  let value = bytes / 1024;
+  if (bytes < 1000) return plainBytes(Math.round(bytes));
+  let value = bytes / 1000;
   let i = 0;
-  while (i < BYTE_UNITS.length - 1 && roundSize(value) >= 1024) {
-    value /= 1024;
+  while (i < BYTE_UNITS.length - 1 && roundSize(value) >= 1000) {
+    value /= 1000;
     i++;
   }
   return `${nf(value < 10 ? 1 : 0).format(value)} ${BYTE_UNITS[i]}`;

@@ -1,4 +1,4 @@
-import { agoShort, bucketLabel, formatShortDateTime, mebibytes, formatBytes, formatDate, formatDateTime, formatDuration, formatInterval, lastSegment, relativeTime, shortHash, spanText } from './format';
+import { agoShort, bucketLabel, formatShortDateTime, megabytes, formatBytes, formatDate, formatDateTime, formatDuration, formatInterval, lastSegment, relativeTime, shortHash, spanText } from './format';
 
 const MIN = 60_000;
 const H = 60 * MIN;
@@ -35,9 +35,9 @@ describe('format', () => {
     expect(formatInterval(6 * 3600)).toBe('every 6 h');
     expect(formatBytes(null)).toBe('—');
     expect(formatBytes(512)).toBe('512 B');
-    expect(formatBytes(1536)).toBe('1.5 KiB');
-    expect(formatBytes(150 * 1024 * 1024)).toBe('150 MiB');
-    expect(formatBytes(5 * 1024 ** 4 * 2000)).toContain('TiB');
+    expect(formatBytes(1500)).toBe('1.5 KB');
+    expect(formatBytes(150 * 1000 * 1000)).toBe('150 MB');
+    expect(formatBytes(5 * 1000 ** 4 * 2000)).toContain('TB');
   });
 
   it('formats dates without depending on the time zone', () => {
@@ -63,8 +63,8 @@ describe('short formats', () => {
   it('writes unknown values as a dash', () => {
     expect(formatShortDateTime(null, NOW)).toBe('—');
     expect(formatShortDateTime(undefined, NOW)).toBe('—');
-    expect(mebibytes(null)).toBe('—');
-    expect(mebibytes(undefined)).toBe('—');
+    expect(megabytes(null)).toBe('—');
+    expect(megabytes(undefined)).toBe('—');
     expect(agoShort(null, NOW)).toBe('—');
     expect(agoShort(undefined, NOW)).toBe('—');
   });
@@ -78,11 +78,11 @@ describe('short formats', () => {
     expect(formatShortDateTime(old, NOW)).not.toMatch(/8:15|08:15/);
   });
 
-  it('scales mebibytes to keep three significant digits', () => {
-    expect(mebibytes(0)).toBe('0.00');
-    expect(mebibytes(1048576 * 25.5)).toBe('25.5');
-    expect(mebibytes(1048576 * 5.25)).toBe('5.25');
-    expect(mebibytes(1048576 * 250)).toBe('250');
+  it('scales megabytes to keep three significant digits', () => {
+    expect(megabytes(0)).toBe('0.00');
+    expect(megabytes(1000000 * 25.5)).toBe('25.5');
+    expect(megabytes(1000000 * 5.25)).toBe('5.25');
+    expect(megabytes(1000000 * 250)).toBe('250');
   });
 
   it('writes a compact ago', () => {

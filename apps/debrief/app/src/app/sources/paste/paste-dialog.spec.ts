@@ -30,7 +30,7 @@ describe('Paste as log dialog', () => {
     await settle(fixture);
     expect(el<HTMLInputElement>(fixture, '[data-testid=paste-name]').value).toBe('Pasted log');
     expect(area(fixture).value).toBe('héllo');
-    expect(el(fixture, '[data-testid=paste-count]').textContent).toContain('6 bytes of 8 MB');
+    expect(el(fixture, '[data-testid=paste-count]').textContent).toContain('6 bytes of 8.4 MB');
     expect(addButton(fixture).disabled).toBe(false);
   });
 

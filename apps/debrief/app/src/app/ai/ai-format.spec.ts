@@ -4,8 +4,8 @@ import { adviceLabel, fitAdvice, fitFacts, fitNumbers, fitLabel, formatBytes, fo
 
 describe('ai-format', () => {
   it('shares the common unit formatters', () => {
-    expect(formatBytes(812 * 1024 ** 2)).toBe('812 MB');
-    expect(formatRate(48 * 1024 ** 2)).toBe('48 MB/s');
+    expect(formatBytes(812 * 1000 ** 2)).toBe('812 MB');
+    expect(formatRate(48 * 1000 ** 2)).toBe('48 MB/s');
     expect(formatEta(130)).toBe('about 2 min left');
     expect(percent(5, 10)).toBe(50);
   });
@@ -65,7 +65,7 @@ describe('ai-format', () => {
   });
 
   it('says how the background set-up is going, for the assistant pane', () => {
-    const GB = 1024 ** 3;
+    const GB = 1000 ** 3;
     expect(assistantSetupLine(false, null, false)).toBeNull();
     expect(assistantSetupLine(true, { stage: 'downloading', bytes: 1.2 * GB, total: 5.6 * GB, bytesPerSec: 1, etaSecs: 1, connections: 4 }, false)).toBe('Setting up — 1.2 GB of 5.6 GB');
     expect(assistantSetupLine(true, { stage: 'verifying', bytes: 1, total: 2 }, false)).toContain('checking');

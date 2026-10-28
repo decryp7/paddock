@@ -14,7 +14,7 @@ import {
   StoreFolderState,
 } from './storage.types';
 
-const MB = 1024 * 1024;
+const MB = 1000 * 1000;
 
 /** Plausible categories shaped like the engine's. Browser development and UI tests only. */
 export function mockCategories(): StorageCategory[] {

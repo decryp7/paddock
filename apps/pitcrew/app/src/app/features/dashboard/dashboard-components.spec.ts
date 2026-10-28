@@ -195,11 +195,11 @@ describe('MachineTiles', () => {
     at: i,
     cpuPermille: 100 * i,
     cpuPeakPermille: 150 * i,
-    memUsedBytes: 8 * 1024 ** 3,
-    memTotalBytes: 16 * 1024 ** 3,
-    diskFreeBytes: 50 * 1024 ** 3,
-    diskTotalBytes: 500 * 1024 ** 3,
-    runners: { cpuPermille: 50 * i, cpuPeakPermille: 80 * i, memBytes: 2 * 1024 ** 3, memPeakBytes: 3 * 1024 ** 3, processes: 4 },
+    memUsedBytes: 8 * 1000 ** 3,
+    memTotalBytes: 16 * 1000 ** 3,
+    diskFreeBytes: 50 * 1000 ** 3,
+    diskTotalBytes: 500 * 1000 ** 3,
+    runners: { cpuPermille: 50 * i, cpuPeakPermille: 80 * i, memBytes: 2 * 1000 ** 3, memPeakBytes: 3 * 1000 ** 3, processes: 4 },
   });
   const service = (machine: MachineSample | null): ServiceInfo => ({
     version: '0.1.0',
@@ -209,7 +209,7 @@ describe('MachineTiles', () => {
     readOnly: false,
     machine,
     ownCpuPermille: 25,
-    ownMemBytes: 24 * 1024 ** 2,
+    ownMemBytes: 24 * 1000 ** 2,
   });
 
   beforeEach(() => TestBed.configureTestingModule({ providers: appProviders(makeMock()) }));
@@ -249,7 +249,7 @@ describe('MachineTiles', () => {
   });
 
   it('warns about low free disk', () => {
-    const low = { ...sample(1), diskFreeBytes: 10 * 1024 ** 3 };
+    const low = { ...sample(1), diskFreeBytes: 10 * 1000 ** 3 };
     const el = mount([low], service(null));
     const spark = el.querySelectorAll('pc-sparkline')[2] as HTMLElement;
     expect(spark.style.color).toContain('--warning');

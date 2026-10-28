@@ -69,8 +69,8 @@ describe('files model', () => {
     const rows = fileRows(result(), new Set());
     expect(rows.filter((r) => r.kind === 'group').map((r) => (r.kind === 'group' ? r.title : ''))).toEqual(['Large files', '3 copies of site.psd', '2 copies of m.onnx']);
     expect(rows.filter((r) => r.kind === 'file' && r.keep).map((r) => (r.kind === 'file' ? r.file.id : ''))).toEqual(['d1a', 'd2a']);
-    expect(rows.find((r) => r.kind === 'group')).toMatchObject({ detail: '2 files, 0.98 GB', open: true });
-    expect(rows.find((r) => r.kind === 'group' && r.key === 'g:dup0')).toMatchObject({ detail: '100 MB each, 200 MB wasted' });
+    expect(rows.find((r) => r.kind === 'group')).toMatchObject({ detail: '2 files, 1.05 GB', open: true });
+    expect(rows.find((r) => r.kind === 'group' && r.key === 'g:dup0')).toMatchObject({ detail: '105 MB each, 210 MB wasted' });
     const collapsed = fileRows(result(), new Set(['g:large', 'g:dup1']));
     expect(collapsed.filter((r) => r.kind === 'file')).toHaveLength(3);
     expect(collapsed.filter((r) => r.kind === 'group' && !r.open)).toHaveLength(2);

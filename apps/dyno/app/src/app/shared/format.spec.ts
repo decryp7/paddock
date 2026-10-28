@@ -23,35 +23,37 @@ const DAY = 24 * HOUR;
 const NOW = 1_700_000_000_000;
 
 describe('formatBytes', () => {
-  it('uses binary multiples', () => {
+  it('uses decimal multiples (1 KB = 1000 bytes)', () => {
     expect(formatBytes(0)).toBe('0 B');
     expect(formatBytes(512)).toBe('512 B');
-    expect(formatBytes(1536)).toBe('1.5 KB');
-    expect(formatBytes(1024 ** 2)).toBe('1 MB');
-    expect(formatBytes(12.34 * 1024 ** 2)).toBe('12.3 MB');
-    expect(formatBytes(123.4 * 1024 ** 3)).toBe('123 GB');
+    expect(formatBytes(1500)).toBe('1.5 KB');
+    expect(formatBytes(1000 ** 2)).toBe('1 MB');
+    expect(formatBytes(12.34 * 1000 ** 2)).toBe('12.3 MB');
+    expect(formatBytes(123.4 * 1000 ** 3)).toBe('123 GB');
   });
   it('promotes values that would print as 1000 of a unit', () => {
-    expect(formatBytes(1000 * 1024)).toBe('0.98 MB');
-    expect(formatBytes(1000)).toBe('0.98 KB');
+    expect(formatBytes(1000 * 1000)).toBe('1 MB');
+    expect(formatBytes(1_048_576)).toBe('1.05 MB');
+    expect(formatBytes(999_600)).toBe('1 MB');
+    expect(formatBytes(1000)).toBe('1 KB');
   });
   it('caps at PB and handles negatives', () => {
-    expect(formatBytes(2 * 1024 ** 6)).toBe('2048 PB');
-    expect(formatBytes(-2048)).toBe('−2 KB');
+    expect(formatBytes(2 * 1000 ** 6)).toBe('2000 PB');
+    expect(formatBytes(-2000)).toBe('−2 KB');
   });
   it('shows a dash for missing or non-finite values', () => {
     for (const v of [null, undefined, NaN, Infinity]) expect(formatBytes(v)).toBe('—');
   });
   it('formats deltas with an explicit sign', () => {
-    expect(formatBytesDelta(1024)).toBe('+1 KB');
-    expect(formatBytesDelta(-1024)).toBe('−1 KB');
+    expect(formatBytesDelta(1000)).toBe('+1 KB');
+    expect(formatBytesDelta(-1000)).toBe('−1 KB');
     expect(formatBytesDelta(0)).toBe('0 B');
   });
 });
 
 describe('formatRate', () => {
   it('appends /s and clamps negatives', () => {
-    expect(formatRate(2.4 * 1024 ** 2)).toBe('2.4 MB/s');
+    expect(formatRate(2.4 * 1000 ** 2)).toBe('2.4 MB/s');
     expect(formatRate(-5)).toBe('0 B/s');
     expect(formatRate(null)).toBe('—');
     expect(formatRate(NaN)).toBe('—');

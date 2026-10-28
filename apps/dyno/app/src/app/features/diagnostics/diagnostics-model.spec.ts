@@ -17,7 +17,7 @@ describe('diagnostics model', () => {
   });
   it('formats sizes in KB', () => {
     expect(sizeInKb(520)).toBe('0.5');
-    expect(sizeInKb(412_000)).toBe('402');
-    expect(sizeInKb(1_500_000)).toBe('1,465');
+    expect(sizeInKb(412_000)).toBe('412');
+    expect(sizeInKb(1_500_000)).toBe('1,500');
   });
 });

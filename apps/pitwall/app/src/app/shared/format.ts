@@ -1,16 +1,16 @@
 /** Formatting of what the server returns. Pure and locale-stable (en), so screenshots and tests are deterministic. */
 
-const KIB = 1024;
+const KB = 1000;
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
 
-/** Bytes as `12.4 GB` (binary multiples, the way Task Manager and Activity Monitor count memory). */
+/** Bytes as `12.4 GB` (decimal multiples, 1 KB = 1000 bytes). */
 export function bytes(n: number | null | undefined, digits = 1): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return '—';
-  if (n < KIB) return `${Math.max(0, Math.round(n))} B`;
+  if (n < KB) return `${Math.max(0, Math.round(n))} B`;
   let v = n;
   let u = 0;
-  while (v >= KIB && u < UNITS.length - 1) {
-    v /= KIB;
+  while (v >= KB && u < UNITS.length - 1) {
+    v /= KB;
     u++;
   }
   return `${v.toFixed(v >= 100 ? 0 : digits)} ${UNITS[u]}`;
@@ -19,7 +19,7 @@ export function bytes(n: number | null | undefined, digits = 1): string {
 /** Just the number of {@link bytes} in GB, for big tile figures (`12.4`). */
 export function gb(n: number | null | undefined, digits = 1): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return '—';
-  return (n / KIB ** 3).toFixed(digits);
+  return (n / KB ** 3).toFixed(digits);
 }
 
 /** Whole percentage of `part / total` (0 when total is 0). */

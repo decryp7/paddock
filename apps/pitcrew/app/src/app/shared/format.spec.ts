@@ -17,13 +17,13 @@ import {
 } from './format';
 
 describe('formatBytes', () => {
-  it('uses binary units and drops decimals for big values', () => {
+  it('uses decimal units (1 KB = 1000 bytes) and drops decimals for big values', () => {
     expect(formatBytes(0)).toBe('0 B');
     expect(formatBytes(512)).toBe('512 B');
     expect(formatBytes(1536)).toBe('1.5 KB');
-    expect(formatBytes(10 * 1024 * 1024)).toBe('10.0 MB');
-    expect(formatBytes(150 * 1024 ** 3)).toBe('150 GB');
-    expect(formatBytes(3 * 1024 ** 5)).toBe('3072 TB');
+    expect(formatBytes(10 * 1000 * 1000)).toBe('10.0 MB');
+    expect(formatBytes(150 * 1000 ** 3)).toBe('150 GB');
+    expect(formatBytes(3 * 1000 ** 5)).toBe('3000 TB');
     expect(formatBytes(1536, 0)).toBe('2 KB');
   });
   it('handles negatives and missing values', () => {

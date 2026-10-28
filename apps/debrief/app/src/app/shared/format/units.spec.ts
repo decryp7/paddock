@@ -27,25 +27,28 @@ describe('formatBytes', () => {
     expect(formatBytes(0)).toBe('0 bytes');
     expect(formatBytes(1)).toBe('1 byte');
     expect(formatBytes(12)).toBe('12 bytes');
-    expect(formatBytes(1023)).toBe('1,023 bytes');
+    expect(formatBytes(999)).toBe('999 bytes');
     expect(formatBytes(0.4)).toBe('0 bytes');
   });
 
-  it('scales in binary steps with short labels', () => {
-    expect(formatBytes(1024)).toBe('1 KB');
-    expect(formatBytes(850 * 1024)).toBe('850 KB');
-    expect(formatBytes(1.5 * 1024)).toBe('1.5 KB');
-    expect(formatBytes(1.2 * 1024 ** 3)).toBe('1.2 GB');
-    expect(formatBytes(5 * 1024 ** 4)).toBe('5 TB');
-    expect(formatBytes(3 * 1024 ** 5)).toBe('3 PB');
-    expect(formatBytes(5000 * 1024 ** 5)).toBe('5,000 PB');
+  it('scales in decimal steps (1 KB = 1000 bytes) with short labels', () => {
+    expect(formatBytes(1000)).toBe('1 KB');
+    expect(formatBytes(850 * 1000)).toBe('850 KB');
+    expect(formatBytes(1500)).toBe('1.5 KB');
+    expect(formatBytes(1_000_000)).toBe('1 MB');
+    expect(formatBytes(1_048_576)).toBe('1 MB');
+    expect(formatBytes(1_572_864)).toBe('1.6 MB');
+    expect(formatBytes(1.2 * 1000 ** 3)).toBe('1.2 GB');
+    expect(formatBytes(5 * 1000 ** 4)).toBe('5 TB');
+    expect(formatBytes(3 * 1000 ** 5)).toBe('3 PB');
+    expect(formatBytes(5000 * 1000 ** 5)).toBe('5,000 PB');
   });
 
   it('rolls over at rounding boundaries', () => {
-    expect(formatBytes(1023.9 * 1024)).toBe('1 MB');
-    expect(formatBytes(1023.4 * 1024)).toBe('1,023 KB');
-    expect(formatBytes(1023.96 * 1024 ** 2)).toBe('1 GB');
-    expect(formatBytes(9.96 * 1024)).toBe('10 KB');
+    expect(formatBytes(999.9 * 1000)).toBe('1 MB');
+    expect(formatBytes(999.4 * 1000)).toBe('999 KB');
+    expect(formatBytes(999.96 * 1000 ** 2)).toBe('1 GB');
+    expect(formatBytes(9.96 * 1000)).toBe('10 KB');
   });
 
   it('shows a dash for anything that is not a size', () => {
@@ -55,7 +58,7 @@ describe('formatBytes', () => {
 
   it('follows the locale', () => {
     setActiveLocale('de-DE');
-    expect(formatBytes(1.5 * 1024)).toBe('1,5 KB');
+    expect(formatBytes(1500)).toBe('1,5 KB');
     expect(formatExactBytes(1234567)).toBe('1.234.567 bytes');
   });
 
@@ -77,8 +80,8 @@ describe('connections', () => {
 
 describe('rates and eta', () => {
   it('formats speed', () => {
-    expect(formatRate(12.4 * 1024 ** 2)).toBe('12 MB/s');
-    expect(formatRate(5.5 * 1024 ** 2)).toBe('5.5 MB/s');
+    expect(formatRate(12.4 * 1000 ** 2)).toBe('12 MB/s');
+    expect(formatRate(5.5 * 1000 ** 2)).toBe('5.5 MB/s');
     expect(formatRate(0)).toBe('');
     expect(formatRate(-1)).toBe('');
     expect(formatRate(Number.NaN)).toBe('');
@@ -180,7 +183,7 @@ describe('formatRelativeTime', () => {
 });
 
 describe('TransferMeter', () => {
-  const MB = 1024 * 1024;
+  const MB = 1000 * 1000;
 
   it('offers nothing before 2 s of samples', () => {
     const m = new TransferMeter();
@@ -238,7 +241,9 @@ describe('the table shared with Rust (debrief-plugin-api units)', () => {
   };
 
   it('formats every case exactly as the Rust side does', () => {
-    each('bytes', (v: number) => formatBytes(v));
+    // `bytes` is left out until the Rust side (debrief-plugin-api `units`) moves to decimal steps too (family decision
+    // 2026-10-28); units-cases.json still holds the binary cases. The TS decimal cases are in the formatBytes tests above.
+    // each('bytes', (v: number) => formatBytes(v));
     each('durationMs', (v: number) => formatDuration(v));
     each('count', (v: number) => formatCount(v));
     each('percent', (v: [number, number]) => formatPercent(v[0], v[1]));

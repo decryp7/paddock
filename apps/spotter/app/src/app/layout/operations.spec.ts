@@ -31,7 +31,7 @@ describe('Operations panel', () => {
     const row = el.querySelector('.op') as HTMLElement;
     expect(row.textContent).toContain('Downloading Lumen CLI 2.4.1');
     expect(row.querySelector('.phase')?.textContent).toContain('Downloading');
-    expect(row.querySelector('.numbers')?.textContent).toMatch(/MiB of 176 MiB/);
+    expect(row.querySelector('.numbers')?.textContent).toMatch(/MB of 185 MB/);
     const bar = row.querySelector('progress') as HTMLProgressElement;
     expect(bar.max).toBe(1);
     expect(bar.value).toBeGreaterThan(0);

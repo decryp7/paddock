@@ -2,13 +2,13 @@
 
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
 
-/** `38.4 GB` (binary units, the way Windows Explorer and Finder's "GB" read for folder sizes). */
+/** `38.4 GB` (decimal units, 1 KB = 1000 bytes, as the Finder shows them). */
 export function formatBytes(bytes: number | null | undefined, digits = 1): string {
   if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return '—';
   let v = Math.abs(bytes);
   let u = 0;
-  while (v >= 1024 && u < UNITS.length - 1) {
-    v /= 1024;
+  while (v >= 1000 && u < UNITS.length - 1) {
+    v /= 1000;
     u++;
   }
   const shown = u === 0 ? String(Math.round(v)) : v >= 100 ? v.toFixed(0) : v.toFixed(digits);

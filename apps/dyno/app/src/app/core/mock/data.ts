@@ -16,8 +16,8 @@ import type {
 } from '../api.types';
 import { prng } from './noise';
 
-const GB = 1024 ** 3;
-const MB = 1024 ** 2;
+const GB = 1000 ** 3;
+const MB = 1000 ** 2;
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;

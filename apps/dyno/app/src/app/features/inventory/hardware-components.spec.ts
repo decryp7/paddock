@@ -4,7 +4,7 @@ import { DeviceArt } from './device-art';
 import type { DimmSlotModel, SocPackageModel } from './hardware-models';
 import { MemorySlots } from './memory-slots';
 
-const GB = 1024 ** 3;
+const GB = 1000 ** 3;
 const mod = (tech: 'ddr4' | 'ddr5', form: 'dimm' | 'soDimm' = 'dimm') => ({ tech, form, sizeLabel: '16 GB', capacityBytes: 16 * GB, ratedMts: 3200, runningMts: 2666, maker: 'Corsair', part: 'CMK16' });
 
 function slots(list: DimmSlotModel[], alt = 'Two slots') {

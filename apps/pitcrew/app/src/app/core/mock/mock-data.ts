@@ -29,8 +29,8 @@ import { DEFAULT_PROCESS_POLICY } from './mock-processes';
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
 export const DAY = 24 * HOUR;
-export const GB = 1024 ** 3;
-export const MB = 1024 ** 2;
+export const GB = 1000 ** 3;
+export const MB = 1000 ** 2;
 
 /** A small deterministic PRNG (mulberry32), so the demo looks the same on every load. */
 export function rng(seed: number): () => number {

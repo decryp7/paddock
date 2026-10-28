@@ -5,7 +5,7 @@ import { runtimeProgressText } from '../../ai/runtimes/runtime-view';
 import { progressText } from '../../updates/updates-dialog';
 import { transferSpeed } from './transfer-speed';
 
-const MB = 1024 * 1024;
+const MB = 1000 * 1000;
 
 describe('transferSpeed', () => {
   it('hides speed until 2 s of samples, then smooths, and resets when the transfer ends', () => {

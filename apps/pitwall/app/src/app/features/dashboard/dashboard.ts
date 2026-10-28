@@ -379,7 +379,7 @@ export class Dashboard implements OnInit {
     if (!ms.length) return '';
     const vram = ms.reduce((s, m) => s + m.vramBytes, 0);
     const ram = ms.reduce((s, m) => s + m.ramBytes, 0);
-    return `${ms.length} hot · ${(vram / 1024 ** 3).toFixed(1)} GB VRAM · ${(ram / 1024 ** 3).toFixed(1)} GB RAM`;
+    return `${ms.length} hot · ${(vram / 1000 ** 3).toFixed(1)} GB VRAM · ${(ram / 1000 ** 3).toFixed(1)} GB RAM`;
   });
   protected readonly queueSummary = computed(() => {
     const q = this.live.queue();

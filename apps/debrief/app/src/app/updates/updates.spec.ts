@@ -41,7 +41,7 @@ describe('updates types', () => {
   });
 
   it('formats progress and dates', () => {
-    expect(progressText(1_500_000, 48_000_000)).toBe('1.4 MB of 46 MB');
+    expect(progressText(1_500_000, 48_000_000)).toBe('1.5 MB of 48 MB');
     expect(progressText(500, null)).toBe('500 bytes');
     expect(releaseDate(null)).toBe('');
     expect(releaseDate('nonsense')).toBe('');
@@ -201,7 +201,7 @@ describe('UpdatesDialog', () => {
     // Notes are text: markup in them is shown, not rendered.
     expect(notes.textContent).toContain('<b>Faster</b>');
     expect(notes.querySelector('b')).toBeNull();
-    expect(el.textContent).toContain('46 MB');
+    expect(el.textContent).toContain('48 MB');
     expect(el.querySelector('[data-testid=updates-auto]')?.textContent).toContain('dev.decryptology.net');
     button('Download')!.click();
     await until(() => store.phase()?.kind === 'downloading');

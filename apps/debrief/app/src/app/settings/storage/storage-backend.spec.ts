@@ -67,10 +67,10 @@ describe('MockStorageBackend', () => {
     expect(r.categories.map((c) => c.id)).toEqual(['webview-cache', 'logs', 'stores']);
     expect(r.categories[0]?.skipped[0]?.reason).toContain('in use');
     expect(r.categories[1]?.skipped[0]?.reason).toBe('Debrief is writing to it');
-    expect(r.freedBytes).toBe((45 + 5) * 1024 * 1024);
+    expect(r.freedBytes).toBe((45 + 5) * 1000 * 1000);
     const after = await b.usage();
     expect(after.categories.find((c) => c.id === 'logs')?.clearableBytes).toBe(0);
-    expect(after.categories.find((c) => c.id === 'logs')?.bytes).toBe(1024 * 1024);
+    expect(after.categories.find((c) => c.id === 'logs')?.bytes).toBe(1000 * 1000);
     await expect(b.clear(['nope' as never])).rejects.toContain('unknown storage category');
   });
 

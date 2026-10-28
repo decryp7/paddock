@@ -51,7 +51,7 @@ describe('ModelsStore packs', () => {
     expect(d.bytesTotal).toBeGreaterThan(gemma.sizeBytes);
     const qwen = store.packs()!.recommendations.find((r) => r.id === 'qwen3.5-2b')!;
     await store.downloadRecommendation(qwen);
-    expect((await backend.downloads())[0]!.bytesTotal).toBeLessThan(qwen.sizeBytes + 500 * 1024 ** 2);
+    expect((await backend.downloads())[0]!.bytesTotal).toBeLessThan(qwen.sizeBytes + 500 * 1000 ** 2);
 
     expect(toasts.toasts().map((t) => t.tone)).toEqual(['ok', 'ok']);
     TestBed.resetTestingModule();

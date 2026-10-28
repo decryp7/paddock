@@ -247,7 +247,7 @@ describe('KnowledgeEditor', () => {
     type(f, '[data-testid=knowledge-name]', 'Glossary');
     type(f, '[data-testid=knowledge-text]', '# Names\n\n**ACME-GW** <img src=x onerror=alert(1)>');
     await settle(f);
-    expect(el(f, '[data-testid=knowledge-size]').textContent).toContain('of 64 KB');
+    expect(el(f, '[data-testid=knowledge-size]').textContent).toContain('of 66 KB');
     el<HTMLButtonElement>(f, '[data-testid=knowledge-preview-tab]').click();
     await settle(f);
     const preview = el(f, '[data-testid=knowledge-preview]');

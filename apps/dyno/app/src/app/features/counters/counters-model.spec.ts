@@ -21,14 +21,14 @@ describe('counter paths', () => {
 describe('values', () => {
   it('formats each unit with the unit kept apart', () => {
     expect(formatCounter(34.2, 'percent')).toEqual(['34', '%']);
-    expect(formatCounter(2048, 'bytes')).toEqual(['2', 'KB']);
-    expect(formatCounter(1572864, 'bytesPerSec')).toEqual(['1.5', 'MB/s']);
+    expect(formatCounter(2000, 'bytes')).toEqual(['2', 'KB']);
+    expect(formatCounter(1572864, 'bytesPerSec')).toEqual(['1.57', 'MB/s']);
     expect(formatCounter(412.4, 'perSec')).toEqual(['412', '/s']);
     expect(formatCounter(0.456, 'milliseconds')).toEqual(['0.46', 'ms']);
     expect(formatCounter(12.34, 'seconds')).toEqual(['12.3', 's']);
     expect(formatCounter(24000, 'number')).toEqual(['24,000', '']);
     expect(formatCounter(3, 'count')).toEqual(['3', '']);
-    expect(counterText(1572864, 'bytesPerSec')).toBe('1.5 MB/s');
+    expect(counterText(1572864, 'bytesPerSec')).toBe('1.57 MB/s');
     expect(counterText(3, 'count')).toBe('3');
   });
 
@@ -88,7 +88,7 @@ describe('the chart', () => {
   it('formats the tooltip with the unit and the clock', () => {
     const c = counterChartOption(history(['bytes']), LIGHT);
     const tooltip = (c.option as { tooltip: { formatter: (p: unknown) => string } }).tooltip;
-    const html = tooltip.formatter([{ axisValue: 1000, marker: '*', seriesName: 'c0', seriesType: 'line', value: [1000, 2048], data: { unit: 'bytes' } }]);
+    const html = tooltip.formatter([{ axisValue: 1000, marker: '*', seriesName: 'c0', seriesType: 'line', value: [1000, 2000], data: { unit: 'bytes' } }]);
     expect(html).toContain('2 KB');
     expect(tooltip.formatter([])).toBe('');
   });

@@ -15,7 +15,7 @@ import {
 import { generateDemo } from './mock-data';
 import { MOCK_PROFILE_TOML } from './mock-profile';
 
-const GB = 1024 ** 3;
+const GB = 1000 ** 3;
 
 export const MOCK_HARDWARE: Hardware = {
   os: 'windows',
@@ -26,7 +26,7 @@ export const MOCK_HARDWARE: Hardware = {
   gpus: [{ name: 'NVIDIA GeForce RTX 4060 Laptop GPU', vramGb: 8, unified: false }],
 };
 
-const MB = 1024 ** 2;
+const MB = 1000 ** 2;
 
 function model(id: string, name: string, paramsB: number, sizeGb: number, license: string, toolCalling: boolean, notes: string, projectorMb: number | null = null): CatalogModel {
   const file = `${name.replace(/ /g, '-')}-Q4_K_M.gguf`;

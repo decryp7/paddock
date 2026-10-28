@@ -18,8 +18,8 @@ const OUTCOME_WORDS: Readonly<Record<Outcome, string>> = {
 };
 
 function size(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes < 1000) return `${bytes} B`;
+  return bytes < 1e6 ? `${(bytes / 1e3).toFixed(1)} KB` : `${(bytes / 1e6).toFixed(1)} MB`;
 }
 
 /**

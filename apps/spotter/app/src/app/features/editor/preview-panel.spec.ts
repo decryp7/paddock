@@ -54,7 +54,7 @@ describe('PreviewPanel', () => {
     expect(t).toContain('1.2.0');
     expect(f.nativeElement.querySelectorAll('.pre')).toHaveLength(1);
     expect(t).toContain('pre-release');
-    expect(t).toContain('2.0 KiB');
+    expect(t).toContain('2.0 KB');
     expect(t).toContain('1 name held no version');
     expect(t).toContain('README.txt');
     expect(f.nativeElement.querySelectorAll('tbody tr')).toHaveLength(2);

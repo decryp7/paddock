@@ -760,7 +760,7 @@ describe('mock extras and backup health', () => {
 
   it('findFiles: modes, the size floor and a folder that must be absolute', async () => {
     const b = fresh();
-    const both = await b.findFiles({ folder: '/Users/sam/Projects/', mode: 'both', minBytes: 50 * 1024 ** 2 });
+    const both = await b.findFiles({ folder: '/Users/sam/Projects/', mode: 'both', minBytes: 50 * 1000 ** 2 });
     expect(both.folder).toBe('/Users/sam/Projects');
     expect(both.large).toHaveLength(8);
     expect(both.duplicates).toHaveLength(3);
@@ -768,8 +768,8 @@ describe('mock extras and backup health', () => {
     expect(both.duplicates[0]!.files[0]!.modified).toBeLessThan(both.duplicates[0]!.files[1]!.modified);
     expect((await b.findFiles({ folder: '/x', mode: 'large', minBytes: 0 })).duplicates).toEqual([]);
     expect((await b.findFiles({ folder: '/x', mode: 'duplicates', minBytes: 0 })).large).toEqual([]);
-    const big = await b.findFiles({ folder: '/x', mode: 'both', minBytes: 1024 ** 3 });
-    expect(big.large.every((f) => f.bytes >= 1024 ** 3)).toBe(true);
+    const big = await b.findFiles({ folder: '/x', mode: 'both', minBytes: 1000 ** 3 });
+    expect(big.large.every((f) => f.bytes >= 1000 ** 3)).toBe(true);
     await expect(b.findFiles({ folder: 'relative/path', mode: 'both', minBytes: 0 })).rejects.toMatchObject({ code: 'badRequest' });
   });
 
@@ -781,7 +781,7 @@ describe('mock extras and backup health', () => {
     await expect(b.removeFoundFiles('scan-1', ['d2a', 'd2b'], 'quarantine')).rejects.toMatchObject({ message: expect.stringContaining('at least one copy') });
     const out = await b.removeFoundFiles('scan-1', ['d2b', 'l1'], 'quarantine');
     expect(out).toMatchObject({ deleted: 2, failed: [], quarantineId: 'q-find-1' });
-    expect(out.freedBytes).toBeGreaterThan(6 * 1024 ** 3);
+    expect(out.freedBytes).toBeGreaterThan(6 * 1000 ** 3);
     expect((await b.removeFoundFiles('scan-1', ['l2'], 'recycleBin')).quarantineId).toBeNull();
     const after = await b.findFiles({ folder: '/x', mode: 'both', minBytes: 0 });
     expect(after.large.map((f) => f.id)).not.toContain('l1');

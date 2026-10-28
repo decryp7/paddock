@@ -8,7 +8,7 @@ const sample = (): SystemSample => new MockBackend({ latencyMs: 0, now: () => 1_
 describe('performance counter widgets', () => {
   it('reads a counter reading with its unit, a percentage scale only for percent counters', () => {
     const r = readCounter({ path: '\\A\\b', unit: 'bytesPerSec', value: { available: 1572864 } });
-    expect(r).toEqual({ value: 1572864, text: ['1.5', 'MB/s'], percent: null, reason: null });
+    expect(r).toEqual({ value: 1572864, text: ['1.57', 'MB/s'], percent: null, reason: null });
     expect(readCounter({ path: 'p', unit: 'percent', value: { available: 130 } }).percent).toBe(100);
     expect(readCounter({ path: 'p', unit: 'percent', value: { available: 42 } }).text).toEqual(['42', '%']);
   });

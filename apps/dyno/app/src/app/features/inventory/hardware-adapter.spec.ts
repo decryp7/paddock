@@ -25,10 +25,10 @@ describe('hardware adapter', () => {
   it('maps unknown kinds and describes the package', () => {
     expect(memoryTech('other')).toBe('unknown');
     expect(memoryTech('ddr5')).toBe('ddr5');
-    const apple = toSocPackage({ name: 'Apple M4 Pro', physicalCores: 14, logicalCores: 14, frequencyMhz: 4500 }, { total: 48 * 1024 ** 3, kind: 'lpddr5' });
+    const apple = toSocPackage({ name: 'Apple M4 Pro', physicalCores: 14, logicalCores: 14, frequencyMhz: 4500 }, { total: 48 * 1000 ** 3, kind: 'lpddr5' });
     expect(apple.style).toBe('apple');
     expect(apple.alt).toBe('Unified memory, 48 GB LPDDR5, part of the Apple M4 Pro chip package');
-    const pc = toSocPackage({ name: 'Intel Core Ultra 7', physicalCores: 16, logicalCores: 22, frequencyMhz: 3800 }, { total: 32 * 1024 ** 3, kind: 'lpddr5' });
+    const pc = toSocPackage({ name: 'Intel Core Ultra 7', physicalCores: 16, logicalCores: 22, frequencyMhz: 3800 }, { total: 32 * 1000 ** 3, kind: 'lpddr5' });
     expect(pc.style).toBe('soldered');
     expect(pc.title).toBe('Memory soldered to the mainboard');
   });

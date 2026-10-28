@@ -75,7 +75,7 @@ describe('models helpers', () => {
   });
 
   it('describes a fit and a time left', () => {
-    const fit: Fit = { verdict: 'tight', needRam: 2 * 1024 ** 3, needVram: 3 * 1024 ** 3, haveRam: 0, haveVram: 0, offload: 'partial', message: '' };
+    const fit: Fit = { verdict: 'tight', needRam: 2 * 1000 ** 3, needVram: 3 * 1000 ** 3, haveRam: 0, haveVram: 0, offload: 'partial', message: '' };
     expect(fitDetail(fit)).toBe('3.0 GB VRAM + 2.0 GB RAM · part of the layers on the GPU');
     expect(fitDetail({ ...fit, needRam: 0, needVram: 0, offload: 'none' })).toBe('Nothing · CPU only');
     expect(fitDetail({ ...fit, needRam: 0, offload: 'all' })).toContain('all layers on the GPU');

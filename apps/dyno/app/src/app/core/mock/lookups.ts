@@ -17,7 +17,7 @@ import type {
 // The mock side of right-click search, hash search, the startup filter and watched folders. It mimics the engine's contract
 // with plausible data; the engine (`dyno_core::weblinks`, `startup`, `watch`) is the reference for behaviour.
 
-const MB = 1024 * 1024;
+const MB = 1000 * 1000;
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
 

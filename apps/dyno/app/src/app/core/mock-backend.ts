@@ -126,8 +126,8 @@ import { type MockOs, type OsProfile, coreKindsOf, osProfile } from './mock/os';
 import { clamp, wobble } from './mock/noise';
 import { type MockProcess, buildProcesses, groupSamples, round, sampleProcess } from './mock/processes';
 
-const GB = 1024 ** 3;
-const MB = 1024 ** 2;
+const GB = 1000 ** 3;
+const MB = 1000 ** 2;
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
 

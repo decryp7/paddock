@@ -7,7 +7,7 @@ import type { KeepFor, ProcessEntry, ProcessList, ProcessPolicy, RunnerSnapshot,
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
-const MB = 1024 ** 2;
+const MB = 1000 ** 2;
 
 export const DEFAULT_PROCESS_POLICY: ProcessPolicy = {
   cleanup: true,

@@ -37,7 +37,7 @@ describe('WhatsNew', () => {
     const t = text(f.nativeElement);
     expect(t).toContain('4.0.0-rc.1');
     expect(t).toContain('pre-release');
-    expect(t).not.toMatch(/MiB|KiB/);
+    expect(t).not.toMatch(/MB|KB/);
     const row = rows(f)[0]!;
     expect(row.classList.contains('seen')).toBe(true);
     expect(row.querySelector('.unseen-dot')!.classList.contains('off')).toBe(true);
@@ -52,12 +52,12 @@ describe('WhatsNew', () => {
 
   it('groups by day with the product, size and file count in the meta line', async () => {
     const { f } = await make([
-      item({ unseen: true }, { prerelease: false, product: 'Server', size: 5 * 1048576, artifacts: [{ name: 'a' }, { name: 'b' }] as never }),
+      item({ unseen: true }, { prerelease: false, product: 'Server', size: 5 * 1000000, artifacts: [{ name: 'a' }, { name: 'b' }] as never }),
       item({ releasedAtMs: NOW - 26 * 3_600_000 }, { prerelease: false, name: 'Plain name' }),
     ]);
     expect(Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('h3')).map((h) => text(h)).slice(0, 2)).toEqual(['Today', 'Yesterday']);
     const [a, b] = rows(f);
-    expect(text(a!.querySelector('.meta'))).toBe('Server · 5.0 MiB · 2 files');
+    expect(text(a!.querySelector('.meta'))).toBe('Server · 5.0 MB · 2 files');
     expect(a!.querySelector('.unseen-dot')!.classList.contains('off')).toBe(false);
     expect(a!.querySelector('.pre')).toBeNull();
     expect(text(b!.querySelector('.meta'))).toBe('Plain name');

@@ -114,8 +114,8 @@ describe('the wire', () => {
     expect(toUpdateError(undefined)).toMatchObject({ kind: 'unreachable', message: 'The updater did not answer.' });
     expect(formatBytes(12)).toBe('12 bytes');
     expect(formatBytes(1_500)).toBe('1.5 KB');
-    expect(formatBytes(41_000_000)).toBe('39 MB');
-    expect(formatBytes(2_000_000_000)).toBe('1.9 GB');
+    expect(formatBytes(41_000_000)).toBe('41 MB');
+    expect(formatBytes(2_000_000_000)).toBe('2 GB');
   });
 
   it('the Tauri backends call the generated commands and parse at the edge', async () => {
@@ -423,7 +423,7 @@ describe('the dialogs', () => {
     button(el, 'Check now').click();
     await settle();
     await fixture.whenStable();
-    expect(text(el)).toContain('Version 1.5.0 is available (39 MB).');
+    expect(text(el)).toContain('Version 1.5.0 is available (41 MB).');
     expect(text(el)).toContain('Faster.');
     // Hold the download in its job to see the progress.
     const hold: (() => void)[] = [];
@@ -435,7 +435,7 @@ describe('the dialogs', () => {
     jobs.emit({ id: id ?? -1, kind: 'update-download', title: 'Downloading the update', subject: '1.5.0', seq: 1, elapsedMs: 0, etaMs: null, cancellable: true, notCancellableReason: null, state: 'running', phase: { id: 'download', label: 'Downloading', unit: 'bytes', total: 41_000_000, done: 20_500_000 } });
     await settle();
     await fixture.whenStable();
-    expect(text(el)).toContain('Downloading: 20 MB of 39 MB');
+    expect(text(el)).toContain('Downloading: 21 MB of 41 MB');
     expect(el.querySelector('progress')?.getAttribute('value')).toBe('0.5');
     hold.forEach((s) => s());
     await settle();

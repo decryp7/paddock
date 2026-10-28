@@ -5,8 +5,8 @@ import { round } from './processes';
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
-const GB = 1024 ** 3;
-const MB = 1024 ** 2;
+const GB = 1000 ** 3;
+const MB = 1000 ** 2;
 
 export const RANGES: Record<HistoryRange, { span: number; step: number }> = {
   hour: { span: HOUR, step: 30_000 },

@@ -115,7 +115,7 @@ describe('JobsPanel', () => {
   afterEach(() => TestBed.resetTestingModule());
 
   it('shows byte progress as sizes with a smoothed speed and time left, never raw numbers', async () => {
-    const MB = 1024 * 1024;
+    const MB = 1000 * 1000;
     let now = 1_000_000;
     vi.spyOn(Date, 'now').mockImplementation(() => now);
     const running = (done: number): JobsSnapshot => ({

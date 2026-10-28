@@ -587,7 +587,7 @@ export class MockAiBackend extends AiBackend {
       if (!m) throw new AiError('notFound', `${fileName} is not installed`);
       if (!/\.gguf$/i.test(path)) throw new AiError('invalid', 'projector files end in .gguf');
       if (!/mmproj/i.test(path)) throw new AiError('modelFile', 'this file is a model, not an image projector (mmproj): choose the mmproj file of the same model');
-      return structuredClone(this.withProjector(fileName, m.projectorDownloadBytes ?? 640 * 1024 * 1024));
+      return structuredClone(this.withProjector(fileName, m.projectorDownloadBytes ?? 640 * 1000 * 1000));
     });
   }
 

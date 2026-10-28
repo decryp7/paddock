@@ -4,8 +4,8 @@
  * go through `$localize` with `@@pd.format.` ids. Unknown, negative or non-finite input shows as "—" (`NONE`), except
  * where the value is optional decoration (a rate or an ETA), which returns '' so callers can drop the whole fragment.
  *
- * Byte sizes use binary steps (1024) with the short labels KB / MB / GB / TB, as Windows Explorer does, so a file
- * shown in an app matches what the file manager shows. Keep exact values in a tooltip (`formatExactBytes`). Domain
+ * Byte sizes use decimal steps (1 KB = 1000 bytes) with the short labels KB / MB / GB / TB, as the macOS Finder does
+ * (family decision 2026-10-28; Windows tools show binary steps under the same labels). Keep exact values in a tooltip (`formatExactBytes`). Domain
  * wording (token counts, GHz) stays in the apps.
  */
 import { activeLocale, groupedNumber, PSEUDO_LOCALE, plural, SOURCE_LOCALE } from '@decryp7/paddock-ui/shell/i18n';
@@ -105,14 +105,14 @@ function roundSize(value: number): number {
   return value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
 }
 
-/** "12 bytes", "1 byte", "850 KB", "1.2 GB". 1023.9 KB rounds up to "1 MB", not "1,024 KB". */
+/** "12 bytes", "1 byte", "850 KB", "1.2 GB" (decimal steps). 999.9 KB rounds up to "1 MB", not "1,000 KB". */
 export function formatBytes(bytes: number | null | undefined): string {
   if (!usable(bytes)) return NONE;
-  if (bytes < 1024) return plainBytes(Math.round(bytes));
-  let value = bytes / 1024;
+  if (bytes < 1000) return plainBytes(Math.round(bytes));
+  let value = bytes / 1000;
   let i = 0;
-  while (i < BYTE_UNITS.length - 1 && roundSize(value) >= 1024) {
-    value /= 1024;
+  while (i < BYTE_UNITS.length - 1 && roundSize(value) >= 1000) {
+    value /= 1000;
     i++;
   }
   return `${nf(value < 10 ? 1 : 0).format(value)} ${BYTE_UNITS[i]}`;

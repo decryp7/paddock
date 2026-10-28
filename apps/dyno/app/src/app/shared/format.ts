@@ -16,19 +16,19 @@ function trimZero(s: string): string {
   return s.includes('.') ? s.replace(/\.?0+$/, '') : s;
 }
 
-/** `1536` → `1.5 KB` (binary multiples, labelled as users expect from Explorer / Finder). */
+/** `1536` → `1.5 KB` (decimal multiples, 1 KB = 1000 bytes, as the Finder shows them). */
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return '—';
   const sign = bytes < 0 ? '−' : '';
   let value = Math.abs(bytes);
   let unit = 0;
-  while (value >= 1024 && unit < BYTE_UNITS.length - 1) {
-    value /= 1024;
+  while (value >= 1000 && unit < BYTE_UNITS.length - 1) {
+    value /= 1000;
     unit++;
   }
-  // Below 1000 of a unit, but ≥ 1000 would print "1000 MB": promote it so it reads "0.98 GB".
-  if (value >= 1000 && unit < BYTE_UNITS.length - 1) {
-    value /= 1024;
+  // 999.6 KB would print "1000 KB": promote it so it reads "1 MB".
+  if (Math.round(value) >= 1000 && unit < BYTE_UNITS.length - 1) {
+    value /= 1000;
     unit++;
   }
   return `${sign}${unit === 0 ? Math.round(value) : compact(value)} ${BYTE_UNITS[unit]}`;

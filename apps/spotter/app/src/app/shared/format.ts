@@ -42,15 +42,15 @@ export function formatInterval(secs: number): string {
   return `every ${spanText(secs * SECOND)}`;
 }
 
-/** Byte counts with binary units. */
+/** Byte counts with decimal units (1 KB = 1000 bytes). */
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
-  let v = bytes / 1024;
+  if (bytes < 1000) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = bytes / 1000;
   let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
+  while (v >= 1000 && i < units.length - 1) {
+    v /= 1000;
     i++;
   }
   return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
@@ -92,10 +92,10 @@ export function formatShortDateTime(ms: number | null | undefined, now: number):
   return d.toLocaleString(undefined, sameYear ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } : { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-/** Bytes as a number of MiB with the unit left to the column header: `25.5`; `—` when unknown. */
-export function mebibytes(bytes: number | null | undefined): string {
+/** Bytes as a number of MB with the unit left to the column header: `25.5`; `—` when unknown. */
+export function megabytes(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined) return '—';
-  const v = bytes / 1048576;
+  const v = bytes / 1e6;
   return v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
 }
 

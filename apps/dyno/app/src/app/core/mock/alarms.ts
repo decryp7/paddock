@@ -3,7 +3,7 @@ import { clamp, wobble } from './noise';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
-const GB = 1024 ** 3;
+const GB = 1000 ** 3;
 
 /** A few plausible alarms in different states, so the Alarms page has every kind of row to show. */
 export function demoAlarms(now: number): Alarm[] {
@@ -85,10 +85,10 @@ export function recorderSamples(at: number, seconds = 600): RecorderSample[] {
       cpuCores: Array.from({ length: 14 }, (_, c) => Math.round(clamp(cpu + 18 * wobble(t, 40 + c, 5), 0, 100))),
       memoryUsed: Math.round((11.5 + 2.2 * burst + 0.4 * wobble(t, 32, 40)) * GB),
       memoryTotal: total,
-      diskReadBps: Math.round((6 + 80 * burst) * 1024 ** 2 * (0.6 + 0.4 * Math.abs(wobble(t, 33, 4)))),
-      diskWriteBps: Math.round((3 + 140 * burst) * 1024 ** 2 * (0.6 + 0.4 * Math.abs(wobble(t, 34, 4)))),
-      netRxBps: Math.round((0.2 + 1.8 * Math.abs(wobble(t, 35, 9))) * 1024 ** 2),
-      netTxBps: Math.round((0.05 + 0.4 * Math.abs(wobble(t, 36, 9))) * 1024 ** 2),
+      diskReadBps: Math.round((6 + 80 * burst) * 1000 ** 2 * (0.6 + 0.4 * Math.abs(wobble(t, 33, 4)))),
+      diskWriteBps: Math.round((3 + 140 * burst) * 1000 ** 2 * (0.6 + 0.4 * Math.abs(wobble(t, 34, 4)))),
+      netRxBps: Math.round((0.2 + 1.8 * Math.abs(wobble(t, 35, 9))) * 1000 ** 2),
+      netTxBps: Math.round((0.05 + 0.4 * Math.abs(wobble(t, 36, 9))) * 1000 ** 2),
       top: [
         { name: burst ? 'rustc' : 'Google Chrome', cpu: Math.round((burst ? 38 : 6) * 10) / 10, memory: Math.round((burst ? 2.4 : 4.1) * GB) },
         { name: 'Visual Studio Code', cpu: 3.1, memory: Math.round(2.1 * GB) },

@@ -11,9 +11,9 @@ describe('driveKind', () => {
   });
 
   it('counts NAND packages by size and lays them out left to right', () => {
-    expect(nandCount(256 * 1024 ** 3)).toBe(1);
-    expect(nandCount(954 * 1024 ** 3)).toBe(2);
-    expect(nandCount(2 * 1024 ** 4)).toBe(3);
+    expect(nandCount(256 * 1000 ** 3)).toBe(1);
+    expect(nandCount(954 * 1000 ** 3)).toBe(2);
+    expect(nandCount(2 * 1000 ** 4)).toBe(3);
     expect(nandSlots(3, 130, 44, 6)).toEqual([130, 180, 230]);
   });
 });

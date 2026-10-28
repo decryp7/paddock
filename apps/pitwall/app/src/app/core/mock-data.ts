@@ -42,8 +42,8 @@ import type {
   UpdateNotice,
 } from './api.types';
 
-export const GiB = 1024 ** 3;
-export const MiB = 1024 ** 2;
+export const GiB = 1000 ** 3;
+export const MiB = 1000 ** 2;
 export const RAM_TOTAL = 32 * GiB;
 export const VRAM_TOTAL = 12 * GiB;
 export const GPU_NAME = 'NVIDIA GeForce RTX 4070';

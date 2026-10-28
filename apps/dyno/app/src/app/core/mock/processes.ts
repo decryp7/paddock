@@ -1,8 +1,8 @@
 import type { AppGroup, ProcessSample, RunState } from '../api.types';
 import { clamp, hash01, seedOf, wobble } from './noise';
 
-const GB = 1024 ** 3;
-const MB = 1024 ** 2;
+const GB = 1000 ** 3;
+const MB = 1000 ** 2;
 
 /** One application in the mock catalogue: how many processes, and the totals they share. */
 export interface AppSpec {

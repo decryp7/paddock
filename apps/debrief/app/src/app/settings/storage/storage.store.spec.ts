@@ -19,7 +19,7 @@ describe('StorageStore', () => {
     expect(store.isLoading()).toBe(false);
     expect(store.categories()).toHaveLength(8);
     expect(store.cache().map((c) => c.id)).toEqual(['bundle-extracts', 'webview-cache', 'ai-runtimes-outdated']);
-    expect(store.cacheBytes()).toBe((12 + 45 + 210) * 1024 * 1024);
+    expect(store.cacheBytes()).toBe((12 + 45 + 210) * 1000 * 1000);
   });
 
   it('shows a failed measurement and recovers on retry', async () => {
@@ -39,7 +39,7 @@ describe('StorageStore', () => {
     await store.load();
     await store.clearCache();
     expect(clear).toHaveBeenCalledWith(['bundle-extracts', 'webview-cache', 'ai-runtimes-outdated']);
-    expect(store.result()?.freedBytes).toBe((12 + 45 + 210) * 1024 * 1024);
+    expect(store.result()?.freedBytes).toBe((12 + 45 + 210) * 1000 * 1000);
     expect(store.clearing()).toBeNull();
     expect(store.cacheBytes()).toBe(0);
     store.dismiss();

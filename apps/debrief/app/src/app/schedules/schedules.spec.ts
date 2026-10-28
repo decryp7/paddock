@@ -554,7 +554,7 @@ describe('RunsView', () => {
     expect(all(fixture, 'tbody tr')).toHaveLength(3);
     expect(text(fixture)).toContain('/demo/agent/runs');
     expect(text(fixture)).toContain('Partial');
-    expect(text(fixture)).toContain('12 MB');
+    expect(text(fixture)).toContain('13 MB');
     const id = '20261017-020000-nightly';
     el<HTMLButtonElement>(fixture, `[aria-label="Details of ${id}"]`).click();
     await settle(fixture);

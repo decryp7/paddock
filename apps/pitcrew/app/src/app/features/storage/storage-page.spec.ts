@@ -161,7 +161,7 @@ describe('StoragePage', () => {
 
     it('lists failures with the engine’s message', async () => {
       const { f, el } = await mount();
-      vi.spyOn(mock, 'pruneEngine').mockResolvedValueOnce({ freed: [['buildCache', 1024 * 1024 * 1024]], failures: [['volumes', 'volume pgdata is in use']], at: 0 });
+      vi.spyOn(mock, 'pruneEngine').mockResolvedValueOnce({ freed: [['buildCache', 1000 * 1000 * 1000]], failures: [['volumes', 'volume pgdata is in use']], at: 0 });
       await click(f, el.querySelector('[data-kind="volumes"]'));
       await click(f, btn(el, 'preview'));
       await click(f, btn(el, 'prune'));

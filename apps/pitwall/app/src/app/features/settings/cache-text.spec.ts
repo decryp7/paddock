@@ -1,7 +1,7 @@
 import type { CacheKindInfo } from '../../core/api.types';
 import { expiryText, oldestText, sizeText, ttlOptions, TTL_CHOICES } from './cache-text';
 
-const MiB = 1024 ** 2;
+const MiB = 1000 ** 2;
 const kind = (over: Partial<CacheKindInfo> = {}): CacheKindInfo => ({
   storage: 'disk',
   entries: 3,

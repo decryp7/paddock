@@ -65,9 +65,9 @@ describe('profiling-format', () => {
     expect(formatBytes(undefined)).toBe('—');
     expect(formatBytes(NaN)).toBe('—');
     expect(formatBytes(512)).toBe('512 bytes');
-    expect(formatBytes(4096)).toBe('4 KB');
-    expect(formatBytes(1.5 * 1024 ** 2)).toBe('1.5 MB');
-    expect(formatBytes(2 * 1024 ** 3)).toBe('2 GB');
+    expect(formatBytes(4000)).toBe('4 KB');
+    expect(formatBytes(1.5 * 1000 ** 2)).toBe('1.5 MB');
+    expect(formatBytes(2 * 1000 ** 3)).toBe('2 GB');
   });
 
   it('formatValue / formatMetric dispatch on the unit', () => {
@@ -91,7 +91,7 @@ describe('profiling-format', () => {
     expect(formatPp(0)).toBe('0.0 pp');
     expect(formatPp(0.001)).toBe('0.0 pp');
     expect(formatPp(-0.001)).toBe('0.0 pp');
-    expect(formatDelta(4096, 'bytes')).toBe('+4 KB');
+    expect(formatDelta(4000, 'bytes')).toBe('+4 KB');
     expect(formatDelta(-3, 'count')).toBe('−3');
     expect(formatDelta(0, 'count')).toBe('0');
     expect(formatDelta(-2048, 'bytes')).toBe('−2 KB');

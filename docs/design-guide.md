@@ -293,6 +293,10 @@ units and thousands separators; relative time under 24 h with absolute on hover;
 start with the benefit, not the lack. Pitwall may be slightly technical, Dyno slightly warmer, Debrief terse, Pitcrew
 operational, Spotter concise.
 
+Byte sizes are decimal across the family (1 KB = 1000 bytes, KB / MB / GB / TB, as the macOS Finder shows them; `formatBytes` in
+`@decryp7/paddock-ui/format`): Windows tools such as Explorer and Task Manager show binary steps under the same labels, so a size can
+differ by a few percent from what they show; free space and capacities must use the same convention as the rest of the app.
+
 "Label: value" pairs (a status chip's "Log store: stopped", a fact list's "Version: 1.2") use a lower-case value unless it is a
 proper noun or a name; the label starts the sentence, the value continues it.
 

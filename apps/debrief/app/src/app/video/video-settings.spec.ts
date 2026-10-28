@@ -64,8 +64,8 @@ describe('VideoSettings with a download', () => {
   it('offers the pinned build with its size, installs it and shows the version', async () => {
     const { fixture, store } = await mount({ runtime: 'windows' });
     expect(id(fixture, 'video-settings-mode').textContent).toBe('No FFmpeg is set up yet.');
-    expect(id(fixture, 'video-settings-pinned').textContent).toContain('FFmpeg 8.0 (LGPL, shared) (74 MB)');
-    expect(id(fixture, 'video-install').textContent?.trim()).toBe('Download FFmpeg (74 MB)');
+    expect(id(fixture, 'video-settings-pinned').textContent).toContain('FFmpeg 8.0 (LGPL, shared) (78 MB)');
+    expect(id(fixture, 'video-install').textContent?.trim()).toBe('Download FFmpeg (78 MB)');
     expect(id(fixture, 'video-rollback').disabled).toBe(true);
     await click(fixture, 'video-install');
     expect(store.runtime()?.status.mode).toBe('managed');
@@ -78,7 +78,7 @@ describe('VideoSettings with a download', () => {
   it('updates, rolls back and deletes the old build', async () => {
     const { fixture, store } = await mount({ runtime: 'windows-installed' });
     expect(id(fixture, 'video-settings-update').textContent).toContain('An update is available');
-    expect(id(fixture, 'video-install').textContent?.trim()).toBe('Update (74 MB)');
+    expect(id(fixture, 'video-install').textContent?.trim()).toBe('Update (78 MB)');
     await click(fixture, 'video-install');
     expect(id(fixture, 'video-settings-previous').textContent).toContain('autobuild-2026-08-31');
     await click(fixture, 'video-rollback');
@@ -93,7 +93,7 @@ describe('VideoSettings with a download', () => {
     const { fixture } = await mount({ runtime: 'broken' });
     expect(id(fixture, 'video-settings-problem').textContent).toContain('ffmpeg.exe is missing');
     expect(id(fixture, 'video-settings-problem').getAttribute('role')).toBe('alert');
-    expect(id(fixture, 'video-install').textContent?.trim()).toBe('Install again (74 MB)');
+    expect(id(fixture, 'video-install').textContent?.trim()).toBe('Install again (78 MB)');
     expect(id(fixture, 'video-install').disabled).toBe(false);
   });
 

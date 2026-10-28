@@ -47,9 +47,9 @@ describe('runtime view helpers', () => {
     const tick = {
       stage: 'progress' as const,
       id: 'cpu',
-      bytes: 10 * 1024 * 1024,
-      total: 20 * 1024 * 1024,
-      bytesPerSec: 5 * 1024 * 1024,
+      bytes: 10 * 1000 * 1000,
+      total: 20 * 1000 * 1000,
+      bytesPerSec: 5 * 1000 * 1000,
       etaSecs: 2,
       verifying: false,
     };
@@ -59,8 +59,8 @@ describe('runtime view helpers', () => {
       stage: 'unpacking' as const,
       id: 'cpu',
       asset: 'a.zip',
-      done: 5 * 1024 * 1024,
-      total: 20 * 1024 * 1024,
+      done: 5 * 1000 * 1000,
+      total: 20 * 1000 * 1000,
     };
     expect(runtimeStageLabel(unpacking, 'CPU')).toBe('Unpacking CPU…');
     expect(runtimePercent(unpacking)).toBe(25);
@@ -96,7 +96,7 @@ describe('runtime view helpers', () => {
     expect(entryStateLabel(entry({ installed: true }))).toBe('Installed');
     expect(
       deviceLine({ name: 'CUDA0', description: 'RTX 4060', totalMib: 8192, freeMib: 7577 }),
-    ).toBe('RTX 4060 (CUDA0, 7.4 GB of 8 GB free)');
+    ).toBe('RTX 4060 (CUDA0, 7.9 GB of 8.6 GB free)');
   });
 
   it('offers the suggested build first while nothing usable is installed', () => {

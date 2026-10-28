@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Byte sizes are decimal
+- Byte sizes are decimal across the family (1 KB = 1000 bytes, like the macOS Finder): `formatBytes` in `@decryp7/paddock-ui/format`
+  (and its callers `formatRate`, the job formatters, the storage page's lower bounds and the MCP audit sizes) divides by 1000, not
+  1024 while labelling KB / MB. The apps' own formatters (Debrief, Dyno, Pitcrew, Pitwall, Spotter) and their chart axes follow;
+  Spotter's KiB / MiB labels are KB / MB.
+
 ### Shell: About, health chip, notices and jobs popover fixes
 - About, Updates and What's new are styled again: `ABOUT_STYLES` selected the pre-`pd-` class names (b88a387a1). A new spec
   (`shell/testing/src/template-classes.spec.ts`) checks that every class a shell template uses has a selector in its styles, so the

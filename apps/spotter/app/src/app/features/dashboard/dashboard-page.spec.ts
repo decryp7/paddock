@@ -87,7 +87,7 @@ describe('DashboardPage', () => {
     const { f } = await make();
     const all = text(q(f, 'sp-whats-new'));
     expect(qa(f, 'sp-whats-new .token mat-icon').length).toBeGreaterThan(0);
-    expect(all).toMatch(/\d+(\.\d+)? (MiB|GiB)/);
+    expect(all).toMatch(/\d+(\.\d+)? (MB|GB)/);
   });
 
   it('marks everything seen from the section header', async () => {
@@ -230,7 +230,7 @@ describe('DashboardPage', () => {
     const { f } = await make(backend);
     const feed = text(q(f, 'sp-events-feed'));
     expect(feed).toContain('9.1.0');
-    expect(feed).toMatch(/9\.1\.0 \(\d+(\.\d+)? MiB\), checksum verified/);
+    expect(feed).toMatch(/9\.1\.0 \(\d+(\.\d+)? MB\), checksum verified/);
     expect(feed).toContain('Timed out');
     expect(qa(f, 'sp-events-feed a')).toHaveLength(4);
     expect(byText(f.nativeElement, 'button', 'Load more')).toBeNull();

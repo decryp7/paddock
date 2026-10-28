@@ -80,8 +80,8 @@ describe('sweepText', () => {
   it('says what the last sweep did', () => {
     expect(sweepText(null, NOW)).toBe('Not yet');
     expect(sweepText(sweep(), NOW)).toBe('5 min ago: nothing due');
-    expect(sweepText(sweep({ moved: 3, bytes: 5 * 1024 * 1024 }), NOW)).toBe('5 min ago: moved 3 files (5 MB)');
-    expect(sweepText(sweep({ moved: 1, bytes: 1024, failed: 2 }), NOW)).toContain('2 stayed');
+    expect(sweepText(sweep({ moved: 3, bytes: 5 * 1000 * 1000 }), NOW)).toBe('5 min ago: moved 3 files (5 MB)');
+    expect(sweepText(sweep({ moved: 1, bytes: 1000, failed: 2 }), NOW)).toContain('2 stayed');
     expect(sweepText(sweep({ failed: 1, firstFailure: 'In use' }), NOW)).toBe('5 min ago: In use');
   });
 });
@@ -89,9 +89,9 @@ describe('sweepText', () => {
 describe('preview texts', () => {
   it('summarises what is due', () => {
     expect(dueSummary(plan(), 604_800)).toBe('Nothing is older than 7 days yet.');
-    expect(dueSummary(plan({ dueTotal: 1, dueBytes: 2048 }), 600)).toBe('1 file (2 KB) is older than 10 minutes and would move to the 7-day quarantine.');
-    expect(dueSummary(plan({ dueTotal: 4, dueBytes: 2048 }), 86_400)).toContain('4 files');
-    expect(dueSummary(plan({ dueTotal: 4, dueBytes: 2048 }), 86_400)).toContain('are older');
+    expect(dueSummary(plan({ dueTotal: 1, dueBytes: 2000 }), 600)).toBe('1 file (2 KB) is older than 10 minutes and would move to the 7-day quarantine.');
+    expect(dueSummary(plan({ dueTotal: 4, dueBytes: 2000 }), 86_400)).toContain('4 files');
+    expect(dueSummary(plan({ dueTotal: 4, dueBytes: 2000 }), 86_400)).toContain('are older');
   });
   it('says what stays and why', () => {
     expect(staysText(plan())).toBe('');
@@ -104,7 +104,7 @@ describe('preview texts', () => {
     expect(t).toContain('very large');
   });
   it('a due file becomes a table row', () => {
-    const r = dueRow({ path: '/a/b/Xcode.dmg', bytes: 3 * 1024 * 1024, arrived: NOW - 3 * 86_400_000, modified: NOW - 3 * 86_400_000 }, NOW);
+    const r = dueRow({ path: '/a/b/Xcode.dmg', bytes: 3 * 1000 * 1000, arrived: NOW - 3 * 86_400_000, modified: NOW - 3 * 86_400_000 }, NOW);
     expect(r).toEqual({ name: 'Xcode.dmg', path: '/a/b/Xcode.dmg', size: '3 MB', age: '3 days' });
   });
 });

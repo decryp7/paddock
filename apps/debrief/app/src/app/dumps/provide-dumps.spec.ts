@@ -76,10 +76,10 @@ describe('dumps views and commands', () => {
 describe('dumps shared', () => {
   it('formats bytes and changes', () => {
     
-    expect(formatBytes(-2048)).toBe('-2 KB');
-    expect(formatBytes(3 << 20)).toBe('3 MB');
-    expect(formatBytes(2 ** 31)).toBe('2 GB');
-    expect(formatDelta(1024)).toBe('+1 KB');
+    expect(formatBytes(-2000)).toBe('-2 KB');
+    expect(formatBytes(3_000_000)).toBe('3 MB');
+    expect(formatBytes(2e9)).toBe('2 GB');
+    expect(formatDelta(1000)).toBe('+1 KB');
     expect(formatDelta(-1024)).toBe('-1 KB');
   });
 

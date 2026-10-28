@@ -13,7 +13,7 @@ import { settle } from '../../../testing/render';
 import { WINDOW_CONTROL, type WindowControl } from '../../core/window-control';
 import { TrayPopover } from './tray-popover';
 
-const GiB = 1024 ** 3;
+const GiB = 1000 ** 3;
 
 function fakeWindows() {
   const openMain = vi.fn().mockResolvedValue(undefined);

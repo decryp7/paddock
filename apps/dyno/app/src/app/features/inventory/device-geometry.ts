@@ -14,7 +14,7 @@ export function driveKind(name: string, removable: boolean): DriveKind {
 
 /** NAND packages on an M.2 stick: one up to 256 GB, two up to 1 TB, three above. The data has no package count. */
 export function nandCount(totalBytes: number): number {
-  const gb = totalBytes / 1024 ** 3;
+  const gb = totalBytes / 1000 ** 3;
   if (gb <= 280) return 1;
   return gb <= 1100 ? 2 : 3;
 }

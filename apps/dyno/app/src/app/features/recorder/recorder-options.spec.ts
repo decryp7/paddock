@@ -18,7 +18,7 @@ describe('recorder options', () => {
   });
 
   it('reads a sample out with units', () => {
-    const r = sampleReadout({ ...samples[0]!, cpuTotal: 71.234, memoryUsed: 13.8 * 1024 ** 3, memoryTotal: 24 * 1024 ** 3, diskReadBps: 120 * 1024 ** 2 } as RecorderSample);
+    const r = sampleReadout({ ...samples[0]!, cpuTotal: 71.234, memoryUsed: 13.8 * 1000 ** 3, memoryTotal: 24 * 1000 ** 3, diskReadBps: 120 * 1000 ** 2 } as RecorderSample);
     expect(r.cpu).toBe('71.2%');
     expect(r.memory).toBe('13.8 of 24 GB');
     expect(r.disk).toContain('read 120');

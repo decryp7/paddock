@@ -10,7 +10,7 @@ import { seriesColor, type ThemeTokens } from '../theme-tokens';
  * colour; one y-axis per plot (two measures of different scale get two plots).
  */
 
-const GB = 1024 ** 3;
+const GB = 1000 ** 3;
 const FONT = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif";
 
 /** The x-axis tick text for a range. */

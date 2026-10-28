@@ -4,8 +4,8 @@ import { formatBytes } from '../../shared/format';
 import type { ThemeTokens } from '../../shared/tokens';
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-const GIB = 1024 ** 3;
-const MIB = 1024 ** 2;
+const GIB = 1000 ** 3;
+const MIB = 1000 ** 2;
 
 /** The index of the sample with the highest CPU (the first one on a tie; 0 when there are none). */
 export function peakIndex(samples: readonly RecorderSample[]): number {

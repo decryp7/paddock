@@ -25,10 +25,11 @@ import { DEFAULT_KEEP_TAIL, ELLIPSIS, fitEnd, fitPath, middleEllipsis, splitForE
 afterEach(() => setActiveLocale(SOURCE_LOCALE));
 
 describe('bytes', () => {
-  it('uses binary steps with Explorer labels and rounds up across a boundary', () => {
-    expect([formatBytes(0), formatBytes(1), formatBytes(12), formatBytes(1023)]).toEqual(['0 bytes', '1 byte', '12 bytes', '1,023 bytes']);
-    expect([formatBytes(1500), formatBytes(850 * 1024), formatBytes(1.2 * 1024 ** 3), formatBytes(1023.9 * 1024)]).toEqual(['1.5 KB', '850 KB', '1.2 GB', '1 MB']);
-    expect(formatBytes(5 * 1024 ** 5)).toBe('5 PB');
+  it('uses decimal steps (1 KB = 1000 bytes) and rounds up across a boundary', () => {
+    expect([formatBytes(0), formatBytes(1), formatBytes(12), formatBytes(999)]).toEqual(['0 bytes', '1 byte', '12 bytes', '999 bytes']);
+    expect([formatBytes(1500), formatBytes(850_000), formatBytes(1.2e9), formatBytes(999_900)]).toEqual(['1.5 KB', '850 KB', '1.2 GB', '1 MB']);
+    expect([formatBytes(1_000_000), formatBytes(1_048_576), formatBytes(1_572_864)]).toEqual(['1 MB', '1 MB', '1.6 MB']);
+    expect(formatBytes(5e15)).toBe('5 PB');
   });
   it('shows a dash for anything that is not a size, and the exact value for a tooltip', () => {
     for (const bad of [null, undefined, -1, Number.NaN, Number.POSITIVE_INFINITY]) expect(formatBytes(bad)).toBe(NONE);
@@ -36,7 +37,7 @@ describe('bytes', () => {
     expect(formatExactBytes(null)).toBe(NONE);
   });
   it('formats a rate and leaves it out while idle or unknown', () => {
-    expect(formatRate(12.4 * 1024 * 1024)).toBe('12 MB/s');
+    expect(formatRate(12.4e6)).toBe('12 MB/s');
     expect([formatRate(0), formatRate(null), formatRate(-5)]).toEqual(['', '', '']);
   });
 });

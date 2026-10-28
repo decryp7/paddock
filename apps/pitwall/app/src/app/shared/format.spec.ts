@@ -1,15 +1,15 @@
 import { ago, bytes, clock, compact, concurrencyText, countdown, date, duration, gb, int, percent, rate, seconds, slotsText, tokensText } from './format';
 
-const GB = 1024 ** 3;
+const GB = 1000 ** 3;
 
 describe('format', () => {
-  it('formats bytes in binary units', () => {
+  it('formats bytes in decimal units (1 KB = 1000 bytes)', () => {
     expect(bytes(0)).toBe('0 B');
     expect(bytes(512)).toBe('512 B');
     expect(bytes(1536)).toBe('1.5 KB');
     expect(bytes(5.03 * GB)).toBe('5.0 GB');
-    expect(bytes(262 * 1024 ** 2)).toBe('262 MB');
-    expect(bytes(3 * 1024 ** 5)).toBe('3072 TB');
+    expect(bytes(262 * 1000 ** 2)).toBe('262 MB');
+    expect(bytes(3 * 1000 ** 5)).toBe('3000 TB');
     expect(bytes(null)).toBe('—');
     expect(bytes(undefined)).toBe('—');
     expect(bytes(NaN)).toBe('—');

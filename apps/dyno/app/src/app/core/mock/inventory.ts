@@ -1,7 +1,7 @@
 import type { Hint, MemoryModule, SystemInventory } from '../api.types';
 import type { MockOs } from './os';
 
-const GB = 1024 ** 3;
+const GB = 1000 ** 3;
 
 // Read when the module loads: the router drops the query string soon after.
 const OPENED_WITH = typeof location === 'undefined' ? '' : location.search;

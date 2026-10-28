@@ -1,8 +1,8 @@
 import type { AppInfo, DiskSample, NetworkSample } from '../api.types';
 import { type AppSpec, APP_SPECS } from './processes';
 
-const GB = 1024 ** 3;
-const MB = 1024 ** 2;
+const GB = 1000 ** 3;
+const MB = 1000 ** 2;
 
 /** The operating system the mock pretends to run on (`?mock=windows|macos|linux`). */
 export type MockOs = AppInfo['os'];

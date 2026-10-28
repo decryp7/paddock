@@ -43,7 +43,7 @@ describe('cleanup model', () => {
   });
 
   it('says plainly what a run did', () => {
-    const out = { freedBytes: 2048, deleted: 2, failed: [], quarantineId: 'q' };
+    const out = { freedBytes: 2000, deleted: 2, failed: [], quarantineId: 'q' };
     expect(outcomeSentence(out, 'quarantine')).toBe('Moved 2 items (2 KB) to the 7-day quarantine.');
     expect(outcomeSentence({ ...out, deleted: 1 }, 'recycleBin')).toContain('1 item (2 KB) to the Recycle Bin / Trash');
     expect(outcomeSentence({ ...out, deleted: 0 }, 'quarantine')).toBe('Nothing was moved.');

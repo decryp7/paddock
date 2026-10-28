@@ -28,8 +28,8 @@ const d: Dashboard = {
   watches: [num('a', [3, 3, 3], [0, 1, 0]), num('b', [2, 2], [1, 0])],
   downloads: [
     { count: 0, failed: 0, bytes: 0 },
-    { count: 3, failed: 1, bytes: 3 * 1048576 + 52429 },
-    { count: 1, failed: 0, bytes: 10 * 1048576 },
+    { count: 3, failed: 1, bytes: 3 * 1000000 + 52429 },
+    { count: 1, failed: 0, bytes: 10 * 1000000 },
   ],
   computeMicros: 1,
 };
@@ -68,13 +68,13 @@ describe('reliability chart', () => {
 });
 
 describe('downloads chart', () => {
-  it('counts completed and failed downloads and converts bytes to MiB', () => {
-    expect(downloadTotals(d)).toEqual({ completed: [0, 2, 1], failed: [0, 1, 0], mebibytes: [0, 3.1, 10] });
+  it('counts completed and failed downloads and converts bytes to MB', () => {
+    expect(downloadTotals(d)).toEqual({ completed: [0, 2, 1], failed: [0, 1, 0], megabytes: [0, 3.1, 10] });
     expect(downloadCounts(d)).toEqual({ total: 4, failed: 1 });
     expect(downloadCounts({ ...d, downloads: [] })).toEqual({ total: 0, failed: 0 });
   });
 
-  it('draws two panels on one time axis: counts as stacked bars above, MiB as a line below', () => {
+  it('draws two panels on one time axis: counts as stacked bars above, MB as a line below', () => {
     const o = downloadsOption(d, colors) as {
       grid: { top: number; height: number }[];
       xAxis: { gridIndex: number; axisLabel?: { show: boolean } }[];
@@ -87,7 +87,7 @@ describe('downloads chart', () => {
     const [g0, g1] = o.grid as [{ top: number; height: number }, { top: number; height: number }];
     expect(g0.top + g0.height, 'the panels do not overlap').toBeLessThan(g1.top);
     expect(o.xAxis[0]!.axisLabel).toEqual({ show: false });
-    expect(o.yAxis.map((a) => a.name)).toEqual(['Downloads per day', 'Downloaded (MiB)']);
+    expect(o.yAxis.map((a) => a.name)).toEqual(['Downloads per day', 'Downloaded (MB)']);
     expect(o.yAxis.every((a) => a.min === 0)).toBe(true);
     expect(o.series.map((s) => [s.name, s.type, s.xAxisIndex])).toEqual([
       ['Completed', 'bar', 0],
@@ -103,6 +103,6 @@ describe('downloads chart', () => {
   });
 
   it('describes itself in words', () => {
-    expect(downloadsSummary(d)).toBe('Downloads: 4 in total, 1 failed, 13 MiB.');
+    expect(downloadsSummary(d)).toBe('Downloads: 4 in total, 1 failed, 13 MB.');
   });
 });

@@ -19,8 +19,8 @@ import type {
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
-const MB = 1024 ** 2;
-const GB = 1024 ** 3;
+const MB = 1000 ** 2;
+const GB = 1000 ** 3;
 
 /** The default window of "What changed" when the query says 0 (the engine's default). */
 const DEFAULT_HOURS = 72;
