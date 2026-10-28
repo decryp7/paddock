@@ -124,7 +124,6 @@ The states of an action are part of the contract:
   an inline alert above the body with the error's user message (`DialogActionError.message`, else a generic sentence)
   and a **Try again** button that runs the same action again. Focus moves to Try again. The rejection is logged with the
   dialog id (no user content).
-```
 
 The frame applies one pure function, `layoutActions(kind, modality, requiredChoice, actions, platform)`, which is
 tested as a table. It defines:

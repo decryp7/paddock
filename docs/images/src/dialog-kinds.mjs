@@ -1,26 +1,34 @@
 // Mockups of the dialog kinds and their states in the shared DialogFrame (ADR 0026), light and dark, plus an anatomy
-// sheet. Drawn in the Paddock tokens (`ui/projects/paddock-ui/scss/_tokens.scss`): Pitwall accent for the decisions and
-// forms, Debrief for the viewer and the save prompt, graphite for the tool. Button order follows D1 of ADR 0026: macOS and
-// Linux put Cancel then the primary on the right; Windows puts the primary then Cancel. Concepts for review, not product
-// screens.
+// sheet. Drawn in the Paddock tokens (`ui/projects/paddock-ui/scss/_tokens.scss`): every kind in graphite, the neutral
+// demo accent, so no app's colour stands for the family; the tool shows Spotter's settings and so uses Spotter's accent,
+// which its caption names. Each image carries a caption (kind, OS order, accent). Widths are the ADR's steps (400, 560, 720;
+// the tool at its preferred 960 x 680). Button order follows ADR 0026 §2: macOS and Linux put Cancel then the primary on
+// the right; Windows puts the primary then Cancel. Concepts for review, not product screens.
 //   node docs/images/src/dialog-kinds.mjs <out-dir>    writes <scene>-<theme>.svg and sizes.json
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+// Token values (`--pd-*`): page is the desktop behind the window, title the OS title bar; everything inside the window is a
+// token. `side` is --pd-bg (the tool's sidebar), `info` / `infoTint` --pd-info and its tint.
 const T = {
   light: {
     page: '#dfe3e9', win: '#f0f2f5', field: '#ffffff', title: '#e8ebef', titleText: '#4f5764', hair: 'rgba(15,20,30,0.10)',
     strong: 'rgba(15,20,30,0.22)', control: '#6b7380', text: '#14171c', muted: '#4f5764', subtle: '#5f6775', dangerFill: '#c42b2b',
-    danger: '#c42b2b', dangerTint: '#fce6e6', shadow: 'rgba(15,20,30,0.22)', side: '#e6e9ee', sel: 'rgba(79,87,100,0.14)',
-    thumb: 'rgba(15,20,30,0.32)', anno: '#c2287c',
-    accents: { pitwall: { text: '#6d3fd6', fill: '#7546e0', on: '#fff' }, debrief: { text: '#1d5fd1', fill: '#2f6fe0', on: '#fff' }, graphite: { text: '#4f5764', fill: '#4f5764', on: '#fff' } },
+    danger: '#c42b2b', dangerTint: '#fce6e6', info: '#1f5fa8', infoTint: '#e4eef9', shadow: 'rgba(15,20,30,0.22)', side: '#f4f5f7',
+    accents: {
+      graphite: { text: '#4f5764', fill: '#4f5764', on: '#ffffff', control: '#4f5764', onControl: '#ffffff' },
+      spotter: { text: '#0b7a6e', fill: '#0e8577', on: '#ffffff', control: '#0e8577', onControl: '#ffffff' },
+    },
   },
   dark: {
     page: '#0b0c0f', win: '#1b1e23', field: '#15171b', title: '#22262c', titleText: '#a0a7b2', hair: 'rgba(255,255,255,0.08)',
     strong: 'rgba(255,255,255,0.16)', control: '#838b98', text: '#eceef1', muted: '#a0a7b2', subtle: '#8b93a0', dangerFill: '#c42b2b',
-    danger: '#ff6b6b', dangerTint: 'rgba(255,107,107,0.14)', shadow: 'rgba(0,0,0,0.6)', side: '#15171b', sel: 'rgba(166,168,173,0.16)',
-    thumb: 'rgba(255,255,255,0.30)', anno: '#f063a8',
-    accents: { pitwall: { text: '#a58bfa', fill: '#7546e0', on: '#fff' }, debrief: { text: '#5b9bff', fill: '#2f6fe0', on: '#fff' }, graphite: { text: '#a6a8ad', fill: '#a6a8ad', on: '#16181c' } },
+    danger: '#ff6b6b', dangerTint: 'rgba(255,107,107,0.14)', info: '#7db2e8', infoTint: 'rgba(125,178,232,0.14)', shadow: 'rgba(0,0,0,0.6)',
+    side: '#0e0f12',
+    accents: {
+      graphite: { text: '#a6a8ad', fill: '#a6a8ad', on: '#16181c', control: '#a6a8ad', onControl: '#0e0f12' },
+      spotter: { text: '#2cc4b0', fill: '#0e8577', on: '#ffffff', control: '#2cc4b0', onControl: '#0e0f12' },
+    },
   },
 };
 
@@ -104,12 +112,15 @@ function footer(c, ac, x, y, width, actions, os = 'mac') {
 let clipSeq = 0;
 /**
  * A dialog window (no title-bar buttons, ADR 0009 §1): content `w` x `h` on a padded backdrop. `os`: 'mac' draws a
- * centred title in a 28 px bar and 10 px corners; 'win' a left-aligned title (no icon) in a 32 px bar and 8 px corners. Ids are
- * sequential per file, so the output is deterministic.
+ * centred title in a 28 px bar and 10 px corners; 'win' a left-aligned title (no icon) in a 32 px bar and 8 px corners.
+ * `caption` is a line under the window on the backdrop (kind, OS, accent). Ids are sequential per file, so the output is
+ * deterministic.
  */
-function windowFrame(c, title, w, h, body, { pad = 40, left = pad, right = pad, top = pad, bottom = pad, extra = '', os = 'mac' } = {}) {
+function windowFrame(c, title, w, h, body, { pad = 40, left = pad, right = pad, top = pad, bottom, extra = '', os = 'mac', caption = null } = {}) {
+  bottom ??= caption ? 64 : pad;
   const TB = os === 'win' ? 32 : 28, R = os === 'win' ? 8 : 10;
   const W = w + left + right, H = h + TB + top + bottom;
+  if (caption && tw(caption, 12) > W - 2 * left) throw new Error(`caption wider than its image: ${caption}`);
   const id = `w${++clipSeq}`;
   const titleSvg = os === 'win'
     ? text(left + 12, top + 20.5, title, { size: 12, fill: c.titleText })
@@ -127,6 +138,7 @@ ${titleSvg}
 <g transform="translate(${left},${top + TB})">${body}</g>
 </g>
 ${rect(left + 0.5, top + 0.5, w - 1, h + TB - 1, 'none', { rx: R, stroke: c.strong })}
+${caption ? text(left, H - 20, caption, { size: 12, fill: c.muted }) : ''}
 ${extra}</svg>`,
   };
 }
@@ -139,20 +151,18 @@ const field = (c, x, y, w, value, { focus = false, ac, disabled = false } = {}) 
 
 const checkbox = (c, ac, x, y, label, checked = false, disabled = false) =>
   `<g${disabled ? ' opacity="0.6"' : ''}>` +
-  rect(x + 0.5, y + 0.5, 15, 15, checked ? ac.fill : c.field, { rx: 4, stroke: checked ? ac.fill : c.control }) +
-  (checked ? `<path d="M${x + 4} ${y + 8.5} l3 3 l5.5 -6.5" fill="none" stroke="${ac.on}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>` : '') +
+  rect(x + 0.5, y + 0.5, 15, 15, checked ? ac.control : c.field, { rx: 4, stroke: checked ? ac.control : c.control }) +
+  (checked ? `<path d="M${x + 4} ${y + 8.5} l3 3 l5.5 -6.5" fill="none" stroke="${ac.onControl}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>` : '') +
   text(x + 24, y + 12.5, label, { fill: c.text }) + '</g>';
 
 const selectBox = (c, x, y, w, value, disabled = false) =>
   `<g${disabled ? ' opacity="0.6"' : ''}>` + rect(x + 0.5, y + 0.5, w - 1, 29, c.field, { rx: 6, stroke: c.control }) + text(x + 10, y + 19.5, value, { fill: c.text }) +
   `<path d="M${x + w - 22} ${y + 13} l4 4 l4 -4" fill="none" stroke="${c.muted}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></g>`;
 
-/** The 32 px glyph of a decision: `danger` (!) or `info` (i), in its tint. */
-function glyph(c, ac, x, y, kind) {
-  const fg = kind === 'danger' ? c.danger : ac.text;
-  const disc = kind === 'danger'
-    ? `<circle cx="${x + 16}" cy="${y + 16}" r="16" fill="${c.dangerTint}"/>`
-    : `<circle cx="${x + 16}" cy="${y + 16}" r="16" fill="${fg}" fill-opacity="0.14"/>`;
+/** The 32 px glyph of a decision: `danger` (!) or `info` (i), the status colour on its tint (never an app accent). */
+function glyph(c, x, y, kind) {
+  const fg = kind === 'danger' ? c.danger : c.info;
+  const disc = `<circle cx="${x + 16}" cy="${y + 16}" r="16" fill="${kind === 'danger' ? c.dangerTint : c.infoTint}"/>`;
   const mark = kind === 'danger'
     ? `<path d="M${x + 16} ${y + 8.5} v9" stroke="${fg}" stroke-width="2.2" stroke-linecap="round"/><circle cx="${x + 16}" cy="${y + 22.5}" r="1.4" fill="${fg}"/>`
     : `<circle cx="${x + 16}" cy="${y + 9.5}" r="1.4" fill="${fg}"/><path d="M${x + 16} ${y + 14} v9" stroke="${fg}" stroke-width="2.2" stroke-linecap="round"/>`;
@@ -164,10 +174,10 @@ function glyph(c, ac, x, y, kind) {
 const P = 20;
 
 /** A decision: glyph, heading (the question), message, optional extra body, then the footer. */
-function decisionScene(c, { heading, message, glyphKind = 'danger', actions, os = 'mac', w = 400, extraBody = null, accent = 'pitwall' }) {
+function decisionScene(c, { heading, message, glyphKind = 'danger', actions, os = 'mac', w = 400, extraBody = null, accent = 'graphite' }) {
   const ac = c.accents[accent];
   const X = P + 48, maxText = w - X - P;
-  let b = glyph(c, ac, P, P, glyphKind);
+  let b = glyph(c, P, P, glyphKind);
   b += text(X, P + 13, heading, { size: 15, w: 600, fill: c.text });
   b += para(X, P + 37, message, maxText, c.muted);
   let y = P + 37 + (lines(message, maxText) - 1) * 20 + 8;
@@ -186,19 +196,21 @@ const revoke = (os) => ({
   actions: [{ label: 'Cancel', role: 'cancel', focus: true }, { label: 'Revoke key', role: 'destructive' }], os,
 });
 const unsaved = (os) => ({
-  glyphKind: 'info', heading: 'Save changes to “orders.debrief”?', w: 440, accent: 'debrief',
+  glyphKind: 'info', heading: 'Save changes to “orders.debrief”?',
   message: 'Your changes are lost if you don’t save them.',
   actions: [{ label: 'Don’t save', role: 'destructive', lead: true }, { label: 'Cancel', role: 'cancel' }, { label: 'Save', role: 'primary', focus: true }], os,
 });
-const scene = (c, title, spec) => {
+const ORDER = { mac: 'macOS and Linux order', win: 'Windows order' };
+const NEUTRAL = 'neutral demo accent';
+const scene = (c, title, spec, caption) => {
   const d = decisionScene(c, spec);
-  return windowFrame(c, title, d.w, d.h, d.b, { os: spec.os });
+  return windowFrame(c, title, d.w, d.h, d.b, { os: spec.os, caption });
 };
 
-const decision = (c) => scene(c, 'Revoke key', revoke('mac'));
-const decisionWindows = (c) => scene(c, 'Revoke key', revoke('win'));
-const saveDontSave = (c) => scene(c, 'Unsaved changes', unsaved('mac'));
-const saveDontSaveWindows = (c) => scene(c, 'Unsaved changes', unsaved('win'));
+const decision = (c) => scene(c, 'Revoke key', revoke('mac'), `Decision, narrow 400 · ${ORDER.mac} · ${NEUTRAL}`);
+const decisionWindows = (c) => scene(c, 'Revoke key', revoke('win'), `Decision, narrow 400 · ${ORDER.win} · ${NEUTRAL}`);
+const saveDontSave = (c) => scene(c, 'Unsaved changes', unsaved('mac'), `Save prompt, narrow 400 · ${ORDER.mac} · ${NEUTRAL}`);
+const saveDontSaveWindows = (c) => scene(c, 'Unsaved changes', unsaved('win'), `Save prompt, narrow 400 · ${ORDER.win} · ${NEUTRAL}`);
 
 /** A required choice: no Cancel; Escape and the OS close do nothing; Copy is a lead action that does not close. */
 function requiredChoice(c) {
@@ -209,15 +221,15 @@ function requiredChoice(c) {
       text(x, y + 50, 'Paste it into Debrief’s settings now.', { size: 12, fill: c.subtle }),
   };
   return scene(c, 'New key', {
-    w: 440, glyphKind: 'info', heading: 'Copy the key for “debrief-laptop”',
+    glyphKind: 'info', heading: 'Copy the key for “debrief-laptop”',
     message: 'This is the only time Pitwall shows it.', extraBody: secret,
     actions: [{ label: 'Copy', role: 'secondary', lead: true }, { label: 'I’ve saved it', role: 'primary', focus: true }],
-  });
+  }, `Required choice, narrow 400 · no Cancel · ${NEUTRAL}`);
 }
 
 /** The form; `state`: idle | busy | error (a rejected async action, kept open with the message and Try again). */
 function formScene(c, state = 'idle') {
-  const ac = c.accents.pitwall, w = 560;
+  const ac = c.accents.graphite, w = 560;
   const busy = state === 'busy';
   let b = '', y = P;
   if (state === 'error') {
@@ -248,17 +260,18 @@ function formScene(c, state = 'idle') {
     { label: 'Cancel', role: 'cancel', disabled: busy },
     busy ? { label: 'Creating…', role: 'primary', busy: true } : { label: 'Create app', role: 'primary' },
   ]);
-  return windowFrame(c, 'New app', w, y + 32 + P, b);
+  const what = { idle: 'Form, medium 560', busy: 'Form, busy: the pressed action spins, all else inert', error: 'Form, rejected: input kept, Try again focused' }[state];
+  return windowFrame(c, 'New app', w, y + 32 + P, b, { caption: `${what} · ${NEUTRAL}` });
 }
 const form = (c) => formScene(c, 'idle');
 const formBusy = (c) => formScene(c, 'busy');
 const formError = (c) => formScene(c, 'error');
 
-/** Viewer: modeless, opens at its preferred size, grows to the cap; the body scrolls and the footer stays. */
+/** Viewer: modeless, opens at its preferred 720 x 560 and grows with its content to the cap; the footer never scrolls. */
 function viewer(c) {
-  const ac = c.accents.debrief, w = 720, h = 420, FH = 64;
+  const ac = c.accents.graphite, w = 720, h = 560, FH = 64;
   const bodyH = h - FH, max = w - 2 * P - 48;
-  let b = text(P, P + 12, 'ERROR · orders-api · 14:02:31.418', { size: 11, w: 600, fill: c.subtle });
+  let b = text(P, P + 12, 'ERROR · orders-api · 14:02:31.418', { size: 12, w: 600, fill: c.subtle });
   const blocks = [
     ['p', 'The request to /orders/7731 failed because the payment service timed out after 30 s. The same timeout appears 41 times in the last hour, always after the connection pool reported 64 of 64 connections in use.'],
     ['p', 'Most likely cause: the pool is too small for the 14:00 batch import, which holds connections for the length of each file. The first timeout follows the batch start by 2.1 s on every occasion in this log.'],
@@ -271,59 +284,82 @@ function viewer(c) {
     ['li', '14:00:02.114  batch-import started 312 files (orders-api, pid 4410).'],
     ['li', '14:00:04.230  pool: 64 of 64 connections in use, 17 waiting.'],
     ['li', '14:00:34.231  payment-client: timeout after 30 000 ms (/orders/7712).'],
+    ['li', '14:02:31.418  payment-client: timeout after 30 000 ms (/orders/7731).'],
+    ['n', 'Based on 1 284 events in orders-api.log between 13:00 and 14:05.'],
   ];
-  let y = P + 40;
+  let y = P + 44;
   for (const [k, s] of blocks) {
     if (k === 'h') {
-      b += text(P, y + 4, s, { w: 600, fill: c.text });
+      y += 6;
+      b += text(P, y, s, { w: 600, fill: c.text });
       y += 26;
     } else if (k === 'li') {
       b += `<circle cx="${P + 4}" cy="${y - 4}" r="2" fill="${c.muted}"/>` + para(P + 16, y, s, max - 16, c.text);
       y += lines(s, max - 16) * 20 + 2;
+    } else if (k === 'n') {
+      y += 14;
+      b += text(P, y, s, { size: 12, fill: c.subtle });
+      y += 20;
     } else {
       b += para(P, y, s, max, c.text);
       y += lines(s, max) * 20 + 12;
     }
   }
-  // Overlay scrollbar: thumb only, inset 4 px, its length the visible share of the content (the text runs on below).
-  const content = y + 160, share = bodyH / content;
-  b += rect(w - 10, 4, 6, Math.round((bodyH - 8) * share), c.thumb, { rx: 3 });
-  b += rect(0, bodyH, w, FH, c.win) + rect(0, bodyH, w, 1, c.hair);
+  if (y > bodyH - P) throw new Error(`viewer content (${y}) overflows its preferred height (${bodyH - P}): trim the content`);
+  b += rect(0, bodyH, w, 1, c.hair);
   b += footer(c, ac, P, bodyH + 16, w - 2 * P, [
     { label: 'Copy', role: 'secondary', lead: true },
     { label: 'Show cited rows', role: 'secondary', lead: true },
     { label: 'Close', role: 'cancel', focus: true },
   ]);
-  return windowFrame(c, 'Explain event', w, h, b);
+  return windowFrame(c, 'Explain event', w, h, b, {
+    caption: `Viewer, wide 720 at its preferred 560 high · grows with its content to the cap, then the body scrolls · ${NEUTRAL}`,
+  });
 }
 
-/** Tool: modeless, user-sized, its own layout; the footer keeps a status line and Close. */
+/** A switch as `.pd-switch` draws it: 32 x 18, on = the accent control fill with the on-control handle. */
+const toggle = (c, ac, x, y, on) =>
+  rect(x + 0.5, y + 0.5, 31, 17, on ? ac.control : c.field, { rx: 8.5, stroke: on ? ac.control : c.control }) +
+  `<circle cx="${x + (on ? 23 : 9)}" cy="${y + 9}" r="6" fill="${on ? ac.onControl : c.muted}"/>`;
+
+/** Tool: modeless, user-sized, its own layout, drawn at its preferred 960 x 680; the footer keeps a status line and Close. */
 function tool(c) {
-  const ac = c.accents.graphite, w = 760, h = 470, FH = 60, SW = 188;
+  const ac = c.accents.spotter, w = 960, h = 680, FH = 60, SW = 216;
   let b = rect(0, 0, SW, h - FH, c.side) + rect(SW - 0.5, 0, 0.5, h - FH, c.hair);
   ['General', 'Appearance', 'Notifications', 'Storage', 'Network', 'Updates', 'Diagnostics'].forEach((s, i) => {
-    const y = 14 + i * 32;
-    if (i === 3) b += rect(10, y, SW - 20, 28, c.sel, { rx: 6 }) + rect(10, y + 6, 3, 16, ac.text, { rx: 1.5 });
+    const y = 12 + i * 32;
+    if (i === 3) {
+      // Selected navigation item (design guide §2): 14 % accent tint, 600 label, a 2 px accent bar.
+      b += rect(8, y, SW - 16, 28, ac.text, { rx: 6, extra: ' fill-opacity="0.14"' }) + rect(8, y + 6, 2, 16, ac.text, { rx: 1 });
+    }
     b += text(22, y + 18.5, s, { fill: i === 3 ? c.text : c.muted, w: i === 3 ? 600 : 400 });
   });
-  const X = SW + 28;
-  b += text(X, 34, 'Storage', { size: 18, w: 600, fill: c.text });
-  b += text(X, 56, 'Where the app keeps its data, and how much it may use.', { fill: c.muted });
-  [['Data folder', '~/Library/Application Support/Spotter'], ['Used', '2.4 GB of 10 GB'], ['Keep history for', '30 days']].forEach(([k, v], i) => {
-    const y = 84 + i * 44;
-    b += rect(X, y + 43.5, w - X - 24, 0.5, c.hair) + text(X, y + 26, k, { fill: c.text });
-    b += i === 2 ? selectBox(c, w - 24 - 160, y + 7, 160, v) : text(w - 24, y + 26, v, { fill: c.muted, anchor: 'end' });
+  const X = SW + 32, R = w - 32, RW = R - X;
+  b += text(X, 40, 'Storage', { size: 18, w: 600, fill: c.text });
+  b += text(X, 64, 'Where Spotter keeps its data, and how much it may use.', { fill: c.muted });
+  const rows = [
+    ['Data folder', (y) => text(R - btnWidth('Change…') - 12, y + 26, '~/Library/Application Support/Spotter', { fill: c.muted, anchor: 'end' }) +
+      button(c, ac, R - btnWidth('Change…'), y + 6, { label: 'Change…', role: 'secondary' }).svg],
+    ['Used', (y) => text(R, y + 26, '2.4 GB of 10 GB', { fill: c.muted, anchor: 'end' })],
+    ['Keep history for', (y) => selectBox(c, R - 180, y + 7, 180, '30 days')],
+    ['Keep snapshots', (y) => selectBox(c, R - 180, y + 7, 180, 'The last 20')],
+    ['Clean up old logs when the disk is low', (y) => toggle(c, ac, R - 32, y + 13, true)],
+  ];
+  rows.forEach(([k, v], i) => {
+    const y = 92 + i * 44;
+    b += rect(X, y + 43.5, RW, 0.5, c.hair) + text(X, y + 26, k, { fill: c.text }) + v(y);
   });
-  const by = 84 + 3 * 44 + 22, bw = w - X - 24;
-  b += rect(X, by, bw, 8, c.hair, { rx: 4 }) + rect(X, by, bw * 0.24, 8, ac.text, { rx: 4 });
-  b += text(X, by + 28, 'Logs 1.6 GB · Snapshots 0.7 GB · Cache 0.1 GB', { size: 12, fill: c.subtle });
-  b += button(c, ac, X, by + 46, { label: 'Clear cache', role: 'secondary' }).svg;
+  const by = 92 + rows.length * 44 + 28;
+  b += text(X, by, 'Space used', { size: 12, w: 600, fill: c.text });
+  b += rect(X, by + 12, RW, 8, c.hair, { rx: 4 }) + rect(X, by + 12, RW * 0.24, 8, ac.text, { rx: 4 });
+  b += text(X, by + 40, 'Logs 1.6 GB · Snapshots 0.7 GB · Cache 0.1 GB', { size: 12, fill: c.subtle });
+  b += button(c, ac, X, by + 60, { label: 'Clear cache', role: 'secondary' }).svg;
   b += rect(0, h - FH, w, 0.5, c.hair) + text(P, h - FH + 34, 'Changes are saved as you make them.', { size: 12, fill: c.subtle });
   b += footer(c, ac, P, h - FH + 14, w - 2 * P, [{ label: 'Close', role: 'cancel' }]);
-  return windowFrame(c, 'Settings', w, h, b);
+  return windowFrame(c, 'Spotter settings', w, h, b, { caption: 'Tool at its preferred 960 × 680, user-sized · Spotter’s settings in Spotter’s accent' });
 }
 
-/** The show-deadline fallback (ADR 0026 §4): not ready after about 1 s, the window shows Loading with a Close. */
+/** The show-deadline fallback (ADR 0026 §4): a form not ready after about 1 s shows Loading with a Close. */
 function loading(c) {
   const ac = c.accents.graphite, w = 560, h = 240;
   const cx = w / 2, cy = 84;
@@ -332,32 +368,33 @@ function loading(c) {
   b += text(cx, cy + 36, 'Loading…', { fill: c.text, anchor: 'middle' });
   b += text(cx, cy + 56, 'This window is still starting. You can close it and open it again.', { size: 12, fill: c.subtle, anchor: 'middle' });
   b += footer(c, ac, P, h - 32 - P, w - 2 * P, [{ label: 'Close', role: 'cancel', focus: true }]);
-  return windowFrame(c, 'Settings', w, h, b);
+  return windowFrame(c, 'New app', w, h, b, { caption: `Form, medium 560, not ready after about 1 s: Loading and Close · ${NEUTRAL}` });
 }
 
-/** The frame's anatomy: a decision with its measurements. */
+/** The frame's anatomy: a decision with its measurements, annotated in neutral ink (text and muted text). */
 function anatomy(c) {
   const { b, w, h, fy } = decisionScene(c, revoke('mac'));
-  const L = 270, R = 280, TOP = 64, BOT = 84;
-  const ox = L, oy = TOP + 28, A = c.anno;
+  const L = 270, R = 420, TOP = 64, BOT = 84;
+  const ox = L, oy = TOP + 28, A = c.muted;
   const ln = (x1, y1, x2, y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${A}" stroke-width="1"/>`;
-  const lab = (x, y, s, anchor = 'start', wt = 500) => text(x, y, s, { size: 12, w: wt, fill: A, anchor });
+  const head = (x, y, s, anchor = 'start') => text(x, y, s, { size: 12, w: 600, fill: c.text, anchor });
+  const lab = (x, y, s, anchor = 'start') => text(x, y, s, { size: 12, fill: c.muted, anchor });
   let a = '';
   a += rect(ox + 0.5, oy + 0.5, w - 1, fy - 9, 'none', { stroke: A, extra: ' stroke-dasharray="4 3"' });
   a += rect(ox + 0.5, oy + fy - 7.5, w - 1, h - fy + 7, 'none', { stroke: A, extra: ' stroke-dasharray="4 3"' });
-  a += ln(ox - 70, oy + 40, ox, oy + 40) + lab(ox - 76, oy + 36, 'Body', 'end', 600) + lab(ox - 76, oy + 52, 'scrolls only past the cap', 'end');
-  a += ln(ox - 70, oy + fy + 16, ox, oy + fy + 16) + lab(ox - 76, oy + fy + 12, 'Footer', 'end', 600) + lab(ox - 76, oy + fy + 28, 'declared actions, never scrolls', 'end');
+  a += ln(ox - 70, oy + 40, ox, oy + 40) + head(ox - 76, oy + 36, 'Body', 'end') + lab(ox - 76, oy + 52, 'scrolls only past the cap', 'end');
+  a += ln(ox - 70, oy + fy + 16, ox, oy + fy + 16) + head(ox - 76, oy + fy + 12, 'Footer', 'end') + lab(ox - 76, oy + fy + 28, 'declared actions, never scrolls', 'end');
   a += lab(ox + w / 2, TOP - 14, 'OS title bar: no close, minimise or zoom (ADR 0009); title from the contract or setTitle()', 'middle');
   const rx = ox + w + 64;
-  a += lab(rx, oy + 16, '20 px padding all round', 'start', 600) + lab(rx, oy + 32, 'heading 15/600, text 13, 12 px gap');
-  a += lab(rx, oy + fy + 2, 'Buttons 32 px, 8 px apart', 'start', 600) + lab(rx, oy + fy + 18, 'Enter = default: Cancel here,')
-    + lab(rx, oy + fy + 34, 'a destructive action never is') + lab(rx, oy + fy + 50, 'Escape, Cmd/Ctrl+W = Cancel');
+  a += head(rx, oy + 16, '20 px padding all round') + lab(rx, oy + 32, 'heading 15/600, text 13, 12 px gap');
+  a += head(rx, oy + fy + 2, 'Buttons 32 px, 8 px apart, order native per OS') + lab(rx, oy + fy + 18, 'Enter = default: Cancel here, a destructive action never is')
+    + lab(rx, oy + fy + 34, 'Escape, Cmd/Ctrl+W = Cancel');
   const hx = ox + w + 24;
   a += ln(hx, oy, hx, oy + h) + ln(hx - 4, oy, hx + 4, oy) + ln(hx - 4, oy + h, hx + 4, oy + h);
-  a += `<text x="${hx + 14}" y="${oy + h / 2}" font-family="${FONT}" font-size="12" font-weight="500" fill="${A}" text-anchor="middle" transform="rotate(-90 ${hx + 14} ${oy + h / 2})">height: measured</text>`;
+  a += `<text x="${hx + 14}" y="${oy + h / 2}" font-family="${FONT}" font-size="12" font-weight="400" fill="${c.muted}" text-anchor="middle" transform="rotate(-90 ${hx + 14} ${oy + h / 2})">height: measured</text>`;
   const wy = oy + h + 20;
   a += ln(ox, wy, ox + w, wy) + ln(ox, wy - 4, ox, wy + 4) + ln(ox + w, wy - 4, ox + w, wy + 4);
-  a += lab(ox + w / 2, wy + 20, 'Width: narrow 400, medium 560, wide 720 (D2). OS minimum = measured min content:', 'middle')
+  a += lab(ox + w / 2, wy + 20, 'Width: narrow 400, medium 560, wide 720 (ADR 0026 §1). OS minimum = measured min content:', 'middle')
     + lab(ox + w / 2, wy + 36, 'header + footer + two body lines high, the footer on one line wide', 'middle');
   return windowFrame(c, 'Revoke key', w, h, b, { left: L, right: R, top: TOP, bottom: BOT, extra: a });
 }
