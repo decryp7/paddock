@@ -1,3 +1,4 @@
+import { fakeDialogContract } from '@decryp7/paddock-ui/shell/testing';
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { defineDialog, msg, type } from '@decryp7/paddock-ui/shell';
 import type { DialogService } from './dialog.service';
@@ -12,17 +13,9 @@ class Rename {
   readonly notAnInput = 3;
 }
 
-const RENAME = defineDialog({
-  id: 't.rename',
-  kind: 'form',
-  modality: 'modal',
-  title: msg('t.rename', 'Rename'),
-  result: type<string>(),
-  commands: [],
-  load: () => Promise.resolve(Rename),
-});
+const RENAME = defineDialog(fakeDialogContract({ id: 't.rename', kind: 'form', modality: 'modal', commands: [] }), { title: msg('t.rename', 'Rename'), result: type<string>(), load: () => Promise.resolve(Rename) });
 
-const UNTYPED = defineDialog({ id: 't.any', kind: 'viewer', title: msg('t.any', 'Any'), commands: [], load: () => Promise.resolve(Rename as never) });
+const UNTYPED = defineDialog(fakeDialogContract({ id: 't.any', kind: 'viewer', commands: [] }), { title: msg('t.any', 'Any'), load: () => Promise.resolve(Rename as never) });
 
 describe('dialog inputs', () => {
   it('are the component’s inputs, optional, with the transform’s write type', () => {

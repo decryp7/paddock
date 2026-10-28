@@ -5,7 +5,7 @@
 //! Ported from Debrief's `dialog_windows.rs` (Debrief ADRs 0050 and 0054) without Debrief's labels, events or error type.
 
 use crate::contract::{
-    Contract, DIALOG_MIN, FALLBACK_SIZE, Kind, MAX_SIDE, Modality, valid_dialog_id,
+    Contract, DIALOG_MIN, Kind, MAX_SIDE, Modality, UNMEASURED_HEIGHT, valid_dialog_id,
 };
 use crate::placement::{self, Monitor, Rect, Remembered, ScreenPosition, TITLE_BAR};
 use serde::{Deserialize, Serialize};
@@ -32,8 +32,8 @@ pub const MAX_TITLE: usize = 200;
 /// The route of the app's UI that renders a dialog (the default of [`crate::Dialogs::new`]).
 pub const DEFAULT_ROUTE: &str = "index.html#/dialog";
 
-/// What the UI asks for when opening a dialog. The kind, modality, required choice and floor are not asked for: they
-/// come from the dialog's declared contract, which Rust owns.
+/// What the UI asks for when opening a dialog. The kind, modality, required choice and sizes are not asked for: they
+/// come from the dialog's declared contract, which Rust owns (ADR 0026 §3).
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -48,19 +48,6 @@ pub struct DialogRequest {
     #[serde(default)]
     #[cfg_attr(test, ts(optional, type = "unknown"))]
     pub input: Option<Value>,
-    #[serde(default)]
-    #[cfg_attr(test, ts(optional))]
-    pub width: Option<f64>,
-    /// None: the window is fitted to its content (a fitted form or decision).
-    #[serde(default)]
-    #[cfg_attr(test, ts(optional))]
-    pub height: Option<f64>,
-    #[serde(default)]
-    #[cfg_attr(test, ts(optional))]
-    pub min_width: Option<f64>,
-    #[serde(default)]
-    #[cfg_attr(test, ts(optional))]
-    pub min_height: Option<f64>,
     /// What the UI remembered of this dialog: its size and its offset from the parent window (never an absolute
     /// screen position). The shell decides where it goes ([`placement::place`]).
     #[serde(default)]
@@ -262,33 +249,24 @@ pub fn json_len(v: &Value) -> usize {
     n.0
 }
 
-/// A size within what a window can sensibly be; the default for a value that is not a number.
-fn clamp_size(v: Option<f64>, min: f64, default: f64) -> f64 {
-    match v {
-        Some(v) if v.is_finite() => v.clamp(min, MAX_SIDE),
-        _ => default.clamp(min, MAX_SIDE),
-    }
-}
-
-/// The validated window geometry of a request, logical px: (width, height, min width, min height). The request's
-/// sizes, else the kind's default, else [`FALLBACK_SIZE`]; never below the dialog's floor ([`Contract::floor`]: a viewer
-/// is never smaller than 680x560) nor above [`MAX_SIDE`].
-pub fn geometry(r: &DialogRequest, contract: &Contract) -> (f64, f64, f64, f64) {
+/// The window geometry of a dialog, logical px: (width, height, min width, min height). The contract's width and
+/// preferred height (a measured decision or form starts at [`UNMEASURED_HEIGHT`] until its first fit), never below the
+/// dialog's floor ([`Contract::floor`]: a viewer is never smaller than 680x560) nor above [`MAX_SIDE`].
+pub fn geometry(contract: &Contract) -> (f64, f64, f64, f64) {
     let floor = contract.floor();
-    let default = contract.kind.policy().default_size.unwrap_or(FALLBACK_SIZE);
-    let min_w = clamp_size(r.min_width, DIALOG_MIN.width, DIALOG_MIN.width).max(floor.width);
-    let min_h = clamp_size(r.min_height, DIALOG_MIN.height, DIALOG_MIN.height).max(floor.height);
+    let height = contract.height.unwrap_or(UNMEASURED_HEIGHT);
     (
-        clamp_size(r.width, min_w, default.width),
-        clamp_size(r.height, min_h, default.height),
-        min_w,
-        min_h,
+        contract.width.clamp(floor.width, MAX_SIDE),
+        height.clamp(floor.height, MAX_SIDE),
+        floor.width,
+        floor.height,
     )
 }
 
-/// Whether the window of a request is fitted to its content: the kind fits content and the request names no height.
-pub fn is_fitted(r: &DialogRequest, kind: Kind) -> bool {
-    kind.policy().fits_content && r.height.is_none()
+/// Whether the window of a dialog of `kind` is fitted to its content (ADR 0026 §1: decisions, forms and viewers are;
+/// a tool is user-sized).
+pub fn is_fitted(kind: Kind) -> bool {
+    kind.policy().fits_content
 }
 
 /// The builder configuration of a dialog window, separate from the build so a test can check it without a window.
@@ -435,15 +413,17 @@ mod tests {
     use crate::contract::{Contracts, VIEWER_MIN};
     use serde_json::json;
 
+    crate::dialogs! {
+        static TABLE;
+        "a" => Form(Modeless),
+        "about" => Viewer,
+        "settings" => Tool,
+        "huge" => Tool { width: Some(Px(4096)), height: Some(4096) },
+        "ask" => Decision,
+    }
+
     fn contracts() -> Contracts {
-        Contracts::parse(
-            r#"{ "version": 1, "dialogs": {
-                "a": { "kind": "form", "modality": "modeless" },
-                "about": { "kind": "viewer", "modality": "modeless", "minSize": { "width": 680, "height": 560 } },
-                "settings": { "kind": "tool", "modality": "modeless" },
-                "ask": { "kind": "decision", "modality": "modal" } } }"#,
-        )
-        .unwrap()
+        Contracts::from_tables(&[&TABLE]).unwrap()
     }
 
     fn contract(id: &str) -> Contract {
@@ -456,10 +436,6 @@ mod tests {
             instance: None,
             title: "Set up".into(),
             input: Some(json!({ "modelId": "m1" })),
-            width: Some(760.0),
-            height: None,
-            min_width: None,
-            min_height: None,
             remembered: None,
         }
     }
@@ -611,39 +587,36 @@ mod tests {
         r.instance = Some("abc1".into());
         assert!(validate(&r).is_ok());
 
-        let mut r = request("a");
-        r.width = Some(f64::NAN);
-        r.height = Some(1e9);
-        r.min_width = Some(10.0);
+        // The contract decides the size: a measured form starts at its width and the unmeasured height, a viewer at its
+        // preferred size (never below its floor), a tool at its own.
         assert_eq!(
-            geometry(&r, &contract("a")),
+            geometry(&contract("a")),
             (
-                FALLBACK_SIZE.width,
-                MAX_SIDE,
+                560.0,
+                UNMEASURED_HEIGHT,
                 DIALOG_MIN.width,
                 DIALOG_MIN.height
             )
         );
-        // The kind's floor wins over a smaller request: a viewer is never below 680x560.
-        let mut small = request("about");
-        small.width = Some(400.0);
-        small.height = Some(300.0);
-        small.min_width = Some(320.0);
-        small.min_height = Some(200.0);
+        assert_eq!(geometry(&contract("ask")).0, 400.0);
         assert_eq!(
-            geometry(&small, &contract("about")),
-            (680.0, 560.0, 680.0, 560.0)
+            geometry(&contract("about")),
+            (720.0, 560.0, VIEWER_MIN.width, VIEWER_MIN.height)
         );
-        // The kind's default size when the request names none.
-        let mut bare = request("settings");
-        bare.width = None;
         assert_eq!(
-            geometry(&bare, &contract("settings")),
+            geometry(&contract("settings")),
             (960.0, 680.0, 320.0, 200.0)
         );
-        let mut bare = request("about");
-        bare.width = None;
-        assert_eq!(geometry(&bare, &contract("about")).0, VIEWER_MIN.width);
+        assert_eq!(geometry(&contract("huge")).1, MAX_SIDE);
+        // The webview cannot size the window either.
+        for field in ["width", "height", "minWidth", "minHeight"] {
+            let mut v = json!({ "dialogId": "a", "title": "t" });
+            v[field] = json!(400);
+            assert!(
+                serde_json::from_value::<DialogRequest>(v).is_err(),
+                "{field}"
+            );
+        }
 
         // A remembered place is an offset from the parent; absolute bounds are refused.
         assert!(
@@ -667,17 +640,9 @@ mod tests {
     }
 
     #[test]
-    fn only_kinds_that_fit_content_and_requests_without_a_height_are_fitted() {
-        let r = request("a");
-        assert!(
-            is_fitted(&r, Kind::Form)
-                && is_fitted(&r, Kind::Decision)
-                && is_fitted(&r, Kind::Viewer)
-        );
-        assert!(!is_fitted(&r, Kind::Tool));
-        let mut fixed = request("a");
-        fixed.height = Some(400.0);
-        assert!(!is_fitted(&fixed, Kind::Form));
+    fn decisions_forms_and_viewers_are_fitted_and_a_tool_is_user_sized() {
+        assert!(is_fitted(Kind::Form) && is_fitted(Kind::Decision) && is_fitted(Kind::Viewer));
+        assert!(!is_fitted(Kind::Tool));
     }
 
     #[test]

@@ -3,10 +3,14 @@ import { axeEveryDialog, dialogContracts, expect, expectEscapeReturnsFocus, expe
 // Accessibility of every shell window (plan X49, WCAG 2.2 AA): axe over the window of every dialog the demo declares, in
 // both themes, and keyboard-only flows. The dialog list is the generated contract file, so a new dialog is covered the
 // moment it exists. The main window, its popovers and the Settings pages are checked in their own specs.
-const CONTRACTS = 'projects/shell-demo/dialog-contracts.json';
+/** The generated contracts of every dialog the demo registers: its own and the shell's (ADR 0026 §3). */
+const CONTRACTS = [
+  'projects/shell-demo/src/app/generated/dialog-contracts.ts',
+  ...['about', 'channels', 'diagnostics', 'mcp', 'setup', 'storage'].map((p) => `projects/paddock-ui/shell/${p}/generated/dialog-contracts.ts`),
+];
 
 test('every dialog window passes axe in both themes (the list is the contract file)', async ({ page }) => {
-  expect(Object.keys(dialogContracts(CONTRACTS)).length).toBeGreaterThanOrEqual(10);
+  expect(Object.keys(dialogContracts(...CONTRACTS)).length).toBeGreaterThanOrEqual(10);
   // A dialog that needs an input to open gets a valid one (its window shows an inline error without it, which the unit tests cover).
   const inputs = { 'pd.channels.secret': { channelId: 'slack', label: 'Team Slack', kind: 'token' }, 'pd.channels.remove': { channelId: 'slack', name: 'Team Slack' }, 'pd.mcp.revoke': { keyId: 1, client: 'Pitwall' } };
   expect(await axeEveryDialog(page, CONTRACTS, { inputs })).toEqual({});

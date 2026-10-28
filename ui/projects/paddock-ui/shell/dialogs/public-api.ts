@@ -3,33 +3,23 @@
  * `defineDialog` (`@decryp7/paddock-ui/shell`); this entry opens them (`DialogService`, typed by the definition), shows
  * them as windows (`WindowDialogBackend` over `paddock-dialogs`) or in the page (`InPageDialogBackend`, `pd-dialog-host`),
  * boots each dialog window on its own (`dialogWindowConfig`, `DialogShell`), keeps the kind policy (size, fit, keys,
- * a visible Close/Cancel), the modal gate, remembered bounds and the contract file Rust reads.
+ * a visible Close/Cancel), the modal gate and remembered bounds. The contracts are Rust's (ADR 0026 §3).
  */
 export {
   DIALOG_MIN,
   VIEWER_MIN,
   TOOL_DEFAULT,
-  FALLBACK_WIDTH,
-  KIND_POLICY,
   dismissOf,
   modalityOf,
   resolveSize,
   fitsContent,
+  growsOnly,
   raiseToKindMinimum,
   instanceKey,
-  type KindPolicy,
   type DialogDismiss,
   type ResolvedSize,
 } from './src/kind';
-export {
-  DIALOG_CONTRACTS_FILE,
-  dialogContract,
-  dialogContractFile,
-  serializeDialogContracts,
-  commandCovered,
-  allowedCommands,
-  type DialogContractOptions,
-} from './src/contracts';
+export { commandCovered, allowedCommands } from './src/contracts';
 export { DIALOG_IO, BROWSER_DIALOG_RESULT_KEY, browserDialogIo, tauriDialogIo, type DialogIo, type TauriBridge, type Unlisten } from './src/io';
 export { DIALOG_ROUTE, DIALOG_ROUTE_PATH, parseDialogRoute, dialogHash, type DialogRoute } from './src/route';
 export { dialogKeyAction, findDefaultAction, hasCloseAction, type DialogKeyAction, type DialogKeyEvent } from './src/keys';

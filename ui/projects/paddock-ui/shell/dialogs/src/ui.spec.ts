@@ -1,3 +1,4 @@
+import { fakeDialogContract } from '@decryp7/paddock-ui/shell/testing';
 import { ChangeDetectionStrategy, Component, inject, Injectable, input, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { defineDialog, DIALOG_EVENTS, msg, provideContributions, SHELL_PORTS, type DialogDef } from '@decryp7/paddock-ui/shell';
@@ -51,8 +52,9 @@ class Throws {
   }
 }
 
-const d = (id: string, spec: Partial<DialogDef> = {}): DialogDef =>
-  defineDialog({ id, kind: 'decision', title: msg(id, `Title ${id}`), commands: [], load: () => Promise.resolve(Content), ...spec }) as DialogDef;
+type Spec = Partial<Pick<DialogDef, 'kind' | 'modality' | 'instanced' | 'requiredChoice' | 'result' | 'load' | 'providers'>>;
+const d = (id: string, { kind = 'decision', modality, instanced, requiredChoice, ...ui }: Spec = {}): DialogDef =>
+  defineDialog(fakeDialogContract({ id, kind, modality, instanced, requiredChoice }), { title: msg(id, `Title ${id}`), load: () => Promise.resolve(Content), ...ui }) as DialogDef;
 
 const DECISION = d('t.decision', { result: undefined });
 const MODELESS = d('t.form', { kind: 'form', modality: 'modeless' });
@@ -274,7 +276,8 @@ describe('dialogs as windows', () => {
     rememberDialogBounds('t.viewer', { dx: 5, dy: 6, width: 100, height: 100 });
     const ref = service.open(VIEWER, { inputs: { a: 1 }, title: 'Mine' });
     await tick();
-    expect(io.opened[0]).toEqual({ dialogId: 't.viewer', instance: undefined, title: 'Mine', input: { a: 1 }, width: 680, height: 560, minWidth: 680, minHeight: 560, remembered: { dx: 5, dy: 6, width: 680, height: 560 } });
+    // The size is the Rust contract's: the request names none (ADR 0026 §3).
+    expect(io.opened[0]).toEqual({ dialogId: 't.viewer', instance: undefined, title: 'Mine', input: { a: 1 }, remembered: { dx: 5, dy: 6, width: 680, height: 560 } });
     expect(gate.blocked()).toBe(false);
     io.emit(DIALOG_EVENTS.result, { nonsense: true });
     io.result('d-main-9', 't.viewer', 'other window');
@@ -335,7 +338,7 @@ describe('dialogs as windows', () => {
   });
 
   it('builds the request and parses the events defensively', () => {
-    expect(windowRequest({ def: DECISION, title: 'T', inputs: {} }, undefined)).toMatchObject({ width: 640, height: undefined, remembered: undefined });
+    expect(windowRequest({ def: DECISION, title: 'T', inputs: {} }, undefined)).toEqual({ dialogId: 't.decision', instance: undefined, title: 'T', input: {}, remembered: undefined });
     expect(parseResult(null)).toBeNull();
     expect(parseClosed({ label: 'a', dialogId: 'b', remembered: { dx: 'x' } })).toEqual({ label: 'a', dialogId: 'b', remembered: null });
     expect(parseClosed({ label: 1 })).toBeNull();

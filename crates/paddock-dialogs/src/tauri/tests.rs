@@ -37,25 +37,33 @@ paddock_commands::command_table! {
 
 /// Contracts for the ids these tests open.
 fn contracts() -> Arc<Contracts> {
-    let entry = |id: &str, kind: &str, modality: &str, required: bool, instanced: bool| {
-        format!(
-            r#""{id}": {{ "kind": "{kind}", "modality": "{modality}", "requiredChoice": {required}, "instanced": {instanced}, "commands": ["app_status"] }}"#
-        )
+    use crate::table::{Entry, Shape};
+    const STATUS: &[paddock_commands::DialogCallable] =
+        &[paddock_commands::DialogCallable::Command("app_status")];
+    let form = Shape::Form(crate::Modality::Modeless);
+    let entry = |id: &'static str, shape: Shape| Entry {
+        commands: STATUS,
+        ..Entry::new(id, shape)
     };
     let mut e = vec![
-        entry("ai-setup", "form", "modeless", false, true),
-        entry("settings", "tool", "modeless", false, false),
-        entry("about", "viewer", "modeless", false, false),
-        entry("close-prompt", "decision", "modal", true, false),
-        entry("unsaved-changes", "decision", "modal", false, false),
-        entry("confirm-x", "decision", "modal", false, false),
-        entry("too-many", "form", "modeless", false, false),
+        Entry {
+            instanced: true,
+            ..entry("ai-setup", form)
+        },
+        entry("settings", Shape::Tool),
+        entry("about", Shape::Viewer),
+        Entry {
+            required_choice: true,
+            ..entry("close-prompt", Shape::Decision)
+        },
+        entry("unsaved-changes", Shape::Decision),
+        entry("confirm-x", Shape::Decision),
+        entry("too-many", form),
     ];
     e.extend(
-        (0..MAX_OPEN_PER_HOST).map(|i| entry(&format!("d{i}"), "form", "modeless", false, false)),
+        (0..MAX_OPEN_PER_HOST).map(|i| entry(Box::leak(format!("d{i}").into_boxed_str()), form)),
     );
-    let json = format!(r#"{{ "version": 1, "dialogs": {{ {} }} }}"#, e.join(","));
-    Arc::new(Contracts::parse(&json).expect("test contracts"))
+    Arc::new(Contracts::from_entries(&e, &[]).expect("test contracts"))
 }
 
 /// Every log record of the guard, as (level, message, dialog, command).
@@ -132,10 +140,6 @@ fn request(id: &str) -> DialogRequest {
         instance: None,
         title: "Set up the assistant".into(),
         input: Some(json!({ "modelId": "m1" })),
-        width: Some(760.0),
-        height: None,
-        min_width: None,
-        min_height: None,
         remembered: None,
     }
 }

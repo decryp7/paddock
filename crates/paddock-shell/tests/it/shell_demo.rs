@@ -32,6 +32,42 @@ paddock_commands::command_table! {
     Query [MAIN | DIALOG] => demo::demo_status,
 }
 
+use paddock_shell::dialog_commands as shell;
+
+paddock_dialogs::dialogs! {
+    /// The demo's own dialogs, as `apps/shell-demo/src-tauri/src/dialogs.rs` declares them (the drift check against the
+    /// demo's manifest keeps the two equal).
+    static DEMO_DIALOGS, base &[shell::startup::window_pong, shell::startup::window_ready];
+    "sd.confirm-reset" => Decision,
+    "sd.rename" => Form(Modal) { width: Some(Narrow) },
+    "sd.about" => Viewer,
+    "sd.inspector" => Tool { width: Some(Px(720)), height: Some(480), commands: &[dialog_callable::demo_status] },
+    "sd.choose-style" => Decision { required_choice: true },
+    "pd.settings" => Tool {
+        width: Some(Px(880)),
+        height: Some(620),
+        commands: &[
+            prefix(shell::settings::ALL, "settings_"),
+            prefix(shell::service::ALL, "service_"),
+            shell::service::open_login_items,
+            prefix(shell::setup::ALL, "setup_"),
+            prefix(shell::packs::ALL, "packs_"),
+            shell::channels::channels_get,
+            shell::channels::channels_save,
+            shell::channels::channels_clear_secret,
+            shell::channels::channels_test,
+            prefix(shell::storage::ALL, "storage_"),
+            shell::mcp::mcp_get,
+            shell::mcp::mcp_save,
+            shell::mcp::mcp_revoke_key,
+            shell::mcp::mcp_audit,
+            shell::mcp::mcp_audit_clear,
+            shell::dialogs::dialog_open,
+            shell::startup::app_relaunch,
+        ],
+    },
+}
+
 fn demo_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../ui/projects/shell-demo")
 }
@@ -55,7 +91,7 @@ fn section(id: &str, title: &str) -> Arc<SettingsSection> {
 fn demo_shell() -> Builder<MockRuntime> {
     Builder::new(AppIdentity::new("shell-demo", "Paddock demo", "0.0.0"))
         .app_commands(&DEMO_COMMANDS)
-        .dialog_contracts(read("dialog-contracts.json"))
+        .dialogs(&[&DEMO_DIALOGS])
         .health(vec![
             ServiceSpec::new("sd.engine", "the demo engine"),
             ServiceSpec::new("sd.index", "the search index"),
@@ -83,8 +119,8 @@ fn a_drifted_demo_is_reported() {
     let renamed = manifest.replace("\"about_info\"", "\"about_infos\"");
     let p = demo_shell().problems(Some(&renamed));
     assert!(p.iter().any(|x| x.contains("about_infos")), "{p:?}");
-    let bad = demo_shell().dialog_contracts("{").problems(None);
-    assert!(bad[0].contains("not valid"), "{bad:?}");
+    let bad = demo_shell().dialogs(&[&DEMO_DIALOGS]).problems(None);
+    assert!(bad[0].contains("do not fit together"), "{bad:?}");
     assert_eq!(
         demo_shell().service_ids(),
         ["sd.engine", "sd.index", "sd.agent"]

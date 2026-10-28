@@ -472,7 +472,10 @@ test.describe('notifications and service health (plan S4)', () => {
 // Dialogs as windows (plan S6, ADR 0009). The browser build opens a dialog window's route by URL, so every dialog of the
 // contract file (generated from the registry, not a hand-kept list) boots with only its window's providers and is checked
 // per kind; the main window shows the same dialogs in the page.
-const CONTRACTS = dialogContracts('projects/shell-demo/dialog-contracts.json');
+const CONTRACTS = dialogContracts(
+  'projects/shell-demo/src/app/generated/dialog-contracts.ts',
+  ...['about', 'channels', 'diagnostics', 'mcp', 'setup', 'storage'].map((p) => `projects/paddock-ui/shell/${p}/generated/dialog-contracts.ts`),
+);
 
 test.describe('dialogs (plan S6)', () => {
   test('the contract file has every kind', () => {
@@ -518,9 +521,9 @@ test.describe('dialogs (plan S6)', () => {
     });
   }
 
-  test('a viewer opens at 680x560 with the shell’s Close in view; axe finds nothing in a dialog window', async ({ app, page }) => {
-    expect(CONTRACTS['sd.about']?.minSize).toEqual({ width: 680, height: 560 });
-    await page.setViewportSize({ width: 680, height: 560 });
+  test('a viewer opens at 720x560 with the shell’s Close in view; axe finds nothing in a dialog window', async ({ app, page }) => {
+    expect([CONTRACTS['sd.about']?.width, CONTRACTS['sd.about']?.height]).toEqual([720, 560]);
+    await page.setViewportSize({ width: 720, height: 560 });
     await app.dialogs.openWindow('sd.about');
     const close = app.dialogs.shellClose;
     await expect(close).toHaveText('Close');

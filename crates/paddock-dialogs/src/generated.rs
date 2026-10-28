@@ -21,8 +21,6 @@ fn text() -> String {
         crate::Kind::decl(),
         crate::Modality::decl(),
         crate::Size::decl(),
-        crate::Contract::decl(),
-        crate::ContractFile::decl(),
         crate::Remembered::decl(),
         crate::DialogRequest::decl(),
         crate::DialogInfo::decl(),
@@ -57,6 +55,22 @@ export const DIALOG_BASE_COMMANDS = [{base}] as const;
         crate::CLOSED_EVENT,
         crate::CLOSE_REQUESTED_EVENT,
     )
+}
+
+/// The kind table every app shares (ADR 0026 §3).
+fn kinds_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../ui/projects/paddock-ui/shell/generated/dialog-kinds.ts")
+}
+
+#[test]
+fn generated_kind_table_is_current() {
+    let synced = testing::sync_generated(
+        &kinds_path(),
+        &crate::ts::kinds_module(REGENERATE),
+        WriteMode::from_env(),
+    );
+    synced.unwrap_or_else(|e| panic!("{e}"));
 }
 
 #[test]

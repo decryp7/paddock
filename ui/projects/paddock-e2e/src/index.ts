@@ -54,6 +54,7 @@ export {
   ShellDialogs,
   ShellSettings,
   dialogContracts,
+  parseDialogContractsModule,
   dialogWindowUrl,
   DIALOG_RESULT_KEY,
   CLOSE_NAMES,

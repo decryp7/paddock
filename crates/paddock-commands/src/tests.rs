@@ -802,14 +802,18 @@ fn a_sync_command_fails_the_async_check() {
         "#[tauri::command]\npub async fn save_session() {}",
     )
     .unwrap();
-    crate::command_table! {
-        static FIXED;
-        Mutation [WINDOW] => open_paths,
-        Quiet [MAIN] => save_session,
-    }
-    testing::assert_async(&FIXED, &[&src]);
+    // A block of its own: each leaf table emits a `dialog_callable` module, one per scope.
+    let fixed: &crate::Table = {
+        crate::command_table! {
+            static FIXED;
+            Mutation [WINDOW] => open_paths,
+            Quiet [MAIN] => save_session,
+        }
+        &FIXED
+    };
+    testing::assert_async(fixed, &[&src]);
     assert!(
-        std::panic::catch_unwind(|| testing::assert_async(&FIXED, &[&dir.path().join("missing")]))
+        std::panic::catch_unwind(|| testing::assert_async(fixed, &[&dir.path().join("missing")]))
             .is_err()
     );
 }
@@ -843,13 +847,17 @@ fn commands_are_found_with_their_line() {
     );
 }
 
-crate::command_table! {
-    /// A table with commands for the tray popover.
-    static TRAY_COMMANDS;
-    Query [WINDOW] => status,
-    Mutation [WINDOW | TRAY] => window_focus,
-    Quiet [TRAY] => tray_fit_height,
+// Each leaf table emits its own `dialog_callable` module: one table per module.
+mod tray_table {
+    crate::command_table! {
+        /// A table with commands for the tray popover.
+        pub(super) static TRAY_COMMANDS;
+        Query [WINDOW] => status,
+        Mutation [WINDOW | TRAY] => window_focus,
+        Quiet [TRAY] => tray_fit_height,
+    }
 }
+use tray_table::TRAY_COMMANDS;
 
 #[test]
 fn a_tray_popover_calls_only_the_commands_that_name_its_class() {
@@ -872,16 +880,22 @@ fn a_tray_popover_calls_only_the_commands_that_name_its_class() {
     );
 }
 
-crate::command_table! {
-    static PART_A;
-    Query [WINDOW] => a::first,
-    Mutation [MAIN] limit 2 * crate::MIB => a::second,
+mod part_a {
+    crate::command_table! {
+        pub(super) static PART_A;
+        Query [WINDOW] => a::first,
+        Mutation [MAIN] limit 2 * crate::MIB => a::second,
+    }
 }
+use part_a::PART_A;
 
-crate::command_table! {
-    static PART_B;
-    Quiet [TRAY] => b::third,
+mod part_b {
+    crate::command_table! {
+        pub(super) static PART_B;
+        Quiet [TRAY] => b::third,
+    }
 }
+use part_b::PART_B;
 
 crate::command_table! {
     /// Both parts.
@@ -1005,4 +1019,44 @@ fn foreign_errors_convert_at_the_edge() {
     assert_eq!((e.code, e.retryable), (ErrorCode::Limit, false));
     let refused = run("dialog_close", "main", None, 0).unwrap_err();
     assert_eq!(CommandError::from(refused).code, ErrorCode::Denied);
+}
+
+mod marked {
+    crate::command_table! {
+        pub(super) static MARKED;
+        Query [MAIN | DIALOG] => app::app_status,
+        Query [WINDOW] => app::app_legal,
+        Mutation [MAIN] => app::app_quit,
+        Quiet [TRAY | DIALOG] => app::tray_fit,
+        Quiet [POPOUT] => app::popout_only,
+    }
+}
+
+#[test]
+fn a_leaf_table_marks_exactly_the_commands_open_to_dialogs() {
+    use crate::{DialogCallable, plugin, prefix};
+    assert_eq!(marked::MARKED.specs().len(), 5);
+    assert_eq!(
+        marked::dialog_callable::ALL,
+        ["app_status", "app_legal", "tray_fit"]
+    );
+    assert_eq!(
+        marked::dialog_callable::app_legal,
+        DialogCallable::Command("app_legal")
+    );
+    assert_eq!(marked::dialog_callable::tray_fit.wire(), "tray_fit");
+    assert_eq!(prefix(marked::dialog_callable::ALL, "app_").wire(), "app_*");
+    assert_eq!(plugin("dialog", "open").wire(), "plugin:dialog|open");
+    for (prefix_text, why) in [
+        ("", "empty"),
+        ("Bad", "not snake"),
+        ("zzz_", "matches nothing"),
+    ] {
+        let r = std::panic::catch_unwind(|| prefix(marked::dialog_callable::ALL, prefix_text));
+        assert!(r.is_err(), "{why}");
+    }
+    assert!(std::panic::catch_unwind(|| plugin("", "open")).is_err());
+    // A prefix matches a name only from its start, and never one shorter than itself.
+    assert!(std::panic::catch_unwind(|| prefix(&["ab"], "abc")).is_err());
+    assert!(std::panic::catch_unwind(|| prefix(&["xab"], "ab")).is_err());
 }

@@ -107,10 +107,12 @@ impl Dialogs {
         }
     }
 
-    /// Dialogs from the app's contract file; a file that does not parse is a build defect, so it is logged by the
-    /// caller and the app runs with no dialogs rather than with unchecked ones.
-    pub fn from_json(json: &str) -> Result<Self, crate::contract::ContractError> {
-        Contracts::parse(json).map(|c| Self::new(Arc::new(c)))
+    /// Dialogs governed by the owners' static tables (the shell's, a feature's, the app's): two tables declaring one id
+    /// is a build defect, reported to the caller.
+    pub fn from_tables(
+        tables: &[&crate::DialogTable],
+    ) -> Result<Self, crate::contract::ContractError> {
+        Contracts::from_tables(tables).map(|c| Self::new(Arc::new(c)))
     }
 
     /// The contracts.
@@ -254,16 +256,15 @@ mod tests {
     use super::*;
     use paddock_commands::DialogGrant;
 
+    crate::dialogs! {
+        static TABLE;
+        "settings" => Tool { commands: &[paddock_commands::DialogCallable::Command("settings_set")] },
+        "close-prompt" => Decision { required_choice: true },
+        "ask" => Decision,
+    }
+
     fn contracts() -> Arc<Contracts> {
-        Arc::new(
-            Contracts::parse(
-                r#"{ "version": 1, "dialogs": {
-                    "settings": { "kind": "tool", "modality": "modeless", "commands": ["settings_set"] },
-                    "close-prompt": { "kind": "decision", "modality": "modal", "requiredChoice": true },
-                    "ask": { "kind": "decision", "modality": "modal" } } }"#,
-            )
-            .unwrap(),
-        )
+        Arc::new(Contracts::from_tables(&[&TABLE]).unwrap())
     }
 
     fn entry(d: &Dialogs, host: &str, parent: &str, id: &str) -> OpenDialog {
@@ -417,9 +418,12 @@ mod tests {
     }
 
     #[test]
-    fn a_contract_file_builds_the_dialogs_or_says_why_not() {
-        let d = Dialogs::from_json(r#"{ "version": 1, "dialogs": {} }"#).unwrap();
-        assert_eq!(d.contracts().ids().count(), 0);
-        assert!(Dialogs::from_json("{").is_err());
+    fn static_tables_build_the_dialogs_or_say_why_not() {
+        let d = Dialogs::from_tables(&[&TABLE]).unwrap();
+        assert_eq!(d.contracts().ids().count(), 3);
+        assert!(
+            Dialogs::from_tables(&[&TABLE, &TABLE]).is_err(),
+            "one id declared twice"
+        );
     }
 }

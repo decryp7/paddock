@@ -192,11 +192,14 @@ fn the_permission_sets_open_each_command_to_exactly_the_classes_of_the_table() {
 
 #[test]
 fn a_dialog_reaches_only_what_its_contract_declares() {
-    let contracts = r#"{"version":1,"base":[],"dialogs":{"sd.settings":{"kind":"tool","modality":"modeless","requiredChoice":false,"instanced":false,"commands":["settings_overview"]}}}"#;
+    paddock_dialogs::dialogs! {
+        static SETTINGS;
+        "sd.settings" => Tool { commands: &[paddock_shell::dialog_commands::settings::settings_overview] },
+    }
     let app = app(Builder::new(identity())
         .in_memory()
         .native_menu(false)
-        .dialog_contracts(contracts));
+        .dialogs(&[&SETTINGS]));
     // The dialog layer does not know this window: the ACL lets the dialog set through, the guard refuses.
     let unknown = window(&app, "d-main-1");
     let e = invoke(&unknown, "settings_overview", json!({})).unwrap_err();
@@ -394,7 +397,7 @@ fn a_part_that_fails_to_set_up_stops_the_start_with_its_name() {
             .plugin(b.in_memory().native_menu(false).build())
             .build(context())
     };
-    let bad_contracts = built(Builder::new(identity()).dialog_contracts("{"));
+    let bad_contracts = built(Builder::new(identity()).dialogs(&[&paddock_channels::DIALOGS]));
     assert!(bad_contracts.is_err());
     let no_service =
         built(Builder::new(identity()).service(|_| Err("the agent is missing".into())));

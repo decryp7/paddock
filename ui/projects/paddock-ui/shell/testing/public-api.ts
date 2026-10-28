@@ -19,6 +19,7 @@ export {
   type CommandTable,
 } from './src/dialog-harness';
 export { FakeDialogIo } from './src/fake-dialog-io';
+export { fakeDialogContract, type FakeContractSpec } from './src/fake-contract';
 export { recordIpc, ANY_ANSWER, type IpcRecorder } from './src/ipc-recorder';
 export {
   provideShellTesting,

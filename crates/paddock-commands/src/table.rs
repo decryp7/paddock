@@ -184,6 +184,116 @@ const fn last_segment(path: &'static str) -> &'static str {
     path.split_at(start).1
 }
 
+/// A command a dialog contract may name (ADR 0026 §3). [`command_table!`](crate::command_table) emits one marker per
+/// command open to dialogs (`dialog_callable::<name>`, a [`DialogCallable::Command`]); a contract names the marker, so a
+/// misspelt command, a removed one or one closed to dialogs is an unresolved name: a compile error that names it.
+/// [`prefix`] and [`plugin`] build the two other forms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DialogCallable {
+    /// One command of a table, open to dialogs.
+    Command(&'static str),
+    /// Every command of a table whose name starts with this (`settings_*`); at least one is open to dialogs.
+    Prefix(&'static str),
+    /// A Tauri plugin's command (`plugin:<plugin>|<command>`): scoped by the plugin's own permissions, checked against
+    /// the plugin's permission list by a unit test in the owner.
+    Plugin {
+        plugin: &'static str,
+        command: &'static str,
+    },
+}
+
+impl DialogCallable {
+    /// The entry as the run-time contract lists it: the command, `prefix*`, or `plugin:<plugin>|<command>`.
+    pub fn wire(&self) -> String {
+        match self {
+            DialogCallable::Command(c) => (*c).to_string(),
+            DialogCallable::Prefix(p) => format!("{p}*"),
+            DialogCallable::Plugin { plugin, command } => format!("plugin:{plugin}|{command}"),
+        }
+    }
+}
+
+/// A `prefix*` entry over `callable` (a table's `dialog_callable::ALL`). Evaluated at compile time in a contract table: a
+/// prefix that is not `lower_snake_case` or that matches no dialog-callable command fails the build.
+pub const fn prefix(callable: &[&str], prefix: &'static str) -> DialogCallable {
+    let p = prefix.as_bytes();
+    assert!(
+        !p.is_empty() && p.len() < MAX_NAME_LEN,
+        "dialog contract: a prefix* entry is empty or too long"
+    );
+    let mut i = 0;
+    while i < p.len() {
+        assert!(
+            p[i].is_ascii_lowercase() || p[i].is_ascii_digit() || p[i] == b'_',
+            "dialog contract: a prefix* entry is not lower_snake_case"
+        );
+        i += 1;
+    }
+    let mut k = 0;
+    while k < callable.len() {
+        if starts_with(callable[k], prefix) {
+            return DialogCallable::Prefix(prefix);
+        }
+        k += 1;
+    }
+    panic!("dialog contract: a prefix* entry matches no dialog-callable command")
+}
+
+/// A plugin command entry (`plugin("dialog", "open")`): not resolvable at compile time; the owner's unit test checks it
+/// against the plugin's generated permission list.
+pub const fn plugin(plugin: &'static str, command: &'static str) -> DialogCallable {
+    assert!(
+        !plugin.is_empty() && !command.is_empty(),
+        "dialog contract: a plugin command needs a plugin and a command"
+    );
+    DialogCallable::Plugin { plugin, command }
+}
+
+const fn starts_with(name: &str, prefix: &str) -> bool {
+    let (n, p) = (name.as_bytes(), prefix.as_bytes());
+    if p.len() > n.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < p.len() {
+        if n[i] != p[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// How many of `specs` are open to dialogs (used by [`command_table!`](crate::command_table) for `dialog_callable::ALL`).
+#[doc(hidden)]
+pub const fn dialog_count(specs: &[Spec]) -> usize {
+    let mut n = 0;
+    let mut i = 0;
+    while i < specs.len() {
+        if specs[i].windows.0 & Windows::DIALOG.0 != 0 {
+            n += 1;
+        }
+        i += 1;
+    }
+    n
+}
+
+/// The names of `specs` open to dialogs, in table order. `N` must be [`dialog_count`]`(specs)`.
+#[doc(hidden)]
+pub const fn dialog_names<const N: usize>(specs: &[Spec]) -> [&'static str; N] {
+    let mut out = [""; N];
+    let mut k = 0;
+    let mut i = 0;
+    while i < specs.len() {
+        if specs[i].windows.0 & Windows::DIALOG.0 != 0 {
+            out[k] = specs[i].name;
+            k += 1;
+        }
+        i += 1;
+    }
+    out
+}
+
 /// What is wrong with a table: the entry at `index` (and, for a duplicate, the earlier entry `first`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TableError {

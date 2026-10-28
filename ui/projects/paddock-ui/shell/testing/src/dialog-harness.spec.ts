@@ -1,3 +1,4 @@
+import { fakeDialogContract } from './fake-contract';
 import { ChangeDetectionStrategy, Component, inject, Injectable } from '@angular/core';
 import { defineDialog, msg, type DialogDef } from '@decryp7/paddock-ui/shell';
 import { DIALOG_REF } from '@decryp7/paddock-ui/shell/dialogs';
@@ -51,15 +52,7 @@ class LogsContent {
 }
 
 const dialog = (id: string, kind: DialogDef['kind'], load: () => Promise<unknown>, extra: Partial<DialogDef> = {}): DialogDef =>
-  defineDialog({
-    id,
-    kind,
-    modality: kind === 'form' ? 'modal' : undefined,
-    title: msg(`t.${id}`, id),
-    commands: ['app_status'],
-    load: load as DialogDef['load'],
-    ...extra,
-  }) as DialogDef;
+  defineDialog(fakeDialogContract({ ...extra, id, kind, modality: kind === 'form' ? 'modal' : undefined, commands: ['app_status'] }), { ...extra, title: msg(`t.${id}`, id), load: load as DialogDef['load'] }) as DialogDef;
 
 const OK = dialog('t.ok', 'decision', () => Promise.resolve(OkContent), { width: 400 });
 const OK_TOOL = dialog('t.tool', 'tool', () => Promise.resolve(OkContent));

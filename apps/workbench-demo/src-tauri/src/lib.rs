@@ -12,6 +12,7 @@
 
 pub mod assistant;
 pub mod commands;
+pub mod dialogs;
 pub mod engine;
 
 use paddock_env::{AppDirs, AppId, MapVars, Os};
@@ -97,10 +98,6 @@ pub fn link(place: &Place) -> Result<Arc<Link>, BoxError> {
     )))
 }
 
-/// The demo's generated dialog contracts (the dock's layout dialogs), written by the UI's spec from its registry.
-pub const DIALOG_CONTRACTS: &str =
-    include_str!("../../../../ui/projects/workbench-demo/dialog-contracts.json");
-
 /// The shell plugin with the demo's parts: the identity, the window layer and the app's own state (the sample job, the
 /// Pitwall link whose changes every window hears).
 pub fn shell<R: Runtime>(place: &Place, link: Arc<Link>) -> Builder<R> {
@@ -112,7 +109,7 @@ pub fn shell<R: Runtime>(place: &Place, link: Arc<Link>) -> Builder<R> {
     };
     let builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))
         .app_commands(&COMMANDS)
-        .dialog_contracts(DIALOG_CONTRACTS)
+        .dialogs(&[&dialogs::DIALOGS, &paddock_workbench::DIALOGS])
         .windows(move |app| windows(app, installed))
         .setup(move |app| {
             app.manage(engine::Engine::new(tick));

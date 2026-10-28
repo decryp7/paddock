@@ -4,6 +4,29 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shared dialog API, part 1: contracts in Rust (ADR 0026 §1, §3; package 1.1a)
+- **Breaking.** Dialog contracts are Rust tables: `paddock_dialogs::dialogs!` (a `Shape` for kind and modality, the width
+  steps `Narrow` 400 / `Medium` 560 / `Wide` 720, a tool's `Px(n)`, a viewer's or tool's preferred `height`, `instanced`,
+  `required_choice`, `commands`). `command_table!` emits a `dialog_callable` module beside each leaf table (one leaf table per
+  module) with a marker per command open to dialogs and `ALL`; `paddock_commands::prefix` and `plugin` build the other entries.
+  A misspelt or closed command, a prefix matching nothing, a modal viewer or a required choice that is not modal does not compile.
+- **Breaking.** `Contracts::parse`, `ContractFile`, `Dialogs::from_json` and `paddock_shell::Builder::dialog_contracts` are gone:
+  `Contracts::from_tables`, `Dialogs::from_tables` and `Builder::dialogs(&[&app::DIALOGS])`; the shell registers its own tables
+  (`paddock_shell::SHELL_DIALOGS`: channels, MCP, storage, diagnostics, updater, set-up) and the workbench has
+  `paddock_workbench::DIALOGS`. `paddock_shell::dialog_commands` re-exports every shell crate's markers for an app's table.
+- **Breaking.** `defineDialog(contract, ui)`: the contract is the generated `DIALOG_CONTRACTS['<id>']` of the owner
+  (`generated/dialog-contracts.ts`), the second argument the title, result, providers and loader. `DialogSpec`, `minWidth`/`minHeight`,
+  `dialogMinSize`, `KIND_POLICY`, `FALLBACK_WIDTH`, `dialogContract`, `dialogContractFile`, `serializeDialogContracts` and the
+  JSON contract files are gone; `DialogRequest` carries no sizes (Rust takes them from the contract). The kind table is generated
+  (`DIALOG_KIND_TABLE`, `DIALOG_WIDTH_STEPS`; `fitsContent` and the new `growsOnly` read it), so TypeScript and Rust agree on
+  which kinds are fitted. `fakeDialogContract` (`shell/testing`) makes contracts for specs.
+- `pd.report-problem` is a modeless form, 720 wide; the shared decisions and forms take the width steps (400 or 560).
+- The manifest's dialogs carry `width` and `height` instead of `minSize`.
+- `@decryp7/paddock-e2e`: `dialogContracts(...paths)` and `axeEveryDialog(page, paths)` read generated `dialog-contracts.ts` files
+  (`parseDialogContractsModule`); conformance C33 reads an app's generated file (or the legacy JSON until Debrief moves).
+- The package bin `paddock-check-dialog-commands` and `npm run check:dialogs` are deleted (ADR 0026 §3: the compiler checks
+  that a command exists and is open to dialogs; the invoke-layer recorder of package 1.2b replaces the rest).
+
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,
   Chromium e2e in two shards, WebKit e2e) and releases through the shared `app-release.yml` from a thin `dyno-release.yml` (nightly

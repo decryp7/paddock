@@ -50,7 +50,7 @@ describe('the layout dialogs are declared as ADR 0009 asks', () => {
     expect([MANAGE.id, MANAGE.kind, MANAGE.modality, MANAGE.commands]).toEqual([LAYOUT_MANAGE_DIALOG_ID, 'tool', 'modeless', ['layout_get', 'layout_set']]);
     expect(LAYOUT_SAVE_DIALOG_ID).toBe('pd.wb.dock.layout-save');
     expect(LAYOUT_MANAGE_DIALOG_ID).toBe('pd.wb.dock.layout-manage');
-    expect(MANAGE.minWidth).toBeLessThanOrEqual(MANAGE.width ?? 0);
+    expect([SAVE.width, MANAGE.width, MANAGE.height]).toEqual([400, 480, 360]);
   });
 
   it('boots in the shell harness: providers, a body, a visible Cancel/Close, Escape, only declared commands', async () => {

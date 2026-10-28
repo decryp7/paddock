@@ -1,7 +1,7 @@
 //! The Tauri adapter of `paddock-dialogs` (built with the `tauri` feature): dialogs as real OS windows (rule 17),
 //! created by kind, placed on the parent's monitor and owned by the window that opened them.
 //!
-//! Set up: manage a [`Dialogs`] (from the app's contract file), list the four commands in the command table, hand
+//! Set up: manage a [`Dialogs`] (from the owners' contract tables, ADR 0026 §3), list the four commands in the command table, hand
 //! [`grant_of`] to the guard of `paddock-commands` and forward window events to [`on_window_event`]:
 //!
 //! ```ignore
@@ -13,7 +13,7 @@
 //!     Quiet [DIALOG] => paddock_dialogs::tauri::dialog_fit_height,
 //! }
 //! tauri::Builder::default()
-//!     .manage(paddock_dialogs::Dialogs::from_json(include_str!("../dialog-contracts.json"))?)
+//!     .manage(paddock_dialogs::Dialogs::from_tables(&[&app::DIALOGS])?)
 //!     .invoke_handler(Guard::new(&COMMANDS).dialog_grants(paddock_dialogs::tauri::grant_of).wrap(handler!()))
 //!     .on_window_event(|w, e| paddock_dialogs::tauri::on_window_event(w, e))
 //! ```
@@ -248,11 +248,11 @@ fn open_on<R: Runtime>(
     entry.title = title.clone();
     entry.input = request.input.clone();
     let label = dialogs.reserve(entry)?;
-    let (w, h, min_w, min_h) = geometry(&request, &contract);
+    let (w, h, min_w, min_h) = geometry(&contract);
     // The placement policy: on the parent's monitor, sized by the kind's rule.
     let parent_os = parent.as_ref().window();
     let monitor = monitor_of_window(&parent_os);
-    let fitted = is_fitted(&request, contract.kind);
+    let fitted = is_fitted(contract.kind);
     let remembered = placement::memory_for(contract.kind, fitted, request.remembered, h);
     let place = placement::place(
         outer_rect(&parent_os),

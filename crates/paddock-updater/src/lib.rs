@@ -79,6 +79,22 @@ paddock_commands::command_table! {
     Mutation [MAIN] => tauri::about_whats_new_start,
 }
 
+paddock_dialogs::dialogs! {
+    /// About, What's new and Updates (ADR 0026 §3).
+    pub static DIALOGS;
+    "pd.about" => Viewer { commands: &[dialog_callable::about_info, dialog_callable::about_legal] },
+    "pd.whats-new" => Viewer { commands: &[dialog_callable::about_whats_new] },
+    "pd.updates" => Tool { width: Some(Px(560)), height: Some(480), commands: &[
+        dialog_callable::updates_status,
+        dialog_callable::updates_check,
+        dialog_callable::updates_download,
+        dialog_callable::updates_cancel,
+        dialog_callable::updates_install_on_quit,
+        dialog_callable::updates_restart,
+        dialog_callable::updates_set_preferences,
+    ] },
+}
+
 #[cfg(feature = "tauri")]
 pub mod tauri;
 

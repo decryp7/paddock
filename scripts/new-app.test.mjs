@@ -107,7 +107,8 @@ describe('a new app', () => {
     assert.equal(conf.identifier, 'net.decryptology.pacenotes');
     assert.equal(conf.build.frontendDist, '../dist/app/browser');
     assert.match(read('app/src-tauri/src/lib.rs'), /pub const APP_ID: &str = "pacenotes";/);
-    assert.match(read('app/src-tauri/src/lib.rs'), /include_str!\("\.\.\/\.\.\/dialog-contracts\.json"\)/);
+    assert.match(read('app/src-tauri/src/lib.rs'), /\.dialogs\(&\[&dialogs::DIALOGS\]\)/);
+    assert.match(read('app/src/app/generated/dialog-contracts.ts'), /cd app\/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app/);
     assert.match(read('app/src/app/demo-name.ts'), /APP_NAME = 'Pacenotes'/);
     assert.ok(existsSync(join(dest, 'app/src-tauri/icons/tray/pacenotes-tray-18ptTemplate@2x.png')));
     assert.ok(!readdirSync(join(dest, 'app/src-tauri/icons/tray')).some((f) => f.startsWith('shell-demo')));

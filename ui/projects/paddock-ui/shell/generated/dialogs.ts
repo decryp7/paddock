@@ -6,38 +6,6 @@ export type DialogModality = "modal" | "modeless";
 
 export type DialogSize = { width: number, height: number, };
 
-export type DialogContract = { kind: DialogKind, modality: DialogModality, 
-/**
- * A modal without a Cancel: Escape and a close request leave it open.
- */
-requiredChoice?: boolean, 
-/**
- * One window per distinct input (the request names an instance key).
- */
-instanced?: boolean, 
-/**
- * The smallest window of the dialog; the kind's floor applies when it is smaller or absent.
- */
-minSize?: DialogSize, 
-/**
- * The commands its window may call beyond the base ones; a trailing `*` is a prefix.
- */
-commands?: Array<string>, };
-
-export type DialogContractFile = { 
-/**
- * Always 1.
- */
-version: number, 
-/**
- * The app's commands every dialog window may call (besides [`BASE_COMMANDS`]).
- */
-base?: Array<string>, 
-/**
- * Every dialog by id.
- */
-dialogs: { [key in string]?: DialogContract }, };
-
 export type DialogRemembered = { dx: number, dy: number, width: number, height: number, };
 
 export type DialogRequest = { dialogId: string, 
@@ -48,11 +16,7 @@ instance?: string, title: string,
 /**
  * The typed input of the dialog, handed to its webview through `dialog_take_input`.
  */
-input?: unknown, width?: number, 
-/**
- * None: the window is fitted to its content (a fitted form or decision).
- */
-height?: number, minWidth?: number, minHeight?: number, 
+input?: unknown, 
 /**
  * What the UI remembered of this dialog: its size and its offset from the parent window (never an absolute
  * screen position). The shell decides where it goes ([`placement::place`]).

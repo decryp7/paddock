@@ -1,25 +1,15 @@
-import { dialogContractFile, serializeDialogContracts } from '@decryp7/paddock-ui/shell/dialogs';
 import { DEMO_DIALOGS } from '../../../../shell-demo/src/app/demo.contributions';
 import { DIALOG_BASE_COMMANDS, dialogBaseProviders } from '../../../../shell-demo/src/app/dialog-base';
 import { APP_COMMANDS } from '../../../../shell-demo/src/app/generated/app-commands';
+import { DIALOG_BASE } from '../../../../shell-demo/src/app/generated/dialog-contracts';
 import { assertDialogBoots, dialogTableProblems } from './dialog-harness';
 import { SHELL_COMMANDS, type DialogDef } from '@decryp7/paddock-ui/shell';
 import { CHANNELS_COMMANDS } from '@decryp7/paddock-ui/shell/channels';
 import { MCP_COMMANDS } from '@decryp7/paddock-ui/shell/mcp';
 
-// The shell demo's dialogs (one per kind) through the boot-every-dialog harness, its contract file and its command table:
-// what every app runs over its own registry (ADR 0009 §4).
+// The shell demo's dialogs (one per kind) through the boot-every-dialog harness and its command table: what every app runs
+// over its own registry (ADR 0009 §4). The contracts are Rust's (ADR 0026 §3): the registry reads the generated ones.
 const DIALOGS = DEMO_DIALOGS as readonly DialogDef[];
-/** Rust's copy of the registry, as an app keeps it next to `tauri.conf.json`. */
-const FILE = 'projects/shell-demo/dialog-contracts.json';
-
-/** Node's `fs`, loaded at run time (the spec programme has no Node types). */
-interface NodeFs {
-  readFileSync(path: string, encoding: 'utf8'): string;
-  writeFileSync(path: string, data: string): void;
-}
-const nodeFs = (): Promise<NodeFs> => import(/* @vite-ignore */ ['node', 'fs'].join(':')) as Promise<NodeFs>;
-const env = (name: string): string | undefined => (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env[name];
 
 describe('shell-demo dialogs', () => {
   it('has one of each kind, a modal form and a required choice', () => {
@@ -50,11 +40,7 @@ describe('shell-demo dialogs', () => {
     expect(dialogTableProblems(DIALOGS, { ...APP_COMMANDS, ...SHELL_COMMANDS, ...CHANNELS_COMMANDS, ...MCP_COMMANDS }, DIALOG_BASE_COMMANDS)).toEqual([]);
   });
 
-  // Regenerate with PADDOCK_WRITE_CONTRACTS=1 npx ng test paddock-ui --watch=false --include=**/reference-dialogs.spec.ts
-  it('keeps dialog-contracts.json equal to the registry', async () => {
-    const fs = await nodeFs();
-    const want = serializeDialogContracts(dialogContractFile(DIALOGS, { base: DIALOG_BASE_COMMANDS }));
-    if (env('PADDOCK_WRITE_CONTRACTS') === '1') fs.writeFileSync(FILE, want);
-    expect(fs.readFileSync(FILE, 'utf8')).toBe(want);
+  it('takes the base commands from the Rust table', () => {
+    expect([...DIALOG_BASE]).toEqual([...DIALOG_BASE_COMMANDS].sort());
   });
 });

@@ -3,7 +3,7 @@ import { DIALOG_EVENTS, type DialogClosed, type DialogRequest, type DialogResult
 import { isRememberedPlace, loadDialogBounds, rememberDialogBounds } from './bounds';
 import { InPageDialogBackend } from './in-page';
 import { DIALOG_IO } from './io';
-import { raiseToKindMinimum, resolveSize } from './kind';
+import { raiseToKindMinimum } from './kind';
 import { errorText, isRecord } from './mount';
 import { DialogPresenter, type DialogSession, type DialogShowRequest } from './types';
 
@@ -19,19 +19,14 @@ export function parseClosed(p: unknown): DialogClosed | null {
   return { label: p['label'], dialogId: p['dialogId'], remembered: isRememberedPlace(r) ? { dx: r.dx, dy: r.dy, width: r.width, height: r.height } : null };
 }
 
-/** What a dialog window is opened with: its id, title and input, the size its kind gives it, and what was remembered. */
+/** What a dialog window is opened with: its id, title and input, and what was remembered. Its size is the Rust contract's. */
 export function windowRequest(request: DialogShowRequest, remembered = loadDialogBounds()[request.def.id]): DialogRequest {
   const def = request.def;
-  const size = resolveSize(def);
   return {
     dialogId: def.id,
     instance: request.instance,
     title: request.title,
     input: request.inputs,
-    width: size.width,
-    height: size.height,
-    minWidth: size.minWidth,
-    minHeight: size.minHeight,
     // Where it goes is Rust's decision (on the parent's monitor); the kind's floor applies to a remembered size.
     remembered: remembered ? raiseToKindMinimum(def.kind, remembered) : undefined,
   };

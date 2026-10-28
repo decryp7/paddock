@@ -1,3 +1,4 @@
+import { fakeDialogContract } from '@decryp7/paddock-ui/shell/testing';
 import { defineCommand, defineDialog, defineHealthService, defineKeybinding, defineMenuItem, defineNotificationKind, definePage, defineSettingsPage, defineStatusItem } from './define';
 import { isMessage, msg } from './message';
 import { type, type IpcCommandName } from './types';
@@ -19,13 +20,13 @@ describe('define*', () => {
     expect(Object.isFrozen(kind.actions)).toBe(true);
   });
 
-  it('resolves a dialog modality only where the kind decides', () => {
-    const base = { title: msg('sd.d', 'D'), commands: [], load, result: type<boolean>() };
-    expect(defineDialog({ ...base, id: 'sd.ask', kind: 'decision' }).modality).toBe('modal');
-    expect(defineDialog({ ...base, id: 'sd.view', kind: 'viewer' }).modality).toBe('modeless');
-    expect(defineDialog({ ...base, id: 'sd.form', kind: 'form', modality: 'modeless' }).modality).toBe('modeless');
-    expect(defineDialog({ ...base, id: 'sd.form2', kind: 'form' }).modality).toBeUndefined();
-    expect(defineDialog({ ...base, id: 'sd.bad', kind: 'nope' as 'form' }).modality).toBeUndefined();
+  it('takes a dialog from its Rust contract and adds only what TypeScript knows', () => {
+    const contract = fakeDialogContract({ id: 'sd.form', kind: 'form', modality: 'modeless', commands: ['a_x'] });
+    const ui = { title: msg('sd.d', 'D'), load, result: type<boolean>() };
+    const def = defineDialog(contract, ui);
+    expect(def).toEqual({ ...contract, ...ui, commands: ['a_x'] });
+    expect(Object.isFrozen(def) && Object.isFrozen(def.commands)).toBe(true);
+    expect(defineDialog(fakeDialogContract({ id: 'sd.ask', kind: 'decision' }), ui).modality).toBe('modal');
   });
 
   it("types dialog commands as the app's names plus the shell plugin's", () => {

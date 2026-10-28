@@ -406,7 +406,7 @@ describe('the Report a Problem dialog', () => {
 describe('the contributions', () => {
   it('are valid, open the dialog from Help, and name only commands the dialog may call', async () => {
     const dialog = defineDiagnosticsDialog({ providers: () => Promise.resolve([]) });
-    expect(dialog).toMatchObject({ id: DIAGNOSTICS_DIALOG_ID, kind: 'decision', modality: 'modal' });
+    expect(dialog).toMatchObject({ id: DIAGNOSTICS_DIALOG_ID, kind: 'form', modality: 'modeless', width: 720 });
     expect(dialog.commands).toEqual([...DIAGNOSTICS_DIALOG_COMMANDS]);
     const batch = diagnosticsContributions([dialog]);
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideContributions(batch)] });
