@@ -4,6 +4,15 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shared dialog API, round 2 of the reviews (frame)
+
+- A refused answer's alert is measured with its margins, so the refitted window keeps the body's bottom padding and does
+  not scroll (e2e: body `scrollHeight <= clientHeight` in the rejected state).
+- `layoutActions` returns the decision's `tone`: `danger` (and Cancel focused) only when a destructive answer is the sole
+  affirmative; a primary beside a destructive (the save prompt) is `info` and focuses the primary.
+- Busy: the pressed button keeps its full colour with its spinner and may say `busyLabel` ("Creating…"); the inert body
+  dims. Rejected: the alert has an error icon and no border; Try again shows its focus ring after the script moved focus.
+
 ### Shared dialog API: About opens its releases page in the system browser
 
 - `pd.about` may call `files_open_url` (`paddock-updater` depends on `paddock-files` for the marker): the releases link asks
