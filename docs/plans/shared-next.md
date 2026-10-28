@@ -834,7 +834,7 @@ cargo-chef, rust-cache, MinIO sccache; Nx/Turborepo decided in the monorepo ADR.
 ## Service update smoke in a throwaway macOS VM (user, 2026-10-25)
 
 C21 (install shell demo N, register its agent, install N+1, check the agent runs N+1) runs in a fresh macOS VM on the
-Mac mini (Tart or similar), created per run and deleted afterwards; manual or nightly, not per push. Never on the
+Mac mini (Tart or similar), created per run and deleted afterwards; run locally on the Mac mini, never in CI (decided 2026-10-28: no VMs in CI) and not per push. Never on the
 user's session or the shared runner (rule 7). The script stays guarded by `PADDOCK_DISPOSABLE_MAC=1`, which only the
 VM sets.
 
@@ -844,3 +844,9 @@ All 9 overview images approved (docs/images/REVIEW.md, REVIEWED.md); C24 is bloc
 diagram-kit recommendation (one meaning per line style: solid = works today, dashed = later/optional, dotted 2 3 with
 ≥3:1 contrast = OS-process boundary, external = neutral dashed node, planned = solid outline + pill) go into
 diagrams/STYLE.md and the next redraw.
+
+## Page-footer safe area follow-up (shell-gaps, 2026-10-28)
+
+`--pd-page-footer-safe` is a fixed 56 px today (the toast host cannot know a page's footer). Next: the frame owns a declared
+footer region that publishes its measured height into `--pd-page-footer-safe` (default 0 without a footer), so toasts sit
+exactly above any footer.

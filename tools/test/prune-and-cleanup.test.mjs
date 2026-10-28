@@ -3,7 +3,7 @@ import { closeSync, existsSync, ftruncateSync, mkdirSync, openSync, symlinkSync,
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { calls, run, scratch, shim, write } from './helpers.mjs';
+import { TOOLS, calls, run, scratch, shim, write } from './helpers.mjs';
 
 const big = (root, path, kb) => {
   mkdirSync(join(root, path), { recursive: true });
@@ -106,4 +106,58 @@ test('host-cleanup: a bad id or prefix is refused before anything is removed; a 
   assert.equal(run('host-cleanup.sh', ['--id', 'x', '--temp-prefix', 'job-'], { bin, env }).status, 0);
   assert.ok(existsSync(join(tmp, 'keep-me')) && !existsSync(join(tmp, 'job-1')));
   assert.deepEqual(calls(bin), []);
+});
+
+// prune-ci-build-folder.sh: only a target-* folder directly in the runner's CI home is ever capped.
+import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+function ciPrune(dir, home, extra = []) {
+  const r = spawnSync('bash', [join(TOOLS, 'prune-ci-build-folder.sh'), dir, '1', ...extra], {
+    env: { PATH: '/usr/bin:/bin', HOME: home, PADDOCK_PRUNE_UNIT: 'kb' },
+    encoding: 'utf8',
+  });
+  return { status: r.status, out: r.stdout + r.stderr };
+}
+function ciHome() {
+  const home = realpathSync(scratch('paddock-prune-home-'));
+  mkdirSync(join(home, '.paddock-ci'), { recursive: true });
+  return home;
+}
+
+test('prune-ci: a target-* folder in the CI home is capped (incremental caches go, bundles with --drop-bundles)', () => {
+  const home = ciHome();
+  const dir = join(home, '.paddock-ci', 'target-app-app');
+  big(dir, 'debug/incremental', 3000);
+  big(dir, 'dist/bundle', 10);
+  const r = ciPrune(dir, home, ['--drop-bundles']);
+  assert.equal(r.status, 0, r.out);
+  assert.ok(!existsSync(join(dir, 'debug/incremental')), r.out);
+  assert.ok(!existsSync(join(dir, 'dist/bundle')));
+});
+
+test('prune-ci: anything else is left alone with a notice (unset, $HOME, /, outside the CI home, a symlink, not target-*, the CI home itself)', () => {
+  const home = ciHome();
+  const outside = realpathSync(scratch('paddock-prune-outside-'));
+  big(outside, 'target-x/debug/incremental', 3000);
+  const real = join(home, '.paddock-ci', 'target-real');
+  big(real, 'debug/incremental', 3000);
+  symlinkSync(real, join(home, '.paddock-ci', 'target-link'));
+  big(home, '.paddock-ci/notes/debug/incremental', 3000);
+  big(home, 'Documents/debug/incremental', 3000);
+  const cases = {
+    unset: ['', join(home, '.paddock-ci', 'target-real', 'debug/incremental/blob')],
+    home: [home, join(home, 'Documents/debug/incremental/blob')],
+    root: ['/', join(home, 'Documents/debug/incremental/blob')],
+    outside: [join(outside, 'target-x'), join(outside, 'target-x/debug/incremental/blob')],
+    symlink: [join(home, '.paddock-ci', 'target-link'), join(real, 'debug/incremental/blob')],
+    'not target-*': [join(home, '.paddock-ci', 'notes'), join(home, '.paddock-ci/notes/debug/incremental/blob')],
+    'the CI home': [join(home, '.paddock-ci'), join(real, 'debug/incremental/blob')],
+    'a dotted path out of it': [join(home, '.paddock-ci', 'target-real', '..', 'target-real', '..', '..', 'Documents'), join(home, 'Documents/debug/incremental/blob')],
+  };
+  for (const [name, [dir, canary]] of Object.entries(cases)) {
+    const r = ciPrune(dir, home);
+    assert.equal(r.status, 0, `${name}: ${r.out}`);
+    assert.ok(existsSync(canary), `${name} must not delete ${canary}`);
+    assert.match(r.out, /nothing to prune|leaving it alone/, name);
+  }
 });

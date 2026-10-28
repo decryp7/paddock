@@ -550,3 +550,28 @@ Debrief's background "Learning human names" ran the local model over up to 2,000
 8 GB on the Mac and made a Windows PC sluggish for the whole run, for a result that rules, a names pack and the logs' own
 metadata match or beat. **Rule:** work over many items never calls an LLM automatically or once per item; it uses
 deterministic rules, TOML packs and static embeddings, and an LLM only answers bounded requests the user starts (rule 46).
+
+## Rule 1 allows small releases alongside a large app (2026-10-28)
+Consolidating CI, Dyno 1.0.0 and Spotter 1.0.0 had to run together, which "one app at a time" forbade, though the two
+releases are small, finished apps in their own folders with their own tags. The rule's reason is attention and machine
+load, and a release prep of a finished app costs little of either. **Rule:** one *large* app at a time; small,
+independent releases (separate app folders, serialized tags) may run alongside it (rule 1, amended 2026-10-28).
+
+## Rule 1 is one release at a time, not one app (2026-10-28)
+Even "one large app at a time" held back work that cost the release nothing, while the real limits that day were two
+single-job CI runners, the machine's load and conflicts in shared code (Dyno and Spotter both wait on the shared dialog
+API). **Rule:** one release at a time; release-critical work first; other apps progress in parallel only while load and
+CI capacity allow and only if they don't change shared code the release depends on (rule 1 and ER-1, amended
+2026-10-28).
+
+## A turn budget in a test wait is a timeout in disguise (2026-10-28, paddock-ui, Debrief)
+The boot-every-dialog harness gave a dialog window 200 macrotask turns to become stable, and Debrief's dialog spec 400
+render rounds to leave Loading. On a busy CI runner a first `import()` of the settings screen took longer, and both
+reported "never leaves Loading" for a dialog that was fine. **Rule:** a test waits on the condition itself (the promise the
+code awaits, `whenStable` over pending tasks), never on a count of turns, rounds or milliseconds; a wait that can hang is
+left to the runner's test timeout, which names the test (rule 5).
+
+## Material first, because it is tested (2026-10-28)
+Hand-rolled components (for example `pd-table`'s sticky header over virtual scroll) cost us bugs that the Angular
+Material and CDK equivalents already solve and test. **Rule:** use a Material component wherever one fits and CDK for
+the behaviour Material lacks; hand-roll only what neither provides, with the reason in the doc comment (rule 47).

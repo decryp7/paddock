@@ -200,6 +200,10 @@ describe('pd-notification-host in a small window (review 2, P3-14)', () => {
     .replace(/\s+/g, ' ');
   const compact = /@media \(max-width: 480px\) \{(.*?)\} \}/.exec(css)?.[1] ?? '';
 
+  it('keeps the page-footer safe area above the status bar, from tokens, so a toast never covers a footer action', () => {
+    expect(css).toMatch(/\bbottom: calc\(var\(--(?:%NS%)?pd-statusbar-height[^)]*\) \+ var\(--(?:%NS%)?pd-page-footer-safe[^)]*\) \+ var\(--(?:%NS%)?pd-space-2\)\)/);
+  });
+
   it('a toast is never wider than 360 px', () => {
     expect(/\.pd-toast \{[^}]*\bwidth: 360px;/.test(css)).toBe(true);
     expect(css).not.toMatch(/\bwidth: 3[7-9]\dpx/);

@@ -166,7 +166,8 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
   cargo clippy --workspace --all-targets -- -D warnings
   cargo test --workspace
   cargo deny --workspace check
-  node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs
+  node --test scripts/check-capabilities.test.mjs
+  node scripts/check-capabilities.mjs
   (cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && npx ng test --watch=false)
   ```
 
@@ -176,7 +177,7 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
   licences). Commit `Cargo.lock` and `package-lock.json`; install with `npm ci` in CI.
 - Renovate updates dependencies and pins CI actions to commit digests. Gitea Actions needs the v3 artifact actions.
 - Use Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`, `chore:`) so changelogs can be
-  generated (`cliff.toml`); `scripts/commit-lint.mjs` checks them. Never add Co-Authored-By or AI attribution
+  generated (`cliff.toml`); `paddock-conformance commit-lint` checks them (CI's `commits` job on pull requests). Never add Co-Authored-By or AI attribution
   trailers. Releases are `dyno-v*` tags following semver (`docs/releasing.md`).
 - Record significant architecture decisions as ADRs in `docs/adr/` (numbered, with status, context, decision,
   consequences).
@@ -188,7 +189,7 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
 - UI: standalone components, signals, OnPush, CSS custom properties for theme tokens (dark and light), accessible
   markup (real buttons, labels, aria-labels on icon buttons), the `dy` selector prefix.
 - UI building blocks: use **Angular CDK** for behaviour and accessibility (menus, overlays, dialogs, listbox,
-  scrolling) instead of hand-rolling them, and **Angular Material** selectively for complex inputs, themed through
+  scrolling) instead of hand-rolling them, and **Angular Material first** (rule 47: a Material component wherever one fits), themed through
   Dyno's CSS tokens. Icons use Material's `MatIconRegistry` with Dyno's own SVGs registered as literals in the `dy`
   namespace; no icon fonts and no icon URLs fetched at run time (the CSP forbids it).
 - Charts use Apache ECharts with the CVD-checked categorical palette. Status colours always come with words or
