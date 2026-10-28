@@ -197,15 +197,24 @@ run of `dev-tool.yml` (below) publishes for the new compiler within a day.
   - the folders of the tool's path dependencies, **normal and build dependencies only**. Dev-dependencies such as
     `paddock-testkit` are left out. They are listed in `tools/paddock-dev/inputs.txt`, and a test compares the list with
     `cargo metadata`'s resolve graph;
-  - the `.cargo/config.toml` files on the tool's path;
+  - the build environment: every non-empty `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, `CARGO_BUILD_*`, `CARGO_PROFILE_*` and
+    `CARGO_TARGET_*` variable as a `NAME=value` line in byte order (not `CARGO_TARGET_DIR`, `CARGO_BUILD_JOBS`,
+    `CARGO_BUILD_TARGET_DIR` or `CARGO_BUILD_RUSTC`);
+  - the cargo config files cargo reads for the tool: `config.toml` and `config` in every `.cargo` folder from
+    `tools/paddock-dev` up to the filesystem root, the other `*.toml` files in the tool's own `.cargo` (what `include`
+    pulls in, such as the git-ignored `ci.toml`), then `$CARGO_HOME`'s, closest first and without duplicates. Each file
+    enters the hash as a line `config-file <git blob id of its text without carriage returns>`. The files are streamed
+    into git and only the digest is held, because a config can hold registry tokens that a shell trace (`sh -x`) would
+    print; a wrapper test checks that a dummy token never appears in a trace;
   - the compiler cargo will use: the `release:` and `commit-hash:` lines of its `-vV` output, run after `setup-rust`.
-    The wrapper resolves that compiler as cargo does: `RUSTC`, then `CARGO_BUILD_RUSTC`, then `build.rustc` from the
-    `.cargo/config.toml` files on the tool's path and `$CARGO_HOME/config.toml`, else `rustc` run from
+    The wrapper resolves that compiler as cargo does: `RUSTC`, then `CARGO_BUILD_RUSTC`, then `build.rustc` (also the dotted key) from
+    those config files, else `rustc` run from
     `tools/paddock-dev`, so a rustup directory override applies. A `--config` on cargo's command line is not seen; the
     wrapper never passes one. The `host:` line is left out because it differs per machine. A stable update therefore
     gives a new hash and a rebuild.
 
-  The hash is `git hash-object --stdin` over the output of `git ls-tree HEAD -- <inputs>` followed by those two lines.
+  The hash is `git hash-object --stdin` over the output of `git ls-tree HEAD -- <inputs>` followed by those two lines and the build environment and `config-file` lines above (`./dev` and `dev self hash` build the
+  same text; a test runs both).
   `rustc -vV` takes about 35 ms here (measured, through the rustup proxy). The consumer's target triple selects the file
   inside the version (`paddock-dev-<target>[.exe]`). When `git status --porcelain --untracked-files=all -- <inputs>` is
   not empty, the wrapper always builds: a changed tracked file or a new untracked file that `.gitignore` does not exclude
@@ -509,6 +518,13 @@ is the first.
 - **Open item, to verify on the Windows runner.** `CreateProcessW` inherits every inheritable handle of the parent. `acquire`
   clears the inherit flag on its own three standard handles; handles beyond those that a runner marks inheritable are not
   covered by that. The lifetime cap above is the backstop; verifying this needs a Windows host and is a task of the CI-kit ADR.
+- **R0b item: hash only the build-affecting keys.** R0 hashes whole config files and every `CARGO_BUILD_*`, `CARGO_PROFILE_*`
+  and `CARGO_TARGET_*` variable, which is safe but too wide: a registry or credential edit, or a runner-local setting such as
+  `rustc-wrapper` (sccache), `target-dir` or `jobs`, gives that runner its own hash, and then "download main's binary" never
+  matches. Before the download path is switched on (R0b), the hash takes only the keys that change the compiled code (`rustflags`,
+  `profile.*`, `linker`, `target`, `rustc`) from the files, parsed once with one rule for both the wrapper and the tool, and the
+  environment and config exclusions are made the same list (`target-dir`, `jobs`, `rustc-wrapper`, `build-dir` are in neither).
+  Until then the wrapper only builds locally, so the width costs cache hits, not correctness.
 - **Tests.** Test holders are started with a short `--max-hold-secs`, so one left behind by a failing test ends by itself
   (ER-14).
 

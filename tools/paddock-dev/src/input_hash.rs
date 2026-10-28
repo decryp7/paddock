@@ -1,8 +1,8 @@
 //! `dev self hash`: the content address of the tool's binary (ADR 0022 §3.3).
 //!
 //! The hash is `git hash-object --stdin` over `git ls-tree HEAD -- <inputs>` followed by the `commit-hash:` and `release:`
-//! lines of `<rustc> -vV` (in rustc's order) and [`flag_lines`] (the hashed environment variables and the text of cargo's config
-//! files), where `<inputs>` are the paths in `tools/paddock-dev/inputs.txt` and `<rustc>`
+//! lines of `<rustc> -vV` (in rustc's order) and [`flag_lines`] (the hashed environment variables and a digest of each cargo config
+//! file), where `<inputs>` are the paths in `tools/paddock-dev/inputs.txt` and `<rustc>`
 //! is the compiler cargo will use. The `./dev` wrapper computes the same value in shell (`./dev --wrapper-hash`); a test
 //! runs both on one repository. When an input has uncommitted changes (`git status --porcelain --untracked-files=all`), the
 //! hash cannot describe the files and the wrapper builds.
@@ -64,9 +64,10 @@ pub fn is_hashed_var(name: &str) -> bool {
 }
 
 /// What else changes the compiled code, as text: the hashed environment variables that are not empty as `NAME=value` lines
-/// in byte order, then the whole text of every config (carriage returns dropped), each after a `config-file` line. The
-/// wrapper builds the same text with `env | grep | sort` and `tr -d '\r'`; trailing newlines are the caller's to trim.
-pub fn flag_lines(vars: &[(String, String)], configs: &[String]) -> String {
+/// in byte order, then one `config-file <digest>` line per config, the digest being [`config_digest`]'s. The wrapper builds
+/// the same text with `env | grep | sort` and `git hash-object`; trailing newlines are the caller's to trim. Configs are
+/// reduced to digests because they can hold registry tokens, which must not travel in text a trace could print.
+pub fn flag_lines(vars: &[(String, String)], config_digests: &[String]) -> String {
     let mut lines: Vec<String> = vars
         .iter()
         .filter(|(k, v)| is_hashed_var(k) && !v.is_empty())
@@ -74,12 +75,16 @@ pub fn flag_lines(vars: &[(String, String)], configs: &[String]) -> String {
         .collect();
     lines.sort();
     let mut out: String = lines.iter().map(|l| format!("{l}\n")).collect();
-    for c in configs {
-        out.push_str("config-file\n");
-        out.push_str(&c.replace('\r', ""));
-        out.push('\n');
+    for d in config_digests {
+        out.push_str(&format!("config-file {d}\n"));
     }
     out
+}
+
+/// Git's blob id of a config's text with carriage returns dropped.
+fn config_digest(exec: &dyn Exec, root: &Path, text: &str) -> Result<String, CliError> {
+    let out = exec.run("git", &["hash-object", "--stdin"], root, Some(text.replace('\r', "").as_bytes()))?;
+    Ok(out.trim().to_string())
 }
 
 /// The `rustc = "..."` of a `[build]` table (or a top-level dotted `build.rustc = `) in a cargo config, read line by line
@@ -272,7 +277,11 @@ pub fn compute(
     let mut git_args: Vec<&str> = vec!["ls-tree", "HEAD", "--"];
     git_args.extend(inputs.iter().map(String::as_str));
     let tree = exec.run("git", &git_args, root, None)?;
-    let flags = flag_lines(vars, &configs);
+    let digests = configs
+        .iter()
+        .map(|c| config_digest(exec, root, c))
+        .collect::<Result<Vec<_>, _>>()?;
+    let flags = flag_lines(vars, &digests);
     let hash = exec
         .run(
             "git",
@@ -374,14 +383,8 @@ mod tests {
             flag_lines(&vars, &[]),
             "CARGO_BUILD_TARGET=wasm32-unknown-unknown\nCARGO_PROFILE_RELEASE_LTO=fat\nCARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-Cx\nRUSTFLAGS=-C target-cpu=native\n"
         );
-        let configs = vec![
-            "[profile.release]\r\nlto = true\n".to_string(),
-            "build.rustflags = [\"-D\"]\n".to_string(),
-        ];
-        assert_eq!(
-            flag_lines(&[], &configs),
-            "config-file\n[profile.release]\nlto = true\n\nconfig-file\nbuild.rustflags = [\"-D\"]\n\n"
-        );
+        let digests = vec!["d1".to_string(), "d2".to_string()];
+        assert_eq!(flag_lines(&[], &digests), "config-file d1\nconfig-file d2\n");
     }
 
     #[test]

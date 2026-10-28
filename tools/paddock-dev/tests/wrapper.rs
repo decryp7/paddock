@@ -430,3 +430,38 @@ fn only_the_five_newest_cached_tools_are_kept() {
     let kept = std::fs::read_dir(home.join("bin")).unwrap().count();
     assert_eq!(kept, 5);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_trace_of_the_wrapper_never_prints_what_a_config_holds() {
+    let f = Fixture::new();
+    let token = "dummy-registry-token-0123456789";
+    std::fs::write(
+        f.cargo_home.path().join("config.toml"),
+        format!("[registry]\ntoken = \"{token}\"\n"),
+    )
+    .unwrap();
+    let env = f.env(&[]);
+    let out = Command::new("sh")
+        .arg("-x")
+        .arg(f.root().join("dev"))
+        .arg("--wrapper-hash")
+        .current_dir(f.root())
+        .env_remove("RUSTC")
+        .env_remove("CARGO_BUILD_RUSTC")
+        .envs(env.iter().cloned())
+        .env("PADDOCK_DEV_HOME", f.cargo_home.path().join("dev-home"))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let everything = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(
+        everything.contains("config-file"),
+        "the trace shows the steps, so the test looks at something: {everything}"
+    );
+    assert!(!everything.contains(token), "the token reached the trace");
+    // ...and the token still counts: the Rust hash, which agrees with the wrapper, changes when it does.
+    let before = f.both(&[]).0;
+    std::fs::write(f.cargo_home.path().join("config.toml"), "[registry]\ntoken = \"another\"\n").unwrap();
+    assert_ne!(f.both(&[]).0, before);
+}

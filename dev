@@ -84,16 +84,16 @@ fi
 host=$(printf '%s\n' "$vv" | sed -n 's/^host: //p')
 
 # What else changes the compiled code: the environment variables RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_*,
-# CARGO_PROFILE_* and CARGO_TARGET_* (not the build folder, the job count or the compiler, which the `-vV` lines already name) when they are not empty, sorted as lines, then
-# the whole text of every config file above (carriage returns dropped), each introduced by a `config-file` line.
+# CARGO_PROFILE_* and CARGO_TARGET_* (not the build folder, the job count or the compiler, which the `-vV` lines already name)
+# when they are not empty, sorted as lines, then one `config-file <digest>` line per config file above, the digest being git's
+# blob id of the file with carriage returns dropped. A config file can hold registry tokens, so it is streamed into git and only
+# its digest is ever held in a variable (which `sh -x` would print).
 flags=$(
   env | grep -E '^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_[A-Za-z0-9_]*|CARGO_PROFILE_[A-Za-z0-9_]*|CARGO_TARGET_[A-Za-z0-9_]*)=' |
     grep -v -E '^(CARGO_TARGET_DIR|CARGO_BUILD_JOBS|CARGO_BUILD_TARGET_DIR|CARGO_BUILD_RUSTC)=' | grep -v '=$' | LC_ALL=C sort || true
   if [ -n "$configs" ]; then
     while IFS= read -r cfg; do
-      printf 'config-file\n'
-      tr -d '\r' <"$cfg"
-      printf '\n'
+      printf 'config-file %s\n' "$(tr -d '\r' <"$cfg" | git -C "$root" hash-object --stdin)"
     done <<EOF
 $configs
 EOF
