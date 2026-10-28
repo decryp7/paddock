@@ -11,6 +11,7 @@ import { DIAGNOSTICS_DIALOG_COMMANDS, DIAGNOSTICS_DIALOG_ID, LOGGING_SETTINGS_PA
 import { formatBytes, truncateMiddle } from './format';
 import { provideShellDiagnostics } from './provide-diagnostics';
 import { PdReportProblemDialog } from './report-problem-dialog';
+import { DIAGNOSTICS_STYLES } from './styles';
 import { MAX_FORWARDED_LINES, MAX_FORWARDED_MESSAGE, WebviewLog, provideWebviewLog, type WebviewLogIpc } from './webview-log';
 import { asDiagError, diagMessage, parsePreviewReply, parseSaveOutcome } from './wire';
 
@@ -317,6 +318,15 @@ describe('the Report a Problem dialog', () => {
     expect(el.querySelector('table')?.querySelectorAll('th[scope="col"]')).toHaveLength(3);
     expect((el.querySelector('[data-testid="dialog-action-save"]') as HTMLButtonElement).disabled).toBe(false);
     expect(el.querySelector('[data-testid="diag-removed"]')).not.toBeNull();
+  });
+
+  it('styles every class its template uses (the Size column stays on one line, long cells break)', async () => {
+    const { el } = await open();
+    const used = new Set([...el.querySelectorAll('[class*="pd-diag__"]')].flatMap((n) => [...n.classList].filter((c) => c.startsWith('pd-diag__'))));
+    expect(used.size).toBeGreaterThan(0);
+    for (const c of used) expect(DIAGNOSTICS_STYLES, c).toContain(`.${c}`);
+    expect(DIAGNOSTICS_STYLES).toMatch(/\.pd-diag__num[^}]*white-space: nowrap/);
+    expect(DIAGNOSTICS_STYLES).toMatch(/\.pd-diag__what[^}]*overflow-wrap: anywhere/);
   });
 
   it('follows the description when focus leaves the box, and saves it with the report', async () => {

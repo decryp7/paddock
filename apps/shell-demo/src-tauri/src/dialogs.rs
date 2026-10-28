@@ -11,7 +11,7 @@ paddock_dialogs::dialogs! {
     "sd.confirm-reset" => Decision,
     "sd.rename" => Form(Modal) { width: Some(Narrow) },
     "sd.about" => Viewer,
-    "sd.inspector" => Tool { width: Some(Px(720)), height: Some(480), commands: &[demo::demo_status] },
+    "sd.inspector" => Form(Modeless) { commands: &[demo::demo_status] },
     "sd.choose-style" => Decision { required_choice: true },
     // The settings commands, the Background service page's, the set-up page's, the packs page's, the Notification
     // channels page's (the secret is set in the secret dialog's window), Storage's, the AI access page's (the key is

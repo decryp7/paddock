@@ -46,11 +46,11 @@ import { DIALOG_REF, DialogActionError, type DialogAction, type DialogContent, t
     :host { display: block; color: var(--pd-text); min-width: 0; container-type: inline-size; }
     .pd-secret { display: flex; flex-direction: column; gap: var(--pd-space-3); }
     .pd-secret__lede { margin: 0; color: var(--pd-text-muted); overflow-wrap: anywhere; }
-    .pd-secret__field { display: flex; flex-direction: column; gap: var(--pd-space-1); font-weight: var(--pd-weight-medium); }
-    .pd-secret__control { display: flex; gap: var(--pd-space-1); min-width: 0; }
-    input { flex: 1; min-width: 0; min-height: var(--pd-control-height); padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: normal; }
+    .pd-secret__field { display: flex; flex-direction: column; gap: var(--pd-space-1); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); }
+    .pd-secret__control { display: flex; align-items: stretch; gap: var(--pd-space-2); min-width: 0; }
+    input { flex: 1; min-width: 0; box-sizing: border-box; min-height: var(--pd-control-height); padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: normal; }
     input:focus-visible, .pd-secret__eye:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .pd-secret__eye { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 4rem; padding: 0 var(--pd-space-2); font: inherit; border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); color: var(--pd-text-muted); cursor: pointer; }
+    .pd-secret__eye { flex: none; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; min-width: 4rem; min-height: var(--pd-control-height); padding: 0 var(--pd-space-2); font: inherit; border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); color: var(--pd-text-muted); cursor: pointer; }
     .pd-secret__eye[aria-pressed='true'] { color: var(--pd-text); background: var(--pd-hover); }
     .pd-secret__error { margin: 0; padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); overflow-wrap: anywhere; }
   `,
@@ -72,7 +72,7 @@ export class PdChannelSecretDialog implements DialogContent<boolean> {
 
   protected readonly t = {
     close: $localize`:@@pd.channels.secret.close:Close`,
-    invalid: $localize`:@@pd.channels.secret.invalid:This window was opened without a channel to set a secret for. Close it and choose Set token or Set password in the channel's editor.`,
+    invalid: $localize`:@@pd.channels.secret.invalid:This window was opened without a channel to set a secret for. Close it and choose Set token or Set password in the channel’s editor.`,
     save: $localize`:@@pd.channels.secret.save:Save`,
     show: $localize`:@@pd.channels.secret.show:Show what you typed`,
     hide: $localize`:@@pd.channels.secret.hide:Hide what you typed`,
@@ -100,8 +100,8 @@ export class PdChannelSecretDialog implements DialogContent<boolean> {
   protected lede(): string {
     const label = this.label() || this.channelId();
     return this.kind() === 'password'
-      ? $localize`:@@pd.channels.secret.lede-password:The password for ${label}:channel: is kept by the app's engine, not in the settings file. It is never shown again.`
-      : $localize`:@@pd.channels.secret.lede-token:The token for ${label}:channel: is kept by the app's engine, not in the settings file. It is never shown again.`;
+      ? $localize`:@@pd.channels.secret.lede-password:The password for ${label}:channel: is kept by the app’s engine, not in the settings file. It is never shown again.`
+      : $localize`:@@pd.channels.secret.lede-token:The token for ${label}:channel: is kept by the app’s engine, not in the settings file. It is never shown again.`;
   }
 
   /** Save (the primary, enabled once something is typed); a window without a channel offers only Close. */
