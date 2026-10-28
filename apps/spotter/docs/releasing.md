@@ -56,7 +56,7 @@ Spotter needs its **own** key pair — never reuse another product's updater key
    Also `RELEASE_TOKEN`: a Gitea access token with `write:repository` scope, used to publish the release.
 
    The bundle jobs then build with `createUpdaterArtifacts` and the public key (passed as `tauri build --config`,
-   and as `TAURI_UPDATER_PUBKEY` for `option_env!` in `app/src-tauri/src/updater.rs`). Without the secrets (forks,
+   and as `TAURI_UPDATER_PUBKEY` for `option_env!` in `app/src-tauri/src/lib.rs`, read by the shell's updater). Without the secrets (forks,
    pull requests) the installers are built without update support and the release job publishes no `latest.json`.
 
    The committed `tauri.conf.json` keeps `pubkey` empty and does not set `createUpdaterArtifacts`, so local

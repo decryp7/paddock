@@ -3,6 +3,7 @@
 //! asks for anything; it never waits for the UI.
 
 use crate::dto::{StatePush, WatchSummaryDto};
+use crate::health::Hub;
 use crate::notifier::{OpenLocation, OsToast, ShellNotifier};
 use crate::state::{resolve_data_dir, AppState, Shared, DATA_DIR_ENV};
 use crate::{applog, credentials, toast, tray};
@@ -81,7 +82,7 @@ fn refresh_local_time(clock: &spotter_engine::clock::SystemClock) {
 }
 
 /// Opens the engine and starts its background work; returns the shared state.
-pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<Shared, String> {
+pub fn init<R: Runtime>(app: &AppHandle<R>, hub: &Hub<R>) -> Result<Shared, String> {
     let default_dir = app
         .path()
         .app_data_dir()
@@ -95,10 +96,13 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<Shared, String> {
     let version = app.package_info().version.to_string();
     let http = Http::new(&version)?;
 
+    let downloader = paddock_download::tauri::downloader(app).ok_or("The shell's downloader is not set up.")?;
+    let registry = crate::jobs::registry(app).ok_or("The shell's jobs are not set up.")?;
+    let downloads = crate::jobs::Downloads::new(registry, downloader.clone(), http.clone());
     let notifier = ShellNotifier::new(
         Arc::new(TauriToast(app.clone())),
         opener(app),
-        http.clone(),
+        downloads.clone(),
         default_downloads.clone(),
     );
     // Before the first toast: the plugin shows buttons only for toasts that are shown after a handler exists.
@@ -121,18 +125,30 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<Shared, String> {
         data_dir,
         default_downloads,
         http,
-        jobs: Arc::default(),
+        downloader,
+        downloads,
+        last_test: std::sync::Mutex::new(None),
+        pending_route: std::sync::Mutex::new(None),
         stop,
     });
 
     // The scheduler, the push of state and the daylight-saving refresh run for as long as the app does.
-    let scheduler = Scheduler::new(engine.clone());
-    let run_stop = stopped.clone();
-    tauri::async_runtime::spawn(async move { scheduler.run(run_stop).await });
+    // The scheduler runs under the shell's service health: when its task dies the chip says so and Restart runs it again.
+    let (scheduled, run_stop) = (engine.clone(), stopped.clone());
+    let supervisor = hub.clone();
+    tauri::async_runtime::spawn(async move {
+        supervisor
+            .supervise(move || {
+                let (scheduler, stop) = (Scheduler::new(scheduled.clone()), run_stop.clone());
+                async move { scheduler.run(stop).await }
+            })
+            .await;
+    });
 
     let (handle, rx) = (app.clone(), engine.subscribe());
     let engine_for_push = engine.clone();
-    tauri::async_runtime::spawn(async move { forward_changes(handle, engine_for_push, rx).await });
+    let reporter = hub.clone();
+    tauri::async_runtime::spawn(async move { forward_changes(handle, engine_for_push, reporter, rx).await });
 
     let mut tick_stop = stopped;
     tauri::async_runtime::spawn(async move {
@@ -147,21 +163,32 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<Shared, String> {
 }
 
 /// Pushes every change of the engine to the windows and the tray.
-async fn forward_changes<R: Runtime>(app: AppHandle<R>, engine: Engine, mut rx: tokio::sync::broadcast::Receiver<Change>) {
+async fn forward_changes<R: Runtime>(app: AppHandle<R>, engine: Engine, hub: Hub<R>, mut rx: tokio::sync::broadcast::Receiver<Change>) {
     use tokio::sync::broadcast::error::RecvError;
     while let Ok(_) | Err(RecvError::Lagged(_)) = rx.recv().await {
-        push_state(&app, &engine);
+        let watches = push_state(&app, &engine);
+        hub.report_sources(&watches);
+        hub.report_renderer(&watches);
     }
 }
 
-/// Emits the current watches to the windows and refreshes the tray.
-pub fn push_state<R: Runtime>(app: &AppHandle<R>, engine: &Engine) {
+/// Emits the current watches to the windows and refreshes the tray; returns the watches.
+pub fn push_state<R: Runtime>(app: &AppHandle<R>, engine: &Engine) -> Vec<spotter_engine::view::WatchSummary> {
     let watches = engine.list_watches();
     let payload = StatePush {
         watches: watches.iter().map(WatchSummaryDto::from).collect(),
     };
     let _ = app.emit(STATE_EVENT, payload);
-    tray::update(app, &watches, notifications_paused(engine));
+    tray::update(app);
+    watches
+}
+
+/// The watches and whether notifications are paused, for the tray's model (empty before the engine is open).
+pub fn snapshot<R: Runtime>(app: &AppHandle<R>) -> (Vec<spotter_engine::view::WatchSummary>, bool) {
+    match app.try_state::<Shared>() {
+        Some(s) => (s.engine.list_watches(), notifications_paused(&s.engine)),
+        None => (Vec::new(), false),
+    }
 }
 
 /// Whether notifications are paused right now.
@@ -179,8 +206,6 @@ pub fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
     let Some(state) = app.try_state::<Shared>() else { return };
     let engine = state.engine.clone();
     match id {
-        "open" => tray::show_main(app, None),
-        "quit" => app.exit(0),
         "check-all" => {
             tauri::async_runtime::spawn(async move {
                 let _ = engine.check_now(None).await;
@@ -203,11 +228,16 @@ pub fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
     }
 }
 
-/// Stops the background tasks (at exit).
-pub fn stop(app: &AppHandle<impl Runtime>) {
+/// Quit's teardown (a bounded step of the shell's exit): stops the background tasks, asks every running job to stop
+/// and ends any browser a render still holds, so a stuck render can neither hang Quit nor outlive the app.
+pub fn stop<R: Runtime>(app: &AppHandle<R>) {
     if let Some(s) = app.try_state::<Shared>() {
         let _ = s.stop.send(true);
     }
+    if let Some(registry) = crate::jobs::registry(app) {
+        crate::jobs::cancel_all(&registry);
+    }
+    spotter_render::process::end_all();
 }
 
 #[cfg(test)]

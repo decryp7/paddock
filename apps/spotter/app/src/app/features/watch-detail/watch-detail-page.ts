@@ -1,5 +1,6 @@
 import { CdkContextMenuTrigger } from '@angular/cdk/menu';
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
+import { routeParam } from '../../core/route-param';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { Router, RouterLink } from '@angular/router';
 import { SuEmptyState } from '@decryp7/paddock-ui';
@@ -37,7 +38,8 @@ function choice(a: { variant?: string; extension?: string }): string {
 })
 export class WatchDetailPage {
   /** From the route (`/watches/:id`). */
-  readonly id = input.required<string>();
+  private readonly param = routeParam('id');
+  readonly id = computed(() => this.param() ?? '');
 
   protected readonly store = inject(WatchDetailStore);
   protected readonly watches = inject(WatchesStore);

@@ -1,23 +1,16 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
-import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
-import type { Settings, Theme } from '../../core/api.types';
+import type { Settings } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
 import { formatDateTime, spanText } from '../../shared/format';
 import { Panel } from '../../shared/ui/panel';
 import { MailSettings } from './mail-settings';
 import { SettingsStore } from '../../state/settings.store';
 
-const THEMES: SuSegment[] = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-];
-
-/** Settings: appearance, notifications, checks, downloads, the page renderer, updates and data. */
+/** Spotter's settings page (a page of the shell's Settings window): startup, notifications, checks, downloads, the page renderer, mail and data. The shell adds Appearance and Updates. */
 @Component({
   selector: 'sp-settings-page',
-  imports: [MatIcon, SuSegmentedControl, Panel, MailSettings],
+  imports: [MatIcon, Panel, MailSettings],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './settings-page.html',
   styleUrl: './settings-page.scss',
@@ -25,7 +18,6 @@ const THEMES: SuSegment[] = [
 export class SettingsPage {
   protected readonly store = inject(SettingsStore);
   private readonly clock = inject(ClockService);
-  protected readonly themes = THEMES;
   protected readonly intervals = [
     { secs: 900, label: '15 minutes' },
     { secs: 3600, label: '1 hour' },
@@ -62,10 +54,6 @@ export class SettingsPage {
 
   protected set(patch: Partial<Settings>): void {
     void this.store.change(patch);
-  }
-
-  protected setTheme(v: string): void {
-    this.set({ theme: v as Theme });
   }
 
   protected checked(e: Event): boolean {

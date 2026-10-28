@@ -1,15 +1,14 @@
 import { TestBed } from '@angular/core/testing';
+import { provideShellTesting, shellPorts } from '@decryp7/paddock-ui/shell/testing';
 import { BACKEND } from '../core/backend';
-import { ThemeService } from '../core/theme.service';
 import { makeMock } from '../../testing/test-helpers';
 import { SettingsStore } from './settings.store';
-import { ToastStore } from './toast.store';
 
 function setup() {
   localStorage.clear();
   const backend = makeMock();
-  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: backend }] });
-  return { backend, store: TestBed.inject(SettingsStore), toasts: TestBed.inject(ToastStore), theme: TestBed.inject(ThemeService) };
+  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: backend }, ...provideShellTesting()] });
+  return { backend, store: TestBed.inject(SettingsStore), notices: () => shellPorts().notices };
 }
 
 const down = { code: 'unavailable', message: 'down', problems: ['p1'] };
@@ -17,13 +16,12 @@ const down = { code: 'unavailable', message: 'down', problems: ['p1'] };
 describe('SettingsStore', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('loads settings, app info, renderer, updates and autostart together', async () => {
+  it('loads settings, app info, renderer and autostart together', async () => {
     const { store } = setup();
     await store.loadAll();
-    expect(store.settings().value?.theme).toBe('system');
+    expect(store.settings().value?.notifications).toBe(true);
     expect(store.info().value?.version).toBe('1.0.0');
     expect(store.renderer().value?.kind).toBe('none');
-    expect(store.update().value?.available).toBe(true);
     expect(store.autostart()).toBe(false);
   });
 
@@ -35,13 +33,6 @@ describe('SettingsStore', () => {
     expect(store.autostart()).toBeNull();
     expect(store.info().error?.message).toBe('down');
     expect(store.settings().value).not.toBeNull();
-  });
-
-  it('applies the loaded theme', async () => {
-    const { backend, store, theme } = setup();
-    await backend.saveSettings({ ...(await backend.getSettings()), theme: 'dark' });
-    await store.loadSettings();
-    expect(theme.preference()).toBe('dark');
   });
 
   it('drops a read that is older than a change made while it ran', async () => {
@@ -62,14 +53,13 @@ describe('SettingsStore', () => {
     expect(store.settings().value?.notifications).toBe(false);
   });
 
-  it('saves a change and shows the engine reply, applying the theme at once', async () => {
-    const { backend, store, theme } = setup();
+  it('saves a change and shows it at once, then the engine reply', async () => {
+    const { backend, store } = setup();
     await store.loadSettings();
-    const p = store.change({ theme: 'dark' });
-    expect(store.settings().value?.theme).toBe('dark');
-    expect(theme.preference()).toBe('dark');
+    const p = store.change({ digest: 'daily' });
+    expect(store.settings().value?.digest).toBe('daily');
     await p;
-    expect((await backend.getSettings()).theme).toBe('dark');
+    expect((await backend.getSettings()).digest).toBe('daily');
     expect(store.problems()).toEqual([]);
   });
 
@@ -80,14 +70,13 @@ describe('SettingsStore', () => {
   });
 
   it('puts the saved values back and keeps the problems when the engine refuses', async () => {
-    const { store, toasts, theme } = setup();
+    const { store, notices } = setup();
     await store.loadSettings();
-    await store.change({ theme: 'dark', defaultIntervalSecs: 5 });
+    await store.change({ digest: 'daily', defaultIntervalSecs: 5 });
     expect(store.settings().value?.defaultIntervalSecs).toBe(6 * 3600);
-    expect(store.settings().value?.theme).toBe('system');
-    expect(theme.preference()).toBe('system');
+    expect(store.settings().value?.digest).toBe('off');
     expect(store.problems()).toEqual(['Use at least one minute.']);
-    expect(toasts.toasts().at(-1)).toMatchObject({ title: 'Settings were not saved', tone: 'danger' });
+    expect(notices().at(-1)).toMatchObject({ level: 'error', message: 'Settings were not saved. The default interval is too short.' });
   });
 
   it('lets the newest of two overlapping changes win, in success and failure', async () => {
@@ -101,10 +90,10 @@ describe('SettingsStore', () => {
       return real(s);
     });
     const first = store.change({ notifications: false });
-    await store.change({ checkAppUpdates: false });
+    await store.change({ allowOsWebview: true });
     release();
     await first;
-    expect(store.settings().value).toMatchObject({ checkAppUpdates: false });
+    expect(store.settings().value).toMatchObject({ allowOsWebview: true });
 
     vi.spyOn(backend, 'saveSettings').mockRejectedValueOnce(down).mockResolvedValueOnce(await real({ ...store.settings().value!, digest: 'daily' } as never));
     const failing = store.change({ digest: 'weekly' } as never);
@@ -114,38 +103,38 @@ describe('SettingsStore', () => {
   });
 
   it('pauses and resumes notifications with a toast, or reports the failure', async () => {
-    const { backend, store, toasts } = setup();
+    const { backend, store, notices } = setup();
     await store.pauseNotifications(30);
     expect(store.settings().value?.notificationsPausedUntilMs).not.toBeNull();
-    expect(toasts.toasts().at(-1)?.title).toBe('Notifications paused');
+    expect(notices().at(-1)?.message).toBe('Notifications paused');
     await store.pauseNotifications(null);
-    expect(toasts.toasts().at(-1)?.title).toBe('Notifications resumed');
+    expect(notices().at(-1)?.message).toBe('Notifications resumed');
     vi.spyOn(backend, 'pauseNotifications').mockRejectedValue(down);
     await store.pauseNotifications(5);
-    expect(toasts.toasts().at(-1)).toMatchObject({ title: 'Could not change notifications', body: 'down' });
+    expect(notices().at(-1)).toMatchObject({ level: 'error', message: 'Could not change notifications. down' });
   });
 
   it('sets autostart, or reports the failure', async () => {
-    const { backend, store, toasts } = setup();
+    const { backend, store, notices } = setup();
     await store.setAutostart(true);
     expect(store.autostart()).toBe(true);
     vi.spyOn(backend, 'setAutostart').mockRejectedValue(down);
     await store.setAutostart(false);
     expect(store.autostart()).toBe(true);
-    expect(toasts.toasts().at(-1)?.title).toBe('Could not change launch at login');
+    expect(notices().at(-1)?.message).toBe('Could not change launch at login. down');
   });
 
   it('opens targets and reports a failure', async () => {
-    const { backend, store, toasts } = setup();
+    const { backend, store, notices } = setup();
     await store.open('logs');
     expect(backend.calls).toContain('open:logs');
     vi.spyOn(backend, 'open').mockRejectedValue(down);
     await store.open('config');
-    expect(toasts.toasts().at(-1)?.title).toBe('Could not open it');
+    expect(notices().at(-1)?.message).toBe('Could not open it. down');
   });
 
   it('chooses the downloads folder, or does nothing when cancelled or failing', async () => {
-    const { backend, store, toasts } = setup();
+    const { backend, store, notices } = setup();
     await store.loadSettings();
     await store.chooseDownloads();
     expect(store.settings().value?.downloadsFolder).toContain('Downloads/Spotter');
@@ -154,43 +143,28 @@ describe('SettingsStore', () => {
     expect(backend.calls.filter((c) => c === 'saveSettings')).toHaveLength(1);
     vi.spyOn(backend, 'chooseFolder').mockRejectedValueOnce(down);
     await store.chooseDownloads();
-    expect(toasts.toasts().at(-1)?.title).toBe('Could not open the picker');
+    expect(notices().at(-1)?.message).toBe('Could not open the picker. down');
   });
 
   it('installs the renderer, with busy state and failure', async () => {
-    const { backend, store, toasts } = setup();
+    const { backend, store, notices } = setup();
     const p = store.installRenderer();
     expect(store.rendererBusy()).toBe(true);
     await p;
     expect(store.rendererBusy()).toBe(false);
     expect(store.renderer().value?.kind).toBe('chromium-downloaded');
-    expect(toasts.toasts().at(-1)?.title).toBe('Browser installed');
+    expect(notices().at(-1)?.message).toBe('Browser installed');
     vi.spyOn(backend, 'installRenderer').mockRejectedValue(down);
     await store.installRenderer();
     expect(store.rendererBusy()).toBe(false);
-    expect(toasts.toasts().at(-1)?.title).toBe('The browser could not be installed');
-  });
-
-  it('checks and installs app updates, resetting busy state on failure', async () => {
-    const { backend, store, toasts } = setup();
-    await store.checkUpdate();
-    expect(store.updateCheck()?.updateAvailable).toBe(true);
-    expect(store.updateBusy()).toBe(false);
-    await store.installUpdate();
-    expect(backend.calls).toContain('installAppUpdate');
-    vi.spyOn(backend, 'checkAppUpdate').mockRejectedValue(down);
-    vi.spyOn(backend, 'installAppUpdate').mockRejectedValue(down);
-    await store.checkUpdate();
-    await store.installUpdate();
-    expect(store.updateBusy()).toBe(false);
-    expect(toasts.toasts().map((t) => t.title)).toEqual(['Could not check for updates', 'The update was not installed']);
+    expect(notices().at(-1)?.message).toBe('The browser could not be installed. down');
   });
 
   it('a cancelled installation says nothing was installed instead of failing', async () => {
-    const { backend, store, toasts } = setup();
+    const { backend, store, notices } = setup();
     vi.spyOn(backend, 'installRenderer').mockRejectedValue({ code: 'cancelled', message: 'Cancelled.', problems: [] });
     await store.installRenderer();
     expect(store.rendererBusy()).toBe(false);
-    expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'info', title: 'Installation cancelled' });
+    expect(notices().at(-1)).toMatchObject({ level: 'info', message: 'Installation cancelled. Nothing was installed.' });
   });
 });

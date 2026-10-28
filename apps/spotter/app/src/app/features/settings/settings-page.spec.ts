@@ -1,9 +1,8 @@
 import { TestBed } from '@angular/core/testing';
+import { shellPorts } from '@decryp7/paddock-ui/shell/testing';
 import { SettingsPage } from './settings-page';
-import { ThemeService } from '../../core/theme.service';
 import { ClockService } from '../../core/clock.service';
 import { SettingsStore } from '../../state/settings.store';
-import { ToastStore } from '../../state/toast.store';
 import { appProviders, byText, makeMock, NOW, settle, text, type as typeInto } from '../../../testing/test-helpers';
 
 async function make(backend = makeMock()) {
@@ -39,7 +38,7 @@ describe('SettingsPage', () => {
   it('shows what the engine reports', async () => {
     const { f } = await make();
     const t = text(f.nativeElement);
-    expect(t).toContain('Version 1.0.0');
+    expect(t).toContain('Spotter watches for new releases anywhere');
     expect(t).toContain('/Users/demo/Library/Application Support/Spotter/spotter.toml');
     expect(t).toContain('Notifications are on.');
     expect(t).toContain('No browser available');
@@ -69,21 +68,10 @@ describe('SettingsPage', () => {
     await settle(f);
     expect((await backend.getSettings()).defaultIntervalSecs).toBe(900);
     expect(pressed(f, 'Default check interval')).toEqual(['15 minutes']);
-    await toggle(f, el(f, '#auto-upd'), false);
-    expect((await backend.getSettings()).checkAppUpdates).toBe(false);
     await toggle(f, el(f, '#osweb'), true);
     expect((await backend.getSettings()).allowOsWebview).toBe(true);
     await toggle(f, el(f, '#autostart'), true);
     expect(el<HTMLInputElement>(f, '#autostart').checked).toBe(true);
-  });
-
-  it('changes the theme through the segmented control', async () => {
-    const { f, backend } = await make();
-    const dark = Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('pd-segmented-control button, pd-segmented-control [role=radio]')).find((b) => text(b) === 'Dark') as HTMLElement;
-    dark.click();
-    await settle(f);
-    expect((await backend.getSettings()).theme).toBe('dark');
-    expect(TestBed.inject(ThemeService).preference()).toBe('dark');
   });
 
   it('turns quiet hours on with defaults, edits a time, and turns them off', async () => {
@@ -124,7 +112,7 @@ describe('SettingsPage', () => {
     await settle(f);
     expect(text(f.nativeElement)).toContain('Chromium downloaded');
     expect(byText(f.nativeElement, 'button', 'Download Chromium')).toBeNull();
-    expect(TestBed.inject(ToastStore).toasts().at(-1)?.title).toBe('Browser installed');
+    expect(shellPorts().messages().at(-1)).toBe('Browser installed');
   });
 
   it.each([
@@ -139,20 +127,6 @@ describe('SettingsPage', () => {
     expect(text(f.nativeElement)).toContain('Invented detail');
     expect(f.componentInstance['rendererTone']()).toBe(tone);
     expect(el(f, '.l .dot').classList.contains(tone)).toBe(true);
-  });
-
-  it('checks for updates, announces the version and installs', async () => {
-    const { f, backend } = await make();
-    (byText(f.nativeElement, 'button', 'Check for updates') as HTMLButtonElement).click();
-    await settle(f);
-    expect(text(f.nativeElement)).toContain('Version 1.1.0 is available. Faster checks');
-    (byText(f.nativeElement, 'button', 'Install') as HTMLButtonElement).click();
-    await settle(f);
-    expect(backend.calls).toContain('installAppUpdate');
-    (byText(f.nativeElement, 'button', 'Check for updates') as HTMLButtonElement).click();
-    await settle(f);
-    expect(text(f.nativeElement)).toContain('You have the latest version.');
-    expect(byText(f.nativeElement, 'button', 'Install')).toBeNull();
   });
 
   it('opens folders and chooses the downloads folder', async () => {
@@ -182,6 +156,15 @@ describe('SettingsPage', () => {
     expect(text(f.nativeElement)).toContain('Engine is down.');
     (byText(f.nativeElement, 'button', /retry/i) as HTMLButtonElement).click();
     await settle(f);
-    expect(text(f.nativeElement)).toContain('Appearance');
+    expect(text(f.nativeElement)).toContain('Notifications');
+  });
+});
+
+describe('SettingsPage: sections that moved to the shell', () => {
+  it('has neither an Appearance nor a Spotter updates section (the shell has them)', async () => {
+    const { f } = await make();
+    const t = text(f.nativeElement);
+    expect(t).not.toContain('Appearance');
+    expect(t).not.toContain('Check for updates');
   });
 });

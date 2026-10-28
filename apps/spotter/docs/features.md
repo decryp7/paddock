@@ -28,3 +28,14 @@ For container tags and package versions (crates.io, npm, PyPI, NuGet) each relea
 to install depends on the platform. The watch's detail page shows a Copy command button on the upgrade line.
 
 ![A package watch with the upgrade line and Copy command](screenshots/watch-detail-upgrade-light.png)
+
+## Downloads
+Spotter's downloads (a release file you download, the file an "after a new release" action fetches, the browser for
+JavaScript pages) all go through the Paddock downloader. A host that serves byte ranges is read over up to four
+connections at once (never more than four to one host, however many downloads run); one that does not is read in one
+stream. When a host answers "too many requests" Spotter waits as long as it asks and tries again with fewer connections.
+A download that is cancelled or cut keeps its partial file and the next download of the same file carries on from it.
+The checksum is computed while the file is written, so nothing is read a second time, and it is compared with the
+publisher's SHA-256 (the release's own, or the `.sha256` file next to it); a file that does not match is deleted, never
+left looking finished. Before it starts Spotter checks that the disk has room for the file. Every download is a job in the
+status bar (Connecting, Resuming, Downloading, Verifying) with Cancel at any moment; Spotter never gives up on one on its own.

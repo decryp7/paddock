@@ -1,6 +1,8 @@
 import type { EnvironmentProviders, Provider } from '@angular/core';
 import type { ComponentFixture } from '@angular/core/testing';
-import { provideRouter, withComponentInputBinding, type Routes } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter, type ParamMap, type Routes } from '@angular/router';
+import { BehaviorSubject } from 'rxjs';
+import { provideShellTesting } from '@decryp7/paddock-ui/shell/testing';
 import { BACKEND } from '../app/core/backend';
 import { MockBackend, type MockOptions } from '../app/core/mock-backend';
 import { CHART_LOADER, type ChartInstance } from '../app/shared/charts/chart';
@@ -36,7 +38,8 @@ export function appProviders(backend: MockBackend, routes: Routes = []): (Provid
     { provide: BACKEND, useValue: backend },
     { provide: CHART_LOADER, useValue: () => Promise.resolve(() => fakeChart()) },
     provideIcons(),
-    provideRouter(routes, withComponentInputBinding()),
+    ...provideShellTesting(),
+    provideRouter(routes),
   ];
 }
 
@@ -73,4 +76,14 @@ export function byText<T extends Element = HTMLElement>(root: ParentNode, select
 export function type(input: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string, event = 'input'): void {
   input.value = value;
   input.dispatchEvent(new Event(event, { bubbles: true }));
+}
+
+/** An `ActivatedRoute` whose parameters a test sets (and changes) by hand, as the page frame's route would. */
+export function routeStub(initial: Record<string, string> = {}): { provider: Provider; set(params: Record<string, string>): void } {
+  const params = new BehaviorSubject<ParamMap>(convertToParamMap(initial));
+  const route = { paramMap: params.asObservable(), get snapshot() { return { paramMap: params.value }; } };
+  return {
+    provider: { provide: ActivatedRoute, useValue: route },
+    set: (next) => params.next(convertToParamMap(next)),
+  };
 }

@@ -20,7 +20,8 @@
         "minWidth": 760,
         "minHeight": 520,
         "resizable": true,
-        "zoomHotkeysEnabled": false
+        "zoomHotkeysEnabled": false,
+        "create": false
       }
     ],
     "security": {
@@ -35,14 +36,5 @@
     "shortDescription": "Watches for new releases anywhere and tells you the moment one appears",
     "longDescription": "Spotter watches folders and shares, HTTP listings, JSON APIs, forges, feeds and web pages (including JavaScript-rendered ones) for new releases and tells you the moment one appears. Everything stays on your machine."
   },
-  "mainBinaryName": "spotter-app",
-  "plugins": {
-    "updater": {
-      "pubkey": "",
-      "endpoints": ["https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json"],
-      "windows": {
-        "installMode": "passive"
-      }
-    }
-  }
+  "mainBinaryName": "spotter-app"
 }

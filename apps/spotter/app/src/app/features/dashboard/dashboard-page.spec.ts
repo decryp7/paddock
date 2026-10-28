@@ -1,11 +1,11 @@
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { shellPorts } from '@decryp7/paddock-ui/shell/testing';
 import { Router } from '@angular/router';
 import { DashboardPage } from './dashboard-page';
 import { CHART_LOADER } from '../../shared/charts/chart';
 import { ClockService } from '../../core/clock.service';
 import { SettingsStore } from '../../state/settings.store';
-import { ToastStore } from '../../state/toast.store';
 import { WatchesStore } from '../../state/watches.store';
 import { appProviders, byText, fakeChart, flush, makeMock, NOW, settle, text } from '../../../testing/test-helpers';
 
@@ -80,7 +80,7 @@ describe('DashboardPage', () => {
     await click(f, items[0]!.querySelector('button[aria-label^="Open "]'));
     await click(f, items[0]!.querySelector('button[aria-label^="Download "]'));
     expect(backend.calls).toEqual(expect.arrayContaining(['acknowledge', 'openRelease', 'downloadRelease']));
-    expect(TestBed.inject(ToastStore).toasts().map((t) => t.title)).toEqual(expect.arrayContaining(['Marked as seen', 'Download finished']));
+    expect(shellPorts().messages().map((m) => m.split('. ')[0])).toEqual(expect.arrayContaining(['Marked as seen', 'Download finished']));
   });
 
   it('shows the installed to latest token and sizes', async () => {

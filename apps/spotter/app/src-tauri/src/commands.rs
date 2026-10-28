@@ -4,14 +4,12 @@
 //! browser) goes to `spawn_blocking`. The command names are the snake_case of the TypeScript method names.
 
 use crate::dto::*;
-use crate::jobs::{Emit, JobGuard, JobKind, JOB_EVENT};
+use crate::jobs::{self, Kind, Operation};
 use crate::state::Shared;
-use crate::{applog, lifecycle, tray, updater};
-use spotter_core::job::Job;
+use crate::{applog, lifecycle, tray};
 use spotter_core::limits::MAX_WATCHES;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Runtime, State};
+use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
@@ -54,17 +52,15 @@ fn spec_of(state: &Shared, draft: WatchDraftDto) -> Out<spotter_core::watch::Wat
     Ok(draft.into_spec(allow_local))
 }
 
-/// The jobs registry's way to the windows.
-fn emitter<R: Runtime>(app: &AppHandle<R>) -> Emit {
-    let app = app.clone();
-    Arc::new(move |event| {
-        let _ = app.emit(JOB_EVENT, event);
-    })
+/// Registers the operation as a shell job (the Jobs list shows it from this moment, with Cancel).
+fn begin_job<R: Runtime>(app: &AppHandle<R>, kind: Kind, title: &str, subject: Option<&str>) -> Out<Operation> {
+    let registry = jobs::registry(app).ok_or_else(|| CommandError::internal("The shell's jobs are not set up."))?;
+    Ok(jobs::begin(&registry, kind, title, subject))
 }
 
-/// Registers the operation the webview named `job_id` and returns what to run it with.
-fn begin_job<R: Runtime>(app: &AppHandle<R>, state: &Shared, job_id: &str, kind: JobKind) -> Out<(Job, JobGuard)> {
-    state.jobs.begin(emitter(app), job_id, kind)
+/// The name of a watch for a job title (the id when it is not known).
+fn watch_name(state: &Shared, id: &str) -> String {
+    state.engine.get_watch(id).map(|d| d.spec.name).unwrap_or_else(|_| id.to_string())
 }
 
 // ---- app ----
@@ -120,13 +116,21 @@ pub async fn test_source<R: Runtime>(
     state: State<'_, Shared>,
     draft: WatchDraftDto,
     secrets: Secrets,
-    job_id: String,
 ) -> Out<SourcePreviewDto> {
     secrets_ok(&secrets)?;
     let spec = spec_of(&state, draft)?;
-    let (job, guard) = begin_job(&app, &state, &job_id, JobKind::TestSource)?;
-    let preview = state.engine.test_source_job(&spec, &secrets, &job).await;
-    guard.end_with(&job, preview.error.is_none());
+    let op = begin_job(&app, Kind::TestSource, "Testing the source", Some(&spec.name))?;
+    // One wizard, one test: a newer test (the form changed) stops the one still running.
+    let earlier = state
+        .last_test
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .replace(op.id());
+    if let (Some(earlier), Some(registry)) = (earlier, jobs::registry(&app)) {
+        registry.cancel(earlier);
+    }
+    let preview = state.engine.test_source_job(&spec, &secrets, &op.job).await;
+    op.end(preview.error.is_none(), "The source could not be checked.");
     Ok((&preview).into())
 }
 
@@ -160,33 +164,26 @@ pub async fn set_paused(state: State<'_, Shared>, id: String, paused: bool) -> O
     Ok(state.engine.set_paused(&id, paused)?)
 }
 
-/// `cancel_job`: asks a running operation to stop (a no-op when it already ended).
-#[tauri::command]
-pub async fn cancel_job(state: State<'_, Shared>, job_id: String) -> Out<()> {
-    text_ok("job id", &job_id)?;
-    state.jobs.cancel(&job_id);
-    Ok(())
-}
-
 /// `check_now`: one watch now (the answer comes when it is done, however long that takes: the UI does not time it
 /// out), or every watch in the background (progress "n of m" arrives as job events and the watches report through
 /// the pushed state).
 #[tauri::command]
-pub async fn check_now<R: Runtime>(app: AppHandle<R>, state: State<'_, Shared>, id: Option<String>, job_id: String) -> Out<()> {
+pub async fn check_now<R: Runtime>(app: AppHandle<R>, state: State<'_, Shared>, id: Option<String>) -> Out<()> {
     match id {
         Some(id) => {
             text_ok("watch id", &id)?;
-            let (job, guard) = begin_job(&app, &state, &job_id, JobKind::Check)?;
-            let result = state.engine.check_now_job(Some(&id), &job).await;
-            guard.end_with(&job, result.is_ok());
+            let name = watch_name(&state, &id);
+            let op = begin_job(&app, Kind::Check, &format!("Checking {name}"), None)?;
+            let result = state.engine.check_now_job(Some(&id), &op.job).await;
+            op.end(result.is_ok(), &result.as_ref().err().map(ToString::to_string).unwrap_or_default());
             result?;
         }
         None => {
-            let (job, guard) = begin_job(&app, &state, &job_id, JobKind::CheckAll)?;
+            let op = begin_job(&app, Kind::CheckAll, "Checking every watch", None)?;
             let engine = state.engine.clone();
             tauri::async_runtime::spawn(async move {
-                let result = engine.check_now_job(None, &job).await;
-                guard.end_with(&job, result.is_ok());
+                let result = engine.check_now_job(None, &op.job).await;
+                op.end(result.is_ok(), &result.as_ref().err().map(ToString::to_string).unwrap_or_default());
             });
         }
     }
@@ -289,23 +286,20 @@ pub async fn open_release<R: Runtime>(
 
 /// `download_release`: downloads or copies the release into the downloads folder, verifying its checksum.
 #[tauri::command]
-pub async fn download_release<R: Runtime>(
-    app: AppHandle<R>,
+pub async fn download_release(
     state: State<'_, Shared>,
     id: String,
     version: String,
     product: Option<String>,
     artifact: Option<String>,
-    job_id: String,
 ) -> Out<String> {
     text_ok("watch id", &id)?;
     text_ok("version", &version)?;
     let release = chosen_release(&state, &id, &version, product.as_deref(), artifact.as_deref())?;
     let folder = downloads_dir(&state);
-    let (job, guard) = begin_job(&app, &state, &job_id, JobKind::Download)?;
-    let result = spotter_sources::download::download_job(&state.http, &release, &folder, true, &job).await;
-    guard.end_with(&job, result.is_ok());
-    if job.is_cancelled() && result.is_err() {
+    let title = format!("Downloading {}", watch_name(&state, &id));
+    let result = state.downloads.release(&title, Some(&version), &release, &folder, true).await;
+    if result.as_ref().err().is_some_and(|e| e == spotter_core::job::CANCELLED) {
         // The user stopped it: not a failed download to put in the history; the part stays to resume.
         return Err(CommandError::cancelled());
     }
@@ -507,10 +501,13 @@ pub async fn renderer_status(state: State<'_, Shared>) -> Out<RendererStatusDto>
 
 /// `install_renderer`: downloads the pinned, checksum-verified Chromium. Only ever runs because the user asked.
 #[tauri::command]
-pub async fn install_renderer<R: Runtime>(app: AppHandle<R>, state: State<'_, Shared>, job_id: String) -> Out<RendererStatusDto> {
-    let (job, guard) = begin_job(&app, &state, &job_id, JobKind::InstallRenderer)?;
-    let installed = spotter_render::install::install(&state.data_dir, &job).await;
-    guard.end_with(&job, installed.is_ok());
+pub async fn install_renderer<R: Runtime>(app: AppHandle<R>, state: State<'_, Shared>) -> Out<RendererStatusDto> {
+    let op = begin_job(&app, Kind::InstallRenderer, "Installing the browser", None)?;
+    let installed = spotter_render::install::install(&state.data_dir, &state.downloader, op.ctx(), &op.job).await;
+    op.end(
+        installed.is_ok(),
+        &installed.as_ref().err().map(ToString::to_string).unwrap_or_default(),
+    );
     installed.map_err(|e| match e {
         spotter_render::Error::Cancelled => CommandError::cancelled(),
         e => CommandError::unavailable(e.to_string()),
@@ -533,26 +530,6 @@ pub async fn import_list(state: State<'_, Shared>, format: String, text: String)
     })
 }
 
-// ---- Spotter's own updates ----
-
-/// `app_update_status`.
-#[tauri::command]
-pub async fn app_update_status<R: Runtime>(app: AppHandle<R>) -> Out<AppUpdateStatusDto> {
-    Ok(updater::status(&app))
-}
-
-/// `check_app_update`.
-#[tauri::command]
-pub async fn check_app_update<R: Runtime>(app: AppHandle<R>) -> Out<AppUpdateCheckDto> {
-    updater::check(&app).await
-}
-
-/// `install_app_update`.
-#[tauri::command]
-pub async fn install_app_update<R: Runtime>(app: AppHandle<R>) -> Out<()> {
-    updater::install(&app).await
-}
-
 // ---- windows ----
 
 /// `show_main_window`: shows and focuses the main window, then asks it to show `route`.
@@ -569,20 +546,10 @@ pub async fn show_main_window<R: Runtime>(app: AppHandle<R>, route: Option<Strin
         .map_err(|e| CommandError::internal(e.to_string()))
 }
 
-/// `hide_tray`: closes the tray popup.
+/// `pending_route`: the page the tray or a toast asked the main window to show before it could listen (taken once).
 #[tauri::command]
-pub async fn hide_tray<R: Runtime>(app: AppHandle<R>) -> Out<()> {
-    let handle = app.clone();
-    app.run_on_main_thread(move || tray::hide_popup(&handle))
-        .map_err(|e| CommandError::internal(e.to_string()))
-}
-
-/// `fit_tray`: fits the tray popup's height to its content (logical pixels, as the page measured it).
-#[tauri::command]
-pub async fn fit_tray<R: Runtime>(app: AppHandle<R>, height: f64) -> Out<()> {
-    let handle = app.clone();
-    app.run_on_main_thread(move || tray::fit_popup(&handle, height))
-        .map_err(|e| CommandError::internal(e.to_string()))
+pub async fn pending_route(state: State<'_, Shared>) -> Out<Option<String>> {
+    Ok(state.pending_route.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take())
 }
 
 /// Runs blocking work off the async threads.
@@ -623,14 +590,13 @@ mod tests {
     }
 
     #[test]
-    fn every_ui_command_has_a_handler() {
-        let src = include_str!("lib.rs");
+    fn every_ui_command_is_in_the_table() {
         let ts = include_str!("../../src/app/core/tauri-backend.ts");
         let mut seen = 0;
         for line in ts.lines() {
             if let Some(rest) = line.split("this.run").nth(1) {
-                if let Some(name) = rest.split('\'').nth(1) {
-                    assert!(src.contains(&format!("commands::{name},")), "no handler for {name}");
+                if let Some(name) = rest.split('\'').nth(1).filter(|n| !n.starts_with("plugin:")) {
+                    assert!(crate::COMMANDS.spec(name).is_some(), "no table entry for {name}");
                     seen += 1;
                 }
             }

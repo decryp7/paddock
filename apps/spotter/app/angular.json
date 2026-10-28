@@ -35,7 +35,8 @@
             "styles": [
               "../../../ui/dist/paddock-ui/css/paddock.css",
               "src/styles.scss"
-            ]
+            ],
+            "polyfills": ["@angular/localize/init"]
           },
           "configurations": {
             "production": {

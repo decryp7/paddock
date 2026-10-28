@@ -1,9 +1,10 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideShellTesting, shellPorts } from '@decryp7/paddock-ui/shell/testing';
 import { provideIcons } from '../icons';
 import type { CommandError, WatchSummary } from '../../core/api.types';
 import { idle, type Loadable } from '../../state/loadable';
-import { byText, flush, settle, text } from '../../../testing/test-helpers';
+import { byText, settle, text } from '../../../testing/test-helpers';
 import { Confirm } from './confirm-dialog';
 import { KindIcon } from './kind-icon';
 import { Panel } from './panel';
@@ -83,27 +84,19 @@ describe('KindIcon and WatchStatus', () => {
 });
 
 describe('Confirm', () => {
-  afterEach(() => document.querySelectorAll('.cdk-overlay-container').forEach((e) => (e.innerHTML = '')));
-
   const data = { title: 'Delete it?', message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true };
+  beforeEach(() => TestBed.configureTestingModule({ providers: [...provideShellTesting()] }));
 
-  it('resolves true on the confirm button and shows the texts', async () => {
-    const answer = TestBed.inject(Confirm).ask(data);
-    await flush(10);
-    const dialog = document.querySelector('sp-confirm-dialog')!;
-    expect(dialog.getAttribute('aria-label') ?? dialog.querySelector('[role=alertdialog]')?.getAttribute('aria-label')).toBe('Delete it?');
-    expect(text(dialog)).toContain('This cannot be undone.');
-    expect(dialog.querySelector('.danger-fill')).not.toBeNull();
-    (byText(dialog, 'button', 'Delete') as HTMLButtonElement).click();
-    expect(await answer).toBe(true);
+  it('asks the shell for the sp.confirm decision dialog and resolves true when it is confirmed', async () => {
+    shellPorts().dialogAnswers.set('sp.confirm', true);
+    expect(await TestBed.inject(Confirm).ask(data)).toBe(true);
+    expect(shellPorts().dialogs).toEqual([{ id: 'sp.confirm', inputs: { title: 'Delete it?', message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true } }]);
   });
 
-  it('resolves false on Cancel and uses the primary style for non-dangerous questions', async () => {
-    const answer = TestBed.inject(Confirm).ask({ ...data, danger: false });
-    await flush(10);
-    const dialog = document.querySelector('sp-confirm-dialog')!;
-    expect(dialog.querySelector('.primary')).not.toBeNull();
-    (byText(dialog, 'button', 'Cancel') as HTMLButtonElement).click();
-    expect(await answer).toBe(false);
+  it('resolves false when dismissed or declined, and defaults danger to false', async () => {
+    expect(await TestBed.inject(Confirm).ask({ ...data, danger: undefined })).toBe(false);
+    expect(shellPorts().dialogs[0]?.inputs).toMatchObject({ danger: false });
+    shellPorts().dialogAnswers.set('sp.confirm', false);
+    expect(await TestBed.inject(Confirm).ask(data)).toBe(false);
   });
 });

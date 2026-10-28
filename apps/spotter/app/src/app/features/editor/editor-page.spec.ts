@@ -1,11 +1,11 @@
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { shellPorts } from '@decryp7/paddock-ui/shell/testing';
 import { Router } from '@angular/router';
 import { EditorPage } from './editor-page';
 import { SCHEDULE_DEBOUNCE_MS } from './editor.store';
-import { ToastStore } from '../../state/toast.store';
 import { SettingsStore } from '../../state/settings.store';
-import { appProviders, byText, flush, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
+import { appProviders, byText, flush, makeMock, routeStub, settle, text, type as typeInto } from '../../../testing/test-helpers';
 
 @Component({ template: '' })
 class Stub {}
@@ -21,9 +21,8 @@ const pressed = (f: F) =>
 type F = Awaited<ReturnType<typeof make>>['f'];
 
 async function make(id?: string, backend = makeMock()) {
-  TestBed.configureTestingModule({ providers: appProviders(backend, routes) });
+  TestBed.configureTestingModule({ providers: [...appProviders(backend, routes), routeStub(id ? { id } : {}).provider] });
   const f = TestBed.createComponent(EditorPage);
-  if (id) f.componentRef.setInput('id', id);
   await settle(f);
   return { f, backend, router: TestBed.inject(Router) };
 }
@@ -146,7 +145,7 @@ describe('EditorPage: adding a watch', () => {
     await click(f, button(f, 'Add watch'));
     await flush(5);
     expect(router.url).toBe('/watches/w-100');
-    expect(TestBed.inject(ToastStore).toasts().at(-1)).toMatchObject({ title: 'Watch added', body: 'tool' });
+    expect(shellPorts().notices.at(-1)).toMatchObject({ level: 'success', message: 'Watch added. tool' });
     const saved = (await backend.getWatch('w-100')).spec;
     expect(saved).toMatchObject({ includePrereleases: true, nameFilter: '*-setup.exe', schedule: { mode: 'every', secs: 2700 }, notify: { mode: 'newer-than-installed' } });
     expect(saved.filter).toEqual({ prefix: '1.', soakHours: 0 });
@@ -281,7 +280,7 @@ describe('EditorPage: editing a watch', () => {
     await click(f, button(f, 'Save changes'));
     await flush(5);
     expect(router.url).toBe('/watches/w-2');
-    expect(TestBed.inject(ToastStore).toasts().at(-1)?.title).toBe('Watch saved');
+    expect(shellPorts().messages().at(-1)).toMatch(/^Watch saved/);
     expect((await backend.getWatch('w-2')).spec.source.values['repo']).toBe('lumen-labs/lumen2');
   });
 
@@ -355,7 +354,7 @@ describe('EditorPage: finding a feed and importing a list', () => {
     await flush(5);
     expect((await backend.listWatches()).map((w) => w.name)).toEqual(expect.arrayContaining(['alpha', 'beta']));
     expect(router.url).toBe('/watches');
-    expect(TestBed.inject(ToastStore).toasts().at(-1)?.title).toBe('Added 2 watches');
+    expect(shellPorts().messages().at(-1)).toMatch(/^Added 2 watches/);
   });
 
   it('stays on the page and lists what could not be added', async () => {
@@ -368,9 +367,9 @@ describe('EditorPage: finding a feed and importing a list', () => {
     await click(f, button(f, 'Read the list'));
     expect(text(q(f, '.surface p'))).toContain('1 watch ready to add');
     await click(f, button(f, 'Add 1 watch'));
-    const last = TestBed.inject(ToastStore).toasts().at(-1)!;
-    expect(last.title).toBe('1 could not be added');
-    expect(last.body).toContain('Acme Installer');
+    const last = shellPorts().messages().at(-1)!;
+    expect(last).toMatch(/^1 could not be added\. /);
+    expect(last).toContain('Acme Installer');
     expect(router.url).not.toBe('/watches');
   });
 

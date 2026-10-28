@@ -4,7 +4,6 @@
  */
 
 /** Colour theme. */
-export type Theme = 'system' | 'light' | 'dark';
 
 /** A watch's status after its last check (`spotter_core::state::WatchStatus`). */
 export type WatchStatusKind = 'pending' | 'ok' | 'noMatch' | 'unreachable' | 'authNeeded' | 'needsYou' | 'invalid' | 'failed';
@@ -474,10 +473,8 @@ export interface AppEvent {
 }
 
 export interface Settings {
-  theme: Theme;
   notifications: boolean;
   notificationsPausedUntilMs: number | null;
-  checkAppUpdates: boolean;
   downloadsFolder: string | null;
   defaultIntervalSecs: number;
   /** 'off' announces at once; otherwise releases are collected into one notification. */
@@ -530,18 +527,6 @@ export interface AppInfo {
   platform: 'windows' | 'macos' | 'linux';
 }
 
-export interface AppUpdateStatus {
-  /** False in builds without the update key. */
-  available: boolean;
-  reason: string | null;
-  currentVersion: string;
-}
-
-export interface AppUpdateCheck {
-  updateAvailable: boolean;
-  version: string | null;
-  notes: string | null;
-}
 
 export type OpenTarget = 'config' | 'logs' | 'downloads';
 
@@ -558,39 +543,3 @@ export interface StatePush {
   watches: WatchSummary[];
 }
 
-/** What a long operation is (`app/src-tauri/src/jobs.rs` `JobKind`). */
-export type JobKind = 'download' | 'installRenderer' | 'check' | 'checkAll' | 'testSource';
-
-/** How a long operation stands (`JobState`). */
-export type JobState = 'running' | 'finished' | 'cancelled' | 'failed';
-
-/** What a phase counts: bytes, or items (entries, files, watches, seconds). */
-export type JobUnit = 'bytes' | 'count';
-
-/** One phase of a long operation on its own scale (`spotter_core::job::Progress`). `total: null` is indeterminate: show the growing `done`. */
-export interface JobProgress {
-  phase:
-    | 'fetchingChecksum'
-    | 'checkingExisting'
-    | 'downloading'
-    | 'copying'
-    | 'unpacking'
-    | 'selfTest'
-    | 'finding'
-    | 'settling'
-    | 'checking';
-  /** The phase in words ("Downloading", "Finding files"). */
-  label: string;
-  unit: JobUnit;
-  done: number;
-  total: number | null;
-}
-
-/** Pushed on the Tauri event `spotter://job` while a long operation runs and once when it ends (`JobEventDto`). */
-export interface JobEvent {
-  jobId: string;
-  kind: JobKind;
-  state: JobState;
-  /** The phase it is in; null once it ended. */
-  progress: JobProgress | null;
-}

@@ -5,10 +5,10 @@
 //!
 //! E-mail channels are not delivered yet (the engine leaves them to the shell); see `docs/roadmap.md`.
 
+use crate::jobs::Downloads;
 use spotter_core::action::{command_args, Action};
 use spotter_engine::notifier::{ActionRequest, Notification, NotificationKind, Notifier};
 use spotter_engine::Engine;
-use spotter_sources::http::Http;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -38,7 +38,7 @@ struct Inner {
     toast: Arc<dyn OsToast>,
     opener: Arc<dyn OpenLocation>,
     engine: OnceLock<Engine>,
-    http: Http,
+    downloads: Downloads,
     default_folder: PathBuf,
 }
 
@@ -51,13 +51,13 @@ pub struct ShellNotifier {
 impl ShellNotifier {
     /// A notifier. Its engine is attached with [`ShellNotifier::attach`] once the engine exists (the engine needs the
     /// notifier first).
-    pub fn new(toast: Arc<dyn OsToast>, opener: Arc<dyn OpenLocation>, http: Http, default_folder: PathBuf) -> ShellNotifier {
+    pub fn new(toast: Arc<dyn OsToast>, opener: Arc<dyn OpenLocation>, downloads: Downloads, default_folder: PathBuf) -> ShellNotifier {
         ShellNotifier {
             inner: Arc::new(Inner {
                 toast,
                 opener,
                 engine: OnceLock::new(),
-                http,
+                downloads,
                 default_folder,
             }),
         }
@@ -123,7 +123,12 @@ impl ShellNotifier {
         verify: bool,
         downloaded: &mut Option<String>,
     ) -> Result<(), String> {
-        let result = spotter_sources::download::download(&self.inner.http, release, folder, verify).await;
+        let title = format!("Downloading {}", request.watch_name);
+        let result = self
+            .inner
+            .downloads
+            .release(&title, Some(&release.version.text), release, folder, verify)
+            .await;
         if let Some(engine) = self.inner.engine.get() {
             let outcome = result
                 .as_ref()
@@ -249,8 +254,19 @@ mod tests {
         }
     }
 
+    fn test_downloads() -> Downloads {
+        let registry = Arc::new(paddock_jobs::JobRegistry::new(Arc::new(NoEvents)));
+        let downloader = Arc::new(paddock_download::Downloader::http(paddock_download::HttpConfig::default()).unwrap());
+        Downloads::new(registry, downloader, spotter_sources::http::Http::new("test").unwrap())
+    }
+
+    struct NoEvents;
+    impl paddock_jobs::EventSink for NoEvents {
+        fn emit(&self, _: &paddock_jobs::JobSnapshot) {}
+    }
+
     fn notifier(opened: Arc<Opened>, toasts: Arc<Toasts>) -> ShellNotifier {
-        ShellNotifier::new(toasts, opened, Http::new("test").unwrap(), PathBuf::from("/nonexistent-default"))
+        ShellNotifier::new(toasts, opened, test_downloads(), PathBuf::from("/nonexistent-default"))
     }
 
     fn request(actions: Vec<Action>, location: &str) -> ActionRequest {

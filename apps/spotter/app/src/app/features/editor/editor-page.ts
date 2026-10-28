@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, untracked } from '@angular/core';
+import { routeParam } from '../../core/route-param';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, untracked } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { Router, RouterLink } from '@angular/router';
 import { BACKEND } from '../../core/backend';
@@ -6,7 +7,7 @@ import type { ChannelKind, LatestBy, NotifyMode, VersionSchemeId, WatchAction } 
 import { SCHEME_OPTIONS } from '../../shared/labels';
 import { Panel } from '../../shared/ui/panel';
 import type { Loadable } from '../../state/loadable';
-import { ToastStore } from '../../state/toast.store';
+import { Notifier } from '../../state/notifier';
 import { findAction, parseArgs, replaceAction, toggleAction, type ActionKind } from './draft-utils';
 import { EditorStore, STEPS, type EditorStep } from './editor.store';
 import { ExtensionChips } from './extension-chips';
@@ -27,11 +28,11 @@ import { SourceStep } from './source-step';
 })
 export class EditorPage {
   /** From the route (`/watches/:id/edit`); absent when adding. */
-  readonly id = input<string>();
+  readonly id = routeParam('id');
 
   protected readonly store = inject(EditorStore);
   private readonly router = inject(Router);
-  private readonly toast = inject(ToastStore);
+  private readonly toast = inject(Notifier);
   private readonly backend = inject(BACKEND);
 
   protected readonly steps = STEPS;

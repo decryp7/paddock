@@ -9,7 +9,7 @@ import { ClockService } from '../core/clock.service';
 import { Clipboard } from '../shared/clipboard';
 import { Confirm } from '../shared/ui/confirm-dialog';
 import { WatchesStore } from '../state/watches.store';
-import { appProviders, byText, flush, makeMock, NOW, settle, text } from '../../testing/test-helpers';
+import { appProviders, byText, flush, makeMock, NOW, routeStub, settle, text } from '../../testing/test-helpers';
 
 @Component({ template: '' })
 class Stub {}
@@ -201,10 +201,9 @@ describe('right-click menus', () => {
   describe('the detail tables', () => {
     async function make() {
       const backend = makeMock();
-      TestBed.configureTestingModule({ providers: appProviders(backend, routes) });
+      TestBed.configureTestingModule({ providers: [...appProviders(backend, routes), routeStub({ id: 'w-1' }).provider] });
       TestBed.inject(WatchesStore).start();
       const f = TestBed.createComponent(WatchDetailPage);
-      f.componentRef.setInput('id', 'w-1');
       await settle(f);
       return { f, backend };
     }
@@ -247,11 +246,12 @@ describe('right-click menus', () => {
 
     it('offers the product actions and marks a product seen', async () => {
       const backend = makeMock({ scenario: 'products' });
-      TestBed.configureTestingModule({ providers: appProviders(backend, routes) });
+      const route = routeStub();
+      TestBed.configureTestingModule({ providers: [...appProviders(backend, routes), route.provider] });
       TestBed.inject(WatchesStore).start();
       const withProducts = (await backend.listWatches()).find((w) => w.productCount > 0)!;
+      route.set({ id: withProducts.id });
       const f = TestBed.createComponent(WatchDetailPage);
-      f.componentRef.setInput('id', withProducts.id);
       await settle(f);
       const rows = productRows(f);
       expect(rows.length).toBeGreaterThan(0);

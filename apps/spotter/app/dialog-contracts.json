@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "base": [
+    "window_pong",
+    "window_ready"
+  ],
+  "dialogs": {
+    "pd.about": {
+      "kind": "viewer",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "minSize": {
+        "width": 680,
+        "height": 560
+      },
+      "commands": [
+        "about_info",
+        "about_legal"
+      ]
+    },
+    "pd.settings": {
+      "kind": "tool",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": [
+        "app_info",
+        "choose_folder",
+        "get_autostart",
+        "get_settings",
+        "install_renderer",
+        "mail_status",
+        "open",
+        "pause_notifications",
+        "renderer_status",
+        "save_settings",
+        "send_test_email",
+        "set_autostart",
+        "set_mail_password",
+        "settings_overview",
+        "settings_reset",
+        "settings_set"
+      ]
+    },
+    "pd.updates": {
+      "kind": "tool",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": [
+        "updates_cancel",
+        "updates_check",
+        "updates_download",
+        "updates_install_on_quit",
+        "updates_restart",
+        "updates_set_preferences",
+        "updates_status"
+      ]
+    },
+    "pd.whats-new": {
+      "kind": "viewer",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "minSize": {
+        "width": 680,
+        "height": 560
+      },
+      "commands": [
+        "about_whats_new"
+      ]
+    },
+    "sp.confirm": {
+      "kind": "decision",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": []
+    }
+  }
+}

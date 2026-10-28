@@ -1,44 +1,28 @@
-//! The tray (Windows notification area, macOS menu bar, Linux status notifier): an icon that shows whether there is
-//! something unseen, a tooltip with the counts and, on a right click, a menu with the unseen releases and quick
-//! actions. A left click opens the popup window (`index.html#/tray`), a frameless transparent window anchored to the
-//! icon that closes when it loses focus.
-//!
-//! Closing the main window destroys it (a hidden webview could come back blank on macOS and keeps its memory); the
-//! tray's Open, or the Dock icon on macOS, creates it again from the configuration. Only an explicit Quit exits.
-//! Without a tray (some Linux desktops) closing the window quits.
+//! Spotter's part of the tray (Windows notification area, macOS menu bar, Linux status notifier): what the icon shows
+//! (unseen releases), its tooltip and its menu. The icon, the menu drawing, the click rules, the popover window
+//! (`index.html#/tray`) and what closing the last window does are the shell's (`paddock-window`); without a tray the
+//! shell quits when the last window closes.
 
+use paddock_window::tauri::{create_tray, refresh_tray, NativeTray, PopoverSpec, Popovers, Tray};
+use paddock_window::tray::{disabled, item, TrayEntry, TrayView};
 use spotter_engine::view::WatchSummary;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-/// The tray's id.
-pub const TRAY_ID: &str = "spotter";
 /// The main window's label (`tauri.conf.json`).
 pub const MAIN: &str = "main";
-/// The popup window's label.
-pub const POPUP: &str = "tray";
 /// The event that asks the main window to show a route.
 pub const NAVIGATE_EVENT: &str = "spotter://navigate";
 
-const OPEN: &str = "open";
-const QUIT: &str = "quit";
 const CHECK_ALL: &str = "check-all";
 const PAUSE: &str = "pause";
 const RESUME: &str = "resume";
 const WATCH_PREFIX: &str = "watch:";
 
-/// The popup's size in logical pixels (the height is replaced by the content's height once the page reports it).
-pub const POPUP_SIZE: (f64, f64) = (360.0, 440.0);
-/// The shortest and tallest the popup gets when it is fitted to its content, in logical pixels.
-pub const POPUP_HEIGHT_RANGE: (f64, f64) = (120.0, 520.0);
+/// The popover's route in the UI (`main.ts` boots the tray window for it).
+pub const POPOVER_ROUTE: &str = "index.html#/tray";
 /// How many unseen releases the right-click menu lists.
 const MENU_WATCHES: usize = 8;
-/// A click on the icon within this time after the popup lost focus is the click that closed it, not a new one.
-const REOPEN_GUARD: Duration = Duration::from_millis(350);
 
 /// What the tray icon shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,8 +126,8 @@ pub fn menu_model(watches: &[WatchSummary], paused: bool) -> Vec<MenuEntry> {
         m.push(MenuEntry::Item(PAUSE.into(), "Pause notifications for 1 hour".into()));
     }
     m.push(MenuEntry::Separator);
-    m.push(MenuEntry::Item(OPEN.into(), "Open Spotter".into()));
-    m.push(MenuEntry::Item(QUIT.into(), "Quit Spotter".into()));
+    m.push(MenuEntry::Item(paddock_window::tray::SHOW_ID.into(), "Open Spotter".into()));
+    m.push(MenuEntry::Item(paddock_window::tray::QUIT_ID.into(), "Quit Spotter".into()));
     m
 }
 
@@ -160,312 +144,62 @@ pub fn valid_route(route: &str) -> bool {
         && route.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'_'))
 }
 
-/// A rectangle in physical pixels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Rect {
-    /// Left.
-    pub x: i32,
-    /// Top.
-    pub y: i32,
-    /// Width.
-    pub w: i32,
-    /// Height.
-    pub h: i32,
-}
-
-/// Where the popup goes: centred on the tray icon, below it when the icon is in the upper half of the screen (macOS
-/// menu bar) and above it otherwise (Windows taskbar), kept inside the work area with a small margin.
-pub fn popup_position(icon: Rect, work: Rect, popup: (i32, i32)) -> (i32, i32) {
-    const GAP: i32 = 6;
-    let (w, h) = popup;
-    let x = (icon.x + icon.w / 2 - w / 2).clamp(work.x + GAP, (work.x + work.w - w - GAP).max(work.x + GAP));
-    let below = icon.y + icon.h / 2 < work.y + work.h / 2;
-    let y = if below { icon.y + icon.h + GAP } else { icon.y - h - GAP };
-    (x, y.clamp(work.y + GAP, (work.y + work.h - h - GAP).max(work.y + GAP)))
-}
-
-/// The popup height for a content height the page reported (logical pixels): within [`POPUP_HEIGHT_RANGE`], and the
-/// default for a value that is not a number (the webview is untrusted).
-pub fn fitted_height(content: f64) -> f64 {
-    if content.is_finite() {
-        content.ceil().clamp(POPUP_HEIGHT_RANGE.0, POPUP_HEIGHT_RANGE.1)
-    } else {
-        POPUP_SIZE.1
-    }
-}
-
-/// The top edge after a resize from `old_h` to `new_h`: a popup above a taskbar icon keeps its bottom edge (it grows
-/// and shrinks upwards, staying next to the icon), one below a menu-bar icon keeps its top edge.
-pub fn fitted_top(top: i32, old_h: i32, new_h: i32, anchored_bottom: bool) -> i32 {
-    if anchored_bottom {
-        top + old_h - new_h
-    } else {
-        top
-    }
-}
-
-/// Marks an app whose tray icon could not be created (Linux without an appindicator): there is no way back to a
-/// closed window, so closing it must exit.
-pub struct NoTray;
-
-/// Whether the app has a tray icon.
-pub fn has_tray<R: Runtime>(app: &AppHandle<R>) -> bool {
-    app.try_state::<NoTray>().is_none()
-}
-
-/// Whether an exit request leaves the app running: closing the last window does when there is a tray to reopen it
-/// from; Quit (an explicit exit code) never does.
-pub fn keeps_running(exit_code: Option<i32>, tray: bool) -> bool {
-    exit_code.is_none() && tray
-}
-
-/// When the popup last closed because it lost focus.
-#[derive(Default)]
-pub struct PopupGuard(Mutex<Option<Instant>>);
-
-impl PopupGuard {
-    /// Remembers that the popup just closed.
-    pub fn closed(&self) {
-        *self.0.lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now());
-    }
-
-    /// Whether a click now is the one that closed the popup.
-    pub fn just_closed(&self) -> bool {
-        self.0
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .is_some_and(|t| t.elapsed() < REOPEN_GUARD)
-    }
-}
-
-fn build_menu<R: Runtime>(app: &AppHandle<R>, watches: &[WatchSummary], paused: bool) -> tauri::Result<Menu<R>> {
-    let mut menu = MenuBuilder::new(app);
-    for (i, e) in menu_model(watches, paused).into_iter().enumerate() {
-        menu = match e {
-            MenuEntry::Header(t) => menu.item(&MenuItem::with_id(app, format!("header-{i}"), t, false, None::<&str>)?),
-            MenuEntry::Separator => menu.item(&PredefinedMenuItem::separator(app)?),
-            MenuEntry::Item(id, label) => menu.item(&MenuItem::with_id(app, id, label, true, None::<&str>)?),
-        };
-    }
-    menu.build()
-}
-
-/// Creates the tray icon.
-pub fn create<R: Runtime>(app: &AppHandle<R>, watches: &[WatchSummary], paused: bool) -> tauri::Result<()> {
-    let menu = build_menu(app, watches, paused)?;
-    let icon = Image::from_bytes(icon_bytes(tray_state(watches), dark_taskbar()))?;
-    TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip(tooltip(watches))
-        .icon(icon)
-        .icon_as_template(cfg!(target_os = "macos"))
-        .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| crate::lifecycle::on_menu(app, event.id().as_ref()))
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                rect,
-                ..
-            } = event
-            {
-                toggle_popup(tray.app_handle(), rect);
-            }
+/// The menu as the shell draws it.
+pub fn view(watches: &[WatchSummary], paused: bool) -> TrayView {
+    let menu = menu_model(watches, paused)
+        .into_iter()
+        .map(|e| match e {
+            MenuEntry::Header(t) => disabled(&t),
+            MenuEntry::Separator => TrayEntry::Separator,
+            MenuEntry::Item(id, label) => item(id, &label),
         })
-        .build(app)?;
-    Ok(())
-}
-
-/// Updates icon, tooltip and menu.
-pub fn update<R: Runtime>(app: &AppHandle<R>, watches: &[WatchSummary], paused: bool) {
-    let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
-    if let Ok(icon) = Image::from_bytes(icon_bytes(tray_state(watches), dark_taskbar())) {
-        let _ = tray.set_icon(Some(icon));
-        let _ = tray.set_icon_as_template(cfg!(target_os = "macos"));
-    }
-    let _ = tray.set_tooltip(Some(tooltip(watches)));
-    if let Ok(menu) = build_menu(app, watches, paused) {
-        let _ = tray.set_menu(Some(menu));
-    }
-}
-
-/// Opens the popup next to the tray icon, or closes it when it is open.
-pub fn toggle_popup<R: Runtime>(app: &AppHandle<R>, icon: tauri::Rect) {
-    if let Some(w) = app.get_webview_window(POPUP) {
-        let _ = w.destroy();
-        return;
-    }
-    if app.state::<PopupGuard>().just_closed() {
-        return;
-    }
-    let scale = app.monitor_from_point(0.0, 0.0).ok().flatten().map_or(1.0, |m| m.scale_factor());
-    let pos: PhysicalPosition<i32> = icon.position.to_physical(scale);
-    let size: tauri::PhysicalSize<u32> = icon.size.to_physical(scale);
-    let monitor = app.monitor_from_point(f64::from(pos.x), f64::from(pos.y)).ok().flatten();
-    let (scale, work) = match &monitor {
-        Some(m) => {
-            let a = m.work_area();
-            (
-                m.scale_factor(),
-                Rect {
-                    x: a.position.x,
-                    y: a.position.y,
-                    w: a.size.width as i32,
-                    h: a.size.height as i32,
-                },
-            )
-        }
-        None => (
-            1.0,
-            Rect {
-                x: 0,
-                y: 0,
-                w: 1920,
-                h: 1080,
-            },
-        ),
+        .collect();
+    let icon = match tray_state(watches) {
+        TrayState::Normal => "normal",
+        TrayState::New => "new",
     };
-    let popup = ((POPUP_SIZE.0 * scale) as i32, (POPUP_SIZE.1 * scale) as i32);
-    let at = popup_position(
-        Rect {
-            x: pos.x,
-            y: pos.y,
-            w: size.width as i32,
-            h: size.height as i32,
-        },
-        work,
-        popup,
-    );
-    let builder = WebviewWindowBuilder::new(app, POPUP, WebviewUrl::App("index.html#/tray".into()))
-        .title("Spotter")
-        .inner_size(POPUP_SIZE.0, POPUP_SIZE.1)
-        .decorations(false)
-        .transparent(true)
-        .resizable(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .shadow(true)
-        .focused(true)
-        .visible(true);
-    #[cfg(target_os = "macos")]
-    let builder = builder.effects(tauri::utils::config::WindowEffectsConfig {
-        effects: vec![tauri::utils::WindowEffect::Popover],
-        state: Some(tauri::utils::WindowEffectState::Active),
-        radius: Some(12.0),
-        color: None,
-        interactive: false,
-    });
-    #[cfg(windows)]
-    let builder = builder.effects(tauri::utils::config::WindowEffectsConfig {
-        effects: vec![tauri::utils::WindowEffect::Acrylic],
-        state: None,
-        radius: None,
-        color: None,
-        interactive: false,
-    });
-    match builder.build() {
-        Ok(w) => {
-            let _ = w.set_position(PhysicalPosition::new(at.0, at.1));
-            crate::native_feel::apply(&w);
-            #[cfg(windows)]
-            if let Err(e) = round_corners(&w) {
-                crate::applog::write(&format!("the tray popup keeps square corners: {e}"));
-            }
-            let handle = app.clone();
-            w.on_window_event(move |e| {
-                if matches!(e, tauri::WindowEvent::Focused(false)) {
-                    handle.state::<PopupGuard>().closed();
-                    if let Some(p) = handle.get_webview_window(POPUP) {
-                        let _ = p.destroy();
-                    }
-                }
-            });
-        }
-        Err(e) => crate::applog::write(&format!("the tray popup could not be opened: {e}")),
-    }
+    TrayView::new(&tooltip(watches), menu, icon)
 }
 
-/// Fits the popup's height to its content (`content` is what the page reported, in logical pixels), keeping it next to
-/// the tray icon. Does nothing when the popup is closed.
-pub fn fit_popup<R: Runtime>(app: &AppHandle<R>, content: f64) {
-    let Some(w) = app.get_webview_window(POPUP) else { return };
-    let (Ok(pos), Ok(size), Ok(scale)) = (w.outer_position(), w.outer_size(), w.scale_factor()) else {
-        return;
-    };
-    let height = fitted_height(content);
-    let new_h = (height * scale).round() as i32;
-    if new_h == size.height as i32 {
-        return;
-    }
-    // Above the middle of the monitor means the popup hangs from a menu bar; below it, it sits on a taskbar.
-    let anchored_bottom = w.current_monitor().ok().flatten().is_some_and(|m| {
-        let a = m.work_area();
-        pos.y + size.height as i32 / 2 > a.position.y + a.size.height as i32 / 2
-    });
-    let _ = w.set_size(tauri::LogicalSize::new(POPUP_SIZE.0, height));
-    let _ = w.set_position(PhysicalPosition::new(
-        pos.x,
-        fitted_top(pos.y, size.height as i32, new_h, anchored_bottom),
-    ));
+/// The icon image for a state name of [`view`].
+fn image(name: &str) -> Option<Image<'static>> {
+    let state = if name == "new" { TrayState::New } else { TrayState::Normal };
+    Image::from_bytes(icon_bytes(state, dark_taskbar())).ok()
 }
 
-/// Asks Windows 11 for rounded corners on a frameless window (`DWMWCP_ROUND`, 8 px). Windows 10 does not know the
-/// attribute: the call fails and the corners stay square, which is how that system draws every window.
-#[cfg(windows)]
-#[allow(unsafe_code)]
-fn round_corners<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Result<(), String> {
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::Graphics::Dwm::{
-        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DWM_WINDOW_CORNER_PREFERENCE,
-    };
-    // Tauri may use another version of the `windows` crate, so only the raw handle crosses over.
-    let hwnd = HWND(window.hwnd().map_err(|e| e.to_string())?.0);
-    let preference: DWM_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND;
-    // SAFETY: `hwnd` is the live popup window and the pointer and size describe one `DWM_WINDOW_CORNER_PREFERENCE`.
-    unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE,
-            std::ptr::from_ref(&preference).cast(),
-            std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
-        )
-    }
-    .map_err(|e| e.to_string())
+/// The shell's tray with Spotter's model, and the popover. Call from the app's set-up, before the main window. Returns
+/// whether the icon exists (Linux without a status-notifier host has none).
+pub fn create<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.manage(Popovers::new().popover(None, PopoverSpec::new(POPOVER_ROUTE, "Spotter")));
+    let native = NativeTray::new(image).menu_on_left_click(false);
+    let tray = Tray::new(native, |app| {
+        let (watches, paused) = crate::lifecycle::snapshot(app);
+        view(&watches, paused)
+    })
+    .popover(true)
+    .on_action(|app, id| crate::lifecycle::on_menu(app, id));
+    create_tray(app, tray)
 }
 
-/// Closes the popup if it is open.
-pub fn hide_popup<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(w) = app.get_webview_window(POPUP) {
-        let _ = w.destroy();
-    }
+/// Redraws the tray after the watches changed (only when the model differs).
+pub fn update<R: Runtime>(app: &AppHandle<R>) {
+    refresh_tray(app);
 }
 
-/// Shows and focuses the main window, creating it again from the configuration when it was closed. `route` (already
-/// validated) is shown: through the URL of a window that is being created, through an event for one that exists.
+/// Shows and focuses the main window (rebuilt when it was closed). `route` (already validated) is shown: the window
+/// is told through an event, and the route also waits for a window that was just built and cannot listen yet.
 pub fn show_main<R: Runtime>(app: &AppHandle<R>, route: Option<&str>) {
-    if let Some(w) = app.get_webview_window(MAIN) {
-        let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
-        if let Some(r) = route {
-            let _ = app.emit_to(MAIN, NAVIGATE_EVENT, r.to_string());
-        }
-        return;
-    }
-    let Some(mut cfg) = app.config().app.windows.iter().find(|w| w.label == MAIN).cloned() else {
-        return;
-    };
     if let Some(r) = route {
-        // The hash route is read when the app boots, so a window created for a click lands on the right page.
-        cfg.url = WebviewUrl::App(format!("index.html#{r}").into());
-    }
-    let builder = WebviewWindowBuilder::from_config(app, &cfg);
-    match builder.and_then(|b| b.build()) {
-        Ok(w) => {
-            crate::native_feel::apply(&w);
-            let _ = w.set_focus();
+        if let Some(state) = app.try_state::<crate::state::Shared>() {
+            *state.pending_route.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(r.to_string());
         }
-        Err(e) => crate::applog::write(&format!("the main window could not be opened: {e}")),
+    }
+    if let Err(e) = paddock_window::tauri::reveal(app, MAIN) {
+        crate::applog::write(&format!("the main window could not be opened: {}", e.message));
+        return;
+    }
+    if let Some(r) = route {
+        let _ = app.emit_to(MAIN, NAVIGATE_EVENT, r.to_string());
     }
 }
 
@@ -585,80 +319,5 @@ mod tests {
         assert!(!valid_route("/a#b"));
         assert!(!valid_route("/a b"));
         assert!(!valid_route(&format!("/{}", "a".repeat(250))));
-    }
-
-    #[test]
-    fn the_popup_sits_below_a_menu_bar_icon_and_above_a_taskbar_icon_inside_the_work_area() {
-        let work = Rect {
-            x: 0,
-            y: 24,
-            w: 1440,
-            h: 876,
-        };
-        let top_icon = Rect {
-            x: 1300,
-            y: 0,
-            w: 24,
-            h: 24,
-        };
-        let (x, y) = popup_position(top_icon, work, (360, 440));
-        assert_eq!(y, 24 + 6, "below the menu bar");
-        assert!(x + 360 <= 1440 - 6, "kept on screen: {x}");
-        let bottom = Rect {
-            x: 0,
-            y: 0,
-            w: 1920,
-            h: 1040,
-        };
-        let task_icon = Rect {
-            x: 1500,
-            y: 1040,
-            w: 32,
-            h: 40,
-        };
-        let (x, y) = popup_position(task_icon, bottom, (360, 440));
-        assert_eq!(x, 1500 + 16 - 180);
-        assert_eq!(y, 1040 - 440 - 6, "above the taskbar");
-        let left = popup_position(Rect { x: 2, y: 0, w: 20, h: 20 }, work, (360, 440));
-        assert_eq!(left.0, 6, "kept inside on the left");
-    }
-
-    #[test]
-    fn the_popup_height_follows_the_content_within_limits() {
-        assert_eq!(fitted_height(200.2), 201.0);
-        assert_eq!(
-            fitted_height(10.0),
-            POPUP_HEIGHT_RANGE.0,
-            "an empty page still leaves a usable popup"
-        );
-        assert_eq!(fitted_height(9000.0), POPUP_HEIGHT_RANGE.1);
-        assert_eq!(fitted_height(f64::NAN), POPUP_SIZE.1, "the webview is untrusted");
-        assert_eq!(fitted_height(f64::INFINITY), POPUP_SIZE.1);
-        assert_eq!(fitted_height(-5.0), POPUP_HEIGHT_RANGE.0);
-    }
-
-    #[test]
-    fn a_popup_above_the_taskbar_keeps_its_bottom_edge_and_one_below_the_menu_bar_its_top() {
-        assert_eq!(fitted_top(500, 440, 300, true), 640, "bottom stays at 940");
-        assert_eq!(fitted_top(500, 300, 440, true), 360);
-        assert_eq!(fitted_top(30, 440, 300, false), 30);
-    }
-
-    #[test]
-    fn closing_the_last_window_keeps_running_and_quit_exits() {
-        assert!(keeps_running(None, true));
-        assert!(!keeps_running(Some(0), true));
-        assert!(
-            !keeps_running(None, false),
-            "no tray: the window is the only way in, so closing it exits"
-        );
-    }
-
-    #[test]
-    fn a_click_right_after_the_popup_closed_is_not_a_new_click() {
-        let g = PopupGuard::default();
-        assert!(!g.just_closed());
-        g.closed();
-        assert!(g.just_closed());
     }
 }

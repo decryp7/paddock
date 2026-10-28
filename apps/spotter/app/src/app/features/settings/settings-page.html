@@ -9,11 +9,7 @@
       }
 
       <section class="group surface" aria-labelledby="app-h">
-        <h2 id="app-h">Appearance</h2>
-        <div class="row">
-          <div><div class="l">Theme</div><div class="help">System follows your computer's light or dark setting.</div></div>
-          <pd-segmented-control label="Theme" [options]="themes" [value]="c.theme" (valueChange)="setTheme($event)" />
-        </div>
+        <h2 id="app-h">Startup</h2>
         <div class="row">
           <div><label class="l" for="autostart">Launch at login</label><div class="help">Start Spotter in the tray when you sign in.</div></div>
           <input id="autostart" type="checkbox" class="toggle" role="switch" [checked]="store.autostart() === true" [disabled]="store.autostart() === null" (change)="store.setAutostart(checked($event))" />
@@ -103,31 +99,6 @@
             </div>
           }
         </sp-panel>
-      </section>
-
-      <section class="group surface" aria-labelledby="upd-h">
-        <h2 id="upd-h">Spotter updates</h2>
-        <div class="row">
-          <div>
-            <div class="l">Version {{ store.info().value?.version ?? store.update().value?.currentVersion ?? '' }}</div>
-            @if (store.update().value; as u) {
-              @if (!u.available) { <div class="help">{{ u.reason ?? 'Updates are not available in this build.' }}</div> }
-            }
-            @if (store.updateCheck(); as chk) {
-              <div class="help" role="status">
-                @if (chk.updateAvailable) { Version {{ chk.version }} is available. {{ chk.notes }} } @else { You have the latest version. }
-              </div>
-            }
-          </div>
-          <div class="inline">
-            <button type="button" class="btn sm" (click)="store.checkUpdate()" [disabled]="store.updateBusy() || store.update().value?.available === false">Check for updates</button>
-            @if (store.updateCheck()?.updateAvailable) { <button type="button" class="btn sm primary" (click)="store.installUpdate()" [disabled]="store.updateBusy()">Install</button> }
-          </div>
-        </div>
-        <div class="row">
-          <div><label class="l" for="auto-upd">Check automatically</label><div class="help">Spotter asks once a day. Nothing else is sent.</div></div>
-          <input id="auto-upd" type="checkbox" class="toggle" role="switch" [checked]="c.checkAppUpdates" (change)="set({ checkAppUpdates: checked($event) })" />
-        </div>
       </section>
 
       <section class="group surface" aria-labelledby="data-h">
