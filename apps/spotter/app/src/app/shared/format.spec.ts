@@ -1,4 +1,4 @@
-import { agoShort, bucketLabel, formatShortDateTime, mebibytes, formatBytes, formatDate, formatDateTime, formatDuration, formatInterval, lastSegment, relativeTime, shortHash, spanText } from './format';
+import { breakablePath, agoShort, bucketLabel, formatShortDateTime, mebibytes, formatBytes, formatDate, formatDateTime, formatDuration, formatInterval, lastSegment, relativeTime, shortHash, spanText } from './format';
 
 const MIN = 60_000;
 const H = 60 * MIN;
@@ -36,7 +36,9 @@ describe('format', () => {
     expect(formatBytes(null)).toBe('—');
     expect(formatBytes(512)).toBe('512 B');
     expect(formatBytes(1536)).toBe('1.5 KiB');
-    expect(formatBytes(150 * 1024 * 1024)).toBe('150 MiB');
+    // One decimal everywhere, however large the number: the sizes of a column and of a list read alike.
+    expect(formatBytes(150 * 1024 * 1024)).toBe('150.0 MiB');
+    expect(formatBytes(43.3 * 1024 * 1024)).toBe('43.3 MiB');
     expect(formatBytes(5 * 1024 ** 4 * 2000)).toContain('TiB');
   });
 
@@ -78,11 +80,11 @@ describe('short formats', () => {
     expect(formatShortDateTime(old, NOW)).not.toMatch(/8:15|08:15/);
   });
 
-  it('scales mebibytes to keep three significant digits', () => {
-    expect(mebibytes(0)).toBe('0.00');
+  it('writes mebibytes with one decimal, whatever the size, so a column lines up', () => {
+    expect(mebibytes(0)).toBe('0.0');
     expect(mebibytes(1048576 * 25.5)).toBe('25.5');
-    expect(mebibytes(1048576 * 5.25)).toBe('5.25');
-    expect(mebibytes(1048576 * 250)).toBe('250');
+    expect(mebibytes(1048576 * 5.25)).toBe('5.3');
+    expect(mebibytes(1048576 * 250)).toBe('250.0');
   });
 
   it('writes a compact ago', () => {
@@ -91,5 +93,16 @@ describe('short formats', () => {
     expect(agoShort(NOW - 20 * MIN, NOW)).toBe('20 min');
     expect(agoShort(NOW - 3 * H, NOW)).toBe('3 h');
     expect(agoShort(NOW - 2 * D, NOW)).toBe('2 days');
+  });
+
+  it('lets a location wrap at its separators and nowhere else', () => {
+    const Z = '\u200b';
+    expect(breakablePath('/Volumes/Builds/acme-installer')).toBe(`/${Z}Volumes/${Z}Builds/${Z}acme-installer`);
+    expect(breakablePath('C:\\Shares\\Builds')).toBe(`C:\\${Z}Shares\\${Z}Builds`);
+    expect(breakablePath('https://x.example/a/b?c=1#d')).toBe(`https://${Z}x.example/${Z}a/${Z}b${Z}?c=1${Z}#d`);
+    // Names stay whole, and nothing is added where nothing can break.
+    expect(breakablePath('acme-installer-3.10.0')).toBe('acme-installer-3.10.0');
+    expect(breakablePath('').length).toBe(0);
+    expect(breakablePath(`${'/'}`)).toBe('/');
   });
 });

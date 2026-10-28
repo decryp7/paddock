@@ -12,7 +12,6 @@ import { BACKEND } from '../core/backend';
 import { createBackend } from '../core/backend-factory';
 import { applyWindowChrome } from '../core/window-chrome';
 import { platformFromUserAgent } from '../core/tauri-backend';
-import { provideQuietJobNotices } from './quiet-jobs';
 import { provideIcons } from '../shared/icons';
 import { provideSpotterAppearance } from './appearance';
 import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS } from './contributions';
@@ -85,7 +84,6 @@ export function bootMainWindow(): Promise<unknown> {
         ...(ipc ? { nativeMenu: tauriNativeMenuPort(ipc) } : {}),
         ...(bridge ? { dialogs: { io: () => tauriDialogIo(bridge) } } : {}),
       }),
-      provideQuietJobNotices(),
     ],
   }).catch((e: unknown) => {
     console.error(e);

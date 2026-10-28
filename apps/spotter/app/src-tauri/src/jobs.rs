@@ -28,6 +28,12 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// Whether the success of this kind of job is left out of the notifications: the wizard's source test (it runs again with
+    /// every edit of the form) and the check of one watch (the dashboard shows what it found).
+    pub fn quiet_on_success(self) -> bool {
+        matches!(self, Kind::TestSource | Kind::Check)
+    }
+
     /// The shell's slug.
     pub fn slug(self) -> &'static str {
         match self {
@@ -76,7 +82,11 @@ pub fn shell_phase(p: &Progress) -> ShellPhase {
 /// Registers an operation (queued, then running) and builds the engine's `Job` for it: its reports become the shell
 /// job's phases and counts, and the shell's cancel token stops it.
 pub fn begin(registry: &JobRegistry, kind: Kind, title: &str, subject: Option<&str>) -> Operation {
-    let ctx = registry.register(kind.slug(), title, subject);
+    let mut ctx = registry.register(kind.slug(), title, subject);
+    if kind.quiet_on_success() {
+        // The shell announces a failure, never the success (rule: no news is good news for what runs with every edit).
+        ctx = ctx.quiet_on_success();
+    }
     ctx.reporter().start();
     let source = ctx.cancel_token().clone();
     let sink_ctx = ctx.clone();
@@ -244,6 +254,16 @@ mod tests {
             JobRegistry::with_clock(rec.clone(), Arc::new(paddock_jobs::FakeClock::new()), 0),
             rec,
         )
+    }
+
+    #[test]
+    fn only_the_source_test_and_the_single_check_are_quiet_on_success() {
+        let (registry, rec) = registry_with_recorder();
+        for kind in [Kind::TestSource, Kind::Check, Kind::CheckAll, Kind::Download, Kind::InstallRenderer] {
+            begin(&registry, kind, "t", None).end(true, "");
+            let last = rec.0.lock().unwrap().last().cloned().unwrap();
+            assert_eq!(last.quiet_on_success, matches!(kind, Kind::TestSource | Kind::Check), "{kind:?}");
+        }
     }
 
     #[test]

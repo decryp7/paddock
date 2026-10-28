@@ -171,6 +171,8 @@ pub struct Chromium {
     dir: PathBuf,
     alive: Arc<AtomicBool>,
     ended_by: Arc<AtomicU8>,
+    /// Whether the last [`close`](Chromium::close) ended with the browser gone by itself (no termination was needed).
+    quit_by_itself: bool,
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -218,6 +220,7 @@ impl Chromium {
                 dir,
                 alive,
                 ended_by,
+                quit_by_itself: false,
             }),
             Err(e) => {
                 alive.store(false, Ordering::Release);
@@ -261,15 +264,27 @@ impl Chromium {
     /// end, then ends whatever is left. A browser that is killed while it still starts up can leave a copy of
     /// itself behind on macOS (the code-sign clone), so every normal end goes through here. Idempotent.
     pub fn close(&mut self) {
+        self.close_within(CLOSE_GRACE);
+    }
+
+    /// As [`close`](Self::close) with the time the browser gets to quit by itself (tests that check that it does give it
+    /// far more than the default, so a loaded machine cannot turn "slow" into "needed a kill").
+    pub fn close_within(&mut self, grace: Duration) {
         if self.alive.load(Ordering::Acquire) && self.process.is_running() && !self.conn.is_closed() {
             let _ = self.conn.call(None, "Browser.close", serde_json::json!({}), Duration::from_secs(2));
-            let end = Instant::now() + CLOSE_GRACE;
+            let end = Instant::now() + grace;
             while self.process.is_running() && Instant::now() < end {
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
+        self.quit_by_itself = !self.process.is_running();
         self.alive.store(false, Ordering::Release);
         self.process.terminate(Duration::from_millis(500));
+    }
+
+    /// Whether the last close found the browser already gone (it quit on `Browser.close`; nothing had to end it).
+    pub fn quit_by_itself(&self) -> bool {
+        self.quit_by_itself
     }
 
     /// Ends the browser at once.

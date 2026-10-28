@@ -233,7 +233,7 @@
               <dt>First seen</dt><dd>{{ dateTime(r.firstSeenMs) }}</dd>
               <dt>Size</dt><dd>{{ bytes(r.size) }}</dd>
               <dt>Location</dt>
-              <dd class="copyable"><span class="code" [attr.title]="r.location">{{ middle(r.location) }}</span><button type="button" class="btn ghost icon sm" (click)="copy(r.location, 'Location')" aria-label="Copy the location"><mat-icon svgIcon="sp:copy" aria-hidden="true" /></button></dd>
+              <dd class="copyable"><span class="code" [attr.title]="r.location">{{ path(r.location) }}</span><button type="button" class="btn ghost icon sm" (click)="copy(r.location, 'Location')" aria-label="Copy the location"><mat-icon svgIcon="sp:copy" aria-hidden="true" /></button></dd>
               @if (r.sha256) {
                 <dt>SHA-256</dt>
                 <dd class="copyable"><span class="code" [attr.title]="r.sha256">{{ middle(r.sha256) }}</span><button type="button" class="btn ghost icon sm" (click)="copy(r.sha256, 'Checksum')" aria-label="Copy the checksum"><mat-icon svgIcon="sp:copy" aria-hidden="true" /></button></dd>

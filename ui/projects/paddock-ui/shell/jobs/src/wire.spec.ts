@@ -25,6 +25,13 @@ describe('the jobs wire model', () => {
 
   const good = { id: 1, kind: 'scan', title: 'Scan', seq: 1, elapsedMs: 0, cancellable: true, state: 'queued' };
 
+  it('reads quietOnSuccess when it is true, leaves it out otherwise and refuses a non-boolean', () => {
+    expect(parseJobSnapshot({ ...good, quietOnSuccess: true })).toMatchObject({ quietOnSuccess: true });
+    expect(parseJobSnapshot({ ...good, quietOnSuccess: false })).not.toHaveProperty('quietOnSuccess');
+    expect(parseJobSnapshot(good)).not.toHaveProperty('quietOnSuccess');
+    expect(parseJobSnapshot({ ...good, quietOnSuccess: 'yes' })).toBeNull();
+  });
+
   it('fills absent optional fields and drops unknown ones', () => {
     expect(parseJobSnapshot({ ...good, extra: 'x' })).toEqual({ ...good, subject: null, etaMs: null, notCancellableReason: null });
     expect(parseJobSnapshot({ ...good, state: 'running' })).toMatchObject({ state: 'running', phase: null });

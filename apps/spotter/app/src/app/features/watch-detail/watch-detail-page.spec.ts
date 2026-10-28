@@ -246,14 +246,16 @@ describe('WatchDetailPage', () => {
     expect(writeText).toHaveBeenCalledWith((await backend.getWatch('w-1')).history[withSha]!.sha256);
   });
 
-  it('shortens a long location in the middle but keeps the full text in the title', async () => {
+  it('shows a long location whole, wrapping at its separators, with the full text in the title', async () => {
     const { f, backend } = await make();
     releaseRows(f)[0]!.click();
     await settle(f);
     const loc = (await backend.getWatch('w-1')).history[0]!.location;
     const code = q(f, '.copyable .code');
     expect(code.getAttribute('title')).toBe(loc);
-    expect(text(code).length).toBeLessThanOrEqual(38);
+    // Never cut in the middle: the same text, only with places a line may break.
+    expect(text(code).replaceAll('\u200b', '')).toBe(loc);
+    expect(text(code)).toContain('\u200b');
   });
 
   it('runs the per-release actions: open, download, and the menu entries', async () => {

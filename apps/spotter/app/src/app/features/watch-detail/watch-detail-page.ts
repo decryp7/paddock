@@ -9,6 +9,7 @@ import { ClockService } from '../../core/clock.service';
 import { Clipboard } from '../../shared/clipboard';
 import { formatBytes, formatDateTime, formatDuration, formatShortDateTime, mebibytes } from '../../shared/format';
 import { kindIcon, SCHEME_OPTIONS } from '../../shared/labels';
+import { breakablePath } from '../../shared/format';
 import { middleEllipsis } from '../../shared/identity';
 import { AgoPipe, AgoShortPipe } from '../../shared/ui/ago.pipe';
 import { Avatar } from '../../shared/ui/avatar';
@@ -55,6 +56,7 @@ export class WatchDetailPage {
   protected readonly duration = formatDuration;
   protected readonly mib = mebibytes;
   protected readonly glyph = kindIcon;
+  protected readonly path = breakablePath;
   protected readonly middle = (text: string) => middleEllipsis(text, 38);
   private readonly clock = inject(ClockService);
   protected readonly short = (ms: number | null | undefined) => formatShortDateTime(ms, this.clock.now());

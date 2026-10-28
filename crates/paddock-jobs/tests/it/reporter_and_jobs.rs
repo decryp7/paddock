@@ -370,3 +370,43 @@ fn many_threads_share_one_reporter() {
         "events arrive in order"
     );
 }
+
+#[test]
+fn quiet_on_success_is_off_by_default_left_out_of_the_wire_form_and_carried_to_the_end() {
+    let sink = Collect::new();
+    let clock = FakeClock::new();
+    let r = reporter(sink.clone(), &clock);
+    assert!(!r.snapshot().quiet_on_success);
+    let plain = serde_json::to_string(&r.snapshot()).unwrap();
+    assert!(!plain.contains("quietOnSuccess"), "{plain}");
+
+    r.set_quiet_on_success();
+    r.start();
+    r.finish(JobState::Done);
+    let last = sink.all().pop().unwrap();
+    assert_eq!(last.state, JobState::Done);
+    assert!(last.quiet_on_success, "the terminal snapshot says it too");
+    let json = serde_json::to_string(&last).unwrap();
+    assert!(json.contains(r#""quietOnSuccess":true"#), "{json}");
+    // A payload without the field (every older one) reads as off.
+    assert!(
+        !serde_json::from_str::<JobSnapshot>(&plain)
+            .unwrap()
+            .quiet_on_success
+    );
+    assert_eq!(serde_json::from_str::<JobSnapshot>(&json).unwrap(), last);
+}
+
+#[test]
+fn a_registered_job_can_ask_to_be_quiet_on_success() {
+    let sink = Collect::new();
+    let registry = JobRegistry::with_clock(sink.clone(), Arc::new(FakeClock::new()), 0);
+    let ctx = registry
+        .register("check", "Checking a", None)
+        .quiet_on_success();
+    ctx.reporter().start();
+    ctx.reporter().finish(JobState::Done);
+    assert!(sink.all().iter().last().unwrap().quiet_on_success);
+    let loud = registry.register("download", "Downloading", None);
+    assert!(!loud.reporter().snapshot().quiet_on_success);
+}
