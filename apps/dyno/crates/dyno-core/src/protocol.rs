@@ -370,6 +370,17 @@ pub enum Request {
     Backup,
     /// Checks the backups now (read-only tools with timeouts) and answers the report. Appended.
     RefreshBackup,
+    /// Adds a custom alert rule, or replaces the one with the same id; answers the settings. The rule is validated by
+    /// the agent. Appended.
+    UpsertAlertRule {
+        /// The rule.
+        rule: crate::alarms::custom::CustomAlertRule,
+    },
+    /// Deletes the custom alert rule with this id; answers the settings. Appended.
+    DeleteAlertRule {
+        /// The rule's id.
+        id: String,
+    },
 }
 
 /// Dyno's own cost.

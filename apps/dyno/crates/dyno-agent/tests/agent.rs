@@ -131,6 +131,46 @@ fn settings_round_trip_and_survive_a_restart() {
 }
 
 #[test]
+fn an_alert_rule_is_added_changed_and_deleted_without_touching_the_other_settings() {
+    use dyno_core::alarms::custom::{CustomAlertRule, CustomMetric, CustomOp};
+    use dyno_core::health::Severity;
+    let h = Harness::start();
+    let peer = h.client();
+    let rule = |limit: f64| CustomAlertRule {
+        id: "busy".into(),
+        name: "Busy".into(),
+        metric: CustomMetric::CpuTotal,
+        op: CustomOp::Above,
+        limit,
+        for_secs: 30,
+        severity: Severity::Warning,
+        enabled: true,
+    };
+    let Reply::Settings(before) = ask(&peer, Request::Settings).unwrap() else {
+        panic!("settings")
+    };
+    let Reply::Settings(added) = ask(&peer, Request::UpsertAlertRule { rule: rule(90.0) }).unwrap() else {
+        panic!("settings")
+    };
+    assert_eq!(added.custom_alerts.len(), 1);
+    let Reply::Settings(changed) = ask(&peer, Request::UpsertAlertRule { rule: rule(80.0) }).unwrap() else {
+        panic!("settings")
+    };
+    assert_eq!((changed.custom_alerts.len(), changed.custom_alerts[0].limit), (1, 80.0));
+    assert_eq!(changed.sampling, before.sampling);
+    let saved = std::fs::read_to_string(h.dirs.settings()).unwrap();
+    assert!(saved.contains("\"busy\""));
+    let mut bad = rule(1.0);
+    bad.id = "not valid".into();
+    assert!(ask(&peer, Request::UpsertAlertRule { rule: bad }).is_err());
+    assert!(ask(&peer, Request::DeleteAlertRule { id: "nope".into() }).is_err());
+    let Reply::Settings(gone) = ask(&peer, Request::DeleteAlertRule { id: "busy".into() }).unwrap() else {
+        panic!("settings")
+    };
+    assert!(gone.custom_alerts.is_empty());
+}
+
+#[test]
 fn history_comes_back_in_the_shape_the_app_expects() {
     let h = Harness::start();
     let (peer, rx) = h.subscriber(LiveDetail::Summary);

@@ -17,8 +17,11 @@ pub fn parse_request(value: Value) -> Result<Request, CommandError> {
     match request {
         // Only the app's own shutdown path may stop the agent.
         Request::Shutdown => Err(CommandError::bad("The window may not stop the agent.")),
-        // The report goes only where the OS save dialog said (`save_inventory_report`), never to a path the webview names.
-        Request::SaveInventoryReport { .. } => Err(CommandError::bad("Use the Export button: it asks where to save the report.")),
+        // A file is written only where the OS save dialog said (the `save_*` commands), never to a path the webview names:
+        // `dyno` is reachable from the tray and dialog windows too.
+        Request::SaveInventoryReport { .. } | Request::SaveDiagnostics { .. } | Request::SaveReport { .. } | Request::SaveIssues { .. } => {
+            Err(CommandError::bad("Use the Export or Save button: it asks where to save the file."))
+        }
         r => Ok(r),
     }
 }
@@ -40,6 +43,14 @@ pub fn handle(link: &AgentLink, shell: &Shell, window: &str, request: Request) -
     reply
         .into_json()
         .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
+}
+
+/// The path as text for the agent. A path that is not valid Unicode is refused rather than altered: the agent would
+/// write to a different file than the one the person chose.
+pub fn utf8_path(path: &std::path::Path) -> Result<String, CommandError> {
+    path.to_str()
+        .map(str::to_string)
+        .ok_or_else(|| CommandError::bad("That location has characters Dyno cannot use in a file name. Choose another folder."))
 }
 
 /// The folders the person picked in the OS folder dialog this session; the file finder may look only in these.
@@ -87,7 +98,7 @@ pub async fn pick_folder(app: AppHandle, picked: State<'_, PickedFolders>) -> Re
     let path = chosen
         .into_path()
         .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
-    Ok(Value::String(picked.remember(&path.to_string_lossy())))
+    Ok(Value::String(picked.remember(&utf8_path(&path)?)))
 }
 
 /// "Export report..." on the Inventory tab: the OS save dialog, then the agent writes the hardware and software report
@@ -116,7 +127,7 @@ pub async fn save_inventory_report(
             .into_path()
             .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
         let reply = link.call(Request::SaveInventoryReport {
-            path: path.to_string_lossy().into_owned(),
+            path: utf8_path(&path)?,
             format,
         })?;
         reply
@@ -202,7 +213,7 @@ pub async fn save_diagnostics(app: AppHandle, link: State<'_, Arc<AgentLink>>) -
         let path = chosen
             .into_path()
             .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
-        let path = path.to_string_lossy().into_owned();
+        let path = utf8_path(&path)?;
         let reply = link.call(Request::SaveDiagnostics { path })?;
         reply
             .into_json()
@@ -242,7 +253,7 @@ pub async fn save_report(
         let path = chosen
             .into_path()
             .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
-        let path = path.to_string_lossy().into_owned();
+        let path = utf8_path(&path)?;
         let reply = link.call(Request::SaveReport { path, format, weeks_ago })?;
         reply
             .into_json()
@@ -272,7 +283,7 @@ pub async fn save_issues(app: AppHandle, link: State<'_, Arc<AgentLink>>, days: 
         let path = chosen
             .into_path()
             .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
-        let path = path.to_string_lossy().into_owned();
+        let path = utf8_path(&path)?;
         let reply = link.call(Request::SaveIssues { path, days })?;
         reply
             .into_json()
@@ -312,6 +323,10 @@ mod tests {
         use serde_json::json;
         // The report is saved only through the dialog command.
         assert!(parse_request(json!({"saveInventoryReport": {"path": "/tmp/x.md", "format": "markdown"}})).is_err());
+        // So are the bundle, the weekly report and the issues: `dyno` is reachable from the tray and dialog windows too.
+        assert!(parse_request(json!({"saveDiagnostics": {"path": "/tmp/x.zip"}})).is_err());
+        assert!(parse_request(json!({"saveReport": {"path": "/tmp/x.md", "format": "markdown", "weeksAgo": 0}})).is_err());
+        assert!(parse_request(json!({"saveIssues": {"path": "/tmp/x.jsonl", "days": 7}})).is_err());
         // The finder's request parses, but `dyno` refuses a folder nobody picked.
         let r = parse_request(json!({"findFiles": {"query": {"folder": "/tmp", "minBytes": 1}}})).unwrap();
         assert!(matches!(r, Request::FindFiles { .. }));
@@ -370,6 +385,17 @@ mod tests {
             Request::FileHash { .. }
         ));
         assert!(parse_request(json!({"fileHash": {"source": {"pid": 1}}})).is_err());
+    }
+
+    #[test]
+    fn a_save_path_that_is_not_unicode_is_refused_not_altered() {
+        assert_eq!(utf8_path(std::path::Path::new("/tmp/report.md")).unwrap(), "/tmp/report.md");
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let odd = std::path::Path::new(std::ffi::OsStr::from_bytes(b"/tmp/caf\xe9.md"));
+            assert_eq!(utf8_path(odd).unwrap_err().code, crate::dto::ErrorCode::BadRequest);
+        }
     }
 
     #[test]
