@@ -324,7 +324,13 @@ answers `answered: true` or `dismissed`, and the opener acts.
 - **Lint `paddock/dialog-frame-footer`.** A registered dialog component may not contain a `.foot`, `.actions` or
   `footer` element, or a Close, Cancel or OK button, outside `dialogActions`.
 - **Rust.**
-  - The 1.1-0 spike's probe, kept as an `#[ignore]` real-window test that the full suite runs on each OS.
+  - The 1.1-0 spike's probe, kept as a real-window test (`paddock-dialogs/tests/show_probe.rs`) that opens the built
+    shell-demo's real dialog frame (`PADDOCK_PROBE_DIST`) and checks the window was shown at the frame's measured
+    height, with no scroll and the footer fully visible. It runs nightly on macOS, Windows and Linux (under `xvfb-run`)
+    with `PADDOCK_REAL_WINDOWS=1`, never in branch CI.
+    **Results:** wired nightly (`.gitea/workflows/nightly.yml`, job `dialog-window-probe`); results to be recorded per
+    OS here, none yet. (The spike's research note, `docs/research/2026-10-28-dialog-hidden-windows.md`, lives on the
+    `spike/dialog-hidden-windows` branch until it is merged; its Results section takes the same line then.)
   - A placement property test: scale 1-3, work areas 800x600 to 7680x4320, any remembered size.
   - Compile-fail tests (`trybuild`) of `dialogs!`.
   - Staleness tests of the generated TypeScript.

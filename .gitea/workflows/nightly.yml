@@ -71,9 +71,68 @@ jobs:
       - name: Check
         run: npm run check:dialog-commands
 
+  # ADR 0026 section 6: the real-window probe. It opens the built shell-demo's real dialog frame in a real (hidden, then
+  # shown) window and checks the window's height against the frame's measure, so it needs a webview and a display: the
+  # host runners have one, Linux gets a virtual one (xvfb-run). Nightly only, never in branch CI (ER-14: it opens windows).
+  dialog-window-probe:
+    name: dialog window probe (${{ matrix.os }})
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          tauri-linux-deps: "true"
+
+      - uses: ./.gitea/actions/setup-node
+        with:
+          app-dir: .
+
+      - name: Build the shell demo
+        run: |
+          npm ci
+          npm run build -w ui
+          npm run shell-demo:build -w ui
+          test -f ui/dist/shell-demo/browser/index.html
+
+      - name: Probe (Linux, virtual display)
+        if: runner.os == 'Linux'
+        working-directory: crates
+        env:
+          PADDOCK_REAL_WINDOWS: "1"
+          PADDOCK_PROBE_DIST: ${{ github.workspace }}/ui/dist/shell-demo/browser
+        run: xvfb-run -a cargo test -p paddock-dialogs --all-features --test show_probe -- --nocapture
+
+      - name: Probe (macOS, Windows)
+        if: runner.os != 'Linux'
+        working-directory: crates
+        env:
+          PADDOCK_REAL_WINDOWS: "1"
+          PADDOCK_PROBE_DIST: ${{ github.workspace }}/ui/dist/shell-demo/browser
+        run: cargo test -p paddock-dialogs --all-features --test show_probe -- --nocapture
+
   mark:
     name: mark the green nightly
-    needs: [ci, dialog-commands]
+    needs: [ci, dialog-commands, dialog-window-probe]
     if: ${{ github.event_name == 'schedule' && success() }}
     runs-on: ubuntu-latest
     container:
