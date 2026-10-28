@@ -7,9 +7,10 @@
   0026 §4.4's three show methods fits each OS, how long does it take, and is the size exact at first paint?
 - Probe: `spikes/dialog-hidden/` (a minimal Tauri 2.12.5 app, tao 0.37.2, wry 0.57.1; not product code). Raw logs and
   summaries: see "Runs" below.
-- Status: measured on all three OS: macOS (displays asleep and session locked, methods a to c), Windows (WebView2
+- Status: measured on all three OS: macOS (displays asleep and session locked, methods a to c; displays awake, two
+  monitors, methods a to d, 2026-10-29), Windows (WebView2
   156, CI host runner in a disconnected session, methods a to d) and Linux (Xvfb, methods a to d). **Not measured:**
-  macOS with the displays awake, macOS method d, a second monitor, Windows in a connected interactive session, and
+  Windows in a connected interactive session, and
   Linux under a real window manager. The proposed ADR amendment is at the end.
 
 ## Method
@@ -98,6 +99,42 @@ Per signal, in every trial and every method:
   does not depend on the cause (below: fit by the viewport delta).
 - Webview zoom: `devicePixelRatio` follows the zoom (1.25, 1.5) and the CSS height shrinks with the wider CSS
   viewport; converting by `dpr / scale` gave the right logical height (381 and 492 px).
+
+### macOS 27.2 (build 26B123, WKWebView), Mac mini, two displays at scale 1, **displays awake**
+
+Run 2026-10-29 (unattended, authorised real windows), `caffeinate -u` keeping the displays awake, two monitors
+(1920 x 1200 and 1920 x 1080, scale 1, so `monitor2` ran). Spike from origin/main bbfde4cd5, methods a to d, 3 reps of
+every scenario, 108 trials, 1620 events. Tauri 2.12.5, tao 0.37.2, wry 0.57.1. Summary (`node summarize.mjs`):
+
+| method | normal ready ms (median / max) | font_slow | route_slow | zoom125 / zoom150 | unowned | monitor2 | missed 3 s deadline | size exact after show |
+|---|---|---|---|---|---|---|---|---|
+| a | 91 / 192 | 489 / 494 | 687 / 688 | 89 / 85 | **3072 / 3074 (deadline, 3/3)** | 91 / 91 | 3 of 21 (all `unowned`) | 0/21 |
+| b | 91 / 92 | 492 / 492 | 684 / 687 | 86 / 84 | 86 / 86 | 87 / 88 | 0 of 21 | 0/21 |
+| c | 89 / 91 | 489 / 490 | 683 / 685 | 86 / 87 | 68 / 69 | 91 / 92 | 0 of 21 | 0/21 |
+| d | 88 / 88 | 488 / 494 | 684 / 686 | 87 / 87 | 70 / 70 | 90 / 98 | 0 of 21 | 0/21 |
+
+- **Pass or fail per method:** a fails for an unowned window (rAF never fires: the window is hidden and nothing is on
+  screen, so the frame wait runs into the 3 s deadline; all owned scenarios are fine). b, c and d pass on readiness in
+  every scenario, including `unowned` and `monitor2`. No method gives an exact size after show (below).
+- **requestAnimationFrame now fires** with the displays awake: 3/3 before show for every method and scenario except
+  `unowned` with a, c and d (hidden, no parent, so not on screen: rAF 0/3 there; `unowned` b is placed visible
+  off-screen and gets frames). This confirms the asleep run's cause: WebKit runs frames only for a page that is on a
+  screen. JS, `DOMContentLoaded`, `fonts.ready` (resolves after the 400 ms face, `fonts.check` true in 108/108),
+  `getBoundingClientRect` (260 px natural height) and `ResizeObserver` all run hidden in every trial, as before.
+- **Ready times** match the asleep run for c (about 65 to 90 ms, plus the font's or the route's delay): the frame wait
+  of a and b costs nothing measurable awake (a: 91 ms median, same as c).
+- **Owned windows are on screen before they are shown**, as asleep: `is_visible()` true right after `build()` in every
+  owned trial of every method, false for unowned a, c and d. The recommendation to attach the parent at show, not at create, stands.
+- **The 32 px shortfall is not a sleeping-display artefact.** Awake, the page's `innerHeight` is still 32 px less than
+  the window's inner size (228 against 260 after the fit; 279 against 381 at zoom 1.25 and 306 against 492 at zoom 1.5,
+  both in CSS px against logical, consistent with `dpr` 1.25 and 1.5 and the same 32 px), at show and one frame later,
+  in all 108 trials. The "size exact" column is therefore 0 everywhere. The fix stays "fit by the viewport delta"
+  (window inner minus `innerHeight`, measured after show), not by the content height alone.
+- **Resize events after show:** 1 in nearly every trial (0 at zoom 1.5 for a to c), as asleep.
+- **Visible flash or focus steal:** not measured. The run was unattended and the spike logs no focus or screenshot
+  events, so nothing here says whether the dialog flashed at the guessed size or took focus. Owned dialogs being on
+  screen at `build()` (above) means a flash of the unfitted window is expected for a, b, c and d with a parent, and
+  b's off-screen window is not visible by position. A person watching, or window-list sampling, is still needed.
 
 ### Windows (WebView2 156.0.4314.50), CI host runner, user session disconnected
 
@@ -240,6 +277,11 @@ needs no frame, so the only expected change is the viewport delta, which the fit
 - **Display asleep or session locked (macOS):** no frames at all, so only a frame-free method (c or d) can report ready.
 
 ## Runs
+
+- macOS 27.2 (26B123), local, 2026-10-29, displays awake, two monitors, methods a to d, 1620 events, from origin/main
+  bbfde4cd5. The product real-window probe `show_probe` (feat/dialog-api f5d785878, `--features tauri`, built shell-demo)
+  exited 2 twice, "no report within 90s: the dialog page never became ready"; the cause is not yet known (the spike's
+  windows loaded fine in the same session), so it is a finding for the dialog-API work, not a result of this note.
 
 - macOS, local, 2026-10-28 14:30 to 14:47, 711 events (`mac.jsonl`), methods a to c, displays asleep. A method d run was
   started at 15:39 and lost in the crash (empty log).
