@@ -101,6 +101,7 @@ fn the_launch_command_line_is_the_one_built_and_the_profile_goes_with_the_browse
     assert!(!dir.exists(), "the throwaway profile is gone");
     assert!(!paddock_proc::is_alive(pid));
     assert!(f.fake.calls().contains(&"Browser.close".to_string()));
+    // conformance: grace-free — the first close already ended the browser, so this one waits out no grace
     assert!(b.close(), "a second close finds it ended");
 }
 
@@ -324,6 +325,7 @@ fn quitting_and_a_lost_connection_are_told_apart() {
     f.fake.act(UserAction::Quit).unwrap();
     wait_until("the process to exit", || !b.proc().is_running());
     assert_eq!(b.gone(&p), Some(Gone::Exited));
+    // conformance: grace-free — the process exited before this close, so it waits out no grace
     assert!(b.close(), "it had ended already");
 }
 
@@ -709,4 +711,11 @@ fn going_back_ends_at_once_when_the_window_is_closed_meanwhile() {
             Err(Error::Closed)
         ));
     });
+}
+
+/// `capture` applies [`MAX_HTML`] (`capture_within` takes it as a parameter so tests need not move that much); the cap is
+/// part of the contract with the apps, so a change to it is a deliberate one.
+#[test]
+fn the_page_size_cap_is_sixteen_mebibytes() {
+    assert_eq!(MAX_HTML, 16 << 20);
 }
