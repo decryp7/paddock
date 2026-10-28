@@ -1,5 +1,8 @@
 import type { Measured, UnavailableReason } from './api.types';
 
+/** Every reason, in the order of the wire contract (`contract/measured-wire.json`). */
+export const ALL_REASONS: readonly UnavailableReason[] = ['needsAdmin', 'notPermitted', 'notSupported', 'residentMemoryOnly'];
+
 /** The words shown for a value that was not read. */
 export const UNAVAILABLE = 'Unavailable';
 

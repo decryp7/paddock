@@ -493,6 +493,36 @@ mod tests {
         );
     }
 
+    /// The wire shape shared with the TypeScript tests: `contract/measured-wire.json` is read by both sides.
+    #[test]
+    fn the_shared_fixture_round_trips_and_names_every_reason() {
+        use crate::others::OtherUsers;
+        let fixture: serde_json::Value = serde_json::from_str(include_str!("../../../contract/measured-wire.json")).unwrap();
+        let process: ProcessSample = serde_json::from_value(fixture["process"].clone()).unwrap();
+        assert_eq!(process.cpu.reason(), Some(UnavailableReason::NeedsAdmin));
+        assert_eq!(process.disk_write_bps.reason(), Some(UnavailableReason::NotPermitted));
+        assert_eq!((process.memory, process.owner), (Measured::Value(5), Owner::Other));
+        assert_eq!(
+            serde_json::to_value(&process).unwrap(),
+            fixture["process"],
+            "Rust writes exactly what the fixture says"
+        );
+        let other: OtherUsers = serde_json::from_value(fixture["otherUsers"].clone()).unwrap();
+        assert_eq!((other.count, other.partial), (3, true));
+        assert_eq!(serde_json::to_value(&other).unwrap(), fixture["otherUsers"]);
+        let reasons: Vec<UnavailableReason> = serde_json::from_value(fixture["reasons"].clone()).unwrap();
+        assert_eq!(
+            reasons,
+            [
+                UnavailableReason::NeedsAdmin,
+                UnavailableReason::NotPermitted,
+                UnavailableReason::NotSupported,
+                UnavailableReason::ResidentMemoryOnly
+            ],
+            "a new reason must be added to the fixture and to the TypeScript union"
+        );
+    }
+
     #[test]
     fn the_wire_shape_of_measured_values_is_stable() {
         use serde_json::json;

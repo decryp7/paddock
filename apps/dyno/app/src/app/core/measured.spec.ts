@@ -1,5 +1,6 @@
-import type { Measured, ProcessSample, UnavailableReason } from './api.types';
-import { measured, readReason, readValue, reasonText, unavailable, unavailableText, UNAVAILABLE } from './measured';
+import fixture from '../../../../contract/measured-wire.json';
+import type { Measured, OtherUsers, ProcessSample, UnavailableReason } from './api.types';
+import { ALL_REASONS, measured, readReason, readValue, reasonText, unavailable, unavailableText, UNAVAILABLE } from './measured';
 
 describe('measured values', () => {
   it('reads a value and never turns an unread one into 0', () => {
@@ -20,14 +21,17 @@ describe('measured values', () => {
     expect(reasonText('residentMemoryOnly')).toBe('Linux gives Dyno only resident memory for these');
   });
 
-  it('matches the JSON the Rust core sends (the same literals are asserted in dyno-core process.rs)', () => {
-    const wire = JSON.parse(
-      '{"pid":2,"parent":1,"name":"b.exe","exe":null,"user":{"value":"me"},"cpu":{"unavailable":{"reason":"needsAdmin"}},' +
-        '"memory":{"value":5},"diskReadBps":{"value":0},"diskWriteBps":{"value":0},"started":{"value":2000},"owner":"own","state":"running"}',
-    ) as ProcessSample;
+  it('matches the shared wire fixture the Rust core reads and writes (contract/measured-wire.json)', () => {
+    const wire = fixture.process as ProcessSample;
     const cpu: Measured<number> = wire.cpu;
     expect(readReason(cpu)).toBe('needsAdmin');
+    expect(readReason(wire.diskWriteBps)).toBe('notPermitted');
     expect(readValue(wire.memory)).toBe(5);
     expect(readValue(wire.started)).toBe(2000);
+    expect(readValue(wire.user)).toBe('me');
+    expect(wire.owner).toBe('other');
+    expect(fixture.reasons).toEqual([...ALL_REASONS]);
+    const other = fixture.otherUsers as OtherUsers;
+    expect([other.count, other.partial, readReason(other.memory)]).toEqual([3, true, 'needsAdmin']);
   });
 });
