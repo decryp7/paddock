@@ -34,7 +34,7 @@ export default assertChromeForTesting(
       deviceScaleFactor: 1,
     },
     projects: [
-      { name: 'gallery', testMatch: ['gallery.spec.ts', 'data.spec.ts', 'view.spec.ts'], use: { baseURL: `http://localhost:${PORT}` } },
+      { name: 'gallery', testMatch: ['gallery.spec.ts', 'data.spec.ts', 'view.spec.ts', 'material.spec.ts'], use: { baseURL: `http://localhost:${PORT}` } },
       { name: 'review', testMatch: ['contact-sheet.spec.ts', 'contact-sheet-x21.spec.ts', 'contact-sheet-x50.spec.ts', 'contact-sheet-x3x.spec.ts', 'contact-sheet-x51.spec.ts'] },
       // The documentation screenshots (e2e/screenshots.spec.ts, the kit's captureDocScreens): `SCREENSHOTS=1 npx playwright test --project=screenshots`.
       { name: 'screenshots', testMatch: SCREENSHOT_SPECS, use: { deviceScaleFactor: 2 } },

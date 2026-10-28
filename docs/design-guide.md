@@ -275,6 +275,25 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
 - **Forms**: label above input 12/500, helper 12 muted, error replaces helper in danger with icon, validate on blur,
   toggles are for immediate effects, checkboxes for form submit; group settings by consequence, not by data model.
 
+### Material controls (rule 47)
+- **One theme.** `@decryp7/paddock-ui/css/material.css` is the whole Material look: Material 3 with density -3, every system and
+  component token resolved to `--pd-*`, so theme, accent, contrast and density follow our tokens. An app loads it and carries no
+  Material theme of its own. The accent comes from `data-accent` on `<html>`; a `data-accent` on a subtree does not reach Material
+  parts (their tokens resolve on `:root`).
+- **Behaviour defaults.** `providePaddockMaterial()` (`@decryp7/paddock-ui/material`): every `mat-form-field` is
+  `appearance="outline"` with `floatLabel="always"`, button toggles show no check mark, and ripples are off. Feedback is the
+  state layer (hover, pressed) and the keyboard ring, the same calm response as the rest of the family and nothing to switch
+  off for Reduce Motion.
+- **Buttons are `matButton`:** `filled` = primary (accent fill), `outlined` = secondary (surface-2 + border-strong), `text` =
+  ghost, and the class `pd-button-danger` on any of them = danger. `tonal` and `elevated` are bridged only so they never fall back
+  to Material's blue; the family does not use them (an app review rejects them).
+- **Keyboard focus** is Material's strong indicator in `--pd-focus-ring`: a 2 px solid ring 2 px outside the control, 3:1 on every
+  surface (`--pd-focus-width`, 2 px). `e2e/material.spec.ts` tabs through every kind of control and asserts it. **Exception, form
+  fields:** the floated label sits on the border, so a ring around the box would cross it; the field's own outline is the ring
+  instead, in `--pd-focus-ring` at 3 px (the resting 1 px border is part of it, so 2 px of new pixels change, SC 2.4.13).
+- **Measured:** `npm run test:tokens` checks the contrast of every bridged component in both schemes and all accents; the gallery
+  page "Material controls" and its e2e check the rendered sizes (28 px rows, 4 px panel padding, 12 px floated label).
+
 ## 9. Motion
 
 Durations: micro (hover, press) 100 ms; standard (popover, tab, expand) 160-200 ms; large (page, dialog) 240-280 ms;
@@ -292,6 +311,9 @@ server. Check the URL in Settings, then Retry."). No exclamation marks, no jokes
 units and thousands separators; relative time under 24 h with absolute on hover; "3 min ago" not "3m". Empty states
 start with the benefit, not the lack. Pitwall may be slightly technical, Dyno slightly warmer, Debrief terse, Pitcrew
 operational, Spotter concise.
+
+"Label: value" pairs (a status chip's "Log store: stopped", a fact list's "Version: 1.2") use a lower-case value unless it is a
+proper noun or a name; the label starts the sentence, the value continues it.
 
 ## 11. Native-feel rules (Debrief ADR 0028 for the whole Paddock family)
 

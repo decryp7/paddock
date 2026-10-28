@@ -89,10 +89,9 @@ jobs:
         crates/**
         ui/**
       # Every sidecar (bundle.externalBin) is started from the built macOS app with --version, which exits 0 (the old
-      # macos-verify-bundle.sh ran the same); dyno-agent, dyno-helper and the dyno command have no --self-test.
+      # macos-verify-bundle.sh ran the same); dyno-agent and the dyno command have no --self-test.
       sidecars: |
         dyno-agent:--version
-        dyno-helper:--version
         dyno:--version
       # Run paths of the packaged binaries, and the executables a package must carry, on Linux and macOS; on macOS the agent
       # also measures once from the built app (read-only).

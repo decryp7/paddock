@@ -1,3 +1,4 @@
+import { UnusualStore } from '../../state/unusual.store';
 import { Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
@@ -121,7 +122,7 @@ describe('dy-issues-page', () => {
     expect(el.querySelector('[aria-label="Stability"]')).not.toBeNull();
   });
 
-  it('new and unusual: reasons, protect, hide and show hidden', async () => {
+  it('new and unusual: lists the reasons and offers no action on a program', async () => {
     const { f, el } = render();
     await settle(f);
     btn(el, 'New and unusual').click();
@@ -129,20 +130,12 @@ describe('dy-issues-page', () => {
     const table = el.querySelector('table[aria-label="New and unusual programs"]')!;
     expect(table.textContent).toContain('Unusual because it runs from a temporary folder');
     expect(table.textContent).not.toMatch(/malware|virus/i);
-    (el.querySelector('[aria-label="Protect updater-helper"]') as HTMLElement).click();
-    await settle(f);
-    expect(el.querySelector('table[aria-label="New and unusual programs"]')!.textContent).not.toContain('updater-helper');
-    (el.querySelector('[aria-label="Hide ngrok"]') as HTMLElement).click();
-    await settle(f);
-    btn(el, 'Show hidden').click();
-    await settle(f);
-    const text = el.querySelector('table[aria-label="New and unusual programs"]')!.textContent!;
-    expect(text).toContain('ngrok');
-    expect(text).toContain('Protected');
-    expect(el.querySelector('[aria-label="Show ngrok again"]')).not.toBeNull();
+    expect(el.querySelector('[aria-label="Protect updater-helper"]')).toBeNull();
+    expect(el.querySelector('[aria-label="Hide ngrok"]')).toBeNull();
+    expect(table.textContent).toContain('updater-helper');
   });
 
-  it('new and unusual: the detail panel explains each reason and states what protect does', async () => {
+  it('new and unusual: the detail panel explains each reason', async () => {
     const { f, el } = render();
     await settle(f);
     btn(el, 'New and unusual').click();
@@ -163,7 +156,7 @@ describe('dy-issues-page', () => {
     btn(el, 'New and unusual').click();
     await settle(f);
     await mock.forgetBaseline();
-    btn(el, 'Show hidden').click();
+    await TestBed.inject(UnusualStore).load();
     await settle(f);
     expect(el.textContent).toContain('Dyno is learning what is normal here');
   });
