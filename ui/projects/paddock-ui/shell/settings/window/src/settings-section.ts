@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, InjectionToken, input } from '@angular/core';
 import { FormField } from '@angular/forms/signals';
+import { MatButton } from '@angular/material/button';
 import type { SettingsPageDef } from '@decryp7/paddock-ui/shell';
 import { type SettingField, SettingsStore } from '@decryp7/paddock-ui/shell/settings';
 import { PdSettingField } from './setting-field';
@@ -16,7 +17,7 @@ export const SETTINGS_PAGE = new InjectionToken<SettingsPageDef>('PADDOCK_SETTIN
 @Component({
   selector: 'pd-settings-section',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdSettingField, FormField],
+  imports: [FormField, MatButton, PdSettingField],
   host: { '[attr.data-section]': 'section()' },
   template: `
     @if (view(); as s) {
@@ -25,7 +26,7 @@ export const SETTINGS_PAGE = new InjectionToken<SettingsPageDef>('PADDOCK_SETTIN
           <h2 class="pd-title" [id]="headingId()">{{ s.title }}</h2>
           <span class="pd-spacer"></span>
           @if (s.fields.length && !keys()) {
-            <button type="button" class="pd-btn" (click)="resetSection()">{{ t.resetSection }}</button>
+            <button matButton="outlined" type="button" (click)="resetSection()">{{ t.resetSection }}</button>
           }
         </div>
         @if (s.description) {
@@ -62,8 +63,7 @@ export const SETTINGS_PAGE = new InjectionToken<SettingsPageDef>('PADDOCK_SETTIN
     .pd-spacer { flex: 1; }
     .pd-desc { margin: var(--pd-space-1) 0 var(--pd-space-2); color: var(--pd-text-muted); line-height: 1.45; }
     .pd-fields { display: flex; flex-direction: column; min-width: 0; }
-    .pd-btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; cursor: pointer; }
-    .pd-btn:focus-visible, .pd-link:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
+    .pd-link:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
     .pd-muted { color: var(--pd-text-muted); }
     .pd-error { margin: var(--pd-space-1) 0; color: var(--pd-danger-text, var(--pd-text)); }
     /* The line may wrap and is never clipped: it sits below the fields at its full height. */

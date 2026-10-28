@@ -1,6 +1,7 @@
 import { provideZonelessChangeDetection, type Type } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
-import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import { DISMISSED } from '@decryp7/paddock-ui/shell';
+import { DIALOG_REF, type DialogContent, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
 import { assertDialogBoots } from '@decryp7/paddock-ui/shell/testing';
 import { DOCK_OPTIONS } from './dock-options';
 import { DOCK_LAYOUT_STORE, InMemoryDockLayoutStore } from './dock-store';
@@ -16,12 +17,25 @@ const nl = (name: string): NamedLayout => ({ name, savedAt: 1, saved: saved() })
 
 const [SAVE, MANAGE] = dockLayoutDialogs({ store: new InMemoryDockLayoutStore() });
 
+/** Records what the content answered (`undefined` for a dismissal). */
 class FakeRef implements DialogRef<never> {
   readonly closes: unknown[] = [];
-  readonly closed = Promise.resolve(undefined);
-  close(result?: unknown): void {
-    this.closes.push(result);
+  readonly closed = Promise.resolve(DISMISSED);
+  answer(value: unknown): void {
+    this.closes.push(value);
   }
+  dismiss(): void {
+    this.closes.push(undefined);
+  }
+}
+
+/** Runs the content's declared action `id` as the frame would. */
+async function press(fixture: ComponentFixture<unknown>, id: string): Promise<void> {
+  const actions = (fixture.componentInstance as DialogContent).dialogActions?.() ?? [];
+  const a = actions.find((x) => x.id === id);
+  if (a?.kind === 'run') await a.run(new AbortController().signal);
+  if (a?.kind === 'answer') (fixture.componentRef.injector.get(DIALOG_REF) as FakeRef).answer(await a.answer(new AbortController().signal) as never);
+  await fixture.whenStable();
 }
 
 async function open<T>(component: Type<T>, store: InMemoryDockLayoutStore, inputs: Record<string, unknown> = {}): Promise<{ fixture: ComponentFixture<T>; el: HTMLElement; ref: FakeRef; q: <E extends HTMLElement>(testid: string) => E | null }> {
@@ -45,12 +59,12 @@ const type = async (fixture: ComponentFixture<unknown>, input: HTMLInputElement,
 };
 
 describe('the layout dialogs are declared as ADR 0009 asks', () => {
-  it('declares save as a modal form and manage as a modeless tool, each with its own contract', () => {
+  it('declares save as a modal form and manage as a modeless form that fits its list, each with its own contract', () => {
     expect([SAVE.id, SAVE.kind, SAVE.modality, SAVE.commands]).toEqual([LAYOUT_SAVE_DIALOG_ID, 'form', 'modal', []]);
-    expect([MANAGE.id, MANAGE.kind, MANAGE.modality, MANAGE.commands]).toEqual([LAYOUT_MANAGE_DIALOG_ID, 'tool', 'modeless', ['layout_get', 'layout_set']]);
+    expect([MANAGE.id, MANAGE.kind, MANAGE.modality, MANAGE.commands]).toEqual([LAYOUT_MANAGE_DIALOG_ID, 'form', 'modeless', ['layout_get', 'layout_set']]);
     expect(LAYOUT_SAVE_DIALOG_ID).toBe('pd.wb.dock.layout-save');
     expect(LAYOUT_MANAGE_DIALOG_ID).toBe('pd.wb.dock.layout-manage');
-    expect(MANAGE.minWidth).toBeLessThanOrEqual(MANAGE.width ?? 0);
+    expect([SAVE.width, MANAGE.width, MANAGE.height]).toEqual([400, 560, null]);
   });
 
   it('boots in the shell harness: providers, a body, a visible Cancel/Close, Escape, only declared commands', async () => {
@@ -72,40 +86,38 @@ describe('Save layout', () => {
     const input = q<HTMLInputElement>('layout-save-name')!;
     expect(input.value).toBe('Layout 2');
     await type(fixture, input, '  Debugging  ');
-    q<HTMLButtonElement>('layout-save-ok')!.click();
+    await press(fixture, 'save');
     expect(ref.closes).toEqual(['Debugging']);
   });
 
   it('refuses an empty name, a duplicate (any case) and a name that is too long, saying why and keeping the dialog open', async () => {
     const { fixture, el, q, ref } = await open(PdLayoutSaveDialog, new InMemoryDockLayoutStore(), { names: ['Work'], suggested: 'x' });
     const input = q<HTMLInputElement>('layout-save-name')!;
-    const save = q<HTMLButtonElement>('layout-save-ok')!;
+    const save = { click: () => press(fixture, 'save') };
     const error = () => el.querySelector('[data-testid="field-error"]')?.textContent?.trim() ?? null;
     expect(error()).toBeNull();
     await type(fixture, input, '   ');
-    save.click();
-    await fixture.whenStable();
+    await save.click();
     expect(error()).toBe('Give the layout a name.');
     expect(input.getAttribute('aria-invalid')).toBe('true');
     await type(fixture, input, 'WORK');
     expect(error()).toBe('A layout with this name exists. Pick another name.');
     await type(fixture, input, 'x'.repeat(MAX_LAYOUT_NAME + 1));
     expect(error()).toBe(`Use at most ${MAX_LAYOUT_NAME} characters.`);
-    save.click();
+    await save.click();
     expect(ref.closes).toEqual([]);
     await type(fixture, input, 'Fine');
     expect(error()).toBeNull();
-    save.click();
+    await save.click();
     expect(ref.closes).toEqual(['Fine']);
   });
 
-  it('cancels without a result, and Cancel is the dialog close', async () => {
-    const { q, ref } = await open(PdLayoutSaveDialog, new InMemoryDockLayoutStore());
-    const cancel = q<HTMLButtonElement>('layout-save-cancel')!;
-    expect(cancel.hasAttribute('data-dialog-close')).toBe(true);
-    expect(q('layout-save-ok')!.hasAttribute('data-default')).toBe(true);
-    cancel.click();
-    expect(ref.closes).toEqual([undefined]);
+  it('declares Save as its primary and draws no footer of its own (the frame adds Cancel)', async () => {
+    const { fixture, q } = await open(PdLayoutSaveDialog, new InMemoryDockLayoutStore());
+    const actions = (fixture.componentInstance as DialogContent).dialogActions!();
+    expect(actions.map((a) => [a.id, a.kind === 'dismiss' ? 'dismiss' : a.role])).toEqual([['save', 'primary']]);
+    expect(q('layout-save-cancel')).toBeNull();
+    expect(q<HTMLInputElement>('layout-save-name')!.hasAttribute('data-autofocus')).toBe(true);
   });
 });
 
@@ -127,6 +139,26 @@ describe('Manage layouts', () => {
     expect(none.q('layout-manage-empty')!.textContent).toContain('No saved layouts');
   });
 
+  it('shows a designed empty state with a Save current layout action that answers a save', async () => {
+    const { el, q, ref, fixture } = await open(PdLayoutManageDialog, new InMemoryDockLayoutStore());
+    expect(q('layout-manage-empty')!.querySelector('h3')!.textContent).toBe('No saved layouts yet');
+    expect((fixture.componentInstance as DialogContent).dialogActions!()).toEqual([]);
+    const save = q<HTMLButtonElement>('layout-manage-save-empty')!;
+    expect(save.textContent?.trim()).toBe('Save current layout');
+    save.click();
+    expect(ref.closes).toEqual([{ save: true } satisfies LayoutManageResult]);
+    expect(el.querySelector('[data-testid="layout-manage-list"]')).toBeNull();
+  });
+
+  it('offers Save current layout at the leading edge once layouts exist', async () => {
+    const { fixture } = await open(PdLayoutManageDialog, await seeded(['Work']));
+    const actions = (fixture.componentInstance as DialogContent).dialogActions!();
+    expect(actions.map((a) => [a.id, a.kind === 'dismiss' ? 'dismiss' : a.role])).toEqual([['save', 'secondary']]);
+    const save = actions[0]!;
+    if (save.kind !== 'answer') throw new Error('expected an answer action');
+    expect(await save.answer(new AbortController().signal)).toEqual({ save: true });
+  });
+
   it('applies a layout by closing with its name', async () => {
     const { el, ref } = await open(PdLayoutManageDialog, await seeded(['Work', 'Play']));
     el.querySelectorAll<HTMLButtonElement>('[data-testid="layout-manage-apply"]')[1]!.click();
@@ -139,6 +171,7 @@ describe('Manage layouts', () => {
     el.querySelectorAll<HTMLButtonElement>('[data-testid="layout-manage-rename-start"]')[0]!.click();
     await fixture.whenStable();
     const input = q<HTMLInputElement>('layout-manage-rename')!;
+    expect(document.activeElement).toBe(input);
     expect(input.value).toBe('Work');
     await type(fixture, input, 'play');
     q<HTMLButtonElement>('layout-manage-rename-ok')!.click();
@@ -155,6 +188,28 @@ describe('Manage layouts', () => {
     expect(rows(el)).toEqual(['Office', 'Play']);
     expect(await stored(store)).toEqual(['Office', 'Play']);
     expect(q('layout-manage-rename')).toBeNull();
+  });
+
+  it('returns focus to the row\'s Rename button when a rename ends (Escape, Cancel or Rename), under the new name', async () => {
+    const store = await seeded(['Work', 'Play']);
+    const { fixture, el, q } = await open(PdLayoutManageDialog, store);
+    const start = (name: string) => el.querySelector<HTMLElement>(`li[data-layout="${name}"] [data-testid="layout-manage-rename-start"]`)!;
+    start('Play').click();
+    await fixture.whenStable();
+    q<HTMLInputElement>('layout-manage-rename')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(start('Play'));
+    start('Work').click();
+    await fixture.whenStable();
+    q<HTMLButtonElement>('layout-manage-rename-cancel')!.click();
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(start('Work'));
+    start('Work').click();
+    await fixture.whenStable();
+    await type(fixture, q<HTMLInputElement>('layout-manage-rename')!, 'Office');
+    q<HTMLButtonElement>('layout-manage-rename-ok')!.click();
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(start('Office'));
   });
 
   it('cancels a rename with Escape without closing the dialog (the key stops at the field) and keeps the name when unchanged', async () => {
@@ -218,9 +273,9 @@ describe('Manage layouts', () => {
     expect(rows(el)).toEqual(['B']);
   });
 
-  it('closes with the Close button, whose result is nothing', async () => {
-    const { q, ref } = await open(PdLayoutManageDialog, await seeded(['A']));
-    q<HTMLButtonElement>('layout-manage-close')!.click();
-    expect(ref.closes).toEqual([undefined]);
+  it('draws no footer of its own: the frame adds Close', async () => {
+    const { fixture, q } = await open(PdLayoutManageDialog, await seeded(['A']));
+    expect(q('layout-manage-close')).toBeNull();
+    expect((fixture.componentInstance as DialogContent).dialogActions!().map((a) => a.kind)).not.toContain('dismiss');
   });
 });

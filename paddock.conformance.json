@@ -8,6 +8,7 @@
     "crates/paddock-diag/tests/webview.rs": "installs the process-wide log, once per process",
     "crates/paddock-log/tests/installed.rs": "installs the process-wide subscriber, log logger and panic hook, once per process",
     "crates/paddock-pitwall/tests/contract.rs": "needs the testing feature (required-features)",
+    "crates/paddock-dialogs/tests/show_probe.rs": "no test harness (harness = false, needs the tauri feature): a Tauri app owns the main thread, so the real-window probe cannot be a module of the libtest binary",
     "crates/paddock-window/tests/native_menu.rs": "no test harness: macOS builds menus on the main thread only",
     "apps/shell-demo/src-tauri/tests/app.rs": "the demo is the starter of new apps (scripts/new-app.mjs copies tests/app.rs); one file, so one binary already",
     "apps/workbench-demo/src-tauri/tests/app.rs": "the demo is the starter of new apps like the shell demo; one file, so one binary already",

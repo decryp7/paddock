@@ -7,3 +7,5 @@
 - Delegate mechanical or well-specified work (refactors with a precise spec, test scaffolding, docs) to cheaper models.
   Keep architecture and review on the main model.
 - Share first (rule 42): check Paddock's crates and packages before writing anything an app copy would duplicate.
+- Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
+  `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.

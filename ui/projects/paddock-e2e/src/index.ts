@@ -41,6 +41,7 @@ export {
   type WalkOutcome,
 } from './keyboard.ts';
 export { LAYOUT_WIDTHS, WINDOW_SIZES, horizontalOverflow, expectNoHorizontalScroll, expectWithinWidth, resize } from './layout.ts';
+export { headerCovers, headerTrack, expectHeaderOnTop, isOpaqueColor, type GridParts, type HeaderCover, type HeaderFrame, type HeaderReport } from './grid.ts';
 export { waitForStableFrame, captureStable, type StableFrameOptions } from './screenshot.ts';
 export { installTauriFake, TauriFake, START_REPLIES, SHELL_PLUGIN_PREFIX, type IpcCall, type TauriFakeOptions } from './ipc.ts';
 export {
@@ -54,11 +55,13 @@ export {
   ShellDialogs,
   ShellSettings,
   dialogContracts,
+  parseDialogContractsModule,
   dialogWindowUrl,
   DIALOG_RESULT_KEY,
   CLOSE_NAMES,
   type DialogContractEntry,
 } from './shell.ts';
+export { dialogFitProblems, openEveryDialog, measureDialogWindow, FIT_SCALES, FIT_WORK_AREAS, MAX_FOOTER_GAP, type DialogFitOptions, type DialogWindowMeasure } from './dialog-fits.ts';
 export { WorkbenchApp, WorkbenchFrame, WorkbenchActivityBar, WorkbenchExplorer, WorkbenchPalette } from './workbench.ts';
 export { renderFlaky, type Flaky } from './retried-reporter.ts';
 export { readVersion, RELEASE_VERSION } from './version.ts';

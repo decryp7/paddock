@@ -4,53 +4,55 @@
 
 # Dyno
 
-**Measures, explains and tunes your PC.** A background agent samples the machine and keeps its history while the window
-is closed; the app shows what is happening, says in plain words why it is slow, and can calm a runaway program, clean
-up, tidy start-up and apply reversible tuning, but only when you enable a rule or click. On **Windows, macOS and Linux**.
+**Watches your PC, read-only.** A background agent samples the machine and keeps its history while the window is
+closed; the app shows what is happening, says in plain words why it is slow, raises alarms, maps the disk and runs
+benchmarks on click. It never changes your machine ([ADR 0021](docs/adr/0021-monitoring-only.md)). On **Windows, macOS
+and Linux**.
 
 A dynamometer measures an engine under load and shows where the power goes: Dyno does that for your computer.
 
 </div>
 
-![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=de37f1cf)
+![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=202f935a)
 
 
-> **Status: v0.1.0, unreleased.** The agent (sampling, history, process actions with undo, rules engine, diagnosis,
-> health, startup list, service registration), the dashboard, processes, settings and tray are built and tested. CPU
-> taming, Health and Cleanup screens may still be placeholders in the UI; cleanup and tuning are not built. [docs/features.md](docs/features.md) says exactly what is real and
+> **Status: 1.0.0 in preparation, unreleased.** Dyno 1.0.0 is a monitor: live and history, processes and why it is slow,
+> alarms, issues, a disk map, counters, extras, benchmarks and the command line, all read-only. Taming, cleanup, tuning and
+> every other way of changing the machine are dropped, not postponed
+> ([ADR 0021](docs/adr/0021-monitoring-only.md)). [docs/features.md](docs/features.md) says exactly what is real and
 > [docs/roadmap.md](docs/roadmap.md) lists what is left.
 
 ![The dashboard](docs/screenshots/dashboard-dark.png)
 
 ## At a glance
 
-![Dyno at a glance: a window and tray in a Tauri shell talk over one local IPC to a per-user agent that samples, serves requests, hosts plugins, applies rules, runs benchmarks in a child process and keeps SQLite history, alarms and a flight recorder; platform adapters for Windows, macOS and Linux, out-of-process plugins and a planned privileged helper sit around it; a pure Rust core holds every decision](diagrams/dyno-overview.svg)
+![Dyno at a glance: a window and tray in a Tauri shell and the dyno command line talk over one local IPC to a per-user agent that samples, answers requests, hosts sensor plugins, runs benchmarks in a child process on a click and keeps SQLite history, alarms, issues and a flight recorder; platform adapters for Windows, macOS and Linux sit around it; a pure Rust core holds every decision; nothing changes the machine](diagrams/dyno-overview.svg)
 
 A per-user **agent** measures and keeps the history whether or not the window is open; an unprivileged **app** (window
 and tray) shows it and sends requests over one local IPC; a pure Rust **core** holds every rule (grouping, diagnosis,
-the rules engine, protection, cleanup policy, health); thin **adapters** per OS read the counters and act on
-processes. Details: [architecture](docs/architecture.md) and every diagram in [docs/design.md](docs/design.md).
+alarms, health, forecasts); thin **adapters** per OS read the counters. Everything runs with your own rights: what the OS shows only to administrators is marked *Unavailable* with the reason. There is no privileged helper in 1.0. Details: [architecture](docs/architecture.md) and every diagram in
+[docs/design.md](docs/design.md).
 
 ## Why Dyno
 
-Task managers show numbers; cleaners and "boosters" change things behind your back. Dyno aims at the middle:
+Task managers show numbers; cleaners and "boosters" change things behind your back. Dyno does the first well and never
+does the second:
 
-- **Observe first.** After install Dyno only measures and explains. Nothing changes without a rule you switched on or a
-  click, and every change is logged with an undo ([ADR 0006](docs/adr/0006-privileged-helper-and-observe-only.md)).
+- **Read-only.** Dyno measures and explains. It ends nothing, deletes nothing and changes no setting
+  ([ADR 0021](docs/adr/0021-monitoring-only.md)). Its own data (history, settings, alarm acknowledgements and notes) is all
+  it writes.
 - **Explains, not just counts.** Processes are grouped into applications, the diagnosis names the likeliest cause with its
   evidence, anomalies are called out, and history keeps short spikes visible.
-- **Safe by construction.** A protected list that nothing can override (critical OS processes, antivirus, audio engine,
-  Dyno itself, your own entries), actions that name a process by id *and* start time, deletes that are recoverable.
 - **Light.** Adaptive sampling, one SQLite writer, no web server. On the 14-core M4 Mac mini the agent used about 2 to
   3 % of one core and 24 MB (see [Dyno's own overhead](docs/architecture.md#dynos-own-overhead)).
 - **Local only.** No telemetry, no cloud, no accounts.
-- **Cross-platform.** Windows, macOS and Linux, each with its own service manager and process-control methods.
+- **Cross-platform.** Windows, macOS and Linux, each with its own service manager.
 
 ## Key features
 
-![Dyno features](docs/images/dyno-features.svg?v=6d630e38)
+![Dyno features](docs/images/dyno-features.svg?v=471f40ce)
 
-![How Dyno works](docs/images/dyno-how-it-works.svg?v=532d471f)
+![How Dyno works](docs/images/dyno-how-it-works.svg?v=a478bd02)
 
 Every feature, with its state, is in [docs/features.md](docs/features.md). Built today:
 
@@ -59,23 +61,30 @@ Every feature, with its state, is in [docs/features.md](docs/features.md). Built
 2. **History that survives closing the window.** Raw points for a day, then 1-minute, 15-minute and hourly rollups holding
    min, average and max ([ADR 0008](docs/adr/0008-storage-sqlite-and-retention.md)).
 3. **Processes by application.** A tree grouped by app ([ADR 0003](docs/adr/0003-process-grouping.md)), sortable and
-   searchable, with details (command line, modules, connections, signer), "what is locking this file", end, suspend,
-   priority and efficiency mode, and an Activity list with **Undo**. Protected processes are locked with the reason.
-4. **Why is it slow?** A diagnosis with causes, confidence, evidence and suggestions; anomalies; disk-full forecast.
-5. **CPU taming engine.** Rules with an escalation ladder (priority, efficiency mode, a cap) and profiles (Gaming,
-   Meeting, On battery, Building code), released automatically ([ADR 0004](docs/adr/0004-cpu-taming-and-throttling-methods.md)).
-   The rules ship disabled; the UI for them is not built yet.
-6. **Startup list** and **health score** with reasons and fixes that preview before anything changes.
-7. **Tray** with a live metric and a compact dropdown; closing the window keeps Dyno measuring.
-8. **Native feel** ([ADR 0009](docs/adr/0009-native-feel.md)), light and dark themes, a colour-vision-checked palette
-   ([ADR 0011](docs/adr/0011-design-system.md)), a command palette (Ctrl or Cmd + K).
-9. **Extensible in three tiers** ([ADR 0007](docs/adr/0007-extensibility-three-tiers.md)): the core, declarative TOML
-   packs (planned) and out-of-process Rust plugins ([docs/plugins.md](docs/plugins.md)).
-10. **Updates itself** with the Tauri updater: signed, opt-in ([docs/releasing.md](docs/releasing.md)).
+   searchable, with details (command line, modules, connections, signer), "what is locking this file", open location,
+   snapshots and diffs.
+4. **Why is it slow?** A diagnosis with causes, confidence, evidence and suggestions; anomalies; disk-full forecast;
+   throttling, SSD and battery life ranges and learned baselines ([ADR 0018](docs/adr/0018-throttling-lifespan-and-baselines.md)).
+5. **Alarms, issues and the weekly report.** Alarms that notify with an ISA-18.2 style lifecycle
+   ([ADR 0013](docs/adr/0013-alarms-lifecycle.md)); crashes and errors from the OS logs with a stability score
+   ([ADR 0017](docs/adr/0017-issues-and-the-program-baseline.md)); a report for any of the last 52 weeks.
+6. **Health and startup items,** with reasons only: Dyno shows, it does not fix.
+7. **Disk map, counters, extras and backup health.** A disk map (in progress for 1.0: the engine is built and the screen is being built; a ring chart of a volume or folder where a click drills in, with a live scan you can cancel), a performance-counter browser, what changed,
+   sleep, boot, GPU, inventory, find files (view only) and backup checks
+   ([ADR 0020](docs/adr/0020-extras-backup-checks-and-taming-proof.md)).
+8. **Benchmarks on click,** network view, IP lookup, web and VirusTotal search (they only open your browser), the flight
+   recorder and the diagnostics bundle.
+9. **Tray** with a live metric and a compact dropdown; closing the window keeps Dyno measuring.
+10. **Native feel** ([ADR 0009](docs/adr/0009-native-feel.md)), light and dark themes, a colour-vision-checked palette
+    ([ADR 0011](docs/adr/0011-design-system.md)), a command palette (Ctrl or Cmd + K).
+11. **The `dyno` command line:** `status`, `why-slow`, `top`, `alarms`, `snapshot` and `counters` ([docs/cli.md](docs/cli.md)),
+    shipped in the installers.
+12. **Extensible with sensors:** the core and out-of-process Rust plugins that add sensors
+    ([ADR 0007](docs/adr/0007-extensibility-three-tiers.md), [docs/plugins.md](docs/plugins.md)).
+13. **Updates itself** with the Tauri updater: signed, opt-in ([docs/releasing.md](docs/releasing.md)).
 
-Planned (see the roadmap): right-click search, watched folders,
-benchmarks on click, a performance-counter browser, the tuning catalogue, cleanup with quarantine, backup health,
-declarative packs, alerts and a weekly report, a local web API, multi-PC view.
+Later, after 1.0 (see the roadmap): the disk map's largest, oldest and duplicate-hint lists and its hidden-space breakdown; the privileged helper and "start as administrator at login"; declarative read-only packs, an optional local web API, "Explain this" via Pitwall,
+suite tie-ins, session recording, a multi-PC view.
 
 ### Screenshots
 
@@ -88,19 +97,16 @@ Taken against the mock backend (`docs/screenshots`, dark and light for every scr
 | ![Settings, dark](docs/screenshots/settings-dark.png) | ![Settings, light](docs/screenshots/settings-light.png) |
 | ![Tray dropdown, dark](docs/screenshots/tray-dark.png) | ![Tray dropdown, light](docs/screenshots/tray-light.png) |
 
-CPU taming, Cleanup and Health may still be placeholder screens until their work packages are done
-([roadmap](docs/roadmap.md)); their placeholder images are listed in the [screenshot checklist](docs/roadmap.md#screenshot-checklist).
-
 ## Quick start
 
 No release is published yet; build it yourself ([Building from source](#building-from-source)) or take the CI artifacts
-of a `v*` tag or the nightly run.
+of a `dyno-v*` tag or the nightly run.
 
 ### Windows
 
 Run the NSIS installer (`Dyno_<version>_x64-setup.exe`; per-user, no administrator rights). Dyno registers its agent as
 a per-user **Run** entry (not a service: a service lives in session 0 and cannot see your idle time, foreground window
-or per-user settings, [ADR 0010](docs/adr/0010-platforms-and-services.md)). Dyno runs with your own rights.
+or per-user settings, [ADR 0010](docs/adr/0010-platforms-and-services.md)). Dyno never needs administrator rights to install or to run. Figures Windows shows only to administrators are marked *Unavailable* with the reason.
 
 ### macOS (13 or newer)
 
@@ -119,11 +125,12 @@ status-notifier host (GNOME: the AppIndicator extension). Details: [docs/linux.m
 
 | Area | State |
 | --- | --- |
-| Core | Built and unit-tested: model, grouping, protection, rules engine, diagnosis, anomalies, forecast, health, history, cleanup policy, protocol. |
-| Agent | Sampling loop, SQLite history with rollups, process actions with undo, rules, startup list, plugin host, service install/ensure, `bench`. Cleanup, tuning, disk usage and the weekly report answer "not built yet". |
-| Platform adapters | macOS and Linux: sensors, process control, details, locks, startup, facts, user activity (macOS tested on a real Mac, Linux in a container with `scripts/linux-verify.sh`). Windows: sensors, process control and user activity; details, locks, startup and facts are not wired yet. |
-| App | Dashboard, processes, settings, tray, command palette, native feel against the real agent through the shell. |
-| Installers | CI builds NSIS, `.dmg`, `.deb` and AppImage on tags, nightly and manual runs. Not yet published. |
+| Core | Built and unit-tested: model, grouping, diagnosis, anomalies, forecast, health, history, alarms, baselines, protocol. |
+| Agent | Sampling loop, SQLite history with rollups, alarms, issues, flight recorder, weekly report, disk usage, benchmarks, startup list (view), plugin host (sensors), service install/ensure. |
+| Platform adapters | macOS and Linux: sensors, details, locks, startup, facts, user activity (macOS tested on a real Mac, Linux in a container with `scripts/linux-verify.sh`). Windows: sensors and user activity; details, locks, startup and facts are not wired yet. |
+| App | Dashboard, processes, why slow, alarms, issues, reports, counters, extras, benchmarks, network, settings, tray, command palette, native feel against the real agent through the shell. |
+| Privileges | Dyno 1.0 has no privileged helper. Everything runs with your own rights; unreadable figures say why, other users' processes are one "Other users" row, and elevation (the helper and "start as administrator at login") is planned for 1.1 (ADR 0022). |
+| Installers | CI builds NSIS, `.dmg`, `.deb` and AppImage on `dyno-v*` tags, nightly and manual runs. Not yet published. |
 
 ## Roadmap
 
@@ -146,7 +153,7 @@ dependencies and the files it touches, plus the known gaps in the foundation.
 | [docs/testing-manual.md](docs/testing-manual.md) | Manual tests that need a real desktop |
 | [docs/plugins.md](docs/plugins.md) | Writing an out-of-process plugin |
 | [docs/suite-lessons.md](docs/suite-lessons.md) | Pitfalls the sister apps already hit |
-| [docs/adr/](docs/adr/README.md) | Architecture decision records 0001 to 0014 |
+| [docs/adr/](docs/adr/README.md) | Architecture decision records 0001 to 0021 |
 
 ## Building from source
 
@@ -168,16 +175,16 @@ More in [docs/development.md](docs/development.md).
 ## Contributing
 
 Read [AGENTS.md](AGENTS.md) first: design principles, safety, security and robustness rules, quality gates. Use
-[Conventional Commits](https://www.conventionalcommits.org/); releases are `v*` tags following semver
+[Conventional Commits](https://www.conventionalcommits.org/); releases are `dyno-vX.Y.Z` tags following semver
 ([docs/releasing.md](docs/releasing.md)).
 
 ## Security and privacy
 
 - The agent never trusts the app and the app never trusts the webview: every request is parsed into a typed value and
   validated in Rust; the IPC is local only, token-authenticated and bounded.
-- Dyno changes your machine only through an enabled rule or an explicit click, logs it and keeps an undo; deletes go to
-  the Trash or a quarantine. The protected list is absolute.
-- Dyno runs with your own rights; it installs nothing and asks for no administrator rights.
+- Dyno does not change your machine: no process actions, no deletes, no settings changes. It writes only its own data
+  ([ADR 0021](docs/adr/0021-monitoring-only.md)).
+- Nothing runs elevated: Dyno 1.0 runs only with your own rights and installs no privileged helper or service.
 - Tauri capabilities are least-privilege (checked in CI by `scripts/check-capabilities.mjs`) and the CSP has no
   `unsafe-eval` and no remote origins. Logs never contain file contents or command lines. No telemetry.
 - Found a vulnerability? Please report it privately to the maintainers rather than in a public issue.

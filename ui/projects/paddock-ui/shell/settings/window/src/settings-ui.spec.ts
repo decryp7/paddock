@@ -26,6 +26,7 @@ import {
   SETTINGS_PROBLEM_FIXTURE,
   SHELL_SETTINGS_PAGES,
 } from '@decryp7/paddock-ui/shell/settings';
+import { PdSettingField } from './setting-field';
 import { PdSettingsSectionPage } from './settings-section';
 import { PdSettingsWindow } from './settings-window';
 import { settingsBed, settle, SPEC_PAGES } from './spec-helpers';
@@ -41,7 +42,7 @@ interface Bed {
 async function open(options: { backend?: MemorySettingsBackend; page?: string; extra?: unknown[]; pages?: typeof SPEC_PAGES; restart?: () => void } = {}): Promise<Bed> {
   const backend = options.backend ?? new MemorySettingsBackend();
   const close = vi.fn();
-  settingsBed({ backend, pages: options.pages, restart: options.restart, extra: [{ provide: DIALOG_REF, useValue: { close, closed: new Promise(() => undefined) } }, ...(options.extra ?? [])] });
+  settingsBed({ backend, pages: options.pages, restart: options.restart, extra: [{ provide: DIALOG_REF, useValue: { dismiss: close, answer: close, closed: new Promise(() => undefined) } }, ...(options.extra ?? [])] });
   const fixture = TestBed.createComponent(PdSettingsWindow);
   if (options.page) fixture.componentRef.setInput('page', options.page);
   await settle();
@@ -78,12 +79,20 @@ describe('pd-settings-window', () => {
     expect($(el, 'pd-settings-section h2').textContent).toBe('Appearance');
   });
 
+  it('says in the footer that changes are saved as they are made, and its content ends where the footer’s Close does', async () => {
+    const bed = await open();
+    expect(bed.fixture.componentInstance.dialogStatus()).toBe('Changes are saved as you make them.');
+    const css = (PdSettingsWindow as unknown as { ɵcmp: { styles: string[] } }).ɵcmp.styles.join('');
+    expect(css).toMatch(/\.pd-content[^{]*\{[^}]*overflow: auto/);
+    expect(css).not.toMatch(/\.pd-content[^{]*\{[^}]*padding-inline-end/);
+  });
+
   it('renders every field kind from the engine’s schema', async () => {
     const bed = await open({ page: 'sd.general' });
     const { el } = bed;
     expect($(el, '.pd-item[aria-current="page"]').dataset['page']).toBe('sd.general');
-    expect($<HTMLInputElement>(field(el, 'notify'), 'input[role="switch"]').checked).toBe(true);
-    expect($(field(el, 'style'), 'pd-select button').textContent?.trim()).toBe('Casual');
+    expect($(field(el, 'notify'), 'button[role="switch"]').getAttribute('aria-checked')).toBe('true');
+    expect($(field(el, 'style'), 'pd-select mat-select').textContent?.trim()).toBe('Casual');
     expect(field(el, 'style').querySelector('select')).toBeNull();
     expect($<HTMLInputElement>(field(el, 'greeting'), 'input[type="text"]').value).toBe('Hello');
     expect($<HTMLInputElement>(field(el, 'repeat'), 'input[type="number"]').value).toBe('1');
@@ -108,13 +117,11 @@ describe('pd-settings-window', () => {
   it('applies a switch and a choice at once, typed values on leaving the control, in stored units', async () => {
     const bed = await open({ page: 'sd.general' });
     const { el, backend } = bed;
-    const toggle = $<HTMLInputElement>(field(el, 'notify'), 'input[role="switch"]');
-    toggle.checked = false;
-    toggle.dispatchEvent(new Event('change'));
+    $(field(el, 'notify'), 'button[role="switch"]').click();
     await settle();
     expect(backend.values('sd.general')?.['notify']).toBe(false);
-    expect($(el, '.pd-foot .pd-status').textContent).toBe('Show a notification saved.');
-    $(field(el, 'style'), 'pd-select button').click();
+    expect(bed.fixture.componentInstance.dialogStatus()).toBe('Show a notification saved.');
+    $(field(el, 'style'), 'pd-select mat-select').click();
     await settle();
     [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=option]')].find((o) => o.textContent?.includes('Formal'))!.click();
     await settle();
@@ -143,7 +150,7 @@ describe('pd-settings-window', () => {
     await type(bed, $<HTMLInputElement>(field(el, 'repeat'), 'input'), '3');
     expect(backend.values('sd.general')).toMatchObject({ repeat: 3, greeting: 'Hello' });
     // Close is held, with a question.
-    $<HTMLButtonElement>(el, '.pd-foot [data-dialog-close]').click();
+    // (The frame's Close asks the content first.)
     expect(bed.fixture.componentInstance.dialogCanClose()).toBe(false);
     await bed.fixture.whenStable();
     const ask = $(el, '[data-testid="settings-unsaved"]');
@@ -175,15 +182,19 @@ describe('pd-settings-window', () => {
     await bed.fixture.whenStable();
     const reset = $<HTMLButtonElement>(field(el, 'repeat'), 'button.pd-reset');
     expect(reset.getAttribute('aria-label')).toBe('Reset to default: Repeat');
-    expect(reset.title).toBe('Default: 1 times');
+    expect(reset.hasAttribute('title')).toBe(false);
+    reset.dispatchEvent(new Event('mouseenter'));
+    reset.dispatchEvent(new FocusEvent('focus'));
+    await settle();
+    expect(document.querySelector('.cdk-describedby-message-container')?.textContent).toContain('Default: 1 times');
     reset.click();
     await settle();
     expect(backend.values('sd.general')).toMatchObject({ repeat: 1, greeting: 'Yo' });
-    $<HTMLButtonElement>(el, 'pd-settings-section .pd-head .pd-btn').click();
+    $<HTMLButtonElement>(el, 'pd-settings-section .pd-head button').click();
     await settle();
     expect(backend.values('sd.general')?.['greeting']).toBe('Hello');
     await bed.fixture.whenStable();
-    expect($(el, '.pd-foot .pd-status').textContent).toBe('General reset to defaults.');
+    expect(bed.fixture.componentInstance.dialogStatus()).toBe('General reset to defaults.');
   });
 
   it('searches every setting however it is written, and Escape clears the search', async () => {
@@ -269,7 +280,7 @@ describe('pd-settings-window', () => {
     const bed = await open({ pages: [flaky], page: 'sd.general' });
     expect(bed.el.textContent).toContain('This page could not be opened.');
     fail = false;
-    $<HTMLButtonElement>(bed.el, '.pd-content .pd-btn').click();
+    $<HTMLButtonElement>(bed.el, '.pd-content .pd-banner button').click();
     await settle();
     await bed.fixture.whenStable();
     await settle();
@@ -280,7 +291,7 @@ describe('pd-settings-window', () => {
     vi.spyOn(broken, 'overview').mockRejectedValueOnce(new Error('gone'));
     const again = await open({ backend: broken });
     expect(again.el.textContent).toContain('The settings could not be loaded: gone');
-    $<HTMLButtonElement>(again.el, '.pd-content .pd-btn').click();
+    $<HTMLButtonElement>(again.el, '.pd-content .pd-banner button').click();
     await settle();
     await again.fixture.whenStable();
     await settle();
@@ -388,5 +399,21 @@ describe('SETTINGS_CONTRIBUTIONS and provideShellSettings', () => {
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellSettings({ backend: () => backend, appearance: false })] });
     expect(TestBed.inject(APPEARANCE_SOURCE, null)).toBeNull();
     localStorage.clear();
+  });
+
+  it('puts a refusal on the Material switch’s real button as aria-invalid, and takes it off again', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const fixture = TestBed.createComponent(PdSettingField);
+    const setting = { key: 'notify', label: 'Notify', description: '', kind: { type: 'bool' }, default: true, restartRequired: false, advanced: false } as never;
+    fixture.componentRef.setInput('setting', setting);
+    await fixture.whenStable();
+    const button = fixture.nativeElement.querySelector('button[role="switch"]') as HTMLElement;
+    expect(button.hasAttribute('aria-invalid')).toBe(false);
+    fixture.componentRef.setInput('errors', [{ kind: 'engine', message: 'Refused.' }]);
+    await fixture.whenStable();
+    expect(button.getAttribute('aria-invalid')).toBe('true');
+    fixture.componentRef.setInput('errors', []);
+    await fixture.whenStable();
+    expect(button.hasAttribute('aria-invalid')).toBe(false);
   });
 });

@@ -19,7 +19,6 @@
   ],
   "sideEffects": false,
   "bin": {
-    "paddock-check-dialog-commands": "bin/paddock-check-dialog-commands.mjs",
     "paddock-i18n": "bin/paddock-i18n.mjs"
   },
   "peerDependencies": {

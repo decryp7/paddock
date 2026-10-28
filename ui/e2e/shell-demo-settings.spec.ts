@@ -22,7 +22,7 @@ test.describe('settings (plan S10)', () => {
     await page.getByRole('button', { name: 'Say hello' }).focus();
     await page.keyboard.press('ControlOrMeta+Comma');
     await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(1);
-    // The window's own Close (the page's dialog frame has one too).
+    // The frame's Close (ADR 0026: the window declares no footer of its own).
     await win.getByText('Close', { exact: true }).click();
     await expect(win).toHaveCount(0);
     expect(pageErrors).toEqual([]);
@@ -37,7 +37,8 @@ test.describe('settings (plan S10)', () => {
     await expect(app.settings.field('repeat').getByRole('spinbutton', { name: 'Repeat' })).toHaveValue('1');
     await expect(app.settings.field('volume')).toContainText('Needs restart');
 
-    await app.settings.field('notify').getByRole('switch').uncheck();
+    await app.settings.field('notify').getByRole('switch').click();
+    await expect(app.settings.field('notify').getByRole('switch')).not.toBeChecked();
     await expect(app.settings.saved('Show a notification saved.')).toBeVisible();
     await app.settings.field('volume').getByRole('spinbutton').fill('0.8');
     await app.settings.field('volume').getByRole('spinbutton').press('Enter');
@@ -165,9 +166,10 @@ test.describe('settings (plan S10)', () => {
     await app.settings.open({ page: 'sd.general' });
     const trigger = app.settings.select('style');
     await trigger.click();
-    const list = page.locator('.pd-list');
+    const list = page.locator('.mat-mdc-select-panel');
     await expect(list).toBeVisible();
-    const [t, l] = [(await trigger.boundingBox())!, (await list.boundingBox())!];
+    // the list lines up with the field's outline, of which the trigger text is inset
+    const [t, l] = [(await app.settings.field('style').locator('.mat-mdc-text-field-wrapper').boundingBox())!, (await list.boundingBox())!];
     expect(Math.abs(l.x - t.x)).toBeLessThanOrEqual(1);
     expect(l.width).toBeGreaterThanOrEqual(t.width - 1);
     expect(l.width).toBeLessThanOrEqual(t.width + 1);

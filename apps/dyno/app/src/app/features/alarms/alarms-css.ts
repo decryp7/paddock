@@ -2,7 +2,7 @@
 export const TABLE_CSS = `
   .grid { container-type: inline-size; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); overflow: clip; }
   .head, .row { display: grid; grid-template-columns: var(--cols); align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); }
-  .head { height: 30px; border-bottom: 1px solid var(--border); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-medium); position: sticky; top: 0; z-index: 1; }
+  .head { height: 30px; border-bottom: 1px solid var(--border); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-medium); position: sticky; top: 0; z-index: 3; }
   .row { min-height: 40px; border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-sm); }
   .row:last-child { border-bottom: 0; }
   .row:hover, .row:focus-visible { background: var(--surface-hover); outline: none; }

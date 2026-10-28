@@ -1,5 +1,6 @@
 import { defineDialog, defineSettingsPage, msg, type, type ContributionBatch, type DialogDef, type ProvidersLoader, type SettingsPageDef } from '@decryp7/paddock-ui/shell';
 import type { ChannelsCommand } from '../generated/channels-commands';
+import { DIALOG_CONTRACTS } from '../generated/dialog-contracts';
 
 // The channels part's contributions: static data and loaders only (lazy by construction, plan §9). The page's component, the
 // secret dialog's component and the providers each need are chunks of their own, loaded when their window opens.
@@ -18,7 +19,7 @@ export const CHANNELS_SECRET_DIALOG_ID = 'pd.channels.secret';
 export const CHANNELS_SETTINGS_COMMANDS = ['channels_get', 'channels_save', 'channels_clear_secret', 'channels_test'] as const satisfies readonly ChannelsCommand[];
 
 /** What the secret dialog's window may call (its contract; Rust's guard allows exactly this). */
-export const CHANNELS_SECRET_DIALOG_COMMANDS = ['channels_set_secret'] as const satisfies readonly ChannelsCommand[];
+export const CHANNELS_SECRET_DIALOG_COMMANDS = DIALOG_CONTRACTS[CHANNELS_SECRET_DIALOG_ID].commands satisfies readonly ChannelsCommand[];
 
 export interface ChannelsSettingsPageOptions {
   /** The providers the page boots with: `provideShellChannels` with the app's backend, from a module of its own so they stay lazy. */
@@ -52,15 +53,9 @@ export interface ChannelsSecretDialogOptions {
  * `DialogService.open(CHANNELS_SECRET_DIALOG_ID, { inputs })` from the page.
  */
 export function defineChannelsSecretDialog(options: ChannelsSecretDialogOptions): DialogDef<typeof CHANNELS_SECRET_DIALOG_ID, boolean, ChannelsCommand> {
-  return defineDialog({
-    id: CHANNELS_SECRET_DIALOG_ID,
-    kind: 'form',
-    modality: 'modal',
-    requiredChoice: false,
+  return defineDialog(DIALOG_CONTRACTS[CHANNELS_SECRET_DIALOG_ID], {
     title: msg('pd.channels.secret.title', 'Channel secret'),
-    width: 440,
     result: type<boolean>(),
-    commands: CHANNELS_SECRET_DIALOG_COMMANDS,
     providers: options.providers,
     load: options.load,
   });
@@ -79,14 +74,9 @@ export interface ChannelsRemoveDialogOptions {
  * window per channel. It calls nothing; it resolves `true` when the user chose Remove, `false` or nothing when they kept the channel.
  */
 export function defineChannelsRemoveDialog(options: ChannelsRemoveDialogOptions): DialogDef<typeof CHANNELS_REMOVE_DIALOG_ID, boolean, ChannelsCommand> {
-  return defineDialog({
-    id: CHANNELS_REMOVE_DIALOG_ID,
-    kind: 'decision',
+  return defineDialog(DIALOG_CONTRACTS[CHANNELS_REMOVE_DIALOG_ID], {
     title: msg('pd.channels.remove.title', 'Remove channel'),
-    width: 420,
-    instanced: true,
     result: type<boolean>(),
-    commands: [],
     load: options.load,
   });
 }

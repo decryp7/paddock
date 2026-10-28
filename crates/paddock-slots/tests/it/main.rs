@@ -1,5 +1,6 @@
 //! Slots over real lock files in scratch folders (no shared state outside them).
 mod holder;
+mod hostile;
 mod races;
 
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};

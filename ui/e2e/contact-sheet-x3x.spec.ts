@@ -67,14 +67,14 @@ test.describe('contact sheet: files and storage', () => {
       await shoot(page, theme, 'storage-tree', 'Settings > Storage: the size tree, the folder size on its group row, glyphs on the items');
 
       await page.getByTestId('storage-clear-cache').click();
-      await expect(page.getByRole('dialog', { name: 'Clear cache?' })).toBeVisible();
+      await expect(page.getByRole('alertdialog', { name: 'Clear cache?' })).toBeVisible();
       await shoot(page, theme, 'storage-confirm-cache', 'The clear confirmation for the cache: Keep is the default, Clear is the danger action');
       await page.keyboard.press('Escape');
       const logs = page.locator('.pd-row[data-key="logs"]');
       await logs.hover();
       await logs.getByRole('button', { name: 'More actions' }).click();
       await page.getByRole('menuitem', { name: 'Clear logs' }).click();
-      await expect(page.getByRole('dialog', { name: 'Clear logs?' })).toBeVisible();
+      await expect(page.getByRole('alertdialog', { name: 'Delete logs?' })).toBeVisible();
       await shoot(page, theme, 'storage-confirm-data', 'The clear confirmation for the user\'s own data: it says it cannot be rebuilt');
       await page.keyboard.press('Escape');
 

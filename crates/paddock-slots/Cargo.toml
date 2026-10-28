@@ -12,3 +12,4 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 tempfile = "3"
+paddock-testkit = { workspace = true }

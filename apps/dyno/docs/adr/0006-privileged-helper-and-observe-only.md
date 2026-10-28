@@ -1,6 +1,6 @@
 # 6. Observe-only by default; system changes only through a privileged helper installed on first use
 
-- Status: accepted (2026-10-23)
+- Status: accepted (2026-10-23); its write parts (points 1 to 3 and 6) are superseded by ADR 0021 (2026-10-28); the helper is read-only and is not in 1.0 (ADR 0021 point 4, ADR 0022)
 - Related: ADR 0004 (CPU taming), ADR 0005 (cleanup safety), `dyno_core::helper`, `crates/dyno-helper`
 
 ## Context

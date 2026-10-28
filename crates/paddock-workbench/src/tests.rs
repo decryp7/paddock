@@ -114,3 +114,13 @@ fn the_window_hook_closes_the_pop_outs_of_a_host_that_goes_away() {
     crate::builder::on_window_event(&host.as_ref().window(), &WindowEvent::Destroyed);
     assert!(app.state::<Panels>().popouts().of_host("main").is_empty());
 }
+
+/// The dock's dialog contracts as TypeScript (ADR 0026 §3).
+#[test]
+fn generated_dialog_contracts_are_current() {
+    let path = crate_dir()
+        .join("../../ui/projects/paddock-ui/workbench/dock/generated/dialog-contracts.ts");
+    let text =
+        paddock_dialogs::ts::contracts_module("paddock-workbench", &crate::DIALOGS, REGENERATE);
+    sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
+}

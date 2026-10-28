@@ -94,7 +94,7 @@ import { activeLocale } from '../i18n/locale';
     .link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
     .list { flex: 1; min-height: 0; overflow: auto; }
     table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
-    th { position: sticky; top: 0; background: var(--bg-2); text-align: left; font-weight: 600; color: var(--muted); padding: 5px 8px; border-bottom: 1px solid var(--border); }
+    th { position: sticky; top: 0; z-index: 3; background: var(--bg-2); text-align: left; font-weight: 600; color: var(--muted); padding: 5px 8px; border-bottom: 1px solid var(--border); }
     td { padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--text-2); }
     .msg { color: var(--text); min-width: 200px; }
     .nowrap { white-space: nowrap; }

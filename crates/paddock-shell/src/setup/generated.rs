@@ -57,3 +57,15 @@ fn generated_typescript_is_current() {
         .collect();
     assert!(stale.is_empty(), "{}", stale.join("\n"));
 }
+
+/// The checklist's dialog contract as TypeScript (ADR 0026 §3).
+#[test]
+fn generated_dialog_contracts_are_current() {
+    let path = generated_dir().join("dialog-contracts.ts");
+    let text = paddock_dialogs::ts::contracts_module(
+        "paddock-shell (set-up)",
+        &super::DIALOGS,
+        REGENERATE,
+    );
+    testing::sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
+}

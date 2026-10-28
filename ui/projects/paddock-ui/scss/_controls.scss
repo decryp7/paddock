@@ -622,6 +622,29 @@
   }
 }
 
+// A Material menu with the popup-menu classes (`<mat-menu class="pd-popmenu">`, pd-table's menus) keeps the family's items:
+// Material's own item rules are as specific as the ones above and load after them, so these name the panel too.
+.pd-popmenu .pd-popmenu__item {
+  min-height: 28px;
+  padding: 0 var(--pd-space-3);
+  border-radius: var(--pd-radius-tag);
+  color: var(--pd-text);
+  font-size: var(--pd-text-body);
+
+  &:focus-visible {
+    background: var(--pd-hover);
+    outline: 2px solid var(--pd-focus-ring);
+    outline-offset: -2px;
+  }
+
+  .mat-mdc-menu-item-text {
+    display: flex;
+    align-items: center;
+    gap: var(--pd-space-2);
+    font: inherit;
+  }
+}
+
 /* A label that takes the rest of the row, and a key hint at the end (CDK menus in the workbench). */
 .pd-popmenu__label {
   flex: 1;

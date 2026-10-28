@@ -50,7 +50,6 @@ plugin catalogue (2026-10-18), the CLR Profiling API "deep mode" agent, and the 
 
 ## Open: platform
 
-- **Store**: moving to DuckDB 2.0's server mode once it is released and supported.
 - **Signing and notarisation**: needs certificates and a self-hosted Mac runner (see [releasing.md](releasing.md)).
 
 ## Engineering follow-ups

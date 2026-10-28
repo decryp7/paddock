@@ -1,0 +1,23 @@
+# Research harness for docs/research/2026-10-28-duckdb-server-mode.md: DuckDB 2.0 in process, over Quack, and over a
+# model of Debrief's IPC (length-prefixed postcard frames with Arrow IPC items on a Unix socket). Not product code and
+# not part of any workspace. Build (macOS, the pinned prebuilt libduckdb 2.0.0):
+#   DUCKDB_LIB_DIR=<libduckdb 2.0.0> DUCKDB_INCLUDE_DIR=<same> CARGO_BUILD_JOBS=2 cargo build --release
+[package]
+name = "quack-harness"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[workspace]
+
+[dependencies]
+duckdb = { version = "=1.20000.0", default-features = false, features = ["appender-arrow"] }
+arrow-ipc = { version = "60", default-features = false }
+parquet = { version = "60", default-features = false, features = ["arrow", "zstd"] }
+postcard = { version = "1.1", default-features = false, features = ["use-std"] }
+serde = { version = "1", features = ["derive"] }
+libc = "0.2"
+
+[profile.release]
+debug = false

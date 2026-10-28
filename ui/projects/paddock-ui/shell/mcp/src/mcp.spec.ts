@@ -298,7 +298,7 @@ describe('the contributions', () => {
     const page = defineMcpSettingsPage({ providers: async () => [], load: async () => class {} });
     expect(page.id).toBe('pd.mcp');
     const key = defineMcpKeyDialog({ providers: async () => [], load: async () => class {} });
-    expect(key).toMatchObject({ id: 'pd.mcp.key', kind: 'form', modality: 'modal', commands: ['mcp_issue_key'] });
+    expect(key).toMatchObject({ id: 'pd.mcp.key', kind: 'form', modality: 'modal', commands: ['mcp_get', 'mcp_issue_key'] });
     const revoke = defineMcpRevokeDialog({ load: async () => class {} });
     expect(revoke).toMatchObject({ id: 'pd.mcp.revoke', kind: 'decision', instanced: true, commands: [] });
     const batch = mcpContributions(page, [key, revoke]);
@@ -308,7 +308,8 @@ describe('the contributions', () => {
 
   it('keep the key command out of the Settings window and in the key dialog only', () => {
     expect(MCP_SETTINGS_COMMANDS).not.toContain('mcp_issue_key');
-    expect(MCP_KEY_DIALOG_COMMANDS).toEqual(['mcp_issue_key']);
+    expect(MCP_KEY_DIALOG_COMMANDS).toEqual(['mcp_get', 'mcp_issue_key']);
+    // It reads the key count on open, so the limit is a validation message before Create key, not a refusal after it.
     for (const c of [...MCP_SETTINGS_COMMANDS, ...MCP_KEY_DIALOG_COMMANDS]) expect(MCP_COMMANDS).toHaveProperty(c);
     expect(MCP_COMMANDS.mcp_issue_key.windows).toEqual(['dialog']);
   });

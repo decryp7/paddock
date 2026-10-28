@@ -1,10 +1,8 @@
+import { fakeDialogContract } from '@decryp7/paddock-ui/shell/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
   buildManifest,
-  DIALOG_MIN,
-  dialogMinSize,
-  VIEWER_MIN,
   ContributionRegistry,
   defineCommand,
   defineDialog,
@@ -49,9 +47,9 @@ function manifest(): PaddockManifest {
         statusItems: [defineStatusItem({ id: 'sd.serving', title: msg('sd.serving', 'Serving'), side: 'end', priority: 80, load })],
         settingsPages: [defineSettingsPage({ id: 'sd.engines', group: 'application', title: msg('sd.engines', 'Engines'), order: 100, load })],
         dialogs: [
-          defineDialog({ id: 'sd.create', kind: 'form', modality: 'modal', title: msg('sd.create', 'Create'), width: 560, minWidth: 400, commands: ['apps_list', 'apps_create', 'apps_create'], load }),
-          defineDialog({ id: 'sd.about', kind: 'viewer', title: msg('sd.about.title', 'About'), instanced: true, commands: ['plugin:paddock-shell|about_*'], load }),
-          defineDialog({ id: 'sd.broken', kind: 'form', title: msg('sd.broken', 'Broken'), commands: [], load }),
+          defineDialog(fakeDialogContract({ id: 'sd.create', kind: 'form', modality: 'modal', commands: ['apps_list', 'apps_create', 'apps_create'] }), { title: msg('sd.create', 'Create'), load }),
+          defineDialog(fakeDialogContract({ id: 'sd.about', kind: 'viewer', instanced: true, commands: ['plugin:paddock-shell|about_*'] }), { title: msg('sd.about.title', 'About'), load }),
+          defineDialog({ ...fakeDialogContract({ id: 'sd.broken', kind: 'form' }), modality: undefined as never }, { title: msg('sd.broken', 'Broken'), load }),
         ],
         healthServices: [defineHealthService({ id: 'sd.engine', label: msg('sd.engine', 'the engine'), icon: 'sd:engine' })],
         notificationKinds: [defineNotificationKind({ id: 'sd.update', title: msg('sd.update', 'Update available'), actions: ['install', 'later'] })],
@@ -83,8 +81,8 @@ describe('paddock-manifest.json', () => {
     expect(m.settingsForms).toEqual([]); // sd.engines has a component of its own
     expect(m.dialogs).toEqual({
       // The minimum is the kind's floor (a viewer's 680x560); a side left out is the least a dialog can be (plan §13).
-      'sd.about': { kind: 'viewer', modality: 'modeless', instanced: true, requiredChoice: false, minSize: { width: 680, height: 560 }, commands: ['plugin:paddock-shell|about_*'] },
-      'sd.create': { kind: 'form', modality: 'modal', instanced: false, requiredChoice: false, minSize: { width: 400, height: 200 }, commands: ['apps_create', 'apps_list'] },
+      'sd.about': { kind: 'viewer', modality: 'modeless', instanced: true, requiredChoice: false, width: 720, height: 560, commands: ['plugin:paddock-shell|about_*'] },
+      'sd.create': { kind: 'form', modality: 'modal', instanced: false, requiredChoice: false, width: 560, height: null, commands: ['apps_create', 'apps_list'] },
     });
     expect(Object.keys(m.dialogs)).toEqual(['sd.about', 'sd.create']);
     expect(m.notificationKinds).toEqual({ 'sd.update': { actions: ['install', 'later'] } });
@@ -121,7 +119,7 @@ describe('paddock-manifest.json', () => {
         settingsPages: [],
         settingsForms: [2],
         healthServices: [],
-        dialogs: { a: { kind: 'popup', modality: 'modal', instanced: false, requiredChoice: false, minSize: { width: 1 }, commands: [1] }, b: 3 },
+        dialogs: { a: { kind: 'popup', modality: 'modal', instanced: false, requiredChoice: false, width: 'x', height: null, commands: [1] }, b: 3 },
         notificationKinds: [],
         messages: { a: 1 },
       }),
@@ -139,7 +137,7 @@ describe('paddock-manifest.json', () => {
       'pages[0]: expected a string',
       'settingsForms[0]: expected a string',
       'dialogs.a.kind: missing or of the wrong type',
-      'dialogs.a.minSize: missing or of the wrong type',
+      'dialogs.a.width: missing or of the wrong type',
       'dialogs.a.commands: missing or of the wrong type',
       'dialogs.b: expected an object',
       'notificationKinds: expected an object',
@@ -156,12 +154,3 @@ describe('paddock-manifest.json', () => {
   });
 });
 
-describe('dialogMinSize', () => {
-  it('raises the declared minimum to the kind’s floor and fills a side left out from DIALOG_MIN', () => {
-    expect(dialogMinSize({ kind: 'decision' })).toBeNull();
-    expect(dialogMinSize({ kind: 'tool', minWidth: 500 })).toEqual({ width: 500, height: DIALOG_MIN.height });
-    expect(dialogMinSize({ kind: 'form', minHeight: 100 })).toEqual(DIALOG_MIN);
-    expect(dialogMinSize({ kind: 'viewer' })).toEqual(VIEWER_MIN);
-    expect(dialogMinSize({ kind: 'viewer', minWidth: 900, minHeight: 100 })).toEqual({ width: 900, height: VIEWER_MIN.height });
-  });
-});
