@@ -123,8 +123,8 @@ test('publish-release: a pitcrew-v tag publishes the release and puts latest.jso
     assert.doesNotMatch(r.out, /secret-token/, 'the token never reaches the log');
 
     const notes = readFileSync(join(dir, 'RELEASE_NOTES.md'), 'utf8');
-    assert.match(notes, /^- one fix\n\n### First launch\n\nPitcrew is not code-signed yet/);
-    assert.match(notes, /\n\n\*\*Existing installs:\*\* download this version once by hand\.\n$/);
+    assert.match(notes, /^### First launch\n\nPitcrew is not code-signed yet/);
+    assert.match(notes, /\n\n\*\*Existing installs:\*\* download this version once by hand\.\n\n- one fix\n$/);
 
     // latest.json: the version after the prefix, https URLs of the tagged release, every signature, no .sig left as an asset.
     const manifest = JSON.parse(readFileSync(join(dir, 'latest.json'), 'utf8'));
