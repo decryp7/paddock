@@ -543,6 +543,13 @@ API). **Rule:** one release at a time; release-critical work first; other apps p
 CI capacity allow and only if they don't change shared code the release depends on (rule 1 and ER-1, amended
 2026-10-28).
 
+## A turn budget in a test wait is a timeout in disguise (2026-10-28, paddock-ui, Debrief)
+The boot-every-dialog harness gave a dialog window 200 macrotask turns to become stable, and Debrief's dialog spec 400
+render rounds to leave Loading. On a busy CI runner a first `import()` of the settings screen took longer, and both
+reported "never leaves Loading" for a dialog that was fine. **Rule:** a test waits on the condition itself (the promise the
+code awaits, `whenStable` over pending tasks), never on a count of turns, rounds or milliseconds; a wait that can hang is
+left to the runner's test timeout, which names the test (rule 5).
+
 ## aws-lc's jitter entropy aborts on Windows VMs; build with AWS_LC_SYS_NO_JITTER_ENTROPY=1 (2026-10-28, Spotter)
 
 Spotter's one test that completes a TLS ClientHello died twice on the Windows runner (a VM) with 0xc0000409, no panic
