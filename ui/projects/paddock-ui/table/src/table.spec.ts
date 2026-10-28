@@ -740,7 +740,7 @@ describe('pd-table', () => {
     expect(rowEls(f).filter((r) => !r.classList.contains('pd-group')).every((r) => !r.hasAttribute('aria-expanded'))).toBe(true);
   });
 
-  it('forgets a row it was waiting to focus when the lines change or the focus moves out of the grid, so it never steals the focus later', async () => {
+  it('forgets a row it was waiting to focus when it leaves the lines or the focus moves out of the grid, so it never steals the focus later', async () => {
     const f = await setup();
     const many = Array.from({ length: PD_TABLE_VIRTUAL_FROM * 5 }, (_, i): Plugin => ({ id: `r${i}`, name: `Row ${i}`, size: i, kind: 'k', path: `/p/${i}` }));
     f.componentInstance.rows.set(many);
@@ -759,12 +759,21 @@ describe('pd-table', () => {
     expect(document.activeElement).toBe(input);
     // The lines change while a far row is pending.
     table.moveTo(450);
-    f.componentInstance.query.set('Row 45');
+    // The row it waits for is filtered out: it is forgotten (a row that stays would still be focused, by its key).
+    f.componentInstance.query.set('Row 12');
     await settle(f);
     viewport.setRenderedRange({ start: 0, end: 20 });
     await settle(f);
     await settle(f);
     expect(document.activeElement).toBe(input);
+  });
+
+  it('drops a pending focus whose line is gone when the table draws before it sees the change', async () => {
+    const f = await setup();
+    const table = f.debugElement.query((d) => d.name === 'pd-table').componentInstance as unknown as { pendingFocus: string | null; focusPending(): void };
+    table.pendingFocus = 'no-such-row';
+    table.focusPending();
+    expect(table.pendingFocus).toBeNull();
   });
   it('moves through the tree grid with the arrows: Right expands a group then enters it, Left collapses it or goes up to it', async () => {
     const f = await setup();

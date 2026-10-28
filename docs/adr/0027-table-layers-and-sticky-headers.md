@@ -106,8 +106,12 @@ above are fixed wherever they occur.
      is a `treegrid` (axe allows `aria-expanded` on a row only in a tree grid): group rows at `aria-level` 1 say
      `aria-expanded`, their rows are at level 2, and every line says its place (`aria-posinset`/`aria-setsize`: a group
      among the groups, a row among its group's count), since a virtual table draws only some rows. The tree keys follow the
-     WAI-ARIA treegrid pattern: on a group row Right expands it when collapsed and moves to its first row when expanded,
-     Left collapses it when expanded; Left on a row moves to its group row; Enter still folds a group or opens a row. A row the keyboard moves to is scrolled into view only when it is out of
+     WAI-ARIA treegrid pattern: on a group row Right expands it when collapsed and moves to its first row when expanded
+     (as in a tree view: the cells are not focus stops, so there is no cell to move into), Left collapses it when
+     expanded; Left on a row moves to its group row; Enter still folds a group or opens a row. Folding from the keyboard
+     keeps the focus on the group row: the virtual table redraws (and recycles) its rows, so the row is focused again once
+     drawn. The focus the keyboard waits for is held by the line's key, not its index, and dropped only when that line is
+     gone or the focus leaves the grid. A row the keyboard moves to is scrolled into view only when it is out of
      view, and focused once the virtual table has drawn it (End and Home in 5,000 rows); the loading placeholders, empty
      and error states (a row of the grid).
    - **Smaller choices:** a cell's tooltip is disabled at rest and enabled only while the pointer is on a cut text (so a cell

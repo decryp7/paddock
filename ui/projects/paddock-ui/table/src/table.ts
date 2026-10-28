@@ -514,7 +514,7 @@ export class PdTable<T> {
   /** The width of the body's scrollbar in pixels (0 when it does not scroll or the bar overlays). */
   protected readonly gutter = signal(0);
   /** The row to focus once the table has drawn it (a virtual table draws a row a frame after it scrolls there). */
-  private pendingFocus: number | null = null;
+  private pendingFocus: string | null = null;
   /** The key of the row whose right-click menu is open (the row stays marked meanwhile). */
   protected readonly menuKey = signal<string | null>(null);
   private readonly collapsed = signal<ReadonlySet<string>>(new Set());
@@ -561,6 +561,8 @@ export class PdTable<T> {
   /** What the table draws: the lines, five placeholders while loading, nothing on an error (the message is below the header). */
   protected readonly lines = computed<readonly PdLine<T>[]>(() => (this.state() === 'loading' ? SKELETON : this.state() === 'error' ? [] : this.items()));
   private readonly positions = computed(() => new Map<PdLine<T>, number>(this.lines().map((l, i) => [l, i])));
+  /** Each line's place by its key (a row's key, `g:` and a group's name): a line keeps its key when lines come and go above it. */
+  private readonly keyIndex = computed(() => new Map(this.lines().map((l, i) => [this.trackLine(i, l), i] as const)));
   /**
    * Where each line sits in the tree of a grouped table (a virtual table draws only some of the rows, so the tree grid says
    * their place): a group among the groups, a row among its group's rows (the group's count). Empty when not grouped.
@@ -613,13 +615,20 @@ export class PdTable<T> {
       if (body) bodyObserver?.observe(body);
       this.updateTabStops();
     });
-    // The lines changed: a row the keyboard was waiting for is not that row any more, and the sort headers' stops follow the rows.
+    // The lines changed: a row the keyboard was waiting for is forgotten only when it is gone (it is waited for by its key, so
+    // a group folding above it does not lose it), and the sort headers' stops follow the rows.
     effect(() => {
-      this.lines();
+      const keys = this.keyIndex();
       this.columns2();
       untracked(() => {
-        this.pendingFocus = null;
-        afterNextRender(() => this.updateTabStops(), { injector: this.injector });
+        if (this.pendingFocus !== null && !keys.has(this.pendingFocus)) this.pendingFocus = null;
+        afterNextRender(
+          () => {
+            this.updateTabStops();
+            this.focusPending();
+          },
+          { injector: this.injector },
+        );
       });
     });
     inject(DestroyRef).onDestroy(() => {
@@ -750,7 +759,7 @@ export class PdTable<T> {
     if (e.key === 'Enter') {
       const item = this.items()[index];
       e.preventDefault();
-      if (item?.kind === 'group') this.toggleGroup(item.key);
+      if (item?.kind === 'group') this.toggleFromKeyboard(item.key);
       else if (item) this.open(item.row);
       return;
     }
@@ -758,9 +767,9 @@ export class PdTable<T> {
     if (item?.kind === 'group' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
       // The tree grid: Right expands a collapsed group, and on an expanded one moves to its first row; Left collapses it.
       e.preventDefault();
-      if (e.key === 'ArrowRight' && item.collapsed) this.toggleGroup(item.key);
+      if (e.key === 'ArrowRight' && item.collapsed) this.toggleFromKeyboard(item.key);
       else if (e.key === 'ArrowRight' && this.items()[index + 1]?.kind === 'row') this.moveTo(index + 1);
-      else if (e.key === 'ArrowLeft' && !item.collapsed) this.toggleGroup(item.key);
+      else if (e.key === 'ArrowLeft' && !item.collapsed) this.toggleFromKeyboard(item.key);
       return;
     }
     if (e.key === 'ArrowLeft' && this.groupBy()) {
@@ -860,16 +869,33 @@ export class PdTable<T> {
     const visible = this.bodyHeight();
     if (top < offset) viewport.scrollToOffset(top);
     else if (top + this.rowPx() > offset + visible) viewport.scrollToOffset(top + this.rowPx() - visible);
-    this.pendingFocus = index;
+    const line = this.lines()[index];
+    this.pendingFocus = line ? this.trackLine(index, line) : null;
     afterNextRender(() => this.focusPending(), { injector: this.injector });
   }
 
-  /** Focuses the row `moveTo` asked for once it is drawn; a no-op when there is none or it is not drawn yet. */
+  /**
+   * Folds or unfolds a group from the keyboard and keeps the focus on its row: the virtual table redraws its rows (and may
+   * recycle the focused row's view), so the group row is focused again, by its key, once it is drawn.
+   */
+  private toggleFromKeyboard(key: string): void {
+    this.toggleGroup(key);
+    this.pendingFocus = `g:${key}`;
+    afterNextRender(() => this.focusPending(), { injector: this.injector });
+  }
+
+  /** Focuses the line the keyboard asked for (by its key) once it is drawn; a no-op when there is none or it is not drawn yet. */
   protected focusPending(): void {
     if (this.pendingFocus === null) return;
-    const row = this.host.querySelector<HTMLElement>(`.pd-body [role="row"][data-index="${this.pendingFocus}"]`);
+    const index = this.keyIndex().get(this.pendingFocus);
+    if (index === undefined) {
+      this.pendingFocus = null;
+      return;
+    }
+    const row = this.host.querySelector<HTMLElement>(`.pd-body [role="row"][data-index="${index}"]`);
     if (!row) return;
     this.pendingFocus = null;
+    this.active.set(index);
     row.focus({ preventScroll: true });
   }
 }

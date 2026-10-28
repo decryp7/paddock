@@ -351,3 +351,20 @@ test('table: the row is the one tab stop: Right reaches its buttons, a focused b
   await page.keyboard.press('Tab');
   expect(await grid.evaluate((g) => g.contains(document.activeElement))).toBe(false);
 });
+
+test('table: folding a group from the keyboard keeps the focus on its row after the virtual table has scrolled', async ({ page }) => {
+  await open(page);
+  const big = page.locator('[data-testid="table-virtual"]');
+  const body = big.locator('.pd-body');
+  await body.evaluate((e) => (e.scrollTop = 40 * 32));
+  await expect(big.locator('[role=row][data-index="45"]')).toBeAttached();
+  await body.evaluate((e) => (e.scrollTop = 0));
+  const group = big.locator('[role=row][data-index="0"]');
+  await expect(group).toBeAttached();
+  await group.focus();
+  const focusedGroup = page.locator('.pd-group[data-index="0"]:focus');
+  for (const [key, expanded] of [['ArrowLeft', 'false'], ['ArrowRight', 'true'], ['Enter', 'false']] as const) {
+    await page.keyboard.press(key);
+    await expect(focusedGroup, `after ${key}`).toHaveAttribute('aria-expanded', expanded);
+  }
+});
