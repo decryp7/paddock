@@ -95,12 +95,12 @@ export function reliabilityOption(d: Dashboard, c: OutcomeColors): Record<string
   };
 }
 
-/** Downloads per bucket and the data they moved, in MiB. */
-export function downloadTotals(d: Dashboard): { completed: number[]; failed: number[]; mebibytes: number[] } {
+/** Downloads per bucket and the data they moved, in MB. */
+export function downloadTotals(d: Dashboard): { completed: number[]; failed: number[]; megabytes: number[] } {
   return {
     completed: d.downloads.map((b) => Math.max(0, b.count - b.failed)),
     failed: d.downloads.map((b) => b.failed),
-    mebibytes: d.downloads.map((b) => Math.round((b.bytes / MIB) * 10) / 10),
+    megabytes: d.downloads.map((b) => Math.round((b.bytes / MIB) * 10) / 10),
   };
 }
 
@@ -112,13 +112,13 @@ export function downloadCounts(d: Dashboard): { total: number; failed: number } 
 /** A sentence describing the downloads chart for assistive technology. */
 export function downloadsSummary(d: Dashboard): string {
   const { total, failed } = downloadCounts(d);
-  const mib = Math.round(d.downloads.reduce((a, b) => a + b.bytes, 0) / MIB);
-  return `Downloads: ${total} in total, ${failed} failed, ${mib} MiB.`;
+  const mb = Math.round(d.downloads.reduce((a, b) => a + b.bytes, 0) / MIB);
+  return `Downloads: ${total} in total, ${failed} failed, ${mb} MB.`;
 }
 
 /**
  * The downloads chart, two panels that share the time axis: the count per day as stacked bars (completed in the accent
- * colour, failed hatched in the danger colour) above, and the data downloaded in MiB as one line below.
+ * colour, failed hatched in the danger colour) above, and the data downloaded in MB as one line below.
  */
 export function downloadsOption(d: Dashboard, c: OutcomeColors): Record<string, unknown> {
   const unit = d.range === '1y' ? 'week' : 'day';
@@ -137,12 +137,12 @@ export function downloadsOption(d: Dashboard, c: OutcomeColors): Record<string, 
     ],
     yAxis: [
       { type: 'value', gridIndex: 0, minInterval: 1, min: 0, name: `Downloads per ${unit}`, nameTextStyle: { align: 'left' } },
-      { type: 'value', gridIndex: 1, min: 0, splitNumber: 2, name: 'Downloaded (MiB)', nameTextStyle: { align: 'left' } },
+      { type: 'value', gridIndex: 1, min: 0, splitNumber: 2, name: 'Downloaded (MB)', nameTextStyle: { align: 'left' } },
     ],
     series: [
       { name: 'Completed', type: 'bar', stack: 'count', xAxisIndex: 0, yAxisIndex: 0, data: t.completed, barMaxWidth: 18, itemStyle: { color: c.accent } },
       { name: 'Failed', type: 'bar', stack: 'count', xAxisIndex: 0, yAxisIndex: 0, data: t.failed, barMaxWidth: 18, itemStyle: { color: c.danger, decal: FAILED_DECAL } },
-      { name: 'Downloaded', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: t.mebibytes, lineStyle: { color: c.textMuted }, itemStyle: { color: c.textMuted }, showSymbol: false },
+      { name: 'Downloaded', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: t.megabytes, lineStyle: { color: c.textMuted }, itemStyle: { color: c.textMuted }, showSymbol: false },
     ],
   };
 }
