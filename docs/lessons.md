@@ -594,14 +594,14 @@ code"; (2) `ui/dist` and the generated, untracked `ui/projects/paddock-ui/css/*.
 screenshots showed old text and a reviewer reported a bug that existed only in stale CSS. **Rule:** one mechanism in `@decryp7/paddock-e2e`
 (ER-21, rule 42), not another warning. A running server is reused only with `PW_REUSE_SERVER=1` (default never, and
 never on CI; `reuseServer()`, `paddockConfig`); `e2ePort` derives the local default port from the worktree (`20000 +
-(hash(folder) mod 400) * 100 +` the config's last two digits: disjoint blocks) and still refuses a default on CI
+(hash(git top level) mod 160) * 100 +` the config's last two digits: disjoint blocks) and still refuses a default on CI
 (`e2ePortOrCiDefault` keeps the apps' fixed CI ports); and the config checks, at load and so before any server starts,
 that what it consumes of ui is built from the current sources. The build writes a content stamp (`css/.source-hash` by
 `npm run build:css`, `ui/dist/.source-hash` by `npm run build -w ui`); the check recomputes the hash of `scss/**` (and
-`src/**` for the dist, tests excluded) and fails with "rebuild ui: npm run build -w ui" on a mismatch, a missing stamp or
+every file of the package for the dist, except tests, bin/ and the generated css) and fails with "rebuild ui: npm run build -w ui" on a mismatch, a missing stamp or
 a missing css entry. A content hash, not mtimes: unchanged rebuilds, checkouts and touches never false-fail. Which
 guard: `paddockConfig({ buildGuard: 'none' | 'ui' | 'ui-dist', uiRoot })`; an app's own config calls
 `appBuildGuard(__dirname, uiRoot)`, which picks `ui-dist` only when the app's tsconfig maps `@decryp7/paddock-ui` to
-`ui/dist` (today Spotter), else nothing. `PW_SKIP_BUILD_GUARD=1` skips it. Tests: `build-guard.test.ts`, `env.test.ts`
+`ui/dist` (today Spotter), else nothing. `PW_SKIP_BUILD_GUARD=1` skips it. The ui config checks the css only with `PW_REUSE_SERVER=1` (its webServers run `build:css` themselves). A direct `ng build paddock-ui` leaves `ui/dist` unstamped, so the guard fails: build with `npm run build -w ui`. Tests: `build-guard.test.ts`, `env.test.ts`
 (including every app config on a fresh checkout). Proposed binding rule (the user decides): every Playwright config
 uses these three, and `scripts/new-app.mjs` templates do.

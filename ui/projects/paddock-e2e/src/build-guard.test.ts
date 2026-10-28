@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { appBuildGuard, appBuildGuardOf, assertFreshBuilds, CSS_ENTRIES, reuseServer, stampBuild, staleBuilds } from './build-guard.ts';
+import { appBuildGuard, appBuildGuardOf, assertFreshBuilds, CSS_ENTRIES, reuseServer, stampBuild, staleBuilds, uiConfigGuard } from './build-guard.ts';
 
 const put = (file: string, text = 'x') => {
   mkdirSync(join(file, '..'), { recursive: true });
@@ -15,6 +15,8 @@ function fixture(): string {
   const pkg = join(ui, 'projects', 'paddock-ui');
   put(join(pkg, 'scss', '_tokens.scss'), 'a');
   put(join(pkg, 'src', 'a.ts'), 'a');
+  put(join(pkg, 'shell', 'src', 'b.ts'), 'a');
+  put(join(pkg, 'ng-package.json'), '{}');
   for (const n of CSS_ENTRIES) put(join(pkg, 'css', `${n}.css`));
   put(join(ui, 'dist', 'paddock-ui', 'index.mjs'));
   stampBuild(ui, 'css');
@@ -50,12 +52,12 @@ test('a fresh build passes; a changed source fails with the rebuild hint, an unc
   }
 });
 
-test('tests, the readme and the generated css are not sources of the dist; a missing entry or stamp is stale', () => {
+test('tests, bin and the generated css are not sources of the dist; a missing entry or stamp is stale', () => {
   const ui = fixture();
   const pkg = join(ui, 'projects', 'paddock-ui');
   try {
     put(join(pkg, 'src', 'a.spec.ts'), 'new');
-    put(join(pkg, 'README.md'), 'new');
+    put(join(pkg, 'bin', 'tool.mjs'), 'new');
     put(join(pkg, 'css', 'material.css'), 'rewritten');
     assert.deepEqual(staleBuilds(ui, 'ui-dist'), []);
     rmSync(join(pkg, 'css', 'material.css'));
@@ -108,3 +110,28 @@ for (const dir of appDirs) {
     }
   });
 }
+
+test('a change in a secondary entry point or a package file makes the dist stale', () => {
+  for (const file of [['shell', 'src', 'b.ts'], ['ng-package.json'], ['workbench', 'src', 'new.ts']]) {
+    const ui = fixture();
+    try {
+      put(join(ui, 'projects', 'paddock-ui', ...file), 'changed');
+      assert.match(staleBuilds(ui, 'ui-dist').join(), /ui\/dist was built from older sources/, file.join('/'));
+      assert.deepEqual(staleBuilds(ui, 'ui'), []);
+    } finally {
+      rmSync(ui, { recursive: true, force: true });
+    }
+  }
+});
+
+test('the ui config checks the css only when a running server is reused (its webServers build it otherwise)', () => {
+  const ui = fixture();
+  try {
+    put(join(ui, 'projects', 'paddock-ui', 'scss', '_tokens.scss'), 'changed');
+    assert.doesNotThrow(() => uiConfigGuard(ui, {}));
+    assert.throws(() => uiConfigGuard(ui, { PW_REUSE_SERVER: '1' }), /rebuild ui/);
+    assert.doesNotThrow(() => uiConfigGuard(ui, { PW_REUSE_SERVER: '1', PW_SKIP_BUILD_GUARD: '1' }));
+  } finally {
+    rmSync(ui, { recursive: true, force: true });
+  }
+});

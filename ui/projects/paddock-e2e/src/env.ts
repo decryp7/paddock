@@ -1,7 +1,7 @@
 /** The first port of the range the local defaults are derived into. */
 export const PORT_RANGE_START = 20_000;
 /** The number of worktree blocks; each block holds 100 ports (the default's last two digits pick the port in it). */
-export const PORT_BLOCKS = 400;
+export const PORT_BLOCKS = 160;
 
 /** A stable 32-bit FNV-1a hash of a string. */
 export function hashString(text: string): number {
@@ -13,10 +13,21 @@ export function hashString(text: string): number {
   return h;
 }
 
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+
+/** The top level of the git checkout (worktree) holding `start`: the nearest folder with a `.git` (a folder, or a file in a worktree); `start` itself when none. */
+export function repoRoot(start: string = process.cwd()): string {
+  for (let dir = start; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, '.git'))) return dir;
+    if (dirname(dir) === dir) return start;
+  }
+}
+
 /**
  * The local default port of a config whose usual port is `fallback` (4300, 4352, ...): a block of 100 ports picked by a
- * hash of `root` (the folder the run starts in, so a worktree), plus the last two digits of `fallback`. Two worktrees
- * land in different blocks unless the hashes collide (1 in 400), and the ports of one worktree never overlap.
+ * hash of `root` (the git top level of the run, so one per worktree), plus the last two digits of `fallback`. Two worktrees
+ * land in different blocks unless the hashes collide (1 in 160), and all stay below 49152 (the ephemeral range), and the ports of one worktree never overlap.
  */
 export function worktreePort(fallback: number, root: string): number {
   return PORT_RANGE_START + (hashString(root) % PORT_BLOCKS) * 100 + (fallback % 100);
@@ -28,7 +39,7 @@ export function worktreePort(fallback: number, root: string): number {
  * by default), on CI (`CI` set) a missing port is an error, because a default could collide with another job on the same
  * runner host.
  */
-export function e2ePort(name: string, fallback: number, env: Readonly<Record<string, string | undefined>> = process.env, root: string = process.cwd()): number {
+export function e2ePort(name: string, fallback: number, env: Readonly<Record<string, string | undefined>> = process.env, root: string = repoRoot()): number {
   return portFrom(name, fallback, env, root, false);
 }
 
@@ -36,7 +47,7 @@ export function e2ePort(name: string, fallback: number, env: Readonly<Record<str
  * Like {@link e2ePort} for the apps' own configs, which have always run on CI with fixed ports: on CI an unset variable gives
  * `fallback` itself (deterministic), locally the worktree-derived port.
  */
-export function e2ePortOrCiDefault(name: string, fallback: number, env: Readonly<Record<string, string | undefined>> = process.env, root: string = process.cwd()): number {
+export function e2ePortOrCiDefault(name: string, fallback: number, env: Readonly<Record<string, string | undefined>> = process.env, root: string = repoRoot()): number {
   return portFrom(name, fallback, env, root, true);
 }
 

@@ -20,9 +20,10 @@ export const CSS_ENTRIES = ['tokens', 'paddock', 'controls', 'material'] as cons
 /** What a Playwright config guards: nothing, the generated css (ui), or css and `ui/dist` (an app that maps @decryp7/paddock-ui to it). */
 export type BuildGuard = 'none' | 'ui' | 'ui-dist';
 
+// Not sources of the dist: dependencies, caches, the generated css (it has its own stamp), bin/ (CLI scripts and their tests).
 const SKIP_DIRS = new Set(['node_modules', '.angular']);
+const SKIP_TOP = new Set(['css', 'bin']);
 const TEST_FILE = /\.(spec|test)\.[cm]?[jt]s$/;
-const SOURCE_FILE = /\.(ts|html|scss|css|json)$/;
 
 function walk(dir: string, rel: string, out: string[]): void {
   let entries;
@@ -34,23 +35,23 @@ function walk(dir: string, rel: string, out: string[]): void {
   for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
     const r = rel ? `${rel}/${e.name}` : e.name;
     if (e.isDirectory()) {
-      if (!SKIP_DIRS.has(e.name)) walk(join(dir, e.name), r, out);
-    } else if (SOURCE_FILE.test(e.name) && !TEST_FILE.test(e.name)) out.push(r);
+      if (!SKIP_DIRS.has(e.name) && !(rel === '' && SKIP_TOP.has(e.name))) walk(join(dir, e.name), r, out);
+    } else if (!TEST_FILE.test(e.name) && e.name !== STAMP_FILE) out.push(r);
   }
 }
 
 /**
- * The hash of the files a build is made from, under `uiRoot` (the ui/ folder): `scss/**` for the css; `scss/**` and
- * `src/**` of projects/paddock-ui (tests excluded) for the dist.
+ * The hash of the files a build is made from, under `uiRoot` (the ui/ folder): `scss/**` for the css; for the dist every
+ * file under projects/paddock-ui (all entry points, ng-package.json, package.json, tsconfig.lib*.json) except tests, bin/,
+ * the generated css/, node_modules and .angular.
  */
 export function sourceHash(uiRoot: string, kind: 'css' | 'dist'): string {
   const pkg = join(uiRoot, 'projects', 'paddock-ui');
   const hash = createHash('sha256');
-  for (const folder of kind === 'css' ? ['scss'] : ['scss', 'src']) {
-    const files: string[] = [];
-    walk(join(pkg, folder), folder, files);
-    for (const f of files) hash.update(`${f}\0`).update(readFileSync(join(pkg, f))).update('\0');
-  }
+  const files: string[] = [];
+  if (kind === 'css') walk(join(pkg, 'scss'), 'scss', files);
+  else walk(pkg, '', files);
+  for (const f of files) hash.update(`${f}\0`).update(readFileSync(join(pkg, f))).update('\0');
   return hash.digest('hex');
 }
 
@@ -110,4 +111,9 @@ export function appBuildGuardOf(appDir: string): BuildGuard {
 /** The call of an app's playwright.config.ts: guards what the app consumes (`appDir` is the config's `__dirname`, `uiRoot` the repo's ui/ folder). */
 export function appBuildGuard(appDir: string, uiRoot: string, env: Readonly<Record<string, string | undefined>> = process.env): void {
   assertFreshBuilds(uiRoot, appBuildGuardOf(appDir), env);
+}
+
+/** The ui workspace's own load-time check: its webServers run `build:css` first, so the css is checked only when a running server is reused. */
+export function uiConfigGuard(uiRoot: string, env: Readonly<Record<string, string | undefined>> = process.env): void {
+  if (reuseServer(env)) assertFreshBuilds(uiRoot, 'ui', env);
 }

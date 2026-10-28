@@ -67,6 +67,7 @@ export {
   appBuildGuardOf,
   assertFreshBuilds,
   reuseServer,
+  uiConfigGuard,
   stampBuild,
   staleBuilds,
   sourceHash,

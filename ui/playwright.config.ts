@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { assertChromeForTesting, assertFreshBuilds, e2ePort, isOn, reuseServer, SCREENSHOT_SPECS } from './projects/paddock-e2e/src/index.ts';
+import { assertChromeForTesting, e2ePort, isOn, reuseServer, SCREENSHOT_SPECS, uiConfigGuard } from './projects/paddock-e2e/src/index.ts';
 
 /**
  * Browser checks of the reference apps (`npx playwright test`): the gallery (`ng serve gallery`) and the shell demo
@@ -12,8 +12,8 @@ import { assertChromeForTesting, assertFreshBuilds, e2ePort, isOn, reuseServer, 
  * --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit`. These projects exist only when the
  * variable is set, so a plain run (and a branch run, rule 3) stays Chromium; the full gate before a build sets it.
  */
-// Fails fast, before any server starts, when the generated css is older than its sources (build-guard.ts).
-assertFreshBuilds(__dirname, 'ui');
+// A reused server does not rebuild the css (the webServers below do): then it must be fresh (build-guard.ts).
+uiConfigGuard(__dirname);
 
 const PORT = e2ePort('PW_PORT', 4300);
 const SHELL_DEMO_PORT = e2ePort('SHELL_DEMO_PORT', 4301);
