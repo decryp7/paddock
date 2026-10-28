@@ -3,7 +3,7 @@
 // that no CI file reaches a CI-home folder except through the script.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -14,27 +14,72 @@ const SCRIPT = join(PADDOCK, 'conformance', 'ci', 'job-isolation.sh');
 const TABLE = join(PADDOCK, 'conformance', 'ci', 'kept-folders.txt');
 const read = (p) => readFileSync(p, 'utf8');
 
+/**
+ * A stand-in for `./dev ci slot` (paddock-dev), for these sequential tests of the shell wiring: a slot is a folder made with
+ * mkdir, and a held slot whose owner folder is gone is free again (the real holder ends when the job folder goes; the real
+ * lock is the kernel's, tested with racing processes in tools/paddock-dev/tests/slots.rs and crates/paddock-slots). It logs
+ * every call to <root>/dev.log.
+ */
+const FAKE_DEV = `#!/usr/bin/env bash
+set -u
+echo "$*" >> "$FAKE_DEV_LOG"
+[ "$1 $2" = "ci slot" ] || exit 2
+cmd=$3; shift 3
+max= owner= root= slot= token= run=()
+while [ $# -gt 0 ]; do
+  case $1 in --max) max=$2; shift ;; --owner) owner=$2; shift ;; --root) root=$2; shift ;; --slot) slot=$2; shift ;; --token) token=$2; shift ;;
+    --) shift; run=("$@"); break ;; esac
+  shift
+done
+d="$root/slots"; mkdir -p "$d"
+held() { [ -d "$d/$1.lock" ] && { [ -n "$(sed -n 's/^owner=//p' "$d/$1.owner" 2>/dev/null)" ] || [ -f "$d/$1.idle" ]; } && { [ -f "$d/$1.idle" ] || [ -d "$(sed -n 's/^owner=//p' "$d/$1.owner")" ]; }; }
+take() { if held "$1"; then return 1; fi; rm -rf "$d/$1.lock" "$d/$1.owner" "$d/$1.idle"; mkdir "$d/$1.lock"; }
+case $cmd in
+  acquire)
+    for n in $(seq 1 "$max"); do
+      if take "s$n"; then printf 'pid=1\\ntoken=t%s\\nowner=%s\\n' "$n$$" "$owner" > "$d/s$n.owner"; echo "s$n t$n$$"; exit 0; fi
+    done
+    echo "error: All $max slots are busy." >&2; exit 4 ;;
+  release)
+    if [ "$(sed -n 's/^token=//p' "$d/$slot.owner" 2>/dev/null)" = "$token" ]; then rm -rf "$d/$slot.lock" "$d/$slot.owner"; fi
+    echo "$slot released" ;;
+  status)
+    for n in $(seq 1 "$max"); do if held "s$n"; then echo "s$n busy"; else echo "s$n free"; fi; done ;;
+  idle-run)
+    if ! take "$slot"; then echo "$slot busy: skipped"; exit 0; fi
+    touch "$d/$slot.idle"
+    PADDOCK_CI_IDLE_SLOT=$slot "\${run[@]}"; rc=$?
+    rm -rf "$d/$slot.lock" "$d/$slot.idle"
+    [ $rc = 0 ] && echo "$slot idle: ran" || exit 1 ;;
+esac
+`;
+
 /** A fake host: a HOME (the CI home is its .paddock-ci) and a runner work folder with per-job folders. */
 function host() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-isolation-')));
   mkdirSync(join(root, 'home'));
+  const dev = join(root, 'dev');
+  writeFileSync(dev, FAKE_DEV);
+  chmodSync(dev, 0o755);
+  const log = join(root, 'dev.log');
+  writeFileSync(log, '');
   /** A job as the runner starts it: <work>/<16 hex>/tmp is its RUNNER_TEMP, and it has its own GITHUB_ENV. */
   const job = (id, extra = {}) => {
     const temp = join(root, 'work', id, 'tmp');
     mkdirSync(temp, { recursive: true });
     const envFile = join(root, 'work', id, 'github-env');
     writeFileSync(envFile, '');
-    const base = { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: 'macOS', RUNNER_TEMP: temp, GITHUB_ENV: envFile, GITHUB_RUN_ID: '7', GITHUB_JOB: id, ...extra };
+    const base = { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: 'macOS', RUNNER_TEMP: temp, GITHUB_ENV: envFile, GITHUB_RUN_ID: '7', GITHUB_JOB: id, PADDOCK_DEV: dev, FAKE_DEV_LOG: log, PADDOCK_SLOT_WAIT_TRIES: '0', ...extra };
     const exec = (args, more = {}) => spawnSync('bash', [SCRIPT, ...args], { env: { ...base, ...more }, encoding: 'utf8' });
     const exported = () => Object.fromEntries(read(envFile).split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
     /** Runs a command with what acquire exported, as the job's later steps see it. */
     const later = (args, more = {}) => exec(args, { ...exported(), ...more });
     return { id, temp, exec, exported, later, gone: () => rmSync(join(root, 'work', id), { recursive: true, force: true }) };
   };
-  return { root, ci: join(root, 'home', '.paddock-ci'), job };
+  return { root, ci: join(root, 'home', '.paddock-ci'), job, log: () => read(log) };
 }
 
-test('two jobs on one host get different slots, and each points its temp folders at the runner\'s own folder for it', () => {
+test('two jobs on one host get different slots from the OS-lock holder, and each points its temp folders at the runner\'s own folder for it', () => {
   const h = host();
   const a = h.job('aaaaaaaaaaaaaaaa');
   const b = h.job('bbbbbbbbbbbbbbbb');
@@ -43,6 +88,8 @@ test('two jobs on one host get different slots, and each points its temp folders
   assert.equal(rb.status, 0, rb.stderr + rb.stdout);
   assert.equal(a.exported().PADDOCK_CI_SLOT, 's1');
   assert.equal(b.exported().PADDOCK_CI_SLOT, 's2');
+  assert.match(a.exported().PADDOCK_CI_SLOT_TOKEN, /^t1\d+$/, 'the holder\'s token, for the release');
+  assert.match(h.log(), new RegExp(`^ci slot acquire --max 4 --owner ${a.temp} --root ${h.ci}$`, 'm'), 'the holder watches the runner\'s job folder; the slots live in the CI home');
   assert.equal(a.exported().TMPDIR, a.temp, 'TMPDIR is the runner\'s per-job folder');
   assert.equal(b.exported().PADDOCK_JOB_TEMP, b.temp);
   assert.notEqual(a.later(['path', 'target', 'x-app']).stdout, b.later(['path', 'target', 'x-app']).stdout, 'the same name, two folders');
@@ -53,46 +100,40 @@ test('two jobs on one host get different slots, and each points its temp folders
   assert.equal(a.exported().PADDOCK_CI_SLOT, 's1');
 });
 
-test('the slot count follows PADDOCK_CI_SLOTS (capacity 3 or 4 needs no change); when every slot is held by a live job, acquire fails and names them', () => {
+test('the slot count follows PADDOCK_CI_SLOTS (the pool maximum); a full house waits, then fails and names the holders', () => {
   const h = host();
   const jobs = ['1', '2', '3', '4'].map((n) => h.job(n.repeat(16), { PADDOCK_CI_SLOTS: '3' }));
   for (const j of jobs.slice(0, 3)) assert.equal(j.exec(['acquire']).status, 0);
   assert.deepEqual(jobs.slice(0, 3).map((j) => j.exported().PADDOCK_CI_SLOT), ['s1', 's2', 's3']);
-  const full = jobs[3].exec(['acquire']);
+  const full = jobs[3].exec(['acquire'], { PADDOCK_SLOT_WAIT_TRIES: '2', PADDOCK_SLOT_WAIT_SECONDS: '0' });
   assert.notEqual(full.status, 0);
-  assert.match(full.stdout, /all 3 slots of this host are held by running jobs/);
-  assert.match(full.stdout, /s2: 7\/2222222222222222/);
+  assert.match(full.stdout, /all 3 slots are held; trying again \(2 of 2\)/);
+  assert.match(full.stdout, /no slot \(paddock-dev exit 4\)/);
+  assert.match(full.stdout, new RegExp(`s2 busy: job folder ${jobs[1].temp}`));
   assert.equal(jobs[1].later(['release']).status, 0);
   assert.equal(jobs[3].exec(['acquire']).status, 0, 'a released slot is free again');
   assert.equal(jobs[3].exported().PADDOCK_CI_SLOT, 's2', 'the lowest free slot: its kept folders are the warmest');
   const bad = h.job('5'.repeat(16), { PADDOCK_CI_SLOTS: 'many' }).exec(['acquire']);
   assert.notEqual(bad.status, 0);
+  assert.match(read(SCRIPT), /PADDOCK_CI_SLOT=.*\n(?:.*\n)*?.*PADDOCK_CI_SLOT_TOKEN=/, 'the token goes to the later steps');
+  assert.doesNotMatch(read(SCRIPT), /stale\(|\.stale-|PADDOCK_SLOT_MAX_AGE_MIN|mkdir "\$lock"/, 'no shell lock and no reclaim: the kernel frees a dead holder\'s lock');
 });
 
-test('a slot is reclaimed only when its owner is gone: its runner folder deleted, too old, or never written; a live job keeps it', () => {
+test('a job that ends without its release frees its slot (the holder ends with the job folder); a release whose holder died fails loudly', () => {
   const h = host();
-  const now = 2_000_000_000;
-  const a = h.job('a'.repeat(16), { PADDOCK_SLOT_NOW: String(now), PADDOCK_CI_SLOTS: '1' });
+  const a = h.job('a'.repeat(16), { PADDOCK_CI_SLOTS: '1' });
   assert.equal(a.exec(['acquire']).status, 0);
-  const b = h.job('b'.repeat(16), { PADDOCK_SLOT_NOW: String(now + 60), PADDOCK_CI_SLOTS: '1' });
+  const b = h.job('b'.repeat(16), { PADDOCK_CI_SLOTS: '1' });
   assert.notEqual(b.exec(['acquire']).status, 0, 'a live job\'s slot is never taken');
   a.gone(); // the runner deleted the job's folder: the job ended without its release step (cancelled, runner restarted)
   const rb = b.exec(['acquire']);
   assert.equal(rb.status, 0, rb.stdout + rb.stderr);
-  assert.match(rb.stdout, /s1 was held by a job that is gone \(7\/a{16}\); reclaimed/);
   assert.equal(b.exported().PADDOCK_CI_SLOT, 's1');
-  // Older than the limit (the runner kept its folder): reclaimed.
-  const c = h.job('c'.repeat(16), { PADDOCK_SLOT_NOW: String(now + 7 * 3600), PADDOCK_CI_SLOTS: '1' });
-  assert.equal(c.exec(['acquire']).status, 0, 'older than PADDOCK_SLOT_MAX_AGE_MIN (6 h)');
-  // A lock without an owner file: being written now (kept), or left by a job killed in between (reclaimed after 5 minutes).
-  const lock = join(h.ci, 'slots', 's2');
-  mkdirSync(lock);
-  const d = h.job('d'.repeat(16), { PADDOCK_CI_SLOTS: '2' });
-  assert.notEqual(d.exec(['acquire']).status, 0, 'a fresh lock without an owner is being written');
-  const old = Date.now() / 1000 - 600;
-  utimesSync(lock, old, old);
-  assert.equal(d.exec(['acquire']).status, 0);
-  assert.equal(d.exported().PADDOCK_CI_SLOT, 's2');
+  // b's holder is gone while b still runs (killed with the job's processes): the release says so and fails the job.
+  rmSync(join(h.ci, 'slots', 's1.owner'));
+  const r = b.later(['release']);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stdout, /the holder of s1 ended before the job did .* isolation was not guaranteed/);
 });
 
 test('release frees only the job\'s own slot; a job without one, or in a Linux container, does nothing', () => {
@@ -100,18 +141,19 @@ test('release frees only the job\'s own slot; a job without one, or in a Linux c
   const a = h.job('a'.repeat(16));
   a.exec(['acquire']);
   const b = h.job('b'.repeat(16));
-  const stolen = b.exec(['release'], { PADDOCK_CI_SLOT: 's1' });
-  assert.equal(stolen.status, 0);
-  assert.match(stolen.stdout, /s1 is not held by this job; leaving it/);
-  assert.ok(existsSync(join(h.ci, 'slots', 's1', 'owner')));
+  const stolen = b.exec(['release'], { PADDOCK_CI_SLOT: 's1', PADDOCK_CI_SLOT_TOKEN: 'not-a-s-token' });
+  assert.notEqual(stolen.status, 0, 'a slot that is not this job\'s is reported');
+  assert.ok(existsSync(join(h.ci, 'slots', 's1.owner')), 'and stays with its holder');
   assert.equal(b.exec(['release']).status, 0, 'no slot: nothing to release');
-  assert.equal(a.later(['release']).status, 0);
-  assert.ok(!existsSync(join(h.ci, 'slots', 's1')));
+  const r = a.later(['release']);
+  assert.equal(r.status, 0, r.stdout);
+  assert.ok(!existsSync(join(h.ci, 'slots', 's1.owner')));
+  assert.match(h.log(), /^ci slot release --slot s1 --token t1\d+ --root /m);
   const linux = h.job('l'.repeat(16), { RUNNER_OS: 'Linux' });
   assert.equal(linux.exec(['acquire']).status, 0);
   assert.equal(read(join(h.root, 'work', 'l'.repeat(16), 'github-env')), '', 'a container exports nothing');
-  assert.ok(!existsSync(join(h.ci, 'slots', 's2')));
   assert.equal(linux.exec(['path', 'target', 'x']).stdout.trim(), join(h.ci, 'target-x-s1'), 'a container is the single slot s1');
+  assert.match(a.exec(['status']).stdout, /s1 free/);
 });
 
 test('path: every kind of kept-folders.txt resolves; an unknown kind, a missing or bad name and a host job without a slot fail', () => {
@@ -142,7 +184,7 @@ test('the CI home follows PADDOCK_CI_HOME (ci-home.sh), and a missing relocated 
   mkdirSync(disk);
   const a = h.job('a'.repeat(16), { PADDOCK_CI_HOME: disk });
   assert.equal(a.exec(['acquire']).status, 0);
-  assert.ok(existsSync(join(disk, 'slots', 's1', 'owner')));
+  assert.ok(existsSync(join(disk, 'slots', 's1.owner')), 'the slots live in the relocated home');
   assert.equal(a.later(['path', 'browser', 'spotter']).stdout.trim(), join(disk, 'test-browser-spotter-s1'));
   const gone = h.job('b'.repeat(16), { PADDOCK_CI_HOME: join(h.root, 'unmounted') }).exec(['acquire']);
   assert.notEqual(gone.status, 0);
@@ -181,36 +223,94 @@ test('{slot} in a process pattern ends it, right after a kept folder\'s name, an
   }
 });
 
-test('disk: the first s1 job takes over a kept folder of the old layout; slots above PADDOCK_CI_KEEP_SLOTS are removed when idle', () => {
+test('disk: the first s1 job takes over a kept folder of the old layout; idle slots above PADDOCK_CI_KEEP_SLOTS are swept, a held one never', () => {
   const h = host();
   mkdirSync(join(h.ci, 'target-x-app', 'debug'), { recursive: true });
   writeFileSync(join(h.ci, 'target-x-app', 'debug', 'warm'), '');
   mkdirSync(join(h.ci, 'src', 'x-app-macOS'), { recursive: true });
-  const a = h.job('a'.repeat(16));
+  const keep2 = { PADDOCK_CI_KEEP_SLOTS: '2' };
+  const a = h.job('a'.repeat(16), keep2);
   a.exec(['acquire']);
   assert.equal(a.later(['path', 'target', 'x-app']).stdout.trim(), join(h.ci, 'target-x-app-s1'));
   assert.ok(existsSync(join(h.ci, 'target-x-app-s1', 'debug', 'warm')), 'renamed, not copied: warm and no second copy');
   assert.ok(!existsSync(join(h.ci, 'target-x-app')));
   a.later(['path', 'src', 'x-app-macOS']);
   assert.ok(!existsSync(join(h.ci, 'src', 'x-app-macOS')) && existsSync(join(h.ci, 'src', 'x-app-macOS-s1')));
-  // A third concurrent job (slot s3, above the two kept slots): its folders go when it releases.
-  const b = h.job('b'.repeat(16));
-  const c = h.job('c'.repeat(16));
+  // A third concurrent job (slot s3, above the two kept slots): its folders go when it releases, under s3's lock.
+  const b = h.job('b'.repeat(16), keep2);
+  const c = h.job('c'.repeat(16), keep2);
   b.exec(['acquire']);
   c.exec(['acquire']);
   assert.equal(c.exported().PADDOCK_CI_SLOT, 's3');
   const third = c.later(['path', 'target', 'x-app']).stdout.trim();
   const secondFolder = b.later(['path', 'target', 'x-app']).stdout.trim();
-  c.later(['release']);
+  const rc = c.later(['release']);
+  assert.equal(rc.status, 0, rc.stdout + rc.stderr);
   assert.ok(!existsSync(third), 'slot s3 is above the kept slots: its folders are removed with it');
   assert.ok(existsSync(secondFolder), 'slot s2 is kept');
-  // Folders of an idle slot above the limit (its job died without releasing, its lock reclaimed): swept at the next acquire.
-  mkdirSync(join(h.ci, 'test-browser-y-s5'), { recursive: true });
+  assert.match(h.log(), /^ci slot idle-run --slot s3 --root \S+ -- bash \S+job-isolation\.sh sweep-slot$/m, 'deleted only under s3\'s lock');
+  // A held slot above the limit is never swept: its job still builds in it.
+  const d = h.job('d'.repeat(16), { PADDOCK_CI_KEEP_SLOTS: '1' });
+  assert.equal(d.exec(['acquire']).status, 0);
+  assert.ok(existsSync(secondFolder), 's2 is held by a running job: its folders stay');
+  // Folders of an idle slot above the limit (its job died without releasing): swept at the next acquire.
+  mkdirSync(join(h.ci, 'test-browser-y-s7'), { recursive: true });
   mkdirSync(join(h.ci, 'test-browser-y-s1x'), { recursive: true });
-  h.job('d'.repeat(16)).exec(['acquire']);
-  assert.ok(!existsSync(join(h.ci, 'test-browser-y-s5')));
+  h.job('e'.repeat(16), keep2).exec(['acquire']);
+  assert.ok(!existsSync(join(h.ci, 'test-browser-y-s7')));
   assert.ok(existsSync(join(h.ci, 'test-browser-y-s1x')), 'only exact slot folders');
   assert.ok(existsSync(join(h.ci, 'target-x-app-s1')) && existsSync(secondFolder));
+  // sweep-slot outside idle-run (no lock held) refuses to delete anything.
+  const bare = a.later(['sweep-slot', 'all']);
+  assert.notEqual(bare.status, 0);
+  assert.match(bare.stderr, /only under `dev ci slot idle-run`/);
+});
+
+test('disk: kept folders no job used for PADDOCK_CI_ORPHAN_DAYS (folders no workflow names any more) go when their slot is idle; used ones stay', () => {
+  const h = host();
+  const daysAgo = (dir, days) => { mkdirSync(dir, { recursive: true }); const t = Date.now() / 1000 - days * 86400; utimesSync(dir, t, t); };
+  daysAgo(join(h.ci, 'target-renamed-job-s1'), 20);
+  daysAgo(join(h.ci, 'target-old-unslotted'), 20);
+  daysAgo(join(h.ci, 'target-recent-unslotted'), 2);
+  daysAgo(join(h.ci, 'target-x-app-s1'), 20);
+  daysAgo(join(h.ci, 'npm'), 20);
+  const a = h.job('a'.repeat(16));
+  a.exec(['acquire']);
+  assert.ok(existsSync(join(h.ci, 'target-renamed-job-s1')), 'slot s1 is held by this job: nothing of it is swept');
+  a.later(['path', 'target', 'x-app']); // in use: its time stamp is renewed
+  assert.equal(a.later(['release']).status, 0);
+  assert.ok(!existsSync(join(h.ci, 'target-renamed-job-s1')), 'unused for 20 days: gone');
+  assert.ok(!existsSync(join(h.ci, 'target-old-unslotted')), 'an old-layout folder nobody took over: gone');
+  assert.ok(existsSync(join(h.ci, 'target-recent-unslotted')), 'recent: stays');
+  assert.ok(existsSync(join(h.ci, 'target-x-app-s1')), 'used by the job: stays');
+  assert.ok(existsSync(join(h.ci, 'npm')), 'shared stores are not swept');
+});
+
+test('disk: below the free-disk floor acquire removes idle slots\' kept folders, highest first, never a held slot\'s; still below, it fails and frees its slot', () => {
+  const h = host();
+  // A df whose free space is 10 GB while target-big-s4 exists, 100 GB after (or always 10 GB with FAKE_FULL).
+  const df = join(h.root, 'df');
+  writeFileSync(df, `#!/bin/sh\necho "Filesystem 1024-blocks Used Available Capacity Mounted"\nif [ -n "\${FAKE_FULL:-}" ] || [ -d "${join(h.ci, 'target-big-s4')}" ]; then gb=10; else gb=100; fi\necho "disk 1 1 $((gb * 1048576)) 1% /"\n`);
+  chmodSync(df, 0o755);
+  const env = { PADDOCK_DF: df, PADDOCK_CI_MIN_FREE_GB: '30' };
+  const b = h.job('b'.repeat(16), env);
+  b.exec(['acquire']); // s1
+  const c = h.job('c'.repeat(16), env);
+  c.exec(['acquire']); // s2, held while the floor is enforced
+  mkdirSync(join(h.ci, 'target-big-s4'), { recursive: true });
+  mkdirSync(join(h.ci, 'target-mid-s2'), { recursive: true });
+  const a = h.job('a'.repeat(16), env);
+  const r = a.exec(['acquire']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /10 GB free on the CI home's disk, below the floor of 30 GB/);
+  assert.equal(a.exported().PADDOCK_CI_SLOT, 's3');
+  assert.ok(!existsSync(join(h.ci, 'target-big-s4')), 'the idle slot s4\'s folders went, under its lock');
+  assert.ok(existsSync(join(h.ci, 'target-mid-s2')), 'held by a running job: kept');
+  const full = h.job('f'.repeat(16), { ...env, FAKE_FULL: '1' });
+  const rf = full.exec(['acquire']);
+  assert.notEqual(rf.status, 0);
+  assert.match(rf.stdout, /still only 10 GB free .* Free disk on the host, then re-run the job/);
+  assert.match(a.exec(['status']).stdout, /s4 free/, 'the failed job gave its slot back');
 });
 
 test('the declared port blocks never overlap each other or an end-to-end port, for every slot up to the default PADDOCK_CI_SLOTS', () => {

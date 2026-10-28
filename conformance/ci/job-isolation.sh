@@ -1,36 +1,43 @@
 #!/usr/bin/env bash
 # Job isolation on a host runner (.gitea/actions/README.md, "Job isolation"; ADR 0025): any number of jobs may run on one
-# host at once (the runner's capacity) without one touching another's folders or processes. The one way an action or
-# workflow reaches a folder of the CI home.
+# host at once (several capacity-1 runners of a Pitcrew pool, all sharing ONE CI home) without one touching another's
+# folders, processes or ports. The one way an action or workflow reaches a folder of the CI home.
 #
-#   job-isolation.sh acquire                 the job's slot (first bash step); exports PADDOCK_CI_SLOT, PADDOCK_JOB_TEMP, TMPDIR
-#   job-isolation.sh release                 gives the slot back (last step, if: always())
-#   job-isolation.sh path <kind> [<name>]    a kept folder of kept-folders.txt (created), for this job's slot
+#   job-isolation.sh acquire                 the job's slot (first bash step); exports PADDOCK_CI_SLOT, PADDOCK_CI_SLOT_TOKEN,
+#                                            PADDOCK_JOB_TEMP, TMPDIR; sweeps idle slots and checks the free-disk floor
+#   job-isolation.sh release                 gives the slot back (last step, if: always()); fails when the slot's holder
+#                                            died during the job (its isolation was then not guaranteed)
+#   job-isolation.sh status                  which slots are held, by which job folder (the stalled-holder recovery)
+#   job-isolation.sh path <kind> [<name>]    a kept folder of kept-folders.txt (created, its time stamp renewed), for this slot
 #   job-isolation.sh temp                    the job's own temp folder (the runner's $RUNNER_TEMP)
 #   job-isolation.sh owns <folder> [<kind>]  exit 0 when <folder> is a kept folder (of that kind) of this job's slot
 #   job-isolation.sh port <name>             the first port of this slot's block for <name> in ports.txt
 #   job-isolation.sh pattern <regex>         a process pattern with {tmp}, {build} and {slot} filled in; exit 1 when it
 #                                            names none of them (it would match other jobs' processes), or when {slot}
 #                                            does not end the pattern right after a kept folder's name
+#   job-isolation.sh sweep-slot [all]        (internal) deletes an idle slot's kept folders; runs only under
+#                                            `dev ci slot idle-run`, which holds that slot's lock while it runs
 #
 # Two kinds of state:
 # - Job-scoped (temp folders, the clean-up's temp sweep and process patterns): the runner's own per-job folder. The Gitea
 #   runner gives every job <workdir_parent>/<16 random hex>/{hostexecutor,tmp,tool_cache,act}, sets RUNNER_TEMP to its tmp,
 #   and deletes the whole folder after the job. acquire points TMPDIR (TMP and TEMP on Windows) at it.
-# - Kept (kept-folders.txt): a stable absolute path per slot, so caches stay warm. A slot is <ci-home>/slots/s<n>, taken by
-#   an atomic mkdir (the first free one of s1..s$PADDOCK_CI_SLOTS); its owner file names the job's RUNNER_TEMP. A slot whose
-#   owner is gone (that folder deleted, older than PADDOCK_SLOT_MAX_AGE_MIN, or no owner file after 5 minutes) is reclaimed;
-#   a live job's slot never is. (To be replaced by the Rust slot lock, `./dev ci slot`, ADR 0025.)
-# - Disk: the first job in slot s1 renames a kept folder of the old unslotted layout to its -s1 name (a warm cache, no
-#   second copy). Kept folders of slots above PADDOCK_CI_KEEP_SLOTS (default 2, the capacity) are removed when their job
-#   releases the slot, and swept at acquire when no job holds that slot.
+# - Kept (kept-folders.txt): a stable absolute path per slot, so caches stay warm. A slot s<n> (n = 1..PADDOCK_CI_SLOTS) is
+#   an OS file lock on <ci-home>/slots/s<n>.lock, held by a detached holder process (`./dev ci slot acquire`, ADR 0022's
+#   paddock-dev) that lives until the job's RUNNER_TEMP is gone or release asks it to stop. The kernel drops the lock when
+#   the holder dies, so there is no stale lock and nothing is ever reclaimed: two jobs never hold one slot.
+# - Disk: a slot's kept folders are deleted only under `dev ci slot idle-run` (the slot's lock held for the whole deletion,
+#   so no job can take the slot meanwhile): at acquire and release, the folders of idle slots above PADDOCK_CI_KEEP_SLOTS
+#   (default: PADDOCK_CI_SLOTS, the pool's maximum), kept folders no job used for PADDOCK_CI_ORPHAN_DAYS (default 14; `path`
+#   renews a folder's time stamp, so a folder no workflow names any more ages out) and, below the free-disk floor
+#   PADDOCK_CI_MIN_FREE_GB (default 30), every idle slot's folders from the highest slot down. The first job in slot s1
+#   renames a kept folder of the old unslotted layout to its -s1 name (a warm cache, no second copy).
 #
-# PADDOCK_CI_SLOTS: the most slots one host hands out; set it in the runner's environment (config.yaml runner.envs) to more
-# than its capacity, or leave the default of 8. A Linux container is a new file system per job, but every container of a
-# host shares the runner's /sccache mount (the compile, npm and Angular caches): acquire and release do nothing there yet
-# and everything else uses the single slot s1; the Angular cache on the mount is shared by two runs of the same job on one
-# Linux host until the Rust slot lock (an OS file lock on the mount, which all containers of a host see) gives containers
-# slots too (ADR 0025).
+# PADDOCK_CI_SLOTS: the most slots one host hands out (default 4); set it in every runner's environment (config.yaml
+# runner.envs) to the pool's maximum number of runners on the host. Linux containers take no slot (one job per Linux host
+# today; see ADR 0025 before running more): acquire and release do nothing there and everything else uses s1.
+# PADDOCK_DEV: the paddock-dev program to run (tests); default the repository's ./dev wrapper, which keeps its binary in the
+# shared kept folder tools/ (outside every job folder, so a Windows job folder can still be deleted while the holder runs).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 table="$here/kept-folders.txt"
@@ -88,6 +95,7 @@ cmd_path() {
     fi
   fi
   mkdir -p "$home/$rel"
+  touch "$home/$rel" 2>/dev/null || true  # in use: the orphan sweep removes only folders no job asked for in ORPHAN_DAYS
   printf '%s\n' "$home/$rel"
 }
 
@@ -102,18 +110,90 @@ slot_folders() {
   done < "$table"
 }
 
-# sweep <home> [<own slot index>]: removes the kept folders of idle slots above PADDOCK_CI_KEEP_SLOTS (no lock held), and of
-# the caller's own slot when it is above that limit (the caller is releasing it).
+# legacy_folders <home>: kept folders of the old unslotted layout (a slot layout without its -{slot}; names that end in a slot
+# are the new layout's), one per line.
+legacy_folders() {
+  local home="$1" kind lay scope glob f
+  while read -r kind lay scope; do
+    case "$kind" in '' | \#*) continue ;; esac
+    [ "$scope" = slot ] || continue
+    glob="${lay//-\{slot\}/}"; glob="${glob//\{name\}/*}"
+    for f in "$home"/$glob; do
+      [ -d "$f" ] && [ ! -L "$f" ] || continue
+      [[ "$(basename "$f")" =~ -s[0-9]+$ ]] && continue
+      printf '%s\n' "$f"
+    done
+  done < "$table"
+}
+
+keep_slots() {
+  local keep="${PADDOCK_CI_KEEP_SLOTS:-}"
+  case "$keep" in '' | *[!0-9]*) keep="$(max_slots)" ;; esac
+  printf '%s\n' "$keep"
+}
+
+max_slots() {
+  local max="${PADDOCK_CI_SLOTS:-4}"
+  case "$max" in '' | 0 | *[!0-9]*) die "PADDOCK_CI_SLOTS must be a whole number above 0 (got '$max')" ;; esac
+  printf '%s\n' "$max"
+}
+
+# old <folder> <days>: true when the folder's time stamp is older than <days> days (path renews it on every use).
+old() { [ -n "$(find "$1" -maxdepth 0 -mtime +"$2" 2>/dev/null)" ]; }
+
+# sweep-slot [all]: the idle slot's folders above the kept slots (all of them with `all`), and its folders (plus, for s1, the
+# old layout's) that no job used for ORPHAN_DAYS. Only under `dev ci slot idle-run`, which holds the slot's lock throughout:
+# no job can take the slot while its folders go.
+cmd_sweep_slot() {
+  local s="${PADDOCK_CI_IDLE_SLOT:-}" mode="${1:-}" home n keep days f why
+  [[ "$s" =~ ^s[1-9][0-9]*$ ]] || die "sweep-slot runs only under \`dev ci slot idle-run\` (which holds the slot's lock)"
+  n="${s#s}"; home="$(ci_home)"; keep="$(keep_slots)"
+  days="${PADDOCK_CI_ORPHAN_DAYS:-14}"
+  case "$days" in '' | *[!0-9]*) days=14 ;; esac
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if [ "$mode" = all ]; then why="the disk is below its free floor"
+    elif [ "$n" -gt "$keep" ]; then why="slot $s is above the $keep kept slots"
+    elif old "$f" "$days"; then why="no job used it for $days days"
+    else continue; fi
+    rm -rf "$f" && echo "job-isolation: removed $(basename "$f") ($why)"
+  done < <(slot_folders "$home" "$n"; if [ "$n" = 1 ]; then legacy_folders "$home"; fi)
+}
+
+# dev_tool <args>: paddock-dev (PADDOCK_DEV, else the repository's ./dev with its binary cached in the shared tools folder).
+dev_tool() {
+  if [ -n "${PADDOCK_DEV:-}" ]; then "$PADDOCK_DEV" "$@"; return; fi
+  local tools repo
+  tools="$(cmd_path tools)"
+  repo="$(cd "$here/../.." && pwd)"
+  (cd "$repo" && PADDOCK_DEV_HOME="$tools/paddock-dev" PADDOCK_DEV_TARGET_DIR="$tools/paddock-dev-target" bash ./dev "$@")
+}
+
+# native <path>: the path as the operating system's own programs take it (Windows form under Git bash).
+native() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s\n' "$1"; fi; }
+
+# sweep <home> [all [<floor>]]: runs sweep-slot on every idle slot that has kept folders (the slot's lock held throughout);
+# the job's own held slot is never touched (its lock is held). With `all`, from the highest slot down, stopping once the free
+# disk is back above <floor>.
 sweep() {
-  local home="$1" own="${2:-}" keep="${PADDOCK_CI_KEEP_SLOTS:-2}" n f max
-  case "$keep" in '' | *[!0-9]*) keep=2 ;; esac
-  max="${PADDOCK_CI_SLOTS:-8}"
-  for ((n = keep + 1; n <= max; n++)); do
-    if [ "$n" != "$own" ] && [ -e "$home/slots/s$n" ]; then continue; fi
-    while IFS= read -r f; do
-      [ -n "$f" ] && rm -rf "$f" && echo "job-isolation: removed $(basename "$f") (slot s$n is above the $keep kept slots)"
-    done < <(slot_folders "$home" "$n")
+  local home="$1" mode="${2:-}" floor="${3:-}" max n
+  max="$(max_slots)"
+  for ((n = max; n >= 1; n--)); do
+    if [ -z "$(slot_folders "$home" "$n")" ] && { [ "$n" != 1 ] || [ -z "$(legacy_folders "$home")" ]; }; then continue; fi
+    dev_tool ci slot idle-run --slot "s$n" --root "$(native "$home")" -- bash "$here/job-isolation.sh" sweep-slot ${mode:+"$mode"} >/dev/null \
+      || echo "::warning::job-isolation: the sweep of slot s$n failed"
+    if [ -n "$floor" ] && [ "$(free_gb "$home")" -ge "$floor" ]; then return 0; fi
   done
+  # Slots above the limit hold no folders the loop above did not see; a held slot's folders stay with its job.
+  for ((n = max + 1; n <= max + 8; n++)); do
+    [ -n "$(slot_folders "$home" "$n")" ] || continue
+    dev_tool ci slot idle-run --slot "s$n" --root "$(native "$home")" -- bash "$here/job-isolation.sh" sweep-slot all >/dev/null || true
+  done
+}
+
+# free_gb <folder>: whole gigabytes free on the folder's disk (PADDOCK_DF replaces df in tests).
+free_gb() {
+  "${PADDOCK_DF:-df}" -Pk "$1" 2>/dev/null | awk 'NR == 2 { print int($4 / 1048576) }'
 }
 
 cmd_owns() {
@@ -201,98 +281,114 @@ cmd_port() {
 
 # ---- slots ----
 
-owner_field() { sed -n "s/^$2=//p" "$1/owner" 2>/dev/null | head -1; }
-
-# stale <lock>: true when the lock's owner is gone.
-stale() {
-  local lock="$1" t since now max_age
-  now="${PADDOCK_SLOT_NOW:-$(date +%s)}"  # the clock, overridable by the tests
-  max_age="${PADDOCK_SLOT_MAX_AGE_MIN:-360}"
-  if [ ! -f "$lock/owner" ]; then
-    # Being written right now, or left by a job killed between mkdir and write: only the latter is old.
-    [ -n "$(find "$lock" -maxdepth 0 -mmin +5 2>/dev/null)" ]
-    return
-  fi
-  t="$(owner_field "$lock" temp)"
-  since="$(owner_field "$lock" since)"
-  if [ -n "$t" ] && [ ! -d "$t" ]; then return 0; fi
-  case "$since" in '' | *[!0-9]*) return 0 ;; esac
-  [ $((now - since)) -gt $((max_age * 60)) ]
+# The env lines a slot gives the job's later steps.
+export_slot() {
+  local out="$1" slot="$2" token="$3" temp="$4"
+  {
+    echo "PADDOCK_CI_SLOT=$slot"
+    echo "PADDOCK_CI_SLOT_TOKEN=$token"
+    if [ "$RUNNER_OS" = Windows ] && command -v cygpath >/dev/null 2>&1; then
+      echo "PADDOCK_JOB_TEMP=$(cygpath -m "$temp")"
+      echo "TMPDIR=$(cygpath -m "$temp")"
+      echo "TMP=$(cygpath -w "$temp")"
+      echo "TEMP=$(cygpath -w "$temp")"
+    else
+      echo "PADDOCK_JOB_TEMP=$temp"
+      echo "TMPDIR=$temp"
+    fi
+  } >> "$out"
 }
 
 cmd_acquire() {
-  if is_linux; then echo "job-isolation: no slot in a Linux container (only the /sccache mount is shared; ADR 0025)"; return 0; fi
-  local out="${GITHUB_ENV:?GITHUB_ENV is not set}" temp home slots max i lock away
+  if is_linux; then echo "job-isolation: no slot in a Linux container (one job per Linux host; ADR 0025)"; return 0; fi
+  local out="${GITHUB_ENV:?GITHUB_ENV is not set}" temp home max said code=0 slot token tries=0 wait floor free
   temp="$(job_temp)"
   [ -d "$temp" ] || die "the runner's per-job temp folder $temp does not exist"
-  max="${PADDOCK_CI_SLOTS:-8}"
-  case "$max" in '' | 0 | *[!0-9]*) die "PADDOCK_CI_SLOTS must be a whole number above 0 (got '$max')" ;; esac
+  max="$(max_slots)"
   if [[ "${PADDOCK_CI_SLOT:-}" =~ ^s[1-9][0-9]*$ ]]; then echo "job-isolation: this job already holds $PADDOCK_CI_SLOT"; return 0; fi
-  home="$(ci_home)"; slots="$home/slots"
-  mkdir -p "$slots"
-  for i in $(seq 1 "$max"); do
-    lock="$slots/s$i"
-    if ! mkdir "$lock" 2>/dev/null; then
-      stale "$lock" || continue
-      # Reclaim: rename it away (one reclaimer wins the rename), check the renamed lock is still a stale one (another job may
-      # have reclaimed and taken the slot in between: then it goes back), and take the slot like a free one.
-      away="$slots/.stale-s$i-$$"
-      mv "$lock" "$away" 2>/dev/null || continue
-      if ! stale "$away"; then
-        if [ ! -e "$lock" ]; then mv "$away" "$lock" 2>/dev/null || true; fi
-        continue
-      fi
-      echo "job-isolation: s$i was held by a job that is gone ($(owner_field "$away" job)); reclaimed"
-      rm -rf "$away"
-      mkdir "$lock" 2>/dev/null || continue
-    fi
-    printf 'temp=%s\njob=%s\nsince=%s\n' "$temp" "${GITHUB_RUN_ID:-?}/${GITHUB_JOB:-?}" "${PADDOCK_SLOT_NOW:-$(date +%s)}" > "$lock/.owner.$$"
-    mv "$lock/.owner.$$" "$lock/owner"
-    {
-      echo "PADDOCK_CI_SLOT=s$i"
-      if [ "$RUNNER_OS" = Windows ] && command -v cygpath >/dev/null 2>&1; then
-        echo "PADDOCK_JOB_TEMP=$(cygpath -m "$temp")"
-        echo "TMPDIR=$(cygpath -m "$temp")"
-        echo "TMP=$(cygpath -w "$temp")"
-        echo "TEMP=$(cygpath -w "$temp")"
-      else
-        echo "PADDOCK_JOB_TEMP=$temp"
-        echo "TMPDIR=$temp"
-      fi
-    } >> "$out"
-    echo "job-isolation: slot s$i (kept folders end in -s$i); temp folders in $temp"
-    sweep "$home"
-    return 0
+  home="$(ci_home)"
+  wait="${PADDOCK_SLOT_WAIT_TRIES:-20}"
+  # A full house is refused (exit 4). It is real (more runners than PADDOCK_CI_SLOTS) or brief (a sweep holds an idle slot's
+  # lock while it deletes that slot's folders): wait a little, then fail and name the holders.
+  while :; do
+    code=0
+    said="$(dev_tool ci slot acquire --max "$max" --owner "$(native "$temp")" --root "$(native "$home")")" || code=$?
+    if [ "$code" = 0 ] || [ "$code" != 4 ] || [ "$tries" -ge "$wait" ]; then break; fi
+    tries=$((tries + 1))
+    echo "job-isolation: all $max slots are held; trying again ($tries of $wait)"
+    sleep "${PADDOCK_SLOT_WAIT_SECONDS:-6}"
   done
-  echo "::error::job-isolation: all $max slots of this host are held by running jobs:"
-  for lock in "$slots"/s*; do [ -d "$lock" ] && echo "  $(basename "$lock"): $(owner_field "$lock" job) (temp $(owner_field "$lock" temp))"; done
-  echo "Set PADDOCK_CI_SLOTS on the runner above its capacity, or remove a slot folder in $slots whose job is not running."
-  exit 1
+  if [ "$code" != 0 ]; then
+    echo "::error::job-isolation: no slot (paddock-dev exit $code). Held slots (./dev ci slot status):"
+    cmd_status || true
+    echo "Set PADDOCK_CI_SLOTS on every runner of this host to the pool's maximum (it is $max), or see ADR 0025, \"Stalled holder\"."
+    exit 1
+  fi
+  read -r slot token <<< "$said"
+  [[ "$slot" =~ ^s[1-9][0-9]*$ ]] && [ -n "$token" ] || die "paddock-dev answered '$said', not a slot and a token"
+  export_slot "$out" "$slot" "$token" "$temp"
+  echo "job-isolation: slot $slot (kept folders end in -$slot); temp folders in $temp"
+  sweep "$home"
+  floor="${PADDOCK_CI_MIN_FREE_GB:-30}"
+  case "$floor" in '' | *[!0-9]*) floor=30 ;; esac
+  free="$(free_gb "$home")"
+  if [ -n "$free" ] && [ "$free" -lt "$floor" ]; then
+    echo "::warning::job-isolation: $free GB free on the CI home's disk, below the floor of $floor GB (PADDOCK_CI_MIN_FREE_GB); removing idle slots' kept folders, highest slot first"
+    sweep "$home" all "$floor"
+    free="$(free_gb "$home")"
+    if [ "$free" -lt "$floor" ]; then
+      echo "::error::job-isolation: still only $free GB free on $home's disk after removing every idle slot's kept folders (floor $floor GB). Free disk on the host, then re-run the job."
+      PADDOCK_CI_SLOT="$slot" PADDOCK_CI_SLOT_TOKEN="$token" cmd_release >/dev/null || true
+      exit 1
+    fi
+  fi
+}
+
+# held_by_us <home> <slot> <token>: the slot's lock is held and its holder is the one this job started.
+held_by_us() {
+  local home="$1" slot="$2" token="$3" state
+  [ "$(sed -n 's/^token=//p' "$home/slots/$slot.owner" 2>/dev/null | head -1)" = "$token" ] || return 1
+  state="$(dev_tool ci slot status --max "${slot#s}" --root "$(native "$home")" | awk -v s="$slot" '$1 == s { print $2 }')"
+  [ "$state" = busy ]
 }
 
 cmd_release() {
   is_linux && return 0
-  local s="${PADDOCK_CI_SLOT:-}" lock home
+  local s="${PADDOCK_CI_SLOT:-}" token="${PADDOCK_CI_SLOT_TOKEN:-}" home ok=1
   [[ "$s" =~ ^s[1-9][0-9]*$ ]] || { echo "job-isolation: this job holds no slot"; return 0; }
   home="$(ci_home)" || return 0
-  lock="$home/slots/$s"
-  # Only this job's own lock: another job may have reclaimed it (which it never does while this job's folder exists).
-  if [ "$(owner_field "$lock" temp)" != "$(job_temp)" ]; then
-    echo "::warning::job-isolation: $s is not held by this job; leaving it"
-    return 0
+  if ! held_by_us "$home" "$s" "$token"; then
+    ok=0
+    echo "::error::job-isolation: the holder of $s ended before the job did (killed with the job's processes?), so another job could have taken $s meanwhile: this job's isolation was not guaranteed. See ADR 0025, \"Stalled holder\"."
   fi
-  sweep "$home" "${s#s}"
-  rm -rf "$lock"
+  # Only this job's own holder: release honours only its token.
+  dev_tool ci slot release --slot "$s" --token "$token" --root "$(native "$home")" >/dev/null \
+    || echo "::warning::job-isolation: $s did not let go in time (./dev ci slot status shows its holder)"
   echo "job-isolation: released $s"
+  sweep "$home"
+  [ "$ok" = 1 ]
+}
+
+cmd_status() {
+  local home max n state owner pid
+  home="$(ci_home)"; max="$(max_slots)"
+  dev_tool ci slot status --max "$max" --root "$(native "$home")" | while read -r n state; do
+    owner="$(sed -n 's/^owner=//p' "$home/slots/$n.owner" 2>/dev/null | head -1)" || owner=""
+    pid="$(sed -n 's/^pid=//p' "$home/slots/$n.owner" 2>/dev/null | head -1)" || pid=""
+    if [ "$state" = busy ]; then echo "  $n busy: job folder ${owner:-?} (holder pid ${pid:-?})"
+    else echo "  $n free"; fi
+  done
 }
 
 case "${1:-}" in
   acquire) cmd_acquire ;;
-  release) cmd_release || true ;;
+  release) cmd_release ;;
+  status) cmd_status ;;
+  sweep-slot) shift; cmd_sweep_slot "$@" ;;
   path) shift; cmd_path "$@" ;;
   temp) job_temp ;;
   owns) shift; cmd_owns "$@" ;;
   port) shift; cmd_port "$@" ;;
   pattern) shift; cmd_pattern "$@" ;;
-  *) echo "usage: job-isolation.sh acquire|release|path <kind> [<name>]|temp|owns <folder>|port <base>|pattern <regex>" >&2; exit 2 ;;
+  *) echo "usage: job-isolation.sh acquire|release|status|path <kind> [<name>]|temp|owns <folder>|port <name>|pattern <regex>" >&2; exit 2 ;;
 esac
