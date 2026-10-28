@@ -428,7 +428,12 @@ export class DialogFrame {
    */
   measure(): DialogMeasure {
     this.render();
-    const height = (el: Element | null | undefined) => (el ? el.getBoundingClientRect().height : 0);
+    // A part's height with its vertical margins (the alert has a top margin that its box does not include).
+    const height = (el: Element | null | undefined) => {
+      if (!el) return 0;
+      const s = getComputedStyle(el);
+      return el.getBoundingClientRect().height + (parseFloat(s.marginTop) || 0) + (parseFloat(s.marginBottom) || 0);
+    };
     const host = this.host.nativeElement;
     const body = this.bodyEl().nativeElement;
     const style = getComputedStyle(body);

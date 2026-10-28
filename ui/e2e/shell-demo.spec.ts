@@ -582,6 +582,20 @@ test.describe('dialogs (plan S6)', () => {
     });
   });
 
+  test('a refused answer refits the window with the alert and its margins: the body does not scroll and keeps its bottom padding', async ({ app, page }) => {
+    await page.setViewportSize({ width: 400, height: 600 });
+    await app.dialogs.openWindow('pd.channels.secret', { channelId: 'slack', label: 'Team Slack', kind: 'token' }, { title: 'Token', query: '?channels-secret=refuse' });
+    await page.getByTestId('channel-secret-input').fill('s3cret-token');
+    await page.getByTestId('dialog-action-save').click();
+    await expect(page.getByTestId('dialog-alert')).toBeVisible();
+    // The alert refits the window once: wait for that second height, then lay the page out at it.
+    await expect.poll(() => app.dialogs.fitHistory()).toHaveLength(2);
+    const fitted = (await app.dialogs.fitHistory())[1]!;
+    await page.setViewportSize({ width: 400, height: fitted });
+    const body = await page.getByTestId('dialog-body').evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+    expect(body.scroll).toBeLessThanOrEqual(body.client);
+  });
+
   test('every dialog opens by its window URL and sends its ready handshake (ADR 0026 §6; the nightly check reads the list)', async ({ page }) => {
     const out = process.env['PADDOCK_DIALOGS_VISITED'];
     const { visited, problems } = await openEveryDialog(page, CONTRACTS, { inputs: { 'pd.confirm': { heading: 'Forget?', message: 'It goes.', confirm: { label: 'Forget greetings' } } }, out });
