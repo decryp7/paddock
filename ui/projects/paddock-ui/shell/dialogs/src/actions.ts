@@ -12,6 +12,8 @@ export interface ActionBase {
   readonly label: string;
   /** Default true. A disabled primary is never run by Enter. */
   readonly enabled?: boolean;
+  /** What the button says while its work runs ("Creating…"); default its label. */
+  readonly busyLabel?: string;
 }
 
 /** Closes the dialog with the value `answer` resolves to. A rejection keeps it open with the error and Try again. */

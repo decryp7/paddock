@@ -6,7 +6,7 @@ import { DialogActionError, type DialogAction } from './actions';
 import { loadDialogBounds, rememberDialogBounds } from './bounds';
 import { dialogWindowConfig, mountDialogWindowHost, openDialogPort, provideDialogs } from './bootstrap';
 import { DeniedCommands } from './denied';
-import { DIALOG_SHOW_DEADLINE_MS, oncePerFrame } from './dialog-frame';
+import { DIALOG_SHOW_DEADLINE_MS, FRAME_STYLES, oncePerFrame } from './dialog-frame';
 import { DialogHost } from './dialog-host';
 import { DialogShell } from './dialog-shell';
 import { DialogService } from './dialog.service';
@@ -164,10 +164,23 @@ describe('the dialog frame (ADR 0026 §2)', () => {
     expect(f.action('go')!.querySelector('.pd-frame-spinner')).not.toBeNull();
     expect(f.action('go')!.disabled && f.action('dismiss')!.disabled).toBe(true);
     expect(f.q('dialog-body')!.hasAttribute('inert')).toBe(true);
+    // The pressed button keeps its full colour (only the others dim) and the inert body is dimmed.
+    expect(FRAME_STYLES).toContain(".pd-frame-btn[aria-busy='true']:disabled { opacity: 1;");
+    expect(FRAME_STYLES).toContain('.pd-frame-body[inert] {');
     await f.key('Enter');
     work.resolve('done');
     await f.stable();
     expect(f.outcome()).toEqual({ kind: 'answered', value: 'done' });
+  });
+
+  it('says what it is doing on the busy button when the action names it (busyLabel)', async () => {
+    const work = deferred<string>();
+    const f = await open([{ kind: 'answer', id: 'go', label: 'Create key', busyLabel: 'Creating…', role: 'primary', answer: () => work.promise }]);
+    expect(f.action('go')!.textContent!.trim()).toBe('Create key');
+    await f.press('go');
+    expect(f.action('go')!.textContent!.trim()).toBe('Creating…');
+    work.resolve('done');
+    await f.stable();
   });
 
   it('aborts an abortable answer on Escape and closes dismissed; a late answer is ignored', async () => {
@@ -249,6 +262,10 @@ describe('the dialog frame (ADR 0026 §2)', () => {
     await f.press('save');
     expect(f.q('dialog-alert-text')!.textContent).toBe('The disk is full.');
     expect(document.activeElement).toBe(f.q('dialog-try-again'));
+    // An error icon, no danger border, and Try again shows its focus ring although the focus was moved by script.
+    expect(f.q('dialog-alert')!.querySelector('.pd-frame-alert-icon svg')).not.toBeNull();
+    expect(FRAME_STYLES).toMatch(/\.pd-frame-alert \{[^}]*border: 0;/);
+    expect(FRAME_STYLES).toContain('.pd-frame-alert .pd-frame-btn:focus {');
     expect(field.value).toBe('typed');
     f.q('dialog-try-again')!.click();
     await f.stable();

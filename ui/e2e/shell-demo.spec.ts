@@ -582,6 +582,12 @@ test.describe('dialogs (plan S6)', () => {
     });
   });
 
+  test('the save prompt asks an ordinary question: info icon, Save has the focus, Don’t save is outlined', async ({ app, page }) => {
+    await app.dialogs.openWindow('sd.unsaved', {}, { title: 'Save changes' });
+    await expect(page.getByTestId('dialog-icon')).toHaveAttribute('data-tone', 'info');
+    await expect(page.getByTestId('dialog-action-save')).toBeFocused();
+  });
+
   test('a refused answer refits the window with the alert and its margins: the body does not scroll and keeps its bottom padding', async ({ app, page }) => {
     await page.setViewportSize({ width: 400, height: 600 });
     await app.dialogs.openWindow('pd.channels.secret', { channelId: 'slack', label: 'Team Slack', kind: 'token' }, { title: 'Token', query: '?channels-secret=refuse' });
