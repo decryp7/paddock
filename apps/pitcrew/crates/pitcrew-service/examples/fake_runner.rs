@@ -137,23 +137,28 @@ fn publish_env(dir: &std::path::Path, dump: &str, held: bool) {
         gate(dir);
     }
     let dest = dir.join("env.txt");
-    // On Windows a rename over a file a test has open for reading fails with PermissionDenied until the reader closes
-    // it (a restarted runner rewriting the dump): try again a bounded number of times, then fail loudly.
-    let mut attempts = 0;
-    loop {
+    // On Windows a rename over a file a test has open for reading fails with a sharing violation (PermissionDenied)
+    // until the reader closes it (a restarted runner rewriting the dump). Nothing signals that close, so this test-only
+    // fake tries a few times with a short, capped back-off (the reader holds a file of a few bytes for microseconds),
+    // then fails loudly.
+    let mut backoff = Duration::from_micros(100);
+    for attempt in 1..=RENAME_ATTEMPTS {
         match std::fs::rename(&part, &dest) {
             Ok(()) => return,
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && attempts < RENAME_ATTEMPTS => {
-                attempts += 1;
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && attempt < RENAME_ATTEMPTS => {
                 std::thread::yield_now();
+                std::thread::sleep(backoff);
+                backoff = (backoff * 2).min(MAX_RENAME_BACKOFF);
             }
-            Err(e) => panic!("the fake runner could not publish {} after {attempts} retries: {e}", dest.display()),
+            Err(e) => panic!("the fake runner could not publish {} after {attempt} attempts: {e}", dest.display()),
         }
     }
 }
 
-/// How often a refused rename of `env.txt` is tried again (each try is one rename call, after yielding the CPU).
-const RENAME_ATTEMPTS: u32 = 100_000;
+/// How often a refused rename of `env.txt` is tried (at most about 0.2 s in all with the capped back-off).
+const RENAME_ATTEMPTS: u32 = 50;
+/// The longest pause between two tries of the rename.
+const MAX_RENAME_BACKOFF: Duration = Duration::from_millis(4);
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
