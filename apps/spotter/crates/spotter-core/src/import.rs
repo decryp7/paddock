@@ -8,7 +8,7 @@ use quick_xml::Reader;
 use quick_xml::XmlVersion;
 
 /// Largest list read (2 MB).
-pub const MAX_IMPORT_BYTES: usize = 2 << 20;
+pub const MAX_IMPORT_BYTES: usize = 2_000_000;
 
 /// A list format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -293,6 +293,16 @@ mod tests {
         assert_eq!(out.skipped.len(), 1);
         assert!(import(ImportFormat::Opml, "<html/>").unwrap_err().contains("<opml>"));
         assert!(import(ImportFormat::Opml, "<opml><body></opml>").unwrap_err().contains("OPML"));
+    }
+
+    /// The limit is the 2 MB the message names (decimal), not 2 MiB.
+    #[test]
+    fn the_limit_is_two_million_bytes() {
+        assert_eq!(MAX_IMPORT_BYTES, 2_000_000);
+        let at_limit = " ".repeat(MAX_IMPORT_BYTES);
+        assert!(import(ImportFormat::Brewfile, &at_limit).is_ok());
+        let msg = import(ImportFormat::Brewfile, &(at_limit + " ")).unwrap_err();
+        assert_eq!(msg, "The list is larger than 2 MB.");
     }
 
     #[test]

@@ -20,6 +20,8 @@ for (const scheme of ['dark', 'light'] as const) {
     /** Waits for the screen to be what a user sees: no skeleton, the primary button drawn, fonts and avatar images decoded. */
     async function loaded(page: Page, options: { primary?: boolean } = {}): Promise<void> {
       await expect(page.locator('pd-skeleton')).toHaveCount(0);
+      // Every avatar's lookup has been answered (a picture or the monogram), so the pictures are the same in every run.
+      await expect(page.locator('sp-avatar[data-state="pending"]')).toHaveCount(0);
       if (options.primary) await expect(page.locator('button.primary, .btn.primary').first()).toBeVisible();
       await page.evaluate(async () => {
         await document.fonts.ready;
@@ -83,7 +85,7 @@ for (const scheme of ['dark', 'light'] as const) {
       ['updates', 'pd.updates', { width: 560, height: 480 }, {}],
       ['about', 'pd.about', { width: 680, height: 560 }, {}],
       ['whats-new', 'pd.whats-new', { width: 680, height: 560 }, {}],
-      ['confirm', 'sp.confirm', { width: 420, height: 160 }, { title: 'Delete watch', message: 'Delete "Lumen CLI"? Its history is deleted with it.', confirmLabel: 'Delete', danger: true }],
+      ['confirm', 'sp.confirm', { width: 420, height: 160 }, { title: 'Delete watch', message: 'Delete "Lumen CLI"? Its history is deleted with it.', confirmLabel: 'Delete watch', danger: true }],
     ];
     for (const [name, id, size, input] of windows) {
       test(`${name} window`, async ({ page, app }) => {

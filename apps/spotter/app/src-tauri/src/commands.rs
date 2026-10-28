@@ -20,8 +20,8 @@ type Out<T> = Result<T, CommandError>;
 const MAX_TEXT: usize = 2048;
 /// Most secret fields in one request.
 const MAX_SECRETS: usize = 16;
-/// Largest list text accepted for an import (the engine re-checks).
-const MAX_IMPORT_TEXT: usize = 3 << 20;
+/// Largest list text accepted for an import: the engine's own limit, which the message names (the engine re-checks).
+const MAX_IMPORT_TEXT: usize = spotter_core::import::MAX_IMPORT_BYTES;
 /// Most events one request may ask for.
 const MAX_EVENTS: usize = 500;
 

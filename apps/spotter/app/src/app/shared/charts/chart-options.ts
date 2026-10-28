@@ -52,7 +52,8 @@ export type OutcomeColors = Pick<PaddockChartTokens, 'neutralBar' | 'accent' | '
 /** Diagonal hatching for a failure series: failures are told apart from successes by pattern as well as colour (colour-vision safe). */
 const FAILED_DECAL = { symbol: 'rect', dashArrayX: [1, 0], dashArrayY: [2, 3], rotation: Math.PI / 4, color: 'rgba(0,0,0,0.45)' };
 
-const MIB = 1024 * 1024;
+/** A megabyte, as the labels say it (decimal). */
+const MB = 1_000_000;
 
 /** Checks per bucket across every watch, split into the ones that worked and the ones that failed. */
 export function reliabilityTotals(d: Dashboard): { succeeded: number[]; failed: number[] } {
@@ -100,7 +101,7 @@ export function downloadTotals(d: Dashboard): { completed: number[]; failed: num
   return {
     completed: d.downloads.map((b) => Math.max(0, b.count - b.failed)),
     failed: d.downloads.map((b) => b.failed),
-    megabytes: d.downloads.map((b) => Math.round((b.bytes / MIB) * 10) / 10),
+    megabytes: d.downloads.map((b) => Math.round((b.bytes / MB) * 10) / 10),
   };
 }
 
@@ -112,7 +113,7 @@ export function downloadCounts(d: Dashboard): { total: number; failed: number } 
 /** A sentence describing the downloads chart for assistive technology. */
 export function downloadsSummary(d: Dashboard): string {
   const { total, failed } = downloadCounts(d);
-  const mb = Math.round(d.downloads.reduce((a, b) => a + b.bytes, 0) / MIB);
+  const mb = Math.round(d.downloads.reduce((a, b) => a + b.bytes, 0) / MB);
   return `Downloads: ${total} in total, ${failed} failed, ${mb} MB.`;
 }
 
