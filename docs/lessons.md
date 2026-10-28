@@ -524,6 +524,20 @@ A dead renderer is reloaded, not aborted; a closed or reset connection is `ERR_E
 browser-side call as an ordering barrier; otherwise the code), so the next failure names its cause instead of being
 retried or guessed at.
 
+**Follow-up (same day):** Windows run 6563 failed the same test with the plain code again, so the cause is neither a
+download nor a replacement the driver saw. It still does not reproduce on the Mac. Two findings while instrumenting it:
+(1) an unexplained abort now carries what the browser reported about the tab from its creation on (lifecycle steps, the
+document request's `Network.requestWillBeSent`/`responseReceived`/`loadingFailed` with `canceled` and `blockedReason`,
+requested and started navigations, crashes, detaches), and the real-browser tests write Chrome's net log
+(`--log-net-log`) and print its page-load, cancellation and error events in a failed assertion. `Network.enable` sent
+while a `Page.navigate` is unanswered gets no answer within 10 s, so it is enabled once when the tab is attached, and
+the connection keeps only documents' network events. (2) The net log showed the "hermetic" test browser talking to the
+internet: Chrome for Testing 156 with `--disable-background-networking` still connected to www.google.com,
+accounts.google.com, update.googleapis.com and clients2.google.com. **Rule:** a test browser gets
+`--no-proxy-server` and `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1` (the rule also
+maps IP literals, so loopback must be excluded), and a test asserts from the net log that it connected to loopback only;
+"no real hosts" is checked, not assumed.
+
 ## A local model over every item turns a background task into a machine hog (2026-10-28, Debrief)
 Debrief's background "Learning human names" ran the local model over up to 2,000 names after every import. It held about
 8 GB on the Mac and made a Windows PC sluggish for the whole run, for a result that rules, a names pack and the logs' own
