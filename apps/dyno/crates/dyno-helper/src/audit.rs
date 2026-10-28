@@ -134,7 +134,7 @@ mod tests {
     fn a_damaged_line_is_skipped_and_the_log_rotates_once() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("audit.jsonl");
-        let log = AuditLog::with_limit(path.clone(), 150);
+        let log = AuditLog::with_limit(path.clone(), 100);
         log.record(&entry(1, "a", AuditVerdict::Applied)).unwrap();
         std::fs::OpenOptions::new()
             .append(true)

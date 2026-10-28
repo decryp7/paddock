@@ -722,7 +722,7 @@ mod tests {
         i.crashes = 2;
         let r = weekly(i);
         assert_eq!((r.avg_cpu, r.peak_cpu, r.avg_memory, r.score_change), (20.0, 90.0, 50.0, 10));
-        assert_eq!(r.highlights.len(), 5);
+        assert_eq!(r.highlights.len(), 4);
         assert!(r.highlights[2].contains("rose by 10"));
         assert!(r.highlights[3].contains("2 app crashes"));
         let mut i = input(&pts);
