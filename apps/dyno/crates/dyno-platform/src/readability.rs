@@ -66,8 +66,8 @@ pub fn uid_min_from(text: &str) -> Option<u32> {
     })
 }
 
-/// The "nobody" users: 65534 on Linux and most Unixes, -2 (4294967294) on macOS, and the "no user" -1.
-const NOBODY_UIDS: [u32; 3] = [65_534, u32::MAX - 1, u32::MAX];
+/// The "nobody" users: 65534 on Linux and most Unixes, -2 (4294967294) on macOS, and the "no user" values 65535 and -1.
+const NOBODY_UIDS: [u32; 4] = [65_534, 65_535, u32::MAX - 1, u32::MAX];
 /// Ids from here up are not people's accounts: container user-namespace ranges start at 65536 and hand out subuids.
 const FIRST_CONTAINER_UID: u32 = 65_536;
 
