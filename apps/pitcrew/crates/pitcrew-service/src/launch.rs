@@ -296,7 +296,7 @@ pub fn kill_tree(pid: u32) {
     }
     #[cfg(windows)]
     {
-        let mut cmd = quiet_command(std::path::Path::new("taskkill.exe"));
+        let mut cmd = quiet_command(&crate::process::taskkill_exe());
         cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);
         let _ = run_with_timeout(cmd, Duration::from_secs(20));
     }

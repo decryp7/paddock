@@ -49,7 +49,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
           <li class="pd-notice" [class.pd-unread]="!n.read" [class.pd-focus]="store.focus() === n.id" [attr.data-severity]="n.severity" [attr.data-testid]="'notice-' + n.id" [attr.data-cause]="n.cause">
             <div class="pd-row">
               <span class="pd-dot" aria-hidden="true"></span>
-              <strong class="pd-title">{{ titleWithCount(n) }}</strong>
+              <strong class="pd-title" [attr.title]="titleWithCount(n)">{{ titleWithCount(n) }}</strong>
               @if (!n.read) {
                 <span class="pd-sr-only">{{ t.unreadMark }}</span>
               }
@@ -87,22 +87,26 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
     .pd-err { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-1) var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-danger); margin: 0; }
     h3 { margin: var(--pd-space-2) 0 0; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); color: var(--pd-text-muted); }
     ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--pd-space-1); }
-    .pd-notice { border: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-border-strong); border-radius: var(--pd-radius-control); padding: var(--pd-space-1) var(--pd-space-2); display: flex; flex-direction: column; gap: var(--pd-space-1); }
+    .pd-notice { position: relative; border: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-border-strong); border-radius: var(--pd-radius-control); padding: var(--pd-space-1) var(--pd-space-2); display: flex; flex-direction: column; gap: var(--pd-space-1); }
     .pd-notice[data-severity='error'], .pd-notice[data-severity='critical'] { border-inline-start-color: var(--pd-danger); }
     .pd-notice[data-severity='warning'] { border-inline-start-color: var(--pd-warning); }
     .pd-notice[data-severity='success'] { border-inline-start-color: var(--pd-success); }
     .pd-notice.pd-focus { outline: 2px solid var(--pd-focus-ring); }
-    .pd-row { display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; }
-    .pd-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+    .pd-row { display: flex; align-items: flex-start; gap: var(--pd-space-1); min-width: 0; }
+    .pd-dot { width: 7px; height: 7px; margin-top: 0.5lh; translate: 0 -50%; border-radius: 50%; flex: none; }
     .pd-unread .pd-dot { background: var(--pd-accent); }
-    .pd-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--pd-weight-medium); }
+    /* Wraps (two lines, then an ellipsis with the full text in the tooltip): a one-line ellipsis cut titles with room to spare. */
+    .pd-title { flex: 1; min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-weight: var(--pd-weight-medium); }
     .pd-notice:not(.pd-unread) .pd-title { font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); }
     .pd-time { white-space: nowrap; color: var(--pd-text-muted); font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; }
     .pd-body { margin: 0; color: var(--pd-text-muted); overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
     .pd-actions { display: flex; flex-wrap: wrap; gap: var(--pd-space-1); justify-content: flex-end; }
-    .pd-row-actions { display: flex; gap: 2px; opacity: 0; }
-    .pd-notice:hover .pd-row-actions, .pd-notice:focus-within .pd-row-actions { opacity: 1; }
-    @media (hover: none) { .pd-row-actions { opacity: 1; } }
+    .pd-row-actions { position: absolute; inset-block-start: 2px; inset-inline-end: var(--pd-space-1); display: flex; gap: 2px; padding-inline-start: var(--pd-space-2); background: var(--pd-surface-3); border-radius: var(--pd-radius-control); opacity: 0; }
+    /* Shown by hover or by focus on one of its own buttons, never by focus on a body action (that would cover the time). */
+    .pd-notice:hover .pd-row-actions, .pd-row-actions:focus-within { opacity: 1; }
+    /* The buttons sit over the time, so it gives way whole while they show (not cut in half). */
+    .pd-notice:hover .pd-time, .pd-row:has(.pd-row-actions:focus-within) .pd-time { visibility: hidden; }
+    @media (hover: none) { .pd-row-actions { position: static; opacity: 1; padding-inline-start: 0; } .pd-notice:hover .pd-time { visibility: visible; } }
     .pd-btn { min-height: 26px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); cursor: pointer; }
     .pd-btn.pd-ghost { background: transparent; border-color: transparent; color: var(--pd-accent); }
     .pd-btn:disabled { color: var(--pd-text-subtle); cursor: default; }
@@ -159,7 +163,7 @@ export class PdNotificationsPanel {
   /** A contributed notification kind's title, the shell's own sources, or the source id. */
   protected sourceLabel(source: string): string {
     const kind = this.registry?.notificationKinds().find((k) => k.id === source);
-    return kind?.title.text ?? BUILT_IN_SOURCES[source]?.() ?? source;
+    return kind?.title.text ?? BUILT_IN_SOURCES[source]?.() ?? source.charAt(0).toUpperCase() + source.slice(1);
   }
 
   protected markReadLabel(title: string): string {
