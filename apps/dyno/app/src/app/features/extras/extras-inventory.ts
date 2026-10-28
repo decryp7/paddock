@@ -8,18 +8,21 @@ import { ExtrasStore } from '../../state/extras.store';
 import { fileName } from '../../state/diagnostics.store';
 import { filterSoftware, hue, initial } from './extras-model';
 import { EXTRAS_STYLES } from './extras-styles';
+import { MatButton } from '@angular/material/button';
+import { MatFormField, MatPrefix } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
 
 /** The installed software, searchable, and a report of the hardware and software saved through the OS save dialog. */
 @Component({
   selector: 'dy-extras-inventory',
-  imports: [AsyncState, Icon, CdkMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [MatFormField, MatInput, MatPrefix, MatButton, AsyncState, Icon, CdkMenuTrigger, CdkMenu, CdkMenuItem],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Software">
-      <label class="search"><dy-icon name="search" /><input class="input" type="search" placeholder="Search installed software" aria-label="Search installed software" [value]="search()" (input)="search.set($any($event.target).value)" /></label>
+      <mat-form-field class="search"><dy-icon matPrefix name="search" /><input matInput type="search" placeholder="Search installed software" aria-label="Search installed software" [value]="search()" (input)="search.set($any($event.target).value)" /></mat-form-field>
       <span class="faint muted">{{ count() }}</span>
       <span class="grow"></span>
-      <button type="button" class="btn" aria-haspopup="menu" [disabled]="store.exporting()" [cdkMenuTriggerFor]="exportMenu"><dy-icon name="file" /> {{ store.exporting() ? 'Saving…' : 'Export report…' }}</button>
+      <button type="button" matButton="outlined" aria-haspopup="menu" [disabled]="store.exporting()" [cdkMenuTriggerFor]="exportMenu"><dy-icon name="file" /> {{ store.exporting() ? 'Saving…' : 'Export report…' }}</button>
     </div>
 
     @if (store.saveError(); as e) {

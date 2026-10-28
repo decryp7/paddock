@@ -4,6 +4,8 @@ import { FormsModule } from '@angular/forms';
 import { errorHint } from '../../core/command-error';
 import { Icon } from '../../shared/icon';
 import { LookupStore } from '../../state/lookup.store';
+import { MatFormField } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
 
 /** The longest search text the engine accepts. */
 export const MAX_QUERY = 200;
@@ -15,7 +17,7 @@ export const MAX_QUERY = 200;
  */
 @Component({
   selector: 'dy-web-search-dialog',
-  imports: [FormsModule, Icon],
+  imports: [MatFormField, MatInput, FormsModule, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
       <p class="subject">About <strong>{{ subject() }}</strong></p>
@@ -23,7 +25,7 @@ export const MAX_QUERY = 200;
       @if (store.seed(); as s) {
         <label class="field">
           <span class="label">Search for</span>
-          <input class="input" name="query" [ngModel]="query()" (ngModelChange)="query.set($event)" [attr.maxlength]="max" aria-describedby="removed" autocomplete="off" spellcheck="false" />
+          <mat-form-field><input matInput name="query" [ngModel]="query()" (ngModelChange)="query.set($event)" [attr.maxlength]="max" aria-describedby="removed" autocomplete="off" spellcheck="false" /></mat-form-field>
         </label>
         <p id="removed" class="removed" [class.none]="s.removed.length === 0">
           <dy-icon [name]="s.removed.length === 0 ? 'check' : 'shield-check'" />

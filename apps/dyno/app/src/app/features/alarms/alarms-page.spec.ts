@@ -67,12 +67,12 @@ describe('dy-alarms-page, Active', () => {
   it('acknowledges everything that waits with the section action, the only primary button', async () => {
     const { f, el } = render();
     await settle(f);
-    const primaries = [...el.querySelectorAll('button.primary')];
+    const primaries = [...el.querySelectorAll('button[matButton="filled"]')];
     expect(primaries).toHaveLength(1);
     expect(text(primaries[0]!)).toBe('Acknowledge all (4)');
     (primaries[0] as HTMLButtonElement).click();
     await settle(f);
-    expect(el.querySelector('button.primary')).toBeNull();
+    expect(el.querySelector('button[matButton="filled"]')).toBeNull();
     expect(el.querySelectorAll('.unread')).toHaveLength(0);
     expect(text(el)).toContain('0 not acknowledged');
   });
@@ -217,7 +217,7 @@ describe('dy-alarms-page, Active', () => {
     const { f, el } = render();
     await settle(f);
     expect(el.textContent).toContain('No open alarms');
-    expect(el.querySelector('button.primary')).toBeNull();
+    expect(el.querySelector('button[matButton="filled"]')).toBeNull();
   });
 
   it('shows an inline error with Retry when the alarms cannot be read', async () => {
@@ -427,15 +427,15 @@ describe('dy-alarms-page, Rules', () => {
     await settle(f);
     expect(settings.settings()!.alarms!.quiet.enabled).toBe(true);
     start.value = '23:15';
-    start.dispatchEvent(new Event('change'));
+    start.dispatchEvent(new Event('input'));
     await settle(f);
     const end = el.querySelector<HTMLInputElement>('[aria-label="Quiet hours end"]')!;
     end.value = '06:30';
-    end.dispatchEvent(new Event('change'));
+    end.dispatchEvent(new Event('input'));
     await settle(f);
     expect(settings.settings()!.alarms!.quiet).toMatchObject({ startMinute: 23 * 60 + 15, endMinute: 6 * 60 + 30 });
     end.value = '';
-    end.dispatchEvent(new Event('change'));
+    end.dispatchEvent(new Event('input'));
     await settle(f);
     expect(settings.settings()!.alarms!.quiet.endMinute).toBe(6 * 60 + 30);
     sw('Critical alarms still notify').click();

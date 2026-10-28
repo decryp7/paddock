@@ -7,6 +7,7 @@ import { AlarmsStore } from '../../state/alarms.store';
 import { alarmSuffix, isShelved, needsAcknowledge, severityWord, shortTime, stateTone, stateWord } from './alarms-model';
 import { TABLE_CSS } from './alarms-css';
 import { AlarmDetail } from './alarm-detail';
+import { MatButton } from '@angular/material/button';
 
 /**
  * The open alarms as one table (newest first) with a detail panel beside it. The section action acknowledges everything that is
@@ -14,14 +15,14 @@ import { AlarmDetail } from './alarm-detail';
  */
 @Component({
   selector: 'dy-alarms-active',
-  imports: [AsyncState, Icon, AlarmDetail, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
+  imports: [MatButton, AsyncState, Icon, AlarmDetail, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="store.loaded()" [error]="store.error()" [empty]="store.alarms().length === 0" emptyTitle="No open alarms" emptyText="When a rule fires, its alarm waits here until you acknowledge it." emptyIcon="bell" what="alarms" [rows]="4" (retry)="store.load()">
       <div class="section-head">
         <p class="lead num">{{ store.alarms().length }} open · {{ store.unacknowledged().length }} not acknowledged</p>
         @if (store.unacknowledged().length > 0) {
-          <button type="button" class="btn primary" [disabled]="busy()" (click)="ackAll()">Acknowledge all ({{ store.unacknowledged().length }})</button>
+          <button type="button" matButton="filled" [disabled]="busy()" (click)="ackAll()">Acknowledge all ({{ store.unacknowledged().length }})</button>
         }
       </div>
       <div class="layout" [class.with-detail]="!!store.selected()">

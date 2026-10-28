@@ -11,6 +11,11 @@ import { SettingsStore } from '../../state/settings.store';
 import { EVENT_STYLE, eventCounts } from '../dashboard/history-options';
 import { EVENT_LABEL } from '../../shared/labels';
 import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCounter, pathParts, readingNumber, readingReason, UNIT_WORD } from './counters-model';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatFormField, MatPrefix } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 
 /**
  * Performance counters: browse what the OS offers (objects, then counters with their instances), search by name, chart
@@ -19,7 +24,7 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
  */
 @Component({
   selector: 'dy-counters-page',
-  imports: [AsyncState, Icon, Chart, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
+  imports: [SuSegmentedControl, PdSelect, MatFormField, MatInput, MatPrefix, MatButton, MatIconButton, AsyncState, Icon, Chart, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -31,21 +36,17 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
       </header>
 
       <div class="bar" role="group" aria-label="Counters toolbar">
-        <label class="search"><dy-icon name="search" /><input class="input" type="search" placeholder="Search counters, for example disk queue" aria-label="Search counters" [value]="store.query()" (input)="onSearch($any($event.target).value)" /></label>
+        <mat-form-field class="search"><dy-icon matPrefix name="search" /><input matInput type="search" placeholder="Search counters, for example disk queue" aria-label="Search counters" [value]="store.query()" (input)="onSearch($any($event.target).value)" /></mat-form-field>
         <span class="spacer"></span>
-        <button type="button" class="btn sm" [cdkMenuTriggerFor]="setsMenu"><dy-icon name="layers" /> Sets @if (store.sets().length) { <span class="count num">{{ store.sets().length }}</span> }</button>
-        <div class="seg" role="group" aria-label="Range">
-          @for (r of ranges; track r.minutes) {
-            <button type="button" [attr.aria-pressed]="store.minutes() === r.minutes" (click)="store.setMinutes(r.minutes)">{{ r.label }}</button>
-          }
-        </div>
+        <button type="button" matButton="outlined" [cdkMenuTriggerFor]="setsMenu"><dy-icon name="layers" /> Sets @if (store.sets().length) { <span class="count num">{{ store.sets().length }}</span> }</button>
+        <pd-segmented-control label="Range" [options]="rangeSegs" [value]="store.minutes() + ''" (valueChange)="store.setMinutes(+$event)" />
       </div>
 
       @if (naming()) {
         <div class="namebar" role="group" aria-label="Save a set">
-          <input class="input sm" type="text" [attr.maxlength]="maxName" aria-label="Set name" placeholder="Name this set" [value]="setName()" (input)="setName.set($any($event.target).value)" (keydown.enter)="saveSet()" (keydown.escape)="naming.set(false)" />
-          <button type="button" class="btn sm primary" [disabled]="!setName().trim()" (click)="saveSet()">Save set</button>
-          <button type="button" class="btn sm ghost" (click)="naming.set(false)">Cancel</button>
+          <mat-form-field><input matInput type="text" [attr.maxlength]="maxName" aria-label="Set name" placeholder="Name this set" [value]="setName()" (input)="setName.set($any($event.target).value)" (keydown.enter)="saveSet()" (keydown.escape)="naming.set(false)" /></mat-form-field>
+          <button type="button" matButton="filled" [disabled]="!setName().trim()" (click)="saveSet()">Save set</button>
+          <button type="button" matButton="text" (click)="naming.set(false)">Cancel</button>
         </div>
       }
 
@@ -68,19 +69,13 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
             </dy-async>
           } @else if (store.opened(); as o) {
             <div class="card-head">
-              <button type="button" class="btn ghost icon sm" aria-label="Back to all objects" (click)="store.closeObject()"><dy-icon name="chevron-left" /></button>
+              <button type="button" matIconButton aria-label="Back to all objects" (click)="store.closeObject()"><dy-icon name="chevron-left" /></button>
               <h2 class="truncate" [title]="o.name">{{ o.name }}</h2>
               <span class="spacer"></span>
               <span class="sub">{{ o.counters.length }} counters</span>
             </div>
             @if (o.instances.length) {
-              <label class="inst"><span>Instance</span>
-                <select class="select sm" aria-label="Instance" (change)="instance.set($any($event.target).value)">
-                  @for (i of o.instances; track i) {
-                    <option [value]="i" [selected]="i === currentInstance()">{{ i }}</option>
-                  }
-                </select>
-              </label>
+              <span class="inst"><span>Instance</span><pd-select [options]="instanceOptions(o.instances)" [value]="currentInstance() ?? ''" ariaLabel="Instance" (valueChange)="instance.set($event)" /></span>
               @if (o.instancesTotal > o.instances.length) {
                 <p class="hint">Showing {{ o.instances.length }} of {{ o.instancesTotal }} instances. Search by name to find the rest.</p>
               }
@@ -130,7 +125,7 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
               </div>
             } @else {
               @if (store.pollError(); as e) {
-                <div class="error" role="alert"><dy-icon name="alert" /><span class="truncate">{{ e.message }}</span><button type="button" class="btn sm ghost" (click)="store.tick()">Retry</button></div>
+                <div class="error" role="alert"><dy-icon name="alert" /><span class="truncate">{{ e.message }}</span><button type="button" matButton="text" (click)="store.tick()">Retry</button></div>
               }
               @if (chart(); as c) {
                 <dy-chart [options]="c.option" [label]="chartLabel()" style="--chart-h: 300px" />
@@ -156,8 +151,8 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
                 <h2>Charted</h2>
                 <span class="spacer"></span>
                 <span class="sub">{{ store.watching().length }} of {{ maxWatched }}</span>
-                <button type="button" class="btn sm ghost" [disabled]="settings.saving()" (click)="startNaming()"><dy-icon name="layers" /> Save as set</button>
-                <button type="button" class="btn sm ghost" (click)="store.setWatching([])">Clear</button>
+                <button type="button" matButton="text" [disabled]="settings.saving()" (click)="startNaming()"><dy-icon name="layers" /> Save as set</button>
+                <button type="button" matButton="text" (click)="store.setWatching([])">Clear</button>
               </div>
               <div class="grid" role="table" aria-label="Charted counters">
                 <div class="head" role="row">
@@ -305,6 +300,8 @@ export class CountersPage implements OnInit {
   private readonly theme = inject(ThemeService);
   private readonly notifier = inject(Notifier);
   protected readonly ranges = RANGES;
+  protected readonly rangeSegs: SuSegment[] = RANGES.map((r) => ({ value: String(r.minutes), label: r.label }));
+  protected readonly instanceOptions = (list: readonly string[]): PdSelectOption[] => list.map((i) => ({ value: i, label: i }));
   protected readonly maxName = MAX_SET_NAME;
   protected readonly maxWatched = MAX_WATCHED;
   protected readonly naming = signal(false);

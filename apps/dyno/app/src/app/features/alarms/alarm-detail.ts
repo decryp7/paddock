@@ -6,11 +6,14 @@ import { formatCount } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { AlarmsStore } from '../../state/alarms.store';
 import { alarmSuffix, changeLabel, isShelved, needsAcknowledge, severityWord, shortTime, stateTone, stateWord } from './alarms-model';
+import { MatButton } from '@angular/material/button';
+import { MatFormField } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
 
 /** The side panel of one alarm: full values, notes (add one), its change log and the way to the recorder. Esc closes it. */
 @Component({
   selector: 'dy-alarm-detail',
-  imports: [Icon, RouterLink, CdkMenu, CdkMenuItem, CdkMenuTrigger],
+  imports: [MatFormField, MatInput, MatButton, Icon, RouterLink, CdkMenu, CdkMenuItem, CdkMenuTrigger],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <aside class="detail" tabindex="-1" aria-label="Alarm details" (keydown.escape)="closed.emit()">
@@ -31,13 +34,13 @@ import { alarmSuffix, changeLabel, isShelved, needsAcknowledge, severityWord, sh
         @if (alarm().clearedAt !== null) { <dt>Returned</dt><dd class="num">{{ time(alarm().clearedAt!) }}</dd> }
       </dl>
       <div class="acts">
-        <button type="button" class="btn sm" [disabled]="!ackable()" (click)="store.acknowledge([alarm().id])"><dy-icon name="check" /> Acknowledge</button>
+        <button type="button" matButton="outlined" [disabled]="!ackable()" (click)="store.acknowledge([alarm().id])"><dy-icon name="check" /> Acknowledge</button>
         @if (shelved()) {
-          <button type="button" class="btn sm" (click)="store.unshelve(alarm().id)"><dy-icon name="undo" /> Unshelve</button>
+          <button type="button" matButton="outlined" (click)="store.unshelve(alarm().id)"><dy-icon name="undo" /> Unshelve</button>
         } @else {
-          <button type="button" class="btn sm" [cdkMenuTriggerFor]="shelveMenu"><dy-icon name="clock" /> Shelve</button>
+          <button type="button" matButton="outlined" [cdkMenuTriggerFor]="shelveMenu"><dy-icon name="clock" /> Shelve</button>
         }
-        <button type="button" class="btn sm ghost" (click)="store.mute(alarm().rule, !alarm().muted)">{{ alarm().muted ? 'Unmute rule' : 'Mute rule' }}</button>
+        <button type="button" matButton="text" (click)="store.mute(alarm().rule, !alarm().muted)">{{ alarm().muted ? 'Unmute rule' : 'Mute rule' }}</button>
       </div>
 
       <h3>Notes</h3>
@@ -47,8 +50,8 @@ import { alarmSuffix, changeLabel, isShelved, needsAcknowledge, severityWord, sh
         <p class="faint small">No notes yet.</p>
       }
       <form class="add" (submit)="$event.preventDefault(); addNote()">
-        <input #noteInput class="input sm" type="text" maxlength="200" aria-label="Add a note" placeholder="Add a note" [value]="draft()" (input)="draft.set($any($event.target).value)" />
-        <button type="submit" class="btn sm" [disabled]="!draft().trim()">Add</button>
+        <mat-form-field><input #noteInput matInput type="text" maxlength="200" aria-label="Add a note" placeholder="Add a note" [value]="draft()" (input)="draft.set($any($event.target).value)" /></mat-form-field>
+        <button type="submit" matButton="outlined" [disabled]="!draft().trim()">Add</button>
       </form>
 
       <h3>History</h3>
@@ -57,7 +60,7 @@ import { alarmSuffix, changeLabel, isShelved, needsAcknowledge, severityWord, sh
       } @empty {
         <p class="faint small">No changes recorded.</p>
       }
-      <a class="btn sm rec" routerLink="/recorder"><dy-icon name="camera" /> Open recorder</a>
+      <a matButton="outlined" class="rec" routerLink="/recorder"><dy-icon name="camera" /> Open recorder</a>
     </aside>
 
     <ng-template #shelveMenu>

@@ -49,7 +49,7 @@ describe('dy-why-slow-page', () => {
 
   it('links each cause to the pages that help to look closer', async () => {
     const { el } = await open();
-    const hrefs = [...el.querySelectorAll('.cause')[0]!.querySelectorAll('a.ghost')].map((a) => a.getAttribute('href'));
+    const hrefs = [...el.querySelectorAll('.cause')[0]!.querySelectorAll('a[matButton="text"]')].map((a) => a.getAttribute('href'));
     expect(hrefs).toEqual(['/processes', '/recorder']);
   });
 
@@ -99,7 +99,7 @@ describe('dy-why-slow-page', () => {
 
   it('links the hints that open a screen and shows the others as words', async () => {
     const { el } = await open();
-    expect(el.querySelector('a.btn:not(.ghost)[href="/processes"]')?.textContent).toContain('Open the task manager');
+    expect(el.querySelector('a[matButton="outlined"][href="/processes"]')?.textContent).toContain('Open the task manager');
     expect(el.querySelector('.wait')?.textContent).toContain('Wait for the build');
     expect(el.querySelector('a[href="/health"]')).not.toBeNull();
   });

@@ -1,12 +1,15 @@
-import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal, type OnInit } from '@angular/core';
 import { DialogActionError, type DialogAction, type DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import type { CustomAlertRule, CustomMetric, CustomOp, Severity } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Icon } from '../../shared/icon';
-import { Switch } from '../../shared/switch';
+import { MatSlideToggle } from '@angular/material/slide-toggle';
 import { CUSTOM_METRICS, metricInfo, severityWord, uniqueRuleId, withRule } from './alarms-model';
+import { MatIconButton } from '@angular/material/button';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 
 const SEVERITIES: Severity[] = ['info', 'warning', 'critical'];
 const MAX_HOLD_SECS = 3600;
@@ -14,91 +17,55 @@ const MAX_HOLD_SECS = 3600;
 /** Add or edit a custom alert rule: a metric, above or below a limit, held for a while, with a severity. */
 @Component({
   selector: 'dy-rule-dialog',
-  imports: [Icon, Switch, CdkMenu, CdkMenuItem, CdkMenuTrigger],
+  imports: [MatIconButton, PdField, PdFieldControl, PdSelect, SuSegmentedControl, Icon, MatSlideToggle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
       <p class="lead">Raises an alarm when a reading stays past a limit.</p>
-      <div class="field">
-        <label for="rule-name">Name</label>
-        <input id="rule-name" class="input" type="text" maxlength="60" placeholder="High CPU while idle" [value]="name()" (input)="name.set($any($event.target).value)" />
-      </div>
-      <div class="field">
-        <span class="label" id="rule-metric-l">Reading</span>
-        <button type="button" class="input pick" aria-labelledby="rule-metric-l" [cdkMenuTriggerFor]="metricMenu"><span>{{ info().label }}</span><span class="faint">{{ info().unit }}</span><dy-icon name="chevron-down" /></button>
-      </div>
+      <pd-field label="Name">
+        <input pdFieldControl aria-label="Name" type="text" maxlength="60" placeholder="High CPU while idle" [value]="name()" (input)="name.set($any($event.target).value)" />
+      </pd-field>
+      <pd-field label="Reading" [hint]="info().hint">
+        <pd-select [options]="metricChoices" [value]="metric()" ariaLabel="Reading" (valueChange)="setMetric($event)" />
+      </pd-field>
       <div class="two">
-        <div class="field">
-          <span class="label" id="rule-op-l">Alarm when it is</span>
-          <div class="seg" role="radiogroup" aria-labelledby="rule-op-l">
-            @for (o of ops; track o) {
-              <button type="button" role="radio" [attr.aria-checked]="op() === o" (click)="op.set(o)">{{ o === 'above' ? 'Above' : 'Below' }}</button>
-            }
-          </div>
-        </div>
-        <div class="field">
-          <span class="label" id="rule-limit-l">Limit</span>
-          <div class="stepper" role="group" aria-labelledby="rule-limit-l">
-            <button type="button" class="ib" aria-label="Decrease the limit" (click)="step(-1)"><dy-icon name="minus" /></button>
-            <span class="in"><input class="input" type="text" inputmode="decimal" aria-label="Limit" [value]="limit()" (input)="limit.set($any($event.target).value)" /><span class="unit">{{ info().unit }}</span></span>
-            <button type="button" class="ib" aria-label="Increase the limit" (click)="step(1)"><dy-icon name="plus" /></button>
-          </div>
+        <pd-field label="Alarm when it is">
+          <pd-segmented-control label="Alarm when it is" [options]="opSegs" [value]="op()" (valueChange)="setOp($event)" />
+        </pd-field>
+        <div class="stepper">
+          <button type="button" matIconButton aria-label="Decrease the limit" (click)="step(-1)"><dy-icon name="minus" /></button>
+          <pd-field label="Limit" size="short" [suffix]="unitTpl">
+            <input pdFieldControl aria-label="Limit" type="text" inputmode="decimal" [value]="limit()" (input)="limit.set($any($event.target).value)" />
+          </pd-field>
+          <button type="button" matIconButton aria-label="Increase the limit" (click)="step(1)"><dy-icon name="plus" /></button>
         </div>
       </div>
       <div class="two">
-        <div class="field">
-          <span class="label" id="rule-for-l">For at least</span>
-          <div class="hold" role="group" aria-labelledby="rule-for-l">
-            <input class="input" type="text" inputmode="numeric" aria-label="Duration" [value]="hold()" (input)="hold.set($any($event.target).value)" />
-            <div class="seg" role="radiogroup" aria-label="Duration unit">
-              <button type="button" role="radio" [attr.aria-checked]="unit() === 'sec'" (click)="setUnit('sec')">sec</button>
-              <button type="button" role="radio" [attr.aria-checked]="unit() === 'min'" (click)="setUnit('min')">min</button>
-            </div>
-          </div>
-          <span class="hint">0 raises the alarm right away. At most 60 min.</span>
+        <div class="hold">
+          <pd-field label="For at least" size="short" hint="0 raises the alarm right away. At most 60 min.">
+            <input pdFieldControl aria-label="Duration" type="text" inputmode="numeric" [value]="hold()" (input)="hold.set($any($event.target).value)" />
+          </pd-field>
+          <pd-segmented-control label="Duration unit" [options]="unitSegs" [value]="unit()" (valueChange)="setUnit($event === 'min' ? 'min' : 'sec')" />
         </div>
-        <div class="field">
-          <span class="label" id="rule-sev-l">Severity</span>
-          <div class="seg" role="radiogroup" aria-labelledby="rule-sev-l">
-            @for (s of severities; track s) {
-              <button type="button" role="radio" [attr.aria-checked]="severity() === s" (click)="severity.set(s)">{{ word(s) }}</button>
-            }
-          </div>
-        </div>
+        <pd-field label="Severity">
+          <pd-segmented-control label="Severity" [options]="severitySegs" [value]="severity()" (valueChange)="setSeverity($event)" />
+        </pd-field>
       </div>
-      <div class="on"><span>Enabled</span><dy-switch [checked]="enabled()" (changed)="enabled.set($event)" label="Enabled" /></div>
+      <mat-slide-toggle [checked]="enabled()" (change)="enabled.set($event.checked)">Enabled</mat-slide-toggle>
       @if (problem(); as p) {
         <p class="err" role="alert"><dy-icon name="alert" /> {{ p }}</p>
       }
-
-    <ng-template #metricMenu>
-      <div class="menu wide" cdkMenu aria-label="Reading">
-        @for (m of metrics; track m.id) {
-          <button type="button" class="menu-item two-line" cdkMenuItem [attr.aria-checked]="metric() === m.id" (cdkMenuItemTriggered)="metric.set(m.id)">
-            <span class="text"><span>{{ m.label }} <span class="faint">({{ m.unit }})</span></span><small>{{ m.hint }}</small></span>
-          </button>
-        }
-      </div>
-    </ng-template>
+      <ng-template #unitTpl><span class="unit">{{ info().unit }}</span></ng-template>
   `,
   styles: `
     :host { display: grid; gap: var(--sp-3); min-width: 0; }
     .lead { color: var(--text-2); }
     .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); align-items: start; }
-    .pick { display: flex; align-items: center; gap: var(--sp-2); width: 100%; text-align: left; cursor: pointer; }
-    .pick span:first-child { flex: 1; }
-    .pick dy-icon { --icon-size: 14px; color: var(--text-3); }
-    .faint { color: var(--text-3); }
-    .hint { color: var(--text-3); font-size: var(--fs-xs); }
-    .stepper { display: flex; align-items: center; gap: 2px; }
-    .ib { display: grid; place-items: center; width: 28px; height: var(--control-h); flex: none; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface-2); color: var(--text-2); cursor: pointer; }
-    .ib:hover { background: var(--surface-hover); color: var(--text-1); }
-    .ib dy-icon { --icon-size: 14px; }
-    .in { position: relative; flex: 1; min-width: 0; }
-    .in input { width: 100%; padding-right: 30px; text-align: right; font-variant-numeric: tabular-nums; }
-    .unit { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--text-3); font-size: var(--fs-sm); pointer-events: none; }
-    .hold { display: flex; gap: var(--sp-2); align-items: center; }
-    .hold input { width: 72px; text-align: right; font-variant-numeric: tabular-nums; }
-    .on { display: flex; justify-content: space-between; align-items: center; font-size: var(--fs-base); }
+    .stepper { display: flex; align-items: flex-start; gap: var(--sp-1); }
+    .stepper pd-field { flex: 1; min-width: 0; }
+    .stepper dy-icon { --icon-size: 14px; }
+    .unit { color: var(--text-3); font-size: var(--fs-sm); }
+    .hold { display: flex; gap: var(--sp-2); align-items: flex-start; }
+    .hold pd-segmented-control { margin-top: var(--sp-1); }
     .err { margin: 0; display: flex; gap: var(--sp-2); align-items: flex-start; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--bad-soft); font-size: var(--fs-sm); }
     .err dy-icon { --icon-size: 15px; color: var(--bad); margin-top: 1px; }
   `,
@@ -109,10 +76,10 @@ export class RuleDialog implements DialogContent<true>, OnInit {
   /** Ids of the other rules (a new id must avoid them). */
   readonly takenIds = input<readonly string[]>([]);
   private readonly backend = inject(BACKEND);
-  protected readonly metrics = CUSTOM_METRICS;
-  protected readonly ops: CustomOp[] = ['above', 'below'];
-  protected readonly severities = SEVERITIES;
-  protected readonly word = severityWord;
+  protected readonly metricChoices: PdSelectOption[] = CUSTOM_METRICS.map((m) => ({ value: m.id, label: `${m.label} (${m.unit})` }));
+  protected readonly opSegs: SuSegment[] = [{ value: 'above', label: 'Above' }, { value: 'below', label: 'Below' }];
+  protected readonly unitSegs: SuSegment[] = [{ value: 'sec', label: 'sec' }, { value: 'min', label: 'min' }];
+  protected readonly severitySegs: SuSegment[] = SEVERITIES.map((s) => ({ value: s, label: severityWord(s) }));
 
   /** Cancel, and the rule's one affirmative: the engine validates the rule and stores it; a refusal is shown in the frame with Try again. */
   readonly dialogActions = computed<readonly DialogAction<true>[]>(() => [
@@ -160,6 +127,18 @@ export class RuleDialog implements DialogContent<true>, OnInit {
     const secs = this.holdSecs();
     if (this.hold().trim() === '' || !Number.isInteger(secs) || secs < 0 || secs > MAX_HOLD_SECS) return 'The time must be a whole number from 0 to 60 minutes.';
     return null;
+  }
+
+  protected setMetric(id: string): void {
+    const m = CUSTOM_METRICS.find((x) => x.id === id);
+    if (m) this.metric.set(m.id);
+  }
+  protected setOp(value: string): void {
+    this.op.set(value === 'below' ? 'below' : 'above');
+  }
+  protected setSeverity(value: string): void {
+    const s = SEVERITIES.find((x) => x === value);
+    if (s) this.severity.set(s);
   }
 
   protected setUnit(u: 'sec' | 'min'): void {

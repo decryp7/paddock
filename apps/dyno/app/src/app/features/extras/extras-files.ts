@@ -5,6 +5,8 @@ import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
 import { MIN_SIZES, MODES, type FileRow, baseName, dirName, fileRows, middleEllipsis, scanSentence } from './files-model';
 import { EXTRAS_STYLES } from './extras-styles';
+import { MatButton } from '@angular/material/button';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 
 /**
  * Large and duplicate files in a folder the person chooses. Searching only reads: Dyno lists the files and moves or
@@ -12,25 +14,17 @@ import { EXTRAS_STYLES } from './extras-styles';
  */
 @Component({
   selector: 'dy-extras-files',
-  imports: [AsyncState, Icon],
+  imports: [SuSegmentedControl, MatButton, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Search">
-      <button type="button" class="btn primary" [disabled]="store.finder().loading" (click)="store.chooseFolder()"><dy-icon name="folder" /> {{ store.folder() ? 'Choose another folder…' : 'Choose a folder…' }}</button>
+      <button type="button" matButton="filled" [disabled]="store.finder().loading" (click)="store.chooseFolder()"><dy-icon name="folder" /> {{ store.folder() ? 'Choose another folder…' : 'Choose a folder…' }}</button>
       @if (store.folder(); as f) {
         <span class="folder path" [title]="f">{{ short(f) }}</span>
       }
       <span class="grow"></span>
-      <div class="seg" role="group" aria-label="Look for">
-        @for (m of modes; track m.mode) {
-          <button type="button" [attr.aria-pressed]="store.mode() === m.mode" (click)="store.setMode(m.mode)">{{ m.label }}</button>
-        }
-      </div>
-      <div class="seg" role="group" aria-label="At least this big">
-        @for (s of sizes; track s.mib) {
-          <button type="button" [attr.aria-pressed]="store.minMib() === s.mib" (click)="store.setMinMib(s.mib)">{{ s.label }}</button>
-        }
-      </div>
+      <pd-segmented-control label="Look for" [options]="modeSegs" [value]="store.mode()" (valueChange)="pickMode($event)" />
+      <pd-segmented-control label="At least this big" [options]="sizeSegs" [value]="store.minMib() + ''" (valueChange)="store.setMinMib(+$event)" />
     </div>
 
     @if (!store.folder() && !store.finder().error) {
@@ -97,6 +91,12 @@ export class ExtrasFiles {
   protected readonly store = inject(ExtrasStore);
   protected readonly modes = MODES;
   protected readonly sizes = MIN_SIZES;
+  protected readonly modeSegs: SuSegment[] = MODES.map((m) => ({ value: m.mode, label: m.label }));
+  protected readonly sizeSegs: SuSegment[] = MIN_SIZES.map((s) => ({ value: String(s.mib), label: s.label }));
+  protected pickMode(value: string): void {
+    const m = MODES.find((x) => x.mode === value);
+    if (m) void this.store.setMode(m.mode);
+  }
   private readonly collapsed = signal<ReadonlySet<string>>(new Set());
 
   protected readonly result = computed(() => this.store.finder().data);

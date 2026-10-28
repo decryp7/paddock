@@ -5,6 +5,7 @@ import { formatDuration, formatStamp } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { ThrottleStore } from '../../state/throttle.store';
 import { CAUSE_LABEL, CAUSE_TONE, type SortDirection, confidenceText, episodeSeconds, sortEpisodes, verdictTone } from './throttling-model';
+import { MatButton } from '@angular/material/button';
 
 /**
  * Throttling: whether the CPU is running slower than it should and why. One reading now (words, confidence and the numbers
@@ -13,7 +14,7 @@ import { CAUSE_LABEL, CAUSE_TONE, type SortDirection, confidenceText, episodeSec
  */
 @Component({
   selector: 'dy-throttling-page',
-  imports: [AsyncState, Icon],
+  imports: [MatButton, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -93,7 +94,7 @@ import { CAUSE_LABEL, CAUSE_TONE, type SortDirection, confidenceText, episodeSec
             </section>
 
             <section class="inputs" aria-label="What Dyno can see on this machine">
-              <button type="button" class="btn sm ghost" [attr.aria-expanded]="inputsOpen()" aria-controls="throttle-inputs" (click)="userOpen.set(!inputsOpen())">
+              <button type="button" matButton="text" [attr.aria-expanded]="inputsOpen()" aria-controls="throttle-inputs" (click)="userOpen.set(!inputsOpen())">
                 <dy-icon [name]="inputsOpen() ? 'chevron-down' : 'chevron-right'" /> What Dyno can see on this machine
               </button>
               @if (inputsOpen()) {

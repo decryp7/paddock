@@ -23,6 +23,10 @@ import {
   trendText,
   unavailableSources,
 } from './issues-model';
+import { MatButton } from '@angular/material/button';
+import { MatFormField, MatPrefix } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 
 /**
  * What the operating system recorded going wrong: a stability score for today and the last days, the apps and kinds with
@@ -31,7 +35,7 @@ import {
  */
 @Component({
   selector: 'dy-issues-view',
-  imports: [AsyncState, Chart, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [SuSegmentedControl, MatFormField, MatInput, MatPrefix, MatButton, AsyncState, Chart, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -88,12 +92,8 @@ import {
         }
 
         <div class="bar" role="group" aria-label="Filters">
-          <label class="search"><dy-icon name="search" /><input class="input" type="search" placeholder="Search apps and messages" aria-label="Search issues" [value]="filter().search" (input)="setFilter({ search: $any($event.target).value })" /></label>
-          <div class="seg" role="group" aria-label="Period">
-            @for (d of windows; track d) {
-              <button type="button" [attr.aria-pressed]="store.days() === d" (click)="store.setDays(d)">{{ d }} days</button>
-            }
-          </div>
+          <mat-form-field class="search"><dy-icon matPrefix name="search" /><input matInput type="search" placeholder="Search apps and messages" aria-label="Search issues" [value]="filter().search" (input)="setFilter({ search: $any($event.target).value })" /></mat-form-field>
+          <pd-segmented-control label="Period" [options]="windowSegs" [value]="store.days() + ''" (valueChange)="store.setDays(+$event)" />
           @if (filter().app || filter().kind) {
             <button type="button" class="chip-btn" aria-label="Clear the filter" (click)="clear()">
               {{ filter().app ?? kindLabel(filter().kind!) }} <dy-icon name="close" />
@@ -155,8 +155,8 @@ import {
                 <pre class="evidence sel">{{ s.evidence }}</pre>
               }
               <div class="dacts">
-                <button type="button" class="btn sm" (click)="copy(s)"><dy-icon name="copy" /> Copy</button>
-                @if (s.app) { <button type="button" class="btn sm" (click)="setFilter({ app: s.app })"><dy-icon name="filter" /> Only this app</button> }
+                <button type="button" matButton="outlined" (click)="copy(s)"><dy-icon name="copy" /> Copy</button>
+                @if (s.app) { <button type="button" matButton="outlined" (click)="setFilter({ app: s.app })"><dy-icon name="filter" /> Only this app</button> }
               </div>
             </aside>
           }
@@ -249,6 +249,7 @@ export class IssuesView {
   private readonly notifier = inject(Notifier);
   private readonly lookups = inject(Lookups);
   protected readonly windows = ISSUE_WINDOWS;
+  protected readonly windowSegs: SuSegment[] = ISSUE_WINDOWS.map((d) => ({ value: String(d), label: `${d} days` }));
   protected readonly filter = signal<IssueFilter>(NO_FILTER);
   protected readonly selectedId = signal<string | null>(null);
   private readonly collapsed = signal<ReadonlySet<string>>(new Set());

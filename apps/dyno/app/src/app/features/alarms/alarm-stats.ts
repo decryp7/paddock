@@ -3,11 +3,12 @@ import { AsyncState } from '../../shared/async-state';
 import { formatDuration } from '../../shared/format';
 import { AlarmsStore } from '../../state/alarms.store';
 import { TABLE_CSS } from './alarms-css';
+import { MatButton } from '@angular/material/button';
 
 /** How the built-in alerts behave: time to acknowledge, the noisiest rules (with Mute) and the engine's suggestions. */
 @Component({
   selector: 'dy-alarm-stats',
-  imports: [AsyncState],
+  imports: [MatButton, AsyncState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="stats-h">
@@ -30,7 +31,7 @@ import { TABLE_CSS } from './alarms-css';
                     <div class="row" role="row">
                       <span class="cell" role="cell"><span class="truncate id" [title]="n.rule">{{ n.rule }}</span>@if (muted(n.rule)) {<span class="faint sfx">Muted</span>}</span>
                       <span class="cell r num" role="cell">×{{ n.occurrences }}</span>
-                      <span class="cell acts" role="cell"><button type="button" class="btn sm ghost text-act" [attr.aria-label]="(muted(n.rule) ? 'Unmute ' : 'Mute ') + n.rule" (click)="store.mute(n.rule, !muted(n.rule))">{{ muted(n.rule) ? 'Unmute' : 'Mute' }}</button></span>
+                      <span class="cell acts" role="cell"><button type="button" matButton="text" class="text-act" [attr.aria-label]="(muted(n.rule) ? 'Unmute ' : 'Mute ') + n.rule" (click)="store.mute(n.rule, !muted(n.rule))">{{ muted(n.rule) ? 'Unmute' : 'Mute' }}</button></span>
                     </div>
                   }
                 </div>

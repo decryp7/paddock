@@ -6,11 +6,12 @@ import { Icon } from '../../shared/icon';
 import { GRADE_LABEL, GRADE_TONE, SEVERITY_LABEL, SEVERITY_TONE } from '../../shared/labels';
 import { Ring } from '../../shared/ring';
 import { HealthStore } from '../../state/health.store';
+import { MatButton } from '@angular/material/button';
 
 /** The health score with its top reasons. */
 @Component({
   selector: 'dy-health-hero',
-  imports: [Ring, Icon],
+  imports: [MatButton, Ring, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" aria-label="Health score">
@@ -49,7 +50,7 @@ import { HealthStore } from '../../state/health.store';
         <div class="err" role="alert">
           <dy-icon name="alert" />
           <div class="text"><strong>{{ e.message }}</strong>@if (hint(); as h) {<span>{{ h }}</span>}</div>
-          <button type="button" class="btn sm" (click)="store.loadReport()"><dy-icon name="refresh" /> Retry</button>
+          <button type="button" matButton="outlined" (click)="store.loadReport()"><dy-icon name="refresh" /> Retry</button>
         </div>
       } @else {
         <div class="score" aria-busy="true" aria-label="Loading health">

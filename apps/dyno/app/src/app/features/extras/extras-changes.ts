@@ -5,19 +5,16 @@ import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
 import { CHANGE_KIND_LABEL, CHANGE_WINDOWS, changeRows, changeTone, watchingNote } from './extras-model';
 import { EXTRAS_STYLES } from './extras-styles';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 
 /** What changed on this computer: installs, updates, new start-up items and setting changes, grouped by day. */
 @Component({
   selector: 'dy-extras-changes',
-  imports: [AsyncState, Icon],
+  imports: [SuSegmentedControl, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Window">
-      <div class="seg" role="group" aria-label="Period">
-        @for (w of windows; track w.hours) {
-          <button type="button" [attr.aria-pressed]="store.hours() === w.hours" (click)="store.setHours(w.hours)">{{ w.label }}</button>
-        }
-      </div>
+      <pd-segmented-control label="Period" [options]="windowSegs" [value]="store.hours() + ''" (valueChange)="store.setHours(+$event)" />
       <span class="grow"></span>
       @if (watching()) { <span class="faint muted">{{ watching() }}</span> }
     </div>
@@ -65,6 +62,7 @@ import { EXTRAS_STYLES } from './extras-styles';
 export class ExtrasChanges implements OnInit {
   protected readonly store = inject(ExtrasStore);
   protected readonly windows = CHANGE_WINDOWS;
+  protected readonly windowSegs: SuSegment[] = CHANGE_WINDOWS.map((w) => ({ value: String(w.hours), label: w.label }));
   protected readonly state = this.store.changes;
   protected readonly data = computed(() => this.store.changes().data);
   protected readonly rows = computed(() => {

@@ -41,11 +41,12 @@ describe('dy-reports-page', () => {
   it('offers the week choices and shows an empty week as a valid report', async () => {
     const { f, el } = render();
     await settle(f);
-    const select = el.querySelector<HTMLSelectElement>('select[aria-label="Week"]')!;
-    expect(select.options[0]!.textContent).toBe('Last 7 days');
-    expect(select.options).toHaveLength(12);
-    select.value = '6';
-    select.dispatchEvent(new Event('change'));
+    (el.querySelector('mat-select[aria-label="Week"] .mat-mdc-select-trigger') as HTMLElement).click();
+    f.detectChanges();
+    const options = [...document.querySelectorAll<HTMLElement>('mat-option')];
+    expect(options[0]!.textContent?.trim()).toBe('Last 7 days');
+    expect(options).toHaveLength(12);
+    options[6]!.click();
     await settle(f);
     expect(TestBed.inject(ReportsStore).weeksAgo()).toBe(6);
     expect(el.querySelector('.empty')?.textContent).toContain('Nothing to report');

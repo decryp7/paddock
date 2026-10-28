@@ -11,6 +11,7 @@ import { Notifier } from '../../shared/notifier';
 import { UnusualStore } from '../../state/unusual.store';
 import { Lookups } from '../lookup/lookups';
 import { hue, initial, learningText, whyText } from './issues-model';
+import { MatButton, MatIconButton } from '@angular/material/button';
 
 /**
  * Programs that are new on this computer, and why some of them may be worth a look. A transparency tool: it lists reasons
@@ -19,7 +20,7 @@ import { hue, initial, learningText, whyText } from './issues-model';
  */
 @Component({
   selector: 'dy-unusual-view',
-  imports: [AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger],
+  imports: [MatButton, MatIconButton, AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -28,11 +29,11 @@ import { hue, initial, learningText, whyText } from './issues-model';
         <div class="bar" role="group" aria-label="New programs">
           <span class="learn">{{ learning() }}</span>
           <span class="grow"></span>
-          <button type="button" class="btn ghost icon" aria-label="More actions" [cdkMenuTriggerFor]="more"><dy-icon name="more" /></button>
+          <button type="button" matIconButton aria-label="More actions" [cdkMenuTriggerFor]="more"><dy-icon name="more" /></button>
         </div>
 
         @if (!o.enabled) {
-          <div class="none"><dy-icon name="eye" /><strong>Watching for new programs is off</strong><span>Turn it on in Settings and Dyno starts learning which programs are normal here.</span><button type="button" class="btn" (click)="openSettings()">Open settings</button></div>
+          <div class="none"><dy-icon name="eye" /><strong>Watching for new programs is off</strong><span>Turn it on in Settings and Dyno starts learning which programs are normal here.</span><button type="button" matButton="outlined" (click)="openSettings()">Open settings</button></div>
         } @else if (o.items.length === 0) {
           <div class="none">
             <dy-icon [name]="o.learning.active ? 'clock' : 'check'" />
@@ -79,7 +80,7 @@ import { hue, initial, learningText, whyText } from './issues-model';
                   <dt>Last seen</dt><dd>{{ s.lastSeen > 0 ? (s.running ? 'Running now' : ago(s.lastSeen)) : 'Has not run since' }}</dd>
                 </dl>
                 <div class="dacts">
-                  @if (s.exe) { <button type="button" class="btn sm" (click)="copy(s.exe)"><dy-icon name="copy" /> Copy path</button> }
+                  @if (s.exe) { <button type="button" matButton="outlined" (click)="copy(s.exe)"><dy-icon name="copy" /> Copy path</button> }
                 </div>
                 <p class="hint">Dyno never ends or removes a program because of what is shown here.</p>
               </aside>

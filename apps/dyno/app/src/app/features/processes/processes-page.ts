@@ -12,6 +12,8 @@ import { Lookups } from '../lookup/lookups';
 import { ProcessesStore } from '../../state/processes.store';
 import { ProcessDetailsPanel } from './process-details';
 import { type Row, type SortKey, type ViewMode } from './process-rows';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 
 const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
   { key: 'name', label: 'Name', align: 'l' },
@@ -25,7 +27,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
 /** The task manager: every app and process, grouped by app, as a tree or flat; sortable, searchable, with a details panel and lookups. Read-only: nothing here changes a process. */
 @Component({
   selector: 'dy-processes-page',
-  imports: [Icon, FormsModule, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger, ProcessDetailsPanel],
+  imports: [SuSegmentedControl, MatButton, MatIconButton, Icon, FormsModule, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger, ProcessDetailsPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap">
@@ -34,23 +36,19 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
           <h1>Processes</h1>
           <p class="num">{{ summary() }}</p>
         </div>
-        <div class="seg" role="group" aria-label="View">
-          @for (m of modes; track m.id) {
-            <button type="button" [attr.aria-pressed]="store.mode() === m.id" (click)="store.setMode(m.id)"><dy-icon [name]="m.icon" /> {{ m.label }}</button>
-          }
-        </div>
+        <pd-segmented-control label="View" [options]="modeSegs()" [value]="store.mode()" (valueChange)="pickMode($event)" />
         <label class="search">
           <dy-icon name="search" />
           <input type="search" placeholder="Filter by name, user or PID" aria-label="Filter processes" [ngModel]="store.query()" (ngModelChange)="store.setQuery($event)" autocomplete="off" spellcheck="false" />
         </label>
-        <button type="button" class="btn" (click)="lockers()"><dy-icon name="lock" /> What is locking this file?</button>
+        <button type="button" matButton="outlined" (click)="lockers()"><dy-icon name="lock" /> What is locking this file?</button>
       </header>
 
       @if (store.actionError(); as e) {
         <div class="banner" role="alert">
           <dy-icon name="alert" />
           <span><strong>{{ e.message }}</strong> @if (hint(); as h) {<small>{{ h }}</small>}</span>
-          <button type="button" class="btn ghost icon sm" aria-label="Dismiss" (click)="store.dismissError()"><dy-icon name="close" /></button>
+          <button type="button" matIconButton aria-label="Dismiss" (click)="store.dismissError()"><dy-icon name="close" /></button>
         </div>
       }
 
@@ -77,7 +75,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
               }
             </div>
           } @else if (store.rows().length === 0) {
-            <div class="empty"><dy-icon name="search" /><strong>No process matches “{{ store.query() }}”.</strong><button type="button" class="btn sm" (click)="store.setQuery('')">Clear filter</button></div>
+            <div class="empty"><dy-icon name="search" /><strong>No process matches “{{ store.query() }}”.</strong><button type="button" matButton="outlined" (click)="store.setQuery('')">Clear filter</button></div>
           } @else {
             <cdk-virtual-scroll-viewport itemSize="32" minBufferPx="320" maxBufferPx="640" class="vp" (keydown)="key($event)">
               <div
@@ -139,7 +137,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                 <span role="gridcell" class="r num faint">{{ pid(r) }}</span>
                 <span role="gridcell" class="act">
                   @if (r.kind !== 'other') {
-                  <button type="button" class="btn ghost icon sm" [attr.aria-label]="'Actions for ' + r.name" [cdkMenuTriggerFor]="menu" [cdkMenuTriggerData]="{ row: r }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
+                  <button type="button" matIconButton [attr.aria-label]="'Actions for ' + r.name" [cdkMenuTriggerFor]="menu" [cdkMenuTriggerData]="{ row: r }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
                   }
                 </span>
               </div>
@@ -220,6 +218,11 @@ export class ProcessesPage implements OnInit, OnDestroy {
 
   protected readonly columns = COLUMNS;
   protected readonly placeholders = Array.from({ length: 12 }, (_, i) => i);
+  protected pickMode(value: string): void {
+    const m = this.modes.find((x) => x.id === value);
+    if (m) this.store.setMode(m.id);
+  }
+  protected readonly modeSegs = computed<SuSegment[]>(() => this.modes.map((m) => ({ value: m.id, label: m.label })));
   protected readonly modes: { id: ViewMode; label: string; icon: 'layers' | 'rules' | 'processes' }[] = [
     { id: 'groups', label: 'Apps', icon: 'layers' },
     { id: 'tree', label: 'Tree', icon: 'rules' },

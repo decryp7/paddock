@@ -64,22 +64,17 @@ describe('dy-extras-page', () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
-  it('follows the tab named in the address, ignores a name it does not know, and moves with the arrow keys', async () => {
+  it('follows the tab named in the address, ignores a name it does not know, and moves with the tab links', async () => {
     expect(tabFrom('files')).toBe('files');
     expect(tabFrom('nope')).toBe('changes');
     expect(tabFrom(null)).toBe('changes');
     const { f, el } = render('gpu');
     await settle(f);
     expect(tabBtn(el, 'GPU').getAttribute('aria-selected')).toBe('true');
-    const press = (key: string) => el.querySelector('[role="tab"][aria-selected="true"]')!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-    press('ArrowRight');
-    await settle(f);
+    await clickTab(f, el, 'Files');
     expect(tabBtn(el, 'Files').getAttribute('aria-selected')).toBe('true');
-    press('ArrowLeft');
-    press('ArrowLeft');
-    await settle(f);
+    await clickTab(f, el, 'Apps');
     expect(tabBtn(el, 'Apps').getAttribute('aria-selected')).toBe('true');
-    press('x');
     expect(TestBed.inject(Router).url).toContain('tab=apps');
   });
 
@@ -261,7 +256,7 @@ describe('dy-extras-page', () => {
     const { f, el, mock } = render('files');
     await settle(f);
     expect(el.querySelector('.none strong')!.textContent).toBe('Find big and duplicate files');
-    expect(el.querySelectorAll('.btn.primary')).toHaveLength(1);
+    expect(el.querySelectorAll('button[matButton="filled"]')).toHaveLength(1);
     btn(el, 'Choose a folder').click();
     await settle(f);
     expect(mock.pickedFolders).toBe(1);
@@ -312,17 +307,17 @@ describe('dy-extras-page', () => {
       expect(el.querySelector<HTMLInputElement>('input[aria-label="Window 1 starts"]')!.value).toBe('22:00');
       expect(el.querySelector<HTMLInputElement>('input[aria-label="Window 1 ends"]')!.value).toBe('02:00');
       expect(el.textContent).toContain('Mon to Fri, 22:00 to 02:00 the next day');
-      expect(el.querySelectorAll('.btn.primary')).toHaveLength(1);
+      expect(el.querySelectorAll('button[matButton="filled"]')).toHaveLength(1);
       expect(btn(el, 'Save windows').disabled).toBe(true);
     });
 
     it('edits days, times and windows, validates early, and saves through the settings', async () => {
       const { f, el, mock, store } = render('maintenance');
       await settle(f);
-      const day = (w: number, name: string) => el.querySelectorAll('li.win')[w]!.querySelector<HTMLButtonElement>(`[aria-label="${name}"]`)!;
-      day(0, 'Saturday').click();
+      const day = (w: number, name: string) => [...el.querySelectorAll('li.win')[w]!.querySelectorAll<HTMLButtonElement>('mat-button-toggle button')].find((b) => b.textContent?.trim() === name)!;
+      day(0, 'Sat').click();
       await settle(f);
-      expect(day(0, 'Saturday').getAttribute('aria-pressed')).toBe('true');
+      expect(day(0, 'Sat').getAttribute('aria-pressed')).toBe('true');
       expect(btn(el, 'Save windows').disabled).toBe(false);
       const start = el.querySelector<HTMLInputElement>('input[aria-label="Window 1 starts"]')!;
       start.value = '21:30';

@@ -5,6 +5,7 @@ import { IssuesStore } from '../../state/issues.store';
 import { UnusualStore } from '../../state/unusual.store';
 import { IssuesView } from './issues-view';
 import { UnusualView } from './unusual-view';
+import { MatButton, MatIconButton } from '@angular/material/button';
 
 type View = 'issues' | 'unusual';
 
@@ -15,7 +16,7 @@ type View = 'issues' | 'unusual';
  */
 @Component({
   selector: 'dy-issues-page',
-  imports: [Icon, IssuesView, UnusualView],
+  imports: [MatButton, MatIconButton, Icon, IssuesView, UnusualView],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -25,10 +26,10 @@ type View = 'issues' | 'unusual';
           <p>Crashes and other problems your system logged, and programs that are new here. Dyno only reads; it changes nothing.</p>
         </div>
         @if (view() === 'issues') {
-          <button type="button" class="btn ghost" [disabled]="issues.exporting() || !issues.overview()" (click)="issues.exportForDebrief()">
+          <button type="button" matButton="text" [disabled]="issues.exporting() || !issues.overview()" (click)="issues.exportForDebrief()">
             <dy-icon name="file" /> {{ issues.exporting() ? 'Saving…' : 'Export for Debrief…' }}
           </button>
-          <button type="button" class="btn ghost icon" aria-label="Read the system logs now" title="Read the system logs now" [disabled]="issues.rescanning()" (click)="issues.rescan()">
+          <button type="button" matIconButton aria-label="Read the system logs now" title="Read the system logs now" [disabled]="issues.rescanning()" (click)="issues.rescan()">
             <dy-icon name="refresh" [class.spin]="issues.rescanning()" />
           </button>
         }

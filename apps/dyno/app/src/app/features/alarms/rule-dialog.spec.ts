@@ -43,7 +43,7 @@ describe('RuleDialog (dy.alert-rule)', () => {
 
   it('adds a rule with a generated unique id and answers true', async () => {
     const { d, backend, set, click, settle } = await open({ rule: null, takenIds: ['gpu-limit'] });
-    await set('#rule-name', 'GPU limit');
+    await set('[aria-label="Name"]', 'GPU limit');
     await click('Critical');
     await click('Below');
     await click('Increase the limit');
@@ -61,7 +61,7 @@ describe('RuleDialog (dy.alert-rule)', () => {
     await settle();
     expect(d.el.textContent).toContain('Give the rule a name.');
     expect(d.outcome()).toBeNull();
-    await set('#rule-name', 'Hot');
+    await set('[aria-label="Name"]', 'Hot');
     await set('[aria-label="Limit"]', 'abc');
     await d.press('save');
     await settle();
@@ -88,7 +88,7 @@ describe('RuleDialog (dy.alert-rule)', () => {
     await click('sec');
     expect(d.el.querySelector<HTMLInputElement>('[aria-label="Duration"]')!.value).toBe('120');
     await click('Decrease the limit');
-    await set('#rule-name', 'GPU hot');
+    await set('[aria-label="Name"]', 'GPU hot');
     await d.press('save');
     await settle();
     expect((await stored(backend)).find((r) => r.id === 'gpu-limit')).toMatchObject({ name: 'GPU hot', limit: 85, forSecs: 120 });

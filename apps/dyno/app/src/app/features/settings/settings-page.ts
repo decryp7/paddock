@@ -6,16 +6,20 @@ import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
-import { Switch } from '../../shared/switch';
+import { MatSlideToggle } from '@angular/material/slide-toggle';
 import { SettingsStore } from '../../state/settings.store';
 import { LOOKUP_PRESETS, presetIdFor, templateProblem } from './ip-lookup-presets';
 import { TrayItemsEditor } from './tray-items-editor';
 import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
+import { MatButton } from '@angular/material/button';
+import { MatFormField, MatSuffix } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 
 /** Dyno's page of the Settings window (Appearance, Updates and About are the shell's): start-up, sampling and retention, the tray, alert thresholds, the observe-only posture and plugins. */
 @Component({
   selector: 'dy-settings-page',
-  imports: [FormsModule, Switch, AsyncState, Icon, TrayItemsEditor],
+  imports: [PdSelect, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, TrayItemsEditor],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page narrow">
@@ -25,8 +29,8 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
           <span class="save-error" role="alert">{{ failed.message }}</span>
         }
         @if (dirty()) {
-          <button type="button" class="btn" (click)="revert()">Discard changes</button>
-          <button type="button" class="btn primary" [disabled]="store.saving() || !!backupProblem()" (click)="save()">Save changes</button>
+          <button type="button" matButton="outlined" (click)="revert()">Discard changes</button>
+          <button type="button" matButton="filled" [disabled]="store.saving() || !!backupProblem()" (click)="save()">Save changes</button>
         }
       </header>
 
@@ -39,7 +43,7 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
               <h2>Start-up</h2>
               <div class="row">
                 <div class="lbl"><strong>Start Dyno at login</strong><small>The background agent keeps measuring either way once it is running.</small></div>
-                <dy-switch [checked]="d.launchAtLogin" (changed)="set({ launchAtLogin: $event })" label="Start Dyno at login" />
+                <mat-slide-toggle [checked]="d.launchAtLogin" aria-label="Start Dyno at login" (change)="set({ launchAtLogin: $event.checked })" />
               </div>
             </section>
 
@@ -47,35 +51,27 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
               <h2>Measuring and history</h2>
               <div class="row">
                 <div class="lbl"><strong>System sampling</strong><small>How often CPU, memory, disk and network are read. Faster costs a little more.</small></div>
-                <select class="select" aria-label="System sampling interval" [ngModel]="d.sampling.intervalMs" (ngModelChange)="setSampling({ intervalMs: +$event })">
-                  @for (o of systemIntervals; track o) {
-                    <option [ngValue]="o">{{ every(o) }}</option>
-                  }
-                </select>
+                <pd-select [options]="systemChoices" [value]="d.sampling.intervalMs + ''" ariaLabel="System sampling interval" (valueChange)="setSampling({ intervalMs: +$event })" />
               </div>
               <div class="row">
                 <div class="lbl"><strong>Process sampling</strong><small>How often the process list is read.</small></div>
-                <select class="select" aria-label="Process sampling interval" [ngModel]="d.sampling.processIntervalMs" (ngModelChange)="setSampling({ processIntervalMs: +$event })">
-                  @for (o of processIntervals; track o) {
-                    <option [ngValue]="o">{{ every(o) }}</option>
-                  }
-                </select>
+                <pd-select [options]="processChoices" [value]="d.sampling.processIntervalMs + ''" ariaLabel="Process sampling interval" (valueChange)="setSampling({ processIntervalMs: +$event })" />
               </div>
               <div class="row">
                 <div class="lbl"><strong>Keep raw samples</strong><small>Hours of one-sample-per-tick history, stored in the agent's local database.</small></div>
-                <label class="num-in"><input class="input" type="number" min="1" max="72" aria-label="Hours of raw samples" [ngModel]="d.retention.rawHours" (ngModelChange)="setRetention({ rawHours: +$event })" /><span>hours</span></label>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" max="72" aria-label="Hours of raw samples" [ngModel]="d.retention.rawHours" (ngModelChange)="setRetention({ rawHours: +$event })" /><span matTextSuffix>hours</span></mat-form-field>
               </div>
               <div class="row">
                 <div class="lbl"><strong>Keep 1-minute roll-ups</strong><small>Older history is averaged into minutes, then quarter-hours, so it stays small.</small></div>
-                <label class="num-in"><input class="input" type="number" min="1" max="30" aria-label="Days of 1-minute roll-ups" [ngModel]="d.retention.minuteDays" (ngModelChange)="setRetention({ minuteDays: +$event })" /><span>days</span></label>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" max="30" aria-label="Days of 1-minute roll-ups" [ngModel]="d.retention.minuteDays" (ngModelChange)="setRetention({ minuteDays: +$event })" /><span matTextSuffix>days</span></mat-form-field>
               </div>
               <div class="row">
                 <div class="lbl"><strong>Keep 15-minute roll-ups</strong><small>The longest view of how your PC behaves.</small></div>
-                <label class="num-in"><input class="input" type="number" min="7" max="400" aria-label="Days of 15-minute roll-ups" [ngModel]="d.retention.quarterHourDays" (ngModelChange)="setRetention({ quarterHourDays: +$event })" /><span>days</span></label>
+                <mat-form-field class="num-in"><input matInput type="number" min="7" max="400" aria-label="Days of 15-minute roll-ups" [ngModel]="d.retention.quarterHourDays" (ngModelChange)="setRetention({ quarterHourDays: +$event })" /><span matTextSuffix>days</span></mat-form-field>
               </div>
               <div class="row">
                 <div class="lbl"><strong>Keep hourly roll-ups</strong><small>Hourly averages with the minimum and maximum, for the 30-day view and beyond.</small></div>
-                <label class="num-in"><input class="input" type="number" min="30" max="1100" aria-label="Days of hourly roll-ups" [ngModel]="d.retention.hourDays" (ngModelChange)="setRetention({ hourDays: +$event })" /><span>days</span></label>
+                <mat-form-field class="num-in"><input matInput type="number" min="30" max="1100" aria-label="Days of hourly roll-ups" [ngModel]="d.retention.hourDays" (ngModelChange)="setRetention({ hourDays: +$event })" /><span matTextSuffix>days</span></mat-form-field>
               </div>
             </section>
 
@@ -90,18 +86,13 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
               <p class="sub">“Look up IP” on the Network page opens this address in your browser with the remote address filled in. Dyno never fetches it, and only the address goes into it. Private and local addresses are never looked up.</p>
               <div class="row">
                 <div class="lbl"><strong>Lookup site</strong><small>Pick one, or choose Custom and type your own address.</small></div>
-                <select class="select" aria-label="Lookup site" [ngModel]="presetId()" (ngModelChange)="choosePreset($event)">
-                  @for (p of presets; track p.id) {
-                    <option [value]="p.id">{{ p.name }} — {{ p.about }}</option>
-                  }
-                  <option value="custom">Custom</option>
-                </select>
+                <pd-select class="site" [options]="siteChoices" [value]="presetId()" ariaLabel="Lookup site" (valueChange)="choosePreset($event)" />
               </div>
               <div class="row">
                 <div class="lbl"><strong>Address</strong><small>https, with {{ '{ip}' }} where the address goes.</small></div>
                 <div class="ipt">
-                  <input class="input" type="text" aria-label="Lookup address" maxlength="300" [ngModel]="ipLookup().ipTemplate" (ngModelChange)="setLookup({ ipTemplate: $event })" />
-                  <button type="button" class="btn sm" [disabled]="!!ipProblem()" (click)="testLookup()">Test with 8.8.8.8</button>
+                  <mat-form-field><input matInput type="text" aria-label="Lookup address" maxlength="300" [ngModel]="ipLookup().ipTemplate" (ngModelChange)="setLookup({ ipTemplate: $event })" /></mat-form-field>
+                  <button type="button" matButton="outlined" [disabled]="!!ipProblem()" (click)="testLookup()">Test with 8.8.8.8</button>
                 </div>
                 @if (ipProblem(); as p) {
                   <small class="problem" role="alert">{{ p }}</small>
@@ -110,7 +101,7 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
               <div class="row">
                 <div class="lbl"><strong>Network owner address (optional)</strong><small>Used when a network number (AS) is known. Contains {{ '{asn}' }}.</small></div>
                 <div class="ipt">
-                  <input class="input" type="text" aria-label="ASN lookup address" maxlength="300" [ngModel]="ipLookup().asnTemplate" (ngModelChange)="setLookup({ asnTemplate: $event })" />
+                  <mat-form-field><input matInput type="text" aria-label="ASN lookup address" maxlength="300" [ngModel]="ipLookup().asnTemplate" (ngModelChange)="setLookup({ asnTemplate: $event })" /></mat-form-field>
                 </div>
                 @if (asnProblem(); as p) {
                   <small class="problem" role="alert">{{ p }}</small>
@@ -122,19 +113,19 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
               <h2>Alerts</h2>
               <div class="row">
                 <div class="lbl"><strong>Tell me about problems</strong><small>Low disk space, overheating and long high CPU use. Alerts only inform.</small></div>
-                <dy-switch [checked]="d.alerts.enabled" (changed)="setAlerts({ enabled: $event })" label="Alerts" />
+                <mat-slide-toggle [checked]="d.alerts.enabled" aria-label="Alerts" (change)="setAlerts({ enabled: $event.checked })" />
               </div>
               <div class="row" [class.off]="!d.alerts.enabled">
                 <div class="lbl"><strong>Low disk space</strong><small>Alert when a drive has less than this much free.</small></div>
-                <label class="num-in"><input class="input" type="number" min="1" max="50" [disabled]="!d.alerts.enabled" aria-label="Low disk space percent" [ngModel]="d.alerts.lowDiskPercent" (ngModelChange)="setAlerts({ lowDiskPercent: +$event })" /><span>% free</span></label>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" max="50" [disabled]="!d.alerts.enabled" aria-label="Low disk space percent" [ngModel]="d.alerts.lowDiskPercent" (ngModelChange)="setAlerts({ lowDiskPercent: +$event })" /><span matTextSuffix>% free</span></mat-form-field>
               </div>
               <div class="row" [class.off]="!d.alerts.enabled">
                 <div class="lbl"><strong>Overheating</strong><small>Alert when a sensor passes this temperature.</small></div>
-                <label class="num-in"><input class="input" type="number" min="60" max="120" [disabled]="!d.alerts.enabled" aria-label="Overheating temperature" [ngModel]="d.alerts.overheatCelsius" (ngModelChange)="setAlerts({ overheatCelsius: +$event })" /><span>°C</span></label>
+                <mat-form-field class="num-in"><input matInput type="number" min="60" max="120" [disabled]="!d.alerts.enabled" aria-label="Overheating temperature" [ngModel]="d.alerts.overheatCelsius" (ngModelChange)="setAlerts({ overheatCelsius: +$event })" /><span matTextSuffix>°C</span></mat-form-field>
               </div>
               <div class="row" [class.off]="!d.alerts.enabled">
                 <div class="lbl"><strong>Long high CPU</strong><small>Alert when one app keeps the CPU busy this long.</small></div>
-                <label class="num-in"><input class="input" type="number" min="1" max="240" [disabled]="!d.alerts.enabled" aria-label="Minutes of high CPU" [ngModel]="d.alerts.longHighCpuMinutes" (ngModelChange)="setAlerts({ longHighCpuMinutes: +$event })" /><span>minutes</span></label>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" max="240" [disabled]="!d.alerts.enabled" aria-label="Minutes of high CPU" [ngModel]="d.alerts.longHighCpuMinutes" (ngModelChange)="setAlerts({ longHighCpuMinutes: +$event })" /><span matTextSuffix>minutes</span></mat-form-field>
               </div>
             </section>
 
@@ -143,23 +134,23 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
               <p class="sub">Dyno learns what is normal for this PC at each time of the week, and watches the CPU speed, disks and battery. These only raise alarms when you allow it.</p>
               <div class="row">
                 <div class="lbl"><strong>Learn what is normal</strong><small>Shows on the dashboard what is unusual for this time of the week. Nothing is highlighted while Dyno is still learning.</small></div>
-                <dy-switch [checked]="baselines().enabled" (changed)="setBaselines({ enabled: $event })" label="Learn what is normal" />
+                <mat-slide-toggle [checked]="baselines().enabled" aria-label="Learn what is normal" (change)="setBaselines({ enabled: $event.checked })" />
               </div>
               <div class="row" [class.off]="!baselines().enabled">
                 <div class="lbl"><strong>Learning period</strong><small>Days of history before anything is called unusual (1 to 30).</small></div>
-                <label class="num-in"><input class="input" type="number" min="1" max="30" [disabled]="!baselines().enabled" aria-label="Days of learning" [ngModel]="baselines().learningDays" (ngModelChange)="setLearningDays($event)" /><span>days</span></label>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" max="30" [disabled]="!baselines().enabled" aria-label="Days of learning" [ngModel]="baselines().learningDays" (ngModelChange)="setLearningDays($event)" /><span matTextSuffix>days</span></mat-form-field>
               </div>
               <div class="row" [class.off]="!baselines().enabled">
                 <div class="lbl"><strong>Alarm when far above usual</strong><small>Raises an alarm when something stays far above what is normal for the time of week. Off by default.</small></div>
-                <dy-switch [checked]="baselines().alarms" (changed)="setBaselines({ alarms: $event })" label="Alarm when far above usual" />
+                <mat-slide-toggle [checked]="baselines().alarms" aria-label="Alarm when far above usual" (change)="setBaselines({ alarms: $event.checked })" />
               </div>
               <div class="row">
                 <div class="lbl"><strong>Alarm for throttling</strong><small>Raises an alarm when the CPU is slowed down for a while.</small></div>
-                <dy-switch [checked]="hardwareAlarms().throttling" (changed)="setHardwareAlarms({ throttling: $event })" label="Alarm for throttling" />
+                <mat-slide-toggle [checked]="hardwareAlarms().throttling" aria-label="Alarm for throttling" (change)="setHardwareAlarms({ throttling: $event.checked })" />
               </div>
               <div class="row">
                 <div class="lbl"><strong>Alarm for worn disks and batteries</strong><small>Raises an alarm when a disk or battery is near the end of its life.</small></div>
-                <dy-switch [checked]="hardwareAlarms().lifespan" (changed)="setHardwareAlarms({ lifespan: $event })" label="Alarm for disks and batteries near end of life" />
+                <mat-slide-toggle [checked]="hardwareAlarms().lifespan" aria-label="Alarm for disks and batteries near end of life" (change)="setHardwareAlarms({ lifespan: $event.checked })" />
               </div>
             </section>
 
@@ -168,11 +159,11 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
               <p class="sub">Dyno notes which programs run on this PC and lists new ones on the Issues page, with the reasons some may be worth a look. It only watches: it never ends or removes a program, and it says "unusual because", never "malware".</p>
               <div class="row">
                 <div class="lbl"><strong>Watch for new programs</strong><small>Keeps a list of the programs it has seen, on this PC only.</small></div>
-                <dy-switch [checked]="unusual().enabled" (changed)="setUnusual({ enabled: $event })" label="Watch for new programs" />
+                <mat-slide-toggle [checked]="unusual().enabled" aria-label="Watch for new programs" (change)="setUnusual({ enabled: $event.checked })" />
               </div>
               <div class="row" [class.off]="!unusual().enabled">
                 <div class="lbl"><strong>Learn quietly first</strong><small>For this long after the first look, nothing is listed, so a fresh install does not flag everything it already has.</small></div>
-                <label class="num-in"><input class="input" type="number" min="0" max="60" [disabled]="!unusual().enabled" aria-label="Days of quiet learning" [ngModel]="unusual().learningDays" (ngModelChange)="setUnusual({ learningDays: +$event })" /><span>days</span></label>
+                <mat-form-field class="num-in"><input matInput type="number" min="0" max="60" [disabled]="!unusual().enabled" aria-label="Days of quiet learning" [ngModel]="unusual().learningDays" (ngModelChange)="setUnusual({ learningDays: +$event })" /><span matTextSuffix>days</span></mat-form-field>
               </div>
             </section>
 
@@ -181,17 +172,17 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
               <p class="sub">Dyno reads the state of Time Machine, Windows Backup, File History, restic, Borg and Duplicati on the Backup health page. It never runs or manages a backup.</p>
               <div class="row">
                 <div class="lbl"><strong>Tell me when a backup is out of date</strong><small>Checks every 6 hours, inside the maintenance windows, and raises an alarm.</small></div>
-                <dy-switch [checked]="backup().alertWhenStale" (changed)="setBackup({ alertWhenStale: $event })" label="Tell me when a backup is out of date" />
+                <mat-slide-toggle [checked]="backup().alertWhenStale" aria-label="Tell me when a backup is out of date" (change)="setBackup({ alertWhenStale: $event.checked })" />
               </div>
               <div class="row">
                 <div class="lbl"><strong>Out of date after</strong><small>A backup older than this counts as stale (1 hour to 90 days).</small></div>
-                <label class="num-in"><input class="input" type="number" min="1" max="2160" aria-label="Hours until a backup is out of date" [ngModel]="backup().staleAfterHours" (ngModelChange)="setBackup({ staleAfterHours: +$event })" /><span>hours</span></label>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" max="2160" aria-label="Hours until a backup is out of date" [ngModel]="backup().staleAfterHours" (ngModelChange)="setBackup({ staleAfterHours: +$event })" /><span matTextSuffix>hours</span></mat-form-field>
               </div>
               @for (t of overridable; track t.tool) {
                 <div class="row top">
                   <div class="lbl"><strong>Where {{ t.name }} is installed</strong><small>Only if Dyno cannot find it. Full folder paths, one per line; searched before the usual places.</small></div>
                   <div class="ipt">
-                    <textarea class="input" rows="2" spellcheck="false" [attr.aria-label]="t.name + ' folders'" [ngModel]="overrideValue(t.tool)" (ngModelChange)="setOverride(t.tool, $event)"></textarea>
+                    <mat-form-field><textarea matInput rows="2" spellcheck="false" [attr.aria-label]="t.name + ' folders'" [ngModel]="overrideValue(t.tool)" (ngModelChange)="setOverride(t.tool, $event)"></textarea></mat-form-field>
                     @if (overrideProblem(t.tool); as p) {
                       <small class="problem" role="alert">{{ p }}</small>
                     }
@@ -232,14 +223,15 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
     .ipt { display: flex; gap: var(--sp-2); flex: 1 1 380px; max-width: 560px; }
     .row.top { align-items: flex-start; }
     .ipt:has(textarea) { flex-direction: column; gap: var(--sp-1); }
-    textarea.input { resize: vertical; min-height: 56px; font: var(--fw-regular) 12px / 1.4 var(--font-mono); padding: var(--sp-2) var(--sp-3); height: auto; }
-    .ipt .input { flex: 1; min-width: 0; }
+    mat-form-field textarea { font: var(--fw-regular) 12px / 1.4 var(--font-mono); }
+    .ipt mat-form-field { flex: 1; min-width: 0; }
     .problem { color: var(--bad); font-size: var(--fs-sm); }
     .lbl { display: grid; gap: 2px; min-width: 0; }
     .lbl small, .txt small { color: var(--text-3); font-size: var(--fs-sm); }
     .num-in { display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--control-h); padding: 0 var(--sp-3) 0 var(--sp-1); border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface-inset); color: var(--text-3); white-space: nowrap; }
     .num-in:focus-within { border-color: var(--focus); outline: 1px solid var(--focus); }
-    .num-in .input { width: 56px; height: 100%; padding: 0 var(--sp-1); border: 0; background: none; outline: none; text-align: right; font-variant-numeric: tabular-nums; }
+    .num-in { width: 148px; }
+    .num-in input { text-align: right; font-variant-numeric: tabular-nums; }
     .sub { color: var(--text-3); margin-bottom: var(--sp-3); font-size: var(--fs-sm); }
     .checks { display: flex; gap: var(--sp-3); flex-wrap: wrap; justify-content: flex-end; }
     .check { display: inline-flex; align-items: center; gap: 6px; }
@@ -256,15 +248,15 @@ export class SettingsPage implements OnInit {
   private readonly backend = inject(BACKEND);
   private readonly notifier = inject(Notifier);
   protected readonly draft = signal<Settings | null>(null);
-  protected readonly presets = LOOKUP_PRESETS;
   protected readonly ipLookup = computed(() => this.draft()?.ipLookup ?? { ipTemplate: 'https://ipinfo.io/{ip}', asnTemplate: '' });
   protected readonly presetId = computed(() => presetIdFor(this.ipLookup().ipTemplate));
   protected readonly ipProblem = computed(() => templateProblem(this.ipLookup().ipTemplate, 'ip'));
   protected readonly asnProblem = computed(() => templateProblem(this.ipLookup().asnTemplate, 'asn'));
   protected readonly baselines = computed<BaselineSettings>(() => this.draft()?.baselines ?? { enabled: true, learningDays: 7, alarms: false });
   protected readonly hardwareAlarms = computed<HardwareAlarms>(() => this.draft()?.hardwareAlarms ?? { throttling: true, lifespan: true });
-  protected readonly systemIntervals = [500, 1000, 2000, 5000];
-  protected readonly processIntervals = [1000, 2000, 5000, 10000];
+  protected readonly systemChoices = [500, 1000, 2000, 5000].map((o): PdSelectOption => ({ value: String(o), label: this.every(o) }));
+  protected readonly processChoices = [1000, 2000, 5000, 10000].map((o): PdSelectOption => ({ value: String(o), label: this.every(o) }));
+  protected readonly siteChoices: PdSelectOption[] = [...LOOKUP_PRESETS.map((p) => ({ value: p.id, label: `${p.name} — ${p.about}` })), { value: 'custom', label: 'Custom' }];
   protected readonly hint = computed(() => {
     const e = this.store.error();
     return e ? errorHint(e.code) : null;

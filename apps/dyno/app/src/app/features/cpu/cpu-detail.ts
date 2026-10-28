@@ -12,16 +12,18 @@ import { LiveStore } from '../../state/live.store';
 import { RANGES } from '../dashboard/history-panels';
 import { coreGroups } from './core-layout';
 import { coreHeatmapOption } from './cpu-options';
+import { MatIconButton } from '@angular/material/button';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 
 /** The CPU in detail: every logical core now (load and frequency, grouped by kind), the hottest apps, and a cores x time heatmap. */
 @Component({
   selector: 'dy-cpu-detail',
-  imports: [RouterLink, Icon, Chart, AsyncState],
+  imports: [SuSegmentedControl, MatIconButton, RouterLink, Icon, Chart, AsyncState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <header class="page-head">
-        <a class="btn ghost icon" routerLink="/" aria-label="Back to the dashboard"><dy-icon name="chevron-left" /></a>
+        <a matIconButton routerLink="/" aria-label="Back to the dashboard"><dy-icon name="chevron-left" /></a>
         <div class="titles">
           <h1>CPU</h1>
           <p class="num">{{ summary() }}</p>
@@ -69,11 +71,7 @@ import { coreHeatmapOption } from './cpu-options';
           <div class="card-head">
             <h2><dy-icon name="trend" /> Load per core over time</h2>
             <span class="spacer"></span>
-            <div class="seg" role="group" aria-label="Range">
-              @for (r of ranges; track r.id) {
-                <button type="button" [attr.aria-pressed]="history.range() === r.id" (click)="history.setRange(r.id)">{{ r.label }}</button>
-              }
-            </div>
+            <pd-segmented-control label="Range" [options]="rangeSegs" [value]="history.range()" (valueChange)="pickRange($event)" />
           </div>
           <dy-async [loaded]="!!history.history()" [error]="history.error()" [empty]="noCores()" emptyTitle="No per-core history yet" emptyText="The agent records every core's load; the heatmap fills in as time passes." what="per-core history" [rows]="0" (retry)="history.load()">
             <div skeleton class="skeleton chart-skeleton"></div>
@@ -115,6 +113,11 @@ export class CpuDetail implements OnInit {
   protected readonly history = inject(HistoryStore);
   private readonly theme = inject(ThemeService);
   protected readonly ranges = RANGES;
+  protected readonly rangeSegs: SuSegment[] = RANGES.map((r) => ({ value: r.id, label: r.label }));
+  protected pickRange(value: string): void {
+    const range = RANGES.find((r) => r.id === value);
+    if (range) void this.history.setRange(range.id);
+  }
   protected readonly pct = formatPercent;
   protected readonly show = showMeasured;
   protected readonly cpu = computed(() => this.live.system()?.cpu ?? null);

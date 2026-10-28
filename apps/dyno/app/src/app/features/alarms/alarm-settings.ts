@@ -2,15 +2,16 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import type { AlarmConfig, CommandError, NetworkAlerts, Settings } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { Notifier } from '../../shared/notifier';
-import { Switch } from '../../shared/switch';
+import { MatSlideToggle } from '@angular/material/slide-toggle';
 import { AlarmsStore } from '../../state/alarms.store';
 import { SettingsStore } from '../../state/settings.store';
 import { clockToMinutes, defaultAlarmConfig, minutesToClock, withQuiet } from './alarms-model';
+import { TimeField } from '../../shared/time-field';
 
 /** Network alarms and how alarms reach you: desktop notifications and quiet hours. Every change saves at once. */
 @Component({
   selector: 'dy-alarm-settings',
-  imports: [AsyncState, Switch],
+  imports: [TimeField, AsyncState, MatSlideToggle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="!!settings.settings()" [error]="settings.error()" what="alarm settings" [rows]="3" (retry)="settings.load()">
@@ -19,11 +20,11 @@ import { clockToMinutes, defaultAlarmConfig, minutesToClock, withQuiet } from '.
         <div class="rows">
           <div class="srow">
             <div class="txt"><span class="name">New exposed listener</span><span class="help">A program starts listening on every network interface, so other devices can reach it.</span></div>
-            <dy-switch [checked]="net().newExposedListener" [disabled]="alarms.saving()" label="New exposed listener" (changed)="setNet({ newExposedListener: $event })" />
+            <mat-slide-toggle [checked]="net().newExposedListener" [disabled]="alarms.saving()" aria-label="New exposed listener" (change)="setNet({ newExposedListener: $event.checked })" />
           </div>
           <div class="srow">
             <div class="txt"><span class="name">New remote host</span><span class="help">A program connects to a host it has not talked to before.</span></div>
-            <dy-switch [checked]="net().newRemoteHost" [disabled]="alarms.saving()" label="New remote host" (changed)="setNet({ newRemoteHost: $event })" />
+            <mat-slide-toggle [checked]="net().newRemoteHost" [disabled]="alarms.saving()" aria-label="New remote host" (change)="setNet({ newRemoteHost: $event.checked })" />
           </div>
         </div>
       </section>
@@ -33,23 +34,23 @@ import { clockToMinutes, defaultAlarmConfig, minutesToClock, withQuiet } from '.
         <div class="rows">
           <div class="srow">
             <div class="txt"><span class="name">Desktop notifications</span><span class="help">Show a notification when a new alarm is raised.</span></div>
-            <dy-switch [checked]="settings.settings()?.notifications ?? false" [disabled]="alarms.saving()" label="Desktop notifications" (changed)="setNotifications($event)" />
+            <mat-slide-toggle [checked]="settings.settings()?.notifications ?? false" [disabled]="alarms.saving()" aria-label="Desktop notifications" (change)="setNotifications($event.checked)" />
           </div>
           <div class="srow">
             <div class="txt"><span class="name">Quiet hours</span><span class="help">No notifications between these times. Alarms are still recorded.</span></div>
-            <dy-switch [checked]="quiet().enabled" [disabled]="alarms.saving()" label="Quiet hours" (changed)="setQuiet({ enabled: $event })" />
+            <mat-slide-toggle [checked]="quiet().enabled" [disabled]="alarms.saving()" aria-label="Quiet hours" (change)="setQuiet({ enabled: $event.checked })" />
           </div>
           <div class="srow" [class.off]="!quiet().enabled">
             <div class="txt"><span class="name">From and until</span><span class="help">An end before the start runs past midnight.</span></div>
             <div class="times">
-              <input class="input" type="time" aria-label="Quiet hours start" [disabled]="!quiet().enabled" [value]="clock(quiet().startMinute)" (change)="setTime('startMinute', $any($event.target).value)" />
+              <dy-time-field label="Quiet hours start" [disabled]="!quiet().enabled" [value]="clock(quiet().startMinute)" (timeChange)="setTime('startMinute', $event)" />
               <span class="faint" aria-hidden="true">to</span>
-              <input class="input" type="time" aria-label="Quiet hours end" [disabled]="!quiet().enabled" [value]="clock(quiet().endMinute)" (change)="setTime('endMinute', $any($event.target).value)" />
+              <dy-time-field label="Quiet hours end" [disabled]="!quiet().enabled" [value]="clock(quiet().endMinute)" (timeChange)="setTime('endMinute', $event)" />
             </div>
           </div>
           <div class="srow" [class.off]="!quiet().enabled">
             <div class="txt"><span class="name">Critical alarms still notify</span><span class="help">Critical alarms break through quiet hours.</span></div>
-            <dy-switch [checked]="quiet().criticalBypass" [disabled]="alarms.saving() || !quiet().enabled" label="Critical alarms still notify" (changed)="setQuiet({ criticalBypass: $event })" />
+            <mat-slide-toggle [checked]="quiet().criticalBypass" [disabled]="alarms.saving() || !quiet().enabled" aria-label="Critical alarms still notify" (change)="setQuiet({ criticalBypass: $event.checked })" />
           </div>
         </div>
       </section>

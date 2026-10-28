@@ -29,6 +29,10 @@ import {
   summarise,
   tableRows,
 } from './network-model';
+import { MatButton } from '@angular/material/button';
+import { MatFormField, MatPrefix } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 
 type Tab = 'connections' | 'listening';
 type Row = TableRow<ConnectionRow> | TableRow<ListenerRow>;
@@ -53,7 +57,7 @@ function readCollapsed(): Set<string> {
  */
 @Component({
   selector: 'dy-network-page',
-  imports: [AsyncState, Icon, RouterLink, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [SuSegmentedControl, MatFormField, MatInput, MatPrefix, MatButton, AsyncState, Icon, RouterLink, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -77,25 +81,12 @@ function readCollapsed(): Set<string> {
       }
 
       <div class="bar" role="group" aria-label="Filters">
-        <div class="seg" role="group" aria-label="Show">
-          <button type="button" [attr.aria-pressed]="tab() === 'connections'" (click)="setTab('connections')">Connections</button>
-          <button type="button" [attr.aria-pressed]="tab() === 'listening'" (click)="setTab('listening')">Listening</button>
-        </div>
-        <label class="search"><dy-icon name="search" /><input class="input" type="search" placeholder="Port, address or program" aria-label="Search the network table" [value]="store.query().search" (input)="search($any($event.target).value)" /></label>
+        <pd-segmented-control label="Show" [options]="tabSegs" [value]="tab()" (valueChange)="setTab($event === 'listening' ? 'listening' : 'connections')" />
+        <mat-form-field class="search"><dy-icon matPrefix name="search" /><input matInput type="search" placeholder="Port, address or program" aria-label="Search the network table" [value]="store.query().search" (input)="search($any($event.target).value)" /></mat-form-field>
         <button type="button" class="tog" [attr.aria-pressed]="store.query().showLoopback" (click)="store.setQuery({ showLoopback: !store.query().showLoopback })"><dy-icon name="check" /> Show loopback</button>
         <button type="button" class="tog" [attr.aria-pressed]="store.query().exposedOnly" (click)="store.setQuery({ exposedOnly: !store.query().exposedOnly })"><dy-icon name="check" /> Exposed only</button>
-        <div class="seg" role="group" aria-label="Protocol">
-          <button type="button" [attr.aria-pressed]="!store.query().proto" (click)="proto('')">All</button>
-          <button type="button" [attr.aria-pressed]="store.query().proto === 'tcp'" (click)="proto('tcp')">TCP</button>
-          <button type="button" [attr.aria-pressed]="store.query().proto === 'udp'" (click)="proto('udp')">UDP</button>
-        </div>
-        <div class="seg" role="group" aria-label="Group by">
-          <button type="button" [attr.aria-pressed]="group() === 'none'" (click)="setGroup('none')">None</button>
-          <button type="button" [attr.aria-pressed]="group() === 'process'" (click)="setGroup('process')">Program</button>
-          @if (tab() === 'connections') {
-            <button type="button" [attr.aria-pressed]="group() === 'host'" (click)="setGroup('host')">Remote host</button>
-          }
-        </div>
+        <pd-segmented-control label="Protocol" [options]="protoSegs" [value]="store.query().proto ?? ''" (valueChange)="proto($event)" />
+        <pd-segmented-control label="Group by" [options]="groupSegs()" [value]="group()" (valueChange)="setGroup($event)" />
         @if (tab() === 'connections') {
           <button type="button" class="tog" [attr.aria-pressed]="store.resolveNames()" title="Look up host names through your DNS resolver. Off by default: each address is sent to it." (click)="store.setResolveNames(!store.resolveNames())"><dy-icon name="check" /> Host names</button>
         }
@@ -200,18 +191,18 @@ function readCollapsed(): Set<string> {
                 @if (isConn(sel)) {
                   @let c3 = asConn(sel);
                   <div class="dacts">
-                    <button type="button" class="btn sm" [disabled]="!!blocked(c3)" [attr.title]="blocked(c3) ?? null" (click)="lookup(c3)"><dy-icon name="external" /> Look up IP</button>
-                    <button type="button" class="btn sm" (click)="copyText(connectionLine(c3))"><dy-icon name="copy" /> Copy</button>
+                    <button type="button" matButton="outlined" [disabled]="!!blocked(c3)" [attr.title]="blocked(c3) ?? null" (click)="lookup(c3)"><dy-icon name="external" /> Look up IP</button>
+                    <button type="button" matButton="outlined" (click)="copyText(connectionLine(c3))"><dy-icon name="copy" /> Copy</button>
                   </div>
                   @if (blocked(c3); as why) { <p class="hint">{{ why }}</p> }
                   <div class="dacts">
-                    <button type="button" class="btn sm" [disabled]="!c3.lookupOk" (click)="store.resolveOne(c3.remote)"><dy-icon name="globe" /> Resolve name</button>
+                    <button type="button" matButton="outlined" [disabled]="!c3.lookupOk" (click)="store.resolveOne(c3.remote)"><dy-icon name="globe" /> Resolve name</button>
                   </div>
                   @if (hostName(c3); as hn) { <p class="hint sel">Host name: {{ hn }}</p> }
                 } @else {
                   @let l3 = asListener(sel);
                   <p class="hint">{{ badge(l3).hint }}</p>
-                  <div class="dacts"><button type="button" class="btn sm" (click)="copyText(listenerLine(l3))"><dy-icon name="copy" /> Copy</button></div>
+                  <div class="dacts"><button type="button" matButton="outlined" (click)="copyText(listenerLine(l3))"><dy-icon name="copy" /> Copy</button></div>
                 }
               </aside>
             }
@@ -312,6 +303,9 @@ export class NetworkPage implements OnInit, OnDestroy {
   private readonly notifier = inject(Notifier);
   protected readonly tab = signal<Tab>('connections');
   protected readonly group = signal<GroupBy>('process');
+  protected readonly tabSegs: SuSegment[] = [{ value: 'connections', label: 'Connections' }, { value: 'listening', label: 'Listening' }];
+  protected readonly protoSegs: SuSegment[] = [{ value: '', label: 'All' }, { value: 'tcp', label: 'TCP' }, { value: 'udp', label: 'UDP' }];
+  protected readonly groupSegs = computed<SuSegment[]>(() => [{ value: 'none', label: 'None' }, { value: 'process', label: 'Program' }, ...(this.tab() === 'connections' ? [{ value: 'host', label: 'Remote host' }] : [])]);
   protected readonly showLocal = signal(false);
   protected readonly collapsed = signal<ReadonlySet<string>>(readCollapsed());
   protected readonly selectedKey = signal<string | null>(null);

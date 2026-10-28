@@ -35,7 +35,7 @@ describe('dy-backup-page', () => {
     expect(el.querySelector('[aria-label="Summary"] h2')?.textContent).toBe('restic backup is out of date');
     const rows = [...el.querySelectorAll('table[aria-label="Backup tools"] tbody tr')];
     expect(rows.map((r) => r.querySelector('strong')?.textContent)).toEqual(['Time Machine', 'restic', 'BorgBackup']);
-    expect(el.querySelectorAll('.page-head .btn.primary')).toHaveLength(1);
+    expect(el.querySelectorAll('.page-head button[matButton="filled"]')).toHaveLength(1);
     expect(el.querySelectorAll('table thead')).toHaveLength(1);
     expect(el.querySelector('[aria-label="Summary"] p')?.textContent).toBe('Checked 40 min ago');
   });

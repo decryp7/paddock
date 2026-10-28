@@ -9,6 +9,7 @@ import { Notifier } from '../../shared/notifier';
 import { injectNow } from '../../shared/now';
 import { BackupStore } from '../../state/backup.store';
 import { BACKUP_STATE_LABEL, type DotTone, checkedText, heroTone, hue, initial, lastBackupText, stateTone } from './backup-model';
+import { MatButton } from '@angular/material/button';
 
 /**
  * Backup health: whether the backups of the tools Dyno can read (Time Machine, Windows Backup, File History, restic, Borg,
@@ -17,7 +18,7 @@ import { BACKUP_STATE_LABEL, type DotTone, checkedText, heroTone, hue, initial, 
  */
 @Component({
   selector: 'dy-backup-page',
-  imports: [AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [MatButton, AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -27,13 +28,13 @@ import { BACKUP_STATE_LABEL, type DotTone, checkedText, heroTone, hue, initial, 
           <h1>Backup health</h1>
           <p>Whether your backups are recent. Dyno only reads their state; it never runs or manages a backup.</p>
         </div>
-        <button type="button" class="btn primary" [disabled]="store.busy() || !store.report()" (click)="store.check()">
+        <button type="button" matButton="filled" [disabled]="store.busy() || !store.report()" (click)="store.check()">
           <dy-icon name="refresh" [class.spin]="store.busy()" /> {{ store.busy() ? 'Checking…' : 'Check now' }}
         </button>
       </header>
 
       @if (store.checkError(); as e) {
-        <div class="note bad" role="alert"><dy-icon name="alert" /><span>{{ e.message }}</span><button type="button" class="btn sm ghost" (click)="store.check()">Retry</button></div>
+        <div class="note bad" role="alert"><dy-icon name="alert" /><span>{{ e.message }}</span><button type="button" matButton="text" (click)="store.check()">Retry</button></div>
       }
 
       <dy-async [loaded]="!!store.report()" [error]="store.error()" what="backup health" [rows]="4" (retry)="store.load()">
@@ -43,7 +44,7 @@ import { BACKUP_STATE_LABEL, type DotTone, checkedText, heroTone, hue, initial, 
               <dy-icon name="restore" />
               <strong>No backup tool found</strong>
               <span>Dyno looks for Time Machine, Windows Backup, File History, restic, Borg and Duplicati. It only reads their state; it never runs or manages a backup.</span>
-              <button type="button" class="btn" [disabled]="store.busy()" (click)="store.check()">Check again</button>
+              <button type="button" matButton="outlined" [disabled]="store.busy()" (click)="store.check()">Check again</button>
             </div>
           } @else {
             <section class="lead" aria-label="Summary">
@@ -94,8 +95,8 @@ import { BACKUP_STATE_LABEL, type DotTone, checkedText, heroTone, hue, initial, 
                     <p class="next sel">{{ s.nextStep }}</p>
                   }
                   <div class="dacts">
-                    <button type="button" class="btn sm" (click)="copy(s)"><dy-icon name="copy" /> Copy</button>
-                    <button type="button" class="btn sm ghost" (click)="openSettings()">Backup settings</button>
+                    <button type="button" matButton="outlined" (click)="copy(s)"><dy-icon name="copy" /> Copy</button>
+                    <button type="button" matButton="text" (click)="openSettings()">Backup settings</button>
                   </div>
                 </aside>
               }

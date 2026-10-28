@@ -313,173 +313,17 @@ code,
   cursor: text;
 }
 
-/* ----------------------------------------------------------------------------------------------------- buttons */
+/* ----------------------------------------------------------------------------------------------------- Material controls */
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-2);
-  height: var(--control-h);
-  padding: 0 var(--sp-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-md);
-  background: var(--surface-2);
-  color: var(--text-1);
-  font: var(--fw-medium) var(--fs-base) / 1 var(--font-sans);
-  white-space: nowrap;
-  cursor: pointer;
-  box-shadow: var(--shadow-1);
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out),
-    transform var(--dur-instant) var(--ease-out);
-  user-select: none;
-
-  dy-icon {
-    --icon-size: 16px;
-    margin: 0 -2px;
-  }
-
-  &:hover:not(:disabled) {
-    background: var(--surface-hover);
-  }
-
-  &:active:not(:disabled) {
-    transform: translateY(0.5px);
-    background: var(--surface-active);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    box-shadow: none;
-  }
-
-  &.primary {
-    background: var(--accent);
-    border-color: transparent;
-    color: var(--text-on-accent);
-
-    &:hover:not(:disabled) {
-      background: var(--accent-hover);
-    }
-  }
-
-  &.danger {
-    color: var(--bad);
-
-    &:hover:not(:disabled) {
-      background: var(--bad-soft);
-      border-color: var(--bad);
-    }
-  }
-
-  &.danger-solid {
-    background: var(--bad);
-    border-color: transparent;
-    color: #fff;
-  }
-
-  &.ghost {
-    background: transparent;
-    border-color: transparent;
-    box-shadow: none;
-
-    &:hover:not(:disabled) {
-      background: var(--surface-hover);
-    }
-  }
-
-  &.sm {
-    height: var(--control-h-sm);
-    padding: 0 var(--sp-2);
-    font-size: var(--fs-sm);
-    gap: var(--sp-1);
-  }
-
-  &.icon {
-    width: var(--control-h);
-    padding: 0;
-
-    &.sm {
-      width: var(--control-h-sm);
-    }
-  }
-
-  &.link {
-    height: auto;
-    padding: 0;
-    border: 0;
-    background: none;
-    box-shadow: none;
-    color: var(--text-2);
-
-    &:hover:not(:disabled) {
-      background: none;
-      color: var(--text-1);
-      text-decoration: underline;
-    }
-  }
+/* Buttons, fields, toggles, tabs and selects are Material (rule 47) themed by css/material.css; only what is Dyno's own is here. */
+.mat-mdc-button-base dy-icon {
+  --icon-size: 16px;
 }
 
-/* --------------------------------------------------------------------------------------------- form controls */
-
-.input,
-.select {
-  height: var(--control-h);
-  padding: 0 var(--sp-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-md);
-  background: var(--surface-2);
-  color: var(--text-1);
-  font: var(--fs-base) var(--font-sans);
+/* An inline text button inside a sentence or a list line. */
+.dy-link {
   min-width: 0;
-  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
-
-  &::placeholder {
-    color: var(--text-3);
-  }
-
-  &:focus-visible,
-  &:focus {
-    outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft-2);
-  }
-
-  &.sm {
-    height: var(--control-h-sm);
-    font-size: var(--fs-sm);
-  }
-}
-
-.select {
-  appearance: none;
-  padding-right: var(--sp-8);
-  background-image:
-    linear-gradient(45deg, transparent 50%, var(--text-2) 50%),
-    linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
-  background-position:
-    calc(100% - 15px) 52%,
-    calc(100% - 10px) 52%;
-  background-size: 5px 5px;
-  background-repeat: no-repeat;
-}
-
-textarea.input {
-  height: auto;
-  padding: var(--sp-2) var(--sp-3);
-  resize: vertical;
-}
-
-input[type='checkbox'],
-input[type='radio'] {
-  accent-color: var(--accent);
-  width: 15px;
-  height: 15px;
-  margin: 0;
+  padding-inline: var(--sp-1);
 }
 
 .field {
@@ -496,47 +340,6 @@ input[type='radio'] {
   .hint {
     font-size: var(--fs-sm);
     color: var(--text-3);
-  }
-}
-
-/* Segmented control (radio-like button group). */
-.seg {
-  display: inline-flex;
-  padding: 2px;
-  gap: 2px;
-  border-radius: var(--r-md);
-  background: var(--surface-inset);
-  border: 1px solid var(--border);
-
-  button {
-    height: calc(var(--control-h) - 6px);
-    padding: 0 var(--sp-3);
-    border: 0;
-    border-radius: var(--r-sm);
-    background: none;
-    color: var(--text-2);
-    font: var(--fw-medium) var(--fs-sm) / 1 var(--font-sans);
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: var(--sp-1);
-    transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
-
-    dy-icon {
-      --icon-size: 15px;
-    }
-
-    &:hover {
-      color: var(--text-1);
-    }
-
-    &[aria-pressed='true'],
-    &[aria-checked='true'],
-    &[aria-selected='true'] {
-      background: var(--surface-2);
-      color: var(--text-1);
-      box-shadow: var(--shadow-1), 0 0 0 1px var(--border);
-    }
   }
 }
 

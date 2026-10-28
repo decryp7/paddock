@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, provideAppInitializer, inject } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import type { Routes } from '@angular/router';
+import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 import { PdShellFrame, provideShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { provideContributions, provideShellContext, provideShellVersionCheck } from '@decryp7/paddock-ui/shell';
 import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
@@ -43,6 +44,8 @@ export function bootMainWindow(): Promise<unknown> {
   return bootstrapApplication(DynoShell, {
     providers: [
       provideIcons(),
+      // Material's behaviour defaults (outline fields, no icon in the toggle's handle, no ripples); the look is css/material.css.
+      providePaddockMaterial(),
       { provide: BACKEND, useFactory: createBackend },
       provideDynoAppearance(),
       provideNotifierActions(),

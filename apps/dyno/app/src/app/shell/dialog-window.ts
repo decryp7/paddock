@@ -1,5 +1,6 @@
 import { bootstrapApplication } from '@angular/platform-browser';
 import { DialogShell, dialogWindowConfig, mountDialogWindowHost, tauriDialogIo, type DialogRoute } from '@decryp7/paddock-ui/shell/dialogs';
+import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 import { provideSettingsAppearance } from '@decryp7/paddock-ui/shell/settings';
 import { BACKEND } from '../core/backend';
 import { createBackend } from '../core/backend-factory';
@@ -21,7 +22,7 @@ export function bootDialogWindow(route: DialogRoute): Promise<unknown> {
     DialogShell,
     dialogWindowConfig({
       dialogs: DIALOGS,
-      providers: [provideIcons(), { provide: BACKEND, useFactory: createBackend }, ...dialogBaseProviders(), ...appearance],
+      providers: [provideIcons(), providePaddockMaterial(), { provide: BACKEND, useFactory: createBackend }, ...dialogBaseProviders(), ...appearance],
       route,
       ...(bridge ? { io: () => tauriDialogIo(bridge) } : {}),
     }),

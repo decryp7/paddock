@@ -5,18 +5,19 @@ import { Icon } from '../../shared/icon';
 import { LiveStore } from '../../state/live.store';
 import type { AppGroup } from '../../core/api.types';
 import { readValue, UNAVAILABLE } from '../../core/measured';
+import { MatButton } from '@angular/material/button';
 
 /** The apps using the most CPU or memory right now, grouped by app ("Chrome · 38"); a click opens them in the task manager. */
 @Component({
   selector: 'dy-top-apps',
-  imports: [Icon],
+  imports: [MatButton, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" [attr.aria-label]="'Top apps by ' + metric()">
       <div class="card-head">
         <h2><dy-icon [name]="metric() === 'cpu' ? 'cpu' : 'memory'" /> Top apps by {{ metric() === 'cpu' ? 'CPU' : 'memory' }}</h2>
         <span class="spacer"></span>
-        <button type="button" class="btn link" (click)="openAll()">View all</button>
+        <button type="button" matButton="text" class="dy-link" (click)="openAll()">View all</button>
       </div>
       @if (!live.connected()) {
         <div class="skeletons" aria-busy="true" aria-label="Loading apps">

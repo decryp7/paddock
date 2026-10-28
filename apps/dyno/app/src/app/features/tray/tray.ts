@@ -11,6 +11,7 @@ import { PlatformService } from '../../core/platform';
 import { Sparkline } from '../../shared/sparkline';
 import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
+import { MatButton, MatIconButton } from '@angular/material/button';
 
 /**
  * The tray dropdown (360 x 520, frameless): a compact dashboard with the health score when the engine has one, four
@@ -18,7 +19,7 @@ import { LiveStore } from '../../state/live.store';
  */
 @Component({
   selector: 'dy-tray',
-  imports: [Icon, Sparkline, SuTrayPopover, MatTooltip],
+  imports: [MatButton, MatIconButton, Icon, Sparkline, SuTrayPopover, MatTooltip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pd-tray-popover label="Dyno" [platform]="platform" (dismissed)="close()">
@@ -68,8 +69,8 @@ import { LiveStore } from '../../state/live.store';
       </main>
       <div slot="footer" class="foot">
         <span class="spacer"></span>
-        <button type="button" class="btn sm primary" (click)="openMain()"><dy-icon name="arrow-right" /> Open Dyno</button>
-        <button type="button" class="btn sm icon ghost" (click)="quit()" aria-label="Quit Dyno" matTooltip="Quit the Dyno app (the background agent keeps measuring)"><dy-icon name="power" /></button>
+        <button type="button" matButton="filled" (click)="openMain()"><dy-icon name="arrow-right" /> Open Dyno</button>
+        <button type="button" matIconButton (click)="quit()" aria-label="Quit Dyno" matTooltip="Quit the Dyno app (the background agent keeps measuring)"><dy-icon name="power" /></button>
       </div>
     </pd-tray-popover>
   `,
@@ -102,8 +103,6 @@ import { LiveStore } from '../../state/live.store';
     li .num:nth-of-type(1) { font-weight: var(--fw-medium); }
     .faint { color: var(--text-3); }
     .foot { display: flex; align-items: center; gap: var(--sp-1); flex: 1; }
-    .foot .btn { height: 28px; }
-    .foot .btn.icon { width: 28px; }
   `,
 })
 export class Tray implements OnInit {

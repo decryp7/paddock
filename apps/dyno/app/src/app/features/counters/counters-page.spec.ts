@@ -64,9 +64,9 @@ describe('CountersPage', () => {
     const { el, f, click, store } = await open();
     const idx = [...el.querySelectorAll('[aria-label="Objects"] button')].findIndex((b) => b.textContent!.includes('Network Interface'));
     await click('[aria-label="Objects"] button', idx);
-    const select = el.querySelector('select[aria-label="Instance"]') as HTMLSelectElement;
-    select.value = 'Wi-Fi';
-    select.dispatchEvent(new Event('change'));
+    (el.querySelector('mat-select[aria-label="Instance"] .mat-mdc-select-trigger') as HTMLElement).click();
+    f.detectChanges();
+    ([...document.querySelectorAll('mat-option')].find((o) => o.textContent?.trim() === 'Wi-Fi') as HTMLElement).click();
     f.detectChanges();
     await click('button[aria-label="Chart Bytes Received/sec"]');
     expect(store.watching()).toEqual(['\\Network Interface(Wi-Fi)\\Bytes Received/sec']);
@@ -106,12 +106,12 @@ describe('CountersPage', () => {
     f.detectChanges();
     await click('button[aria-label="Pin Pages/sec"]');
     expect(store.isPinned('\\Memory\\Pages/sec')).toBe(true);
-    await click('button.btn.ghost', 0);
+    await click('button[matButton="text"]', [...el.querySelectorAll('button[matButton="text"]')].findIndex((b) => b.textContent?.includes('Save as set')));
     const name = el.querySelector('input[aria-label="Set name"]') as HTMLInputElement;
     name.value = 'Memory only';
     name.dispatchEvent(new Event('input'));
     f.detectChanges();
-    await click('.namebar .primary');
+    await click('.namebar button[matButton="filled"]');
     expect(store.sets().map((s) => s.name)).toContain('Memory only');
     expect(el.querySelector('.namebar')).toBeNull();
   });

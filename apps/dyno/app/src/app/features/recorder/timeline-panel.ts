@@ -4,11 +4,12 @@ import { ThemeService } from '../../core/theme';
 import { Chart } from '../../shared/chart';
 import { formatBytes } from '../../shared/format';
 import { clockSeconds, momentInRange, overviewPoints, panelHeadings, rangeFromDrag, timelineOption, timelineSummary, TIMELINE_HEIGHT, type SampleRange } from './recorder-options';
+import { MatButton } from '@angular/material/button';
 
 /** One snapshot's timeline (stacked charts on one time axis) and the busiest processes at the picked moment. */
 @Component({
   selector: 'dy-timeline-panel',
-  imports: [Chart],
+  imports: [MatButton, Chart],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="plot" tabindex="0" role="group" aria-label="Timeline. Left and right arrow keys move the picked moment." (keydown)="onKey($event)">
@@ -33,14 +34,14 @@ import { clockSeconds, momentInRange, overviewPoints, panelHeadings, rangeFromDr
       </div>
       <span class="range-text">{{ rangeText() }}</span>
       @if (range()) {
-        <button type="button" class="btn sm ghost" (click)="clearRange()">Show all</button>
+        <button type="button" matButton="text" (click)="clearRange()">Show all</button>
       }
     </div>
     <section class="busy" aria-label="Who was busiest">
       <div class="busy-head">
         <h2>Who was busiest</h2>
         <span class="at">{{ momentTime() }} · CPU {{ cpuAt() }}</span>
-        <button type="button" class="btn sm ghost" (click)="peak.emit()">Jump to peak</button>
+        <button type="button" matButton="text" (click)="peak.emit()">Jump to peak</button>
       </div>
       <table class="table">
         <caption class="visually-hidden">Top processes at {{ momentTime() }}</caption>
@@ -74,7 +75,7 @@ import { clockSeconds, momentInRange, overviewPoints, panelHeadings, rangeFromDr
     .busy-head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-2); }
     .busy-head h2 { margin: 0; white-space: nowrap; font-size: var(--fs-md); font-weight: var(--fw-semibold); }
     .at { white-space: nowrap; color: var(--text-2); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
-    .busy-head .btn { margin-left: auto; }
+    .busy-head .mat-mdc-button-base { margin-left: auto; }
     .table { width: 100%; }
     .r { width: 150px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
     .name { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

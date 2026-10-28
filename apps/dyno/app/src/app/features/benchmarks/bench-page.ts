@@ -7,6 +7,10 @@ import { BenchStore } from '../../state/bench.store';
 import { DeviceArt } from '../inventory/device-art';
 import { BenchArt } from './bench-art';
 import { barPair, bestValues, kindTitle, statusNote, verdictWord } from './bench-model';
+import { MatButton } from '@angular/material/button';
+import { MatFormField } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
+import { MatCheckbox } from '@angular/material/checkbox';
 
 const KINDS: { kind: BenchKind; text: string }[] = [
   { kind: 'cpu', text: 'Integer work on one core and on all of them' },
@@ -18,7 +22,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
 /** Benchmarks: started only by a click, each in its own process with a timeout; the load at the time is stored with the result. */
 @Component({
   selector: 'dy-bench-page',
-  imports: [AsyncState, BenchArt, DeviceArt, Icon],
+  imports: [MatCheckbox, MatFormField, MatInput, MatButton, AsyncState, BenchArt, DeviceArt, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -36,7 +40,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
               <h2><dy-icon name="gauge" /> Run</h2>
               <span class="spacer"></span>
               @if (o.running) {
-                <button type="button" class="btn sm" (click)="store.cancel()"><dy-icon name="stop" /> Cancel</button>
+                <button type="button" matButton="outlined" (click)="store.cancel()"><dy-icon name="stop" /> Cancel</button>
               }
             </div>
             @if (o.running; as r) {
@@ -53,29 +57,27 @@ const KINDS: { kind: BenchKind; text: string }[] = [
             } @else {
               <div class="kinds" role="group" aria-label="What to measure">
                 @for (k of kinds; track k.kind) {
-                  <label class="kind" [attr.data-on]="chosen().has(k.kind)">
-                    <input type="checkbox" [checked]="chosen().has(k.kind)" (change)="toggle(k.kind)" [attr.aria-label]="title(k.kind)" />
-                    <dy-icon [name]="icons[k.kind]" />
-                    <span class="kt"><strong>{{ title(k.kind) }}</strong><span class="sub">{{ k.text }}</span></span>
-                  </label>
+                  <mat-checkbox class="kind" [attr.data-on]="chosen().has(k.kind)" [checked]="chosen().has(k.kind)" (change)="toggle(k.kind)">
+                    <span class="kbody"><dy-icon [name]="icons[k.kind]" /><span class="kt"><strong>{{ title(k.kind) }}</strong><span class="sub">{{ k.text }}</span></span></span>
+                  </mat-checkbox>
                 }
               </div>
               <div class="runbar">
                 <div class="field grow">
                   <label for="bench-label">Name this run</label>
-                  <input id="bench-label" class="input" type="text" maxlength="80" placeholder="Baseline" [value]="label()" (input)="label.set($any($event.target).value)" />
+                  <mat-form-field><input id="bench-label" matInput type="text" maxlength="80" placeholder="Baseline" [value]="label()" (input)="label.set($any($event.target).value)" /></mat-form-field>
                 </div>
-                <button type="button" class="btn primary" [disabled]="store.busy() || chosen().size === 0" (click)="run()"><dy-icon name="play" /> Run benchmarks</button>
+                <button type="button" matButton="filled" [disabled]="store.busy() || chosen().size === 0" (click)="run()"><dy-icon name="play" /> Run benchmarks</button>
               </div>
               <div class="pair">
                 <div class="field grow">
                   <label for="bench-change">Before and after a change</label>
-                  <input id="bench-change" class="input" type="text" maxlength="80" placeholder="What you are about to change, e.g. Power mode: High performance" [value]="change()" (input)="change.set($any($event.target).value)" />
+                  <mat-form-field><input id="bench-change" matInput type="text" maxlength="80" placeholder="What you are about to change, e.g. Power mode: High performance" [value]="change()" (input)="change.set($any($event.target).value)" /></mat-form-field>
                 </div>
                 <ol class="stepper" aria-label="Before and after steps">
-                  <li><button type="button" class="btn" [class.primary]="!!change().trim() && !hasBefore()" [disabled]="store.busy() || chosen().size === 0 || !change().trim()" (click)="run('before')">1 · Measure before</button></li>
+                  <li><button type="button" [matButton]="!!change().trim() && !hasBefore() ? 'filled' : 'outlined'" [disabled]="store.busy() || chosen().size === 0 || !change().trim()" (click)="run('before')">1 · Measure before</button></li>
                   <li class="mid">2 · Make the change</li>
-                  <li><button type="button" class="btn" [class.primary]="hasBefore()" [disabled]="store.busy() || chosen().size === 0 || !change().trim() || !hasBefore()" (click)="run('after')">3 · Measure after</button></li>
+                  <li><button type="button" [matButton]="hasBefore() ? 'filled' : 'outlined'" [disabled]="store.busy() || chosen().size === 0 || !change().trim() || !hasBefore()" (click)="run('after')">3 · Measure after</button></li>
                 </ol>
               </div>
             }
@@ -130,7 +132,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
               <div class="card-head">
                 <h2><dy-icon name="diff" /> Comparison</h2>
                 <span class="spacer"></span>
-                <button type="button" class="btn sm ghost" (click)="store.clearComparison()">Close</button>
+                <button type="button" matButton="text" (click)="store.clearComparison()">Close</button>
               </div>
               @for (w of c.warnings; track w) {
                 <p class="warning"><dy-icon name="alert" /> {{ w }}</p>
@@ -161,7 +163,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
             <div class="card-head">
               <h2><dy-icon name="calendar" /> History</h2>
               <span class="spacer"></span>
-              <button type="button" class="btn sm" [disabled]="picked().length !== 2" (click)="compare()"><dy-icon name="diff" /> Compare selected</button>
+              <button type="button" matButton="outlined" [disabled]="picked().length !== 2" (click)="compare()"><dy-icon name="diff" /> Compare selected</button>
             </div>
             @if (o.runs.length === 0) {
               <p class="note">No runs yet. Choose what to measure above and click Run benchmarks.</p>
@@ -172,12 +174,12 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                 <tbody>
                   @for (r of o.runs; track r.id) {
                     <tr>
-                      <td><input type="checkbox" [checked]="picked().includes(r.id)" [attr.aria-label]="'Select ' + r.label" (change)="pick(r.id)" /></td>
+                      <td><mat-checkbox [checked]="picked().includes(r.id)" [aria-label]="'Select ' + r.label" (change)="pick(r.id)" /></td>
                       <td>{{ r.label }}@if (r.phase) { <span class="badge outline">{{ r.phase === 'before' ? 'Before' : 'After' }}</span> }</td>
                       <td>{{ day(r.startedAt) }}</td>
                       <td class="r num">{{ pct(r.load.cpuPercent) }}</td>
                       <td>{{ kindsOf(r) }}</td>
-                      <td class="r"><button type="button" class="btn sm ghost" [attr.aria-label]="'Delete ' + r.label" (click)="store.remove(r.id)"><dy-icon name="trash" /></button></td>
+                      <td class="r"><button type="button" matButton="text" [attr.aria-label]="'Delete ' + r.label" (click)="store.remove(r.id)"><dy-icon name="trash" /></button></td>
                     </tr>
                   }
                 </tbody>
@@ -193,11 +195,11 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     dy-async { display: grid; gap: var(--sp-4); }
     .page { display: grid; gap: var(--sp-4); align-content: start; }
     .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) 0; }
-    .kind { position: relative; display: flex; align-items: center; gap: var(--sp-3); padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); cursor: pointer; }
+    .kind { position: relative; display: flex; align-items: center; gap: var(--sp-3); padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); }
     .kind[data-on='true'] { border-color: var(--border-strong); background: var(--surface-2); }
     .kind dy-icon { --icon-size: 20px; color: var(--text-3); flex: none; }
     .kind[data-on='true'] dy-icon { color: var(--text-1); }
-    .kind input { order: 3; margin-left: auto; }
+    .kbody { display: inline-flex; align-items: center; gap: var(--sp-3); }
     .kt { display: grid; min-width: 0; }
     .stepper { list-style: none; margin: 0; padding: 0; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
     .stepper .mid { color: var(--text-3); font-size: var(--fs-sm); padding: 0 var(--sp-1); }

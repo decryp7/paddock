@@ -11,13 +11,15 @@ import { LiveStore } from '../../state/live.store';
 import { NetworkStore, type ProcessNetwork } from '../../state/network.store';
 import { ProcessesStore } from '../../state/processes.store';
 import { toCommandError } from '../../core/command-error';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatTabsModule } from '@angular/material/tabs';
 
 type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
 
 /** The side panel of one process: facts, parent chain and the lists the OS may or may not let Dyno read (with the reason when not). */
 @Component({
   selector: 'dy-process-details',
-  imports: [Icon, NgTemplateOutlet, RouterLink],
+  imports: [MatTabsModule, MatButton, MatIconButton, Icon, NgTemplateOutlet, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <aside class="panel" aria-label="Process details">
@@ -28,24 +30,24 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
             <span class="faint num">PID {{ pidText(x.process.pid) }} · {{ show(x.process.user, text) }}</span>
           }
         </div>
-        <button type="button" class="btn ghost icon sm" aria-label="Close details" (click)="close()"><dy-icon name="close" /></button>
+        <button type="button" matIconButton aria-label="Close details" (click)="close()"><dy-icon name="close" /></button>
       </header>
       @if (store.detailsError(); as e) {
         <div class="err" role="alert">
           <dy-icon name="alert" />
           <div class="text"><strong>{{ e.message }}</strong>@if (hint(); as h) {<span>{{ h }}</span>}</div>
-          <button type="button" class="btn sm" (click)="reload()">Retry</button>
+          <button type="button" matButton="outlined" (click)="reload()">Retry</button>
         </div>
       } @else if (store.detailsLoading() || !d()) {
         <div class="skeletons" aria-busy="true"><div class="skeleton"></div><div class="skeleton" style="width: 70%"></div><div class="skeleton"></div></div>
       } @else {
         @if (d(); as x) {
-          <div class="tabs" role="tablist" aria-label="Details">
+          <nav mat-tab-nav-bar class="tabs" [tabPanel]="panel" aria-label="Details">
             @for (t of tabs; track t.id) {
-              <button type="button" role="tab" [attr.aria-selected]="tab() === t.id" (click)="pickTab(t.id)">{{ t.label }}</button>
+              <button type="button" mat-tab-link [active]="tab() === t.id" (click)="pickTab(t.id)">{{ t.label }}</button>
             }
-          </div>
-          <div class="content" role="tabpanel">
+          </nav>
+          <mat-tab-nav-panel #panel class="content">
             @switch (tab()) {
               @case ('overview') {
                 <dl class="dy-selectable">
@@ -54,8 +56,8 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                     <span class="mono wrap cmd" [class.open]="cmdOpen()" [title]="x.commandLine.join(' ')">{{ x.commandLine.join(' ') || 'Not available' }}</span>
                     @if (x.commandLine.length) {
                       <span class="cmd-acts">
-                        @if (x.commandLine.join(' ').length > 120) { <button type="button" class="btn link" (click)="cmdOpen.set(!cmdOpen())">{{ cmdOpen() ? 'Show less' : 'Show more' }}</button> }
-                        <button type="button" class="btn link" (click)="copyCommand(x.commandLine)">Copy</button>
+                        @if (x.commandLine.join(' ').length > 120) { <button type="button" matButton="text" class="dy-link" (click)="cmdOpen.set(!cmdOpen())">{{ cmdOpen() ? 'Show less' : 'Show more' }}</button> }
+                        <button type="button" matButton="text" class="dy-link" (click)="copyCommand(x.commandLine)">Copy</button>
                       </span>
                     }
                   </dd>
@@ -81,7 +83,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                 <ol class="chain">
                   <li class="me"><dy-icon name="processes" /> {{ x.process.name }}</li>
                   @for (p of x.parents; track p.pid) {
-                    <li><button type="button" class="btn link" (click)="open(p.pid)">{{ p.name }}</button> <span class="faint num">PID {{ pidText(p.pid) }}</span></li>
+                    <li><button type="button" matButton="text" class="dy-link" (click)="open(p.pid)">{{ p.name }}</button> <span class="faint num">PID {{ pidText(p.pid) }}</span></li>
                   }
                 </ol>
               }
@@ -116,7 +118,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                       }
                     </ul>
                   }
-                  <a class="btn link" routerLink="/network">Open the Network page</a>
+                  <a matButton="text" class="dy-link" routerLink="/network">Open the Network page</a>
                 } @else {
                   <p class="faint">Reading the network…</p>
                 }
@@ -125,7 +127,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                 <ng-container *ngTemplateOutlet="list; context: { l: x.modules, empty: 'No loaded libraries.' }" />
               }
             }
-          </div>
+          </mat-tab-nav-panel>
         }
       }
     </aside>
@@ -155,9 +157,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
     .titles { flex: 1; min-width: 0; display: grid; }
     .faint { color: var(--text-3); font-size: var(--fs-xs); }
     .lock { display: flex; gap: var(--sp-2); align-items: center; margin: 0 var(--sp-4) var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--surface-inset); color: var(--text-2); font-size: var(--fs-sm); }
-    .tabs { display: flex; gap: 2px; padding: 0 var(--sp-3); border-bottom: 1px solid var(--border); }
-    .tabs button { height: 32px; padding: 0 var(--sp-3); border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-2); font: var(--fw-medium) var(--fs-sm) var(--font-sans); cursor: default; }
-    .tabs button[aria-selected='true'] { color: var(--text-1); border-bottom-color: var(--accent); }
+    .tabs { padding: 0 var(--sp-3); }
     .content { flex: 1; overflow: auto; padding: var(--sp-3) var(--sp-4) var(--sp-4); }
     dl { margin: 0; display: grid; gap: 2px var(--sp-3); grid-template-columns: 96px minmax(0, 1fr); font-size: var(--fs-sm); }
     dt { color: var(--text-3); padding: 3px 0; }

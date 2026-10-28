@@ -6,11 +6,12 @@ import { confirm } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
-import { Switch } from '../../shared/switch';
+import { MatSlideToggle } from '@angular/material/slide-toggle';
 import { AlarmsStore } from '../../state/alarms.store';
 import { SettingsStore } from '../../state/settings.store';
 import { TABLE_CSS } from './alarms-css';
 import { ruleSummary, severityWord } from './alarms-model';
+import { MatButton } from '@angular/material/button';
 
 /** The id of the rule form's window (its contract is in `src-tauri/src/dialogs.rs`). */
 const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
@@ -18,13 +19,13 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
 /** The user's own alert rules from the settings: add, edit, enable and delete. The engine validates every save. */
 @Component({
   selector: 'dy-custom-rules',
-  imports: [AsyncState, Icon, Switch, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
+  imports: [MatButton, AsyncState, Icon, MatSlideToggle, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="custom-h">
       <div class="sec-head">
         <div class="titles"><h2 class="h2" id="custom-h">Custom alert rules</h2><p class="lead">Raise an alarm when a reading stays past a limit you choose.</p></div>
-        <button type="button" class="btn primary" [disabled]="!settings.settings()" (click)="edit(null)"><dy-icon name="plus" /> Add rule</button>
+        <button type="button" matButton="filled" [disabled]="!settings.settings()" (click)="edit(null)"><dy-icon name="plus" /> Add rule</button>
       </div>
       <dy-async [loaded]="!!settings.settings()" [error]="settings.error()" [empty]="rules().length === 0" emptyTitle="No custom rules" emptyText="Add a rule to be told when the CPU, memory, disk or temperature crosses your own limit." emptyIcon="bell" what="alert rules" [rows]="3" (retry)="settings.load()">
         <div class="grid" role="table" aria-label="Custom alert rules">
@@ -40,7 +41,7 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
               <span class="cell" role="cell"><span class="truncate" [title]="r.name">{{ r.name }}</span></span>
               <span class="cell muted" role="cell"><span class="truncate" [title]="summary(r)">{{ summary(r) }}</span></span>
               <span class="cell" role="cell"><span class="dot" [attr.data-tone]="r.severity === 'critical' ? 'bad' : r.severity === 'warning' ? 'warn' : 'info'" aria-hidden="true"></span><span [class.muted]="r.severity !== 'critical'">{{ word(r) }}</span></span>
-              <span class="cell" role="cell"><dy-switch [checked]="r.enabled" [disabled]="alarms.saving()" [label]="'Enable ' + r.name" (changed)="toggle(r, $event)" /></span>
+              <span class="cell" role="cell"><mat-slide-toggle [checked]="r.enabled" [disabled]="alarms.saving()" [aria-label]="'Enable ' + r.name" (change)="toggle(r, $event.checked)" /></span>
               <span class="cell acts" role="cell">
                 <button type="button" class="ib" [attr.aria-label]="'Edit ' + r.name" title="Edit" (click)="edit(r)"><dy-icon name="edit" /></button>
                 <button type="button" class="ib more" [attr.aria-label]="'More actions for ' + r.name" [cdkMenuTriggerFor]="menu" [cdkMenuTriggerData]="{ rule: r }"><dy-icon name="more" /></button>

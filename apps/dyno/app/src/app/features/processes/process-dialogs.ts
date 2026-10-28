@@ -4,17 +4,20 @@ import type { CommandError, Locker } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
 import { Icon } from '../../shared/icon';
 import { ProcessesStore } from '../../state/processes.store';
+import { MatButton } from '@angular/material/button';
+import { MatFormField } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
 
 /** "What is locking this file?": the processes that hold a path open, with what they are. */
 @Component({
   selector: 'dy-lockers-dialog',
-  imports: [FormsModule, Icon],
+  imports: [MatFormField, MatInput, MatButton, FormsModule, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
       <p class="lead">Find the programs that hold a file or folder open.</p>
       <form class="find" (ngSubmit)="find()">
-        <input class="input grow" name="path" [ngModel]="path()" (ngModelChange)="path.set($event)" placeholder="Path of the file or folder" aria-label="Path" autocomplete="off" spellcheck="false" />
-        <button type="submit" class="btn primary" [disabled]="busy() || !path().trim()">Find</button>
+        <mat-form-field class="grow"><input matInput name="path" [ngModel]="path()" (ngModelChange)="path.set($event)" placeholder="Path of the file or folder" aria-label="Path" autocomplete="off" spellcheck="false" /></mat-form-field>
+        <button type="submit" matButton="filled" [disabled]="busy() || !path().trim()">Find</button>
       </form>
       @if (error(); as e) {
         <div class="err" role="alert"><dy-icon name="alert" /><span>{{ e.message }} @if (hint(); as h) {<small>{{ h }}</small>}</span></div>
