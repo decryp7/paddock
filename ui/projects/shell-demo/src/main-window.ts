@@ -27,7 +27,6 @@ import { DemoNote } from './app/demo-note';
 import { provideDemoAppearance } from './app/demo-appearance';
 import { relaunchApp } from './app/language.providers';
 import { LANGUAGE_CONFIG, LocalStorageLanguageStorage, PSEUDO_LOCALE } from '@decryp7/paddock-ui/shell/i18n';
-import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 import { demoSettingsBackend } from './app/demo-settings';
 import { ShellDemo } from './app/shell-demo';
 
