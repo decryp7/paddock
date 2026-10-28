@@ -57,7 +57,7 @@ separate instance for the other. **Thread counts** come from one function, `padd
 `physical cores − 1` for User, `physical cores / 2` for Background, 1 for Idle; never logical cores (SMT siblings share
 the core the user is typing on). A child's thread argument (`--threads`, pool sizes) is taken from it.
 
-**Check.** Conformance **C39** (`conformance/src/priority.mjs`, `paddock-rules` once ADR 0022 phase 4 lands): every
+**Check.** Conformance **C40** (`conformance/src/priority.mjs`, `paddock-rules` once ADR 0022 phase 4 lands): every
 `Command::new`/`std::process::Command` in non-test code of `crates/` and `apps/` goes through `paddock_proc::command` with
 an explicit `.priority(...)`, or is on a reviewed allow-list with a reason; direct `setpriority`, `SetPriorityClass`,
 `pthread_set_qos_class_self_np`, `*_PRIORITY_CLASS` outside `paddock-proc` fail. Tests in `paddock-proc` per OS: a child
@@ -76,7 +76,7 @@ and its thread count, on each OS's CI runner.
 | Debrief | `crates/debrief-core/src/threads.rs:116,126`; `crates/debrief-ai/src/models/priority.rs:17,29` | two thread helpers (QoS background vs utility) | `priority::apply_current` |
 | Dyno | `crates/dyno-core/src/process.rs:75`; `dyno-platform/src/{unix_control,macos/control,linux/os_control,linux/sys,windows/control}.rs` | priority control *of other processes* (the user's tool) | out of scope (it is the product), allow-listed |
 | Pitwall | `crates/pitwall-server/src/process.rs:42` | llama-server below-normal | `Priority` per request kind |
-| Pitcrew, Spotter, Sighter, Pacenotes | – | no priority set on children (Spotter's renderer, Pitcrew's services) | C39 lists them; Background for Spotter's scheduled renders |
+| Pitcrew, Spotter, Sighter, Pacenotes | – | no priority set on children (Spotter's renderer, Pitcrew's services) | C40 lists them; Background for Spotter's scheduled renders |
 
 ### 2. No polling without a wake-up
 
@@ -87,14 +87,14 @@ an OS without events) is an ADR 0020 mode-2 check: a declared interval, backoff 
 maximum), **demand** (paused without subscribers or a visible window) and **idle stop** (it ends when its purpose is met
 or after a declared maximum). A store or OS call inside a loop body is work for the check, never for a `sleep` loop.
 
-**Check.** ADR 0020 WP-12's lint, made binding and widened: **C40** flags `thread::sleep`, `sleep(` and `wait_timeout`
+**Check.** ADR 0020 WP-12's lint, made binding and widened: **C41** flags `thread::sleep`, `sleep(` and `wait_timeout`
 in non-test code outside `paddock-jobs::exec` and the allow-list (each entry with interval, backoff, demand and idle
 stop); frontend `setInterval`/`timer(`/`interval(` outside the shared live feed likewise. A PR test per fixed instance
 counts its work on a `ManualExecutor`/fake clock: **0 statements, 0 OS calls, 0 wake-ups across N idle turns** (the
 budget D7 adopted: ≤ 1 wake-up/s and ≤ 0.5 % of a core per idle process, also measured nightly in `debrief-bench.yml`).
 
 **Instances today.** Classified (survey): 44 periodic polls, 17 frontend polls, ~30 copies of a `try_wait`-sleep loop.
-Raw grep of `thread::sleep(` in non-test paths (includes inline test modules; the C40 first run gives the exact list):
+Raw grep of `thread::sleep(` in non-test paths (includes inline test modules; the C41 first run gives the exact list):
 shared crates 19, Debrief 245, Dyno 68, Pitcrew 17, Spotter 17, Pitwall 8, Sighter 0, Pacenotes 0. The measured ones:
 
 | App | Site | Measured |
@@ -114,7 +114,7 @@ otherwise run inline is submitted to the ADR 0020 executor (mode 1, a class and 
 and an **idempotency key** (`JobSpec::key`: kind + scope + canonical request; `submit` returns the queued or running job
 with the same key). Requests read the last finished result and never wait for a rebuild; a rebuild is single-flight.
 
-**Check.** **C41**: `thread::spawn`/`Builder::spawn` in non-test code outside `paddock-jobs` and the lease allow-list
+**Check.** **C42**: `thread::spawn`/`Builder::spawn` in non-test code outside `paddock-jobs` and the lease allow-list
 (ADR 0020's mode-3 exemptions: pipe readers, lifelines, OS consumers) fails; every job kind registered with the jobs
 registry declares its key function and its phases (a registry test enumerates kinds and asserts both); a PR test per
 kind submits the same request twice and gets one id.
@@ -146,7 +146,7 @@ the name. One watcher serves all of an app's children (an ADR 0020 mode-2 check 
 call's end), not one thread per child.
 
 **Check.** A `paddock-proc` test with a counting OS shim: watching 14 children for 10 fake-clock seconds makes 14 per-pid
-reads per tick and 0 machine snapshots; C40/C41's allow-list names the only callers of `machine_snapshot()`; nightly, the
+reads per tick and 0 machine snapshots; C41/C42's allow-list names the only callers of `machine_snapshot()`; nightly, the
 plugin idle harness (`crates/debrief-plugins/tests/it/perf_plugins.rs`) asserts the host's idle CPU within the D7 budget.
 
 **Instances today:**
@@ -166,10 +166,10 @@ plugin idle harness (`crates/debrief-plugins/tests/it/perf_plugins.rs`) asserts 
 ## Rollout
 
 1. **Paddock, now (with Debrief 1.2's wave 2):** `paddock-proc` `Priority`, `threads()`, per-pid and tree probes, one
-   watcher for all children (Debrief 1.2 package P1 with 2.2); C39-C41 land in **warning** mode with their generated
+   watcher for all children (Debrief 1.2 package P1 with 2.2); C40-C42 land in **warning** mode with their generated
    instance lists committed.
 2. **Debrief 1.2:** packages P0-P4, NR1, BP1, J1 and B1 of the 1.2 plan (section "Performance packages"); PH1 moves its
-   children onto `paddock-proc`, which takes rules 1 and 4 with it; C39-C41 become **errors for `apps/debrief`** when its
+   children onto `paddock-proc`, which takes rules 1 and 4 with it; C40-C42 become **errors for `apps/debrief`** when its
    lists are empty or reasoned.
 3. **Other apps, each with its next release** (rule 1, one app at a time): Pitwall (llama-server priority per request,
    ADR 0020 WP-11), Pacenotes and Sighter (born compliant: the checks are errors for them from their first code), Pitcrew
