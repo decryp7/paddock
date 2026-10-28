@@ -1,10 +1,10 @@
 import { P, save, sequence } from './common.mjs';
 
-/** parts: [id, name, tech, role]; script items: ['m', a, b, text, reply?] ['s', p, text] ['o', kind, cond] ['e', cond] ['c'] ['n', p, text, w?] ['C', from, id, text] creates a late part (5th field true) ['x', id] ends its lifeline ['r', id] resumes it (in the other branch of an alt) */
+/** parts: [id, name, tech, role]; script items: ['m', a, b, text, reply?] ['s', p, text] ['o', kind, cond] ['e', cond] ['c'] ['n', p, text, w?] */
 function seq(file, { title, desc, parts, script, pw = 168, gap = 40 }) {
   const w = 96 + parts.length * pw + (parts.length - 1) * gap;
   const d = P({ title, kind: 'UML · Sequence diagram', desc, w });
-  const s = sequence(d, parts.map(([id, name, tech, role, late]) => ({ id, name, tech, role, late })), { pw, gap });
+  const s = sequence(d, parts.map(([id, name, tech, role]) => ({ id, name, tech, role })), { pw, gap });
   for (const [k, ...a] of script) {
     if (k === 'm') s.msg(a[0], a[1], a[2], { reply: !!a[3] });
     else if (k === 's') s.self(a[0], a[1]);
@@ -12,9 +12,6 @@ function seq(file, { title, desc, parts, script, pw = 168, gap = 40 }) {
     else if (k === 'e') s.else(a[0]);
     else if (k === 'c') s.close();
     else if (k === 'n') s.note(a[0], a[1], a[2]);
-    else if (k === 'C') s.create(a[0], a[1], a[2]);
-    else if (k === 'x') s.end(a[0]);
-    else if (k === 'r') s.resume(a[0]);
   }
   const y = s.done();
   const names = { ui: 'Angular UI', accent: 'Dyno', core: 'Pure core', process: 'Process · OS · data', plugin: 'Plugin', external: 'External' };

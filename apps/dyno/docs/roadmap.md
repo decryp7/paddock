@@ -314,7 +314,7 @@ Each is small and independent; all are core logic plus an adapter plus a card or
 
 - **Scope.** The installed memory modules (size, type, speed, slot, manufacturer) drawn as slots: Windows through WMI, macOS
   through `system_profiler` (including Apple Silicon's unified memory, drawn as one package), Linux through DMI tables, which
-  need root and are read only on a click (needs root; the helper in 1.1).
+  need root, so in 1.0 the page says so; the helper reads them in 1.1.
 - **Acceptance.** Empty slots are drawn empty; an unreadable source says why; an unreadable Linux read says it needs root and the app works without it.
 - **Depends on.** Nothing in 1.0 (the Linux read waits for the helper in 1.1). **Touches.** `dyno-platform/**`, a facts type in the core, a memory detail page.
 
