@@ -1,6 +1,7 @@
 # 23. Tests never free a port they probe
 
-- Status: Proposed (2026-10-28)
+- Status: Accepted (2026-10-28, after an independent review). The user decided on 2026-10-28 that the apps' sites stay
+  waived until 2026-12-31, one waiver per file
 - Date: 2026-10-28
 - Related: rule 40 (recurring bugs mean a missing design rule), rules 42/43 (share first, shared behaviour tested once),
   ER-12 and ER-14 (deterministic tests that do not depend on the machine); ADR 0021 (portable tests, `paddock-testkit`);
@@ -49,12 +50,17 @@ cannot use a real port at all.
    the code under test gets a small connector port (`paddock_pitwall::loopback::Connector`, with `Tcp` as the real
    one, `Client::with_connector`), and the test injects one that returns `ErrorKind::ConnectionRefused`. Where the
    behaviour is only the mapping of a library error (paddock-net, paddock-channels, paddock-download), a unit test
-   builds the refused error and checks how it is mapped. Those tests already existed. The tests that used a freed port
-   now use a reset port: the connection fails with the same error kind, without depending on the machine.
+   builds the refused error and checks how it is mapped: paddock-net's wire mapping (refused, reset and aborted, since
+   Windows may report an abort) and paddock-download's `classify` build `ConnectionRefused`; paddock-channels takes
+   paddock-net's result and tests its next step. The tests that used a freed port now use a reset port and are named
+   for it ("a reset connection is a connect error"): the connection fails with the same error kind, without depending on
+   the machine.
 3. **One check: C39 "Tests never free a port they probe"** (conformance, error level, every Rust file). It reports:
    - a chain that reads the port of a temporary listener: `TcpListener::bind(..).unwrap().local_addr()`, also with `?`,
-     `.expect(..)` or `.await`;
-   - a block or fn body that binds `let l = ..bind(..)` and ends with `l.local_addr()..`, using `l` for nothing else;
+     `.expect(..)`, `.unwrap_or_else(..)`, `.map_err(..)`, `.context(..)`, `.with_context(..)` or `.await`, and under a
+     `use .. TcpListener as Alias` name;
+   - a block or fn body that binds `let l = ..bind(..)` (or a socket2 `Socket::new(..)` that it binds and sets up) and
+     ends with `l.local_addr()..`, using `l` for nothing else;
    - `drop(l)` when a value made from `l.local_addr()` is used after the drop.
 
    A justified case carries `// conformance: freed-port — <reason>`. A waiver without a reason is itself an error. The
@@ -70,14 +76,15 @@ Fixed in this change (shared crates):
 |---|---|---|
 | `crates/paddock-pitwall/tests/contract.rs` | `a_link_that_has_not_seen_pitwall_says_what_is_missing` (failed in run 6512) | `HeldPort::hang_up()` |
 | `crates/paddock-pitwall/tests/contract.rs` | `the_server_gone_is_not_running_and_a_foreign_listener_is_a_protocol_error` | a refusing `Connector` |
-| `crates/paddock-pitwall/src/loopback.rs` | `refused_garbage_and_header_injection` | `send_via` with a refusing `Connector` |
+| `crates/paddock-pitwall/src/loopback.rs` | `refused_garbage_and_header_injection` | `send_via` with a refusing `Connector` (port 1: it never connects) |
 | `crates/paddock-pitwall/src/loopback.rs` | the cancel test ("already cancelled: no socket") | `HeldPort::hang_up()` |
-| `crates/paddock-net/tests/it/real.rs` | `a_closed_port_is_a_connect_error_...`, `a_proxy_that_cannot_be_reached_...` | `HeldPort::reset()` |
-| `crates/paddock-channels/tests/it/network.rs` | `an_unreachable_host_is_a_connect_error`, `smtp_to_a_closed_port_is_a_connect_error` | `HeldPort::reset()` |
+| `crates/paddock-net/tests/it/real.rs` | `a_reset_connection_is_a_connect_error_...`, `a_proxy_that_resets_the_connection_...` | `HeldPort::reset()` |
+| `crates/paddock-channels/tests/it/network.rs` | `a_reset_connection_is_a_connect_error`, `smtp_reset_by_the_server_is_a_connect_error` | `HeldPort::reset()` |
 | `crates/paddock-download/tests/it/gaps.rs` | the closed-port case at the end | `HeldPort::reset()` |
-| `crates/paddock-download/tests/it/http.rs` | `an_unreachable_host_is_a_network_error_after_the_attempts`, the proxy that is not there | `HeldPort::reset()` |
+| `crates/paddock-download/tests/it/http.rs` | `a_reset_connection_is_a_network_error_after_the_attempts`, the proxy that resets | `HeldPort::reset()` |
 
-Left to each app, under a dated C39 waiver for `apps/*` in `paddock.waivers.toml` (expires 2026-12-31):
+Left to each app, under one dated C39 waiver per file in `paddock.waivers.toml` (expires 2026-12-31), so a new freed
+port in an app is still reported:
 
 | App | Site | Note |
 |---|---|---|
@@ -97,9 +104,13 @@ Left to each app, under a dated C39 waiver for `apps/*` in `paddock.waivers.toml
 
 ## Risks
 
-- C39 is a heuristic over masked text. It does not follow a listener through a helper that returns only its port by
-  another route (for example, a struct field that is dropped later). The kit's documentation and this ADR name the
-  pattern, so a reviewer can catch what the check misses.
+- C39 is a heuristic over masked text. Known gaps: a listener kept in a struct field or a collection and dropped
+  later; a helper that takes the listener by value and returns only its port; a port read through `peer_addr` or
+  `as_raw_fd` tricks; a socket2 socket whose port is read without a `let` binding. The kit's documentation and this ADR
+  name the pattern, so a reviewer can catch what the check misses.
+- The SMTP refusal mapping of paddock-channels (`mail::classify`) has no constructed-error test: lettre's error
+  constructors are crate-private. Any network error falls through to `SendError::Connect`, the branch the reset-port
+  test reaches.
 - On some OS a reset port could produce an error the code maps differently from a refusal. The three net-stack crates
   map every I/O failure that is not a timeout or TLS to "connect", so the assertions hold. The changed tests ran 50 times
   in a row on macOS. Linux and Windows are covered by CI.
