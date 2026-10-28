@@ -287,12 +287,11 @@ Dialogs as real OS windows (ADR 0009, rule 17), ported from Debrief's `dialog_co
   (`grant_of(label)`, the `paddock_commands::DialogGrant`) and decides close requests (`close_request(label, now)`:
   forwarded as the dialog's Close/Cancel, closed when it did not answer within 1.5 s, a required choice kept unless the
   watchdog marked its page unresponsive).
-- `window`: the wire `Measure { content, minContent }` (TS `DialogMeasureWire`), `plan_fit` (the cap is 75 % of the work
+- `window`: the wire `Measure { content, minContent, viewportHeight? }` (TS `DialogMeasureWire`; `viewportHeight` is the page's `innerHeight`, 1..=4096: the fit adds `viewport_delta` = the window's inner height less it, clamped to 0..=400, to the content and minimum heights, for a webview shorter than its window), `plan_fit` (the cap is 75 % of the work
   area less the window's own outer-minus-inner decorations and limits the preferred size only, never below `minContent`,
   which becomes the OS minimum; decisions and forms shrink and grow, a viewer only grows, a tool keeps its size) and
-  **`show_mechanism(os)`, the one place the per-OS way of keeping a window unseen is chosen** (`ReadyThenShow`: hidden,
-  shown on `dialog_ready`, method d of the 1.1-0 spike, on every OS today; `OffscreenThenShow`: visible off-screen, moved
-  into place on ready, method b, for Windows if its measurement disagrees).
+  **`show_mechanism(os)`, the one place the way of keeping a window unseen is chosen** (`ReadyThenShow`: hidden,
+  shown on `dialog_ready`, method d of the 1.1-0 spike, measured on macOS, Linux and Windows).
 - `tauri` feature: `open` (window by kind, created **hidden** at the placed size on the dialog shell's surface colour,
   no title-bar buttons, owned or independent per OS, `WindowHooks` for the app's webview settings), the commands
   `dialog_open`, `dialog_take_input`, `dialog_close`, `dialog_ready { measure }` (sizes, then shows and focuses the

@@ -6,7 +6,7 @@
 //! exists per dialog id, opener and instance key: opening it again focuses the existing one.
 
 use crate::contract::{Contracts, Grant, Kind, Modality};
-use crate::placement::{Bounds, ScreenPosition};
+use crate::placement::Bounds;
 use crate::window::{DEFAULT_ROUTE, DialogError, DialogErrorCode, MAX_OPEN_PER_HOST, Measure};
 use paddock_commands::labels::{DIALOG_PREFIX, Label};
 use serde_json::Value;
@@ -68,11 +68,9 @@ pub struct OpenDialog {
     pub asked: Option<Instant>,
     /// The window watchdog found its page not answering: nobody can make a required choice, so the OS close may.
     pub unresponsive: bool,
-    /// The window is on screen. A window starts pending (hidden, or off-screen) and is shown once, on `dialog_ready`
+    /// The window is on screen. A window starts pending (hidden) and is shown once, on `dialog_ready`
     /// or at the show deadline; its parent is disabled and a second open focuses it only from then on.
     pub shown: bool,
-    /// Where it goes when it is shown (the placement; used by the off-screen show mechanism).
-    pub at: Option<ScreenPosition>,
     /// The last measure its page reported, for a refit when the scale factor changes.
     pub measure: Option<Measure>,
 }
@@ -99,7 +97,6 @@ impl OpenDialog {
             asked: None,
             unresponsive: false,
             shown: false,
-            at: None,
             measure: None,
         }
     }
@@ -315,7 +312,11 @@ impl Dialogs {
     /// Like [`Dialogs::mark_shown`], and when it is the first time runs `then` with the entry under the registry lock, so
     /// that a close racing the show is ordered against it: whatever `then` queues (the parent's disabling) is queued
     /// before anything a later [`Dialogs::remove_with`] queues, and a close that came first leaves nothing to show.
-    pub fn mark_shown_with(&self, label: &str, then: impl FnOnce(&OpenDialog)) -> Option<OpenDialog> {
+    pub fn mark_shown_with(
+        &self,
+        label: &str,
+        then: impl FnOnce(&OpenDialog),
+    ) -> Option<OpenDialog> {
         let mut map = self.lock();
         let e = map.get_mut(label)?;
         if std::mem::replace(&mut e.shown, true) {
@@ -328,7 +329,11 @@ impl Dialogs {
     /// Forgets the dialog window `label` like [`Dialogs::remove`] and runs `then` under the registry lock with the
     /// entry and whether it was the last SHOWN modal dialog of its parent (a pending modal has not locked the parent
     /// and does not hold it).
-    pub fn remove_with(&self, label: &str, then: impl FnOnce(&OpenDialog, bool)) -> Option<OpenDialog> {
+    pub fn remove_with(
+        &self,
+        label: &str,
+        then: impl FnOnce(&OpenDialog, bool),
+    ) -> Option<OpenDialog> {
         let mut map = self.lock();
         let e = map.remove(label)?;
         let last = !map
@@ -341,13 +346,6 @@ impl Dialogs {
     /// Whether `label` is an open dialog whose window has not been shown yet.
     pub fn is_pending(&self, label: &str) -> bool {
         self.lock().get(label).is_some_and(|e| !e.shown)
-    }
-
-    /// Records where the pending dialog `label` goes when it is shown.
-    pub fn set_at(&self, label: &str, at: ScreenPosition) {
-        if let Some(e) = self.lock().get_mut(label) {
-            e.at = Some(at);
-        }
     }
 
     /// Records the last measure the page of `label` reported.

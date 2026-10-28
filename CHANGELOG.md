@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shared dialog API, review fixes (Rust)
+
+- `Measure` has an optional `viewportHeight` (the page's `window.innerHeight`, wire type `DialogMeasureWire`). Rust adds
+  the window's inner height less it (clamped to 0..=400 logical px) to the content and minimum content heights, so a
+  webview shorter than its window no longer cuts off the footer.
+- A modal's parent is disabled and re-enabled under the registry lock, on the main thread, and only shown modals hold
+  it: a deadline that fires after a close, or a pending modal, can no longer leave the parent disabled.
+
 ### Shared dialog API, part 5: macOS attach at show and the configured deadline
 - macOS: an owned dialog window is built without a parent and attached with `addChildWindow:ordered:` when it is shown
   (`objc2-app-kit`, a macOS-only dependency of `paddock-dialogs`, already in every app's tree through Tauri), instead of
@@ -76,7 +84,7 @@ Conventional Commits; one semver tag for the whole repo.
   `Dialogs::show_deadline` (1 s, `with_show_deadline`; `paddock-startup` `Config::dialog_show_deadline`) it is shown at the
   placed size and a late ready fits it once. The deadline runs through an injectable `Scheduler`.
 - The show mechanism per OS is chosen in one function, `paddock_dialogs::show_mechanism(os)`: method d (hidden, show on ready)
-  everywhere today, from the 1.1-0 spike (macOS and Linux measured; a Windows result flips one line to the off-screen method).
+  on every OS (the 1.1-0 spike measured macOS, Linux and Windows); the off-screen method is gone.
 - The minimum content becomes the OS minimum. The size cap is 75 % of the work area less the dialog window's own
   outer-minus-inner decorations, applies to the preferred size only and never pushes below the minimum content. Physical
   sizes are rounded up once. A decision keeps its offset only, a form its width and offset, a viewer and a tool their size.

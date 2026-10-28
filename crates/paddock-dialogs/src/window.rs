@@ -279,9 +279,6 @@ pub struct WindowConfig {
     /// Logical px (see [`ScreenPosition`]).
     pub position: (f64, f64),
     pub min_inner: (f64, f64),
-    /// Visible when built: only for [`ShowMechanism::OffscreenThenShow`] (off-screen); otherwise created hidden and
-    /// shown by the lifecycle ([`ShowMechanism::ReadyThenShow`]).
-    pub visible: bool,
     /// The background before the page paints ([`window_surface`]).
     pub background: (u8, u8, u8),
     pub resizable: bool,
@@ -312,8 +309,6 @@ pub struct WindowSpec<'a> {
     pub modality: Modality,
     /// The OS (`std::env::consts::OS`).
     pub os: &'a str,
-    /// How the window is kept unseen until it is fitted ([`show_mechanism`]).
-    pub mechanism: ShowMechanism,
     /// The parent's colour scheme, for the background ([`window_surface`]).
     pub dark: bool,
 }
@@ -334,11 +329,7 @@ pub fn window_config(
         url: dialog_url(spec.route, spec.dialog_id, spec.host, spec.label),
         title: spec.title.to_string(),
         inner: (w, h),
-        position: match spec.mechanism {
-            ShowMechanism::ReadyThenShow => at.logical,
-            ShowMechanism::OffscreenThenShow => OFFSCREEN,
-        },
-        visible: spec.mechanism == ShowMechanism::OffscreenThenShow,
+        position: at.logical,
         background: window_surface(spec.dark),
         min_inner: (min.0.min(w), min.1.min(h)),
         resizable: true,
@@ -409,21 +400,14 @@ impl Measure {
 pub enum ShowMechanism {
     /// Method d: the window is created hidden and shown on `dialog_ready` (or at the show deadline).
     ReadyThenShow,
-    /// Method b: the window is created visible and off-screen (unfocused), moved into place on `dialog_ready` (or at
-    /// the show deadline).
-    OffscreenThenShow,
 }
 
-/// The ONE place the show mechanism is chosen per OS (`std::env::consts::OS`). Measured on macOS and Linux: method d.
-/// Windows is pending; if it disagrees, return [`ShowMechanism::OffscreenThenShow`] for `"windows"` here and nowhere
-/// else.
+/// The ONE place the show mechanism is chosen per OS (`std::env::consts::OS`). The 1.1-0 spike measured method d on
+/// macOS, Linux and Windows, so it is the same everywhere.
 pub fn show_mechanism(os: &str) -> ShowMechanism {
     let _ = os;
     ShowMechanism::ReadyThenShow
 }
-
-/// Where an off-screen window waits (logical px, far outside any display arrangement).
-pub const OFFSCREEN: (f64, f64) = (-30_000.0, -30_000.0);
 
 /// The background of a dialog window before its page paints, RGB: the dialog shell's own surface (`--pd-surface-2` of
 /// `_tokens.scss`, dark `#1b1e23`, light `#f0f2f5`), so the window never flashes another colour. The scheme is the parent
@@ -997,7 +981,6 @@ mod tests {
                 title: "Set up",
                 modality,
                 os,
-                mechanism: ShowMechanism::ReadyThenShow,
                 dark: true,
             };
             let at = placement::screen_position(&place, os);
@@ -1017,12 +1000,9 @@ mod tests {
             assert_eq!(c.min_inner, (500.0, 300.0));
             assert_eq!(c.title, "Set up");
             // Created unseen, on the dialog shell's own surface.
-            assert!(!c.visible);
             assert_eq!(c.background, window_surface(true));
-            // The off-screen mechanism waits far from every display and is visible.
-            let off = window_config(
+            let light = window_config(
                 &WindowSpec {
-                    mechanism: ShowMechanism::OffscreenThenShow,
                     dark: false,
                     ..spec
                 },
@@ -1030,8 +1010,7 @@ mod tests {
                 &place,
                 (680.0, 300.0),
             );
-            assert!(off.visible && off.position == OFFSCREEN);
-            assert_eq!(off.background, window_surface(false));
+            assert_eq!(light.background, window_surface(false));
         }
     }
 
