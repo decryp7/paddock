@@ -89,18 +89,6 @@ describe('Shell', () => {
     f.detectChanges();
     expect(el.querySelector('.agent')!.textContent).toContain('Agent stopped');
   });
-  it('shows Running as administrator with a way back while the agent is elevated', async () => {
-    const { f, mock, el, live } = await make();
-    expect(el.querySelector('[data-testid="admin-state"]')).toBeNull();
-    mock.elevated = true;
-    live.receive(mock.liveUpdate('summary'));
-    f.detectChanges();
-    const badge = el.querySelector('[data-testid="admin-state"]')!;
-    expect(badge.textContent).toContain('Running as administrator');
-    badge.querySelector('button')!.click();
-    await f.whenStable();
-    expect(mock.elevated).toBe(false);
-  });
   it('toasts alerts pushed by the agent', async () => {
     const { f, mock, el } = await make();
     mock.pushAlert({ id: 'x', at: NOW, kind: 'lowDisk', severity: 'warning', title: 'Disk almost full', detail: '' });

@@ -17,12 +17,10 @@ pub mod files;
 pub mod handlers;
 pub mod handlers_search;
 pub mod hardware;
-pub mod identity;
 pub mod inventory;
 pub mod issues;
 pub mod netwatch;
 pub mod network;
-pub mod ownership;
 pub mod paths;
 pub mod recorder;
 pub mod rollup;
@@ -52,19 +50,7 @@ impl Running {
         details: Box<dyn dyno_core::ports::ProcessSource>,
         reveal: agent::Reveal,
     ) -> Result<Running, String> {
-        let session = dyno_core::session::Session::normal(identity::this_uid());
-        Running::start_session(dirs, platform, details, reveal, session)
-    }
-
-    /// [`Running::start`] for a given session (normal, or administrator rights for this session only).
-    pub fn start_session(
-        dirs: paths::Dirs,
-        platform: dyno_platform::Platform,
-        details: Box<dyn dyno_core::ports::ProcessSource>,
-        reveal: agent::Reveal,
-        session: dyno_core::session::Session,
-    ) -> Result<Running, String> {
-        let (shared, sensors, processes) = Shared::build_session(dirs, platform, details, reveal, session)?;
+        let (shared, sensors, processes) = Shared::build(dirs, platform, details, reveal)?;
         let (host, discovery) = server::bind(&shared).map_err(|e| format!("Dyno could not open its private endpoint: {e}"))?;
         let mut threads = Vec::new();
         let s = shared.clone();
@@ -127,27 +113,6 @@ impl Running {
                 .spawn(move || netwatch::run(&s))
                 .map_err(|e| format!("could not start the network change watcher: {e}"))?,
         );
-        #[cfg(unix)]
-        if let Some((uid, gid)) = shared.session.file_owner() {
-            // Administrator rights, the user's files: see `ownership`.
-            let s = shared.clone();
-            threads.push(
-                std::thread::Builder::new()
-                    .name("dyno-owner".into())
-                    .spawn(move || {
-                        let root = s.dirs.root().to_path_buf();
-                        while !s.stopped() {
-                            ownership::hand_over(&root, uid, gid, &ownership::OsOwners);
-                            let mut waited = std::time::Duration::ZERO;
-                            while waited < std::time::Duration::from_secs(5) && !s.stopped() {
-                                std::thread::sleep(std::time::Duration::from_millis(250));
-                                waited += std::time::Duration::from_millis(250);
-                            }
-                        }
-                    })
-                    .map_err(|e| format!("could not start the file owner: {e}"))?,
-            );
-        }
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()
@@ -172,11 +137,6 @@ impl Running {
         self.shared.request_stop();
         for t in self.threads {
             let _ = t.join();
-        }
-        #[cfg(unix)]
-        if let Some((uid, gid)) = self.shared.session.file_owner() {
-            // Whatever the agent wrote while shutting down.
-            ownership::hand_over(self.shared.dirs.root(), uid, gid, &ownership::OsOwners);
         }
     }
 }

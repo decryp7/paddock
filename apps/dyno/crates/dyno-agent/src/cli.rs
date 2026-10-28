@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 static SIGNALLED: AtomicBool = AtomicBool::new(false);
 
 const USAGE: &str = "dyno-agent — measures your PC and keeps its history\n\n\
-usage:\n  dyno-agent run                 run in the foreground (what the service starts)\n  dyno-agent run --elevated <folder> <user> [<uid> <gid>]   run as administrator for this session (started by Dyno after the OS prompt)\n  dyno-agent status              is an agent running?\n  \
+usage:\n  dyno-agent run                 run in the foreground (what the service starts)\n  dyno-agent status              is an agent running?\n  \
 dyno-agent stop                ask the running agent to exit\n  dyno-agent once                print one measurement as JSON (changes nothing)\n  \
 dyno-agent bench [seconds] [none|summary|processes]   run for a while and report Dyno's own CPU and memory as JSON\n  \
 dyno-agent service install|uninstall|status|ensure   register it to start at login\n";
@@ -24,7 +24,6 @@ pub fn main(args: Vec<String>) -> i32 {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let out = match args.as_slice() {
         ["run"] => run(),
-        ["run", "--elevated", rest @ ..] => parse_elevated(rest).and_then(run_elevated),
         ["status"] => status(),
         ["stop"] => stop(),
         ["once"] => once(),
@@ -117,55 +116,6 @@ fn run() -> Result<(), String> {
     let (platform, details) = platforms();
     let running = Running::start(dirs, platform, details, reveal())?;
     eprintln!("dyno-agent {} running (pid {})", env!("CARGO_PKG_VERSION"), running.discovery.pid);
-    while !running.stopped() && !SIGNALLED.load(Ordering::SeqCst) {
-        std::thread::sleep(Duration::from_millis(200));
-    }
-    running.stop();
-    Ok(())
-}
-
-/// What the elevated session needs: its own data folder, the user it belongs to and that user's Unix id.
-#[derive(Debug, PartialEq, Eq)]
-struct ElevatedArgs {
-    folder: std::path::PathBuf,
-    user: String,
-    uid: Option<u32>,
-    gid: Option<u32>,
-}
-
-/// Parses `<folder> <user> [<uid>]`; the folder must be absolute and the user a non-empty key.
-fn parse_elevated(rest: &[&str]) -> Result<ElevatedArgs, String> {
-    let number = |s: &str| s.parse::<u32>().map_err(|_| "the user and group ids must be numbers".to_string());
-    let (folder, user, uid, gid) = match rest {
-        [folder, user] => (folder, user, None, None),
-        [folder, user, uid, gid] => (folder, user, Some(number(uid)?), Some(number(gid)?)),
-        _ => return Err("run --elevated takes a folder, a user and optionally the user and group ids".into()),
-    };
-    let folder = std::path::PathBuf::from(folder);
-    if !folder.is_absolute() || user.is_empty() {
-        return Err("run --elevated needs an absolute folder and a user".into());
-    }
-    Ok(ElevatedArgs {
-        folder,
-        user: (*user).to_string(),
-        uid,
-        gid,
-    })
-}
-
-/// Runs with administrator rights for this session. Its data lives in its own folder (made by the app, so the person can
-/// remove it afterwards); it is never registered to start at login and ends with Dyno.
-fn run_elevated(a: ElevatedArgs) -> Result<(), String> {
-    let dirs = Dirs::at(a.folder);
-    install_signal_handlers();
-    let (platform, details) = platforms();
-    let session = dyno_core::session::Session::elevated(a.user, a.uid).with_gid(a.gid);
-    let running = Running::start_session(dirs, platform, details, reveal(), session)?;
-    eprintln!(
-        "dyno-agent {} running as administrator (pid {})",
-        env!("CARGO_PKG_VERSION"),
-        running.discovery.pid
-    );
     while !running.stopped() && !SIGNALLED.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(200));
     }
@@ -300,27 +250,4 @@ fn tempfile_dir() -> Result<std::path::PathBuf, String> {
     let dir = std::env::temp_dir().join(format!("dyno-bench-{}", std::process::id()));
     std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
     Ok(dir)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_elevated_arguments_are_parsed_once_and_refused_when_odd() {
-        let ok = parse_elevated(&["/data/elevated", "uid:501", "501", "20"]).unwrap();
-        assert_eq!((ok.user.as_str(), ok.uid, ok.gid), ("uid:501", Some(501), Some(20)));
-        assert_eq!(parse_elevated(&["/data/e", "user:alex"]).unwrap().uid, None);
-        for bad in [
-            &["/data/e"][..],
-            &["relative", "uid:1"],
-            &["/data/e", ""],
-            &["/data/e", "u", "x"],
-            &["/d", "b", "1"],
-            &["/d", "b", "1", "x"],
-            &["a", "b", "1", "2"],
-        ] {
-            assert!(parse_elevated(bad).is_err(), "{bad:?}");
-        }
-    }
 }

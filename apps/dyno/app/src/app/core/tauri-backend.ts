@@ -17,7 +17,6 @@ import type {
   Anomaly,
   AppInfo,
   Diagnosis,
-  ElevationStatus,
   HealthReport,
   History,
   HistoryRange,
@@ -511,15 +510,6 @@ export class TauriBackend implements DynoBackend {
   /** The shell shows the OS save dialog and asks the agent to write the report there. */
   saveInventoryReport(format: InventoryFormat): Promise<SavedInventory | null> {
     return this.command<SavedInventory | null>('save_inventory_report', { format }, DIALOG_TIMEOUT_MS);
-  }
-
-  /** The OS asks for permission (UAC, the password dialog or polkit); the answer can take as long as the person does. */
-  runAsAdministrator(): Promise<ElevationStatus> {
-    return this.command<ElevationStatus>('run_as_administrator', undefined, DIALOG_TIMEOUT_MS);
-  }
-
-  runUnelevated(): Promise<ElevationStatus> {
-    return this.command<ElevationStatus>('run_unelevated', undefined, DIALOG_TIMEOUT_MS);
   }
 
   /** The shell shows the OS folder dialog and answers the chosen path (or null). */

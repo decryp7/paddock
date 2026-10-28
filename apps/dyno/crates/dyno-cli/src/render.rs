@@ -341,7 +341,6 @@ mod tests {
             processes: None,
             groups: None,
             other_users: None,
-            elevated: false,
         }
     }
 

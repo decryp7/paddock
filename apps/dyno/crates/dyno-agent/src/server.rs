@@ -39,7 +39,6 @@ pub fn bind(shared: &Shared) -> std::io::Result<(Host, Discovery)> {
         started: crate::agent::now().millis(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         protocol: PROTOCOL_VERSION,
-        elevated_for: shared.session.for_user.clone().filter(|_| shared.session.elevated),
     };
     d.write(&shared.dirs.discovery())?;
     Ok((host, d))
@@ -57,10 +56,6 @@ pub fn serve(shared: &Arc<Shared>, mut host: Host) {
             shared.wake_sampler();
         }
         match host.accept(Duration::from_millis(400)) {
-            Ok(conn) if !shared.session.caller_allowed(conn.peer_uid()) => {
-                // Someone else's connection (another user on this Mac or Linux box): refused without reading anything.
-                eprintln!("dyno-agent: refused a connection from another user");
-            }
             Ok(conn) => match connect(shared, conn) {
                 Ok(entry) => peers.push(entry),
                 Err(e) => eprintln!("dyno-agent: could not start a connection: {e}"),

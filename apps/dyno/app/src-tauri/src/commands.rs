@@ -10,7 +10,7 @@ use crate::window;
 use dyno_core::protocol::{Reply, Request};
 use serde_json::Value;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State, Webview};
+use tauri::{AppHandle, State, Webview};
 
 /// Parses what the UI sent. Anything the UI is not allowed to ask is refused here.
 pub fn parse_request(value: Value) -> Result<Request, CommandError> {
@@ -313,35 +313,6 @@ pub async fn popover_close(webview: Webview, app: AppHandle) -> Result<(), Comma
     }
     crate::popover::close(&app, webview.label());
     Ok(())
-}
-
-/// "Run as administrator": restarts the agent with administrator rights for this session after the OS prompt. A cancelled
-/// prompt is a normal answer (`elevated: false` and a calm message).
-#[tauri::command]
-pub async fn run_as_administrator(link: State<'_, Arc<AgentLink>>, app: AppHandle) -> Result<crate::dto::ElevationStatus, CommandError> {
-    let link = link.inner().clone();
-    let app2 = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let ctl = app2.state::<crate::elevation::ElevationCtl>();
-        ctl.run_as_administrator(link.as_ref())
-    })
-    .await
-    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
-    .map_err(|m| CommandError::new(crate::dto::ErrorCode::AccessDenied, m))
-}
-
-/// "Go back to normal rights": the elevated agent exits and a normal one starts.
-#[tauri::command]
-pub async fn run_unelevated(link: State<'_, Arc<AgentLink>>, app: AppHandle) -> Result<crate::dto::ElevationStatus, CommandError> {
-    let link = link.inner().clone();
-    let app2 = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let ctl = app2.state::<crate::elevation::ElevationCtl>();
-        ctl.run_unelevated(link.as_ref())
-    })
-    .await
-    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
-    .map_err(CommandError::internal)
 }
 
 /// The tray dropdown's "Quit".

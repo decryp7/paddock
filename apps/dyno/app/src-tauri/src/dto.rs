@@ -18,16 +18,6 @@ pub struct AppInfo {
     pub updates_reason: Option<String>,
 }
 
-/// `ElevationStatus`: the answer to "Run as administrator" and "Go back to normal rights".
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ElevationStatus {
-    /// Whether the agent now runs with administrator rights.
-    pub elevated: bool,
-    /// A calm sentence when the request did not change anything (the prompt was cancelled).
-    pub message: Option<String>,
-}
-
 /// The OS name the UI uses.
 pub const fn os_name() -> &'static str {
     if cfg!(windows) {

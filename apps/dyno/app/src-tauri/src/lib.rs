@@ -5,7 +5,6 @@
 
 pub mod commands;
 pub mod dto;
-pub mod elevation;
 pub mod link;
 pub mod logging;
 pub mod login;
@@ -48,8 +47,6 @@ pub fn run() {
             commands::save_issues,
             commands::pick_folder,
             commands::save_inventory_report,
-            commands::run_as_administrator,
-            commands::run_unelevated,
         ])
         .on_window_event(|win, event| match event {
             tauri::WindowEvent::Destroyed => {
@@ -76,7 +73,6 @@ pub fn run() {
             app.manage(shell.clone());
             app.manage(link.clone());
             app.manage(commands::PickedFolders::default());
-            app.manage(elevation::ElevationCtl::os(dyno_agent::paths::Dirs::current()));
             popover::init(app.handle());
             let items = shell::initial_items(&dyno_core::settings::Settings::default().tray_items);
             if let Err(e) = tray::sync_items(app.handle(), &items) {

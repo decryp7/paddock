@@ -42,7 +42,6 @@ pub mod protocol;
 pub mod recorder;
 pub mod report;
 pub mod sampling;
-pub mod session;
 pub mod settings;
 pub mod snapshot;
 pub mod startup;

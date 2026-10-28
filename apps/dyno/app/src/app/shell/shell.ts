@@ -1,4 +1,3 @@
-import { ElevationStore } from '../state/elevation.store';
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { MatTooltip } from '@angular/material/tooltip';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
@@ -86,13 +85,6 @@ function readCollapsed(): boolean {
           <span class="keys"><kbd>{{ platform.mod }}</kbd><kbd>K</kbd></span>
         </button>
         <span class="spacer" [attr.data-tauri-drag-region]="platform.overlayTitleBar ? '' : null"></span>
-        @if (elevation.elevated()) {
-          <div class="admin" role="status" data-testid="admin-state">
-            <dy-icon name="shield" />
-            <span>Running as administrator</span>
-            <button type="button" class="btn ghost sm" [disabled]="elevation.busy()" (click)="elevation.goBackToNormal()">Go back to normal rights</button>
-          </div>
-        }
         <div class="agent" [attr.data-state]="live.agent().state" role="status" [matTooltip]="agentTip()">
           <span class="pulse"></span>
           <span>{{ agentText() }}</span>
@@ -110,7 +102,6 @@ function readCollapsed(): boolean {
     .skip { position: absolute; left: -9999px; top: 8px; z-index: 2000; }
     .skip:focus { left: 8px; background: var(--surface-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); }
 
-    .admin { display: flex; align-items: center; gap: var(--sp-2); padding: 2px var(--sp-2); border-radius: var(--r-md); background: var(--warn-soft); color: var(--text-1); font-size: var(--fs-sm); }
     .sidebar { display: flex; flex-direction: column; min-width: 0; background: var(--surface-1); border-right: 1px solid var(--border); padding: var(--sp-3) var(--sp-2); gap: var(--sp-2); overflow: hidden; }
     .traffic { height: var(--titlebar-inset); flex: none; }
     .brand { display: flex; align-items: center; gap: var(--sp-2); height: 36px; padding: 0 var(--sp-2); }
@@ -151,7 +142,6 @@ function readCollapsed(): boolean {
 export class Shell implements OnInit {
   protected readonly platform = inject(PlatformService);
   protected readonly live = inject(LiveStore);
-  protected readonly elevation = inject(ElevationStore);
   private readonly settings = inject(SettingsStore);
   private readonly dialogs = inject(Dialogs);
   private readonly notifier = inject(Notifier);

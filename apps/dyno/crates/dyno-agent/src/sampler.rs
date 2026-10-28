@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 
 /// The most groups sent as "top" lists.
 const TOP: usize = 6;
+/// Other users' processes are folded into one "Other users" row (off while Dyno runs as administrator).
+const GROUP_OTHER_USERS: bool = true;
 
 /// What the loop keeps between ticks.
 pub struct Sampler {
@@ -215,7 +217,7 @@ impl Sampler {
             .value()
             .copied()
             .unwrap_or_else(|| derive_pressure(&sample.memory));
-        let (listed, other_users) = others::split(&core.latest.processes, shared.session.group_other_users());
+        let (listed, other_users) = others::split(&core.latest.processes, GROUP_OTHER_USERS);
         let listed_groups = if other_users.is_some() {
             group(&listed)
         } else {
@@ -230,7 +232,6 @@ impl Sampler {
             processes: Some(listed),
             groups: Some(listed_groups),
             other_users,
-            elevated: shared.session.elevated,
         };
         core.latest.live = Some(live.clone());
         drop_pressure_unused(pressure);

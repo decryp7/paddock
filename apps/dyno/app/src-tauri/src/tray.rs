@@ -18,10 +18,6 @@ use tauri::{AppHandle, Manager, Wry};
 /// The main popover's window label (in `capabilities/default.json`).
 pub const DROPDOWN: &str = "tray";
 const OPEN: &str = "open";
-/// Menu item: restart the agent with administrator rights for this session.
-const RUN_AS_ADMIN: &str = "run-as-admin";
-/// Menu item: restart the agent with normal rights.
-const NORMAL_RIGHTS: &str = "normal-rights";
 const QUIT: &str = "quit";
 
 /// The tray id of an item.
@@ -78,37 +74,11 @@ pub fn dark_taskbar() -> bool {
     }
 }
 
-/// Switches the agent between administrator and normal rights from the tray menu. The OS shows its own prompt; the answer
-/// is logged (the windows show the state from the live stream).
-fn switch_rights(app: &AppHandle<Wry>, administrator: bool) {
-    let app = app.clone();
-    std::thread::spawn(move || {
-        let (Some(ctl), Some(link)) = (
-            app.try_state::<crate::elevation::ElevationCtl>(),
-            app.try_state::<std::sync::Arc<crate::link::AgentLink>>(),
-        ) else {
-            return;
-        };
-        let result = if administrator {
-            ctl.run_as_administrator(link.inner().as_ref())
-        } else {
-            ctl.run_unelevated(link.inner().as_ref())
-        };
-        match result {
-            Ok(status) => logging::info(&format!("rights switched from the tray menu: elevated={}", status.elevated)),
-            Err(message) => logging::info(&format!("rights could not be switched: {message}")),
-        }
-    });
-}
-
 fn build_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
     Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, OPEN, "Open Dyno", true, None::<&str>)?,
-            &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, RUN_AS_ADMIN, "Run as administrator", true, None::<&str>)?,
-            &MenuItem::with_id(app, NORMAL_RIGHTS, "Go back to normal rights", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, QUIT, "Quit Dyno", true, None::<&str>)?,
         ],
@@ -136,8 +106,6 @@ fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             OPEN => window::show_main(app),
             QUIT => quit(app),
-            RUN_AS_ADMIN => switch_rights(app, true),
-            NORMAL_RIGHTS => switch_rights(app, false),
             _ => {}
         })
         .on_tray_icon_event(move |tray, event| {
