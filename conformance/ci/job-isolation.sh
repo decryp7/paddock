@@ -37,6 +37,8 @@
 # PADDOCK_CI_SLOTS: the most slots one host hands out (default 4); set it in every runner's environment (config.yaml
 # runner.envs) to the pool's maximum number of runners on the host. Linux containers take no slot (one job per Linux host
 # today; see ADR 0025 before running more): acquire and release do nothing there and everything else uses s1.
+# Output: a value command (path, temp, owns, port, pattern, slots, status) prints exactly its value on stdout; every message
+# goes to stderr, so a caller's "$(job-isolation.sh path ...)" is the path and nothing else (never capture it with 2>&1).
 # PADDOCK_DEV: the paddock-dev program to run (tests); default the repository's ./dev wrapper, which keeps its binary in the
 # shared kept folder tools/ (outside every job folder, so a Windows job folder can still be deleted while the holder runs).
 set -euo pipefail
@@ -161,7 +163,7 @@ cmd_sweep_slot() {
     elif [ "$n" -gt "$keep" ]; then why="slot $s is above the $keep kept slots"
     elif old "$f" "$days"; then why="no job used it for $days days"
     else continue; fi
-    rm -rf "$f" && echo "job-isolation: removed $(basename "$f") ($why)"
+    rm -rf "$f" && echo "job-isolation: removed $(basename " >&2$f") ($why)"
   done < <(slot_folders "$home" "$n"; if [ "$n" = 1 ]; then legacy_folders "$home"; fi)
 }
 
@@ -186,7 +188,7 @@ sweep() {
   for ((n = max; n >= 1; n--)); do
     if [ -z "$(slot_folders "$home" "$n")" ] && { [ "$n" != 1 ] || [ -z "$(legacy_folders "$home")" ]; }; then continue; fi
     dev_tool ci slot idle-run --slot "s$n" --root "$(native "$home")" -- bash "$here/job-isolation.sh" sweep-slot ${mode:+"$mode"} >/dev/null \
-      || echo "::warning::job-isolation: the sweep of slot s$n failed"
+      || echo "::warning::job-isolation: the sweep of slot s$n failed" >&2
     if [ -n "$floor" ] && [ "$(free_gb "$home")" -ge "$floor" ]; then return 0; fi
   done
   # Slots above the limit hold no folders the loop above did not see; a held slot's folders stay with its job.
@@ -316,12 +318,12 @@ export_slot() {
 }
 
 cmd_acquire() {
-  if is_linux; then echo "job-isolation: no slot in a Linux container (one job per Linux host; ADR 0025)"; return 0; fi
+  if is_linux; then echo "job-isolation: no slot in a Linux container (one job per Linux host; ADR 0025)" >&2; return 0; fi
   local out="${GITHUB_ENV:?GITHUB_ENV is not set}" temp home max said code=0 slot token tries=0 wait floor free
   temp="$(job_temp)"
   [ -d "$temp" ] || die "the runner's per-job temp folder $temp does not exist"
   max="$(max_slots)"
-  if [[ "${PADDOCK_CI_SLOT:-}" =~ ^s[1-9][0-9]*$ ]]; then echo "job-isolation: this job already holds $PADDOCK_CI_SLOT"; return 0; fi
+  if [[ "${PADDOCK_CI_SLOT:-}" =~ ^s[1-9][0-9]*$ ]]; then echo "job-isolation: this job already holds $PADDOCK_CI_SLOT" >&2; return 0; fi
   home="$(ci_home)"
   wait="${PADDOCK_SLOT_WAIT_TRIES:-20}"
   # A full house is refused (exit 4). It is real (more runners than PADDOCK_CI_SLOTS) or brief (a sweep holds an idle slot's
@@ -331,29 +333,29 @@ cmd_acquire() {
     said="$(dev_tool ci slot acquire --max "$max" --owner "$(native "$temp")" --root "$(native "$home")")" || code=$?
     if [ "$code" = 0 ] || [ "$code" != 4 ] || [ "$tries" -ge "$wait" ]; then break; fi
     tries=$((tries + 1))
-    echo "job-isolation: all $max slots are held; trying again ($tries of $wait)"
+    echo "job-isolation: all $max slots are held; trying again ($tries of $wait)" >&2
     sleep "${PADDOCK_SLOT_WAIT_SECONDS:-6}"
   done
   if [ "$code" != 0 ]; then
-    echo "::error::job-isolation: no slot (paddock-dev exit $code). Held slots (./dev ci slot status):"
-    cmd_status || true
-    echo "Set PADDOCK_CI_SLOTS on every runner of this host to the pool's maximum (it is $max), or see ADR 0025, \"Stalled holder\"."
+    echo "::error::job-isolation: no slot (paddock-dev exit $code). Held slots (./dev ci slot status):" >&2
+    cmd_status >&2 || true
+    echo "Set PADDOCK_CI_SLOTS on every runner of this host to the pool's maximum (it is $max), or see ADR 0025, \"Stalled holder\"." >&2
     exit 1
   fi
   read -r slot token <<< "$said"
   [[ "$slot" =~ ^s[1-9][0-9]*$ ]] && [ -n "$token" ] || die "paddock-dev answered '$said', not a slot and a token"
   export_slot "$out" "$slot" "$token" "$temp"
-  echo "job-isolation: slot $slot (kept folders end in -$slot); temp folders in $temp"
+  echo "job-isolation: slot $slot (kept folders end in -$slot); temp folders in $temp" >&2
   sweep "$home"
   floor="${PADDOCK_CI_MIN_FREE_GB:-30}"
   case "$floor" in '' | *[!0-9]*) floor=30 ;; esac
   free="$(free_gb "$home")"
   if [ -n "$free" ] && [ "$free" -lt "$floor" ]; then
-    echo "::warning::job-isolation: $free GB free on the CI home's disk, below the floor of $floor GB (PADDOCK_CI_MIN_FREE_GB); removing idle slots' kept folders, highest slot first"
+    echo "::warning::job-isolation: $free GB free on the CI home's disk, below the floor of $floor GB (PADDOCK_CI_MIN_FREE_GB); removing idle slots' kept folders, highest slot first" >&2
     sweep "$home" all "$floor"
     free="$(free_gb "$home")"
     if [ "$free" -lt "$floor" ]; then
-      echo "::error::job-isolation: still only $free GB free on $home's disk after removing every idle slot's kept folders (floor $floor GB). Free disk on the host, then re-run the job."
+      echo "::error::job-isolation: still only $free GB free on $home's disk after removing every idle slot's kept folders (floor $floor GB). Free disk on the host, then re-run the job." >&2
       PADDOCK_CI_SLOT="$slot" PADDOCK_CI_SLOT_TOKEN="$token" cmd_release >/dev/null || true
       exit 1
     fi
@@ -371,16 +373,16 @@ held_by_us() {
 cmd_release() {
   is_linux && return 0
   local s="${PADDOCK_CI_SLOT:-}" token="${PADDOCK_CI_SLOT_TOKEN:-}" home ok=1
-  [[ "$s" =~ ^s[1-9][0-9]*$ ]] || { echo "job-isolation: this job holds no slot"; return 0; }
+  [[ "$s" =~ ^s[1-9][0-9]*$ ]] || { echo "job-isolation: this job holds no slot" >&2; return 0; }
   home="$(ci_home)" || return 0
   if ! held_by_us "$home" "$s" "$token"; then
     ok=0
-    echo "::error::job-isolation: the holder of $s ended before the job did (killed with the job's processes?), so another job could have taken $s meanwhile: this job's isolation was not guaranteed. See ADR 0025, \"Stalled holder\"."
+    echo "::error::job-isolation: the holder of $s ended before the job did (killed with the job's processes?), so another job could have taken $s meanwhile: this job's isolation was not guaranteed. See ADR 0025, \"Stalled holder\"." >&2
   fi
   # Only this job's own holder: release honours only its token.
   dev_tool ci slot release --slot "$s" --token "$token" --root "$(native "$home")" >/dev/null \
-    || echo "::warning::job-isolation: $s did not let go in time (./dev ci slot status shows its holder)"
-  echo "job-isolation: released $s"
+    || echo "::warning::job-isolation: $s did not let go in time (./dev ci slot status shows its holder)" >&2
+  echo "job-isolation: released $s" >&2
   sweep "$home"
   [ "$ok" = 1 ]
 }

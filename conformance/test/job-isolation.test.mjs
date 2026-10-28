@@ -107,9 +107,9 @@ test('the slot count follows PADDOCK_CI_SLOTS (the pool maximum); a full house w
   assert.deepEqual(jobs.slice(0, 3).map((j) => j.exported().PADDOCK_CI_SLOT), ['s1', 's2', 's3']);
   const full = jobs[3].exec(['acquire'], { PADDOCK_SLOT_WAIT_TRIES: '2', PADDOCK_SLOT_WAIT_SECONDS: '0' });
   assert.notEqual(full.status, 0);
-  assert.match(full.stdout, /all 3 slots are held; trying again \(2 of 2\)/);
-  assert.match(full.stdout, /no slot \(paddock-dev exit 4\)/);
-  assert.match(full.stdout, new RegExp(`s2 busy: job folder ${jobs[1].temp}`));
+  assert.match(full.stderr, /all 3 slots are held; trying again \(2 of 2\)/);
+  assert.match(full.stderr, /no slot \(paddock-dev exit 4\)/);
+  assert.match(full.stderr, new RegExp(`s2 busy: job folder ${jobs[1].temp}`));
   assert.equal(jobs[1].later(['release']).status, 0);
   assert.equal(jobs[3].exec(['acquire']).status, 0, 'a released slot is free again');
   assert.equal(jobs[3].exported().PADDOCK_CI_SLOT, 's2', 'the lowest free slot: its kept folders are the warmest');
@@ -133,7 +133,7 @@ test('a job that ends without its release frees its slot (the holder ends with t
   rmSync(join(h.ci, 'slots', 's1.owner'));
   const r = b.later(['release']);
   assert.notEqual(r.status, 0);
-  assert.match(r.stdout, /the holder of s1 ended before the job did .* isolation was not guaranteed/);
+  assert.match(r.stderr, /the holder of s1 ended before the job did .* isolation was not guaranteed/);
 });
 
 test('release frees only the job\'s own slot; a job without one, or in a Linux container, does nothing', () => {
@@ -302,14 +302,14 @@ test('disk: below the free-disk floor acquire removes idle slots\' kept folders,
   const a = h.job('a'.repeat(16), env);
   const r = a.exec(['acquire']);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /10 GB free on the CI home's disk, below the floor of 30 GB/);
+  assert.match(r.stderr, /10 GB free on the CI home's disk, below the floor of 30 GB/);
   assert.equal(a.exported().PADDOCK_CI_SLOT, 's3');
   assert.ok(!existsSync(join(h.ci, 'target-big-s4')), 'the idle slot s4\'s folders went, under its lock');
   assert.ok(existsSync(join(h.ci, 'target-mid-s2')), 'held by a running job: kept');
   const full = h.job('f'.repeat(16), { ...env, FAKE_FULL: '1' });
   const rf = full.exec(['acquire']);
   assert.notEqual(rf.status, 0);
-  assert.match(rf.stdout, /still only 10 GB free .* Free disk on the host, then re-run the job/);
+  assert.match(rf.stderr, /still only 10 GB free .* Free disk on the host, then re-run the job/);
   assert.match(a.exec(['status']).stdout, /s4 free/, 'the failed job gave its slot back');
 });
 
@@ -413,4 +413,26 @@ test('job-isolation.sh fills patterns as plain text and keeps -e in command subs
   const gone = a.later(['path', 'target', 'x'], { PADDOCK_CI_HOME: join(h.root, 'unmounted') });
   assert.notEqual(gone.status, 0);
   assert.equal(gone.stdout, '', 'no path is printed for a home that is not there');
+});
+
+// CI run 6731: stable-workspace took `path src` with 2>&1, so the migration's message became part of the path ("invalid
+// format", "cannot change to 'job-isolation: moved ...'"). A value command prints exactly its value on stdout; every message
+// goes to stderr, and no CI file folds stderr into a captured value.
+test('value commands print only their value on stdout (messages go to stderr), and no caller captures 2>&1', () => {
+  const h = host();
+  mkdirSync(join(h.ci, 'src', 'x-app-macOS'), { recursive: true });
+  const a = h.job('a'.repeat(16));
+  const acq = a.exec(['acquire']);
+  assert.equal(acq.stdout, '', `acquire prints messages to stderr only: ${acq.stdout}`);
+  const moved = a.later(['path', 'src', 'x-app-macOS']);
+  assert.equal(moved.stdout, `${join(h.ci, 'src', 'x-app-macOS-s1')}\n`, 'the migration case: the path and nothing else');
+  assert.match(moved.stderr, /moved src\/x-app-macOS to src\/x-app-macOS-s1/);
+  for (const args of [['path', 'npm'], ['port', 'sccache'], ['temp'], ['slots']]) assert.equal(a.later(args).stdout.trim().split('\n').length, 1, args.join(' '));
+  const rel = a.later(['release']);
+  assert.equal(rel.stdout, '', `release prints messages to stderr only: ${rel.stdout}`);
+  const found = [];
+  for (const f of spawnSync('git', ['ls-files', '.gitea/workflows/*.yml', '.gitea/actions/*/action.yml', 'conformance/ci/*.sh', 'tools/*.sh', 'apps/*/scripts/ci/*'], { cwd: PADDOCK, encoding: 'utf8' }).stdout.split('\n').filter(Boolean)) {
+    for (const l of read(join(PADDOCK, f)).split('\n')) if (/\$\([^)]*job-isolation\.sh[^)]*2>&1/.test(l)) found.push(`${f}: ${l.trim()}`);
+  }
+  assert.deepEqual(found, [], 'never fold the script\'s stderr into a captured value');
 });
