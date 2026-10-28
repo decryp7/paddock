@@ -118,8 +118,10 @@ The states of an action are part of the contract:
   `aria-busy`, and the body's controls are inert.
   - If the action is `abortable`, the dismiss action stays enabled. Dismissing aborts the signal and closes with
     `dismissed`; a late resolution is ignored.
-  - If it is not, a dismissal (button, key or OS close) waits until the work settles and then applies. The footer says
-    "Finishing…". Work that can last longer than a moment is a job (ADR 0008), not a busy action.
+  - If it is not, a dismissal (button, key or OS close) waits until the work settles. The footer says "Finishing…". If
+    the work then answers, the dialog closes as answered, because the work happened and the opener must not be told
+    otherwise (user, 2026-10-28); if it fails or was a `run`, the dismissal applies. Work that can last longer than a
+    moment is a job (ADR 0008), not a busy action.
 - **Rejected.** `answer` or `run` rejects (throws): the dialog stays open, the user's input is kept, and the frame shows
   an inline alert above the body with the error's user message (`DialogActionError.message`, else a generic sentence)
   and a **Try again** button that runs the same action again. Focus moves to Try again. The rejection is logged with the
