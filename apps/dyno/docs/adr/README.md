@@ -25,6 +25,7 @@ so the numbering is fixed.
 | [0018](0018-throttling-lifespan-and-baselines.md) | Throttling episodes, hardware life forecasts as ranges and learned baselines: pure judging, read-only readers, evidence before alarms |
 | [0019](0019-watched-folders-and-browser-lookups.md) | Watched folders sweep into the quarantine only, previewed first; web and hash searches are browser hand-offs |
 | [0020](0020-extras-backup-checks-and-taming-proof.md) | Extras and backup health behind a ToolRunner; the login-shell PATH resolver; taming rules that expire and prove their effect |
+| [0023](0023-paddock-app-shell.md) | The UI runs on the Paddock app shell and the shared dialog API: pages as contributions, OS-window dialogs with declared actions, the shell's settings, notifications and tray popover, a token bridge over `--pd-*` |
 
 New records: copy the shape of an existing one (status, related, context, decision, consequences). ADR numbers are
 allocated at merge time; renumber on a clash and fix the code comments that cite them.

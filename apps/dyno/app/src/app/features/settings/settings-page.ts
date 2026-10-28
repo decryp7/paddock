@@ -20,10 +20,7 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
   template: `
     <div class="page narrow">
       <header class="page-head">
-        <div class="titles">
-          <h1>Settings</h1>
-          <p>Dyno only looks. It changes nothing on your PC.</p>
-        </div>
+        <div class="titles"><h1 class="visually-hidden">Dyno settings</h1></div>
         @if (store.saveError(); as failed) {
           <span class="save-error" role="alert">{{ failed.message }}</span>
         }

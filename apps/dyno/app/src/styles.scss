@@ -9,6 +9,14 @@
 @include cdk.overlay();
 @include cdk.a11y-visually-hidden();
 
+/* The pages frame puts a page in two wrappers of automatic height. Dyno's screens that fill the window (the process table, the
+   timelines) size themselves with `height: 100%`, so the wrappers pass the page's height down; a page that is taller than the
+   window still scrolls in the frame's main region. */
+pd-page-host,
+pd-part-outlet.pd-page {
+  height: 100%;
+}
+
 :root {
   /* Type. Dyno's dense scale (the shared body is 13 px as well); the families are the shared ones. */
   --font-sans: var(--pd-font-sans);

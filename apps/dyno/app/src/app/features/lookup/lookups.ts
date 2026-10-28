@@ -15,7 +15,7 @@ export class Lookups {
 
   /** "Search this file's hash on VirusTotal…" for a program; resolves `true` when the browser was opened. */
   async searchHash(source: HashSource, name: string): Promise<boolean> {
-    const outcome = await this.dialogs.open<true>('dy.file-hash', { inputs: { source, name }, title: `Search the file's hash: ${name}` }).closed;
+    const outcome = await this.dialogs.open<true>('dy.file-hash', { inputs: { source, name }, title: "Search the file's hash on VirusTotal" }).closed;
     return outcome.kind === 'answered';
   }
 }
