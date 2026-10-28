@@ -9,6 +9,7 @@ use crate::updater::{self, AppUpdateStatus, UpdateInfo};
 use pitwall_core::mgmt::{CommandError, ErrorCode};
 use serde_json::Value;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt;
@@ -155,23 +156,57 @@ fn spec(kind: &'static str, title: &str, phase: &str) -> JobSpec {
     }
 }
 
-/// Runs one server method as a cancellable job. The call carries an `opId`; on Cancel the app sends `cancel_op` with it
-/// and the server stops the work and undoes it (a half-loaded model is not left behind, a benchmark stores nothing), then
-/// answers `{"cancelled": true}`, which ends the job as cancelled. If the server answers something else first, the work
-/// had finished and the job reports that.
+/// A job's call to the server has no deadline: a model load may take as long as the weights need. Whether the server is
+/// still there is [`server_gone`]'s question, not a clock's. (A year: far beyond any load, within every timer's range.)
+const NO_DEADLINE: Duration = Duration::from_secs(365 * 24 * 3600);
+/// How often a running job asks the server whether it is still alive.
+const LIVENESS_PERIOD: Duration = Duration::from_secs(5);
+/// How many pings in a row must go unanswered before the server counts as gone (a busy server may miss one).
+const LIVENESS_MISSES: u32 = 3;
+
+/// Resolves, with the reason, once the server stopped answering: `LIVENESS_MISSES` pings in a row that could not reach it
+/// (refused, closed or unanswered within the ping's own short timeout). A server that answers with any error is alive.
+/// Together with the work call failing when its connection closes, this ends a job whose server died or hung, promptly
+/// and without a deadline on the operation itself.
+async fn server_gone(client: &SharedClient) -> CommandError {
+    let mut missed = 0;
+    loop {
+        tokio::time::sleep(LIVENESS_PERIOD).await;
+        match forward(client.as_ref(), "overview", Value::Null).await {
+            Err(e) if e.code == ErrorCode::ServerUnavailable => {
+                missed += 1;
+                if missed >= LIVENESS_MISSES {
+                    return CommandError::new(
+                        ErrorCode::ServerUnavailable,
+                        "Pitwall's server stopped answering while this was running, so it did not finish. Restart the background service and try again.",
+                    );
+                }
+            }
+            _ => missed = 0,
+        }
+    }
+}
+
+/// Runs one server method as a cancellable job with no deadline. The call carries an `opId`; on Cancel the app sends
+/// `cancel_op` with it and the server stops the work and undoes it (a half-loaded model is not left behind, a benchmark
+/// stores nothing), then answers `{"cancelled": true}`, which ends the job as cancelled. If the server answers something
+/// else first, the work had finished and the job reports that. If the server dies or hangs, the job fails with that reason.
 fn server_job(jobs: &Arc<Jobs>, client: SharedClient, sink: JobSink, spec: JobSpec, method: &'static str, mut args: Value) -> u64 {
     jobs::start(jobs, spec, sink, move |ctx| async move {
         // Unique per job and per run of the app; the server forgets it when the work ends.
         let op_id = format!("{method}-{}", ctx.id().0);
         args["opId"] = Value::String(op_id.clone());
-        let work = forward(client.as_ref(), method, args);
+        let work = client.call(method, args, NO_DEADLINE);
         tokio::pin!(work);
         let cancel = jobs::cancelled(ctx.cancel_token());
         tokio::pin!(cancel);
+        let gone = server_gone(&client);
+        tokio::pin!(gone);
         let mut asked = false;
         let reply = loop {
             tokio::select! {
                 r = &mut work => break r,
+                e = &mut gone => break Err(e),
                 () = &mut cancel, if !asked => {
                     asked = true;
                     // Best effort: when the server cannot be reached the work call fails too, which ends the job.
@@ -310,7 +345,6 @@ mod tests {
     use crate::server_client::{BoxFuture, FrameStream, ServerClient};
     use pitwall_core::mgmt::ErrorCode;
     use std::sync::Mutex;
-    use std::time::Duration;
     use tokio::sync::Notify;
 
     /// A server whose long methods run until `cancel_op` arrives, then answer as the real one does: `{"cancelled": true}`.
@@ -455,5 +489,140 @@ mod tests {
         let s = os_prompt_spec("install-service", "t", "p");
         assert!(s.not_cancellable.as_deref().is_some_and(|r| !r.is_empty()));
         assert!(spec("load-model", "t", "p").not_cancellable.is_none());
+    }
+
+    /// A server that answers pings (`overview`) at once and works for `work_takes` on the (paused) clock, or never answers
+    /// the work and, from `dies_after` calls to `overview`, no longer answers pings either.
+    struct Timed {
+        work_takes: Option<Duration>,
+        alive_pings: Mutex<Option<u32>>,
+        timeouts: Mutex<Vec<(String, Duration)>>,
+    }
+
+    impl ServerClient for Timed {
+        fn call<'a>(&'a self, method: &'a str, _args: Value, timeout: Duration) -> BoxFuture<'a, Result<Value, CommandError>> {
+            Box::pin(async move {
+                self.timeouts.lock().unwrap().push((method.to_string(), timeout));
+                if method == "overview" {
+                    let mut left = self.alive_pings.lock().unwrap();
+                    return match left.as_mut() {
+                        Some(0) => Err(crate::server_client::unavailable()),
+                        Some(n) => {
+                            *n -= 1;
+                            Ok(Value::Null)
+                        }
+                        None => Ok(Value::Null),
+                    };
+                }
+                match self.work_takes {
+                    Some(d) => {
+                        tokio::time::sleep(d).await;
+                        Ok(serde_json::json!({ "loaded": true }))
+                    }
+                    None => std::future::pending().await,
+                }
+            })
+        }
+
+        fn open_stream<'a>(
+            &'a self,
+            _: &'a str,
+            _: Option<Value>,
+            _: Duration,
+        ) -> BoxFuture<'a, Result<Box<dyn FrameStream>, CommandError>> {
+            Box::pin(async { Err(crate::server_client::unavailable()) })
+        }
+    }
+
+    /// Moves the fake clock forward `secs` seconds, one second at a time so every timer fires in order.
+    async fn run_for(secs: u64) {
+        for _ in 0..secs {
+            tokio::time::advance(Duration::from_secs(1)).await;
+            settle().await;
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_load_that_takes_longer_than_the_old_600_second_limit_still_completes() {
+        let server = Arc::new(Timed {
+            work_takes: Some(Duration::from_secs(1500)),
+            alive_pings: Mutex::new(None),
+            timeouts: Mutex::default(),
+        });
+        let client: SharedClient = server.clone();
+        let (sink, events) = collector();
+        let jobs = jobs();
+        let id = server_job(
+            &jobs,
+            client,
+            sink,
+            spec("load-model", "t", "p"),
+            "load_model",
+            serde_json::json!({ "id": "m" }),
+        );
+        run_for(700).await;
+        assert_eq!(jobs.running(), 1, "past 600 s and still working");
+        run_for(801).await;
+        assert_eq!(
+            events.lock().unwrap().last(),
+            Some(&JobEvent::Done {
+                job_id: id,
+                result: serde_json::json!({ "loaded": true })
+            })
+        );
+        let t = server.timeouts.lock().unwrap();
+        assert!(
+            t.iter().any(|(m, d)| m == "load_model" && *d > Duration::from_secs(3600)),
+            "the work call has no practical deadline"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_server_that_dies_mid_load_fails_the_job_within_a_few_pings() {
+        let server = Arc::new(Timed {
+            work_takes: None,
+            alive_pings: Mutex::new(Some(2)),
+            timeouts: Mutex::default(),
+        });
+        let client: SharedClient = server;
+        let (sink, events) = collector();
+        let jobs = jobs();
+        server_job(
+            &jobs,
+            client,
+            sink,
+            spec("load-model", "t", "p"),
+            "load_model",
+            serde_json::json!({ "id": "m" }),
+        );
+        // Two answered pings, then three missed ones: 5 pings, 5 seconds apart.
+        run_for(30).await;
+        assert_eq!(jobs.running(), 0, "ended long before any 600 s limit");
+        assert!(matches!(
+            events.lock().unwrap().last(),
+            Some(JobEvent::Failed { error, .. }) if error.code == ErrorCode::ServerUnavailable && error.message.contains("stopped answering")
+        ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_connection_that_closes_mid_load_fails_the_job_at_once() {
+        let fake = Arc::new(crate::server_client::fake::FakeServer::new());
+        fake.reply(
+            "load_model",
+            crate::server_client::fake::Reply::Err(crate::server_client::unavailable()),
+        );
+        let client: SharedClient = fake;
+        let (sink, events) = collector();
+        let jobs = jobs();
+        server_job(
+            &jobs,
+            client,
+            sink,
+            spec("load-model", "t", "p"),
+            "load_model",
+            serde_json::json!({ "id": "m" }),
+        );
+        settle().await;
+        assert!(matches!(events.lock().unwrap().last(), Some(JobEvent::Failed { .. })));
     }
 }
