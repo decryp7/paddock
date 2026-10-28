@@ -44,6 +44,16 @@ Conventional Commits; one semver tag for the whole repo.
   two viewports, `elementFromPoint` across the header row in the first frame and again once a row reaches the header with
   the row under it hovered, opaque background); the gallery runs it over `pd-table` in both themes, Chromium and WebKit.
 
+### Frame navigation on Material and the CDK (WP-4 of the Material migration, rule 47)
+- The pages sidebar is a `mat-nav-list`; the CDK `FocusKeyManager` moves focus with Up, Down, Home and End (wrapping). Tab still reaches every link.
+- Count badges (sidebar and activity bar) are `matBadge` (aria-hidden: the count stays in the link's name). In the sidebar the count is at the row's end (on the icon in the rail); a count without a badge label stays in the link's name. The two page groups are `role="list"` of list items, not extra navigation landmarks. Tones set `--mat-badge-background-color`.
+- Tooltips are `matTooltip`, not `title`: the rail's page names, the activity bar and its More menu, the status bar's More button, the part Retry button, the path text's Copy button. `pd-path-text` shows the full value only when the text on screen is shorter than it; the title bar no longer repeats the app name as a native title.
+- The Copy menu (`PdCopyMenuHost`) is a CDK context menu (`cdkContextMenuTrigger` and `cdkMenu`), opened at the pointer by `PdCopyMenu` as before. The `.pd-badge`/`.pd-act-badge` classes and `[data-testid="page-badge"]` are gone: the e2e page object `badges` finds `.mat-badge-content`.
+
+### Shell toasts keep a page-footer safe area
+- New token `--pd-page-footer-safe` (56 px). `pd-notification-host` now sits above the status bar plus this safe area, so a toast no
+  longer covers a page footer's primary action (a wizard's Next); the status-bar fallback is 24 px like the token.
+
 ### One shared Material theme (WP-0 of the Material migration, rule 47)
 - `css/material.css` (`scss/entry-material.scss`) is now the whole Material look: one Material 3 `mat.theme` (density -3) whose system
   and component tokens all resolve to `--pd-*`, so theme, accent, contrast and density follow our tokens and an app carries no
@@ -281,6 +291,7 @@ Conventional Commits; one semver tag for the whole repo.
   sizes are rounded up once. A decision keeps its offset only, a form its width and offset, a viewer and a tool their size.
 - A modal's parent is disabled when the dialog is shown, not when it is created; opening a dialog that is still pending
   creates no window and does not show it early. A scale-factor change refits the window from its last measure.
+
 
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,

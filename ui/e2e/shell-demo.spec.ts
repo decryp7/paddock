@@ -78,7 +78,7 @@ test('the app name is cut to one ellipsis with no space before it at any narrow 
     const shown = (await page.getByTestId('app-name').textContent()) ?? '';
     expect(shown, `at ${width} px`).not.toMatch(/\s…/);
     expect(shown.split('…').length - 1, `at ${width} px`).toBeLessThanOrEqual(1);
-    await expect(page.getByTestId('app-name')).toHaveAttribute('title', 'Paddock Shell Demo');
+    await expect(page.getByTestId('app-name').getByTestId('path-text')).toHaveAttribute('data-full', 'Paddock Shell Demo');
     // The text itself is shortened (not clipped by CSS, whose cut can fall after a space), so nothing overflows its box.
     const clipped = await page.getByTestId('app-name').evaluate((e) => e.scrollWidth > Math.ceil(e.getBoundingClientRect().width));
     expect(clipped, `${shown} is clipped at ${width} px`).toBe(false);

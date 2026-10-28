@@ -67,7 +67,7 @@ test.describe('activity bar and Explorer (plan W4)', () => {
     await page.keyboard.press('Escape');
     await wb.explorer.expand('wd.files', 'docs');
     const long = wb.explorer.node('wd.files', 'docs/architecture-overview-of-the-request-pipeline.md');
-    await expect(long.getByTestId('path-text')).toHaveAttribute('title', /architecture-overview-of-the-request-pipeline\.md$/);
+    await expect(long.getByTestId('path-text')).toHaveAttribute('data-full', /architecture-overview-of-the-request-pipeline\.md$/);
   });
 });
 
@@ -303,6 +303,9 @@ test.describe('review 1 (X50)', () => {
       }).length,
     );
     expect(cut).toBe(0);
+    // The pointer still rests on the activity button, whose matTooltip is open: the first Escape dismisses a tooltip (WCAG 1.4.13), so move away first.
+    await page.mouse.move(300, 600);
+    await expect(page.locator('.mat-mdc-tooltip')).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(wb.frame.sidebar).toHaveCount(0);
     await expectNoHorizontalScroll(page);
