@@ -60,6 +60,23 @@ describe('the channel secret dialog', () => {
     expect(document.body.innerHTML).not.toContain('s3cret');
   });
 
+  it('says Saving… on the busy Save button while the engine stores the secret', async () => {
+    let release!: () => void;
+    class Slow extends MemoryChannelsBackend {
+      override setSecret(): Promise<void> {
+        return new Promise((resolve) => (release = resolve));
+      }
+    }
+    const d = await open({}, new Slow());
+    await d.typeSecret('s3cret');
+    expect(d.action('save')!.textContent!.trim()).toBe('Save');
+    void d.press('save');
+    await d.stable();
+    expect(d.action('save')!.textContent!.trim()).toBe('Saving…');
+    release();
+    await d.stable();
+  });
+
   it('shows the engine’s refusal in the frame’s alert, keeps the dialog open and the secret for Try again', async () => {
     class Refusing extends MemoryChannelsBackend {
       override setSecret(): Promise<void> {

@@ -89,6 +89,7 @@ export class PdMcpKeyDialog implements DialogContent<boolean> {
     client: $localize`:@@pd.mcp.key.client:Client name`,
     close: $localize`:@@pd.mcp.key.close:Close`,
     create: $localize`:@@pd.mcp.key.create:Create key`,
+    creating: $localize`:@@pd.mcp.key-creating:Creating…`,
     once: $localize`:@@pd.mcp.key.once:This is the only time the key is shown. Copy it now; the app keeps only a fingerprint and cannot show it again.`,
     keyLabel: $localize`:@@pd.mcp.key.key-label:Key`,
     how: $localize`:@@pd.mcp.key.how:Give it to the client as the first line it sends when it connects: {"key": "..."}. Anyone with the key can read what the enabled tools expose.`,
@@ -104,7 +105,7 @@ export class PdMcpKeyDialog implements DialogContent<boolean> {
   readonly dialogActions = computed<readonly DialogAction<boolean>[]>(() => {
     const issued = this.key();
     if (issued === null) {
-      return [{ kind: 'run', id: 'create', label: this.t.create, role: 'primary', enabled: this.limit() === null && this.model().client.trim().length > 0, run: () => this.create() }];
+      return [{ kind: 'run', id: 'create', label: this.t.create, busyLabel: this.t.creating, role: 'primary', enabled: this.limit() === null && this.model().client.trim().length > 0, run: () => this.create() }];
     }
     return [
       { kind: 'run', id: 'copy', label: this.t.copy, role: 'secondary', lead: true, run: () => this.copy(issued) },

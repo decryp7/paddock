@@ -74,6 +74,7 @@ export class PdChannelSecretDialog implements DialogContent<boolean> {
     close: $localize`:@@pd.channels.secret.close:Close`,
     invalid: $localize`:@@pd.channels.secret.invalid:This window was opened without a channel to set a secret for. Close it and choose Set token or Set password in the channel’s editor.`,
     save: $localize`:@@pd.channels.secret.save:Save`,
+    saving: $localize`:@@pd.channels.secret-saving:Saving…`,
     show: $localize`:@@pd.channels.secret.show:Show what you typed`,
     hide: $localize`:@@pd.channels.secret.hide:Hide what you typed`,
     showShort: $localize`:@@pd.channels.secret.show-short:Show`,
@@ -107,7 +108,7 @@ export class PdChannelSecretDialog implements DialogContent<boolean> {
   /** Save (the primary, enabled once something is typed); a window without a channel offers only Close. */
   readonly dialogActions = computed<readonly DialogAction<boolean>[]>(() =>
     this.valid()
-      ? [{ kind: 'answer', id: 'save', label: this.t.save, role: 'primary', enabled: this.model().secret.length > 0, answer: () => this.save() }]
+      ? [{ kind: 'answer', id: 'save', label: this.t.save, busyLabel: this.t.saving, role: 'primary', enabled: this.model().secret.length > 0, answer: () => this.save() }]
       : [{ kind: 'dismiss', id: 'close', label: this.t.close }],
   );
 

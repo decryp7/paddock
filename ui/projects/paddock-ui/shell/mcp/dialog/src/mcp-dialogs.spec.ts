@@ -76,6 +76,29 @@ describe('the key dialog', () => {
     expect(d.outcome()).toBeNull();
   });
 
+  it('says Creating… on the busy Create key button while the engine issues the key', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    class Slow extends MemoryMcpBackend {
+      override async issueKey(client: string) {
+        await gate;
+        return super.issueKey(client);
+      }
+    }
+    const memory = new Slow();
+    const d = await renderFramed(PdMcpKeyDialog, { id: 'pd.mcp.key', kind: 'form', modality: 'modal', providers: [provideMcpBackend({ backend: () => memory })] });
+    const input = d.q<HTMLInputElement>('mcp-key-client')!;
+    input.value = 'Pitwall';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await d.stable();
+    expect(d.action('create')!.textContent!.trim()).toBe('Create key');
+    void d.press('create');
+    await d.stable();
+    expect(d.action('create')!.textContent!.trim()).toBe('Creating…');
+    release();
+    await d.stable();
+  });
+
   it('shows the key limit as a validation message on the name field and keeps Create key disabled', async () => {
     const memory = new MemoryMcpBackend();
     for (let i = 0; i < 16; i++) await memory.issueKey(`client ${i}`);
