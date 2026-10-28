@@ -348,12 +348,6 @@ const VIRTUAL_BUFFER_ROWS = 8;
       --mat-table-row-item-container-height: var(--pd-table-row);
       --mat-icon-button-state-layer-size: var(--pd-hit-min);
       --mat-icon-button-container-shape: var(--pd-radius-control);
-      /* Until fix/material-state-layer merges (the bridge then sets the state-layer opacities): the hover fill and opacities. Drop these five then. */
-      --mat-icon-button-state-layer-color: var(--pd-hover);
-      --mat-icon-button-ripple-color: var(--pd-hover);
-      --mat-icon-button-hover-state-layer-opacity: 1;
-      --mat-icon-button-focus-state-layer-opacity: 1;
-      --mat-icon-button-pressed-state-layer-opacity: 1;
       --mat-icon-button-touch-target-display: none;
     }
     .pd-toolbar { display: flex; align-items: center; gap: var(--pd-space-2); min-height: var(--pd-toolbar-height); min-width: 0; }
