@@ -46,7 +46,7 @@ describe('dy-issues-page', () => {
     expect(el.querySelectorAll('table[aria-label="Apps with the most issues"] tbody tr').length).toBe(5);
     expect(el.querySelectorAll('table[aria-label="Issues"] tr.day').length).toBeGreaterThan(2);
     expect(el.textContent).toContain('2 of 2 logs read');
-    expect(el.querySelector('.tab-count, .count')?.textContent).toBe('5');
+    expect(el.querySelector('pd-segmented-control .pd-count')?.textContent?.trim()).toBe('5');
   });
 
   it('filters by a leaderboard row, clears it, collapses a day and opens evidence as plain text', async () => {

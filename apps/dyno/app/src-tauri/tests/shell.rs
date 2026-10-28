@@ -25,6 +25,24 @@ fn the_dialog_contracts_the_manifest_and_the_tables_agree() {
     assert!(problems.is_empty(), "{problems:#?}");
 }
 
+/// The manifest repeats each dialog's kind, modality, instancing and size; they must be what Rust declares (a stale manifest
+/// would hide a changed contract from the UI's own lint).
+#[test]
+fn the_manifest_repeats_each_dialogs_contract_exactly() {
+    let manifest: serde_json::Value = serde_json::from_str(MANIFEST).unwrap();
+    let contracts = paddock_dialogs::Contracts::from_tables(&[&DIALOGS]).unwrap();
+    for entry in DIALOGS.entries() {
+        let m = &manifest["dialogs"][entry.id];
+        let c = contracts.get(entry.id).unwrap();
+        assert_eq!(m["width"].as_f64(), Some(entry.width_px()), "{} width", entry.id);
+        assert_eq!(m["height"].as_f64(), entry.height_px(), "{} height", entry.id);
+        assert_eq!(m["instanced"].as_bool(), Some(entry.instanced), "{} instanced", entry.id);
+        assert_eq!(m["requiredChoice"].as_bool(), Some(entry.required_choice), "{} requiredChoice", entry.id);
+        assert_eq!(m["modality"].as_str(), Some(format!("{:?}", c.modality).to_lowercase().as_str()), "{} modality", entry.id);
+        assert_eq!(m["kind"].as_str(), Some(format!("{:?}", c.kind).to_lowercase().as_str()), "{} kind", entry.id);
+    }
+}
+
 /// Dyno's services are the ones the UI registers, in the status bar's order.
 #[test]
 fn the_services_are_the_ones_the_ui_lists() {

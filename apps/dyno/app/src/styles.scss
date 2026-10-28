@@ -22,22 +22,22 @@ pd-part-outlet.pd-page {
   --font-sans: var(--pd-font-sans);
   --font-display: var(--pd-font-sans);
   --font-mono: var(--pd-font-mono);
-  --fs-2xs: 10.5px;
+  --fs-2xs: calc(var(--pd-text-caption) - 0.5px);
   --fs-xs: var(--pd-text-caption);
   --fs-sm: var(--pd-text-label);
   --fs-base: var(--pd-text-body);
   --fs-md: var(--pd-text-body-lg);
-  --fs-lg: 16px;
-  --fs-xl: 19px;
-  --fs-2xl: 24px;
-  --fs-3xl: 30px;
-  --fs-display: 44px;
+  --fs-lg: var(--pd-text-subtitle);
+  --fs-xl: var(--pd-text-title);
+  --fs-2xl: calc(var(--pd-text-title) + var(--pd-space-1) + var(--pd-space-0));
+  --fs-3xl: var(--pd-text-display);
+  --fs-display: var(--pd-text-hero);
   --lh-tight: 1.2;
   --lh-base: 1.45;
   --fw-regular: var(--pd-weight-regular);
   --fw-medium: var(--pd-weight-medium);
   --fw-semibold: var(--pd-weight-semibold);
-  --fw-bold: 700;
+  --fw-bold: var(--pd-weight-semibold);
 
   /* Space, radii, motion. */
   --sp-0: var(--pd-space-0);
@@ -45,18 +45,18 @@ pd-part-outlet.pd-page {
   --sp-2: var(--pd-space-2);
   --sp-3: var(--pd-space-3);
   --sp-4: var(--pd-space-4);
-  --sp-5: 20px;
+  --sp-5: calc(var(--pd-space-4) + var(--pd-space-1));
   --sp-6: var(--pd-space-6);
   --sp-8: var(--pd-space-8);
-  --sp-10: 40px;
+  --sp-10: calc(var(--pd-space-8) + var(--pd-space-2));
   --sp-12: var(--pd-space-12);
-  --r-xs: 3px;
+  --r-xs: calc(var(--pd-radius-tag) - 1px);
   --r-sm: var(--pd-radius-tag);
   --r-md: var(--pd-radius-control);
   --r-lg: var(--pd-radius-card);
   --r-xl: var(--pd-radius-dialog);
   --r-pill: var(--pd-radius-pill);
-  --dur-instant: 80ms;
+  --dur-instant: var(--pd-duration-micro);
   --dur-fast: var(--pd-duration-micro);
   --dur-base: var(--pd-duration);
   --dur-slow: var(--pd-duration-large);
@@ -117,18 +117,6 @@ pd-part-outlet.pd-page {
   --bar-fill: var(--pd-chart-neutral-bar);
   --chart-grid: var(--pd-chart-grid);
   --chart-axis: var(--pd-text-subtle);
-  /* Dyno's heat colour (the accent, as an r g b triple for the heat cells), per scheme like the shared tokens. */
-  --heat: 222 85 159;
-}
-
-:root[data-theme='light'] {
-  --heat: 190 53 132;
-}
-
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme='dark']) {
-    --heat: 190 53 132;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

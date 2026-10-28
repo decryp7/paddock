@@ -6,6 +6,7 @@ import { UnusualStore } from '../../state/unusual.store';
 import { IssuesView } from './issues-view';
 import { UnusualView } from './unusual-view';
 import { MatButton, MatIconButton } from '@angular/material/button';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 
 type View = 'issues' | 'unusual';
 
@@ -16,7 +17,7 @@ type View = 'issues' | 'unusual';
  */
 @Component({
   selector: 'dy-issues-page',
-  imports: [MatButton, MatIconButton, Icon, IssuesView, UnusualView],
+  imports: [SuSegmentedControl, MatButton, MatIconButton, Icon, IssuesView, UnusualView],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -35,10 +36,7 @@ type View = 'issues' | 'unusual';
         }
       </header>
 
-      <div class="views seg" role="group" aria-label="View">
-        <button type="button" [attr.aria-pressed]="view() === 'issues'" (click)="view.set('issues')">Issues</button>
-        <button type="button" [attr.aria-pressed]="view() === 'unusual'" (click)="view.set('unusual')">New and unusual @if (listed() > 0) {<span class="count num">{{ listed() }}</span>}</button>
-      </div>
+      <pd-segmented-control class="views" label="View" [options]="viewSegs()" [value]="view()" (valueChange)="view.set($event === 'unusual' ? 'unusual' : 'issues')" />
 
       @if (issues.saveError(); as e) {
         <div class="note bad" role="alert"><dy-icon name="alert" /><span class="msg">{{ e.message }}</span></div>
@@ -74,6 +72,10 @@ export class IssuesPage implements OnInit {
   protected readonly view = signal<View>('issues');
   /** Programs on the list (the number next to the tab). */
   protected readonly listed = computed(() => this.unusual.overview()?.items.filter((i) => i.status === 'new').length ?? 0);
+  protected readonly viewSegs = computed<SuSegment[]>(() => [
+    { value: 'issues', label: 'Issues' },
+    { value: 'unusual', label: 'New and unusual', ...(this.listed() > 0 ? { count: this.listed() } : {}) },
+  ]);
   protected readonly name = fileName;
 
   ngOnInit(): void {

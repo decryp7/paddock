@@ -53,7 +53,7 @@ import { MatButton } from '@angular/material/button';
               (keydown.space)="$event.preventDefault(); pick(a)"
             >
               <span class="cell" role="gridcell">@if (unread(a)) {<span class="unread" title="Not acknowledged" aria-label="Not acknowledged"></span>}</span>
-              <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="a.severity === 'critical' ? 'bad' : a.severity === 'warning' ? 'warn' : 'info'" [attr.aria-label]="sev(a)" role="img"></span>@if (a.severity === 'critical') {<span>Critical</span>}</span>
+              <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="a.severity === 'critical' ? 'bad' : a.severity === 'warning' ? 'warn' : 'info'" [attr.aria-label]="sev(a)" role="img"></span><span [class.muted]="a.severity === 'info'">{{ sev(a) }}</span></span>
               <span class="cell title-cell" role="gridcell">
                 <span class="two">
                   <span class="line"><span class="t truncate" [title]="a.title">{{ a.title }}</span>@if (suffix(a); as s) {<span class="sfx">{{ s }}</span>}</span>

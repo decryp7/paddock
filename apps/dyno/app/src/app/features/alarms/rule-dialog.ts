@@ -5,7 +5,7 @@ import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Icon } from '../../shared/icon';
 import { MatSlideToggle } from '@angular/material/slide-toggle';
-import { CUSTOM_METRICS, metricInfo, severityWord, uniqueRuleId, withRule } from './alarms-model';
+import { CUSTOM_METRICS, metricInfo, severityWord, uniqueRuleId } from './alarms-model';
 import { MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
@@ -172,8 +172,7 @@ export class RuleDialog implements DialogContent<true>, OnInit {
       enabled: this.enabled(),
     };
     try {
-      const current = await this.backend.settings();
-      await this.backend.saveSettings({ ...current, customAlerts: withRule(current.customAlerts ?? [], rule, this.rule()?.id ?? null) });
+      await this.backend.upsertAlertRule(rule);
     } catch (e) {
       throw new DialogActionError(toCommandError(e).message);
     }

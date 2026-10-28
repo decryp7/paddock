@@ -146,6 +146,34 @@ pub fn normalise_rules(rules: Vec<CustomAlertRule>) -> Vec<CustomAlertRule> {
     out
 }
 
+/// Adds `rule`, or replaces the rule with the same id. The rule is checked (a malformed one is refused with what to fix)
+/// and its name and time are bounded like `normalise_rules` does; at most [`MAX_RULES`] rules are kept.
+pub fn upsert_rule(rules: &mut Vec<CustomAlertRule>, mut rule: CustomAlertRule) -> Result<(), String> {
+    rule.name = rule.name.trim().chars().take(MAX_NAME).collect();
+    rule.for_secs = rule.for_secs.min(MAX_FOR_SECS);
+    if !rule.is_valid() {
+        return Err("The rule needs a name, a limit that is a number, and an id of letters, digits, - and _.".to_string());
+    }
+    if let Some(i) = rules.iter().position(|r| r.id == rule.id) {
+        rules[i] = rule;
+    } else if rules.len() >= MAX_RULES {
+        return Err(format!("There can be at most {MAX_RULES} custom rules; delete one first."));
+    } else {
+        rules.push(rule);
+    }
+    Ok(())
+}
+
+/// Removes the rule with `id`; refuses an id no rule has.
+pub fn delete_rule(rules: &mut Vec<CustomAlertRule>, id: &str) -> Result<(), String> {
+    let before = rules.len();
+    rules.retain(|r| r.id != id);
+    if rules.len() == before {
+        return Err("That rule no longer exists.".to_string());
+    }
+    Ok(())
+}
+
 /// Remembers how long each rule's condition has held and which rules are raised.
 #[derive(Debug, Default)]
 pub struct CustomEvaluator {
@@ -244,6 +272,33 @@ mod tests {
             severity: Severity::Warning,
             enabled: true,
         }
+    }
+
+    #[test]
+    fn upserting_adds_replaces_and_refuses_what_is_malformed() {
+        let mut rules = Vec::new();
+        upsert_rule(&mut rules, rule("a", CustomMetric::CpuTotal, CustomOp::Above, 90.0, 5)).unwrap();
+        let mut again = rule("a", CustomMetric::CpuTotal, CustomOp::Above, 80.0, 99_999);
+        again.name = "  Busy  ".into();
+        upsert_rule(&mut rules, again).unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!((rules[0].limit, rules[0].name.as_str(), rules[0].for_secs), (80.0, "Busy", MAX_FOR_SECS));
+        assert!(upsert_rule(&mut rules, rule("bad id", CustomMetric::CpuTotal, CustomOp::Above, 1.0, 0)).is_err());
+        assert!(upsert_rule(&mut rules, rule("n", CustomMetric::CpuTotal, CustomOp::Above, f64::NAN, 0)).is_err());
+        assert_eq!(rules.len(), 1);
+        for i in 0..MAX_RULES {
+            let _ = upsert_rule(&mut rules, rule(&format!("r{i}"), CustomMetric::CpuTotal, CustomOp::Above, 1.0, 0));
+        }
+        assert_eq!(rules.len(), MAX_RULES);
+        assert!(upsert_rule(&mut rules, rule("one-more", CustomMetric::CpuTotal, CustomOp::Above, 1.0, 0)).is_err());
+    }
+
+    #[test]
+    fn deleting_removes_one_rule_and_refuses_an_unknown_id() {
+        let mut rules = vec![rule("a", CustomMetric::CpuTotal, CustomOp::Above, 1.0, 0)];
+        assert!(delete_rule(&mut rules, "b").is_err());
+        delete_rule(&mut rules, "a").unwrap();
+        assert!(rules.is_empty());
     }
 
     #[test]

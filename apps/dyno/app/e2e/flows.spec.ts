@@ -439,7 +439,7 @@ test.describe('issues', () => {
 
   test('the new and unusual view lists reasons and offers no action on a program', async ({ page }) => {
     await page.goto(url('/issues'));
-    await page.getByRole('button', { name: /New and unusual/ }).click();
+    await page.getByRole('radio', { name: /New and unusual/ }).click();
     const table = page.getByRole('table', { name: 'New and unusual programs' });
     await expect(table.getByRole('row', { name: /updater-helper/ })).toContainText('Unusual because it runs from a temporary folder');
     await expect(page.getByRole('button', { name: 'Protect updater-helper' })).toHaveCount(0);
@@ -550,7 +550,7 @@ test.describe('backup health', () => {
   test('finding no backup tool is a normal state', async ({ page }) => {
     await page.goto(url('/backup', '&backup=none'));
     await expect(page.getByText('No backup tool found')).toBeVisible();
-    await expect(page.locator('.none')).toContainText('never runs or manages a backup');
+    await expect(page.locator('dy-backup-page')).toContainText('never runs or manages a backup');
     await expect(page.getByRole('alert')).toHaveCount(0);
   });
 

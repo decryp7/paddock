@@ -12,12 +12,12 @@ export interface NoticeAction {
 
 const LEVEL: Record<Tone, ShellNotice['level']> = { ok: 'success', warn: 'warning', bad: 'error', info: 'info', accent: 'info', muted: 'info' };
 
-/** The type of the notice button that undoes something (`{ type: 'dy.undo', id }`). */
-export const UNDO_ACTION = 'dy.undo';
+/** The type of a notice's button (`{ type: 'dy.notice-action', id, label }`): the caller supplies the label. */
+export const NOTICE_ACTION = 'dy.notice-action';
 
 /**
  * Results of user actions, through the shell's notification host (one display rule, one message per cause, a centre to read
- * them again, announced to screen readers). An action (Undo) becomes a button of the notice that runs in this window.
+ * them again, announced to screen readers). An action becomes a button of the notice that runs in this window.
  */
 @Injectable({ providedIn: 'root' })
 export class Notifier {
@@ -33,9 +33,9 @@ export class Notifier {
     if (action) {
       const id = this.nextId++;
       this.actions.set(id, action);
-      // Only the latest few undo closures are kept.
+      // Only the latest few action closures are kept.
       if (this.actions.size > 8) this.actions.delete(this.actions.keys().next().value as number);
-      this.ports.notify({ ...notice, action: { type: UNDO_ACTION, id, label: action.label } });
+      this.ports.notify({ ...notice, action: { type: NOTICE_ACTION, id, label: action.label } });
     } else {
       this.ports.notify(notice);
     }
@@ -45,7 +45,7 @@ export class Notifier {
     this.show(e.message, 'bad');
   }
 
-  /** Runs and forgets the action of notice button `id` (the handler of `UNDO_ACTION`). */
+  /** Runs and forgets the action of notice button `id` (the handler of `NOTICE_ACTION`). */
   runAction(id: number): void {
     const action = this.actions.get(id);
     this.actions.delete(id);
@@ -53,7 +53,7 @@ export class Notifier {
   }
 }
 
-/** Registers the Undo button of notices in this window. */
+/** Registers the buttons of notices in this window. */
 export function provideNotifierActions(): EnvironmentProviders {
   return makeEnvironmentProviders([
     {
@@ -62,8 +62,8 @@ export function provideNotifierActions(): EnvironmentProviders {
       useFactory: (): NoticeActionHandler => {
         const notifier = inject(Notifier);
         return {
-          type: UNDO_ACTION,
-          label: (a) => (typeof a['label'] === 'string' ? a['label'] : 'Undo'),
+          type: NOTICE_ACTION,
+          label: (a) => (typeof a['label'] === 'string' ? a['label'] : ''),
           run: (a) => {
             if (typeof a['id'] === 'number') notifier.runAction(a['id']);
           },

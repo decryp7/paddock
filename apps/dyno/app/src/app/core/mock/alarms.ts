@@ -120,7 +120,7 @@ export function demoBundlePreview(): BundlePreview {
     { path: 'alarms/stats.json', description: 'Alarm statistics', bytes: 840 },
     { path: 'alarms/history.json', description: 'Recent alarm changes', bytes: 18_400 },
     { path: 'network/sockets.json', description: 'Listening ports and connections (addresses redacted)', bytes: 9_300 },
-    { path: 'activity.json', description: 'What Dyno and you changed recently', bytes: 11_900 },
+    { path: 'activity.json', description: 'What Dyno recorded recently', bytes: 11_900 },
     { path: 'alerts.json', description: 'Recent alerts', bytes: 3_100 },
     { path: 'recorder/last-10-minutes.json', description: 'The last ten minutes at one-second resolution', bytes: 412_000 },
     { path: 'manifest.json', description: 'Every file and what was removed', bytes: 1_900 },

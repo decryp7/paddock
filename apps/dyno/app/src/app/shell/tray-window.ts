@@ -16,7 +16,7 @@ import { provideDynoAppearance } from './appearance';
 class TrayRoot {}
 
 /**
- * The tray popover window (`tray` and `tray-<item>`, rule 34: its own bootstrap with a small provider set): no pages, no
+ * The tray popover window (`tray`, rule 34: its own bootstrap with a small provider set): no pages, no
  * start-up contract (the watchdog does not watch popovers) and only commands open to the tray class. The shell places and
  * fits the window.
  */

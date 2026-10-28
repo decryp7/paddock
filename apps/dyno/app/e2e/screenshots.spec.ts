@@ -365,7 +365,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/issues',
     size: { width: 1440, height: 900 },
     ready: async (page) => {
-      await page.getByRole('button', { name: /New and unusual/ }).click();
+      await page.getByRole('radio', { name: /New and unusual/ }).click();
       await page.getByRole('row', { name: /updater-helper/ }).click();
       await expect(page.getByRole('complementary', { name: 'Program details' })).toBeVisible();
     },

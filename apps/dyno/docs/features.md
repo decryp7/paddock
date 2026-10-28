@@ -189,9 +189,8 @@ the running Dyno refuses with a message. [cli.md](cli.md). [WP-27](roadmap.md#wp
 ## Tray, window and settings
 
 **Built.** A tray icon with a live metric (CPU, memory, …, chosen in Settings; a template image on macOS) and a compact dropdown
-window; closing the window destroys it and keeps the tray and the agent; Quit exits the app and leaves the agent measuring. A
-command palette (Ctrl or Cmd + K). Settings: theme (system, dark, light), tray metric and style, sampling intervals, history
-retention, launch at login, alert settings. Light and dark themes with a colour-vision-checked palette
+window; closing the window destroys it and keeps the tray and the agent; Quit exits the app and leaves the agent measuring. Settings: tray metric and style, sampling intervals, history
+retention, launch at login, alert settings; the theme, accent and density are the shell's Appearance page. Light and dark themes with a colour-vision-checked palette
 ([ADR 0011](adr/0011-design-system.md)); a desktop feel ([ADR 0009](adr/0009-native-feel.md)): no text selection on chrome,
 Dyno's own Copy menu, no browser keys.
 
