@@ -10,7 +10,7 @@ use crate::placement::Bounds;
 use crate::window::{DEFAULT_ROUTE, DialogError, DialogErrorCode, MAX_OPEN_PER_HOST, Measure};
 use paddock_commands::labels::{DIALOG_PREFIX, Label};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -73,6 +73,9 @@ pub struct OpenDialog {
     pub shown: bool,
     /// The last measure its page reported, for a refit when the scale factor changes.
     pub measure: Option<Measure>,
+    /// What the window's inner height has beyond the page's viewport, logical px, taken once at the first fit
+    /// (`dialog_ready`) and reused by every later one.
+    pub viewport_delta: Option<f64>,
 }
 
 impl OpenDialog {
@@ -98,6 +101,7 @@ impl OpenDialog {
             unresponsive: false,
             shown: false,
             measure: None,
+            viewport_delta: None,
         }
     }
 }
@@ -124,6 +128,8 @@ pub struct Dialogs {
     exiting: AtomicBool,
     show_deadline: Duration,
     scheduler: Arc<dyn Scheduler>,
+    /// Parents whose window is currently disabled by this layer.
+    applied: Mutex<BTreeSet<String>>,
 }
 
 impl Dialogs {
@@ -143,6 +149,7 @@ impl Dialogs {
             exiting: AtomicBool::new(false),
             show_deadline: SHOW_DEADLINE,
             scheduler: Arc::new(ThreadScheduler),
+            applied: Mutex::default(),
         }
     }
 
@@ -301,51 +308,57 @@ impl Dialogs {
         }
     }
 
-    /// Marks the dialog window `label` as shown. `Some(true)` the first time (the caller shows the window), `Some(false)`
-    /// when it was shown already, `None` for a window that is not an open dialog.
-    pub fn mark_shown(&self, label: &str) -> Option<bool> {
-        self.lock()
-            .get_mut(label)
-            .map(|e| !std::mem::replace(&mut e.shown, true))
-    }
-
-    /// Like [`Dialogs::mark_shown`], and when it is the first time runs `then` with the entry under the registry lock, so
-    /// that a close racing the show is ordered against it: whatever `then` queues (the parent's disabling) is queued
-    /// before anything a later [`Dialogs::remove_with`] queues, and a close that came first leaves nothing to show.
-    pub fn mark_shown_with(
-        &self,
-        label: &str,
-        then: impl FnOnce(&OpenDialog),
-    ) -> Option<OpenDialog> {
+    /// Marks the dialog window `label` as shown. The entry the first time (the caller shows the window), `None` when it
+    /// was shown already or is not an open dialog.
+    pub fn mark_shown(&self, label: &str) -> Option<OpenDialog> {
         let mut map = self.lock();
         let e = map.get_mut(label)?;
         if std::mem::replace(&mut e.shown, true) {
             return None;
         }
-        then(e);
         Some(e.clone())
     }
 
-    /// Forgets the dialog window `label` like [`Dialogs::remove`] and runs `then` under the registry lock with the
-    /// entry and whether it was the last SHOWN modal dialog of its parent (a pending modal has not locked the parent
-    /// and does not hold it).
-    pub fn remove_with(
-        &self,
-        label: &str,
-        then: impl FnOnce(&OpenDialog, bool),
-    ) -> Option<OpenDialog> {
-        let mut map = self.lock();
-        let e = map.remove(label)?;
-        let last = !map
-            .values()
-            .any(|o| o.parent == e.parent && o.modality == Modality::Modal && o.shown);
-        then(&e, last);
-        Some(e)
+    /// Whether `parent` should be disabled right now: it has at least one SHOWN modal dialog open (a pending modal has
+    /// not locked it). Only the desired state, from the registry; window APIs are never called under its lock.
+    pub fn parent_wants_disabled(&self, parent: &str) -> bool {
+        Self::held_by(&self.lock(), parent)
+    }
+
+    fn held_by(map: &BTreeMap<String, OpenDialog>, parent: &str) -> bool {
+        map.values()
+            .any(|o| o.parent == parent && o.modality == Modality::Modal && o.shown)
+    }
+
+    /// Reads the latest desired state of `parent` (see [`Dialogs::parent_wants_disabled`]) and compares it with the state
+    /// last applied to the window: `Some(disabled)` when the window must change, `None` when it already is as wanted.
+    /// The queued main-thread task that applies it calls this, so whichever of a show and a close runs last decides, and
+    /// the answer is never stale.
+    pub fn parent_change(&self, parent: &str) -> Option<bool> {
+        let wanted = self.parent_wants_disabled(parent);
+        let mut applied = self.applied.lock().unwrap_or_else(PoisonError::into_inner);
+        if applied.contains(parent) == wanted {
+            return None;
+        }
+        if wanted {
+            applied.insert(parent.to_string());
+        } else {
+            applied.remove(parent);
+        }
+        Some(wanted)
     }
 
     /// Whether `label` is an open dialog whose window has not been shown yet.
     pub fn is_pending(&self, label: &str) -> bool {
         self.lock().get(label).is_some_and(|e| !e.shown)
+    }
+
+    /// The viewport delta of `label`: the one recorded by its first fit, or, if there is none yet, `first()` (computed
+    /// by the caller from the window as it is now), which is recorded. `None` for a window that is not an open dialog.
+    pub fn viewport_delta_or(&self, label: &str, first: impl FnOnce() -> f64) -> Option<f64> {
+        let mut map = self.lock();
+        let e = map.get_mut(label)?;
+        Some(*e.viewport_delta.get_or_insert_with(first))
     }
 
     /// Records the last measure the page of `label` reported.

@@ -31,6 +31,23 @@ Conventional Commits; one semver tag for the whole repo.
   webview shorter than its window no longer cuts off the footer.
 - A modal's parent is disabled and re-enabled under the registry lock, on the main thread, and only shown modals hold
   it: a deadline that fires after a close, or a pending modal, can no longer leave the parent disabled.
+- **Fixed.** The deadline/close race that could leave a parent disabled with no dialog: the registry records only the
+  desired state (a parent is disabled iff a shown modal of it is open) and one queued main-thread task reads the latest
+  of it and applies it (`Dialogs::parent_change`); no window API is called under the registry lock, and a close whose
+  task runs before the show's still ends with the parent enabled. `Dialogs::mark_shown_with` and `remove_with` are gone
+  (`mark_shown` returns the entry).
+- The viewport delta is taken once, at the first fit (`dialog_ready`), kept on the registry entry (`viewport_delta`) and
+  reused by later fits, so a later `dialog_fit` does not recompute it from a resized window.
+- `Measure` has an optional `devicePixelRatio` (finite, 0.25..=8; `DialogMeasureWire`, `DialogMeasure`): the page reports
+  CSS px, and the fit converts content, minimum content and viewport height to logical px by the webview zoom,
+  `devicePixelRatio / scale_factor` (1 when either is missing, `zoom_of`, `Measure::logical`).
+- `DialogInfo` has `pending` (the window is not on screen yet): an existing window that is still pending no longer
+  unblocks its opener before its `paddock://dialog-shown` event (`WindowDialogBackend`); a closed window's early-shown
+  mark is forgotten.
+- Conformance C40: `__command(` and `__prefix(` are called nowhere outside `crates/paddock-commands` (test code and
+  doctests excepted).
+- The real-window probe boots the built shell-demo's real dialog frame (`PADDOCK_PROBE_DIST`) and runs nightly on macOS,
+  Windows and Linux (`nightly.yml`, job `dialog-window-probe`; Linux under `xvfb-run`).
 
 - **Breaking.** `paddock_commands::DialogCallable` is a struct with a private field (its old variants are now
   `DialogCallableKind`, read with `kind()`): a contract can only name a `dialog_callable::<name>` marker, `prefix` or

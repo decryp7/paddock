@@ -287,7 +287,7 @@ Dialogs as real OS windows (ADR 0009, rule 17), ported from Debrief's `dialog_co
   (`grant_of(label)`, the `paddock_commands::DialogGrant`) and decides close requests (`close_request(label, now)`:
   forwarded as the dialog's Close/Cancel, closed when it did not answer within 1.5 s, a required choice kept unless the
   watchdog marked its page unresponsive).
-- `window`: the wire `Measure { content, minContent, viewportHeight? }` (TS `DialogMeasureWire`; `viewportHeight` is the page's `innerHeight`, 1..=4096: the fit adds `viewport_delta` = the window's inner height less it, clamped to 0..=400, to the content and minimum heights, for a webview shorter than its window), `plan_fit` (the cap is 75 % of the work
+- `window`: the wire `Measure { content, minContent, viewportHeight?, devicePixelRatio? }` (TS `DialogMeasureWire`; the page reports CSS px: `devicePixelRatio` is its `window.devicePixelRatio`, 0.25..=8, and the fit converts content, minimum and viewport to logical px with the webview zoom `zoom_of` = ratio / window scale factor, 1 when either is missing; `viewportHeight` is the page's `innerHeight`, 1..=4096: the fit adds `viewport_delta` = the window's inner height less it, clamped to 0..=400, to the content and minimum heights, for a webview shorter than its window; the delta is taken once, at the first fit (`dialog_ready`), kept on the registry entry and reused by later fits), `plan_fit` (the cap is 75 % of the work
   area less the window's own outer-minus-inner decorations and limits the preferred size only, never below `minContent`,
   which becomes the OS minimum; decisions and forms shrink and grow, a viewer only grows, a tool keeps its size) and
   **`show_mechanism(os)`, the one place the way of keeping a window unseen is chosen** (`ReadyThenShow`: hidden,
@@ -300,7 +300,7 @@ Dialogs as real OS windows (ADR 0009, rule 17), ported from Debrief's `dialog_co
   `paddock://dialog-result`, `paddock://dialog-closed` (to the opener), `paddock://dialog-close-requested` (to the
   dialog). The lifecycle: a window is pending until `dialog_ready`, or until `Dialogs::show_deadline` (1 s;
   `with_show_deadline`, `paddock-startup`'s `Config::dialog_show_deadline`) passes and it is shown at the placed size
-  (a late `dialog_ready` then fits it once); a modal's parent is disabled when the window is shown, never at creation;
+  (a late `dialog_ready` then fits it once); a modal's parent is disabled when the window is shown, never at creation (the registry records only the desired state, a parent is disabled iff a shown modal of it is open, and one queued main-thread task reads the latest of it and applies it; no window API runs under the registry lock);
   opening a pending dialog again creates no window and does not focus (show) it early. The deadline runs through a
   `Scheduler` (`ThreadScheduler`; tests inject their own and never sleep).
 
@@ -324,11 +324,13 @@ Wire types are generated into `ui/projects/paddock-ui/shell/generated/dialogs.ts
 `DIALOG_BASE_COMMANDS`; `PADDOCK_WRITE_TS=1 cargo test -p paddock-dialogs --lib generated`).
 
 **The real-window probe** (ADR 0026 §6): `tests/show_probe.rs` (`harness = false`: a Tauri app owns the main thread) opens
-a real dialog window hidden on the real webview, lets its page measure itself synchronously and send `dialog_ready`, and
-checks that the window was shown by that ready and not by the deadline (set to 300 s) and that after the show the frame is
-its measured height and the page's viewport equals it (no cut-off footer, no scroll bar). It exits 0 at once unless
-`PADDOCK_REAL_WINDOWS=1`, so the ordinary run skips it; the full suite sets the variable on each OS (a display or Xvfb on
-Linux): `PADDOCK_REAL_WINDOWS=1 cargo test -p paddock-dialogs --all-features --test show_probe`. Exit 0 passes, 1 fails
+the real dialog frame (`sd.rename` of the built shell-demo, served from `PADDOCK_PROBE_DIST`, normally
+`ui/dist/shell-demo/browser`) in a real window created hidden, lets the page measure itself synchronously and send
+`dialog_ready`, and checks that the window was shown by that ready and not by the deadline (set to 300 s) and that after
+the show the page's viewport equals the measured content height, the page does not scroll and the footer is fully
+visible. It exits 0 at once unless `PADDOCK_REAL_WINDOWS=1` (and says so when `PADDOCK_PROBE_DIST` is missing), so the
+ordinary run skips it; `nightly.yml` sets both on macOS, Windows and Linux (under `xvfb-run`):
+`PADDOCK_REAL_WINDOWS=1 PADDOCK_PROBE_DIST=ui/dist/shell-demo/browser cargo test -p paddock-dialogs --all-features --test show_probe`. Exit 0 passes, 1 fails
 (the reason is printed), 2 means no report within 90 s. It opens a window on the desktop, so run it on purpose.
 ## `paddock-health` (plan S3)
 

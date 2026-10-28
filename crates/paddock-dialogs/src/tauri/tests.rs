@@ -454,6 +454,7 @@ fn measure(content_h: f64, min_h: f64) -> Measure {
         content: size(720.0, content_h),
         min_content: size(400.0, min_h),
         viewport_height: None,
+        device_pixel_ratio: None,
     }
 }
 
@@ -765,6 +766,10 @@ fn opening_a_pending_dialog_again_creates_no_window_and_does_not_show_it_early()
         (again.label.as_str(), again.existing),
         (first.label.as_str(), true)
     );
+    assert!(
+        first.pending && again.pending,
+        "not on screen yet: its shown event is still to come"
+    );
     assert_eq!(h.webview_windows().len(), windows, "no second window");
     assert!(
         !native_since(mark)
@@ -782,7 +787,8 @@ fn opening_a_pending_dialog_again_creates_no_window_and_does_not_show_it_early()
     )
     .unwrap();
     let mark = native_mark();
-    assert!(open(&h, "main", request("ai-setup")).unwrap().existing);
+    let shown = open(&h, "main", request("ai-setup")).unwrap();
+    assert!(shown.existing && !shown.pending, "on screen already");
     assert_eq!(native_since(mark), [format!("focus:{}", first.label)]);
 }
 
@@ -868,6 +874,7 @@ fn a_scale_change_refits_a_dialog_from_its_last_measure() {
             content: bad,
             min_content: bad,
             viewport_height: None,
+            device_pixel_ratio: None,
         },
     );
     scale_changed(&dialog);
@@ -991,7 +998,7 @@ fn the_guard_holds_each_dialog_to_its_contract_on_the_invoke_path() {
     .unwrap();
     assert_eq!(
         info,
-        json!({ "label": "d-main-1", "dialogId": "settings", "existing": false })
+        json!({ "label": "d-main-1", "dialogId": "settings", "existing": false, "pending": true })
     );
     let dialog = window(&app, "d-main-1");
     let start = invoke(&dialog, "dialog_take_input", json!({})).unwrap();
@@ -1061,4 +1068,180 @@ fn the_guard_holds_each_dialog_to_its_contract_on_the_invoke_path() {
         invoke(&dialog, "dialog_close", json!({ "result": { "ok": true } })),
         Ok(Value::Null)
     );
+}
+
+/// Holds the main thread's queue by hand for one test: what `on_main_thread` is given waits until the test runs it.
+struct HeldMain;
+
+impl HeldMain {
+    fn new() -> Self {
+        DEFER_MAIN.with(|d| d.set(true));
+        MAIN_QUEUE.with(|q| q.borrow_mut().clear());
+        HeldMain
+    }
+
+    fn queued(&self) -> usize {
+        MAIN_QUEUE.with(|q| q.borrow().len())
+    }
+
+    /// Runs the queued tasks in the order given by `order` (indexes into the queue as it stands).
+    fn run(&self, order: &[usize]) {
+        let mut tasks: Vec<_> = MAIN_QUEUE
+            .with(|q| q.borrow_mut().drain(..).collect::<Vec<_>>())
+            .into_iter()
+            .map(Some)
+            .collect();
+        for i in order {
+            (tasks[*i].take().expect("each task runs once"))();
+        }
+    }
+
+    fn run_all(&self) {
+        let n = self.queued();
+        self.run(&(0..n).collect::<Vec<_>>());
+    }
+}
+
+impl Drop for HeldMain {
+    fn drop(&mut self) {
+        DEFER_MAIN.with(|d| d.set(false));
+        MAIN_QUEUE.with(|q| q.borrow_mut().clear());
+    }
+}
+
+fn parent_ops(mark: usize) -> Vec<String> {
+    native_since(mark)
+        .into_iter()
+        .filter(|o| o.ends_with(":main"))
+        .collect()
+}
+
+#[test]
+fn a_deadline_show_then_a_close_leaves_the_parent_enabled() {
+    for os in ["windows", "linux"] {
+        let (app, timer) = manual_app();
+        let h = app.handle().clone();
+        let held = HeldMain::new();
+        let mark = native_mark();
+        let a = open_on(&h, "main", request("unsaved-changes"), os).unwrap();
+        timer.deadline_passes();
+        assert!(!state(&app).is_pending(&a.label), "{os}: shown");
+        assert_eq!(held.queued(), 1, "{os}: the disable is only queued");
+        on_destroyed_on(&h, &a.label, os);
+        assert_eq!(held.queued(), 2, "{os}");
+        // The queued tasks read the latest state: the dialog is gone, so nothing is ever disabled.
+        held.run_all();
+        assert_eq!(parent_ops(mark), Vec::<String>::new(), "{os}");
+        assert!(!state(&app).parent_wants_disabled("main"), "{os}");
+    }
+}
+
+#[test]
+fn a_show_that_ran_before_the_close_disables_then_enables_the_parent() {
+    for os in ["windows", "linux"] {
+        let (app, timer) = manual_app();
+        let h = app.handle().clone();
+        let held = HeldMain::new();
+        let mark = native_mark();
+        let a = open_on(&h, "main", request("unsaved-changes"), os).unwrap();
+        timer.deadline_passes();
+        held.run_all();
+        assert_eq!(parent_ops(mark), ["disable:main"], "{os}");
+        on_destroyed_on(&h, &a.label, os);
+        held.run_all();
+        assert_eq!(parent_ops(mark), ["disable:main", "enable:main"], "{os}");
+    }
+}
+
+#[test]
+fn a_close_before_the_deadline_queues_nothing_and_the_late_deadline_shows_nothing() {
+    for os in ["windows", "linux"] {
+        let (app, timer) = manual_app();
+        let h = app.handle().clone();
+        let held = HeldMain::new();
+        let mark = native_mark();
+        let a = open_on(&h, "main", request("unsaved-changes"), os).unwrap();
+        on_destroyed_on(&h, &a.label, os);
+        timer.deadline_passes();
+        assert_eq!(held.queued(), 0, "{os}");
+        assert_eq!(parent_ops(mark), Vec::<String>::new(), "{os}");
+    }
+}
+
+#[test]
+fn two_modals_disable_the_parent_once_and_only_the_last_close_enables_it() {
+    for os in ["windows", "linux"] {
+        let (app, timer) = manual_app();
+        let h = app.handle().clone();
+        let held = HeldMain::new();
+        let mark = native_mark();
+        let a = open_on(&h, "main", request("unsaved-changes"), os).unwrap();
+        let b = open_on(&h, "main", request("confirm-x"), os).unwrap();
+        timer.deadline_passes();
+        held.run_all();
+        assert_eq!(parent_ops(mark), ["disable:main"], "{os}: once, not twice");
+        on_destroyed_on(&h, &a.label, os);
+        held.run_all();
+        assert_eq!(parent_ops(mark), ["disable:main"], "{os}: B still holds it");
+        on_destroyed_on(&h, &b.label, os);
+        held.run_all();
+        assert_eq!(parent_ops(mark), ["disable:main", "enable:main"], "{os}");
+    }
+}
+
+#[test]
+fn a_close_whose_task_runs_before_the_queued_disable_still_ends_enabled() {
+    for os in ["windows", "linux"] {
+        let (app, timer) = manual_app();
+        let h = app.handle().clone();
+        let held = HeldMain::new();
+        let mark = native_mark();
+        let a = open_on(&h, "main", request("unsaved-changes"), os).unwrap();
+        timer.deadline_passes();
+        on_destroyed_on(&h, &a.label, os);
+        // The close's task (index 1) runs before the show's (index 0).
+        held.run(&[1, 0]);
+        assert_eq!(parent_ops(mark), Vec::<String>::new(), "{os}");
+        assert!(!state(&app).parent_wants_disabled("main"), "{os}");
+    }
+}
+
+#[test]
+fn a_first_fit_keeps_the_viewport_delta_and_the_zoom_converts_the_measure_to_logical_px() {
+    let (app, _t) = manual_app();
+    let h = app.handle().clone();
+    let info = open(&h, "main", request("ai-setup")).unwrap();
+    let dialog = os_window(&app, &info.label);
+    assert_eq!(state(&app).get(&info.label).unwrap().viewport_delta, None);
+    // The mock window is 0x0 at scale 1: the delta taken at ready is 0; a page at devicePixelRatio 2 is zoom 2.
+    let mut m = measure(300.0, 100.0);
+    m.viewport_height = Some(150.0);
+    m.device_pixel_ratio = Some(2.0);
+    ready(&h, &dialog, m, "linux").unwrap();
+    let e = state(&app).get(&info.label).unwrap();
+    assert_eq!(e.viewport_delta, Some(0.0));
+    let kept = e.measure.unwrap();
+    assert_eq!(
+        (
+            kept.content.height,
+            kept.min_content.height,
+            kept.viewport_height,
+            kept.device_pixel_ratio
+        ),
+        (600.0, 200.0, Some(300.0), None)
+    );
+    // A later fit reuses the recorded delta; it does not read it off the window again.
+    state(&app).remove(&info.label);
+    let info = open(&h, "main", request("ai-setup")).unwrap();
+    let dialog = os_window(&app, &info.label);
+    assert_eq!(
+        state(&app).viewport_delta_or(&info.label, || 7.0),
+        Some(7.0)
+    );
+    fit(&h, &dialog, m, None, "linux").unwrap();
+    assert_eq!(
+        state(&app).get(&info.label).unwrap().viewport_delta,
+        Some(7.0)
+    );
+    assert_eq!(state(&app).viewport_delta_or("d-main-99", || 1.0), None);
 }

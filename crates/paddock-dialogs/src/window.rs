@@ -80,8 +80,11 @@ pub enum Theme {
 pub struct DialogInfo {
     pub label: String,
     pub dialog_id: String,
-    /// The window existed already and was focused.
+    /// The window existed already (and was focused, if it was on screen).
     pub existing: bool,
+    /// The window is not on screen yet: it is shown when its page is ready (or at the show deadline), and
+    /// `paddock://dialog-shown` follows. False for an existing window that was shown already.
+    pub pending: bool,
 }
 
 /// What a dialog's own webview needs to render (`dialog_take_input`).
@@ -398,6 +401,26 @@ pub struct Measure {
     #[serde(default)]
     #[cfg_attr(test, ts(optional))]
     pub viewport_height: Option<f64>,
+    /// The page's `window.devicePixelRatio` when it measured. A webview zoomed away from the window's scale factor
+    /// (browser zoom, an OS text scale) reports CSS px that are not logical px: the fit converts with [`zoom_of`].
+    /// Absent: CSS px are taken as logical.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub device_pixel_ratio: Option<f64>,
+}
+
+/// The least and the most a reported `devicePixelRatio` can be (anything else is a wrong report).
+pub const DEVICE_PIXEL_RATIO_RANGE: std::ops::RangeInclusive<f64> = 0.25..=8.0;
+
+/// The webview zoom: CSS px per logical px, `devicePixelRatio / scale_factor`. 1 when the page sent no ratio or either
+/// number is not a positive finite one.
+pub fn zoom_of(device_pixel_ratio: Option<f64>, scale_factor: f64) -> f64 {
+    match device_pixel_ratio {
+        Some(r) if r.is_finite() && r > 0.0 && scale_factor.is_finite() && scale_factor > 0.0 => {
+            r / scale_factor
+        }
+        _ => 1.0,
+    }
 }
 
 /// The most a viewport delta can be, logical px (a bigger gap is a wrong report, not a webview inset).
@@ -416,6 +439,21 @@ pub fn viewport_delta(inner_height: f64, viewport_height: Option<f64>) -> f64 {
 }
 
 impl Measure {
+    /// The measure in logical px: content, minimum content and viewport height, which the page reports in CSS px,
+    /// multiplied by `zoom` ([`zoom_of`]). The ratio is spent, so converting again does nothing.
+    pub fn logical(self, zoom: f64) -> Measure {
+        let by = |s: Size| Size {
+            width: s.width * zoom,
+            height: s.height * zoom,
+        };
+        Measure {
+            content: by(self.content),
+            min_content: by(self.min_content),
+            viewport_height: self.viewport_height.map(|v| v * zoom),
+            device_pixel_ratio: None,
+        }
+    }
+
     /// The measure if all four numbers are finite and positive and at most [`MAX_SIDE`] (a webview cannot make Rust
     /// size a window to nonsense); an `Invalid` error otherwise.
     pub fn checked(self) -> Result<Measure, DialogError> {
@@ -427,7 +465,10 @@ impl Measure {
         let viewport_ok = self
             .viewport_height
             .is_none_or(|v| v.is_finite() && (1.0..=MAX_SIDE).contains(&v));
-        if sane(self.content) && sane(self.min_content) && viewport_ok {
+        let ratio_ok = self
+            .device_pixel_ratio
+            .is_none_or(|r| r.is_finite() && DEVICE_PIXEL_RATIO_RANGE.contains(&r));
+        if sane(self.content) && sane(self.min_content) && viewport_ok && ratio_ok {
             Ok(self)
         } else {
             Err(DialogError::new(
@@ -515,6 +556,9 @@ pub struct Around<'a> {
     pub monitor: Option<Monitor>,
     /// The OS (`std::env::consts::OS`).
     pub os: &'a str,
+    /// What the window's inner height has beyond the page's viewport, logical px ([`viewport_delta`]), taken once at
+    /// `dialog_ready` and reused by every later fit.
+    pub viewport_delta: f64,
 }
 
 /// The fit of a dialog of `kind` (preferred-height floor `floor`, [`Kind::policy`]'s viewer height; 0 for the others)
@@ -540,6 +584,7 @@ pub fn plan_fit(
         outer,
         monitor,
         os,
+        viewport_delta: delta,
     } = *around;
     let measure = measure.checked()?;
     let monitor = monitor.filter(|m| m.work.is_usable());
@@ -547,7 +592,6 @@ pub fn plan_fit(
     let (avail_w, avail_h) = work.map_or((MAX_SIDE, MAX_SIDE), |(w, h)| {
         ((w - decor.width).max(1.0), (h - decor.height).max(1.0))
     });
-    let delta = viewport_delta(current.height, measure.viewport_height);
     let min = Size {
         width: measure.min_content.width.min(avail_w),
         height: (measure.min_content.height + delta).min(avail_h),
@@ -638,6 +682,7 @@ mod tests {
                 height: mh,
             },
             viewport_height: None,
+            device_pixel_ratio: None,
         }
     }
 
@@ -652,6 +697,7 @@ mod tests {
             outer: None,
             monitor,
             os,
+            viewport_delta: 0.0,
         }
     }
 
@@ -705,24 +751,54 @@ mod tests {
     #[test]
     fn a_viewport_short_of_the_window_adds_its_delta_to_content_and_minimum() {
         let cur = size(400.0, 332.0);
+        let m = measure(400.0, 300.0, 300.0, 150.0);
         let none = plan_fit(
-            Kind::Form,
-            measure(400.0, 300.0, 300.0, 150.0),
-            0.0,
-            &around(cur, size(0.0, 0.0), None, "macos"),
-        )
-        .unwrap();
-        let mut m = measure(400.0, 300.0, 300.0, 150.0);
-        m.viewport_height = Some(300.0);
-        let fit = plan_fit(
             Kind::Form,
             m,
             0.0,
             &around(cur, size(0.0, 0.0), None, "macos"),
         )
         .unwrap();
+        let mut a = around(cur, size(0.0, 0.0), None, "macos");
+        a.viewport_delta = 32.0;
+        let fit = plan_fit(Kind::Form, m, 0.0, &a).unwrap();
         assert_eq!(fit.size.height, none.size.height + 32.0);
         assert_eq!(fit.min.height, none.min.height + 32.0);
+        // The delta is the caller's, taken once: a measure's own viewport height does not recompute it.
+        let mut resized = m;
+        resized.viewport_height = Some(100.0);
+        assert_eq!(plan_fit(Kind::Form, resized, 0.0, &a).unwrap(), fit);
+    }
+
+    #[test]
+    fn the_zoom_is_the_ratio_over_the_scale_and_defaults_to_one() {
+        assert_eq!(zoom_of(Some(3.0), 2.0), 1.5);
+        assert_eq!(zoom_of(Some(2.0), 2.0), 1.0);
+        for (r, s) in [
+            (None, 2.0),
+            (Some(2.0), 0.0),
+            (Some(2.0), f64::NAN),
+            (Some(0.0), 2.0),
+            (Some(f64::NAN), 2.0),
+        ] {
+            assert_eq!(zoom_of(r, s), 1.0, "{r:?} {s}");
+        }
+    }
+
+    #[test]
+    fn a_zoomed_measure_converts_css_px_to_logical_px_once() {
+        let mut m = measure(400.0, 300.0, 300.0, 150.0);
+        m.viewport_height = Some(280.0);
+        m.device_pixel_ratio = Some(3.0);
+        let l = m.logical(zoom_of(m.device_pixel_ratio, 2.0));
+        assert_eq!(
+            (l.content, l.min_content, l.viewport_height),
+            (size(600.0, 450.0), size(450.0, 225.0), Some(420.0))
+        );
+        assert_eq!(l.device_pixel_ratio, None, "spent");
+        assert_eq!(l.logical(1.5), l.logical(1.5));
+        let plain = measure(400.0, 300.0, 300.0, 150.0);
+        assert_eq!(plain.logical(1.0), plain);
     }
 
     #[test]
@@ -732,6 +808,16 @@ mod tests {
             v.viewport_height = bad;
             assert_eq!(v.checked().unwrap_err().code, DialogErrorCode::Invalid);
         }
+        v.viewport_height = None;
+        for bad in [0.0, 0.24, 8.01, f64::NAN, f64::INFINITY] {
+            v.device_pixel_ratio = Some(bad);
+            assert_eq!(v.checked().unwrap_err().code, DialogErrorCode::Invalid);
+        }
+        for ok in [0.25, 2.0, 8.0] {
+            v.device_pixel_ratio = Some(ok);
+            assert!(v.checked().is_ok(), "{ok}");
+        }
+        v.device_pixel_ratio = None;
         v.viewport_height = Some(300.0);
         assert!(v.checked().is_ok());
         assert!(measure(400.0, 300.0, 300.0, 150.0).checked().is_ok());
@@ -926,6 +1012,7 @@ mod tests {
             outer: Some(outer),
             monitor: Some(m),
             os,
+            viewport_delta: 0.0,
         };
         let fit = plan_fit(
             Kind::Form,
@@ -1140,6 +1227,7 @@ mod tests {
             label: "d-main-1".into(),
             dialog_id: "a".into(),
             existing: false,
+            pending: true,
         };
         assert_eq!(serde_json::to_value(&info).unwrap()["dialogId"], "a");
     }

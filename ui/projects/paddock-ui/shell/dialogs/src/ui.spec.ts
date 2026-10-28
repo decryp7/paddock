@@ -616,6 +616,60 @@ describe('dialogs as windows', () => {
     expect(gate.blocked()).toBe(false);
   });
 
+  it('does not block the window for an existing window that is still pending until its shown event comes', async () => {
+    const { io, service, gate } = setup();
+    // Another opener (a reloaded page) finds the window Rust opened for this dialog, which is not on screen yet.
+    await io.open({ dialogId: 't.decision', title: 'x', input: {}, theme: 'light' });
+    const ref = service.open(DECISION);
+    await tick();
+    expect(gate.blocked()).toBe(false);
+    io.shown('d-main-1', 't.decision');
+    await tick();
+    expect(gate.blocked()).toBe(true);
+    io.result('d-main-1', 't.decision', null);
+    io.closed('d-main-1', 't.decision');
+    await ref.closed;
+    expect(gate.blocked()).toBe(false);
+  });
+
+  it('blocks at once for an existing window that is on screen already, and a pending one that closes never blocks', async () => {
+    const { io, service, gate } = setup();
+    await io.open({ dialogId: 't.decision', title: 'x', input: {}, theme: 'light' });
+    io.shown('d-main-1', 't.decision');
+    const ref = service.open(DECISION);
+    await tick();
+    expect(gate.blocked()).toBe(true);
+    io.result('d-main-1', 't.decision', null);
+    io.closed('d-main-1', 't.decision');
+    await ref.closed;
+    expect(gate.blocked()).toBe(false);
+    // Pending, then closed before it ever showed.
+    await io.open({ dialogId: 't.decision', title: 'x', input: {}, theme: 'light' });
+    const again = service.open(DECISION);
+    await tick();
+    io.result('d-main-2', 't.decision', null);
+    io.closed('d-main-2', 't.decision');
+    await again.closed;
+    await tick();
+    expect(gate.blocked()).toBe(false);
+  });
+
+  it('forgets a window that was shown before its open reply when it closes, so a reused label does not show early', async () => {
+    const { io, service, gate } = setup();
+    const first = service.open(DECISION);
+    await tick();
+    // The events of a window overtake the reply to its `open` (no pending entry yet): shown, then closed.
+    io.shown('d-main-2', 't.choice');
+    io.closed('d-main-2', 't.choice');
+    service.open(CHOICE);
+    await tick();
+    expect(io.opened).toHaveLength(2);
+    expect(gate.blocked()).toBe(false);
+    io.result('d-main-1', 't.decision', null);
+    io.closed('d-main-1', 't.decision');
+    await first.closed;
+  });
+
   it('opens one window per input of an instanced dialog', async () => {
     const { io, service } = setup();
     service.open(INSTANCED, { inputs: { id: 1 } });

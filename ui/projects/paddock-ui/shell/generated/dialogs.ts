@@ -12,7 +12,13 @@ export type DialogMeasureWire = { content: DialogSize, minContent: DialogSize,
  * inner height (the 1.1-0 spike measured 32 px on a Mac whose outer and inner sizes were equal): the fit adds the
  * difference ([`viewport_delta`]) to the content and minimum content heights so the footer is not cut off.
  */
-viewportHeight?: number, };
+viewportHeight?: number, 
+/**
+ * The page's `window.devicePixelRatio` when it measured. A webview zoomed away from the window's scale factor
+ * (browser zoom, an OS text scale) reports CSS px that are not logical px: the fit converts with [`zoom_of`].
+ * Absent: CSS px are taken as logical.
+ */
+devicePixelRatio?: number, };
 
 export type DialogRemembered = { dx: number, dy: number, width: number, height: number, };
 
@@ -40,9 +46,14 @@ theme?: DialogTheme, };
 
 export type DialogInfo = { label: string, dialogId: string, 
 /**
- * The window existed already and was focused.
+ * The window existed already (and was focused, if it was on screen).
  */
-existing: boolean, };
+existing: boolean, 
+/**
+ * The window is not on screen yet: it is shown when its page is ready (or at the show deadline), and
+ * `paddock://dialog-shown` follows. False for an existing window that was shown already.
+ */
+pending: boolean, };
 
 export type DialogStart = { dialogId: string, title: string, kind: DialogKind, modality: DialogModality, 
 /**
