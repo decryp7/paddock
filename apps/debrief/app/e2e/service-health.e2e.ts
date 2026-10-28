@@ -19,7 +19,7 @@ test.describe('service health', () => {
     for (let i = 0; i < 3; i++) await fail(page, 'store', message);
     const chip = page.getByTestId('service-health-chip');
     await expect(chip).toHaveCount(1);
-    await expect(chip).toContainText('Log store: stopped');
+    await expect(chip).toContainText('Log store: Stopped');
     await expect(page.getByTestId('notification')).toHaveCount(0);
     await expect(page.locator('[data-testid=notification][data-cause="workspace.error"]')).toHaveCount(0);
     await chip.click();

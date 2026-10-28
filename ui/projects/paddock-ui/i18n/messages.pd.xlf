@@ -764,20 +764,38 @@
       <trans-unit id="pd.health.state.degraded" datatype="html">
         <source>limited</source>
       </trans-unit>
-      <trans-unit id="pd.health.state.network" datatype="html">
-        <source>can't reach the network</source>
+      <trans-unit id="pd.health.state.limited" datatype="html">
+        <source>limited</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.moved" datatype="html">
+        <source>moved</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.needs-approval" datatype="html">
+        <source>needs approval</source>
       </trans-unit>
       <trans-unit id="pd.health.state.not-installed" datatype="html">
         <source>not installed</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.not-running" datatype="html">
+        <source>not running</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.program-missing" datatype="html">
+        <source>program missing</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.quarantined" datatype="html">
         <source>switched off</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.refused" datatype="html">
+        <source>refused by the system</source>
       </trans-unit>
       <trans-unit id="pd.health.state.repairing" datatype="html">
         <source>repairing</source>
       </trans-unit>
       <trans-unit id="pd.health.state.stopped" datatype="html">
         <source>stopped</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.unavailable" datatype="html">
+        <source>not available</source>
       </trans-unit>
       <trans-unit id="pd.health.status" datatype="html">
         <source>Services</source>

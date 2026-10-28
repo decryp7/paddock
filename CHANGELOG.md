@@ -8,8 +8,9 @@ Conventional Commits; one semver tag for the whole repo.
 - About, Updates and What's new are styled again: `ABOUT_STYLES` selected the pre-`pd-` class names (b88a387a1). A new spec
   (`shell/testing/src/template-classes.spec.ts`) checks that every class a shell template uses has a selector in its styles, so the
   rename drift cannot come back unnoticed.
-- The service health chip is sentence-cased for labels such as "your sources" and says what is wrong: "Can't reach the network" (a
-  cause code naming the network) or "not installed" (repair `install`) instead of always "stopped". `stateWord` takes the cause and repair.
+- The service health chip is sentence-cased ("Your sources: Stopped") and says what is wrong from the cause code Rust emits
+  (`CAUSE_WORDS`: "Not installed", "Needs approval", "Not available" ...). A spec reads the Rust sources and fails for a cause code
+  without words. No network cause code exists on the Rust side yet, so none is mapped.
 - Notification centre titles wrap (two lines, full text in the tooltip) instead of cutting at one line, and the hover buttons no longer reserve room.
 - Jobs: `pd-job` has a `flat` input (a row without border or background) and `pd-jobs-list` a `flat` input, which the status popover
   uses (no card in a card); a phase named like the job's title is not said twice ("Downloading" in the card and the status item).

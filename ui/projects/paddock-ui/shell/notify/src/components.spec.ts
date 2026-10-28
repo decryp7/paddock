@@ -19,7 +19,7 @@ describe('chip text', () => {
   it('names one service and its state, or counts several', () => {
     expect(shortName('the log store')).toBe('Log store');
     expect((['down', 'degraded', 'quarantined', 'repairing'] as const).map((s) => stateWord(s))).toEqual(['stopped', 'limited', 'switched off', 'repairing']);
-    expect(chipText([{ label: 'the log store', state: 'down' }])).toBe('Log store: stopped');
+    expect(chipText([{ label: 'the log store', state: 'down' }])).toBe('Log store: Stopped');
     expect(chipText([{ label: 'a', state: 'down' }, { label: 'b', state: 'degraded' }])).toBe('2 services need attention');
     // The compact form of a narrow status bar.
     expect(chipCompactText([{ label: 'the log store', state: 'down' }])).toBe('Store stopped');
@@ -34,8 +34,8 @@ describe('chip text', () => {
     expect(shortName('llama.cpp server')).toBe('llama.cpp server');
     expect(shortName('Pitwall server')).toBe('Pitwall server');
     expect(shortName('The log store')).toBe('Log store');
-    expect(chipText([{ label: 'iPhone link', state: 'degraded' }])).toBe('iPhone link: limited');
-    expect(chipText([{ label: 'llama.cpp', state: 'down' }])).toBe('llama.cpp: stopped');
+    expect(chipText([{ label: 'iPhone link', state: 'degraded' }])).toBe('iPhone link: Limited');
+    expect(chipText([{ label: 'llama.cpp', state: 'down' }])).toBe('llama.cpp: Stopped');
     // The compact word starts the text: a plain lower-case one takes a capital, a name keeps its own.
     expect(chipCompactText([{ label: 'the iPhone link', state: 'down' }])).toBe('link stopped'.replace('link', 'Link'));
     expect(chipCompactText([{ label: 'the sync iPhone', state: 'down' }])).toBe('iPhone stopped');
@@ -48,17 +48,19 @@ describe('chip text, sentence case and accurate state words', () => {
   it('starts with a capital when the label opens with a possessive or determiner', () => {
     expect(shortName('your sources')).toBe('Your sources');
     expect(shortName('my sync')).toBe('My sync');
-    expect(chipText([{ label: 'your sources', state: 'down' }])).toBe('Your sources: stopped');
+    expect(chipText([{ label: 'your sources', state: 'down' }])).toBe('Your sources: Stopped');
     expect(chipCompactText([{ label: 'your sources', state: 'down' }])).toBe('Sources stopped');
   });
 
-  it('says what is wrong when the cause or repair says so', () => {
-    const net = { label: 'your sources', state: 'down' as const, cause: cause('sources.network-unreachable'), repair: 'retry' as const };
-    expect(chipText([net])).toBe("Your sources: can't reach the network");
-    expect(chipCompactText([net])).toBe("Sources can't reach the network");
-    expect(chipText([{ label: 'the index', state: 'down', cause: cause('index.missing'), repair: 'install' }])).toBe('Index: not installed');
-    expect(chipText([{ label: 'the index', state: 'down', cause: cause('index.crashed'), repair: 'restart' }])).toBe('Index: stopped');
-    expect(stateWord('down', cause('x.offline'), null)).toBe("can't reach the network");
+  it('says what is wrong by the cause code, with a capital after the colon', () => {
+    const svc = (code: string) => ({ label: 'your sources', state: 'down' as const, cause: cause(code) });
+    expect(chipText([svc('service.notInstalled')])).toBe('Your sources: Not installed');
+    expect(chipText([svc('service.unavailable')])).toBe('Your sources: Not available');
+    expect(chipCompactText([svc('service.needsApproval')])).toBe('Sources needs approval');
+    expect(chipText([svc('store.crashed')])).toBe('Your sources: Stopped');
+    // A code nobody listed (or none) is plain "stopped".
+    expect(chipText([svc('x.unknown')])).toBe('Your sources: Stopped');
+    expect(stateWord('down', cause(null))).toBe('stopped');
   });
 });
 
@@ -77,7 +79,7 @@ describe('pd-service-status', () => {
     expect(el.querySelector('[data-testid=service-health-chip]')).toBeNull();
     health.fail('store', cause('The log store stopped.', { hint: 'Choose Restart.', detail: 'exit 6' }));
     await f.whenStable();
-    expect(one(el, '[data-testid=service-health-chip]').textContent).toContain('Log store: stopped');
+    expect(one(el, '[data-testid=service-health-chip]').textContent).toContain('Log store: Stopped');
     await open(f);
     const section = one(el, '[data-testid=service-health-store]');
     expect(section.textContent).toContain('The log store stopped.');

@@ -341,7 +341,7 @@ test.describe('notifications and service health (plan S4)', () => {
     await page.getByRole('button', { name: 'Break the demo engine' }).click();
 
     await expect(chip).toHaveCount(1);
-    await expect(chip).toHaveText('Demo engine: stopped');
+    await expect(chip).toHaveText('Demo engine: Stopped');
     // The chip states the outage: no toast for a health cause.
     await expect(n.toastItems).toHaveCount(0);
     // The panel waits calmly instead of showing an error of its own.
@@ -377,7 +377,7 @@ test.describe('notifications and service health (plan S4)', () => {
     const { chip } = app.statusBar;
     await page.goto('/');
     await page.getByRole('button', { name: 'Break the search index' }).click();
-    await expect(chip).toHaveText('Search index: stopped');
+    await expect(chip).toHaveText('Search index: Stopped');
     await chip.click();
     const details = app.notifications.services;
     await expect(details).toContainText('The search index stopped: a segment is damaged.');
@@ -386,7 +386,7 @@ test.describe('notifications and service health (plan S4)', () => {
     await expect(details).toContainText('The search index could not be rebuilt.');
     await expect(details).toContainText('Free some disk space, then try again.');
     await expect(details.getByRole('button', { name: 'Reset search index' })).toBeEnabled();
-    await expect(chip).toHaveText('Search index: stopped');
+    await expect(chip).toHaveText('Search index: Stopped');
     // Two services down: one chip with a count.
     await page.keyboard.press('Escape');
     await expect(chip).toBeFocused();

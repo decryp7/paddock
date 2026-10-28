@@ -105,9 +105,9 @@ describe('the log store worker dies (ADR 0055)', () => {
 
 describe('each other service fails the same way', () => {
   it.each([
-    ['ai', 'The AI worker was switched off.', 'quarantined', 'reset', 'AI worker: switched off'],
-    ['plugins', 'The plugin net.x was switched off after it failed several times.', 'quarantined', 'liftQuarantine', 'Plugins: switched off'],
-    ['browser', 'The research browser is not available.', 'down', 'install', 'Research browser: stopped'],
+    ['ai', 'The AI worker was switched off.', 'quarantined', 'reset', 'AI worker: Switched off'],
+    ['plugins', 'The plugin net.x was switched off after it failed several times.', 'quarantined', 'liftQuarantine', 'Plugins: Switched off'],
+    ['browser', 'The research browser is not available.', 'down', 'install', 'Research browser: Stopped'],
     ['downloads', 'A download failed: Download Qwen.', 'down', 'retry', 'Downloads: stopped'],
   ] as const)('%s: one chip with the cause, its repair action, and the repair works', async (service, message, state, repair, chip) => {
     const { f, health } = await setup();
