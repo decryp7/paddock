@@ -298,9 +298,10 @@ async fn implicit_tls_against_a_plain_server_is_a_tls_error() {
 
 /// The test above is the first in its process to need random bytes from aws-lc (the TLS ClientHello). aws-lc seeds its
 /// generator from CPU Jitter Entropy when that is compiled in, and calls `abort()` when the jitter source fails its
-/// health tests three times (aws/aws-lc-rs#1072); on Windows the CRT turns that into exit 0xc0000409. It killed this test
-/// on the Windows CI runner in runs 6457 and 6628. Spotter's `.cargo/config.toml` builds aws-lc without jitter
-/// entropy, so the generator seeds from the operating system alone; this checks that setting reaches the build.
+/// health tests three times (aws/aws-lc-rs#1072); on Windows the CRT turns that into exit 0xc0000409, the probable cause
+/// of this test dying on the Windows CI runner in runs 6457 and 6628. Spotter's `.cargo/config.toml` builds aws-lc
+/// without jitter entropy, so the generator seeds from the operating system alone. This proves the `[env]` value reaches
+/// rustc for spotter-engine, the same mechanism that hands it to aws-lc-sys's build script in the same cargo run.
 #[test]
 fn aws_lc_is_built_without_jitter_entropy_which_can_abort_the_process() {
     assert_eq!(

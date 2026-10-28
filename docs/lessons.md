@@ -542,3 +542,16 @@ single-job CI runners, the machine's load and conflicts in shared code (Dyno and
 API). **Rule:** one release at a time; release-critical work first; other apps progress in parallel only while load and
 CI capacity allow and only if they don't change shared code the release depends on (rule 1 and ER-1, amended
 2026-10-28).
+
+## aws-lc's jitter entropy aborts on Windows VMs; build with AWS_LC_SYS_NO_JITTER_ENTROPY=1 (2026-10-28, Spotter)
+
+Spotter's one test that completes a TLS ClientHello died twice on the Windows runner (a VM) with 0xc0000409, no panic
+and an empty stderr (runs 6457 and 6628). The probable cause: the first random draw in a process seeds aws-lc's
+generator from CPU Jitter Entropy, which calls `abort()` when the jitter source fails its health tests three times
+(aws/aws-lc-rs#1072, open, seen on Windows VMs and at early boot), and the MSVC CRT turns `abort()` into a fast fail
+with that code, which reads like a stack overrun. Not caught in a dump; on the Mac 8,680 fresh processes under load
+never failed. The shipped app takes the same path for mail and HTTPS. **Rule:** an app that links aws-lc (rustls'
+default provider, reqwest's `rustls`) sets `AWS_LC_SYS_NO_JITTER_ENTROPY = { value = "1", force = true }` in its
+`.cargo/config.toml` `[env]`, with a test that reads it through `option_env!`, and never sets the target-suffixed
+variant, which the build script reads first. Windows 0xc0000409 is any self-triggered abort (`abort()`, `__fastfail`,
+`/GS`), not proof of a buffer overrun: look for a C `abort()` first.
