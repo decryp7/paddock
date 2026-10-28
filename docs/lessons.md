@@ -586,3 +586,11 @@ jobs could both hold a slot (rename away, check, move back), and the disk sweep 
 job could take the slot in between. **Rule:** a lock between processes is an OS file lock held by a process that lives as
 long as the owner (`paddock-slots`, `./dev ci slot`: the kernel frees it when the holder dies, so nothing is reclaimed),
 and work that needs "nobody holds X" runs while holding X's lock (`./dev ci slot idle-run`), never after a check.
+
+## A CI script tested only on the Mac's bash 3.2 can break in bash 5 (2026-10-28, CI kit)
+
+`job-isolation.sh` passed every test on the Mac and failed in CI's containers (bash 5.2): `patsub_replacement` made a
+backslash in `${v//p/r}`'s replacement an escape (every scoped process pattern became an invalid regular expression), and
+command substitutions dropped `-e` (a missing CI home became an empty one). **Rule:** a CI shell script never puts a
+computed value into `${v//p/r}`'s replacement (concatenate instead), sets `shopt -s inherit_errexit`, checks a value a
+substitution must produce, and its tests are also run under the container's bash before pushing (`docker run node:22`).
