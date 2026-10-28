@@ -12,6 +12,18 @@ Conventional Commits; one semver tag for the whole repo.
   generated `JOB_SNAPSHOT_FIXTURES` carry a quiet job, so both sides test the same wire form. Spotter uses it for the source test and
   the check of one watch.
 
+### Shell: About, health chip, notices and jobs popover fixes
+- About, Updates and What's new are styled again: `ABOUT_STYLES` selected the pre-`pd-` class names (b88a387a1). A new spec
+  (`shell/testing/src/template-classes.spec.ts`) checks that every class a shell template uses has a selector in its styles, so the
+  rename drift cannot come back unnoticed (it also covers host classes and `src/lib`, and a class binding cannot satisfy itself).
+- The service health chip is sentence-cased for labels such as "your sources" (the value after the colon stays lower case, a rule
+  now in the design guide §10) and says what is wrong from the cause code Rust emits (`CAUSE_WORDS`: "not installed", "needs
+  approval", "needs pairing" ...). `cause-codes.spec.ts` reads the Rust sources and fails for a cause code without words, a
+  non-literal `.code(` that is not listed, or a word for a code nothing emits. No network cause code exists on the Rust side yet.
+- Notification centre titles wrap (two lines, full text in the tooltip) instead of cutting at one line, and the hover buttons no longer reserve room.
+- Jobs: `pd-job` has a `flat` input (a row without border or background) and `pd-jobs-list` a `flat` input, which the status popover
+  uses (no card in a card); a phase named like the job's title is not said twice ("Downloading" in the card and the status item).
+
 ### Shell toasts keep a page-footer safe area
 - New token `--pd-page-footer-safe` (56 px). `pd-notification-host` now sits above the status bar plus this safe area, so a toast no
   longer covers a page footer's primary action (a wizard's Next); the status-bar fallback is 24 px like the token.
