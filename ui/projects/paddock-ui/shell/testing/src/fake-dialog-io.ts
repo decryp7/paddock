@@ -22,6 +22,7 @@ export class FakeDialogIo implements DialogIo {
   withholdReady = false;
   private readonly handlers = new Map<string, Set<(p: unknown) => void>>();
   private readonly labels = new Map<string, string>();
+  private readonly onScreen = new Set<string>();
   private next = 1;
   /** When set, `open` fails with it (the window system refused). */
   failOpen: Error | null = null;
@@ -35,7 +36,7 @@ export class FakeDialogIo implements DialogIo {
     const known = this.labels.get(key);
     const label = known ?? `d-main-${this.next++}`;
     this.labels.set(key, label);
-    return { label, dialogId: request.dialogId, existing: known !== undefined };
+    return { label, dialogId: request.dialogId, existing: known !== undefined, pending: !this.onScreen.has(label) };
   }
   async take(): Promise<DialogStart> {
     return this.start;
@@ -77,10 +78,12 @@ export class FakeDialogIo implements DialogIo {
   /** The dialog window `label` is gone (and forgets its label, so opening it again opens a new one). */
   closed(label: string, dialogId: string, remembered: DialogRemembered | null = null): void {
     for (const [k, v] of this.labels) if (v === label) this.labels.delete(k);
+    this.onScreen.delete(label);
     this.emit(DIALOG_EVENTS.closed, { label, dialogId, remembered });
   }
   /** The window `label` of dialog `dialogId` was shown (the opener's scrim for a macOS parent starts here). */
   shown(label: string, dialogId: string): void {
+    this.onScreen.add(label);
     this.emit(DIALOG_EVENTS.shown, { label, dialogId });
   }
   /** A close request reached this dialog window (the OS close, or the opener's `close`). */

@@ -256,9 +256,8 @@ fn open_on<R: Runtime>(
     if let Some(existing) = dialogs.find(caller, &request.dialog_id, request.instance.as_deref()) {
         // A pending dialog is not on screen yet and shows (focused) when it is ready; focusing it now would show it
         // unfitted (a hidden window orders in when it is made key).
-        if !dialogs.is_pending(&existing)
-            && let Some(w) = app.get_webview_window(&existing)
-        {
+        let pending = dialogs.is_pending(&existing);
+        if !pending && let Some(w) = app.get_webview_window(&existing) {
             let _ = w.unminimize();
             native("focus", &existing);
             let _ = w.set_focus();
@@ -267,6 +266,7 @@ fn open_on<R: Runtime>(
             label: existing,
             dialog_id: request.dialog_id,
             existing: true,
+            pending,
         });
     }
     let parent = app
@@ -325,6 +325,7 @@ fn open_on<R: Runtime>(
         label,
         dialog_id: request.dialog_id,
         existing: false,
+        pending: true,
     })
 }
 

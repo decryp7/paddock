@@ -46,9 +46,14 @@ theme?: DialogTheme, };
 
 export type DialogInfo = { label: string, dialogId: string, 
 /**
- * The window existed already and was focused.
+ * The window existed already (and was focused, if it was on screen).
  */
-existing: boolean, };
+existing: boolean, 
+/**
+ * The window is not on screen yet: it is shown when its page is ready (or at the show deadline), and
+ * `paddock://dialog-shown` follows. False for an existing window that was shown already.
+ */
+pending: boolean, };
 
 export type DialogStart = { dialogId: string, title: string, kind: DialogKind, modality: DialogModality, 
 /**

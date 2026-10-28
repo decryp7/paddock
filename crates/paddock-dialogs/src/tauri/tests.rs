@@ -766,6 +766,10 @@ fn opening_a_pending_dialog_again_creates_no_window_and_does_not_show_it_early()
         (again.label.as_str(), again.existing),
         (first.label.as_str(), true)
     );
+    assert!(
+        first.pending && again.pending,
+        "not on screen yet: its shown event is still to come"
+    );
     assert_eq!(h.webview_windows().len(), windows, "no second window");
     assert!(
         !native_since(mark)
@@ -783,7 +787,8 @@ fn opening_a_pending_dialog_again_creates_no_window_and_does_not_show_it_early()
     )
     .unwrap();
     let mark = native_mark();
-    assert!(open(&h, "main", request("ai-setup")).unwrap().existing);
+    let shown = open(&h, "main", request("ai-setup")).unwrap();
+    assert!(shown.existing && !shown.pending, "on screen already");
     assert_eq!(native_since(mark), [format!("focus:{}", first.label)]);
 }
 
@@ -993,7 +998,7 @@ fn the_guard_holds_each_dialog_to_its_contract_on_the_invoke_path() {
     .unwrap();
     assert_eq!(
         info,
-        json!({ "label": "d-main-1", "dialogId": "settings", "existing": false })
+        json!({ "label": "d-main-1", "dialogId": "settings", "existing": false, "pending": true })
     );
     let dialog = window(&app, "d-main-1");
     let start = invoke(&dialog, "dialog_take_input", json!({})).unwrap();

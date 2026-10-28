@@ -86,7 +86,8 @@ export class WindowDialogBackend extends DialogPresenter {
         const info = await this.io.open(sent);
         label = info.label;
         this.pending.set(info.label, { dialogId: request.def.id, resolve, shown, result: null });
-        if (info.existing || this.shownEarly.delete(info.label)) shown();
+        // An existing window that is on screen already will not announce itself again; a pending one (or a new one) does.
+        if ((info.existing && !info.pending) || this.shownEarly.delete(info.label)) shown();
       } catch (e) {
         console.warn(`[paddock-dialogs] the window of dialog ${request.def.id} could not open; shown in the page: ${errorText(e)}`);
         fallback = this.inPage.show(request);
@@ -124,10 +125,11 @@ export class WindowDialogBackend extends DialogPresenter {
       }),
       this.io.listen(DIALOG_EVENTS.closed, (p) => {
         const e = parseClosed(p);
-        const entry = e && this.pending.get(e.label);
-        if (!e || !entry) return;
-        this.pending.delete(e.label);
+        if (!e) return;
         this.shownEarly.delete(e.label);
+        const entry = this.pending.get(e.label);
+        if (!entry) return;
+        this.pending.delete(e.label);
         if (e.remembered) rememberDialogBounds(entry.dialogId, e.remembered);
         entry.resolve(decodeOutcome(entry.result));
       }),

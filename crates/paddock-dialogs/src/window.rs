@@ -80,8 +80,11 @@ pub enum Theme {
 pub struct DialogInfo {
     pub label: String,
     pub dialog_id: String,
-    /// The window existed already and was focused.
+    /// The window existed already (and was focused, if it was on screen).
     pub existing: bool,
+    /// The window is not on screen yet: it is shown when its page is ready (or at the show deadline), and
+    /// `paddock://dialog-shown` follows. False for an existing window that was shown already.
+    pub pending: bool,
 }
 
 /// What a dialog's own webview needs to render (`dialog_take_input`).
@@ -1224,6 +1227,7 @@ mod tests {
             label: "d-main-1".into(),
             dialog_id: "a".into(),
             existing: false,
+            pending: true,
         };
         assert_eq!(serde_json::to_value(&info).unwrap()["dialogId"], "a");
     }
