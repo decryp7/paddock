@@ -120,6 +120,94 @@ describe('PdPathText', () => {
     expect(button.getAttribute('aria-label')).toBe('Copied');
   });
 
+  describe('measured', () => {
+    let measure: ((cb: () => void) => void) | undefined;
+    class RO {
+      constructor(readonly cb: () => void) {
+        measure = () => cb();
+      }
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+    }
+    const canvas = (width: number) => vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ font: '', measureText: (s: string) => ({ width: s.length * width }) } as unknown as CanvasRenderingContext2D);
+
+    beforeEach(() => {
+      vi.stubGlobal('ResizeObserver', RO);
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    });
+
+    async function fit(inputs: Record<string, unknown>, boxWidth: number) {
+      const f = TestBed.createComponent(PdPathText);
+      for (const [k, v] of Object.entries(inputs)) f.componentRef.setInput(k, v);
+      f.detectChanges();
+      const el = f.nativeElement as HTMLElement;
+      const rect = vi.spyOn(el.querySelector('.pd-text')!, 'getBoundingClientRect').mockReturnValue({ width: boxWidth } as DOMRect);
+      measure?.(() => undefined);
+      await f.whenStable();
+      f.detectChanges();
+      // A second, different width reuses the canvas context made for the first.
+      rect.mockReturnValue({ width: boxWidth + 30 } as DOMRect);
+      measure?.(() => undefined);
+      await f.whenStable();
+      f.detectChanges();
+      return el;
+    }
+
+    it('shortens in the middle to the measured width and then explains itself with a tooltip', async () => {
+      canvas(10);
+      const el = await fit({ value: '/var/log/app/system.log', keepTail: 6 }, 150);
+      const shown = el.querySelector('.pd-shown')?.textContent ?? '';
+      expect(shown).toContain('…');
+      expect(shown.length).toBeLessThan('/var/log/app/system.log'.length);
+      el.querySelector('.pd-text')?.dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('/var/log/app/system.log'));
+    });
+
+    it('shortens the end of a title when asked to', async () => {
+      canvas(10);
+      const el = await fit({ value: 'A very long title of a window', clip: 'end' }, 120);
+      expect(el.querySelector('.pd-shown')?.textContent).toContain('…');
+    });
+
+    it('shows the whole value where there is no canvas, or it cannot be made', async () => {
+      vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+      expect((await fit({ value: '/a/very/long/path' }, 20)).querySelector('.pd-shown')?.textContent).toBe('/a/very/long/path');
+      vi.restoreAllMocks();
+      vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => {
+        throw new Error('no canvas');
+      });
+      expect((await fit({ value: '/a/very/long/path' }, 20)).querySelector('.pd-shown')?.textContent).toBe('/a/very/long/path');
+    });
+
+    it('stops watching its box when it is destroyed', () => {
+      const f = TestBed.createComponent(PdPathText);
+      f.componentRef.setInput('value', 'x');
+      f.detectChanges();
+      f.destroy();
+    });
+
+    it('puts the Copied label back after a moment', async () => {
+      vi.useFakeTimers();
+      stubClipboard(async () => undefined);
+      const f = TestBed.createComponent(PdPathText);
+      f.componentRef.setInput('value', '/a/b');
+      f.componentRef.setInput('copy', true);
+      f.detectChanges();
+      const button = (f.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.pd-copy')!;
+      button.click();
+      await vi.advanceTimersByTimeAsync(0);
+      f.detectChanges();
+      expect(button.getAttribute('aria-label')).toBe('Copied');
+      await vi.advanceTimersByTimeAsync(1600);
+      f.detectChanges();
+      expect(button.getAttribute('aria-label')).toBe('Copy the full path');
+    });
+  });
+
   it('does not claim a copy that failed', async () => {
     stubClipboard(() => Promise.reject(new Error('denied')));
     const f = TestBed.createComponent(PdPathText);

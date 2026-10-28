@@ -107,7 +107,7 @@ const CONTRIBUTIONS = {
       order: 500,
       active: () => true,
       run: {
-        menu: () => [
+        menu: () => layoutsEmpty() ? [] : [
           { id: 'a', label: 'Problems', checked: true, run: { view: 'wd.problems' } },
           { id: 'b', label: 'Build', keybinding: 'Mod+Shift+B', run: { command: 'wd.build' } },
         ],
@@ -120,10 +120,13 @@ const CONTRIBUTIONS = {
 @Component({ imports: [PdWorkbench], changeDetection: ChangeDetectionStrategy.OnPush, template: `<pd-workbench><div slot="stage" data-testid="stage">STAGE</div><span slot="title-end">END</span></pd-workbench>` })
 class Root {}
 
-async function boot(options: { dock?: boolean; plan?: ExplorerPlan; storage?: MemoryStorage; extra?: Partial<ShellWorkbenchOptions> } = {}) {
+const layoutsEmpty = signal(false);
+
+async function boot(options: { ro?: unknown; dock?: boolean; plan?: ExplorerPlan; storage?: MemoryStorage; extra?: Partial<ShellWorkbenchOptions> } = {}) {
   log.length = 0;
   problems.set(3);
-  vi.stubGlobal('ResizeObserver', undefined);
+  layoutsEmpty.set(false);
+  vi.stubGlobal('ResizeObserver', options.ro);
   const storage = options.storage ?? new MemoryStorage();
   const dock = fakeDock();
   const centre = new MemoryNotificationCentre();
@@ -480,5 +483,48 @@ describe('review 2', () => {
     await settle(fixture);
     expect(menuButton.classList.contains('pd-open')).toBe(true);
     expect(element.querySelector('[data-activity-id="wd.act.problems"]')?.getAttribute('data-tone')).toBe('neutral');
+  });
+});
+
+describe('pd-activity-bar', () => {
+  it('a button runs its item, and an entry of a fly-out runs its command', async () => {
+    const { element, fixture, dock } = await boot();
+    element.querySelector<HTMLButtonElement>('[data-activity-id="wd.act.problems"]')!.click();
+    await settle(fixture);
+    expect(dock.shown).toContain('wd.problems');
+    const menuButton = element.querySelector<HTMLElement>('[data-activity-id="wd.act.menu"]')!;
+    menuButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    await settle(fixture);
+    const entries = [...document.querySelectorAll<HTMLButtonElement>('[data-activity-menu="wd.act.menu"] [role^="menuitem"]')];
+    expect(entries.map((e) => e.textContent?.replace(/\s+/g, ' ').trim())).toEqual([expect.stringContaining('Problems'), expect.stringContaining('Build')]);
+    entries[1]!.click();
+    await settle(fixture);
+    expect(log).toContain('build');
+  });
+
+  it('says so when a fly-out has no entries', async () => {
+    const { element, fixture } = await boot();
+    layoutsEmpty.set(true);
+    element.querySelector<HTMLElement>('[data-activity-id="wd.act.menu"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    await settle(fixture);
+    expect(document.querySelector('[data-activity-menu="wd.act.menu"]')?.textContent).toContain('Nothing here');
+  });
+
+  it('follows its own height with a ResizeObserver and stops with it', async () => {
+    const disconnect = vi.fn();
+    const callbacks: ((entries: unknown[]) => void)[] = [];
+    class RO {
+      constructor(cb: (entries: unknown[]) => void) {
+        callbacks.push(cb);
+      }
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = disconnect;
+    }
+    const { fixture } = await boot({ ro: RO });
+    // Every observer of the frame (the status bar has one too) is told its element changed.
+    for (const cb of callbacks) cb([]);
+    fixture.destroy();
+    expect(disconnect).toHaveBeenCalled();
   });
 });

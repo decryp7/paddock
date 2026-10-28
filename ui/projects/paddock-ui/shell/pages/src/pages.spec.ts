@@ -231,6 +231,7 @@ const PAGES: PageDef<Ctx>[] = [
     icon: 'pd:window',
     order: 200,
     badge: (ctx) => ctx.count(),
+    badgeLabel: (ctx) => `${ctx.count()} things`,
     providers: () => Promise.resolve([Scoped]),
     load: () => Promise.resolve(PageTwo as Type<unknown>),
   }),
@@ -336,6 +337,10 @@ describe('pd-shell-frame with provideShellPages', () => {
     await settle();
     await fixture.whenStable();
     expect(el.querySelector('[data-page-link="t.two"] .mat-badge-content')?.textContent).toBe('3');
+    // Expanded, a link has a tooltip only to say what its badge counts.
+    expect(el.querySelector('[data-page-link="t.two"]')?.getAttribute('aria-label')).toBe('Two, 3 things');
+    el.querySelector('[data-page-link="t.two"]')?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('3 things'));
     expect(el.querySelector('[data-page-link="t.lab"]')).not.toBeNull();
     await router.navigateByUrl('/two');
     await settle();
@@ -509,9 +514,15 @@ describe('pd-shell-frame with provideShellPages', () => {
     const foot = el.querySelector<HTMLElement>('nav [slot="sidebar"], nav .pd-slot')!;
     foot.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', keyCode: 40, bubbles: true, cancelable: true }));
     expect(document.activeElement).toBe(links[0]);
-    // Expanded, the names are drawn, so a link has no tooltip of its own.
+    // Expanded, the names are drawn, so a link has no tooltip of its own, unless its badge needs explaining.
     links[0]?.dispatchEvent(new MouseEvent('mouseenter'));
     expect(document.querySelector('.mat-mdc-tooltip')).toBeNull();
+    // A key on the list itself, not on a link, is left alone.
+    expect(key(el.querySelector<HTMLElement>('mat-nav-list')!, 'ArrowDown').defaultPrevented).toBe(false);
+    // The bottom list has its own keys.
+    const bottom = links.at(-1) as HTMLElement;
+    key(bottom, 'ArrowUp');
+    expect(document.activeElement).toBe(links.at(-2));
   });
 
   it('the native menu bar waits for ready; the recovery and checkpoint are wired', async () => {
