@@ -12,7 +12,7 @@ const PAD = 2;
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap" [style.height.px]="height()">
-      <svg [attr.viewBox]="'0 0 ' + width() + ' ' + height()" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+      <!-- conformance: svg-ok — usage chart --><svg [attr.viewBox]="'0 0 ' + width() + ' ' + height()" preserveAspectRatio="none" aria-hidden="true" focusable="false">
         <path class="area" [attr.d]="paths().area" />
         <path class="line" [attr.d]="paths().line" vector-effect="non-scaling-stroke" />
       </svg>

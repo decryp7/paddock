@@ -6,7 +6,7 @@ import { downsample, sparkPaths } from '../geometry';
   selector: 'pc-sparkline',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <svg [attr.viewBox]="'0 0 ' + width() + ' ' + height()" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+    <!-- conformance: svg-ok — sparkline chart --><svg [attr.viewBox]="'0 0 ' + width() + ' ' + height()" preserveAspectRatio="none" aria-hidden="true" focusable="false">
       <path class="area" [attr.d]="paths().area" />
       <path class="line" [attr.d]="paths().line" vector-effect="non-scaling-stroke" />
     </svg>

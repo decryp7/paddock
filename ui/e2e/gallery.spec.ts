@@ -112,6 +112,32 @@ test.describe('UI basics review fixes (regressions)', () => {
     expect(strokes.lit24).toEqual(['1.5px', 'non-scaling-stroke', '24']);
   });
 
+  test('every pd: icon is a mat-icon of the registry: pd-glyph and <mat-icon svgIcon> draw the same literal, nothing is fetched (icons on Material)', async ({ page }) => {
+    const requests: string[] = [];
+    page.on('request', (r) => {
+      if (/\.svg(\?|$)/.test(r.url())) requests.push(r.url());
+    });
+    await open(page, 'light', 'debrief');
+    const rows = await page.evaluate(() =>
+      [...document.querySelectorAll('li.gal-icon')].map((li) => {
+        const name = li.querySelector('.gal-icon-name')?.textContent ?? '';
+        const glyph = li.querySelector('[data-row="glyph"] pd-glyph:first-child mat-icon');
+        const direct = li.querySelector('.gal-mat--16');
+        const sig = (el: Element | null): string => (el?.querySelector('svg')?.innerHTML ?? '').replace(/\s+/g, ' ');
+        const box = (el: Element | null): number[] => [Math.round(el?.getBoundingClientRect().width ?? 0), Math.round(el?.getBoundingClientRect().height ?? 0)];
+        return { name, ns: glyph?.getAttribute('data-mat-icon-namespace'), same: sig(glyph) === sig(direct) && sig(glyph) !== '', box: box(glyph), directBox: box(direct) };
+      }),
+    );
+    expect(rows.length).toBeGreaterThanOrEqual(30);
+    for (const r of rows) {
+      expect(r.ns, r.name).toBe('pd');
+      expect(r.same, `${r.name} glyph and mat-icon markup`).toBe(true);
+      expect(r.box, r.name).toEqual([16, 16]);
+      expect(r.directBox, r.name).toEqual([16, 16]);
+    }
+    expect(requests).toEqual([]);
+  });
+
   for (const density of ['comfortable', 'standard', 'compact'] as const) {
     test(`input, native select and themed select are the same height, ${density} (P1-4)`, async ({ page }) => {
       await open(page, 'dark', 'debrief', density);

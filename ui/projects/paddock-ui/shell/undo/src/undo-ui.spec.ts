@@ -42,7 +42,7 @@ describe('pd-undo-toast', () => {
     const t = mount();
     t.store.record({ label: 'x', announce: true, do: () => undefined, undo: () => undefined });
     await settle();
-    expect(Number(t.el.querySelector('pd-glyph svg')!.getAttribute('width'))).toBeGreaterThanOrEqual(14);
+    expect(parseFloat((t.el.querySelector('pd-glyph mat-icon') as HTMLElement).style.width)).toBeGreaterThanOrEqual(14);
   });
 });
 

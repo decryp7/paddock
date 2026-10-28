@@ -355,7 +355,7 @@ describe('file-type icons', () => {
     fixture.detectChanges();
     const icons = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('[data-testid="recent-icon"]'));
     expect(icons).toHaveLength(3);
-    for (const i of icons) expect(i.querySelector('svg')?.getAttribute('width')).toBe('16');
+    for (const i of icons) expect((i.querySelector('mat-icon') as HTMLElement).style.width).toBe('16px');
     const paths = icons.map((i) => i.querySelector('path')?.getAttribute('d'));
     expect(paths).toEqual([PD_ICON_PATHS['file-text'], PD_ICON_PATHS.folder, PD_ICON_PATHS.archive]);
   });

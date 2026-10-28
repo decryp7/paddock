@@ -187,28 +187,23 @@ describe('pd-empty-state icon', () => {
 });
 
 describe('pd-glyph', () => {
-  it('draws a named glyph, accepts the pd: prefix and custom paths, and is decorative', () => {
+  it('draws a named glyph through the icon registry, accepts the pd: prefix, and is decorative', () => {
     const f = TestBed.createComponent(PdGlyph);
     f.componentRef.setInput('name', 'pd:refresh');
     f.componentRef.setInput('size', 20);
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
     expect(el.getAttribute('aria-hidden')).toBe('true');
-    expect(el.querySelector('svg')?.getAttribute('width')).toBe('20');
+    expect(el.querySelector('mat-icon')?.getAttribute('data-mat-icon-name')).toBe('refresh');
+    expect((el.querySelector('mat-icon') as HTMLElement).style.width).toBe('20px');
     expect(el.querySelector('path')?.getAttribute('d')).toContain('M20 12a8 8');
     // 1.5 screen px at any size: the paths do not scale their stroke.
     expect(el.querySelector('svg')?.getAttribute('stroke-width')).toBe('1.5');
     expect(el.querySelector('path')?.getAttribute('vector-effect')).toBe('non-scaling-stroke');
     f.componentRef.setInput('size', 24);
     f.detectChanges();
+    expect((el.querySelector('mat-icon') as HTMLElement).style.width).toBe('24px');
     expect(el.querySelector('svg')?.getAttribute('stroke-width')).toBe('1.5');
-    f.componentRef.setInput('stroke', 3);
-    f.detectChanges();
-    expect(el.querySelector('svg')?.getAttribute('stroke-width')).toBe('3');
-    f.componentRef.setInput('paths', 'M1 1h2');
-    f.detectChanges();
-    expect(el.querySelector('path')?.getAttribute('d')).toBe('M1 1h2');
-    f.componentRef.setInput('paths', '');
     f.componentRef.setInput('name', 'nothing');
     f.detectChanges();
     expect(el.querySelector('path')).toBeNull();

@@ -24,7 +24,7 @@ export function trendBars(values: number[], width: number, height: number, gap =
   selector: 'pc-trend-bars',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <svg [attr.viewBox]="'0 0 ' + width + ' ' + height" role="img" [attr.aria-label]="label()" focusable="false">
+    <!-- conformance: svg-ok — bar chart --><svg [attr.viewBox]="'0 0 ' + width + ' ' + height" role="img" [attr.aria-label]="label()" focusable="false">
       @for (b of bars(); track $index) {
         <rect [attr.x]="b.x" [attr.y]="b.y" [attr.width]="b.w" [attr.height]="b.h" rx="1" />
       }

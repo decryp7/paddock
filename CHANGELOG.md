@@ -4,6 +4,23 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Icons on Material's registry (rule 47, rule 42), conformance C46
+- The shared `pd:` icon set is registered with `MatIconRegistry` as literals (`providePaddockIcons()` in `@decryp7/paddock-ui/icons`; no URLs,
+  no HTTP). `providePaddockMaterial()` and `provideShellCore()` include it, so every main, dialog and pop-out window of a shell app has it;
+  the gallery bootstrap provides it itself. `bypassSecurityTrustHtml` is used only for these static bundled strings (documented in
+  `registerPaddockIcons`). New exports: `providePaddockIcons`, `ensurePaddockIcons`, `isPdIcon`, `pdIconId`.
+- `pd-glyph` and the shell's default `pd-shell-icon` now render `<mat-icon svgIcon="pd:...">` (decorative, `aria-hidden`; sizes from the
+  `size` input / 16 px; the letter fallback stays for names that are not in the set). Breaking, no shim: `pd-glyph` lost its `paths`, `dots`
+  and `stroke` inputs (no template used them; an app's own glyph is a registered literal in its namespace), and an unknown glyph name draws
+  an empty box instead of an empty `<svg>`. `PD_ICON_*`, `pd-icon`, `SHELL_ICON` and `provideShellIcon` are unchanged. The SVG inside a
+  glyph now carries Material's `width="100%"`; read the size from the `mat-icon`.
+- Conformance C46 (rule 47): no hand-written `<svg>` in a component template (`.html` or inline `template:`) under `ui/projects/**` and
+  `apps/*/app/src/**`, and an svg built in code with `createElementNS(.., 'svg')` (dockview's glyphs, tab and group actions: three shared files
+  and Debrief's copy are waived until their dock icons are mat-icons); charts, diagrams and illustrations carry `<!-- conformance: svg-ok — <reason> -->` (or `// conformance: svg-ok — <reason>`).
+  Inventory on 2026-10-28: Debrief 28 and Dyno 14 (dated waivers to 2026-12-31, each migrates in its own branch), shared UI and demos 17 files
+  (one waiver per file), Pitcrew, Pitwall and Spotter none (their charts carry the marker). It runs in Paddock's own conformance job.
+- Gallery: the icons page's second row is a real `<mat-icon svgIcon="pd:name">`; e2e checks both rows draw the same literal and fetch nothing.
+
 ### One shared Material theme (WP-0 of the Material migration, rule 47)
 - `css/material.css` (`scss/entry-material.scss`) is now the whole Material look: one Material 3 `mat.theme` (density -3) whose system
   and component tokens all resolve to `--pd-*`, so theme, accent, contrast and density follow our tokens and an app carries no

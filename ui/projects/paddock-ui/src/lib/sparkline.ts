@@ -38,7 +38,7 @@ export function sparklineGeometry(values: readonly number[], width: number, heig
   selector: 'pd-sparkline',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <svg [attr.viewBox]="'0 0 ' + width() + ' ' + height()" [attr.height]="height()" preserveAspectRatio="none" role="img" [attr.aria-label]="summary()">
+    <!-- conformance: svg-ok — sparkline chart --><svg [attr.viewBox]="'0 0 ' + width() + ' ' + height()" [attr.height]="height()" preserveAspectRatio="none" role="img" [attr.aria-label]="summary()">
       @if (area() && geometry().line) {
         <path [attr.d]="geometry().area" class="pd-area" />
       }

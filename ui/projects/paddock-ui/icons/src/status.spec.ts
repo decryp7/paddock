@@ -35,7 +35,7 @@ describe('status glyphs (review 3 P2-4)', () => {
     const el = fixture.nativeElement as HTMLElement;
     expect(el.getAttribute('data-status')).toBe('error');
     expect(el.getAttribute('aria-hidden')).toBe('true');
-    expect(el.querySelector('svg')?.getAttribute('width')).toBe('14');
+    expect((el.querySelector('mat-icon') as HTMLElement).style.width).toBe('14px');
     expect(el.querySelector('path')?.getAttribute('d')).toBe(PD_ICON_PATHS.error);
   });
 

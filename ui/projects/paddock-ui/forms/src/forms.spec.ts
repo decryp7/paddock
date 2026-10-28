@@ -117,7 +117,7 @@ describe('pd-field', () => {
     await settle(f);
     const error = fields(f)[0]!.querySelector('[data-testid=field-error]')!;
     expect(error.textContent).toContain('Give it a name.');
-    expect(error.querySelector('pd-glyph svg')?.getAttribute('width')).toBe('14');
+    expect((error.querySelector('pd-glyph mat-icon') as HTMLElement).style.width).toBe('14px');
     assertStatusGlyphs(error);
     expect(input.getAttribute('aria-invalid')).toBe('true');
     expect(input.getAttribute('aria-describedby')).toContain(error.id);

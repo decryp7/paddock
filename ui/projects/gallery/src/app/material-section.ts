@@ -9,6 +9,7 @@ import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatDatepickerModule } from '@angular/material/datepicker';
 import { MatExpansionModule } from '@angular/material/expansion';
+import { PADDOCK_DATE_FORMATS } from '@decryp7/paddock-ui/material';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatListModule } from '@angular/material/list';
@@ -27,7 +28,6 @@ import { MatTimepickerModule } from '@angular/material/timepicker';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatTreeModule } from '@angular/material/tree';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
-import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 
 interface Run {
   readonly name: string;
@@ -55,7 +55,7 @@ const RUNS: Run[] = [
 @Component({
   selector: 'gal-material',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [provideNativeDateAdapter(), providePaddockMaterial()],
+  providers: [provideNativeDateAdapter(PADDOCK_DATE_FORMATS)],
   imports: [
     FormsModule,
     MatAutocompleteModule,

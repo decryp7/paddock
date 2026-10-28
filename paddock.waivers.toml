@@ -92,3 +92,139 @@ check = "C39"
 path = "apps/spotter/crates/spotter-sources/tests/http_sources.rs"
 reason = "Spotter: an unreachable-source test on a freed port; to use HeldPort::reset"
 expires = "2026-12-31"
+
+# C46 (rule 47): hand-written <svg> icons in templates. Shared code and the demos: one waiver per file, so a new one is still caught;
+# each moves to <mat-icon svgIcon="pd:..."> (or a registered literal) in a follow-up. Debrief and Dyno write icons as <svg> throughout
+# (Debrief 27 elements, Dyno 14 on 2026-10-28) and migrate in their own branches; Pitcrew, Pitwall and Spotter are clean (their charts carry svg-ok).
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/shell/dialogs/src/dialog-host.ts"
+reason = "the dialog host close icon (an X in the host's own 14 px size): moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/shell/jobs/src/jobs-status.ts"
+reason = "the jobs status-bar list icon: moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/shell/notify/src/notification-host.ts"
+reason = "the toast close icon: moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/shell/notify/src/notifications-panel.ts"
+reason = "the panel's check and close icons: moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/shell/notify/src/notifications-status.ts"
+reason = "the status-bar bell: moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/shell/notify/src/waiting-for.ts"
+reason = "the waiting-for status icon (path chosen by status): moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/src/lib/card.ts"
+reason = "the card chevron: moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/src/lib/job.ts"
+reason = "the job state icons (check, cross, warning): moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/src/lib/metric.ts"
+reason = "the metric trend arrow: moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/src/lib/status-pill.ts"
+reason = "the status pill icon: moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/workbench/dock/src/dock-host.ts"
+reason = "the dock tab close icon: moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/workbench/panels/src/popout-title-bar.ts"
+reason = "the pop-out title bar icons: moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/gallery/src/app/gallery.ts"
+reason = "a stop square in a gallery button demo: moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/gallery/src/app/material-section.ts"
+reason = "a chevron in the Material gallery section: moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/shell-demo/src/app/demo-icon.ts"
+reason = "the shell demo's own icon component (its names are drawn as svg): moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/shell-demo/src/app/tray-popover.ts"
+reason = "the tray popover icons: moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/workbench-demo/public/drag-ghost.html"
+reason = "the drag ghost page icon (a static page, no Angular): moves to mat-icon svgIcon"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "apps/debrief/*"
+reason = "Debrief: 27 hand-written <svg> icons in templates (2026-10-28); the migration to MatIconRegistry is its own branch"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "apps/dyno/*"
+reason = "Dyno: 14 hand-written <svg> icons in templates (2026-10-28); the migration to MatIconRegistry is its own branch"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/workbench/dock/src/dock-glyph.ts"
+reason = "dockview glyphs built in code (dockview renders outside Angular): needs a mat-icon created through ViewContainerRef or a registry-fed svg helper; follow-up"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/workbench/dock/src/panel-tab.ts"
+reason = "the dockview tab icon built in code (dockview renders outside Angular): needs a mat-icon created through ViewContainerRef or a registry-fed svg helper; follow-up"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C46"
+path = "ui/projects/paddock-ui/workbench/dock/src/group-actions.ts"
+reason = "the dockview group action icons built in code (dockview renders outside Angular): needs a mat-icon created through ViewContainerRef or a registry-fed svg helper; follow-up"
+expires = "2026-12-31"

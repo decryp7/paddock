@@ -336,7 +336,7 @@ describe('pd-view review 1 fixes', () => {
     });
     it('draws the empty icon at 32 px', async () => {
       const f = await setup();
-      expect(one(node(f, 'empty'), 'pd-glyph svg').getAttribute('width')).toBe('32');
+      expect(one<HTMLElement>(node(f, 'empty'), 'pd-glyph mat-icon').style.width).toBe('32px');
     });
     it('keeps the disclosure of the list inside the frame, under the drawing', async () => {
       const f = await setup();

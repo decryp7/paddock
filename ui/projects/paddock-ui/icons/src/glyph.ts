@@ -1,45 +1,34 @@
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
-import { ICON_STROKE, type OutlineDot } from './outline';
-import { PD_ICON_DOTS, PD_ICON_PATHS, type PdIconName } from './paths';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { MatIconModule, MatIconRegistry } from '@angular/material/icon';
+import { DomSanitizer } from '@angular/platform-browser';
+import { type PdIconName } from './paths';
+import { ensurePaddockIcons, isPdIcon, pdIconId } from './register';
 
 /**
- * Draws one glyph of the generic `pd:` set (or any path data given as `paths`) inline: `<pd-glyph name="refresh" />`. 24 px
- * grid, `currentColor`, round caps. Decorative (`aria-hidden`): the button or label around it carries the name. Apps that
- * use Angular Material draw the same glyphs with `<mat-icon svgIcon="pd:refresh">` after `registerPaddockIcons`.
+ * Draws one glyph of the generic `pd:` set: `<pd-glyph name="refresh" />`, which is `<mat-icon svgIcon="pd:refresh">` with the
+ * family's size and nothing else (rule 47). The set is registered as literals with Material's icon registry
+ * (`providePaddockIcons`, never fetched); 24 px grid, `currentColor`, 1.5 px strokes, solid dots. Decorative (`aria-hidden`):
+ * the button or label around it carries the name. A name that is not in the set draws an empty box of the same size.
  */
 @Component({
   selector: 'pd-glyph',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { 'aria-hidden': 'true' },
-  template: `<svg [attr.viewBox]="'0 0 24 24'" [attr.width]="size()" [attr.height]="size()" focusable="false" fill="none" stroke="currentColor" [attr.stroke-width]="strokeWidth()" stroke-linecap="round" stroke-linejoin="round">@if (path()) {<path [attr.d]="path()" vector-effect="non-scaling-stroke" />}@for (d of shownDots(); track $index) {<circle [attr.cx]="d[0]" [attr.cy]="d[1]" [attr.r]="d[2]" fill="currentColor" stroke="none" />}</svg>`,
+  imports: [MatIconModule],
+  host: { 'aria-hidden': 'true', '[style.width.px]': 'size()', '[style.height.px]': 'size()' },
+  template: `@if (id(); as svg) {<mat-icon [svgIcon]="svg" [style.width.px]="size()" [style.height.px]="size()" />}`,
   styles: `
     :host { display: inline-flex; flex: none; align-items: center; justify-content: center; }
-    svg { display: block; }
+    mat-icon { display: block; flex: none; }
   `,
 })
 export class PdGlyph {
   /** A glyph of the set ("refresh"; a "pd:" prefix is accepted). */
   readonly name = input<PdIconName | (string & {})>('');
-  /** Path data instead of a name: an app's own glyph drawn on the same grid. */
-  readonly paths = input<string>('');
   /** Pixels (width and height). */
   readonly size = input(16);
-  /** Filled dots (`[cx, cy, r]` on the grid) of an app's own `paths` glyph; a named glyph brings its own. */
-  readonly dots = input<readonly OutlineDot[]>([]);
-  /** Stroke width in screen pixels at any size (the glyph's strokes do not scale with `size`). Default: the guide's 1.5 px. */
-  readonly stroke = input<number | null>(null);
-  protected readonly strokeWidth = computed(() => this.stroke() ?? ICON_STROKE);
-  protected readonly shownDots = computed(() => {
-    const n = this.name().replace(/^pd:/, '') as PdIconName;
-    const list = this.paths() ? this.dots() : (PD_ICON_DOTS[n] ?? []);
-    // Dots are as heavy as the strokes: never thinner than the stroke's width on the screen, whatever the size.
-    const min = ((this.strokeWidth() / 2) * 24) / this.size();
-    return list.map(([cx, cy, r]) => [cx, cy, Math.max(r, min)] as const);
-  });
-  protected readonly path = computed(() => {
-    const p = this.paths();
-    if (p) return p;
-    const n = this.name().replace(/^pd:/, '');
-    return (PD_ICON_PATHS as Readonly<Record<string, string>>)[n] ?? '';
-  });
+  protected readonly id = computed(() => (isPdIcon(this.name()) ? pdIconId(this.name()) : ''));
+
+  constructor() {
+    ensurePaddockIcons(inject(MatIconRegistry), inject(DomSanitizer));
+  }
 }

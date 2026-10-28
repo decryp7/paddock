@@ -17,6 +17,19 @@ for (const colorScheme of THEMES) {
   });
 }
 
+for (const colorScheme of THEMES) {
+  test(`the sidebar draws its pd: icons through the icon registry (${colorScheme})`, async ({ app, page }) => {
+    test.info().annotations.push({ type: 'theme', description: colorScheme });
+    await page.emulateMedia({ colorScheme });
+    await app.frame.open();
+    const icons = page.locator('pd-pages-sidebar pd-shell-icon mat-icon[data-mat-icon-namespace="pd"]');
+    await expect(icons.first()).toBeVisible();
+    expect(await icons.count()).toBeGreaterThan(0);
+    const boxes = await icons.evaluateAll((els) => els.map((e) => [Math.round(e.getBoundingClientRect().width), Math.round(e.getBoundingClientRect().height), e.querySelector('svg path, svg circle') ? 1 : 0]));
+    for (const b of boxes) expect(b).toEqual([16, 16, 1]);
+  });
+}
+
 test('no horizontal scroll at 320 px (rule 18)', async ({ app, page }) => {
   await page.setViewportSize({ width: 320, height: 640 });
   await app.frame.open();

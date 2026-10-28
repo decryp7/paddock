@@ -17,7 +17,7 @@ export function sparkPath(values: readonly number[], w: number, h: number): { li
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { 'aria-hidden': 'true' },
   template: `
-    <svg [attr.viewBox]="'0 0 ' + width() + ' ' + height()" [attr.width]="width()" [attr.height]="height()" preserveAspectRatio="none">
+    <!-- conformance: svg-ok — sparkline chart --><svg [attr.viewBox]="'0 0 ' + width() + ' ' + height()" [attr.width]="width()" [attr.height]="height()" preserveAspectRatio="none">
       <path [attr.d]="path().area" [attr.fill]="color()" fill-opacity="0.12" />
       <path [attr.d]="path().line" fill="none" [attr.stroke]="color()" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
     </svg>

@@ -1,4 +1,5 @@
 import { bootstrapApplication } from '@angular/platform-browser';
+import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 import { PD_ECHARTS, type PdEchartsLib } from '@decryp7/paddock-ui/chart';
 import { Gallery } from './app/gallery';
 
@@ -9,4 +10,6 @@ async function loadEcharts(): Promise<PdEchartsLib> {
   return core as unknown as PdEchartsLib;
 }
 
-bootstrapApplication(Gallery, { providers: [{ provide: PD_ECHARTS, useValue: loadEcharts }] }).catch((e: unknown) => console.error(e));
+// providePaddockMaterial(): the family's Material defaults and the pd: icon set, once per window (it holds EnvironmentProviders, so
+// it belongs in the bootstrap, never in a component's providers).
+bootstrapApplication(Gallery, { providers: [{ provide: PD_ECHARTS, useValue: loadEcharts }, providePaddockMaterial()] }).catch((e: unknown) => console.error(e));

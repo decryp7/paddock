@@ -36,7 +36,7 @@ export function diagramScene(d: Diagram): Scene {
     @let s = scene();
     <div class="pd-view-scene__frame">
     <div class="pd-view-scene__scroll" role="region" pdViewScroll [attr.aria-label]="label()">
-      <svg class="pd-view-scene__svg" [attr.viewBox]="'0 0 ' + s.width + ' ' + s.height" [attr.width]="s.width" [attr.height]="s.height" role="group" [attr.aria-label]="summary()" focusable="false">
+      <!-- conformance: svg-ok — scene drawing, not an icon --><svg class="pd-view-scene__svg" [attr.viewBox]="'0 0 ' + s.width + ' ' + s.height" [attr.width]="s.width" [attr.height]="s.height" role="group" [attr.aria-label]="summary()" focusable="false">
         <defs>
           <marker [attr.id]="arrowId" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" class="pd-view-scene__arrow" />

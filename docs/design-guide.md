@@ -213,7 +213,15 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   both. Inputs use the control border (3:1), 1 px; focus = accent border plus the family focus ring (a solid 2 px accent outline, 2 px offset, 3:1 or better on every surface: the same ring as every other control, SC 2.4.13). Hover on an input or select moves the border to muted text; hover on a secondary button mixes 7% text colour into its fill, so it changes on every surface. Icons are never smaller than 14 px (a 1.5 px stroke at 12 px merges the "!" and "i" with their frames); the lint in `ui/test/tokens/icon-size.spec.ts` enforces it. Pitwall and the other app accents in dark use a lighter violet (`--pd-accent-control`) for switches and checks beside the deeper primary fill: two tones of one hue is accepted, not a second accent.
   A translucent halo (accent at 35% alpha) measured 1.7 to 2.0:1 and does not count as the focus indicator; use it only as decoration beside the solid ring.
   A selected segmented-control segment is an accent tint with a 1 px accent ring and a 600 label, in both schemes (a raised surface inverts in dark). The fill of an on toggle, checked box or radio is `--pd-accent-control` (3:1 on every surface; in dark it is the accent colour with dark ink, in light the accent fill with white ink).
-- Icons: Paddock's own SVG set, 16 px default (20 for nav, 14 inline with 12 px text), 1.5 px stroke on the screen at every size (`vector-effect: non-scaling-stroke`, the same through `<pd-glyph>` and `<mat-icon svgIcon>`), round caps and
+- Icons: Paddock's own SVG set, registered with Angular Material's `MatIconRegistry` in the `pd` namespace and drawn as
+  `<mat-icon svgIcon="pd:name">` (rule 47). The set is literals built from `PD_ICON_PATHS` and `PD_ICON_DOTS`
+  (`@decryp7/paddock-ui/icons`), registered by `providePaddockIcons()` (included in `providePaddockMaterial()` and in every
+  shell window through `provideShellCore()`; `pd-glyph` also registers on first use), never fetched: the CSP forbids icon URLs.
+  They are trusted with `bypassSecurityTrustHtml` because they are static strings bundled with the package, never input. An
+  app's own glyphs are registered the same way in its namespace (`outlineIcon` draws them on the same grid). `<pd-glyph name size>`
+  is the short form (a `mat-icon` with the family's size, decorative); `pd-icon` draws any registered name and a letter on a
+  rounded square for a name with no icon. A hand-written `<svg>` icon in a template is an error (conformance C46); charts,
+  diagrams and illustrations carry `<!-- conformance: svg-ok — <reason> -->`. Size: 16 px default (20 for nav, 14 inline with 12 px text), 1.5 px stroke on the screen at every size (`vector-effect: non-scaling-stroke`, the same through `<pd-glyph>` and `<mat-icon svgIcon>`), round caps and
   joins, 24 px design grid scaled, dots drawn as filled circles never as strokes, `currentColor` only, optical alignment to cap height. Same metaphor = same icon across
   apps (settings, logs, update, runner, model, process). Filled variant only for the active nav item. Every icon-only
   button has `aria-label` and tooltip (500 ms delay). App icon: rounded square 22% radius with a single-hue gradient

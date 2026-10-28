@@ -1,5 +1,5 @@
-import { ChangeDetectionStrategy, Component, ElementRef, afterNextRender, computed, effect, inject, signal, viewChild } from '@angular/core';
-import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
+import { ChangeDetectionStrategy, Component, ElementRef, afterNextRender, computed, effect, signal, viewChild } from '@angular/core';
+import { MatIconModule } from '@angular/material/icon';
 import * as echarts from 'echarts/core';
 import { LineChart, ScatterChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, MarkLineComponent, TooltipComponent } from 'echarts/components';
@@ -29,7 +29,7 @@ import {
   type SuTheme,
 } from '@decryp7/paddock-ui';
 import { PdPathText } from '@decryp7/paddock-ui';
-import { PD_ICON_PATHS, PdGlyph, pdIconSvg, type PdIconName, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
+import { PD_ICON_PATHS, PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdSelect } from '@decryp7/paddock-ui/select';
 import { GalData } from './data-sections';
 import { GalMaterial } from './material-section';
@@ -49,7 +49,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
 @Component({
   selector: 'gal-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdStatusGlyph, SuCard, SuStatusPill, SuMetric, SuSparkline, SuEmptyState, SuErrorState, SuSkeleton, SuJob, SuSegmentedControl, SuTrayPopover, PdGlyph, PdPathText, PdSelect, GalData, GalView, GalMaterial],
+  imports: [PdStatusGlyph, SuCard, SuStatusPill, SuMetric, SuSparkline, SuEmptyState, SuErrorState, SuSkeleton, SuJob, SuSegmentedControl, SuTrayPopover, PdGlyph, MatIconModule, PdPathText, PdSelect, GalData, GalView, GalMaterial],
   template: `
     <main class="gal-page">
       <header class="gal-bar">
@@ -197,13 +197,12 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
 
       <section class="gal-section" data-testid="icons" aria-labelledby="h-icons">
         <h2 id="h-icons">Icons (pd:)</h2>
-        <p>One 24 px grid, round caps and joins, currentColor. First row: pd-glyph at 16 px (the UI size, 1.5 px on screen) and 24 px. Second row: the registered literal, exactly what mat-icon svgIcon="pd:name" draws, at 16 and 24 px.</p>
+        <p>One 24 px grid, round caps and joins, currentColor. First row: pd-glyph at 16 px (the UI size, 1.5 px on screen) and 24 px. Second row: mat-icon svgIcon="pd:name" itself, at 16 and 24 px; both rows draw the same registered literal.</p>
         <ul class="gal-icons">
           @for (n of iconNames; track n) {
             <li class="gal-icon">
               <span class="gal-icon-pair" data-row="glyph"><pd-glyph [name]="n" [size]="16" /><pd-glyph [name]="n" [size]="24" /></span>
-              <!-- eslint-disable-next-line paddock/template-no-inner-html -- fixed SVG literals of this package, bound exactly as <mat-icon svgIcon> inserts them, to compare with pd-glyph -->
-              <span class="gal-icon-pair" data-row="literal"><span class="mat-icon gal-mat gal-mat--16" [innerHTML]="literal(n)"></span><span class="mat-icon gal-mat gal-mat--24" [innerHTML]="literal(n)"></span></span>
+              <span class="gal-icon-pair" data-row="literal"><mat-icon class="gal-mat gal-mat--16" [svgIcon]="'pd:' + n" /><mat-icon class="gal-mat gal-mat--24" [svgIcon]="'pd:' + n" /></span>
               <span class="gal-icon-name">{{ n }}</span>
             </li>
           }
@@ -362,12 +361,6 @@ export class Gallery {
     { value: 'err', label: 'Errors', count: 6 },
     { value: 'off', label: 'Off', disabled: true },
   ];
-
-  private readonly sanitizer = inject(DomSanitizer);
-  /** The registered `pd:` literal of a glyph, as `<mat-icon svgIcon>` inserts it (fixed content from the package). */
-  protected literal(name: string): SafeHtml {
-    return this.sanitizer.bypassSecurityTrustHtml(pdIconSvg(name as PdIconName));
-  }
 
   protected readonly theme = signal<string>(param<SuTheme>('theme', SU_THEMES, 'system'));
   protected readonly accent = signal<string>(param<SuAccent>('accent', SU_ACCENTS, 'debrief'));

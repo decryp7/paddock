@@ -1,3 +1,4 @@
+import { providePaddockIcons } from '@decryp7/paddock-ui/icons';
 import { computed, EnvironmentProviders, inject, Injectable, makeEnvironmentProviders, Signal } from '@angular/core';
 import { describe, SHELL_COMMAND_RUNNER, SHELL_PORTS, ShellContext, ShellContextHost } from './context';
 import type { CommandDef, Live } from './define';
@@ -83,6 +84,8 @@ export class CommandService {
  */
 export function provideShellCore(): EnvironmentProviders {
   return makeEnvironmentProviders([
+    // The `pd:` icons of the frame, in every window (main, dialog, pop-out).
+    providePaddockIcons(),
     {
       provide: SHELL_COMMAND_RUNNER,
       useFactory: () => {

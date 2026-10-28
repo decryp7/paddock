@@ -13,7 +13,7 @@ import { PdGlyph } from '@decryp7/paddock-ui/icons';
         @if (icon()) {
           <pd-glyph [name]="icon()" [size]="32" />
         } @else {
-        <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true" focusable="false">
+        <!-- conformance: svg-ok — 32 px state illustration, not a 16 px icon --><svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true" focusable="false">
           <path d="M3.5 13.5 6 5.5h12l2.5 8M3.5 13.5v5h17v-5M3.5 13.5h5l1 2h5l1-2h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
         }
@@ -53,7 +53,7 @@ export class SuEmptyState {
   host: { role: 'alert' },
   template: `
     <span class="pd-icon">
-      <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true" focusable="false">
+      <!-- conformance: svg-ok — 32 px state illustration, not a 16 px icon --><svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true" focusable="false">
         <path d="M8 2.75h8L21.25 8v8L16 21.25H8L2.75 16V8L8 2.75ZM9 9l6 6M15 9l-6 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
     </span>

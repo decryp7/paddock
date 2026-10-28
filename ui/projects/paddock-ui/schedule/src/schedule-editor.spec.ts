@@ -148,9 +148,9 @@ describe('pd-schedule-editor', () => {
   it('draws its icon buttons at 14 px or more', async () => {
     const t = schedule({ mode: 'times', days: ['mon'], times: ['09:00', '10:00'], zone: null });
     await settle(t.f);
-    const svgs = t.all<SVGElement>('pd-glyph svg');
-    expect(svgs.length).toBeGreaterThan(0);
-    expect(svgs.every((s) => Number(s.getAttribute('width')) >= 14)).toBe(true);
+    const icons = t.all<HTMLElement>('pd-glyph mat-icon');
+    expect(icons.length).toBeGreaterThan(0);
+    expect(icons.every((s) => parseFloat(s.style.width) >= 14)).toBe(true);
   });
 });
 

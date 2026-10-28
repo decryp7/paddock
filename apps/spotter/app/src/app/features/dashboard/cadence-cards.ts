@@ -31,7 +31,7 @@ interface Card {
             </div>
             @if (c.watch.latest) { <sp-ver class="latest" [value]="c.watch.latest.version" /> }
           </div>
-          <svg class="line" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true">
+          <!-- conformance: svg-ok — cadence sparkline chart --><svg class="line" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true">
             <line x1="0" y1="7" x2="100" y2="7" class="axis" vector-effect="non-scaling-stroke" />
             @for (m of c.marks; track m.x) {
               <line [attr.x1]="m.x" [attr.x2]="m.x" y1="2" y2="12" class="tick" [class.multi]="m.count > 1" vector-effect="non-scaling-stroke" />
