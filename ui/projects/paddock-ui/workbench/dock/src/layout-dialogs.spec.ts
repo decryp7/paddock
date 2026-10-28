@@ -158,6 +158,28 @@ describe('Manage layouts', () => {
     expect(q('layout-manage-rename')).toBeNull();
   });
 
+  it('returns focus to the row\'s Rename button when a rename ends (Escape, Cancel or Rename), under the new name', async () => {
+    const store = await seeded(['Work', 'Play']);
+    const { fixture, el, q } = await open(PdLayoutManageDialog, store);
+    const start = (name: string) => el.querySelector<HTMLElement>(`li[data-layout="${name}"] [data-testid="layout-manage-rename-start"]`)!;
+    start('Play').click();
+    await fixture.whenStable();
+    q<HTMLInputElement>('layout-manage-rename')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(start('Play'));
+    start('Work').click();
+    await fixture.whenStable();
+    q<HTMLButtonElement>('layout-manage-rename-cancel')!.click();
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(start('Work'));
+    start('Work').click();
+    await fixture.whenStable();
+    await type(fixture, q<HTMLInputElement>('layout-manage-rename')!, 'Office');
+    q<HTMLButtonElement>('layout-manage-rename-ok')!.click();
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(start('Office'));
+  });
+
   it('cancels a rename with Escape without closing the dialog (the key stops at the field) and keeps the name when unchanged', async () => {
     const store = await seeded(['Work']);
     const { fixture, el, q } = await open(PdLayoutManageDialog, store);

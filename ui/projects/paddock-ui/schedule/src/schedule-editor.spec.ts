@@ -199,6 +199,21 @@ describe('pd-schedule-editor', () => {
     expect(seen).toEqual(['Escape']);
   });
 
+  it('Escape in a shut time field keeps its time and leaves the event for a dialog around the editor to close on', async () => {
+    const t = schedule({ mode: 'times', days: ['mon'], times: ['21:00'], zone: null });
+    const seen: string[] = [];
+    t.el.addEventListener('keydown', (e) => seen.push(e.key));
+    await settle(t.f);
+    const input = t.q<HTMLInputElement>('.pd-times input');
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
+    await settle(t.f);
+    expect(input.value).toBe('21:00');
+    expect(t.value()).toMatchObject({ times: ['21:00'] });
+    expect(t.all('[data-testid=field-error]')).toHaveLength(0);
+    expect(seen).toEqual(['Escape']);
+  });
+
   it('labels the interval unit select', async () => {
     const t = schedule({ mode: 'every', secs: 3600 });
     await settle(t.f);
@@ -273,6 +288,9 @@ describe('pd-pause-editor', () => {
     expect(t.el.textContent).toContain('Ends the next day.');
     const [from, until] = t.all('input[role=combobox]') as HTMLInputElement[];
     expect([from!.value, until!.value]).toEqual(['22:00', '06:00']);
+    from!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
+    await settle(t.f);
+    expect(from!.value).toBe('22:00');
     const type = async (input: HTMLInputElement, text: string) => {
       input.value = text;
       input.dispatchEvent(new Event('input'));

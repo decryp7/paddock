@@ -63,6 +63,17 @@ test.describe('schedule editors (plan X33)', () => {
     await expect(page.getByTestId('schedule-preview').getByRole('alert')).toHaveText('Pick at least one day.');
   });
 
+  test('Escape in a shut time field keeps the time', async ({ app, page }) => {
+    await app.frame.open('#/schedule');
+    await page.getByRole('radio', { name: 'At times' }).click();
+    const time = page.getByRole('combobox', { name: 'Time of day 1' });
+    await expect(time).toHaveValue('09:00');
+    await time.focus();
+    await page.keyboard.press('Escape');
+    await expect(time).toHaveValue('09:00');
+    await expect(page.getByTestId('schedule-preview')).toContainText('5 days at 09:00');
+  });
+
   test('pause windows: add, edit, overnight note, remove, and the engine’s problem for an empty window', async ({ app, page }) => {
     await app.frame.open('#/schedule');
     const first = page.getByTestId('pause-window-0');

@@ -358,3 +358,24 @@ test('a pop-out window boots its shell and its one view (regression: the page ke
   await expect(page.locator('pd-popout-shell')).toBeVisible();
   expect(pageErrors).toEqual([]);
 });
+
+test('the rename row in Manage layouts: the buttons stand on the field\'s line, and focus returns to Rename when it ends', async ({ page }) => {
+  const wb = new WorkbenchApp(page);
+  await wb.frame.open();
+  await page.getByRole('menuitem', { name: 'Window', exact: true }).click();
+  await page.getByRole('menuitem', { name: /Save layout/i }).click();
+  await page.getByTestId('layout-save-ok').click();
+  await page.getByRole('menuitem', { name: 'Window', exact: true }).click();
+  await page.getByRole('menuitem', { name: /Manage layouts/i }).click();
+  await page.getByTestId('layout-manage-rename-start').first().click();
+  const centre = async (sel: string): Promise<number> => {
+    const box = (await page.locator(sel).first().boundingBox())!;
+    return box.y + box.height / 2;
+  };
+  const outline = await centre('.pd-lmd__rename .mdc-notched-outline');
+  expect(Math.abs((await centre('[data-testid=layout-manage-rename-ok]')) - outline)).toBeLessThanOrEqual(1);
+  expect(Math.abs((await centre('[data-testid=layout-manage-rename-cancel]')) - outline)).toBeLessThanOrEqual(1);
+  await expect(page.getByTestId('layout-manage-rename')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('layout-manage-rename-start').first()).toBeFocused();
+});

@@ -9,6 +9,7 @@ import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { PdDayPicker } from './day-picker';
+import { PdKeepTimeOnEscape } from './keep-time';
 import { dateToTime, TIME_PROVIDERS, TimeProblems, timeOptions, timeToDate } from './time-value';
 import {
   addTime,
@@ -51,7 +52,7 @@ export function presetLabel(secs: number): string {
 @Component({
   selector: 'pd-schedule-editor',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdStatusGlyph, PdDayPicker, PdGlyph, PdSelect, PdField, PdFieldControl, SuSegmentedControl, MatButton, MatIconButton, MatButtonToggleGroup, MatButtonToggle, MatTimepicker, MatTimepickerInput, MatTimepickerToggle, MatTooltip],
+  imports: [PdStatusGlyph, PdDayPicker, PdGlyph, PdSelect, PdField, PdFieldControl, SuSegmentedControl, MatButton, MatIconButton, MatButtonToggleGroup, MatButtonToggle, MatTimepicker, MatTimepickerInput, PdKeepTimeOnEscape, MatTimepickerToggle, MatTooltip],
   providers: [TIME_PROVIDERS],
   template: `
     <pd-segmented-control [label]="modeLabel" [options]="modeSegments()" [value]="value().mode" (valueChange)="setMode($event)" />
@@ -77,7 +78,7 @@ export function presetLabel(secs: number): string {
             @for (t of times(); track $index) {
               <li>
                 <pd-field size="short" [label]="timeLabel($index + 1)" [suffix]="toggle" [error]="timeProblems.shown($index) ? badTimeText : null">
-                  <input pdFieldControl [matTimepicker]="picker" [value]="timeDates()[$index] ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTimeAt($index, $event)" (keydown.escape)="closePicker($event, picker)" (blur)="timeProblems.leave($index)" />
+                  <input pdFieldControl pdKeepTime [matTimepicker]="picker" [value]="timeDates()[$index] ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTimeAt($index, $event)" (keydown.escape)="closePicker($event, picker)" (blur)="timeProblems.leave($index)" />
                   <mat-timepicker #picker panelClass="pd-timepicker-panel" [options]="timeList" />
                   <ng-template #toggle><mat-timepicker-toggle [for]="picker" [disabled]="disabled()" /></ng-template>
                 </pd-field>
@@ -132,6 +133,7 @@ export function presetLabel(secs: number): string {
     .pd-times { display: grid; gap: var(--pd-space-1); margin: var(--pd-space-2) 0 0; padding: 0; list-style: none; }
     .pd-times li { display: flex; align-items: flex-start; gap: var(--pd-space-1); }
     .pd-add { justify-self: start; }
+    .pd-add pd-glyph { margin-inline-end: var(--pd-space-1); vertical-align: middle; }
     .pd-preview { display: grid; gap: var(--pd-space-1); min-width: 0; padding: var(--pd-space-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); }
     .pd-preview p, .pd-runs { margin: 0; }
     .pd-description { font-weight: var(--pd-weight-semibold); }

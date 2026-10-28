@@ -84,8 +84,8 @@ export interface LayoutManageResult {
     .pd-lmd__name { flex: 1 1 8rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-lmd__row:has(.pd-lmd__rename) { align-items: flex-start; }
     .pd-lmd__rename { flex: 1 1 12rem; }
-    /* The buttons stand at the field's height, on the outline's line (the label notch takes the first few pixels). */
-    .pd-lmd__rbtn { margin-top: var(--pd-space-1); }
+    /* The buttons are the outline's height and start at its top, so their centres are the field's. */
+    .pd-lmd__rbtn { --mat-button-outlined-container-height: var(--pd-control-height); }
     .pd-lmd__btn { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-button-height, 28px); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
     .pd-lmd__btn--danger { color: var(--pd-danger-text, var(--pd-danger)); }
     .pd-lmd__btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
@@ -149,7 +149,19 @@ export class PdLayoutManageDialog {
 
   protected cancelRename(event?: Event): void {
     event?.stopPropagation();
+    this.endRename();
+  }
+
+  /** The rename field goes: focus returns to that row's Rename button (it would otherwise fall to the page). */
+  private endRename(name: string | null = this.renaming()): void {
     this.renaming.set(null);
+    afterNextRender(
+      () => {
+        const row = [...this.host.nativeElement.querySelectorAll<HTMLElement>('li[data-layout]')].find((li) => li.dataset['layout'] === name);
+        row?.querySelector<HTMLElement>('[data-testid="layout-manage-rename-start"]')?.focus();
+      },
+      { injector: this.injector },
+    );
   }
 
   protected commitRename(event?: Event): void {
@@ -161,7 +173,7 @@ export class PdLayoutManageDialog {
     if (field.invalid()) return;
     const to = cleanLayoutName(field.value());
     if (to && to !== from) this.write(renameLayout(this.layouts(), from, to));
-    this.renaming.set(null);
+    this.endRename(to && to !== from ? to : from);
   }
 
   protected remove(name: string): void {
