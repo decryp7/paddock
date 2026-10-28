@@ -11,7 +11,7 @@
 //! The core is pure over tokio's clock and a [`paddock_jobs::Clock`], so tests run it on a fake clock without sleeping.
 
 use paddock_jobs::{
-    CancelReason, CancelToken, Clock, EventSink, JobContext, JobRegistry, JobSnapshot, JobState, Phase, DEFAULT_MIN_INTERVAL_MS,
+    CancelReason, CancelToken, Clock, EventSink, JobContext, JobRegistry, JobSnapshot, JobState, Phase, Unit, DEFAULT_MIN_INTERVAL_MS,
 };
 use pitwall_core::mgmt::{CommandError, ErrorCode};
 use serde::Serialize;
@@ -23,6 +23,9 @@ use std::time::Duration;
 
 /// How often a running job counts one more second of work (its total is unknown, so there is no percentage).
 pub const TICK: Duration = Duration::from_secs(1);
+
+/// The phase id of a job whose Cancel did not take effect: the UI may then also offer "Stop waiting".
+pub const CANCEL_FAILED_PHASE: &str = "cancel-failed";
 
 /// One event of a job, as the UI receives it (`kind` is the tag, fields are camelCase).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -47,6 +50,10 @@ pub enum JobEvent {
         done: u64,
         /// The phase's size when known.
         total: Option<u64>,
+        /// What `done` and `total` count (`items` or `bytes`); the UI formats a size for bytes.
+        unit: Unit,
+        /// The UI may offer "Stop waiting" (`job_stop_waiting`): Cancel did not take effect, the job goes on.
+        can_stop_waiting: bool,
         /// Whole seconds since the job started.
         elapsed_secs: u64,
         /// Whether Cancel can stop the job in this phase. False while a step cannot be interrupted (`not_cancellable_reason`
@@ -159,6 +166,8 @@ impl EventSink for Router {
                         phase: phase.as_ref().map_or_else(|| "Starting".to_string(), |p| p.phase.label.clone()),
                         done: phase.as_ref().map_or(0, |p| p.done),
                         total: phase.as_ref().and_then(|p| p.phase.total),
+                        unit: phase.as_ref().map_or(Unit::Items, |p| p.phase.unit),
+                        can_stop_waiting: phase.as_ref().is_some_and(|p| p.phase.id == CANCEL_FAILED_PHASE),
                         elapsed_secs: s.elapsed_ms / 1000,
                         cancellable: s.cancellable,
                         not_cancellable_reason: s.not_cancellable_reason.clone(),
@@ -202,6 +211,23 @@ impl EventSink for Router {
 pub struct Jobs {
     registry: JobRegistry,
     router: Arc<Router>,
+    signals: Mutex<HashMap<u64, Signals>>,
+}
+
+/// Counters a job body waits on: every Cancel press and every "Stop waiting" press bumps one. The cancel token itself
+/// fires only once; a retried Cancel needs its own signal.
+#[derive(Clone)]
+struct Signals {
+    cancel: tokio::sync::watch::Sender<u64>,
+    stop: tokio::sync::watch::Sender<u64>,
+}
+
+/// What a job body receives to react to presses of Cancel and "Stop waiting".
+pub struct Presses {
+    /// Cancel was pressed (again).
+    pub cancel: tokio::sync::watch::Receiver<u64>,
+    /// "Stop waiting" was pressed.
+    pub stop: tokio::sync::watch::Receiver<u64>,
 }
 
 impl Default for Jobs {
@@ -217,6 +243,7 @@ impl Jobs {
         Jobs {
             registry: JobRegistry::with_clock(router.clone(), clock, min_interval_ms),
             router,
+            signals: Mutex::default(),
         }
     }
 
@@ -225,6 +252,13 @@ impl Jobs {
         // The queued snapshot registering emits has no route yet and tells the UI nothing; the first running one does.
         let ctx = self.registry.register(spec.kind, &spec.title, None);
         self.router.route(ctx.id().0, sink.clone());
+        lock(&self.signals).insert(
+            ctx.id().0,
+            Signals {
+                cancel: tokio::sync::watch::channel(0).0,
+                stop: tokio::sync::watch::channel(0).0,
+            },
+        );
         ctx
     }
 
@@ -238,7 +272,38 @@ impl Jobs {
         if snap.state.is_terminal() || !snap.cancellable {
             return false;
         }
-        self.registry.cancel(id)
+        let asked = self.registry.cancel(id);
+        if asked {
+            if let Some(s) = lock(&self.signals).get(&id.0) {
+                s.cancel.send_modify(|n| *n += 1);
+            }
+        }
+        asked
+    }
+
+    /// The user stops waiting for a job whose Cancel did not take effect. `true` when the job offers it (its phase is
+    /// [`CANCEL_FAILED_PHASE`]); the body then ends the job as cancelled.
+    pub fn stop_waiting(&self, id: u64) -> bool {
+        let jid = paddock_jobs::JobId(id);
+        let offered = self
+            .registry
+            .snapshots()
+            .into_iter()
+            .any(|s| s.id == jid && matches!(&s.state, JobState::Running { phase: Some(p) } if p.phase.id == CANCEL_FAILED_PHASE));
+        if offered {
+            if let Some(s) = lock(&self.signals).get(&id) {
+                s.stop.send_modify(|n| *n += 1);
+            }
+        }
+        offered
+    }
+
+    /// The presses of a running job, for its body. `None` for an unknown or ended job.
+    pub fn presses(&self, id: u64) -> Option<Presses> {
+        lock(&self.signals).get(&id).map(|s| Presses {
+            cancel: s.cancel.subscribe(),
+            stop: s.stop.subscribe(),
+        })
     }
 
     /// How many jobs have not ended.
@@ -292,6 +357,7 @@ where
             ))
         });
         let cancel = ctx.cancel_token().reason();
+        lock(&jobs.signals).remove(&id);
         ctx.reporter().flush();
         let end = match (result, cancel) {
             (Ok(Outcome::Done(v)), _) => {
@@ -539,6 +605,8 @@ mod tests {
             phase: "x".into(),
             done: 1,
             total: None,
+            unit: Unit::Bytes,
+            can_stop_waiting: false,
             elapsed_secs: 2,
             cancellable: false,
             not_cancellable_reason: Some("why".into()),
@@ -546,7 +614,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             v,
-            serde_json::json!({ "kind": "progress", "jobId": 7, "phase": "x", "done": 1, "total": null, "elapsedSecs": 2, "cancellable": false, "notCancellableReason": "why" })
+            serde_json::json!({ "kind": "progress", "jobId": 7, "phase": "x", "done": 1, "total": null, "unit": "bytes", "canStopWaiting": false, "elapsedSecs": 2, "cancellable": false, "notCancellableReason": "why" })
         );
     }
 }

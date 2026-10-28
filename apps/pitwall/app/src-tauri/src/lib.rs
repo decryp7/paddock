@@ -210,6 +210,7 @@ pub fn run() {
             app_commands::start_uninstall_service,
             app_commands::start_app_update,
             app_commands::job_cancel,
+            app_commands::job_stop_waiting,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

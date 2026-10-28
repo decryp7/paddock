@@ -161,8 +161,12 @@ fn spec(kind: &'static str, title: &str, phase: &str) -> JobSpec {
 /// How long the server gets to stop the work after `cancel_op` was acknowledged. Not a limit on the operation (that has
 /// none): only on the server honouring a cancel. Past it the job says Cancel did not take effect.
 const CANCEL_GRACE: Duration = Duration::from_secs(15);
-/// What the job shows once Cancel did not take effect.
-const CANCEL_FAILED: &str = "The server did not stop this. It is still working and cannot be cancelled again from here.";
+/// What the job shows once Cancel did not take effect. Cancel stays available (sending `cancel_op` again is harmless) and
+/// the UI also offers "Stop waiting" (`can_stop_waiting`).
+const CANCEL_FAILED: &str =
+    "The server has not stopped this yet. Press Cancel to try again, stop waiting, or use Repair service in Settings if it is stuck.";
+/// What the job shows when the user stopped waiting.
+const STOPPED_WAITING: &str = "Stopped waiting. The server may still be working on this; use Repair service in Settings if it stays busy.";
 
 /// A random per-run token for operation ids. Job ids restart at 1 on every launch of the app while the server keeps
 /// running, so an id made of the job number alone could meet a stale cancel stored for an earlier run's job.
@@ -186,12 +190,6 @@ fn op_id(nonce: &str, method: &str, job: u64) -> String {
     format!("{method}-{nonce}-{job}")
 }
 
-/// Cancel did not take effect: say so, and stop offering Cancel (it cannot be repeated). Held until the job ends.
-fn cancel_failed(ctx: &paddock_jobs::JobContext) -> paddock_jobs::UncancellableGuard {
-    ctx.phase(Phase::discovering("cancel-failed", "Could not cancel"));
-    ctx.uncancellable(CANCEL_FAILED)
-}
-
 /// Runs one server method as a cancellable job with no deadline. The call carries an `opId`; on Cancel the job shows
 /// "Cancelling" and the app sends `cancel_op` with it, and the server stops the work and undoes it (a half-loaded model is
 /// not left behind, a benchmark stores nothing), then answers `{"cancelled": true}`, which ends the job as cancelled. If
@@ -210,26 +208,32 @@ fn server_job(
     mut args: Value,
 ) -> u64 {
     let nonce = nonce.to_string();
+    let jobs2 = jobs.clone();
     jobs::start(jobs, spec, sink, move |ctx| async move {
         let op_id = op_id(&nonce, method, ctx.id().0);
         args["opId"] = Value::String(op_id.clone());
         let work = client.call(method, args, None);
         tokio::pin!(work);
-        let cancel = jobs::cancelled(ctx.cancel_token());
-        tokio::pin!(cancel);
-        let mut asked = false;
+        let Some(mut presses) = jobs2.presses(ctx.id().0) else {
+            return Err(internal("the job ended before it started"));
+        };
         let mut grace: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
-        let mut failed_guard = None;
+        let mut failed = false;
         let reply = loop {
             tokio::select! {
                 r = &mut work => break r,
-                () = &mut cancel, if !asked => {
-                    asked = true;
+                // Every press of Cancel asks the server again; a failed earlier ask does not switch Cancel off.
+                Ok(()) = presses.cancel.changed() => {
+                    grace = None;
+                    failed = false;
                     ctx.phase(Phase::discovering("cancel", "Cancelling"));
                     match forward(client.as_ref(), "cancel_op", serde_json::json!({ "opId": op_id })).await {
                         Ok(_) => grace = Some(Box::pin(tokio::time::sleep(CANCEL_GRACE))),
                         // Refused or unreachable (an unreachable server also fails the work call, which ends the job).
-                        Err(_) => failed_guard = Some(cancel_failed(&ctx)),
+                        Err(_) => {
+                            failed = true;
+                            ctx.phase(Phase::discovering(jobs::CANCEL_FAILED_PHASE, CANCEL_FAILED));
+                        }
                     }
                 }
                 () = async {
@@ -239,11 +243,16 @@ fn server_job(
                     }
                 }, if grace.is_some() => {
                     grace = None;
-                    failed_guard = Some(cancel_failed(&ctx));
+                    failed = true;
+                    ctx.phase(Phase::discovering(jobs::CANCEL_FAILED_PHASE, CANCEL_FAILED));
+                }
+                Ok(()) = presses.stop.changed(), if failed => {
+                    // The app's job ends as cancelled; dropping the call closes its connection. The server may still work.
+                    ctx.phase(Phase::discovering("stopped-waiting", STOPPED_WAITING));
+                    return Ok(Outcome::Cancelled);
                 }
             }
         }?;
-        drop(failed_guard);
         Ok(if reply.get("cancelled") == Some(&Value::Bool(true)) {
             Outcome::Cancelled
         } else {
@@ -356,7 +365,7 @@ async fn state_json(client: &SharedClient) -> Result<Value, CommandError> {
 /// in place for another try.
 #[tauri::command]
 pub async fn start_app_update(app: AppHandle, jobs: State<'_, Arc<Jobs>>, on_event: Channel<JobEvent>) -> Result<u64, CommandError> {
-    let mut spec = spec("app-update", "Updating Pitwall", "Downloading the update");
+    let mut spec = spec("app-update", "Updating Pitwall", "Preparing the update");
     spec.own_progress = true;
     Ok(jobs::start(jobs.inner(), spec, channel_sink(on_event), move |ctx| async move {
         ctx.phase(Phase {
@@ -385,6 +394,13 @@ fn apply_install_progress(ctx: &paddock_jobs::JobContext, p: updater::InstallPro
         }
         updater::InstallProgress::Installing => ctx.phase(Phase::discovering("install", "Installing the update")),
     }
+}
+
+/// The user stops waiting for a job whose Cancel did not take effect: the job ends as cancelled and says the server may
+/// still be working. `false` when the job does not offer it (the progress event's `canStopWaiting` is false).
+#[tauri::command]
+pub async fn job_stop_waiting(jobs: State<'_, Arc<Jobs>>, id: u64) -> Result<bool, CommandError> {
+    Ok(jobs.stop_waiting(id))
 }
 
 /// Cancels a job. `true` when the request was made; `false` for an unknown or finished job, or one in a step that cannot
@@ -475,7 +491,7 @@ mod tests {
         /// What `cancel_op` answers.
         cancel_reply: Mutex<Result<Value, CommandError>>,
         /// Whether `cancel_op` really stops the work.
-        honours_cancel: bool,
+        honours_cancel: std::sync::atomic::AtomicBool,
         /// Lets an ignored-cancel work finish.
         release: Notify,
     }
@@ -488,7 +504,7 @@ mod tests {
                 cancel: Notify::new(),
                 finish_with: Mutex::default(),
                 cancel_reply: Mutex::new(Ok(Value::Null)),
-                honours_cancel: true,
+                honours_cancel: true.into(),
                 release: Notify::new(),
             }
         }
@@ -511,20 +527,18 @@ mod tests {
                 self.calls.lock().unwrap().push((method.to_string(), args));
                 self.called.send_modify(|n| *n += 1);
                 if method == "cancel_op" {
-                    if self.honours_cancel {
+                    let reply = self.cancel_reply.lock().unwrap().clone();
+                    if reply.is_ok() && self.honours_cancel.load(std::sync::atomic::Ordering::SeqCst) {
                         self.cancel.notify_one();
                     }
-                    return self.cancel_reply.lock().unwrap().clone();
+                    return reply;
                 }
                 if let Some(v) = self.finish_with.lock().unwrap().clone() {
                     return Ok(v);
                 }
-                if self.honours_cancel {
-                    self.cancel.notified().await;
-                    Ok(serde_json::json!({ "cancelled": true }))
-                } else {
-                    self.release.notified().await;
-                    Ok(serde_json::json!({ "loaded": true }))
+                tokio::select! {
+                    () = self.cancel.notified() => Ok(serde_json::json!({ "cancelled": true })),
+                    () = self.release.notified() => Ok(serde_json::json!({ "loaded": true })),
                 }
             })
         }
@@ -609,11 +623,29 @@ mod tests {
         assert!(!jobs.cancel(id), "nothing left to cancel");
     }
 
+    /// The phases in the order they were entered (a phase repeats its event every second while it runs).
+    fn phases(e: &[JobEvent]) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
+        for p in e.iter().filter_map(progress_phase) {
+            if out.last() != Some(&p) {
+                out.push(p);
+            }
+        }
+        out
+    }
+
+    fn cancel_ops(server: &CancelAware) -> usize {
+        server.calls().iter().filter(|(m, _)| m == "cancel_op").count()
+    }
+
+    fn failed_to_cancel(e: &[JobEvent]) -> bool {
+        matches!(e.last(), Some(JobEvent::Progress { phase, can_stop_waiting: true, cancellable: true, .. }) if phase.contains("not stopped"))
+    }
+
     #[tokio::test(start_paused = true)]
-    async fn a_server_that_ignores_the_cancel_makes_the_job_say_so_instead_of_leaving_cancel_on() {
-        let mut server = CancelAware::new();
-        server.honours_cancel = false;
-        let server = Arc::new(server);
+    async fn a_server_that_ignores_the_cancel_keeps_cancel_on_and_offers_stop_waiting() {
+        let server = Arc::new(CancelAware::new());
+        server.honours_cancel.store(false, std::sync::atomic::Ordering::SeqCst);
         let client: SharedClient = server.clone();
         let (sink, events) = collector();
         let jobs = jobs();
@@ -627,30 +659,44 @@ mod tests {
             serde_json::json!({ "id": "m" }),
         );
         server.received(1).await;
+        assert!(!jobs.stop_waiting(id), "not offered before a cancel failed");
         assert!(jobs.cancel(id));
         events
             .until("it shows Cancelling", |e| e.iter().any(|e| progress_phase(e) == Some("Cancelling")))
             .await;
-        // The server acknowledged but never stops: after the grace the job says Cancel did not take effect.
+        // The server acknowledged but never stops: after the grace the job says so, Cancel stays on, Stop waiting is offered.
+        events.until("it says the cancel failed", failed_to_cancel).await;
+        assert_eq!(jobs.running(), 1, "the work goes on and is still reported");
+        assert!(
+            events
+                .all()
+                .iter()
+                .any(|e| matches!(e, JobEvent::Progress { phase, .. } if phase.contains("Repair service"))),
+            "the message points at Repair service"
+        );
+        // Cancel again: the server is asked again.
+        assert!(jobs.cancel(id), "Cancel is still available");
+        events.until("asked twice", |_| cancel_ops(&server) == 2).await;
         events
-            .until("it says the cancel failed", |e| {
-                matches!(e.last(), Some(JobEvent::Progress { phase, cancellable: false, not_cancellable_reason: Some(_), .. }) if phase == "Could not cancel")
+            .until("it says the cancel failed again", |e| {
+                failed_to_cancel(e) && phases(e).iter().filter(|p| **p == "Cancelling").count() == 2
             })
             .await;
-        assert_eq!(jobs.running(), 1, "the work goes on and is still reported");
-        assert!(!jobs.cancel(id), "Cancel is off, not silently enabled");
-        // The work finishing later still ends the job with its result.
-        server.release.notify_one();
+        // Stop waiting ends the app's job as cancelled and says the server may still be working.
+        assert!(jobs.stop_waiting(id));
         events.until_terminal().await;
-        assert!(matches!(events.last(), Some(JobEvent::Done { .. })), "{:?}", events.last());
+        assert_eq!(events.last(), Some(JobEvent::Cancelled { job_id: id }));
+        assert!(events
+            .all()
+            .iter()
+            .any(|e| matches!(e, JobEvent::Progress { phase, .. } if phase.starts_with("Stopped waiting") && phase.contains("may still be working"))));
+        assert_eq!(jobs.running(), 0);
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_server_that_refuses_the_cancel_makes_the_job_say_so_at_once() {
-        let mut server = CancelAware::new();
-        server.honours_cancel = false;
-        *server.cancel_reply.lock().unwrap() = Err(CommandError::new(ErrorCode::NotFound, "no such method"));
-        let server = Arc::new(server);
+    async fn a_refused_cancel_shows_at_once_and_a_second_press_can_still_stop_the_work() {
+        let server = Arc::new(CancelAware::new());
+        *server.cancel_reply.lock().unwrap() = Err(CommandError::new(ErrorCode::Conflict, "busy"));
         let client: SharedClient = server.clone();
         let (sink, events) = collector();
         let jobs = jobs();
@@ -665,13 +711,14 @@ mod tests {
         );
         server.received(1).await;
         assert!(jobs.cancel(id));
-        events
-            .until(
-                "it says the cancel failed",
-                |e| matches!(e.last(), Some(JobEvent::Progress { phase, cancellable: false, .. }) if phase == "Could not cancel"),
-            )
-            .await;
+        events.until("it says the cancel failed", failed_to_cancel).await;
         assert_eq!(jobs.running(), 1);
+        // The failure was brief: the next press goes through and the work stops.
+        *server.cancel_reply.lock().unwrap() = Ok(Value::Null);
+        assert!(jobs.cancel(id));
+        events.until_terminal().await;
+        assert_eq!(events.last(), Some(JobEvent::Cancelled { job_id: id }));
+        assert_eq!(cancel_ops(&server), 2);
     }
 
     #[tokio::test(start_paused = true)]
@@ -863,7 +910,7 @@ mod tests {
         let jobs = jobs();
         let (sink, events) = collector();
         let spec = {
-            let mut s = spec("app-update", "t", "Downloading the update");
+            let mut s = spec("app-update", "t", "Preparing the update");
             s.own_progress = true;
             s
         };
@@ -901,6 +948,16 @@ mod tests {
                 _ => None,
             })
             .collect();
+        assert!(
+            all.iter()
+                .filter(|e| progress_phase(e) == Some("Downloading the update"))
+                .all(|e| matches!(e, JobEvent::Progress { unit: Unit::Bytes, .. })),
+            "the download counts bytes"
+        );
+        assert!(all
+            .iter()
+            .filter(|e| progress_phase(e) == Some("Installing the update"))
+            .all(|e| matches!(e, JobEvent::Progress { unit: Unit::Items, .. })));
         assert!(bytes.contains(&(100, None)) && bytes.contains(&(400, Some(1000))), "{bytes:?}");
         assert!(bytes.windows(2).all(|w| w[0].0 <= w[1].0), "never backwards: {bytes:?}");
         assert!(all.iter().any(|e| progress_phase(e) == Some("Installing the update")));
