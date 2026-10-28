@@ -21,6 +21,8 @@ tauri-build = { version = "2.7.3", features = [] }
 [dependencies]
 pitwall-core.workspace = true
 pitwall-loopback = { path = "../../crates/pitwall-loopback" }
+# The shared service crate (core only, no tauri feature): the launchctl parser and its stale rule.
+paddock-service = { path = "../../../../crates/paddock-service" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
