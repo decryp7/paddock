@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, linkedSignal } from '@angular/core';
+import { SavedNote } from '../../shared/ui/saved-note';
 import { MatIcon } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
 import type { CleanupPolicy, Config, DiskGuardPolicy, PausePolicy, ProcessPolicy } from '../../core/api.types';
@@ -70,7 +71,7 @@ export const GROUPS: DefaultsGroup[] = [
 /** The defaults every runner uses unless it overrides them: watchdog, restarts, update timeouts, logs, cleanup. */
 @Component({
   selector: 'pc-defaults-section',
-  imports: [MatIcon, RouterLink, LoadState, CleanupPolicyEditor, ProcessPolicyEditor, DiskGuardEditor, PauseEditor],
+  imports: [MatIcon, RouterLink, LoadState, SavedNote, CleanupPolicyEditor, ProcessPolicyEditor, DiskGuardEditor, PauseEditor],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pc-load-state what="The settings" [hasValue]="!!settings.config()" [error]="settings.settings().error" [skeleton]="[80, 160, 160]" (retry)="settings.load()">
@@ -95,6 +96,7 @@ export const GROUPS: DefaultsGroup[] = [
         </div>
       }
       @if (draft(); as d) {
+        <pc-saved-note />
         <section class="card">
           <div class="card-body groups">
             @for (g of groups; track g.title) {

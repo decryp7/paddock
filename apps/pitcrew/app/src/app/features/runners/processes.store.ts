@@ -18,11 +18,13 @@ interface ProcessesState {
   busy: number | null;
   /** The engine's text when the last action was refused, shown inline next to the table. */
   actionError: string | null;
+  /** The last stop, said inline next to the table (a result of the user's own action, not a notice). */
+  stopped: string | null;
 }
 
 /** One runner's process tree and the leftovers of finished jobs, refreshed every few seconds; stop and keep actions. */
 export const ProcessesStore = signalStore(
-  withState<ProcessesState>({ runner: null, list: idle<ProcessList>(), busy: null, actionError: null }),
+  withState<ProcessesState>({ runner: null, list: idle<ProcessList>(), busy: null, actionError: null, stopped: null }),
   withProps(() => ({ _poll: { id: null as ReturnType<typeof setInterval> | null } })),
   withMethods((store, backend = inject(BACKEND), clock = inject(ClockService), toasts = inject(Notify), status = inject(StatusStore)) => {
     const load = async (runner: string, silent = false): Promise<void> => {
@@ -59,10 +61,10 @@ export const ProcessesStore = signalStore(
       async stop(entry: ProcessEntry, allowRunner = false): Promise<boolean> {
         const runner = store.runner();
         if (!runner) return false;
-        patchState(store, { busy: entry.pid, actionError: null });
+        patchState(store, { busy: entry.pid, actionError: null, stopped: null });
         try {
           await backend.stopProcess(runner, entry.pid, entry.startedAt, allowRunner);
-          toasts.show({ tone: 'success', icon: 'check-circle', title: `Stopped ${entry.name}`, body: `pid ${entry.pid}` });
+          patchState(store, { stopped: `Stopped ${entry.name} (pid ${entry.pid})` });
           return true;
         } catch (e) {
           const message = toCommandError(e).message;

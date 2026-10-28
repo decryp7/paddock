@@ -90,6 +90,8 @@ export interface MockOptions {
   startFailed?: boolean;
   /** Where long work shows up as jobs (the browser build's stand-in for `paddock://jobs`); without it nothing is reported. */
   jobs?: MemoryJobsBackend;
+  /** The window's jobs store: a job waited for through it is not announced by the shell (as in the desktop build). */
+  follow?: (id: number) => unknown;
 }
 
 const FLOW: Exclude<RunnerSnapshot['updatePhase']['phase'], 'idle' | 'rollingBack'>[] = [
@@ -115,6 +117,7 @@ export class MockBackend implements PitcrewBackend {
   private readonly scenario: MockScenario;
   private readonly latency: number;
   private readonly jobs: MemoryJobsBackend | null;
+  private readonly follow: ((id: number) => unknown) | null;
   private readonly simulate: boolean;
   private readonly platformName: Platform;
   private readonly now: () => number;
@@ -141,6 +144,7 @@ export class MockBackend implements PitcrewBackend {
     this.scenario = options.scenario ?? 'demo';
     this.latency = options.latencyMs ?? 0;
     this.jobs = options.jobs ?? null;
+    this.follow = options.follow ?? null;
     this.simulate = options.simulate ?? false;
     this.platformName = options.platform ?? 'browser';
     this.now = options.now ?? Date.now;
@@ -819,6 +823,7 @@ export class MockBackend implements PitcrewBackend {
     let seq = 0;
     const snap = (state: SuJobState, cancellable = true): void =>
       jobs.emit({ id, kind, title, subject, seq: seq++, elapsedMs: this.now() - started, cancellable, ...state });
+    this.follow?.(id);
     snap({ state: 'running', phase: { id: 'service', label: 'Waiting for the service', unit: 'items', done: 0 } });
     try {
       const result = await work();

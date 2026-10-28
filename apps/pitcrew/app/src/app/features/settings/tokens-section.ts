@@ -3,7 +3,6 @@ import { MatIcon } from '@angular/material/icon';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { SettingsStore } from '../../state/settings.store';
-import { Notify } from '../../state/notify';
 
 interface ServerRow {
   url: string;
@@ -105,7 +104,6 @@ interface ServerRow {
 export class TokensSection {
   private readonly settings = inject(SettingsStore);
   private readonly backend = inject(BACKEND);
-  private readonly toasts = inject(Notify);
 
   protected readonly store = 'Windows Credential Manager / macOS Keychain';
   protected readonly extra = signal<string[]>([]);
@@ -149,7 +147,6 @@ export class TokensSection {
       await this.backend.setApiToken(url, token);
       input.value = '';
       this.has.update((h) => ({ ...h, [url]: true }));
-      this.toasts.show({ tone: 'success', icon: 'key', title: 'Token saved', body: `Stored in the credential store for ${url}.` });
     } catch (err) {
       this.error.set(toCommandError(err).message);
     } finally {

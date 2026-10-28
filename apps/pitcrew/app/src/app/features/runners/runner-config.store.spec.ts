@@ -187,7 +187,8 @@ describe('RunnerConfigStore', () => {
     expect(store.file()!.fingerprint).not.toBe(before);
     expect(store.file()!.restartPending).toBe(true);
     expect(store.dirty()).toBe(false);
-    expect(toasts.notices[0]!.message).toContain('Configuration saved');
+    // The panel's saved banner says it; no notice.
+    expect(toasts.notices).toHaveLength(0);
     store.dismissSaved();
     expect(store.saved()).toBeNull();
     store.patch({ capacity: 3 });
@@ -198,14 +199,14 @@ describe('RunnerConfigStore', () => {
     expect(store.saved()).toBeNull();
   });
 
-  it('shows no changed keys in the toast for a comment-only save', async () => {
+  it('keeps the comment-only save quiet: no changed keys, no notice', async () => {
     const store = await loaded();
     store.setMode('raw');
     store.setRaw(`# note\n${store.rawText()}`);
     await previewed(store);
     await store.save();
     expect(store.saved()?.restart).toBe('notNeeded');
-    expect(TestBed.inject(NoticeLog).notices[0]!.message).not.toContain(': ');
+    expect(TestBed.inject(NoticeLog).notices).toHaveLength(0);
   });
 
   it('turns a stale base into a conflict that Reload clears', async () => {

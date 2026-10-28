@@ -1,6 +1,7 @@
 import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { SHELL_COMMAND_RUNNER, SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { ChangeDetectionStrategy, Component, ElementRef, Injector, afterNextRender, computed, inject, signal, viewChild } from '@angular/core';
+import { SavedNote } from '../../shared/ui/saved-note';
 import { MatIcon } from '@angular/material/icon';
 import { Router, RouterLink } from '@angular/router';
 import type { RunnerSnapshot, UpdatePolicy } from '../../core/api.types';
@@ -19,7 +20,7 @@ import { Notify } from '../../state/notify';
 /** Runner versions and updates in progress, the default update schedule, and Pitcrew's own updates. */
 @Component({
   selector: 'pc-updates-page',
-  imports: [MatIcon, RouterLink, CdkMenu, CdkMenuItem, CdkMenuTrigger, UpdateProgress, UpdatePolicyEditor, LoadState, EmptyState],
+  imports: [MatIcon, RouterLink, SavedNote, CdkMenu, CdkMenuItem, CdkMenuTrigger, UpdateProgress, UpdatePolicyEditor, LoadState, EmptyState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown.escape)': 'close()' },
   templateUrl: './updates-page.html',

@@ -53,10 +53,12 @@ describe('SettingsStore', () => {
     config.defaults.logs.keep = 9;
     expect(await s.store.save(config)).toBe(true);
     expect(s.store.saving()).toBe(false);
-    expect(s.toasts.notices.at(-1)?.message).toContain('Settings saved');
+    // Said inline by the page that saved, not as a notice.
+    expect(s.store.savedNote()).toBe('Settings saved');
+    expect(s.toasts.notices).toHaveLength(0);
     expect(s.store.config()?.defaults.logs.keep).toBe(9);
     expect(await s.store.save(config, 'Custom')).toBe(true);
-    expect(s.toasts.notices.at(-1)?.message).toContain('Custom');
+    expect(s.store.savedNote()).toBe('Custom');
   });
 
   it('reports a refused save', async () => {
@@ -80,7 +82,7 @@ describe('SettingsStore', () => {
     await flush();
     expect(s.store.runnerConfig('ui-tests')?.labels).toEqual(['only']);
     expect(s.store.runnerConfig('build-win')?.labels).toEqual(['windows', 'x64', 'msvc']);
-    expect(s.toasts.notices.at(-1)?.message).toContain('Labels saved');
+    expect(s.store.savedNote()).toContain('Labels saved');
   });
 
   it('refuses to save a runner before the config is loaded', async () => {

@@ -11,6 +11,9 @@
           </div>
         </header>
         <div class="card-body flush">
+          @if (store.stopped(); as done) {
+            <p class="callout success" role="status"><mat-icon svgIcon="pc:check-circle" aria-hidden="true" />{{ done }}</p>
+          }
           @if (store.actionError(); as err) {
             <div class="callout danger" role="alert">
               <mat-icon svgIcon="pc:alert" aria-hidden="true" />
@@ -54,7 +57,7 @@
                         </div>
                         <div class="cmd-line">
                           <code class="cmd" [title]="e.command">{{ e.command }}</code>
-                          <button type="button" class="btn icon sm ghost" [attr.aria-label]="'Copy the command of ' + e.name + ' (pid ' + e.pid + ')'" (click)="copy(e)"><mat-icon svgIcon="pc:copy" aria-hidden="true" /></button>
+                          <button type="button" class="btn icon sm ghost" [attr.aria-label]="copiedPid() === e.pid ? 'Command of ' + e.name + ' copied' : 'Copy the command of ' + e.name + ' (pid ' + e.pid + ')'" (click)="copy(e)"><mat-icon [svgIcon]="copiedPid() === e.pid ? 'pc:check' : 'pc:copy'" aria-hidden="true" /></button>
                         </div>
                         @if (row.fate; as f) {
                           <div class="fate" [class]="f.tone" data-testid="fate">

@@ -140,6 +140,19 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
     await app.statusBar.jobs.click();
     await expect(app.jobs.list).toContainText('Cleaning up the disk');
     await expect(app.jobs.list).toContainText(/Done|done|Finished/, { timeout: 15_000 });
+    // A job its page waits for is not announced a second time by the shell.
+    await expect(page.locator('pd-notification-host').getByText(/Cleaning up the disk/)).toHaveCount(0);
+  });
+
+  test('copying a log line is confirmed on its button, not by a notice', async ({ page }) => {
+    // The clipboard of the test browser is a stand-in: what matters is the confirmation, not the system clipboard.
+    await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { value: { writeText: async () => undefined }, configurable: true }));
+    await page.goto(`${APP}/logs`);
+    const line = page.locator('[role=log] .line').first();
+    await line.hover();
+    await line.getByRole('button', { name: 'Copy this line' }).click();
+    await expect(line.getByRole('button', { name: 'Line copied' })).toBeVisible();
+    await expect(page.locator('pd-notification-host').getByText(/copied/i)).toHaveCount(0);
   });
 
   test('About, Updates and What’s New are windows of the shell', async ({ page, app }) => {

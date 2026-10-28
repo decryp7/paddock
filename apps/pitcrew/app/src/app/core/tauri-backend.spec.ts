@@ -306,6 +306,25 @@ describe('TauriBackend jobs (long work never times out, rule 12)', () => {
     await expect(b).rejects.toMatchObject({ code: 'cancelled' });
   });
 
+  it('waits through the shell\'s job follow, so the shell does not announce the end a second time', async () => {
+    const stop = vi.fn();
+    let finish!: (job: unknown) => void;
+    const follow = vi.fn(() => ({ finished: new Promise((r) => (finish = r)), stop }));
+    const listen = vi.fn(async () => vi.fn());
+    const call = vi.fn(async (cmd: string) => (cmd === 'job_result' ? 'the result' : 9));
+    const backend = new TauriBackend(call as unknown as CommandCall, listen as unknown as EventListen, follow as never);
+    const done = backend.cleanDisk('r');
+    await flush();
+    expect(follow).toHaveBeenCalledWith(9);
+    expect(listen).not.toHaveBeenCalledWith('paddock://jobs', expect.anything());
+    finish({ id: 9, state: 'done' });
+    expect(await done).toBe('the result');
+    const failed = new TauriBackend(call as unknown as CommandCall, listen as unknown as EventListen, (() => ({ finished: Promise.resolve({ id: 9, state: 'failed', message: 'no disk' }), stop })) as never);
+    await expect(failed.cleanDisk('r')).rejects.toEqual({ code: 'internal', message: 'no disk' });
+    const cancelled = new TauriBackend(call as unknown as CommandCall, listen as unknown as EventListen, (() => ({ finished: Promise.resolve({ id: 9, state: 'cancelled', reason: 'user' }), stop })) as never);
+    await expect(cancelled.cleanDisk('r')).rejects.toMatchObject({ code: 'cancelled' });
+  });
+
   it('parses job payloads, never trusting them', () => {
     expect(jobEnd(null)).toBeNull();
     expect(jobEnd({ id: 'x', state: 'done' })).toBeNull();

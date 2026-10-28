@@ -102,7 +102,8 @@ describe('ProcessesStore', () => {
     const e = s.store.list().value!.entries.find((x) => x.leftover?.rule === '*GradleDaemon*')!;
     expect(await s.store.stop(e)).toBe(true);
     expect(s.store.list().value!.entries.some((x) => x.pid === e.pid)).toBe(false);
-    expect(TestBed.inject(NoticeLog).notices[0]!.message).toContain('Stopped java.exe');
+    expect(s.store.stopped()).toContain('Stopped java.exe');
+    expect(TestBed.inject(NoticeLog).notices).toHaveLength(0);
     expect(s.store.busy()).toBeNull();
   });
 

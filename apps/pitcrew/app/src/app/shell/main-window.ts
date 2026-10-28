@@ -1,10 +1,10 @@
-import { inject, provideAppInitializer } from '@angular/core';
+import { Injector, inject, provideAppInitializer } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { provideContributions, provideShellContext, provideShellVersionCheck } from '@decryp7/paddock-ui/shell';
 import { LANGUAGE_CONFIG, LocalStorageLanguageStorage } from '@decryp7/paddock-ui/shell/i18n';
 import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
 import { tauriDialogIo } from '@decryp7/paddock-ui/shell/dialogs';
-import { MemoryJobsBackend, TauriJobsBackend } from '@decryp7/paddock-ui/shell/jobs';
+import { JobsStore, MemoryJobsBackend, TauriJobsBackend } from '@decryp7/paddock-ui/shell/jobs';
 import { tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
 import { TauriNotificationsBackend, TauriServiceHealthBackend } from '@decryp7/paddock-ui/shell/notify';
 import { provideShellPages } from '@decryp7/paddock-ui/shell/pages';
@@ -33,6 +33,8 @@ const SCENARIOS: MockScenario[] = ['demo', 'empty', 'unavailable', 'notInstalled
  * `?mock-down` takes the service down (its controls keep working), `?mock-startfailed` shows launchd refusing it after an update.
  */
 function browserBackend(): PitcrewBackend {
+  // Looked up when a job starts: the jobs store needs the shell's ports, which need this backend (no cycle at creation).
+  const injector = inject(Injector);
   const params = new URLSearchParams(globalThis.location?.search ?? '');
   const scenario = params.get('mock') as MockScenario | null;
   const platform = params.get('platform');
@@ -44,6 +46,7 @@ function browserBackend(): PitcrewBackend {
     startFailed: params.has('mock-startfailed'),
     platform: platform === 'macos' || platform === 'windows' || platform === 'linux' ? platform : 'browser',
     jobs: browserJobs,
+    follow: (id) => injector.get(JobsStore).follow(id),
   });
 }
 
@@ -58,7 +61,15 @@ export function bootMainWindow(): Promise<unknown> {
       provideIcons(),
       provideNativeFeel(),
       // Inside the app the real Tauri backend; in the browser build (development, UI tests) the mock.
-      { provide: BACKEND, useFactory: () => (isTauri() ? new TauriBackend() : browserBackend()) },
+      {
+        provide: BACKEND,
+        useFactory: () => {
+          if (!isTauri()) return browserBackend();
+          // Jobs the pages start are waited for through the window's jobs store, so the shell does not announce their end too.
+          const injector = inject(Injector);
+          return new TauriBackend(undefined, undefined, (id) => injector.get(JobsStore).follow(id));
+        },
+      },
       provideAppInitializer(() => {
         const backend = inject(BACKEND);
         if (backend instanceof TauriBackend) void backend.init();

@@ -132,8 +132,12 @@ describe('ProcessesPanel', () => {
     (row(el, 'sleep.exe').querySelector('button[aria-label^="Copy the command"]') as HTMLElement).click();
     await flush();
     expect(write).toHaveBeenCalledWith('sleep 3600');
+    // Confirmed on the button itself, not as a notice.
+    await settle(f, 2);
+    expect(row(el, 'sleep.exe').querySelector('button[aria-label$="copied"]')).toBeTruthy();
+    expect(TestBed.inject(NoticeLog).notices).toHaveLength(0);
     write.mockRejectedValueOnce(new Error('denied'));
-    (row(el, 'sleep.exe').querySelector('button[aria-label^="Copy the command"]') as HTMLElement).click();
+    (row(el, 'sleep.exe').querySelector('button[aria-label$="copied"]') as HTMLElement).click();
     await settle(f, 2);
   });
 
