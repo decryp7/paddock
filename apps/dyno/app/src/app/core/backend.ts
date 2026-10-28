@@ -24,6 +24,7 @@ import type {
   PluginInfo,
   ProcessDetails,
   ProcessRef,
+  CustomAlertRule,
   Settings,
   SizeNode,
   SnapshotDiff,
@@ -169,6 +170,10 @@ export interface DynoBackend {
   alerts(limit: number): Promise<Alert[]>;
   settings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<Settings>;
+  /** Adds an alert rule, or replaces the one with the same id; the engine validates it and answers the settings. */
+  upsertAlertRule(rule: CustomAlertRule): Promise<Settings>;
+  /** Deletes the alert rule with `id`; answers the settings. */
+  deleteAlertRule(id: string): Promise<Settings>;
   plugins(): Promise<PluginInfo[]>;
 
   // Issues and unusual programs (observe-only).

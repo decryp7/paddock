@@ -6,7 +6,7 @@ import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Icon } from '../../shared/icon';
 import { Switch } from '../../shared/switch';
-import { CUSTOM_METRICS, metricInfo, severityWord, uniqueRuleId, withRule } from './alarms-model';
+import { CUSTOM_METRICS, metricInfo, severityWord, uniqueRuleId } from './alarms-model';
 
 const SEVERITIES: Severity[] = ['info', 'warning', 'critical'];
 const MAX_HOLD_SECS = 3600;
@@ -192,8 +192,7 @@ export class RuleDialog implements DialogContent<true>, OnInit {
       enabled: this.enabled(),
     };
     try {
-      const current = await this.backend.settings();
-      await this.backend.saveSettings({ ...current, customAlerts: withRule(current.customAlerts ?? [], rule, this.rule()?.id ?? null) });
+      await this.backend.upsertAlertRule(rule);
     } catch (e) {
       throw new DialogActionError(toCommandError(e).message);
     }

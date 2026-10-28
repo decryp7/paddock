@@ -72,7 +72,7 @@ describe('RuleDialog (dy.alert-rule)', () => {
     await settle();
     expect(d.el.textContent).toContain('whole number');
     await set('[aria-label="Duration"]', '10');
-    vi.spyOn(backend, 'saveSettings').mockRejectedValueOnce({ code: 'badRequest', message: 'Limit must be 0 to 100.' });
+    vi.spyOn(backend, 'upsertAlertRule').mockRejectedValueOnce({ code: 'badRequest', message: 'Limit must be 0 to 100.' });
     await d.press('save');
     await settle();
     expect(d.el.textContent).toContain('Limit must be 0 to 100.');

@@ -15,25 +15,29 @@ provides every one of these parts once.
 - **Pages are contributions.** The 17 screens of the sidebar (`shell/nav.ts`) are `definePage` entries with lazy loaders
   (`dy.dashboard`, `dy.processes` …); the CPU detail is a detail route. The command palette, the sidebar, the status bar, the
   menus and the native-feel guard (browser keys, context menu, Copy) are the frame's: `dy-shell`, `dy-toasts`,
-  `command-palette`, `copy-menu`, `native-feel` and the Coming dialog are deleted. The top bar's agent pill is the status item
+  `copy-menu`, `native-feel` and the Coming dialog are deleted. **The command palette (Ctrl+K, jump to a page) is removed for
+  1.0**: the pages frame has no shared palette (only the workbench has one), and the sidebar reaches every page. A shared
+  palette for the pages frame is a follow-up in Paddock; Dyno adopts it when it exists (no palette of its own is kept). The top bar's agent pill is the status item
   `dy.agent` (the tooltip keeps Dyno's own cost); the shell's service chip covers the agent being down (service `dy.agent`).
 - **Settings, About, Updates and What's New are the shell's.** Dyno's page (`dy.general`) sits beside the shell's Appearance
-  and Updates pages in the Settings window (a tool dialog). The theme, `ThemeService.set`, the About card and the `app_info`
+  and Updates pages in the Settings window (a tool dialog). The theme (including `Settings.theme` in the engine), `ThemeService.set`, the About card and the `app_info`
   command are gone; `ThemeService` only answers whether the page is dark now, for the charts, from the shell's appearance store.
 - **Notifications are the shell's.** `Notifier` keeps its small API (`show`, `error`) and posts through the shell's port, so
-  results of actions land in the notification host and centre; an action (the counter set's Undo) is the notice's button.
+  results of actions land in the notification host and centre; an action is the notice's button (type `dy.notice-action`, the
+  caller names the label).
   `dy.alarm` is the notification kind Rust posts alarms with.
 - **Dialogs are OS windows with declared actions** (ADR 0026). Contracts are Rust's (`src-tauri/src/dialogs.rs`, generated to
-  `generated/dialog-contracts.ts`): `dy.alert-rule` (modal form; stores the rule itself through the engine and answers `true`),
+  `generated/dialog-contracts.ts`): `dy.alert-rule` (modal form; stores the rule through the engine's own `upsertAlertRule`/`deleteAlertRule` requests, never by
+  reading and writing all settings from the dialog window, and answers `true`),
   `dy.lockers` (read-only tool), `dy.web-search` (modal form), `dy.file-hash` (viewer: Copy, Close, Open VirusTotal; an unreadable
   file is the rejected state with Try again) and the shell's `pd.confirm`, which replaces `dy-confirm-dialog` for deleting an
   alert rule and forgetting the known programs. Components draw no footer. `Dialogs`, `DialogFrame` and the CDK dialog are gone.
 - **Styles.** The shared theme (tokens, base, controls, Material) is loaded from `@decryp7/paddock-ui`; Dyno's `--surface-*`,
   `--text-*`, `--sp-*`, `--r-*`, status and chart tokens are a thin bridge over the `--pd-*` tokens in `styles.scss`, so the
-  feature components did not change. Dyno's theme, dark mixins, vibrancy and popover tokens are deleted (the shared css and
+  feature components did not change. The heat colour is the accent itself (`color-mix` over `--pd-accent`), so the heat maps follow `data-accent`. Dyno's theme, dark mixins, vibrancy and popover tokens are deleted (the shared css and
   `applyStoredAppearance` own theme, accent, density, contrast and motion).
 - **Tray.** The popover page uses the shell's `pd-tray-popover`; fitting, closing and Quit are the shell's tray commands. All tray
-  items open the one `tray` popover. The icons are still drawn by Dyno's Rust (live, one per item), which the shell cannot yet draw.
+  items open the one `tray` popover (the per-item "own popover" option and its `opens` setting are deleted). The icons are still drawn by Dyno's Rust (live, one per item), which the shell cannot yet draw.
 
 ## Consequences
 The frame, toast, dialog, palette and theme code (about 1,500 lines with their specs) left Dyno; the shell's tests cover it.
