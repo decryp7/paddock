@@ -116,7 +116,7 @@ covers installing, registering runners and everyday use ([macOS](macos.md), [Lin
 
 ## Holds: low-disk guard and pause windows
 
-![Disk guard and pause windows](screenshots/dark/settings-disk-guard.png)
+![Disk guard and pause windows](screenshots/dark/settings-defaults.png)
 
 - **Low-disk guard** ([ADR 0013](adr/0013-holds-low-disk-guard-and-pause-windows.md)). Below a free-space threshold
   (default 4 GB) Pitcrew drains the runners (the job in progress finishes, no new ones start) and resumes them by itself

@@ -5,6 +5,10 @@
   "angularDir": "app",
   "processes": ["fake_runner"],
   "processPatterns": ["[/\\\\]pitcrew-it-[^/\\\\]+[/\\\\]runner[/\\\\]bin[/\\\\]gitea-runner"],
+  "checks": [
+    "cd apps/pitcrew",
+    "node --test scripts/doc-images.test.mjs"
+  ],
   "ui": [
     "cd apps/pitcrew/app",
     "npm audit --omit=dev --audit-level=high",

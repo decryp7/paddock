@@ -35,7 +35,7 @@ for (const theme of ['dark', 'light'] as const) {
       await page.goto('/?simulate=0&mock=notInstalled#/');
       await expect(app.statusBar.chip).toContainText(/Pitcrew service/);
       await app.statusBar.chip.click();
-      await expect(app.notifications.services).toContainText('cannot reach its background service');
+      await expect(app.notifications.services).toContainText('is not installed');
       await shoot(page, 'health-down');
     });
 

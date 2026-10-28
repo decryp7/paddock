@@ -11,7 +11,15 @@ export const browserJobs = new MemoryJobsBackend();
 const cause = (message: string, hint: string, detail: string, code: string): Cause => ({ message, hint, detail, code, raiseCap: null, settings: null });
 
 /** What an unreachable service means for the chip (mirrors `health::cause_of` in Rust). */
-export function causeOf(c: ConnectionState): Cause | null {
+export function causeOf(c: ConnectionState, installed: boolean): Cause | null {
+  if (c.state === 'unavailable' && !installed) {
+    return cause(
+      'The Pitcrew service is not installed, so runners are not being managed.',
+      'Choose Restart to install it; Windows asks for administrator permission (a UAC prompt), macOS asks you to approve Pitcrew in System Settings.',
+      c.message,
+      'pc.service.not-installed',
+    );
+  }
   if (c.state === 'unavailable') {
     return cause('Pitcrew cannot reach its background service, so runners are not being managed.', 'Choose Restart to register and start the service again.', c.message, 'pc.service.unavailable');
   }
@@ -51,9 +59,14 @@ export class BrowserHealth {
   constructor() {
     this.backend.watch((e) => {
       if (e.kind !== 'connection') return;
-      const cause = causeOf(e.connection);
-      if (cause) this.health.fail(SERVICE_ID, cause, 'restart');
-      else if (e.connection.state === 'connected') this.health.ok(SERVICE_ID);
+      const connection = e.connection;
+      // Whether the OS has the service registered is asked only for a lost one, as Rust's event thread does.
+      const installed = connection.state === 'unavailable' ? this.backend.serviceInstall().then((s) => s.installed, () => true) : Promise.resolve(true);
+      void installed.then((isInstalled) => {
+        const cause = causeOf(connection, isInstalled);
+        if (cause) this.health.fail(SERVICE_ID, cause, 'restart');
+        else if (connection.state === 'connected') this.health.ok(SERVICE_ID);
+      });
     });
   }
 }

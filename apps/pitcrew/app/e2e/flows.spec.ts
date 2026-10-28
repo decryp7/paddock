@@ -128,7 +128,7 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
     await page.goto('/?simulate=0&mock=notInstalled#/');
     await expect(app.statusBar.chip).toContainText(/Pitcrew service/);
     await app.statusBar.chip.click();
-    await expect(app.notifications.services).toContainText('cannot reach its background service');
+    await expect(app.notifications.services).toContainText('is not installed');
     await app.notifications.services.getByRole('button', { name: 'Restart' }).click();
     await expect(app.notifications.services).toBeHidden();
     await expect(page.getByRole('link', { name: 'build-win' }).first()).toBeVisible();

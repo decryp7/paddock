@@ -59,6 +59,11 @@ describe('chip text, sentence case and accurate state words', () => {
     expect(chipCompactText([svc('service.needsApproval')])).toBe('Sources needs approval');
     expect(chipText([svc('service.repairFailed')])).toBe('Your sources: stopped');
     expect(chipText([{ label: 'the AI', state: 'degraded', cause: cause('pitwall.needsPairing') }])).toBe('AI: needs pairing');
+    // An app's own codes (Pitcrew's) have words too.
+    expect(stateWord('down', cause('pc.service.not-installed'))).toBe('not installed');
+    expect(stateWord('down', cause('pc.service.unavailable'))).toBe('not reachable');
+    expect(stateWord('down', cause('pc.service.mismatch'))).toBe('different version');
+    expect(stateWord('down', cause('pc.service.repair'))).toBe('repair failed');
     // A code nobody listed (or none) is plain "stopped".
     expect(chipText([svc('x.unknown')])).toBe('Your sources: stopped');
     expect(stateWord('down', cause(null))).toBe('stopped');
