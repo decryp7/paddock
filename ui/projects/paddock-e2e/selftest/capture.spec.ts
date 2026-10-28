@@ -185,3 +185,23 @@ test('expectPageFillsHost looks at the real page, skips unrendered viewports and
   await expectPageFillsHost(page, { fill: false });
   await expect(expectPageFillsHost(page, { timeout: 500 })).rejects.toThrow(/does not fill/);
 });
+
+test('expectFullyVisible accepts rounded buttons (4px, 6px, a 999px pill): hit tests respect border-radius', async ({ page }) => {
+  for (const radius of ['4px', '6px', '999px']) {
+    await open(page, `${MAIN('')}<div style="position:fixed;left:20px;top:100px"><button id="ok" style="height:32px;width:96px;border:0;background:#06c;border-radius:${radius}">OK</button></div>`);
+    await expectFullyVisible(page.locator('#ok'), radius, 800);
+  }
+});
+
+test('expectFullyVisible still sees a rounded button covered on one side', async ({ page }) => {
+  await open(page, '<button id="ok" style="position:fixed;left:10px;top:100px;height:40px;width:80px;border-radius:999px">OK</button><div style="position:fixed;left:0;top:100px;width:200px;height:20px;background:#000"></div>');
+  await expect(expectFullyVisible(page.locator('#ok'), '', 500)).rejects.toThrow(/covered/);
+});
+
+test('a broken SVG image does not count as decoded; an overflow-hidden card cut at the edge is still a cut', async ({ page }) => {
+  await open(page, MAIN('<img id="b" alt="b" style="width:20px;height:20px" src="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27%3E%3Cbroken">'));
+  await expect(waitForCapturable(page, { timeout: 800 })).rejects.toThrow(/images not decoded/);
+  const rows = Array.from({ length: 12 }, (_, i) => `<p style="height:40px;margin:0">Row ${i}</p>`).join('');
+  await open(page, MAIN(`<div style="height:100%;overflow:hidden">${rows}</div>`));
+  await expect(waitForCapturable(page, { timeout: 800 })).rejects.toThrow(/cut off/);
+});

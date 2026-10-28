@@ -70,7 +70,7 @@ Findings: success toasts for trivial actions, and double announcements (the app'
 - [ ] No toast for a trivial, instant, visible action (a copy, a toggle, a rename that the UI shows). A toast is for an
       outcome the user could miss: a background job's end, an error with a next step.
 - [ ] One announcement per event: if the shell already says it (job end, health change, update), the app does not.
-- [ ] Nothing times out a running job; the UI shows "Still working" (rule 12, C35). **(checked: C35)**
+- [ ] Nothing times out a running job; the UI shows "Still working" (rule 12, C35). **(manual; C35 checks the call policy only when the app's conformance run includes it)**
 - [ ] A tray or toast action that opens something navigates to the page that shows it (and the page exists after the move). **(manual)**
 
 ## 5. Copy and removed UI
@@ -80,7 +80,7 @@ Finding: texts that still pointed at UI that was removed in the move.
 - [ ] Search the whole app (templates, `$localize` texts, help, errors, empty states, docs, dialog copy, menu items) for
       the names of every control, menu, page and setting the move removed or renamed, and fix or delete each hit.
 - [ ] Error and empty states say what to do with the controls that exist now; sentence case, verb plus object on buttons.
-- [ ] Rebuild the translation catalogs (`paddock-i18n build`; C32). **(checked: C32)**
+- [ ] Rebuild the translation catalogs (`paddock-i18n build`; C32). **(manual; C32 checks it when the app's conformance run includes it)**
 - [ ] No "mock", "demo" or "placeholder" wording in user-facing text. **(manual)**
 
 ## 5b. What the move replaces
@@ -97,6 +97,16 @@ Finding: texts that still pointed at UI that was removed in the move.
 - [ ] Affected tests only (`node scripts/affected.mjs origin/main --explain`), plus the touched e2e files, one engine.
 - [ ] `captureScreen`/`expectFullyVisible`/`expectPageFillsHost` are used in the app's e2e, not copies of them (rule 42). **(manual)**
 - [ ] CHANGELOG entry for anything shared that changed; the app's own docs updated.
+
+## Adoption steps per app
+
+- Pitcrew: `screenshots.spec.ts` lines 111 and 159 take clipped shots (`clip`): replace them with `captureScreen` of the whole
+  window (or `fullPage: 'main'`); a region shot hides what is around it.
+- Pitwall: `capture.shot.ts` takes element shots: take the whole page with `captureScreen` instead, or `captureDocScreens`
+  (which has no `element`/`clip` options any more).
+- Spotter and Dyno: route their screenshot specs through `captureScreen` / `captureDocScreens`; delete their own settle code.
+- Spotter and Pitcrew: wire the shell's jobs only through `provideShellJobs` options (a backend factory is fine); wait for
+  jobs with `JobFollow`; drop `paddock://jobs` listeners (Pitcrew `tauri-backend.ts`).
 
 ## How an app adopts the helpers
 

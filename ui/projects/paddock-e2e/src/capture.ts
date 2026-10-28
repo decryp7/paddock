@@ -107,7 +107,9 @@ export function probe(args: { main: string; busy: string; allow: string; animate
   const innerScroller = (e: Element): boolean => {
     for (let a = e.parentElement; a && a !== root; a = a.parentElement) {
       const s = getComputedStyle(a);
-      if ([s.overflowY, s.overflow].some((o) => /auto|scroll|hidden|clip/.test(o))) return true;
+      // Only a real scroller: overflow auto or scroll that has something to scroll. A card with overflow hidden or clip
+      // cut at the shot's edge is cut content.
+      if (/auto|scroll/.test(s.overflowY) && a.scrollHeight > a.clientHeight + 1) return true;
     }
     return false;
   };
@@ -195,7 +197,22 @@ export function problemsOf(p: PageProbe, fullPage: 'viewport' | 'main'): string[
 async function look(page: Page, options: CaptureOptions): Promise<PageProbe> {
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   const busy = [BUSY_SELECTOR, options.busy].filter(Boolean).join(', ');
-  return page.evaluate(probe, { main: options.main ?? MAIN_SELECTOR, busy, allow: options.allow ?? '', animated: options.animated ?? '', overlayOk: OVERLAY_OK });
+  const p = await page.evaluate(probe, { main: options.main ?? MAIN_SELECTOR, busy, allow: options.allow ?? '', animated: options.animated ?? '', overlayOk: OVERLAY_OK });
+  // An SVG without an intrinsic size has naturalWidth 0 like a broken one; only decode() tells them apart.
+  const broken = await page.evaluate(async () => {
+    const out: string[] = [];
+    for (const i of document.images) {
+      if (i.complete && i.naturalWidth === 0 && i.getBoundingClientRect().width > 0 && /^data:image\/svg|\.svg(?:[?#]|$)/i.test(i.currentSrc || i.src)) {
+        try {
+          await i.decode();
+        } catch {
+          out.push(`<img${i.id ? `#${i.id}` : ''}> (${(i.currentSrc || i.src).slice(0, 40)})`);
+        }
+      }
+    }
+    return out;
+  });
+  return broken.length ? { ...p, undecoded: [...p.undecoded, ...broken] } : p;
 }
 
 /**
@@ -274,9 +291,23 @@ export function visibilityProblems(el: Element): string[] {
     }
   }
   if (out.length > 0) return out;
-  // Centre and the four corners (1 px in): a cover over half the button leaves the centre free.
+  // Centre and the four corners. Hit tests respect border-radius, so a corner point 1 px inside the box of a rounded button
+  // lands on the parent: each corner is inset by r * (1 - 1/sqrt 2) + 1 along both axes, r being that corner's radius
+  // (capped at half the box). Note elementFromPoint skips pointer-events:none, so such a cover is not seen here.
   const at = (x: number, y: number) => document.elementFromPoint(Math.min(Math.max(x, 0), window.innerWidth - 1), Math.min(Math.max(y, 0), window.innerHeight - 1));
-  const points: [number, number][] = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + 1, r.top + 1], [r.right - 1, r.top + 1], [r.left + 1, r.bottom - 1], [r.right - 1, r.bottom - 1]];
+  const cs = getComputedStyle(el);
+  const radius = (v: string): number => {
+    const first = v.split(' ')[0] ?? '0';
+    const n = Number.parseFloat(first);
+    if (!Number.isFinite(n)) return 0;
+    return Math.min(first.endsWith('%') ? (n / 100) * r.width : n, r.width / 2, r.height / 2);
+  };
+  const k = 1 - 1 / Math.SQRT2;
+  const tl = radius(cs.borderTopLeftRadius) * k + 1;
+  const tr = radius(cs.borderTopRightRadius) * k + 1;
+  const bl = radius(cs.borderBottomLeftRadius) * k + 1;
+  const br = radius(cs.borderBottomRightRadius) * k + 1;
+  const points: [number, number][] = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + tl, r.top + tl], [r.right - tr, r.top + tr], [r.left + bl, r.bottom - bl], [r.right - br, r.bottom - br]];
   for (const [x, y] of points) {
     const hit = at(x, y);
     if (hit && !el.contains(hit)) {
