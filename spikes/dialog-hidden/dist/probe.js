@@ -3,11 +3,14 @@
 //   a: content, fonts.ready, then the next animation frame (today's shell: afterNextRender + fonts.ready), then measure;
 //   b: as a, in a window that is visible but off-screen;
 //   c: content, fonts.ready, then a synchronous layout read (getBoundingClientRect), no frame wait; if that read started
-//      a font load (status "loading"), wait for fonts.ready once more and read again.
+//      a font load (status "loading"), wait for fonts.ready once more and read again;
+//   d: as c, with the frame laid out at the declared width (`cssw`) rather than the viewport's, which an unmapped
+//      WebKitGTK view reports as 0; the fixed width is dropped when the window is shown.
 (() => {
   const q = new URLSearchParams(location.search);
   const method = q.get('method') || 'a';
   const scenario = q.get('scenario') || 'normal';
+  const cssw = Number(q.get('cssw')) || 560;
   const T = window.__TAURI__;
   const label = T.window.getCurrentWindow().label;
   const send = (ev, data = {}) =>
@@ -19,6 +22,7 @@
   const style = document.createElement('style');
   style.textContent = `@font-face { font-family: ProbeSans; src: url(${base}font?d=${fontDelay}); }`;
   document.head.appendChild(style);
+  if (method === 'd') style.textContent += ` #frame { width: ${cssw}px; }`;
 
   send('script', { iw: innerWidth, ih: innerHeight, dpr: devicePixelRatio, ua: navigator.userAgent, fstatus: document.fonts.status });
 
@@ -72,7 +76,7 @@
     await content;
     await document.fonts.ready;
     let m;
-    if (method === 'c') {
+    if (method === 'c' || method === 'd') {
       m = measure();
       if (document.fonts.status === 'loading') { await document.fonts.ready; m = { ...measure(), refont: true }; }
     } else {
@@ -84,6 +88,7 @@
 
   T.event.listen('probe-shown', async (e) => {
     if (e.payload !== label) return;
+    if (method === 'd') style.textContent = style.textContent.replace(/ #frame \{[^}]*\}/, '');
     send('shown_sync', measure());
     await nextFrame();
     send('after_show', measure());

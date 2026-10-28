@@ -8,6 +8,7 @@ before and after the window is shown:
 - `b`: created visible far off-screen; same page logic; Rust fits, moves it into place and shows it.
 - `c`: created hidden; the page waits for its content and `document.fonts.ready`, then reads its layout synchronously
   (`getBoundingClientRect`), with no frame wait.
+- `d`: as c, with the frame laid out at the dialog's declared width (an unmapped WebKitGTK view has a 0 x 0 viewport).
 
 Scenarios: `normal`, `font_slow` (the font arrives after 400 ms), `route_slow` (the body arrives after 600 ms),
 `zoom125`/`zoom150` (webview zoom, a stand-in for display scale), `unowned` (no parent window), `monitor2` (on the last

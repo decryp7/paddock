@@ -3,7 +3,8 @@
 //!
 //! The app opens a host window and then, one after another, a probe dialog per trial. Each trial picks a show method
 //! (`a` hidden then measure after a frame, `b` visible off-screen then move in, `c` hidden then a synchronous layout read
-//! after `fonts.ready`) and a scenario (fonts slow, route slow, zoom, second monitor, owned or not). The page
+//! after `fonts.ready`, `d` as c with the frame laid out at the declared width instead of the viewport's) and a
+//! scenario (fonts slow, route slow, zoom, second monitor, owned or not). The page
 //! (`dist/dialog.html`) reports what it sees; Rust fits the window to the reported content height, shows it and asks the
 //! page to measure again. Every observation is one JSON line in `$PROBE_OUT` (default `probe.jsonl`). The app exits when
 //! the trials are done. Not product code.
@@ -107,7 +108,7 @@ fn trials(monitors: usize) -> Vec<Trial> {
     let mut out = Vec::new();
     for rep in 0..reps {
         for scenario in &scenarios {
-            for method in ["a", "b", "c"] {
+            for method in ["a", "b", "c", "d"] {
                 out.push(Trial { method, scenario, rep });
             }
         }
@@ -178,7 +179,13 @@ fn run_trials(app: AppHandle, rx: Receiver<Msg>, monitors: Vec<tauri::Monitor>) 
             0
         };
         let (x, y) = centred(&monitors, monitor, GUESS);
-        let url = format!("dialog.html?method={}&scenario={}", trial.method, trial.scenario);
+        // `cssw`: the dialog's width in CSS px (logical width / zoom), which method d lays out against while hidden.
+        let url = format!(
+            "dialog.html?method={}&scenario={}&cssw={}",
+            trial.method,
+            trial.scenario,
+            WIDTH / trial.zoom()
+        );
         let mut b = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.clone().into()))
             .title("Probe dialog")
             .inner_size(WIDTH, GUESS)

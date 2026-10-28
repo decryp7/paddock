@@ -23,7 +23,9 @@ for (const [label, t] of byLabel) {
   const settle = first(t, 'js:settle');
   const script = first(t, 'js:script');
   const want = ready ? Math.ceil(ready.data.h * (ready.data.dpr / (shown?.data.scale ?? 1))) : null;
-  const inner = shown?.data.inner?.[1];
+  // The window's inner height once settled: GTK applies set_size asynchronously, so the value right after it is stale.
+  const inner = (first(t, 'settled') ?? shown)?.data.inner?.[1];
+  const sync = first(t, 'js:shown_sync');
   const roAfter = t.ev.filter((e) => e.ev === 'js:ro' && e.t_ms > showT).map((e) => e.data.h);
   const exact = !!(ready && after && settle && Math.abs(after.data.h - ready.data.h) < 0.5 && Math.abs(settle.data.h - ready.data.h) < 0.5
     && Math.abs(after.data.ih - ready.data.h) < 1.0 && inner != null && Math.abs(inner - want) < 1.0);
@@ -32,7 +34,7 @@ for (const [label, t] of byLabel) {
     built: first(t, 'built')?.t_ms, script: script?.t_ms, visAtScript: script?.data.vis, builtVisible: first(t, 'built')?.data.visible,
     raf: before('js:raf1'), fonts: before('js:fonts_ready_initial'), ro: before('js:ro'), t0lat: first(t, 'js:timeout0')?.data.lat,
     ready: ready?.t_ms, deadline: !!first(t, 'deadline'), font: ready?.data.font, h: ready?.data.h, afterH: after?.data.h, ih: after?.data.ih,
-    settleH: settle?.data.h, inner, want, scale: shown?.data.scale, dpr: ready?.data.dpr, roAfter: roAfter.length, exact,
+    settleH: settle?.data.h, syncIh: sync?.data.ih, inner, want, scale: shown?.data.scale, dpr: ready?.data.dpr, roAfter: roAfter.length, exact,
     show: shown?.t_ms, afterShow: after ? after.t_ms - (shown?.t_ms ?? 0) : null,
   });
 }
@@ -43,10 +45,10 @@ const f = (x) => (x == null ? '-' : Math.round(x));
 const count = (xs, p) => `${xs.filter(p).length}/${xs.length}`;
 
 if (flag === '--trials') {
-  console.log('| label | method | scenario | vis@script | built visible | raf hidden | fonts hidden | RO hidden | ready ms | deadline | font at ready | h | after h | innerHeight | window inner | want | scale | dpr | RO after show | exact |');
-  console.log('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  console.log('| label | method | scenario | vis@script | built visible | raf hidden | fonts hidden | RO hidden | ready ms | deadline | font at ready | h | after h | innerHeight at show | innerHeight next frame | window inner | want | scale | dpr | RO after show | exact |');
+  console.log('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const r of rows) {
-    console.log(`| ${r.label} | ${r.method} | ${r.scenario} | ${r.visAtScript} | ${r.builtVisible} | ${r.raf} | ${r.fonts} | ${r.ro} | ${f(r.ready)} | ${r.deadline} | ${r.font} | ${r.h} | ${r.afterH} | ${r.ih} | ${r.inner} | ${r.want} | ${r.scale} | ${r.dpr} | ${r.roAfter} | ${r.exact} |`);
+    console.log(`| ${r.label} | ${r.method} | ${r.scenario} | ${r.visAtScript} | ${r.builtVisible} | ${r.raf} | ${r.fonts} | ${r.ro} | ${f(r.ready)} | ${r.deadline} | ${r.font} | ${r.h} | ${r.afterH} | ${r.syncIh} | ${r.ih} | ${r.inner} | ${r.want} | ${r.scale} | ${r.dpr} | ${r.roAfter} | ${r.exact} |`);
   }
   process.exit(0);
 }
