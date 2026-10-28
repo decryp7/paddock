@@ -79,11 +79,10 @@ fn a_redirect_is_not_followed() {
 }
 
 #[test]
-fn an_unreachable_host_is_a_connect_error() {
-    let port = {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap().port()
-    };
+fn a_reset_connection_is_a_connect_error() {
+    // A held port that resets every connection, not a port read off a dropped listener (ADR 0023).
+    let held = paddock_testkit::net::HeldPort::reset();
+    let port = held.port();
     let e = poster().post(&request(port)).unwrap_err();
     assert_eq!(e.kind, K::Connect, "{e}");
 }
@@ -234,11 +233,10 @@ fn smtp_replies_become_the_right_error() {
 }
 
 #[test]
-fn smtp_to_a_closed_port_is_a_connect_error() {
-    let port = {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap().port()
-    };
+fn smtp_reset_by_the_server_is_a_connect_error() {
+    // A held port that resets every connection, not a port read off a dropped listener (ADR 0023).
+    let held = paddock_testkit::net::HeldPort::reset();
+    let port = held.port();
     let e = LettreSender.send(&mail(port, None)).unwrap_err();
     assert!(e.retryable() && matches!(e, SendError::Connect(_)), "{e:?}");
 }

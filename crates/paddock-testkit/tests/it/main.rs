@@ -4,5 +4,6 @@
 mod env;
 mod golden;
 mod hostile;
+mod net;
 mod runner;
 mod scratch;
