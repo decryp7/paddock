@@ -58,6 +58,13 @@ export const INSPECTOR_DIALOG = defineDialog(DIALOG_CONTRACTS['sd.inspector'], {
   load: () => import('./dialogs/inspector-dialog').then((m) => m.InspectorDialog),
 });
 
+/** A save prompt: Save, Don't save and Cancel, in the OS's order (ADR 0026 §2). */
+export const UNSAVED_DIALOG = defineDialog(DIALOG_CONTRACTS['sd.unsaved'], {
+  title: msg('sd.dialog.unsaved', 'Unsaved changes'),
+  result: type<'save' | 'discard'>(),
+  load: () => import('./dialogs/unsaved-dialog').then((m) => m.UnsavedDialog),
+});
+
 /** A required choice: a modal without Cancel. */
 export const CHOOSE_STYLE_DIALOG = defineDialog(DIALOG_CONTRACTS['sd.choose-style'], {
   title: msg('sd.dialog.choose-style', 'Choose a greeting style'),
@@ -171,7 +178,7 @@ export const CONFIRM_DIALOG = defineConfirmDialog({
   load: () => import('@decryp7/paddock-ui/shell/confirm/dialog').then((m) => m.PdConfirmDialog),
 });
 
-export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, CONFIRM_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, CHANNELS_REMOVE_DIALOG, MCP_KEY_DIALOG, STORAGE_CONFIRM_DIALOG, MCP_REVOKE_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG, SETUP.dialog] as const;
+export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, CONFIRM_DIALOG, UNSAVED_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, CHANNELS_REMOVE_DIALOG, MCP_KEY_DIALOG, STORAGE_CONFIRM_DIALOG, MCP_REVOKE_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG, SETUP.dialog] as const;
 
 /** About's commands, Help menu items and notice kind (its dialogs are among `DEMO_DIALOGS`). */
 export const SHELL_ABOUT_CONTRIBUTIONS = aboutContributions([]);

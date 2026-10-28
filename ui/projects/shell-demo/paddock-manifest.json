@@ -530,6 +530,15 @@
       "width": 400,
       "height": null,
       "commands": []
+    },
+    "sd.unsaved": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 400,
+      "height": null,
+      "commands": []
     }
   },
   "healthServices": [
@@ -598,6 +607,7 @@
     "sd.dialog.confirm-reset": "Reset greetings?",
     "sd.dialog.inspector": "Engine inspector",
     "sd.dialog.rename": "Rename",
+    "sd.dialog.unsaved": "Unsaved changes",
     "sd.engine.break": "Break the demo engine",
     "sd.fail": "Fail on purpose",
     "sd.greet": "Say hello",

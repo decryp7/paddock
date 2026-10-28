@@ -13,6 +13,7 @@ paddock_dialogs::dialogs! {
     "sd.about" => Viewer,
     "sd.inspector" => Tool { width: Some(Px(720)), height: Some(480), commands: &[demo::demo_status] },
     "sd.choose-style" => Decision { required_choice: true },
+    "sd.unsaved" => Decision,
     // The settings commands, the Background service page's, the set-up page's, the packs page's, the Notification
     // channels page's (the secret is set in the secret dialog's window), Storage's, the AI access page's (the key is
     // issued in the key dialog's window), `dialog_open` (a page opens a dialog of its own) and the Language page's

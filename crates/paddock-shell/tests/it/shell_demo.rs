@@ -43,6 +43,7 @@ paddock_dialogs::dialogs! {
     "sd.about" => Viewer,
     "sd.inspector" => Tool { width: Some(Px(720)), height: Some(480), commands: &[dialog_callable::demo_status] },
     "sd.choose-style" => Decision { required_choice: true },
+    "sd.unsaved" => Decision,
     "pd.settings" => Tool {
         width: Some(Px(880)),
         height: Some(620),

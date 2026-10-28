@@ -57,6 +57,17 @@ export const DIALOG_CONTRACTS = {
     requiredChoice: true,
     commands: [],
   },
+  'sd.unsaved': {
+    id: 'sd.unsaved',
+    kind: 'decision',
+    modality: 'modal',
+    width: 400,
+    widthStep: 'narrow',
+    height: null,
+    instanced: false,
+    requiredChoice: false,
+    commands: [],
+  },
   'pd.settings': {
     id: 'pd.settings',
     kind: 'tool',
