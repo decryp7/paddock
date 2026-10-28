@@ -488,6 +488,10 @@ Not part of v1; anything new goes here.
 - **Disk map, after 1.0** (decided 2026-10-28; 1.0 has volumes, the sunburst drill-down, Retry of the incomplete folders, Reveal
   and the Full Disk Access prompt): duplicate files, the big and old file lists, and the breakdown of hidden space (1.0 shows
   one figure, used minus counted).
+- **Disk map on Windows, faster (open, after 1.0).** Each file is opened once (`CreateFileW`, then two queries) to get its volume
+  serial, file index, link count and allocation size. Reading ids and allocation sizes for a whole folder from one folder handle
+  (`GetFileInformationByHandleEx` with `FileIdExtdDirectoryInfo`) would cut that, but it carries no link count, so hard links
+  would need another way to be found. Measure on a real Windows disk before choosing.
 - Further ideas land here as they come up.
 
 ## Screenshot checklist

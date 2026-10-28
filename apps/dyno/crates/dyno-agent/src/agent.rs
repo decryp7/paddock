@@ -223,7 +223,7 @@ pub struct Shared {
     /// "Is this normal?" baselines learned from history.
     pub baselines: crate::baselines::BaselineCentre,
     /// The disk map: volumes and scans (read-only).
-    pub disk: crate::disk::centre::DiskCentre,
+    pub disk: Arc<crate::disk::centre::DiskCentre>,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -358,7 +358,7 @@ impl Shared {
             ),
             hardware: crate::hardware::HardwareCentre::os(),
             baselines: crate::baselines::BaselineCentre::new(),
-            disk: crate::disk::centre::DiskCentre::new(
+            disk: Arc::new(crate::disk::centre::DiskCentre::new(
                 Arc::new(crate::disk::fs::OsDirSource),
                 disk_ports.volumes,
                 Arc::new(crate::disk::BroadcastStatus(me.clone())),
@@ -366,7 +366,7 @@ impl Shared {
                 disk_ports.access,
                 cores,
                 settings_limits,
-            ),
+            )),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),

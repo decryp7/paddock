@@ -44,6 +44,26 @@ impl VolumeLister for OneVolume {
     }
 }
 
+/// A volume list that holds its first answer until the test lets it go (the system being slow), and says when it was asked.
+struct SlowVolumes {
+    inner: OneVolume,
+    open: Arc<(Mutex<bool>, std::sync::Condvar)>,
+    asked: Mutex<std::sync::mpsc::Sender<()>>,
+}
+
+impl VolumeLister for SlowVolumes {
+    fn list(&self) -> Vec<ListedVolume> {
+        let _ = self.asked.lock().unwrap().send(());
+        let (flag, cv) = &*self.open;
+        let mut released = flag.lock().unwrap();
+        while !*released {
+            released = cv.wait(released).unwrap();
+        }
+        drop(released);
+        self.inner.list()
+    }
+}
+
 struct NoAccess(bool);
 
 impl AccessProbe for NoAccess {
@@ -336,6 +356,40 @@ fn a_folder_that_was_refused_is_read_again_by_a_retry_and_full_disk_access_is_na
     assert_eq!(second.progress.unreadable, 0);
     assert!(second.progress.bytes > first.progress.bytes, "what was inside is now counted");
     assert!(!second.needs_full_disk_access);
+    drop(peer);
+    running.stop();
+}
+
+#[test]
+fn the_volume_list_is_asked_for_in_the_background_and_never_holds_other_requests() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    let fake = Fake::new();
+    let open = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let (asked, was_asked) = channel();
+    let ports = DiskPorts {
+        volumes: Arc::new(SlowVolumes {
+            inner: OneVolume(tmp.path().to_path_buf()),
+            open: open.clone(),
+            asked: Mutex::new(asked),
+        }),
+        access: Arc::new(NoAccess(false)),
+    };
+    // The agent starts although the system has not answered yet.
+    let running = Running::start_with(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(())), ports).unwrap();
+    was_asked.recv().unwrap();
+    let peer = connect(&dirs).unwrap().0;
+    assert!(
+        matches!(ask(&peer, Request::DiskScans).unwrap(), Reply::DiskScans(s) if s.is_empty()),
+        "other requests answer meanwhile"
+    );
+    // The system answers: the first DiskVolumes then has its list.
+    *open.0.lock().unwrap() = true;
+    open.1.notify_all();
+    let Reply::DiskVolumes(v) = ask(&peer, Request::DiskVolumes).unwrap() else {
+        panic!("volumes")
+    };
+    assert_eq!(v.len(), 1);
     drop(peer);
     running.stop();
 }

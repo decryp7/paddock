@@ -74,6 +74,8 @@ impl Running {
                 .map_err(|e| format!("could not start the sampler: {e}"))?,
         );
         inventory::warm(&shared);
+        // The volume list is asked for once now, off every request path, so the first page or scan never waits for it.
+        shared.disk.refresh_in_background();
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()

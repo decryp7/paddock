@@ -260,6 +260,7 @@ pub struct DiskCentre {
     /// Scans (and retries) that have a slot but are not kept yet: counted as running, so two starts cannot both take the last slot.
     starting: Mutex<HashSet<String>>,
     kept_nodes: AtomicUsize,
+    refreshing: std::sync::atomic::AtomicBool,
     next: AtomicU64,
     scans: Mutex<Vec<Arc<Entry>>>,
     live: Mutex<HashMap<String, Arc<LiveWorkers>>>,
@@ -291,6 +292,7 @@ impl DiskCentre {
             known: Mutex::new(None),
             starting: Mutex::new(HashSet::new()),
             kept_nodes: AtomicUsize::new(MAX_KEPT_NODES),
+            refreshing: std::sync::atomic::AtomicBool::new(false),
             next: AtomicU64::new(1),
             scans: Mutex::new(Vec::new()),
             live: Mutex::new(HashMap::new()),
@@ -309,8 +311,32 @@ impl DiskCentre {
 
     /// The volumes mounted now. Asks the system (slow on a Mac with a share that has gone away) and remembers the answer, which
     /// starting a scan then uses instead of asking again.
-    pub fn volumes(&self) -> Vec<Volume> {
-        self.refresh().into_iter().map(|l| l.volume).collect()
+    pub fn volumes(self: &Arc<Self>) -> Vec<Volume> {
+        let known = lock(&self.known).clone();
+        match known {
+            // The last answer now; the system is asked again in the background for the next call.
+            Some(k) => {
+                self.refresh_in_background();
+                k.into_iter().map(|l| l.volume).collect()
+            }
+            None => self.refresh().into_iter().map(|l| l.volume).collect(),
+        }
+    }
+
+    /// Asks the system for the volumes on a thread of its own and remembers the answer; does nothing while such a call is
+    /// already running. Never blocks the caller (the system can take seconds when a share has gone away).
+    pub fn refresh_in_background(self: &Arc<Self>) {
+        if self.refreshing.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let me = self.clone();
+        let spawned = std::thread::Builder::new().name("dyno-volumes".into()).spawn(move || {
+            me.refresh();
+            me.refreshing.store(false, Ordering::SeqCst);
+        });
+        if spawned.is_err() {
+            self.refreshing.store(false, Ordering::SeqCst);
+        }
     }
 
     fn refresh(&self) -> Vec<ListedVolume> {
@@ -676,7 +702,7 @@ mod tests {
     }
 
     struct Rig {
-        centre: DiskCentre,
+        centre: Arc<DiskCentre>,
         events: Arc<Events>,
         clock: Arc<Manual>,
         access: Arc<Access>,
@@ -704,7 +730,7 @@ mod tests {
             },
         );
         Rig {
-            centre,
+            centre: Arc::new(centre),
             events,
             clock,
             access,
@@ -1323,6 +1349,25 @@ mod tests {
             ErrorCode::NotFound
         );
         assert_eq!(r.lister.1.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_known_volume_list_is_answered_at_once_and_refreshed_in_the_background() {
+        let fs = Arc::new(FakeFs::new());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        assert_eq!(r.centre.volumes().len(), 1);
+        assert_eq!(r.lister.1.load(Ordering::SeqCst), 1, "never listed: asked now");
+        lock(&r.lister.0).push(vol("W", &fs.root(), VolumeLocation::Internal));
+        assert_eq!(
+            r.centre.volumes().len(),
+            1,
+            "the answer of the last listing, without waiting for the system"
+        );
+        while r.centre.refreshing.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        assert_eq!(r.lister.1.load(Ordering::SeqCst), 2);
+        assert_eq!(r.centre.volumes().len(), 2, "the background listing arrived");
     }
 
     #[test]
