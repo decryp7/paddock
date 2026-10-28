@@ -1,6 +1,9 @@
 # 22. The privileged helper is installed with the app, from a protected folder
 
-- Status: proposed (2026-10-28)
+- Status: Proposed for Dyno 1.1 (deferred from 1.0 on 2026-10-28: the user chose no helper in 1.0). Dyno 1.0 ships
+  without the privileged helper. It runs with the user's rights only, is signed with the family updater key, and
+  updates per user through the normal Tauri updater. The design below, including the decisions it records for "1.0"
+  (D1, D2, D5, D6), now applies to Dyno 1.1 and must be confirmed again for it.
 - Revision 2 (2026-10-28): adds the user's decisions of 2026-10-28 (all processes and administrator-only counters in
   1.0, the helper on all three OS, per-machine Windows, no signing purchases, any local user) and the first
   independent review (P1: updates ran an elevated installer from `%TEMP%`; the protected-location rule was not exact).
@@ -18,6 +21,79 @@
   (background priority, no polling, per-pid monitoring). `crates/dyno-helper`, `dyno_core::helper_wire`,
   `dyno_agent::helper_centre`, `dyno_platform::{elevate, processes}`, `app/src-tauri/{tauri*.conf.json, updater.rs,
   windows/installer-hooks.nsh}`. Paddock rules 7, 9, 19, 21, 23, 24, 26.
+
+## Dyno 1.0 without a helper
+
+Dyno 1.0 has no privileged helper:
+
+- no `dyno-helper` in the bundles;
+- no install, update or repair flow for a helper;
+- the NSIS installer stays per-user, and the DMG and `.deb` stay as they are.
+
+What follows is what 1.0 cannot show, and how the UI marks it.
+
+> **Placeholder:** the per-OS facts (what an unelevated agent cannot read on Windows, macOS and Linux) come from the
+> researcher's note, and are filled in here when it arrives.
+
+| OS | Not available in 1.0 (user rights only) | How the UI marks it |
+| --- | --- | --- |
+| Windows | _to be filled in from the research note_ | _to be filled in_ |
+| macOS | _to be filled in from the research note_ | _to be filled in_ |
+| Linux | _to be filled in from the research note_ | _to be filled in_ |
+
+**How the UI marks it,** on every OS:
+
+- A reading Dyno cannot get is `Unavailable` with its reason (`Reading<T>`), never zero or blank. The reason names the
+  limit plainly, for example "Windows shows this only to administrators" or "Other accounts' processes are hidden from
+  your account".
+- Where only part of a list can be read (other accounts' processes), the list says so in one line above it.
+- No page offers to install anything. No text calls the missing parts "planned", and none points at the page it is
+  shown on (rule 19).
+
+## Open for 1.1
+
+Resolve these before this record is accepted for 1.1:
+
+- **P1 (round-3 review): the update key and where updates come from.** The user keeps the family updater key for now.
+  Every Paddock workflow can read that key (`PADDOCK_TAURI_SIGNING_PRIVATE_KEY`) and `RELEASE_TOKEN` through repository
+  secrets. A helper that installs any update signed with that key as SYSTEM or root is therefore **unsafe**: a
+  malicious or compromised workflow on any branch could sign a package the helper would run. The separate repository
+  of section 3 does not fix this alone, because it checks the artefacts against a Tauri signature and a SHA-256 that
+  any workflow can forge. Before `Update` ships, one of these must hold:
+  - **A Dyno-only key** that no paddock workflow can read.
+  - **Or provenance checks:**
+    - `dyno-v*` is a protected tag, and the tagged commit is on protected main.
+    - The expected hashes come only from the `dyno-release` run for that tag: a push event, `head_sha` equal to the
+      tag commit, and the workflow path checked through the Gitea API.
+    - Assets created or changed after that run ended are refused.
+    - The signed version equals the tag and the package's own version.
+    - The job runs on a fresh, throwaway container runner registered for that repository only, with no shared cache,
+      and with every tool pinned by digest.
+    - `RELEASE_TOKEN` belongs to an account that can neither push to main nor create `dyno-v*` tags.
+
+  Each check needs a test. The trust that remains must be stated: the tag build itself in paddock CI, including caches
+  that other workflows can fill, and Dyno's own dependencies.
+- **P2 (round 3), not yet folded in:**
+  - `DuplicateHandle`:
+    - use one process handle (`PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_DUP_HANDLE`) for both the image check and
+      the duplication;
+    - request only `FILE_READ_DATA | SYNCHRONIZE`;
+    - check that the object type is File;
+    - read at explicit offsets (`ReadFile` with `OVERLAPPED` offsets, `pread`), never the shared file position.
+  - File systems: replace the deny-list (NFS, SMB, FUSE) with an allow-list of local types, for example ext4, xfs,
+    btrfs and f2fs on Linux, apfs and hfs on macOS, and NTFS and ReFS on fixed Windows drives. overlayfs, 9p and
+    virtiofs then fail too. Say which stalled read still needs the abandon path (a hanging local block device), and
+    keep the update lock while an abandoned worker lives.
+  - `%ProgramData%\Dyno`:
+    - create it with create-new and never open an existing folder for writing;
+    - retry a few times, then fail closed;
+    - rename a bad folder aside with a random suffix;
+    - show a message when the rename fails because another account's program holds the folder open.
+  - ACLs: `Users` may currently read `Helper\`, and so the audit log on disk, which contradicts "Audit is
+    administrators only". Make `Dyno\` and `Helper\` SYSTEM and Administrators only (users need nothing there now that
+    the token is gone), make the Unix data folders 0700 and the audit log 0600, and state the ACL of `Dyno\` itself.
+  - Size bands: rows 3, 5, 7, 14, 15 and 19 to 22 fall outside their S/M/L bands. Fix the bands (for example S up to
+    1 day, M 1 to 3, L 3 to 6, XL 6 to 10) or the rows. Add 2 to 3 days for the provenance work, and add the row again.
 
 ## Context
 
