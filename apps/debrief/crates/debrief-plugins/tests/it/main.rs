@@ -12,6 +12,7 @@ mod evtx_memory;
 mod formats_samples;
 mod native_profiling;
 mod otel_samples;
+mod perf_plugins;
 mod real_libraries;
 mod registry_samples;
 mod syslog_samples;

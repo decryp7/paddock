@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn a_copied_service_is_executable_and_replaces_the_old_one() {
         use std::os::unix::fs::PermissionsExt;
-        let d = std::env::temp_dir().join(format!("pitcrew-linux-copy-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("pitcrew-it-linux-copy-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         let src = d.join("src");

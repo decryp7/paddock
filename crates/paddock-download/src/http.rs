@@ -250,3 +250,29 @@ pub(crate) fn classify(e: ureq::Error) -> TransportError {
     };
     TransportError::new(kind, e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn refused_reset_and_aborted_connections_are_connect_errors() {
+        // Constructed errors: a test cannot make a real port refuse portably (ADR 0023).
+        for kind in [
+            ErrorKind::ConnectionRefused,
+            ErrorKind::ConnectionReset,
+            ErrorKind::ConnectionAborted,
+        ] {
+            assert_eq!(
+                classify(ureq::Error::Io(Error::from(kind))).kind,
+                TransportErrorKind::Connect,
+                "{kind:?}"
+            );
+        }
+        assert_eq!(
+            classify(ureq::Error::ConnectionFailed).kind,
+            TransportErrorKind::Connect
+        );
+    }
+}

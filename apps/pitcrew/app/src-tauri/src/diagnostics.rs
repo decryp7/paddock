@@ -36,7 +36,7 @@ mod tests {
 
     #[test]
     fn bundles_are_redacted_zips_with_safe_names() {
-        let dir = std::env::temp_dir().join(format!("pitcrew-diag-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("pitcrew-it-diag-{}", std::process::id()));
         let sections = vec![
             DiagnosticsSection {
                 name: "../evil/config.toml".into(),

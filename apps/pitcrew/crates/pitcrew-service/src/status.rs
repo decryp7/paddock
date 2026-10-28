@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn a_stopped_service_is_an_error() {
-        let d = std::env::temp_dir().join(format!("pitcrew-status-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("pitcrew-it-status-{}", std::process::id()));
         if cfg!(unix) {
             assert!(print(&d).is_err());
         }
