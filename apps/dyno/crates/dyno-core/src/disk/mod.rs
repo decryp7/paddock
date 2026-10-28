@@ -1,6 +1,11 @@
 //! The disk-space map's data (read-only): a folder's size tree, how it is bounded for the UI, and the check that a
 //! folder path names no `.` or `..` segment.
 
+pub mod index;
+pub mod scan;
+pub mod source;
+pub mod volume;
+
 use serde::{Deserialize, Serialize};
 
 /// A folder's size with its biggest children (the disk-space treemap).
