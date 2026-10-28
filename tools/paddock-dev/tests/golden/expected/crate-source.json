@@ -1,0 +1,38 @@
+{
+ "all": false,
+ "crates": true,
+ "ui": false,
+ "eslint": false,
+ "conformance": false,
+ "tools": false,
+ "icons": false,
+ "ciImage": false,
+ "paddockDev": false,
+ "docs": false,
+ "apps": [
+  "x"
+ ],
+ "kinds": {
+  "x": [
+   "rust"
+  ]
+ },
+ "packages": {
+  "crates": [
+   "fx-a",
+   "fx-b"
+  ],
+  "apps/x/app/src-tauri": [
+   "x"
+  ]
+ },
+ "why": {
+  "app:x": [
+   "cargo apps/x/app/src-tauri reaches crates/a"
+  ],
+  "crates": [
+   "crates/a/src/lib.rs",
+   "cargo crates/b reaches crates/a"
+  ]
+ }
+}

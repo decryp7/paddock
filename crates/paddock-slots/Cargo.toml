@@ -1,0 +1,14 @@
+[package]
+name = "paddock-slots"
+version = "0.1.0"
+description = "Numbered slots backed by operating-system file locks that the kernel releases when the holder dies: take the first free slot of N, hold it for the life of a job, release it, and read which slots are busy. No stale reclaim, so no reclaim race."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[dependencies]
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+tempfile = "3"

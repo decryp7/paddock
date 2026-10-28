@@ -111,6 +111,16 @@ describe('the graph of this tree', () => {
     assert.deepEqual([i.ciImage, i.ui, i.apps], [true, true, []]);
   });
 
+  test('the developer tool is its own project: its folder and the ./dev wrapper mark it, and the shared crates it uses reach it', () => {
+    const own = run('tools/paddock-dev/src/lib.rs');
+    assert.deepEqual([own.paddockDev, own.tools, own.crates, own.apps], [true, false, false, []]);
+    for (const f of ['dev', 'dev.cmd']) assert.deepEqual([run(f).paddockDev, run(f).all], [true, false], f);
+    assert.ok(run('crates/paddock-slots/src/lib.rs').paddockDev, 'a path dependency of the tool reaches it');
+    assert.ok(run('crates/paddock-cli/src/lib.rs').paddockDev);
+    assert.ok(run('.cargo/config.toml').paddockDev, 'global inputs reach it');
+    assert.equal(run('tools/bootstrap.sh').paddockDev, false);
+  });
+
   test('every project of a changed file is in the plan, and no app outside apps/ appears', () => {
     for (const f of tracked) {
       const own = owners(f);
