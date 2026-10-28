@@ -118,9 +118,7 @@ pub struct Server {
     clock: Arc<dyn Clock>,
     audit: Arc<dyn AuditSink>,
     redactor: Arc<dyn Redact>,
-    abandoned: Arc<AtomicUsize>,
-    /// Signalled each time an abandoned call's thread has ended and been uncounted.
-    abandoned_ended: Arc<(Mutex<()>, Condvar)>,
+    abandoned: Arc<Abandoned>,
 }
 
 fn read<T>(l: &RwLock<T>) -> RwLockReadGuard<'_, T> {
@@ -163,8 +161,7 @@ impl Server {
             clock,
             audit,
             redactor,
-            abandoned: Arc::new(AtomicUsize::new(0)),
-            abandoned_ended: Arc::new((Mutex::new(()), Condvar::new())),
+            abandoned: Arc::new(Abandoned::default()),
         }
     }
 
@@ -523,7 +520,7 @@ impl Server {
                 format!("Invalid arguments for {name}: {m}."),
             );
         }
-        if self.abandoned.load(Ordering::SeqCst) >= self.limits.max_abandoned {
+        if self.abandoned.count() >= self.limits.max_abandoned {
             return fail(
                 Outcome::Refused,
                 "The server is busy finishing earlier slow calls. Try again in a moment.".into(),
@@ -608,11 +605,10 @@ impl Server {
         rx: mpsc::Receiver<Msg>,
     ) -> Run {
         let state = Arc::new(AtomicU8::new(RUNNING));
-        let (handler, cancel, abandoned, ended, st) = (
+        let (handler, cancel, abandoned, st) = (
             tool.handler.clone(),
             ctx.cancel.clone(),
             self.abandoned.clone(),
-            self.abandoned_ended.clone(),
             state.clone(),
         );
         std::thread::spawn(move || {
@@ -622,32 +618,63 @@ impl Server {
                 .compare_exchange(RUNNING, FINISHED, Ordering::SeqCst, Ordering::SeqCst)
                 .is_err()
             {
-                abandoned.fetch_sub(1, Ordering::SeqCst);
-                let _guard = ended
-                    .0
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                ended.1.notify_all();
+                abandoned.sub();
             }
         });
         wait(&rx, &state, &cancel, &self.abandoned, timeout)
     }
 
-    /// Blocks until every abandoned call (one past its time limit or cancelled by the client) has really ended, so the server takes
-    /// calls again. Returns at once when none is running; the wait is on the end of the calls, not on a time.
+    /// Test hook: returns once no abandoned call is counted. It is unbounded, so never use it on a server whose tools can hang
+    /// forever; a real graceful stop would be a separate design.
+    #[doc(hidden)]
     pub fn wait_for_abandoned_calls(&self) {
-        let (m, cv) = &*self.abandoned_ended;
-        let mut guard = m.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        while self.abandoned.load(Ordering::SeqCst) > 0 {
-            guard = cv
-                .wait(guard)
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-        }
+        self.abandoned.wait_until_none();
     }
 
     /// The calendar time the server's clock reports.
     pub fn now(&self) -> SystemTime {
         self.clock.wall()
+    }
+}
+
+/// The number of calls abandoned (past their limit or cancelled) whose threads have not ended. Every change notifies, so a
+/// waiter never misses the count reaching zero.
+#[derive(Default)]
+struct Abandoned {
+    n: Mutex<usize>,
+    changed: Condvar,
+}
+
+impl Abandoned {
+    fn guard(&self) -> MutexGuard<'_, usize> {
+        self.n
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn add(&self) {
+        *self.guard() += 1;
+        self.changed.notify_all();
+    }
+
+    fn sub(&self) {
+        let mut n = self.guard();
+        *n = n.saturating_sub(1);
+        self.changed.notify_all();
+    }
+
+    fn count(&self) -> usize {
+        *self.guard()
+    }
+
+    fn wait_until_none(&self) {
+        let mut n = self.guard();
+        while *n > 0 {
+            n = self
+                .changed
+                .wait(n)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
     }
 }
 
@@ -658,7 +685,7 @@ fn wait(
     rx: &mpsc::Receiver<Msg>,
     state: &AtomicU8,
     cancel: &CancelToken,
-    abandoned: &AtomicUsize,
+    abandoned: &Abandoned,
     timeout: Duration,
 ) -> Run {
     let stop = match rx.recv_timeout(timeout) {
@@ -668,7 +695,7 @@ fn wait(
         },
         Err(_) => Run::TimedOut,
     };
-    abandoned.fetch_add(1, Ordering::SeqCst);
+    abandoned.add();
     if state
         .compare_exchange(RUNNING, ABANDONED, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
@@ -678,7 +705,7 @@ fn wait(
     }
     // It finished in the instant between the stop and now. A call past its time limit takes the answer; a call the client
     // cancelled stays unanswered, because the cancel was read first (MCP: the receiver does not answer a cancelled request).
-    abandoned.fetch_sub(1, Ordering::SeqCst);
+    abandoned.sub();
     match stop {
         Run::Cancelled => Run::Cancelled,
         _ => rx.iter().find_map(settled).unwrap_or(Run::Panicked),
@@ -793,7 +820,7 @@ mod tests {
         tx.send(Msg::Cancelled).unwrap();
         tx.send(Msg::Done(Ok(Ok(ToolOutput::text("late")))))
             .unwrap();
-        let (state, abandoned) = (AtomicU8::new(FINISHED), AtomicUsize::new(0));
+        let (state, abandoned) = (AtomicU8::new(FINISHED), Abandoned::default());
         let run = wait(
             &rx,
             &state,
@@ -805,23 +832,35 @@ mod tests {
             matches!(run, Run::Cancelled),
             "a call the client cancelled got its tool's answer"
         );
-        assert_eq!(
-            abandoned.load(Ordering::SeqCst),
-            0,
-            "a finished call is not abandoned"
-        );
+        assert_eq!(abandoned.count(), 0, "a finished call is not abandoned");
     }
 
     #[test]
     fn a_call_that_times_out_as_its_tool_ends_without_an_answer_is_a_panic() {
         let (tx, rx) = mpsc::channel();
         drop(tx);
-        let (state, abandoned) = (AtomicU8::new(FINISHED), AtomicUsize::new(0));
+        let (state, abandoned) = (AtomicU8::new(FINISHED), Abandoned::default());
         let run = wait(&rx, &state, &CancelToken::new(), &abandoned, Duration::ZERO);
         assert!(
             matches!(run, Run::Panicked),
             "a tool that ended without an answer counts as a panic"
         );
-        assert_eq!(abandoned.load(Ordering::SeqCst), 0);
+        assert_eq!(abandoned.count(), 0);
+    }
+
+    /// The path where a call finishes between its stop and being counted: it is added then uncounted, and a waiter must wake.
+    #[test]
+    fn uncounting_a_call_that_finished_as_it_was_stopped_wakes_a_waiter() {
+        let (tx, rx) = mpsc::channel();
+        drop(tx);
+        let (state, abandoned) = (AtomicU8::new(FINISHED), Arc::new(Abandoned::default()));
+        let waiter = {
+            let a = abandoned.clone();
+            std::thread::spawn(move || a.wait_until_none())
+        };
+        let run = wait(&rx, &state, &CancelToken::new(), &abandoned, Duration::ZERO);
+        waiter.join().unwrap();
+        assert!(matches!(run, Run::Panicked));
+        assert_eq!(abandoned.count(), 0);
     }
 }
