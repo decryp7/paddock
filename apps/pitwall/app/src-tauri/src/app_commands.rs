@@ -3,10 +3,13 @@
 
 use crate::app_state::{self, AppState, FirstRun};
 use crate::commands::{forward, SharedClient};
+use crate::jobs::{JobContext, JobEvent, JobSink, JobSpec, Jobs};
 use crate::service_install::{self, ServiceInstall};
 use crate::updater::{self, AppUpdateStatus, UpdateInfo};
 use pitwall_core::mgmt::{CommandError, ErrorCode};
 use serde_json::Value;
+use std::sync::Arc;
+use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt;
 
@@ -132,4 +135,142 @@ pub async fn check_app_update(app: AppHandle) -> Result<Option<UpdateInfo>, Comm
 #[tauri::command]
 pub async fn install_app_update(app: AppHandle) -> Result<(), CommandError> {
     updater::install(&app).await
+}
+
+// Long operations as jobs (ER-17..19). Each `start_*` returns the job id at once and reports on the channel; `job_cancel`
+// stops one. The blocking commands above stay until the UI has moved over.
+
+fn channel_sink(channel: Channel<JobEvent>) -> JobSink {
+    Arc::new(move |event| {
+        let _ = channel.send(event);
+    })
+}
+
+fn spec(title: &str, phase: &str, cancellable: bool) -> JobSpec {
+    JobSpec {
+        title: title.into(),
+        phase: phase.into(),
+        cancellable,
+    }
+}
+
+/// Runs one server method as a job. Cancel stops waiting for it (the server keeps what it was doing).
+fn server_job(
+    jobs: &Arc<Jobs>,
+    client: SharedClient,
+    on_event: Channel<JobEvent>,
+    spec: JobSpec,
+    method: &'static str,
+    args: Value,
+) -> u64 {
+    let phase = spec.phase.clone();
+    jobs.start(spec, channel_sink(on_event), move |ctx: JobContext| async move {
+        ctx.phase(&phase);
+        forward(client.as_ref(), method, args).await
+    })
+}
+
+/// Loads a model in the background (`load_model` as a job).
+#[tauri::command]
+pub async fn start_load_model(
+    client: State<'_, SharedClient>,
+    jobs: State<'_, Arc<Jobs>>,
+    id: String,
+    on_event: Channel<JobEvent>,
+) -> Result<u64, CommandError> {
+    crate::commands::Validate::validate(&id, "id")?;
+    let spec = spec("Loading the model", "Starting the engine and loading the weights", true);
+    Ok(server_job(
+        jobs.inner(),
+        client.inner().clone(),
+        on_event,
+        spec,
+        "load_model",
+        serde_json::json!({ "id": id }),
+    ))
+}
+
+/// Runs a benchmark in the background (`run_benchmark` as a job).
+#[tauri::command]
+pub async fn start_benchmark(
+    client: State<'_, SharedClient>,
+    jobs: State<'_, Arc<Jobs>>,
+    model_id: String,
+    on_event: Channel<JobEvent>,
+) -> Result<u64, CommandError> {
+    crate::commands::Validate::validate(&model_id, "modelId")?;
+    let spec = spec("Running the benchmark", "Benchmarking", true);
+    Ok(server_job(
+        jobs.inner(),
+        client.inner().clone(),
+        on_event,
+        spec,
+        "run_benchmark",
+        serde_json::json!({ "modelId": model_id }),
+    ))
+}
+
+/// Registers and starts the service in the background (`install_service` as a job). The result is the service state.
+#[tauri::command]
+pub async fn start_install_service(
+    client: State<'_, SharedClient>,
+    jobs: State<'_, Arc<Jobs>>,
+    on_event: Channel<JobEvent>,
+) -> Result<u64, CommandError> {
+    let client = client.inner().clone();
+    // Not cancellable: the OS prompt (UAC, Login Items) is the user's to answer, and the registration is not atomic.
+    Ok(jobs.start(
+        spec("Installing the background service", "Waiting for the system to register it", false),
+        channel_sink(on_event),
+        move |_| async move {
+            blocking_install(service_install::install, "installing the service").await?;
+            mark_offered();
+            state_json(&client).await
+        },
+    ))
+}
+
+/// Stops and removes the service in the background (`uninstall_service` as a job).
+#[tauri::command]
+pub async fn start_uninstall_service(
+    client: State<'_, SharedClient>,
+    jobs: State<'_, Arc<Jobs>>,
+    on_event: Channel<JobEvent>,
+) -> Result<u64, CommandError> {
+    let client = client.inner().clone();
+    Ok(jobs.start(
+        spec("Removing the background service", "Waiting for the system to remove it", false),
+        channel_sink(on_event),
+        move |_| async move {
+            blocking_install(service_install::uninstall, "removing the service").await?;
+            state_json(&client).await
+        },
+    ))
+}
+
+async fn blocking_install(f: fn() -> Result<(), CommandError>, what: &str) -> Result<(), CommandError> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| internal(format!("{what} stopped unexpectedly: {e}")))?
+}
+
+async fn state_json(client: &SharedClient) -> Result<Value, CommandError> {
+    serde_json::to_value(compose_state(client).await).map_err(|e| internal(format!("the service state could not be read: {e}")))
+}
+
+/// Downloads and installs the update in the background (`install_app_update` as a job); the app restarts when it is done.
+/// Cancel is possible until the install begins, as dropping the download leaves the old version untouched.
+#[tauri::command]
+pub async fn start_app_update(app: AppHandle, jobs: State<'_, Arc<Jobs>>, on_event: Channel<JobEvent>) -> Result<u64, CommandError> {
+    Ok(jobs.start(
+        spec("Updating Pitwall", "Downloading and installing the update", true),
+        channel_sink(on_event),
+        move |_| async move { updater::install(&app).await.map(|()| Value::Null) },
+    ))
+}
+
+/// Cancels a job; an unknown or finished id is fine.
+#[tauri::command]
+pub async fn job_cancel(jobs: State<'_, Arc<Jobs>>, id: u64) -> Result<(), CommandError> {
+    jobs.cancel(id)
 }
