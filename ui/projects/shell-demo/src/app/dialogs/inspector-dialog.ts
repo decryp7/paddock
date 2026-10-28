@@ -1,8 +1,9 @@
 import { ChangeDetectionStrategy, Component, computed, inject, resource } from '@angular/core';
+import { formatDuration } from '@decryp7/paddock-ui/format';
 import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import { DemoEngine } from './demo-ipc';
 
-/** A tool: modeless, user-sized, remembers its size. It reads the engine through its own providers (`demo_status`). */
+/** A form: modeless, medium, fitted to its three facts. It reads the engine through its own providers (`demo_status`). */
 @Component({
   selector: 'sd-inspector-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -12,7 +13,7 @@ import { DemoEngine } from './demo-ipc';
         @case ('resolved') {
           <dl class="facts" data-testid="engine-status">
             <dt>Engine</dt><dd>{{ status.value()?.engine }}</dd>
-            <dt>Up for</dt><dd>{{ status.value()?.uptimeSeconds }} s</dd>
+            <dt>Up for</dt><dd>{{ uptime(status.value()?.uptimeSeconds) }}</dd>
             <dt>Queued</dt><dd>{{ status.value()?.queued }}</dd>
           </dl>
         }
@@ -32,5 +33,9 @@ export class InspectorDialog implements DialogContent {
   protected readonly status = resource({ loader: () => this.engine.status() });
   /** Refresh at the leading edge; the frame adds Close. */
   readonly dialogActions = computed<readonly DialogAction[]>(() => [{ kind: 'run', id: 'refresh', label: 'Refresh', role: 'secondary', lead: true, run: () => void this.status.reload() }]);
-  readonly dialogStatus = computed(() => (this.status.status() === 'resolved' ? `Queued: ${this.status.value()?.queued ?? 0}` : null));
+
+  /** "12 min 34 s": the engine's seconds as a person reads them. */
+  protected uptime(seconds: number | undefined): string {
+    return formatDuration(seconds === undefined ? null : seconds * 1000);
+  }
 }

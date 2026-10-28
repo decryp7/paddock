@@ -48,7 +48,7 @@ import { DIAGNOSTICS_STYLES } from './styles';
             <tbody>
               @for (f of store.files(); track f.name) {
                 <tr>
-                  <th scope="row" [title]="f.name">{{ shortName(f.name) }}</th>
+                  <th scope="row" class="pd-diag__name" [title]="f.name">{{ shortName(f.name) }}</th>
                   <td class="pd-diag__what">{{ f.summary }}</td>
                   <td class="pd-diag__num">{{ size(f.bytes) }}</td>
                 </tr>

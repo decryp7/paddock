@@ -59,12 +59,12 @@ const type = async (fixture: ComponentFixture<unknown>, input: HTMLInputElement,
 };
 
 describe('the layout dialogs are declared as ADR 0009 asks', () => {
-  it('declares save as a modal form and manage as a modeless tool, each with its own contract', () => {
+  it('declares save as a modal form and manage as a modeless form that fits its list, each with its own contract', () => {
     expect([SAVE.id, SAVE.kind, SAVE.modality, SAVE.commands]).toEqual([LAYOUT_SAVE_DIALOG_ID, 'form', 'modal', []]);
-    expect([MANAGE.id, MANAGE.kind, MANAGE.modality, MANAGE.commands]).toEqual([LAYOUT_MANAGE_DIALOG_ID, 'tool', 'modeless', ['layout_get', 'layout_set']]);
+    expect([MANAGE.id, MANAGE.kind, MANAGE.modality, MANAGE.commands]).toEqual([LAYOUT_MANAGE_DIALOG_ID, 'form', 'modeless', ['layout_get', 'layout_set']]);
     expect(LAYOUT_SAVE_DIALOG_ID).toBe('pd.wb.dock.layout-save');
     expect(LAYOUT_MANAGE_DIALOG_ID).toBe('pd.wb.dock.layout-manage');
-    expect([SAVE.width, MANAGE.width, MANAGE.height]).toEqual([400, 480, 360]);
+    expect([SAVE.width, MANAGE.width, MANAGE.height]).toEqual([400, 560, null]);
   });
 
   it('boots in the shell harness: providers, a body, a visible Cancel/Close, Escape, only declared commands', async () => {
@@ -137,6 +137,26 @@ describe('Manage layouts', () => {
     const none = await open(PdLayoutManageDialog, new InMemoryDockLayoutStore());
     expect(rows(none.el)).toEqual([]);
     expect(none.q('layout-manage-empty')!.textContent).toContain('No saved layouts');
+  });
+
+  it('shows a designed empty state with a Save current layout action that answers a save', async () => {
+    const { el, q, ref, fixture } = await open(PdLayoutManageDialog, new InMemoryDockLayoutStore());
+    expect(q('layout-manage-empty')!.querySelector('h3')!.textContent).toBe('No saved layouts yet');
+    expect((fixture.componentInstance as DialogContent).dialogActions!()).toEqual([]);
+    const save = q<HTMLButtonElement>('layout-manage-save-empty')!;
+    expect(save.textContent?.trim()).toBe('Save current layout');
+    save.click();
+    expect(ref.closes).toEqual([{ save: true } satisfies LayoutManageResult]);
+    expect(el.querySelector('[data-testid="layout-manage-list"]')).toBeNull();
+  });
+
+  it('offers Save current layout at the leading edge once layouts exist', async () => {
+    const { fixture } = await open(PdLayoutManageDialog, await seeded(['Work']));
+    const actions = (fixture.componentInstance as DialogContent).dialogActions!();
+    expect(actions.map((a) => [a.id, a.kind === 'dismiss' ? 'dismiss' : a.role])).toEqual([['save', 'secondary']]);
+    const save = actions[0]!;
+    if (save.kind !== 'answer') throw new Error('expected an answer action');
+    expect(await save.answer(new AbortController().signal)).toEqual({ save: true });
   });
 
   it('applies a layout by closing with its name', async () => {
@@ -233,6 +253,6 @@ describe('Manage layouts', () => {
   it('draws no footer of its own: the frame adds Close', async () => {
     const { fixture, q } = await open(PdLayoutManageDialog, await seeded(['A']));
     expect(q('layout-manage-close')).toBeNull();
-    expect((fixture.componentInstance as DialogContent).dialogActions).toBeUndefined();
+    expect((fixture.componentInstance as DialogContent).dialogActions!().map((a) => a.kind)).not.toContain('dismiss');
   });
 });

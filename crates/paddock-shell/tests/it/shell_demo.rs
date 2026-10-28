@@ -41,7 +41,7 @@ paddock_dialogs::dialogs! {
     "sd.confirm-reset" => Decision,
     "sd.rename" => Form(Modal) { width: Some(Narrow) },
     "sd.about" => Viewer,
-    "sd.inspector" => Tool { width: Some(Px(720)), height: Some(480), commands: &[dialog_callable::demo_status] },
+    "sd.inspector" => Form(Modeless) { commands: &[dialog_callable::demo_status] },
     "sd.choose-style" => Decision { required_choice: true },
     "sd.unsaved" => Decision,
     "pd.settings" => Tool {

@@ -4,11 +4,11 @@
 export const DIALOG_CONTRACTS = {
   'pd.setup': {
     id: 'pd.setup',
-    kind: 'tool',
+    kind: 'form',
     modality: 'modeless',
     width: 560,
-    widthStep: null,
-    height: 520,
+    widthStep: 'medium',
+    height: null,
     instanced: false,
     requiredChoice: false,
     commands: ['setup_act', 'setup_finish', 'setup_repair', 'setup_skip', 'setup_state'],

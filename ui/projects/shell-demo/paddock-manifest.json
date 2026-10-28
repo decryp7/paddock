@@ -433,12 +433,12 @@
       ]
     },
     "pd.setup": {
-      "kind": "tool",
+      "kind": "form",
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
       "width": 560,
-      "height": 520,
+      "height": null,
       "commands": [
         "setup_act",
         "setup_finish",
@@ -457,12 +457,12 @@
       "commands": []
     },
     "pd.updates": {
-      "kind": "tool",
+      "kind": "form",
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
       "width": 560,
-      "height": 480,
+      "height": null,
       "commands": [
         "updates_cancel",
         "updates_check",
@@ -512,12 +512,12 @@
       "commands": []
     },
     "sd.inspector": {
-      "kind": "tool",
+      "kind": "form",
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "width": 720,
-      "height": 480,
+      "width": 560,
+      "height": null,
       "commands": [
         "demo_status"
       ]

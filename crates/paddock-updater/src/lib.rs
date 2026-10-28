@@ -84,7 +84,7 @@ paddock_dialogs::dialogs! {
     pub static DIALOGS;
     "pd.about" => Viewer { commands: &[dialog_callable::about_info, dialog_callable::about_legal] },
     "pd.whats-new" => Viewer { commands: &[dialog_callable::about_whats_new] },
-    "pd.updates" => Tool { width: Some(Px(560)), height: Some(480), commands: &[
+    "pd.updates" => Form(Modeless) { commands: &[
         dialog_callable::updates_status,
         dialog_callable::updates_check,
         dialog_callable::updates_download,
