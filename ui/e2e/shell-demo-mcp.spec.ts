@@ -53,13 +53,13 @@ test.describe('AI access (MCP) (plan X22)', () => {
 
     // Revoke asks first; Keep is the default and Escape keeps the key.
     await page.getByTestId('mcp-revoke').click();
-    const confirm = page.getByRole('dialog', { name: 'Revoke the key of "Pitwall"?' });
+    const confirm = page.getByRole('alertdialog', { name: 'Revoke the key of “Pitwall”?' });
     await expect(confirm.getByRole('button', { name: 'Keep' })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(confirm).toHaveCount(0);
     await expect(page.getByTestId('mcp-keys')).toContainText('Active');
     await page.getByTestId('mcp-revoke').click();
-    await page.getByRole('dialog', { name: 'Revoke the key of "Pitwall"?' }).getByRole('button', { name: 'Revoke key', exact: true }).click();
+    await page.getByRole('alertdialog', { name: 'Revoke the key of “Pitwall”?' }).getByRole('button', { name: 'Revoke key', exact: true }).click();
     await expect(page.getByTestId('mcp-keys')).toContainText('Revoked');
     await expect(page.getByTestId('mcp-revoke')).toHaveCount(0);
 

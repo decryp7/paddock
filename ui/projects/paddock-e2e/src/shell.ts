@@ -298,9 +298,9 @@ export class ShellDialogs {
     const h = await this.page.evaluate(() => document.documentElement.dataset['fitHistory'] ?? '');
     return h ? h.split(',').map(Number) : [];
   }
-  /** A dialog shown in the page, by its accessible name. */
+  /** A dialog shown in the page, by its accessible name (a decision is an `alertdialog` named by its heading). */
   inPage(name: string): Locator {
-    return this.page.getByRole('dialog', { name });
+    return this.page.getByRole('dialog', { name }).or(this.page.getByRole('alertdialog', { name }));
   }
   /** The backdrop of a modal dialog in the page. */
   get backdrop(): Locator {

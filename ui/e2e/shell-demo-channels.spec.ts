@@ -58,7 +58,7 @@ test.describe('notification channels (plan X17)', () => {
 
     // Remove asks in a dialog of its own: Keep is the default and Escape keeps the channel.
     await page.getByTestId('channel-row-Build-Hook').getByRole('button', { name: 'Remove Ops Hook' }).click();
-    const confirm = page.getByRole('dialog', { name: 'Remove "Ops Hook"?' });
+    const confirm = page.getByRole('alertdialog', { name: 'Remove the channel “Ops Hook”?' });
     await expect(confirm).toContainText('Its stored secret is deleted too.');
     await expect(confirm.getByRole('button', { name: 'Keep' })).toBeFocused();
     expect(await axeViolations(page)).toEqual([]);
@@ -66,7 +66,7 @@ test.describe('notification channels (plan X17)', () => {
     await expect(confirm).toHaveCount(0);
     await expect(page.getByTestId('channel-row-Build-Hook')).toBeVisible();
     await page.getByTestId('channel-row-Build-Hook').getByRole('button', { name: 'Remove Ops Hook' }).click();
-    await page.getByRole('dialog', { name: 'Remove "Ops Hook"?' }).getByRole('button', { name: 'Remove channel', exact: true }).click();
+    await page.getByRole('alertdialog', { name: 'Remove the channel “Ops Hook”?' }).getByRole('button', { name: 'Remove channel', exact: true }).click();
     await expect(page.locator('tbody tr')).toHaveCount(2);
     await expect(page.getByTestId('channel-row-Build-Hook')).toHaveCount(0);
     expect(pageErrors).toEqual([]);

@@ -629,7 +629,7 @@ test.describe('dialogs (plan S6)', () => {
     // A modeless dialog may sit over the buttons (it opens in the middle of the window): the button is clicked as itself.
     const open = (id: string) => page.locator(`[data-dialog-open="${id}"]`).dispatchEvent('click');
     await open('sd.confirm-reset');
-    const modal = d.inPage('Reset greetings?');
+    const modal = d.inPage('Reset the greetings?');
     await expect(modal).toHaveAttribute('aria-modal', 'true');
     await expect(d.backdrop).toBeVisible();
     await modal.getByRole('button', { name: 'Reset greetings' }).click();
@@ -650,7 +650,7 @@ test.describe('dialogs (plan S6)', () => {
     await expect(page.getByTestId('dialog-answer')).toHaveText('About the shell demo: dismissed');
 
     await open('sd.choose-style');
-    const choice = d.inPage('Choose a greeting style');
+    const choice = d.inPage('How should the demo greet you?');
     await page.keyboard.press('Escape');
     await expect(choice).toBeVisible();
     await choice.getByRole('button', { name: 'Casual' }).click();
