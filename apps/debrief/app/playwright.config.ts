@@ -10,9 +10,9 @@ appBuildGuard(resolve(__dirname, './'), resolve(__dirname, '../../../ui'));
 // the one production build, served with the Tauri CSP header (e2e/serve-prod.mjs): one build per run (and per CI shard)
 // instead of a dev server plus a production build, and every spec runs under the CSP the desktop app enforces.
 const CI = !!process.env['CI'];
-// CI must name its port (a fixed default could collide with another job on the host); locally 4300 is the default.
+// CI must name its port (a fixed default could collide with another job on the host); locally the default is derived from the worktree (offset of 4340, apart from the ui gallery's 4300).
 if (CI && !process.env['DEBRIEF_E2E_PORT']) throw new Error('CI: set DEBRIEF_E2E_PORT (the port of the production-build server)');
-const PORT = e2ePortOrCiDefault('DEBRIEF_E2E_PORT', 4300);
+const PORT = e2ePortOrCiDefault('DEBRIEF_E2E_PORT', 4340);
 // DEBRIEF_E2E_PREBUILT=1 serves the dist/app/browser an earlier `npx ng build` left (CI builds once before the tests);
 // otherwise the run builds first, so it never tests a stale build.
 const PREBUILT = !!process.env['DEBRIEF_E2E_PREBUILT'];

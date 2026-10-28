@@ -36,7 +36,7 @@ function walk(dir: string, rel: string, out: string[]): void {
     const r = rel ? `${rel}/${e.name}` : e.name;
     if (e.isDirectory()) {
       if (!SKIP_DIRS.has(e.name) && !(rel === '' && SKIP_TOP.has(e.name))) walk(join(dir, e.name), r, out);
-    } else if (!TEST_FILE.test(e.name) && e.name !== STAMP_FILE) out.push(r);
+    } else if (!e.name.startsWith('.') && !TEST_FILE.test(e.name)) out.push(r);
   }
 }
 

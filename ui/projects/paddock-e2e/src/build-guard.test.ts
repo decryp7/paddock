@@ -58,6 +58,7 @@ test('tests, bin and the generated css are not sources of the dist; a missing en
   try {
     put(join(pkg, 'src', 'a.spec.ts'), 'new');
     put(join(pkg, 'bin', 'tool.mjs'), 'new');
+    put(join(pkg, 'shell', '.DS_Store'), 'finder');
     put(join(pkg, 'css', 'material.css'), 'rewritten');
     assert.deepEqual(staleBuilds(ui, 'ui-dist'), []);
     rmSync(join(pkg, 'css', 'material.css'));

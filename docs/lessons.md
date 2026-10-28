@@ -602,6 +602,6 @@ every file of the package for the dist, except tests, bin/ and the generated css
 a missing css entry. A content hash, not mtimes: unchanged rebuilds, checkouts and touches never false-fail. Which
 guard: `paddockConfig({ buildGuard: 'none' | 'ui' | 'ui-dist', uiRoot })`; an app's own config calls
 `appBuildGuard(__dirname, uiRoot)`, which picks `ui-dist` only when the app's tsconfig maps `@decryp7/paddock-ui` to
-`ui/dist` (today Spotter), else nothing. `PW_SKIP_BUILD_GUARD=1` skips it. The ui config checks the css only with `PW_REUSE_SERVER=1` (its webServers run `build:css` themselves). A direct `ng build paddock-ui` leaves `ui/dist` unstamped, so the guard fails: build with `npm run build -w ui`. Tests: `build-guard.test.ts`, `env.test.ts`
+`ui/dist` (today Spotter), else nothing. `PW_SKIP_BUILD_GUARD=1` skips it. The ui config checks the css only with `PW_REUSE_SERVER=1` (its webServers run `build:css` themselves). Dot-files (`.DS_Store`) are ignored; README and doc edits under `projects/paddock-ui` mark the dist stale on purpose (every non-test file counts). A direct `ng build paddock-ui` leaves `ui/dist` unstamped, so the guard fails: build with `npm run build -w ui`. Tests: `build-guard.test.ts`, `env.test.ts`
 (including every app config on a fresh checkout). Proposed binding rule (the user decides): every Playwright config
 uses these three, and `scripts/new-app.mjs` templates do.
