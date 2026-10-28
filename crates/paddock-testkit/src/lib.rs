@@ -9,6 +9,8 @@
 //!   rewrites them.
 //! - [`FakeRunner`]: a scripted stand-in for "run an OS command" seams (launchctl, systemctl, reg, ...), recording every call.
 //! - [`never_panics`] and [`corpus`]: run a parser over deterministic hostile inputs and fail on any panic.
+//! - [`net::HeldPort`]: a loopback port held for the test where every connection is closed or reset, instead of a
+//!   port read off a listener that was then dropped (ADR 0023).
 //! - [`FakeClock`]: the deterministic clock of `paddock_jobs::time`, re-exported so a test needs one dependency.
 //!
 //! Nothing here touches the user's folders, starts a process or sleeps.
@@ -16,6 +18,7 @@
 pub mod env;
 pub mod golden;
 pub mod hostile;
+pub mod net;
 pub mod runner;
 pub mod scratch;
 

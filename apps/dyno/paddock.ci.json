@@ -1,5 +1,39 @@
 {
-  "$comment": "Dyno's CI contract (scripts/affected.mjs, ADR 0014 §6). Dyno is not a leg of ci.yml: its gates (Rust on several OS, licences, frontend, e2e, installers, the release from a dyno-v* tag) are its own workflow, .gitea/workflows/dyno.yml, whose plan job asks `node scripts/affected.mjs --ci --app dyno`.",
-  "workflow": "dyno.yml",
-  "cargo": "."
+  "$comment": "Dyno's CI contract (scripts/affected.mjs, .gitea/actions/app-gates, ADR 0014 §6; the field list is in .gitea/actions/README.md): a leg of ci.yml on Linux (the capabilities and CSP check; fmt, clippy, nextest incl. the Linux adapters against the container's real /proc, doc tests, deny; then the frontend: audit, lint, build, index.html check, unit tests with coverage and once more in another time zone; the Chromium e2e in two parallel legs, `e2e`/`e2eShards`, and the WebKit e2e in a leg of its own, `e2eWebkit`, on main, tags, the nightly and a dispatch with `webkit`) and, for the OS adapters (launch agent, Unix sockets, SIGSTOP/SIGCONT duty cycles, lsof, codesign; the Windows adapters), the Rust gates on Windows and macOS, clippy on Windows too (`windowsClippy`: the Windows adapters are linted where they compile). Commands run from the repo root, one per line of a step; one `cd` holds for the lines after it. Installers, the run-path and seal checks of the packaged binaries, the agent's one real measurement from the built macOS app (apps/dyno/scripts/check-bundle.sh) and the release are .gitea/workflows/dyno-release.yml (a dyno-v* tag, a push to main, the nightly or a manual run), through the shared app-release.yml.",
+  "cargo": ".",
+  "os": [
+    "ubuntu-latest",
+    "windows-latest",
+    "macos-latest"
+  ],
+  "angularDir": "app",
+  "windowsClippy": true,
+  "processPatterns": [
+    "[/\\\\]\\.paddock-ci[/\\\\]target-dyno-app[/\\\\]debug[/\\\\](dyno-ipc-test-child|dyno-test-plugin|dyno-bench)(\\.exe)?( |$)",
+    "[/\\\\]dyno-it-plugins-[A-Za-z0-9]+[/\\\\][^/\\\\]+[/\\\\]plugin(\\.exe)?( |$)"
+  ],
+  "checks": [
+    "cd apps/dyno",
+    "node --test scripts/check-capabilities.test.mjs",
+    "node scripts/check-capabilities.mjs"
+  ],
+  "ui": [
+    "cd apps/dyno/app",
+    "npm audit --omit=dev --audit-level=high",
+    "npx ng lint",
+    "npx ng build",
+    "node ../../../conformance/ci/check-index.mjs dist/dyno-app/browser/index.html",
+    "npx ng test --watch=false --coverage",
+    "TZ=Pacific/Auckland npx ng test --watch=false"
+  ],
+  "e2e": [
+    "cd apps/dyno/app",
+    "PW_PORT=$((4359 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=$E2E_SHARD"
+  ],
+  "e2eShards": 2,
+  "e2eArtifacts": "apps/dyno/app/.angular/playwright-results",
+  "e2eWebkit": [
+    "cd apps/dyno/app",
+    "PW_PORT=4362 npx playwright test --project=webkit --workers=1"
+  ]
 }

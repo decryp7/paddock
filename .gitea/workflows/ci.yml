@@ -240,7 +240,7 @@ jobs:
       # waiver (paddock.waivers.toml).
       - name: Paddock itself (applicable checks)
         working-directory: .
-        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37 --strict C36
+        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39 --strict C36
 
 
   # The shared CI actions' scripts and the dev and host tools (plan X10, X47): every script runs in a scratch folder with a
@@ -639,6 +639,11 @@ jobs:
           app-id: ${{ matrix.app }}
           processes: ${{ matrix.processes }}
           process-patterns: ${{ matrix.process_patterns }}
+          temp-prefix: ${{ matrix.app }}-it-
+
+      # The kept build folder stays within its cap (this job's own folder only, after the builds).
+      - uses: ./.gitea/actions/prune-build-folder
+        if: always() && runner.os != 'Linux'
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()

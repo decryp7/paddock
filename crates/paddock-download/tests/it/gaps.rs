@@ -500,11 +500,10 @@ fn get_bytes_tries_again_when_the_body_is_cut_and_gives_up_when_nothing_answers(
         5000
     );
     assert_eq!(cut.log().len(), 2);
-    // Nothing listens on the port: the connection failure is retried, then reported by host.
-    let closed = {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        format!("http://{}/", listener.local_addr().unwrap())
-    };
+    // The server resets the connection: the failure is retried, then reported by host.
+    // A held port that resets every connection, not a port read off a dropped listener (ADR 0023).
+    let held = paddock_testkit::net::HeldPort::reset();
+    let closed = format!("{}/", held.url());
     assert!(matches!(
         d.get_bytes(&closed, &Fetch::new()),
         Err(DownloadError::Network { .. })

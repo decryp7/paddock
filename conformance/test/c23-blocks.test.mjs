@@ -52,7 +52,7 @@ test('C23 blocks are quiet without --paddock (C28 warns about it)', async () => 
 test('the rules block is docs/rules.md, one level down, links absolute, and carries the app-facing intro', () => {
   const md = renderRules(readFileSync(join(PADDOCK, 'docs', 'rules.md'), 'utf8'));
   assert.match(md, /^## Paddock rules \(binding\)\n\nThe family's binding rules, copied from \[paddock\/docs\/rules\.md\]/);
-  assert.match(md, /\n### Way of working\n1\. \*\*One app at a time/);
+  assert.match(md, /\n### Way of working\n1\. \*\*One large app at a time/);
   assert.doesNotMatch(md, /\n## Way of working/);
   assert.match(md, /\]\(https:\/\/dev\.decryptology\.net\/decryp7\/paddock\/src\/branch\/main\/docs\/research\//);
   assert.throws(() => renderRules('# T\n\nno sections'), /no "## " section/);

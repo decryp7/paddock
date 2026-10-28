@@ -218,8 +218,12 @@ impl PageDriver for ChromiumPage {
 
 #[cfg(test)]
 mod tests {
+    // Used by the Unix-only fake-browser tests below.
+    #[cfg(unix)]
     use super::super::lifecycle::{GoneReason, Lifecycle, Phase};
-    use super::super::sessions::{Finish, Sources, TookPart, QUIT_GRACE};
+    #[cfg(unix)]
+    use super::super::sessions::{Finish, TookPart, QUIT_GRACE};
+    use super::super::sessions::Sources;
     use super::*;
     use std::sync::Mutex;
 
