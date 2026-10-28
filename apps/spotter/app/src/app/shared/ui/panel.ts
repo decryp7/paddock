@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { SuErrorState, SuSkeleton } from '@decryp7/paddock-ui';
+import { SuSkeleton } from '@decryp7/paddock-ui';
 import type { Loadable } from '../../state/loadable';
 
 /**
@@ -8,12 +8,17 @@ import type { Loadable } from '../../state/loadable';
  */
 @Component({
   selector: 'sp-panel',
-  imports: [SuErrorState, SuSkeleton],
+  imports: [SuSkeleton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let s = state();
     @if (s.error && s.value === null) {
-      <pd-error-state [heading]="'Could not load ' + label()" [cause]="s.error.message" [busy]="s.loading" (retry)="retry.emit()" />
+      <!-- Not the shared error state: its Retry is a filled primary, and a page with several failed panels has one primary at most. -->
+      <div class="failed" role="alert">
+        <h3>Could not load {{ label() }}</h3>
+        <p>{{ s.error.message }}</p>
+        <button type="button" class="btn" [disabled]="s.loading" (click)="retry.emit()">Retry</button>
+      </div>
     } @else if (s.value === null) {
       <div class="loading" role="status" aria-live="polite">
         <span class="pd-visually-hidden">Loading {{ label() }}…</span>
@@ -34,6 +39,24 @@ import type { Loadable } from '../../state/loadable';
   styles: `
     :host {
       display: block;
+    }
+    .failed {
+      display: grid;
+      justify-items: start;
+      gap: var(--pd-space-2);
+      padding: var(--pd-space-4);
+      border: 1px solid var(--pd-border);
+      border-radius: var(--pd-radius-card);
+      background: var(--pd-surface-1);
+    }
+    .failed h3 {
+      margin: 0;
+      font-size: var(--pd-text-body);
+      font-weight: var(--pd-weight-semibold);
+    }
+    .failed p {
+      margin: 0;
+      color: var(--pd-text-muted);
     }
     .loading {
       display: grid;

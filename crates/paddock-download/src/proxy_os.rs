@@ -164,13 +164,13 @@ pub(crate) fn parse_windows_registry(text: &str) -> ProxyRules {
 /// position: the first `label : value` line after the heading is the proxy server list, the second the bypass list. "Direct
 /// access" has no such line. A first value that is not a proxy address means no proxy, never a wrong one.
 pub(crate) fn parse_winhttp(text: &str) -> ProxyRules {
+    // French writes a space before every colon, so the heading itself ("Paramètres … actuels :") is a `label :` line with no
+    // value: empty values are skipped before the first two are taken.
     let mut values = text
         .lines()
-        .filter_map(|l| l.split_once(" :").map(|(_, v)| v.trim().to_string()));
-    let Some(servers) = values
-        .next()
-        .filter(|s| !s.is_empty() && looks_like_servers(s))
-    else {
+        .filter_map(|l| l.split_once(" :").map(|(_, v)| v.trim().to_string()))
+        .filter(|v| !v.is_empty());
+    let Some(servers) = values.next().filter(|s| looks_like_servers(s)) else {
         return ProxyRules::none();
     };
     windows_servers(&servers, values.next().as_deref().unwrap_or_default())
@@ -337,6 +337,18 @@ HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settin
         assert!(
             parse_winhttp("Heading:\n    Something :  not an address with spaces\n").is_empty()
         );
+    }
+
+    /// French puts a space before each colon: the heading is a `label :` line without a value, and must not count as the first one.
+    #[test]
+    fn winhttp_output_in_french_is_read_by_position() {
+        let fr = "Paramètres de proxy WinHTTP actuels :\n\n    Serveur(s) proxy :  wh.corp:8080\n    Liste de contournement :  *.corp;<local>\n";
+        let r = parse_winhttp(fr);
+        assert_eq!(r.for_url("https://x.example").unwrap().host(), "wh.corp");
+        assert!(r.for_url("https://a.corp").is_none());
+        let direct =
+            "Paramètres de proxy WinHTTP actuels :\n\n    Accès direct (aucun serveur proxy).\n";
+        assert!(parse_winhttp(direct).is_empty());
     }
 
     /// The tools are started from the system folder, never found through the search path or the current folder.

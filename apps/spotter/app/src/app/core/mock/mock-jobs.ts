@@ -1,4 +1,5 @@
 import type { SuJobSnapshot } from '@decryp7/paddock-ui';
+import { QUIET_ON_SUCCESS_KINDS } from '../../generated/job-kinds';
 import type { CommandError } from '../api.types';
 
 export type Phase = 'fetchingChecksum' | 'checkingExisting' | 'downloading' | 'copying' | 'unpacking' | 'selfTest' | 'finding' | 'settling' | 'checking';
@@ -6,9 +7,6 @@ export type Unit = 'bytes' | 'count';
 
 /** Reports one step of a phase; rejects with `cancelled` when the user cancelled the job. */
 export type Tick = (phase: Phase, label: string, unit: Unit, done: number, total: number | null) => Promise<void>;
-
-/** The jobs whose success is not announced (the Rust side asks for it with `JobContext::quiet_on_success`). */
-export const QUIET_ON_SUCCESS: ReadonlySet<string> = new Set(['sp.test-source', 'sp.check']);
 
 /** Where snapshots go: the shell's Jobs list (a `MemoryJobsBackend.emit` in the browser build, a recorder in tests). */
 export type SnapshotSink = (job: SuJobSnapshot) => void;
@@ -40,7 +38,7 @@ export class MockJobs {
     const id = this.next++;
     const started = Date.now();
     let seq = 0;
-    const emit = (state: SuJobSnapshot extends infer S ? Omit<S, never> : never): void => this.sink({ ...(state as object), id, kind, title, seq: ++seq, elapsedMs: Date.now() - started, cancellable: true, ...(QUIET_ON_SUCCESS.has(kind) ? { quietOnSuccess: true } : {}) } as SuJobSnapshot);
+    const emit = (state: SuJobSnapshot extends infer S ? Omit<S, never> : never): void => this.sink({ ...(state as object), id, kind, title, seq: ++seq, elapsedMs: Date.now() - started, cancellable: true, ...(QUIET_ON_SUCCESS_KINDS.has(kind) ? { quietOnSuccess: true } : {}) } as SuJobSnapshot);
     emit({ state: 'queued' } as never);
     const tick: Tick = async (phase, label, unit, done, total) => {
       if (this.cancelled.has(id)) throw cancelledError();

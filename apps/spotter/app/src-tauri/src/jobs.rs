@@ -28,6 +28,9 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// Every kind (the UI's mock takes its list from here: tests generate `src/app/generated/job-kinds.ts`).
+    pub const ALL: [Kind; 5] = [Kind::Download, Kind::InstallRenderer, Kind::Check, Kind::CheckAll, Kind::TestSource];
+
     /// Whether the success of this kind of job is left out of the notifications: the wizard's source test (it runs again with
     /// every edit of the form) and the check of one watch (the dashboard shows what it found).
     pub fn quiet_on_success(self) -> bool {
@@ -254,6 +257,23 @@ mod tests {
             JobRegistry::with_clock(rec.clone(), Arc::new(paddock_jobs::FakeClock::new()), 0),
             rec,
         )
+    }
+
+    /// `Kind::ALL` lists every kind: the match below stops compiling when a variant is added, and then fails here until it is listed.
+    #[test]
+    fn all_lists_every_kind() {
+        fn index(k: Kind) -> usize {
+            match k {
+                Kind::Download => 0,
+                Kind::InstallRenderer => 1,
+                Kind::Check => 2,
+                Kind::CheckAll => 3,
+                Kind::TestSource => 4,
+            }
+        }
+        let mut seen: Vec<usize> = Kind::ALL.iter().map(|k| index(*k)).collect();
+        seen.sort_unstable();
+        assert_eq!(seen, vec![0, 1, 2, 3, 4]);
     }
 
     #[test]

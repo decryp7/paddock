@@ -46,6 +46,16 @@ describe('Panel', () => {
     expect(f.componentInstance.retries).toBe(1);
   });
 
+  it('offers Retry as a plain button: several failed panels on one page never show several primary actions', () => {
+    const f = make();
+    f.componentInstance.state.set({ value: null, loading: false, error: err });
+    f.detectChanges();
+    const retry = byText(f.nativeElement, 'button', /retry/i) as HTMLButtonElement;
+    expect(retry.classList.contains('btn')).toBe(true);
+    expect(retry.classList.contains('primary')).toBe(false);
+    expect(f.nativeElement.querySelector('[role=alert]')).not.toBeNull();
+  });
+
   it('shows the content, and keeps it with an inline notice when a refresh fails', () => {
     const f = make();
     f.componentInstance.state.set({ value: 'ok', loading: false, error: null });

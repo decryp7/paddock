@@ -40,6 +40,22 @@ fn no_command_is_in_both_tables() {
 
 const REGENERATE: &str = "cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test shell";
 
+/// The UI's mock of the jobs takes the kinds, and which of them are quiet on success, from Rust's list (one source).
+#[test]
+fn the_uis_job_kinds_are_generated_from_the_kinds() {
+    use spotter_app_lib::jobs::Kind;
+    let rows: Vec<String> = Kind::ALL
+        .iter()
+        .map(|k| format!("  {{ slug: '{}', quietOnSuccess: {} }},", k.slug(), k.quiet_on_success()))
+        .collect();
+    let text = format!(
+        "// Generated from `jobs::Kind` by the app's tests. Do not edit: {REGENERATE}.\n\n/** The kinds of job Spotter registers, and whether their success is left out of the notifications. */\nexport const JOB_KINDS = [\n{}\n] as const;\n\n/** The slugs of the kinds whose success is quiet. */\nexport const QUIET_ON_SUCCESS_KINDS: ReadonlySet<string> = new Set(JOB_KINDS.filter((k) => k.quietOnSuccess).map((k) => k.slug));\n",
+        rows.join("\n")
+    );
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/app/generated/job-kinds.ts");
+    sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
+}
+
 /// The UI's command names are generated from the table, so a typo in a dialog contract is a compile error.
 #[test]
 fn the_uis_command_names_are_generated_from_the_table() {
