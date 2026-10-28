@@ -14,7 +14,7 @@
   ],
   "checks": [
     "cd apps/dyno",
-    "node --test scripts/check-capabilities.test.mjs",
+    "node --test scripts/check-capabilities.test.mjs scripts/notices/generate.test.mjs",
     "node scripts/check-capabilities.mjs"
   ],
   "ui": [

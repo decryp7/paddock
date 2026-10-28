@@ -33,6 +33,9 @@
     "targets": ["nsis", "dmg", "app"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
     "externalBin": ["binaries/dyno-agent", "binaries/dyno-helper", "binaries/dyno"],
+    "resources": {
+      "resources/THIRD_PARTY_NOTICES.md": "resources/THIRD_PARTY_NOTICES.md"
+    },
     "category": "Utility",
     "shortDescription": "Measures, explains and tunes your PC",
     "longDescription": "Dyno measures your PC, explains why it is slow and tunes it: a background agent keeps the history, the tray icon shows the load, and nothing changes without your say-so."

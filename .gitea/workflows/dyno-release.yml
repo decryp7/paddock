@@ -58,6 +58,45 @@ jobs:
           tag-pattern: dyno-v*
           nightly-marker: "false"
 
+      # Licences, advisories and sources, and the third-party notices bundled in the installers
+      # (resources/THIRD_PARTY_NOTICES.md) must match the lockfiles: the checks of Debrief's licences job with Dyno's own
+      # generator (apps/dyno/scripts/notices; the shared app-licences.yml expects an app-level package-lock.json, which
+      # the monorepo does not have). They run in this job so a failure stops the gates and the release before anything is
+      # built; the release job's condition is pinned by conformance/test/ci-actions.test.mjs.
+      - if: ${{ steps.plan.outputs.run == 'true' }}
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+      - id: licences-cache
+        if: ${{ steps.plan.outputs.run == 'true' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /usr/local/cargo/registry/index
+            /usr/local/cargo/registry/cache
+            /usr/local/cargo/advisory-dbs
+          key: dyno-licences-${{ runner.os }}-${{ hashFiles('apps/dyno/Cargo.lock') }}
+          restore-keys: dyno-licences-${{ runner.os }}-
+      - name: Licences, advisories and sources
+        if: ${{ steps.plan.outputs.run == 'true' }}
+        working-directory: apps/dyno
+        run: cargo deny --all-features --workspace check
+      - name: Third-party notices are up to date
+        if: ${{ steps.plan.outputs.run == 'true' }}
+        working-directory: apps/dyno
+        run: |
+          node --test scripts/notices/generate.test.mjs
+          scripts/notices/generate.sh
+          git diff --exit-code -- app/src-tauri/resources
+      - uses: actions/cache/save@v4
+        if: ${{ always() && steps.plan.outputs.run == 'true' }}
+        with:
+          path: |
+            /usr/local/cargo/registry/index
+            /usr/local/cargo/registry/cache
+            /usr/local/cargo/advisory-dbs
+          key: dyno-licences-${{ runner.os }}-${{ hashFiles('apps/dyno/Cargo.lock') }}-${{ github.run_id }}
+
   # A tag is gated by exactly Dyno's legs of ci.yml (all of them, both halves, on the tagged commit).
   gates:
     name: gates
@@ -82,12 +121,9 @@ jobs:
       cargo-dir: apps/dyno
       tag-prefix: dyno-
       latest-tag: dyno-latest
-      notes-extra: "**Existing installs:** download this version once by hand. Dyno now updates from the Paddock releases, which a copy installed before this version does not look at."
       cliff-config: apps/dyno/cliff.toml
       cliff-paths: |
         apps/dyno/**
-        crates/**
-        ui/**
       # Every sidecar (bundle.externalBin) is started from the built macOS app with --version, which exits 0 (the old
       # macos-verify-bundle.sh ran the same); dyno-agent, dyno-helper and the dyno command have no --self-test.
       sidecars: |
