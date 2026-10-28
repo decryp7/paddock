@@ -87,14 +87,11 @@
 <rect x="1009.6203880567006" y="180" width="44.6960892731477" height="8" rx="0" fill="url(#hatch)" />
 </g>
 <rect x="470" y="196" width="10" height="10" rx="2" fill="#5e6775" />
-<text x="486" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Counted</text>
-<text x="536.62" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >567.4 GB</text>
-<rect x="605.9" y="196" width="10" height="10" rx="2" fill="url(#hatch)" />
-<text x="621.9" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Hidden space</text>
-<text x="705.8199999999999" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >49.1 GB</text>
-<rect x="768.44" y="196" width="10" height="10" rx="2" fill="#1b1e23" stroke="rgba(255,255,255,0.16)" stroke-width="1" />
-<text x="784.44" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Free</text>
-<text x="815.08" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >378.2 GB</text>
+<text x="486" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" fill="#a0a7b2" style="font-variant-numeric: tabular-nums">Counted<tspan dx="6" fill="#eceef1" font-weight="500">567.4 GB</tspan></text>
+<rect x="612.28" y="196" width="10" height="10" rx="2" fill="url(#hatch)" />
+<text x="628.28" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" fill="#a0a7b2" style="font-variant-numeric: tabular-nums">Hidden space<tspan dx="6" fill="#eceef1" font-weight="500">49.1 GB</tspan></text>
+<rect x="779.64" y="196" width="10" height="10" rx="2" fill="#1b1e23" stroke="rgba(255,255,255,0.16)" stroke-width="1" />
+<text x="795.64" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" fill="#a0a7b2" style="font-variant-numeric: tabular-nums">Free<tspan dx="6" fill="#eceef1" font-weight="500">378.2 GB</tspan></text>
 <rect x="240.5" y="216.5" width="615" height="659" rx="10" fill="#15171b" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
 <defs><path id="lp0_0" d="M550.22,423.02A127.0,127.0 0 0 1 589.10,670.16" fill="none"/><path id="lp0_1" d="M549.97,437.02A113.0,113.0 0 0 1 584.57,656.92" fill="none"/><path id="lp1_0" d="M551.16,369.03A181.0,181.0 0 0 1 664.99,688.11" fill="none"/><path id="lp25_0" d="M603.99,713.69A173.0,173.0 0 0 0 655.14,685.83" fill="none"/><path id="lp38_0" d="M461.95,476.76A113.0,113.0 0 0 0 580.82,658.13" fill="none"/><path id="lp38_1" d="M450.53,467.03A128.0,128.0 0 0 0 585.17,672.48" fill="none"/><path id="lp39_0" d="M390.12,620.73A173.0,173.0 0 0 0 598.24,715.54" fill="none"/><path id="lp61_0" d="M380.34,618.19A181.0,181.0 0 0 1 381.28,479.54" fill="none"/></defs>
 <path d="M548.90,400.00A150,150 0 0 1 594.92,692.47L577.11,637.27A92,92 0 0 0 548.90,458.00Z" fill="#60aeeb" opacity="1.0"/>

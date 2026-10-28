@@ -118,7 +118,9 @@ walk: used bytes from the OS. Before and during the walk, hidden space shows **o
 is the ghost "Not counted yet" = used − measured hidden − counted, which only shrinks while counted segments only
 grow. The remainder ("Snapshots and files Dyno can't read" = used − counted − measured) is known only when the walk
 ends: at that moment the ghost, whatever is left of it, becomes that hatched remainder in one step, so counted +
-measured hidden + remainder = used exactly, and the bar is full. If counted exceeds used − measured (hard links into
+measured hidden + remainder = used exactly, and the bar is full. The job bar does the same: its `Reading folders`
+total is used − measured hidden, so it stands below 100 % by the remainder's share until the walk ends, then snaps to
+done (the phase ends; nothing is ever shown going backwards). If counted exceeds used − measured (hard links into
 another volume, APFS clones counted per copy), the remainder is 0 and the strip says "Counted more than used: clones
 are counted once per copy" instead of a negative value. A cancelled or failed scan keeps the ghost as "Not counted yet".
 
@@ -140,16 +142,16 @@ in the chart. This view is the declared accessible equivalent of the chart (WCAG
 
 | State | Mockup | What it shows |
 |---|---|---|
-| Loading a stored result | `disk-map-skeleton-*` | Skeleton capacity strip, a skeleton ring at final size and 9 skeleton rows (`SuSkeleton`, static in reduced motion); no layout shift |
+| Loading a stored result | `disk-map-skeleton-*` | Skeleton capacity strip, a skeleton ring at final size and 9 skeleton rows (`SuSkeleton`, static in reduced motion); no layout shift. The light skeleton fill must show on the page background too: `--pd-surface-2` (#F0F2F5) on the page (#F4F5F7) is invisible, so the skeleton uses surface-2 mixed 8 % towards `--pd-text` (#E3E6EB) |
 | Not scanned (empty) | `disk-map-empty-*` | Capacity strip from the OS (measured hidden parts only, the rest "Not counted yet"); `SuEmptyState`: 32 px glyph, "See what fills Macintosh HD", one sentence, one primary **Scan Macintosh HD** (a folder is chosen in the picker) |
 | Nothing readable (macOS first run without Full Disk Access) | `disk-map-fda-*` | `SuErrorState` with the lock glyph in danger: "Dyno can't read Macintosh HD", why in one sentence, three numbered steps (System Settings › Privacy & Security › Full Disk Access, turn on Dyno, come back and Retry), **Retry** (primary) and **Open Full Disk Access settings** (opens the pane only, through `x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles`; Dyno changes nothing there and cannot). Shown when the engine reports `FullDiskAccess::Denied` (section 9.13) or when every top folder is unreadable. On Windows and Linux the same state says which folders and why (access denied, needs administrator) |
 | Scanning | `disk-map-scanning-*` | `pd-job` with phase, count, determinate bar, ETA, Cancel; segments appear as folders finish; the ghost shrinks; hidden space shows the measured parts, the remainder "After the scan"; no duplicate-hint count yet |
-| Cancelled | `disk-map-cancelled-*` | Info callout "Partial result: stopped by you at 56 %"; the partial index stays; unfinished folders marked "incomplete" in the list; the ghost stays "Not counted yet"; duplicate hints "need a whole scan"; **Rescan** is the primary |
+| Cancelled | `disk-map-cancelled-*` | Info callout "Partial result: stopped by you at 56 %"; the partial index stays; unfinished folders marked "incomplete" in the list; the ghost stays "Not counted yet"; the snapshots-and-unreadable remainder and duplicate hints say "Needs a whole scan"; **Rescan** is the primary |
 | Done | `disk-map-done-*` | Volume root; hidden space with all three parts and the bar at 100 % |
 | Hover | `disk-map-hover-*` | Path isolation, outline, centre details, path caption, row highlight |
 | Drilled in | `disk-map-drilled-*` | `Developer` as centre, breadcrumb, "Up to Library" in the centre, keyboard focus on `Xcode`, details with Reveal in Finder and Copy path; the hints badge (2) equals the groups under Developer |
 | Table | `disk-map-table-*` | Tree table with two rows open, the focused row, Newest change |
-| Partly unreadable | `disk-map-unreadable-*` | A folder scan of `/Users/alex` without Full Disk Access: warning callout "6 folders could not be read" with **Show the folders**; the parent marked "incomplete"; a "Not readable" list with the reason per folder. Never silent (ADR 0019 rule 6) |
+| Partly unreadable | `disk-map-unreadable-*` | A folder scan of `/Users/alex` without Full Disk Access (so `alex` and `Library` are smaller than in the other mockups): warning callout "6 folders could not be read" with **Open Full Disk Access settings** and **Show the folders**; the incomplete `Library` segment has a dashed warning-colour outline in the chart and "incomplete" in the list; a "Not readable" list with the reason per folder; the strip shows the folder, the rest of its volume and the free space. Never silent (ADR 0019 rule 6) |
 | Volume picker | `disk-map-picker-*` | CDK menu grouped Internal / External / Network; free space per volume ("of the server" for a share); a share that did not answer its `statfs` within the limit shows the warning glyph and "Not answering"; "Choose a folder…" (`⌘O`) |
 | Error: network share dropped | `disk-map-error-network-*` | Danger callout "Scan stopped: nas.local stopped answering", what is kept, what Retry does; header primary **Retry**; the share drawn against what was counted (no ghost in the ring); the strip shows the server volume with "Not counted yet or other data on the server" |
 | Stale | done | Subtitle "scanned 3 days ago"; the result is never refreshed behind the user's back |

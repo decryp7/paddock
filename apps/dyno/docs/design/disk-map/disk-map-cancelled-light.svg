@@ -88,17 +88,13 @@
 <rect x="1021.0328742334373" y="180" width="33.28360309641098" height="8" rx="0" fill="url(#hatch)" />
 </g>
 <rect x="470" y="196" width="10" height="10" rx="2" fill="#868f9d" />
-<text x="486" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Counted</text>
-<text x="536.62" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >325.9 GB</text>
-<rect x="605.9" y="196" width="10" height="10" rx="2" fill="url(#ghost)" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
-<text x="621.9" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Not counted yet</text>
-<text x="725.8" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >253.5 GB</text>
-<rect x="795.0799999999999" y="196" width="10" height="10" rx="2" fill="url(#hatch)" />
-<text x="811.0799999999999" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Hidden space</text>
-<text x="894.9999999999999" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >37.1 GB</text>
-<rect x="957.6199999999999" y="196" width="10" height="10" rx="2" fill="#f0f2f5" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
-<text x="973.6199999999999" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Free</text>
-<text x="1004.2599999999999" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >378.2 GB</text>
+<text x="486" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" fill="#4f5764" style="font-variant-numeric: tabular-nums">Counted<tspan dx="6" fill="#14171c" font-weight="500">325.9 GB</tspan></text>
+<rect x="612.28" y="196" width="10" height="10" rx="2" fill="url(#ghost)" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
+<text x="628.28" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" fill="#4f5764" style="font-variant-numeric: tabular-nums">Not counted yet<tspan dx="6" fill="#14171c" font-weight="500">253.5 GB</tspan></text>
+<rect x="805.44" y="196" width="10" height="10" rx="2" fill="url(#hatch)" />
+<text x="821.44" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" fill="#4f5764" style="font-variant-numeric: tabular-nums">Hidden space<tspan dx="6" fill="#14171c" font-weight="500">37.1 GB</tspan></text>
+<rect x="972.8000000000001" y="196" width="10" height="10" rx="2" fill="#f0f2f5" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
+<text x="988.8000000000001" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" fill="#4f5764" style="font-variant-numeric: tabular-nums">Free<tspan dx="6" fill="#14171c" font-weight="500">378.2 GB</tspan></text>
 <rect x="240.5" y="216.5" width="1175" height="63" rx="10" fill="#ffffff" stroke="rgba(15,20,30,0.10)" stroke-width="1" />
 <rect x="241" y="228" width="3" height="40" rx="1.5" fill="#1f5fa8" />
 <g transform="translate(258,230) scale(0.6666666666666666)"><path d="M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 11v5.5" fill="none" stroke="#1f5fa8" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
@@ -236,6 +232,6 @@
 <rect x="888" y="667" width="10" height="10" rx="2.5" fill="url(#hatch)" stroke="#5f6775" stroke-width="1" />
 <text x="906" y="676" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Snapshots and files Dyno can’t read</text>
 <text x="906" y="693" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >3 local Time Machine snapshots; their size is what the scan can’t explain</text>
-<text x="1324" y="676" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >After the scan</text>
+<text x="1324" y="676" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Needs a whole scan</text>
 <line x1="873" y1="841.5" x2="1415" y2="841.5" stroke="rgba(15,20,30,0.10)"/>
 <text x="888" y="863" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Duplicate hints need a whole scan; they are not shown for a partial one.</text></svg>

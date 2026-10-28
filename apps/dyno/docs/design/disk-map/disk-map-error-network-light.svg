@@ -79,7 +79,7 @@
 <g transform="translate(1340.0,140) scale(0.5833333333333334)"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="#4f5764" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
 <text x="1360.0" y="151" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Table</text>
 <line x1="240" y1="168.5" x2="1416" y2="168.5" stroke="rgba(15,20,30,0.10)"/>
-<text x="240" y="189" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Server volume: 5.70 TB used of 7.80 TB</text>
+<text x="240" y="189" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >5.70 TB used on the server</text>
 <text x="240" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >2.10 TB free on the server</text>
 <rect x="470" y="180" width="946" height="8" rx="4" fill="#f0f2f5" />
 <clipPath id="capclip"><rect x="470" y="180" width="946" height="8" rx="4"/></clipPath><g clip-path="url(#capclip)">
@@ -87,17 +87,13 @@
 <rect x="600.8633333333333" y="180" width="558.4443589743589" height="8" rx="0" fill="url(#ghost)" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
 </g>
 <rect x="470" y="196" width="10" height="10" rx="2" fill="#868f9d" />
-<text x="486" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Counted in Media</text>
-<text x="596.56" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >1.08 TB</text>
-<rect x="659.1800000000001" y="196" width="10" height="10" rx="2" fill="url(#ghost)" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
-<text x="675.1800000000001" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Not counted yet or other data on the server</text>
-<text x="965.5600000000002" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >4.62 TB</text>
-<rect x="1028.18" y="196" width="10" height="10" rx="2" fill="url(#hatch)" />
-<text x="1044.18" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Hidden space</text>
-<text x="1128.1000000000001" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >not reported by network shares</text>
-<rect x="1343.9" y="196" width="10" height="10" rx="2" fill="#f0f2f5" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
-<text x="1359.9" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Free</text>
-<text x="1390.5400000000002" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >2.10 TB</text>
+<text x="486" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" fill="#4f5764" style="font-variant-numeric: tabular-nums">Counted in Media<tspan dx="6" fill="#14171c" font-weight="500">1.08 TB</tspan></text>
+<rect x="662.8" y="196" width="10" height="10" rx="2" fill="url(#ghost)" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
+<text x="678.8" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" fill="#4f5764" style="font-variant-numeric: tabular-nums">Not counted or other server data<tspan dx="6" fill="#14171c" font-weight="500">4.62 TB</tspan></text>
+<rect x="957.3599999999999" y="196" width="10" height="10" rx="2" fill="url(#hatch)" />
+<text x="973.3599999999999" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" fill="#4f5764" style="font-variant-numeric: tabular-nums">Hidden space<tspan dx="6" fill="#14171c" font-weight="500">not reported</tspan></text>
+<rect x="1158.32" y="196" width="10" height="10" rx="2" fill="#f0f2f5" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
+<text x="1174.32" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" fill="#4f5764" style="font-variant-numeric: tabular-nums">Free<tspan dx="6" fill="#14171c" font-weight="500">2.10 TB</tspan></text>
 <rect x="240.5" y="216.5" width="1175" height="63" rx="10" fill="#ffffff" stroke="rgba(15,20,30,0.10)" stroke-width="1" />
 <rect x="241" y="228" width="3" height="40" rx="1.5" fill="#c42b2b" />
 <g transform="translate(258,230) scale(0.6666666666666666)"><path d="M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM9 9l6 6M15 9l-6 6" fill="none" stroke="#c42b2b" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
