@@ -43,9 +43,9 @@ import { TimeField } from '../../shared/time-field';
           <div class="srow" [class.off]="!quiet().enabled">
             <div class="txt"><span class="name">From and until</span><span class="help">An end before the start runs past midnight.</span></div>
             <div class="times">
-              <dy-time-field label="Quiet hours start" shown="Start" [disabled]="!quiet().enabled" [value]="clock(quiet().startMinute)" (timeChange)="setTime('startMinute', $event)" />
+              <dy-time-field label="Start of quiet hours" shown="Start" [disabled]="!quiet().enabled" [value]="clock(quiet().startMinute)" (timeChange)="setTime('startMinute', $event)" />
               <span class="faint" aria-hidden="true">to</span>
-              <dy-time-field label="Quiet hours end" shown="End" [disabled]="!quiet().enabled" [value]="clock(quiet().endMinute)" (timeChange)="setTime('endMinute', $event)" />
+              <dy-time-field label="End of quiet hours" shown="End" [disabled]="!quiet().enabled" [value]="clock(quiet().endMinute)" (timeChange)="setTime('endMinute', $event)" />
             </div>
           </div>
           <div class="srow" [class.off]="!quiet().enabled">

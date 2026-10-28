@@ -3,13 +3,13 @@ import { TimeField } from './time-field';
 
 function make(value: string, disabled = false) {
   const f = TestBed.createComponent(TimeField);
-  f.componentRef.setInput('label', 'Quiet hours start');
+  f.componentRef.setInput('label', 'Start of quiet hours');
   f.componentRef.setInput('value', value);
   f.componentRef.setInput('disabled', disabled);
   const emitted: string[] = [];
   f.componentInstance.timeChange.subscribe((t) => emitted.push(t));
   f.detectChanges();
-  const input = (f.nativeElement as HTMLElement).querySelector<HTMLInputElement>('input[aria-label="Quiet hours start"]')!;
+  const input = (f.nativeElement as HTMLElement).querySelector<HTMLInputElement>('input[aria-label="Start of quiet hours"]')!;
   const type = (text: string) => {
     input.value = text;
     input.dispatchEvent(new Event('input'));
@@ -22,7 +22,7 @@ describe('TimeField', () => {
   it('shows the time in 24 hours under its label', () => {
     const { input, el } = make('22:00');
     expect(input.value).toBe('22:00');
-    expect(el.querySelector('mat-label')?.textContent).toContain('Quiet hours start');
+    expect(el.querySelector('mat-label')?.textContent).toContain('Start of quiet hours');
   });
 
   it('emits a typed time as HH:MM', () => {

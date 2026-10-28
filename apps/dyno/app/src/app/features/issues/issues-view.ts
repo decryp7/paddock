@@ -1,4 +1,3 @@
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import type { AppTally, Issue, IssueKind } from '../../core/api.types';
 import { ThemeService } from '../../core/theme';
@@ -23,12 +22,13 @@ import {
   trendText,
   unavailableSources,
 } from './issues-model';
-import { MatButton } from '@angular/material/button';
-import { MatFormField, MatPrefix } from '@angular/material/form-field';
-import { MatInput } from '@angular/material/input';
+import { MatButton, MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
+import { SearchField } from '../../shared/search-field';
+import { MatMenuModule } from '@angular/material/menu';
+import { openContextMenu } from '../../shared/context-menu';
 
 /**
  * What the operating system recorded going wrong: a stability score for today and the last days, the apps and kinds with
@@ -37,7 +37,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
  */
 @Component({
   selector: 'dy-issues-view',
-  imports: [FullTextTip, MatTooltip, SuSegmentedControl, MatFormField, MatInput, MatPrefix, MatButton, AsyncState, Chart, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [MatMenuModule, MatIconButton, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, MatButton, AsyncState, Chart, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -94,12 +94,10 @@ import { FullTextTip } from '../../shared/full-text-tip';
         }
 
         <div class="bar" role="group" aria-label="Filters">
-          <mat-form-field class="search"><dy-icon matPrefix name="search" /><input matInput type="search" placeholder="Search apps and messages" aria-label="Search issues" [value]="filter().search" (input)="setFilter({ search: $any($event.target).value })" /></mat-form-field>
+          <dy-search-field label="Search issues" placeholder="Search apps and messages" [value]="filter().search" (valueChange)="setFilter({ search: $event })" />
           <pd-segmented-control label="Period" [options]="windowSegs" [value]="store.days() + ''" (valueChange)="store.setDays(+$event)" />
           @if (filter().app || filter().kind) {
-            <button type="button" class="chip-btn" aria-label="Clear the filter" (click)="clear()">
-              {{ filter().app ?? kindLabel(filter().kind!) }} <dy-icon name="close" />
-            </button>
+            <button type="button" matButton="outlined" [attr.aria-label]="'Clear the filter ' + (filter().app ?? kindLabel(filter().kind!))" (click)="clear()">{{ filter().app ?? kindLabel(filter().kind!) }} <dy-icon name="close" /></button>
           }
           <span class="grow"></span>
           <span class="faint src">{{ sourcesText() }}</span>
@@ -121,17 +119,17 @@ import { FullTextTip } from '../../shared/full-text-tip';
                     @if (r.kind === 'day') {
                       <tr class="day">
                         <td colspan="5">
-                          <button type="button" class="chev" [attr.aria-expanded]="r.open" [attr.aria-label]="(r.open ? 'Collapse ' : 'Expand ') + r.label" (click)="toggleDay(r.key)"><dy-icon [name]="r.open ? 'chevron-down' : 'chevron-right'" /></button>
+                          <button type="button" matIconButton class="chev" [attr.aria-expanded]="r.open" [attr.aria-label]="(r.open ? 'Collapse ' : 'Expand ') + r.label" (click)="toggleDay(r.key)"><dy-icon [name]="r.open ? 'chevron-down' : 'chevron-right'" /></button>
                           <strong>{{ r.label }}</strong><span class="faint cnt">{{ plural(r.count, 'issue') }}</span>
                         </td>
                       </tr>
                     } @else {
-                      <tr class="row" tabindex="0" [attr.data-id]="r.issue.id" [class.sel]="selectedId() === r.issue.id" [cdkContextMenuTriggerFor]="menu" [cdkContextMenuTriggerData]="{ issue: r.issue }" (click)="select(r.issue)" (keydown.enter)="select(r.issue)" (keydown.shift.f10)="select(r.issue)" (contextmenu)="select(r.issue)">
+                      <tr class="row" tabindex="0" [attr.data-id]="r.issue.id" [class.sel]="selectedId() === r.issue.id" (click)="select(r.issue)" (keydown.enter)="select(r.issue)" (keydown.shift.f10)="select(r.issue)" (contextmenu)="select(r.issue); openContextMenu($event, menuAnchor, menuTrigger, { issue: r.issue })">
                         <td class="time num muted">{{ clock(r.issue.at) }}</td>
                         <td class="kind"><span class="dot" [attr.data-tone]="dotTone(r.issue)" aria-hidden="true"></span>{{ kindLabel(r.issue.kind) }}</td>
                         <td><span class="ell" [dyFullText]="subject(r.issue)">{{ subject(r.issue) }}</span></td>
-                        <td class="muted"><span class="ell" [matTooltip]="r.issue.evidence">{{ r.issue.evidence || r.issue.title }}</span></td>
-                        <td class="acts"><button type="button" class="ib" [attr.aria-label]="'Copy details of ' + subject(r.issue)" matTooltip="Copy details" (click)="copy(r.issue, $event)"><dy-icon name="copy" /></button></td>
+                        <td class="muted"><span class="ell" [dyFullText]="r.issue.evidence">{{ r.issue.evidence || r.issue.title }}</span></td>
+                        <td class="acts"><button type="button" matIconButton [attr.aria-label]="'Copy details of ' + subject(r.issue)" matTooltipPosition="left" [matTooltip]="'Copy details of ' + subject(r.issue)" (click)="copy(r.issue, $event)"><dy-icon name="copy" /></button></td>
                       </tr>
                     }
                   }
@@ -144,7 +142,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
             <aside class="detail" tabindex="-1" aria-label="Issue details" (keydown.escape)="selectedId.set(null)">
               <div class="dhead">
                 <strong>{{ s.title }}</strong>
-                <button type="button" class="ib" aria-label="Close details" (click)="selectedId.set(null)"><dy-icon name="close" /></button>
+                <button type="button" matIconButton aria-label="Close details" (click)="selectedId.set(null)"><dy-icon name="close" /></button>
               </div>
               <dl>
                 <dt>When</dt><dd>{{ when(s) }}</dd>
@@ -166,17 +164,19 @@ import { FullTextTip } from '../../shared/full-text-tip';
       }
     </dy-async>
 
-    <ng-template #menu let-issue="issue">
-      <div class="menu" cdkMenu aria-label="Issue actions">
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copy(issue)"><dy-icon name="copy" /> Copy details</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchWeb(issue)"><dy-icon name="search" /> Search the web…</button>
-        @if (issue.app) { <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="setFilter({ app: issue.app })"><dy-icon name="filter" /> Only this app</button> }
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="setFilter({ kind: issue.kind })"><dy-icon name="filter" /> Only this kind</button>
-      </div>
-    </ng-template>
+    <span #menuAnchor class="dy-ctx-anchor" aria-hidden="true" #menuTrigger="matMenuTrigger" [matMenuTriggerFor]="menu"></span>
+    <mat-menu #menu="matMenu" aria-label="Issue actions">
+      <ng-template matMenuContent let-issue="issue">
+        <button mat-menu-item (click)="copy(issue)"><dy-icon name="copy" /> Copy details</button>
+        <button mat-menu-item (click)="searchWeb(issue)"><dy-icon name="search" /> Search the web…</button>
+        @if (issue.app) { <button mat-menu-item (click)="setFilter({ app: issue.app })"><dy-icon name="filter" /> Only this app</button> }
+        <button mat-menu-item (click)="setFilter({ kind: issue.kind })"><dy-icon name="filter" /> Only this kind</button>
+      </ng-template>
+    </mat-menu>
   `,
   styles: `
     :host { display: grid; gap: var(--sp-3); align-content: start; }
+    .chev { width: 22px; height: 22px; padding: 0; flex: none; --icon-size: 14px; }
     dy-async { display: grid; gap: var(--sp-3); }
     .hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-2) var(--sp-6); align-items: center; padding: var(--sp-4) var(--sp-5); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); }
     .score { display: flex; align-items: center; gap: var(--sp-4); min-width: 200px; }
@@ -199,11 +199,6 @@ import { FullTextTip } from '../../shared/full-text-tip';
     .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; min-height: 44px; }
     .grow { flex: 1; }
     .src { font-size: var(--fs-xs); }
-    .search { position: relative; display: block; flex: 1 1 200px; min-width: 160px; max-width: 320px; }
-    .search dy-icon { position: absolute; left: 8px; top: 7px; --icon-size: 15px; color: var(--text-3); }
-    .search input { padding-left: 30px; width: 100%; }
-    .chip-btn { display: inline-flex; align-items: center; gap: 4px; height: var(--control-h); max-width: 260px; padding: 0 8px 0 10px; border: 1px solid var(--accent); border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent-text); font: var(--fw-medium) var(--fs-sm) / 1 var(--font-sans); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .chip-btn dy-icon { --icon-size: 13px; }
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 340px; }
     .tablewrap { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); overflow: auto; max-height: 560px; min-width: 0; }
@@ -218,17 +213,12 @@ import { FullTextTip } from '../../shared/full-text-tip';
     tr.day td { height: 32px; background: var(--surface-inset); border-bottom: 1px solid var(--border-subtle); }
     .cnt { margin-left: var(--sp-2); }
     tr.day strong { font-weight: var(--fw-semibold); }
-    .chev { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 0; background: none; color: var(--text-3); border-radius: var(--r-sm); cursor: pointer; vertical-align: middle; }
-    .chev:hover { background: var(--surface-active); color: var(--text-1); }
     tr.row { cursor: default; }
     tr.row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
     tr.row.sel td { background: var(--accent-soft); }
     tr.row.sel td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     .issues td.acts { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); text-align: right; }
     tr.row:hover td.acts, tr.row:focus-within td.acts, tr.row.sel td.acts { opacity: 1; }
-    .ib { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
-    .ib:hover { background: var(--surface-active); color: var(--text-1); }
-    .ib dy-icon { --icon-size: 15px; }
     .none { display: grid; justify-items: center; gap: var(--sp-2); padding: var(--sp-8) var(--sp-5); text-align: center; color: var(--text-3); }
     .none dy-icon { --icon-size: 32px; }
     .none strong { color: var(--text-1); font-size: 15px; font-weight: var(--fw-semibold); }
@@ -246,6 +236,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
   `,
 })
 export class IssuesView {
+  protected readonly openContextMenu = openContextMenu;
   protected readonly store = inject(IssuesStore);
   private readonly theme = inject(ThemeService);
   private readonly notifier = inject(Notifier);

@@ -1,5 +1,4 @@
 import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import type { BackupStatus } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -9,9 +8,11 @@ import { Notifier } from '../../shared/notifier';
 import { injectNow } from '../../shared/now';
 import { BackupStore } from '../../state/backup.store';
 import { BACKUP_STATE_LABEL, type DotTone, checkedText, heroTone, hue, initial, lastBackupText, stateTone } from './backup-model';
-import { MatButton } from '@angular/material/button';
+import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
+import { MatMenuModule } from '@angular/material/menu';
+import { openContextMenu } from '../../shared/context-menu';
 
 /**
  * Backup health: whether the backups of the tools Dyno can read (Time Machine, Windows Backup, File History, restic, Borg,
@@ -20,7 +21,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
  */
 @Component({
   selector: 'dy-backup-page',
-  imports: [FullTextTip, MatTooltip, MatButton, AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [MatMenuModule, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -62,7 +63,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
                   </thead>
                   <tbody>
                     @for (s of store.statuses(); track s.tool) {
-                      <tr class="row" tabindex="0" [attr.data-tool]="s.tool" [class.sel]="selectedTool() === s.tool" [cdkContextMenuTriggerFor]="menu" [cdkContextMenuTriggerData]="{ status: s }" (click)="select(s)" (keydown.enter)="select(s)" (keydown.shift.f10)="select(s)" (contextmenu)="select(s)">
+                      <tr class="row" tabindex="0" [attr.data-tool]="s.tool" [class.sel]="selectedTool() === s.tool" (click)="select(s)" (keydown.enter)="select(s)" (keydown.shift.f10)="select(s)" (contextmenu)="select(s); openContextMenu($event, menuAnchor, menuTrigger, { status: s })">
                         <td class="tool"><span class="tile" aria-hidden="true" [style.background]="tile(s.name)">{{ initial(s.name) }}</span><strong>{{ s.name }}</strong></td>
                         <td class="state">
                           <span class="dot" [attr.data-tone]="dot(s)" aria-hidden="true"></span>
@@ -70,7 +71,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
                         </td>
                         <td class="when num muted" [matTooltip]="fullDate(s)">{{ last(s) }}</td>
                         <td class="muted"><span class="ell" [dyFullText]="s.summary">{{ s.summary }}</span></td>
-                        <td class="acts"><button type="button" class="ib" [attr.aria-label]="'Details of ' + s.name" matTooltip="Details" (click)="select(s); $event.stopPropagation()"><dy-icon name="info" /></button></td>
+                        <td class="acts"><button type="button" matIconButton [attr.aria-label]="'Details of ' + s.name" matTooltipPosition="left" [matTooltip]="'Details of ' + s.name" (click)="select(s); $event.stopPropagation()"><dy-icon name="info" /></button></td>
                       </tr>
                     }
                   </tbody>
@@ -81,7 +82,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
                 <aside class="detail" tabindex="-1" aria-label="Backup details" >
                   <div class="dhead">
                     <strong>{{ s.name }}</strong>
-                    <button type="button" class="ib" aria-label="Close details" (click)="close()"><dy-icon name="close" /></button>
+                    <button type="button" matIconButton aria-label="Close details" (click)="close()"><dy-icon name="close" /></button>
                   </div>
                   <p class="state-line"><span class="dot" [attr.data-tone]="dot(s)" aria-hidden="true"></span>{{ label(s) }}</p>
                   <dl>
@@ -104,12 +105,13 @@ import { FullTextTip } from '../../shared/full-text-tip';
       </dy-async>
     </div>
 
-    <ng-template #menu let-status="status">
-      <div class="menu" cdkMenu aria-label="Backup actions">
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="select(status)"><dy-icon name="info" /> Details</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copy(status)"><dy-icon name="copy" /> Copy summary</button>
-      </div>
-    </ng-template>
+    <span #menuAnchor class="dy-ctx-anchor" aria-hidden="true" #menuTrigger="matMenuTrigger" [matMenuTriggerFor]="menu"></span>
+    <mat-menu #menu="matMenu" aria-label="Backup actions">
+      <ng-template matMenuContent let-status="status">
+        <button mat-menu-item (click)="select(status)"><dy-icon name="info" /> Details</button>
+        <button mat-menu-item (click)="copy(status)"><dy-icon name="copy" /> Copy summary</button>
+      </ng-template>
+    </mat-menu>
   `,
   styles: `
     :host { display: block; }
@@ -144,9 +146,6 @@ import { FullTextTip } from '../../shared/full-text-tip';
     tbody tr:last-child td { border-bottom: 0; }
     td.acts { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
     tr.row:hover td.acts, tr.row:focus-within td.acts, tr.row.sel td.acts { opacity: 1; }
-    .ib { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
-    .ib:hover { background: var(--surface-active); color: var(--text-1); }
-    .ib dy-icon { --icon-size: 15px; }
     .none { display: grid; justify-items: center; gap: var(--sp-2); padding: var(--sp-8) var(--sp-5); text-align: center; color: var(--text-3); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); }
     .none dy-icon { --icon-size: 32px; }
     .none strong { color: var(--text-1); font-size: 15px; font-weight: var(--fw-semibold); }
@@ -168,6 +167,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
   `,
 })
 export class BackupPage implements OnInit {
+  protected readonly openContextMenu = openContextMenu;
   protected readonly store = inject(BackupStore);
   private readonly notifier = inject(Notifier);
   private readonly ports = inject(SHELL_PORTS);

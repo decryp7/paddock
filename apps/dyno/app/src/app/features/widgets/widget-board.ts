@@ -107,8 +107,8 @@ import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
     .cell { position: relative; min-width: 0; display: grid; grid-template-rows: 1fr auto; gap: var(--sp-1); }
     .cell dy-widget { height: 100%; }
     .editing .cell dy-widget { outline: 1px dashed var(--border-strong); outline-offset: 2px; }
-    .edit { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--overlay-bg); box-shadow: var(--shadow-2); }
-    .edit pd-segmented-control { margin: 0 2px; } .edit pd-select { width: 140px; max-width: 100%; }
+    .edit { display: flex; flex-wrap: nowrap; min-width: 0; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--overlay-bg); box-shadow: var(--shadow-2); }
+    .edit pd-segmented-control { margin: 0 2px; } .edit pd-select { flex: 1 1 4rem; min-width: 3.5rem; width: auto; } .edit .spacer { flex: 0 0 0; }
     .grab { cursor: grab; }
     .cdk-drag-preview { box-shadow: var(--shadow-3); border-radius: var(--r-lg); }
     .cdk-drag-placeholder { opacity: 0.35; }

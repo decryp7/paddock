@@ -265,6 +265,19 @@ test.describe('widgets', () => {
 });
 
 test.describe('counters', () => {
+  test('row actions can be clicked one after another: their tooltips never cover the next button', async ({ page }) => {
+    await page.goto(url('/counters'));
+    await page.getByRole('searchbox', { name: 'Search counters' }).fill('bytes');
+    await expect(page.getByRole('list', { name: 'Search results' })).toBeVisible();
+    const results = page.getByRole('list', { name: 'Search results' });
+    // Real pointer clicks, no force: a tooltip of one row action must not sit over the next one.
+    await results.getByRole('button', { name: /^Chart Bytes Received \(en0\)/ }).click();
+    await results.getByRole('button', { name: /^Chart Bytes Sent \(en0\)/ }).click();
+    await results.getByRole('button', { name: /^Chart Bytes Received \(lo0\)/ }).click();
+    await expect(results.getByRole('button', { name: /^Stop charting/ })).toHaveCount(3);
+  });
+
+
   test('browse an object, chart a counter with the events marked, pin it and put it on the dashboard', async ({ page }) => {
     await page.goto(url('/counters'));
     await expect(page.getByRole('heading', { level: 1, name: 'Counters' })).toBeVisible();
@@ -321,7 +334,7 @@ test.describe('network', () => {
     const grid = page.getByRole('grid', { name: 'Listening ports' });
     await expect(grid.getByText('Exposed').first()).toBeVisible();
     await expect(grid.getByText('postgres')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Show loopback' }).click();
+    await page.getByRole('checkbox', { name: 'Show loopback' }).click();
     await expect(grid.getByText('postgres').first()).toBeVisible();
     await grid.focus();
     await page.keyboard.press('ArrowDown');
@@ -507,15 +520,15 @@ test.describe('startup filter', () => {
     await expect(rows.first()).toBeVisible();
     await expect(section.getByText(/Showing \d+ of \d+ entries\./)).toBeVisible();
     const before = await rows.count();
-    const hideSystem = section.getByRole('button', { name: /Hide system entries/ });
-    await expect(hideSystem).toHaveAttribute('aria-pressed', 'false');
+    const hideSystem = section.getByRole('checkbox', { name: /Hide system entries/ });
+    await expect(hideSystem).not.toBeChecked();
     await hideSystem.click();
-    await expect(hideSystem).toHaveAttribute('aria-pressed', 'true');
+    await expect(hideSystem).toBeChecked();
     await expect(rows).toHaveCount(before - 1);
     await expect(section.getByText(/Showing \d+ of \d+ entries, 1 hidden by the filter/)).toBeVisible();
     await page.reload();
-    await expect(page.getByRole('region', { name: 'Start-up items' }).getByRole('button', { name: /Hide system entries/ })).toHaveAttribute('aria-pressed', 'true');
-    await page.getByRole('region', { name: 'Start-up items' }).getByRole('button', { name: /Hide signed apps/ }).click();
+    await expect(page.getByRole('region', { name: 'Start-up items' }).getByRole('checkbox', { name: /Hide system entries/ })).toBeChecked();
+    await page.getByRole('region', { name: 'Start-up items' }).getByRole('checkbox', { name: /Hide signed apps/ }).click();
     // The demo list has no unsigned entry, so hiding both leaves nothing, and the page says why instead of claiming nothing starts.
     await expect(page.getByRole('region', { name: 'Start-up items' }).getByText('Everything is hidden by the filter')).toBeVisible();
   });

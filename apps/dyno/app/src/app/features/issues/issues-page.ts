@@ -31,7 +31,7 @@ type View = 'issues' | 'unusual';
           <button type="button" matButton="text" [disabled]="issues.exporting() || !issues.overview()" (click)="issues.exportForDebrief()">
             <dy-icon name="file" /> {{ issues.exporting() ? 'Saving…' : 'Export for Debrief…' }}
           </button>
-          <button type="button" matIconButton aria-label="Read the system logs now" matTooltip="Read the system logs now" [disabled]="issues.rescanning()" (click)="issues.rescan()">
+          <button type="button" matIconButton aria-label="Read the system logs now" matTooltipPosition="left" [matTooltip]="'Read the system logs now'" [disabled]="issues.rescanning()" (click)="issues.rescan()">
             <dy-icon name="refresh" [class.spin]="issues.rescanning()" />
           </button>
         }

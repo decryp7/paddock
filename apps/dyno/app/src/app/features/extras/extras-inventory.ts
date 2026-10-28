@@ -1,4 +1,3 @@
-import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import type { InventoryFormat } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -9,22 +8,22 @@ import { fileName } from '../../state/diagnostics.store';
 import { filterSoftware, hue, initial } from './extras-model';
 import { EXTRAS_STYLES } from './extras-styles';
 import { MatButton } from '@angular/material/button';
-import { MatFormField, MatPrefix } from '@angular/material/form-field';
-import { MatInput } from '@angular/material/input';
 import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
+import { SearchField } from '../../shared/search-field';
+import { MatMenuModule } from '@angular/material/menu';
 
 /** The installed software, searchable, and a report of the hardware and software saved through the OS save dialog. */
 @Component({
   selector: 'dy-extras-inventory',
-  imports: [FullTextTip, MatTooltip, MatFormField, MatInput, MatPrefix, MatButton, AsyncState, Icon, CdkMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [MatMenuModule, SearchField, FullTextTip, MatTooltip, MatButton, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Software">
-      <mat-form-field class="search"><dy-icon matPrefix name="search" /><input matInput type="search" placeholder="Search installed software" aria-label="Search installed software" [value]="search()" (input)="search.set($any($event.target).value)" /></mat-form-field>
+      <dy-search-field label="Search installed software" placeholder="Search installed software" [(value)]="search" />
       <span class="faint muted">{{ count() }}</span>
       <span class="grow"></span>
-      <button type="button" matButton="outlined" aria-haspopup="menu" [disabled]="store.exporting()" [cdkMenuTriggerFor]="exportMenu"><dy-icon name="file" /> {{ store.exporting() ? 'Saving…' : 'Export report…' }}</button>
+      <button type="button" matButton="outlined" aria-haspopup="menu" [disabled]="store.exporting()" [matMenuTriggerFor]="exportMenu"><dy-icon name="file" /> {{ store.exporting() ? 'Saving…' : 'Export report…' }}</button>
     </div>
 
     @if (store.saveError(); as e) {
@@ -51,7 +50,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
                   <tr>
                     <td><span class="tile" aria-hidden="true" [style.background]="tile(i.name)">{{ initial(i.name) }}</span><span class="nm" [dyFullText]="i.name">{{ i.name }}</span></td>
                     <td class="num">{{ i.version ?? '—' }}</td>
-                    <td class="muted"><span class="ell" [matTooltip]="i.publisher ?? ''">{{ i.publisher ?? '—' }}</span></td>
+                    <td class="muted"><span class="ell" [dyFullText]="i.publisher ?? ''">{{ i.publisher ?? '—' }}</span></td>
                   </tr>
                 }
               </tbody>
@@ -62,12 +61,12 @@ import { FullTextTip } from '../../shared/full-text-tip';
       }
     </dy-async>
 
-    <ng-template #exportMenu>
-      <div class="menu" cdkMenu aria-label="Export report">
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="export('markdown')"><dy-icon name="file" /> Markdown (readable)</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="export('json')"><dy-icon name="file" /> JSON (for other tools)</button>
-      </div>
-    </ng-template>
+    <mat-menu #exportMenu="matMenu" aria-label="Export report">
+      <ng-template matMenuContent>
+        <button mat-menu-item (click)="export('markdown')"><dy-icon name="file" /> Markdown (readable)</button>
+        <button mat-menu-item (click)="export('json')"><dy-icon name="file" /> JSON (for other tools)</button>
+      </ng-template>
+    </mat-menu>
   `,
   styles: [EXTRAS_STYLES, `.w-ver { width: 200px; } .nm { vertical-align: middle; }`],
 })

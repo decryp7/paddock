@@ -56,7 +56,7 @@ import { SUBJECT_ICON, SUBJECT_WORD, confidenceText, historyProgress, outcomeKin
                   @case ('tooLittleHistory') {
                     @if (history(f.outcome); as h) {
                       <div class="progress">
-                        <mat-progress-bar class="bar" mode="determinate" aria-label="History collected" [value]="progress(f.outcome)" />
+                        <mat-progress-bar class="bar" mode="determinate" aria-label="History collected" [value]="progressPercent(f.outcome)" [attr.aria-valuetext]="'Have ' + h.haveDays + ' of ' + h.needDays + ' days'" />
                         <span class="num">Have {{ h.haveDays }} of {{ h.needDays }} days</span>
                       </div>
                     }
@@ -145,6 +145,7 @@ export class LifespanPage implements OnInit {
     const h = this.history(o);
     return h ? historyProgress(h) : 0;
   };
+  protected progressPercent = (o: LifeOutcome) => Math.round(this.progress(o));
   protected reason = (o: LifeOutcome) => (typeof o === 'object' && 'unavailable' in o ? o.unavailable.reason : '');
 
   ngOnInit(): void {

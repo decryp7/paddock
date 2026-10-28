@@ -44,7 +44,7 @@ const NEVER = [
           <dy-icon name="check" />
           <span>Saved {{ plural(s.files, 'file') }} ({{ bytes(s.bytes) }}) to</span>
           <code class="path" tabindex="0">{{ s.path }}</code>
-          <button type="button" matIconButton aria-label="Copy the saved path" matTooltip="Copy path" (click)="copy(s.path)"><dy-icon name="copy" /></button>
+          <button type="button" matIconButton aria-label="Copy the saved path" matTooltipPosition="left" [matTooltip]="'Copy the saved path'" (click)="copy(s.path)"><dy-icon name="copy" /></button>
         </div>
       }
 
@@ -60,7 +60,7 @@ const NEVER = [
             <section class="card files" aria-label="Files in the bundle">
               <div class="card-head">
                 <h2>Files</h2>
-                <button type="button" matIconButton class="refresh" aria-label="Refresh the preview" matTooltip="Refresh" (click)="store.loadPreview()"><dy-icon name="refresh" /></button>
+                <button type="button" matIconButton class="refresh" aria-label="Refresh the preview" matTooltipPosition="left" [matTooltip]="'Refresh the preview'" (click)="store.loadPreview()"><dy-icon name="refresh" /></button>
               </div>
               <table class="table">
                 <caption class="visually-hidden">Files in the diagnostics bundle</caption>

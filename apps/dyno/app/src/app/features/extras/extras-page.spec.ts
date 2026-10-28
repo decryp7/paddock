@@ -304,8 +304,8 @@ describe('dy-extras-page', () => {
       expect(el.textContent).toContain('never limits anything you click');
       expect(el.querySelector('.status')!.textContent).toContain('Closed now. Next window opens');
       expect(el.querySelectorAll('li.win')).toHaveLength(2);
-      expect(el.querySelector<HTMLInputElement>('input[aria-label="Window 1 starts"]')!.value).toBe('22:00');
-      expect(el.querySelector<HTMLInputElement>('input[aria-label="Window 1 ends"]')!.value).toBe('02:00');
+      expect(el.querySelector<HTMLInputElement>('input[aria-label="From, window 1"]')!.value).toBe('22:00');
+      expect(el.querySelector<HTMLInputElement>('input[aria-label="To, window 1"]')!.value).toBe('02:00');
       expect(el.textContent).toContain('Mon to Fri, 22:00 to 02:00 the next day');
       expect(el.querySelectorAll('button[matButton="filled"]')).toHaveLength(1);
       expect(btn(el, 'Save windows').disabled).toBe(true);
@@ -319,14 +319,14 @@ describe('dy-extras-page', () => {
       await settle(f);
       expect(day(0, 'Sat').getAttribute('aria-pressed')).toBe('true');
       expect(btn(el, 'Save windows').disabled).toBe(false);
-      const start = el.querySelector<HTMLInputElement>('input[aria-label="Window 1 starts"]')!;
+      const start = el.querySelector<HTMLInputElement>('input[aria-label="From, window 1"]')!;
       start.value = '21:30';
       start.dispatchEvent(new Event('input'));
       start.value = 'bad';
       start.dispatchEvent(new Event('input'));
       await settle(f);
       expect(el.textContent).toContain('21:30 to 02:00');
-      const end = el.querySelector<HTMLInputElement>('input[aria-label="Window 1 ends"]')!;
+      const end = el.querySelector<HTMLInputElement>('input[aria-label="To, window 1"]')!;
       end.value = '21:30';
       end.dispatchEvent(new Event('input'));
       await settle(f);

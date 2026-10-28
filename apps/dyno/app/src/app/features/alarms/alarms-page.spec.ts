@@ -26,7 +26,7 @@ const text = (el: Element) => (el.textContent ?? '').replace(/\s+/g, ' ').trim()
 const button = (root: ParentNode, label: string | RegExp) =>
   [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => (typeof label === 'string' ? text(b) === label || b.getAttribute('aria-label') === label : label.test(text(b)) || label.test(b.getAttribute('aria-label') ?? '')));
 const menuItem = (label: string | RegExp) =>
-  [...document.querySelectorAll<HTMLElement>('[cdkMenuItem], .menu-item')].find((b) => (typeof label === 'string' ? text(b) === label : label.test(text(b))));
+  [...document.querySelectorAll<HTMLElement>('[mat-menu-item]')].find((b) => (typeof label === 'string' ? text(b) === label : label.test(text(b))));
 const tab = async (f: Parameters<typeof settle>[0], el: HTMLElement, name: string) => {
   button(el, name)!.click();
   await settle(f);
@@ -421,7 +421,7 @@ describe('dy-alarms-page, Rules', () => {
     sw('Desktop notifications').click();
     await settle(f);
     expect(settings.settings()!.notifications).toBe(!before);
-    const start = el.querySelector<HTMLInputElement>('[aria-label="Quiet hours start"]')!;
+    const start = el.querySelector<HTMLInputElement>('[aria-label="Start of quiet hours"]')!;
     expect(start.disabled).toBe(true);
     sw('Quiet hours').click();
     await settle(f);
@@ -429,7 +429,7 @@ describe('dy-alarms-page, Rules', () => {
     start.value = '23:15';
     start.dispatchEvent(new Event('input'));
     await settle(f);
-    const end = el.querySelector<HTMLInputElement>('[aria-label="Quiet hours end"]')!;
+    const end = el.querySelector<HTMLInputElement>('[aria-label="End of quiet hours"]')!;
     end.value = '06:30';
     end.dispatchEvent(new Event('input'));
     await settle(f);
@@ -454,7 +454,7 @@ describe('dy-alarms-page, Rules', () => {
     await settle(f);
     await tab(f, el, 'Rules');
     expect(text(el)).toContain('No custom rules');
-    expect(el.querySelector<HTMLInputElement>('[aria-label="Quiet hours start"]')!.value).toBe('22:00');
+    expect(el.querySelector<HTMLInputElement>('[aria-label="Start of quiet hours"]')!.value).toBe('22:00');
     expect(el.querySelector('button[role="switch"][aria-label="Desktop notifications"]')!.getAttribute('aria-checked')).toBe('false');
   });
 

@@ -1,5 +1,4 @@
 import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import type { UnusualItem } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -14,6 +13,8 @@ import { hue, initial, learningText, whyText } from './issues-model';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
+import { MatMenuModule } from '@angular/material/menu';
+import { openContextMenu } from '../../shared/context-menu';
 
 /**
  * Programs that are new on this computer, and why some of them may be worth a look. A transparency tool: it lists reasons
@@ -22,7 +23,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
  */
 @Component({
   selector: 'dy-unusual-view',
-  imports: [FullTextTip, MatTooltip, MatButton, MatIconButton, AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger],
+  imports: [MatMenuModule, FullTextTip, MatTooltip, MatButton, MatIconButton, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -31,7 +32,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
         <div class="bar" role="group" aria-label="New programs">
           <span class="learn">{{ learning() }}</span>
           <span class="grow"></span>
-          <button type="button" matIconButton aria-label="More actions" [cdkMenuTriggerFor]="more"><dy-icon name="more" /></button>
+          <button type="button" matIconButton aria-label="More actions" [matMenuTriggerFor]="more"><dy-icon name="more" /></button>
         </div>
 
         @if (!o.enabled) {
@@ -49,7 +50,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
                 <thead><tr><th>Program</th><th>Why</th><th class="when">First seen</th><th class="state">State</th></tr></thead>
                 <tbody>
                   @for (i of o.items; track i.key) {
-                    <tr class="row" tabindex="0" [class.sel]="selectedKey() === i.key" [cdkContextMenuTriggerFor]="menu" [cdkContextMenuTriggerData]="{ item: i }" (click)="select(i)" (keydown.enter)="select(i)" (keydown.shift.f10)="select(i)" (contextmenu)="select(i)">
+                    <tr class="row" tabindex="0" [class.sel]="selectedKey() === i.key" (click)="select(i)" (keydown.enter)="select(i)" (keydown.shift.f10)="select(i)" (contextmenu)="select(i); openContextMenu($event, menuAnchor, menuTrigger, { item: i })">
                       <td>
                         <span class="prog">
                           <span class="av" aria-hidden="true" [style.background]="tile(i.name)">{{ ini(i.name) }}</span>
@@ -69,7 +70,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
               <aside class="detail" tabindex="-1" aria-label="Program details" (keydown.escape)="selectedKey.set(null)">
                 <div class="dhead">
                   <span class="prog"><span class="av" aria-hidden="true" [style.background]="tile(s.name)">{{ ini(s.name) }}</span><strong>{{ s.name }}</strong></span>
-                  <button type="button" class="ib" aria-label="Close details" (click)="selectedKey.set(null)"><dy-icon name="close" /></button>
+                  <button type="button" matIconButton aria-label="Close details" (click)="selectedKey.set(null)"><dy-icon name="close" /></button>
                 </div>
                 <p class="lead">{{ why(s) }}.</p>
                 @if (s.reasons.length > 1) {
@@ -92,18 +93,19 @@ import { FullTextTip } from '../../shared/full-text-tip';
       }
     </dy-async>
 
-    <ng-template #menu let-item="item">
-      <div class="menu" cdkMenu aria-label="Program actions">
-        @if (item.exe) { <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copy(item.exe)"><dy-icon name="copy" /> Copy path</button> }
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchWeb(item)"><dy-icon name="search" /> Search the web…</button>
-        @if (item.exe) { <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchHash(item)"><dy-icon name="shield" /> Search file hash on VirusTotal…</button> }
-      </div>
-    </ng-template>
-    <ng-template #more>
-      <div class="menu" cdkMenu aria-label="More actions">
-        <button type="button" class="menu-item danger" cdkMenuItem (cdkMenuItemTriggered)="forget()"><dy-icon name="trash" /> Forget the programs Dyno knows…</button>
-      </div>
-    </ng-template>
+    <span #menuAnchor class="dy-ctx-anchor" aria-hidden="true" #menuTrigger="matMenuTrigger" [matMenuTriggerFor]="menu"></span>
+    <mat-menu #menu="matMenu" aria-label="Program actions">
+      <ng-template matMenuContent let-item="item">
+        @if (item.exe) { <button mat-menu-item (click)="copy(item.exe)"><dy-icon name="copy" /> Copy path</button> }
+        <button mat-menu-item (click)="searchWeb(item)"><dy-icon name="search" /> Search the web…</button>
+        @if (item.exe) { <button mat-menu-item (click)="searchHash(item)"><dy-icon name="shield" /> Search file hash on VirusTotal…</button> }
+      </ng-template>
+    </mat-menu>
+    <mat-menu #more="matMenu" aria-label="More actions">
+      <ng-template matMenuContent>
+        <button mat-menu-item class="danger" (click)="forget()"><dy-icon name="trash" /> Forget the programs Dyno knows…</button>
+      </ng-template>
+    </mat-menu>
   `,
   styles: `
     :host { display: grid; gap: var(--sp-3); align-content: start; }
@@ -111,10 +113,6 @@ import { FullTextTip } from '../../shared/full-text-tip';
     .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; min-height: 44px; }
     .grow { flex: 1; }
     .learn { color: var(--text-2); font-size: var(--fs-sm); }
-    .tog { display: inline-flex; align-items: center; gap: 4px; height: var(--control-h); padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-pill); background: var(--surface-2); color: var(--text-2); font: var(--fw-medium) var(--fs-sm) / 1 var(--font-sans); cursor: pointer; }
-    .tog dy-icon { --icon-size: 13px; display: none; }
-    .tog[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
-    .tog[aria-pressed='true'] dy-icon { display: inline-block; }
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 340px; }
     .tablewrap { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); overflow: auto; max-height: 620px; min-width: 0; }
@@ -132,10 +130,6 @@ import { FullTextTip } from '../../shared/full-text-tip';
     tr.row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
     tr.row.sel td { background: var(--accent-soft); }
     tr.row.sel td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
-    .ib { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
-    .ib:hover:not(:disabled) { background: var(--surface-active); color: var(--text-1); }
-    .ib:disabled { opacity: 0.35; cursor: default; }
-    .ib dy-icon { --icon-size: 15px; }
     .none { display: grid; justify-items: center; gap: var(--sp-2); padding: var(--sp-8) var(--sp-5); text-align: center; color: var(--text-3); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); }
     .none dy-icon { --icon-size: 32px; }
     .none strong { color: var(--text-1); font-size: 15px; font-weight: var(--fw-semibold); }
@@ -151,11 +145,11 @@ import { FullTextTip } from '../../shared/full-text-tip';
     .sel { user-select: text; cursor: text; }
     .dacts { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
     .hint { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
-    .menu-item.danger { color: var(--bad); }
     @media (max-width: 1100px) { .layout.with-detail { grid-template-columns: minmax(0, 1fr); } }
   `,
 })
 export class UnusualView {
+  protected readonly openContextMenu = openContextMenu;
   protected readonly store = inject(UnusualStore);
   private readonly notifier = inject(Notifier);
   private readonly ports = inject(SHELL_PORTS);

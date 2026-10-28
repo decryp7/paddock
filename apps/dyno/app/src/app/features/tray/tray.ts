@@ -70,7 +70,7 @@ import { MatButton, MatIconButton } from '@angular/material/button';
       <div slot="footer" class="foot">
         <span class="spacer"></span>
         <button type="button" matButton="filled" (click)="openMain()"><dy-icon name="arrow-right" /> Open Dyno</button>
-        <button type="button" matIconButton (click)="quit()" aria-label="Quit Dyno" matTooltip="Quit the Dyno app (the background agent keeps measuring)"><dy-icon name="power" /></button>
+        <button type="button" matIconButton (click)="quit()" aria-label="Quit Dyno" matTooltipPosition="left" [matTooltip]="'Quit Dyno'"><dy-icon name="power" /></button>
       </div>
     </pd-tray-popover>
   `,

@@ -57,7 +57,7 @@ describe('dy-issues-page', () => {
     const rows = [...el.querySelectorAll('table[aria-label="Issues"] tr.row')];
     expect(rows.length).toBe(3);
     expect(rows.every((r) => r.textContent!.includes('Mail'))).toBe(true);
-    (el.querySelector('[aria-label="Clear the filter"]') as HTMLElement).click();
+    (el.querySelector('[aria-label^="Clear the filter"]') as HTMLElement).click();
     await settle(f);
     expect(el.querySelectorAll('table[aria-label="Issues"] tr.row').length).toBeGreaterThan(3);
     (el.querySelector('tr.day button') as HTMLElement).click();

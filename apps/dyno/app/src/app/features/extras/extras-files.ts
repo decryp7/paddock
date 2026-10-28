@@ -5,7 +5,7 @@ import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
 import { MIN_SIZES, MODES, type FileRow, baseName, dirName, fileRows, middleEllipsis, scanSentence } from './files-model';
 import { EXTRAS_STYLES } from './extras-styles';
-import { MatButton } from '@angular/material/button';
+import { MatButton, MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
 
@@ -15,7 +15,7 @@ import { MatTooltip } from '@angular/material/tooltip';
  */
 @Component({
   selector: 'dy-extras-files',
-  imports: [MatTooltip, SuSegmentedControl, MatButton, AsyncState, Icon],
+  imports: [MatIconButton, MatTooltip, SuSegmentedControl, MatButton, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Search">
@@ -52,7 +52,7 @@ import { MatTooltip } from '@angular/material/tooltip';
                     @if (row.kind === 'group') {
                       <tr class="day">
                         <td colspan="3">
-                          <button type="button" class="chev" [attr.aria-expanded]="row.open" [attr.aria-label]="(row.open ? 'Collapse ' : 'Expand ') + row.title" (click)="toggleGroup(row.key)"><dy-icon [name]="row.open ? 'chevron-down' : 'chevron-right'" /></button>
+                          <button type="button" matIconButton class="chev" [attr.aria-expanded]="row.open" [attr.aria-label]="(row.open ? 'Collapse ' : 'Expand ') + row.title" (click)="toggleGroup(row.key)"><dy-icon [name]="row.open ? 'chevron-down' : 'chevron-right'" /></button>
                           <strong>{{ row.title }}</strong><span class="faint cnt">{{ row.detail }}</span>
                         </td>
                       </tr>
@@ -83,8 +83,6 @@ import { MatTooltip } from '@angular/material/tooltip';
       .w-mod { width: 110px; }
       .fname { font-weight: var(--fw-medium); }
       .dir { color: var(--text-3); margin-left: var(--sp-2); }
-      .chev { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 0; background: none; color: var(--text-3); border-radius: var(--r-sm); cursor: pointer; vertical-align: middle; }
-      .chev:hover { background: var(--surface-active); color: var(--text-1); }
     `,
   ],
 })

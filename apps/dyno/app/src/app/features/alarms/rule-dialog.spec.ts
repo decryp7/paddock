@@ -96,7 +96,7 @@ describe('RuleDialog (dy.alert-rule)', () => {
 
   it('steps temperatures by one degree within bounds', async () => {
     const { d, set, click, settle } = await open({ rule: { ...GPU, metric: 'temperature', limit: 80 }, takenIds: [] });
-    expect(d.el.querySelector('.stepper')!.textContent).toContain('°C');
+    expect(d.el.querySelector('.tools')!.textContent).toContain('°C');
     await set('[aria-label="Limit"]', '150');
     await click('Increase the limit');
     await settle();

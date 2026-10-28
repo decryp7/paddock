@@ -1,4 +1,3 @@
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf } from '@angular/cdk/scrolling';
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, input } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -16,6 +15,9 @@ import { MatButton, MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
+import { SearchField } from '../../shared/search-field';
+import { MatMenuModule } from '@angular/material/menu';
+import { openContextMenu } from '../../shared/context-menu';
 
 const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
   { key: 'name', label: 'Name', align: 'l' },
@@ -29,7 +31,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
 /** The task manager: every app and process, grouped by app, as a tree or flat; sortable, searchable, with a details panel and lookups. Read-only: nothing here changes a process. */
 @Component({
   selector: 'dy-processes-page',
-  imports: [FullTextTip, MatTooltip, SuSegmentedControl, MatButton, MatIconButton, Icon, FormsModule, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger, ProcessDetailsPanel],
+  imports: [MatMenuModule, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, MatButton, MatIconButton, Icon, FormsModule, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, ProcessDetailsPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap">
@@ -39,10 +41,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
           <p class="num">{{ summary() }}</p>
         </div>
         <pd-segmented-control label="View" [options]="modeSegs()" [value]="store.mode()" (valueChange)="pickMode($event)" />
-        <label class="search">
-          <dy-icon name="search" />
-          <input type="search" placeholder="Filter by name, user or PID" aria-label="Filter processes" [ngModel]="store.query()" (ngModelChange)="store.setQuery($event)" autocomplete="off" spellcheck="false" />
-        </label>
+        <dy-search-field label="Filter processes" placeholder="Filter by name, user or PID" [value]="store.query()" (valueChange)="store.setQuery($event)" />
         <button type="button" matButton="outlined" (click)="lockers()"><dy-icon name="lock" /> What is locking this file?</button>
       </header>
 
@@ -91,16 +90,12 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                 [class.suspended]="r.suspended"
                 [class.group]="r.kind === 'group'"
                 [attr.data-key]="r.key"
-                [cdkContextMenuTriggerFor]="menu"
-                [cdkContextMenuTriggerData]="{ row: r }"
-                [cdkContextMenuDisabled]="r.kind === 'other'"
                 (click)="rowClick(r)"
                 (keydown.space)="$event.preventDefault(); rowClick(r)"
-                (dblclick)="store.toggle(r)"
-              >
+                (dblclick)="store.toggle(r)" (contextmenu)="!(r.kind === 'other') ? openContextMenu($event, menuAnchor, menuTrigger, { row: r }) : null">
                 <span role="gridcell" class="name" [style.padding-left.px]="8 + r.depth * 20">
                   @if (r.expandable) {
-                    <button type="button" class="chev" [attr.aria-label]="(r.expanded ? 'Collapse ' : 'Expand ') + r.name" (click)="$event.stopPropagation(); store.toggle(r)">
+                    <button type="button" matIconButton class="chev" [attr.aria-label]="(r.expanded ? 'Collapse ' : 'Expand ') + r.name" (click)="$event.stopPropagation(); store.toggle(r)">
                       <dy-icon [name]="r.expanded ? 'chevron-down' : 'chevron-right'" />
                     </button>
                   } @else {
@@ -139,7 +134,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                 <span role="gridcell" class="r num faint">{{ pid(r) }}</span>
                 <span role="gridcell" class="act">
                   @if (r.kind !== 'other') {
-                  <button type="button" matIconButton [attr.aria-label]="'Actions for ' + r.name" [cdkMenuTriggerFor]="menu" [cdkMenuTriggerData]="{ row: r }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
+                  <button type="button" matIconButton [attr.aria-label]="'Actions for ' + r.name" [matMenuTriggerFor]="menu" [matMenuTriggerData]="{ row: r }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
                   }
                 </span>
               </div>
@@ -152,31 +147,29 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
       </div>
     </div>
 
-    <ng-template #menu let-row="row">
-      <div class="menu wide" cdkMenu [attr.aria-label]="'Actions for ' + row.name">
+    <span #menuAnchor class="dy-ctx-anchor" aria-hidden="true" #menuTrigger="matMenuTrigger" [matMenuTriggerFor]="menu"></span>
+    <mat-menu #menu="matMenu" aria-label="Actions">
+      <ng-template matMenuContent let-row="row">
         @if (row.ref) {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="details(row)"><dy-icon name="info" /> Details</button>
+          <button mat-menu-item (click)="details(row)"><dy-icon name="info" /> Details</button>
         }
         @if (row.ref) {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.openLocation(row.ref)"><dy-icon name="folder" /> Open file location</button>
+          <button mat-menu-item (click)="store.openLocation(row.ref)"><dy-icon name="folder" /> Open file location</button>
         }
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchWeb(row)"><dy-icon name="search" /> Search the web…</button>
+        <button mat-menu-item (click)="searchWeb(row)"><dy-icon name="search" /> Search the web…</button>
         @if (row.ref) {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchHash(row)"><dy-icon name="shield" /> Search file hash on VirusTotal…</button>
+          <button mat-menu-item (click)="searchHash(row)"><dy-icon name="shield" /> Search file hash on VirusTotal…</button>
         }
-      </div>
-    </ng-template>
+      </ng-template>
+    </mat-menu>
   `,
   styles: `
     :host { display: block; height: 100%; }
+    .chev { width: 22px; height: 22px; padding: 0; flex: none; --icon-size: 14px; }
     .wrap { height: 100%; display: flex; flex-direction: column; padding: var(--sp-5) var(--sp-6) var(--sp-4); gap: var(--sp-3); min-height: 0; }
     .head { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
     .titles { flex: 1; min-width: 200px; display: grid; gap: 2px; }
     .titles p { color: var(--text-3); }
-    .search { display: flex; align-items: center; gap: var(--sp-2); height: var(--control-h); padding: 0 var(--sp-3); width: 260px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface-2); color: var(--text-3); }
-    .search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft-2); }
-    .search input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--text-1); font: var(--fs-base) var(--font-sans); }
-    .search dy-icon { --icon-size: 15px; }
     .banner { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid color-mix(in srgb, var(--bad) 35%, transparent); border-radius: var(--r-md); background: var(--bad-soft); }
     .banner > dy-icon { color: var(--bad); }
     .banner span { flex: 1; } .banner small { display: block; color: var(--text-2); }
@@ -198,9 +191,6 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
     .row.suspended .nm { color: var(--text-3); }
     .name { display: flex; align-items: center; gap: 6px; }
     .nm { min-width: 0; }
-    .chev { all: unset; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; color: var(--text-3); cursor: default; flex: none; }
-    .chev:hover { background: var(--surface-active); } .chev:focus-visible { outline: 2px solid var(--focus); }
-    .chev dy-icon { --icon-size: 14px; } .chev-space { width: 18px; flex: none; }
     .heat { border-radius: 0; }
     .faint { color: var(--text-3); }
     .note { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-3); font-size: var(--fs-sm); }
@@ -211,6 +201,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
   `,
 })
 export class ProcessesPage implements OnInit, OnDestroy {
+  protected readonly openContextMenu = openContextMenu;
   protected readonly store = inject(ProcessesStore);
   private readonly dialogs = inject(DialogService);
   private readonly live = inject(LiveStore);

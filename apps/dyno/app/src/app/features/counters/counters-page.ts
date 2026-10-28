@@ -1,4 +1,3 @@
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { ThemeService } from '../../core/theme';
 import type { CounterHit, CounterInfo, CounterUnit, TimelineEventKind } from '../../core/api.types';
@@ -12,12 +11,15 @@ import { EVENT_STYLE, eventCounts } from '../dashboard/history-options';
 import { EVENT_LABEL } from '../../shared/labels';
 import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCounter, pathParts, readingNumber, readingReason, UNIT_WORD } from './counters-model';
 import { MatButton, MatIconButton } from '@angular/material/button';
-import { MatFormField, MatPrefix } from '@angular/material/form-field';
+import { MatFormField } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
+import { SearchField } from '../../shared/search-field';
+import { MatMenuModule } from '@angular/material/menu';
+import { openContextMenu } from '../../shared/context-menu';
 
 /**
  * Performance counters: browse what the OS offers (objects, then counters with their instances), search by name, chart
@@ -26,7 +28,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
  */
 @Component({
   selector: 'dy-counters-page',
-  imports: [FullTextTip, MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatPrefix, MatButton, MatIconButton, AsyncState, Icon, Chart, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
+  imports: [MatMenuModule, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatButton, MatIconButton, AsyncState, Icon, Chart],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -38,9 +40,9 @@ import { FullTextTip } from '../../shared/full-text-tip';
       </header>
 
       <div class="bar" role="group" aria-label="Counters toolbar">
-        <mat-form-field class="search"><dy-icon matPrefix name="search" /><input matInput type="search" placeholder="Search counters, for example disk queue" aria-label="Search counters" [value]="store.query()" (input)="onSearch($any($event.target).value)" /></mat-form-field>
+        <dy-search-field label="Search counters" placeholder="Search counters, for example disk queue" [value]="store.query()" (valueChange)="onSearch($event)" />
         <span class="spacer"></span>
-        <button type="button" matButton="outlined" [cdkMenuTriggerFor]="setsMenu"><dy-icon name="layers" /> Sets @if (store.sets().length) { <span class="count num">{{ store.sets().length }}</span> }</button>
+        <button type="button" matButton="outlined" [matMenuTriggerFor]="setsMenu"><dy-icon name="layers" /> Sets @if (store.sets().length) { <span class="count num">{{ store.sets().length }}</span> }</button>
         <pd-segmented-control label="Range" [options]="rangeSegs" [value]="store.minutes() + ''" (valueChange)="store.setMinutes(+$event)" />
       </div>
 
@@ -63,7 +65,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
                     <span class="name truncate" [matTooltip]="h.path">{{ hitName(h) }}</span>
                     <span class="meta truncate">{{ h.object }}</span>
                     <span class="acts">
-                      <button type="button" class="ib" [attr.aria-label]="(isWatched(h.path) ? 'Stop charting ' : 'Chart ') + hitName(h)" [matTooltip]="isWatched(h.path) ? 'Stop charting' : 'Chart this counter'" (click)="toggle(h.path)"><dy-icon [name]="isWatched(h.path) ? 'check' : 'plus'" /></button>
+                      <button type="button" matIconButton [attr.aria-label]="(isWatched(h.path) ? 'Stop charting ' : 'Chart ') + hitName(h)" matTooltipPosition="left" [matTooltip]="(isWatched(h.path) ? 'Stop charting ' : 'Chart ') + hitName(h)" (click)="toggle(h.path)"><dy-icon [name]="isWatched(h.path) ? 'check' : 'plus'" /></button>
                     </span>
                   </li>
                 }
@@ -85,10 +87,10 @@ import { FullTextTip } from '../../shared/full-text-tip';
             <ul class="list" role="list" aria-label="Counters of {{ o.name }}">
               @for (c of o.counters; track c.name) {
                 <li class="item" [class.on]="isWatched(pathOf(c))">
-                  <span class="name truncate" [matTooltip]="c.help ?? c.name">{{ c.name }}</span>
+                  <span class="name truncate" [dyFullText]="c.help ?? c.name">{{ c.name }}</span>
                   <span class="meta truncate">{{ unitWord(c.unit) }}</span>
                   <span class="acts">
-                    <button type="button" class="ib" [attr.aria-label]="(isWatched(pathOf(c)) ? 'Stop charting ' : 'Chart ') + c.name" (click)="toggle(pathOf(c))"><dy-icon [name]="isWatched(pathOf(c)) ? 'check' : 'plus'" /></button>
+                    <button type="button" matIconButton [attr.aria-label]="(isWatched(pathOf(c)) ? 'Stop charting ' : 'Chart ') + c.name" (click)="toggle(pathOf(c))"><dy-icon [name]="isWatched(pathOf(c)) ? 'check' : 'plus'" /></button>
                   </span>
                 </li>
               }
@@ -164,7 +166,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
                   <span role="columnheader"><span class="visually-hidden">Actions</span></span>
                 </div>
                 @for (p of store.watching(); track p) {
-                  <div class="row" role="row" [cdkContextMenuTriggerFor]="rowMenu" [cdkContextMenuTriggerData]="{ path: p }">
+                  <div class="row" role="row" (contextmenu)="openContextMenu($event, rowMenuAnchor, rowMenuTrigger, { path: p })">
                     <span class="cell" role="cell">
                       <span class="swatch" [style.background]="swatch($index)" aria-hidden="true"></span>
                       <span class="truncate" [matTooltip]="p">{{ title(p) }}</span>
@@ -181,9 +183,9 @@ import { FullTextTip } from '../../shared/full-text-tip';
                       }
                     </span>
                     <span class="cell acts" role="cell">
-                      <button type="button" class="ib" [attr.aria-label]="(store.isPinned(p) ? 'Unpin ' : 'Pin ') + title(p)" [matTooltip]="store.isPinned(p) ? 'Unpin' : 'Pin to keep it on the dashboard list'" (click)="store.togglePin(p)"><dy-icon name="pin" /></button>
-                      <button type="button" class="ib" [attr.aria-label]="'Stop charting ' + title(p)" matTooltip="Stop charting" (click)="store.unwatch(p)"><dy-icon name="close" /></button>
-                      <button type="button" class="ib" [attr.aria-label]="'More actions for ' + title(p)" [cdkMenuTriggerFor]="rowMenu" [cdkMenuTriggerData]="{ path: p }"><dy-icon name="more" /></button>
+                      <button type="button" matIconButton [attr.aria-label]="(store.isPinned(p) ? 'Unpin ' : 'Pin ') + title(p)" matTooltipPosition="left" [matTooltip]="(store.isPinned(p) ? 'Unpin ' : 'Pin ') + title(p)" (click)="store.togglePin(p)"><dy-icon name="pin" /></button>
+                      <button type="button" matIconButton [attr.aria-label]="'Stop charting ' + title(p)" matTooltipPosition="left" [matTooltip]="'Stop charting ' + title(p)" (click)="store.unwatch(p)"><dy-icon name="close" /></button>
+                      <button type="button" matIconButton [attr.aria-label]="'More actions for ' + title(p)" [matMenuTriggerFor]="rowMenu" [matMenuTriggerData]="{ path: p }"><dy-icon name="more" /></button>
                     </span>
                   </div>
                 }
@@ -200,8 +202,8 @@ import { FullTextTip } from '../../shared/full-text-tip';
                     <span class="name truncate" [matTooltip]="p">{{ title(p) }}</span>
                     <span class="meta truncate">{{ object(p) }}</span>
                     <span class="acts">
-                      <button type="button" class="ib" [attr.aria-label]="'Chart ' + title(p)" matTooltip="Chart this counter" (click)="store.watch(p)"><dy-icon name="plus" /></button>
-                      <button type="button" class="ib" [attr.aria-label]="'Unpin ' + title(p)" matTooltip="Unpin" (click)="store.togglePin(p)"><dy-icon name="close" /></button>
+                      <button type="button" matIconButton [attr.aria-label]="'Chart ' + title(p)" matTooltipPosition="left" [matTooltip]="'Chart ' + title(p)" (click)="store.watch(p)"><dy-icon name="plus" /></button>
+                      <button type="button" matIconButton [attr.aria-label]="'Unpin ' + title(p)" matTooltipPosition="left" [matTooltip]="'Unpin ' + title(p)" (click)="store.togglePin(p)"><dy-icon name="close" /></button>
                     </span>
                   </li>
                 }
@@ -212,36 +214,34 @@ import { FullTextTip } from '../../shared/full-text-tip';
       </div>
     </div>
 
-    <ng-template #rowMenu let-path="path">
-      <div class="menu" cdkMenu aria-label="Counter actions">
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.togglePin(path)"><dy-icon name="pin" /> {{ store.isPinned(path) ? 'Unpin' : 'Pin' }}</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.addToDashboard(path)"><dy-icon name="dashboard" /> Add to the dashboard</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copy(path)"><dy-icon name="copy" /> Copy path</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.unwatch(path)"><dy-icon name="close" /> Stop charting</button>
-      </div>
-    </ng-template>
+    <span #rowMenuAnchor class="dy-ctx-anchor" aria-hidden="true" #rowMenuTrigger="matMenuTrigger" [matMenuTriggerFor]="rowMenu"></span>
+    <mat-menu #rowMenu="matMenu" aria-label="Counter actions">
+      <ng-template matMenuContent let-path="path">
+        <button mat-menu-item (click)="store.togglePin(path)"><dy-icon name="pin" /> {{ store.isPinned(path) ? 'Unpin' : 'Pin' }}</button>
+        <button mat-menu-item (click)="store.addToDashboard(path)"><dy-icon name="dashboard" /> Add to the dashboard</button>
+        <button mat-menu-item (click)="copy(path)"><dy-icon name="copy" /> Copy path</button>
+        <button mat-menu-item (click)="store.unwatch(path)"><dy-icon name="close" /> Stop charting</button>
+      </ng-template>
+    </mat-menu>
 
-    <ng-template #setsMenu>
-      <div class="menu" cdkMenu aria-label="Counter sets">
+    <mat-menu #setsMenu="matMenu" aria-label="Counter sets">
+      <ng-template matMenuContent>
         @for (s of store.sets(); track s.name) {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.applySet(s.name)"><dy-icon name="layers" /> {{ s.name }} <span class="n num">{{ s.paths.length }}</span></button>
+          <button mat-menu-item (click)="store.applySet(s.name)"><dy-icon name="layers" /> {{ s.name }} <span class="n num">{{ s.paths.length }}</span></button>
         } @empty {
-          <span class="menu-item muted-item">No saved sets yet</span>
+          <button mat-menu-item disabled>No saved sets yet</button>
         }
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!store.charted()" (cdkMenuItemTriggered)="startNaming()"><dy-icon name="plus" /> Save charted counters as a set…</button>
+        <button mat-menu-item [disabled]="!store.charted()" (click)="startNaming()"><dy-icon name="plus" /> Save charted counters as a set…</button>
         @for (s of store.sets(); track s.name) {
-          <button type="button" class="menu-item danger" cdkMenuItem (cdkMenuItemTriggered)="store.deleteSet(s.name)"><dy-icon name="trash" /> Delete “{{ s.name }}”</button>
+          <button mat-menu-item class="danger" (click)="store.deleteSet(s.name)"><dy-icon name="trash" /> Delete “{{ s.name }}”</button>
         }
-      </div>
-    </ng-template>
+      </ng-template>
+    </mat-menu>
   `,
   styles: `
     :host { display: block; }
     .page { display: grid; gap: var(--sp-3); align-content: start; }
     .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; min-height: 44px; }
-    .search { position: relative; display: block; flex: 1 1 260px; min-width: 200px; max-width: 420px; }
-    .search dy-icon { position: absolute; left: 8px; top: 7px; --icon-size: 15px; color: var(--text-3); }
-    .search input { padding-left: 30px; width: 100%; }
     .count { margin-left: 4px; padding: 0 6px; border-radius: var(--r-pill); background: var(--surface-active); color: var(--text-2); font-size: var(--fs-xs); }
     .namebar { display: flex; gap: var(--sp-2); align-items: center; }
     .cols { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
@@ -258,9 +258,6 @@ import { FullTextTip } from '../../shared/full-text-tip';
     .item dy-icon { --icon-size: 14px; color: var(--text-3); }
     .acts { display: inline-flex; justify-content: flex-end; gap: 2px; opacity: 0.4; transition: opacity var(--dur-fast) var(--ease-out); }
     .item:hover .acts, .item:focus-within .acts, .row:hover .acts, .row:focus-within .acts, .item.on .acts { opacity: 1; }
-    .ib { display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
-    .ib:hover { background: var(--surface-active); color: var(--text-1); }
-    .ib dy-icon { --icon-size: 15px; color: inherit; }
     .inst { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-3) var(--sp-2); color: var(--text-3); font-size: var(--fs-xs); }
     .inst select { flex: 1; min-width: 0; }
     .hint { margin: 0; padding: var(--sp-2) var(--sp-3); color: var(--text-3); font-size: var(--fs-xs); }
@@ -289,13 +286,12 @@ import { FullTextTip } from '../../shared/full-text-tip';
     .pinned { --icon-size: 12px; color: var(--text-3); flex: none; }
     .unavail { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
-    .muted-item { color: var(--text-3); }
-    .menu-item.danger { color: var(--bad); }
-    .menu-item .n { margin-left: auto; padding-left: var(--sp-3); }
+    .n { margin-left: auto; padding-left: var(--sp-3); }
     @media (max-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr); } }
   `,
 })
 export class CountersPage implements OnInit {
+  protected readonly openContextMenu = openContextMenu;
   protected readonly store = inject(CountersStore);
   protected readonly settings = inject(SettingsStore);
   private readonly destroyRef = inject(DestroyRef);

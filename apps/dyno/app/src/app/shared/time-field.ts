@@ -39,7 +39,7 @@ import { dateToTime, PdKeepTimeOnEscape, TIME_PROVIDERS, TimeProblems, timeOptio
   `,
 })
 export class TimeField {
-  /** The visible label ("From", "Quiet hours start"). */
+  /** The visible label ("From", "Start of quiet hours"). */
   readonly label = input.required<string>();
   /** A shorter visible label for the narrow field ('From'); the accessible name stays `label`. */
   readonly shown = input('');

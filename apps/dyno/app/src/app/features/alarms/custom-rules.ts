@@ -1,4 +1,3 @@
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import type { CustomAlertRule } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -11,9 +10,12 @@ import { AlarmsStore } from '../../state/alarms.store';
 import { SettingsStore } from '../../state/settings.store';
 import { TABLE_CSS } from './alarms-css';
 import { ruleSummary, severityWord } from './alarms-model';
-import { MatButton } from '@angular/material/button';
+import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
+import { MatMenuModule } from '@angular/material/menu';
+import { MatDivider } from '@angular/material/divider';
+import { openContextMenu } from '../../shared/context-menu';
 
 /** The id of the rule form's window (its contract is in `src-tauri/src/dialogs.rs`). */
 const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
@@ -21,7 +23,7 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
 /** The user's own alert rules from the settings: add, edit, enable and delete. The engine validates every save. */
 @Component({
   selector: 'dy-custom-rules',
-  imports: [FullTextTip, MatTooltip, MatButton, AsyncState, Icon, MatSlideToggle, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
+  imports: [MatMenuModule, MatDivider, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon, MatSlideToggle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="custom-h">
@@ -39,14 +41,14 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
             <span role="columnheader"><span class="visually-hidden">Actions</span></span>
           </div>
           @for (r of rules(); track r.id) {
-            <div class="row" role="row" [class.off]="!r.enabled" [cdkContextMenuTriggerFor]="menu" [cdkContextMenuTriggerData]="{ rule: r }">
+            <div class="row" role="row" [class.off]="!r.enabled" (contextmenu)="openContextMenu($event, menuAnchor, menuTrigger, { rule: r })">
               <span class="cell" role="cell"><span class="truncate" [dyFullText]="r.name">{{ r.name }}</span></span>
               <span class="cell muted" role="cell"><span class="truncate" [dyFullText]="summary(r)">{{ summary(r) }}</span></span>
               <span class="cell" role="cell"><span class="dot" [attr.data-tone]="r.severity === 'critical' ? 'bad' : r.severity === 'warning' ? 'warn' : 'info'" aria-hidden="true"></span><span [class.muted]="r.severity !== 'critical'">{{ word(r) }}</span></span>
               <span class="cell" role="cell"><mat-slide-toggle [checked]="r.enabled" [disabled]="alarms.saving()" [aria-label]="'Enable ' + r.name" (change)="toggle(r, $event.checked)" /></span>
               <span class="cell acts" role="cell">
-                <button type="button" class="ib" [attr.aria-label]="'Edit ' + r.name" matTooltip="Edit" (click)="edit(r)"><dy-icon name="edit" /></button>
-                <button type="button" class="ib more" [attr.aria-label]="'More actions for ' + r.name" [cdkMenuTriggerFor]="menu" [cdkMenuTriggerData]="{ rule: r }"><dy-icon name="more" /></button>
+                <button type="button" matIconButton [attr.aria-label]="'Edit ' + r.name" matTooltipPosition="left" [matTooltip]="'Edit ' + r.name" (click)="edit(r)"><dy-icon name="edit" /></button>
+                <button type="button" matIconButton class="more" [attr.aria-label]="'More actions for ' + r.name" [matMenuTriggerFor]="menu" [matMenuTriggerData]="{ rule: r }"><dy-icon name="more" /></button>
               </span>
             </div>
           }
@@ -54,14 +56,15 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
       </dy-async>
     </section>
 
-    <ng-template #menu let-rule="rule">
-      <div class="menu" cdkMenu [attr.aria-label]="'Actions for ' + rule.name">
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="edit(rule)"><dy-icon name="edit" /> Edit…</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="toggle(rule, !rule.enabled)"><dy-icon name="power" /> {{ rule.enabled ? 'Turn off' : 'Turn on' }}</button>
-        <div class="menu-sep"></div>
-        <button type="button" class="menu-item danger" cdkMenuItem (cdkMenuItemTriggered)="remove(rule)"><dy-icon name="trash" /> Delete…</button>
-      </div>
-    </ng-template>
+    <span #menuAnchor class="dy-ctx-anchor" aria-hidden="true" #menuTrigger="matMenuTrigger" [matMenuTriggerFor]="menu"></span>
+    <mat-menu #menu="matMenu" aria-label="Actions">
+      <ng-template matMenuContent let-rule="rule">
+        <button mat-menu-item (click)="edit(rule)"><dy-icon name="edit" /> Edit…</button>
+        <button mat-menu-item (click)="toggle(rule, !rule.enabled)"><dy-icon name="power" /> {{ rule.enabled ? 'Turn off' : 'Turn on' }}</button>
+        <mat-divider />
+        <button mat-menu-item class="danger" (click)="remove(rule)"><dy-icon name="trash" /> Delete…</button>
+      </ng-template>
+    </mat-menu>
   `,
   styles: [
     TABLE_CSS,
@@ -76,6 +79,7 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
   ],
 })
 export class CustomRules {
+  protected readonly openContextMenu = openContextMenu;
   protected readonly settings = inject(SettingsStore);
   protected readonly alarms = inject(AlarmsStore);
   private readonly dialogs = inject(DialogService);

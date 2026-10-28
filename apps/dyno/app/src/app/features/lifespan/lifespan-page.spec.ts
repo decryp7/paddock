@@ -58,7 +58,8 @@ describe('dy-lifespan-page', () => {
     expect(bars).toHaveLength(2);
     expect(bars[0]!.getAttribute('aria-label')).toBe('History collected');
     expect(bars[0]!.getAttribute('aria-valuemax')).toBe('100');
-    expect(Number(bars[0]!.getAttribute('aria-valuenow'))).toBeCloseTo((6 / 14) * 100, 0);
+    expect(bars[0]!.getAttribute('aria-valuenow')).toBe(String(Math.round((6 / 14) * 100)));
+    expect(bars[0]!.getAttribute('aria-valuetext')).toBe('Have 6 of 14 days');
     expect(el.textContent).toContain('Have 6 of 14 days');
     expect(el.querySelector('.range')).toBeNull();
   });

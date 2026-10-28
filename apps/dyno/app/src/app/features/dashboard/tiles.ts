@@ -34,7 +34,7 @@ const CPU_VIEWS: SuSegment[] = [{ value: 'overall', label: 'Overall' }, { value:
       @if (cpu()) {
         <span badge class="head">
           <pd-segmented-control label="CPU view" [options]="cpuViews" [value]="prefs.cpuView()" (valueChange)="prefs.setCpuView($event === 'cores' ? 'cores' : 'overall')" />
-          <a matIconButton routerLink="/cpu" aria-label="CPU details" matTooltip="CPU details"><dy-icon name="arrow-right" /></a>
+          <a matIconButton routerLink="/cpu" aria-label="CPU details" matTooltipPosition="left" [matTooltip]="'CPU details'"><dy-icon name="arrow-right" /></a>
         </span>
       }
       @if (cpu(); as c) {

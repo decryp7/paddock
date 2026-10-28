@@ -24,49 +24,51 @@ const MAX_HOLD_SECS = 3600;
       <pd-field label="Name">
         <input pdFieldControl aria-label="Name" type="text" maxlength="60" placeholder="High CPU while idle" [value]="name()" (input)="name.set($any($event.target).value)" />
       </pd-field>
-      <pd-field label="Reading" [hint]="info().hint">
-        <pd-select [options]="metricChoices" [value]="metric()" ariaLabel="Reading" (valueChange)="setMetric($event)" />
-      </pd-field>
+      <pd-select class="reading" label="Reading" ariaLabel="Reading" describedBy="rule-reading-hint" [options]="metricChoices" [value]="metric()" (valueChange)="setMetric($event)" />
+      <p class="hint" id="rule-reading-hint">{{ info().hint }}</p>
       <div class="two">
-        <pd-field label="Alarm when it is">
+        <fieldset class="group">
+          <legend>Alarm when it is</legend>
           <pd-segmented-control label="Alarm when it is" [options]="opSegs" [value]="op()" (valueChange)="setOp($event)" />
+        </fieldset>
+        <pd-field label="Limit" [suffix]="limitTools">
+          <input pdFieldControl aria-label="Limit" type="text" inputmode="decimal" [value]="limit()" (input)="limit.set($any($event.target).value)" />
         </pd-field>
-        <div class="stepper">
-          <button type="button" matIconButton aria-label="Decrease the limit" (click)="step(-1)"><dy-icon name="minus" /></button>
-          <pd-field label="Limit" size="short" [suffix]="unitTpl">
-            <input pdFieldControl aria-label="Limit" type="text" inputmode="decimal" [value]="limit()" (input)="limit.set($any($event.target).value)" />
-          </pd-field>
-          <button type="button" matIconButton aria-label="Increase the limit" (click)="step(1)"><dy-icon name="plus" /></button>
-        </div>
       </div>
       <div class="two">
-        <div class="hold">
-          <pd-field label="For at least" size="short">
-            <input pdFieldControl aria-label="Duration" type="text" inputmode="numeric" [value]="hold()" (input)="hold.set($any($event.target).value)" />
-          </pd-field>
-          <pd-segmented-control label="Duration unit" [options]="unitSegs" [value]="unit()" (valueChange)="setUnit($event === 'min' ? 'min' : 'sec')" />
-        </div>
-        <pd-field label="Severity">
-          <pd-segmented-control label="Severity" [options]="severitySegs" [value]="severity()" (valueChange)="setSeverity($event)" />
+        <pd-field label="For at least" hint="0 raises the alarm right away. At most 60 min." [suffix]="holdUnit">
+          <input pdFieldControl aria-label="Duration" type="text" inputmode="numeric" [value]="hold()" (input)="hold.set($any($event.target).value)" />
         </pd-field>
+        <fieldset class="group">
+          <legend>Severity</legend>
+          <pd-segmented-control label="Severity" [options]="severitySegs" [value]="severity()" (valueChange)="setSeverity($event)" />
+        </fieldset>
       </div>
-      <p class="hint">For at least: 0 raises the alarm right away. At most 60 min.</p>
       <mat-slide-toggle [checked]="enabled()" (change)="enabled.set($event.checked)">Enabled</mat-slide-toggle>
       @if (problem(); as p) {
         <p class="err" role="alert"><dy-icon name="alert" /> {{ p }}</p>
       }
-      <ng-template #unitTpl><span class="unit">{{ info().unit }}</span></ng-template>
+      <ng-template #limitTools>
+        <span class="tools">
+          <span class="unit">{{ info().unit }}</span>
+          <button type="button" matIconButton aria-label="Decrease the limit" (click)="step(-1)"><dy-icon name="minus" /></button>
+          <button type="button" matIconButton aria-label="Increase the limit" (click)="step(1)"><dy-icon name="plus" /></button>
+        </span>
+      </ng-template>
+      <ng-template #holdUnit><pd-segmented-control label="Duration unit" [options]="unitSegs" [value]="unit()" (valueChange)="setUnit($event === 'min' ? 'min' : 'sec')" /></ng-template>
   `,
   styles: `
     :host { display: grid; gap: var(--sp-3); min-width: 0; }
-    .lead { color: var(--text-2); }
-    .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); align-items: end; }
-    .hint { margin: calc(-1 * var(--sp-1)) 0 0; color: var(--text-3); font-size: var(--fs-xs); }
-    .stepper { display: flex; align-items: center; justify-content: flex-start; gap: var(--sp-1); }
-    .stepper pd-field { flex: 0 1 8rem; min-width: 0; }
-    .stepper dy-icon { --icon-size: 14px; }
+    .lead { color: var(--text-2); margin: 0; }
+    .reading { display: flex; width: 100%; }
+    .reading :is(mat-form-field) { width: 100%; }
+    .hint { margin: calc(-1 * var(--sp-2)) 0 0; padding-inline: var(--sp-4); color: var(--text-3); font-size: var(--fs-xs); }
+    .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+    .group { margin: 0; min-width: 0; padding: 0 var(--sp-3) var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-md); }
+    .group legend { padding: 0 var(--sp-1); color: var(--text-2); font-size: var(--fs-xs); }
+    .tools { display: inline-flex; align-items: center; gap: var(--sp-1); }
+    .tools dy-icon { --icon-size: 14px; }
     .unit { color: var(--text-3); font-size: var(--fs-sm); }
-    .hold { display: flex; gap: var(--sp-2); align-items: center; }
     .err { margin: 0; display: flex; gap: var(--sp-2); align-items: flex-start; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--bad-soft); font-size: var(--fs-sm); }
     .err dy-icon { --icon-size: 15px; color: var(--bad); margin-top: 1px; }
   `,

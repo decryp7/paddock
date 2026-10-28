@@ -1,4 +1,3 @@
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
 import type { Alarm, ShelveFor } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -7,9 +6,12 @@ import { AlarmsStore } from '../../state/alarms.store';
 import { alarmSuffix, isShelved, needsAcknowledge, severityWord, shortTime, stateTone, stateWord } from './alarms-model';
 import { TABLE_CSS } from './alarms-css';
 import { AlarmDetail } from './alarm-detail';
-import { MatButton } from '@angular/material/button';
+import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
+import { MatMenuModule } from '@angular/material/menu';
+import { MatDivider } from '@angular/material/divider';
+import { openContextMenu } from '../../shared/context-menu';
 
 /**
  * The open alarms as one table (newest first) with a detail panel beside it. The section action acknowledges everything that is
@@ -17,7 +19,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
  */
 @Component({
   selector: 'dy-alarms-active',
-  imports: [FullTextTip, MatTooltip, MatButton, AsyncState, Icon, AlarmDetail, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
+  imports: [MatMenuModule, MatDivider, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon, AlarmDetail],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="store.loaded()" [error]="store.error()" [empty]="store.alarms().length === 0" emptyTitle="No open alarms" emptyText="When a rule fires, its alarm waits here until you acknowledge it." emptyIcon="bell" what="alarms" [rows]="4" (retry)="store.load()">
@@ -48,12 +50,9 @@ import { FullTextTip } from '../../shared/full-text-tip';
               [attr.data-id]="a.id"
               [class.selected]="store.selectedId() === a.id"
               [attr.aria-selected]="store.selectedId() === a.id"
-              [cdkContextMenuTriggerFor]="menu"
-              [cdkContextMenuTriggerData]="{ alarm: a }"
               (click)="pick(a)"
               (keydown.enter)="pick(a)"
-              (keydown.space)="$event.preventDefault(); pick(a)"
-            >
+              (keydown.space)="$event.preventDefault(); pick(a)" (contextmenu)="openContextMenu($event, menuAnchor, menuTrigger, { alarm: a })">
               <span class="cell" role="gridcell">@if (unread(a)) {<span class="unread" matTooltip="Not acknowledged" aria-label="Not acknowledged"></span>}</span>
               <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="a.severity === 'critical' ? 'bad' : a.severity === 'warning' ? 'warn' : 'info'" [attr.aria-label]="sev(a)" role="img"></span><span [class.muted]="a.severity === 'info'">{{ sev(a) }}</span></span>
               <span class="cell title-cell" role="gridcell">
@@ -68,9 +67,9 @@ import { FullTextTip } from '../../shared/full-text-tip';
               <span class="cell muted num" role="gridcell">{{ time(a.lastSeen) }}</span>
               <span class="cell r muted num" role="gridcell">×{{ a.repeatCount }}</span>
               <span class="cell acts" role="gridcell">
-                <button type="button" class="ib" [attr.aria-label]="'Acknowledge ' + a.title" matTooltip="Acknowledge" [disabled]="!ackable(a)" (click)="ack(a, $event)"><dy-icon name="check" /></button>
-                <button type="button" class="ib" [attr.aria-label]="'Shelve ' + a.title" matTooltip="Shelve" [cdkMenuTriggerFor]="shelveMenu" [cdkMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="clock" /></button>
-                <button type="button" class="ib more" [attr.aria-label]="'More actions for ' + a.title" [cdkMenuTriggerFor]="menu" [cdkMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
+                <button type="button" matIconButton [attr.aria-label]="'Acknowledge ' + a.title" matTooltipPosition="left" [matTooltip]="'Acknowledge ' + a.title" [disabled]="!ackable(a)" (click)="ack(a, $event)"><dy-icon name="check" /></button>
+                <button type="button" matIconButton [attr.aria-label]="'Shelve ' + a.title" matTooltipPosition="left" [matTooltip]="'Shelve ' + a.title" [matMenuTriggerFor]="shelveMenu" [matMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="clock" /></button>
+                <button type="button" matIconButton class="more" [attr.aria-label]="'More actions for ' + a.title" [matMenuTriggerFor]="menu" [matMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
               </span>
             </div>
           }
@@ -81,26 +80,27 @@ import { FullTextTip } from '../../shared/full-text-tip';
       </div>
     </dy-async>
 
-    <ng-template #menu let-alarm="alarm">
-      <div class="menu" cdkMenu [attr.aria-label]="'Actions for ' + alarm.title">
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!ackable(alarm)" (cdkMenuItemTriggered)="ack(alarm)"><dy-icon name="check" /> Acknowledge</button>
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuTriggerFor]="shelveMenu" [cdkMenuTriggerData]="{ alarm }"><dy-icon name="clock" /> Shelve… <dy-icon name="chevron-right" class="trail" /></button>
+    <span #menuAnchor class="dy-ctx-anchor" aria-hidden="true" #menuTrigger="matMenuTrigger" [matMenuTriggerFor]="menu"></span>
+    <mat-menu #menu="matMenu" aria-label="Actions">
+      <ng-template matMenuContent let-alarm="alarm">
+        <button mat-menu-item [disabled]="!ackable(alarm)" (click)="ack(alarm)"><dy-icon name="check" /> Acknowledge</button>
+        <button mat-menu-item [matMenuTriggerFor]="shelveMenu" [matMenuTriggerData]="{ alarm }"><dy-icon name="clock" /> Shelve…</button>
         @if (shelved(alarm)) {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.unshelve(alarm.id)"><dy-icon name="undo" /> Unshelve</button>
+          <button mat-menu-item (click)="store.unshelve(alarm.id)"><dy-icon name="undo" /> Unshelve</button>
         }
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="addNote(alarm)"><dy-icon name="edit" /> Add note…</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.mute(alarm.rule, !alarm.muted)"><dy-icon name="bell" /> {{ alarm.muted ? 'Unmute this rule' : 'Mute this rule' }}</button>
-        <div class="menu-sep"></div>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="showHistory(alarm)"><dy-icon name="list" /> Show history</button>
-      </div>
-    </ng-template>
-    <ng-template #shelveMenu let-alarm="alarm">
-      <div class="menu" cdkMenu aria-label="Shelve for">
+        <button mat-menu-item (click)="addNote(alarm)"><dy-icon name="edit" /> Add note…</button>
+        <button mat-menu-item (click)="store.mute(alarm.rule, !alarm.muted)"><dy-icon name="bell" /> {{ alarm.muted ? 'Unmute this rule' : 'Mute this rule' }}</button>
+        <mat-divider />
+        <button mat-menu-item (click)="showHistory(alarm)"><dy-icon name="list" /> Show history</button>
+      </ng-template>
+    </mat-menu>
+    <mat-menu #shelveMenu="matMenu" aria-label="Shelve for">
+      <ng-template matMenuContent let-alarm="alarm">
         @for (o of shelveOptions; track o.id) {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="shelve(alarm, o.id)">{{ o.label }}</button>
+          <button mat-menu-item (click)="shelve(alarm, o.id)">{{ o.label }}</button>
         }
-      </div>
-    </ng-template>
+      </ng-template>
+    </mat-menu>
   `,
   styles: [
     TABLE_CSS,
@@ -128,6 +128,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
   ],
 })
 export class AlarmsActive {
+  protected readonly openContextMenu = openContextMenu;
   protected readonly store = inject(AlarmsStore);
   protected readonly now = signal(Date.now());
   protected readonly busy = signal(false);

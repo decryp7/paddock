@@ -705,112 +705,16 @@ kbd,
   padding-top: 12vh;
 }
 
-.menu {
-  min-width: 200px;
-  padding: var(--sp-1);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--overlay-bg);
-  box-shadow: var(--shadow-3);
-  animation: dy-fade-in var(--dur-fast) var(--ease-out);
-  display: flex;
-  flex-direction: column;
-  outline: none;
+/* Menus are Material (rule 47): a Dyno icon in an item, and the one danger colour. */
+.mat-mdc-menu-item dy-icon {
+  --icon-size: 16px;
+  margin-inline-end: var(--sp-3);
+  color: var(--text-2);
 }
 
-.menu-item {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  height: 30px;
-  padding: 0 var(--sp-2);
-  border: 0;
-  border-radius: var(--r-sm);
-  background: none;
-  color: var(--text-1);
-  font: var(--fs-base) var(--font-sans);
-  text-align: left;
-  cursor: pointer;
-  white-space: nowrap;
-
-  dy-icon {
-    --icon-size: 15px;
-    color: var(--text-2);
-  }
-
-  .trail {
-    margin-left: auto;
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-    padding-left: var(--sp-4);
-  }
-
-  &:hover:not([aria-disabled='true']):not(:disabled),
-  &:focus-visible,
-  &.cdk-menu-item-active {
-    background: var(--surface-hover);
-    outline: none;
-  }
-
-  &[aria-disabled='true'],
-  &:disabled {
-    color: var(--text-3);
-    cursor: not-allowed;
-  }
-
-  &.danger,
-  &.danger dy-icon {
-    color: var(--bad);
-  }
-
-  &[aria-checked='true']::after {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--accent);
-    margin-left: auto;
-  }
-}
-
-.menu.wide {
-  width: 300px;
-}
-
-.menu-item.two-line {
-  height: auto;
-  padding: var(--sp-2);
-  align-items: flex-start;
-  white-space: normal;
-
-  .text {
-    display: grid;
-    gap: 1px;
-    flex: 1;
-  }
-
-  small {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    line-height: 1.35;
-  }
-
-  &[aria-checked='true']::after {
-    margin-top: 6px;
-  }
-}
-
-.menu-sep {
-  height: 1px;
-  margin: var(--sp-1) 0;
-  background: var(--border);
-}
-
-.menu-label {
-  padding: var(--sp-2) var(--sp-2) var(--sp-1);
-  font-size: var(--fs-xs);
-  color: var(--text-3);
-  font-weight: var(--fw-medium);
+.mat-mdc-menu-item.danger,
+.mat-mdc-menu-item.danger dy-icon {
+  color: var(--bad);
 }
 
 .mat-mdc-tooltip {
@@ -822,4 +726,20 @@ kbd,
   max-width: 320px;
   white-space: pre-line;
   text-align: start;
+}
+
+/* The zero-size anchor a context menu opens from (see shared/context-menu.ts). */
+.dy-ctx-anchor {
+  position: fixed;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* One control height in a toolbar: buttons as tall as fields and segmented controls. */
+:root {
+  --mat-button-filled-container-height: var(--control-h);
+  --mat-button-outlined-container-height: var(--control-h);
+  --mat-button-text-container-height: var(--control-h);
+  --mat-button-tonal-container-height: var(--control-h);
 }

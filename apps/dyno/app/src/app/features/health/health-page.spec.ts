@@ -57,20 +57,20 @@ describe('dy-health-page', () => {
   describe('the startup filter', () => {
     beforeEach(() => localStorage.clear());
     afterEach(() => localStorage.clear());
-    const toggles = (el: HTMLElement) => [...el.querySelectorAll<HTMLButtonElement>('[aria-label="Hide from the list"] button')];
+    const toggles = (el: HTMLElement) => [...el.querySelectorAll<HTMLInputElement>('[aria-label="Hide from the list"] input[type="checkbox"]')];
 
     it('shows both counts, hides what the engine says is the OS or signed, and says how many it hid', async () => {
       const { f, el } = render();
       await settle(f);
       const store = TestBed.inject(HealthStore);
       const { total, os, signed } = store.startupCounts();
-      expect(toggles(el).map((t) => t.getAttribute('aria-pressed'))).toEqual(['false', 'false']);
-      expect(toggles(el)[0]!.textContent).toContain(String(os));
-      expect(toggles(el)[1]!.textContent).toContain(String(signed));
+      expect(toggles(el).map((t) => String(t.checked))).toEqual(['false', 'false']);
+      expect(toggles(el)[0]!.closest('mat-checkbox')!.textContent).toContain(String(os));
+      expect(toggles(el)[1]!.closest('mat-checkbox')!.textContent).toContain(String(signed));
       expect(el.querySelector('.shown')?.textContent).toContain(`Showing ${total} of ${total} entries.`);
       toggles(el)[0]!.click();
       await settle(f);
-      expect(toggles(el)[0]!.getAttribute('aria-pressed')).toBe('true');
+      expect(toggles(el)[0]!.checked).toBe(true);
       expect(store.startup().length).toBe(total - os);
       expect(el.querySelector('.shown')?.textContent).toContain(`${os} hidden by the filter`);
       toggles(el)[1]!.click();
@@ -87,7 +87,7 @@ describe('dy-health-page', () => {
       const second = render();
       await settle(second.f);
       expect(TestBed.inject(ViewPrefs).startupFilter()).toEqual({ hideOs: false, hideSigned: true });
-      expect(toggles(second.el)[1]!.getAttribute('aria-pressed')).toBe('true');
+      expect(toggles(second.el)[1]!.checked).toBe(true);
     });
 
     it('with everything hidden it says so instead of claiming nothing starts', async () => {

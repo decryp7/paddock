@@ -1,4 +1,3 @@
-import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, input, output, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import type { Alarm, ShelveFor } from '../../core/api.types';
@@ -6,20 +5,21 @@ import { formatCount } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { AlarmsStore } from '../../state/alarms.store';
 import { alarmSuffix, changeLabel, isShelved, needsAcknowledge, severityWord, shortTime, stateTone, stateWord } from './alarms-model';
-import { MatButton } from '@angular/material/button';
+import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatFormField } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
+import { MatMenuModule } from '@angular/material/menu';
 
 /** The side panel of one alarm: full values, notes (add one), its change log and the way to the recorder. Esc closes it. */
 @Component({
   selector: 'dy-alarm-detail',
-  imports: [MatFormField, MatInput, MatButton, Icon, RouterLink, CdkMenu, CdkMenuItem, CdkMenuTrigger],
+  imports: [MatMenuModule, MatIconButton, MatFormField, MatInput, MatButton, Icon, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <aside class="detail" tabindex="-1" aria-label="Alarm details" (keydown.escape)="closed.emit()">
       <div class="dhead">
         <strong class="ttl">{{ alarm().title }}</strong>
-        <button type="button" class="ib" aria-label="Close details" (click)="closed.emit()"><dy-icon name="close" /></button>
+        <button type="button" matIconButton aria-label="Close details" (click)="closed.emit()"><dy-icon name="close" /></button>
       </div>
       <p class="status"><span class="dot" [attr.data-tone]="tone()" aria-hidden="true"></span>{{ state() }}@if (suffix()) {<span class="faint"> · {{ suffix() }}</span>}</p>
       <p class="text">{{ alarm().detail }}</p>
@@ -38,7 +38,7 @@ import { MatInput } from '@angular/material/input';
         @if (shelved()) {
           <button type="button" matButton="outlined" (click)="store.unshelve(alarm().id)"><dy-icon name="undo" /> Unshelve</button>
         } @else {
-          <button type="button" matButton="outlined" [cdkMenuTriggerFor]="shelveMenu"><dy-icon name="clock" /> Shelve</button>
+          <button type="button" matButton="outlined" [matMenuTriggerFor]="shelveMenu"><dy-icon name="clock" /> Shelve</button>
         }
         <button type="button" matButton="text" (click)="store.mute(alarm().rule, !alarm().muted)">{{ alarm().muted ? 'Unmute rule' : 'Mute rule' }}</button>
       </div>
@@ -63,22 +63,19 @@ import { MatInput } from '@angular/material/input';
       <a matButton="outlined" class="rec" routerLink="/recorder"><dy-icon name="camera" /> Open recorder</a>
     </aside>
 
-    <ng-template #shelveMenu>
-      <div class="menu" cdkMenu aria-label="Shelve for">
+    <mat-menu #shelveMenu="matMenu" aria-label="Shelve for">
+      <ng-template matMenuContent>
         @for (o of options; track o.id) {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.shelve(alarm().id, o.id)">{{ o.label }}</button>
+          <button mat-menu-item (click)="store.shelve(alarm().id, o.id)">{{ o.label }}</button>
         }
-      </div>
-    </ng-template>
+      </ng-template>
+    </mat-menu>
   `,
   styles: `
     :host { display: block; }
     .detail { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); padding: var(--sp-3) var(--sp-4) var(--sp-4); display: grid; gap: var(--sp-2); align-content: start; }
     .dhead { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-2); }
     .ttl { font-weight: var(--fw-semibold); line-height: 1.35; overflow-wrap: anywhere; }
-    .ib { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
-    .ib:hover, .ib:focus-visible { background: var(--surface-active); color: var(--text-1); }
-    .ib dy-icon { --icon-size: 15px; }
     .status { margin: 0; display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
     .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--text-3); }
     .dot[data-tone='bad'] { background: var(--bad); }
