@@ -92,7 +92,8 @@ export const FRAME_STYLES = `
     .pd-frame-btn:disabled { opacity: 0.55; cursor: default; }
     /* The pressed button keeps its full colour while it works; the others dim. */
     .pd-frame-btn[aria-busy='true']:disabled { opacity: 1; cursor: progress; }
-    .pd-frame-body[inert] { opacity: 0.6; transition: opacity var(--pd-duration-micro, 100ms); }
+    /* While it works only the controls dim; the heading and the text stay readable. */
+    .pd-frame-body[inert] :is(input, select, textarea, button, label, [role='combobox'], [role='listbox']) { opacity: 0.6; transition: opacity var(--pd-duration-micro, 100ms); }
     .pd-frame-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-frame-spinner { inline-size: 12px; block-size: 12px; border-radius: 50%; border: 2px solid currentColor; border-inline-end-color: transparent; animation: pd-frame-spin 0.8s linear infinite; }
     @keyframes pd-frame-spin { to { transform: rotate(360deg); } }

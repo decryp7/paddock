@@ -5,7 +5,7 @@ import { DialogActionError, type DialogAction, type DialogContent } from '@decry
 function save(search: string = globalThis.location?.search ?? ''): Promise<'save'> {
   const mode = new URLSearchParams(search).get('unsaved');
   if (mode === 'slow') return new Promise(() => undefined);
-  if (mode === 'refuse') return Promise.reject(new DialogActionError('The greeting file is read-only. Save it somewhere else.'));
+  if (mode === 'refuse') return Promise.reject(new DialogActionError('The greeting could not be saved: the disk did not answer. Try again in a moment.'));
   return Promise.resolve('save');
 }
 
@@ -22,7 +22,7 @@ function save(search: string = globalThis.location?.search ?? ''): Promise<'save
 export class UnsavedDialog implements DialogContent<'save' | 'discard'> {
   readonly dialogHeading = signal('Save the changes to “Greeting”?');
   readonly dialogActions = signal<readonly DialogAction<'save' | 'discard'>[]>([
-    { kind: 'answer', id: 'save', label: 'Save', role: 'primary', answer: () => save() },
+    { kind: 'answer', id: 'save', label: 'Save', busyLabel: 'Saving…', role: 'primary', answer: () => save() },
     { kind: 'answer', id: 'dont-save', label: 'Don’t save', role: 'destructive', answer: () => 'discard' },
   ]);
 }

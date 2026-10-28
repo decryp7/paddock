@@ -78,6 +78,14 @@ describe('pd-settings-window', () => {
     expect($(el, 'pd-settings-section h2').textContent).toBe('Appearance');
   });
 
+  it('says in the footer that changes are saved as they are made, and its content ends where the footer’s Close does', async () => {
+    const bed = await open();
+    expect(bed.fixture.componentInstance.dialogStatus()).toBe('Changes are saved as you make them.');
+    const css = (PdSettingsWindow as unknown as { ɵcmp: { styles: string[] } }).ɵcmp.styles.join('');
+    expect(css).toMatch(/\.pd-content[^{]*\{[^}]*overflow: auto/);
+    expect(css).not.toMatch(/\.pd-content[^{]*\{[^}]*padding-inline-end/);
+  });
+
   it('renders every field kind from the engine’s schema', async () => {
     const bed = await open({ page: 'sd.general' });
     const { el } = bed;

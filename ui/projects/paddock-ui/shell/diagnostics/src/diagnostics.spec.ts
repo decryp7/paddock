@@ -327,7 +327,10 @@ describe('the Report a Problem dialog', () => {
     for (const c of used) expect(DIAGNOSTICS_STYLES, c).toContain(`.${c}`);
     expect(DIAGNOSTICS_STYLES).toMatch(/\.pd-diag__num[^}]*white-space: nowrap/);
     expect(DIAGNOSTICS_STYLES).toMatch(/\.pd-diag__what[^}]*overflow-wrap: anywhere/);
-    expect(DIAGNOSTICS_STYLES).toMatch(/th\.pd-diag__name[^}]*overflow-wrap: anywhere[^}]*word-break: break-all[^}]*hyphens: none/);
+    // A file name stays on one line, cut with an ellipsis; the whole name is its tooltip.
+    expect(DIAGNOSTICS_STYLES).toMatch(/th\.pd-diag__name[^}]*white-space: nowrap[^}]*overflow: hidden[^}]*text-overflow: ellipsis/);
+    const name = el.querySelector<HTMLElement>('th.pd-diag__name')!;
+    expect(name.title).not.toBe('');
   });
 
   it('follows the description when focus leaves the box, and saves it with the report', async () => {

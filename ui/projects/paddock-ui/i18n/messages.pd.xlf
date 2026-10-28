@@ -1751,6 +1751,9 @@
       <trans-unit id="pd.settings.retry" datatype="html">
         <source>Retry</source>
       </trans-unit>
+      <trans-unit id="pd.settings.saved-live" datatype="html">
+        <source>Changes are saved as you make them.</source>
+      </trans-unit>
       <trans-unit id="pd.settings.search" datatype="html">
         <source>Search settings</source>
       </trans-unit>

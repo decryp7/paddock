@@ -166,7 +166,8 @@ describe('the dialog frame (ADR 0026 §2)', () => {
     expect(f.q('dialog-body')!.hasAttribute('inert')).toBe(true);
     // The pressed button keeps its full colour (only the others dim) and the inert body is dimmed.
     expect(FRAME_STYLES).toContain(".pd-frame-btn[aria-busy='true']:disabled { opacity: 1;");
-    expect(FRAME_STYLES).toContain('.pd-frame-body[inert] {');
+    expect(FRAME_STYLES).toContain('.pd-frame-body[inert] :is(input, select, textarea, button, label');
+    expect(FRAME_STYLES).not.toContain('.pd-frame-body[inert] {');
     await f.key('Enter');
     work.resolve('done');
     await f.stable();

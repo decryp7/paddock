@@ -175,7 +175,7 @@ interface LoadedPage {
     .pd-item:focus-visible, .pd-btn:focus-visible, .pd-link:focus-visible, .pd-search:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
     .pd-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pd-accent); }
-    .pd-content { flex: 1; min-width: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--pd-space-4); padding-inline-end: var(--pd-space-1); }
+    .pd-content { flex: 1; min-width: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--pd-space-4); }
     .pd-content > * { flex: none; }
     .pd-muted { color: var(--pd-text-muted); }
     .pd-page-hit { margin: 0; }
@@ -205,6 +205,7 @@ export class PdSettingsWindow implements DialogContent {
     loadingSettings: $localize`:@@pd.settings.loading:Loading settings…`,
     pageFailed: $localize`:@@pd.settings.page-failed:This page could not be opened.`,
     loading: $localize`:@@pd.settings.loading-page:Loading…`,
+    savedLive: $localize`:@@pd.settings.saved-live:Changes are saved as you make them.`,
   };
   protected readonly store = inject(SettingsStore);
   private readonly drafts = inject(SettingsDrafts);
@@ -339,6 +340,6 @@ export class PdSettingsWindow implements DialogContent {
     this.ref?.dismiss();
   }
 
-  /** The footer's status line (the frame draws the footer and its Close; ADR 0026 §2). */
-  readonly dialogStatus = computed(() => this.store.notice() ?? null);
+  /** The footer's status line: the last change's notice, else how saving works (the frame draws it beside Close; ADR 0026 §2). */
+  readonly dialogStatus = computed(() => this.store.notice() ?? this.t.savedLive);
 }
