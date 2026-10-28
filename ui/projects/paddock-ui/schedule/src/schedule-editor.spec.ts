@@ -111,24 +111,29 @@ describe('pd-schedule-editor', () => {
     t.all('pd-day-picker button')[1]!.click();
     await settle(t.f);
     // The only time of day cannot be removed; a second one can be added, edited and removed.
-    expect(t.q<HTMLButtonElement>('.pd-times button').disabled).toBe(true);
+    expect(t.q<HTMLButtonElement>('.pd-times button[aria-label^="Remove"]').disabled).toBe(true);
     t.q('.pd-add').click();
     await settle(t.f);
     expect(t.value()).toMatchObject({ times: ['09:00', '10:00'] });
     const inputs = t.all<HTMLInputElement>('.pd-times input');
-    expect(inputs.map((i) => i.value)).toEqual(['9:00 AM', '10:00 AM']);
+    expect(inputs.map((i) => i.value)).toEqual(['09:00', '10:00']);
     expect(inputs[1]!.getAttribute('role')).toBe('combobox');
     expect(t.all('.pd-times label').map((l) => l.textContent!.trim())).toEqual(['Time of day 1', 'Time of day 2']);
-    await t.type(inputs[1]!, '5:45 PM');
+    await t.type(inputs[1]!, '17:45');
     expect(t.value()).toMatchObject({ times: ['09:00', '17:45'] });
-    // Incomplete or empty text keeps the last good time.
+    // Incomplete or empty text keeps the last good time and the field says it could not read it.
     await t.type(inputs[1]!, '');
     expect(t.value()).toMatchObject({ times: ['09:00', '17:45'] });
+    expect(t.all('.pd-times [data-testid=field-error]').map((e) => e.textContent)).toEqual([expect.stringContaining('Enter a time such as 09:00.')]);
     await t.type(inputs[1]!, 'soon');
     expect(t.value()).toMatchObject({ times: ['09:00', '17:45'] });
-    t.all('.pd-times button')[0]!.click();
+    expect(t.all('.pd-times [data-testid=field-error]')).toHaveLength(1);
+    await t.type(inputs[1]!, '18:00');
+    expect(t.all('.pd-times [data-testid=field-error]')).toHaveLength(0);
+    expect(t.value()).toMatchObject({ times: ['09:00', '18:00'] });
+    t.all('.pd-times button[aria-label^="Remove"]')[0]!.click();
     await settle(t.f);
-    expect(t.value()).toMatchObject({ times: ['17:45'] });
+    expect(t.value()).toMatchObject({ times: ['18:00'] });
     await t.change(t.q<HTMLInputElement>('[data-testid=schedule-zone] input'), ' Asia/Tokyo ');
     expect(t.value()).toMatchObject({ zone: 'Asia/Tokyo' });
     await t.change(t.q<HTMLInputElement>('[data-testid=schedule-zone] input'), '');
@@ -146,6 +151,31 @@ describe('pd-schedule-editor', () => {
     }
     expect(first.map((d) => d && `${d.getHours()}:${d.getMinutes()}`)).toEqual(['9:0', '17:30']);
     pickers().forEach((d, i) => expect(d).toBe(first[i]));
+  });
+
+  it('has a time list toggle, and Escape closes an open list without leaving the editor', async () => {
+    const t = schedule({ mode: 'times', days: ['mon'], times: ['09:00'], zone: null });
+    const seen: string[] = [];
+    t.el.addEventListener('keydown', (e) => seen.push(e.key));
+    await settle(t.f);
+    const toggle = t.q<HTMLButtonElement>('mat-timepicker-toggle button');
+    expect(toggle.getAttribute('aria-haspopup')).toBe('listbox');
+    toggle.click();
+    await settle(t.f);
+    const input = t.q<HTMLInputElement>('.pd-times input');
+    expect(input.getAttribute('aria-expanded')).toBe('true');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
+    await settle(t.f);
+    expect(input.getAttribute('aria-expanded')).toBe('false');
+    expect(seen).toEqual([]);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
+    expect(seen).toEqual(['Escape']);
+  });
+
+  it('labels the interval unit select', async () => {
+    const t = schedule({ mode: 'every', secs: 3600 });
+    await settle(t.f);
+    expect(t.q('pd-select label').textContent).toContain('Interval unit');
   });
 
   it('stops adding times at the engine limit', async () => {
@@ -215,19 +245,19 @@ describe('pd-pause-editor', () => {
     expect(t.value().windows).toEqual([{ days: [], start: '22:00', end: '06:00' }]);
     expect(t.el.textContent).toContain('Ends the next day.');
     const [from, until] = t.all('input[role=combobox]') as HTMLInputElement[];
-    expect([from!.value, until!.value]).toEqual(['10:00 PM', '6:00 AM']);
+    expect([from!.value, until!.value]).toEqual(['22:00', '06:00']);
     const type = async (input: HTMLInputElement, text: string) => {
       input.value = text;
       input.dispatchEvent(new Event('input'));
       await settle(t.f);
     };
-    await type(from!, '7:00 AM');
-    await type(until!, '9:30 AM');
+    await type(from!, '07:00');
+    await type(until!, '09:30');
     expect(t.value().windows[0]).toMatchObject({ start: '07:00', end: '09:30' });
     expect(t.el.textContent).not.toContain('Ends the next day.');
     // A window across midnight: 11:15 PM until 12:00 AM.
-    await type(from!, '11:15 PM');
-    await type(until!, '12:00 AM');
+    await type(from!, '23:15');
+    await type(until!, '00:00');
     expect(t.value().windows[0]).toMatchObject({ start: '23:15', end: '00:00' });
     expect(t.el.textContent).toContain('Ends the next day.');
     await type(until!, '');

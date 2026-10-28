@@ -70,8 +70,9 @@ describe('pd-select', () => {
     expect(trigger(f).id).toBe('theme');
     expect(trigger(f).getAttribute('aria-expanded')).toBe('false');
     const label = f.nativeElement.querySelector('label')!;
-    expect(label.id).toBe('theme-label');
-    expect(trigger(f).getAttribute('aria-labelledby')).toContain(label.id);
+    // the label is not ours: no id is written onto it, its text names the select
+    expect(label.id).toBe('');
+    expect(trigger(f).getAttribute('aria-label')).toBe('Theme');
     expect(trigger(f).getAttribute('aria-describedby')).toBe('theme-hint');
     expect(options()).toHaveLength(0);
   });
@@ -120,6 +121,31 @@ describe('pd-select', () => {
     options()[1]!.click();
     await settle(f);
     expect(f.componentInstance.value()).toBe('dark');
+  });
+
+  it('Escape closes the open list and stops there (an enclosing dialog must stay open); with the list shut it goes on', async () => {
+    const f = setup();
+    const seen: string[] = [];
+    (f.nativeElement as HTMLElement).addEventListener('keydown', (e) => seen.push((e as KeyboardEvent).key));
+    await settle(f);
+    trigger(f).click();
+    await settle(f);
+    expect(trigger(f).getAttribute('aria-expanded')).toBe('true');
+    key(trigger(f), 'Escape', 27);
+    await settle(f);
+    expect(trigger(f).getAttribute('aria-expanded')).toBe('false');
+    expect(seen).toEqual([]);
+    key(trigger(f), 'Escape', 27);
+    expect(seen).toEqual(['Escape']);
+  });
+
+  it('marks the chosen option with a check', async () => {
+    const f = setup();
+    await settle(f);
+    trigger(f).click();
+    await settle(f);
+    expect(options()[1]!.querySelector('.mat-pseudo-checkbox-minimal')).not.toBeNull();
+    expect(options()[0]!.querySelector('.mat-pseudo-checkbox-minimal')).toBeNull();
   });
 
   it('a click outside closes the list without choosing', async () => {

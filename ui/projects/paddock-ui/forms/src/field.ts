@@ -1,5 +1,6 @@
-import { ChangeDetectionStrategy, Component, computed, Directive, DoCheck, ElementRef, forwardRef, inject, input, signal, type OnDestroy } from '@angular/core';
-import { MatError, MatFormField, MatFormFieldControl, MatHint, MatLabel } from '@angular/material/form-field';
+import { NgTemplateOutlet } from '@angular/common';
+import { ChangeDetectionStrategy, Component, computed, Directive, DoCheck, ElementRef, forwardRef, inject, input, signal, type OnDestroy, type TemplateRef } from '@angular/core';
+import { MatError, MatFormField, MatFormFieldControl, MatHint, MatLabel, MatSuffix } from '@angular/material/form-field';
 import { PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { Subject } from 'rxjs';
 import { fieldMessage, type PdFieldMessages, type PdFieldStateLike } from './messages';
@@ -28,31 +29,54 @@ type NativeControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 @Component({
   selector: 'pd-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MatFormField, MatLabel, MatHint, MatError, PdStatusGlyph, forwardRef(() => PdFieldProxy)],
-  host: { class: 'pd-field', '[class.pd-field--invalid]': 'invalid()', '[class.pd-field--short]': 'size() === "short"' },
+  imports: [MatFormField, MatLabel, MatHint, MatError, MatSuffix, NgTemplateOutlet, PdStatusGlyph, forwardRef(() => PdFieldProxy)],
+  host: { class: 'pd-field', '[class.pd-field--invalid]': 'invalid()', '[class.pd-field--short]': 'size() === "short"', '[class.pd-field--plain]': '!hasControl()' },
   template: `
-    <mat-form-field appearance="outline" floatLabel="always" subscriptSizing="dynamic">
-      <mat-label>{{ label() }}</mat-label>
-      <ng-container pdFieldProxy />
-      <ng-content />
+    <ng-template #body><ng-content /></ng-template>
+    @if (hasControl()) {
+      <mat-form-field appearance="outline" floatLabel="always" subscriptSizing="dynamic">
+        <mat-label>{{ label() }}</mat-label>
+        <ng-container pdFieldProxy />
+        <ng-container *ngTemplateOutlet="body" />
+        @if (suffix(); as tpl) {
+          <span matIconSuffix class="pd-field__suffix"><ng-container *ngTemplateOutlet="tpl" /></span>
+        }
+        @if (message(); as m) {
+          <mat-error [id]="errorId" data-testid="field-error"><pd-status-glyph status="error" [size]="14" /><span>{{ m }}</span></mat-error>
+        }
+        @if (hint() && !message()) {
+          <mat-hint class="pd-field__hint" [id]="hintId">{{ hint() }}</mat-hint>
+        }
+      </mat-form-field>
+    } @else {
+      <!-- No text control to outline (a picker made of a button, say): the classic layout, the label above the content. -->
+      <span class="pd-field__label" [id]="controlId + '-label'">{{ label() }}</span>
+      <div role="group" [attr.aria-labelledby]="controlId + '-label'"><ng-container *ngTemplateOutlet="body" /></div>
       @if (message(); as m) {
-        <mat-error [id]="errorId" data-testid="field-error"><pd-status-glyph status="error" [size]="14" /><span>{{ m }}</span></mat-error>
+        <p class="pd-field__error" [id]="errorId" data-testid="field-error"><pd-status-glyph status="error" [size]="14" /><span>{{ m }}</span></p>
       }
       @if (hint() && !message()) {
-        <mat-hint class="pd-field__hint" [id]="hintId">{{ hint() }}</mat-hint>
+        <span class="pd-field__hint" [id]="hintId">{{ hint() }}</span>
       }
-    </mat-form-field>
+    }
   `,
   styles: `
     :host { display: block; min-width: 0; }
+    :host(.pd-field--plain) { display: grid; gap: var(--pd-space-1); align-content: start; }
     mat-form-field { width: 100%; min-width: 0; }
     /* A short field narrows the control only: the error and the hint keep the whole column (an error of 20 characters must not wrap). */
     :host(.pd-field--short) ::ng-deep .mat-mdc-text-field-wrapper { max-width: 8rem; }
-    /* The outline draws the border, the fill and the focus: the classic control classes of controls.css give way inside the field. */
-    :host ::ng-deep :is(.pd-input, .pd-textarea, .pd-select) { min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
-    :host ::ng-deep :is(.pd-input, .pd-textarea, .pd-select):is(:hover, :focus, :focus-visible, :disabled, [aria-invalid]) { border: 0; outline: none; background: transparent; color: inherit; }
+    /* The outline draws the border, the fill and the focus: whatever look the marked control brings (the classic control classes of
+       controls.css, a dialog's own input style) gives way inside the field. Matched by the marker, not by class names. */
+    :host ::ng-deep [pdFieldControl][pdFieldControl] { box-sizing: border-box; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+    :host ::ng-deep [pdFieldControl][pdFieldControl]:is(:hover, :focus, :focus-visible, :disabled, [aria-invalid]) { border: 0; outline: none; background: transparent; box-shadow: none; }
+    /* A disabled field reads as disabled: a quieter fill under the outline. */
+    :host ::ng-deep .mat-form-field-disabled .mdc-text-field--outlined { background: color-mix(in srgb, var(--pd-surface-2), var(--pd-text) 3%); border-radius: var(--pd-radius-input); }
+    .pd-field__label { font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
+    .pd-field__hint { font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+    .pd-field__error { display: flex; align-items: flex-start; gap: var(--pd-space-1); margin: 0; font-size: var(--pd-text-label); color: var(--pd-danger-text, var(--pd-danger)); }
     mat-error { display: flex; align-items: flex-start; gap: var(--pd-space-1); }
-    mat-error pd-status-glyph { margin-top: 1px; }
+    mat-error pd-status-glyph, .pd-field__error pd-status-glyph { margin-top: 1px; }
   `,
 })
 export class PdField implements DoCheck {
@@ -68,6 +92,10 @@ export class PdField implements DoCheck {
   readonly size = input<'default' | 'short'>('default');
   /** The form was submitted: show the errors of fields the user never touched. */
   readonly submitted = input(false);
+  /** An error the host knows without a form state (a time the picker could not read), shown like a validation error. */
+  readonly error = input<string | null>(null);
+  /** A template drawn at the end of the outline (a picker's toggle button), which may use template variables of the host. */
+  readonly suffix = input<TemplateRef<unknown> | null>(null);
 
   private readonly id = ++nextId;
   /** The id of the control, for the label's `for`. */
@@ -76,7 +104,7 @@ export class PdField implements DoCheck {
   protected readonly errorId = `${this.controlId}-error`;
 
   /** The message shown, or null. */
-  readonly message = computed(() => fieldMessage(this.state(), this.messages(), this.submitted()));
+  readonly message = computed(() => this.error() ?? fieldMessage(this.state(), this.messages(), this.submitted()));
   /** Whether the control is marked invalid. */
   readonly invalid = computed(() => this.message() !== null);
   /** Whether the field is required (a mark after the label). */
@@ -86,6 +114,8 @@ export class PdField implements DoCheck {
   readonly describedBy = signal<string | null>(null);
   /** The control marked `pdFieldControl` inside, if any. */
   readonly control = signal<PdFieldControl | null>(null);
+  /** Whether there is a control to outline. */
+  protected readonly hasControl = computed(() => this.control() !== null);
   /** Fires when something `mat-form-field` shows about the control changed (focus, value, disabled, error). */
   readonly changes = new Subject<void>();
   private seen = '';
@@ -109,6 +139,8 @@ export class PdField implements DoCheck {
   selector: '[pdFieldControl]',
   host: {
     class: 'mat-mdc-input-element mat-mdc-form-field-input-control mdc-text-field__input',
+    '[class.mat-mdc-form-field-textarea-control]': 'element.nodeName === "TEXTAREA"',
+    '[class.mat-mdc-native-select-inline]': 'element.nodeName === "SELECT"',
     '[id]': 'field.controlId',
     '[attr.aria-describedby]': 'field.describedBy()',
     '[attr.aria-invalid]': 'field.invalid() ? "true" : null',
@@ -125,6 +157,7 @@ export class PdFieldControl implements OnDestroy {
   readonly focused = signal(false);
   constructor() {
     this.field.control.set(this);
+    this.field.changes.next();
   }
 
   ngOnDestroy(): void {
@@ -147,7 +180,10 @@ export class PdFieldProxy implements MatFormFieldControl<string> {
 
   readonly stateChanges = this.field.changes;
   readonly ngControl = null;
-  readonly controlType = 'pd-field';
+  /** `mat-native-select` makes Material draw the arrow of a native select. */
+  get controlType(): string {
+    return this.field.control()?.element.nodeName === 'SELECT' ? 'mat-native-select' : 'mat-input';
+  }
   readonly autofilled = false;
   readonly shouldLabelFloat = true;
 

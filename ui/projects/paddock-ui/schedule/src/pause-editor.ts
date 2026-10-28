@@ -1,7 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, model } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, model, signal } from '@angular/core';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { DateAdapter, MAT_DATE_FORMATS } from '@angular/material/core';
-import { MatTimepicker, MatTimepickerInput } from '@angular/material/timepicker';
+import { MatTimepicker, MatTimepickerInput, MatTimepickerToggle } from '@angular/material/timepicker';
 import { MatTooltip } from '@angular/material/tooltip';
 import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
@@ -21,7 +21,7 @@ import { dateToTime, TIME_PROVIDERS, timeOptions, timeToDate } from './time-valu
 @Component({
   selector: 'pd-pause-editor',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdStatusGlyph, PdDayPicker, PdGlyph, PdField, PdFieldControl, MatButton, MatIconButton, MatTimepicker, MatTimepickerInput, MatTooltip],
+  imports: [PdStatusGlyph, PdDayPicker, PdGlyph, PdField, PdFieldControl, MatButton, MatIconButton, MatTimepicker, MatTimepickerInput, MatTimepickerToggle, MatTooltip],
   providers: [TIME_PROVIDERS],
   template: `
     @if (value().windows.length === 0) {
@@ -31,13 +31,15 @@ import { dateToTime, TIME_PROVIDERS, timeOptions, timeToDate } from './time-valu
       @for (w of value().windows; track $index) {
         <li class="pd-window" [attr.data-testid]="'pause-window-' + $index">
           <pd-day-picker [value]="w.days" [label]="daysLabel($index + 1)" [disabled]="disabled()" (valueChange)="patch($index, { days: $event })" />
-          <pd-field size="short" [label]="fromText">
-            <input pdFieldControl [matTimepicker]="startPicker" [value]="dates()[$index]?.start ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTime($index, 'start', $event)" />
+          <pd-field size="short" [label]="fromText" [suffix]="startToggle" [error]="bad().has($index + 'start') ? badTimeText : null">
+            <input pdFieldControl [matTimepicker]="startPicker" [value]="dates()[$index]?.start ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTime($index, 'start', $event)" (keydown.escape)="closePicker($event, startPicker)" />
             <mat-timepicker #startPicker panelClass="pd-timepicker-panel" [options]="timeList" />
+            <ng-template #startToggle><mat-timepicker-toggle [for]="startPicker" [disabled]="disabled()" /></ng-template>
           </pd-field>
-          <pd-field size="short" [label]="toText">
-            <input pdFieldControl [matTimepicker]="endPicker" [value]="dates()[$index]?.end ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTime($index, 'end', $event)" />
+          <pd-field size="short" [label]="toText" [suffix]="endToggle" [error]="bad().has($index + 'end') ? badTimeText : null">
+            <input pdFieldControl [matTimepicker]="endPicker" [value]="dates()[$index]?.end ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTime($index, 'end', $event)" (keydown.escape)="closePicker($event, endPicker)" />
             <mat-timepicker #endPicker panelClass="pd-timepicker-panel" [options]="timeList" />
+            <ng-template #endToggle><mat-timepicker-toggle [for]="endPicker" [disabled]="disabled()" /></ng-template>
           </pd-field>
           @if (w.start > w.end) {
             <span class="pd-note">{{ overnightText }}</span>
@@ -80,6 +82,9 @@ export class PdPauseEditor {
   protected readonly timeList = timeOptions(this.adapter, this.formats);
   /** The windows' times as `Date`s, one object per change of `value` (a binding that made a new `Date` on every check would never settle). */
   protected readonly dates = computed(() => this.value().windows.map((w) => ({ start: timeToDate(w.start), end: timeToDate(w.end) })));
+  /** The times (`0start`, `1end`...) the picker could not read; the last good time stays in the windows. */
+  protected readonly bad = signal<ReadonlySet<string>>(new Set());
+  protected readonly badTimeText = $localize`:Field error|@@pd.schedule.badTime:Enter a time such as 09:00.`;
   protected readonly max = MAX_PAUSE_WINDOWS;
   protected readonly emptyText = $localize`:Empty state|@@pd.schedule.pause.empty:No windows: nothing is paused.`;
   protected readonly fromText = $localize`:Field label|@@pd.schedule.pause.from:From`;
@@ -106,7 +111,20 @@ export class PdPauseEditor {
   /** The picker's `Date` (null while the text is empty or incomplete: the last good time stays) as the engine's `HH:MM`. */
   protected setTime(index: number, field: 'start' | 'end', date: Date | null): void {
     const time = dateToTime(date);
+    this.bad.update((bad) => {
+      const next = new Set(bad);
+      if (time) next.delete(`${index}${field}`);
+      else next.add(`${index}${field}`);
+      return next;
+    });
     if (time) this.patch(index, { [field]: time });
+  }
+
+  /** Escape closes an open time list and goes no further, so a dialog around the editor stays open. */
+  protected closePicker(e: Event, picker: MatTimepicker<Date>): void {
+    if (!picker.isOpen()) return;
+    e.stopPropagation();
+    picker.close();
   }
 
   protected add(): void {
@@ -116,6 +134,7 @@ export class PdPauseEditor {
 
   protected remove(index: number): void {
     const v = this.value();
+    this.bad.set(new Set());
     this.value.set({ ...v, windows: v.windows.filter((_, i) => i !== index) });
   }
 

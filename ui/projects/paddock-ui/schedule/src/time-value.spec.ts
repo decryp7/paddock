@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
-import { DateAdapter, MAT_DATE_FORMATS, MAT_DATE_LOCALE, provideNativeDateAdapter } from '@angular/material/core';
+import { DateAdapter, MAT_DATE_FORMATS, MAT_DATE_LOCALE } from '@angular/material/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { dateToTime, timeOptions, timeToDate } from './time-value';
+import { dateToTime, TIME_PROVIDERS, timeOptions, timeToDate } from './time-value';
 
 // Node (the test runner) reads `TZ` again whenever it is assigned.
 const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env;
@@ -58,13 +58,13 @@ describe('timeToDate and dateToTime', () => {
 describe('timeOptions', () => {
   it('lists the whole reference day, 48 half hours by default, labelled in the locale', () => {
     setZone('America/New_York');
-    TestBed.configureTestingModule({ providers: [provideNativeDateAdapter(), { provide: MAT_DATE_LOCALE, useValue: 'en-US' }] });
+    TestBed.configureTestingModule({ providers: [TIME_PROVIDERS, { provide: MAT_DATE_LOCALE, useValue: 'en-US' }] });
     const adapter = TestBed.inject<DateAdapter<Date>>(DateAdapter);
     const formats = TestBed.inject(MAT_DATE_FORMATS);
     const options = timeOptions(adapter, formats);
     expect(options).toHaveLength(48);
-    expect(options[0]!.label).toBe('12:00 AM');
-    expect(options[47]!.label).toBe('11:30 PM');
+    expect(options[0]!.label).toBe('00:00');
+    expect(options[47]!.label).toBe('23:30');
     expect(options.map((o) => dateToTime(o.value))).toEqual(Array.from({ length: 48 }, (_, i) => `${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`));
     expect(timeOptions(adapter, formats, 15)).toHaveLength(96);
   });

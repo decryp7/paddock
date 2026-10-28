@@ -1,4 +1,4 @@
-import { type DateAdapter, type MatDateFormats, provideNativeDateAdapter } from '@angular/material/core';
+import { type DateAdapter, MAT_DATE_FORMATS, MAT_NATIVE_DATE_FORMATS, type MatDateFormats, provideNativeDateAdapter } from '@angular/material/core';
 import type { MatTimepickerOption } from '@angular/material/timepicker';
 
 /**
@@ -36,5 +36,14 @@ export function timeOptions(adapter: DateAdapter<Date>, formats: MatDateFormats,
   return options;
 }
 
-/** The date adapter the timepicker needs: the platform's `Date`, in the app's locale. */
-export const TIME_PROVIDERS = [provideNativeDateAdapter()];
+const TIME_24H: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
+
+/** The times are shown and read in 24 hours ("17:45"), like the engine's `HH:MM` and the preview under the editor. */
+export const TIME_FORMATS: MatDateFormats = {
+  ...MAT_NATIVE_DATE_FORMATS,
+  parse: { ...MAT_NATIVE_DATE_FORMATS.parse, timeInput: TIME_24H },
+  display: { ...MAT_NATIVE_DATE_FORMATS.display, timeInput: TIME_24H, timeOptionLabel: TIME_24H },
+};
+
+/** What the timepicker needs: the platform's `Date` adapter, in the app's locale, with 24-hour times. */
+export const TIME_PROVIDERS = [provideNativeDateAdapter(TIME_FORMATS), { provide: MAT_DATE_FORMATS, useValue: TIME_FORMATS }];

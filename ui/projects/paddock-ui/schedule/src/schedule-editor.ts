@@ -1,8 +1,8 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, model } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, model, signal } from '@angular/core';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
 import { DateAdapter, MAT_DATE_FORMATS } from '@angular/material/core';
-import { MatTimepicker, MatTimepickerInput } from '@angular/material/timepicker';
+import { MatTimepicker, MatTimepickerInput, MatTimepickerToggle } from '@angular/material/timepicker';
 import { MatTooltip } from '@angular/material/tooltip';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
@@ -51,7 +51,7 @@ export function presetLabel(secs: number): string {
 @Component({
   selector: 'pd-schedule-editor',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdStatusGlyph, PdDayPicker, PdGlyph, PdSelect, PdField, PdFieldControl, SuSegmentedControl, MatButton, MatIconButton, MatButtonToggleGroup, MatButtonToggle, MatTimepicker, MatTimepickerInput, MatTooltip],
+  imports: [PdStatusGlyph, PdDayPicker, PdGlyph, PdSelect, PdField, PdFieldControl, SuSegmentedControl, MatButton, MatIconButton, MatButtonToggleGroup, MatButtonToggle, MatTimepicker, MatTimepickerInput, MatTimepickerToggle, MatTooltip],
   providers: [TIME_PROVIDERS],
   template: `
     <pd-segmented-control [label]="modeLabel" [options]="modeSegments()" [value]="value().mode" (valueChange)="setMode($event)" />
@@ -67,7 +67,7 @@ export function presetLabel(secs: number): string {
           <pd-field class="pd-amount" size="short" [label]="everyLabel">
             <input pdFieldControl type="number" min="1" step="1" [value]="split().amount" [disabled]="disabled()" (change)="setAmount($event)" />
           </pd-field>
-          <pd-select [options]="unitOptions" [value]="split().unit" [ariaLabel]="unitLabel" [disabled]="disabled()" (valueChange)="setUnit($event)" />
+          <pd-select class="pd-unit" [label]="unitLabel" [options]="unitOptions" [value]="split().unit" [disabled]="disabled()" (valueChange)="setUnit($event)" />
         </div>
       }
       @case ('times') {
@@ -76,9 +76,10 @@ export function presetLabel(secs: number): string {
           <ul class="pd-times">
             @for (t of times(); track $index) {
               <li>
-                <pd-field size="short" [label]="timeLabel($index + 1)">
-                  <input pdFieldControl [matTimepicker]="picker" [value]="timeDates()[$index] ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTimeAt($index, $event)" />
+                <pd-field size="short" [label]="timeLabel($index + 1)" [suffix]="toggle" [error]="badTimes().has($index) ? badTimeText : null">
+                  <input pdFieldControl [matTimepicker]="picker" [value]="timeDates()[$index] ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTimeAt($index, $event)" (keydown.escape)="closePicker($event, picker)" />
                   <mat-timepicker #picker panelClass="pd-timepicker-panel" [options]="timeList" />
+                  <ng-template #toggle><mat-timepicker-toggle [for]="picker" [disabled]="disabled()" /></ng-template>
                 </pd-field>
                 <button type="button" matIconButton [attr.aria-label]="removeLabel($index + 1)" [matTooltip]="removeText" [disabled]="disabled() || times().length < 2" (click)="removeTimeAt($index)">
                   <pd-glyph name="close" [size]="14" />
@@ -127,7 +128,8 @@ export function presetLabel(secs: number): string {
     .pd-row, .pd-stack { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); min-width: 0; }
     .pd-stack { display: grid; justify-items: start; }
     .pd-amount { width: 8rem; }
-    .pd-times { display: grid; gap: var(--pd-space-1); margin: 0; padding: 0; list-style: none; }
+    .pd-unit { width: 9rem; }
+    .pd-times { display: grid; gap: var(--pd-space-1); margin: var(--pd-space-2) 0 0; padding: 0; list-style: none; }
     .pd-times li { display: flex; align-items: flex-start; gap: var(--pd-space-1); }
     .pd-add { justify-self: start; }
     .pd-preview { display: grid; gap: var(--pd-space-1); min-width: 0; padding: var(--pd-space-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); }
@@ -253,16 +255,36 @@ export class PdScheduleEditor {
     if (v.mode === 'times') this.value.set({ ...v, times: addTime(v.times) });
   }
 
-  /** The picker's `Date` (null while the text is empty or incomplete: the last good time stays) as the engine's `HH:MM`. */
+  /** The times the picker could not read (the last good time stays in the schedule). */
+  protected readonly badTimes = signal<ReadonlySet<number>>(new Set());
+  protected readonly badTimeText = $localize`:Field error|@@pd.schedule.badTime:Enter a time such as 09:00.`;
+
+  /** The picker's `Date` (null while the text is empty or incomplete: the last good time stays and the field says so) as the engine's `HH:MM`. */
   protected setTimeAt(index: number, date: Date | null): void {
     const v = this.value();
     const time = dateToTime(date);
+    this.badTimes.update((bad) => {
+      const next = new Set(bad);
+      if (time) next.delete(index);
+      else next.add(index);
+      return next;
+    });
     if (v.mode === 'times' && time) this.value.set({ ...v, times: setTime(v.times, index, time) });
+  }
+
+  /** Escape closes an open time list and goes no further, so a dialog around the editor stays open. */
+  protected closePicker(e: Event, picker: MatTimepicker<Date>): void {
+    if (!picker.isOpen()) return;
+    e.stopPropagation();
+    picker.close();
   }
 
   protected removeTimeAt(index: number): void {
     const v = this.value();
-    if (v.mode === 'times' && v.times.length > 1) this.value.set({ ...v, times: removeTime(v.times, index) });
+    if (v.mode === 'times' && v.times.length > 1) {
+      this.badTimes.set(new Set());
+      this.value.set({ ...v, times: removeTime(v.times, index) });
+    }
   }
 
   protected setCron(e: Event): void {

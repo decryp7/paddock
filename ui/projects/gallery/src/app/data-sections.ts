@@ -117,6 +117,12 @@ const COLUMNS: PdColumn<Plugin>[] = [
         <pd-field label="Workspace" hint="Set by your administrator">
           <input type="text" pdFieldControl value="Debrief" disabled />
         </pd-field>
+        <pd-field label="Level" hint="A native select in a field" data-testid="native-select-field">
+          <select pdFieldControl><option>Standard</option><option>Compact</option></select>
+        </pd-field>
+        <pd-field label="Folder" hint="A picker with no text control" data-testid="plain-field">
+          <div class="gal-row"><span>~/builds</span><button type="button" class="pd-btn">Choose folder</button></div>
+        </pd-field>
         <div class="gal-row"><button class="pd-btn pd-btn--primary" type="submit">Save</button></div>
       </form>
       <p data-testid="forms-status">{{ saved() ? 'Saved ' + saved() : 'Not saved' }}</p>

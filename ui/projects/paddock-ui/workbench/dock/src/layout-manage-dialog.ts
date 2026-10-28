@@ -82,11 +82,9 @@ export interface LayoutManageResult {
     .pd-lmd__row + .pd-lmd__row { border-top: 1px solid var(--pd-hairline); }
     .pd-lmd__name { flex: 1 1 8rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-lmd__rename { flex: 1 1 12rem; }
-    .pd-lmd__input { box-sizing: border-box; width: 100%; min-height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
-    .pd-lmd__input[aria-invalid='true'] { border-color: var(--pd-danger); }
     .pd-lmd__btn { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-button-height, 28px); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
     .pd-lmd__btn--danger { color: var(--pd-danger-text, var(--pd-danger)); }
-    .pd-lmd__btn:focus-visible, .pd-lmd__input:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pd-lmd__btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-lmd__undo { display: flex; align-items: center; justify-content: space-between; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-surface-3); }
     .pd-lmd__actions { display: flex; justify-content: flex-end; }
   `,

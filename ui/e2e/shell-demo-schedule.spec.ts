@@ -54,7 +54,7 @@ test.describe('schedule editors (plan X33)', () => {
     const remove = page.getByRole('button', { name: /^Remove time of day/ });
     await expect(remove).toBeDisabled();
     await page.getByRole('button', { name: 'Add a time' }).click();
-    await expect(page.getByRole('combobox', { name: 'Time of day 2' })).toHaveValue('10:00 AM');
+    await expect(page.getByRole('combobox', { name: 'Time of day 2' })).toHaveValue('10:00');
     await expect(remove.first()).toBeEnabled();
     await remove.first().click();
     await expect(page.getByRole('combobox', { name: /^Time of day/ })).toHaveCount(1);
@@ -71,12 +71,12 @@ test.describe('schedule editors (plan X33)', () => {
     await expect(page.getByTestId('pause-window-1')).toBeVisible();
     // The timepicker takes the time in the locale's words and commits on leaving the field.
     const times = page.getByTestId('pause-window-1').getByRole('combobox');
-    await times.nth(0).fill('9:00 AM');
+    await times.nth(0).fill('09:00');
     await times.nth(0).press('Tab');
-    await times.nth(1).fill('9:00 AM');
+    await times.nth(1).fill('09:00');
     await times.nth(1).press('Tab');
     await expect(page.getByRole('alert')).toContainText('differs from its end');
-    await times.nth(1).fill('10:00 AM');
+    await times.nth(1).fill('10:00');
     await times.nth(1).press('Tab');
     await expect(page.getByRole('alert')).toHaveCount(0);
     await page.getByRole('button', { name: 'Remove window 2' }).click();

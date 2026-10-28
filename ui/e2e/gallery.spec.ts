@@ -40,6 +40,22 @@ test('keyboard: arrows move the segmented control and Tab shows a focus ring', a
   expect(parseFloat(ring[2]!)).toBeGreaterThanOrEqual(2);
 });
 
+test('a native select in a pd-field draws Material\'s arrow, and a field with no control keeps the classic layout', async ({ page }) => {
+  await open(page, 'light', 'debrief');
+  const arrow = await page.getByTestId('native-select-field').locator('.mat-mdc-form-field-infix').evaluate((e) => {
+    const cs = getComputedStyle(e, '::after');
+    return [cs.content, parseFloat(cs.borderTopWidth) + parseFloat(cs.borderLeftWidth), cs.borderTopColor];
+  });
+  expect(arrow[0]).not.toBe('none');
+  expect(arrow[1]).toBeGreaterThan(0);
+  const select = page.getByTestId('native-select-field').locator('select');
+  expect(await select.evaluate((e) => getComputedStyle(e).appearance)).toBe('none');
+  expect(await select.evaluate((e) => getComputedStyle(e).borderTopWidth)).toBe('0px');
+  const plain = page.getByTestId('plain-field');
+  await expect(plain.locator('mat-form-field')).toHaveCount(0);
+  await expect(plain.getByRole('group', { name: 'Folder' })).toBeVisible();
+});
+
 test('interactive card activates with Enter and Space', async ({ page }) => {
   await open(page, 'dark', 'debrief');
   const card = page.getByRole('button', { name: 'Network' });

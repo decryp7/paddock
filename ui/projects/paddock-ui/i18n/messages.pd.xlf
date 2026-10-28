@@ -1412,6 +1412,9 @@
       <trans-unit id="pd.schedule.addTime" datatype="html">
         <source>Add a time</source>
       </trans-unit>
+      <trans-unit id="pd.schedule.badTime" datatype="html">
+        <source>Enter a time such as 09:00.</source>
+      </trans-unit>
       <trans-unit id="pd.schedule.cron" datatype="html">
         <source>Cron expression</source>
       </trans-unit>

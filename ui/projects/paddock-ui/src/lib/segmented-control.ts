@@ -33,6 +33,8 @@ export interface SuSegment {
   `,
   styles: `
     :host { display: inline-flex; }
+    /* A disabled option reads as disabled in both schemes. */
+    :host ::ng-deep .mat-button-toggle-disabled { opacity: 0.5; }
     .pd-count { margin-inline-start: var(--pd-space-1); font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; color: var(--pd-text-muted); }
   `,
 })
