@@ -32,7 +32,7 @@ export default defineConfig({
   webServer: {
     command: `npx ng serve --port ${PORT} --poll 1500`,
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: process.env['PW_REUSE'] === '1',
+    reuseExistingServer: true,
     timeout: 180_000,
   },
 });

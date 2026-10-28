@@ -1,3 +1,5 @@
+import { By } from '@angular/platform-browser';
+import { MatTooltip } from '@angular/material/tooltip';
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
@@ -122,7 +124,8 @@ describe('CountersPage', () => {
     f.detectChanges();
     const cell = el.querySelector('.unavail')!;
     expect(cell.textContent).toContain('Unavailable');
-    expect(cell.getAttribute('title')).toMatch(/not available/);
+    const tip = f.debugElement.queryAll(By.css('.unavail'))[0]!.injector.get(MatTooltip);
+    expect(tip.message).toMatch(/not available/);
   });
 
   it('shows an inline error with Retry when the objects cannot be listed', async () => {

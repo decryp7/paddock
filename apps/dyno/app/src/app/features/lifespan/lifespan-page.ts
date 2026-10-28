@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/cor
 import type { LifeForecast, LifeOutcome } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatDate, formatSpan } from '../../shared/format';
+import { MatProgressBar } from '@angular/material/progress-bar';
 import { Icon } from '../../shared/icon';
 import { LifespanStore } from '../../state/lifespan.store';
 import { SUBJECT_ICON, SUBJECT_WORD, confidenceText, historyProgress, outcomeKind, outcomeTone, rangeBar } from './lifespan-model';
@@ -12,7 +13,7 @@ import { SUBJECT_ICON, SUBJECT_WORD, confidenceText, historyProgress, outcomeKin
  */
 @Component({
   selector: 'dy-lifespan-page',
-  imports: [AsyncState, Icon],
+  imports: [MatProgressBar, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -55,7 +56,7 @@ import { SUBJECT_ICON, SUBJECT_WORD, confidenceText, historyProgress, outcomeKin
                   @case ('tooLittleHistory') {
                     @if (history(f.outcome); as h) {
                       <div class="progress">
-                        <div class="bar" role="progressbar" aria-label="History collected" aria-valuemin="0" [attr.aria-valuemax]="h.needDays" [attr.aria-valuenow]="h.haveDays"><span [style.width.%]="progress(f.outcome)"></span></div>
+                        <mat-progress-bar class="bar" mode="determinate" aria-label="History collected" [value]="progress(f.outcome)" />
                         <span class="num">Have {{ h.haveDays }} of {{ h.needDays }} days</span>
                       </div>
                     }
@@ -105,8 +106,7 @@ import { SUBJECT_ICON, SUBJECT_WORD, confidenceText, historyProgress, outcomeKin
     .ends { display: flex; justify-content: space-between; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-sm); white-space: nowrap; }
     .ends .mid { color: var(--text-1); font-weight: var(--fw-medium); }
     .progress { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-sm); max-width: 560px; }
-    .progress .bar { flex: 1; height: 8px; border-radius: var(--r-pill); background: var(--surface-active); overflow: hidden; }
-    .progress .bar span { display: block; height: 100%; background: var(--accent); }
+    .progress .bar { flex: 1; }
     .progress .num { white-space: nowrap; }
     .unavailable { margin: 0; display: flex; gap: var(--sp-2); align-items: flex-start; color: var(--text-2); max-width: 78ch; }
     .unavailable dy-icon { --icon-size: 16px; color: var(--text-3); margin-top: 2px; }

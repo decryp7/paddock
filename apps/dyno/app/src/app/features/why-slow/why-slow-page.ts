@@ -9,6 +9,7 @@ import { Notifier } from '../../shared/notifier';
 import { DiagnosisStore } from '../../state/diagnosis.store';
 import { causeLinks, diagnosisText, hintPath, historyLine, windowText } from './why-slow-model';
 import { MatButton } from '@angular/material/button';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /**
  * "Why is my PC slow?" in full: the engine's likeliest causes with what was measured, the apps behind each, pages to look
@@ -16,7 +17,7 @@ import { MatButton } from '@angular/material/button';
  */
 @Component({
   selector: 'dy-why-slow-page',
-  imports: [MatButton, Icon, RouterLink],
+  imports: [MatTooltip, MatButton, Icon, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -56,7 +57,7 @@ import { MatButton } from '@angular/material/button';
                 <h3>{{ c.title }}</h3>
                 <p>{{ c.explanation }}</p>
               </div>
-              <span class="conf num" [title]="'How sure Dyno is: ' + conf(c.confidence)">{{ conf(c.confidence) }} confident</span>
+              <span class="conf num" [matTooltip]="'How sure Dyno is: ' + conf(c.confidence)">{{ conf(c.confidence) }} confident</span>
             </div>
 
             <div class="cols">
@@ -75,7 +76,7 @@ import { MatButton } from '@angular/material/button';
                   <h4>Apps involved</h4>
                   <ul class="apps">
                     @for (a of c.involved; track a.id) {
-                      <li><span class="n truncate" [title]="a.name">{{ a.name }}</span><span class="num">{{ a.share }}</span></li>
+                      <li><span class="n truncate" [matTooltip]="a.name">{{ a.name }}</span><span class="num">{{ a.share }}</span></li>
                     }
                   </ul>
                 </div>

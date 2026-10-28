@@ -21,6 +21,7 @@ import {
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { PdDayPicker } from '@decryp7/paddock-ui/schedule';
 import { TimeField } from '../../shared/time-field';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /**
  * Maintenance windows: when Dyno's own heavier background work (scans, backup checks, report building) may run. Clicks
@@ -28,7 +29,7 @@ import { TimeField } from '../../shared/time-field';
  */
 @Component({
   selector: 'dy-extras-maintenance',
-  imports: [TimeField, PdDayPicker, MatButton, MatIconButton, AsyncState, Icon, MatSlideToggle],
+  imports: [MatTooltip, TimeField, PdDayPicker, MatButton, MatIconButton, AsyncState, Icon, MatSlideToggle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="!!draft()" [error]="settings.error()" what="maintenance windows" [rows]="4" (retry)="settings.load()">
@@ -53,7 +54,7 @@ import { TimeField } from '../../shared/time-field';
                   <dy-time-field shown="From" [label]="'Window ' + (i + 1) + ' starts'" [value]="time(w.startMinute)" (timeChange)="setTime(i, w, 'startMinute', $event)" />
                   <dy-time-field shown="To" [label]="'Window ' + (i + 1) + ' ends'" [value]="time(w.endMinute)" (timeChange)="setTime(i, w, 'endMinute', $event)" />
                   <span class="sum muted">{{ summary(w) }}</span>
-                  <button type="button" matIconButton [attr.aria-label]="'Remove window ' + (i + 1)" title="Remove window" (click)="remove(i)"><dy-icon name="trash" /></button>
+                  <button type="button" matIconButton [attr.aria-label]="'Remove window ' + (i + 1)" matTooltip="Remove window" (click)="remove(i)"><dy-icon name="trash" /></button>
                 </li>
               }
             </ul>

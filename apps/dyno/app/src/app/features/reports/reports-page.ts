@@ -8,6 +8,7 @@ import { ReportsStore } from '../../state/reports.store';
 import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports-model';
 import { MatButton } from '@angular/material/button';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /**
  * Reports: Dyno's weekly summary built by the engine from its own history (health trend, busiest apps, disk forecast, issues
@@ -15,7 +16,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
  */
 @Component({
   selector: 'dy-reports-page',
-  imports: [PdSelect, MatButton, AsyncState, Icon, Sparkline],
+  imports: [MatTooltip, PdSelect, MatButton, AsyncState, Icon, Sparkline],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -84,7 +85,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
                   <thead><tr><th>App</th><th class="r">CPU (average)</th><th class="r">Memory (average)</th></tr></thead>
                   <tbody>
                     @for (a of r.topApps; track a.app) {
-                      <tr><td><span class="ell" [title]="a.app">{{ a.app }}</span></td><td class="r">{{ pct(a.cpuAvg) }}</td><td class="r">{{ bytes(a.memoryAvg) }}</td></tr>
+                      <tr><td><span class="ell" [matTooltip]="a.app">{{ a.app }}</span></td><td class="r">{{ pct(a.cpuAvg) }}</td><td class="r">{{ bytes(a.memoryAvg) }}</td></tr>
                     }
                   </tbody>
                 </table>

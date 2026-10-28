@@ -27,6 +27,7 @@ import { MatButton } from '@angular/material/button';
 import { MatFormField, MatPrefix } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /**
  * What the operating system recorded going wrong: a stability score for today and the last days, the apps and kinds with
@@ -35,7 +36,7 @@ import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
  */
 @Component({
   selector: 'dy-issues-view',
-  imports: [SuSegmentedControl, MatFormField, MatInput, MatPrefix, MatButton, AsyncState, Chart, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [MatTooltip, SuSegmentedControl, MatFormField, MatInput, MatPrefix, MatButton, AsyncState, Chart, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -67,7 +68,7 @@ import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
                 <tbody>
                   @for (a of o.apps.slice(0, 5); track a.name) {
                     <tr class="pick" tabindex="0" [class.on]="filter().app === a.name" [attr.aria-label]="'Show only ' + a.name" (click)="toggleApp(a)" (keydown.enter)="toggleApp(a)">
-                      <td><span class="ell" [title]="a.name">{{ a.name }}</span></td>
+                      <td><span class="ell" [matTooltip]="a.name">{{ a.name }}</span></td>
                       <td class="r">{{ a.count }}</td>
                       <td class="r muted">{{ ago(a.last) }}</td>
                     </tr>
@@ -127,9 +128,9 @@ import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
                       <tr class="row" tabindex="0" [attr.data-id]="r.issue.id" [class.sel]="selectedId() === r.issue.id" [cdkContextMenuTriggerFor]="menu" [cdkContextMenuTriggerData]="{ issue: r.issue }" (click)="select(r.issue)" (keydown.enter)="select(r.issue)" (keydown.shift.f10)="select(r.issue)" (contextmenu)="select(r.issue)">
                         <td class="time num muted">{{ clock(r.issue.at) }}</td>
                         <td class="kind"><span class="dot" [attr.data-tone]="dotTone(r.issue)" aria-hidden="true"></span>{{ kindLabel(r.issue.kind) }}</td>
-                        <td><span class="ell" [title]="subject(r.issue)">{{ subject(r.issue) }}</span></td>
-                        <td class="muted"><span class="ell" [title]="r.issue.evidence">{{ r.issue.evidence || r.issue.title }}</span></td>
-                        <td class="acts"><button type="button" class="ib" [attr.aria-label]="'Copy details of ' + subject(r.issue)" title="Copy details" (click)="copy(r.issue, $event)"><dy-icon name="copy" /></button></td>
+                        <td><span class="ell" [matTooltip]="subject(r.issue)">{{ subject(r.issue) }}</span></td>
+                        <td class="muted"><span class="ell" [matTooltip]="r.issue.evidence">{{ r.issue.evidence || r.issue.title }}</span></td>
+                        <td class="acts"><button type="button" class="ib" [attr.aria-label]="'Copy details of ' + subject(r.issue)" matTooltip="Copy details" (click)="copy(r.issue, $event)"><dy-icon name="copy" /></button></td>
                       </tr>
                     }
                   }

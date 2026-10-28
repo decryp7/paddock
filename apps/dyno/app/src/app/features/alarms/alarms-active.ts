@@ -8,6 +8,7 @@ import { alarmSuffix, isShelved, needsAcknowledge, severityWord, shortTime, stat
 import { TABLE_CSS } from './alarms-css';
 import { AlarmDetail } from './alarm-detail';
 import { MatButton } from '@angular/material/button';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /**
  * The open alarms as one table (newest first) with a detail panel beside it. The section action acknowledges everything that is
@@ -15,7 +16,7 @@ import { MatButton } from '@angular/material/button';
  */
 @Component({
   selector: 'dy-alarms-active',
-  imports: [MatButton, AsyncState, Icon, AlarmDetail, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
+  imports: [MatTooltip, MatButton, AsyncState, Icon, AlarmDetail, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="store.loaded()" [error]="store.error()" [empty]="store.alarms().length === 0" emptyTitle="No open alarms" emptyText="When a rule fires, its alarm waits here until you acknowledge it." emptyIcon="bell" what="alarms" [rows]="4" (retry)="store.load()">
@@ -52,22 +53,22 @@ import { MatButton } from '@angular/material/button';
               (keydown.enter)="pick(a)"
               (keydown.space)="$event.preventDefault(); pick(a)"
             >
-              <span class="cell" role="gridcell">@if (unread(a)) {<span class="unread" title="Not acknowledged" aria-label="Not acknowledged"></span>}</span>
+              <span class="cell" role="gridcell">@if (unread(a)) {<span class="unread" matTooltip="Not acknowledged" aria-label="Not acknowledged"></span>}</span>
               <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="a.severity === 'critical' ? 'bad' : a.severity === 'warning' ? 'warn' : 'info'" [attr.aria-label]="sev(a)" role="img"></span><span [class.muted]="a.severity === 'info'">{{ sev(a) }}</span></span>
               <span class="cell title-cell" role="gridcell">
                 <span class="two">
-                  <span class="line"><span class="t truncate" [title]="a.title">{{ a.title }}</span>@if (suffix(a); as s) {<span class="sfx">{{ s }}</span>}</span>
-                  <span class="d truncate" [title]="a.detail">{{ a.detail }}</span>
+                  <span class="line"><span class="t truncate" [matTooltip]="a.title">{{ a.title }}</span>@if (suffix(a); as s) {<span class="sfx">{{ s }}</span>}</span>
+                  <span class="d truncate" [matTooltip]="a.detail">{{ a.detail }}</span>
                 </span>
               </span>
-              <span class="cell c-rule muted" role="gridcell"><span class="truncate id" [title]="a.rule">{{ a.rule }}</span></span>
+              <span class="cell c-rule muted" role="gridcell"><span class="truncate id" [matTooltip]="a.rule">{{ a.rule }}</span></span>
               <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="tone(a)" aria-hidden="true"></span><span [class.muted]="tone(a) === 'calm'">{{ state(a) }}</span></span>
               <span class="cell c-first muted num" role="gridcell">{{ time(a.firstSeen) }}</span>
               <span class="cell muted num" role="gridcell">{{ time(a.lastSeen) }}</span>
               <span class="cell r muted num" role="gridcell">×{{ a.repeatCount }}</span>
               <span class="cell acts" role="gridcell">
-                <button type="button" class="ib" [attr.aria-label]="'Acknowledge ' + a.title" title="Acknowledge" [disabled]="!ackable(a)" (click)="ack(a, $event)"><dy-icon name="check" /></button>
-                <button type="button" class="ib" [attr.aria-label]="'Shelve ' + a.title" title="Shelve" [cdkMenuTriggerFor]="shelveMenu" [cdkMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="clock" /></button>
+                <button type="button" class="ib" [attr.aria-label]="'Acknowledge ' + a.title" matTooltip="Acknowledge" [disabled]="!ackable(a)" (click)="ack(a, $event)"><dy-icon name="check" /></button>
+                <button type="button" class="ib" [attr.aria-label]="'Shelve ' + a.title" matTooltip="Shelve" [cdkMenuTriggerFor]="shelveMenu" [cdkMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="clock" /></button>
                 <button type="button" class="ib more" [attr.aria-label]="'More actions for ' + a.title" [cdkMenuTriggerFor]="menu" [cdkMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
               </span>
             </div>

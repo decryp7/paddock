@@ -56,8 +56,9 @@ describe('dy-lifespan-page', () => {
     await settle(f);
     const bars = [...el.querySelectorAll('[role=progressbar]')];
     expect(bars).toHaveLength(2);
-    expect(bars[0]!.getAttribute('aria-valuenow')).toBe('6');
-    expect(bars[0]!.getAttribute('aria-valuemax')).toBe('14');
+    expect(bars[0]!.getAttribute('aria-label')).toBe('History collected');
+    expect(bars[0]!.getAttribute('aria-valuemax')).toBe('100');
+    expect(Number(bars[0]!.getAttribute('aria-valuenow'))).toBeCloseTo((6 / 14) * 100, 0);
     expect(el.textContent).toContain('Have 6 of 14 days');
     expect(el.querySelector('.range')).toBeNull();
   });

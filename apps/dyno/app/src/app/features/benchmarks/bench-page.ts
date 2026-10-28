@@ -11,6 +11,7 @@ import { MatButton } from '@angular/material/button';
 import { MatFormField } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
 import { MatCheckbox } from '@angular/material/checkbox';
+import { MatTooltip } from '@angular/material/tooltip';
 
 const KINDS: { kind: BenchKind; text: string }[] = [
   { kind: 'cpu', text: 'Integer work on one core and on all of them' },
@@ -22,7 +23,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
 /** Benchmarks: started only by a click, each in its own process with a timeout; the load at the time is stored with the result. */
 @Component({
   selector: 'dy-bench-page',
-  imports: [MatCheckbox, MatFormField, MatInput, MatButton, AsyncState, BenchArt, DeviceArt, Icon],
+  imports: [MatTooltip, MatCheckbox, MatFormField, MatInput, MatButton, AsyncState, BenchArt, DeviceArt, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -112,7 +113,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                             <li>
                               <span class="label">{{ m.label }}</span>
                               <span class="value num">{{ metric(m.value) }} <small>{{ m.unit }}</small></span>
-                              <span class="bar" role="presentation"><i [style.width.%]="pair(m).fill * 100"></i>@if (pair(m).marker !== null) { <b class="mk" [style.left.%]="pair(m).marker! * 100" title="Best earlier run"></b> }</span>
+                              <span class="bar" role="presentation"><i [style.width.%]="pair(m).fill * 100"></i>@if (pair(m).marker !== null) { <b class="mk" [style.left.%]="pair(m).marker! * 100" matTooltip="Best earlier run"></b> }</span>
                             </li>
                           }
                         </ul>

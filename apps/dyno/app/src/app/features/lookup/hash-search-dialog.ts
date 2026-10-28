@@ -5,6 +5,7 @@ import { errorHint } from '../../core/command-error';
 import { formatBytes } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { LookupStore } from '../../state/lookup.store';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /**
  * "Search this file's hash on VirusTotal": Dyno reads the file on this computer, shows its SHA-256, and only then, on a click,
@@ -12,14 +13,14 @@ import { LookupStore } from '../../state/lookup.store';
  */
 @Component({
   selector: 'dy-hash-search-dialog',
-  imports: [Icon],
+  imports: [MatTooltip, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
       <p class="subject"><strong>{{ name() }}</strong></p>
       <p class="msg">Dyno computed this hash here, on your computer. Nothing is uploaded: the button opens VirusTotal's page for the hash in your browser.</p>
       @if (store.hash(); as h) {
         <dl>
-          <dt>File</dt><dd class="mono sel" [title]="h.path">{{ h.path }}</dd>
+          <dt>File</dt><dd class="mono sel" [matTooltip]="h.path">{{ h.path }}</dd>
           <dt>Size</dt><dd>{{ size() }}</dd>
           <dt>SHA-256</dt>
           <dd class="hash">

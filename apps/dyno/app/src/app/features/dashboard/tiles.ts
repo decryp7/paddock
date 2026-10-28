@@ -11,6 +11,7 @@ import { coreGroups } from '../cpu/core-layout';
 import { Tile } from './tile';
 import { MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /** The tone of a used-fraction bar (visual only: the number is always printed). */
 function usedTone(percent: number): 'ok' | 'warn' | 'bad' | null {
@@ -26,14 +27,14 @@ const CPU_VIEWS: SuSegment[] = [{ value: 'overall', label: 'Overall' }, { value:
 /** CPU: hero, one sparkline, caption rows; the toggle switches to one live bar per core grouped by core kind. */
 @Component({
   selector: 'dy-cpu-tile',
-  imports: [SuSegmentedControl, MatIconButton, Tile, Sparkline, RouterLink, Icon],
+  imports: [MatTooltip, SuSegmentedControl, MatIconButton, Tile, Sparkline, RouterLink, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-tile title="CPU" icon="cpu" [ready]="live.connected()">
       @if (cpu()) {
         <span badge class="head">
           <pd-segmented-control label="CPU view" [options]="cpuViews" [value]="prefs.cpuView()" (valueChange)="prefs.setCpuView($event === 'cores' ? 'cores' : 'overall')" />
-          <a matIconButton routerLink="/cpu" aria-label="CPU details" title="CPU details"><dy-icon name="arrow-right" /></a>
+          <a matIconButton routerLink="/cpu" aria-label="CPU details" matTooltip="CPU details"><dy-icon name="arrow-right" /></a>
         </span>
       }
       @if (cpu(); as c) {
@@ -42,7 +43,7 @@ const CPU_VIEWS: SuSegment[] = [{ value: 'overall', label: 'Overall' }, { value:
           <dy-sparkline [values]="live.series().cpu" [max]="100" color="var(--accent)" label="CPU use over the last minute" style="--spark-h: 32px" />
           <div class="cores" role="img" [attr.aria-label]="coreLabel()">
             @for (v of c.perCore; track $index) {
-              <span class="core" [style.background]="coreColor(v)" [title]="'Core ' + count($index) + ': ' + pct(v)"></span>
+              <span class="core" [style.background]="coreColor(v)" [matTooltip]="'Core ' + count($index) + ': ' + pct(v)"></span>
             }
           </div>
           <dl class="caps">

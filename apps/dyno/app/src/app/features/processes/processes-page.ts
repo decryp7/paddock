@@ -14,6 +14,7 @@ import { ProcessDetailsPanel } from './process-details';
 import { type Row, type SortKey, type ViewMode } from './process-rows';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { MatTooltip } from '@angular/material/tooltip';
 
 const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
   { key: 'name', label: 'Name', align: 'l' },
@@ -27,7 +28,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
 /** The task manager: every app and process, grouped by app, as a tree or flat; sortable, searchable, with a details panel and lookups. Read-only: nothing here changes a process. */
 @Component({
   selector: 'dy-processes-page',
-  imports: [SuSegmentedControl, MatButton, MatIconButton, Icon, FormsModule, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger, ProcessDetailsPanel],
+  imports: [MatTooltip, SuSegmentedControl, MatButton, MatIconButton, Icon, FormsModule, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger, ProcessDetailsPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap">
@@ -104,7 +105,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                   } @else {
                     <span class="chev-space"></span>
                   }
-                  <span class="nm truncate" [title]="r.name">{{ r.name }}</span>
+                  <span class="nm truncate" [matTooltip]="r.name">{{ r.name }}</span>
                   @if (r.kind !== 'process' && r.count > 1) {
                     <span class="badge">{{ num(r.count) }}</span>
                   }
@@ -114,23 +115,23 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                 </span>
                 <span role="gridcell" class="r num heat" [style.background]="bar(r.cpu ?? 0, 40, sortKey() === 'cpu')">
                   @if (r.cpu === null) {
-                    <span class="na" [title]="r.unavailable.cpu" [attr.aria-label]="r.unavailable.cpu">Unavailable</span>
+                    <span class="na" [matTooltip]="r.unavailable.cpu" [attr.aria-label]="r.unavailable.cpu">Unavailable</span>
                   } @else {
-                    <span [title]="r.partial ? 'Partial: some values could not be read' : ''">{{ pct(r.cpu) }}{{ r.partial ? ' (partial)' : '' }}</span>
+                    <span [matTooltip]="r.partial ? 'Partial: some values could not be read' : ''">{{ pct(r.cpu) }}{{ r.partial ? ' (partial)' : '' }}</span>
                   }
                 </span>
                 <span role="gridcell" class="r num heat" [style.background]="bar(r.memory ?? 0, 2147483648, sortKey() === 'memory')">
                   @if (r.memory === null) {
-                    <span class="na" [title]="r.unavailable.memory" [attr.aria-label]="r.unavailable.memory">Unavailable</span>
+                    <span class="na" [matTooltip]="r.unavailable.memory" [attr.aria-label]="r.unavailable.memory">Unavailable</span>
                   } @else {
-                    <span [title]="r.partial ? 'Partial: some values could not be read' : ''">{{ bytes(r.memory) }}{{ r.partial ? ' (partial)' : '' }}</span>
+                    <span [matTooltip]="r.partial ? 'Partial: some values could not be read' : ''">{{ bytes(r.memory) }}{{ r.partial ? ' (partial)' : '' }}</span>
                   }
                 </span>
                 <span role="gridcell" class="r num heat" [style.background]="bar(r.disk ?? 0, 52428800, sortKey() === 'disk')">
                   @if (r.disk === null) {
-                    <span class="na" [title]="r.unavailable.disk" [attr.aria-label]="r.unavailable.disk">Unavailable</span>
+                    <span class="na" [matTooltip]="r.unavailable.disk" [attr.aria-label]="r.unavailable.disk">Unavailable</span>
                   } @else {
-                    <span [title]="r.partial ? 'Partial: some values could not be read' : ''">{{ rate(r.disk) }}{{ r.partial ? ' (partial)' : '' }}</span>
+                    <span [matTooltip]="r.partial ? 'Partial: some values could not be read' : ''">{{ rate(r.disk) }}{{ r.partial ? ' (partial)' : '' }}</span>
                   }
                 </span>
                 <span role="gridcell" class="truncate faint">{{ r.user ?? '' }}</span>

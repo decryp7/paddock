@@ -12,6 +12,7 @@ import { HistoryStore } from '../../state/history.store';
 import { EVENT_STYLE, consumersOption, diskTrendOption, eventCounts, historyOption } from './history-options';
 import { MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { MatTooltip } from '@angular/material/tooltip';
 
 export const RANGES: { id: HistoryRange; label: string; long: string }[] = [
   { id: 'hour', label: '1h', long: 'Last hour' },
@@ -26,7 +27,7 @@ const GLYPH: Record<string, string> = { triangle: '▲', rect: '■', circle: '�
 /** CPU and memory history with the events of the range marked on it, a range switch and a legend that filters the events. */
 @Component({
   selector: 'dy-history-panel',
-  imports: [SuSegmentedControl, MatIconButton, Chart, AsyncState, Icon],
+  imports: [MatTooltip, SuSegmentedControl, MatIconButton, Chart, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" aria-label="History">
@@ -44,7 +45,7 @@ const GLYPH: Record<string, string> = { triangle: '▲', rect: '■', circle: '�
         <dy-chart [options]="option()" [label]="chartLabel()" (zoomed)="zoomed.set(true)" style="--chart-h: 430px" />
         <div class="legend" role="group" aria-label="Events on the timeline">
           @for (e of events(); track e.kind) {
-            <button type="button" class="chip-toggle" [attr.aria-pressed]="!hidden().has(e.kind)" (click)="toggle(e.kind)" [title]="'Show or hide: ' + label(e.kind)">
+            <button type="button" class="chip-toggle" [attr.aria-pressed]="!hidden().has(e.kind)" (click)="toggle(e.kind)" [matTooltip]="'Show or hide: ' + label(e.kind)">
               <span class="glyph" [style.color]="color(e.kind)" aria-hidden="true">{{ glyph(e.kind) }}</span>
               {{ label(e.kind) }} <span class="n num">{{ e.count }}</span>
             </button>

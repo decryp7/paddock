@@ -7,11 +7,12 @@ import { GRADE_LABEL, GRADE_TONE, SEVERITY_LABEL, SEVERITY_TONE } from '../../sh
 import { Ring } from '../../shared/ring';
 import { HealthStore } from '../../state/health.store';
 import { MatButton } from '@angular/material/button';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /** The health score with its top reasons. */
 @Component({
   selector: 'dy-health-hero',
-  imports: [MatButton, Ring, Icon],
+  imports: [MatTooltip, MatButton, Ring, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" aria-label="Health score">
@@ -41,7 +42,7 @@ import { MatButton } from '@angular/material/button';
                   <span class="t"><span class="badge" [attr.data-tone]="sevTone(x)">{{ sevLabel(x) }}</span> {{ x.title }}</span>
                   <span class="d">{{ x.detail }}</span>
                 </div>
-                <span class="imp num" [title]="'Costs ' + pts(x.impact)">{{ pts(x.impact, true) }}</span>
+                <span class="imp num" [matTooltip]="'Costs ' + pts(x.impact)">{{ pts(x.impact, true) }}</span>
               </li>
             }
           </ul>

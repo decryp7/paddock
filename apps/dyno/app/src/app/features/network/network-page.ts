@@ -33,6 +33,7 @@ import { MatButton } from '@angular/material/button';
 import { MatFormField, MatPrefix } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { MatTooltip } from '@angular/material/tooltip';
 
 type Tab = 'connections' | 'listening';
 type Row = TableRow<ConnectionRow> | TableRow<ListenerRow>;
@@ -57,7 +58,7 @@ function readCollapsed(): Set<string> {
  */
 @Component({
   selector: 'dy-network-page',
-  imports: [SuSegmentedControl, MatFormField, MatInput, MatPrefix, MatButton, AsyncState, Icon, RouterLink, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [MatTooltip, SuSegmentedControl, MatFormField, MatInput, MatPrefix, MatButton, AsyncState, Icon, RouterLink, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -88,7 +89,7 @@ function readCollapsed(): Set<string> {
         <pd-segmented-control label="Protocol" [options]="protoSegs" [value]="store.query().proto ?? ''" (valueChange)="proto($event)" />
         <pd-segmented-control label="Group by" [options]="groupSegs()" [value]="group()" (valueChange)="setGroup($event)" />
         @if (tab() === 'connections') {
-          <button type="button" class="tog" [attr.aria-pressed]="store.resolveNames()" title="Look up host names through your DNS resolver. Off by default: each address is sent to it." (click)="store.setResolveNames(!store.resolveNames())"><dy-icon name="check" /> Host names</button>
+          <button type="button" class="tog" [attr.aria-pressed]="store.resolveNames()" matTooltip="Look up host names through your DNS resolver. Off by default: each address is sent to it." (click)="store.setResolveNames(!store.resolveNames())"><dy-icon name="check" /> Host names</button>
         }
       </div>
 
@@ -129,16 +130,16 @@ function readCollapsed(): Set<string> {
                       @if (group() === 'process') { <span class="av" aria-hidden="true">{{ ini(r.title) }}</span> }
                       <strong class="truncate">{{ r.title }}</strong>
                       <span class="meta">{{ r.count }} {{ tab() === 'connections' ? (r.count === 1 ? 'connection' : 'connections') : (r.count === 1 ? 'port' : 'ports') }}@if (tab() === 'connections' && group() === 'process') { · {{ r.hosts }} {{ r.hosts === 1 ? 'host' : 'hosts' }} }@if (r.exposed) { · <span class="exp">{{ r.exposed }} exposed</span> }</span>
-                      @if (tab() === 'connections' && group() === 'process' && trafficOf(r.title); as tr) { <span class="traffic num" title="Bytes per second over the last few seconds">↓ {{ rate(tr.rxBps) }} · ↑ {{ rate(tr.txBps) }}</span> }
+                      @if (tab() === 'connections' && group() === 'process' && trafficOf(r.title); as tr) { <span class="traffic num" matTooltip="Bytes per second over the last few seconds">↓ {{ rate(tr.rxBps) }} · ↑ {{ rate(tr.txBps) }}</span> }
                     </span>
                   } @else if (tab() === 'connections') {
                     @let c = conn(r);
                     @if (group() !== 'process') {
-                      <span class="cell prog" role="gridcell"><span class="av" aria-hidden="true">{{ ini(name(c.owner)) }}</span><span class="truncate" [title]="reason(c.owner) ?? ''">{{ name(c.owner) }}</span></span>
+                      <span class="cell prog" role="gridcell"><span class="av" aria-hidden="true">{{ ini(name(c.owner)) }}</span><span class="truncate" [matTooltip]="reason(c.owner) ?? ''">{{ name(c.owner) }}</span></span>
                     }
-                    <span class="cell remote" role="gridcell" [class.indent]="group() === 'process'"><span class="truncate" [title]="c.remote">{{ short(c.remote) }}</span><span class="addr">:{{ c.remotePort }}</span></span>
+                    <span class="cell remote" role="gridcell" [class.indent]="group() === 'process'"><span class="truncate" [matTooltip]="c.remote">{{ short(c.remote) }}</span><span class="addr">:{{ c.remotePort }}</span></span>
                     @if (store.resolveNames()) {
-                      <span class="cell muted" role="gridcell"><span class="truncate" [title]="hostName(c) ?? ''">{{ hostName(c) ?? (c.lookupOk ? '—' : 'Private address') }}</span></span>
+                      <span class="cell muted" role="gridcell"><span class="truncate" [matTooltip]="hostName(c) ?? ''">{{ hostName(c) ?? (c.lookupOk ? '—' : 'Private address') }}</span></span>
                     }
                     <span class="cell" role="gridcell">{{ service(c.remotePort) }}</span>
                     <span class="cell muted" role="gridcell">{{ protoText(c.proto, c.ipv6) }}</span>
@@ -148,10 +149,10 @@ function readCollapsed(): Set<string> {
                   } @else {
                     @let l = lis(r);
                     @if (group() !== 'process') {
-                      <span class="cell prog" role="gridcell"><span class="av" aria-hidden="true">{{ ini(name(l.owner)) }}</span><span class="truncate" [title]="reason(l.owner) ?? ''">{{ name(l.owner) }}</span></span>
+                      <span class="cell prog" role="gridcell"><span class="av" aria-hidden="true">{{ ini(name(l.owner)) }}</span><span class="truncate" [matTooltip]="reason(l.owner) ?? ''">{{ name(l.owner) }}</span></span>
                     }
                     <span class="cell" role="gridcell" [class.indent]="group() === 'process'">{{ service(l.port) }}</span>
-                    <span class="cell" role="gridcell"><span class="addr">{{ l.local }}</span> <span class="reach" [attr.data-tone]="reachTone(l)" [title]="badge(l).hint"><dy-icon [name]="l.exposure === 'allInterfaces' ? 'globe' : l.exposure === 'loopback' ? 'lock' : 'network'" /> {{ badge(l).label }}</span></span>
+                    <span class="cell" role="gridcell"><span class="addr">{{ l.local }}</span> <span class="reach" [attr.data-tone]="reachTone(l)" [matTooltip]="badge(l).hint"><dy-icon [name]="l.exposure === 'allInterfaces' ? 'globe' : l.exposure === 'loopback' ? 'lock' : 'network'" /> {{ badge(l).label }}</span></span>
                     <span class="cell muted" role="gridcell">{{ protoText(l.proto, l.ipv6) }}</span>
                     <span class="cell muted" role="gridcell">{{ since(l.firstSeen) }}</span>
                   }
@@ -160,12 +161,12 @@ function readCollapsed(): Set<string> {
                     @if (r.kind === 'item') {
                       @if (tab() === 'connections') {
                         @let c2 = conn(r);
-                        <button type="button" class="ib" [disabled]="!!blocked(c2)" [attr.title]="blocked(c2) ?? 'Look up this address in your browser'" [attr.aria-label]="'Look up IP ' + c2.remote" (click)="lookup(c2, $event)"><dy-icon name="external" /></button>
-                        <button type="button" class="ib" title="Copy the connection" [attr.aria-label]="'Copy connection to ' + c2.remote" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
+                        <button type="button" class="ib" [disabled]="!!blocked(c2)" [matTooltip]="blocked(c2) ?? 'Look up this address in your browser'" [attr.aria-label]="'Look up IP ' + c2.remote" (click)="lookup(c2, $event)"><dy-icon name="external" /></button>
+                        <button type="button" class="ib" matTooltip="Copy the connection" [attr.aria-label]="'Copy connection to ' + c2.remote" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
                       } @else {
-                        <button type="button" class="ib" title="Copy the listener" aria-label="Copy listener" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
+                        <button type="button" class="ib" matTooltip="Copy the listener" aria-label="Copy listener" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
                       }
-                      <a class="ib" routerLink="/processes" title="Show the program in the task manager" aria-label="Show process" (click)="$event.stopPropagation()"><dy-icon name="processes" /></a>
+                      <a class="ib" routerLink="/processes" matTooltip="Show the program in the task manager" aria-label="Show process" (click)="$event.stopPropagation()"><dy-icon name="processes" /></a>
                     }
                   </span>
                   }
@@ -191,7 +192,7 @@ function readCollapsed(): Set<string> {
                 @if (isConn(sel)) {
                   @let c3 = asConn(sel);
                   <div class="dacts">
-                    <button type="button" matButton="outlined" [disabled]="!!blocked(c3)" [attr.title]="blocked(c3) ?? null" (click)="lookup(c3)"><dy-icon name="external" /> Look up IP</button>
+                    <button type="button" matButton="outlined" [disabled]="!!blocked(c3)" [matTooltip]="blocked(c3) ?? null" (click)="lookup(c3)"><dy-icon name="external" /> Look up IP</button>
                     <button type="button" matButton="outlined" (click)="copyText(connectionLine(c3))"><dy-icon name="copy" /> Copy</button>
                   </div>
                   @if (blocked(c3); as why) { <p class="hint">{{ why }}</p> }

@@ -7,6 +7,7 @@ import { IssuesView } from './issues-view';
 import { UnusualView } from './unusual-view';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { MatTooltip } from '@angular/material/tooltip';
 
 type View = 'issues' | 'unusual';
 
@@ -17,7 +18,7 @@ type View = 'issues' | 'unusual';
  */
 @Component({
   selector: 'dy-issues-page',
-  imports: [SuSegmentedControl, MatButton, MatIconButton, Icon, IssuesView, UnusualView],
+  imports: [MatTooltip, SuSegmentedControl, MatButton, MatIconButton, Icon, IssuesView, UnusualView],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -30,7 +31,7 @@ type View = 'issues' | 'unusual';
           <button type="button" matButton="text" [disabled]="issues.exporting() || !issues.overview()" (click)="issues.exportForDebrief()">
             <dy-icon name="file" /> {{ issues.exporting() ? 'Saving…' : 'Export for Debrief…' }}
           </button>
-          <button type="button" matIconButton aria-label="Read the system logs now" title="Read the system logs now" [disabled]="issues.rescanning()" (click)="issues.rescan()">
+          <button type="button" matIconButton aria-label="Read the system logs now" matTooltip="Read the system logs now" [disabled]="issues.rescanning()" (click)="issues.rescan()">
             <dy-icon name="refresh" [class.spin]="issues.rescanning()" />
           </button>
         }

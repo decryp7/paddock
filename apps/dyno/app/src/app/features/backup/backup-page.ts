@@ -10,6 +10,7 @@ import { injectNow } from '../../shared/now';
 import { BackupStore } from '../../state/backup.store';
 import { BACKUP_STATE_LABEL, type DotTone, checkedText, heroTone, hue, initial, lastBackupText, stateTone } from './backup-model';
 import { MatButton } from '@angular/material/button';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /**
  * Backup health: whether the backups of the tools Dyno can read (Time Machine, Windows Backup, File History, restic, Borg,
@@ -18,7 +19,7 @@ import { MatButton } from '@angular/material/button';
  */
 @Component({
   selector: 'dy-backup-page',
-  imports: [MatButton, AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [MatTooltip, MatButton, AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -66,9 +67,9 @@ import { MatButton } from '@angular/material/button';
                           <span class="dot" [attr.data-tone]="dot(s)" aria-hidden="true"></span>
                           {{ label(s) }}
                         </td>
-                        <td class="when num muted" [title]="fullDate(s)">{{ last(s) }}</td>
-                        <td class="muted"><span class="ell" [title]="s.summary">{{ s.summary }}</span></td>
-                        <td class="acts"><button type="button" class="ib" [attr.aria-label]="'Details of ' + s.name" title="Details" (click)="select(s); $event.stopPropagation()"><dy-icon name="info" /></button></td>
+                        <td class="when num muted" [matTooltip]="fullDate(s)">{{ last(s) }}</td>
+                        <td class="muted"><span class="ell" [matTooltip]="s.summary">{{ s.summary }}</span></td>
+                        <td class="acts"><button type="button" class="ib" [attr.aria-label]="'Details of ' + s.name" matTooltip="Details" (click)="select(s); $event.stopPropagation()"><dy-icon name="info" /></button></td>
                       </tr>
                     }
                   </tbody>

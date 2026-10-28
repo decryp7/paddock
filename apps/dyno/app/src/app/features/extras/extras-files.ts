@@ -7,6 +7,7 @@ import { MIN_SIZES, MODES, type FileRow, baseName, dirName, fileRows, middleElli
 import { EXTRAS_STYLES } from './extras-styles';
 import { MatButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /**
  * Large and duplicate files in a folder the person chooses. Searching only reads: Dyno lists the files and moves or
@@ -14,13 +15,13 @@ import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
  */
 @Component({
   selector: 'dy-extras-files',
-  imports: [SuSegmentedControl, MatButton, AsyncState, Icon],
+  imports: [MatTooltip, SuSegmentedControl, MatButton, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Search">
       <button type="button" matButton="filled" [disabled]="store.finder().loading" (click)="store.chooseFolder()"><dy-icon name="folder" /> {{ store.folder() ? 'Choose another folder…' : 'Choose a folder…' }}</button>
       @if (store.folder(); as f) {
-        <span class="folder path" [title]="f">{{ short(f) }}</span>
+        <span class="folder path" [matTooltip]="f">{{ short(f) }}</span>
       }
       <span class="grow"></span>
       <pd-segmented-control label="Look for" [options]="modeSegs" [value]="store.mode()" (valueChange)="pickMode($event)" />
@@ -58,7 +59,7 @@ import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
                     } @else {
                       <tr>
                         <td>
-                          <span class="ell" [title]="row.file.path"><strong class="fname">{{ base(row.file.path) }}</strong> <span class="dir path">{{ short(dir(row.file.path), 56) }}</span></span>
+                          <span class="ell" [matTooltip]="row.file.path"><strong class="fname">{{ base(row.file.path) }}</strong> <span class="dir path">{{ short(dir(row.file.path), 56) }}</span></span>
                         </td>
                         <td class="r">{{ bytes(row.file.bytes) }}</td>
                         <td class="r muted">{{ modified(row.file.modified) }}</td>

@@ -5,11 +5,12 @@ import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
 import { type UsageKey, type UsageSort, hue, initial, nextSort, sortUsage } from './extras-model';
 import { EXTRAS_STYLES } from './extras-styles';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /** Network traffic and energy impact per app since it started, sortable by any column. */
 @Component({
   selector: 'dy-extras-apps',
-  imports: [AsyncState, Icon],
+  imports: [MatTooltip, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="!!data()" [error]="store.apps().error" [empty]="data()?.apps?.length === 0" emptyTitle="No app activity to show" emptyText="Dyno has no network or energy numbers for any app yet." emptyIcon="network" what="app usage" [rows]="6" (retry)="store.loadApps()">
@@ -33,7 +34,7 @@ import { EXTRAS_STYLES } from './extras-styles';
             <tbody>
               @for (a of rows(); track a.app) {
                 <tr>
-                  <td><span class="tile" aria-hidden="true" [style.background]="tile(a.app)">{{ initial(a.app) }}</span><span class="nm" [title]="a.app">{{ a.app }}</span></td>
+                  <td><span class="tile" aria-hidden="true" [style.background]="tile(a.app)">{{ initial(a.app) }}</span><span class="nm" [matTooltip]="a.app">{{ a.app }}</span></td>
                   @if (!u.networkUnavailable) {
                     <td class="r">{{ bytes(a.bytesIn) }}</td>
                     <td class="r">{{ bytes(a.bytesOut) }}</td>

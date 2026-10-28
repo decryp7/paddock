@@ -13,13 +13,14 @@ import { ProcessesStore } from '../../state/processes.store';
 import { toCommandError } from '../../core/command-error';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatTabsModule } from '@angular/material/tabs';
+import { MatTooltip } from '@angular/material/tooltip';
 
 type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
 
 /** The side panel of one process: facts, parent chain and the lists the OS may or may not let Dyno read (with the reason when not). */
 @Component({
   selector: 'dy-process-details',
-  imports: [MatTabsModule, MatButton, MatIconButton, Icon, NgTemplateOutlet, RouterLink],
+  imports: [MatTooltip, MatTabsModule, MatButton, MatIconButton, Icon, NgTemplateOutlet, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <aside class="panel" aria-label="Process details">
@@ -53,7 +54,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                 <dl class="dy-selectable">
                   <dt>Command line</dt>
                   <dd>
-                    <span class="mono wrap cmd" [class.open]="cmdOpen()" [title]="x.commandLine.join(' ')">{{ x.commandLine.join(' ') || 'Not available' }}</span>
+                    <span class="mono wrap cmd" [class.open]="cmdOpen()" [matTooltip]="x.commandLine.join(' ')">{{ x.commandLine.join(' ') || 'Not available' }}</span>
                     @if (x.commandLine.length) {
                       <span class="cmd-acts">
                         @if (x.commandLine.join(' ').length > 120) { <button type="button" matButton="text" class="dy-link" (click)="cmdOpen.set(!cmdOpen())">{{ cmdOpen() ? 'Show less' : 'Show more' }}</button> }
