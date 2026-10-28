@@ -387,6 +387,34 @@ mod tests {
     const SPAWN_FAILED: &str = "gui/501/net.decryptology.pitwall.service = {\n\tactive count = 0\n\tpath = (submitted by smd.362)\n\ttype = Submitted\n\tmanaged_by = com.apple.xpc.ServiceManagement\n\tstate = spawn scheduled\n\n\tprogram identifier = Contents/MacOS/pitwall-server (mode: 2)\n\tparent bundle identifier = net.decryptology.pitwall\n\tparent bundle version = 1.0.2\n\truns = 534\n\tlast exit code = 78: EX_CONFIG\n\n\tjob state = spawn failed\n\tsanitizer flags = 0x0\n\n\tproperties = partial import | keepalive | runatload | resolve program | has LWCR\n}\n";
     const HEALTHY: &str = "gui/501/net.decryptology.pitwall.service = {\n\tstate = running\n\tpid = 88412\n\truns = 1\n\tlast exit code = (never exited)\n\tjob state = running\n\tproperties = keepalive | runatload | has LWCR\n}\n";
 
+    /// An invented `launchctl print` of Pitwall's service on macOS 26 (not a real user's output): the job's own `state` is
+    /// followed by nested coalition blocks that carry a `state = active` of their own. The refused job: spawn failed,
+    /// exit 78, a launch constraint.
+    const SPAWN_FAILED_MACOS_26: &str = "gui/501/net.decryptology.pitwall.service = {\n\tactive count = 0\n\tpath = (submitted by smd.101)\n\ttype = Submitted\n\tmanaged_by = com.apple.xpc.ServiceManagement\n\tstate = spawn scheduled\n\n\tprogram identifier = Contents/MacOS/pitwall-server (mode: 2)\n\tparent bundle identifier = net.decryptology.pitwall\n\tparent bundle version = 1.0.4\n\truns = 12\n\tlast exit code = 78: EX_CONFIG\n\n\tresource coalition = {\n\t\tID = 700\n\t\ttype = resource\n\t\tstate = active\n\t\tactive count = 0\n\t}\n\n\tjetsam coalition = {\n\t\tID = 701\n\t\ttype = jetsam\n\t\tstate = active\n\t\tactive count = 0\n\t}\n\n\tjob state = spawn failed\n\n\tproperties = partial import | keepalive | runatload | resolve program | has LWCR | tle system\n}\n";
+    /// The same agent running well on macOS 26: the coalitions' `state = active` must not hide `job state = running`.
+    const RUNNING_MACOS_26: &str = "gui/501/net.decryptology.pitwall.service = {\n\tactive count = 1\n\tpath = (submitted by smd.101)\n\ttype = Submitted\n\tmanaged_by = com.apple.xpc.ServiceManagement\n\tstate = running\n\n\tprogram identifier = Contents/MacOS/pitwall-server (mode: 2)\n\tpid = 2210\n\tlast exit code = (never exited)\n\n\tresource coalition = {\n\t\tID = 702\n\t\ttype = resource\n\t\tstate = active\n\t\tactive count = 1\n\t}\n\n\tjetsam coalition = {\n\t\tID = 703\n\t\ttype = jetsam\n\t\tstate = active\n\t\tactive count = 1\n\t}\n\n\tjob state = running\n\n\tproperties = partial import | keepalive | runatload | resolve program | has LWCR | tle system\n}\n";
+
+    #[test]
+    fn macos_26_launchctl_output_goes_through_pitwalls_repair_decision() {
+        let refused = parse_job(SPAWN_FAILED_MACOS_26);
+        assert!(refused.found && refused.stale(), "the refused job is recognised despite the nested blocks: {refused:?}");
+        let running = parse_job(RUNNING_MACOS_26);
+        assert!(running.found && running.running && !running.stale(), "{running:?}");
+        // Pitwall's decision: a refused job whose server does not answer is repaired...
+        let mut o = observed(refused);
+        o.status = RegistrationStatus::NotRegistered;
+        assert_eq!(plan(&o), Plan::Repair(RepairReason::Stale));
+        // ...a healthy one is left alone, and so is the refused one while the server still answers.
+        assert_eq!(plan(&observed(running)), Plan::Nothing);
+        let mut o = observed(refused);
+        o.answers = true;
+        assert_eq!(plan(&o), Plan::Nothing);
+        // What the user switched off in Login Items is never repaired, whatever launchd reports.
+        let mut o = observed(refused);
+        o.status = RegistrationStatus::RequiresApproval;
+        assert_eq!(plan(&o), Plan::Nothing);
+    }
+
     fn observed<'a>(job: JobReport) -> Observed<'a> {
         Observed {
             status: RegistrationStatus::Enabled,
