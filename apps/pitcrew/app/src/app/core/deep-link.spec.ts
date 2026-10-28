@@ -6,7 +6,7 @@ import { provideDeepLinks, safeRoute } from './deep-link';
 
 describe('safeRoute', () => {
   it('lets the known screens and runner pages through', () => {
-    for (const ok of ['/', '/runners', '/activity', '/logs', '/updates', '/settings', '/runners/build-win', '/logs/mac.mini_1']) {
+    for (const ok of ['/', '/runners', '/activity', '/logs', '/updates', '/runners/build-win', '/logs/mac.mini_1']) {
       expect(safeRoute(ok)).toBe(ok);
     }
   });
@@ -25,6 +25,7 @@ describe('safeRoute', () => {
       '//evil.example',
       'https://evil.example',
       '/unknown',
+      '/settings',
       '/settings/x',
       '/runners/a/b',
       '/runners/a/processes/x',

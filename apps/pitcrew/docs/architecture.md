@@ -120,6 +120,24 @@ The service is deliberately thin around the core (level 3, [service components](
   routes are Dashboard, Runners, a runner's page, Activity, Logs, Updates and Settings; registering a runner is a
   wizard opened from several places.
 
+## Not yet on the shell
+
+Pitcrew runs on the Paddock app shell (ADR 0008 of the family), with these parts still its own. Each has a shared
+counterpart in the shell that Pitcrew has not adopted yet (ER-22: share first); the follow-up is one change per part, with
+the shell's own tests replacing Pitcrew's:
+
+- **Service install, repair and login item** (`service_install.rs`, `health.rs`, the Service settings page, the dashboard's
+  Install service): the shell has `Builder::service` (manager, health entry with Repair, the `pd.login` section, the first-run
+  checklist). Until then Pitcrew's commands are `install_service`, `repair_service` and `pitcrew_open_login_items`.
+- **Notification channels** (the `notify-channels` crate, `notification_channels_get` and `_save`, the channels settings
+  page): the shell has `Builder::channels` over `paddock-channels`.
+- **Diagnostics export** (`export_diagnostics`): the shell has `Builder::diagnostics` (preview, save, cancel).
+- **Autostart** (`get_autostart`, `set_autostart`): part of the shell's service and login part.
+- **Dialogs**: the confirm, stop-process and configuration-diff windows move to the shared dialog API (ADR 0026 section 7).
+- **Quiet jobs**: per-job `quiet_on_success` once it is in the shared jobs crate.
+- **Material**: Pitcrew's own controls, tokens and checkboxes move to Angular Material and the shared theme in the later
+  Pitcrew Material package (rule 47).
+
 ## Decisions at a glance
 
 | ADR | Decision |

@@ -88,7 +88,7 @@ export interface MockOptions {
   serverDown?: boolean;
   /** macOS: launchd refuses the service after an update (the "could not start" state with Repair). */
   startFailed?: boolean;
-  /** Where long work shows up as jobs (the browser build's stand-in for `paddock://jobs`); without it nothing is reported. */
+  /** Where long work shows up as jobs (the browser build's stand-in for the engine's job events); without it nothing is reported. */
   jobs?: MemoryJobsBackend;
   /** The window's jobs store: a job waited for through it is not announced by the shell (as in the desktop build). */
   follow?: (id: number) => unknown;

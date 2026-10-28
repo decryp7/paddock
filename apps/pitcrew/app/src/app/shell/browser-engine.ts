@@ -5,7 +5,7 @@ import { BACKEND } from '../core/backend';
 import type { ConnectionState } from '../core/api.types';
 import { SERVICE_ID } from './pitcrew.contributions';
 
-/** The browser build's jobs (the mock backend reports its long work here, as the engine does over `paddock://jobs`). */
+/** The browser build's jobs (the mock backend reports its long work here, as the engine does as job events). */
 export const browserJobs = new MemoryJobsBackend();
 
 const cause = (message: string, hint: string, detail: string, code: string): Cause => ({ message, hint, detail, code, raiseCap: null, settings: null });

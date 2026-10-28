@@ -1,4 +1,4 @@
-import { captureScreen, test } from '@decryp7/paddock-e2e';
+import { captureScreen, expect, test } from '@decryp7/paddock-e2e';
 import type { Page } from '@playwright/test';
 import { join } from 'node:path';
 
@@ -81,6 +81,8 @@ for (const theme of ['dark', 'light'] as const) {
         await page.goto(`/?simulate=0${shot.query ? '&' + shot.query : ''}#${shot.path}`);
         await page.getByRole('navigation', { name: 'Pages' }).waitFor();
         await shot.prepare?.(page);
+        // Grown to the page's whole height only once the page has its content (a skeleton is short).
+        await expect(page.locator('pd-skeleton, .skeleton, [aria-busy=true]')).toHaveCount(0);
         await captureScreen(page, join(OUT, theme, `${shot.name}.png`), { fullPage: 'main' });
       });
     }

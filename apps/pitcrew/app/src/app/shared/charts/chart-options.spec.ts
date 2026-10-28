@@ -187,6 +187,8 @@ describe('loadOption', () => {
     expect(o['series'][0].lineStyle.color).toBe(t.series[0]);
     expect(o['series'][1].lineStyle.color).toBe(t.muted);
     expect(o['yAxis'].max).toBe(1000);
+    // The ticks divide the maximum evenly, so the top tick is the maximum and no two labels crowd each other ("32 GB" over "28 GB").
+    expect(o['yAxis'].interval).toBe(250);
     expect(o['legend'].show).toBe(true);
   });
   it('has a free axis without a maximum and a tooltip with all three numbers', () => {

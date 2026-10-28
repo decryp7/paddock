@@ -1,6 +1,6 @@
 //! Long app-side work as jobs (Paddock rules 10-12, ADR 0008): cleaning a disk, registering a runner, pruning the
 //! container engine and trimming the Actions cache. A command registers the job, queues it on the pool and returns its
-//! id at once; the UI follows `paddock://jobs` (phases, "Still working", Cancel) and never times the work out. The
+//! id at once; the UI follows the job through the shell (phases, "Still working", Cancel) and never times the work out. The
 //! service request itself cannot be interrupted once sent, so the job is cancellable until then and says so after.
 //! A job's result (what the UI shows when it ends) is kept here and read once with `job_result`.
 

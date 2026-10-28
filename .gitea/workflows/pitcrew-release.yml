@@ -80,6 +80,7 @@ jobs:
       cargo-dir: apps/pitcrew
       tag-prefix: pitcrew-
       latest-tag: pitcrew-latest
+      # TODO: remove notes-extra after 1.1.0 (it tells copies installed before the move to download once by hand).
       notes-extra: "**Existing installs:** download this version once by hand. Pitcrew now updates from the Paddock releases, which a copy installed before this version does not look at."
       cliff-config: apps/pitcrew/cliff.toml
       cliff-paths: |
