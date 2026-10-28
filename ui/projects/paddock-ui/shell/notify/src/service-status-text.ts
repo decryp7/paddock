@@ -53,6 +53,8 @@ const CAUSE_WORDS: Readonly<Record<string, () => string>> = {
   'service.repairFailed': () => $localize`:@@pd.health.state.stopped:stopped`,
   'packs.refused': () => $localize`:@@pd.health.state.stopped:stopped`,
   'pd.settings.file-problem': () => $localize`:@@pd.health.state.stopped:stopped`,
+  'dy.agent.restarting': () => $localize`:@@pd.health.state.reconnecting:reconnecting`,
+  'dy.agent.failed': () => $localize`:@@pd.health.state.stopped:stopped`,
   'sd.engine.stopped': () => $localize`:@@pd.health.state.stopped:stopped`,
   'sd.index.damaged': () => $localize`:@@pd.health.state.stopped:stopped`,
   'sd.index.rebuild': () => $localize`:@@pd.health.state.stopped:stopped`,

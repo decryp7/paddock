@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### The dialog frame's filled button uses the page primary's colours
+- `.pd-frame-btn--filled` takes `--pd-accent-fill` with `--pd-on-accent`, the same as `.pd-btn--primary` and Material's filled button, so a dialog's primary and a page's primary are one colour in both schemes (`--pd-accent-control` is for toggles and checkmarks).
+
 ### `pd-table` on Angular Material's table (ADR 0027, decision 5)
 - `pd-table` is built on `mat-table`: a header-only table above the CDK virtual scroll viewport and the body table inside it,
   one `role="grid"`, so the header never moves with the rows (also on fast scrolls, jumps and End). `matSort` and
