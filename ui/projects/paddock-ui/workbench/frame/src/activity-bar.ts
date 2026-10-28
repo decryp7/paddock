@@ -60,7 +60,6 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
           matTooltipPosition="right"
           [matBadge]="items.badge(item) ?? ''"
           [matBadgeHidden]="items.badge(item) === null"
-          matBadgeSize="small"
           [attr.data-tone]="items.badgeTone(item)"
           [attr.aria-keyshortcuts]="keys(item)"
           [cdkMenuTriggerFor]="flyout"
@@ -83,7 +82,6 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
           matTooltipPosition="right"
           [matBadge]="items.badge(item) ?? ''"
           [matBadgeHidden]="items.badge(item) === null"
-          matBadgeSize="small"
           [attr.data-tone]="items.badgeTone(item)"
           [attr.aria-keyshortcuts]="keys(item)"
           [attr.aria-pressed]="item.toggle ? items.isActive(item) : null"
@@ -193,12 +191,17 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
       --mat-badge-background-color: var(--pd-surface-3);
       --mat-badge-text-color: var(--pd-text);
       --mat-badge-container-size: 14px;
-      --mat-badge-container-small-size: 14px;
-      --mat-badge-small-size-text-size: var(--pd-text-caption);
+      --mat-badge-container-padding: 0 3px;
+      --mat-badge-line-height: 14px;
+      --mat-badge-text-size: var(--pd-text-caption);
+      --mat-badge-text-weight: var(--pd-weight-semibold);
       --mat-badge-container-shape: 7px;
-      --mat-badge-container-offset: -3px 0;
-      --mat-badge-container-overlap-offset: -3px;
+      --mat-badge-container-overlap-offset: -9px;
     }
+    /* The directive draws the badge outside this template's encapsulation, so its ring is reached with ::ng-deep (the colours stay tokens). */
+    :host ::ng-deep .pd-act .mat-badge-content { box-shadow: 0 0 0 1.5px var(--pd-surface-1); }
+    :host ::ng-deep .pd-act[data-tone='warning'] .mat-badge-content { box-shadow: 0 0 0 1.5px var(--pd-surface-1), inset 0 0 0 1px var(--pd-warning); }
+    :host ::ng-deep .pd-act[data-tone='danger'] .mat-badge-content { box-shadow: 0 0 0 1.5px var(--pd-surface-1), inset 0 0 0 1px var(--pd-danger); }
     .pd-act[data-tone='info'] { --mat-badge-background-color: var(--pd-info-tint); }
     .pd-act[data-tone='warning'] { --mat-badge-background-color: var(--pd-warning-tint); }
     .pd-act[data-tone='danger'] { --mat-badge-background-color: var(--pd-danger-tint); }

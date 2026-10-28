@@ -32,7 +32,7 @@ export class PdSidebarLink implements FocusableOption {
       <a mat-list-item pdSidebarLink class="pd-item" [routerLink]="'/' + pages.path(p.id)" routerLinkActive="active" ariaCurrentWhenActive="page" [attr.data-page-link]="p.id"
         [attr.aria-label]="labelled() && !pages.badgeLabels()[p.id] ? null : label(p.title.text, p.id)" [matTooltip]="tip(p.title.text, p.id)" matTooltipPosition="right"
         (click)="navigated.emit()">
-        <pd-icon class="pd-icon" matListItemIcon [name]="p.icon" [matBadge]="pages.badges()[p.id] ?? ''" matBadgeSize="small" [matBadgeHidden]="!pages.badges()[p.id]" />
+        <pd-icon class="pd-icon" matListItemIcon [name]="p.icon" [matBadge]="pages.badges()[p.id] ?? ''" [matBadgeHidden]="!pages.badges()[p.id]" />
         <span class="pd-label" matListItemTitle>{{ p.title.text }}</span>
       </a>
     </ng-template>
@@ -83,11 +83,15 @@ export class PdSidebarLink implements FocusableOption {
       --mat-badge-background-color: var(--pd-surface-3);
       --mat-badge-text-color: var(--pd-text);
       --mat-badge-container-size: 16px;
-      --mat-badge-container-small-size: 16px;
-      --mat-badge-small-size-text-size: var(--pd-text-caption);
+      --mat-badge-container-padding: 0 4px;
+      --mat-badge-line-height: 16px;
+      --mat-badge-text-size: var(--pd-text-caption);
       --mat-badge-container-shape: var(--pd-radius-pill);
-      --mat-badge-legacy-small-size-container-size: 16px;
+      
+      --mat-badge-container-overlap-offset: -10px;
     }
+    /* The directive draws the badge outside this template's encapsulation, so its ring is reached with ::ng-deep (the colours stay tokens). */
+    :host ::ng-deep .pd-icon .mat-badge-content { box-shadow: 0 0 0 2px var(--pd-surface-1), inset 0 0 0 1px var(--pd-border-strong); font-variant-numeric: tabular-nums; }
     :host(.pd-rail) .pd-item { justify-content: center; padding: 0; }
     :host(.pd-rail) .pd-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     @media (prefers-reduced-motion: reduce) { .pd-item { transition: none; } }
