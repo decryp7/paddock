@@ -544,6 +544,14 @@
   --mat-button-protected-label-text-weight: var(--pd-weight-medium);
 }
 
+// A projected glyph (pd-glyph, mat-icon, an svg) sits centred on the label with a 4 px gap: the label is a flex row, not a text line
+// (in a line box the 16 px glyph rests on the baseline, about 4 px above the text centre, with no gap).
+html .mat-mdc-button-base .mdc-button__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pd-space-1);
+}
+
 // The secondary button is a filled surface with the strong border (the outlined variant has no container token).
 .mat-mdc-outlined-button:not(:disabled) {
   background-color: var(--pd-surface-2);

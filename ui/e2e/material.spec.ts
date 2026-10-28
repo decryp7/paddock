@@ -147,6 +147,24 @@ for (const theme of THEMES) {
     }
   });
 
+  test(`Material controls: a glyph in a matButton is centred on the label with a gap (${theme})`, async ({ page }) => {
+    await open(page, theme);
+    for (const id of ['filled', 'outlined', 'text']) {
+      const m = await page.getByTestId(`material-glyph-${id}`).evaluate((button) => {
+        const glyph = button.querySelector('pd-glyph') as HTMLElement;
+        const range = document.createRange();
+        const text = [...(glyph.parentElement as HTMLElement).childNodes].find((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim()) as Text;
+        range.selectNodeContents(text);
+        const t = range.getBoundingClientRect();
+        const g = glyph.getBoundingClientRect();
+        return { dy: Math.abs(g.top + g.height / 2 - (t.top + t.height / 2)), gap: t.left - g.right };
+      });
+      expect(m.dy, `${id} centre offset`).toBeLessThanOrEqual(1);
+      expect(m.gap, `${id} gap`).toBeGreaterThanOrEqual(3);
+      expect(m.gap, `${id} gap`).toBeLessThanOrEqual(8);
+    }
+  });
+
   test(`Material controls: a real select, menu and tooltip open themed and sized (${theme})`, async ({ page }) => {
     await open(page, theme);
     const rowH = await px(page, '--pd-control-height');
