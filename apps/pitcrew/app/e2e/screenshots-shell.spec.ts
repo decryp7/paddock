@@ -46,6 +46,30 @@ for (const theme of ['dark', 'light'] as const) {
       await shoot(page, 'notification-centre');
     });
 
+    test('config diff window', async ({ page, app }) => {
+      await page.setViewportSize({ width: 720, height: 560 });
+      const line = (kind: string, text: string, oldNo: number | null, newNo: number | null) => ({ kind, text, oldNo, newNo });
+      const preview = {
+        text: '',
+        changed: true,
+        restartNeeded: true,
+        diff: {
+          hunks: [
+            { lines: [line('same', 'runner:', 1, 1), line('removed', '  capacity: 1', 2, null), line('added', '  capacity: 4', null, 2), line('removed', '  timeout: 3h', 3, null), line('added', '  timeout: 2h', null, 3), line('same', '  fetch_interval: 2s', 4, 4)] },
+          ],
+          added: 2,
+          removed: 2,
+          truncated: false,
+        },
+        issues: [],
+        changedKeys: ['runner.capacity', 'runner.timeout'],
+        labels: [],
+      };
+      await app.dialogs.openWindow('pc.config-diff', { preview, maxBackups: 5 });
+      await app.dialogs.loaded();
+      await shoot(page, 'config-diff');
+    });
+
     test('register window, last step', async ({ page, app }) => {
       await page.setViewportSize({ width: 660, height: 640 });
       await app.dialogs.openWindow('pc.register', {});

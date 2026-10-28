@@ -5,7 +5,8 @@
       <p class="subtitle">{{ status.status() ? summary() : status.offline() ? 'Not connected to the Pitcrew service' : 'Connecting to the Pitcrew service…' }}</p>
     </div>
     <div class="btn-row">
-      <button type="button" class="btn primary" (click)="register.open()">
+      <!-- One filled primary per screen: while the service is unreachable the page's own action (Install service) is the primary. -->
+      <button type="button" class="btn" [class.primary]="!!status.status()" (click)="register.open()">
         <mat-icon svgIcon="pc:plus" aria-hidden="true" />Register runner
       </button>
     </div>

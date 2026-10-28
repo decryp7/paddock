@@ -38,7 +38,8 @@ const SHOTS: Shot[] = [
       const text = await editor.inputValue();
       await editor.fill(text.replace('  capacity: 1\n', '  capacity: 1\n\t  retries: 3\n'));
       await page.getByTestId('yaml-status').waitFor();
-      await page.getByRole('button', { name: /Error on line/ }).hover();
+      // The error's button takes the editor to its line, so the shot shows where the file is wrong.
+      await page.getByRole('button', { name: /Error on line/ }).click();
     },
   },
   { name: 'runner-processes', path: '/runners/build-win?tab=processes' },

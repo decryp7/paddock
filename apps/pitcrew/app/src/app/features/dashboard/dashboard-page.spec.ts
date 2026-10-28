@@ -128,6 +128,8 @@ describe('DashboardPage', () => {
     expect(text(el)).toContain('The Pitcrew service is not installed');
     expect(text(el)).toMatch(/UAC|System Settings/);
     expect(byText<HTMLButtonElement>(el, 'pc-service-offline button', 'Install service')).toBeTruthy();
+    // One filled primary: Install service, not Register runner.
+    expect(el.querySelectorAll('button.primary')).toHaveLength(1);
   });
 
   it('names a version mismatch in its title and offers Retry', async () => {

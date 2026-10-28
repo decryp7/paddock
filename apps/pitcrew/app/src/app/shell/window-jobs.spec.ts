@@ -1,4 +1,4 @@
-import { createEnvironmentInjector, EnvironmentInjector, provideZonelessChangeDetection, runInInjectionContext } from '@angular/core';
+import { createEnvironmentInjector, EnvironmentInjector, provideZonelessChangeDetection, runInInjectionContext, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 import { SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
@@ -34,7 +34,8 @@ describe('a registration job seen by two windows', () => {
     const register = window(parent);
     const main = window(parent);
     const unrelated = window(parent);
-    runInInjectionContext(main.injector, () => followJobsStartedElsewhere());
+    const open = signal(true);
+    runInInjectionContext(main.injector, () => followJobsStartedElsewhere(undefined, open));
 
     const events = [job(1, 0, 'running'), job(1, 1, 'done')];
     // The same engine events reach every window.
@@ -54,10 +55,25 @@ describe('a registration job seen by two windows', () => {
   it('leaves the end of any other job to the shell', async () => {
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
     const main = window(TestBed.inject(EnvironmentInjector));
-    runInInjectionContext(main.injector, () => followJobsStartedElsewhere());
+    runInInjectionContext(main.injector, () => followJobsStartedElsewhere(undefined, signal(true)));
     main.backend.emit(job(2, 0, 'running', 'pitcrew.clean-disk'));
     await settle();
     main.backend.emit(job(2, 1, 'done', 'pitcrew.clean-disk'));
+    await settle();
+    expect(main.notices.map((n) => n.level)).toEqual(['success']);
+  });
+
+  it('announces the end itself when the register window is gone before the job ends', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const main = window(TestBed.inject(EnvironmentInjector));
+    const open = signal(true);
+    runInInjectionContext(main.injector, () => followJobsStartedElsewhere(undefined, open));
+    main.backend.emit(job(3, 0, 'running'));
+    await settle();
+    // The window closes (or crashes) with the job still running: nobody else will say how it ended.
+    open.set(false);
+    await settle();
+    main.backend.emit(job(3, 1, 'done'));
     await settle();
     expect(main.notices.map((n) => n.level)).toEqual(['success']);
   });
