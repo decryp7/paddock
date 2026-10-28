@@ -1,0 +1,366 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900"><rect x="0" y="0" width="1440" height="900" rx="0" fill="#f4f5f7" />
+<rect x="0" y="0" width="216" height="900" rx="0" fill="#ffffff" />
+<line x1="215.5" y1="0" x2="215.5" y2="900" stroke="rgba(15,20,30,0.10)"/>
+<defs><linearGradient id="appg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f27bb5"/><stop offset="1" stop-color="#b01e6e"/></linearGradient></defs>
+<rect x="16" y="50" width="24" height="24" rx="5.5" fill="url(#appg)" />
+<g transform="translate(18,52) scale(0.8333333333333334)"><path d="M5 17a7.5 7.5 0 1 1 14 0M12 13l3.5-4" fill="none" stroke="#ffffff" stroke-width="2.16" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="50" y="67" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="16" font-weight="600" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Dyno</text>
+<g transform="translate(18,99) scale(0.6666666666666666)"><path d="M4 13a8 8 0 0 1 16 0M12 13l4-4M4 17h16" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="111.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Dashboard</text>
+<g transform="translate(18,132) scale(0.6666666666666666)"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="144.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Processes</text>
+<g transform="translate(18,165) scale(0.6666666666666666)"><path d="M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM15.25 15.25 20 20" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="177.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Why slow</text>
+<g transform="translate(18,198) scale(0.6666666666666666)"><path d="M10 14V5a2 2 0 0 1 4 0v9a3.5 3.5 0 1 1-4 0z" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="210.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Throttling</text>
+<g transform="translate(18,231) scale(0.6666666666666666)"><path d="M12 4 21 19.5H3zM12 9v3.5" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="243.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Issues</text>
+<g transform="translate(18,264) scale(0.6666666666666666)"><path d="M7 7h10v10H7zM10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="276.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Inventory</text>
+<g transform="translate(18,297) scale(0.6666666666666666)"><path d="M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM3.5 12h17M12 3.5c-2.3 2.4-3.5 5.2-3.5 8.5s1.2 6.1 3.5 8.5c2.3-2.4 3.5-5.2 3.5-8.5S14.3 5.9 12 3.5Z" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="309.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Network</text>
+<g transform="translate(18,330) scale(0.6666666666666666)"><path d="M2.5 12h4l3-7.5 4 15 3-7.5h5" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="342.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Counters</text>
+<g transform="translate(18,363) scale(0.6666666666666666)"><path d="M5 17a7.5 7.5 0 1 1 14 0M12 13l3.5-4" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="375.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Benchmarks</text>
+<g transform="translate(18,396) scale(0.6666666666666666)"><path d="M6 10.5a6 6 0 0 1 12 0V16l1.5 2h-15L6 16zM10 20.5a2 2 0 0 0 4 0" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="408.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Alarms</text>
+<g transform="translate(18,429) scale(0.6666666666666666)"><path d="M4.5 19.5h15M7 16v-4M11 16V8M15 16v-6M19 16V6" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="441.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Reports</text>
+<g transform="translate(18,462) scale(0.6666666666666666)"><path d="M4 8h4l1.5-2h5L16 8h4v11H4zM12 10.5a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="474.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Flight recorder</text>
+<rect x="8" y="488" width="200" height="30" rx="6" fill="rgba(176,30,110,0.10)" />
+<rect x="8" y="494" width="2" height="18" rx="1" fill="#b01e6e" />
+<g transform="translate(18,495) scale(0.6666666666666666)"><path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5H12zM14.5 2.75a7.25 7.25 0 0 1 6.75 6.75H14.5z" fill="none" stroke="#b01e6e" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="507.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Disk map</text>
+<g transform="translate(18,528) scale(0.6666666666666666)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="540.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Watched folders</text>
+<g transform="translate(18,561) scale(0.6666666666666666)"><path d="M12 19.5s-7.5-4.5-7.5-10a4 4 0 0 1 7.5-2 4 4 0 0 1 7.5 2c0 5.5-7.5 10-7.5 10z" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="573.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Health</text>
+<g transform="translate(18,594) scale(0.6666666666666666)"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9M4.5 4.5V9H9M12 8v4l2.75 1.75" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="606.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Backup health</text>
+<g transform="translate(18,627) scale(0.6666666666666666)"><path d="M12 4 20 8.5 12 13 4 8.5zM5.5 12.5 12 16.2l6.5-3.7M5.5 16 12 19.7l6.5-3.7" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="639.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Extras</text>
+<g transform="translate(18,660) scale(0.6666666666666666)"><path d="M3.5 8h15v8h-15zM20.5 11v2M6.5 11v2M9.5 11v2" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="672.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Lifespan</text>
+<g transform="translate(18,693) scale(0.6666666666666666)"><path d="M5.75 3.5h7.75l4.75 5v12H5.75zM13.5 3.5v5h4.75M8.75 12.5h6.5M8.75 16h6.5" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="705.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Diagnostics</text>
+<g transform="translate(18,726) scale(0.6666666666666666)"><path d="M10.1 5.68L10.5 3.13L13.5 3.13L13.9 5.68L16.52 7.19L18.94 6.26L20.44 8.86L18.42 10.49L18.42 13.51L20.44 15.14L18.94 17.74L16.52 16.81L13.9 18.32L13.5 20.87L10.5 20.87L10.1 18.32L7.48 16.81L5.06 17.74L3.56 15.14L5.58 13.51L5.58 10.49L3.56 8.86L5.06 6.26L7.48 7.19ZM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="738.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Settings</text>
+<g transform="translate(18,866) scale(0.6666666666666666)"><path d="M4 5h16v14H4zM9.5 5v14" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="878.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Collapse</text>
+<line x1="216" y1="51.5" x2="1440" y2="51.5" stroke="rgba(15,20,30,0.10)"/>
+<rect x="240" y="11" width="168" height="30" rx="6" fill="#f0f2f5" stroke="rgba(15,20,30,0.10)" stroke-width="1" />
+<g transform="translate(250,19) scale(0.5833333333333334)"><path d="M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM15.25 15.25 20 20" fill="none" stroke="#5f6775" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="272" y="30.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#5f6775" text-anchor="start" style="font-variant-numeric: tabular-nums" >Search</text>
+<rect x="364" y="17" width="17" height="18" rx="4" fill="none" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
+<text x="372.5" y="30" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#5f6775" text-anchor="middle" style="font-variant-numeric: tabular-nums" >⌘</text>
+<rect x="384" y="17" width="17" height="18" rx="4" fill="none" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
+<text x="392.5" y="30" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#5f6775" text-anchor="middle" style="font-variant-numeric: tabular-nums" >K</text>
+<circle cx="1328" cy="26" r="4" fill="#187a46"/>
+<text x="1338" y="30.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Monitoring</text>
+<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f0f2f5"/><line x1="0" y1="0" x2="0" y2="6" stroke="#5f6775" stroke-width="1.6"/></pattern><pattern id="ghost" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#f0f2f5"/><line x1="0" y1="0" x2="0" y2="8" stroke="rgba(15,20,30,0.10)" stroke-width="2"/></pattern></defs>
+<text x="240" y="92" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="18" font-weight="600" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Disk map</text>
+<text x="240" y="112" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Folder on Macintosh HD · /Users/alex · scanned just now</text>
+<rect x="1326.71" y="76" width="89.29" height="32" rx="6" fill="#c2287c" />
+<g transform="translate(1338.71,84) scale(0.6666666666666666)"><path d="M20 12a8 8 0 1 1-2.34-5.66L20 8.5M20 4v4.5h-4.5" fill="none" stroke="#ffffff" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="1360.71" y="96.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#ffffff" text-anchor="start" style="font-variant-numeric: tabular-nums" >Rescan</text>
+<rect x="240.5" y="132.5" width="88.86" height="28" rx="6" fill="none" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
+<g transform="translate(249,138.5) scale(0.6666666666666666)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#4f5764" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="271" y="151" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >alex</text>
+<g transform="translate(307.86,140.5) scale(0.5)"><path d="M6 9l6 6 6-6" fill="none" stroke="#4f5764" stroke-width="3.00" stroke-linecap="round" stroke-linejoin="round"/></g>
+<line x1="341.36" y1="136" x2="341.36" y2="156" stroke="rgba(15,20,30,0.22)"/>
+<g transform="translate(356.86,138) scale(0.6666666666666666)"><path d="M14.5 6 8.5 12l6 6" fill="none" stroke="rgba(15,20,30,0.22)" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="384.86" y="151" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13"><tspan fill="#14171c" font-weight="600">alex</tspan></text>
+<rect x="1244.5" y="132.5" width="172" height="28" rx="6" fill="#f0f2f5" stroke="rgba(15,20,30,0.10)" stroke-width="1" />
+<rect x="1246.5" y="134.5" width="83.0" height="24" rx="5" fill="rgba(176,30,110,0.10)" stroke="#b01e6e" stroke-width="1" />
+<g transform="translate(1256.0,140) scale(0.5833333333333334)"><path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5H12zM14.5 2.75a7.25 7.25 0 0 1 6.75 6.75H14.5z" fill="none" stroke="#b01e6e" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="1276.0" y="151" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Chart</text>
+<g transform="translate(1340.0,140) scale(0.5833333333333334)"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="#4f5764" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="1360.0" y="151" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Table</text>
+<line x1="240" y1="168.5" x2="1416" y2="168.5" stroke="rgba(15,20,30,0.10)"/>
+<text x="240" y="189" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >396.2 GB counted in alex</text>
+<text x="240" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >378.2 GB free on Macintosh HD</text>
+<rect x="470" y="180" width="946" height="8" rx="4" fill="#f0f2f5" />
+<clipPath id="capclip"><rect x="470" y="180" width="946" height="8" rx="4"/></clipPath><g clip-path="url(#capclip)">
+<rect x="470" y="180" width="374.80225193525683" height="8" rx="0" fill="#868f9d" />
+</g>
+<rect x="470" y="196" width="10" height="10" rx="2" fill="#868f9d" />
+<text x="486" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >alex</text>
+<text x="516.64" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >396.2 GB</text>
+<rect x="585.92" y="196" width="10" height="10" rx="2" fill="#f0f2f5" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
+<text x="601.92" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Free</text>
+<text x="632.56" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >378.2 GB</text>
+<rect x="240.5" y="216.5" width="1175" height="63" rx="10" fill="#ffffff" stroke="rgba(15,20,30,0.10)" stroke-width="1" />
+<rect x="241" y="228" width="3" height="40" rx="1.5" fill="#8f5f00" />
+<g transform="translate(258,230) scale(0.6666666666666666)"><path d="M12 4 21 19.5H3zM12 9v3.5" fill="none" stroke="#8f5f00" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="282" y="243" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >6 folders could not be read</text>
+<text x="282" y="262" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >macOS protects Mail, Messages, Safari and 3 more folders. Their size is not included. Allow Full Disk Access to count them.</text>
+<rect x="1256.06" y="232.5" width="143.44" height="31" rx="6" fill="#f0f2f5" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
+<text x="1328.28" y="252.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#14171c" text-anchor="middle" style="font-variant-numeric: tabular-nums" >Show the folders</text>
+<rect x="240.5" y="292.5" width="615" height="583" rx="10" fill="#ffffff" stroke="rgba(15,20,30,0.10)" stroke-width="1" />
+<defs><path id="lp0_0" d="M550.01,465.12A114.9,114.9 0 0 1 601.92,681.46" fill="none"/><path id="lp0_1" d="M549.76,479.12A100.9,100.9 0 0 1 595.35,669.10" fill="none"/><path id="lp1_0" d="M550.85,416.72A163.3,163.3 0 0 1 710.13,560.49" fill="none"/><path id="lp51_0" d="M486.92,660.31A100.9,100.9 0 0 0 592.21,670.70" fill="none"/><path id="lp51_1" d="M477.84,672.25A115.9,115.9 0 0 0 598.78,684.18" fill="none"/><path id="lp86_0" d="M447.35,572.89A100.9,100.9 0 0 0 484.16,658.13" fill="none"/><path id="lp86_1" d="M432.39,571.83A115.9,115.9 0 0 0 474.66,669.75" fill="none"/></defs>
+<path d="M548.90,445.00A135.0,135.0 0 0 1 610.06,699.89L586.37,653.37A82.8,82.8 0 0 0 548.90,497.20Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M548.90,398.20A181.8,181.8 0 0 1 728.76,560.54L683.99,565.14A136.8,136.8 0 0 0 548.90,443.20Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M548.90,360.40A219.6,219.6 0 0 1 682.16,406.14L660.05,434.55A183.6,183.6 0 0 0 548.90,396.40Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M548.90,328.00A252.0,252.0 0 0 1 684.10,367.91L667.48,393.61A221.4,221.4 0 0 0 548.90,358.60Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M685.61,368.89A252.0,252.0 0 0 1 702.05,380.57L683.26,404.72A221.4,221.4 0 0 0 668.99,394.58Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M683.58,407.25A219.6,219.6 0 0 1 757.49,514.14L723.10,524.79A183.6,183.6 0 0 0 661.47,435.66Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M703.47,381.68A252.0,252.0 0 0 1 760.52,444.58L734.65,460.93A221.4,221.4 0 0 0 684.68,405.83Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M761.48,446.10A252.0,252.0 0 0 1 782.45,487.59L753.94,498.71A221.4,221.4 0 0 0 735.62,462.45Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M783.10,489.27A252.0,252.0 0 0 1 788.44,504.54L759.21,513.60A221.4,221.4 0 0 0 754.59,500.39Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M758.02,515.85A219.6,219.6 0 0 1 764.08,540.83L728.63,547.10A183.6,183.6 0 0 0 723.64,526.51Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M788.97,506.26A252.0,252.0 0 0 1 792.38,518.52L762.68,525.88A221.4,221.4 0 0 0 759.74,515.32Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M792.82,520.27A252.0,252.0 0 0 1 794.91,529.60L764.90,535.61A221.4,221.4 0 0 0 763.12,527.63Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M795.26,531.36A252.0,252.0 0 0 1 795.98,535.18L765.85,540.51A221.4,221.4 0 0 0 765.26,537.38Z" fill="#6f737d" opacity="1.0"/>
+<path d="M764.39,542.60A219.6,219.6 0 0 1 765.31,548.39L729.67,553.43A183.6,183.6 0 0 0 728.94,548.88Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M796.30,536.95A252.0,252.0 0 0 1 797.39,543.86L767.10,548.14A221.4,221.4 0 0 0 766.16,542.29Z" fill="#6f737d" opacity="1.0"/>
+<path d="M765.56,550.17A219.6,219.6 0 0 1 766.36,556.68L730.55,560.36A183.6,183.6 0 0 0 729.92,555.21Z" fill="#6f737d" opacity="1.0"/>
+<path d="M728.94,562.33A181.8,181.8 0 0 1 716.32,648.71L674.74,631.49A136.8,136.8 0 0 0 684.17,566.93Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M766.54,558.47A219.6,219.6 0 0 1 758.62,642.14L724.14,631.81A183.6,183.6 0 0 0 730.73,562.15Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M798.77,555.16A252.0,252.0 0 0 1 799.48,596.17L768.95,594.10A221.4,221.4 0 0 0 768.33,558.29Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M799.36,597.97A252.0,252.0 0 0 1 794.86,630.66L764.90,624.40A221.4,221.4 0 0 0 768.83,595.89Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M794.49,632.42A252.0,252.0 0 0 1 789.66,651.44L760.35,642.66A221.4,221.4 0 0 0 764.53,626.16Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M758.11,643.87A219.6,219.6 0 0 1 755.08,653.08L721.19,640.96A183.6,183.6 0 0 0 723.62,633.54Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M789.15,653.16A252.0,252.0 0 0 1 787.02,659.83L758.03,650.03A221.4,221.4 0 0 0 759.83,644.38Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M786.45,661.53A252.0,252.0 0 0 1 785.59,663.98L756.78,653.68A221.4,221.4 0 0 0 757.46,651.73Z" fill="#6f737d" opacity="1.0"/>
+<path d="M754.48,654.77A219.6,219.6 0 0 1 751.24,663.16L717.98,649.39A183.6,183.6 0 0 0 720.58,642.65Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M784.99,665.68A252.0,252.0 0 0 1 781.18,675.56L752.91,663.85A221.4,221.4 0 0 0 756.17,655.38Z" fill="#6f737d" opacity="1.0"/>
+<path d="M715.63,650.37A181.8,181.8 0 0 1 672.80,712.19L642.07,679.32A136.8,136.8 0 0 0 674.05,633.16Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M750.55,664.83A219.6,219.6 0 0 1 731.08,701.27L701.15,681.27A183.6,183.6 0 0 0 717.29,651.06Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M780.49,677.22A252.0,252.0 0 0 1 765.94,706.52L739.53,691.06A221.4,221.4 0 0 0 752.22,665.52Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M765.03,708.07A252.0,252.0 0 0 1 758.02,719.28L732.57,702.27A221.4,221.4 0 0 0 738.62,692.62Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M730.08,702.77A219.6,219.6 0 0 1 715.62,721.87L688.24,698.50A183.6,183.6 0 0 0 700.15,682.76Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M757.02,720.77A252.0,252.0 0 0 1 753.79,725.45L728.86,707.70A221.4,221.4 0 0 0 731.57,703.77Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M752.74,726.91A252.0,252.0 0 0 1 749.81,730.92L725.37,712.51A221.4,221.4 0 0 0 727.82,709.16Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M748.72,732.36A252.0,252.0 0 0 1 740.26,742.91L716.99,723.04A221.4,221.4 0 0 0 724.28,713.95Z" fill="#6f737d" opacity="1.0"/>
+<path d="M714.45,723.24A219.6,219.6 0 0 1 705.80,732.72L680.04,707.57A183.6,183.6 0 0 0 687.07,699.87Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M739.10,744.28A252.0,252.0 0 0 1 728.99,755.34L707.09,733.97A221.4,221.4 0 0 0 715.82,724.41Z" fill="#6f737d" opacity="1.0"/>
+<path d="M704.55,734.00A219.6,219.6 0 0 1 698.62,739.81L674.03,713.51A183.6,183.6 0 0 0 678.78,708.86Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M727.74,756.63A252.0,252.0 0 0 1 720.74,763.48L699.85,741.12A221.4,221.4 0 0 0 705.84,735.26Z" fill="#6f737d" opacity="1.0"/>
+<path d="M671.49,713.42A181.8,181.8 0 0 1 650.84,729.92L625.57,692.68A136.8,136.8 0 0 0 640.76,680.55Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M697.30,741.04A219.6,219.6 0 0 1 684.13,752.32L661.93,723.98A183.6,183.6 0 0 0 672.72,714.74Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M719.43,764.71A252.0,252.0 0 0 1 714.24,769.39L694.14,746.32A221.4,221.4 0 0 0 698.53,742.35Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M712.88,770.57A252.0,252.0 0 0 1 704.11,777.82L685.24,753.73A221.4,221.4 0 0 0 692.78,747.50Z" fill="#6f737d" opacity="1.0"/>
+<path d="M682.71,753.43A219.6,219.6 0 0 1 676.15,758.33L655.26,729.01A183.6,183.6 0 0 0 660.51,725.09Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M702.69,778.93A252.0,252.0 0 0 1 694.95,784.72L677.20,759.79A221.4,221.4 0 0 0 683.82,754.84Z" fill="#6f737d" opacity="1.0"/>
+<path d="M674.69,759.37A219.6,219.6 0 0 1 672.06,761.20L651.85,731.41A183.6,183.6 0 0 0 653.80,730.05Z" fill="#6f737d" opacity="1.0"/>
+<path d="M649.35,730.93A181.8,181.8 0 0 1 631.30,741.59L610.88,701.49A136.8,136.8 0 0 0 624.08,693.70Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M670.58,762.21A219.6,219.6 0 0 1 663.64,766.68L644.81,736.00A183.6,183.6 0 0 0 650.36,732.42Z" fill="#0c6dbe" opacity="1.0"/>
+<path d="M688.77,789.02A252.0,252.0 0 0 1 680.59,794.30L664.58,768.22A221.4,221.4 0 0 0 671.59,763.70Z" fill="#6f737d" opacity="1.0"/>
+<path d="M662.11,767.63A219.6,219.6 0 0 1 657.28,770.48L639.49,739.18A183.6,183.6 0 0 0 643.28,736.94Z" fill="#0d63ab" opacity="1.0"/>
+<path d="M679.06,795.24A252.0,252.0 0 0 1 673.29,798.65L658.17,772.04A221.4,221.4 0 0 0 663.05,769.16Z" fill="#6f737d" opacity="1.0"/>
+<path d="M655.72,771.37A219.6,219.6 0 0 1 648.45,775.28L632.11,743.20A183.6,183.6 0 0 0 637.93,740.07Z" fill="#6f737d" opacity="1.0"/>
+<path d="M608.46,700.71A135.0,135.0 0 0 1 465.12,686.57L497.44,645.57A82.8,82.8 0 0 0 584.77,654.19Z" fill="#c47600" opacity="1.0"/>
+<path d="M629.69,742.41A181.8,181.8 0 0 1 543.42,761.74L544.78,716.76A136.8,136.8 0 0 0 609.27,702.31Z" fill="#c47600" opacity="1.0"/>
+<path d="M646.85,776.10A219.6,219.6 0 0 1 613.49,789.61L602.90,755.20A183.6,183.6 0 0 0 630.51,744.02Z" fill="#c47600" opacity="1.0"/>
+<path d="M661.55,804.97A252.0,252.0 0 0 1 631.55,817.75L621.51,788.84A221.4,221.4 0 0 0 647.66,777.70Z" fill="#c47600" opacity="1.0"/>
+<path d="M629.85,818.34A252.0,252.0 0 0 1 623.03,820.57L614.02,791.33A221.4,221.4 0 0 0 619.81,789.43Z" fill="#af6b03" opacity="1.0"/>
+<path d="M611.77,790.14A219.6,219.6 0 0 1 586.79,796.15L580.57,760.69A183.6,183.6 0 0 0 601.18,755.73Z" fill="#af6b03" opacity="1.0"/>
+<path d="M621.31,821.10A252.0,252.0 0 0 1 601.23,826.31L594.87,796.38A221.4,221.4 0 0 0 612.30,791.86Z" fill="#c47600" opacity="1.0"/>
+<path d="M599.47,826.69A252.0,252.0 0 0 1 592.38,828.06L587.10,797.92A221.4,221.4 0 0 0 593.11,796.76Z" fill="#af6b03" opacity="1.0"/>
+<path d="M585.01,796.46A219.6,219.6 0 0 1 569.76,798.52L566.34,762.68A183.6,183.6 0 0 0 578.80,761.00Z" fill="#c47600" opacity="1.0"/>
+<path d="M590.60,828.37A252.0,252.0 0 0 1 572.84,830.77L569.93,800.31A221.4,221.4 0 0 0 585.32,798.23Z" fill="#6f737d" opacity="1.0"/>
+<path d="M567.97,798.69A219.6,219.6 0 0 1 559.47,799.30L557.74,763.34A183.6,183.6 0 0 0 564.55,762.85Z" fill="#af6b03" opacity="1.0"/>
+<path d="M571.05,830.94A252.0,252.0 0 0 1 561.03,831.66L559.56,801.10A221.4,221.4 0 0 0 568.14,800.48Z" fill="#6f737d" opacity="1.0"/>
+<path d="M557.68,799.39A219.6,219.6 0 0 1 550.88,799.58L550.56,763.58A183.6,183.6 0 0 0 555.94,763.43Z" fill="#c47600" opacity="1.0"/>
+<path d="M559.24,831.75A252.0,252.0 0 0 1 551.17,831.98L550.90,801.38A221.4,221.4 0 0 0 557.76,801.18Z" fill="#6f737d" opacity="1.0"/>
+<path d="M549.08,799.60A219.6,219.6 0 0 1 542.28,799.53L543.37,763.54A183.6,183.6 0 0 0 548.76,763.60Z" fill="#af6b03" opacity="1.0"/>
+<path d="M549.37,832.00A252.0,252.0 0 0 1 541.31,831.91L542.23,801.32A221.4,221.4 0 0 0 549.10,801.40Z" fill="#6f737d" opacity="1.0"/>
+<path d="M541.62,761.69A181.8,181.8 0 0 1 464.76,741.63L485.57,701.72A136.8,136.8 0 0 0 542.98,716.71Z" fill="#af6b03" opacity="1.0"/>
+<path d="M540.48,799.47A219.6,219.6 0 0 1 467.91,784.47L481.17,751.01A183.6,183.6 0 0 0 541.57,763.49Z" fill="#c47600" opacity="1.0"/>
+<path d="M539.51,831.86A252.0,252.0 0 0 1 514.38,829.75L518.57,799.44A221.4,221.4 0 0 0 540.43,801.27Z" fill="#c47600" opacity="1.0"/>
+<path d="M512.60,829.50A252.0,252.0 0 0 1 490.34,825.31L497.45,795.55A221.4,221.4 0 0 0 516.79,799.19Z" fill="#af6b03" opacity="1.0"/>
+<path d="M488.59,824.90A252.0,252.0 0 0 1 474.19,820.95L483.26,791.72A221.4,221.4 0 0 0 495.70,795.13Z" fill="#c47600" opacity="1.0"/>
+<path d="M472.47,820.42A252.0,252.0 0 0 1 464.41,817.73L474.66,788.90A221.4,221.4 0 0 0 481.54,791.19Z" fill="#af6b03" opacity="1.0"/>
+<path d="M462.71,817.13A252.0,252.0 0 0 1 455.97,814.59L467.24,786.15A221.4,221.4 0 0 0 472.97,788.30Z" fill="#c47600" opacity="1.0"/>
+<path d="M466.23,783.81A219.6,219.6 0 0 1 452.59,777.79L468.36,745.43A183.6,183.6 0 0 0 479.50,750.34Z" fill="#af6b03" opacity="1.0"/>
+<path d="M454.29,813.93A252.0,252.0 0 0 1 438.39,806.91L451.80,779.41A221.4,221.4 0 0 0 465.57,785.48Z" fill="#6f737d" opacity="1.0"/>
+<path d="M450.97,777.00A219.6,219.6 0 0 1 447.29,775.15L463.93,743.22A183.6,183.6 0 0 0 466.74,744.64Z" fill="#c47600" opacity="1.0"/>
+<path d="M436.77,806.13A252.0,252.0 0 0 1 432.32,803.88L446.46,776.74A221.4,221.4 0 0 0 450.18,778.62Z" fill="#6f737d" opacity="1.0"/>
+<path d="M463.17,740.79A181.8,181.8 0 0 1 436.15,723.32L464.01,687.98A136.8,136.8 0 0 0 483.97,700.89Z" fill="#c47600" opacity="1.0"/>
+<path d="M445.70,774.31A219.6,219.6 0 0 1 434.96,768.27L453.61,737.48A183.6,183.6 0 0 0 462.34,742.39Z" fill="#c47600" opacity="1.0"/>
+<path d="M430.72,803.05A252.0,252.0 0 0 1 418.16,795.98L434.02,769.81A221.4,221.4 0 0 0 444.86,775.91Z" fill="#6f737d" opacity="1.0"/>
+<path d="M433.42,767.34A219.6,219.6 0 0 1 425.74,762.42L445.91,732.60A183.6,183.6 0 0 0 452.07,736.55Z" fill="#af6b03" opacity="1.0"/>
+<path d="M416.62,795.04A252.0,252.0 0 0 1 407.59,789.26L424.73,763.91A221.4,221.4 0 0 0 432.48,768.88Z" fill="#6f737d" opacity="1.0"/>
+<path d="M424.25,761.41A219.6,219.6 0 0 1 416.83,756.12L438.45,727.34A183.6,183.6 0 0 0 444.41,731.59Z" fill="#c47600" opacity="1.0"/>
+<path d="M406.10,788.25A252.0,252.0 0 0 1 397.37,782.02L415.75,757.56A221.4,221.4 0 0 0 423.24,762.90Z" fill="#6f737d" opacity="1.0"/>
+<path d="M415.39,755.04A219.6,219.6 0 0 1 412.74,753.00L435.03,724.73A183.6,183.6 0 0 0 437.01,726.25Z" fill="#6f737d" opacity="1.0"/>
+<path d="M463.71,685.45A135.0,135.0 0 0 1 413.45,569.03L465.45,573.62A82.8,82.8 0 0 0 496.03,644.46Z" fill="#087d51" opacity="1.0"/>
+<path d="M434.73,722.20A181.8,181.8 0 0 1 371.99,625.53L415.62,614.48A136.8,136.8 0 0 0 462.60,686.87Z" fill="#087d51" opacity="1.0"/>
+<path d="M411.33,751.89A219.6,219.6 0 0 1 367.50,705.07L397.17,684.69A183.6,183.6 0 0 0 433.62,723.62Z" fill="#087d51" opacity="1.0"/>
+<path d="M391.27,777.33A252.0,252.0 0 0 1 373.32,761.64L394.61,739.66A221.4,221.4 0 0 0 410.22,753.30Z" fill="#087d51" opacity="1.0"/>
+<path d="M372.03,760.39A252.0,252.0 0 0 1 359.13,746.83L382.14,726.65A221.4,221.4 0 0 0 393.32,738.41Z" fill="#09714b" opacity="1.0"/>
+<path d="M357.94,745.48A252.0,252.0 0 0 1 348.67,734.18L372.94,715.54A221.4,221.4 0 0 0 380.95,725.30Z" fill="#087d51" opacity="1.0"/>
+<path d="M347.57,732.75A252.0,252.0 0 0 1 340.79,723.42L366.02,706.09A221.4,221.4 0 0 0 371.84,714.12Z" fill="#09714b" opacity="1.0"/>
+<path d="M366.48,703.59A219.6,219.6 0 0 1 354.04,682.98L385.91,666.22A183.6,183.6 0 0 0 396.15,683.21Z" fill="#09714b" opacity="1.0"/>
+<path d="M339.77,721.94A252.0,252.0 0 0 1 330.42,707.13L356.90,691.79A221.4,221.4 0 0 0 365.00,704.61Z" fill="#087d51" opacity="1.0"/>
+<path d="M329.52,705.58A252.0,252.0 0 0 1 325.36,698.05L352.45,683.81A221.4,221.4 0 0 0 355.99,690.23Z" fill="#09714b" opacity="1.0"/>
+<path d="M353.20,681.38A219.6,219.6 0 0 1 344.33,662.12L377.78,648.80A183.6,183.6 0 0 0 385.07,664.63Z" fill="#087d51" opacity="1.0"/>
+<path d="M324.52,696.46A252.0,252.0 0 0 1 319.32,685.87L347.13,673.11A221.4,221.4 0 0 0 351.61,682.22Z" fill="#087d51" opacity="1.0"/>
+<path d="M318.57,684.23A252.0,252.0 0 0 1 315.45,677.08L343.73,665.39A221.4,221.4 0 0 0 346.38,671.47Z" fill="#09714b" opacity="1.0"/>
+<path d="M314.76,675.41A252.0,252.0 0 0 1 314.23,674.12L342.66,662.79A221.4,221.4 0 0 0 343.04,663.73Z" fill="#6f737d" opacity="1.0"/>
+<path d="M343.67,660.45A219.6,219.6 0 0 1 339.40,648.62L373.64,637.51A183.6,183.6 0 0 0 377.11,647.12Z" fill="#09714b" opacity="1.0"/>
+<path d="M313.57,672.44A252.0,252.0 0 0 1 308.58,658.61L337.68,649.17A221.4,221.4 0 0 0 341.99,661.12Z" fill="#6f737d" opacity="1.0"/>
+<path d="M338.84,646.90A219.6,219.6 0 0 1 335.35,634.82L370.25,625.97A183.6,183.6 0 0 0 373.08,635.80Z" fill="#087d51" opacity="1.0"/>
+<path d="M308.02,656.90A252.0,252.0 0 0 1 304.83,646.13L334.39,638.21A221.4,221.4 0 0 0 337.13,647.46Z" fill="#087d51" opacity="1.0"/>
+<path d="M304.37,644.40A252.0,252.0 0 0 1 303.94,642.78L333.61,635.26A221.4,221.4 0 0 0 333.92,636.47Z" fill="#6f737d" opacity="1.0"/>
+<path d="M371.55,623.79A181.8,181.8 0 0 1 366.83,564.92L411.65,568.87A136.8,136.8 0 0 0 415.17,612.73Z" fill="#09714b" opacity="1.0"/>
+<path d="M334.91,633.07A219.6,219.6 0 0 1 330.73,611.92L366.37,606.84A183.6,183.6 0 0 0 369.81,624.23Z" fill="#087d51" opacity="1.0"/>
+<path d="M303.50,641.03A252.0,252.0 0 0 1 302.15,635.33L332.03,628.72A221.4,221.4 0 0 0 333.16,633.51Z" fill="#087d51" opacity="1.0"/>
+<path d="M301.76,633.57A252.0,252.0 0 0 1 298.66,616.50L328.95,612.18A221.4,221.4 0 0 0 331.64,626.96Z" fill="#6f737d" opacity="1.0"/>
+<path d="M330.48,610.14A219.6,219.6 0 0 1 328.65,590.54L364.62,588.96A183.6,183.6 0 0 0 366.12,605.05Z" fill="#09714b" opacity="1.0"/>
+<path d="M298.40,614.72A252.0,252.0 0 0 1 297.64,608.71L328.05,605.33A221.4,221.4 0 0 0 328.70,610.40Z" fill="#087d51" opacity="1.0"/>
+<path d="M297.44,606.92A252.0,252.0 0 0 1 296.90,601.24L327.40,598.77A221.4,221.4 0 0 0 327.85,603.54Z" fill="#09714b" opacity="1.0"/>
+<path d="M296.75,599.44A252.0,252.0 0 0 1 296.28,591.96L326.85,590.62A221.4,221.4 0 0 0 327.25,596.97Z" fill="#6f737d" opacity="1.0"/>
+<path d="M328.57,588.74A219.6,219.6 0 0 1 328.59,570.92L364.55,572.56A183.6,183.6 0 0 0 364.54,587.16Z" fill="#087d51" opacity="1.0"/>
+<path d="M296.21,590.16A252.0,252.0 0 0 1 296.07,574.10L326.66,574.93A221.4,221.4 0 0 0 326.78,588.82Z" fill="#087d51" opacity="1.0"/>
+<path d="M296.12,572.31A252.0,252.0 0 0 1 296.22,569.45L326.79,570.84A221.4,221.4 0 0 0 326.71,573.13Z" fill="#6f737d" opacity="1.0"/>
+<path d="M328.67,569.12A219.6,219.6 0 0 1 329.17,561.59L365.03,564.76A183.6,183.6 0 0 0 364.63,570.76Z" fill="#09714b" opacity="1.0"/>
+<path d="M296.30,567.65A252.0,252.0 0 0 1 296.90,558.75L327.38,561.44A221.4,221.4 0 0 0 326.87,569.04Z" fill="#6f737d" opacity="1.0"/>
+<path d="M413.60,567.24A135.0,135.0 0 0 1 447.97,489.34L486.42,524.65A82.8,82.8 0 0 0 465.60,571.83Z" fill="#b04c95" opacity="1.0"/>
+<path d="M366.99,563.12A181.8,181.8 0 0 1 410.82,460.70L444.63,490.39A136.8,136.8 0 0 0 411.81,567.08Z" fill="#b04c95" opacity="1.0"/>
+<path d="M412.01,459.34A181.8,181.8 0 0 1 413.50,457.68L446.65,488.12A136.8,136.8 0 0 0 445.82,489.04Z" fill="#6f737d" opacity="1.0"/>
+<path d="M449.19,488.01A135.0,135.0 0 0 1 489.00,458.57L511.50,505.68A82.8,82.8 0 0 0 487.63,523.33Z" fill="#be3108" opacity="1.0"/>
+<path d="M414.72,456.35A181.8,181.8 0 0 1 425.79,445.41L455.87,478.87A136.8,136.8 0 0 0 447.86,486.80Z" fill="#be3108" opacity="1.0"/>
+<path d="M386.88,430.78A219.6,219.6 0 0 1 396.13,421.38L420.92,447.49A183.6,183.6 0 0 0 413.40,455.14Z" fill="#be3108" opacity="1.0"/>
+<path d="M363.02,408.86A252.0,252.0 0 0 1 373.82,397.89L394.89,420.08A221.4,221.4 0 0 0 385.56,429.57Z" fill="#6f737d" opacity="1.0"/>
+<path d="M397.43,420.14A219.6,219.6 0 0 1 400.52,417.30L424.58,444.07A183.6,183.6 0 0 0 422.23,446.25Z" fill="#aa2e0a" opacity="1.0"/>
+<path d="M375.12,396.65A252.0,252.0 0 0 1 378.85,393.20L399.31,415.96A221.4,221.4 0 0 0 396.20,418.84Z" fill="#6f737d" opacity="1.0"/>
+<path d="M427.13,444.20A181.8,181.8 0 0 1 438.52,434.86L465.44,470.92A136.8,136.8 0 0 0 457.21,477.67Z" fill="#aa2e0a" opacity="1.0"/>
+<path d="M401.85,416.09A219.6,219.6 0 0 1 412.63,407.08L434.71,435.52A183.6,183.6 0 0 0 425.92,442.86Z" fill="#be3108" opacity="1.0"/>
+<path d="M380.19,392.00A252.0,252.0 0 0 1 392.76,381.49L411.53,405.66A221.4,221.4 0 0 0 400.65,414.75Z" fill="#6f737d" opacity="1.0"/>
+<path d="M414.05,405.98A219.6,219.6 0 0 1 415.91,404.57L437.45,433.42A183.6,183.6 0 0 0 436.13,434.42Z" fill="#6f737d" opacity="1.0"/>
+<path d="M439.97,433.78A181.8,181.8 0 0 1 450.76,426.39L474.64,464.53A136.8,136.8 0 0 0 466.89,469.84Z" fill="#be3108" opacity="1.0"/>
+<path d="M417.35,403.49A219.6,219.6 0 0 1 430.71,394.35L449.81,424.86A183.6,183.6 0 0 0 438.89,432.34Z" fill="#6f737d" opacity="1.0"/>
+<path d="M452.29,425.43A181.8,181.8 0 0 1 460.02,420.91L481.60,460.40A136.8,136.8 0 0 0 476.17,463.58Z" fill="#aa2e0a" opacity="1.0"/>
+<path d="M432.23,393.39A219.6,219.6 0 0 1 435.74,391.26L454.02,422.28A183.6,183.6 0 0 0 451.34,423.91Z" fill="#be3108" opacity="1.0"/>
+<path d="M415.04,365.93A252.0,252.0 0 0 1 419.29,363.35L434.83,389.71A221.4,221.4 0 0 0 431.28,391.87Z" fill="#6f737d" opacity="1.0"/>
+<path d="M437.29,390.35A219.6,219.6 0 0 1 441.89,387.74L459.15,419.33A183.6,183.6 0 0 0 455.57,421.37Z" fill="#6f737d" opacity="1.0"/>
+<path d="M461.60,420.05A181.8,181.8 0 0 1 464.39,418.57L484.89,458.63A136.8,136.8 0 0 0 483.18,459.53Z" fill="#be3108" opacity="1.0"/>
+<path d="M443.47,386.88A219.6,219.6 0 0 1 447.17,384.92L463.57,416.96A183.6,183.6 0 0 0 460.73,418.47Z" fill="#6f737d" opacity="1.0"/>
+<path d="M465.99,417.75A181.8,181.8 0 0 1 468.83,416.34L488.23,456.95A136.8,136.8 0 0 0 486.49,457.81Z" fill="#aa2e0a" opacity="1.0"/>
+<path d="M448.78,384.10A219.6,219.6 0 0 1 452.54,382.24L468.05,414.72A183.6,183.6 0 0 0 465.17,416.14Z" fill="#6f737d" opacity="1.0"/>
+<path d="M490.63,457.80A135.0,135.0 0 0 1 527.06,446.63L534.81,498.26A82.8,82.8 0 0 0 513.13,504.90Z" fill="#6f737d" opacity="1.0"/>
+<path d="M470.45,415.57A181.8,181.8 0 0 1 511.27,401.95L520.14,446.07A136.8,136.8 0 0 0 489.85,456.17Z" fill="#6f737d" opacity="1.0"/>
+<path d="M454.16,381.46A219.6,219.6 0 0 1 471.55,374.14L483.94,407.94A183.6,183.6 0 0 0 469.68,413.94Z" fill="#6f737d" opacity="1.0"/>
+<path d="M440.19,352.22A252.0,252.0 0 0 1 447.60,348.86L459.69,376.97A221.4,221.4 0 0 0 453.38,379.84Z" fill="#6f737d" opacity="1.0"/>
+<path d="M449.25,348.15A252.0,252.0 0 0 1 454.73,345.90L465.95,374.36A221.4,221.4 0 0 0 461.34,376.26Z" fill="#646871" opacity="1.0"/>
+<path d="M456.40,345.24A252.0,252.0 0 0 1 460.39,343.72L470.93,372.45A221.4,221.4 0 0 0 467.63,373.70Z" fill="#6f737d" opacity="1.0"/>
+<path d="M473.24,373.52A219.6,219.6 0 0 1 489.58,368.31L499.01,403.06A183.6,183.6 0 0 0 485.63,407.32Z" fill="#646871" opacity="1.0"/>
+<path d="M462.08,343.10A252.0,252.0 0 0 1 466.93,341.40L476.67,370.41A221.4,221.4 0 0 0 472.62,371.83Z" fill="#6f737d" opacity="1.0"/>
+<path d="M468.63,340.82A252.0,252.0 0 0 1 473.22,339.35L482.20,368.60A221.4,221.4 0 0 0 478.38,369.83Z" fill="#646871" opacity="1.0"/>
+<path d="M474.94,338.82A252.0,252.0 0 0 1 481.09,337.05L489.11,366.58A221.4,221.4 0 0 0 483.92,368.08Z" fill="#6f737d" opacity="1.0"/>
+<path d="M491.31,367.84A219.6,219.6 0 0 1 499.60,365.80L507.39,400.95A183.6,183.6 0 0 0 500.75,402.58Z" fill="#6f737d" opacity="1.0"/>
+<path d="M482.82,336.57A252.0,252.0 0 0 1 490.20,334.72L497.11,364.53A221.4,221.4 0 0 0 490.84,366.11Z" fill="#6f737d" opacity="1.0"/>
+<path d="M491.95,334.31A252.0,252.0 0 0 1 492.59,334.17L499.21,364.04A221.4,221.4 0 0 0 498.87,364.12Z" fill="#6f737d" opacity="1.0"/>
+<path d="M501.36,365.41A219.6,219.6 0 0 1 503.81,364.89L510.91,400.18A183.6,183.6 0 0 0 509.15,400.56Z" fill="#6f737d" opacity="1.0"/>
+<path d="M513.03,401.59A181.8,181.8 0 0 1 520.11,400.35L526.79,444.85A136.8,136.8 0 0 0 521.91,445.71Z" fill="#646871" opacity="1.0"/>
+<path d="M505.58,364.54A219.6,219.6 0 0 1 514.50,362.97L519.84,398.57A183.6,183.6 0 0 0 512.68,399.83Z" fill="#6f737d" opacity="1.0"/>
+<path d="M528.84,446.37A135.0,135.0 0 0 1 547.10,445.00L547.10,497.20A82.8,82.8 0 0 0 536.59,497.99Z" fill="#6f737d" opacity="1.0"/>
+<path d="M521.89,400.08A181.8,181.8 0 0 1 534.99,398.67L537.99,443.57A136.8,136.8 0 0 0 528.57,444.59Z" fill="#6f737d" opacity="1.0"/>
+<path d="M516.28,362.70A219.6,219.6 0 0 1 532.47,360.95L534.87,396.87A183.6,183.6 0 0 0 521.62,398.30Z" fill="#6f737d" opacity="1.0"/>
+<path d="M536.78,398.55A181.8,181.8 0 0 1 544.25,398.24L544.95,443.23A136.8,136.8 0 0 0 539.78,443.45Z" fill="#646871" opacity="1.0"/>
+<path d="M534.26,360.83A219.6,219.6 0 0 1 538.57,360.60L539.97,396.58A183.6,183.6 0 0 0 536.66,396.75Z" fill="#6f737d" opacity="1.0"/>
+<path d="M532.10,328.50A252.0,252.0 0 0 1 537.31,328.23L538.50,358.80A221.4,221.4 0 0 0 534.14,359.03Z" fill="#6f737d" opacity="1.0"/>
+<path d="M540.37,360.53A219.6,219.6 0 0 1 543.65,360.44L544.22,396.44A183.6,183.6 0 0 0 541.76,396.51Z" fill="#6f737d" opacity="1.0"/>
+<path d="M546.05,398.21A181.8,181.8 0 0 1 547.10,398.20L547.10,443.20A136.8,136.8 0 0 0 546.75,443.21Z" fill="#6f737d" opacity="1.0"/>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#ffffff" style="font-variant-numeric: tabular-nums"><textPath href="#lp0_0" startOffset="50%" text-anchor="middle">Library</textPath></text>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#ffffff" style="font-variant-numeric: tabular-nums"><textPath href="#lp0_1" startOffset="50%" text-anchor="middle">168.4 GB</textPath></text>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#ffffff" style="font-variant-numeric: tabular-nums"><textPath href="#lp1_0" startOffset="50%" text-anchor="middle">Developer</textPath></text>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#0e0f12" style="font-variant-numeric: tabular-nums"><textPath href="#lp51_0" startOffset="50%" text-anchor="middle">Projects</textPath></text>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#0e0f12" style="font-variant-numeric: tabular-nums"><textPath href="#lp51_1" startOffset="50%" text-anchor="middle">71.8 GB</textPath></text>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#ffffff" style="font-variant-numeric: tabular-nums"><textPath href="#lp86_0" startOffset="50%" text-anchor="middle">Movies</textPath></text>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#ffffff" style="font-variant-numeric: tabular-nums"><textPath href="#lp86_1" startOffset="50%" text-anchor="middle">62.5 GB</textPath></text>
+<circle cx="548.0" cy="580.0" r="78.8" fill="#ffffff"/>
+<text x="548.0" y="550.0" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#14171c" text-anchor="middle" style="font-variant-numeric: tabular-nums" >alex</text>
+<text x="548.0" y="584.0" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" style="font-variant-numeric: tabular-nums"><tspan font-size="28" font-weight="600" fill="#14171c">396.2</tspan><tspan font-size="13" fill="#4f5764" dx="3">GB</tspan></text>
+<text x="548.0" y="606.0" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="middle" style="font-variant-numeric: tabular-nums" >counted</text>
+<text x="548.0" y="623.0" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="middle" style="font-variant-numeric: tabular-nums" >1,373,805 items</text>
+<rect x="872.5" y="292.5" width="543" height="583" rx="10" fill="#ffffff" stroke="rgba(15,20,30,0.10)" stroke-width="1" />
+<text x="888" y="317" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >In this folder</text>
+<rect x="1000.47" y="304" width="18.105" height="18" rx="9" fill="#f0f2f5" />
+<text x="1009.5225" y="317" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#4f5764" text-anchor="middle" style="font-variant-numeric: tabular-nums" >7</text>
+<rect x="888" y="330" width="130.575" height="2" rx="1" fill="#b01e6e" />
+<text x="1040.575" y="317" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Largest files</text>
+<text x="1156.3700000000001" y="317" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Oldest files</text>
+<text x="1264.95" y="317" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Duplicate hints</text>
+<rect x="1379.175" y="304" width="18.105" height="18" rx="9" fill="#f0f2f5" />
+<text x="1388.2275" y="317" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#4f5764" text-anchor="middle" style="font-variant-numeric: tabular-nums" >1</text>
+<line x1="872" y1="332.5" x2="1416" y2="332.5" stroke="rgba(15,20,30,0.10)"/>
+<rect x="873" y="333" width="542" height="28" rx="0" fill="#f0f2f5" />
+<text x="888" y="351" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Name</text>
+<text x="1324" y="351" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Size</text>
+<text x="1400" y="351" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Share</text>
+<rect x="888" y="372" width="10" height="10" rx="2.5" fill="#0c6dbe" />
+<g transform="translate(906,370) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#4f5764" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="928" y="381.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Library</text>
+<text x="986.505" y="381.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >incomplete</text>
+<rect x="1158" y="375" width="72" height="4" rx="2" fill="#f0f2f5" />
+<rect x="1158" y="375" width="30.602725896012117" height="4" rx="2" fill="#868f9d" />
+<text x="1324" y="381.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >168.4 GB</text>
+<text x="1400" y="381.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >42.5%</text>
+<line x1="888" y1="392.5" x2="1400" y2="392.5" stroke="rgba(15,20,30,0.10)"/>
+<rect x="888" y="404" width="10" height="10" rx="2.5" fill="#c47600" />
+<g transform="translate(906,402) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#4f5764" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="928" y="413.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Projects</text>
+<rect x="1158" y="407" width="72" height="4" rx="2" fill="#f0f2f5" />
+<rect x="1158" y="407" width="13.047955577990912" height="4" rx="2" fill="#868f9d" />
+<text x="1324" y="413.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >71.8 GB</text>
+<text x="1400" y="413.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >18.1%</text>
+<line x1="888" y1="424.5" x2="1400" y2="424.5" stroke="rgba(15,20,30,0.10)"/>
+<rect x="888" y="436" width="10" height="10" rx="2.5" fill="#087d51" />
+<g transform="translate(906,434) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#4f5764" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="928" y="445.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Movies</text>
+<rect x="1158" y="439" width="72" height="4" rx="2" fill="#f0f2f5" />
+<rect x="1158" y="439" width="11.357900050479557" height="4" rx="2" fill="#868f9d" />
+<text x="1324" y="445.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >62.5 GB</text>
+<text x="1400" y="445.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >15.8%</text>
+<line x1="888" y1="456.5" x2="1400" y2="456.5" stroke="rgba(15,20,30,0.10)"/>
+<rect x="888" y="468" width="10" height="10" rx="2.5" fill="#b04c95" />
+<g transform="translate(906,466) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#4f5764" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="928" y="477.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Pictures</text>
+<rect x="1158" y="471" width="72" height="4" rx="2" fill="#f0f2f5" />
+<rect x="1158" y="471" width="7.5053003533568905" height="4" rx="2" fill="#868f9d" />
+<text x="1324" y="477.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >41.3 GB</text>
+<text x="1400" y="477.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >10.4%</text>
+<line x1="888" y1="488.5" x2="1400" y2="488.5" stroke="rgba(15,20,30,0.10)"/>
+<rect x="888" y="500" width="10" height="10" rx="2.5" fill="#be3108" />
+<g transform="translate(906,498) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#4f5764" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="928" y="509.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Music</text>
+<rect x="1158" y="503" width="72" height="4" rx="2" fill="#f0f2f5" />
+<rect x="1158" y="503" width="4.379606259464917" height="4" rx="2" fill="#868f9d" />
+<text x="1324" y="509.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >24.1 GB</text>
+<text x="1400" y="509.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >6.1%</text>
+<line x1="888" y1="520.5" x2="1400" y2="520.5" stroke="rgba(15,20,30,0.10)"/>
+<rect x="888" y="532" width="10" height="10" rx="2.5" fill="#6f737d" />
+<g transform="translate(906,530) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#4f5764" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="928" y="541.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Downloads</text>
+<rect x="1158" y="535" width="72" height="4" rx="2" fill="#f0f2f5" />
+<rect x="1158" y="535" width="3.398283695103483" height="4" rx="2" fill="#868f9d" />
+<text x="1324" y="541.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >18.7 GB</text>
+<text x="1400" y="541.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >4.7%</text>
+<line x1="888" y1="552.5" x2="1400" y2="552.5" stroke="rgba(15,20,30,0.10)"/>
+<rect x="888" y="564" width="10" height="10" rx="2.5" fill="#6f737d" />
+<g transform="translate(906,562) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#4f5764" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="928" y="573.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Documents</text>
+<rect x="1158" y="567" width="72" height="4" rx="2" fill="#f0f2f5" />
+<rect x="1158" y="567" width="1.7082281675921254" height="4" rx="2" fill="#868f9d" />
+<text x="1324" y="573.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >9.4 GB</text>
+<text x="1400" y="573.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >2.4%</text>
+<line x1="888" y1="584.5" x2="1400" y2="584.5" stroke="rgba(15,20,30,0.10)"/>
+<text x="888" y="619" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Not readable</text>
+<rect x="888" y="639" width="10" height="10" rx="2.5" fill="url(#hatch)" stroke="#5f6775" stroke-width="1" />
+<text x="906" y="648" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Library/Mail</text>
+<text x="906" y="665" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Protected by macOS (Full Disk Access)</text>
+<text x="1324" y="648" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Not readable</text>
+<rect x="888" y="685" width="10" height="10" rx="2.5" fill="url(#hatch)" stroke="#5f6775" stroke-width="1" />
+<text x="906" y="694" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Library/Messages</text>
+<text x="906" y="711" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Protected by macOS (Full Disk Access)</text>
+<text x="1324" y="694" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Not readable</text>
+<rect x="888" y="731" width="10" height="10" rx="2.5" fill="url(#hatch)" stroke="#5f6775" stroke-width="1" />
+<text x="906" y="740" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Library/Safari and 3 more</text>
+<text x="906" y="757" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Show the folders lists all six</text>
+<text x="1324" y="740" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Not readable</text>
+<line x1="873" y1="841.5" x2="1415" y2="841.5" stroke="rgba(15,20,30,0.10)"/>
+<text x="888" y="863" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Library is incomplete: 6 of its folders could not be read.</text></svg>

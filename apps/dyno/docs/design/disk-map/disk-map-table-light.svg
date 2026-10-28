@@ -83,15 +83,15 @@
 <text x="240" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >378.2 GB free</text>
 <rect x="470" y="180" width="946" height="8" rx="4" fill="#f0f2f5" />
 <clipPath id="capclip"><rect x="470" y="180" width="946" height="8" rx="4"/></clipPath><g clip-path="url(#capclip)">
-<rect x="470" y="180" width="538.7616366743741" height="8" rx="0" fill="#868f9d" />
-<rect x="1010.7616366743741" y="180" width="43.55484065547401" height="8" rx="0" fill="url(#hatch)" />
+<rect x="470" y="180" width="537.6203880567006" height="8" rx="0" fill="#868f9d" />
+<rect x="1009.6203880567006" y="180" width="44.6960892731477" height="8" rx="0" fill="url(#hatch)" />
 </g>
 <rect x="470" y="196" width="10" height="10" rx="2" fill="#868f9d" />
 <text x="486" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Counted</text>
-<text x="536.62" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >568.6 GB</text>
+<text x="536.62" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >567.4 GB</text>
 <rect x="605.9" y="196" width="10" height="10" rx="2" fill="url(#hatch)" />
 <text x="621.9" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Hidden space</text>
-<text x="705.8199999999999" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >47.9 GB</text>
+<text x="705.8199999999999" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >49.1 GB</text>
 <rect x="768.44" y="196" width="10" height="10" rx="2" fill="#f0f2f5" stroke="rgba(15,20,30,0.22)" stroke-width="1" />
 <text x="784.44" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Free</text>
 <text x="815.08" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >378.2 GB</text>
@@ -99,13 +99,13 @@
 <rect x="256.5" y="228.5" width="240" height="28" rx="6" fill="#ffffff" stroke="#6b7380" stroke-width="1" />
 <g transform="translate(266,235) scale(0.5833333333333334)"><path d="M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM15.25 15.25 20 20" fill="none" stroke="#5f6775" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
 <text x="286" y="247" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#5f6775" text-anchor="start" style="font-variant-numeric: tabular-nums" >Filter alex</text>
-<text x="1400" y="247" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >7 items · 396.2 GB</text>
+<text x="1400" y="247" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >7 folders · 396.2 GB</text>
 <rect x="241" y="268" width="1174" height="28" rx="0" fill="#f0f2f5" />
 <text x="284" y="286" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Name</text>
 <text x="856" y="286" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Size</text>
 <text x="1016" y="286" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >% of alex</text>
 <text x="1136" y="286" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Items</text>
-<text x="1352" y="286" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Modified</text>
+<text x="1352" y="286" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Newest change</text>
 <g transform="translate(813.36,276) scale(0.5)"><path d="M6 9l6 6 6-6" fill="none" stroke="#14171c" stroke-width="3.00" stroke-linecap="round" stroke-linejoin="round"/></g>
 <g transform="translate(254,306) scale(0.5)"><path d="M6 9l6 6 6-6" fill="none" stroke="#4f5764" stroke-width="3.00" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="268" y="307" width="10" height="10" rx="2.5" fill="#0c6dbe" />
@@ -120,7 +120,6 @@
 <g transform="translate(1376,304) scale(0.6666666666666666)"><path d="" fill="none" stroke="#5f6775" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="12" r="1.6" fill="#5f6775"/><circle cx="12" cy="12" r="1.6" fill="#5f6775"/><circle cx="18" cy="12" r="1.6" fill="#5f6775"/></g>
 <line x1="241" y1="327.5" x2="1415" y2="327.5" stroke="rgba(15,20,30,0.10)"/>
 <rect x="241" y="328" width="1174" height="32" rx="0" fill="rgba(176,30,110,0.10)" />
-<rect x="241" y="328" width="2" height="32" rx="0" fill="#b01e6e" />
 <g transform="translate(304,337) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#4f5764" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
 <text x="326" y="348.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="start" style="font-variant-numeric: tabular-nums" >Developer</text>
 <text x="856" y="348.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >92.6 GB</text>
@@ -128,7 +127,7 @@
 <rect x="868" y="342" width="18.697627460878344" height="4" rx="2" fill="#868f9d" />
 <text x="1016" y="348.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >23.4%</text>
 <text x="1136" y="348.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >297,155</text>
-<text x="1352" y="348.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Oct 2</text>
+<text x="1352" y="348.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Today, 9:12 AM</text>
 <rect x="243" y="329" width="1170" height="30" rx="4" fill="none" stroke="#b01e6e" stroke-width="2"/>
 <g transform="translate(1376,336) scale(0.6666666666666666)"><path d="" fill="none" stroke="#14171c" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="12" r="1.6" fill="#14171c"/><circle cx="12" cy="12" r="1.6" fill="#14171c"/><circle cx="18" cy="12" r="1.6" fill="#14171c"/></g>
 <line x1="241" y1="359.5" x2="1415" y2="359.5" stroke="rgba(15,20,30,0.10)"/>
@@ -149,7 +148,7 @@
 <rect x="868" y="406" width="5.431600201918224" height="4" rx="2" fill="#868f9d" />
 <text x="1016" y="412.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >6.8%</text>
 <text x="1136" y="412.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >98,290</text>
-<text x="1352" y="412.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Sep 14</text>
+<text x="1352" y="412.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Today, 8:41 AM</text>
 <g transform="translate(1376,400) scale(0.6666666666666666)"><path d="" fill="none" stroke="#5f6775" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="12" r="1.6" fill="#5f6775"/><circle cx="12" cy="12" r="1.6" fill="#5f6775"/><circle cx="18" cy="12" r="1.6" fill="#5f6775"/></g>
 <line x1="241" y1="423.5" x2="1415" y2="423.5" stroke="rgba(15,20,30,0.10)"/>
 <g transform="translate(304,433) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#4f5764" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
@@ -159,7 +158,7 @@
 <rect x="868" y="438" width="1.9787985865724382" height="4" rx="2" fill="#868f9d" />
 <text x="1016" y="444.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >2.5%</text>
 <text x="1136" y="444.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >37,207</text>
-<text x="1352" y="444.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Oct 26</text>
+<text x="1352" y="444.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Today, 9:10 AM</text>
 <g transform="translate(1376,432) scale(0.6666666666666666)"><path d="" fill="none" stroke="#5f6775" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="12" r="1.6" fill="#5f6775"/><circle cx="12" cy="12" r="1.6" fill="#5f6775"/><circle cx="18" cy="12" r="1.6" fill="#5f6775"/></g>
 <line x1="241" y1="455.5" x2="1415" y2="455.5" stroke="rgba(15,20,30,0.10)"/>
 <g transform="translate(304,465) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#4f5764" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
@@ -169,7 +168,7 @@
 <rect x="868" y="470" width="1.5951539626451288" height="4" rx="2" fill="#868f9d" />
 <text x="1016" y="476.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >2.0%</text>
 <text x="1136" y="476.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >29,016</text>
-<text x="1352" y="476.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Aug 3</text>
+<text x="1352" y="476.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Oct 26</text>
 <g transform="translate(1376,464) scale(0.6666666666666666)"><path d="" fill="none" stroke="#5f6775" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="12" r="1.6" fill="#5f6775"/><circle cx="12" cy="12" r="1.6" fill="#5f6775"/><circle cx="18" cy="12" r="1.6" fill="#5f6775"/></g>
 <line x1="241" y1="487.5" x2="1415" y2="487.5" stroke="rgba(15,20,30,0.10)"/>
 <g transform="translate(254,498) scale(0.5)"><path d="M6 9l6 6 6-6" fill="none" stroke="#4f5764" stroke-width="3.00" stroke-linecap="round" stroke-linejoin="round"/></g>
@@ -191,7 +190,7 @@
 <rect x="868" y="534" width="6.380615850580515" height="4" rx="2" fill="#868f9d" />
 <text x="1016" y="540.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >8.0%</text>
 <text x="1136" y="540.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >123,521</text>
-<text x="1352" y="540.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Today, 8:55 AM</text>
+<text x="1352" y="540.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Oct 21</text>
 <g transform="translate(1376,528) scale(0.6666666666666666)"><path d="" fill="none" stroke="#5f6775" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="12" r="1.6" fill="#5f6775"/><circle cx="12" cy="12" r="1.6" fill="#5f6775"/><circle cx="18" cy="12" r="1.6" fill="#5f6775"/></g>
 <line x1="241" y1="551.5" x2="1415" y2="551.5" stroke="rgba(15,20,30,0.10)"/>
 <g transform="translate(304,561) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#4f5764" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
@@ -201,7 +200,7 @@
 <rect x="868" y="566" width="5.734477536597678" height="4" rx="2" fill="#868f9d" />
 <text x="1016" y="572.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >7.2%</text>
 <text x="1136" y="572.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >91,855</text>
-<text x="1352" y="572.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Sep 14</text>
+<text x="1352" y="572.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Yesterday, 6:40 PM</text>
 <g transform="translate(1376,560) scale(0.6666666666666666)"><path d="" fill="none" stroke="#5f6775" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="12" r="1.6" fill="#5f6775"/><circle cx="12" cy="12" r="1.6" fill="#5f6775"/><circle cx="18" cy="12" r="1.6" fill="#5f6775"/></g>
 <line x1="241" y1="583.5" x2="1415" y2="583.5" stroke="rgba(15,20,30,0.10)"/>
 <g transform="translate(304,593) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#4f5764" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
@@ -211,7 +210,7 @@
 <rect x="868" y="598" width="2.382635032811711" height="4" rx="2" fill="#868f9d" />
 <text x="1016" y="604.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >3.0%</text>
 <text x="1136" y="604.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >41,839</text>
-<text x="1352" y="604.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Oct 26</text>
+<text x="1352" y="604.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Sep 14</text>
 <g transform="translate(1376,592) scale(0.6666666666666666)"><path d="" fill="none" stroke="#5f6775" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="12" r="1.6" fill="#5f6775"/><circle cx="12" cy="12" r="1.6" fill="#5f6775"/><circle cx="18" cy="12" r="1.6" fill="#5f6775"/></g>
 <line x1="241" y1="615.5" x2="1415" y2="615.5" stroke="rgba(15,20,30,0.10)"/>
 <g transform="translate(254,626) scale(0.5)"><path d="M9 6l6 6-6 6" fill="none" stroke="#4f5764" stroke-width="3.00" stroke-linecap="round" stroke-linejoin="round"/></g>
@@ -247,7 +246,7 @@
 <rect x="868" y="694" width="4.86622917718324" height="4" rx="2" fill="#868f9d" />
 <text x="1016" y="700.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >6.1%</text>
 <text x="1136" y="700.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >97,402</text>
-<text x="1352" y="700.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Today, 8:55 AM</text>
+<text x="1352" y="700.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Aug 3</text>
 <g transform="translate(1376,688) scale(0.6666666666666666)"><path d="" fill="none" stroke="#5f6775" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="12" r="1.6" fill="#5f6775"/><circle cx="12" cy="12" r="1.6" fill="#5f6775"/><circle cx="18" cy="12" r="1.6" fill="#5f6775"/></g>
 <line x1="241" y1="711.5" x2="1415" y2="711.5" stroke="rgba(15,20,30,0.10)"/>
 <g transform="translate(254,722) scale(0.5)"><path d="M9 6l6 6-6 6" fill="none" stroke="#4f5764" stroke-width="3.00" stroke-linecap="round" stroke-linejoin="round"/></g>
@@ -259,7 +258,7 @@
 <rect x="868" y="726" width="3.7758707723372034" height="4" rx="2" fill="#868f9d" />
 <text x="1016" y="732.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >4.7%</text>
 <text x="1136" y="732.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#14171c" text-anchor="end" style="font-variant-numeric: tabular-nums" >74,592</text>
-<text x="1352" y="732.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Sep 14</text>
+<text x="1352" y="732.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >Today, 7:30 AM</text>
 <g transform="translate(1376,720) scale(0.6666666666666666)"><path d="" fill="none" stroke="#5f6775" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="12" r="1.6" fill="#5f6775"/><circle cx="12" cy="12" r="1.6" fill="#5f6775"/><circle cx="18" cy="12" r="1.6" fill="#5f6775"/></g>
 <line x1="241" y1="743.5" x2="1415" y2="743.5" stroke="rgba(15,20,30,0.10)"/>
 <g transform="translate(254,754) scale(0.5)"><path d="M9 6l6 6-6 6" fill="none" stroke="#4f5764" stroke-width="3.00" stroke-linecap="round" stroke-linejoin="round"/></g>
@@ -275,5 +274,5 @@
 <g transform="translate(1376,752) scale(0.6666666666666666)"><path d="" fill="none" stroke="#5f6775" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="12" r="1.6" fill="#5f6775"/><circle cx="12" cy="12" r="1.6" fill="#5f6775"/><circle cx="18" cy="12" r="1.6" fill="#5f6775"/></g>
 <line x1="241" y1="775.5" x2="1415" y2="775.5" stroke="rgba(15,20,30,0.10)"/>
 <line x1="241" y1="841.5" x2="1415" y2="841.5" stroke="rgba(15,20,30,0.10)"/>
-<text x="256" y="863" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >Arrows move · → opens a row in place · Enter makes it the centre · Backspace goes up · ⇧F10 menu</text>
+<text x="256" y="863" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="start" style="font-variant-numeric: tabular-nums" >↑↓ move · → opens a row in place · Enter makes it the centre · ⌘↑ goes up · ⇧F10 menu</text>
 <text x="1400" y="863" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#4f5764" text-anchor="end" style="font-variant-numeric: tabular-nums" >7 folders · 2 open · 15 rows</text></svg>

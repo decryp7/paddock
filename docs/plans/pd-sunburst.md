@@ -1,6 +1,6 @@
 # `pd-sunburst`: a drillable ring chart for hierarchies (paddock-ui)
 
-- Status: spec proposal, 2026-10-28, for independent review; first consumer Dyno's disk map
+- Status: spec proposal, 2026-10-28, revised after the independent review of `098daa12a`; first consumer Dyno's disk map
   ([apps/dyno/docs/design/disk-map.md](../../apps/dyno/docs/design/disk-map.md))
 - Entry point: `@decryp7/paddock-ui/chart` (beside `pd-chart`, sharing `ring.ts` and the token reader)
 - Also in this change: tree rows for `pd-table` (section 7), the accessible companion
@@ -48,12 +48,12 @@ an unknown `centre` id falls back to the root.
 | `centre` | `model<string \| null>(null)` | id of the node in the middle (two-way: the breadcrumb and the table share it) |
 | `label` | `string` (required) | accessible name of the chart ("Disk usage of Macintosh HD") |
 | `rings` | `number`, 4 (1-6) | levels drawn below the centre |
-| `minAngle` | `number`, 0.6 (degrees) | smaller segments fold into "n smaller items" per parent |
+| `minAngle` | `number`, 1.5 (degrees; min 1) | smaller segments fold into "n smaller items" per parent (0.6° left 1 px slivers between the gaps) |
 | `maxChildren` | `number`, 48 | per parent, before folding |
 | `maxSegments` | `number`, 1000 (hard 2000) | when exceeded, `minAngle` rises until it fits; `folded` output reports it |
-| `scale` | `number \| null`, null | fixed denominator (a volume's used bytes) so arcs only grow during a live fill; `null` = the centre's value |
+| `scale` | `number \| null`, null | fixed denominator (a volume's used bytes) so arcs only grow during a live fill; `null` = the centre's value (folders, network shares) |
 | `colourBy` | `'branch' \| ((node) => number \| 'neutral')`, `'branch'` | branch: the 5 largest children of the centre take ring-ordered chart slots, the rest neutral; a function maps to palette slots by identity |
-| `format` | `(value: number) => string`, `formatBytes` | value text (centre, labels, aria) |
+| `format` | `(value: number) => string`, **required** | value text (centre, labels, aria); no default, because the component is not about bytes (Dyno passes `formatBytes`) |
 | `state` | `'ready' \| 'loading' \| 'empty' \| 'error'`, `'ready'` | loading: skeleton ring at final size; empty and error render `SuEmptyState` / `SuErrorState` with projected actions |
 | `emptyTitle`, `emptyText`, `errorText` | strings | state copy |
 | `live` | `boolean`, false | while true: no tweening, updates coalesced to 4 per second |
@@ -84,10 +84,16 @@ Content projection: `ng-template[pdSunburstCentre]` (context: the centre or hove
   (12 % towards `--pd-text`).
 - `labelFits(arc, text)`: curved label only when the arc length at the ring's mid radius fits the text plus 18 px and
   the chosen ink reaches 4.5:1 on the fill.
-- `nextFocus(arcs, current, key)`: the tree keyboard model (Up/Down along the ring, Right outwards, Left inwards,
-  Home/End, type-ahead).
+- `nextFocus(arcs, current, key)`: the tree keyboard model (Up/Down among siblings only, stopping at the ends; Right to
+  the first child, Left to the parent: the only keys that change level; Home/End among siblings; type-ahead). No
+  Backspace binding (it belongs to text fields); going up a centre is the consumer's command (`⌘↑` / `Alt+Up`).
 
 ## 5. Accessibility
+
+- **The consumer's table is the declared accessible equivalent** (WCAG 1.1.1, 2.1.1): every consumer pairs the chart
+  with a list or table that carries every value. The SVG tree semantics below are **experimental**: ARIA tree roles on
+  SVG elements are not verified with VoiceOver in WKWebView (macOS shells) or with Narrator in WebView2, so they are
+  tested per platform and nothing depends on them.
 
 - The `<svg>` has `role="tree"` and `aria-label`; each segment is a `role="treeitem"` `<path>` with `tabindex` -1/0
   (roving), `aria-level`, `aria-setsize`, `aria-posinset`, `aria-expanded` (true when its children are drawn),

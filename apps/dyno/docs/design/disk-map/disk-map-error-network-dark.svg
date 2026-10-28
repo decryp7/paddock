@@ -61,7 +61,7 @@
 <text x="1338" y="30.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Monitoring</text>
 <defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#1b1e23"/><line x1="0" y1="0" x2="0" y2="6" stroke="#8b93a0" stroke-width="1.6"/></pattern><pattern id="ghost" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#1b1e23"/><line x1="0" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.08)" stroke-width="2"/></pattern></defs>
 <text x="240" y="92" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="18" font-weight="600" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Disk map</text>
-<text x="240" y="112" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >nas.local/Media · SMB network volume · scan stopped 1 min ago</text>
+<text x="240" y="112" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Media on nas.local · SMB network share · scan stopped 1 min ago</text>
 <rect x="1333.925" y="76" width="82.075" height="32" rx="6" fill="#c2287c" />
 <g transform="translate(1345.925,84) scale(0.6666666666666666)"><path d="M20 12a8 8 0 1 1-2.34-5.66L20 8.5M20 4v4.5h-4.5" fill="none" stroke="#ffffff" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
 <text x="1367.925" y="96.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#ffffff" text-anchor="start" style="font-variant-numeric: tabular-nums" >Retry</text>
@@ -79,101 +79,122 @@
 <g transform="translate(1340.0,140) scale(0.5833333333333334)"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="#a0a7b2" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
 <text x="1360.0" y="151" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Table</text>
 <line x1="240" y1="168.5" x2="1416" y2="168.5" stroke="rgba(255,255,255,0.08)"/>
-<text x="240" y="189" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >5.70 TB used of 7.80 TB</text>
-<text x="240" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >2.10 TB free</text>
+<text x="240" y="189" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Server volume: 5.70 TB used of 7.80 TB</text>
+<text x="240" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >2.10 TB free on the server</text>
 <rect x="470" y="180" width="946" height="8" rx="4" fill="#1b1e23" />
 <clipPath id="capclip"><rect x="470" y="180" width="946" height="8" rx="4"/></clipPath><g clip-path="url(#capclip)">
 <rect x="470" y="180" width="128.86333333333334" height="8" rx="0" fill="#5e6775" />
 <rect x="600.8633333333333" y="180" width="558.4443589743589" height="8" rx="0" fill="url(#ghost)" stroke="rgba(255,255,255,0.16)" stroke-width="1" />
 </g>
 <rect x="470" y="196" width="10" height="10" rx="2" fill="#5e6775" />
-<text x="486" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Counted before the stop</text>
-<text x="643.1800000000001" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >1.08 TB</text>
-<rect x="705.8" y="196" width="10" height="10" rx="2" fill="url(#ghost)" stroke="rgba(255,255,255,0.16)" stroke-width="1" />
-<text x="721.8" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Not counted yet</text>
-<text x="825.6999999999999" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >4.62 TB</text>
-<rect x="888.3199999999999" y="196" width="10" height="10" rx="2" fill="url(#hatch)" />
-<text x="904.3199999999999" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Hidden space</text>
-<text x="988.2399999999999" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >not reported by network shares</text>
-<rect x="1204.04" y="196" width="10" height="10" rx="2" fill="#1b1e23" stroke="rgba(255,255,255,0.16)" stroke-width="1" />
-<text x="1220.04" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Free</text>
-<text x="1250.68" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >2.10 TB</text>
+<text x="486" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Counted in Media</text>
+<text x="596.56" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >1.08 TB</text>
+<rect x="659.1800000000001" y="196" width="10" height="10" rx="2" fill="url(#ghost)" stroke="rgba(255,255,255,0.16)" stroke-width="1" />
+<text x="675.1800000000001" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Not counted yet or other data on the server</text>
+<text x="965.5600000000002" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >4.62 TB</text>
+<rect x="1028.18" y="196" width="10" height="10" rx="2" fill="url(#hatch)" />
+<text x="1044.18" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Hidden space</text>
+<text x="1128.1000000000001" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >not reported by network shares</text>
+<rect x="1343.9" y="196" width="10" height="10" rx="2" fill="#1b1e23" stroke="rgba(255,255,255,0.16)" stroke-width="1" />
+<text x="1359.9" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Free</text>
+<text x="1390.5400000000002" y="205" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >2.10 TB</text>
 <rect x="240.5" y="216.5" width="1175" height="63" rx="10" fill="#15171b" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
 <rect x="241" y="228" width="3" height="40" rx="1.5" fill="#ff6b6b" />
 <g transform="translate(258,230) scale(0.6666666666666666)"><path d="M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM9 9l6 6M15 9l-6 6" fill="none" stroke="#ff6b6b" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
 <text x="282" y="243" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Scan stopped: nas.local stopped answering</text>
-<text x="282" y="262" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >The connection was lost after 3 min (Wi-Fi changed network). The 1.08 TB counted so far is kept; Retry continues from where it stopped.</text>
+<text x="282" y="262" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >The connection was lost after 3 min. The 1.08 TB counted so far is kept; Retry reads only the folders that were not finished.</text>
 <rect x="240.5" y="292.5" width="615" height="583" rx="10" fill="#15171b" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
-<defs><path id="lp0_0" d="M550.01,465.12A114.9,114.9 0 0 1 637.03,507.36" fill="none"/><path id="lp0_1" d="M549.76,479.12A100.9,100.9 0 0 1 626.18,516.21" fill="none"/><path id="lp1_0" d="M550.85,416.72A163.3,163.3 0 0 1 632.93,440.52" fill="none"/></defs>
-<path d="M548.90,445.00A135.0,135.0 0 0 1 653.52,495.79L612.50,528.08A82.8,82.8 0 0 0 548.90,497.20Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M548.90,398.20A181.8,181.8 0 0 1 644.48,425.91L620.41,463.94A136.8,136.8 0 0 0 548.90,443.20Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M548.90,360.40A219.6,219.6 0 0 1 612.25,370.01L601.57,404.39A183.6,183.6 0 0 0 548.90,396.40Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M548.90,328.00A252.0,252.0 0 0 1 588.30,331.24L583.30,361.43A221.4,221.4 0 0 0 548.90,358.60Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M590.08,331.54A252.0,252.0 0 0 1 606.89,334.98L599.63,364.70A221.4,221.4 0 0 0 585.07,361.73Z" fill="#71b6ec" opacity="1.0"/>
-<path d="M608.64,335.40A252.0,252.0 0 0 1 621.85,339.06L612.78,368.29A221.4,221.4 0 0 0 601.38,365.13Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M613.97,370.54A219.6,219.6 0 0 1 664.70,393.98L645.45,424.39A183.6,183.6 0 0 0 603.29,404.92Z" fill="#71b6ec" opacity="1.0"/>
-<path d="M623.57,339.60A252.0,252.0 0 0 1 655.59,352.12L642.42,379.74A221.4,221.4 0 0 0 614.50,368.82Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M657.21,352.89A252.0,252.0 0 0 1 670.35,359.69L655.40,386.39A221.4,221.4 0 0 0 644.05,380.52Z" fill="#71b6ec" opacity="1.0"/>
-<path d="M671.92,360.57A252.0,252.0 0 0 1 682.03,366.60L665.66,392.46A221.4,221.4 0 0 0 656.97,387.27Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M646.00,426.88A181.8,181.8 0 0 1 682.50,457.68L649.06,487.80A136.8,136.8 0 0 0 621.93,464.90Z" fill="#71b6ec" opacity="1.0"/>
-<path d="M666.22,394.94A219.6,219.6 0 0 1 679.27,403.95L657.63,432.72A183.6,183.6 0 0 0 646.97,425.36Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M683.55,367.56A252.0,252.0 0 0 1 695.36,375.58L677.38,400.33A221.4,221.4 0 0 0 667.19,393.42Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M696.82,376.63A252.0,252.0 0 0 1 698.74,378.06L680.35,402.51A221.4,221.4 0 0 0 678.83,401.39Z" fill="#71b6ec" opacity="1.0"/>
-<path d="M680.70,405.03A219.6,219.6 0 0 1 692.32,414.48L668.55,441.52A183.6,183.6 0 0 0 659.07,433.80Z" fill="#71b6ec" opacity="1.0"/>
-<path d="M700.18,379.14A252.0,252.0 0 0 1 703.35,381.58L684.40,405.61A221.4,221.4 0 0 0 681.79,403.59Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M704.76,382.70A252.0,252.0 0 0 1 707.64,385.02L688.17,408.63A221.4,221.4 0 0 0 685.81,406.72Z" fill="#71b6ec" opacity="1.0"/>
-<path d="M709.03,386.16A252.0,252.0 0 0 1 711.63,388.35L691.68,411.55A221.4,221.4 0 0 0 689.56,409.77Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M712.99,389.52A252.0,252.0 0 0 1 713.71,390.15L693.51,413.13A221.4,221.4 0 0 0 693.04,412.72Z" fill="#71b6ec" opacity="1.0"/>
-<path d="M693.67,415.67A219.6,219.6 0 0 1 698.85,420.41L674.02,446.47A183.6,183.6 0 0 0 669.90,442.71Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M715.06,391.34A252.0,252.0 0 0 1 716.20,392.35L695.70,415.06A221.4,221.4 0 0 0 694.86,414.32Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M717.54,393.56A252.0,252.0 0 0 1 718.44,394.38L697.66,416.85A221.4,221.4 0 0 0 697.03,416.27Z" fill="#71b6ec" opacity="1.0"/>
-<path d="M719.76,395.60A252.0,252.0 0 0 1 721.21,396.96L700.09,419.11A221.4,221.4 0 0 0 698.99,418.07Z" fill="#a2acb1" opacity="1.0"/>
-<path d="M700.16,421.66A219.6,219.6 0 0 1 703.91,425.35L678.24,450.60A183.6,183.6 0 0 0 675.32,447.72Z" fill="#71b6ec" opacity="1.0"/>
-<path d="M722.51,398.20A252.0,252.0 0 0 1 723.55,399.20L702.15,421.08A221.4,221.4 0 0 0 701.40,420.35Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M724.83,400.46A252.0,252.0 0 0 1 727.00,402.62L705.19,424.09A221.4,221.4 0 0 0 703.44,422.34Z" fill="#a2acb1" opacity="1.0"/>
-<path d="M705.17,426.63A219.6,219.6 0 0 1 708.20,429.80L681.83,454.31A183.6,183.6 0 0 0 679.51,451.88Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M728.27,403.91A252.0,252.0 0 0 1 729.02,404.69L706.96,425.90A221.4,221.4 0 0 0 706.45,425.37Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M730.27,405.98A252.0,252.0 0 0 1 730.93,406.68L708.65,427.65A221.4,221.4 0 0 0 708.21,427.19Z" fill="#71b6ec" opacity="1.0"/>
-<path d="M732.04,407.86A252.0,252.0 0 0 1 732.04,407.86L709.70,428.76A221.4,221.4 0 0 0 709.70,428.76Z" fill="#a2acb1" opacity="1.0"/>
-<path d="M709.42,431.11A219.6,219.6 0 0 1 710.59,432.39L683.84,456.48A183.6,183.6 0 0 0 683.06,455.63Z" fill="#71b6ec" opacity="1.0"/>
-<path d="M733.15,409.05A252.0,252.0 0 0 1 734.35,410.37L711.65,430.88A221.4,221.4 0 0 0 710.74,429.89Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M683.70,459.02A181.8,181.8 0 0 1 690.29,466.84L654.93,494.68A136.8,136.8 0 0 0 650.26,489.13Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M711.80,433.73A219.6,219.6 0 0 1 713.70,435.89L686.44,459.40A183.6,183.6 0 0 0 685.04,457.82Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M735.87,412.05A252.0,252.0 0 0 1 736.52,412.77L713.55,432.99A221.4,221.4 0 0 0 713.13,432.52Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M737.70,414.12A252.0,252.0 0 0 1 738.23,414.73L715.06,434.71A221.4,221.4 0 0 0 714.74,434.35Z" fill="#a2acb1" opacity="1.0"/>
-<path d="M714.87,437.25A219.6,219.6 0 0 1 716.26,438.88L688.58,461.90A183.6,183.6 0 0 0 687.61,460.76Z" fill="#71b6ec" opacity="1.0"/>
-<path d="M739.41,416.09A252.0,252.0 0 0 1 740.15,416.95L716.74,436.67A221.4,221.4 0 0 0 716.24,436.07Z" fill="#60aeeb" opacity="1.0"/>
-<path d="M741.24,418.25A252.0,252.0 0 0 1 741.24,418.25L717.77,437.89A221.4,221.4 0 0 0 717.77,437.89Z" fill="#a2acb1" opacity="1.0"/>
-<path d="M717.41,440.27A219.6,219.6 0 0 1 719.99,443.46L691.70,465.73A183.6,183.6 0 0 0 689.73,463.29Z" fill="#a2acb1" opacity="1.0"/>
-<path d="M654.63,497.20A135.0,135.0 0 0 1 672.96,528.92L624.51,548.35A82.8,82.8 0 0 0 613.61,529.49Z" fill="#f3aa25" opacity="1.0"/>
-<path d="M691.40,468.26A181.8,181.8 0 0 1 706.09,490.23L666.85,512.26A136.8,136.8 0 0 0 656.04,496.09Z" fill="#f3aa25" opacity="1.0"/>
-<path d="M721.10,444.87A219.6,219.6 0 0 1 725.81,451.13L696.57,472.14A183.6,183.6 0 0 0 692.82,467.14Z" fill="#f3aa25" opacity="1.0"/>
-<path d="M746.56,424.83A252.0,252.0 0 0 1 747.23,425.69L722.97,444.34A221.4,221.4 0 0 0 722.52,443.76Z" fill="#f3aa25" opacity="1.0"/>
-<path d="M748.32,427.11A252.0,252.0 0 0 1 748.91,427.88L724.44,446.26A221.4,221.4 0 0 0 724.07,445.77Z" fill="#f2b23d" opacity="1.0"/>
-<path d="M749.99,429.32A252.0,252.0 0 0 1 752.12,432.22L727.27,450.08A221.4,221.4 0 0 0 725.53,447.70Z" fill="#a2acb1" opacity="1.0"/>
-<path d="M726.86,452.59A219.6,219.6 0 0 1 731.29,459.04L701.16,478.75A183.6,183.6 0 0 0 697.62,473.60Z" fill="#f2b23d" opacity="1.0"/>
-<path d="M753.17,433.68A252.0,252.0 0 0 1 754.83,436.04L729.65,453.43A221.4,221.4 0 0 0 728.32,451.54Z" fill="#f3aa25" opacity="1.0"/>
-<path d="M755.85,437.52A252.0,252.0 0 0 1 757.26,439.59L731.79,456.55A221.4,221.4 0 0 0 730.68,454.91Z" fill="#f2b23d" opacity="1.0"/>
-<path d="M758.26,441.09A252.0,252.0 0 0 1 758.40,441.31L732.79,458.06A221.4,221.4 0 0 0 732.79,458.05Z" fill="#a2acb1" opacity="1.0"/>
-<path d="M732.27,460.55A219.6,219.6 0 0 1 735.05,464.95L704.31,483.68A183.6,183.6 0 0 0 702.14,480.26Z" fill="#f3aa25" opacity="1.0"/>
-<path d="M759.39,442.82A252.0,252.0 0 0 1 760.65,444.78L734.77,461.11A221.4,221.4 0 0 0 733.78,459.57Z" fill="#f3aa25" opacity="1.0"/>
-<path d="M761.61,446.31A252.0,252.0 0 0 1 762.20,447.26L736.14,463.28A221.4,221.4 0 0 0 735.73,462.63Z" fill="#f2b23d" opacity="1.0"/>
-<path d="M735.99,466.49A219.6,219.6 0 0 1 737.30,468.70L706.20,486.82A183.6,183.6 0 0 0 705.24,485.22Z" fill="#f2b23d" opacity="1.0"/>
-<path d="M763.65,449.62A252.0,252.0 0 0 1 765.30,452.39L738.86,467.79A221.4,221.4 0 0 0 737.52,465.55Z" fill="#a2acb1" opacity="1.0"/>
-<path d="M738.21,470.25A219.6,219.6 0 0 1 739.05,471.73L707.66,489.35A183.6,183.6 0 0 0 707.10,488.37Z" fill="#f3aa25" opacity="1.0"/>
-<path d="M766.21,453.95A252.0,252.0 0 0 1 767.31,455.87L740.62,470.85A221.4,221.4 0 0 0 739.77,469.35Z" fill="#a2acb1" opacity="1.0"/>
-<path d="M706.97,491.80A181.8,181.8 0 0 1 716.40,511.50L674.63,528.25A136.8,136.8 0 0 0 667.73,513.83Z" fill="#f2b23d" opacity="1.0"/>
-<path d="M739.94,473.30A219.6,219.6 0 0 1 750.05,493.99L716.87,507.95A183.6,183.6 0 0 0 708.54,490.92Z" fill="#f3aa25" opacity="1.0"/>
-<path d="M768.19,457.44A252.0,252.0 0 0 1 774.54,469.63L746.99,482.93A221.4,221.4 0 0 0 741.51,472.42Z" fill="#f3aa25" opacity="1.0"/>
-<path d="M775.33,471.25A252.0,252.0 0 0 1 777.57,476.08L749.65,488.60A221.4,221.4 0 0 0 747.77,484.55Z" fill="#f2b23d" opacity="1.0"/>
-<path d="M778.31,477.72A252.0,252.0 0 0 1 779.92,481.42L751.71,493.29A221.4,221.4 0 0 0 750.39,490.24Z" fill="#f3aa25" opacity="1.0"/>
-<path d="M750.75,495.64A219.6,219.6 0 0 1 751.48,497.43L718.07,510.83A183.6,183.6 0 0 0 717.57,509.61Z" fill="#f2b23d" opacity="1.0"/>
-<path d="M780.62,483.08A252.0,252.0 0 0 1 780.99,483.98L752.66,495.54A221.4,221.4 0 0 0 752.41,494.95Z" fill="#f3aa25" opacity="1.0"/>
-<path d="M781.61,485.51A252.0,252.0 0 0 1 781.61,485.51L753.25,496.98A221.4,221.4 0 0 0 753.25,496.98Z" fill="#a2acb1" opacity="1.0"/>
-<path d="M673.63,530.59A135.0,135.0 0 1 1 547.10,445.00L547.10,497.20A82.8,82.8 0 1 0 625.18,550.02Z" fill="url(#ghost)" opacity="1.0" stroke="rgba(255,255,255,0.16)" stroke-dasharray="3 3"/>
+<defs><path id="lp0_0" d="M447.20,575.45A100.9,100.9 0 1 0 549.76,479.12" fill="none"/><path id="lp0_1" d="M432.22,574.77A115.9,115.9 0 1 0 550.02,464.12" fill="none"/><path id="lp1_0" d="M550.85,416.72A163.3,163.3 0 0 1 576.85,740.73" fill="none"/><path id="lp10_0" d="M399.83,626.52A155.3,155.3 0 0 0 570.08,733.72" fill="none"/><path id="lp52_0" d="M433.47,570.81A114.9,114.9 0 0 1 545.99,465.12" fill="none"/><path id="lp52_1" d="M447.42,571.93A100.9,100.9 0 0 1 546.24,479.12" fill="none"/><path id="lp53_0" d="M385.22,566.94A163.3,163.3 0 0 1 442.23,455.59" fill="none"/><path id="lp74_0" d="M446.63,451.97A163.3,163.3 0 0 1 545.15,416.72" fill="none"/></defs>
+<path d="M548.90,445.00A135.0,135.0 0 1 1 413.21,572.45L465.31,575.72A82.8,82.8 0 1 0 548.90,497.20Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M548.90,398.20A181.8,181.8 0 0 1 577.88,759.33L570.70,714.90A136.8,136.8 0 0 0 548.90,443.20Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M548.90,360.40A219.6,219.6 0 0 1 767.57,583.34L731.58,582.65A183.6,183.6 0 0 0 548.90,396.40Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M548.90,328.00A252.0,252.0 0 0 1 739.59,416.31L716.26,436.10A221.4,221.4 0 0 0 548.90,358.60Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M740.76,417.68A252.0,252.0 0 0 1 788.03,503.24L758.85,512.46A221.4,221.4 0 0 0 717.42,437.47Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M788.57,504.96A252.0,252.0 0 0 1 799.97,583.97L769.37,583.38A221.4,221.4 0 0 0 759.39,514.18Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M767.54,585.14A219.6,219.6 0 0 1 583.90,796.64L578.16,761.11A183.6,183.6 0 0 0 731.55,584.45Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M799.93,585.77A252.0,252.0 0 0 1 728.09,756.27L706.30,734.78A221.4,221.4 0 0 0 769.34,585.18Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M726.83,757.55A252.0,252.0 0 0 1 657.23,807.10L644.06,779.47A221.4,221.4 0 0 0 705.04,736.07Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M655.60,807.87A252.0,252.0 0 0 1 589.07,828.63L584.19,798.42A221.4,221.4 0 0 0 642.44,780.25Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M576.10,759.62A181.8,181.8 0 0 1 373.88,632.29L417.04,619.56A136.8,136.8 0 0 0 568.92,715.19Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M582.13,796.93A219.6,219.6 0 0 1 491.44,792.19L500.85,757.44A183.6,183.6 0 0 0 576.39,761.39Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M587.29,828.92A252.0,252.0 0 0 1 504.58,828.23L509.96,798.11A221.4,221.4 0 0 0 582.41,798.71Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M502.81,827.91A252.0,252.0 0 0 1 482.96,823.46L490.97,793.93A221.4,221.4 0 0 0 508.19,797.79Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M489.70,791.72A219.6,219.6 0 0 1 412.66,752.94L434.97,724.68A183.6,183.6 0 0 0 499.11,756.97Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M481.23,822.99A252.0,252.0 0 0 1 453.89,813.77L465.42,785.42A221.4,221.4 0 0 0 489.23,793.46Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M452.22,813.09A252.0,252.0 0 0 1 427.62,801.39L442.34,774.56A221.4,221.4 0 0 0 463.75,784.74Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M426.04,800.52A252.0,252.0 0 0 1 404.28,787.00L421.82,761.92A221.4,221.4 0 0 0 440.76,773.69Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M402.80,785.97A252.0,252.0 0 0 1 392.59,778.37L411.55,754.35A221.4,221.4 0 0 0 420.34,760.89Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M411.25,751.82A219.6,219.6 0 0 1 379.25,720.53L407.01,697.60A183.6,183.6 0 0 0 433.55,723.56Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M391.18,777.26A252.0,252.0 0 0 1 379.15,767.06L399.73,744.42A221.4,221.4 0 0 0 410.13,753.24Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M377.81,765.85A252.0,252.0 0 0 1 367.63,755.99L389.61,734.70A221.4,221.4 0 0 0 398.40,743.21Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M366.38,754.70A252.0,252.0 0 0 1 361.61,749.59L384.32,729.08A221.4,221.4 0 0 0 388.36,733.40Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M360.40,748.26A252.0,252.0 0 0 1 355.81,742.99L379.22,723.28A221.4,221.4 0 0 0 383.11,727.75Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M354.65,741.62A252.0,252.0 0 0 1 354.27,741.16L377.86,721.67A221.4,221.4 0 0 0 378.06,721.91Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M378.10,719.14A219.6,219.6 0 0 1 357.92,689.97L389.15,672.07A183.6,183.6 0 0 0 405.86,696.22Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M353.12,739.77A252.0,252.0 0 0 1 343.77,727.63L368.64,709.79A221.4,221.4 0 0 0 376.72,720.29Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M342.72,726.17A252.0,252.0 0 0 1 337.15,718.01L362.82,701.35A221.4,221.4 0 0 0 367.59,708.33Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M336.17,716.50A252.0,252.0 0 0 1 331.38,708.77L357.74,693.23A221.4,221.4 0 0 0 361.84,699.84Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M330.47,707.22A252.0,252.0 0 0 1 329.81,706.08L356.36,690.87A221.4,221.4 0 0 0 356.83,691.68Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M357.02,688.41A219.6,219.6 0 0 1 343.73,660.60L377.27,647.53A183.6,183.6 0 0 0 388.26,670.51Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M328.91,704.52A252.0,252.0 0 0 1 322.59,692.66L350.01,679.08A221.4,221.4 0 0 0 355.46,689.30Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M321.79,691.05A252.0,252.0 0 0 1 316.44,679.42L344.60,667.45A221.4,221.4 0 0 0 349.21,677.47Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M315.74,677.76A252.0,252.0 0 0 1 313.54,672.37L342.05,661.26A221.4,221.4 0 0 0 343.90,665.79Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M343.07,658.93A219.6,219.6 0 0 1 337.63,642.98L372.16,632.80A183.6,183.6 0 0 0 376.62,645.85Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M312.89,670.70A252.0,252.0 0 0 1 307.27,654.51L336.53,645.57A221.4,221.4 0 0 0 341.40,659.58Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M306.74,652.79A252.0,252.0 0 0 1 306.55,652.15L335.90,643.49A221.4,221.4 0 0 0 336.01,643.85Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M373.37,630.56A181.8,181.8 0 0 1 366.50,569.53L411.41,572.34A136.8,136.8 0 0 0 416.54,617.83Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M337.12,641.26A219.6,219.6 0 0 1 331.88,618.96L367.34,612.72A183.6,183.6 0 0 0 371.65,631.07Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M306.04,650.42A252.0,252.0 0 0 1 302.77,638.04L332.58,631.10A221.4,221.4 0 0 0 335.39,641.76Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M302.37,636.29A252.0,252.0 0 0 1 300.61,627.96L330.67,622.24A221.4,221.4 0 0 0 332.17,629.34Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M300.27,626.19A252.0,252.0 0 0 1 299.97,624.58L330.11,619.28A221.4,221.4 0 0 0 330.33,620.48Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M331.57,617.19A219.6,219.6 0 0 1 329.17,598.34L365.05,595.48A183.6,183.6 0 0 0 367.03,610.95Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M299.66,622.81A252.0,252.0 0 0 1 297.70,609.23L328.11,605.79A221.4,221.4 0 0 0 329.80,617.50Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M297.50,607.44A252.0,252.0 0 0 1 296.87,600.92L327.37,598.49A221.4,221.4 0 0 0 327.90,604.00Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M329.02,596.55A219.6,219.6 0 0 1 328.54,587.96L364.53,586.80A183.6,183.6 0 0 0 364.91,593.69Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M296.73,599.12A252.0,252.0 0 0 1 296.16,589.00L326.75,588.02A221.4,221.4 0 0 0 327.23,596.69Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M328.49,586.16A219.6,219.6 0 0 1 328.40,578.86L364.40,579.19A183.6,183.6 0 0 0 364.47,585.00Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M296.10,587.20A252.0,252.0 0 0 1 296.00,578.56L326.60,578.84A221.4,221.4 0 0 0 326.69,586.22Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M328.42,577.06A219.6,219.6 0 0 1 328.53,572.36L364.51,573.76A183.6,183.6 0 0 0 364.42,577.39Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M296.02,576.76A252.0,252.0 0 0 1 296.16,571.10L326.73,572.29A221.4,221.4 0 0 0 326.62,577.04Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M328.60,570.56A219.6,219.6 0 0 1 328.78,567.16L364.71,569.41A183.6,183.6 0 0 0 364.58,571.96Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M413.32,570.66A135.0,135.0 0 0 1 547.10,445.00L547.10,497.20A82.8,82.8 0 0 0 465.42,573.92Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M366.61,567.73A181.8,181.8 0 0 1 431.99,440.03L460.53,474.82A136.8,136.8 0 0 0 411.53,570.54Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M328.89,565.36A219.6,219.6 0 0 1 337.57,517.19L372.03,527.63A183.6,183.6 0 0 0 364.82,567.62Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M296.55,563.34A252.0,252.0 0 0 1 297.80,549.97L328.16,553.73A221.4,221.4 0 0 0 327.09,565.25Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M298.02,548.19A252.0,252.0 0 0 1 299.95,535.55L330.05,541.05A221.4,221.4 0 0 0 328.39,551.94Z" fill="#f2b23d" opacity="1.0"/>
+<path d="M300.28,533.77A252.0,252.0 0 0 1 301.94,525.59L331.80,532.31A221.4,221.4 0 0 0 330.38,539.28Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M302.34,523.84A252.0,252.0 0 0 1 304.17,516.34L333.75,524.18A221.4,221.4 0 0 0 332.19,530.55Z" fill="#f2b23d" opacity="1.0"/>
+<path d="M304.63,514.60A252.0,252.0 0 0 1 306.57,507.79L335.85,516.67A221.4,221.4 0 0 0 334.21,522.44Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M338.10,515.46A219.6,219.6 0 0 1 357.61,470.57L388.75,488.64A183.6,183.6 0 0 0 372.55,525.90Z" fill="#f2b23d" opacity="1.0"/>
+<path d="M307.09,506.07A252.0,252.0 0 0 1 314.80,484.49L343.08,496.19A221.4,221.4 0 0 0 336.37,514.94Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M315.49,482.82A252.0,252.0 0 0 1 324.36,463.85L351.47,478.05A221.4,221.4 0 0 0 343.77,494.52Z" fill="#f2b23d" opacity="1.0"/>
+<path d="M325.20,462.26A252.0,252.0 0 0 1 329.58,454.31L356.05,469.66A221.4,221.4 0 0 0 352.30,476.46Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M358.51,469.01A219.6,219.6 0 0 1 378.65,440.20L406.32,463.23A183.6,183.6 0 0 0 389.65,487.08Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M330.49,452.75A252.0,252.0 0 0 1 341.30,435.85L366.34,453.45A221.4,221.4 0 0 0 356.96,468.11Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M342.33,434.38A252.0,252.0 0 0 1 350.51,423.47L374.42,442.56A221.4,221.4 0 0 0 367.37,451.97Z" fill="#f2b23d" opacity="1.0"/>
+<path d="M351.63,422.07A252.0,252.0 0 0 1 353.74,419.47L377.26,439.05A221.4,221.4 0 0 0 375.54,441.16Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M379.80,438.82A219.6,219.6 0 0 1 394.27,423.18L419.37,448.99A183.6,183.6 0 0 0 407.47,461.85Z" fill="#f2b23d" opacity="1.0"/>
+<path d="M354.90,418.09A252.0,252.0 0 0 1 360.10,412.08L382.84,432.55A221.4,221.4 0 0 0 378.41,437.67Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M361.31,410.74A252.0,252.0 0 0 1 364.85,406.91L387.02,428.01A221.4,221.4 0 0 0 384.05,431.21Z" fill="#f2b23d" opacity="1.0"/>
+<path d="M366.09,405.60A252.0,252.0 0 0 1 371.69,399.95L393.02,421.89A221.4,221.4 0 0 0 388.26,426.70Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M395.56,421.93A219.6,219.6 0 0 1 408.01,410.81L430.84,438.64A183.6,183.6 0 0 0 420.66,447.74Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M372.98,398.70A252.0,252.0 0 0 1 387.46,385.76L406.87,409.42A221.4,221.4 0 0 0 394.31,420.64Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M433.38,438.89A181.8,181.8 0 0 1 547.10,398.20L547.10,443.20A136.8,136.8 0 0 0 461.92,473.68Z" fill="#f2b23d" opacity="1.0"/>
+<path d="M409.40,409.66A219.6,219.6 0 0 1 527.45,361.36L530.67,397.22A183.6,183.6 0 0 0 432.24,437.50Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M388.85,384.62A252.0,252.0 0 0 1 458.10,344.58L468.91,373.21A221.4,221.4 0 0 0 408.26,408.27Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M459.78,343.95A252.0,252.0 0 0 1 494.13,333.82L500.57,363.74A221.4,221.4 0 0 0 470.60,372.57Z" fill="#f2b23d" opacity="1.0"/>
+<path d="M495.89,333.45A252.0,252.0 0 0 1 524.55,329.09L527.29,359.57A221.4,221.4 0 0 0 502.33,363.36Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M529.24,361.20A219.6,219.6 0 0 1 547.10,360.40L547.10,396.40A183.6,183.6 0 0 0 532.46,397.06Z" fill="#f2b23d" opacity="1.0"/>
+<path d="M526.34,328.93A252.0,252.0 0 0 1 539.20,328.15L540.16,358.74A221.4,221.4 0 0 0 529.08,359.41Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M541.00,328.10A252.0,252.0 0 0 1 547.10,328.00L547.10,358.60A221.4,221.4 0 0 0 541.96,358.68Z" fill="#f2b23d" opacity="1.0"/>
 <text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#0e0f12" style="font-variant-numeric: tabular-nums"><textPath href="#lp0_0" startOffset="50%" text-anchor="middle">Video</textPath></text>
 <text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#0e0f12" style="font-variant-numeric: tabular-nums"><textPath href="#lp0_1" startOffset="50%" text-anchor="middle">820.0 GB</textPath></text>
 <text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#0e0f12" style="font-variant-numeric: tabular-nums"><textPath href="#lp1_0" startOffset="50%" text-anchor="middle">Films</textPath></text>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#0e0f12" style="font-variant-numeric: tabular-nums"><textPath href="#lp10_0" startOffset="50%" text-anchor="middle">Series</textPath></text>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#0e0f12" style="font-variant-numeric: tabular-nums"><textPath href="#lp52_0" startOffset="50%" text-anchor="middle">Photos</textPath></text>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#0e0f12" style="font-variant-numeric: tabular-nums"><textPath href="#lp52_1" startOffset="50%" text-anchor="middle">259.0 GB</textPath></text>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#0e0f12" style="font-variant-numeric: tabular-nums"><textPath href="#lp53_0" startOffset="50%" text-anchor="middle">2025</textPath></text>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#0e0f12" style="font-variant-numeric: tabular-nums"><textPath href="#lp74_0" startOffset="50%" text-anchor="middle">2024</textPath></text>
 <circle cx="548.0" cy="580.0" r="78.8" fill="#15171b"/>
 <text x="548.0" y="550.0" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#eceef1" text-anchor="middle" style="font-variant-numeric: tabular-nums" >Media</text>
 <text x="548.0" y="584.0" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" style="font-variant-numeric: tabular-nums"><tspan font-size="28" font-weight="600" fill="#eceef1">1.08</tspan><tspan font-size="13" fill="#a0a7b2" dx="3">TB</tspan></text>
@@ -182,13 +203,11 @@
 <rect x="872.5" y="292.5" width="543" height="583" rx="10" fill="#15171b" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
 <text x="888" y="317" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >In this folder</text>
 <rect x="1000.47" y="304" width="18.105" height="18" rx="9" fill="#22262c" />
-<text x="1009.5225" y="317" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#a0a7b2" text-anchor="middle" style="font-variant-numeric: tabular-nums" >3</text>
+<text x="1009.5225" y="317" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#a0a7b2" text-anchor="middle" style="font-variant-numeric: tabular-nums" >2</text>
 <rect x="888" y="330" width="130.575" height="2" rx="1" fill="#f063a8" />
 <text x="1040.575" y="317" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Largest files</text>
 <text x="1156.3700000000001" y="317" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Oldest files</text>
 <text x="1264.95" y="317" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Duplicate hints</text>
-<rect x="1379.175" y="304" width="18.105" height="18" rx="9" fill="#22262c" />
-<text x="1388.2275" y="317" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#a0a7b2" text-anchor="middle" style="font-variant-numeric: tabular-nums" >3</text>
 <line x1="872" y1="332.5" x2="1416" y2="332.5" stroke="rgba(255,255,255,0.08)"/>
 <rect x="873" y="333" width="542" height="28" rx="0" fill="#1b1e23" />
 <text x="888" y="351" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Name</text>
@@ -198,34 +217,27 @@
 <g transform="translate(906,370) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#a0a7b2" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
 <text x="928" y="381.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Video</text>
 <rect x="1158" y="375" width="72" height="4" rx="2" fill="#1b1e23" />
-<rect x="1158" y="375" width="10.357894736842105" height="4" rx="2" fill="#5e6775" />
+<rect x="1158" y="375" width="54.717330861909176" height="4" rx="2" fill="#5e6775" />
 <text x="1324" y="381.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="end" style="font-variant-numeric: tabular-nums" >820.0 GB</text>
-<text x="1400" y="381.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >14.4%</text>
+<text x="1400" y="381.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >76.0%</text>
 <line x1="888" y1="392.5" x2="1400" y2="392.5" stroke="rgba(255,255,255,0.08)"/>
 <rect x="888" y="404" width="10" height="10" rx="2.5" fill="#f3aa25" />
 <g transform="translate(906,402) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#a0a7b2" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
 <text x="928" y="413.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Photos</text>
+<text x="979.29" y="413.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >incomplete</text>
 <rect x="1158" y="407" width="72" height="4" rx="2" fill="#1b1e23" />
-<rect x="1158" y="407" width="3.2715789473684214" height="4" rx="2" fill="#5e6775" />
+<rect x="1158" y="407" width="17.282669138090824" height="4" rx="2" fill="#5e6775" />
 <text x="1324" y="413.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="end" style="font-variant-numeric: tabular-nums" >259.0 GB</text>
-<text x="1400" y="413.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >4.5%</text>
+<text x="1400" y="413.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >24.0%</text>
 <line x1="888" y1="424.5" x2="1400" y2="424.5" stroke="rgba(255,255,255,0.08)"/>
-<rect x="888" y="436" width="10" height="10" rx="2.5" fill="url(#ghost)" stroke="#8b93a0" stroke-width="1" />
-<g transform="translate(906,434) scale(0.5833333333333334)"><path d="M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 7.5V12l3 2" fill="none" stroke="#a0a7b2" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
-<text x="928" y="445.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Not counted</text>
-<rect x="1158" y="439" width="72" height="4" rx="2" fill="#1b1e23" />
-<rect x="1158" y="439" width="58.370526315789476" height="4" rx="2" fill="#5e6775" />
-<text x="1324" y="445.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="end" style="font-variant-numeric: tabular-nums" >4.62 TB</text>
-<text x="1400" y="445.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >81.1%</text>
-<line x1="888" y1="456.5" x2="1400" y2="456.5" stroke="rgba(255,255,255,0.08)"/>
-<text x="888" y="491" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Hidden space</text>
-<rect x="888" y="511" width="10" height="10" rx="2.5" fill="url(#hatch)" stroke="#8b93a0" stroke-width="1" />
-<text x="906" y="520" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Purgeable space</text>
-<text x="906" y="537" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >SMB shares do not report it</text>
-<text x="1324" y="520" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >Not reported</text>
-<rect x="888" y="557" width="10" height="10" rx="2.5" fill="url(#hatch)" stroke="#8b93a0" stroke-width="1" />
-<text x="906" y="566" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Snapshots</text>
-<text x="906" y="583" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Snapshots on the server are not visible over SMB</text>
-<text x="1324" y="566" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >Not reported</text>
+<text x="888" y="459" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Not counted yet</text>
+<rect x="888" y="479" width="10" height="10" rx="2.5" fill="url(#hatch)" stroke="#8b93a0" stroke-width="1" />
+<text x="906" y="488" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Backups, Music and Photos/Older</text>
+<text x="906" y="505" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Retry reads them when nas.local answers again</text>
+<text x="1324" y="488" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >Not counted yet</text>
+<rect x="888" y="525" width="10" height="10" rx="2.5" fill="url(#hatch)" stroke="#8b93a0" stroke-width="1" />
+<text x="906" y="534" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Purgeable space and snapshots</text>
+<text x="906" y="551" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >SMB shares do not report them</text>
+<text x="1324" y="534" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >Not reported</text>
 <line x1="873" y1="841.5" x2="1415" y2="841.5" stroke="rgba(255,255,255,0.08)"/>
-<text x="888" y="863" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Retry keeps what was counted and reads only the folders not finished.</text></svg>
+<text x="888" y="863" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >A share is drawn against what was counted: the server does not say how big the share is.</text></svg>
