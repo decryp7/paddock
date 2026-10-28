@@ -35,8 +35,6 @@ export interface DialogHarnessOptions {
   readonly baseCommands?: readonly string[];
   /** Answers of the recorded IPC by command (anything else gets a value that tolerates any use). */
   readonly answers?: Readonly<Record<string, unknown>>;
-  /** How many macrotask turns the harness gives a window that never becomes stable before it reports it (default 200). */
-  readonly maxTurns?: number;
   /** Console errors that are expected (the mock refusing a fixture path); matched against each message. */
   readonly ignoreErrors?: readonly RegExp[];
 }
@@ -58,19 +56,6 @@ export function dialogsOf(...batches: readonly ContributionBatch<never>[]): Dial
 }
 
 const MISSING_PROVIDER = /NG0\d+|No provider|NullInjector/;
-
-/**
- * Waits for the window's stability (rule 38): the dialog shell's start (its loaders and providers), its debounced checks
- * and any `resource` the content loads are pending tasks, so `whenStable` resolves once the window has settled. Only a
- * window that never settles (a loader that never answers) is given up on after `maxTurns` macrotask turns, so the
- * harness reports it instead of hanging. True when it became stable.
- */
-async function settle(fixture: { whenStable(): Promise<unknown> }, maxTurns: number): Promise<boolean> {
-  let stable = false;
-  void fixture.whenStable().then(() => (stable = true));
-  for (let turn = 0; !stable && turn < maxTurns; turn++) await new Promise<void>((r) => setTimeout(r, 0));
-  return stable;
-}
 
 function describeArgs(args: readonly unknown[]): string {
   return args.map((x) => (x instanceof Error ? `${x.name}: ${x.message}` : typeof x === 'object' ? safeJson(x) : String(x))).join(' ');
@@ -103,13 +88,11 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), ...config.providers, { provide: DIALOG_IO, useValue: io }] });
     const fixture = TestBed.createComponent(DialogShell);
     const root = fixture.nativeElement as HTMLElement;
-    const loading = () => root.querySelector('[data-testid=dialog-loading]');
-    const turns = options.maxTurns ?? 200;
-    await settle(fixture, turns);
+    // The shell registers its start (and the content's resources) as pending tasks: no turn or time budget, a slow import just takes as long as it takes.
+    await fixture.whenStable();
 
     const failed = root.querySelector('[data-testid=dialog-error-reason]')?.textContent?.trim();
     if (failed) problems.push(`does not open: ${failed}`);
-    else if (loading()) problems.push('never leaves Loading');
     const ignored = options.ignoreErrors ?? [];
     const logged = errors.filter((e) => !ignored.some((r) => r.test(e)));
     for (const e of logged.filter((x) => MISSING_PROVIDER.test(x))) if (!failed || !e.includes(failed)) problems.push(`logs a missing provider: ${e}`);
@@ -135,7 +118,7 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
     const wayOut = root.querySelector('[data-testid=dialog-footer] [data-role=dismiss]');
     if ((def.requiredChoice !== true || failed) && !wayOut) problems.push('has no visible Close/Cancel');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-    await settle(fixture, turns);
+    await fixture.whenStable();
     const want = def.requiredChoice === true && !failed ? [] : [null];
     if (io.closedWith.length !== want.length || io.closedWith.some((r) => r !== null)) {
       problems.push(want.length ? `does not close on Escape (closed with ${safeJson(io.closedWith)})` : 'is a required choice that Escape closed');
@@ -175,7 +158,10 @@ export async function assertDialogBoots(def: DialogDef, options: DialogHarnessOp
   return report;
 }
 
-/** Boots every dialog of `options.dialogs`, one after another. */
+/**
+ * Boots every dialog of `options.dialogs`, one after another. A loader that never answers hangs this whole `it` until the
+ * runner's timeout without naming the dialog, so prefer one `it` per dialog with `assertDialogBoots`.
+ */
 export async function bootEveryDialog(options: DialogHarnessOptions): Promise<DialogBootReport[]> {
   const out: DialogBootReport[] = [];
   for (const def of options.dialogs) out.push(await bootDialog(def, options));
