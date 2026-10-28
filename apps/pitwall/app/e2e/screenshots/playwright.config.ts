@@ -1,12 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
-import { e2ePortFor, reuseServer } from '../../../../../scripts/e2e-guard.cjs';
+import { resolve } from 'node:path';
+import { appBuildGuard, reuseServer } from '../../../../../ui/projects/paddock-e2e/src/build-guard.ts';
+import { e2ePortOrCiDefault } from '../../../../../ui/projects/paddock-e2e/src/env.ts';
+
+// Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
+appBuildGuard(resolve(__dirname, '../../'), resolve(__dirname, '../../../../../ui'));
 
 // Captures every screen in dark and light into docs/screenshots (npm run screenshots): 1440x900 logical, 2x pixels, one worker.
-const PORT = e2ePortFor('PW_SHOT_PORT', 4390);
+const PORT = e2ePortOrCiDefault('PW_SHOT_PORT', 4390);
 
 export default defineConfig({
-  // Fails fast when ui/dist or the generated css is older than its sources (scripts/e2e-guard.cjs).
-  globalSetup: '../../../../../scripts/e2e-guard-apps.cjs',
   testDir: '.',
   testMatch: '*.shot.ts',
   workers: 1,

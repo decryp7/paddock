@@ -1,11 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
-import { assertChromeForTesting, isOn, SCREENSHOT_SPECS } from './projects/paddock-e2e/src/index.ts';
-import { e2ePortFor, reuseServer } from '../scripts/e2e-guard.cjs';
+import { assertChromeForTesting, assertFreshBuilds, e2ePort, isOn, reuseServer, SCREENSHOT_SPECS } from './projects/paddock-e2e/src/index.ts';
 
 /**
  * Browser checks of the reference apps (`npx playwright test`): the gallery (`ng serve gallery`) and the shell demo
  * (`ng serve shell-demo`), and the documentation screenshots (`SCREENSHOTS=1 npx playwright test`, written to
- * docs/screenshots with hashes.json). Ports come from PW_PORT, SHELL_DEMO_PORT and WORKBENCH_DEMO_PORT; unset, they derive from the worktree's path (scripts/e2e-guard.cjs; CI keeps 4300 to 4302).
+ * docs/screenshots with hashes.json). Ports come from PW_PORT, SHELL_DEMO_PORT and WORKBENCH_DEMO_PORT; unset, they derive from the worktree's path (CI must set them: e2ePort refuses a default there).
  * A running server is reused only with PW_REUSE_SERVER=1; a stale ui/dist or css fails the run (rebuild ui: npm run build -w ui). The
  * browser is Playwright's Chromium (Chrome for Testing), never the installed Chrome (rule 7, @decryp7/paddock-e2e).
  *
@@ -13,9 +12,12 @@ import { e2ePortFor, reuseServer } from '../scripts/e2e-guard.cjs';
  * --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit`. These projects exist only when the
  * variable is set, so a plain run (and a branch run, rule 3) stays Chromium; the full gate before a build sets it.
  */
-const PORT = e2ePortFor('PW_PORT', 4300);
-const SHELL_DEMO_PORT = e2ePortFor('SHELL_DEMO_PORT', 4301);
-const WORKBENCH_DEMO_PORT = e2ePortFor('WORKBENCH_DEMO_PORT', 4302);
+// Fails fast, before any server starts, when the generated css is older than its sources (build-guard.ts).
+assertFreshBuilds(__dirname, 'ui');
+
+const PORT = e2ePort('PW_PORT', 4300);
+const SHELL_DEMO_PORT = e2ePort('SHELL_DEMO_PORT', 4301);
+const WORKBENCH_DEMO_PORT = e2ePort('WORKBENCH_DEMO_PORT', 4302);
 
 // The specs read the same variables, so they reach the derived ports too (workers inherit the environment).
 process.env['PW_PORT'] ??= String(PORT);
@@ -27,8 +29,6 @@ const safari = { ...devices['Desktop Safari'], viewport: { width: 1280, height: 
 
 export default assertChromeForTesting(
   defineConfig({
-    // Fails fast when the generated css is older than its sources (scripts/e2e-guard.cjs).
-    globalSetup: '../scripts/e2e-guard-ui.cjs',
     testDir: './e2e',
     outputDir: './.angular/playwright-results',
     fullyParallel: false,

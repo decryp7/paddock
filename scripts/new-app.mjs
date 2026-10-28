@@ -325,7 +325,8 @@ export function e2eSmoke({ id, name, template = 'shell-demo' }) {
   const config = `import { paddockConfig } from '@decryp7/paddock-e2e';
 
 // ${name}'s end-to-end specs (plan X39): Chromium in a branch (\`npm run e2e\`), WebKit too on the combined result and in CI.
-export default paddockConfig({ app: '${id}', defaultPort: 4200, serve: (port) => \`npx ng serve --port \${port}\` });
+// buildGuard 'none': the app uses the published @decryp7/paddock-ui from node_modules, not ui/dist (an app mapped to ui/dist says 'ui-dist' and uiRoot).
+export default paddockConfig({ app: '${id}', defaultPort: 4200, buildGuard: 'none', serve: (port) => \`npx ng serve --port \${port}\` });
 `;
   const ready = workbench ? "page.locator('pd-dock [role=tab]').first()" : "page.locator('#pd-main')";
   const extra = workbench

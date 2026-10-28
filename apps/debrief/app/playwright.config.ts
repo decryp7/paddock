@@ -1,5 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
-import { e2ePortFor } from '../../../scripts/e2e-guard.cjs';
+import { resolve } from 'node:path';
+import { appBuildGuard } from '../../../ui/projects/paddock-e2e/src/build-guard.ts';
+import { e2ePortOrCiDefault } from '../../../ui/projects/paddock-e2e/src/env.ts';
+
+// Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
+appBuildGuard(resolve(__dirname, './'), resolve(__dirname, '../../../ui'));
 
 // End-to-end tests run against the browser build, where the app injects the in-memory MockBackend. Every project uses
 // the one production build, served with the Tauri CSP header (e2e/serve-prod.mjs): one build per run (and per CI shard)
@@ -7,7 +12,7 @@ import { e2ePortFor } from '../../../scripts/e2e-guard.cjs';
 const CI = !!process.env['CI'];
 // CI must name its port (a fixed default could collide with another job on the host); locally 4300 is the default.
 if (CI && !process.env['DEBRIEF_E2E_PORT']) throw new Error('CI: set DEBRIEF_E2E_PORT (the port of the production-build server)');
-const PORT = e2ePortFor('DEBRIEF_E2E_PORT', 4300);
+const PORT = e2ePortOrCiDefault('DEBRIEF_E2E_PORT', 4300);
 // DEBRIEF_E2E_PREBUILT=1 serves the dist/app/browser an earlier `npx ng build` left (CI builds once before the tests);
 // otherwise the run builds first, so it never tests a stale build.
 const PREBUILT = !!process.env['DEBRIEF_E2E_PREBUILT'];
@@ -22,8 +27,6 @@ const BASELINE = !!process.env['DEBRIEF_SHELL_BASELINE'];
 const baselineSnapshots = (browser: string) => `{snapshotDir}/{testFileDir}/{testFileName}-snapshots/{arg}-${browser}{-platform}{ext}`;
 
 export default defineConfig({
-  // Fails fast when ui/dist or the generated css is older than its sources (scripts/e2e-guard.cjs).
-  globalSetup: '../../../scripts/e2e-guard-apps.cjs',
   testDir: 'e2e',
   testMatch: '**/*.e2e.ts',
   fullyParallel: true,

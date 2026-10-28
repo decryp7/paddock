@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { CHROME_ENV, CHROMIUM_TEST_ENV } from './browser.ts';
 import { paddockConfig, SCREENSHOT_SPECS } from './config.ts';
+import { worktreePort } from './env.ts';
 
 const base = { app: 'demo', defaultPort: 4390 };
 const names = (c: { projects?: readonly { name?: string }[] }) => (c.projects ?? []).map((p) => p.name);
@@ -19,7 +20,7 @@ test('the preset: chromium and webkit, the port from the variable, no retries, t
 });
 
 test('the port: a local default, a named variable, an error for a bad value and on CI without one', () => {
-  assert.equal(paddockConfig({ ...base, env: {} }).use?.baseURL, 'http://localhost:4390');
+  assert.equal(paddockConfig({ ...base, env: {} }).use?.baseURL, `http://localhost:${worktreePort(4390, process.cwd())}`);
   assert.equal(paddockConfig({ ...base, portEnv: 'DEMO_E2E_PORT', env: { DEMO_E2E_PORT: '4500', PW_PORT: '1' } }).use?.baseURL, 'http://localhost:4500');
   assert.throws(() => paddockConfig({ ...base, env: { PW_PORT: 'nope' } }), /PW_PORT is not a port/);
   assert.throws(() => paddockConfig({ ...base, env: { CI: 'true' } }), /CI: set PW_PORT/);
@@ -89,4 +90,11 @@ test('extra reporters, window size, timeout and extensions are applied', () => {
   assert.deepEqual(c.use?.viewport, { width: 1000, height: 700 });
   assert.equal(c.timeout, 5000);
   assert.equal(c.expect?.timeout, 7000);
+});
+
+test('buildGuard: none by default; ui and ui-dist need uiRoot and fail fast on a stale or missing build', () => {
+  assert.doesNotThrow(() => paddockConfig({ ...base, env: {} }));
+  assert.throws(() => paddockConfig({ ...base, buildGuard: 'ui', env: {} }), /needs uiRoot/);
+  assert.throws(() => paddockConfig({ ...base, buildGuard: 'ui', uiRoot: '/nonexistent/ui', env: {} }), /rebuild ui: npm run build -w ui/);
+  assert.doesNotThrow(() => paddockConfig({ ...base, buildGuard: 'ui', uiRoot: '/nonexistent/ui', env: { PW_SKIP_BUILD_GUARD: '1' } }));
 });

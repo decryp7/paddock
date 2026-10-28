@@ -1,13 +1,16 @@
 import { defineConfig, devices } from '@playwright/test';
-import { e2ePortFor, reuseServer } from '../../../scripts/e2e-guard.cjs';
+import { resolve } from 'node:path';
+import { appBuildGuard, reuseServer } from '../../../ui/projects/paddock-e2e/src/build-guard.ts';
+import { e2ePortOrCiDefault } from '../../../ui/projects/paddock-e2e/src/env.ts';
+
+// Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
+appBuildGuard(resolve(__dirname, './'), resolve(__dirname, '../../../ui'));
 
 // End-to-end tests run against the browser build, where the app injects the in-memory MockBackend.
-const PORT = e2ePortFor('PW_E2E_PORT', 4350);
+const PORT = e2ePortOrCiDefault('PW_E2E_PORT', 4350);
 const CI = !!process.env['CI'];
 
 export default defineConfig({
-  // Fails fast when ui/dist or the generated css is older than its sources (scripts/e2e-guard.cjs).
-  globalSetup: '../../../scripts/e2e-guard-apps.cjs',
   testDir: 'e2e',
   testMatch: '**/*.e2e.ts',
   fullyParallel: true,

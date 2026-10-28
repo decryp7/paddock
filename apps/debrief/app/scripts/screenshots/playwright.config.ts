@@ -1,13 +1,16 @@
 import { defineConfig, devices } from '@playwright/test';
-import { e2ePortFor, reuseServer } from '../../../../../scripts/e2e-guard.cjs';
+import { resolve } from 'node:path';
+import { appBuildGuard, reuseServer } from '../../../../../ui/projects/paddock-e2e/src/build-guard.ts';
+import { e2ePortOrCiDefault } from '../../../../../ui/projects/paddock-e2e/src/env.ts';
+
+// Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
+appBuildGuard(resolve(__dirname, '../../'), resolve(__dirname, '../../../../../ui'));
 
 // Regenerates the README screenshots (docs/screenshots) from the browser build with the mock backend.
 // Run from app/: npm run screenshots   (needs `npm run e2e:install` once for the Chromium browser)
-const PORT = e2ePortFor('DEBRIEF_SHOT_PORT', 4320);
+const PORT = e2ePortOrCiDefault('DEBRIEF_SHOT_PORT', 4320);
 
 export default defineConfig({
-  // Fails fast when ui/dist or the generated css is older than its sources (scripts/e2e-guard.cjs).
-  globalSetup: '../../../../../scripts/e2e-guard-apps.cjs',
   testDir: '.',
   testMatch: 'capture.ts',
   workers: 1,

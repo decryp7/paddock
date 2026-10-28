@@ -130,7 +130,7 @@ describe('a new app', () => {
     assert.equal(pkg.scripts.test, undefined);
     assert.equal(pkg.devDependencies.jsdom, undefined);
     assert.equal(JSON.parse(read('app/angular.json')).projects.app.architect.test, undefined);
-    assert.match(read('app/playwright.config.ts'), /paddockConfig\(\{ app: 'pacenotes', defaultPort: 4200, serve: \(port\) => `npx ng serve --port \$\{port\}` \}\)/);
+    assert.match(read('app/playwright.config.ts'), /paddockConfig\(\{ app: 'pacenotes', defaultPort: 4200, buildGuard: 'none', serve: \(port\) => `npx ng serve --port \$\{port\}` \}\)/);
     const smoke = read('app/e2e/smoke.spec.ts');
     assert.match(smoke, /page\.locator\('#pd-main'\)/);
     assert.match(smoke, /axeInThemes\(page\)/);
