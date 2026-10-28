@@ -59,6 +59,7 @@ function preset(options) {
         'paddock/signal-read-before-await': 'error',
         'paddock/store-rules': ['error', options.storeFlagsAllowedIn ? { allowFlagsIn: options.storeFlagsAllowedIn } : {}],
         'paddock/no-raw-style-values': 'error',
+        'paddock/dialog-content-footer': 'error',
         ...forms,
         ...(options.rules ?? {}),
       },
