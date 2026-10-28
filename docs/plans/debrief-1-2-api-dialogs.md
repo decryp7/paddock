@@ -10,7 +10,8 @@ Inventories were read on 2026-10-28:
 - Dyno on the local branch `dyno/monitoring-only` (it has not been pushed);
 - Spotter and Pitwall on `origin/main`;
 - Pitwall's old repository on branch `feat/shell`;
-- Debrief on `apps/debrief/app/src/app/dialog-windows/dialog-registry.ts`.
+- Debrief on `apps/debrief/app/src/app/dialog-windows/dialog-registry.ts`;
+- Pitcrew on `origin/main`.
 
 ## 1. Dialogs per app and their kind
 
@@ -32,7 +33,7 @@ Widths are the named steps `narrow` (400), `medium` (560) and `wide` (720). "Act
 | `pd.updates`, `pd.settings`, `pd.setup`, `pd.wb.dock.layout-manage` | tool | modeless | 960 x 680 (setup 560 x 520) | C; status line |
 | `pd.channels.secret`, `pd.mcp.key`, `pd.wb.dock.layout-save` | form | modal | narrow | C, P |
 | `pd.channels.remove`, `pd.mcp.revoke`, `pd.storage.confirm` | decision | modal | narrow | C (Enter), D |
-| `pd.report-problem` | decision → **form** (it has inputs) | modal | wide (680 today) | C, P |
+| `pd.report-problem` | decision → **form**, **modeless** (a text area, a report that loads and saves; the user may look at the app while writing) | modeless | wide (680 today) | C, P "Save report"; after saving, P "Done" |
 
 ### Pitwall 1.1 (5 own plus shared; from `feat/shell` and `origin/main`)
 
@@ -56,21 +57,40 @@ Widths are the named steps `narrow` (400), `medium` (560) and `wide` (720). "Act
 | Tray popup | stays its own window | not a dialog | |
 | settings, about, updates | `pd.*` | tool / viewer | |
 
-### Dyno 1.0 (`dyno/monitoring-only`)
+### Dyno 1.0 (`dyno/monitoring-only`, at fabb1fb35)
+
+Dyno is monitoring-only (Dyno ADR 0021, D3). The branch has removed the backends of rules, process actions, undo,
+tuning, cleanup and watched folders. Its UI still holds their dialogs and confirms; DY-D deletes them with the move.
+Counted on the branch on 2026-10-28.
 
 | Today | Becomes | Kind | Actions |
 |---|---|---|---|
-| `dy-confirm-dialog`, 9 uses (end process, delete alert rule, forget programs, remove helper, ...) | `pd.confirm` with `details` | decision | C, D or P |
+| `dy-confirm-dialog`: the 3 call sites that stay (delete an alert rule, `alarms/custom-rules.ts`; remove the helper, `helper/helper-card.ts`; forget the known programs, `issues/unusual-view.ts`) | `pd.confirm` (with `details` for the alert rule) | decision | C, D |
 | `alarms/rule-dialog` (alert rule) | `dy.alert-rule` | form, modal, medium | C, P "Add rule" / "Save" |
-| `dy-lockers-dialog` (what is locking a file) | `dy.lockers` | **tool** (live search, a list, End per row through `pd.confirm`) | C; P "Find" in the body |
+| `dy-lockers-dialog` (what is locking a file) | `dy.lockers` | **tool**, read-only: a path field and Find in the body, a live list; no End per row (process actions are gone) | C |
 | `dy-web-search-dialog` | `dy.web-search` | form, modal, narrow | C, P "Search" |
-| `dy-hash-search-dialog` | `dy.file-hash` | **viewer** (hashing streams in) | S lead "Copy", S lead "Try again", C, P "Open VirusTotal" (`run`) |
-| `dy-helper-dialog` | `dy.helper-install` | decision | C "Not now", P "Install"; the OS prompt and install run as a job |
+| `dy-hash-search-dialog` | `dy.file-hash` | **viewer** (hashing streams in) | S lead "Copy", C, P "Open VirusTotal" (`run`); a failed hash is the rejected state with Try again |
+| `dy-helper-dialog` | `dy.helper-install` | decision | C "Not now", P "Install"; the OS prompt and the install run as a job |
 | `dy-coming-dialog` (planned features) | `dy.coming` | viewer | C (it has none today, only the X) |
 | `dy-command-palette` | stays in-app | not a dialog | |
-| `rules/rule-dialog`, `dy-temporary-dialog`, `dy-affinity-dialog`, `dy-cap-dialog` | **deleted** (Dyno is monitoring-only, Dyno ADR 0021; user, 2026-10-28) | | |
-| Orphans: `dy-cleanup-confirm-dialog`, `dy-fix-dialog`, `dy-tuning-dialog`, `dy-add-folder-dialog`, `dy-preview-dialog` | deleted with their removed backends | | |
 | Tray popover, native Save and folder pickers | unchanged | not dialogs | |
+
+Deleted in DY-D, with their call sites:
+
+- the 6 confirm call sites of removed features: two in `rules/rules-page.ts`, end process in `processes/processes-page.ts`
+  and in the lockers list (`processes/process-dialogs.ts`), the act preview in `why-slow/why-slow-page.ts`, and stop
+  watching in `watched/watched-page.ts`;
+- the dialogs `rules/rule-dialog`, `dy-temporary-dialog`, `dy-affinity-dialog`, `dy-cap-dialog`,
+  `dy-cleanup-confirm-dialog` (also used by `extras/extras-files.ts`), `dy-fix-dialog`, `dy-tuning-dialog`,
+  `dy-add-folder-dialog` and `dy-preview-dialog`.
+
+### Pitcrew (its next minor on the shell; a fourth copy, ER-22)
+
+| Today (`origin/main`) | Becomes | Kind | Actions |
+|---|---|---|---|
+| `pc-confirm-dialog` (`shared/ui/confirm-dialog.ts`, 440), 6 call sites: runner actions, service, cache, engine, updates, remove channel | `pd.confirm`; remove channel → `pd.channels.remove` once Pitcrew uses the shared channels | decision | C, P or D |
+| `pc-stop-process-dialog` (460): stop a runner or its process | `pd.confirm` with `details` | decision | C (focus), D "End the runner process" / "Stop now" |
+| `pc-config-diff-dialog` (760): review config changes before applying | `pc.config-diff` | decision, wide; the diff scrolls in the body | C, P "Save and apply" |
 
 ### Debrief 1.2 (50, in package M2b)
 
@@ -92,24 +112,42 @@ Notes:
 - ADR 0016's "28 forms" includes ai-query, which moves to tool here.
 - `unsaved-changes` and `close-prompt` use Save / Cancel / Don't save, with D lead.
 
+#### Debrief's widths on the three steps (D2)
+
+The registry declares 13 different widths, and 640 is the default for those that declare none, so 14 in all. The rule:
+480 and below → `narrow` 400; 481-680 → `medium` 560; above 680 → `wide` 720. A tool keeps a number.
+
+| Today | Step | Ids |
+|---|---|---|
+| 420-480 | narrow 400 | save-layout, unsaved-changes, open-ask, close-prompt, marker-override, open-live, import-range, export |
+| 520-640, and the 640 default | medium 560 | parser-import-confirm, encoding, recent-projects, manage-layouts, add-tile, report-export, plugin-permissions, clock, search-web, package-review, profile-etl, note-editor, drop, mask, extract, paste, redaction |
+| 680 | wide 720 | report-problem (→ `pd.report-problem`) |
+| 720-760 | wide 720 | folder-setup, knowledge-editor, profile-native, profile-dotnet, about, incident-summary, collector, mark, infer, format-wizard, ai-setup, ai-proposal-result, ai-propose, alert-rules, redacted-copy, and the viewers without a width (cheat-sheet, ai-narrative, ai-regex) |
+| tools, own number | 960 x 680 default | settings, research (720 x 560), ai-models (820 x 640), ai-query (720 x 560), **parser-editor** (820: from form to tool, an editor beside the work) |
+
+Narrowing a 480 form to 400 and a 760 one to 720 reflows them. `expectDialogFits` over the 50 in M2b catches a
+footer or field that no longer fits.
+
 ## 2. Work packages (replace rows 1.1 and 1.2)
 
 Every package starts with a failing test that is committed red, with the failure pasted into the PR. All of them use
 heavy.sh, `CARGO_BUILD_JOBS=2` and their own target directory.
 
-Order: 1.1a → (1.1b ∥ 1.2a) → 1.2b → 1.2c. After 1.2c, Pitwall, Spotter and Dyno can adopt in parallel with Debrief's
-M2b.
+Order: 1.1-0 ∥ 1.1a → (1.1b ∥ 1.2a) → 1.2b → 1.2c. 1.1b needs both 1.1-0 and 1.1a. After 1.2c, Pitwall, Spotter,
+Dyno and Pitcrew can adopt in parallel with Debrief's M2b.
 
 | WP | What | Files (shared UI / crates) | Failing test first | Role | Depends | Days |
 |---|---|---|---|---|---|---|
-| **1.1a** | **Contract in Rust.** <ul><li>`dialogs!` macro: command function paths, const checks of kind/modality and of `DIALOG` in the command table.</li><li>`Contracts::from_tables`.</li><li>Generated `dialog-kinds.ts` and per-owner `dialog-contracts.ts`.</li><li>`defineDialog(contract, ui)`.</li><li>Move the 13 `pd.*` contracts and the demos' 7.</li><li>Delete `serializeDialogContracts`, `dialogContractFile`, the JSON file and its parse path.</li></ul> | `crates/paddock-dialogs/src/{contract,table,generated}.rs`, the `dialogs.rs` of `paddock-shell`/`-channels`/`-mcp`/`-storage`/`-workbench`, `ui/projects/paddock-ui/shell/{src/define.ts,dialogs/src/{kind,contracts}.ts,generated/}`, shell-demo and workbench-demo `src-tauri` | <ul><li>`kind.spec.ts`: for every kind x {height, no height}, TS `fitsContent` equals the generated `fits`. Fails today on the viewer.</li><li>`trybuild` case: a dialog naming a command without `DIALOG` fails to compile.</li></ul> | implementer (with this spec) | ADR 0026 accepted | 2 |
-| **1.1b** | **Sizing and the window lifecycle.** <ul><li>Minimum content as `set_min_size`.</li><li>Remembered size clamped (decisions and forms keep offset and width only).</li><li>Cap never below the minimum.</li><li>Logical to physical rounded up.</li><li>Title bar = outer − inner.</li><li>Create hidden; `dialog_ready`/`dialog_fit {content, minContent}`; shown on ready.</li><li>Watchdog shows a dialog that is not ready.</li><li>`ScaleFactorChanged` refit.</li></ul> | `crates/paddock-dialogs/src/{placement,window,tauri}.rs`, `crates/paddock-startup/src/watchdog.rs` (dialog labels), `shell/dialogs/src/io.ts` | <ul><li>Property test (scale 1-3, work area 800x600 to 7680x4320, any remembered size): placed size in [min content, work area], and physical back to logical ≥ request. Fails today on rounding and on the remembered size below the content.</li><li>Mock-runtime test: a dialog is not visible before `dialog_ready`.</li></ul> | implementer | 1.1a | 2 |
-| **1.2a** | **DialogFrame.** <ul><li>Header slot, body, `flex: none` footer.</li><li>`DialogAction`, `layoutActions` (pure).</li><li>Button order native per OS (D1); Enter, Escape and focus moved from `keys.ts` into the frame; busy state; focus return in `DialogService`.</li><li>Measuring wrapper and refit triggers (one per frame).</li><li>`dialogStatus`, `dialogMinBodyHeight`.</li><li>`hasCloseAction`/`findDefaultAction` heuristics deleted.</li></ul> | `ui/projects/paddock-ui/shell/dialogs/src/{dialog-frame,actions,dialog-shell,keys,dialog.service}.ts` | <ul><li>`actions.spec.ts` table (order on macOS, Linux and Windows, counts, Enter never destructive, fallback Close).</li><li>Playwright on shell-demo `sd.rename` at deviceScaleFactor 1.5 in a 1366x768 window: the footer buttons are hit by `elementFromPoint` after the content grows by 400 px and shrinks back, gap ≤ 24 px. Fails today (grow-only, unpinned footer).</li></ul> | designer | 1.1a | 2.5 |
-| **1.2b** | **Test kit and checks.** <ul><li>Harness additions (ADR §6), on top of `fix/dialog-boot-flake` (merged first).</li><li>`FakeDialogIo` ready and fit.</li><li>`expectDialogFits`, `openEveryDialog`, `measureDialogWindow` in `paddock-e2e`.</li><li>`dialog-commands-seen.json`, the `unexercised` reasons and their ratchet (count may only fall, D4).</li><li>Lint `paddock/dialog-frame-footer`.</li><li>Conformance: visited ids = contract entries.</li></ul> | `ui/projects/paddock-ui/shell/testing/src/`, `ui/projects/paddock-e2e/src/dialogs/`, `eslint/src/rules/dialog-frame.cjs`, `conformance/src/dialogs.mjs` (or the `paddock-dev` rule when phase 4 lands) | <ul><li>The lint fails on a planted `.foot`.</li><li>The harness reports "draws its own footer" on today's `channel-remove-dialog`.</li><li>`expectDialogFits` fails on a planted fixed-height form at 1.5.</li></ul> | implementer | 1.2a, 1.1b | 1.5 |
-| **1.2c** | **Adoption by the shared and demo dialogs.** <ul><li>`pd.confirm` (new).</li><li>13 `pd.*` + 5 shell-demo + 2 workbench-demo declare actions and lose their footers.</li><li>`pd.report-problem` becomes a form.</li><li>Screenshots of every kind in both themes for the independent review (rule 22).</li></ul> | `ui/projects/paddock-ui/shell/{about,channels,mcp,storage,diagnostics,setup,settings,confirm}/`, `workbench/dock/src/layout-dialogs.ts`, `ui/projects/shell-demo/`, `ui/projects/workbench-demo/` | 1.2b's checks over all 20 (red until each dialog is moved); `expectDialogFits` over 20 at 3 scales x 2 work areas in Chromium | implementer | 1.2b | 1.5 |
+| **1.1-0** | **Spike: hidden-until-ready on three webviews** (ADR §4.4). <ul><li>A probe dialog on WKWebView (macOS), WebView2 (Windows) and WebKitGTK (Linux), at scales 1, 1.25 and 1.5.</li><li>Measure: does a hidden window run layout and resolve `fonts.ready`; the time to `dialog_ready`; the measured height against the height after show.</li><li>Compare: (a) hidden, then show; (b) visible at alpha 0 or off-screen, then show; (c) a synchronous layout after `fonts.ready`.</li><li>Pick the mechanism per OS and check the ~1 s show deadline against the measured times.</li></ul> | `crates/paddock-dialogs/examples/show-probe.rs`, `docs/research/2026-10-dialog-show-spike.md` | The probe's assertion "measured height = height after show, and ready before the deadline" is the test; it is kept as an `#[ignore]` real-window test | researcher | ADR 0026 accepted | 1 |
+| **1.1a** | **Contract in Rust.** <ul><li>`command_table!` emits `dialog_callable::<name>` markers and `DIALOG_CALLABLE`.</li><li>The `dialogs!` macro: marker references, `prefix*` const assertion, plugin-qualified names checked by a unit test, typed kind/modality.</li><li>`Contracts::from_tables`.</li><li>Generated `dialog-kinds.ts` and per-owner `dialog-contracts.ts`.</li><li>`defineDialog(contract, ui)`.</li><li>Move the 13 `pd.*` contracts and the demos' 7.</li><li>Delete `serializeDialogContracts`, `dialogContractFile`, the JSON file and its parse path.</li></ul> | `crates/paddock-commands/src/table.rs` (markers), `crates/paddock-dialogs/src/{contract,table,generated}.rs`, the `dialogs.rs` of `paddock-shell`/`-channels`/`-mcp`/`-storage`/`-workbench`, `ui/projects/paddock-ui/shell/{src/define.ts,dialogs/src/{kind,contracts}.ts,generated/}`, shell-demo and workbench-demo `src-tauri` | <ul><li>`kind.spec.ts`: for every kind x {height, no height}, TS `fitsContent` equals the generated `fits`. Fails today on the viewer.</li><li>`trybuild` cases: a misspelt command, a command without `DIALOG`, a prefix matching nothing, `Kind::Viewer` with `Modal`; each fails to compile.</li></ul> | implementer (with this spec) | ADR 0026 accepted | 2 |
+| **1.1b** | **Sizing and the window lifecycle** (ADR §4). <ul><li>Minimum content as `set_min_size`.</li><li>Remembered size clamped (decisions and forms keep offset and width only).</li><li>Cap never below the minimum.</li><li>The dialog's own inner logical size, rounded up once; decorations from the dialog's own outer − inner.</li><li>Create hidden with the theme background; `dialog_ready`/`dialog_fit {content, minContent}`; show on ready or at the show deadline, with the mechanism from 1.1-0.</li><li>Parent disabled (or scrim) at show; a second open while pending focuses on show.</li><li>`ScaleFactorChanged` refit.</li></ul> | `crates/paddock-dialogs/src/{placement,window,tauri}.rs`, `crates/paddock-startup/src/{config,watchdog}.rs` (show deadline, dialog labels), `shell/dialogs/src/io.ts` | <ul><li>Property test (scale 1-3, work area 800x600 to 7680x4320, any remembered size): placed size in [min content, work area], and physical back to logical ≥ request. Fails today on rounding and on the remembered size below the content.</li><li>Mock-runtime tests: not visible before `dialog_ready`; shown at the deadline with no ready; the parent stays enabled until show; a second open while pending creates no window.</li></ul> | implementer | 1.1-0, 1.1a | 2 |
+| **1.2a** | **DialogFrame** (ADR §2, §4.8). <ul><li>Header slot, body, `flex: none` footer.</li><li>`DialogAction` union, `DialogOutcome`, `layoutActions` (pure).</li><li>Button order native per OS (D1).</li><li>Enter, Escape and focus moved from `keys.ts` into the frame.</li><li>Busy (abortable and not), rejected with Try again.</li><li>Focus return in `DialogService`.</li><li>Measuring wrapper and refit triggers (one per frame).</li><li>`dialogStatus`, `dialogMinBodyHeight`.</li><li>`in-page.ts` on the same frame: hidden until ready or the deadline, focus trap.</li><li>`hasCloseAction`/`findDefaultAction` heuristics deleted.</li></ul> | `ui/projects/paddock-ui/shell/dialogs/src/{dialog-frame,actions,dialog-shell,keys,dialog.service,in-page,dialog-host}.ts` | <ul><li>`actions.spec.ts` table: order on macOS, Linux and Windows; counts; Enter never destructive; fallback Close; each action state, with an Escape while busy for an abortable and a non-abortable answer.</li><li>Playwright on shell-demo `sd.rename` at deviceScaleFactor 1.5 in a 1366x768 window: the footer buttons are hit by `elementFromPoint` after the content grows by 400 px and shrinks back, gap ≤ 24 px. Fails today (grow-only, unpinned footer).</li></ul> | designer | 1.1a | 2.5 |
+| **1.2b** | **Test kit and checks.** <ul><li>Harness additions (ADR §6), on top of `fix/dialog-boot-flake` (merged first).</li><li>`FakeDialogIo` ready, fit and withheld ready.</li><li>The command recorder at the TS invoke layer, tagging windows and in-page dialogs.</li><li>`expectDialogFits`, `openEveryDialog`, `measureDialogWindow` in `paddock-e2e`.</li><li>`dialog-commands-seen.json`; the "declared but never sent" check in nightly and full runs only (never in affected-only CI, ER-7); the `unexercised` reasons and their ratchet (D4).</li><li>Lint `paddock/dialog-frame-footer`.</li><li>Conformance: visited ids = contract entries.</li></ul> | `ui/projects/paddock-ui/shell/{ipc,testing}/src/`, `ui/projects/paddock-e2e/src/dialogs/`, `eslint/src/rules/dialog-frame.cjs`, `conformance/src/dialogs.mjs` (or the `paddock-dev` rule when phase 4 lands), `.gitea/workflows/nightly.yml` (one step, by the integrating agent) | <ul><li>The lint fails on a planted `.foot`.</li><li>The harness reports "draws its own footer" on today's `channel-remove-dialog`.</li><li>The recorder fails an in-page dialog that sends an undeclared command.</li><li>`expectDialogFits` fails on a planted fixed-height form at 1.5.</li></ul> | implementer | 1.2a, 1.1b | 1.5 |
+| **1.2c** | **Adoption by the shared and demo dialogs.** <ul><li>`pd.confirm` (new).</li><li>13 `pd.*` + 5 shell-demo + 2 workbench-demo declare actions and lose their footers.</li><li>`pd.report-problem` becomes a modeless form.</li><li>Screenshots of every kind and state in both themes and both button orders for the independent review (rule 22).</li></ul> | `ui/projects/paddock-ui/shell/{about,channels,mcp,storage,diagnostics,setup,settings,confirm}/`, `workbench/dock/src/layout-dialogs.ts`, `ui/projects/shell-demo/`, `ui/projects/workbench-demo/` | 1.2b's checks over all 20 (red until each dialog is moved); `expectDialogFits` over 20 at 3 scales x 2 work areas in Chromium | implementer | 1.2b | 1.5 |
 
-In total that is 9.5 agent-days, against 4.5 in the plan. The critical path 1.1a → 1.2a → 1.2b → 1.2c is about
-7.5 days.
+**Effort: 10.5 agent-days** (1 + 2 + 2 + 2.5 + 1.5 + 1.5), against 4.5 in the plan. The critical path,
+1.1a → 1.2a → 1.2b → 1.2c, is 7.5 days. The spike runs beside 1.1a and is on the critical path only if it takes
+longer than 2 days.
 
 ### Adoption packages (after 1.2c, one per app, sized for its release)
 
@@ -117,7 +155,8 @@ In total that is 9.5 agent-days, against 4.5 in the plan. The critical path 1.1a
 |---|---|---|---|
 | PW-D | Pitwall 1.1 | `src-tauri/src/dialogs.rs` (4 own); `pd.confirm` for 11 call sites; quit, consent and key-secret actions; `expectDialogFits` over its contract | 1.5 |
 | SP-D | Spotter 1.0 | `pd.confirm` for 2 call sites; delete `confirm-dialog.ts`; shared settings, about and updates; checks | 0.5 |
-| DY-D | Dyno 1.0 | 6 dialogs + `pd.confirm` for 9 call sites; lockers as a tool; delete the orphans and the `Dialogs` service and `dy-dialog`; checks | 2 |
+| DY-D | Dyno 1.0 | 6 own dialogs and `pd.confirm` for the 3 call sites that stay; lockers as a read-only tool; delete the dialogs and the 6 confirm call sites of removed features, the `Dialogs` service and `dy-dialog`; checks | 2 |
+| PC-D | Pitcrew (next minor) | `pd.confirm` for 6 + 1 call sites; `pc.config-diff`; delete `confirm-dialog.ts` and `stop-process-dialog.ts`; checks | 1 |
 | M2b | Debrief 1.2 | As planned, plus moving the 50 command lists to `src-tauri/src/dialogs.rs` and deleting the TS analysis | 3.5 + 0.5 |
 
 ## 3. Decisions taken (user, 2026-10-28)
