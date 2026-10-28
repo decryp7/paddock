@@ -33,7 +33,7 @@
               }
             ],
             "styles": [
-              "node_modules/@decryp7/paddock-ui/css/paddock.css",
+              "../../../ui/dist/paddock-ui/css/paddock.css",
               "src/styles.scss"
             ],
             "polyfills": [
