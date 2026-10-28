@@ -64,6 +64,13 @@ describe('control styles and the Material bridge (plan X37)', () => {
     }
   });
 
+  it('the bridge alone (no mat.theme) sets the hover, focus and pressed state-layer opacities, or Material draws an opaque disc', () => {
+    const value = (name: string) => new RegExp(`${name}\\s*:\\s*([^;]+);`).exec(material)?.[1];
+    expect(value('--mat-sys-hover-state-layer-opacity')).toBe('var(--pd-hover-alpha)');
+    expect(value('--mat-sys-focus-state-layer-opacity')).toBe('var(--pd-hover-alpha)');
+    expect(value('--mat-sys-pressed-state-layer-opacity')).toBe('var(--pd-pressed-alpha)');
+  });
+
   describe.each(['dark', 'light'] as Scheme[])('contrast of the pairs the controls add, %s', (scheme) => {
     it.each(ACCENTS)('the control fill (on toggle track, checked box or radio) is 3:1 on the page, surface-1, surface-2 and surface-3, and its ink is legible, accent %s', (accent) => {
       const v = resolve(rules, scheme, accent);

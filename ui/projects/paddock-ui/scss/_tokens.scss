@@ -54,9 +54,6 @@
   // Radii.
   --pd-radius-tag: 4px;
   --pd-radius-control: 6px;
-  // The alpha of --pd-hover and --pd-pressed (they are written out below per theme): Material's state layers use them as opacities.
-  --pd-hover-alpha: 0.05;
-  --pd-pressed-alpha: 0.09;
   --pd-radius-input: 6px;
   --pd-radius-card: 10px;
   --pd-radius-popover: 10px;
@@ -136,8 +133,11 @@
   --pd-text: #eceef1;
   --pd-text-muted: #a0a7b2;
   --pd-text-subtle: #8b93a0;
-  --pd-hover: rgb(255 255 255 / 0.05);
-  --pd-pressed: rgb(255 255 255 / 0.09);
+  // Interaction fills: one alpha each in every theme; Material's state layers use the same two numbers as their opacities.
+  --pd-hover-alpha: 0.05;
+  --pd-pressed-alpha: 0.09;
+  --pd-hover: rgb(255 255 255 / var(--pd-hover-alpha));
+  --pd-pressed: rgb(255 255 255 / var(--pd-pressed-alpha));
   --pd-scrim: rgb(0 0 0 / 0.55);
   --pd-on-accent: #ffffff;
   --pd-on-danger: #ffffff;
@@ -188,8 +188,8 @@
   --pd-text: #14171c;
   --pd-text-muted: #4f5764;
   --pd-text-subtle: #5f6775;
-  --pd-hover: rgb(15 20 30 / 0.05);
-  --pd-pressed: rgb(15 20 30 / 0.09);
+  --pd-hover: rgb(15 20 30 / var(--pd-hover-alpha));
+  --pd-pressed: rgb(15 20 30 / var(--pd-pressed-alpha));
   --pd-scrim: rgb(15 20 30 / 0.32);
   --pd-on-accent: #ffffff;
   --pd-on-danger: #ffffff;
