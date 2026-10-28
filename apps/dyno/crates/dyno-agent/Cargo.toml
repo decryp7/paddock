@@ -31,7 +31,6 @@ sha2 = "0.10"
 libc = "0.2"
 
 [dev-dependencies]
-dyno-helper.workspace = true
 plist = "1"
 tempfile.workspace = true
 

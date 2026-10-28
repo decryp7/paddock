@@ -29,7 +29,7 @@ export function errorHint(code: ErrorCode): string | null {
     case 'agentUnavailable':
       return 'The Dyno agent is not running. It restarts automatically; try again in a moment.';
     case 'accessDenied':
-      return 'Windows or macOS refused. Some readings need the Dyno helper (an administrator prompt).';
+      return 'Windows or macOS refused. This reading needs administrator rights.';
     case 'timeout':
       return 'The request took too long. Try again.';
     case 'busy':

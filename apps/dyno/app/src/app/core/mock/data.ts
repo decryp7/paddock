@@ -149,7 +149,6 @@ export function demoActivity(now: number): ActivityEntry[] {
   const a = (id: string, ago: number, kind: ActivityEntry['kind'], title: string, detail: string): ActivityEntry => ({ id, at: now - ago, kind, title, detail });
   return [
     a('act-4', 26 * HOUR, 'alert', 'Memory pressure high', 'Commit reached 92% of the limit'),
-    a('act-3', 2 * DAY, 'system', 'Removed the privileged helper', 'The helper is gone; Dyno keeps working without it.'),
     a('act-2', 3 * DAY, 'alert', 'Docker backend keeps restarting', '6 restarts in 2 hours.'),
     a('act-1', 12 * DAY, 'system', 'Dyno started', 'Sampling every 1 s, processes every 2 s'),
   ];

@@ -10,13 +10,12 @@ import { Switch } from '../../shared/switch';
 import { SettingsStore } from '../../state/settings.store';
 import { LOOKUP_PRESETS, presetIdFor, templateProblem } from './ip-lookup-presets';
 import { TrayItemsEditor } from './tray-items-editor';
-import { HelperCard } from '../helper/helper-card';
 import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
 
 /** Settings: appearance, start-up, sampling and retention, the tray, alert thresholds, the observe-only posture, plugins and About. */
 @Component({
   selector: 'dy-settings-page',
-  imports: [FormsModule, Switch, AsyncState, Icon, TrayItemsEditor, HelperCard],
+  imports: [FormsModule, Switch, AsyncState, Icon, TrayItemsEditor],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page narrow">
@@ -37,7 +36,7 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
       <dy-async [loaded]="!!draft()" [error]="store.error()" what="settings" [rows]="4" (retry)="store.load()">
         @if (draft(); as d) {
           <div class="stack">
-            <p class="posture" aria-label="What Dyno changes"><dy-icon name="shield-check" /> Dyno only reads and changes nothing on your computer. The few readings that need administrator rights use a small read-only helper that is installed only when you approve it.</p>
+            <p class="posture" aria-label="What Dyno changes"><dy-icon name="shield-check" /> Dyno only reads and changes nothing on your computer.</p>
 
             <section class="card" aria-label="Appearance">
               <h2>Appearance</h2>
@@ -214,8 +213,6 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
           </div>
         }
       </dy-async>
-
-      <dy-helper-card />
 
       <section class="card" aria-label="Plugins">
         <h2>Plugins</h2>

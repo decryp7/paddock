@@ -49,7 +49,6 @@ import type {
   StartBenchmark,
   SystemSample,
   Timestamp,
-  HelperStatus,
   WeeklyReport,
   ReportFormat,
   SavedReport,
@@ -163,7 +162,7 @@ export function applyMockPlatform(search: string, root: HTMLElement): void {
 
 /**
  * The backend for browser development and UI tests: a developer's laptop (macOS by default) in the middle of a `cargo
- * build`. Live values are a deterministic function of the clock; the few requests that change anything (helper, settings,
+ * build`. Live values are a deterministic function of the clock; the few requests that change anything (settings,
  * snapshots, benchmarks) change the mock's state so those flows can be exercised. It mimics the contract; it is never the reference for behaviour.
  */
 export class MockBackend implements DynoBackend {
@@ -180,7 +179,6 @@ export class MockBackend implements DynoBackend {
   private alertLog: Alert[];
   private settingsValue: Settings = demoSettings();
   private counters!: MockCounters;
-  private helperValue: HelperStatus = mockHelper('notInstalled');
   private startup: StartupEntry[] = demoStartup();
   private snapshotList: SnapshotInfo[];
   private readonly snapshotData = new Map<string, ProcessSample[]>();
@@ -435,7 +433,7 @@ export class MockBackend implements DynoBackend {
               },
             },
         connections: system
-          ? { unavailable: 'Needs the Dyno helper (administrator) for system processes.' }
+          ? { unavailable: 'Needs administrator rights for system processes.' }
           : {
               items: {
                 items: browser
@@ -646,39 +644,6 @@ export class MockBackend implements DynoBackend {
       const score = 100 - reasons.reduce((a, r) => a + r.impact, 0);
       return { at: this.now(), score, grade: score >= 80 ? 'good' : score >= 60 ? 'fair' : 'poor', reasons };
     });
-  }
-
-  // ------------------------------------------------------------------------------------ the privileged helper
-
-  helperStatus(): Promise<HelperStatus> {
-    return this.reply('helperStatus', () => this.helperValue);
-  }
-
-  /** Opens the (pretend) permission prompt; the helper is ready a moment later, as the real one is once the prompt is answered. */
-  installHelper(): Promise<HelperStatus> {
-    return this.reply('installHelper', () => {
-      if (this.latencyMs === 0) {
-        this.helperValue = mockHelper('ready');
-        return this.helperValue;
-      }
-      this.helperValue = mockHelper('installing');
-      setTimeout(() => (this.helperValue = mockHelper('ready')), 800);
-      return this.helperValue;
-    });
-  }
-
-  uninstallHelper(): Promise<HelperStatus> {
-    return this.reply('uninstallHelper', () => {
-      this.helperValue = mockHelper('notInstalled');
-      this.log('system', 'Removed the privileged helper', 'The helper is gone; Dyno keeps working without it.');
-      return this.helperValue;
-    });
-  }
-
-  private needHelper(): void {
-    if (this.helperValue.state !== 'ready') {
-      throw err('accessDenied', 'This reading needs Dyno\'s helper, which is not installed. Install it under Settings > Helper (the system asks for your permission once); nothing else in Dyno needs it.');
-    }
   }
 
   startupEntries(): Promise<StartupEntry[]> {
@@ -1174,7 +1139,8 @@ export class MockBackend implements DynoBackend {
     return p;
   }
 
-  private log(kind: ActivityEntry['kind'], title: string, detail: string): ActivityEntry {
+  /** Records an activity line and pushes it to the subscribers. */
+  log(kind: ActivityEntry['kind'], title: string, detail: string): ActivityEntry {
     const entry: ActivityEntry = { id: `act-${this.nextId++}`, at: this.now(), kind, title, detail };
     this.activityLog = [entry, ...this.activityLog];
     queueMicrotask(() => this.emitActivity(entry));
@@ -1226,26 +1192,6 @@ export class MockBackend implements DynoBackend {
       else setTimeout(run, delay);
     });
   }
-}
-
-/** The helper as the mock reports it (the real wording comes from the engine). */
-function mockHelper(state: HelperStatus['state']): HelperStatus {
-  const text: Record<HelperStatus['state'], string> = {
-    notInstalled: 'The helper is not installed. Dyno works without it; install it to read the few things that need administrator rights (for example programs\' network traffic on Windows).',
-    installing: "Waiting for you to answer the system's permission prompt.",
-    ready: 'The helper is installed and ready. It only reads and changes nothing on this computer.',
-    outdated: 'The installed helper is older than this Dyno. Update the helper.',
-    unreachable: 'The helper is installed but did not answer. Install it again from Settings to repair it.',
-    unsupported: 'The helper cannot be installed on this computer.',
-  };
-  return {
-    state,
-    message: text[state],
-    version: state === 'ready' ? '0.1.0' : null,
-    prompt: 'The system asks you to confirm with your account password or a Windows permission prompt.',
-    recent: [],
-    error: null,
-  };
 }
 
 function err(code: CommandError['code'], message: string): CommandError {

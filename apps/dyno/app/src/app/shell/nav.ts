@@ -27,7 +27,7 @@ export const NAV: NavItem[] = [
   { path: '/extras', label: 'Extras', icon: 'layers', keywords: 'what changed installs updates sleep wake blockers boot startup time apps network energy gpu large files duplicates software inventory maintenance windows' },
   { path: '/lifespan', label: 'Lifespan', icon: 'battery', keywords: 'ssd disk battery life wear forecast replace endurance capacity cycles' },
   { path: '/diagnostics', label: 'Diagnostics', icon: 'file', keywords: 'bundle zip bug report redacted support' },
-  { path: '/settings', label: 'Settings', icon: 'settings', keywords: 'theme tray plugins about preferences helper administrator install uninstall' },
+  { path: '/settings', label: 'Settings', icon: 'settings', keywords: 'theme tray plugins about preferences' },
 ];
 
 /** What is on the roadmap but has no screen: listed in one dialog, never as a route or a page of its own. */

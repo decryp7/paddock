@@ -1027,7 +1027,6 @@ name = "dyno-agent"
 version = "0.1.0"
 dependencies = [
  "dyno-core",
- "dyno-helper",
  "dyno-ipc",
  "dyno-platform",
  "dyno-plugin-host",

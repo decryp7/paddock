@@ -441,32 +441,6 @@ export interface HealthReport {
   reasons: HealthReason[];
 }
 
-/** How the privileged helper stands (ADR 0016). */
-export type HelperState = 'unsupported' | 'notInstalled' | 'ready' | 'outdated' | 'unreachable' | 'installing';
-
-/** One line of the helper's own audit log. */
-export interface HelperAuditEntry {
-  at: number;
-  peer: number | null;
-  what: string;
-  verdict: 'done' | 'refused' | 'failed';
-  detail: string;
-}
-
-/** The privileged helper for Settings and the "install the helper" dialog. */
-export interface HelperStatus {
-  state: HelperState;
-  /** One sentence saying what it means and what to do next. */
-  message: string;
-  version: string | null;
-  /** What the operating system will ask for when installing, in words. */
-  prompt: string;
-  /** The last entries of the helper's audit log, newest first. */
-  recent: HelperAuditEntry[];
-  /** Why the last install, update or removal did not work, until the next attempt. */
-  error: string | null;
-}
-
 export type StartupLocation =
   | 'userRunKey'
   | 'machineRunKey'
@@ -680,7 +654,6 @@ export interface MemoryArray {
 
 export interface InventoryUnavailable {
   reason: string;
-  /** Reading it needs the privileged helper (a later work package). */
 }
 
 /** Externally tagged, like Rust's serde default. */

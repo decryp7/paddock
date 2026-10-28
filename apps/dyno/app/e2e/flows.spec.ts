@@ -34,18 +34,6 @@ test.describe('screens', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
   });
 
-  test('Settings shows the helper and removes it again', async ({ page }) => {
-    await page.goto(url('/settings'));
-    const card = page.getByRole('region', { name: 'Helper' });
-    await expect(card.getByText('Not installed', { exact: true })).toBeVisible();
-    await card.getByRole('button', { name: /Install the helper/ }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Install the helper' }).click();
-    await expect(card.getByText('Ready', { exact: true })).toBeVisible();
-    await card.getByRole('button', { name: 'Remove the helper' }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Remove the helper' }).click();
-    await expect(card.getByText('Not installed', { exact: true })).toBeVisible();
-  });
-
   test('the tray dropdown renders its compact dashboard', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 520 });
     await page.goto(url('/tray'));

@@ -199,7 +199,7 @@ impl<'de> Deserialize<'de> for Owner {
 }
 
 const UNKNOWN_REASON: &str =
-    "The OS did not say which program owns this. It may belong to another user or the system; Dyno never runs elevated, the helper can look it up.";
+    "The OS did not say which program owns this. It may belong to another user or the system; Dyno does not run with administrator rights.";
 
 fn owner_of(pid: Option<u32>, names: &HashMap<u32, (&str, Option<&str>)>) -> Owner {
     match pid {

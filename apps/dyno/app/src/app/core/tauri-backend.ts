@@ -46,7 +46,6 @@ import type {
   BenchOverview,
   StartBenchmark,
   Timestamp,
-  HelperStatus,
   WeeklyReport,
   ReportFormat,
   SavedReport,
@@ -265,18 +264,6 @@ export class TauriBackend implements DynoBackend {
 
   health(): Promise<HealthReport> {
     return this.request('health');
-  }
-
-  helperStatus(): Promise<HelperStatus> {
-    return this.request('helperStatus');
-  }
-
-  installHelper(): Promise<HelperStatus> {
-    return this.request('installHelper');
-  }
-
-  uninstallHelper(): Promise<HelperStatus> {
-    return this.request('uninstallHelper');
   }
 
   startupEntries(): Promise<StartupEntry[]> {

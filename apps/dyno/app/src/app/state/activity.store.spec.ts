@@ -51,7 +51,7 @@ describe('ActivityStore', () => {
     const { store, mock } = setup();
     await store.load();
     const before = store.entries().length;
-    await mock.uninstallHelper(); // logs an entry and emits it
+    mock.log('system', 'A note', 'Pushed to the subscribers.');
     await Promise.resolve();
     expect(store.entries().length).toBe(before + 1);
   });

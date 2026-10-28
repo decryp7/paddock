@@ -45,7 +45,6 @@ import type {
   BenchOverview,
   StartBenchmark,
   Timestamp,
-  HelperStatus,
   WeeklyReport,
   ReportFormat,
   SavedReport,
@@ -111,11 +110,6 @@ export interface DynoBackend {
   /** The disk map: a folder's size with its biggest children (the system drive when `null`). */
   diskUsage(path: string | null): Promise<SizeNode>;
 
-  // The privileged helper (ADR 0016). Installing happens only from the confirmation dialog.
-  helperStatus(): Promise<HelperStatus>;
-  /** Starts the install or update (the system's permission prompt opens); resolves at once with state `installing`. */
-  installHelper(): Promise<HelperStatus>;
-  uninstallHelper(): Promise<HelperStatus>;
   startupEntries(): Promise<StartupEntry[]>;
 
   // What is installed (memory modules, CPU, disks) and hints.
