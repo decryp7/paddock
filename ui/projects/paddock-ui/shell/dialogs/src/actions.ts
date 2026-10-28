@@ -12,6 +12,8 @@ export interface ActionBase {
   readonly label: string;
   /** Default true. A disabled primary is never run by Enter. */
   readonly enabled?: boolean;
+  /** What the button says while its work runs ("Creating…"); default its label. */
+  readonly busyLabel?: string;
 }
 
 /** Closes the dialog with the value `answer` resolves to. A rejection keeps it open with the error and Try again. */
@@ -84,6 +86,11 @@ export interface ActionLayout {
   readonly enterTarget: string | null;
   /** What has the focus first: `'field'` (a form's first field), `'heading'` (no safe action) or an action id. */
   readonly focus: 'field' | string | null;
+  /**
+   * A decision's icon: `danger` only when a destructive action is the sole affirmative (Delete, Remove); a primary
+   * beside a destructive (Save, Don't save) is an ordinary question, `info`.
+   */
+  readonly tone: 'danger' | 'info';
   /** What is wrong with the declaration (empty when it is valid). A defect lays out the fallback: one Close. */
   readonly problems: readonly string[];
 }
@@ -108,8 +115,9 @@ const ID = /^[a-z][a-z0-9-]*$/;
  * - Counts: at most one primary and one destructive; exactly one dismiss, none for a required choice; without a declared
  *   dismiss the frame adds Cancel (modal) or Close (modeless).
  * - Enter: the primary; never a destructive action (a destructive decision's Enter is Cancel).
- * - Focus: a form's first field; a destructive decision's Cancel; anything else the Enter target; never a destructive
- *   action (a required choice that only destroys focuses its heading).
+ * - Focus: a form's first field; Cancel when a destructive action is the sole affirmative; anything else the Enter
+ *   target (the save prompt's Save); never a destructive action (a required choice that only destroys focuses its heading).
+ * - Tone: `danger` only when a destructive action is the sole affirmative, else `info`.
  * - A declaration that breaks a rule never throws: the layout is one Close, and `problems` says why.
  */
 export function layoutActions(
@@ -147,7 +155,7 @@ export function layoutActions(
   const frameDismiss: DismissAction = { kind: 'dismiss', id: FRAME_DISMISS_ID, label: modality === 'modal' ? labels.cancel : labels.close };
   if (problems.length) {
     const close: DismissAction = { kind: 'dismiss', id: FRAME_DISMISS_ID, label: labels.close };
-    return { lead: [], trail: [{ action: close, filled: false, danger: false }], dismiss: close, enterTarget: null, focus: close.id, problems };
+    return { lead: [], trail: [{ action: close, filled: false, danger: false }], dismiss: close, enterTarget: null, focus: close.id, tone: 'info', problems };
   }
 
   const dismiss = requiredChoice ? null : (dismisses[0] ?? frameDismiss);
@@ -177,12 +185,14 @@ export function layoutActions(
     if (affirmative) trail.push(affirmative);
   }
   const enterTarget = primary ? primary.id : destructive && dismiss ? dismiss.id : null;
-  const destructiveDecision = kind === 'decision' && destructive !== null;
+  // A destructive action that is the sole affirmative: Cancel has the focus and the decision's tone is danger.
+  const destructiveDecision = kind === 'decision' && destructive !== null && !both;
   // Never a destructive action: a required choice whose only answer destroys something focuses its heading instead.
   const safe = (a: DialogAction | null | undefined) => (a && !(a.kind === 'answer' && a.role === 'destructive') ? a.id : null);
   const firstSafe = valid.find((a) => a.kind !== 'dismiss' && safe(a) !== null)?.id ?? null;
   const focus = kind === 'form' ? 'field' : destructiveDecision && dismiss ? dismiss.id : (enterTarget ?? dismiss?.id ?? safe(affirmative) ?? firstSafe ?? 'heading');
-  return { lead: lead.map(place), trail: trail.map(place), dismiss, enterTarget, focus, problems };
+  const tone = destructive !== null && !both ? 'danger' : 'info';
+  return { lead: lead.map(place), trail: trail.map(place), dismiss, enterTarget, focus, tone, problems };
 }
 
 /** What a key press does in a dialog (ADR 0009 §1): Escape and Cmd/Ctrl+W dismiss it, Enter runs its Enter target. */

@@ -57,6 +57,48 @@ export function oncePerFrame(work: () => void, doc: Pick<Document, 'visibilitySt
  * content's declared actions with `layoutActions`. It owns Enter, Escape and the first focus, the busy and rejected
  * states, and measures what the window needs, synchronously (`measure`), refitting at most once per frame.
  */
+/** The frame's stylesheet (exported for its spec, which checks the states' rules). */
+export const FRAME_STYLES = `
+    :host { box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; height: 100%; color: var(--pd-text); }
+    :host(.pd-frame--pinned) { flex: none; max-width: none; width: var(--pd-frame-pinned-width); }
+    .pd-frame-alert { flex: none; display: flex; align-items: center; gap: var(--pd-space-3, 12px); margin: var(--pd-space-3, 12px) var(--pd-space-4, 16px) 0; padding: var(--pd-space-2, 8px) var(--pd-space-3, 12px); border-radius: var(--pd-radius-control, 6px); border: 0; background: var(--pd-danger-tint); }
+    .pd-frame-alert-icon { flex: none; display: inline-grid; color: var(--pd-danger); }
+    /* Try again gets the focus by script after a refusal: its ring shows then too, not only after a key press. */
+    .pd-frame-alert .pd-frame-btn:focus { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pd-frame-alert-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+    .pd-frame-head { flex: none; padding: var(--pd-space-3, 12px) var(--pd-space-4, 16px) 0; }
+    .pd-frame-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--pd-space-4, 16px); outline: none; }
+    .pd-frame-content { display: flex; flex-direction: column; gap: var(--pd-space-3, 12px); min-width: 0; }
+    .pd-frame-body--decision { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--pd-space-4, 16px); align-items: start; padding-block-end: var(--pd-space-2, 8px); }
+    .pd-frame-icon { display: inline-grid; place-items: center; inline-size: 40px; block-size: 40px; border-radius: 50%; background: var(--pd-info-tint); color: var(--pd-info); }
+    .pd-frame-icon--danger { background: var(--pd-danger-tint); color: var(--pd-danger); }
+    .pd-frame-heading { margin: 0; font-size: var(--pd-text-subtitle, 15px); font-weight: var(--pd-weight-semibold, 600); line-height: 1.35; overflow-wrap: anywhere; }
+    :host([data-kind='decision']) .pd-frame-content { gap: var(--pd-space-2, 8px); color: var(--pd-text-muted); }
+    :host([data-kind='decision']) .pd-frame-heading { color: var(--pd-text); }
+    /* A decision is one continuous surface: no divider or band under its question (ADR 0026 mockups). */
+    :host([data-kind='decision']) .pd-frame-foot { border-top: 0; background: transparent; padding-block-start: var(--pd-space-2, 8px); padding-block-end: var(--pd-space-4, 16px); }
+    :host([data-kind='tool']) .pd-frame-content { height: 100%; }
+    :host([data-kind='tool']) .pd-frame-content > :not(.pd-frame-loading):not(.pd-frame-failed) { flex: 1 1 auto; min-height: 0; }
+    .pd-frame-loading { margin: var(--pd-space-4, 16px) auto; color: var(--pd-text-muted); }
+    .pd-frame-failed-title { margin: 0 0 var(--pd-space-2, 8px); font-size: var(--pd-text-subtitle, 15px); font-weight: var(--pd-weight-semibold, 600); }
+    .pd-frame-failed-reason { margin: 0; color: var(--pd-danger); overflow-wrap: anywhere; }
+    .pd-frame-foot { flex: none; display: flex; align-items: center; gap: var(--pd-space-2, 8px); padding: var(--pd-space-3, 12px) var(--pd-space-4, 16px); border-top: 1px solid var(--pd-hairline); background: var(--pd-surface-2); }
+    .pd-frame-status { flex: 0 1 auto; min-width: 0; margin: 0; color: var(--pd-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pd-frame-group { flex: none; display: flex; gap: var(--pd-space-2, 8px); }
+    .pd-frame-spacer { flex: 1 1 auto; }
+    .pd-frame-btn { display: inline-flex; align-items: center; gap: var(--pd-space-2, 8px); min-height: var(--pd-button-height, 28px); padding: 0 var(--pd-space-3, 12px); border-radius: var(--pd-radius-control, 6px); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium, 500); white-space: nowrap; cursor: pointer; }
+    .pd-frame-btn--filled { background: var(--pd-accent); border-color: var(--pd-accent); color: var(--pd-on-accent); }
+    .pd-frame-btn--danger { background: var(--pd-danger-fill); border-color: var(--pd-danger-fill); color: var(--pd-on-danger); }
+    .pd-frame-btn:disabled { opacity: 0.55; cursor: default; }
+    /* The pressed button keeps its full colour while it works; the others dim. */
+    .pd-frame-btn[aria-busy='true']:disabled { opacity: 1; cursor: progress; }
+    .pd-frame-body[inert] { opacity: 0.6; transition: opacity var(--pd-duration-micro, 100ms); }
+    .pd-frame-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pd-frame-spinner { inline-size: 12px; block-size: 12px; border-radius: 50%; border: 2px solid currentColor; border-inline-end-color: transparent; animation: pd-frame-spin 0.8s linear infinite; }
+    @keyframes pd-frame-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .pd-frame-spinner { animation: none; border-inline-end-color: currentColor; opacity: 0.6; } }
+`;
+
 @Component({
   selector: 'pd-dialog-frame',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -71,6 +113,9 @@ export function oncePerFrame(work: () => void, doc: Pick<Document, 'visibilitySt
   template: `
     @if (rejected(); as r) {
       <div class="pd-frame-alert" role="alert" data-testid="dialog-alert" #alert>
+        <span class="pd-frame-alert-icon" aria-hidden="true">
+          <svg viewBox="0 0 20 20" width="18" height="18"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M10 6v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" /><circle cx="10" cy="14" r="1.1" fill="currentColor" /></svg>
+        </span>
         <span class="pd-frame-alert-text" data-testid="dialog-alert-text">{{ r.message }}</span>
         <button #retryButton type="button" class="pd-frame-btn" data-testid="dialog-try-again" (click)="retry()">{{ t.tryAgain }}</button>
       </div>
@@ -144,44 +189,11 @@ export function oncePerFrame(work: () => void, doc: Pick<Document, 'visibilitySt
         @if (busy() === p.action.id) {
           <span class="pd-frame-spinner" aria-hidden="true"></span>
         }
-        {{ p.action.label }}
+        {{ busy() === p.action.id ? (p.action.busyLabel ?? p.action.label) : p.action.label }}
       </button>
     </ng-template>
   `,
-  styles: `
-    :host { box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; height: 100%; color: var(--pd-text); }
-    :host(.pd-frame--pinned) { flex: none; max-width: none; width: var(--pd-frame-pinned-width); }
-    .pd-frame-alert { flex: none; display: flex; align-items: center; gap: var(--pd-space-3, 12px); margin: var(--pd-space-3, 12px) var(--pd-space-4, 16px) 0; padding: var(--pd-space-2, 8px) var(--pd-space-3, 12px); border-radius: var(--pd-radius-control, 6px); border: 1px solid var(--pd-danger); background: var(--pd-danger-tint); }
-    .pd-frame-alert-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-    .pd-frame-head { flex: none; padding: var(--pd-space-3, 12px) var(--pd-space-4, 16px) 0; }
-    .pd-frame-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--pd-space-4, 16px); outline: none; }
-    .pd-frame-content { display: flex; flex-direction: column; gap: var(--pd-space-3, 12px); min-width: 0; }
-    .pd-frame-body--decision { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--pd-space-4, 16px); align-items: start; padding-block-end: var(--pd-space-2, 8px); }
-    .pd-frame-icon { display: inline-grid; place-items: center; inline-size: 40px; block-size: 40px; border-radius: 50%; background: var(--pd-info-tint); color: var(--pd-info); }
-    .pd-frame-icon--danger { background: var(--pd-danger-tint); color: var(--pd-danger); }
-    .pd-frame-heading { margin: 0; font-size: var(--pd-text-subtitle, 15px); font-weight: var(--pd-weight-semibold, 600); line-height: 1.35; overflow-wrap: anywhere; }
-    :host([data-kind='decision']) .pd-frame-content { gap: var(--pd-space-2, 8px); color: var(--pd-text-muted); }
-    :host([data-kind='decision']) .pd-frame-heading { color: var(--pd-text); }
-    /* A decision is one continuous surface: no divider or band under its question (ADR 0026 mockups). */
-    :host([data-kind='decision']) .pd-frame-foot { border-top: 0; background: transparent; padding-block-start: var(--pd-space-2, 8px); padding-block-end: var(--pd-space-4, 16px); }
-    :host([data-kind='tool']) .pd-frame-content { height: 100%; }
-    :host([data-kind='tool']) .pd-frame-content > :not(.pd-frame-loading):not(.pd-frame-failed) { flex: 1 1 auto; min-height: 0; }
-    .pd-frame-loading { margin: var(--pd-space-4, 16px) auto; color: var(--pd-text-muted); }
-    .pd-frame-failed-title { margin: 0 0 var(--pd-space-2, 8px); font-size: var(--pd-text-subtitle, 15px); font-weight: var(--pd-weight-semibold, 600); }
-    .pd-frame-failed-reason { margin: 0; color: var(--pd-danger); overflow-wrap: anywhere; }
-    .pd-frame-foot { flex: none; display: flex; align-items: center; gap: var(--pd-space-2, 8px); padding: var(--pd-space-3, 12px) var(--pd-space-4, 16px); border-top: 1px solid var(--pd-hairline); background: var(--pd-surface-2); }
-    .pd-frame-status { flex: 0 1 auto; min-width: 0; margin: 0; color: var(--pd-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pd-frame-group { flex: none; display: flex; gap: var(--pd-space-2, 8px); }
-    .pd-frame-spacer { flex: 1 1 auto; }
-    .pd-frame-btn { display: inline-flex; align-items: center; gap: var(--pd-space-2, 8px); min-height: var(--pd-button-height, 28px); padding: 0 var(--pd-space-3, 12px); border-radius: var(--pd-radius-control, 6px); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium, 500); white-space: nowrap; cursor: pointer; }
-    .pd-frame-btn--filled { background: var(--pd-accent); border-color: var(--pd-accent); color: var(--pd-on-accent); }
-    .pd-frame-btn--danger { background: var(--pd-danger-fill); border-color: var(--pd-danger-fill); color: var(--pd-on-danger); }
-    .pd-frame-btn:disabled { opacity: 0.55; cursor: default; }
-    .pd-frame-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .pd-frame-spinner { inline-size: 12px; block-size: 12px; border-radius: 50%; border: 2px solid currentColor; border-inline-end-color: transparent; animation: pd-frame-spin 0.8s linear infinite; }
-    @keyframes pd-frame-spin { to { transform: rotate(360deg); } }
-    @media (prefers-reduced-motion: reduce) { .pd-frame-spinner { animation: none; border-inline-end-color: currentColor; opacity: 0.6; } }
-  `,
+  styles: FRAME_STYLES,
 })
 export class DialogFrame {
   /** The component's texts in the window's language (plan S15). */
@@ -257,12 +269,8 @@ export class DialogFrame {
   });
   /** The question a decision asks (or a content's heading), drawn as the body's `h2`. */
   protected readonly heading = computed(() => (this.state() === 'ready' ? (this.content()?.dialogHeading?.() ?? null) : null));
-  /** A decision with a heading draws its icon: `danger` when it has a destructive action, else `info`. */
-  protected readonly decision = computed<'danger' | 'info' | null>(() => {
-    if (this.kind() !== 'decision' || !this.heading()) return null;
-    const l = this.layout();
-    return [...l.lead, ...l.trail].some((p) => p.action.kind === 'answer' && p.action.role === 'destructive') ? 'danger' : 'info';
-  });
+  /** A decision with a heading draws its icon in the layout's tone (`danger` only for a sole destructive answer). */
+  protected readonly decision = computed<'danger' | 'info' | null>(() => (this.kind() !== 'decision' || !this.heading() ? null : this.layout().tone));
   protected readonly header = computed(() => (this.state() === 'ready' ? (this.content()?.dialogHeader?.() ?? null) : null));
   protected readonly statusLine = computed(() => (this.finishing() ? this.t.finishing : this.state() === 'ready' ? (this.content()?.dialogStatus?.() ?? null) : null));
 
@@ -428,7 +436,12 @@ export class DialogFrame {
    */
   measure(): DialogMeasure {
     this.render();
-    const height = (el: Element | null | undefined) => (el ? el.getBoundingClientRect().height : 0);
+    // A part's height with its vertical margins (the alert has a top margin that its box does not include).
+    const height = (el: Element | null | undefined) => {
+      if (!el) return 0;
+      const s = getComputedStyle(el);
+      return el.getBoundingClientRect().height + (parseFloat(s.marginTop) || 0) + (parseFloat(s.marginBottom) || 0);
+    };
     const host = this.host.nativeElement;
     const body = this.bodyEl().nativeElement;
     const style = getComputedStyle(body);
