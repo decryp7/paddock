@@ -904,3 +904,57 @@ The store runs on DuckDB 2.0.0 (released 2026-10-21, an LTS release) through duc
   against 630 (macOS), low-memory importing 268 MB against 400; all pass. Aggregates that spill are not re-tested here; the
   ORDER BY ... LIMIT/OFFSET out-of-memory at the 183 MB limit is still present in 2.0, and the catalogue-memory work on
   `debrief/d0-catalogue-memory` covers it, so this change does not touch it.
+
+### DuckDB 2.0 feature survey (2026-10-28)
+
+Sources read on 2026-10-28: [DuckDB 2.0 highlights](https://duckdb.org/2026/08/17/duckdb-20-highlights.html) (2026-08-17),
+[Announcing DuckDB 2.0.0](https://duckdb.org/2026/10/21/announcing-duckdb-200) (2026-10-21), [Asynchronous I/O](https://duckdb.org/2026/07/31/asynchronous-io.html)
+(2026-07-31), [Announcing DuckDB 1.5.0](https://duckdb.org/2026/03/09/announcing-duckdb-150.html) (2026-03-09), the
+[migration guide](https://duckdb.org/docs/2.0/operations_manual/migration.html), the duckdb-rs GitHub releases (1.10504 to 1.20000)
+and `duckdb_settings()` of the 2.0.0 CLI. The 1.4 notes were not read separately: nothing Debrief uses changed there that 1.5 and 2.0 do not
+cover. The duckdb-rs `CHANGELOG.md` path returned 404; the release notes were used instead.
+
+| Feature | Debrief use | Decision |
+|---|---|---|
+| Async I/O for Parquet and CSV (`async_threads`, `read_ahead_depth`) | Every event query reads Parquet segments | **Now**: `async_threads` = Performance threads (default is 4 per core, 56 here). `read_ahead_depth` left automatic: 0 or 2 gave no measurable gain (below) |
+| Partition-aware planning, partial aggregates below joins | Facets, histograms | Automatic, nothing to do |
+| Zone maps and Bloom filters for more types, `IN` and function predicates | id lookups, source filters over many segments | Automatic |
+| Lazy column metadata | Wide `events_wide` views, many segments | Automatic |
+| Aggregations spill to disk (#24499) | Old out-of-memory work-arounds in ADR 0014 (distinct counts, lanes) | **Later**: re-test each work-around under the 183 MB limit before removing any; ORDER BY LIMIT/OFFSET still runs out of memory (reviewer, 2026-10-28) |
+| `DICT_FSST` string compression, compact deletes, storage v2.0.0 | Only the small catalog is DuckDB storage | **Later**: lifting the `v1.5.0` pin with a `FORMAT_VERSION` bump; the catalog is too small to gain |
+| Non-blocking checkpoints (1.5) | Catalog checkpoints are tiny | Not relevant |
+| Native time zones instead of ICU (2.2x on `AT TIME ZONE`) | Few time-zone expressions | Automatic |
+| `VARIANT` with shredding, `variant_*` functions, VARIANT in Parquet | `extra` is a `MAP(VARCHAR, VARCHAR)` | **Later**: research whether typed shredded extras beat promoted columns |
+| ART index checkpoint remap, buffer-managed ART (planned) | The catalog has few indexes | Not relevant |
+| Arrow 60 (duckdb-rs), `MapFieldNames` | Event batches reach the store as Arrow | Done (this change) |
+| duckdb-rs: `Config::set` returns errors, progress on `Connection`, `Appender: Sync` | Settings go through `Config::with`; the catalog uses prepared statements, not the appender (events are Parquet) | **Later**: query progress for the SQL console and long analyses (ER-18) |
+| Prepared statements, interrupt | Cancellation is already `QueryControl` plus interrupt | Not relevant (nothing new) |
+| C API v2, loadable extensions, `quack`, extension repositories, parser extensions | Debrief bundles and loads no extension (ADR 0030) | Not relevant |
+| PEG parser (default), lambda syntax, `MERGE`, `//`, `~`, `!` changes | SQL console users' queries; generated SQL uses none | Release note written (CHANGELOG) |
+| `MMAP` and `DIRECT_IO` modes | Not a need at a 192 MB limit | Not relevant |
+| `read_duckdb`, `CONNECT`, remote pushdown, DuckLake, Iceberg, Delta | Debrief is local-only | Not relevant |
+| `cache_local_files` (off by default) and `enable_external_file_cache` | Local segments; `parquet_metadata_cache` is still set | Not relevant (local files are not cached by design) |
+
+**Measured** (synthetic corpus from `tests/bench.rs`, 3,000,000 events, 172 MB of segments, same-shape generated data, M4 Pro shared with other
+agents, load 20 to 60; `memory_limit` 192 MB, `threads` 4, nine read queries per run, three runs each; sum of the nine wall times,
+CPU = user + sys, peak RSS of the CLI process):
+
+| Engine and settings | Wall (s) | CPU (s) | Peak RSS (MB) |
+|---|---|---|---|
+| DuckDB 1.5.6 | 0.76 to 1.09 | 1.92 to 1.99 | 107 to 110 |
+| 2.0.0, defaults (`async_threads` 56) | 0.64 to 0.67 | 1.61 to 1.67 | 115 to 120 |
+| 2.0.0, `async_threads` 4 (shipped) | 0.56 to 0.66 | 1.60 to 1.66 | 110 to 116 |
+| 2.0.0, `async_threads` 4, `read_ahead_depth` 0 | 0.54 to 0.58 | 1.57 to 1.63 | 109 to 115 |
+| 2.0.0, `async_threads` 4, `read_ahead_depth` 2 | 0.61 to 0.67 | 1.59 to 1.63 | 111 to 113 |
+| 2.0.0, `async_threads` 16 | 0.56 to 0.70 | 1.56 to 1.59 | 110 to 120 |
+
+2.0 against 1.5.6: about 25% less wall time and 17% less CPU for the same queries. `async_threads` 4 against the default: about 10% less
+wall time and about 5 MB less peak memory, inside the noise of a loaded machine, so the reason to set it is the bound on I/O threads, not speed. The
+corpus is small enough to be cached by the operating system, so these runs do not show the cold-read gain DuckDB reports (1.5x on cold
+local SSD reads). `read_ahead_depth` shows no gain beyond noise and stays automatic. The store's own benchmark on 2.0 (same corpus): import
+182,545 events/s (peak RSS 1,142 MB), full-text index 114,350 docs/s, text search with ILIKE 302 ms warm, Tantivy 5 ms; the
+timeline over 1000 buckets from raw events takes 2.3 s cold and is served from histograms in 26 ms. No 1.x run of this
+benchmark was made (it needs a second release build on a loaded machine).
+
+**Follow-ups**: re-test the spill work-arounds; lift the storage pin with a catalog migration; query progress for the SQL console; shredded
+VARIANT for `extra`; static linking of libduckdb (research WP-D1b).
