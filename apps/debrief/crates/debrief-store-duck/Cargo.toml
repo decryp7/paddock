@@ -34,6 +34,8 @@ tantivy = { workspace = true, features = ["mmap", "lz4-compression"] }
 debrief-store-client = { path = "../debrief-store-client" }
 # Current resident set size on Windows, macOS and Linux (MIT OR Apache-2.0), for the memory budget test.
 memory-stats.workspace = true
+# The physical footprint and load average in the full-text benchmark (src/fts_bench.rs).
+libc.workspace = true
 getrandom.workspace = true
 chrono.workspace = true
 zip.workspace = true

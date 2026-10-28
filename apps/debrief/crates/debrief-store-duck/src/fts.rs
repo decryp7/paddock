@@ -234,7 +234,7 @@ impl Fts {
             let current = index.load_metas().ok().and_then(|m| m.payload).is_some_and(|p| p == payload(epoch));
             if current {
                 if let Ok(f) = fields(&index) {
-                    index.tokenizers().register(TOKENIZER, WordsTokenizer);
+                    index.tokenizers().register(TOKENIZER, WordsTokenizer::default());
                     let reader = index.reader_builder().reload_policy(ReloadPolicy::Manual).try_into()?;
                     return Ok((Fts { index, reader, f, budget }, false));
                 }
@@ -246,7 +246,7 @@ impl Fts {
         std::fs::create_dir_all(dir)?;
         let (schema, f) = schema();
         let index = Index::create_in_dir(dir, schema).context("creating the full-text index")?;
-        index.tokenizers().register(TOKENIZER, WordsTokenizer);
+        index.tokenizers().register(TOKENIZER, WordsTokenizer::default());
         {
             let mut w: IndexWriter = index.writer_with_num_threads(1, 15 << 20)?;
             let mut prepared = w.prepare_commit()?;
@@ -736,13 +736,17 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
 }
 
 #[cfg(test)]
+#[path = "fts_bench.rs"]
+mod bench;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn segment_keys_differ_and_the_tokenizer_gives_the_words() {
         assert_ne!(segment_key("a"), segment_key("b"));
-        let mut t = WordsTokenizer;
+        let mut t = WordsTokenizer::default();
         let mut stream = t.token_stream("System.TimeoutException");
         let mut words = Vec::new();
         while stream.advance() {
@@ -760,6 +764,13 @@ mod tests {
                 "systemtimeoutexception"
             ]
         );
-        assert!(!WordsTokenizer.token_stream("").advance());
+        assert!(!WordsTokenizer::default().token_stream("").advance());
+        // A reused tokenizer gives the next text's words only, at fresh positions.
+        let mut stream = t.token_stream("a.b");
+        let mut again = Vec::new();
+        while stream.advance() {
+            again.push((stream.token().text.clone(), stream.token().position));
+        }
+        assert_eq!(again, [("a".to_string(), 0), ("b".to_string(), 1), ("ab".to_string(), 2)]);
     }
 }
