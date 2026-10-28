@@ -370,6 +370,23 @@ fn connect_error_on(e: &std::io::Error, windows: bool) -> HttpError {
     }
 }
 
+/// How a request reaches `127.0.0.1:port`. The real one is [`Tcp`]; a test that needs "nothing listens" injects one that
+/// refuses, since no port a test holds refuses portably (macOS drops the attempt instead; ADR 0023).
+pub trait Connector: Send + Sync {
+    /// Opens a connection to `addr` within `limit`.
+    fn connect(&self, addr: SocketAddr, limit: Duration) -> std::io::Result<TcpStream>;
+}
+
+/// The real [`Connector`]: a TCP connection with a time limit.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Tcp;
+
+impl Connector for Tcp {
+    fn connect(&self, addr: SocketAddr, limit: Duration) -> std::io::Result<TcpStream> {
+        TcpStream::connect_timeout(&addr, limit)
+    }
+}
+
 /// Sends `req` to `127.0.0.1:port` and reads the status and headers. The body is read from the [`Response`].
 pub fn send(
     port: u16,
@@ -388,6 +405,18 @@ pub fn send_as(
     t: Timeouts,
     cancel: Option<&CancelToken>,
 ) -> Result<Response, HttpError> {
+    send_via(&Tcp, port, user_agent, req, t, cancel)
+}
+
+/// [`send_as`] through a given [`Connector`].
+pub fn send_via(
+    connector: &dyn Connector,
+    port: u16,
+    user_agent: &str,
+    req: &Request<'_>,
+    t: Timeouts,
+    cancel: Option<&CancelToken>,
+) -> Result<Response, HttpError> {
     if cancel.is_some_and(CancelToken::is_cancelled) {
         return Err(HttpError::Cancelled);
     }
@@ -400,7 +429,9 @@ pub fn send_as(
         ));
     }
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-    let stream = TcpStream::connect_timeout(&addr, t.connect).map_err(|e| connect_error(&e))?;
+    let stream = connector
+        .connect(addr, t.connect)
+        .map_err(|e| connect_error(&e))?;
     let _ = stream.set_nodelay(true);
     stream
         .set_read_timeout(Some(SLICE))
@@ -519,6 +550,15 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::mpsc;
 
+    /// A connector where nothing listens.
+    struct Refuses;
+
+    impl Connector for Refuses {
+        fn connect(&self, _: SocketAddr, _: Duration) -> std::io::Result<TcpStream> {
+            Err(std::io::Error::from(ErrorKind::ConnectionRefused))
+        }
+    }
+
     /// Serves one connection: reads the request, writes the pieces, then (when `hold`) keeps the connection open until the
     /// returned sender is dropped. Returns the port, the request text and the release sender.
     fn serve(pieces: Vec<Vec<u8>>, hold: bool) -> (u16, mpsc::Receiver<String>, mpsc::Sender<()>) {
@@ -636,12 +676,15 @@ mod tests {
 
     #[test]
     fn refused_garbage_and_header_injection() {
-        let free = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        let closed = send(free, &Request::get("/"), Timeouts::QUICK, None);
+        let held = paddock_testkit::net::HeldPort::hang_up();
+        let closed = send_via(
+            &Refuses,
+            held.port(),
+            "t",
+            &Request::get("/"),
+            Timeouts::QUICK,
+            None,
+        );
         assert!(
             matches!(closed, Err(HttpError::Refused(_))),
             "{:?}",
@@ -883,13 +926,9 @@ mod tests {
         );
         h.join().unwrap();
         // Already cancelled: no socket is opened at all.
-        let free = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        let held = paddock_testkit::net::HeldPort::hang_up();
         assert_eq!(
-            send(free, &Request::get("/"), slow, Some(&cancel)).err(),
+            send(held.port(), &Request::get("/"), slow, Some(&cancel)).err(),
             Some(HttpError::Cancelled)
         );
         // A cancel in the middle of a body.
