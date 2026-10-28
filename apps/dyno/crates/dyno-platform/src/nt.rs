@@ -27,7 +27,9 @@ pub const MAX_PROCESSES: usize = 100_000;
 pub const MIN_ENTRY: usize = 256;
 
 const OFF_NEXT: usize = 0;
-const OFF_PRIVATE: usize = 8;
+/// `WorkingSetPrivateSize`: the part of the working set that is not shared. (Task Manager's "Private bytes" is
+/// `PrivatePageCount`, at offset 200, which this module does not read.)
+const OFF_WORKING_SET_PRIVATE: usize = 8;
 const OFF_CREATE: usize = 32;
 const OFF_USER: usize = 40;
 const OFF_KERNEL: usize = 48;
@@ -58,8 +60,9 @@ pub struct NtProcess {
     pub kernel_time: u64,
     /// Working set in bytes.
     pub working_set: u64,
-    /// Private bytes (the working set that is not shared).
-    pub private_bytes: u64,
+    /// `WorkingSetPrivateSize`: the part of the working set that is not shared. Not Windows' "Private Bytes" counter
+    /// (`PrivatePageCount`).
+    pub working_set_private: u64,
     /// Bytes read by I/O operations (all devices).
     pub read_bytes: u64,
     /// Bytes written by I/O operations.
@@ -142,7 +145,7 @@ pub fn parse_processes(buf: &[u8]) -> Result<Vec<NtProcess>, NtError> {
                 user_time: u64_at(rec, OFF_USER).ok_or(NtError::Truncated)?,
                 kernel_time: u64_at(rec, OFF_KERNEL).ok_or(NtError::Truncated)?,
                 working_set: u64_at(rec, OFF_WORKING_SET).ok_or(NtError::Truncated)?,
-                private_bytes: u64_at(rec, OFF_PRIVATE).ok_or(NtError::Truncated)?,
+                working_set_private: u64_at(rec, OFF_WORKING_SET_PRIVATE).ok_or(NtError::Truncated)?,
                 read_bytes: u64_at(rec, OFF_READ_BYTES).ok_or(NtError::Truncated)?,
                 write_bytes: u64_at(rec, OFF_WRITE_BYTES).ok_or(NtError::Truncated)?,
             });
@@ -168,13 +171,62 @@ pub enum QueryOutcome {
     Failed(i32),
 }
 
+/// A zeroed byte buffer whose start is 8-byte aligned, as the records the system writes into it expect (a `Vec<u8>` only
+/// promises an alignment of 1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NtBuffer {
+    words: Vec<u64>,
+    len: usize,
+}
+
+impl NtBuffer {
+    /// A zeroed buffer of `len` bytes.
+    pub fn zeroed(len: usize) -> NtBuffer {
+        NtBuffer {
+            words: vec![0u64; len.div_ceil(8)],
+            len,
+        }
+    }
+
+    /// The bytes.
+    #[allow(unsafe_code)]
+    pub fn as_bytes(&self) -> &[u8] {
+        // SAFETY: `words` owns at least `len` initialised bytes, u8 has no alignment or validity requirements, and the
+        // slice borrows `self`.
+        unsafe { std::slice::from_raw_parts(self.words.as_ptr().cast::<u8>(), self.len) }
+    }
+
+    /// The bytes, writable.
+    #[allow(unsafe_code)]
+    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
+        // SAFETY: as in `as_bytes`, and the slice mutably borrows `self`.
+        unsafe { std::slice::from_raw_parts_mut(self.words.as_mut_ptr().cast::<u8>(), self.len) }
+    }
+
+    /// Keeps only the first `len` bytes.
+    pub fn truncate(&mut self, len: usize) {
+        self.len = self.len.min(len);
+    }
+
+    /// The number of bytes.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Whether the buffer holds no bytes.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
 /// Calls `query` with a buffer that grows until the answer fits: from [`INITIAL_BUFFER`], to what the system asked for plus
-/// headroom for processes started meanwhile, at most [`MAX_GROWTHS`] times and never beyond `cap` bytes.
-pub fn read_with_growth(mut query: impl FnMut(&mut [u8]) -> QueryOutcome, initial: usize, cap: usize) -> Result<Vec<u8>, NtError> {
+/// headroom for processes started meanwhile, at most [`MAX_GROWTHS`] times and never beyond `cap` bytes. The buffer is
+/// 8-byte aligned.
+pub fn read_with_growth(mut query: impl FnMut(&mut [u8]) -> QueryOutcome, initial: usize, cap: usize) -> Result<NtBuffer, NtError> {
     let mut size = initial.clamp(MIN_ENTRY, cap);
     for _ in 0..=MAX_GROWTHS {
-        let mut buf = vec![0u8; size];
-        match query(&mut buf) {
+        let mut buf = NtBuffer::zeroed(size);
+        match query(buf.as_bytes_mut()) {
             QueryOutcome::Done(n) => {
                 buf.truncate(n.min(size));
                 return Ok(buf);
@@ -402,7 +454,7 @@ mod tests {
         let mut r = vec![0u8; MIN_ENTRY];
         let put32 = |r: &mut Vec<u8>, off: usize, v: u32| r[off..off + 4].copy_from_slice(&v.to_le_bytes());
         let put64 = |r: &mut Vec<u8>, off: usize, v: u64| r[off..off + 8].copy_from_slice(&v.to_le_bytes());
-        put64(&mut r, OFF_PRIVATE, ws / 2);
+        put64(&mut r, OFF_WORKING_SET_PRIVATE, ws / 2);
         put64(&mut r, OFF_CREATE, (FILETIME_UNIX_DIFF_SECS + 1_000) * 10_000_000);
         put64(&mut r, OFF_USER, user);
         put64(&mut r, OFF_KERNEL, kernel);
@@ -441,7 +493,7 @@ mod tests {
                 user_time: 30,
                 kernel_time: 40,
                 working_set: 5 << 20,
-                private_bytes: (5 << 20) / 2,
+                working_set_private: (5 << 20) / 2,
                 read_bytes: 7,
                 write_bytes: 9,
             }
@@ -489,6 +541,26 @@ mod tests {
     }
 
     #[test]
+    fn the_buffer_the_system_writes_into_is_eight_byte_aligned() {
+        for size in [MIN_ENTRY, 1000, 4097] {
+            let mut seen = None;
+            let buf = read_with_growth(
+                |b| {
+                    seen = Some((b.as_ptr() as usize, b.len()));
+                    QueryOutcome::Done(b.len())
+                },
+                size,
+                1 << 20,
+            )
+            .unwrap();
+            let (addr, len) = seen.unwrap();
+            assert_eq!(addr % 8, 0, "{size}");
+            assert_eq!((len, buf.len()), (size, size));
+        }
+        assert!(NtBuffer::zeroed(0).is_empty());
+    }
+
+    #[test]
     fn the_buffer_grows_to_what_the_system_asks_for_and_stops_at_the_cap() {
         let mut sizes = Vec::new();
         let out = read_with_growth(
@@ -505,7 +577,9 @@ mod tests {
             1 << 20,
         )
         .unwrap();
-        assert_eq!(out, [7, 0, 0]);
+        assert_eq!(out.as_bytes(), [7, 0, 0]);
+        assert_eq!(out.len(), 3);
+        assert!(!out.is_empty());
         assert_eq!(sizes.len(), 2);
         assert!(sizes[1] >= 5000);
         assert_eq!(

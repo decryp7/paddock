@@ -62,7 +62,7 @@ impl NtSource for NtQuery {
             INITIAL_BUFFER,
             MAX_BUFFER,
         )?;
-        crate::nt::parse_processes(&buf)
+        crate::nt::parse_processes(buf.as_bytes())
     }
 
     #[allow(unsafe_code)]

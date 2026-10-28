@@ -413,7 +413,7 @@ mod tests {
             user_time: 0,
             kernel_time: 0,
             working_set: ws,
-            private_bytes: ws,
+            working_set_private: ws,
             read_bytes: 0,
             write_bytes: 0,
         }
