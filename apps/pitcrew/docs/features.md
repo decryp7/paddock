@@ -149,13 +149,13 @@ covers installing, registering runners and everyday use ([macOS](macos.md), [Lin
   machine's totals ([ADR 0007](adr/0007-runner-scoped-metrics.md)). A tile shows what Pitcrew itself costs.
 - **History:** CPU and memory with the runners stacked on the rest of the machine, over a range you choose.
 
-![Runner load and history](screenshots/dark/dashboard-load.png)
+![Runner load and history](screenshots/dark/dashboard.png)
 
 - **Jobs per day (jobs per hour for the 24-hour range), uptime, average job duration, an events feed** (restarts, stalls, updates, cleanups) and **update
   results**. With a read-only Gitea token (kept in the OS credential store) it also shows job outcomes and **queue
   wait**; without one it says what to add.
 
-![Dashboard history](screenshots/light/dashboard-history.png)
+![Dashboard history](screenshots/light/dashboard.png)
 
 ## Runners and a runner's page
 
@@ -253,7 +253,7 @@ A runner's page has a **Processes** tab ([ADR 0012](adr/0012-process-tracking-an
 
 ## Registering and adopting runners
 
-![Register wizard](screenshots/dark/register-wizard.png)
+![Register wizard](screenshots/dark/shell-register-wizard.png)
 
 - **A wizard** asks for the server URL, the registration token, a name in Pitcrew and on the server, labels, a new folder
   or an existing runner folder, and (Windows) where the runner runs and what it does while nobody is logged on.

@@ -46,6 +46,20 @@ for (const theme of ['dark', 'light'] as const) {
       await shoot(page, 'notification-centre');
     });
 
+    test('register window, last step', async ({ page, app }) => {
+      await page.setViewportSize({ width: 660, height: 640 });
+      await app.dialogs.openWindow('pc.register', {});
+      await app.dialogs.loaded();
+      const dialog = page.locator('pd-dialog-shell');
+      await dialog.getByLabel('Server URL').fill('https://git.example.com');
+      await dialog.getByLabel('Registration token').fill('demo-registration-token');
+      await dialog.getByRole('button', { name: 'Continue' }).click();
+      await dialog.getByLabel('Name in Pitcrew').fill('nightly');
+      await dialog.getByRole('button', { name: 'Continue' }).click();
+      await dialog.getByText('Run as the service account').click();
+      await shoot(page, 'register-wizard');
+    });
+
     // Dialog windows are shot at the size their definition declares (a fitted one at its width and the content's height).
     const windows: [string, string, { width: number; height: number }, unknown][] = [
       ['settings', 'pd.settings', { width: 920, height: 680 }, {}],

@@ -148,7 +148,9 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
     // The clipboard of the test browser is a stand-in: what matters is the confirmation, not the system clipboard.
     await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { value: { writeText: async () => undefined }, configurable: true }));
     await page.goto(`${APP}/logs`);
-    const line = page.locator('[role=log] .line').first();
+    // The viewer follows the end of the log and scrolls: hold on to one line by its number.
+    const seq = (await page.locator('[role=log] .line .seq').last().textContent())!.trim();
+    const line = page.locator('[role=log] .line').filter({ has: page.locator('.seq', { hasText: new RegExp(`^\\s*${seq}\\s*$`) }) });
     await line.hover();
     await line.getByRole('button', { name: 'Copy this line' }).click();
     await expect(line.getByRole('button', { name: 'Line copied' })).toBeVisible();
