@@ -2,6 +2,7 @@
 //! `inputs.txt` list, the slot commands with the real binary and the `./dev` wrapper.
 mod cli;
 mod golden;
+mod hostile;
 mod inputs;
 mod slots;
 mod wrapper;

@@ -3731,6 +3731,7 @@ name = "paddock-repo-graph"
 version = "0.1.0"
 dependencies = [
  "paddock-proc",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "serde_json",
  "tempfile",
@@ -3867,6 +3868,7 @@ dependencies = [
 name = "paddock-slots"
 version = "0.1.0"
 dependencies = [
+ "paddock-testkit",
  "paddock-workspace-hack",
  "tempfile",
 ]

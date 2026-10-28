@@ -3,9 +3,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join, posix } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
@@ -584,5 +584,15 @@ describe('command line: incomplete or unknown arguments are refused, never plann
     assert.equal(parseArgs(['origin/main', '--explain']).explain, true);
     assert.deepEqual(parseArgs(['--files', 'a,b', '--explain']).files, ['a', 'b']);
     assert.equal(parseArgs(['--all']).all, true);
+  });
+});
+
+describe('paths from cargo metadata on Windows', () => {
+  test('repoRelative gives a / path where path.relative would give a \\ one', () => {
+    const win = (root, p) => repoRelative(root, p, win32.relative, win32.sep);
+    assert.equal(win('C:\\work\\paddock', 'C:\\work\\paddock\\crates\\paddock-cli'), 'crates/paddock-cli');
+    assert.equal(win('C:\\work\\paddock', 'c:\\WORK\\paddock\\apps\\x\\app\\src-tauri'), 'apps/x/app/src-tauri', 'drive letter and case do not matter on Windows');
+    assert.equal(win('C:\\work\\paddock', 'C:\\work\\paddock'), '');
+    assert.equal(repoRelative('/r', '/r/crates/a'), 'crates/a');
   });
 });

@@ -31,9 +31,18 @@
 // No dependencies; Node 22+.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
-import { dirname, join, posix, relative, resolve } from 'node:path';
+import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from '../conformance/src/util/is-main.mjs';
+
+/**
+ * `p` relative to `root`, always with `/` separators: every key of the graphs is a `/` path, and on Windows `path.relative`
+ * returns `crates\\paddock-cli`, which matches none of them (the crate and its apps were then unreachable).
+ * `rel` and `separator` are injectable so that a test can use `path.win32`.
+ */
+export function repoRelative(root, p, rel = relative, separator = sep) {
+  return rel(root, p).split(separator).join('/');
+}
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const git = (args, cwd = ROOT) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -155,8 +164,8 @@ export function cargoGraph(files, root = ROOT) {
     }
     const workspace = dirname(m);
     for (const p of meta.packages) {
-      const dir = relative(root, dirname(p.manifest_path));
-      const deps = p.dependencies.filter((d) => d.path).map((d) => relative(root, d.path));
+      const dir = repoRelative(root, dirname(p.manifest_path));
+      const deps = p.dependencies.filter((d) => d.path).map((d) => repoRelative(root, d.path));
       crates.set(dir, { name: p.name, workspace, deps });
     }
   }
@@ -187,7 +196,7 @@ export function npmGraph(files, root = ROOT) {
     const dist = JSON.parse(readFileSync(join(root, f), 'utf8')).build?.frontendDist;
     if (typeof dist !== 'string' || /^https?:/.test(dist)) continue;
     const self = dirname(f);
-    const target = nodeOf(relative(root, resolve(root, self, dist)), pkgs.keys());
+    const target = nodeOf(repoRelative(root, resolve(root, self, dist)), pkgs.keys());
     if (!target || self === target || self.startsWith(`${target}/`)) continue;
     if (!pkgs.has(self)) pkgs.set(self, { name: self, deps: [] });
     edge(self, target);
@@ -196,7 +205,7 @@ export function npmGraph(files, root = ROOT) {
   for (const f of files.filter((x) => /(^|\/)(tsconfig[^/]*\.json|angular\.json|eslint\.config\.[cm]?js)$/.test(x))) {
     const from = nodeOf(f, pkgs.keys());
     if (!from) continue;
-    for (const ref of pathRefs(readFileSync(join(root, f), 'utf8'))) edge(from, nodeOf(relative(root, resolve(root, dirname(f), ref)), pkgs.keys()));
+    for (const ref of pathRefs(readFileSync(join(root, f), 'utf8'))) edge(from, nodeOf(repoRelative(root, resolve(root, dirname(f), ref)), pkgs.keys()));
   }
   return pkgs;
 }
