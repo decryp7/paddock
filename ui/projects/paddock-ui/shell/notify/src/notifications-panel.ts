@@ -104,7 +104,9 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
     .pd-row-actions { position: absolute; inset-block-start: 2px; inset-inline-end: var(--pd-space-1); display: flex; gap: 2px; padding-inline-start: var(--pd-space-2); background: var(--pd-surface-3); border-radius: var(--pd-radius-control); opacity: 0; }
     /* Shown by hover or by focus on one of its own buttons, never by focus on a body action (that would cover the time). */
     .pd-notice:hover .pd-row-actions, .pd-row-actions:focus-within { opacity: 1; }
-    @media (hover: none) { .pd-row-actions { position: static; opacity: 1; padding-inline-start: 0; } }
+    /* The buttons sit over the time, so it gives way whole while they show (not cut in half). */
+    .pd-notice:hover .pd-time, .pd-row:has(.pd-row-actions:focus-within) .pd-time { visibility: hidden; }
+    @media (hover: none) { .pd-row-actions { position: static; opacity: 1; padding-inline-start: 0; } .pd-notice:hover .pd-time { visibility: visible; } }
     .pd-btn { min-height: 26px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); cursor: pointer; }
     .pd-btn.pd-ghost { background: transparent; border-color: transparent; color: var(--pd-accent); }
     .pd-btn:disabled { color: var(--pd-text-subtle); cursor: default; }
