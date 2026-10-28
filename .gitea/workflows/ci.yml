@@ -722,7 +722,13 @@ jobs:
       - name: Tests
         if: ${{ !cancelled() }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
-        run: cargo nextest run --locked --no-fail-fast
+        run: cargo nextest run --profile ci --locked --no-fail-fast
+
+      # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.
+      - name: Deny
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: cargo deny check
 
       # The kept build folder stays within its cap (this job's own folder only, after the builds).
       - uses: ./.gitea/actions/prune-build-folder
