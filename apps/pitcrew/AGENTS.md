@@ -159,7 +159,7 @@ Pitcrew runs privileged (a Windows service as LocalSystem), downloads executable
 - UI: standalone components, signals, OnPush, CSS custom properties for theme tokens (dark and light), accessible
   markup (real buttons, labels, aria-labels on icon buttons), the `pc` selector prefix.
 - UI building blocks: use **Angular CDK** for behaviour and accessibility (menus, overlays, dialogs, listbox,
-  scrolling) instead of hand-rolling them, and **Angular Material** selectively for complex inputs, themed through
+  scrolling) instead of hand-rolling them, and **Angular Material first** (rule 47: a Material component wherever one fits), themed through
   Pitcrew's CSS tokens. Icons use Material's `MatIconRegistry` with Pitcrew's own SVGs registered as literals in the
   `pc` namespace (`<mat-icon svgIcon="pc:refresh">`); no icon fonts and no icon URLs fetched at run time (the CSP
   forbids it).
