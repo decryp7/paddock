@@ -9,7 +9,8 @@
   "angularDir": "app",
   "windowsClippy": true,
   "processPatterns": [
-    "[/\\\\]\\.paddock-ci[/\\\\]target-dyno-app[/\\\\]debug[/\\\\](dyno-ipc-test-child|dyno-test-plugin|dyno-bench)(\\.exe)?( |$)"
+    "[/\\\\]\\.paddock-ci[/\\\\]target-dyno-app[/\\\\]debug[/\\\\](dyno-ipc-test-child|dyno-test-plugin|dyno-bench)(\\.exe)?( |$)",
+    "[/\\\\]dyno-it-plugins-[A-Za-z0-9]+[/\\\\][^/\\\\]+[/\\\\]plugin(\\.exe)?( |$)"
   ],
   "checks": [
     "cd apps/dyno",
