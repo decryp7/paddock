@@ -66,22 +66,33 @@ pub fn uid_min_from(text: &str) -> Option<u32> {
     })
 }
 
-/// Whose a Unix process is: `uid` against Dyno's own and the first ordinary user id. A process with no readable owner is
-/// [`Owner::Unknown`].
+/// The "nobody" users: 65534 on Linux and most Unixes, -2 (4294967294) on macOS, and the "no user" -1.
+const NOBODY_UIDS: [u32; 3] = [65_534, u32::MAX - 1, u32::MAX];
+/// Ids from here up are not people's accounts: container user-namespace ranges start at 65536 and hand out subuids.
+const FIRST_CONTAINER_UID: u32 = 65_536;
+
+/// Whose a Unix process is: `uid` against Dyno's own and the first ordinary user id. Ids below the first ordinary user,
+/// "nobody" and container subuids (65536 and up) are the system's, not another person's. A process with no readable owner
+/// is [`Owner::Unknown`].
 pub fn classify_uid(uid: Option<u32>, own_uid: Option<u32>, first_user: u32) -> Owner {
     match (uid, own_uid) {
         (Some(u), Some(own)) if u == own => Owner::Own,
-        (Some(u), _) if u < first_user => Owner::System,
+        (Some(u), _) if u < first_user || NOBODY_UIDS.contains(&u) || u >= FIRST_CONTAINER_UID => Owner::System,
         (Some(_), Some(_)) => Owner::Other,
         _ => Owner::Unknown,
     }
 }
 
-/// Whose a Windows process is by its account SID: SYSTEM, LOCAL SERVICE and NETWORK SERVICE are the system; the same SID as
-/// Dyno's is its own; any other is another user's.
+/// SID prefixes of Windows' virtual accounts: service SIDs (80), IIS application pools (82), the Desktop Window Manager (90)
+/// and the font driver host UMFD (96). They are the system's, not another person's.
+const SYSTEM_SID_PREFIXES: [&str; 4] = ["S-1-5-80-", "S-1-5-82-", "S-1-5-90-", "S-1-5-96-"];
+
+/// Whose a Windows process is by its account SID: SYSTEM, LOCAL SERVICE, NETWORK SERVICE and the virtual accounts are the
+/// system; the same SID as Dyno's is its own; any other is another user's.
 pub fn classify_sid(sid: Option<&str>, own_sid: Option<&str>) -> Owner {
     match (sid, own_sid) {
         (Some("S-1-5-18" | "S-1-5-19" | "S-1-5-20"), _) => Owner::System,
+        (Some(a), _) if SYSTEM_SID_PREFIXES.iter().any(|p| a.starts_with(p)) => Owner::System,
         (Some(a), Some(b)) if a == b => Owner::Own,
         (Some(_), Some(_)) => Owner::Other,
         _ => Owner::Unknown,
@@ -344,12 +355,40 @@ mod tests {
         assert_eq!(classify_uid(Some(499), Some(501), 500), Owner::System);
         assert_eq!(classify_uid(Some(502), Some(501), 500), Owner::Other);
         assert_eq!(classify_uid(None, Some(501), 500), Owner::Unknown);
+        // Nobody and container subuids are the system's, never "Other users".
+        for nobody in [65_534, 4_294_967_294, u32::MAX] {
+            assert_eq!(classify_uid(Some(nobody), Some(1000), 1000), Owner::System, "{nobody}");
+        }
+        assert_eq!(classify_uid(Some(100_000), Some(1000), 1000), Owner::System, "a container subuid");
+        assert_eq!(classify_uid(Some(65_535), Some(1000), 1000), Owner::System);
+        assert_eq!(
+            classify_uid(Some(1001), Some(1000), 1000),
+            Owner::Other,
+            "an ordinary second user is still another user"
+        );
+        assert_eq!(
+            classify_uid(Some(100_000), Some(100_000), 1000),
+            Owner::Own,
+            "Dyno's own account stays its own"
+        );
         assert_eq!(classify_uid(Some(502), None, 500), Owner::Unknown);
         assert_eq!(classify_sid(Some("S-1-5-18"), Some("S-1-5-21-1")), Owner::System);
         assert_eq!(classify_sid(Some("S-1-5-20"), None), Owner::System);
         assert_eq!(classify_sid(Some("S-1-5-21-1"), Some("S-1-5-21-1")), Owner::Own);
         assert_eq!(classify_sid(Some("S-1-5-21-2"), Some("S-1-5-21-1")), Owner::Other);
         assert_eq!(classify_sid(None, Some("S-1-5-21-1")), Owner::Unknown);
+        for virtual_account in ["S-1-5-80-1234-5", "S-1-5-82-1-2", "S-1-5-90-0-1", "S-1-5-96-0-2"] {
+            assert_eq!(
+                classify_sid(Some(virtual_account), Some("S-1-5-21-1")),
+                Owner::System,
+                "{virtual_account}"
+            );
+        }
+        assert_eq!(
+            classify_sid(Some("S-1-5-801-1"), Some("S-1-5-21-1")),
+            Owner::Other,
+            "only the exact sub-authority counts"
+        );
         assert_eq!(classify_session(0, 2), Owner::System);
         assert_eq!(classify_session(2, 2), Owner::Own);
         assert_eq!(classify_session(3, 2), Owner::Other);
