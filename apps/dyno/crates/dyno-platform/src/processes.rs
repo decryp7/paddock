@@ -10,7 +10,7 @@ use crate::readability::classify_session;
 use crate::readability::classify_sid;
 #[cfg(unix)]
 use crate::readability::classify_uid;
-use crate::readability::{apply_nt, as_not_supported, first_user_uid, measure, Os, Raw};
+use crate::readability::{apply_nt, as_not_supported, first_user_uid, measure, Os, Raw, SubIds};
 use crate::sensors::rate;
 use dyno_core::ports::{PlatformError, ProcessSource};
 use dyno_core::process::Owner;
@@ -46,6 +46,22 @@ fn own_user_of(u: &sysinfo::Uid) -> OwnUser {
 #[cfg(windows)]
 fn own_user_of(u: &sysinfo::Uid) -> OwnUser {
     u.to_string()
+}
+
+/// The subordinate id ranges of this Linux machine (`/etc/subuid`, `/etc/subgid`); none elsewhere.
+fn sub_ids() -> SubIds {
+    if !cfg!(target_os = "linux") {
+        return SubIds::none();
+    }
+    let read = |path: &str| {
+        use std::io::Read;
+        let mut text = String::new();
+        // Small files; bounded anyway.
+        std::fs::File::open(path).ok()?.take(1 << 20).read_to_string(&mut text).ok()?;
+        Some(text)
+    };
+    let (uids, gids) = (read("/etc/subuid"), read("/etc/subgid"));
+    SubIds::parse([uids.as_deref(), gids.as_deref()].into_iter().flatten())
 }
 
 /// The text of `/etc/login.defs` on Linux, where it says where ordinary user ids start.
@@ -121,6 +137,8 @@ pub struct SysinfoProcesses {
     own_user: Option<OwnUser>,
     #[cfg_attr(windows, allow(dead_code))]
     first_user: u32,
+    #[cfg_attr(windows, allow(dead_code))]
+    sub_ids: SubIds,
     probe: Box<dyn DetailsProbe>,
     nt: Option<NtDriver>,
 }
@@ -139,6 +157,7 @@ impl SysinfoProcesses {
             cores,
             own_user: None,
             first_user: first_user_uid(Os::this(), login_defs().as_deref()),
+            sub_ids: sub_ids(),
             probe,
             nt: None,
         }
@@ -185,7 +204,12 @@ impl SysinfoProcesses {
     fn owner_of(&self, p: &Process, fallback_uid: Option<u32>) -> Owner {
         #[cfg(unix)]
         {
-            classify_uid(p.user_id().map(|u| **u).or(fallback_uid), self.own_user, self.first_user)
+            classify_uid(
+                p.user_id().map(|u| **u).or(fallback_uid),
+                self.own_user,
+                self.first_user,
+                &self.sub_ids,
+            )
         }
         #[cfg(windows)]
         {

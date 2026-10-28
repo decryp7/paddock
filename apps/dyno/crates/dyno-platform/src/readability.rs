@@ -68,16 +68,53 @@ pub fn uid_min_from(text: &str) -> Option<u32> {
 
 /// The "nobody" users: 65534 on Linux and most Unixes, -2 (4294967294) on macOS, and the "no user" values 65535 and -1.
 const NOBODY_UIDS: [u32; 4] = [65_534, 65_535, u32::MAX - 1, u32::MAX];
-/// Ids from here up are not people's accounts: container user-namespace ranges start at 65536 and hand out subuids.
-const FIRST_CONTAINER_UID: u32 = 65_536;
+/// Most subordinate id ranges read from `/etc/subuid` and `/etc/subgid`.
+const MAX_SUB_RANGES: usize = 4096;
+
+/// The subordinate id ranges of a Linux machine (`/etc/subuid`, `/etc/subgid`): ids handed to user namespaces, so to
+/// containers, never to people. Directory accounts (AD, LDAP) also have large ids, which is why a high id alone says nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SubIds(Vec<(u32, u32)>);
+
+impl SubIds {
+    /// No ranges (macOS, Windows, or files that could not be read).
+    pub fn none() -> SubIds {
+        SubIds::default()
+    }
+
+    /// The ranges named in the text of `/etc/subuid` and/or `/etc/subgid` (`name:first:count` per line); lines that are not
+    /// that are skipped. The injected texts keep tests off the real `/etc`.
+    pub fn parse<'a>(texts: impl IntoIterator<Item = &'a str>) -> SubIds {
+        let mut ranges = Vec::new();
+        for line in texts.into_iter().flat_map(str::lines) {
+            let mut parts = line.trim().split(':');
+            let (Some(_name), Some(first), Some(count)) = (parts.next(), parts.next(), parts.next()) else {
+                continue;
+            };
+            if let (Ok(first), Ok(count)) = (first.trim().parse::<u32>(), count.trim().parse::<u32>()) {
+                if count > 0 && ranges.len() < MAX_SUB_RANGES {
+                    ranges.push((first, count));
+                }
+            }
+        }
+        SubIds(ranges)
+    }
+
+    /// Whether `id` lies in one of the ranges.
+    pub fn contains(&self, id: u32) -> bool {
+        self.0
+            .iter()
+            .any(|(first, count)| id >= *first && u64::from(id) < u64::from(*first) + u64::from(*count))
+    }
+}
 
 /// Whose a Unix process is: `uid` against Dyno's own and the first ordinary user id. Ids below the first ordinary user,
-/// "nobody" and container subuids (65536 and up) are the system's, not another person's. A process with no readable owner
-/// is [`Owner::Unknown`].
-pub fn classify_uid(uid: Option<u32>, own_uid: Option<u32>, first_user: u32) -> Owner {
+/// "nobody" and ids in a subordinate range (`sub`: containers) are the system's, not another person's. Any other id, however
+/// large, is a person's account (directory accounts have large ids). A process with no readable owner is [`Owner::Unknown`].
+pub fn classify_uid(uid: Option<u32>, own_uid: Option<u32>, first_user: u32, sub: &SubIds) -> Owner {
     match (uid, own_uid) {
         (Some(u), Some(own)) if u == own => Owner::Own,
-        (Some(u), _) if u < first_user || NOBODY_UIDS.contains(&u) || u >= FIRST_CONTAINER_UID => Owner::System,
+        (Some(u), _) if u < first_user || NOBODY_UIDS.contains(&u) || sub.contains(u) => Owner::System,
         (Some(_), Some(_)) => Owner::Other,
         _ => Owner::Unknown,
     }
@@ -350,28 +387,60 @@ mod tests {
 
     #[test]
     fn owners_are_told_apart_by_uid_sid_and_session() {
-        assert_eq!(classify_uid(Some(501), Some(501), 500), Owner::Own);
-        assert_eq!(classify_uid(Some(0), Some(501), 500), Owner::System);
-        assert_eq!(classify_uid(Some(499), Some(501), 500), Owner::System);
-        assert_eq!(classify_uid(Some(502), Some(501), 500), Owner::Other);
-        assert_eq!(classify_uid(None, Some(501), 500), Owner::Unknown);
-        // Nobody and container subuids are the system's, never "Other users".
-        for nobody in [65_534, 4_294_967_294, u32::MAX] {
-            assert_eq!(classify_uid(Some(nobody), Some(1000), 1000), Owner::System, "{nobody}");
+        let none = SubIds::none();
+        assert_eq!(classify_uid(Some(501), Some(501), 500, &none), Owner::Own);
+        assert_eq!(classify_uid(Some(0), Some(501), 500, &none), Owner::System);
+        assert_eq!(classify_uid(Some(499), Some(501), 500, &none), Owner::System);
+        assert_eq!(classify_uid(Some(502), Some(501), 500, &none), Owner::Other);
+        assert_eq!(classify_uid(None, Some(501), 500, &none), Owner::Unknown);
+        assert_eq!(classify_uid(Some(502), None, 500, &none), Owner::Unknown);
+        // Nobody (65534, 65535, macOS -2, -1) is the system's, never "Other users".
+        for nobody in [65_534, 65_535, 4_294_967_294, u32::MAX] {
+            assert_eq!(classify_uid(Some(nobody), Some(1000), 1000, &none), Owner::System, "{nobody}");
         }
-        assert_eq!(classify_uid(Some(100_000), Some(1000), 1000), Owner::System, "a container subuid");
-        assert_eq!(classify_uid(Some(65_535), Some(1000), 1000), Owner::System);
         assert_eq!(
-            classify_uid(Some(1001), Some(1000), 1000),
+            classify_uid(Some(1001), Some(1000), 1000, &none),
             Owner::Other,
             "an ordinary second user is still another user"
         );
+    }
+
+    #[test]
+    fn only_subordinate_id_ranges_make_a_large_id_a_container_not_a_person() {
+        // Injected file contents, never the real /etc.
+        let sub = SubIds::parse([
+            "alex:100000:65536\nbob:165536:65536\n",
+            "alex:100000:65536\n# comment\nbad line\nx:y:z\nzero:5:0\n",
+        ]);
+        assert!(sub.contains(100_000) && sub.contains(165_535) && sub.contains(231_071));
+        assert!(!sub.contains(99_999) && !sub.contains(231_072) && !sub.contains(5));
         assert_eq!(
-            classify_uid(Some(100_000), Some(100_000), 1000),
+            classify_uid(Some(120_000), Some(1000), 1000, &sub),
+            Owner::System,
+            "a container subuid"
+        );
+        // A directory account (AD, LDAP) has a large id outside every subordinate range: a person.
+        assert_eq!(classify_uid(Some(1_200_345), Some(1000), 1000, &sub), Owner::Other);
+        assert_eq!(
+            classify_uid(Some(70_000), Some(1000), 1000, &SubIds::none()),
+            Owner::Other,
+            "no ranges, no containers"
+        );
+        assert_eq!(
+            classify_uid(Some(100_000), Some(100_000), 1000, &sub),
             Owner::Own,
             "Dyno's own account stays its own"
         );
-        assert_eq!(classify_uid(Some(502), None, 500), Owner::Unknown);
+        assert!(
+            SubIds::parse([&*"a:4294967290:100".to_string()]).contains(u32::MAX),
+            "ranges reaching past u32 do not wrap"
+        );
+        let many = (0..5000).map(|i| format!("u{i}:{}:1\n", i * 10)).collect::<String>();
+        assert!(!SubIds::parse([many.as_str()]).contains(49_990), "the number of ranges is capped");
+    }
+
+    #[test]
+    fn sids_and_sessions_are_told_apart() {
         assert_eq!(classify_sid(Some("S-1-5-18"), Some("S-1-5-21-1")), Owner::System);
         assert_eq!(classify_sid(Some("S-1-5-20"), None), Owner::System);
         assert_eq!(classify_sid(Some("S-1-5-21-1"), Some("S-1-5-21-1")), Owner::Own);
