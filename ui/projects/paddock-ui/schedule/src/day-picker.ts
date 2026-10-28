@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { toggleDay, WEEKDAYS, type Weekday } from './schedule-model';
+import { MatButtonToggle, MatButtonToggleChange, MatButtonToggleGroup } from '@angular/material/button-toggle';
+import { WEEKDAYS, type Weekday } from './schedule-model';
 
 /** The short name of a day, in the active locale (English source text). */
 export function dayLabel(day: Weekday): string {
@@ -21,23 +22,23 @@ export function dayLabel(day: Weekday): string {
   }
 }
 
-/** Seven day toggles (Monday first) in a labelled group; each is a real button with `aria-pressed`. */
+/**
+ * Seven day toggles (Monday first) in a labelled group: a multiple-selection `mat-button-toggle-group`, so each day is a real
+ * button with `aria-pressed`; Tab moves between the days (Material's toggles are separate tab stops) and Space or Enter flips one.
+ */
 @Component({
   selector: 'pd-day-picker',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { role: 'group', '[attr.aria-label]': 'label()' },
+  imports: [MatButtonToggleGroup, MatButtonToggle],
   template: `
-    @for (d of days; track d) {
-      <button type="button" class="pd-day" [class.pd-on]="value().includes(d)" [attr.aria-pressed]="value().includes(d)" [disabled]="disabled()" (click)="valueChange.emit(toggle(d))">{{ name(d) }}</button>
-    }
+    <mat-button-toggle-group multiple hideMultipleSelectionIndicator [aria-label]="label()" [value]="value()" [disabled]="disabled()" (change)="changed($event)">
+      @for (d of days; track d) {
+        <mat-button-toggle [value]="d">{{ name(d) }}</mat-button-toggle>
+      }
+    </mat-button-toggle-group>
   `,
   styles: `
-    :host { display: inline-flex; flex-wrap: wrap; gap: var(--pd-space-1); }
-    .pd-day { min-width: var(--pd-hit-min); min-height: var(--pd-control-height); padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-label); }
-    .pd-day:hover:not(:disabled, .pd-on) { background: var(--pd-hover); color: var(--pd-text); }
-    .pd-day.pd-on { border-color: var(--pd-accent); background: var(--pd-accent-tint); color: var(--pd-text); font-weight: var(--pd-weight-semibold); }
-    .pd-day:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
-    .pd-day:disabled { opacity: 0.5; }
+    :host { display: inline-flex; }
   `,
 })
 export class PdDayPicker {
@@ -51,7 +52,8 @@ export class PdDayPicker {
   protected readonly days = WEEKDAYS;
   protected readonly name = dayLabel;
 
-  protected toggle(day: Weekday): Weekday[] {
-    return toggleDay(this.value(), day);
+  protected changed(e: MatButtonToggleChange): void {
+    const chosen = e.value as readonly Weekday[];
+    this.valueChange.emit(WEEKDAYS.filter((d) => chosen.includes(d)));
   }
 }

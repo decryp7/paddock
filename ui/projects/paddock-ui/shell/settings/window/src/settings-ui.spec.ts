@@ -83,7 +83,7 @@ describe('pd-settings-window', () => {
     const { el } = bed;
     expect($(el, '.pd-item[aria-current="page"]').dataset['page']).toBe('sd.general');
     expect($<HTMLInputElement>(field(el, 'notify'), 'input[role="switch"]').checked).toBe(true);
-    expect($(field(el, 'style'), 'pd-select button').textContent?.trim()).toBe('Casual');
+    expect($(field(el, 'style'), 'pd-select mat-select').textContent?.trim()).toBe('Casual');
     expect(field(el, 'style').querySelector('select')).toBeNull();
     expect($<HTMLInputElement>(field(el, 'greeting'), 'input[type="text"]').value).toBe('Hello');
     expect($<HTMLInputElement>(field(el, 'repeat'), 'input[type="number"]').value).toBe('1');
@@ -114,7 +114,7 @@ describe('pd-settings-window', () => {
     await settle();
     expect(backend.values('sd.general')?.['notify']).toBe(false);
     expect($(el, '.pd-foot .pd-status').textContent).toBe('Show a notification saved.');
-    $(field(el, 'style'), 'pd-select button').click();
+    $(field(el, 'style'), 'pd-select mat-select').click();
     await settle();
     [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=option]')].find((o) => o.textContent?.includes('Formal'))!.click();
     await settle();

@@ -445,7 +445,7 @@ describe('the dialogs', () => {
     await settle();
     expect((await updates.status()).autoCheck).toBe(true);
     expect(el.querySelector('select')).toBeNull();
-    el.querySelector<HTMLButtonElement>('pd-select button')!.click();
+    el.querySelector<HTMLButtonElement>('pd-select mat-select')!.click();
     await settle();
     await fixture.whenStable();
     [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=option]')].find((o) => o.textContent?.includes('Beta'))!.click();

@@ -33,23 +33,30 @@ function schedule(value: Schedule, extra: { preview?: SchedulePreview | null; pr
     input.dispatchEvent(new Event('change'));
     await settle(f);
   };
-  return { f, el, q, all, change, value: () => f.componentInstance.value() };
+  // The timepicker reads what is typed (in the locale's words) on `input`.
+  const type = async (input: HTMLInputElement, text: string) => {
+    input.value = text;
+    input.dispatchEvent(new Event('input'));
+    await settle(f);
+  };
+  return { f, el, q, all, change, type, value: () => f.componentInstance.value() };
 }
 
 describe('pd-schedule-editor', () => {
   it('switches mode and keeps a useful start for each', async () => {
     const t = schedule({ mode: 'every', secs: 900 });
     await settle(t.f);
-    const modes = t.all('button[role=radio]');
+    const radios = () => t.all('pd-segmented-control button[role=radio]');
+    const modes = radios();
     expect(modes.map((b) => b.textContent!.trim())).toEqual(['Every…', 'At times', 'Cron']);
-    expect(t.all('button[role=radio]').map((b) => b.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
+    expect(radios().map((b) => b.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
     modes[1]!.click();
     await settle(t.f);
     expect(t.value()).toEqual({ mode: 'times', days: ['mon', 'tue', 'wed', 'thu', 'fri'], times: ['09:00'], zone: null });
-    t.all('button[role=radio]')[2]!.click();
+    radios()[2]!.click();
     await settle(t.f);
     expect(t.value()).toEqual({ mode: 'cron', expr: '0 9 * * 1-5', zone: null });
-    t.all('button[role=radio]')[0]!.click();
+    radios()[0]!.click();
     await settle(t.f);
     expect(t.value()).toEqual({ mode: 'every', secs: 3600 });
   });
@@ -57,12 +64,13 @@ describe('pd-schedule-editor', () => {
   it('edits an interval by preset, amount and unit, and refuses an unusable number', async () => {
     const t = schedule({ mode: 'every', secs: 900 });
     await settle(t.f);
-    expect(t.all('.pd-preset').map((b) => b.textContent!.trim())).toEqual(['15 min', '30 min', '1 h', '3 h', '6 h', '12 h', 'Daily']);
-    expect(t.q('.pd-preset.pd-on').textContent!.trim()).toBe('15 min');
-    t.all('.pd-preset')[4]!.click();
+    const presets = () => t.all('.pd-presets button');
+    expect(presets().map((b) => b.textContent!.trim())).toEqual(['15 min', '30 min', '1 h', '3 h', '6 h', '12 h', 'Daily']);
+    expect(presets().filter((b) => b.getAttribute('aria-checked') === 'true').map((b) => b.textContent!.trim())).toEqual(['15 min']);
+    presets()[4]!.click();
     await settle(t.f);
     expect(t.value()).toEqual({ mode: 'every', secs: 21_600 });
-    const amount = t.q<HTMLInputElement>('input.pd-amount');
+    const amount = t.q<HTMLInputElement>('pd-field.pd-amount input');
     expect(amount.value).toBe('6');
     await t.change(amount, '2');
     expect(t.value()).toEqual({ mode: 'every', secs: 7200 });
@@ -70,7 +78,7 @@ describe('pd-schedule-editor', () => {
     expect(t.value()).toEqual({ mode: 'every', secs: 7200 });
     expect(amount.value).toBe('2');
     // The unit: 2 hours becomes 2 days through the select.
-    t.q<HTMLButtonElement>('pd-select button').click();
+    t.q('pd-select mat-select').click();
     await settle(t.f);
     const options = [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=option]')];
     expect(options.map((o) => o.textContent!.trim())).toEqual(['Minutes', 'Hours', 'Days']);
@@ -83,8 +91,8 @@ describe('pd-schedule-editor', () => {
   it('edits days, times and the zone of an "at times" schedule', async () => {
     const t = schedule({ mode: 'times', days: ['mon'], times: ['09:00'], zone: null });
     await settle(t.f);
-    expect(t.all('.pd-day').map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false', 'false', 'false', 'false', 'false']);
-    t.all('.pd-day')[2]!.click();
+    expect(t.all('pd-day-picker button').map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false', 'false', 'false', 'false', 'false']);
+    t.all('pd-day-picker button')[2]!.click();
     await settle(t.f);
     expect(t.value()).toMatchObject({ days: ['mon', 'wed'] });
     // The only time of day cannot be removed; a second one can be added, edited and removed.
@@ -93,16 +101,22 @@ describe('pd-schedule-editor', () => {
     await settle(t.f);
     expect(t.value()).toMatchObject({ times: ['09:00', '10:00'] });
     const inputs = t.all<HTMLInputElement>('.pd-times input');
-    await t.change(inputs[1]!, '17:45');
+    expect(inputs.map((i) => i.value)).toEqual(['9:00 AM', '10:00 AM']);
+    expect(inputs[1]!.getAttribute('role')).toBe('combobox');
+    expect(t.all('.pd-times label').map((l) => l.textContent!.trim())).toEqual(['Time of day 1', 'Time of day 2']);
+    await t.type(inputs[1]!, '5:45 PM');
     expect(t.value()).toMatchObject({ times: ['09:00', '17:45'] });
-    await t.change(inputs[1]!, '');
+    // Incomplete or empty text keeps the last good time.
+    await t.type(inputs[1]!, '');
+    expect(t.value()).toMatchObject({ times: ['09:00', '17:45'] });
+    await t.type(inputs[1]!, 'soon');
     expect(t.value()).toMatchObject({ times: ['09:00', '17:45'] });
     t.all('.pd-times button')[0]!.click();
     await settle(t.f);
     expect(t.value()).toMatchObject({ times: ['17:45'] });
-    await t.change(t.q<HTMLInputElement>('.pd-field input'), ' Asia/Tokyo ');
+    await t.change(t.q<HTMLInputElement>('[data-testid=schedule-zone] input'), ' Asia/Tokyo ');
     expect(t.value()).toMatchObject({ zone: 'Asia/Tokyo' });
-    await t.change(t.q<HTMLInputElement>('.pd-field input'), '');
+    await t.change(t.q<HTMLInputElement>('[data-testid=schedule-zone] input'), '');
     expect(t.value()).toMatchObject({ zone: null });
   });
 
@@ -132,7 +146,7 @@ describe('pd-schedule-editor', () => {
     expect(t.all('.pd-runs li').every((li) => li.textContent!.includes('09:00'))).toBe(true);
     expect(t.q('.pd-warning').textContent).toContain('Clamped');
     expect(t.q('.pd-zone').textContent).toBe('Times are in Europe/Berlin.');
-    expect(t.all('.pd-field')).toHaveLength(0);
+    expect(t.el.querySelector('[data-testid=schedule-zone]')).toBeNull();
   });
 
   it('shows problems instead of the preview, and disables every control when disabled', async () => {
@@ -172,19 +186,25 @@ describe('pd-pause-editor', () => {
     await settle(t.f);
     expect(t.value().windows).toEqual([{ days: [], start: '22:00', end: '06:00' }]);
     expect(t.el.textContent).toContain('Ends the next day.');
-    const [from, until] = t.all('input[type=time]') as HTMLInputElement[];
-    from!.value = '07:00';
-    from!.dispatchEvent(new Event('change'));
-    until!.value = '09:30';
-    until!.dispatchEvent(new Event('change'));
-    await settle(t.f);
+    const [from, until] = t.all('input[role=combobox]') as HTMLInputElement[];
+    expect([from!.value, until!.value]).toEqual(['10:00 PM', '6:00 AM']);
+    const type = async (input: HTMLInputElement, text: string) => {
+      input.value = text;
+      input.dispatchEvent(new Event('input'));
+      await settle(t.f);
+    };
+    await type(from!, '7:00 AM');
+    await type(until!, '9:30 AM');
     expect(t.value().windows[0]).toMatchObject({ start: '07:00', end: '09:30' });
     expect(t.el.textContent).not.toContain('Ends the next day.');
-    until!.value = '';
-    until!.dispatchEvent(new Event('change'));
-    await settle(t.f);
-    expect(t.value().windows[0]).toMatchObject({ end: '09:30' });
-    t.all('.pd-day')[5]!.click();
+    // A window across midnight: 11:15 PM until 12:00 AM.
+    await type(from!, '11:15 PM');
+    await type(until!, '12:00 AM');
+    expect(t.value().windows[0]).toMatchObject({ start: '23:15', end: '00:00' });
+    expect(t.el.textContent).toContain('Ends the next day.');
+    await type(until!, '');
+    expect(t.value().windows[0]).toMatchObject({ end: '00:00' });
+    t.all('pd-day-picker button')[5]!.click();
     await settle(t.f);
     expect(t.value().windows[0]!.days).toEqual(['sat']);
     t.q('.pd-window button[aria-label="Remove window 1"]').click();
@@ -200,7 +220,7 @@ describe('pd-pause-editor', () => {
     t.q('.pd-add').click();
     expect(t.value().windows).toHaveLength(14);
     expect(t.q('.pd-problem').textContent).toContain('differs');
-    const zone = t.q('.pd-field input') as HTMLInputElement;
+    const zone = t.q('[data-testid=pause-zone] input') as HTMLInputElement;
     zone.value = 'Europe/Berlin';
     zone.dispatchEvent(new Event('change'));
     await settle(t.f);

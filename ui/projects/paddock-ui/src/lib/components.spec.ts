@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { SuCard } from './card';
 import { SuMetric, deltaTone, formatNumber } from './metric';
-import { SuSegmentedControl, nextEnabled, type SuSegment } from './segmented-control';
+import { SuSegmentedControl, type SuSegment } from './segmented-control';
 import { SuSkeleton } from './skeleton';
 import { SuSparkline, sparklineGeometry } from './sparkline';
 import { SU_STATUSES } from './status';
@@ -313,20 +313,6 @@ describe('SuSkeleton', () => {
   });
 });
 
-describe('nextEnabled', () => {
-  const o: SuSegment[] = [{ value: 'a', label: 'A' }, { value: 'b', label: 'B', disabled: true }, { value: 'c', label: 'C' }];
-  it('skips disabled segments and wraps', () => {
-    expect(nextEnabled(o, 0, 1)).toBe(2);
-    expect(nextEnabled(o, 2, 1)).toBe(0);
-    expect(nextEnabled(o, 0, -1)).toBe(2);
-    expect(nextEnabled(o, 2, -1)).toBe(0);
-  });
-  it('returns -1 when nothing is enabled', () => {
-    expect(nextEnabled([{ value: 'a', label: 'A', disabled: true }], 0, 1)).toBe(-1);
-    expect(nextEnabled([], 0, 1)).toBe(-1);
-  });
-});
-
 describe('SuSegmentedControl', () => {
   const options: SuSegment[] = [
     { value: '1h', label: '1 h' },
@@ -343,8 +329,9 @@ describe('SuSegmentedControl', () => {
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
     const radios = (): HTMLButtonElement[] => Array.from(el.querySelectorAll('button'));
-    const key = (k: string): void => {
-      el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+    // Material's button toggles read `keyCode`
+    const key = (k: string, keyCode: number): void => {
+      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: k, keyCode, bubbles: true, cancelable: true }));
       f.detectChanges();
     };
     return { f, el, radios, key };
@@ -352,11 +339,13 @@ describe('SuSegmentedControl', () => {
 
   it('is a named radio group with one tab stop on the checked option', () => {
     const { el, radios } = make();
-    expect(el.getAttribute('role')).toBe('radiogroup');
-    expect(el.getAttribute('aria-label')).toBe('Time range');
+    const group = el.querySelector('mat-button-toggle-group')!;
+    expect(group.getAttribute('role')).toBe('radiogroup');
+    expect(group.getAttribute('aria-label')).toBe('Time range');
+    expect(radios().map((r) => r.getAttribute('role'))).toEqual(['radio', 'radio', 'radio', 'radio']);
     expect(radios().map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false', 'false']);
-    expect(radios().map((r) => r.tabIndex)).toEqual([-1, 0, -1, -1]);
     expect(radios()[1]?.textContent).toContain('7');
+    expect(radios()[2]?.disabled).toBe(true);
   });
 
   it('selects on click, but not a disabled option', () => {
@@ -364,40 +353,31 @@ describe('SuSegmentedControl', () => {
     radios()[0]?.click();
     f.detectChanges();
     expect(f.componentInstance.value()).toBe('1h');
+    expect(radios()[0]?.getAttribute('aria-checked')).toBe('true');
     radios()[2]?.click();
     expect(f.componentInstance.value()).toBe('1h');
   });
 
-  it('moves with arrows (skipping disabled), Home and End, and focuses the new option', () => {
+  it('moves with the arrow keys (skipping disabled, wrapping) and focuses the new option', () => {
     const { f, radios, key } = make();
-    key('ArrowRight');
+    radios()[1]?.focus();
+    key('ArrowRight', 39);
     expect(f.componentInstance.value()).toBe('7d');
     expect(document.activeElement).toBe(radios()[3]);
-    key('ArrowDown');
+    key('ArrowDown', 40);
     expect(f.componentInstance.value()).toBe('1h');
-    key('ArrowLeft');
+    key('ArrowLeft', 37);
     expect(f.componentInstance.value()).toBe('7d');
-    key('ArrowUp');
+    key('ArrowUp', 38);
     expect(f.componentInstance.value()).toBe('24h');
-    key('Home');
-    expect(f.componentInstance.value()).toBe('1h');
-    key('End');
-    expect(f.componentInstance.value()).toBe('7d');
+    expect(radios()[1]?.getAttribute('aria-checked')).toBe('true');
   });
 
   it('ignores other keys', () => {
-    const { f, key } = make();
-    key('a');
+    const { f, radios, key } = make();
+    radios()[1]?.focus();
+    key('a', 65);
     expect(f.componentInstance.value()).toBe('24h');
-  });
-
-  it('with no enabled option arrows do nothing', () => {
-    const f = TestBed.createComponent(SuSegmentedControl);
-    f.componentRef.setInput('options', [{ value: 'a', label: 'A', disabled: true }]);
-    f.componentRef.setInput('label', 'x');
-    f.detectChanges();
-    (f.nativeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    expect(f.componentInstance.value()).toBe('');
   });
 });
 

@@ -1,7 +1,13 @@
-import { ChangeDetectionStrategy, Component, input, model } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input, model } from '@angular/core';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { DateAdapter, MAT_DATE_FORMATS } from '@angular/material/core';
+import { MatTimepicker, MatTimepickerInput } from '@angular/material/timepicker';
+import { MatTooltip } from '@angular/material/tooltip';
+import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdDayPicker } from './day-picker';
 import { MAX_PAUSE_WINDOWS, newWindow, type PauseWindow, type PauseWindows, type Weekday, zoneValue } from './schedule-model';
+import { dateToTime, TIME_PROVIDERS, timeOptions, timeToDate } from './time-value';
 
 /**
  * The shared pause-window editor (plan X33), for pause windows and quiet hours: a list of daily windows (the days they start
@@ -15,7 +21,8 @@ import { MAX_PAUSE_WINDOWS, newWindow, type PauseWindow, type PauseWindows, type
 @Component({
   selector: 'pd-pause-editor',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdStatusGlyph, PdDayPicker, PdGlyph],
+  imports: [PdStatusGlyph, PdDayPicker, PdGlyph, PdField, PdFieldControl, MatButton, MatIconButton, MatTimepicker, MatTimepickerInput, MatTooltip],
+  providers: [TIME_PROVIDERS],
   template: `
     @if (value().windows.length === 0) {
       <p class="pd-empty">{{ emptyText }}</p>
@@ -24,40 +31,37 @@ import { MAX_PAUSE_WINDOWS, newWindow, type PauseWindow, type PauseWindows, type
       @for (w of value().windows; track $index) {
         <li class="pd-window" [attr.data-testid]="'pause-window-' + $index">
           <pd-day-picker [value]="w.days" [label]="daysLabel($index + 1)" [disabled]="disabled()" (valueChange)="patch($index, { days: $event })" />
-          <label class="pd-inline">
-            <span>{{ fromText }}</span>
-            <input class="pd-input pd-input--sm" type="time" [value]="w.start" [disabled]="disabled()" (change)="setTime($index, 'start', $event)" />
-          </label>
-          <label class="pd-inline">
-            <span>{{ toText }}</span>
-            <input class="pd-input pd-input--sm" type="time" [value]="w.end" [disabled]="disabled()" (change)="setTime($index, 'end', $event)" />
-          </label>
+          <pd-field size="short" [label]="fromText">
+            <input pdFieldControl [matTimepicker]="startPicker" [value]="toDate(w.start)" [disabled]="disabled()" autocomplete="off" (valueChange)="setTime($index, 'start', $event)" />
+            <mat-timepicker #startPicker [options]="timeList" />
+          </pd-field>
+          <pd-field size="short" [label]="toText">
+            <input pdFieldControl [matTimepicker]="endPicker" [value]="toDate(w.end)" [disabled]="disabled()" autocomplete="off" (valueChange)="setTime($index, 'end', $event)" />
+            <mat-timepicker #endPicker [options]="timeList" />
+          </pd-field>
           @if (w.start > w.end) {
             <span class="pd-note">{{ overnightText }}</span>
           }
-          <button type="button" class="pd-btn pd-btn--sm pd-btn--icon pd-btn--ghost" [attr.aria-label]="removeLabel($index + 1)" [attr.title]="removeText" [disabled]="disabled()" (click)="remove($index)">
+          <button type="button" matIconButton [attr.aria-label]="removeLabel($index + 1)" [matTooltip]="removeText" [disabled]="disabled()" (click)="remove($index)">
             <pd-glyph name="close" [size]="14" />
           </button>
         </li>
       }
     </ul>
-    <button type="button" class="pd-btn pd-btn--sm pd-add" [disabled]="disabled() || value().windows.length >= max" (click)="add()"><pd-glyph name="plus" [size]="14" />{{ addText }}</button>
-    <label class="pd-field">
-      <span class="pd-field__label">{{ zoneLabel }}</span>
-      <input class="pd-input" type="text" spellcheck="false" autocomplete="off" [placeholder]="zonePlaceholder" [value]="value().zone ?? ''" [disabled]="disabled()" (change)="setZone($event)" />
-    </label>
+    <button type="button" matButton="outlined" class="pd-add" [disabled]="disabled() || value().windows.length >= max" (click)="add()"><pd-glyph name="plus" [size]="14" />{{ addText }}</button>
+    <pd-field class="pd-zone" data-testid="pause-zone" [label]="zoneLabel">
+      <input pdFieldControl type="text" spellcheck="false" autocomplete="off" [placeholder]="zonePlaceholder" [value]="value().zone ?? ''" [disabled]="disabled()" (change)="setZone($event)" />
+    </pd-field>
     @for (p of problems(); track $index) {
       <p class="pd-problem" role="alert"><pd-status-glyph status="error" [size]="14" />{{ p }}</p>
     }
   `,
   styles: `
     :host { display: grid; gap: var(--pd-space-3); justify-items: start; min-width: 0; }
-    :host > .pd-field { justify-self: stretch; }
+    :host > .pd-zone { justify-self: stretch; }
     .pd-windows { display: grid; gap: var(--pd-space-2); width: 100%; margin: 0; padding: 0; list-style: none; }
-    .pd-window { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); }
-    .pd-inline { display: inline-flex; align-items: center; gap: var(--pd-space-1); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+    .pd-window { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); }
     .pd-note, .pd-empty { margin: 0; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
-    .pd-add { gap: var(--pd-space-1); }
     .pd-problem { display: flex; align-items: flex-start; gap: var(--pd-space-1); margin: 0; font-size: var(--pd-text-label); color: var(--pd-danger); }
   `,
 })
@@ -68,6 +72,11 @@ export class PdPauseEditor {
   readonly problems = input<readonly string[]>([]);
   readonly disabled = input(false);
 
+  private readonly adapter = inject<DateAdapter<Date>>(DateAdapter);
+  private readonly formats = inject(MAT_DATE_FORMATS);
+  /** The times the picker offers (every 30 minutes). */
+  protected readonly timeList = timeOptions(this.adapter, this.formats);
+  protected readonly toDate = timeToDate;
   protected readonly max = MAX_PAUSE_WINDOWS;
   protected readonly emptyText = $localize`:Empty state|@@pd.schedule.pause.empty:No windows: nothing is paused.`;
   protected readonly fromText = $localize`:Field label|@@pd.schedule.pause.from:From`;
@@ -91,9 +100,10 @@ export class PdPauseEditor {
     this.value.set({ ...v, windows: v.windows.map((w, i): PauseWindow => (i === index ? { ...w, ...change } : w)) });
   }
 
-  protected setTime(index: number, field: 'start' | 'end', e: Event): void {
-    const text = (e.target as HTMLInputElement).value;
-    if (text) this.patch(index, { [field]: text });
+  /** The picker's `Date` (null while the text is empty or incomplete: the last good time stays) as the engine's `HH:MM`. */
+  protected setTime(index: number, field: 'start' | 'end', date: Date | null): void {
+    const time = dateToTime(date);
+    if (time) this.patch(index, { [field]: time });
   }
 
   protected add(): void {

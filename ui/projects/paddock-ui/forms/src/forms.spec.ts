@@ -61,10 +61,10 @@ interface Model {
   imports: [PdField, PdFieldControl, FormField],
   template: `
     <pd-field label="Name" hint="Shown in the list" [state]="f.name()" [submitted]="submitted()" [messages]="messages">
-      <input class="pd-input" type="text" pdFieldControl [formField]="f.name" />
+      <input type="text" pdFieldControl [formField]="f.name" />
     </pd-field>
     <pd-field label="Port" [state]="f.port()">
-      <input class="pd-input" type="number" pdFieldControl [formField]="f.port" />
+      <input type="number" pdFieldControl [formField]="f.port" />
     </pd-field>
     <pd-field label="Plain"><input pdFieldControl /></pd-field>
   `,
@@ -100,13 +100,16 @@ describe('pd-field', () => {
 
   it('labels the control, marks required fields and says nothing about an untouched field', async () => {
     const f = await setup();
-    const [name] = fields(f);
+    const [name, port] = fields(f);
     const input = name!.querySelector('input')!;
     expect(name!.querySelector('label')!.getAttribute('for')).toBe(input.id);
     expect(name!.querySelector('label')!.textContent).toContain('Name');
-    expect(name!.querySelector('.pd-required')).not.toBeNull();
+    expect(name!.querySelector('.mat-mdc-form-field-required-marker')).not.toBeNull();
+    expect(port!.querySelector('.mat-mdc-form-field-required-marker')).toBeNull();
     expect(name!.querySelector('[data-testid=field-error]')).toBeNull();
     expect(input.getAttribute('aria-invalid')).toBeNull();
+    expect(name!.querySelector('.mat-form-field-appearance-outline')).not.toBeNull();
+    expect(name!.querySelector('.mat-form-field-invalid')).toBeNull();
     expect(input.getAttribute('aria-describedby')).toBe(name!.querySelector('.pd-field__hint')!.id);
   });
 
