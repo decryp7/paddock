@@ -41,7 +41,7 @@ import { LANGUAGE_CONFIG, languageOptions, LanguageStore, type LanguageChoice } 
     .pd-options { display: flex; flex-direction: column; gap: var(--pd-space-1); }
     .pd-option { min-height: var(--pd-hit-min); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); }
     .pd-option:hover { background: var(--pd-hover); }
-    .pd-option.pd-on { background: var(--pd-accent-tint); font-weight: var(--pd-weight-semibold); }
+    .pd-option.pd-on { background: var(--pd-accent-tint); --mat-radio-label-text-weight: var(--pd-weight-semibold); }
     .pd-restart { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); }
     .pd-restart span { flex: 1 1 14rem; min-width: 0; }
   `,

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, input, model, output } from '@angular/core';
+import { afterRenderEffect, ChangeDetectionStrategy, Component, computed, ElementRef, input, model, output, viewChild } from '@angular/core';
 import type { FormValueControl, ValidationError } from '@angular/forms/signals';
 import { MatButton } from '@angular/material/button';
 import { MatChip, MatChipSet } from '@angular/material/chips';
@@ -26,7 +26,7 @@ let nextId = 0;
     @let k = f.kind;
     <div class="pd-head">
       @if (k.type === 'bool') {
-        <mat-slide-toggle class="pd-label" [id]="id" [checked]="value() === true" [disabled]="disabled()" [aria-describedby]="describedBy() ?? ''" (change)="choose($event.checked)" (focusout)="touch.emit()">{{ f.label }}</mat-slide-toggle>
+        <mat-slide-toggle #toggle class="pd-label" [id]="id" [checked]="value() === true" [disabled]="disabled()" [aria-describedby]="describedBy() ?? ''" (change)="choose($event.checked)" (focusout)="touch.emit()">{{ f.label }}</mat-slide-toggle>
       } @else {
         <label class="pd-label" [for]="id">{{ f.label }}</label>
       }
@@ -131,6 +131,17 @@ export class PdSettingField implements FormValueControl<SettingValue> {
   readonly resetToDefault = output<void>();
 
   protected readonly id = `pd-setting-${++nextId}`;
+  private readonly toggle = viewChild('toggle', { read: ElementRef });
+
+  constructor() {
+    // Material's toggle has no `aria-invalid` input: the state goes onto its real switch button, as it was on the native switch.
+    afterRenderEffect(() => {
+      const button = (this.toggle()?.nativeElement as HTMLElement | undefined)?.querySelector('button[role="switch"]');
+      const invalid = !!this.message();
+      if (invalid) button?.setAttribute('aria-invalid', 'true');
+      else button?.removeAttribute('aria-invalid');
+    });
+  }
   protected readonly unit = computed(() => editUnit(this.setting().kind));
   protected readonly unitLabel = computed(() => {
     const k = this.setting().kind;

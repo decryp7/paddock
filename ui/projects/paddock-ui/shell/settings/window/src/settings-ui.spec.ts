@@ -26,6 +26,7 @@ import {
   SETTINGS_PROBLEM_FIXTURE,
   SHELL_SETTINGS_PAGES,
 } from '@decryp7/paddock-ui/shell/settings';
+import { PdSettingField } from './setting-field';
 import { PdSettingsSectionPage } from './settings-section';
 import { PdSettingsWindow } from './settings-window';
 import { settingsBed, settle, SPEC_PAGES } from './spec-helpers';
@@ -390,5 +391,21 @@ describe('SETTINGS_CONTRIBUTIONS and provideShellSettings', () => {
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellSettings({ backend: () => backend, appearance: false })] });
     expect(TestBed.inject(APPEARANCE_SOURCE, null)).toBeNull();
     localStorage.clear();
+  });
+
+  it('puts a refusal on the Material switch’s real button as aria-invalid, and takes it off again', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const fixture = TestBed.createComponent(PdSettingField);
+    const setting = { key: 'notify', label: 'Notify', description: '', kind: { type: 'bool' }, default: true, restartRequired: false, advanced: false } as never;
+    fixture.componentRef.setInput('setting', setting);
+    await fixture.whenStable();
+    const button = fixture.nativeElement.querySelector('button[role="switch"]') as HTMLElement;
+    expect(button.hasAttribute('aria-invalid')).toBe(false);
+    fixture.componentRef.setInput('errors', [{ kind: 'engine', message: 'Refused.' }]);
+    await fixture.whenStable();
+    expect(button.getAttribute('aria-invalid')).toBe('true');
+    fixture.componentRef.setInput('errors', []);
+    await fixture.whenStable();
+    expect(button.hasAttribute('aria-invalid')).toBe(false);
   });
 });
