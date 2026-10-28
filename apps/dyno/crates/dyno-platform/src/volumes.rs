@@ -175,10 +175,20 @@ pub fn media_traits(m: &RawMount) -> MediaTraits {
     }
 }
 
+/// The mounts as `getfsstat` lists them.
 #[cfg(target_os = "macos")]
 fn macos_mounts() -> Vec<RawMount> {
-    // SAFETY: a null buffer with size 0 only asks for the count.
-    let count = unsafe { libc::getfsstat(std::ptr::null_mut(), 0, libc::MNT_NOWAIT) };
+    read_fsstat(Path::new("/Volumes"), |buf, bytes| {
+        // SAFETY: `buf` is null with `bytes` 0 (only the count is asked) or valid for `bytes` bytes, as `read_fsstat` makes it.
+        unsafe { libc::getfsstat(buf, bytes, libc::MNT_NOWAIT) }
+    })
+}
+
+/// Reads the mount table through `fsstat` (`getfsstat`: called once for the count, once to fill a buffer of that many
+/// entries). An empty or failing table is an empty list.
+#[cfg(target_os = "macos")]
+fn read_fsstat(volumes_dir: &Path, fsstat: impl Fn(*mut libc::statfs, i32) -> i32) -> Vec<RawMount> {
+    let count = fsstat(std::ptr::null_mut(), 0);
     let Ok(n) = usize::try_from(count) else { return Vec::new() };
     if n == 0 {
         return Vec::new();
@@ -186,14 +196,18 @@ fn macos_mounts() -> Vec<RawMount> {
     // SAFETY: `statfs` is plain data; zero is a valid bit pattern.
     let mut buf: Vec<libc::statfs> = vec![unsafe { std::mem::zeroed() }; n];
     let bytes = i32::try_from(n * std::mem::size_of::<libc::statfs>()).unwrap_or(i32::MAX);
-    // SAFETY: `buf` holds `n` entries and `bytes` is exactly their size.
-    let got = unsafe { libc::getfsstat(buf.as_mut_ptr(), bytes, libc::MNT_NOWAIT) };
+    let got = fsstat(buf.as_mut_ptr(), bytes);
     let got = usize::try_from(got).unwrap_or(0).min(n);
+    mounts_from_statfs(&buf[..got], volumes_dir)
+}
+
+#[cfg(target_os = "macos")]
+fn mounts_from_statfs(entries: &[libc::statfs], volumes_dir: &Path) -> Vec<RawMount> {
     let text = |a: &[libc::c_char]| {
         let b: Vec<u8> = a.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
         String::from_utf8_lossy(&b).into_owned()
     };
-    let mut out: Vec<RawMount> = buf[..got]
+    let mut out: Vec<RawMount> = entries
         .iter()
         .map(|s| RawMount {
             source: text(&s.f_mntfromname),
@@ -206,7 +220,7 @@ fn macos_mounts() -> Vec<RawMount> {
         .collect();
     // The startup disk carries the name of the `/Volumes` link that points at `/`.
     if let Some(root) = out.iter_mut().find(|m| m.mount == MACOS_DATA) {
-        root.name = Some(macos_startup_name(Path::new("/Volumes")).unwrap_or_else(|| "Macintosh HD".into()));
+        root.name = Some(macos_startup_name(volumes_dir).unwrap_or_else(|| "Macintosh HD".into()));
     }
     out
 }
@@ -403,14 +417,101 @@ mod tests {
     }
 
     #[test]
-    fn this_machine_lists_a_volume_with_capacity() {
-        let m = mounts();
-        assert!(!m.is_empty());
-        let tmp = std::env::temp_dir();
-        let (total, free) = capacity(&tmp.to_string_lossy())
-            .or_else(|| capacity(&tmp.to_string_lossy()))
-            .unwrap();
+    fn capacity_is_read_for_a_folder_of_this_run_and_refused_for_a_missing_mount() {
+        let t = tempfile::tempdir().unwrap();
+        let (total, free) = capacity(&t.path().to_string_lossy()).unwrap();
         assert!(total > 0 && free <= total);
         assert!(capacity("no-such-mount-for-dyno-tests").is_none());
+    }
+
+    /// The one test that lists this machine's real mounts (ER-14: unit tests never depend on them). Run it by hand with
+    /// `cargo test -p dyno-platform -- --ignored real_mounts`; it only reads the mount table, it runs no program.
+    #[test]
+    #[ignore = "reads this machine's real mount table"]
+    fn real_mounts_are_listed() {
+        assert!(!mounts().is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    mod fsstat {
+        use super::super::*;
+
+        fn entry(from: &str, on: &str, fs: &str, flags: u32) -> libc::statfs {
+            // SAFETY: `statfs` is plain data; zero is a valid bit pattern.
+            let mut s: libc::statfs = unsafe { std::mem::zeroed() };
+            let put = |dst: &mut [libc::c_char], text: &str| {
+                for (d, b) in dst.iter_mut().zip(text.bytes()) {
+                    *d = b as libc::c_char;
+                }
+            };
+            put(&mut s.f_mntfromname, from);
+            put(&mut s.f_mntonname, on);
+            put(&mut s.f_fstypename, fs);
+            s.f_flags = flags;
+            s
+        }
+
+        /// A `getfsstat` over a fixed table: the count when asked without a buffer, the entries otherwise.
+        fn table(entries: Vec<libc::statfs>) -> impl Fn(*mut libc::statfs, i32) -> i32 {
+            move |buf, _| {
+                if buf.is_null() {
+                    return entries.len() as i32;
+                }
+                for (i, e) in entries.iter().enumerate() {
+                    // SAFETY: `read_fsstat` passes a buffer of `entries.len()` entries.
+                    unsafe { *buf.add(i) = *e };
+                }
+                entries.len() as i32
+            }
+        }
+
+        #[test]
+        fn an_empty_or_failing_mount_table_is_an_empty_list() {
+            let none = tempfile::tempdir().unwrap();
+            assert!(read_fsstat(none.path(), |_, _| 0).is_empty());
+            assert!(read_fsstat(none.path(), |_, _| -1).is_empty());
+        }
+
+        #[test]
+        fn a_table_that_shrinks_between_the_two_calls_is_read_as_far_as_it_goes() {
+            let one = vec![entry("/dev/disk3s1", "/Volumes/usb", "exfat", 0)];
+            let calls = std::cell::Cell::new(0);
+            let none = tempfile::tempdir().unwrap();
+            let list = read_fsstat(none.path(), |buf, bytes| {
+                calls.set(calls.get() + 1);
+                if buf.is_null() {
+                    return 3;
+                }
+                table(one.clone())(buf, bytes)
+            });
+            assert_eq!(list.len(), 1);
+            assert_eq!(calls.get(), 2);
+        }
+
+        #[test]
+        fn entries_carry_their_names_flags_and_the_startup_name() {
+            let none = tempfile::tempdir().unwrap();
+            let list = read_fsstat(
+                none.path(),
+                table(vec![
+                    entry("/dev/disk3s5", MACOS_DATA, "apfs", libc::MNT_DONTBROWSE as u32),
+                    entry("/dev/disk4s1", "/Volumes/usb", "exfat", libc::MNT_RDONLY as u32),
+                    entry("/dev/disk3s6", "/System/Volumes/VM", "apfs", libc::MNT_DONTBROWSE as u32),
+                ]),
+            );
+            assert_eq!(list.len(), 3);
+            assert_eq!(
+                list[0].name.as_deref(),
+                Some("Macintosh HD"),
+                "no link in the folder: the usual name"
+            );
+            assert!(!list[0].hidden, "the data volume stays visible");
+            assert!(list[1].read_only && !list[1].hidden);
+            assert!(list[2].hidden);
+            assert_eq!(
+                (list[1].source.as_str(), list[1].mount.as_str(), list[1].fs.as_str()),
+                ("/dev/disk4s1", "/Volumes/usb", "exfat")
+            );
+        }
     }
 }

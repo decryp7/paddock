@@ -408,6 +408,22 @@ pub enum Request {
         /// The node.
         node: u32,
     },
+    /// Reads the folders a finished scan could not open once more, and only those; answers the scan's status at once. The
+    /// scan runs again as a job (same id, new events). Appended.
+    RetryDiskScan {
+        /// The scan.
+        scan: u64,
+    },
+    /// Opens the system's privacy pane where Full Disk Access is given (macOS; other systems answer `Unsupported` with the
+    /// reason). Appended.
+    OpenFullDiskAccessSettings,
+    /// Shows a node in Finder, Explorer or the file manager. The path comes from the scan, never from the caller. Appended.
+    DiskReveal {
+        /// The scan.
+        scan: u64,
+        /// The node.
+        node: u32,
+    },
 }
 
 /// Dyno's own cost.
@@ -1017,6 +1033,11 @@ mod tests {
             progress: ScanProgress::default(),
             truncated: false,
             unreadable_first: vec![],
+            needs_full_disk_access: false,
+            items_per_second: Some(10),
+            eta_seconds: None,
+            hidden_bytes: None,
+            scanned_at: None,
         }
     }
 
@@ -1051,6 +1072,9 @@ mod tests {
                 min_fraction: 0.004,
             },
             Request::DiskPath { scan: 1, node: 2 },
+            Request::RetryDiskScan { scan: 1 },
+            Request::DiskReveal { scan: 1, node: 2 },
+            Request::OpenFullDiskAccessSettings,
         ];
         for r in requests {
             let m = Message::Request(Box::new(r));

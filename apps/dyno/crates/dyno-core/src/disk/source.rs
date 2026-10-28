@@ -24,8 +24,11 @@ pub struct DirEntryInfo {
     pub name: String,
     /// Kind.
     pub kind: EntryKind,
-    /// Bytes the entry occupies on the volume (allocated; the logical size where the OS can't say).
+    /// Bytes the entry occupies on the volume (allocated: blocks on Unix, clusters on Windows; the length where the OS
+    /// can't say).
     pub bytes: u64,
+    /// Bytes of content (the length).
+    pub logical: u64,
     /// The volume the entry is on (`st_dev`; the volume serial on Windows).
     pub dev: u64,
     /// The entry's file id, with `dev` its identity.

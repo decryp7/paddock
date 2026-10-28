@@ -127,6 +127,12 @@ export interface DynoBackend {
   diskChildren(query: DiskChildrenQuery): Promise<DiskChildren>;
   /** The full path of a node (Reveal, Copy path). */
   diskPath(scan: number, node: number): Promise<string>;
+  /** Reads the folders a finished scan could not open once more, and only those; resolves at once with the status (the scan runs again). */
+  retryDiskScan(scan: number): Promise<DiskScanStatus>;
+  /** Opens the system's Full Disk Access pane (macOS); rejects with `unsupported` and the reason elsewhere. */
+  openFullDiskAccessSettings(): Promise<void>;
+  /** Shows a node in Finder, Explorer or the file manager. */
+  diskReveal(scan: number, node: number): Promise<void>;
 
   // The privileged helper (ADR 0016). Installing happens only from the confirmation dialog.
   helperStatus(): Promise<HelperStatus>;

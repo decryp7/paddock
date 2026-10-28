@@ -3,7 +3,7 @@
 //! priority, no sleeps: workers wait on a condition for work, Cancel sets a flag and returns at once, and a worker that is
 //! stuck inside a call to a dead network share is abandoned, never awaited.
 
-use dyno_core::disk::index::{DiskIndex, NodeId, ScanLimits};
+use dyno_core::disk::index::{DiskIndex, NodeId, ScanLimits, Sizes};
 use dyno_core::disk::scan::{ScanFailure, ScanProgress, UNREADABLE_LISTED};
 use dyno_core::disk::source::{DirEntryInfo, DirSource, EntryKind, ReadError};
 use dyno_core::time::Timestamp;
@@ -31,8 +31,21 @@ pub enum End {
 pub trait WalkHooks: Send + Sync {
     /// Some folders were committed.
     fn progress(&self, walk: &Walk);
-    /// The walk ended; called exactly once.
+    /// The walk ended; called once per pass.
     fn ended(&self, walk: &Walk, end: &End);
+    /// A retry began another pass over the folders the first one could not open; called before its threads start.
+    fn restarted(&self, walk: &Walk);
+}
+
+/// Why a retry did not start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RetryError {
+    /// The walk is still running, or it ended by Cancel or an error (only a pass that finished can be retried).
+    NotFinished,
+    /// Every folder was read.
+    NothingToRetry,
+    /// No thread could be started; nothing was changed.
+    NoThread,
 }
 
 /// Counts the walk's threads still alive, so a host with threads stuck in dead calls can be refused more work.
@@ -74,6 +87,14 @@ impl Drop for LiveGuard {
     }
 }
 
+/// Starts a named thread running the job; fails when the OS will not give another thread.
+pub type Spawn = fn(String, Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()>;
+
+/// The real thread starter.
+pub fn os_spawn(name: String, job: Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()> {
+    std::thread::Builder::new().name(name).spawn(job).map(|_| ())
+}
+
 /// Settings of one walk.
 #[derive(Clone)]
 pub struct WalkConfig {
@@ -87,6 +108,8 @@ pub struct WalkConfig {
     pub total_bytes: Option<u64>,
     /// Threads of this host that are still alive (shared by every scan of the host).
     pub live: Arc<LiveWorkers>,
+    /// How threads are started ([`os_spawn`]; tests give one that fails).
+    pub spawn: Spawn,
 }
 
 struct Task {
@@ -120,6 +143,8 @@ pub struct Walk {
     /// Every folder was read (set by the worker that saw the queue run dry).
     completed: AtomicBool,
     root_dev: u64,
+    /// The folder the walk started from.
+    root: PathBuf,
     cfg: WalkConfig,
     /// (device, file id) of every folder entered: a bind mount or firmlink loop is entered once.
     entered: Mutex<HashSet<(u64, u64)>>,
@@ -163,6 +188,7 @@ impl Walk {
             entered.insert((me.dev, me.ino));
         }
         let walk = Arc::new(Walk {
+            root: root.clone(),
             source,
             index: Mutex::new(index),
             queue: Mutex::new(Queue {
@@ -190,30 +216,107 @@ impl Walk {
                 ..cfg
             },
         });
-        for n in 0..walk.cfg.threads {
-            let w = walk.clone();
-            let guard = walk.cfg.live.enter();
-            let spawned = std::thread::Builder::new().name(format!("dyno-disk-scan-{n}")).spawn(move || {
-                dyno_platform::priority::background_current_thread();
-                // A bug in one reader ends the scan with a message; it never takes the agent down.
-                if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| w.worker())).is_err() {
-                    w.fail(ScanFailure::Internal {
-                        detail: "a reader thread stopped unexpectedly".into(),
-                    });
-                }
-                // Done is announced by the last worker out, after its thread has left the host's count: a finished scan
-                // never looks like one with threads still stuck in calls.
-                drop(guard);
-                w.worker_exited();
-            });
+        walk.launch(walk.cfg.threads)?;
+        Ok(walk)
+    }
+
+    /// Starts `threads` workers (the caller has set `alive` to the same number). Fails only when not even one starts.
+    fn launch(self: &Arc<Self>, threads: usize) -> Result<(), ReadError> {
+        for n in 0..threads {
+            let w = self.clone();
+            let guard = self.cfg.live.enter();
+            let spawned = (self.cfg.spawn)(
+                format!("dyno-disk-scan-{n}"),
+                Box::new(move || {
+                    dyno_platform::priority::background_current_thread();
+                    // A bug in one reader ends the scan with a message; it never takes the agent down.
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| w.worker())).is_err() {
+                        w.fail(ScanFailure::Internal {
+                            detail: "a reader thread stopped unexpectedly".into(),
+                        });
+                    }
+                    // Done is announced by the last worker out, after its thread has left the host's count: a finished scan
+                    // never looks like one with threads still stuck in calls.
+                    drop(guard);
+                    w.worker_exited();
+                }),
+            );
             if spawned.is_err() {
                 if n == 0 {
                     return Err(ReadError::Other("Dyno could not start a thread to read folders.".into()));
                 }
-                walk.alive.fetch_sub(1, Ordering::SeqCst);
+                self.alive.fetch_sub(1, Ordering::SeqCst);
             }
         }
-        Ok(walk)
+        Ok(())
+    }
+
+    /// Reads once more the folders the finished pass could not open, and only those, into the same index: what they hold is
+    /// added, and the tree completes if nothing else is missing. Returns at once; the pass runs on its own threads and ends
+    /// like any other (hooks `restarted`, then `progress`, then `ended`).
+    pub fn retry(self: &Arc<Self>) -> Result<(), RetryError> {
+        let mut end = lock(&self.end.0);
+        // The final event goes out just before the outcome is set, so a caller that reacts to the event at once can get
+        // here in between: wait for the outcome of a pass that is ending.
+        while end.is_none() && self.finishing.load(Ordering::SeqCst) {
+            end = self.end.1.wait(end).unwrap_or_else(|p| p.into_inner());
+        }
+        if *end != Some(End::Done) {
+            return Err(RetryError::NotFinished);
+        }
+        let ids = lock(&self.index).reopen_unreadable();
+        if ids.is_empty() {
+            return Err(RetryError::NothingToRetry);
+        }
+        let tasks: Vec<Task> = {
+            let i = lock(&self.index);
+            ids.iter()
+                .filter_map(|id| i.path_names(*id).ok().map(|names| (*id, names)))
+                .map(|(node, names)| Task {
+                    node,
+                    path: names.iter().skip(1).fold(self.root.clone(), |p, n| p.join(n)),
+                })
+                .collect()
+        };
+        let threads = self.cfg.threads.min(tasks.len()).max(1);
+        let tasks_len = tasks.len();
+        let paths: Vec<PathBuf> = tasks.iter().map(|t| t.path.clone()).collect();
+        let again: HashSet<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        *lock(&self.queue) = Queue {
+            stack: tasks,
+            ..Queue::default()
+        };
+        self.stopped.store(false, Ordering::SeqCst);
+        self.completed.store(false, Ordering::SeqCst);
+        self.alive.store(threads, Ordering::SeqCst);
+        // The folders about to be read again are no longer counted as refused; any that is refused again is counted anew.
+        let taken = u64::try_from(tasks_len).unwrap_or(u64::MAX);
+        // No worker is alive between passes, so nothing else changes the count.
+        self.unreadable
+            .store(self.unreadable.load(Ordering::Relaxed).saturating_sub(taken), Ordering::Relaxed);
+        lock(&self.problems).unreadable_first.retain(|p| !again.contains(p));
+        self.finishing.store(false, Ordering::SeqCst);
+        *end = None;
+        drop(end);
+        self.hooks.restarted(self);
+        if self.launch(threads).is_err() {
+            // Nothing could start: leave every folder as it was and say the pass is over.
+            let mut i = lock(&self.index);
+            for id in ids {
+                i.mark_unreadable(id);
+                i.finish_listing(id);
+            }
+            drop(i);
+            lock(&self.queue).stack.clear();
+            for p in &paths {
+                self.note_unreadable(p);
+            }
+            self.finishing.store(true, Ordering::SeqCst);
+            *lock(&self.end.0) = Some(End::Done);
+            self.end.1.notify_all();
+            return Err(RetryError::NoThread);
+        }
+        Ok(())
     }
 
     /// The numbers as of now, consistent with the index.
@@ -360,7 +463,7 @@ impl Walk {
         let mut dirs: Vec<DirEntryInfo> = Vec::new();
         let mut mounts: Vec<String> = Vec::new();
         let mut big: Vec<DirEntryInfo> = Vec::new();
-        let (mut small_bytes, mut small_items, mut small_newest) = (0u64, 0u64, Timestamp(0));
+        let (mut small, mut small_items, mut small_newest) = (Sizes::default(), 0u64, Timestamp(0));
         let mut unreachable: Option<String> = None;
         let listed = self.source.read_dir(&task.path, &mut |entry| {
             if self.stopped.load(Ordering::Relaxed) {
@@ -376,7 +479,8 @@ impl Walk {
                         if e.bytes >= notable {
                             big.push(e);
                         } else {
-                            small_bytes = small_bytes.saturating_add(e.bytes);
+                            small.on_disk = small.on_disk.saturating_add(e.bytes);
+                            small.logical = small.logical.saturating_add(e.logical);
                             small_items += 1;
                             small_newest = small_newest.max(e.mtime);
                         }
@@ -433,10 +537,18 @@ impl Walk {
                 i.add_mount_point(task.node, m);
             }
             for f in &big {
-                i.add_file(task.node, &f.name, f.bytes, f.mtime);
+                i.add_file(
+                    task.node,
+                    &f.name,
+                    Sizes {
+                        on_disk: f.bytes,
+                        logical: f.logical,
+                    },
+                    f.mtime,
+                );
             }
             if small_items > 0 {
-                i.add_folded_files(task.node, small_bytes, small_items, small_newest);
+                i.add_folded_files(task.node, small, small_items, small_newest);
             }
             if unreadable_here {
                 i.mark_unreadable(task.node);
@@ -452,7 +564,7 @@ impl Walk {
 mod tests {
     use super::*;
     use crate::disk::fs::OsDirSource;
-    use crate::disk::testing::FakeFs;
+    use crate::disk::testing::{FakeFs, Gate};
     use dyno_core::disk::index::DiskChildren;
     use std::path::Path;
     use std::sync::atomic::AtomicUsize;
@@ -463,6 +575,7 @@ mod tests {
     #[derive(Default)]
     struct Rec {
         progress: AtomicUsize,
+        restarts: AtomicUsize,
         ended: Mutex<Vec<End>>,
     }
 
@@ -472,6 +585,9 @@ mod tests {
         }
         fn ended(&self, _: &Walk, end: &End) {
             lock(&self.ended).push(end.clone());
+        }
+        fn restarted(&self, _: &Walk) {
+            self.restarts.fetch_add(1, Ordering::SeqCst);
         }
     }
 
@@ -486,6 +602,7 @@ mod tests {
             cross_volumes: false,
             total_bytes: None,
             live: Arc::new(LiveWorkers::default()),
+            spawn: os_spawn,
         }
     }
 
@@ -642,6 +759,234 @@ mod tests {
         let (w, _, _) = run(Arc::new(fs), r, c);
         // Two ids are remembered (counted once); the names of the other two ids are all counted, repeats included.
         assert_eq!(w.snapshot().progress.bytes, 2 * 10 + 4 * 10);
+    }
+
+    /// root: ok (30 B), Library (refused; 40 B + a 5 MB file once readable), Mail (refused; 7 B once readable).
+    fn with_two_refused() -> (Arc<FakeFs>, PathBuf, PathBuf) {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        let ok = fs.dir(&r, "ok");
+        fs.file(&ok, "x", 30);
+        let lib = fs.dir(&r, "Library");
+        fs.file(&lib, "small", 40);
+        fs.file(&lib, "big", 5 * MB);
+        let mail = fs.dir(&lib, "Mail");
+        fs.file(&mail, "inbox", 7);
+        fs.fail_open(&lib, ReadError::PermissionDenied);
+        (Arc::new(fs), lib, mail)
+    }
+
+    #[test]
+    fn a_retry_reads_only_the_refused_folders_and_completes_the_tree() {
+        let (fs, lib, _) = with_two_refused();
+        let (w, rec, end) = run(fs.clone(), fs.root(), cfg(2));
+        assert_eq!(end, End::Done);
+        assert_eq!(w.snapshot().progress.unreadable, 1);
+        assert!(!w.with_index(DiskIndex::is_complete));
+        let reads = fs.reads.load(Ordering::SeqCst);
+
+        fs.allow_open(&lib);
+        w.retry().unwrap();
+        assert_eq!(w.wait(), End::Done);
+        assert_eq!(
+            fs.reads.load(Ordering::SeqCst),
+            reads + 2,
+            "Library and the Mail folder it holds, nothing else"
+        );
+        let s = w.snapshot();
+        assert_eq!(s.progress.bytes, 30 + 40 + 5 * MB + 7);
+        assert_eq!((s.progress.unreadable, s.unreadable_first.len()), (0, 0));
+        assert!(w.with_index(DiskIndex::is_complete), "nothing else was missing");
+        assert_eq!(rec.restarts.load(Ordering::SeqCst), 1);
+        assert_eq!(*lock(&rec.ended), vec![End::Done, End::Done], "each pass ends once");
+        assert_eq!(w.retry(), Err(RetryError::NothingToRetry));
+    }
+
+    #[test]
+    fn a_folder_refused_again_stays_refused_and_can_be_tried_later() {
+        let (fs, lib, _) = with_two_refused();
+        let (w, _, _) = run(fs.clone(), fs.root(), cfg(1));
+        w.retry().unwrap();
+        assert_eq!(w.wait(), End::Done);
+        let s = w.snapshot();
+        assert_eq!((s.progress.unreadable, s.unreadable_first.len()), (1, 1), "counted once, not twice");
+        assert_eq!(s.progress.bytes, 30);
+        assert!(!w.with_index(DiskIndex::is_complete));
+        fs.allow_open(&lib);
+        w.retry().unwrap();
+        assert_eq!(w.wait(), End::Done);
+        assert!(w.with_index(DiskIndex::is_complete));
+    }
+
+    #[test]
+    fn a_retry_keeps_the_other_refusals_that_are_not_folders() {
+        let (fs, lib, _) = with_two_refused();
+        let ok = fs.root().join("ok");
+        fs.fail_entries(&ok, vec![ReadError::PermissionDenied]);
+        let (w, _, _) = run(fs.clone(), fs.root(), cfg(1));
+        assert_eq!(w.snapshot().progress.unreadable, 2, "Library, and an entry of ok");
+        fs.allow_open(&lib);
+        w.retry().unwrap();
+        w.wait();
+        let s = w.snapshot();
+        assert_eq!(
+            s.progress.unreadable, 1,
+            "the entry of ok was not read again, so it is still counted"
+        );
+        assert!(s.unreadable_first.iter().any(|p| p.ends_with("ok")));
+    }
+
+    #[test]
+    fn only_a_pass_that_finished_can_be_retried() {
+        let (fs, _, _) = with_two_refused();
+        let gate = Gate::new();
+        let g = gate.clone();
+        fs.on_read(move |_| g.pass());
+        let rec = Arc::new(Rec::default());
+        let w = Walk::start(fs.clone(), fs.root(), "vol", cfg(1), rec).unwrap();
+        gate.wait_arrived(1);
+        assert_eq!(w.retry(), Err(RetryError::NotFinished), "still running");
+        w.cancel();
+        gate.open();
+        assert_eq!(w.wait(), End::Cancelled);
+        assert_eq!(
+            w.retry(),
+            Err(RetryError::NotFinished),
+            "cancelled: the partial index is not retried"
+        );
+    }
+
+    /// Hooks whose `ended` holds the pass in its closing moment (the final event sent, the outcome not yet set).
+    struct Closing {
+        reached: mpsc::Sender<()>,
+        hold: Arc<Gate>,
+    }
+
+    impl WalkHooks for Closing {
+        fn progress(&self, _: &Walk) {}
+        fn ended(&self, _: &Walk, _: &End) {
+            self.reached.send(()).unwrap();
+            self.hold.pass();
+        }
+        fn restarted(&self, _: &Walk) {}
+    }
+
+    #[test]
+    fn a_retry_asked_for_while_a_pass_is_ending_waits_for_its_outcome() {
+        let (fs, lib, _) = with_two_refused();
+        let (reached, closing) = mpsc::channel();
+        let hold = Gate::new();
+        let w = Walk::start(
+            fs.clone(),
+            fs.root(),
+            "vol",
+            cfg(1),
+            Arc::new(Closing {
+                reached,
+                hold: hold.clone(),
+            }),
+        )
+        .unwrap();
+        closing.recv().unwrap();
+        assert_eq!(w.outcome(), None, "the final event went out, the outcome is not set yet");
+        fs.allow_open(&lib);
+        let (asking, asked) = mpsc::channel();
+        let w2 = w.clone();
+        let retry = std::thread::spawn(move || {
+            asking.send(()).unwrap();
+            w2.retry()
+        });
+        asked.recv().unwrap();
+        hold.open();
+        assert_eq!(retry.join().unwrap(), Ok(()), "not refused as unfinished");
+        // The second pass ends through the same hook, which is open now.
+        assert_eq!(w.wait(), End::Done);
+        assert_eq!(w.snapshot().progress.bytes, 30 + 40 + 5 * MB + 7);
+    }
+
+    #[test]
+    fn a_clean_walk_has_nothing_to_retry() {
+        let fs = Arc::new(sample());
+        let (w, _, _) = run(fs.clone(), fs.root(), cfg(1));
+        assert_eq!(w.retry(), Err(RetryError::NothingToRetry));
+        assert_eq!(w.outcome(), Some(End::Done), "the state is untouched");
+    }
+
+    fn no_threads(_: String, _: Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()> {
+        Err(std::io::Error::other("no more threads"))
+    }
+
+    #[test]
+    fn a_retry_that_cannot_start_a_thread_changes_nothing() {
+        static OUT_OF_THREADS: AtomicBool = AtomicBool::new(false);
+        fn flaky(name: String, job: Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()> {
+            if OUT_OF_THREADS.load(Ordering::SeqCst) {
+                no_threads(name, job)
+            } else {
+                os_spawn(name, job)
+            }
+        }
+        let (fs, lib, _) = with_two_refused();
+        let mut c = cfg(1);
+        c.spawn = flaky;
+        let (w, rec, _) = run(fs.clone(), fs.root(), c);
+        fs.allow_open(&lib);
+        OUT_OF_THREADS.store(true, Ordering::SeqCst);
+        assert_eq!(w.retry(), Err(RetryError::NoThread));
+        assert_eq!(w.outcome(), Some(End::Done));
+        assert!(!w.with_index(DiskIndex::is_complete), "the refused folder is as it was");
+        assert_eq!(w.snapshot().progress.bytes, 30);
+        assert_eq!(w.snapshot().progress.unreadable, 1, "still counted as refused");
+        OUT_OF_THREADS.store(false, Ordering::SeqCst);
+        w.retry().unwrap();
+        assert_eq!(w.wait(), End::Done);
+        assert!(
+            w.with_index(DiskIndex::is_complete),
+            "the folder could be retried when threads came back"
+        );
+        assert!(rec.restarts.load(Ordering::SeqCst) >= 1);
+    }
+
+    #[test]
+    fn a_walk_that_cannot_start_a_thread_says_so() {
+        let fs = Arc::new(sample());
+        let mut c = cfg(2);
+        c.spawn = no_threads;
+        let err = Walk::start(fs.clone(), fs.root(), "vol", c, Arc::new(Rec::default()))
+            .err()
+            .unwrap();
+        assert!(matches!(err, ReadError::Other(m) if m.contains("thread")));
+    }
+
+    #[test]
+    fn a_failure_to_start_one_of_several_threads_leaves_the_others_to_finish_the_walk() {
+        use std::sync::atomic::AtomicBool;
+        static FIRST: AtomicBool = AtomicBool::new(true);
+        fn once(name: String, job: Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()> {
+            if FIRST.swap(false, Ordering::SeqCst) {
+                os_spawn(name, job)
+            } else {
+                Err(std::io::Error::other("no more threads"))
+            }
+        }
+        let fs = Arc::new(sample());
+        let mut c = cfg(3);
+        c.spawn = once;
+        let (w, _, end) = run(fs.clone(), fs.root(), c);
+        assert_eq!(end, End::Done, "the one thread that started finishes the walk");
+        assert_eq!(w.snapshot().progress.bytes, 9 * MB + 125);
+    }
+
+    #[test]
+    fn both_sizes_are_counted_per_file() {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        fs.file_sized(&r, "sparse.img", 2 * MB, 40 * MB);
+        fs.file_sized(&r, "tiny", 4096, 12);
+        let (w, _, _) = run(Arc::new(fs), r, cfg(1));
+        let top = level(&w, 0);
+        assert_eq!((top.node.bytes, top.node.logical_bytes), (2 * MB + 4096, 40 * MB + 12));
+        assert_eq!((top.loose.bytes, top.loose.logical_bytes), (4096, 12));
     }
 
     #[test]

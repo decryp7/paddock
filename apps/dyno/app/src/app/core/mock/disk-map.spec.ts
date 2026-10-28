@@ -138,12 +138,88 @@ describe('the mock disk map', () => {
     expect([...kinds].sort()).toEqual(['file', 'folder', 'mountPoint', 'unreadable']);
   });
 
-  it('gives the full path of a node', async () => {
+  it('gives the full path of a node, and a root path that is never empty', async () => {
     const b = make();
+    const start = await runScan(b, { volume: { id: '/' } });
+    expect(await b.diskPath(start.first.scan, 0)).toBe('/');
+    const folder = await runScan(b, { folder: { path: '/Users/alex' } });
+    expect(await b.diskPath(folder.first.scan, 0)).toBe('/Users/alex');
     const { first } = await runScan(b, { volume: { id: '/Volumes/Photos' } });
     const top = await b.diskChildren({ scan: first.scan, node: null, offset: 0, limit: 1, minFraction: 0 });
     expect(await b.diskPath(first.scan, 0)).toBe('/Volumes/Photos');
     expect(await b.diskPath(first.scan, top.children[0]!.id)).toMatch(/^\/Volumes\/Photos\/\w+/);
+  });
+
+  it('keeps both sizes and they add up like the on-disk ones', async () => {
+    const b = make();
+    const { first } = await runScan(b, { volume: { id: '/' } });
+    const all = await b.diskChildren({ scan: first.scan, node: null, offset: 0, limit: 256, minFraction: 0.05 });
+    const sum = all.children.reduce((a, c) => a + c.logicalBytes, 0) + all.other.logicalBytes + all.loose.logicalBytes;
+    expect(sum).toBe(all.node.logicalBytes);
+    expect(all.node.logicalBytes).toBeLessThan(all.node.bytes);
+  });
+
+  it('says when Full Disk Access is the likely reason folders were refused (the startup disk only)', async () => {
+    const b = make();
+    const { events } = await runScan(b, { volume: { id: '/' } });
+    expect(events[0]!.needsFullDiskAccess).toBe(false);
+    expect(events.at(-1)!.needsFullDiskAccess).toBe(true);
+    const photos = await runScan(b, { volume: { id: '/Volumes/Photos' } });
+    expect(photos.events.at(-1)!.needsFullDiskAccess).toBe(false);
+  });
+
+  it('reads only the refused folders again, as the same scan', async () => {
+    const b = make();
+    const { first } = await runScan(b, { volume: { id: '/' } });
+    const seen: DiskScanStatus[] = [];
+    let done!: () => void;
+    const finished = new Promise<void>((r) => (done = r));
+    b.onDiskScan((s) => {
+      seen.push(s);
+      if (s.state === 'done') done();
+    });
+    const again = await b.retryDiskScan(first.scan);
+    expect(again.scan).toBe(first.scan);
+    expect(again.state).toBe('running');
+    expect(again.progress.unreadable).toBe(0);
+    await expect(b.retryDiskScan(first.scan)).rejects.toMatchObject({ code: 'busy' });
+    await finished;
+    expect(seen.at(-1)!.progress.bytes).toBeGreaterThanOrEqual(again.progress.bytes);
+    expect(seen.at(-1)!.progress.unreadable).toBe(1);
+    const photos = await b.startDiskScan({ volume: { id: '/Volumes/Photos' } });
+    await b.cancelDiskScan(photos.scan);
+    await expect(b.retryDiskScan(photos.scan)).rejects.toMatchObject({ code: 'badRequest' });
+    await expect(b.retryDiskScan(99)).rejects.toMatchObject({ code: 'notFound' });
+  });
+
+  it('gives a pace and an estimate while running, the hidden space and the time when done', async () => {
+    const b = make();
+    const { events } = await runScan(b, { volume: { id: '/' } });
+    const running = events.filter((e) => e.state === 'running');
+    expect(running[0]!.itemsPerSecond).toBeNull();
+    expect(running.some((e) => e.itemsPerSecond !== null && e.etaSeconds !== null)).toBe(true);
+    expect(running.every((e) => e.hiddenBytes === null && e.scannedAt === null)).toBe(true);
+    const last = events.at(-1)!;
+    expect(last.itemsPerSecond).toBeNull();
+    expect(last.etaSeconds).toBeNull();
+    expect(last.hiddenBytes).toBeGreaterThanOrEqual(0);
+    expect(last.scannedAt).toBe(NOW);
+    const cancelled = await b.startDiskScan({ volume: { id: '/Volumes/Photos' } });
+    await b.cancelDiskScan(cancelled.scan);
+    expect((await b.diskScans()).find((s) => s.scan === cancelled.scan)!.scannedAt).toBe(NOW);
+  });
+
+  it('opens the Full Disk Access pane', async () => {
+    await expect(make().openFullDiskAccessSettings()).resolves.toBeUndefined();
+  });
+
+  it('reveals a node by id and refuses an unknown one', async () => {
+    const b = make();
+    const { first } = await runScan(b, { volume: { id: '/Volumes/Photos' } });
+    const top = await b.diskChildren({ scan: first.scan, node: null, offset: 0, limit: 1, minFraction: 0 });
+    await b.diskReveal(first.scan, top.children[0]!.id);
+    await expect(b.diskReveal(first.scan, 9999)).rejects.toMatchObject({ code: 'notFound' });
+    await expect(b.diskReveal(99, 0)).rejects.toMatchObject({ code: 'notFound' });
   });
 
   it('refuses what the engine refuses', async () => {

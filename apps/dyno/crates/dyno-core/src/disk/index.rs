@@ -61,6 +61,25 @@ impl ScanLimits {
     }
 }
 
+/// The two sizes of a file or a sum of files: what it occupies on the volume and what a program reading it would get.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Sizes {
+    /// Bytes allocated on the volume (blocks, clusters); this is what the tree is sorted by.
+    pub on_disk: u64,
+    /// Bytes of content (the length). Smaller than `on_disk` for small files, larger for sparse or compressed ones.
+    pub logical: u64,
+}
+
+impl Sizes {
+    /// A file whose content fills its allocation exactly (what a source that can tell only one size reports).
+    pub fn same(bytes: u64) -> Sizes {
+        Sizes {
+            on_disk: bytes,
+            logical: bytes,
+        }
+    }
+}
+
 /// A node's id inside one index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeId(pub u32);
@@ -85,8 +104,10 @@ struct Node {
     open: u32,
     child_count: u32,
     bytes: u64,
+    logical: u64,
     items: u64,
     loose_bytes: u64,
+    loose_logical: u64,
     loose_items: u64,
     newest: i64,
 }
@@ -103,6 +124,8 @@ pub struct DiskNode {
     pub kind: NodeKind,
     /// Bytes on the volume, children included. Only grows during a scan.
     pub bytes: u64,
+    /// Bytes of content, children included (what the files add up to when read).
+    pub logical_bytes: u64,
     /// Files and folders inside, recursively.
     pub items: u64,
     /// Newest modification inside.
@@ -119,8 +142,10 @@ pub struct DiskNode {
 pub struct Folded {
     /// How many nodes (or files) are in it.
     pub count: u64,
-    /// Their bytes.
+    /// Their bytes on the volume.
     pub bytes: u64,
+    /// Their bytes of content.
+    pub logical_bytes: u64,
     /// Their items.
     pub items: u64,
 }
@@ -187,8 +212,10 @@ impl DiskIndex {
             open: 1,
             child_count: 0,
             bytes: 0,
+            logical: 0,
             items: 0,
             loose_bytes: 0,
+            loose_logical: 0,
             loose_items: 0,
             newest: 0,
         });
@@ -251,11 +278,12 @@ impl DiskIndex {
         !full
     }
 
-    fn bump(&mut self, from: u32, bytes: u64, items: u64, mtime: i64) {
+    fn bump(&mut self, from: u32, sizes: Sizes, items: u64, mtime: i64) {
         let mut at = from;
         while at != NONE {
             let n = &mut self.nodes[at as usize];
-            n.bytes = n.bytes.saturating_add(bytes);
+            n.bytes = n.bytes.saturating_add(sizes.on_disk);
+            n.logical = n.logical.saturating_add(sizes.logical);
             n.items = n.items.saturating_add(items);
             n.newest = n.newest.max(mtime);
             at = n.parent;
@@ -287,8 +315,10 @@ impl DiskIndex {
             open: 0,
             child_count: 0,
             bytes: 0,
+            logical: 0,
             items: 0,
             loose_bytes: 0,
+            loose_logical: 0,
             loose_items: 0,
             newest: 0,
         }
@@ -305,7 +335,7 @@ impl DiskIndex {
         n.open = 1;
         let id = self.link(parent, n);
         self.nodes[parent.0 as usize].open += 1;
-        self.bump(parent.0, 0, 1, 0);
+        self.bump(parent.0, Sizes::default(), 1, 0);
         Some(id)
     }
 
@@ -317,7 +347,7 @@ impl DiskIndex {
         let mut n = self.blank(name, NodeKind::MountPoint);
         n.complete = true;
         self.link(parent, n);
-        self.bump(parent.0, 0, 1, 0);
+        self.bump(parent.0, Sizes::default(), 1, 0);
         true
     }
 
@@ -326,27 +356,45 @@ impl DiskIndex {
         self.nodes[node.0 as usize].kind = NodeKind::Unreadable;
     }
 
+    /// Opens every unreadable folder for another try and returns their ids. Each one is a folder being listed again, so
+    /// [`finish_listing`](Self::finish_listing) completes it and its ancestors when the second try succeeds, and
+    /// [`mark_unreadable`](Self::mark_unreadable) leaves it as it was when it fails again. A folder that has anything in it
+    /// (it was not refused at the door) is left alone: listing it again would count its files twice.
+    pub fn reopen_unreadable(&mut self) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        for (id, n) in self.nodes.iter_mut().enumerate() {
+            if n.kind == NodeKind::Unreadable && n.child_count == 0 && n.loose_items == 0 {
+                n.kind = NodeKind::Folder;
+                n.open = 1;
+                out.push(NodeId(u32::try_from(id).unwrap_or(NONE)));
+            }
+        }
+        out
+    }
+
     /// Adds a file under `parent`. A notable file gets a node; any other is folded into `parent`'s loose totals.
-    pub fn add_file(&mut self, parent: NodeId, name: &str, bytes: u64, mtime: Timestamp) {
-        if bytes >= self.limits.notable_bytes && self.room() {
+    pub fn add_file(&mut self, parent: NodeId, name: &str, sizes: Sizes, mtime: Timestamp) {
+        if sizes.on_disk >= self.limits.notable_bytes && self.room() {
             let mut n = self.blank(name, NodeKind::File);
             n.complete = true;
-            n.bytes = bytes;
+            n.bytes = sizes.on_disk;
+            n.logical = sizes.logical;
             n.items = 1;
             n.newest = mtime.0;
             self.link(parent, n);
-            self.bump(parent.0, bytes, 1, mtime.0);
+            self.bump(parent.0, sizes, 1, mtime.0);
         } else {
-            self.add_folded_files(parent, bytes, 1, mtime);
+            self.add_folded_files(parent, sizes, 1, mtime);
         }
     }
 
     /// Adds files that were already summed by the caller (small ones, folded into `parent`).
-    pub fn add_folded_files(&mut self, parent: NodeId, bytes: u64, items: u64, newest: Timestamp) {
+    pub fn add_folded_files(&mut self, parent: NodeId, sizes: Sizes, items: u64, newest: Timestamp) {
         let p = &mut self.nodes[parent.0 as usize];
-        p.loose_bytes = p.loose_bytes.saturating_add(bytes);
+        p.loose_bytes = p.loose_bytes.saturating_add(sizes.on_disk);
+        p.loose_logical = p.loose_logical.saturating_add(sizes.logical);
         p.loose_items = p.loose_items.saturating_add(items);
-        self.bump(parent.0, bytes, items, newest.0);
+        self.bump(parent.0, sizes, items, newest.0);
     }
 
     /// Ends the listing of a folder: it is complete once every child folder is too.
@@ -370,6 +418,7 @@ impl DiskIndex {
             name: self.name(id),
             kind: n.kind,
             bytes: n.bytes,
+            logical_bytes: n.logical,
             items: n.items,
             newest_change: Timestamp(n.newest),
             complete: n.complete,
@@ -436,6 +485,7 @@ impl DiskIndex {
             Folded {
                 count: f.count + 1,
                 bytes: f.bytes.saturating_add(n.bytes),
+                logical_bytes: f.logical_bytes.saturating_add(n.logical),
                 items: f.items.saturating_add(n.items),
             }
         });
@@ -450,6 +500,7 @@ impl DiskIndex {
             loose: Folded {
                 count: parent.loose_items,
                 bytes: parent.loose_bytes,
+                logical_bytes: parent.loose_logical,
                 items: parent.loose_items,
             },
             shown: u32::try_from(shown).unwrap_or(u32::MAX),
@@ -478,12 +529,12 @@ mod tests {
         let mut i = DiskIndex::new("vol", limits(100));
         let r = i.root();
         let a = i.add_folder(r, "a").unwrap();
-        i.add_file(a, "big.bin", 5 * MB, Timestamp(50));
-        i.add_file(a, "small", 10, Timestamp(60));
+        i.add_file(a, "big.bin", Sizes::same(5 * MB), Timestamp(50));
+        i.add_file(a, "small", Sizes::same(10), Timestamp(60));
         let b = i.add_folder(r, "b").unwrap();
-        i.add_file(b, "mid.bin", 3 * MB, Timestamp(70));
+        i.add_file(b, "mid.bin", Sizes::same(3 * MB), Timestamp(70));
         let c = i.add_folder(r, "c").unwrap();
-        i.add_file(r, "loose", 7, Timestamp(5));
+        i.add_file(r, "loose", Sizes::same(7), Timestamp(5));
         for f in [a, b, c] {
             i.finish_listing(f);
         }
@@ -504,6 +555,7 @@ mod tests {
             Folded {
                 count: 1,
                 bytes: 7,
+                logical_bytes: 7,
                 items: 1
             }
         );
@@ -545,7 +597,7 @@ mod tests {
         let r = i.root();
         for n in 0..10 {
             let f = i.add_folder(r, &format!("f{n}")).unwrap();
-            i.add_file(f, "x", 2 * MB + n, Timestamp(1));
+            i.add_file(f, "x", Sizes::same(2 * MB + n), Timestamp(1));
             i.finish_listing(f);
         }
         let mut seen = Vec::new();
@@ -600,6 +652,82 @@ mod tests {
     }
 
     #[test]
+    fn unreadable_folders_can_be_opened_again_and_complete_the_tree() {
+        let mut i = DiskIndex::new("r", limits(100));
+        let r = i.root();
+        let locked = i.add_folder(r, "Library").unwrap();
+        let fine = i.add_folder(r, "fine").unwrap();
+        i.add_file(fine, "x", Sizes::same(9), Timestamp(1));
+        i.mark_unreadable(locked);
+        for n in [locked, fine, r] {
+            i.finish_listing(n);
+        }
+        assert!(!i.is_complete());
+        assert_eq!(i.reopen_unreadable(), vec![locked], "only the refused folder is opened again");
+        i.add_file(locked, "mail", Sizes::same(40), Timestamp(2));
+        i.finish_listing(locked);
+        assert!(i.is_complete(), "the second try completes the folder and everything above it");
+        assert_eq!(i.totals().0, 49);
+        assert!(i.reopen_unreadable().is_empty(), "nothing is left to retry");
+
+        // A second refusal leaves the folder as it was.
+        let mut j = DiskIndex::new("r", limits(100));
+        let r = j.root();
+        let locked = j.add_folder(r, "Library").unwrap();
+        j.mark_unreadable(locked);
+        j.finish_listing(locked);
+        j.finish_listing(r);
+        assert_eq!(j.reopen_unreadable(), vec![locked]);
+        j.mark_unreadable(locked);
+        j.finish_listing(locked);
+        assert!(!j.is_complete());
+        assert_eq!(j.reopen_unreadable(), vec![locked], "it can be tried again later");
+    }
+
+    #[test]
+    fn a_folder_with_contents_is_not_opened_again() {
+        let mut i = DiskIndex::new("r", limits(100));
+        let r = i.root();
+        let a = i.add_folder(r, "a").unwrap();
+        i.add_file(a, "tiny", Sizes::same(1), Timestamp(1));
+        i.mark_unreadable(a);
+        assert!(i.reopen_unreadable().is_empty(), "its files are already counted");
+    }
+
+    #[test]
+    fn both_sizes_are_kept_and_add_up() {
+        let mut i = DiskIndex::new("r", limits(100));
+        let r = i.root();
+        let a = i.add_folder(r, "a").unwrap();
+        // A sparse file occupies less than its length; a tiny one occupies a whole block.
+        i.add_file(
+            a,
+            "sparse.img",
+            Sizes {
+                on_disk: 3 * MB,
+                logical: 50 * MB,
+            },
+            Timestamp(1),
+        );
+        i.add_file(
+            a,
+            "tiny",
+            Sizes {
+                on_disk: 4096,
+                logical: 10,
+            },
+            Timestamp(2),
+        );
+        i.finish_listing(a);
+        i.finish_listing(r);
+        let top = i.children(r, 0, 10, 0.0).unwrap();
+        assert_eq!((top.node.bytes, top.node.logical_bytes), (3 * MB + 4096, 50 * MB + 10));
+        let inner = i.children(NodeId(top.children[0].id), 0, 10, 0.0).unwrap();
+        assert_eq!((inner.children[0].bytes, inner.children[0].logical_bytes), (3 * MB, 50 * MB));
+        assert_eq!((inner.loose.bytes, inner.loose.logical_bytes), (4096, 10));
+    }
+
+    #[test]
     fn mount_points_are_shown_but_not_entered() {
         let mut i = DiskIndex::new("r", limits(100));
         let r = i.root();
@@ -621,7 +749,7 @@ mod tests {
         assert!(i.add_folder(r, "c").is_none(), "the root and two folders fill three nodes");
         assert!(i.truncated());
         assert_eq!(i.skipped_folders(), 1);
-        i.add_file(a, "big", 9 * MB, Timestamp(1));
+        i.add_file(a, "big", Sizes::same(9 * MB), Timestamp(1));
         let p = i.children(a, 0, 10, 0.0).unwrap();
         assert!(p.children.is_empty(), "no room for a node: folded into loose");
         assert_eq!(p.loose.bytes, 9 * MB);
@@ -689,7 +817,12 @@ mod tests {
     fn the_wire_shape_is_camel_case() {
         let i = sample();
         let v = serde_json::to_value(i.children(i.root(), 0, 2, 0.0).unwrap()).unwrap();
-        assert!(v["nextOffset"].is_u64() && v["node"]["newestChange"].is_i64() && v["children"][0]["hasChildren"].is_boolean());
+        assert!(
+            v["node"]["logicalBytes"].is_u64()
+                && v["nextOffset"].is_u64()
+                && v["node"]["newestChange"].is_i64()
+                && v["children"][0]["hasChildren"].is_boolean()
+        );
         assert_eq!(v["children"][0]["kind"], "folder");
     }
 }

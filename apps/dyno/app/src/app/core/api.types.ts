@@ -482,6 +482,16 @@ export interface DiskScanStatus {
   truncated: boolean;
   /** The first folders that could not be read. */
   unreadableFirst: string[];
+  /** Folders were refused and this Mac has not given Dyno Full Disk Access, the likely reason (macOS only). */
+  needsFullDiskAccess: boolean;
+  /** Files and folders counted per second while running; `null` until it can be known (never a made-up number). */
+  itemsPerSecond: number | null;
+  /** Seconds left in the first pass over a whole volume; `null` when it cannot be known. */
+  etaSeconds: number | null;
+  /** Used space the scan did not count (used minus counted), for a whole-volume scan that is done; `null` otherwise. */
+  hiddenBytes: number | null;
+  /** When the latest pass ended; `null` while the first pass runs. */
+  scannedAt: Timestamp | null;
 }
 
 export type NodeKind = 'folder' | 'file' | 'mountPoint' | 'unreadable';
@@ -493,6 +503,8 @@ export interface DiskNode {
   kind: NodeKind;
   /** Bytes on the volume, children included. */
   bytes: number;
+  /** Bytes of content, children included (what the files add up to when read). */
+  logicalBytes: number;
   /** Files and folders inside, recursively. */
   items: number;
   newestChange: Timestamp;
@@ -504,7 +516,10 @@ export interface DiskNode {
 /** A sum of folded things. */
 export interface Folded {
   count: number;
+  /** Bytes on the volume. */
   bytes: number;
+  /** Bytes of content. */
+  logicalBytes: number;
   items: number;
 }
 

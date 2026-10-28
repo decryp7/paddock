@@ -670,6 +670,18 @@ export class MockBackend implements DynoBackend {
     return this.reply('diskPath', () => this.disk.path(scan, node));
   }
 
+  retryDiskScan(scan: number): Promise<DiskScanStatus> {
+    return this.reply('retryDiskScan', () => this.disk.retry(scan));
+  }
+
+  openFullDiskAccessSettings(): Promise<void> {
+    return this.reply('openFullDiskAccessSettings', () => undefined);
+  }
+
+  diskReveal(scan: number, node: number): Promise<void> {
+    return this.reply('diskReveal', () => this.disk.reveal(scan, node));
+  }
+
   // ------------------------------------------------------------------------------------- health
 
   health(): Promise<HealthReport> {

@@ -34,15 +34,20 @@ const status = (state: DiskScanStatus['state'], volume: Volume | null): DiskScan
   progress: { bytes: 600, items: 12, folders: 3, totalBytes: 600, unreadable: 1 },
   truncated: false,
   unreadableFirst: ['/Users/alex/Library/Mail'],
+  needsFullDiskAccess: true,
+  itemsPerSecond: 1200,
+  etaSeconds: null,
+  hiddenBytes: 40,
+  scannedAt: 1_700_000_100_000,
 });
 
 const phases: ScanPhase[] = ['readingVolumeFacts', 'readingFolders'];
 
 const children: DiskChildren = {
-  node: { id: 0, name: 'Macintosh HD', kind: 'folder', bytes: 504, items: 5, newestChange: 1_700_000_000_000, complete: false, hasChildren: true },
-  children: [{ id: 1, name: 'Users', kind: 'folder', bytes: 500, items: 1, newestChange: 1_700_000_000_000, complete: true, hasChildren: true }],
-  other: { count: 2, bytes: 0, items: 0 },
-  loose: { count: 1, bytes: 4, items: 1 },
+  node: { id: 0, name: 'Macintosh HD', kind: 'folder', bytes: 504, logicalBytes: 484, items: 5, newestChange: 1_700_000_000_000, complete: false, hasChildren: true },
+  children: [{ id: 1, name: 'Users', kind: 'folder', bytes: 500, logicalBytes: 480, items: 1, newestChange: 1_700_000_000_000, complete: true, hasChildren: true }],
+  other: { count: 2, bytes: 0, logicalBytes: 0, items: 0 },
+  loose: { count: 1, bytes: 4, logicalBytes: 4, items: 1 },
   shown: 1,
   offset: 0,
   nextOffset: null,
@@ -60,6 +65,9 @@ const expected = {
     children: { diskChildren: { scan: 7, node: 4, offset: 0, limit: 48, minFraction: 0.004 } },
     childrenOfRoot: { diskChildren: { scan: 7, node: null, offset: 48, limit: 48, minFraction: 0 } },
     path: { diskPath: { scan: 7, node: 4 } },
+    retry: { retryDiskScan: { scan: 7 } },
+    openFullDiskAccess: 'openFullDiskAccessSettings',
+    reveal: { diskReveal: { scan: 7, node: 4 } },
   },
   volumes: [internal, usb, share],
   statuses: [

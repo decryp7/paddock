@@ -51,15 +51,26 @@ pub fn read_error(e: &io::Error) -> ReadError {
     }
 }
 
+/// (allocated bytes, device, file id, links) of an entry; the length is read from the metadata.
 #[cfg(unix)]
-fn identity(meta: &Metadata) -> (u64, u64, u64, u64) {
+fn identity(meta: &Metadata, _path: &Path) -> (u64, u64, u64, u64) {
     use std::os::unix::fs::MetadataExt;
     (meta.blocks().saturating_mul(512), meta.dev(), meta.ino(), meta.nlink())
 }
 
-#[cfg(not(unix))]
-fn identity(meta: &Metadata) -> (u64, u64, u64, u64) {
-    // No file id without an open handle: hard links are counted per name and a loop is stopped by not following links.
+/// On Windows the identity and the allocation come from an open handle (volume serial plus file index, link count,
+/// allocation size). A file that cannot be opened (a sharing violation, no rights) is counted by its length with no
+/// identity, so it is neither lost nor treated as a hard link of anything.
+#[cfg(windows)]
+fn identity(meta: &Metadata, path: &Path) -> (u64, u64, u64, u64) {
+    match dyno_platform::fileid::file_facts(path) {
+        Ok(f) => (f.allocated, f.volume, f.index, f.links),
+        Err(_) => (meta.len(), 0, 0, 1),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn identity(meta: &Metadata, _path: &Path) -> (u64, u64, u64, u64) {
     (meta.len(), 0, 0, 1)
 }
 
@@ -76,7 +87,7 @@ fn is_link(meta: &Metadata) -> bool {
     }
 }
 
-fn info(name: String, meta: &Metadata) -> DirEntryInfo {
+fn info(name: String, path: &Path, meta: &Metadata) -> DirEntryInfo {
     let kind = if is_link(meta) {
         EntryKind::Link
     } else if meta.is_dir() {
@@ -86,11 +97,16 @@ fn info(name: String, meta: &Metadata) -> DirEntryInfo {
     } else {
         EntryKind::Other
     };
-    let (bytes, dev, ino, links) = identity(meta);
+    let (bytes, dev, ino, links) = if kind == EntryKind::Link {
+        (0, 0, 0, 1)
+    } else {
+        identity(meta, path)
+    };
     DirEntryInfo {
         name,
         kind,
         bytes: if kind == EntryKind::File { bytes } else { 0 },
+        logical: if kind == EntryKind::File { meta.len() } else { 0 },
         dev,
         ino,
         links,
@@ -104,12 +120,15 @@ impl DirSource for OsDirSource {
         let name = path
             .file_name()
             .map_or_else(|| path.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
-        Ok(info(name, &meta))
+        Ok(info(name, path, &meta))
     }
 
     fn read_dir(&self, path: &Path, each: &mut dyn FnMut(Result<DirEntryInfo, ReadError>) -> bool) -> Result<(), ReadError> {
         for entry in std::fs::read_dir(path).map_err(|e| read_error(&e))? {
-            let item = entry.and_then(|e| e.metadata().map(|m| info(e.file_name().to_string_lossy().into_owned(), &m)));
+            let item = entry.and_then(|e| {
+                e.metadata()
+                    .map(|m| info(e.file_name().to_string_lossy().into_owned(), &e.path(), &m))
+            });
             if !each(item.map_err(|e| read_error(&e))) {
                 break;
             }
@@ -138,12 +157,25 @@ mod tests {
         assert_eq!(seen[0].name, "file.bin");
         assert_eq!(seen[0].kind, EntryKind::File);
         assert!(seen[0].bytes >= 5000, "allocated bytes are at least the length");
+        assert_eq!(seen[0].logical, 5000, "the length is kept next to the allocation");
+        assert_eq!(seen[1].logical, 0);
         assert_eq!(seen[1].kind, EntryKind::Dir);
         assert_eq!(seen[1].bytes, 0, "a folder's own entry counts nothing");
         let me = OsDirSource.stat(t.path()).unwrap();
         assert_eq!(me.kind, EntryKind::Dir);
         #[cfg(unix)]
         assert_eq!(me.dev, seen[1].dev);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_sparse_file_occupies_less_than_its_length() {
+        let t = tempfile::tempdir().unwrap();
+        let f = std::fs::File::create(t.path().join("sparse.img")).unwrap();
+        f.set_len(64 * 1024 * 1024).unwrap();
+        let e = OsDirSource.stat(&t.path().join("sparse.img")).unwrap();
+        assert_eq!(e.logical, 64 * 1024 * 1024);
+        assert!(e.bytes < e.logical, "holes take no blocks on a file system that supports them");
     }
 
     #[test]

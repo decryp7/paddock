@@ -292,6 +292,18 @@ export class TauriBackend implements DynoBackend {
     return this.request({ diskPath: { scan, node } });
   }
 
+  retryDiskScan(scan: number): Promise<DiskScanStatus> {
+    return this.request({ retryDiskScan: { scan } });
+  }
+
+  openFullDiskAccessSettings(): Promise<void> {
+    return this.request('openFullDiskAccessSettings');
+  }
+
+  diskReveal(scan: number, node: number): Promise<void> {
+    return this.request({ diskReveal: { scan, node } });
+  }
+
   // ---------------------------------------------------------------------------------------- health
 
   health(): Promise<HealthReport> {

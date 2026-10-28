@@ -5,7 +5,7 @@
 //! equal this file, so a change on one side without the other fails a test on both. To update the file after a deliberate
 //! change, run this test with `DYNO_UPDATE_WIRE_FIXTURE=1` and commit the result together with the TypeScript.
 
-use dyno_core::disk::index::{DiskIndex, ScanLimits};
+use dyno_core::disk::index::{DiskIndex, ScanLimits, Sizes};
 use dyno_core::disk::scan::{DiskScanStatus, DiskTarget, ScanFailure, ScanPhase, ScanProgress, ScanState};
 use dyno_core::disk::volume::{NetworkProtocol, Volume, VolumeLocation};
 use dyno_core::protocol::Request;
@@ -47,6 +47,11 @@ fn status(scan: u64, state: ScanState, volume: Option<Volume>) -> DiskScanStatus
         },
         truncated: false,
         unreadable_first: vec!["/Users/alex/Library/Mail".into()],
+        needs_full_disk_access: true,
+        items_per_second: Some(1200),
+        eta_seconds: None,
+        hidden_bytes: Some(40),
+        scanned_at: Some(Timestamp(1_700_000_100_000)),
     }
 }
 
@@ -61,8 +66,16 @@ fn children() -> Value {
     );
     let root = i.root();
     let users = i.add_folder(root, "Users").unwrap();
-    i.add_file(users, "disk-image.dmg", 500, Timestamp(1_700_000_000_000));
-    i.add_file(root, "swap", 4, Timestamp(1_600_000_000_000));
+    i.add_file(
+        users,
+        "disk-image.dmg",
+        Sizes {
+            on_disk: 500,
+            logical: 480,
+        },
+        Timestamp(1_700_000_000_000),
+    );
+    i.add_file(root, "swap", Sizes::same(4), Timestamp(1_600_000_000_000));
     i.add_mount_point(root, "Volumes");
     let locked = i.add_folder(root, "private").unwrap();
     i.mark_unreadable(locked);
@@ -96,6 +109,9 @@ fn sample() -> Value {
             "children": to_value(Request::DiskChildren { scan: 7, node: Some(4), offset: 0, limit: 48, min_fraction: 0.004 }).unwrap(),
             "childrenOfRoot": to_value(Request::DiskChildren { scan: 7, node: None, offset: 48, limit: 48, min_fraction: 0.0 }).unwrap(),
             "path": to_value(Request::DiskPath { scan: 7, node: 4 }).unwrap(),
+            "retry": to_value(Request::RetryDiskScan { scan: 7 }).unwrap(),
+            "openFullDiskAccess": to_value(Request::OpenFullDiskAccessSettings).unwrap(),
+            "reveal": to_value(Request::DiskReveal { scan: 7, node: 4 }).unwrap(),
         },
         "volumes": [to_value(&internal).unwrap(), to_value(&usb).unwrap(), to_value(&share).unwrap()],
         "statuses": [

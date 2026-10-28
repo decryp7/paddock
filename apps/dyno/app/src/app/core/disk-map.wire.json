@@ -8,6 +8,7 @@
         "id": 1,
         "items": 1,
         "kind": "folder",
+        "logicalBytes": 480,
         "name": "Users",
         "newestChange": 1700000000000
       }
@@ -15,7 +16,8 @@
     "loose": {
       "bytes": 4,
       "count": 1,
-      "items": 1
+      "items": 1,
+      "logicalBytes": 4
     },
     "nextOffset": null,
     "node": {
@@ -25,6 +27,7 @@
       "id": 0,
       "items": 5,
       "kind": "folder",
+      "logicalBytes": 484,
       "name": "Macintosh HD",
       "newestChange": 1700000000000
     },
@@ -32,7 +35,8 @@
     "other": {
       "bytes": 0,
       "count": 2,
-      "items": 0
+      "items": 0,
+      "logicalBytes": 0
     },
     "shown": 1
   },
@@ -65,8 +69,20 @@
       }
     },
     "diskVolumes": "diskVolumes",
+    "openFullDiskAccess": "openFullDiskAccessSettings",
     "path": {
       "diskPath": {
+        "node": 4,
+        "scan": 7
+      }
+    },
+    "retry": {
+      "retryDiskScan": {
+        "scan": 7
+      }
+    },
+    "reveal": {
+      "diskReveal": {
         "node": 4,
         "scan": 7
       }
@@ -97,7 +113,11 @@
   },
   "statuses": [
     {
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
       "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
       "phase": "readingFolders",
       "progress": {
         "bytes": 600,
@@ -107,6 +127,7 @@
         "unreadable": 1
       },
       "scan": 7,
+      "scannedAt": 1700000100000,
       "seq": 3,
       "state": "running",
       "target": {
@@ -133,7 +154,11 @@
       }
     },
     {
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
       "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
       "phase": "readingFolders",
       "progress": {
         "bytes": 600,
@@ -143,6 +168,7 @@
         "unreadable": 1
       },
       "scan": 7,
+      "scannedAt": 1700000100000,
       "seq": 3,
       "state": "done",
       "target": {
@@ -157,7 +183,11 @@
       "volume": null
     },
     {
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
       "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
       "phase": "readingFolders",
       "progress": {
         "bytes": 600,
@@ -167,6 +197,7 @@
         "unreadable": 1
       },
       "scan": 7,
+      "scannedAt": 1700000100000,
       "seq": 3,
       "state": "cancelled",
       "target": {
@@ -181,7 +212,11 @@
       "volume": null
     },
     {
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
       "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
       "phase": "readingFolders",
       "progress": {
         "bytes": 600,
@@ -191,6 +226,7 @@
         "unreadable": 1
       },
       "scan": 7,
+      "scannedAt": 1700000100000,
       "seq": 3,
       "state": {
         "failed": {
@@ -213,7 +249,11 @@
       "volume": null
     },
     {
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
       "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
       "phase": "readingFolders",
       "progress": {
         "bytes": 600,
@@ -223,6 +263,7 @@
         "unreadable": 1
       },
       "scan": 7,
+      "scannedAt": 1700000100000,
       "seq": 3,
       "state": {
         "failed": {
@@ -245,7 +286,11 @@
       "volume": null
     },
     {
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
       "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
       "phase": "readingFolders",
       "progress": {
         "bytes": 600,
@@ -255,6 +300,7 @@
         "unreadable": 1
       },
       "scan": 7,
+      "scannedAt": 1700000100000,
       "seq": 3,
       "state": {
         "failed": {

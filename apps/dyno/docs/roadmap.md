@@ -485,6 +485,9 @@ Not part of v1; anything new goes here.
 - **Multi-PC LAN view.** See several of your own PCs on one dashboard over the LAN, opt-in, read-only, over **TLS with a
   pre-shared key**. Needs its own ADR (discovery, key exchange, certificate handling) before any code; depends on WP-16 and
   WP-27.
+- **Disk map, after 1.0** (decided 2026-10-28; 1.0 has volumes, the sunburst drill-down, Retry of the incomplete folders, Reveal
+  and the Full Disk Access prompt): duplicate files, the big and old file lists, and the breakdown of hidden space (1.0 shows
+  one figure, used minus counted).
 - Further ideas land here as they come up.
 
 ## Screenshot checklist

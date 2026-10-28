@@ -55,6 +55,7 @@ impl FakeFs {
             name: name.into(),
             kind,
             bytes,
+            logical: bytes,
             dev,
             ino,
             links,
@@ -79,6 +80,13 @@ impl FakeFs {
         self.push(parent, self.entry(name, EntryKind::File, bytes, 1, self.ino(), 1));
     }
 
+    /// A file whose allocation and length differ (a sparse or compressed file, or a small one in a whole block).
+    pub fn file_sized(&self, parent: &Path, name: &str, on_disk: u64, logical: u64) {
+        let mut e = self.entry(name, EntryKind::File, on_disk, 1, self.ino(), 1);
+        e.logical = logical;
+        self.push(parent, e);
+    }
+
     /// A file with `links` names sharing one file id.
     pub fn linked_file(&self, parent: &Path, name: &str, bytes: u64, ino: u64) {
         self.push(parent, self.entry(name, EntryKind::File, bytes, 1, ino, 2));
@@ -95,6 +103,11 @@ impl FakeFs {
     /// Opening this folder fails.
     pub fn fail_open(&self, path: &Path, e: ReadError) {
         self.open_errors.lock().unwrap().insert(path.to_path_buf(), e);
+    }
+
+    /// Opening this folder works again (the person gave the rights).
+    pub fn allow_open(&self, path: &Path) {
+        self.open_errors.lock().unwrap().remove(path);
     }
 
     /// Looking at this path fails (a root that cannot be started from).

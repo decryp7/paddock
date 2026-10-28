@@ -52,7 +52,18 @@ impl Running {
         details: Box<dyn dyno_core::ports::ProcessSource>,
         reveal: agent::Reveal,
     ) -> Result<Running, String> {
-        let (shared, sensors, processes) = Shared::build(dirs, platform, details, reveal)?;
+        Running::start_with(dirs, platform, details, reveal, disk::DiskPorts::os())
+    }
+
+    /// [`Running::start`] with the disk map's machine ports given (tests pass fixed ones).
+    pub fn start_with(
+        dirs: paths::Dirs,
+        platform: dyno_platform::Platform,
+        details: Box<dyn dyno_core::ports::ProcessSource>,
+        reveal: agent::Reveal,
+        disk_ports: disk::DiskPorts,
+    ) -> Result<Running, String> {
+        let (shared, sensors, processes) = Shared::build_with(dirs, platform, details, reveal, disk_ports)?;
         let (host, discovery) = server::bind(&shared).map_err(|e| format!("Dyno could not open its private endpoint: {e}"))?;
         let mut threads = Vec::new();
         let s = shared.clone();

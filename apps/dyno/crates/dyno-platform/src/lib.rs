@@ -7,12 +7,14 @@
 //! a `// SAFETY:` comment.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod access;
 pub mod battery;
 pub mod counters;
 pub mod dev_folders;
 pub mod elevate;
 pub mod extras;
 pub mod fake;
+pub mod fileid;
 pub mod hardware;
 pub mod inventory;
 pub mod issues;

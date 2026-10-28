@@ -211,6 +211,17 @@ impl Shared {
     /// defaults with a note in the activity log). Returns the sampler's two ports separately. `details` is a second
     /// process source used only for on-demand details, so a slow `lsof` never delays a sampling tick.
     pub fn build(dirs: Dirs, platform: Platform, details: Box<dyn ProcessSource>, reveal: Reveal) -> Result<Built, String> {
+        Shared::build_with(dirs, platform, details, reveal, crate::disk::DiskPorts::os())
+    }
+
+    /// [`Shared::build`] with the disk map's machine ports given (tests pass fixed ones).
+    pub fn build_with(
+        dirs: Dirs,
+        platform: Platform,
+        details: Box<dyn ProcessSource>,
+        reveal: Reveal,
+        disk_ports: crate::disk::DiskPorts,
+    ) -> Result<Built, String> {
         let t = now();
         let mut notes: Vec<String> = Vec::new();
         if let Err(e) = std::fs::create_dir_all(dirs.root()) {
@@ -324,9 +335,10 @@ impl Shared {
             baselines: crate::baselines::BaselineCentre::new(),
             disk: crate::disk::centre::DiskCentre::new(
                 Arc::new(crate::disk::fs::OsDirSource),
-                Arc::new(crate::disk::volumes::OsVolumes),
+                disk_ports.volumes,
                 Arc::new(crate::disk::BroadcastStatus(me.clone())),
                 Arc::new(crate::disk::centre::SystemClock::default()),
+                disk_ports.access,
                 cores,
                 settings_limits,
             ),

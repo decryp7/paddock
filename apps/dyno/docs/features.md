@@ -189,8 +189,7 @@ the real path, not in a personal folder, unchanged since the scan), skips files 
 moves items to a 7-day **quarantine** (restorable from the page or the activity log, then deleted for good by the agent) or to the
 Recycle Bin / Trash. Categories come from TOML packs: the built-in pack is embedded; you may add packs to the data folder's
 `packs/` folder (paths by template, `children` and `installers` selectors only; a bad pack is reported in the activity log and
-ignored). Windows, macOS and Linux (XDG folders) have categories. The disk-space map (`DiskUsage`) is bounded in depth, entries and
-time. Policy: [ADR 0005](adr/0005-cleanup-safety.md). Not built yet: scheduled cleanups, Docker image removal (the category says
+ignored). Windows, macOS and Linux (XDG folders) have categories. The disk map is a separate engine (volumes, a cancellable scan as a job, one level at a time). Policy: [ADR 0005](adr/0005-cleanup-safety.md). Not built yet: scheduled cleanups, Docker image removal (the category says
 to run `docker image prune`), a disk-map screen, Linux Trash is never emptied by Dyno. Work package:
 [WP-04](roadmap.md#wp-04-cleanup-with-quarantine-and-undo).
 

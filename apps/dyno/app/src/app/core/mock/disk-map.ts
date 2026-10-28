@@ -91,11 +91,15 @@ function specFor(volumeId: string): Spec {
   );
 }
 
+/** Small files take whole blocks, so their content is a little less than what they occupy. */
+const looseLogical = (bytes: number): number => Math.round(bytes * 0.88);
+
 interface Built {
   parent: number;
   name: string;
   kind: NodeKind;
   bytes: number;
+  logical: number;
   items: number;
   loose: number;
   newest: number;
@@ -113,17 +117,22 @@ export class MockTree {
   private build(spec: Spec, parent: number): number {
     const id = this.nodes.length;
     const kind = spec.kind ?? (spec.children ? 'folder' : 'file');
-    const node: Built = { parent, name: spec.name, kind, bytes: 0, items: 0, loose: Math.round((spec.loose ?? 0) * GB), newest: this.newest - id * 3_600_000, kids: [] };
+    const node: Built = { parent, name: spec.name, kind, bytes: 0, logical: 0, items: 0, loose: Math.round((spec.loose ?? 0) * GB), newest: this.newest - id * 3_600_000, kids: [] };
     this.nodes.push(node);
     for (const c of spec.children ?? []) {
       const child = this.build(c, id);
       node.kids.push(child);
       const k = this.nodes[child]!;
       node.bytes += k.bytes;
+      node.logical += k.logical;
       node.items += k.items + 1;
     }
-    if (!spec.children) node.bytes = Math.round((spec.gb ?? 0) * GB);
+    if (!spec.children) {
+      node.bytes = Math.round((spec.gb ?? 0) * GB);
+      node.logical = node.bytes;
+    }
     node.bytes += node.loose;
+    node.logical += looseLogical(node.loose);
     node.items += node.loose > 0 ? Math.max(1, Math.round(node.loose / (40 * MB))) : 0;
     return id;
   }
@@ -134,7 +143,7 @@ export class MockTree {
 
   private info(id: number): DiskNode {
     const n = this.nodes[id]!;
-    return { id, name: n.name, kind: n.kind, bytes: n.bytes, items: n.items, newestChange: n.newest, complete: n.kind !== 'unreadable', hasChildren: n.kids.length > 0 || n.loose > 0 };
+    return { id, name: n.name, kind: n.kind, bytes: n.bytes, logicalBytes: n.logical, items: n.items, newestChange: n.newest, complete: n.kind !== 'unreadable', hasChildren: n.kids.length > 0 || n.loose > 0 };
   }
 
   children(q: Pick<DiskChildrenQuery, 'node' | 'offset' | 'limit' | 'minFraction'>): DiskChildren | null {
@@ -145,11 +154,11 @@ export class MockTree {
     const floor = q.minFraction > 0 ? Math.max(1, Math.ceil(parent.bytes * Math.min(q.minFraction, 1))) : 0;
     const shown = kids.filter((k) => this.nodes[k]!.bytes >= floor);
     const rest = kids.slice(shown.length);
-    const other: Folded = { count: rest.length, bytes: rest.reduce((a, k) => a + this.nodes[k]!.bytes, 0), items: rest.reduce((a, k) => a + this.nodes[k]!.items, 0) };
+    const other: Folded = { count: rest.length, bytes: rest.reduce((a, k) => a + this.nodes[k]!.bytes, 0), logicalBytes: rest.reduce((a, k) => a + this.nodes[k]!.logical, 0), items: rest.reduce((a, k) => a + this.nodes[k]!.items, 0) };
     const limit = Math.min(Math.max(q.limit, 1), 256);
     const start = Math.min(q.offset, shown.length);
     const end = Math.min(start + limit, shown.length);
-    const loose: Folded = { count: parent.loose > 0 ? 1 : 0, bytes: parent.loose, items: parent.loose > 0 ? 1 : 0 };
+    const loose: Folded = { count: parent.loose > 0 ? 1 : 0, bytes: parent.loose, logicalBytes: looseLogical(parent.loose), items: parent.loose > 0 ? 1 : 0 };
     return { node: this.info(id), children: shown.slice(start, end).map((k) => this.info(k)), other, loose, shown: shown.length, offset: start, nextOffset: end < shown.length ? end : null };
   }
 
@@ -157,7 +166,8 @@ export class MockTree {
     if (!this.nodes[id]) return null;
     const names: string[] = [];
     for (let at = id; at > 0; at = this.nodes[at]!.parent) names.unshift(this.nodes[at]!.name);
-    return [root.replace(/\/$/, ''), ...names].join('/');
+    // The root's path is the folder the scan started from, never empty.
+    return names.length === 0 ? root : [root.replace(/\/$/, ''), ...names].join('/');
   }
 }
 
@@ -179,6 +189,8 @@ export class MockDiskMap {
   private readonly scans = new Map<number, Scan>();
   private readonly listeners = new Set<(s: DiskScanStatus) => void>();
   private nextScan = 1;
+  /** The paths "revealed", for tests. */
+  readonly revealed: string[] = [];
 
   constructor(
     private readonly now: () => number,
@@ -228,6 +240,11 @@ export class MockDiskMap {
         progress: { bytes: 0, items: 0, folders: 0, totalBytes: total, unreadable: 0 },
         truncated: false,
         unreadableFirst: [],
+        needsFullDiskAccess: false,
+        itemsPerSecond: null,
+        etaSeconds: null,
+        hiddenBytes: null,
+        scannedAt: null,
       },
     };
     this.scans.set(scan.status.scan, scan);
@@ -259,6 +276,11 @@ export class MockDiskMap {
         unreadable: share >= 0.35 ? 1 : 0,
       },
       unreadableFirst: share >= 0.35 ? ['/Users/alex/Library/Mail'] : [],
+      needsFullDiskAccess: share >= 0.35 && scan.status.volume?.id === '/',
+      itemsPerSecond: state === 'running' ? Math.round(counted / (4 * MB) / (share * 10)) : null,
+      etaSeconds: state === 'running' && prev.totalBytes !== null ? Math.round((1 - share) * 40) : null,
+      hiddenBytes: state === 'done' && prev.totalBytes !== null ? Math.max(0, prev.totalBytes - Math.max(prev.bytes, counted)) : null,
+      scannedAt: state === 'running' ? scan.status.scannedAt : this.now(),
     });
   }
 
@@ -266,7 +288,33 @@ export class MockDiskMap {
     const s = this.find(scan);
     if (s.status.state !== 'running') return;
     s.timers.forEach(clearTimeout);
-    this.emit(s, { state: 'cancelled' });
+    this.emit(s, { state: 'cancelled', scannedAt: this.now() });
+  }
+
+  /** Reads the folders that could not be opened again, and only those; the mock's Mail folder stays closed (no access). */
+  retry(scan: number): DiskScanStatus {
+    const s = this.find(scan);
+    if (s.status.state === 'running') throw this.error('busy', 'That scan is still running.');
+    if (s.status.state !== 'done' || s.status.progress.unreadable === 0) throw this.error('badRequest', 'There is nothing to read again.');
+    this.emit(s, { state: 'running', phase: 'readingFolders', progress: { ...s.status.progress, unreadable: 0 }, unreadableFirst: [] });
+    const status = structuredClone(s.status);
+    s.timers.push(
+      this.later(() => {
+        if (s.status.state !== 'running') return;
+        this.emit(s, {
+          state: 'done',
+          scannedAt: this.now(),
+          progress: { ...s.status.progress, folders: s.status.progress.folders + 1, unreadable: 1 },
+          unreadableFirst: ['/Users/alex/Library/Mail'],
+        });
+      }, 1),
+    );
+    return status;
+  }
+
+  /** Shows a node in the file manager: the mock only checks that the node exists and remembers it. */
+  reveal(scan: number, node: number): void {
+    this.revealed.push(this.path(scan, node));
   }
 
   list(): DiskScanStatus[] {
