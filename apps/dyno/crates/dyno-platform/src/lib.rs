@@ -7,11 +7,13 @@
 //! a `// SAFETY:` comment.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod access;
 pub mod battery;
 pub mod counters;
 pub mod dev_folders;
 pub mod extras;
 pub mod fake;
+pub mod fileid;
 pub mod hardware;
 pub mod inventory;
 pub mod issues;
@@ -19,12 +21,14 @@ pub mod links;
 pub mod network;
 pub mod nt;
 pub mod parse;
+pub mod priority;
 pub mod process;
 pub mod processes;
 pub mod readability;
 pub mod runner;
 pub mod sensors;
 pub mod toolpath;
+pub mod volumes;
 #[cfg(unix)]
 #[allow(unsafe_code)]
 pub mod unix_proc;

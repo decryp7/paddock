@@ -31,7 +31,17 @@ describe('TauriBackend: request shapes', () => {
     ['history', (b) => b.history('week', 5), { history: { range: 'week', end: 5 } }],
     ['history now', (b) => b.history('hour', null), { history: { range: 'hour', end: null } }],
     ['activity', (b) => b.activity(30), { activity: { limit: 30 } }],
-    ['diskUsage', (b) => b.diskUsage(null), { diskUsage: { path: null } }],
+    ['diskVolumes', (b) => b.diskVolumes(), 'diskVolumes'],
+    ['startDiskScan of a volume', (b) => b.startDiskScan({ volume: { id: '/' } }), { startDiskScan: { target: { volume: { id: '/' } } } }],
+    ['startDiskScan of a folder', (b) => b.startDiskScan({ folder: { path: '/x' } }), { startDiskScan: { target: { folder: { path: '/x' } } } }],
+    ['cancelDiskScan', (b) => b.cancelDiskScan(7), { cancelDiskScan: { scan: 7 } }],
+    ['diskScans', (b) => b.diskScans(), 'diskScans'],
+    ['diskChildren', (b) => b.diskChildren({ scan: 7, node: null, offset: 48, limit: 48, minFraction: 0.004 }), { diskChildren: { scan: 7, node: null, offset: 48, limit: 48, minFraction: 0.004 } }],
+    ['diskRings', (b) => b.diskRings({ scan: 7, node: null, rings: 3, minShare: 0.01, maxNodes: 500 }), { diskRings: { scan: 7, node: null, rings: 3, minShare: 0.01, maxNodes: 500 } }],
+    ['diskPath', (b) => b.diskPath(7, 4), { diskPath: { scan: 7, node: 4 } }],
+    ['retryDiskScan', (b) => b.retryDiskScan(7), { retryDiskScan: { scan: 7 } }],
+    ['openFullDiskAccessSettings', (b) => b.openFullDiskAccessSettings(), 'openFullDiskAccessSettings'],
+    ['diskReveal', (b) => b.diskReveal(7, 4), { diskReveal: { scan: 7, node: 4 } }],
     ['health', (b) => b.health(), 'health'],
     ['startupEntries', (b) => b.startupEntries(), 'startupEntries'],
     ['weeklyReport', (b) => b.weeklyReport(3), { weeklyReport: { weeksAgo: 3 } }],
@@ -241,10 +251,18 @@ describe('TauriBackend: live subscription', () => {
 });
 
 describe('TauriBackend: push channels', () => {
+  it('the disk scan event has the name the shell emits', () => {
+    expect(EVENTS.diskScan).toBe('dyno://disk-scan');
+    expect(EVENTS.diskVolumes).toBe('dyno://disk-volumes');
+  });
+
+
   it.each([
     ['onAlert', EVENTS.alert],
     ['onActivity', EVENTS.activity],
     ['onAgentStatus', EVENTS.agent],
+    ['onDiskScan', EVENTS.diskScan],
+    ['onDiskVolumes', EVENTS.diskVolumes],
   ] as const)('%s listens to its own event', async (method, event) => {
     const { backend, emit, listen, stops } = fake();
     const l = vi.fn();
