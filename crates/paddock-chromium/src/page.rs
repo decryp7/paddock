@@ -9,7 +9,8 @@ use paddock_jobs::CancelToken;
 use paddock_jobs::time::{Clock, Deadline};
 use serde_json::{Value, json};
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 const CALL: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(100);
@@ -35,6 +36,20 @@ pub struct Page {
     pub(crate) target: String,
     /// The browser's clock (`LaunchOptions::clock`): [`Page::wait_ready`] polls and times out on it.
     pub(crate) clock: Arc<dyn Clock>,
+    /// The event mark from before the tab was created (or adopted): a failed load's trace starts here.
+    pub(crate) born: u64,
+    /// The navigation that was still running when the page was attached (see [`pending_at_enable`]), and the event mark
+    /// from before `Page.enable` reported it: the first [`Page::navigate`] waits until it has settled.
+    pub(crate) initial: Option<(Initial, u64)>,
+    /// Set once `initial` has settled (its events may since have left the bounded event log).
+    pub(crate) initial_settled: AtomicBool,
+}
+
+/// A navigation of the tab's main frame that `Page.enable` reported as running.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Initial {
+    frame: String,
+    loader: String,
 }
 
 /// The address and title of a page.
@@ -88,6 +103,7 @@ pub enum Outcome {
 impl Page {
     /// Opens a new page (a tab beside the others) and attaches to it.
     pub(crate) fn attach(conn: Arc<Connection>, clock: Arc<dyn Clock>) -> Result<Page> {
+        let born = conn.mark();
         let t = conn.call(
             None,
             "Target.createTarget",
@@ -95,7 +111,7 @@ impl Page {
             CALL,
         )?;
         let target = str_of(&t, "targetId")?;
-        Page::adopt(conn, target, clock)
+        Page::attach_to(conn, target, clock, born)
     }
 
     /// Attaches to the existing page `target` (the one the browser opened with).
@@ -103,6 +119,16 @@ impl Page {
         conn: Arc<Connection>,
         target: String,
         clock: Arc<dyn Clock>,
+    ) -> Result<Page> {
+        let born = conn.mark();
+        Page::attach_to(conn, target, clock, born)
+    }
+
+    fn attach_to(
+        conn: Arc<Connection>,
+        target: String,
+        clock: Arc<dyn Clock>,
+        born: u64,
     ) -> Result<Page> {
         let s = conn.call(
             None,
@@ -113,13 +139,25 @@ impl Page {
         let session = str_of(&s, "sessionId")?;
         conn.watch(&session);
         conn.watch(&target);
-        let p = Page {
+        let mut p = Page {
             conn,
             session,
             target,
             clock,
+            born,
+            initial: None,
+            initial_settled: AtomicBool::new(false),
         };
+        let enabling = p.conn.mark();
         p.call("Page.enable", json!({}))?;
+        // A tab's own first navigation (`about:blank` from `Target.createTarget`, or the start page) may still be
+        // running: `Page.enable` then reports it as `Page.frameStartedNavigating` before its reply (Chromium's
+        // PageHandler::Enable, read 2026-10-28). A `Page.navigate` sent meanwhile can come back `net::ERR_ABORTED`.
+        p.initial =
+            pending_at_enable(&p.conn.events_since(enabling), &p.session).map(|i| (i, enabling));
+        // For a load that fails, what the browser reported about it (see `trace`): a handful of lifecycle events per
+        // document, and the document request's network events (the connection keeps only documents' network events).
+        let _ = p.call("Page.setLifecycleEventsEnabled", json!({"enabled": true}));
         p.call("Network.enable", json!({}))?;
         // Downloads are never wanted from a page that is only read.
         let _ = p.conn.call(
@@ -189,8 +227,33 @@ impl Page {
         ev.map(|_| ()).ok_or(Error::Timeout("the page load"))
     }
 
-    /// Loads `url` and waits for the load event (or `timeout`).
+    /// Waits, at most `timeout`, until the navigation that was running when the page was attached has committed or
+    /// stopped; returns at once when there was none or it already did.
+    fn settle_initial(&self, timeout: Duration) -> Result<()> {
+        let Some((initial, since)) = &self.initial else {
+            return Ok(());
+        };
+        if self.initial_settled.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let (s, t) = (self.session.clone(), self.target.clone());
+        let ev = self.conn.wait_event(*since, timeout, |e| {
+            settles(e, initial, &s) || ends(e, &s, &t)
+        });
+        if self.is_closed() {
+            return Err(Error::Closed);
+        }
+        ev.ok_or(Error::Timeout("the tab's first page"))?;
+        self.initial_settled.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    /// Loads `url` and waits for the load event (or `timeout`). On a new tab it first waits (within the same `timeout`)
+    /// until the tab's own first navigation has settled, so that one cannot cancel this load.
     pub fn navigate(&self, url: &str, timeout: Duration) -> Result<()> {
+        let start = Instant::now();
+        self.settle_initial(timeout)?;
+        let timeout = timeout.saturating_sub(start.elapsed());
         let since = self.conn.mark();
         let r = self.call("Page.navigate", json!({"url": url}))?;
         if let Some(e) = r.get("errorText").and_then(Value::as_str) {
@@ -203,7 +266,8 @@ impl Page {
                     replaced_by(ev, &self.session, &r).is_some()
                 })
                 .and_then(|ev| replaced_by(&ev, &self.session, &r));
-            return Err(not_loaded(e, &r, newer.as_deref()));
+            let trace = trace(&self.conn.events_since(self.born), since, &self.session);
+            return Err(not_loaded(e, &r, newer.as_deref(), &trace));
         }
         self.wait_load(since, timeout)
     }
@@ -415,10 +479,54 @@ fn replaced_by(e: &Event, session: &str, reply: &Value) -> Option<String> {
     })
 }
 
+/// The navigation `Page.enable` reported as running (its `Page.frameStartedNavigating` for this session, sent before
+/// its reply), if any; a same-document change is not one.
+fn pending_at_enable(events: &[(u64, Event)], session: &str) -> Option<Initial> {
+    events.iter().find_map(|(_, e)| {
+        let p = &e.params;
+        (e.method == "Page.frameStartedNavigating"
+            && e.session.as_deref() == Some(session)
+            && !matches!(
+                p.get("navigationType").and_then(Value::as_str),
+                Some("sameDocument" | "historySameDocument")
+            ))
+        .then(|| Initial {
+            frame: p
+                .get("frameId")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            loader: p
+                .get("loaderId")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        })
+    })
+}
+
+/// An event that ends the running navigation `initial`: it committed (`Page.frameNavigated` with its loader) or its
+/// frame stopped loading (committed and loaded, failed, or cancelled).
+fn settles(e: &Event, initial: &Initial, session: &str) -> bool {
+    let p = &e.params;
+    let id = |ptr: &str| p.pointer(ptr).and_then(Value::as_str);
+    e.session.as_deref() == Some(session)
+        && match e.method.as_str() {
+            "Page.frameStoppedLoading" => id("/frameId") == Some(&initial.frame),
+            "Page.frameNavigated" => {
+                id("/frame/id") == Some(&initial.frame)
+                    && id("/frame/loaderId") == Some(&initial.loader)
+            }
+            _ => false,
+        }
+}
+
 /// Why `Page.navigate` answered with `error` (its `errorText`) instead of a page. Chrome reports every navigation it
 /// cancels before the page commits as `net::ERR_ABORTED`: a response that is a download or has no content (a 204), and a
-/// navigation that another one replaced. A download and a replacement get their own message; anything else keeps the code.
-fn not_loaded(error: &str, reply: &Value, replaced_by: Option<&str>) -> Error {
+/// navigation that another one replaced. A download and a replacement get their own message; anything else keeps the
+/// code, and an abort that is neither adds what Chrome reported about the tab until then (`trace`), so a cause nobody has
+/// named yet can be read off it. Other codes (an unknown host, a refused connection) already say what happened.
+fn not_loaded(error: &str, reply: &Value, replaced_by: Option<&str>, trace: &str) -> Error {
     if reply.get("isDownload").and_then(Value::as_bool) == Some(true) {
         return Error::Protocol("the address is a file download, not a page".into());
     }
@@ -426,8 +534,104 @@ fn not_loaded(error: &str, reply: &Value, replaced_by: Option<&str>) -> Error {
         Some(url) => Error::Protocol(format!(
             "the page did not load: another navigation (to {url}) replaced it ({error})"
         )),
-        None => Error::Protocol(format!("the page did not load: {error}")),
+        None if trace.is_empty() || error != "net::ERR_ABORTED" => {
+            Error::Protocol(format!("the page did not load: {error}"))
+        }
+        None => Error::Protocol(format!(
+            "the page did not load: {error} (what the browser reported: {trace})"
+        )),
     }
+}
+
+/// The most recent entries [`trace`] keeps.
+const TRACE_ENTRIES: usize = 24;
+/// The longest text [`trace`] returns.
+const TRACE_CHARS: usize = 2000;
+
+/// A short account of the tab's navigation events in `events` (from its creation on), with a marker where
+/// `Page.navigate` was sent (`navigate`, an event mark): requested and started navigations, commits, lifecycle steps,
+/// the document request's network events (sent, answered, failed with its reason), downloads, dialogs, crashes and
+/// detaches. Bounded to the last [`TRACE_ENTRIES`] entries and [`TRACE_CHARS`] characters.
+fn trace(events: &[(u64, Event)], navigate: u64, session: &str) -> String {
+    let mut entries: Vec<String> = Vec::new();
+    let mut marked = false;
+    for (seq, e) in events {
+        if !marked && *seq > navigate {
+            entries.push("[Page.navigate sent]".into());
+            marked = true;
+        }
+        let ours = e.session.as_deref() == Some(session);
+        let browser_level = e.session.is_none()
+            && (e.method.starts_with("Target.") || e.method.starts_with("Inspector."));
+        if let Some(d) = (ours || browser_level).then(|| describe(e)).flatten() {
+            entries.push(d);
+        }
+    }
+    if !marked {
+        entries.push("[Page.navigate sent]".into());
+    }
+    let skip = entries.len().saturating_sub(TRACE_ENTRIES);
+    let mut out = if skip > 0 {
+        format!("... {skip} earlier; ")
+    } else {
+        String::new()
+    };
+    out.push_str(&entries[skip..].join("; "));
+    if out.chars().count() > TRACE_CHARS {
+        out = out.chars().take(TRACE_CHARS).collect::<String>() + "...";
+    }
+    out
+}
+
+/// One trace entry, or `None` for an event that says nothing about why a load stopped.
+fn describe(e: &Event) -> Option<String> {
+    let p = &e.params;
+    let s = |ptr: &str| -> String { p.pointer(ptr).and_then(Value::as_str).unwrap_or("").into() };
+    let raw = |k: &str| p.pointer(k).map(Value::to_string).unwrap_or_default();
+    let short = e.method.rsplit('.').next().unwrap_or(&e.method);
+    let with = |fields: &[(&str, String)]| {
+        let f: Vec<String> = fields
+            .iter()
+            .filter(|(_, v)| !v.is_empty())
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+        format!("{short} {}", f.join(" ")).trim_end().to_string()
+    };
+    let document = s("/type") == "Document";
+    Some(match e.method.as_str() {
+        "Page.frameRequestedNavigation" => with(&[("reason", s("/reason")), ("url", s("/url"))]),
+        "Page.frameStartedNavigating" => {
+            with(&[("type", s("/navigationType")), ("url", s("/url"))])
+        }
+        "Page.frameNavigated" => with(&[("url", s("/frame/url"))]),
+        "Page.frameStartedLoading"
+        | "Page.frameStoppedLoading"
+        | "Page.loadEventFired"
+        | "Page.domContentEventFired" => short.to_string(),
+        "Page.frameDetached" => with(&[("reason", s("/reason"))]),
+        "Page.lifecycleEvent" => with(&[("name", s("/name"))]),
+        "Page.downloadWillBegin" => with(&[("url", s("/url"))]),
+        "Page.javascriptDialogOpening" => with(&[("type", s("/type"))]),
+        "Network.requestWillBeSent" if document => with(&[("url", s("/request/url"))]),
+        "Network.responseReceived" if document => with(&[
+            ("status", raw("/response/status")),
+            ("mime", s("/response/mimeType")),
+        ]),
+        "Network.loadingFailed" => with(&[
+            ("type", s("/type")),
+            ("error", s("/errorText")),
+            ("canceled", raw("/canceled")),
+            ("blocked", s("/blockedReason")),
+            ("cors", s("/corsErrorStatus/corsError")),
+        ]),
+        "Inspector.targetCrashed"
+        | "Inspector.detached"
+        | "Target.targetCrashed"
+        | "Target.detachedFromTarget" => {
+            with(&[("reason", s("/reason")), ("status", s("/status"))])
+        }
+        _ => return None,
+    })
 }
 
 fn str_of(v: &Value, k: &str) -> Result<String> {
@@ -487,25 +691,255 @@ mod tests {
     #[test]
     fn a_download_is_named_as_one() {
         let r = json!({"frameId": "F", "loaderId": "L1", "isDownload": true, "errorText": "net::ERR_ABORTED"});
-        let m = not_loaded("net::ERR_ABORTED", &r, None).to_string();
+        let m = not_loaded("net::ERR_ABORTED", &r, None, "").to_string();
         assert!(m.contains("file download"), "{m}");
     }
 
     #[test]
     fn a_replaced_load_names_the_navigation_that_replaced_it() {
         let r = json!({"frameId": "F", "loaderId": "L1", "isDownload": false, "errorText": "net::ERR_ABORTED"});
-        let m = not_loaded("net::ERR_ABORTED", &r, Some("http://a.test/next")).to_string();
+        let m = not_loaded("net::ERR_ABORTED", &r, Some("http://a.test/next"), "x").to_string();
         assert!(
             m.contains("replaced")
                 && m.contains("http://a.test/next")
                 && m.contains("net::ERR_ABORTED"),
             "{m}"
         );
-        let plain = not_loaded("net::ERR_NAME_NOT_RESOLVED", &r, None).to_string();
+        let plain = not_loaded(
+            "net::ERR_NAME_NOT_RESOLVED",
+            &r,
+            None,
+            "[Page.navigate sent]",
+        )
+        .to_string();
         assert!(
             plain.ends_with("the page did not load: net::ERR_NAME_NOT_RESOLVED"),
             "{plain}"
         );
+    }
+
+    fn ev(method: &str, session: Option<&str>, params: Value) -> Event {
+        Event {
+            method: method.into(),
+            session: session.map(str::to_string),
+            params,
+        }
+    }
+
+    #[test]
+    fn an_unexplained_abort_carries_what_the_browser_reported() {
+        let events = vec![
+            (1, started("S", "F", "L0", "about:blank")),
+            (
+                2,
+                ev("Page.lifecycleEvent", Some("S"), json!({"name": "init"})),
+            ),
+            (
+                3,
+                ev(
+                    "Network.requestWillBeSent",
+                    Some("S"),
+                    json!({"type": "Document", "request": {"url": "http://a.test/"}}),
+                ),
+            ),
+            // Subresources, other tabs and silent events stay out.
+            (
+                4,
+                ev(
+                    "Network.requestWillBeSent",
+                    Some("S"),
+                    json!({"type": "Script", "request": {"url": "http://a.test/x.js"}}),
+                ),
+            ),
+            (
+                5,
+                ev(
+                    "Page.frameNavigated",
+                    Some("T"),
+                    json!({"frame": {"url": "http://other.test/"}}),
+                ),
+            ),
+            (6, ev("Network.dataReceived", Some("S"), json!({}))),
+            (
+                7,
+                ev(
+                    "Network.responseReceived",
+                    Some("S"),
+                    json!({"type": "Document", "response": {"status": 200, "mimeType": "text/html"}}),
+                ),
+            ),
+            (
+                8,
+                ev(
+                    "Network.loadingFailed",
+                    Some("S"),
+                    json!({"type": "Document", "errorText": "net::ERR_ABORTED", "canceled": true, "blockedReason": "inspector", "corsErrorStatus": {"corsError": "X"}}),
+                ),
+            ),
+            (9, ev("Inspector.targetCrashed", None, json!({}))),
+            (
+                10,
+                ev(
+                    "Page.frameNavigated",
+                    Some("S"),
+                    json!({"frame": {"url": "http://a.test/"}}),
+                ),
+            ),
+            (
+                11,
+                ev(
+                    "Page.frameRequestedNavigation",
+                    Some("S"),
+                    json!({"reason": "scriptInitiated", "url": "http://a.test/n"}),
+                ),
+            ),
+            (
+                12,
+                ev(
+                    "Page.frameStoppedLoading",
+                    Some("S"),
+                    json!({"frameId": "F"}),
+                ),
+            ),
+            (
+                13,
+                ev("Page.frameDetached", Some("S"), json!({"reason": "remove"})),
+            ),
+            (
+                14,
+                ev(
+                    "Page.downloadWillBegin",
+                    Some("S"),
+                    json!({"url": "http://a.test/z.zip"}),
+                ),
+            ),
+            (
+                15,
+                ev(
+                    "Page.javascriptDialogOpening",
+                    Some("S"),
+                    json!({"type": "beforeunload"}),
+                ),
+            ),
+            (
+                16,
+                ev("Target.detachedFromTarget", None, json!({"reason": "gone"})),
+            ),
+            (17, ev("Target.attachedToTarget", None, json!({}))),
+        ];
+        let t = trace(&events, 2, "S");
+        assert_eq!(
+            t,
+            "frameStartedNavigating type=differentDocument url=about:blank; lifecycleEvent name=init; [Page.navigate sent]; \
+             requestWillBeSent url=http://a.test/; responseReceived status=200 mime=text/html; \
+             loadingFailed type=Document error=net::ERR_ABORTED canceled=true blocked=inspector cors=X; targetCrashed; \
+             frameNavigated url=http://a.test/; frameRequestedNavigation reason=scriptInitiated url=http://a.test/n; \
+             frameStoppedLoading; frameDetached reason=remove; downloadWillBegin url=http://a.test/z.zip; \
+             javascriptDialogOpening type=beforeunload; detachedFromTarget reason=gone"
+        );
+        let r = json!({"frameId": "F", "loaderId": "L1", "isDownload": false});
+        let m = not_loaded("net::ERR_ABORTED", &r, None, &t).to_string();
+        assert!(
+            m.contains("net::ERR_ABORTED (what the browser reported: frameStartedNavigating"),
+            "{m}"
+        );
+        // Nothing after the navigation still marks where it was sent.
+        assert_eq!(
+            trace(&events[..1], 9, "S"),
+            "frameStartedNavigating type=differentDocument url=about:blank; [Page.navigate sent]"
+        );
+        assert_eq!(trace(&[], 0, "S"), "[Page.navigate sent]");
+    }
+
+    #[test]
+    fn the_trace_is_bounded() {
+        let many: Vec<(u64, Event)> = (0..100)
+            .map(|i| {
+                (
+                    i,
+                    ev(
+                        "Page.lifecycleEvent",
+                        Some("S"),
+                        json!({"name": "x".repeat(200)}),
+                    ),
+                )
+            })
+            .collect();
+        let t = trace(&many, 1000, "S");
+        assert!(t.starts_with("... 77 earlier; "), "{}", &t[..40]);
+        assert!(t.chars().count() <= TRACE_CHARS + 3 && t.ends_with("..."));
+    }
+
+    #[test]
+    fn the_navigation_running_at_enable_is_found_and_settles_on_its_commit_or_stop() {
+        let at_enable = vec![
+            (
+                1,
+                ev("Page.lifecycleEvent", Some("S"), json!({"name": "init"})),
+            ),
+            (2, started("T", "G", "L9", "about:blank")),
+            (3, started("S", "F", "L0", "about:blank")),
+        ];
+        let i = pending_at_enable(&at_enable, "S").unwrap();
+        assert_eq!(
+            i,
+            Initial {
+                frame: "F".into(),
+                loader: "L0".into()
+            }
+        );
+        // Nothing running, or only a same-document change: nothing to wait for.
+        assert_eq!(pending_at_enable(&at_enable[..2], "S"), None);
+        let mut same = started("S", "F", "L1", "about:blank#x");
+        same.params["navigationType"] = json!("sameDocument");
+        assert_eq!(pending_at_enable(&[(1, same)], "S"), None);
+        let nav = |frame: &str, loader: &str| {
+            ev(
+                "Page.frameNavigated",
+                Some("S"),
+                json!({"frame": {"id": frame, "loaderId": loader}}),
+            )
+        };
+        assert!(settles(&nav("F", "L0"), &i, "S"));
+        assert!(settles(
+            &ev(
+                "Page.frameStoppedLoading",
+                Some("S"),
+                json!({"frameId": "F"})
+            ),
+            &i,
+            "S"
+        ));
+        // Another loader, another frame, another tab or another event does not settle it.
+        assert!(!settles(&nav("F", "L1"), &i, "S"));
+        assert!(!settles(&nav("child", "L0"), &i, "S"));
+        assert!(!settles(
+            &ev(
+                "Page.frameStoppedLoading",
+                Some("S"),
+                json!({"frameId": "child"})
+            ),
+            &i,
+            "S"
+        ));
+        assert!(!settles(
+            &ev(
+                "Page.frameStoppedLoading",
+                Some("T"),
+                json!({"frameId": "F"})
+            ),
+            &i,
+            "S"
+        ));
+        assert!(!settles(
+            &ev(
+                "Page.lifecycleEvent",
+                Some("S"),
+                json!({"frameId": "F", "name": "load"})
+            ),
+            &i,
+            "S"
+        ));
     }
 
     #[test]

@@ -155,6 +155,16 @@ impl Connection {
         lock(&self.inner.events).seq
     }
 
+    /// The events after `since` still in the bounded log, oldest first, with their sequence numbers.
+    pub fn events_since(&self, since: u64) -> Vec<(u64, Event)> {
+        lock(&self.inner.events)
+            .log
+            .iter()
+            .filter(|(s, _)| *s > since)
+            .cloned()
+            .collect()
+    }
+
     /// Waits for an event after `since` that `pred` accepts.
     pub fn wait_event(
         &self,
@@ -215,6 +225,13 @@ fn idle(e: &tungstenite::Error) -> bool {
     matches!(e, tungstenite::Error::Io(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut))
 }
 
+/// Whether an event goes into the bounded log. Network events are only wanted for documents (a failed load's trace,
+/// `page::trace`): a page's own requests would flood the log, so the rest is dropped here.
+fn kept(method: &str, params: Option<&Value>) -> bool {
+    !method.starts_with("Network.")
+        || params.and_then(|p| p.get("type")).and_then(Value::as_str) == Some("Document")
+}
+
 fn dispatch(inner: &Inner, text: &str) {
     let Ok(v) = serde_json::from_str::<Value>(text) else {
         return;
@@ -234,6 +251,9 @@ fn dispatch(inner: &Inner, text: &str) {
     } else if let Some(m) = v.get("method").and_then(Value::as_str) {
         if GONE_EVENTS.contains(&m) {
             mark_gone(inner, v.get("params").unwrap_or(&Value::Null));
+        }
+        if !kept(m, v.get("params")) {
+            return;
         }
         let mut g = lock(&inner.events);
         g.seq += 1;
@@ -303,6 +323,24 @@ mod tests {
             !lock(&i.watched).contains_key("T9"),
             "unwatched ids are not kept"
         );
+    }
+
+    #[test]
+    fn only_documents_network_events_are_logged() {
+        let i = inner();
+        for t in [
+            r#"{"method":"Network.loadingFailed","params":{"type":"Document","canceled":true}}"#,
+            r#"{"method":"Network.loadingFailed","params":{"type":"Script"}}"#,
+            r#"{"method":"Network.dataReceived","params":{}}"#,
+            r#"{"method":"Network.requestWillBeSentExtraInfo"}"#,
+            r#"{"method":"Page.frameNavigated","params":{}}"#,
+        ] {
+            dispatch(&i, t);
+        }
+        let g = lock(&i.events);
+        let kept: Vec<&str> = g.log.iter().map(|(_, e)| e.method.as_str()).collect();
+        assert_eq!(kept, ["Network.loadingFailed", "Page.frameNavigated"]);
+        assert_eq!(g.log[0].1.params["type"], "Document");
     }
 
     #[test]

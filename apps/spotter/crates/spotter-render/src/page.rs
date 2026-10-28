@@ -5,6 +5,7 @@ use crate::challenge::{self, Challenge};
 use crate::ready::{self, Observation, Readiness, Rule};
 use crate::{Error, Result};
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -25,6 +26,18 @@ pub struct Page {
     /// The event mark from before the tab was created: a failed load's trace starts here, so it shows the tab's own
     /// first (`about:blank`) navigation too.
     pub(crate) born: u64,
+    /// The navigation that was still running when the page was attached (see [`pending_at_enable`]), and the event mark
+    /// from before `Page.enable` reported it: the first [`Page::navigate`] waits until it has settled.
+    pub(crate) initial: Option<(Initial, u64)>,
+    /// Set once `initial` has settled (its events may since have left the bounded event log).
+    pub(crate) initial_settled: AtomicBool,
+}
+
+/// A navigation of the tab's main frame that `Page.enable` reported as running.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Initial {
+    frame: String,
+    loader: String,
 }
 
 /// What a page looks like right now.
@@ -64,8 +77,19 @@ impl Page {
         let target = str_of(&t, "targetId")?;
         let s = conn.call(None, "Target.attachToTarget", json!({"targetId": target, "flatten": true}), CALL)?;
         let session = str_of(&s, "sessionId")?;
-        let p = Page { conn, session, born };
+        let mut p = Page {
+            conn,
+            session,
+            born,
+            initial: None,
+            initial_settled: AtomicBool::new(false),
+        };
+        let enabling = p.conn.mark();
         p.call("Page.enable", json!({}))?;
+        // The tab's own first navigation (`about:blank` from `Target.createTarget`) may still be running: `Page.enable`
+        // then reports it as `Page.frameStartedNavigating` before its reply (Chromium's PageHandler::Enable, read
+        // 2026-10-28). A `Page.navigate` sent meanwhile can come back `net::ERR_ABORTED`.
+        p.initial = pending_at_enable(&p.conn.events_since(enabling), &p.session).map(|i| (i, enabling));
         // For a load that fails, what the browser reported about it (see `trace`): a handful of lifecycle events per
         // document, and the document request's network events (`Network.loadingFailed` carries `canceled`,
         // `blockedReason` and `corsErrorStatus`; the connection keeps only documents' network events). Enabled here,
@@ -86,8 +110,32 @@ impl Page {
         self.conn.call(Some(&self.session), method, params, CALL)
     }
 
-    /// Loads `url` and waits for the load event (or `timeout`).
+    /// Waits, at most `timeout`, until the navigation that was running when the page was attached has committed or
+    /// stopped; returns at once when there was none or it already did.
+    fn settle_initial(&self, timeout: Duration) -> Result<()> {
+        let Some((initial, since)) = &self.initial else {
+            return Ok(());
+        };
+        if self.initial_settled.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let ev = self.conn.wait_event(*since, timeout, |e| settles(e, initial, &self.session));
+        if self.conn.is_closed() {
+            return Err(Error::Protocol(
+                "the browser closed the connection while the page was loading".into(),
+            ));
+        }
+        ev.ok_or(Error::Timeout("the tab's first page"))?;
+        self.initial_settled.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    /// Loads `url` and waits for the load event (or `timeout`). On a new tab it first waits (within the same `timeout`)
+    /// until the tab's own first navigation has settled, so that one cannot cancel this load.
     pub fn navigate(&self, url: &str, timeout: Duration) -> Result<()> {
+        let start = Instant::now();
+        self.settle_initial(timeout)?;
+        let timeout = timeout.saturating_sub(start.elapsed());
         let since = self.conn.mark();
         let r = self.call("Page.navigate", json!({"url": url}))?;
         if let Some(e) = r.get("errorText").and_then(Value::as_str) {
@@ -240,6 +288,37 @@ fn not_loaded(error: &str, reply: &Value, replaced_by: Option<&str>, trace: &str
         None if trace.is_empty() || error != "net::ERR_ABORTED" => Error::Protocol(format!("the page did not load: {error}")),
         None => Error::Protocol(format!("the page did not load: {error} (what the browser reported: {trace})")),
     }
+}
+
+/// The navigation `Page.enable` reported as running (its `Page.frameStartedNavigating` for this session, sent before
+/// its reply), if any; a same-document change is not one.
+fn pending_at_enable(events: &[(u64, Event)], session: &str) -> Option<Initial> {
+    events.iter().find_map(|(_, e)| {
+        let p = &e.params;
+        (e.method == "Page.frameStartedNavigating"
+            && e.session.as_deref() == Some(session)
+            && !matches!(
+                p.get("navigationType").and_then(Value::as_str),
+                Some("sameDocument" | "historySameDocument")
+            ))
+        .then(|| Initial {
+            frame: p.get("frameId").and_then(Value::as_str).unwrap_or("").to_string(),
+            loader: p.get("loaderId").and_then(Value::as_str).unwrap_or("").to_string(),
+        })
+    })
+}
+
+/// An event that ends the running navigation `initial`: it committed (`Page.frameNavigated` with its loader) or its
+/// frame stopped loading (committed and loaded, failed, or cancelled).
+fn settles(e: &Event, initial: &Initial, session: &str) -> bool {
+    let p = &e.params;
+    let id = |ptr: &str| p.pointer(ptr).and_then(Value::as_str);
+    e.session.as_deref() == Some(session)
+        && match e.method.as_str() {
+            "Page.frameStoppedLoading" => id("/frameId") == Some(&initial.frame),
+            "Page.frameNavigated" => id("/frame/id") == Some(&initial.frame) && id("/frame/loaderId") == Some(&initial.loader),
+            _ => false,
+        }
 }
 
 /// The most recent entries [`trace`] keeps.
@@ -440,6 +519,48 @@ mod tests {
             "frameStartedNavigating type=differentDocument url=about:blank; [Page.navigate sent]"
         );
         assert_eq!(trace(&[], 0, "S"), "[Page.navigate sent]");
+    }
+
+    #[test]
+    fn the_navigation_running_at_enable_is_found_and_settles_on_its_commit_or_stop() {
+        let at_enable = vec![
+            (1, ev("Page.lifecycleEvent", Some("S"), json!({"name": "init"}))),
+            (2, started("T", "G", "L9", "about:blank")),
+            (3, started("S", "F", "L0", "about:blank")),
+        ];
+        let i = pending_at_enable(&at_enable, "S").unwrap();
+        assert_eq!(
+            i,
+            Initial {
+                frame: "F".into(),
+                loader: "L0".into()
+            }
+        );
+        // Nothing running, or only a same-document change: nothing to wait for.
+        assert_eq!(pending_at_enable(&at_enable[..2], "S"), None);
+        let mut same = started("S", "F", "L1", "about:blank#x");
+        same.params["navigationType"] = json!("sameDocument");
+        assert_eq!(pending_at_enable(&[(1, same)], "S"), None);
+        let nav = |frame: &str, loader: &str| {
+            ev(
+                "Page.frameNavigated",
+                Some("S"),
+                json!({"frame": {"id": frame, "loaderId": loader}}),
+            )
+        };
+        let stopped = |s: &str, frame: &str| ev("Page.frameStoppedLoading", Some(s), json!({"frameId": frame}));
+        assert!(settles(&nav("F", "L0"), &i, "S"));
+        assert!(settles(&stopped("S", "F"), &i, "S"));
+        // Another loader, another frame, another tab or another event does not settle it.
+        assert!(!settles(&nav("F", "L1"), &i, "S"));
+        assert!(!settles(&nav("child", "L0"), &i, "S"));
+        assert!(!settles(&stopped("S", "child"), &i, "S"));
+        assert!(!settles(&stopped("T", "F"), &i, "S"));
+        assert!(!settles(
+            &ev("Page.lifecycleEvent", Some("S"), json!({"frameId": "F", "name": "load"})),
+            &i,
+            "S"
+        ));
     }
 
     #[test]

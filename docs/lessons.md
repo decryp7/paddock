@@ -538,6 +538,13 @@ accounts.google.com, update.googleapis.com and clients2.google.com. **Rule:** a 
 maps IP literals, so loopback must be excluded), and a test asserts from the net log that it connected to loopback only;
 "no real hosts" is checked, not assumed.
 
+**Likeliest cause, now guarded:** Chrome's `Page.enable` reports a navigation of the tab that is still running as
+`Page.frameStartedNavigating` before its reply (Chromium's PageHandler::Enable, read 2026-10-28). A new tab's own first
+navigation (`about:blank` from `Target.createTarget`) can still be running on a loaded Windows runner when the first
+`Page.navigate` is sent. **Rule:** a page notes the navigation `Page.enable` reported, and its first load waits (within
+the caller's timeout, on events, no sleep) until that navigation committed or stopped loading. Both drivers
+(paddock-chromium and Spotter's copy) do this; the fake browser's `SlowStartPage` reproduces the abort.
+
 ## A local model over every item turns a background task into a machine hog (2026-10-28, Debrief)
 Debrief's background "Learning human names" ran the local model over up to 2,000 names after every import. It held about
 8 GB on the Mac and made a Windows PC sluggish for the whole run, for a result that rules, a names pack and the logs' own
