@@ -56,15 +56,11 @@ pub fn walk(root: &Path, limits: WalkLimits) -> Result<Vec<RepoFile>, RepoFilesE
         .build();
     for entry in walker {
         let entry = entry.map_err(|e| io_error(root, &e))?;
-        let Some(ft) = entry.file_type() else {
-            continue;
-        };
-        let Ok(rel) = entry.path().strip_prefix(root) else {
-            continue;
-        };
-        if !ft.is_file() {
+        // Only the standard-input entry has no file type, and a path walk never yields one.
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }
+        let rel = entry.path().strip_prefix(root).unwrap_or(entry.path());
         if out.len() >= limits.max_files {
             return Err(RepoFilesError::TooManyFiles(limits.max_files));
         }

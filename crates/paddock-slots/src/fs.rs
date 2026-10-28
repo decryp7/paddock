@@ -22,6 +22,8 @@ pub struct OwnerInfo {
     pub owner: PathBuf,
     /// The holder process.
     pub pid: u32,
+    /// The holder's token: only a release that presents it is honoured.
+    pub token: String,
 }
 
 fn io(path: &Path) -> impl FnOnce(std::io::Error) -> SlotError + '_ {
@@ -46,7 +48,12 @@ impl FsLocks {
     /// Records the holder next to the lock.
     pub fn write_owner(&self, id: SlotId, info: &OwnerInfo) -> Result<(), SlotError> {
         let p = self.file(id, "owner");
-        let text = format!("pid={}\nowner={}\n", info.pid, info.owner.display());
+        let text = format!(
+            "pid={}\ntoken={}\nowner={}\n",
+            info.pid,
+            info.token,
+            info.owner.display()
+        );
         std::fs::write(&p, text).map_err(io(&p))
     }
 
@@ -59,6 +66,7 @@ impl FsLocks {
         };
         Some(OwnerInfo {
             pid: field("pid")?.parse().ok()?,
+            token: field("token")?.to_string(),
             owner: PathBuf::from(field("owner")?),
         })
     }
@@ -68,20 +76,27 @@ impl FsLocks {
         let _ = std::fs::remove_file(self.file(id, "owner"));
     }
 
-    /// Asks the holder of `id` to release it.
-    pub fn request_release(&self, id: SlotId) -> Result<(), SlotError> {
+    /// Asks the holder whose token is `token` to release `id`. A holder with another token ignores the request.
+    pub fn request_release(&self, id: SlotId, token: &str) -> Result<(), SlotError> {
         let p = self.file(id, "release");
-        std::fs::write(&p, b"").map_err(io(&p))
+        std::fs::write(&p, token).map_err(io(&p))
     }
 
-    /// Whether a release was asked for.
-    pub fn release_requested(&self, id: SlotId) -> bool {
-        self.file(id, "release").exists()
+    /// Whether a release was asked for with exactly this token.
+    pub fn release_requested(&self, id: SlotId, token: &str) -> bool {
+        std::fs::read_to_string(self.file(id, "release")).is_ok_and(|t| t.trim() == token)
     }
 
-    /// Withdraws the request (the holder does this when it lets go).
+    /// Removes the release request file, whoever wrote it (a new holder does this before it announces itself).
     pub fn clear_release(&self, id: SlotId) {
         let _ = std::fs::remove_file(self.file(id, "release"));
+    }
+
+    /// Removes the release request only if it carries `token` (a releaser withdrawing its own request).
+    pub fn withdraw_release(&self, id: SlotId, token: &str) {
+        if self.release_requested(id, token) {
+            self.clear_release(id);
+        }
     }
 }
 
@@ -97,15 +112,19 @@ impl SlotLocks for FsLocks {
             .write(true)
             .open(&p)
             .map_err(io(&p))?;
-        Ok(lock_outcome(file.try_lock(), &p)?.then_some(FsGuard { _file: file }))
+        lock_outcome(file.try_lock(), file, &p)
     }
 }
 
-/// Whether the lock was taken (`false`: somebody else holds it); any other failure is an error.
-fn lock_outcome(result: Result<(), TryLockError>, path: &Path) -> Result<bool, SlotError> {
+/// The guard when the lock was taken, `None` when somebody else holds it; any other failure is an error.
+fn lock_outcome(
+    result: Result<(), TryLockError>,
+    file: File,
+    path: &Path,
+) -> Result<Option<FsGuard>, SlotError> {
     match result {
-        Ok(()) => Ok(true),
-        Err(TryLockError::WouldBlock) => Ok(false),
+        Ok(()) => Ok(Some(FsGuard { _file: file })),
+        Err(TryLockError::WouldBlock) => Ok(None),
         Err(TryLockError::Error(e)) => Err(io(path)(e)),
     }
 }
@@ -116,11 +135,21 @@ mod tests {
 
     #[test]
     fn lock_outcomes() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = || File::create(dir.path().join("x.lock")).unwrap();
         let p = Path::new("x.lock");
-        assert!(lock_outcome(Ok(()), p).unwrap());
-        assert!(!lock_outcome(Err(TryLockError::WouldBlock), p).unwrap());
-        let err =
-            lock_outcome(Err(TryLockError::Error(std::io::Error::other("disk"))), p).unwrap_err();
+        assert!(lock_outcome(Ok(()), file(), p).unwrap().is_some());
+        assert!(
+            lock_outcome(Err(TryLockError::WouldBlock), file(), p)
+                .unwrap()
+                .is_none()
+        );
+        let err = lock_outcome(
+            Err(TryLockError::Error(std::io::Error::other("disk"))),
+            file(),
+            p,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("x.lock") && err.to_string().contains("disk"));
     }
 }

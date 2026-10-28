@@ -60,6 +60,26 @@ pub fn acquire_first<L: SlotLocks>(
     Ok(None)
 }
 
+/// [`acquire_first`] with a few more tries when every slot looked busy. A status probe (or any other reader) takes a
+/// lock for an instant, so a free slot can look busy once; a full house that stays full is refused after `attempts`
+/// tries. `pause` runs between tries (a short sleep in production, a probe letting go in a test).
+pub fn acquire_retry<L: SlotLocks>(
+    locks: &L,
+    max: u32,
+    attempts: u32,
+    mut pause: impl FnMut(),
+) -> Result<Option<(SlotId, L::Guard)>, SlotError> {
+    for attempt in 0..attempts.max(1) {
+        if attempt > 0 {
+            pause();
+        }
+        if let Some(got) = acquire_first(locks, max)? {
+            return Ok(Some(got));
+        }
+    }
+    Ok(None)
+}
+
 /// Whether a slot is free or held.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SlotState {
@@ -123,6 +143,36 @@ mod tests {
         assert_eq!(acquire_first(&f, 4).unwrap().unwrap().0.number(), 4);
         assert!(acquire_first(&f, 0).unwrap().is_none());
     }
+
+    #[test]
+    fn a_slot_that_looked_busy_for_a_moment_is_taken_on_a_later_try() {
+        // Slot 1 is "held" by a probe that lets go when the acquirer pauses.
+        let f = Fake(RefCell::new(BTreeSet::from([1])), None);
+        let mut pauses = 0;
+        let got = acquire_retry(&f, 1, 5, || {
+            pauses += 1;
+            f.0.borrow_mut().remove(&1);
+        })
+        .unwrap();
+        assert_eq!((got.map(|g| g.0.number()), pauses), (Some(1), 1));
+        // A full house that stays full is refused after exactly the tries given, pausing between them.
+        let full = Fake(RefCell::new(BTreeSet::from([1, 2])), None);
+        let mut pauses = 0;
+        assert!(
+            acquire_retry(&full, 2, 4, || pauses += 1)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(pauses, 3);
+        // Zero attempts still tries once; errors end the tries at once.
+        noop();
+        let empty = Fake(RefCell::new(BTreeSet::new()), None);
+        assert!(acquire_retry(&empty, 1, 0, noop).unwrap().is_some());
+        let failing = Fake(RefCell::new(BTreeSet::new()), Some(1));
+        assert!(acquire_retry(&failing, 1, 3, noop).is_err());
+    }
+
+    fn noop() {}
 
     #[test]
     fn errors_propagate_and_states_list_busy_slots() {

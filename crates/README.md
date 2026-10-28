@@ -1866,9 +1866,9 @@ The shared layers under `tools/paddock-dev` (`./dev`), each with a pure core and
   files, a file at a revision, the log). Features, both off by default: `git-history` (`GitHistory`) and `cargo-metadata`
   (`CargoCli`), which run `git` and `cargo` through `paddock-proc`. **`cargo-metadata` is never enabled under
   `apps/pacenotes/`** (cargo reads the repository's `.cargo/config.toml`, which can name programs to run; ADR 0022 §6, and the
-  extended WP-C6 check will fail on it). Paddock's own rules (global inputs, doc inputs, owners) are `paddock-dev`'s `plan`
+  a conformance check that fails on it is planned in ADR 0022 §3.7 and does not exist yet; until then review is the guard). Paddock's own rules (global inputs, doc inputs, owners) are `paddock-dev`'s `plan`
   module, not this crate's.
-- `paddock-slots`: `SlotId` (`s1`...), the `SlotLocks` port and `acquire_first`/`slot_states` (pure), `FsLocks` over
+- `paddock-slots`: `SlotId` (`s1`...), the `SlotLocks` port and `acquire_first`/`slot_states` (pure), `acquire_retry` (a few tries when every slot looked busy, because a status probe holds a lock for an instant), tokens (`fresh_token`; `release` presents the holder's token and a holder honours only its own, so a late release never frees the next job's slot), `FsLocks` over
   `<root>/slots/sN.lock` (`File::try_lock`: `flock`, `LockFileEx`), and the holder protocol `hold` (take a slot, announce it
   on a writer, keep it until the owner folder is gone or `release` asks), `release`, `wait_free`. The lock file is never read
   or written (Windows locks block other handles); `sN.owner` and `sN.release` are information and a request. Reading

@@ -100,6 +100,14 @@ fn hashes_are_sha256_hex_and_files_are_capped() {
 }
 
 #[test]
+fn a_folder_is_not_a_hashable_file() {
+    let d = tempfile::tempdir().unwrap();
+    // Opening a folder succeeds on Unix and reading it fails; on Windows opening fails. Both are typed errors.
+    let err = hash_file(d.path(), 10).unwrap_err();
+    assert!(matches!(err, RepoFilesError::Io { .. }));
+}
+
+#[test]
 fn hash_files_keeps_the_order_for_any_thread_count() {
     let d = tempfile::tempdir().unwrap();
     for i in 0..9 {

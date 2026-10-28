@@ -1,7 +1,8 @@
-use crate::{FsLocks, OwnerInfo, SlotError, SlotId, SlotLocks, acquire_first};
+use crate::{FsLocks, OwnerInfo, SlotError, SlotId, SlotLocks, acquire_retry};
 use std::io::Write;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Why a hold ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,13 +39,14 @@ pub fn hold_until(probe: &mut impl HoldProbe) -> HoldEnd {
 struct FsProbe<'a> {
     locks: &'a FsLocks,
     id: SlotId,
+    token: &'a str,
     owner: &'a Path,
     poll: Duration,
 }
 
 impl HoldProbe for FsProbe<'_> {
     fn release_requested(&mut self) -> bool {
-        self.locks.release_requested(self.id)
+        self.locks.release_requested(self.id, self.token)
     }
     fn owner_present(&mut self) -> bool {
         self.owner.exists()
@@ -54,44 +56,99 @@ impl HoldProbe for FsProbe<'_> {
     }
 }
 
-/// The holder process's whole job: take the first free slot of `max`, write its name and a newline to `announce` (or
-/// `none` when all are busy, returning `Ok(None)`), then keep it until `owner` disappears or a release is requested, and
-/// let go. If the process is killed, the kernel releases the lock; the owner and release files left behind are only
-/// information and are overwritten by the next holder.
+/// How many times a holder tries all slots when they all look busy (readers take a lock for an instant).
+pub const ACQUIRE_ATTEMPTS: u32 = 5;
+const ACQUIRE_PAUSE: Duration = Duration::from_millis(10);
+
+/// A token no other holder has had: process id, clock and a counter, in hex.
+pub fn fresh_token() -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    format!(
+        "{:x}-{nanos:x}-{:x}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// What a holder tells its starter on one line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Announcement {
+    /// It holds this slot; release it with this token.
+    Slot(SlotId, String),
+    /// Every slot was busy.
+    None,
+}
+
+impl Announcement {
+    /// The line written to the starter: `sN <token>` or `none`.
+    pub fn line(&self) -> String {
+        match self {
+            Announcement::Slot(id, token) => format!("{id} {token}\n"),
+            Announcement::None => "none\n".to_string(),
+        }
+    }
+
+    /// Reads a line written by [`Announcement::line`].
+    pub fn parse(line: &str) -> Result<Announcement, SlotError> {
+        let line = line.trim();
+        if line == "none" {
+            return Ok(Announcement::None);
+        }
+        match line.split_once(' ') {
+            Some((id, token)) if !token.is_empty() && !token.contains(char::is_whitespace) => {
+                Ok(Announcement::Slot(id.parse()?, token.to_string()))
+            }
+            _ => Err(SlotError::Invalid(line.to_string())),
+        }
+    }
+}
+
+/// The holder process's whole job: take the first free slot of `max` (retrying briefly, see [`acquire_retry`]), write
+/// [`Announcement`] to `announce`, then keep the slot until `owner` disappears or a release with the holder's token is
+/// requested, and let go. If the process is killed, the kernel releases the lock; the owner and release files left behind
+/// are only information and are overwritten by the next holder.
 pub fn hold(
     locks: &FsLocks,
     max: u32,
     owner: &Path,
     poll: Duration,
-    mut announce: impl Write,
+    announce: &mut dyn Write,
 ) -> Result<Option<(SlotId, HoldEnd)>, SlotError> {
-    let Some((id, guard)) = acquire_first(locks, max)? else {
+    let Some((id, guard)) = acquire_retry(locks, max, ACQUIRE_ATTEMPTS, || {
+        std::thread::sleep(ACQUIRE_PAUSE)
+    })?
+    else {
         let _ = announce
-            .write_all(b"none\n")
+            .write_all(Announcement::None.line().as_bytes())
             .and_then(|()| announce.flush());
         return Ok(None);
     };
+    let token = fresh_token();
     locks.clear_release(id);
     locks.write_owner(
         id,
         &OwnerInfo {
             owner: owner.to_path_buf(),
             pid: std::process::id(),
+            token: token.clone(),
         },
     )?;
     // The parent may have gone already; the hold does not depend on it.
     let _ = announce
-        .write_all(format!("{id}\n").as_bytes())
+        .write_all(Announcement::Slot(id, token.clone()).line().as_bytes())
         .and_then(|()| announce.flush());
-    drop(announce);
     let end = hold_until(&mut FsProbe {
         locks,
         id,
+        token: &token,
         owner,
         poll,
     });
     locks.clear_owner(id);
-    locks.clear_release(id);
+    locks.withdraw_release(id, &token);
     drop(guard);
     Ok(Some((id, end)))
 }
@@ -115,22 +172,35 @@ pub fn wait_free(
     }
 }
 
-/// Asks the holder of `id` to let go and waits until it has. Releasing a free slot is fine and returns at once.
+/// Lets go of the slot held under `token` and waits until it is free. It returns at once when the slot is free, and also
+/// when the slot is now held by somebody else (another token): that holder is not the caller's to release.
 pub fn release(
     locks: &FsLocks,
     id: SlotId,
+    token: &str,
     timeout: Duration,
     poll: Duration,
 ) -> Result<(), SlotError> {
-    if wait_free(locks, id, Duration::ZERO, poll)? {
+    let ours = |locks: &FsLocks| locks.read_owner(id).is_some_and(|o| o.token == token);
+    if wait_free(locks, id, Duration::ZERO, poll)? || !ours(locks) {
         return Ok(());
     }
-    locks.request_release(id)?;
-    if wait_free(locks, id, timeout, poll)? {
-        locks.clear_release(id);
-        Ok(())
-    } else {
-        Err(SlotError::ReleaseTimeout(id.to_string()))
+    locks.request_release(id, token)?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        if wait_free(locks, id, Duration::ZERO, poll)? {
+            locks.withdraw_release(id, token);
+            return Ok(());
+        }
+        if !ours(locks) {
+            // Our holder ended by itself and the slot was taken again meanwhile: the request is stale.
+            locks.withdraw_release(id, token);
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(SlotError::ReleaseTimeout(id.to_string()));
+        }
+        std::thread::sleep(poll);
     }
 }
 
