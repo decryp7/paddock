@@ -45,7 +45,7 @@ test.describe('set-up checklist (plan X19)', () => {
 
   test('every step can be skipped and taken up again, and Pitwall is optional', async ({ app, page }) => {
     await app.dialogs.openWindow('pd.setup', {}, { title: 'Set-up', query: '?setup=fresh' });
-    await expect(page.getByTestId('setup-message-pitwall')).toContainText('not installed');
+    await expect(page.getByTestId('setup-detail-pitwall')).toContainText('not installed');
     await page.getByTestId('setup-skip-pitwall').click();
     await expect(page.getByTestId('setup-status-pitwall')).toContainText('Skipped');
     await expect(page.getByTestId('setup-skip-pitwall')).toHaveText('Take it up again');

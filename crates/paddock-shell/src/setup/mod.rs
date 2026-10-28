@@ -55,7 +55,7 @@ paddock_commands::command_table! {
 paddock_dialogs::dialogs! {
     /// The set-up checklist as its own window (ADR 0026 §3).
     pub static DIALOGS;
-    "pd.setup" => Tool { width: Some(Px(560)), height: Some(520), commands: &[
+    "pd.setup" => Form(Modeless) { commands: &[
         dialog_callable::setup_state,
         dialog_callable::setup_act,
         dialog_callable::setup_repair,

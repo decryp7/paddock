@@ -62,8 +62,13 @@ describe('the Set-up page', () => {
     expect(text(q('setup-act-service')!)).toBe('Install');
     expect(q('setup-act-service')!.className).toContain('pd-setup__btn--primary');
     expect(text(q('setup-act-login')!)).toBe('Turn on');
+    // One filled button for the list (the first step to do); the others are outlined.
+    expect(q('setup-act-login')!.className).not.toContain('pd-setup__btn--primary');
+    expect(el.querySelectorAll('.pd-setup__btn--primary')).toHaveLength(1);
     // Pitwall is optional: the shared needs-AI sentence explains, Skip is there.
-    expect(text(q('setup-message-pitwall')!)).toContain('not installed');
+    // The sentence says it once: the step's general description gives way to it.
+    expect(text(q('setup-detail-pitwall')!)).toContain('not installed');
+    expect(text(q('setup-item-pitwall')!)).not.toContain('Pitwall is the local AI server of the family');
     expect(text(q('setup-skip-pitwall')!)).toBe('Skip for now');
     expect(text(q('setup-lede')!)).toContain('optional');
   });
