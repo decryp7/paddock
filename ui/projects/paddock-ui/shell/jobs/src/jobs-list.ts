@@ -16,10 +16,10 @@ import { JobsStore } from './jobs.store';
       <pd-error-state [heading]="t.readFailed" [cause]="cause" [busy]="store.isLoading()" (retry)="store.load()" />
     }
     @if (store.list().length) {
-      <ul class="pd-jobs" [attr.aria-label]="label()">
+      <ul class="pd-jobs" [class.pd-flat]="flat()" [attr.aria-label]="label()">
         @for (job of store.list(); track job.id) {
           <li>
-            <pd-job [job]="job" [stalled]="store.stalledIds().has(job.id)" [elapsedMs]="elapsed(job)" (cancel)="store.cancel($event)" />
+            <pd-job [flat]="flat()" [job]="job" [stalled]="store.stalledIds().has(job.id)" [elapsedMs]="elapsed(job)" (cancel)="store.cancel($event)" />
           </li>
         }
       </ul>
@@ -35,6 +35,9 @@ import { JobsStore } from './jobs.store';
     :host { display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; }
     .pd-jobs { display: flex; flex-direction: column; gap: var(--pd-space-2); margin: 0; padding: 0; list-style: none; }
     .pd-jobs li { min-width: 0; }
+    /* Flat rows (a popover is the card): a hairline between jobs, no box around each. */
+    .pd-jobs.pd-flat { gap: 0; }
+    .pd-jobs.pd-flat li + li { border-top: 1px solid var(--pd-hairline); }
     .pd-loading { padding: var(--pd-space-2) 0; }
   `,
 })
@@ -48,6 +51,8 @@ export class PdJobsList {
   protected readonly store = inject(JobsStore);
   /** The list's accessible name. */
   readonly label = input($localize`:@@pd.jobs.list:Jobs`);
+  /** Flat rows instead of one card per job: for a list inside a bordered container (UI rule 17). */
+  readonly flat = input(false);
 
   /** A running job's time now: its last snapshot's plus the time since it arrived (so a quiet step still counts up). */
   protected elapsed(job: SuJobSnapshot): number {
