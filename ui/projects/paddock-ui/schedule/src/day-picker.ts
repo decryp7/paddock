@@ -41,7 +41,9 @@ export function dayLabel(day: Weekday): string {
     :host { display: inline-flex; }
     /* Two selected days side by side share one ring: the second leaves out its left edge. */
     :host ::ng-deep .mat-button-toggle-checked + .mat-button-toggle-checked { box-shadow: inset 0 1px 0 0 var(--pd-accent), inset -1px 0 0 0 var(--pd-accent), inset 0 -1px 0 0 var(--pd-accent); }
-    :host ::ng-deep .mat-button-toggle-disabled { opacity: 0.5; }
+    :host ::ng-deep .mat-button-toggle-disabled:not(.mat-button-toggle-checked) { opacity: 0.5; }
+    /* A disabled chosen option keeps its ring and tint at full strength and dims only the label, so what is chosen stays readable. */
+    :host ::ng-deep .mat-button-toggle-disabled.mat-button-toggle-checked .mat-button-toggle-label-content { opacity: 0.6; }
   `,
 })
 export class PdDayPicker {

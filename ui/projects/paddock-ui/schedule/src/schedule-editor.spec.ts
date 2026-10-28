@@ -124,6 +124,10 @@ describe('pd-schedule-editor', () => {
     // Incomplete or empty text keeps the last good time and the field says it could not read it.
     await t.type(inputs[1]!, '');
     expect(t.value()).toMatchObject({ times: ['09:00', '17:45'] });
+    // (the error shows once the field is left, like every field's: not on each keystroke)
+    expect(t.all('.pd-times [data-testid=field-error]')).toHaveLength(0);
+    inputs[1]!.dispatchEvent(new Event('blur'));
+    await settle(t.f);
     expect(t.all('.pd-times [data-testid=field-error]').map((e) => e.textContent)).toEqual([expect.stringContaining('Enter a time such as 09:00.')]);
     await t.type(inputs[1]!, 'soon');
     expect(t.value()).toMatchObject({ times: ['09:00', '17:45'] });
@@ -151,6 +155,29 @@ describe('pd-schedule-editor', () => {
     }
     expect(first.map((d) => d && `${d.getHours()}:${d.getMinutes()}`)).toEqual(['9:0', '17:30']);
     pickers().forEach((d, i) => expect(d).toBe(first[i]));
+  });
+
+  it('drops a time error once the schedule changes from outside the field (the field is rewritten with the real time)', async () => {
+    const t = schedule({ mode: 'times', days: ['mon'], times: ['09:00', '10:00'], zone: null });
+    await settle(t.f);
+    const inputs = t.all<HTMLInputElement>('.pd-times input');
+    await t.type(inputs[0]!, 'xx');
+    inputs[0]!.dispatchEvent(new Event('blur'));
+    await settle(t.f);
+    expect(t.all('.pd-times [data-testid=field-error]')).toHaveLength(1);
+    // another time is edited: the schedule changes and the first field shows its real time again, with no error
+    await t.type(inputs[1]!, '11:30');
+    expect(t.all('.pd-times [data-testid=field-error]')).toHaveLength(0);
+    expect(inputs[0]!.value).toBe('09:00');
+    expect(inputs[0]!.getAttribute('aria-invalid')).toBeNull();
+    // a day toggle does the same
+    await t.type(inputs[0]!, 'xx');
+    inputs[0]!.dispatchEvent(new Event('blur'));
+    await settle(t.f);
+    expect(t.all('.pd-times [data-testid=field-error]')).toHaveLength(1);
+    t.all('pd-day-picker button')[1]!.click();
+    await settle(t.f);
+    expect(t.all('.pd-times [data-testid=field-error]')).toHaveLength(0);
   });
 
   it('has a time list toggle, and Escape closes an open list without leaving the editor', async () => {
@@ -262,6 +289,14 @@ describe('pd-pause-editor', () => {
     expect(t.el.textContent).toContain('Ends the next day.');
     await type(until!, '');
     expect(t.value().windows[0]).toMatchObject({ end: '00:00' });
+    expect(t.all('[data-testid=field-error]')).toHaveLength(0);
+    until!.dispatchEvent(new Event('blur'));
+    await settle(t.f);
+    expect(t.all('[data-testid=field-error]')).toHaveLength(1);
+    // editing the other time rewrites this one with its real value and drops the error
+    await type(from!, '22:00');
+    expect(t.all('[data-testid=field-error]')).toHaveLength(0);
+    expect(until!.value).toBe('00:00');
     t.all('pd-day-picker button')[5]!.click();
     await settle(t.f);
     expect(t.value().windows[0]!.days).toEqual(['sat']);

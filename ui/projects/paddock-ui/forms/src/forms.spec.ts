@@ -223,6 +223,7 @@ describe('pd-field', () => {
     expect(plain.querySelector('.pd-field__label')!.textContent).toBe('Folder');
     expect(plain.querySelector('[role=group]')!.getAttribute('aria-labelledby')).toBe(plain.querySelector('.pd-field__label')!.id);
     expect(plain.querySelector('.pd-field__hint')!.textContent).toBe('Where it goes');
+    expect(plain.querySelector('[role=group]')!.getAttribute('aria-describedby')).toBe(plain.querySelector('.pd-field__hint')!.id);
     expect(plain.querySelector('button')).not.toBeNull();
     f.componentInstance.show.set(true);
     await settle(f);

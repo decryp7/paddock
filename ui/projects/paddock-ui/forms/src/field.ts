@@ -51,7 +51,7 @@ type NativeControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
     } @else {
       <!-- No text control to outline (a picker made of a button, say): the classic layout, the label above the content. -->
       <span class="pd-field__label" [id]="controlId + '-label'">{{ label() }}</span>
-      <div role="group" [attr.aria-labelledby]="controlId + '-label'"><ng-container *ngTemplateOutlet="body" /></div>
+      <div role="group" [attr.aria-labelledby]="controlId + '-label'" [attr.aria-describedby]="message() ? errorId : hint() ? hintId : null"><ng-container *ngTemplateOutlet="body" /></div>
       @if (message(); as m) {
         <p class="pd-field__error" [id]="errorId" data-testid="field-error"><pd-status-glyph status="error" [size]="14" /><span>{{ m }}</span></p>
       }
@@ -72,6 +72,8 @@ type NativeControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
     :host ::ng-deep [pdFieldControl][pdFieldControl]:is(:hover, :focus, :focus-visible, :disabled, [aria-invalid]) { border: 0; outline: none; background: transparent; box-shadow: none; }
     /* A disabled field reads as disabled: a quieter fill under the outline. */
     :host ::ng-deep .mat-form-field-disabled .mdc-text-field--outlined { background: color-mix(in srgb, var(--pd-surface-2), var(--pd-text) 3%); border-radius: var(--pd-radius-input); }
+    /* The label and the hint start where Material's hint does, so a picker lines up with the outlined fields of the same form. */
+    :host(.pd-field--plain) :is(.pd-field__label, .pd-field__hint, .pd-field__error) { padding-inline: var(--pd-space-4); }
     .pd-field__label { font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
     .pd-field__hint { font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-field__error { display: flex; align-items: flex-start; gap: var(--pd-space-1); margin: 0; font-size: var(--pd-text-label); color: var(--pd-danger-text, var(--pd-danger)); }

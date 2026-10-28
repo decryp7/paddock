@@ -139,6 +139,7 @@ describe('Manage layouts', () => {
     el.querySelectorAll<HTMLButtonElement>('[data-testid="layout-manage-rename-start"]')[0]!.click();
     await fixture.whenStable();
     const input = q<HTMLInputElement>('layout-manage-rename')!;
+    expect(document.activeElement).toBe(input);
     expect(input.value).toBe('Work');
     await type(fixture, input, 'play');
     q<HTMLButtonElement>('layout-manage-rename-ok')!.click();

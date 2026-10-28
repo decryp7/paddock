@@ -1,4 +1,5 @@
 import { type DateAdapter, MAT_DATE_FORMATS, MAT_NATIVE_DATE_FORMATS, type MatDateFormats, provideNativeDateAdapter } from '@angular/material/core';
+import { linkedSignal, type WritableSignal } from '@angular/core';
 import type { MatTimepickerOption } from '@angular/material/timepicker';
 
 /**
@@ -47,3 +48,43 @@ export const TIME_FORMATS: MatDateFormats = {
 
 /** What the timepicker needs: the platform's `Date` adapter, in the app's locale, with 24-hour times. */
 export const TIME_PROVIDERS = [provideNativeDateAdapter(TIME_FORMATS), { provide: MAT_DATE_FORMATS, useValue: TIME_FORMATS }];
+
+/**
+ * The time fields whose text the picker could not read (empty, or not a time). A field is marked as it is typed in but
+ * shows the problem only once it was left (like every field's error); a valid time clears it; and any change of the
+ * schedule from outside the field clears all of them, because the fields are then rewritten with their real times.
+ */
+export class TimeProblems<K> {
+  private readonly typed: WritableSignal<ReadonlySet<K>>;
+  private readonly left: WritableSignal<ReadonlySet<K>>;
+
+  /** `source` is what the fields are rendered from (the editor's `value`). */
+  constructor(source: () => unknown) {
+    this.typed = linkedSignal({ source, computation: (): ReadonlySet<K> => new Set<K>() });
+    this.left = linkedSignal({ source, computation: (): ReadonlySet<K> => new Set<K>() });
+  }
+
+  /** The picker reported the field's text: `ok` when it read a time. */
+  report(key: K, ok: boolean): void {
+    this.typed.update((s) => with_(s, key, !ok));
+    if (ok) this.left.update((s) => with_(s, key, false));
+  }
+
+  /** The field was left. */
+  leave(key: K): void {
+    if (this.typed().has(key)) this.left.update((s) => with_(s, key, true));
+  }
+
+  /** Whether the field shows its problem. */
+  shown(key: K): boolean {
+    return this.left().has(key);
+  }
+}
+
+function with_<K>(set: ReadonlySet<K>, key: K, present: boolean): ReadonlySet<K> {
+  if (set.has(key) === present) return set;
+  const next = new Set(set);
+  if (present) next.add(key);
+  else next.delete(key);
+  return next;
+}

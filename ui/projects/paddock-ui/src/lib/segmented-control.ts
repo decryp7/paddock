@@ -34,7 +34,9 @@ export interface SuSegment {
   styles: `
     :host { display: inline-flex; }
     /* A disabled option reads as disabled in both schemes. */
-    :host ::ng-deep .mat-button-toggle-disabled { opacity: 0.5; }
+    :host ::ng-deep .mat-button-toggle-disabled:not(.mat-button-toggle-checked) { opacity: 0.5; }
+    /* A disabled chosen option keeps its ring and tint at full strength and dims only the label, so what is chosen stays readable. */
+    :host ::ng-deep .mat-button-toggle-disabled.mat-button-toggle-checked .mat-button-toggle-label-content { opacity: 0.6; }
     .pd-count { margin-inline-start: var(--pd-space-1); font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; color: var(--pd-text-muted); }
   `,
 })
