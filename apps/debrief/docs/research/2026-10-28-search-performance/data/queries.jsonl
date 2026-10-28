@@ -1,0 +1,36 @@
+{"kind": "plain", "query": "why did the payment fail", "relevant": [15, 32, 47, 52, 53, 61, 62, 69, 76, 77, 85, 86, 94, 95, 107, 108, 116, 117, 124, 131, 132, 139, 141, 146, 147, 155, 156, 381, 424, 494]}
+{"kind": "plain", "query": "disk filling up, no space left", "relevant": [61, 64, 76, 79, 94, 97, 116, 119, 131, 134, 141, 155, 158]}
+{"kind": "plain", "query": "the hard drive is broken or failing", "relevant": [376, 377, 378, 379]}
+{"kind": "plain", "query": "lost connection to the database", "relevant": [13, 25, 311, 315, 317, 383]}
+{"kind": "plain", "query": "could not reach the backend server", "relevant": [292, 293, 297, 394]}
+{"kind": "plain", "query": "app slow to respond", "relevant": [9, 10, 11, 12, 26, 28, 29, 30, 46, 51, 68, 84, 105, 123, 138, 145, 328, 345, 393, 404, 405, 406, 407, 419, 462, 468, 485]}
+{"kind": "plain", "query": "the service crashed", "relevant": [33, 60, 76, 93, 115, 131, 141, 154, 368, 443, 492, 502]}
+{"kind": "plain", "query": "a process ran out of memory and was killed", "relevant": [367]}
+{"kind": "plain", "query": "the pod keeps restarting", "relevant": [368, 369, 502]}
+{"kind": "plain", "query": "emails are not being sent to customers", "relevant": [473, 474, 480]}
+{"kind": "plain", "query": "work is piling up in a queue", "relevant": [354, 363, 473]}
+{"kind": "plain", "query": "the other side dropped the connection", "relevant": [348, 391, 475]}
+{"kind": "plain", "query": "calls to the payment provider are being blocked after many errors", "relevant": [422]}
+{"kind": "plain", "query": "when was the server shut down", "relevant": [16, 34, 300, 318, 362, 395]}
+{"kind": "plain", "query": "when did the application start up", "relevant": [0, 2, 17, 19, 40, 48, 65, 81, 99, 120, 135, 142, 301, 319, 338, 351, 396, 410, 459, 469]}
+{"kind": "plain", "query": "null pointer crash in the consumer", "relevant": [368, 443, 444]}
+{"kind": "plain", "query": "a scheduled job keeps failing and was stopped", "relevant": [480]}
+{"kind": "plain", "query": "a worker gave up its claim on a batch", "relevant": [458]}
+{"kind": "plain", "query": "an interrupted export that will be picked up again", "relevant": [464, 465]}
+{"kind": "plain", "query": "how much CPU and memory is the process using", "relevant": [5, 21, 37, 38, 353, 355]}
+{"kind": "plain", "query": "page not found errors on the web server", "relevant": [185, 289]}
+{"kind": "plain", "query": "someone logged in remotely", "relevant": [373]}
+{"kind": "plain", "query": "the payment is being tried again", "relevant": [14, 31, 59, 75, 92, 130, 140, 153, 435]}
+{"kind": "plain", "query": "the trial licence is about to expire", "relevant": [372]}
+{"kind": "plain", "query": "health check failing for the container", "relevant": [366]}
+{"kind": "plain", "query": "a job ran longer than allowed", "relevant": [336]}
+{"kind": "plain", "query": "upstream gateway gave up waiting", "relevant": [15, 32, 47, 291, 357, 366, 442, 451]}
+{"kind": "plain", "query": "invoice could not be sent to the accounting system", "relevant": [347]}
+{"kind": "plain", "query": "the mobile app crashed", "relevant": [492, 502, 503]}
+{"kind": "plain", "query": "an order was received", "relevant": [50, 67, 83, 103, 122, 137, 144, 387]}
+{"kind": "ident", "query": "hikaripool", "relevant": [311, 312]}
+{"kind": "ident", "query": "ordrservice paymnts", "relevant": [14, 15, 31, 32, 359, 386]}
+{"kind": "ident", "query": "order 88412", "relevant": [50, 52, 53, 54, 67, 69, 70, 83, 85, 86, 87, 103, 107, 108, 109, 122, 124, 125, 137, 139, 144, 146, 147, 148, 494]}
+{"kind": "ident", "query": "billingservice", "relevant": [35, 37]}
+{"kind": "ident", "query": "sendordermail", "relevant": [470, 473, 474, 479, 480]}
+{"kind": "ident", "query": "payment adaptor circuitbreaker", "relevant": [421, 431, 433]}
