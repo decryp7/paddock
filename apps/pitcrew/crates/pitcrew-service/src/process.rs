@@ -57,41 +57,54 @@ fn drain(stream: Option<impl Read + Send + 'static>) -> Drain {
     })
 }
 
-/// Runs `cmd` to completion, stopping it after `timeout`. Error messages name the program only, never its
-/// arguments (a registration token is an argument).
-pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<ToolOutput, Error> {
+/// Runs `cmd` to completion, stopping it after `timeout`, together with every program it started (a login shell's
+/// `~/.zshrc`, `cmd /c`). Error messages name the program only, never its arguments (a registration token is an
+/// argument).
+pub fn run_with_timeout(cmd: Command, timeout: Duration) -> Result<ToolOutput, Error> {
+    let started = Instant::now();
+    run_until(cmd, timeout.as_secs(), |_| started.elapsed() >= timeout)
+}
+
+/// Runs `cmd` to completion unless `give_up(pid)` says to stop first; then the tool and every program it started are
+/// ended and `TimedOut` (naming `secs`) is returned. The tool runs in a session of its own on Unix (it leads its process
+/// group and has no controlling terminal, so an interactive login shell started from a terminal is not stopped by
+/// `SIGTTIN`) and in a kill-on-close job object on Windows (which also holds helpers that left its tree).
+///
+/// After a tool finishes normally, helpers it left running differ by platform: on Windows closing the job ends them;
+/// on Unix they survive (only a timeout signals the group), as they would when the tool ran from a shell.
+pub(crate) fn run_until(mut cmd: Command, secs: u64, mut give_up: impl FnMut(u32) -> bool) -> Result<ToolOutput, Error> {
     let program = Path::new(cmd.get_program())
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    tree::own_session(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| Error::Os {
         what: "starting a program",
         reason: format!("{program}: {e}"),
     })?;
+    let tree = tree::Tree::of(&child);
     let out = drain(child.stdout.take());
     let err = drain(child.stderr.take());
-    let started = Instant::now();
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(Error::TimedOut {
-                    program,
-                    secs: timeout.as_secs(),
-                });
+            Ok(None) if give_up(child.id()) => {
+                tree.end(&mut child);
+                return Err(Error::TimedOut { program, secs });
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(25)),
             Err(e) => {
+                tree.end(&mut child);
                 return Err(Error::Os {
                     what: "waiting for a program",
                     reason: e.to_string(),
-                })
+                });
             }
         }
     };
+    // On Windows, closing the job ends helpers the tool left running; their pipes then close.
+    tree.close();
     let text = |h: Drain| String::from_utf8_lossy(&h.and_then(|h| h.join().ok()).unwrap_or_default()).into_owned();
     Ok(ToolOutput {
         success: status.success(),
@@ -99,6 +112,151 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<ToolOutpu
         stdout: text(out),
         stderr: text(err),
     })
+}
+
+/// `taskkill.exe` in the system folder, by full path (never whatever `taskkill` the `PATH` finds first).
+#[cfg(windows)]
+pub fn taskkill_exe() -> std::path::PathBuf {
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+    std::path::PathBuf::from(root).join("System32").join("taskkill.exe")
+}
+
+/// A tool's process tree: its own session on Unix, a kill-on-close job object on Windows.
+mod tree {
+    #![allow(unsafe_code)]
+    use std::process::{Child, Command};
+
+    /// Makes the tool start a session of its own (`setsid`): it leads a new process group, so `killpg` reaches every
+    /// program it starts, and it has no controlling terminal to be stopped by.
+    #[cfg(unix)]
+    pub fn own_session(cmd: &mut Command) {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: the closure runs between fork and exec and only calls setsid, which is async-signal-safe and touches no
+        // memory of the parent.
+        unsafe {
+            cmd.pre_exec(|| nix::unistd::setsid().map(|_| ()).map_err(std::io::Error::from));
+        }
+    }
+
+    #[cfg(not(unix))]
+    pub fn own_session(_cmd: &mut Command) {}
+
+    /// What ends the tree.
+    pub struct Tree {
+        #[cfg(windows)]
+        job: Option<windows::Win32::Foundation::HANDLE>,
+    }
+
+    impl Tree {
+        /// The tree of a just-started tool. On Windows the tool joins a kill-on-close job (a program it starts later
+        /// joins too); when that fails (an old Windows, a job that forbids it) `taskkill /T` is the fallback. The tool
+        /// joins the job only after `spawn` returned: a program it started in that moment (before its own start-up
+        /// code ran, so in practice never) would be outside the job, which is why `end` also runs `taskkill /T`.
+        #[cfg(windows)]
+        pub fn of(child: &Child) -> Tree {
+            Tree { job: job_for(child) }
+        }
+
+        #[cfg(not(windows))]
+        pub fn of(_child: &Child) -> Tree {
+            Tree {}
+        }
+
+        /// The tool finished: on Windows the job is closed, which ends any helper it left running.
+        pub fn close(self) {}
+
+        /// Ends the tool and everything it started, and reaps the tool.
+        pub fn end(&self, child: &mut Child) {
+            #[cfg(unix)]
+            {
+                // The tool leads its own process group (`own_session`).
+                if let Ok(pid) = i32::try_from(child.id()) {
+                    let _ = nix::sys::signal::killpg(nix::unistd::Pid::from_raw(pid), nix::sys::signal::Signal::SIGKILL);
+                }
+            }
+            #[cfg(windows)]
+            match self.job {
+                Some(job) => {
+                    // SAFETY: a job handle this value owns and has not closed.
+                    unsafe {
+                        let _ = windows::Win32::System::JobObjects::TerminateJobObject(job, 1);
+                    }
+                    // Anything that escaped the job (see `of`) and is still in the tool's tree.
+                    taskkill_tree(child.id());
+                }
+                None => taskkill_tree(child.id()),
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    #[cfg(windows)]
+    impl Drop for Tree {
+        fn drop(&mut self) {
+            if let Some(job) = self.job.take() {
+                // SAFETY: the handle is owned here and closed once; closing it ends what is left in the job.
+                unsafe {
+                    let _ = windows::Win32::Foundation::CloseHandle(job);
+                }
+            }
+        }
+    }
+
+    /// A new kill-on-close job holding `child`, or `None` when Windows refuses.
+    #[cfg(windows)]
+    fn job_for(child: &Child) -> Option<windows::Win32::Foundation::HANDLE> {
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        // SAFETY: no attributes and no name; the handle is closed below on failure or owned by the `Tree`.
+        let job = unsafe { CreateJobObjectW(None, windows::core::PCWSTR::null()) }.ok()?;
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: `info` is a valid structure of the size passed, for the class passed; both handles are valid while
+        // `child` lives.
+        let ok = unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&raw const info).cast(),
+                u32::try_from(std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).unwrap_or(0),
+            )
+            .and_then(|()| AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())))
+        };
+        if ok.is_err() {
+            // SAFETY: the job was created above and is not used again.
+            unsafe {
+                let _ = CloseHandle(job);
+            }
+            return None;
+        }
+        Some(job)
+    }
+
+    /// `taskkill /PID n /T /F`, run directly (not through `run_with_timeout`, which would recurse) and waited for a few
+    /// seconds at most.
+    #[cfg(windows)]
+    fn taskkill_tree(pid: u32) {
+        use std::process::Stdio;
+        use std::time::{Duration, Instant};
+        let mut kill = super::quiet_command(&super::taskkill_exe());
+        kill.args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if let Ok(mut k) = kill.spawn() {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while matches!(k.try_wait(), Ok(None)) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            let _ = k.kill();
+            let _ = k.wait();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -133,6 +291,145 @@ pub(crate) mod tests {
         let err = run_with_timeout(shell(hang), Duration::from_millis(500)).unwrap_err();
         assert!(matches!(err, Error::TimedOut { .. }), "{err}");
         assert!(started.elapsed() < Duration::from_secs(15));
+    }
+
+    /// A tool that started programs of its own (a login shell running `~/.zshrc`, `cmd /c`) is stopped with all of
+    /// them: killing only the tool left its children running, holding its output pipes open. The test gives up on the
+    /// tool once its tree is complete (no time budget), then waits until every member is gone.
+    #[test]
+    fn a_tool_that_hangs_is_stopped_with_the_programs_it_started() {
+        // Unix: `; wait` keeps the shell from replacing itself with `sleep`, so the tool has a child of its own.
+        // Windows: `start /b` runs a second ping beside the first, both children of `cmd`.
+        let script = if cfg!(windows) {
+            "start /b ping -n 300 127.0.0.1 >nul & ping -n 300 127.0.0.1 >nul"
+        } else {
+            "sleep 300 & wait"
+        };
+        // The shell and its sleep; on Windows `cmd` and its two pings.
+        let complete = if cfg!(windows) { 3 } else { 2 };
+        let guard = Instant::now() + HANG_GUARD;
+        let mut members = vec![];
+        let err = run_until(shell(script), 0, |pid| {
+            members = tree_members(pid);
+            members.len() >= complete || Instant::now() > guard
+        })
+        .unwrap_err();
+        assert!(matches!(err, Error::TimedOut { .. }), "{err}");
+        assert!(members.len() >= complete, "the tool started its programs: {members:?}");
+        let gone = eventually_gone(&members);
+        if !gone {
+            // Only processes that are still the tool's own: a pid reused by an unrelated process is never touched.
+            for m in &members {
+                if running(*m) {
+                    kill_pid(m.pid);
+                }
+            }
+        }
+        assert!(gone, "the tool's tree outlived it: {members:?}");
+    }
+
+    /// Ends a hung test, never a product interval.
+    const HANG_GUARD: Duration = Duration::from_secs(60);
+
+    /// One process of the tool's tree, with what identifies it beyond its pid: the tool's process group on Unix, its
+    /// start time on Windows.
+    #[derive(Debug, Clone, Copy)]
+    struct Member {
+        pid: u32,
+        mark: u64,
+    }
+
+    /// The tool `pid` and its programs: its process group on Unix, its descendants on Windows.
+    #[cfg(unix)]
+    fn tree_members(pid: u32) -> Vec<Member> {
+        let out = quiet_command(Path::new("pgrep")).args(["-g", &pid.to_string()]).output().unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|l| l.trim().parse().ok())
+            .map(|p| Member {
+                pid: p,
+                mark: u64::from(pid),
+            })
+            .collect()
+    }
+
+    #[cfg(windows)]
+    fn tree_members(pid: u32) -> Vec<Member> {
+        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+        let mut sys = System::new();
+        sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+        let mut tree = vec![Pid::from_u32(pid)];
+        loop {
+            let before = tree.len();
+            for (p, proc_) in sys.processes() {
+                if !tree.contains(p) && proc_.parent().is_some_and(|pp| tree.contains(&pp)) {
+                    tree.push(*p);
+                }
+            }
+            if tree.len() == before {
+                break;
+            }
+        }
+        // `cmd` gets a console host of its own, which is not one of the tool's programs.
+        tree.into_iter()
+            .filter_map(|p| sys.process(p).map(|q| (p, q)))
+            .filter(|(_, q)| !q.name().to_string_lossy().eq_ignore_ascii_case("conhost.exe"))
+            .map(|(p, q)| Member {
+                pid: p.as_u32(),
+                mark: q.start_time(),
+            })
+            .collect()
+    }
+
+    /// Whether every one of `members` is gone (a zombie counts as gone), waiting on that condition up to the hang guard.
+    fn eventually_gone(members: &[Member]) -> bool {
+        let guard = Instant::now() + HANG_GUARD;
+        loop {
+            if members.iter().all(|m| !running(*m)) {
+                return true;
+            }
+            if Instant::now() > guard {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Whether the member still runs and is still the tool's (same process group).
+    #[cfg(unix)]
+    fn running(m: Member) -> bool {
+        let out = quiet_command(Path::new("ps"))
+            .args(["-o", "stat=,pgid=", "-p", &m.pid.to_string()])
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut fields = text.split_whitespace();
+        match (fields.next(), fields.next().and_then(|g| g.parse::<u64>().ok())) {
+            (Some(stat), Some(pgid)) => !stat.starts_with('Z') && pgid == m.mark,
+            _ => false,
+        }
+    }
+
+    /// Whether the member still runs and is still the same process (same start time).
+    #[cfg(windows)]
+    fn running(m: Member) -> bool {
+        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+        let mut sys = System::new();
+        let pid = Pid::from_u32(m.pid);
+        sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, ProcessRefreshKind::nothing());
+        sys.process(pid).is_some_and(|p| p.start_time() == m.mark)
+    }
+
+    #[cfg(unix)]
+    fn kill_pid(pid: u32) {
+        if let Ok(p) = i32::try_from(pid) {
+            let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(p), nix::sys::signal::Signal::SIGKILL);
+        }
+    }
+
+    #[cfg(windows)]
+    fn kill_pid(pid: u32) {
+        let _ = quiet_command(&taskkill_exe()).args(["/PID", &pid.to_string(), "/F"]).output();
     }
 
     #[test]
