@@ -14,7 +14,9 @@ const APP = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
  * build-folder action's, tested in conformance/test/ci-actions.test.mjs.) */
 function scratch() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'debrief-ci-folder-')));
-  const app = join(root, 'app');
+  const app = join(root, 'apps', 'debrief');
+  mkdirSync(join(root, 'conformance', 'ci'), { recursive: true });
+  copyFileSync(join(APP, '..', '..', 'conformance', 'ci', 'ci-home.sh'), join(root, 'conformance', 'ci', 'ci-home.sh'));
   mkdirSync(join(app, 'scripts', 'ci'), { recursive: true });
   mkdirSync(join(app, '.cargo'));
   mkdirSync(join(app, 'src'));

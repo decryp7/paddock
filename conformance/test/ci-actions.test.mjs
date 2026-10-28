@@ -325,7 +325,7 @@ function runSccacheStep(env, shim = 'true') {
   mkdirSync(join(dir, 'bin'));
   writeFileSync(join(dir, 'bin', 'sccache'), `#!/bin/sh\n[ "$1" = --version ] && echo sccache 0.19.0\n${shim}\nexit 0\n`);
   chmodSync(join(dir, 'bin', 'sccache'), 0o755);
-  writeFileSync(join(dir, 'step.sh'), body);
+  writeFileSync(join(dir, 'step.sh'), body.replaceAll('${{ github.action_path }}', join(ACTIONS, 'setup-rust')));
   const ghEnv = join(dir, 'github-env');
   writeFileSync(ghEnv, '');
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(dir, 'step.sh')], {
@@ -479,7 +479,7 @@ function runStableWorkspace(os, root, over = {}) {
   const text = read(join(ACTIONS, 'stable-workspace', 'action.yml'));
   const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   const script = join(root, 'step.sh');
-  writeFileSync(script, body);
+  writeFileSync(script, body.replaceAll('${{ github.action_path }}', join(ACTIONS, 'stable-workspace')));
   return spawnSync('bash', ['-e', '-o', 'pipefail', script], {
     env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_WORKSPACE: join(root, 'work', 'abc', 'hostexecutor'), GITHUB_ENV: join(root, 'github-env'), NAME: 'decryp7/paddock-crate', ...over },
     encoding: 'utf8',
@@ -553,7 +553,8 @@ test('stable-workspace leaves Linux containers alone and never fails a job it ca
   assert.equal(runStableWorkspace('Linux', root).status, 0);
   assert.ok(!lstatSync(join(root, 'work', 'abc', 'hostexecutor')).isSymbolicLink());
   // The stable root cannot be created (a file is in the way): warn and build in place.
-  writeFileSync(join(root, 'blocked'), '');
+  mkdirSync(join(root, 'blocked'));
+  writeFileSync(join(root, 'blocked', 'src'), '');
   const r = runStableWorkspace('macOS', root, { PADDOCK_CI_HOME: join(root, 'blocked') });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /::warning::stable-workspace: could not move/);
@@ -577,11 +578,11 @@ test('CI moves the checkout to a stable path on the host runners only, after Git
 
 test('the test browser of a host job lives in a kept folder of the runner user, outside the checkout that stable-workspace moves', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
-  const dirs = [...ci.matchAll(/PADDOCK_TEST_BROWSER_DIR=(\S+)/g)].map((m) => m[1]);
+  const dirs = [...ci.matchAll(/PADDOCK_TEST_BROWSER_DIR=([^"]*?)(?:"|>>| >>)/g)].map((m) => m[1]);
   assert.equal(dirs.length, 3, 'one per host OS in the crate job, and the app leg\'s own (per app, under $HOME)');
   for (const d of dirs) {
     assert.doesNotMatch(d, /GITHUB_WORKSPACE|\.\./, `${d}: a path relative to the checkout dies when the checkout moves`);
-    assert.match(d, /\.paddock-ci[\\/]test-browser/, d);
+    assert.match(d, /(\.paddock-ci|ci-home\.sh\)|\$home)[\\/]test-browser/, d);
   }
   assert.ok(ci.indexOf('PADDOCK_TEST_BROWSER_DIR') < ci.indexOf('uses: ./.gitea/actions/install-test-browser'), 'the folder is chosen before the browser is installed');
 });
@@ -634,7 +635,7 @@ function runHostTools(os, { kept = null, onPath = null } = {}) {
   writeFileSync(join(bin, 'curl'), '#!/bin/sh\necho "curl was called" >&2\nexit 7\n', { mode: 0o755 });
   if (kept) shim(join(root, 'home', '.paddock-ci', 'tools', 'cargo-nextest', version), kept === 'pin' ? version : kept);
   if (onPath) shim(bin, onPath === 'pin' ? version : onPath);
-  writeFileSync(join(root, 'step.sh'), body);
+  writeFileSync(join(root, 'step.sh'), body.replaceAll('${{ github.action_path }}', join(ACTIONS, 'host-tools')));
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(root, 'step.sh')], {
     env: { PATH: `${bin}:/usr/bin:/bin`, HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_PATH: join(root, 'github-path') },
     encoding: 'utf8',
@@ -853,7 +854,7 @@ function runNodeCaches(os, env = {}) {
   const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   mkdirSync(join(root, 'ws', 'ui', '.angular', 'cache'), { recursive: true });
   writeFileSync(join(root, 'ws', 'ui', '.angular', 'cache', 'stale'), '');
-  writeFileSync(join(root, 'step.sh'), body);
+  writeFileSync(join(root, 'step.sh'), body.replaceAll('${{ github.action_path }}', join(ACTIONS, 'node-caches')));
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(root, 'step.sh')], {
     env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_WORKSPACE: join(root, 'ws'), GITHUB_ENV: join(root, 'github-env'), ANGULAR_DIR: 'ui', NAME: 'e2e-1', PADDOCK_CI_MOUNT: join(root, 'no-mount'), ...env },
     encoding: 'utf8',
@@ -1076,4 +1077,74 @@ test("app-gates runs every command list through run-commands.sh, which names the
   assert.equal(good.status, 0, good.stdout);
   assert.match(good.stdout, /4361/, 'shell expansion works as in the old bash -c');
   assert.equal(run('cd nowhere').status, 1);
+});
+
+/** Every file that may run on a host runner and so must ask ci-home.sh for the CI home: all workflows, all shared actions, the shared
+ * and the apps' CI scripts. */
+function ciFiles() {
+  const listed = spawnSync('git', ['ls-files', '.gitea/workflows/*.yml', '.gitea/actions/*/action.yml', 'conformance/ci/*.sh', 'apps/*/scripts/ci/*'], { cwd: PADDOCK, encoding: 'utf8' });
+  assert.equal(listed.status, 0, listed.stderr);
+  return listed.stdout.split('\n').filter((f) => f && !f.endsWith('.test.mjs') && f !== 'conformance/ci/ci-home.sh');
+}
+
+/** Script lines (not comments or descriptions) that spell out the default cache root. Exceptions are explicit: the Windows
+ * %USERPROFILE% lines (cmd cannot run the bash script) and the demos' own CARGO_TARGET_DIR lines. */
+function hardCodedCacheRoot() {
+  const exempt = (f, l) => /%USERPROFILE%/.test(l) || (/^\.gitea\/workflows\/(shell|workbench)-demo-release\.yml$/.test(f) && /CARGO_TARGET_DIR=/.test(l));
+  const found = [];
+  for (const f of ciFiles()) {
+    for (const l of read(join(PADDOCK, f)).split('\n')) {
+      if (/^\s*(#|description:)/.test(l) || exempt(f, l)) continue;
+      if (/\$HOME\/\.paddock-ci|\$\{HOME\}\/\.paddock-ci|PADDOCK_CI_HOME:-|~\/\.paddock-ci/.test(l)) found.push(`${f}: ${l.trim()}`);
+    }
+  }
+  return found;
+}
+
+test('ci-home.sh is always assigned first: no workflow or action line takes it inside another command (bash -e would not stop)', () => {
+  const found = [];
+  for (const f of ciFiles()) {
+    for (const l of read(join(PADDOCK, f)).split('\n')) {
+      if (/^\s*#/.test(l)) continue;
+      if (/\$\([^)]*ci-home\.sh/.test(l) && !/^\s*[A-Za-z_]\w*="\$\(bash [^#]*ci-home\.sh"?\)"\s*(#.*)?$/.test(l)) found.push(`${f}: ${l.trim()}`);
+    }
+  }
+  assert.deepEqual(found, [], 'assign first (home="$(bash .../ci-home.sh)"), then use $home');
+});
+
+test('ci-home: PADDOCK_CI_HOME relocates the CI home, a missing relocated home stops the job, and nothing hard-codes the default', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-ci-home-')));
+  const run = (env) => spawnSync('bash', [join(PADDOCK, 'conformance', 'ci', 'ci-home.sh')], { env: { PATH: '/usr/bin:/bin', ...env }, encoding: 'utf8' });
+  const def = run({ HOME: join(root, 'home') });
+  assert.equal(def.status, 0, def.stderr);
+  assert.equal(def.stdout.trim(), join(root, 'home', '.paddock-ci'));
+  assert.ok(existsSync(join(root, 'home', '.paddock-ci')), 'the default home is created on first use');
+  const disk = join(root, 'disk');
+  const gone = run({ HOME: join(root, 'home'), PADDOCK_CI_HOME: disk });
+  assert.notEqual(gone.status, 0, 'an unmounted relocated home must stop the job');
+  assert.match(gone.stderr, /PADDOCK_CI_HOME .* does not exist: is its disk mounted/);
+  assert.equal(gone.stdout, '', 'nothing is printed for a later step to use');
+  assert.ok(!existsSync(disk), 'the relocated home is not recreated');
+  mkdirSync(disk);
+  const there0 = run({ HOME: join(root, 'home'), PADDOCK_CI_HOME: disk + '/' });
+  assert.equal(there0.stdout.trim(), disk, 'a trailing slash is normalised');
+  const rel = run({ HOME: join(root, 'home'), PADDOCK_CI_HOME: 'disk' });
+  assert.notEqual(rel.status, 0, 'a relative PADDOCK_CI_HOME is refused');
+  assert.match(rel.stderr, /not an absolute path/);
+  assert.equal(rel.stdout, '');
+  symlinkSync(disk, join(root, 'link'));
+  assert.equal(run({ HOME: join(root, 'home'), PADDOCK_CI_HOME: join(root, 'link') }).stdout.trim(), disk, 'a link is resolved');
+  const there = run({ HOME: join(root, 'home'), PADDOCK_CI_HOME: disk });
+  assert.equal(there.stdout.trim(), disk);
+  // build-folder follows it (and fails the same way).
+  const ws = join(root, 'ws');
+  mkdirSync(join(ws, '.cargo'), { recursive: true });
+  writeFileSync(join(ws, '.cargo', 'config.toml'), 'include = [{ path = "ci.toml", optional = true }]\n');
+  const bf = (home) => spawnSync('bash', [join(PADDOCK, 'conformance', 'ci', 'build-folder.sh'), ws, 'x-app'], {
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: 'macOS', GITHUB_ENV: join(root, 'env'), PADDOCK_CI_HOME: home }, encoding: 'utf8' });
+  assert.equal(bf(disk).status, 0);
+  assert.ok(existsSync(join(disk, 'target-x-app')));
+  assert.notEqual(bf(join(root, 'unmounted')).status, 0);
+  assert.ok(!existsSync(join(root, 'unmounted')));
+  assert.deepEqual(hardCodedCacheRoot(), [], 'one implementation: ask conformance/ci/ci-home.sh');
 });

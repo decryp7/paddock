@@ -135,7 +135,8 @@ runs:
             if [ -d "$MOUNT" ] && [ -w "$MOUNT" ]; then DIR="$MOUNT"
             else DIR="${RUNNER_TEMP:-/tmp}/sccache"; echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."; fi
           else
-            DIR="$HOME/.paddock-ci/sccache"
+            ci_home="$(bash "${{ github.action_path }}/../../../conformance/ci/ci-home.sh")"  # the one implementation: fails when a relocated home is missing
+            DIR="$ci_home/sccache"
           fi
           mkdir -p "$DIR"
           if [ "$RUNNER_OS" = Windows ]; then DIR="$(cygpath -w "$DIR")"; fi
