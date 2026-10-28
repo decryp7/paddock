@@ -4,6 +4,14 @@
 - Revision 2 (2026-10-28): adds the user's decisions of 2026-10-28 (all processes and administrator-only counters in
   1.0, the helper on all three OS, per-machine Windows, no signing purchases, any local user) and the first
   independent review (P1: updates ran an elevated installer from `%TEMP%`; the protected-location rule was not exact).
+- Revision 3 (2026-10-28): records D5 (the helper installs Dyno's own signed, newer updates) and D6 (scope U3) as
+  decided by the user on 2026-10-28, and answers the second independent review:
+  - P1: how the helper opens the caller's update file;
+  - P1: the installer's temporary folder;
+  - P1: a `%ProgramData%\Dyno` folder that another user created first;
+  - P1: a Dyno-only update key;
+  - P2: update state and limits, the signature grammar, macOS launch jobs and the hardened runtime, the polkit rule,
+    U3 for traffic, and the ADR 0024 waivers.
 - Related: amends ADR 0016 (sections 1, 3, 4, 5 and 6: who installs the helper, who may call, what it does, update and
   uninstall, when it is asked for) and ADR 0021 point 4 (new read-only requests, and one named exception: the helper
   installs a signed, newer Dyno). ADR 0006 and ADR 0010 (the per-user agent and its login entry) stay. Paddock ADR 0024
@@ -18,9 +26,12 @@ The user decided on 2026-10-28:
 - The privileged helper is **installed with the app on Windows, macOS and Linux**.
 - In Dyno 1.0 the helper **reads all processes** (other users' and the system's) **and administrator-only counters**,
   including DMI memory details on Linux.
-- Windows becomes a **per-machine install** in `%ProgramFiles%`, with a UAC prompt at install and at updates.
+- Windows becomes a **per-machine install** in `%ProgramFiles%`, with a UAC prompt at install. Updates have no prompt,
+  because the helper installs them (D5).
 - **No signing purchases**: no Apple Developer ID, no Authenticode.
-- **Any local user** may use the helper.
+- **Any local user** may use the helper. Each caller sees what scope U3 allows (D6, section 6).
+- **D5**: the helper installs Dyno's own signed, newer updates.
+- **D6**: U3.
 
 Dyno stays a read-only monitor (ADR 0021).
 
@@ -118,7 +129,7 @@ Windows.
 
 | Option | What it means | For | Against |
 | --- | --- | --- | --- |
-| **P1. The helper installs updates.** The agent downloads the package and its update signature into the user's cache and asks the helper `Update`. The helper copies the bytes into a folder only it can write, **verifies the copy** against a public key compiled into the helper, checks that the signed version is newer, and runs the copy as SYSTEM or root | Nothing is checked or run in a user-writable place. No prompt at updates on any OS. Works without any certificate. On macOS it also solves "a DMG/app update cannot run `postinstall`": the update *is* the `.pkg`, run by `installer` as root | The helper gains one write action (installing a signed, newer Dyno), a named exception to ADR 0021 (decision D5). Package-manager details per OS (below) |
+| **P1. The helper installs updates.** The agent downloads the package and its update signature into the user's cache and asks the helper `Update`. The helper copies the bytes into a folder only it can write, **verifies the copy** against a public key compiled into the helper, checks that the signed version is newer, and runs the copy as SYSTEM or root | Nothing is checked or run in a user-writable place. No prompt at updates on any OS. Works without any certificate. On macOS it also solves "a DMG/app update cannot run `postinstall`": the update *is* the `.pkg`, run by `installer` as root | The helper gains one write action (installing a signed, newer Dyno), a named exception to ADR 0021 (D5, decided). Package-manager details per OS (below) |
 | P2. Keep the Tauri updater's install | Unchanged | No new code | Problem 1 at every update, on Windows and Linux; on macOS the helper and the programs outside the bundle go stale. Only D3/D4 (signing) would make the prompt honest, and even then the swap race stays |
 | P3. Updates only by downloading the installer by hand | No in-app update | Simple | Same race (the file sits in Downloads); worse experience |
 
@@ -128,7 +139,7 @@ Windows.
 | --- | --- | --- | --- |
 | U1. One user, recorded at install (ADR 0016) | Everything | Smallest audience | An installer cannot reliably tell who the user is (over-the-shoulder UAC gives the admin's SID; PackageKit gives no user; MDM gives no console user) |
 | U2. Any local user sees everything | Every process of every account, with names, paths, owner and resources; per-program traffic | Simple; the user's literal choice | On a shared PC or over RDP or SSH, any account sees what every other person runs and when (section 6) |
-| **U3. Any local user may call; a caller sees its own processes and the system's in detail, other people's only as one total; administrators see everything** | Own and system/service accounts: full detail. Other interactive accounts: one row "Other users: N processes, CPU, memory, disk". Administrators: all detail | Same "any local user" install and caller rule; answers "why is my PC slow" (services, drivers, updaters), and hides other people's activity from non-administrators | One more check per caller (is it an administrator?); an administrator account sees everyone, which an administrator can do anyway |
+| **U3 (decided, D6). Any local user may call; a caller sees its own processes and the system's in detail, other people's only as one total; administrators see everything** | Own and system/service accounts: full detail. Other interactive accounts: one row "Other users: N processes, CPU, memory, disk". Administrators: all detail | Same "any local user" install and caller rule; answers "why is my PC slow" (services, drivers, updaters), and hides other people's activity from non-administrators | One more check per caller (is it an administrator?); an administrator account sees everyone, which an administrator can do anyway |
 
 ## Decision (proposed)
 
@@ -153,6 +164,15 @@ The service runs `"%ProgramFiles%\Dyno\dyno-helper.exe" service`. It is not copi
   so running the installer again or using Repair (section 3) recovers.
 - **`NSIS_HOOK_POSTINSTALL`** runs `dyno-helper.exe install --machine --agent-exe "$INSTDIR\dyno-agent.exe"`. It:
   - applies an explicit ACL to `$INSTDIR`: SYSTEM and Administrators Full, Users Read & execute, no inheritance;
+  - **makes the data folder trustworthy before it writes anything** (review P1-4). Any user may create folders in
+    `%ProgramData%`, so another account could have created `%ProgramData%\Dyno` first and would own whatever is
+    written there. The install therefore:
+    - opens the folder without following reparse points;
+    - if it fails the protected-location rule (owner, ACL, or a junction or link anywhere inside), renames it to
+      `%ProgramData%\Dyno.untrusted-<time>` and records that in the audit log;
+    - creates `%ProgramData%\Dyno` and `Dyno\Helper` anew with an explicit security descriptor set at creation: owner
+      SYSTEM, SYSTEM and Administrators Full, Users Read only for `Helper` and nothing for `Helper\updates`, and no
+      inheritance from `%ProgramData%`;
   - writes `%ProgramData%\Dyno\Helper\config.json` in its own schema;
   - removes an old click-installed 0.x service and its `%ProgramFiles%\Dyno\Helper\` copy explicitly, by service name
     and path, not through the HKCU hive;
@@ -172,10 +192,19 @@ The service runs `"%ProgramFiles%\Dyno\dyno-helper.exe" service`. It is not copi
 #### macOS: M1', an unsigned `.pkg`
 
 - **Payload**, laid down by Installer as root, so nothing is copied after the fact:
-  - `/Library/Application Support/Dyno/bin/{dyno-agent, dyno-helper, dyno}`, each ad-hoc signed and checked with
-    `codesign --verify --strict` in CI (rule 23);
+  - `/Library/Application Support/Dyno/bin/{dyno-agent, dyno-helper, dyno}`, each ad-hoc signed **with the hardened
+    runtime** (`codesign -s - -o runtime`, no `get-task-allow`) and checked with `codesign --verify --strict` in CI.
+    The hardened runtime blocks `DYLD_INSERT_LIBRARIES` and attaching a debugger to these programs, so same-user
+    injection into the agent (problem 3) needs more than an environment variable.
+    - This is a narrow exception to rule 23 ("while ad-hoc, the hardened runtime is off"). Rule 23's reason is that
+      ad-hoc code under the hardened runtime cannot load vendor-signed libraries. These three programs link only system
+      libraries, so the reason does not apply to them.
+    - CI checks that with `otool -L`: only `/usr/lib` and `/System` may appear.
+    - `Dyno.app` itself stays as rule 23 says.
+    - Even so, the path pin is not a full boundary on macOS. A root or debugger-entitled process can still inject;
+      section 6 bounds what that gains.
   - `/Applications/Dyno.app` (the UI only; it starts the agent at the fixed path above);
-  - `/Library/LaunchDaemons/net.decryptology.dyno.helper.plist` (`AbandonProcessGroup` true, see section 3);
+  - `/Library/LaunchDaemons/net.decryptology.dyno.helper.plist`;
   - the agent's launch-agent plist pointing at the fixed path (ADR 0010's opt-in stays).
 - **`preinstall`:** `launchctl bootout system/net.decryptology.dyno.helper`, then stop the agents.
 - **`postinstall`:** `dyno-helper install --machine --agent-exe "/Library/Application Support/Dyno/bin/dyno-agent"`
@@ -206,8 +235,24 @@ The service runs `"%ProgramFiles%\Dyno\dyno-helper.exe" service`. It is not copi
 - **`postrm purge`:** removes `/var/lib/dyno-helper`.
 - **Without systemd:** if `/run/systemd/system` does not exist (containers, chroots), each step logs and skips, and the
   scripts exit 0.
+- **The polkit rule** `/usr/share/polkit-1/rules.d/50-dyno-helper.rules` (a package file) allows exactly one thing:
+  starting the helper's unit, from a local, active session.
+
+  ```js
+  polkit.addRule(function (action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "dyno-helper.service" &&
+        action.lookup("verb") == "start" &&
+        subject.local && subject.active) {
+      return polkit.Result.YES;
+    }
+  });
+  ```
+
 - **`rpm`:** takes the same scripts if it is ever built.
-- **AppImage:** never a helper.
+- **AppImage:** never a helper. It keeps the Tauri updater's own in-place AppImage update, which replaces the user's own
+  file with no elevation, so problem 1 does not arise. To see other accounts' processes and the administrator-only
+  counters, the user installs the `.deb` (the `NotIncluded` text says so).
 
 ### 2. The trust model (fixes (a))
 
@@ -240,6 +285,13 @@ says what to do. It is a pure function over a `FileFacts` port.
 - `/Library/Application Support` (`root:admin 0755`) and `/usr/bin` pass. `/Applications` (`root:admin 0775`) fails,
   which is why macOS keeps its programs outside the bundle.
 
+**Every file the helper relies on is checked by handle before use** (review P1-4): `config.json`, `policy.toml`, the
+audit log, everything in `updates\`, and the programs it starts. The helper opens the file, then applies the rule to
+the open handle (owner and ACL through `GetSecurityInfo`, `fstat`) and to the path's components. A file that fails is
+ignored with an audit line, and the helper fails closed. The Unix data folders (`/var/lib/dyno-helper`,
+`/Library/Application Support/Dyno/Helper`, `/etc/dyno`) have root-only parents, so another user cannot create them
+first. They are still checked the same way.
+
 **Tests:** stock `C:\Program Files`, a user-writable second drive, a renamable parent, a planted DLL folder,
 inherit-only and CREATOR OWNER ACEs, a conditional ACE, `/Applications`, and a sticky `/tmp`.
 
@@ -259,7 +311,9 @@ inherit-only and CREATOR OWNER ACEs, a conditional ACE, `/Applications`, and a s
 - **The caller's account and administrator status** come from the same facts and decide the answer's scope (section 6):
   - Windows: the peer's token; membership of Administrators counts even when UAC has filtered it.
   - macOS: uid 0 or membership of `admin`.
-  - Linux: uid 0 or membership of `sudo` or `wheel`.
+  - Linux: uid 0 or membership of `sudo` or `wheel`. Supplementary groups come from `SO_PEERGROUPS` (Linux 4.13+),
+    with `getgrouplist` for the peer's uid as a fallback. On macOS, membership is checked with `mbr_check_membership`
+    (`cr_groups` holds only 16 groups).
 - **The per-user token is dropped.** It protects nothing once any local user may call.
 
 #### 3. The request list
@@ -278,40 +332,138 @@ every update is checked by the helper itself.
 
 ### 3. Updates, downgrades, uninstall, repair (fixes (c) and problem 1 for updates)
 
-#### `Update(UpdateRequest { file: PathBuf, signature: String })`
+#### `Update(UpdateRequest { file: FileRef, signature: String })`
 
-The helper:
+**One update at a time.** A lock and the state file `updates/state.json` enforce it. A second request answers "An
+update is already running."
 
-1. **Opens** the caller's file read-only. It refuses links and anything that is not a regular file, and accepts at most
-   512 MB.
-2. **Copies** the bytes into a fresh file created with create-new in a folder only it can write:
-   `%ProgramData%\Dyno\Helper\updates\` (SYSTEM and Administrators only, no inheritance),
-   `/Library/Application Support/Dyno/Helper/updates/` (root, 0700) or `/var/lib/dyno-helper/updates/` (root, 0700).
-   The source is never read again.
-3. **Verifies the copy** with minisign against `UPDATE_PUBKEY`, compiled into the helper from the CI secret
-   `TAURI_UPDATER_PUBKEY`. A build without the key refuses every update: "This build cannot update itself."
-4. **Checks the signed trusted comment.** CI signs each package a second time with the same key, with a trusted comment
-   `dyno-update 1 version=<v> target=<os>-<arch> kind=<nsis|pkg|deb|rpm>`. The trusted comment is covered by the
-   signature. The helper requires:
-   - `target` and `kind` match this machine and install;
-   - `version` is strictly newer than its own.
+**1. Receiving the file, not a path** (review P1-2). A path chosen by the caller would make SYSTEM or root open it:
 
-   This prevents downgrade and replay through the helper. It also stops a valid Dyno package for another OS from being
-   run.
-5. **Runs the verified copy, detached** from the helper's own lifetime:
-   - Windows: `CreateProcess` outside the service's job, silent `/S /UPDATE`. `PREINSTALL` then stops the service, which
-     ends the helper but not the installer.
-   - macOS: `/usr/sbin/installer -pkg <copy> -target /` in a new session. `AbandonProcessGroup` is set, so `preinstall`'s
-     `bootout` does not kill it.
-   - Linux: `systemd-run --unit=dyno-update --collect apt-get install -y --no-install-recommends <copy>` (or `dnf
-     install -y <copy>`) in its own transient unit. `prerm`'s `systemctl stop` then does not kill the package manager.
-6. **Records** the update in the audit log before it starts, and answers the caller.
-7. **Starts again.** The new helper starts again (`POSTINSTALL`, `postinstall`, `postinst`). On Windows it then starts
-   the agent in each session that had one before the update (`WTSEnumerateSessions`, `WTSQueryUserToken`,
-   `CreateProcessAsUser` of the agent in `%ProgramFiles%`).
+- a UNC or `\\?\` path makes the machine account authenticate over SMB (NTLM relay);
+- a FIFO or an oplock can stall the helper;
+- a junction or link can redirect it.
 
-**The Tauri updater** keeps `check` and `download` (it checks the update signature early) and is never asked to
-install on any OS. The agent hands the downloaded file to the helper. The UI shows the update as a job with phases
+So the caller passes an open file instead:
+
+- **Unix:** the agent opens the downloaded file and sends the descriptor over the socket with `SCM_RIGHTS` (`dyno-ipc`
+  gains descriptor passing).
+- **Windows:** the agent sends its handle value. The helper duplicates it out of the verified peer process
+  (`OpenProcess(PROCESS_DUP_HANDLE)` on the pid from the pipe, then `DuplicateHandle`). The helper never resolves a
+  name the caller wrote.
+
+The helper then checks the handle it holds:
+
+- **Windows:** `GetFileType` is `FILE_TYPE_DISK`. `FileAttributeTagInfo` shows no reparse point. The handle's volume
+  (`GetFinalPathNameByHandleW` with `VOLUME_NAME_GUID`, then `GetDriveTypeW`) is a local fixed drive.
+- **Unix:** `fstat` says `S_ISREG`. The file system is local (`fstatfs`: not NFS, SMB or FUSE; on macOS `MNT_LOCAL`).
+  For files the helper opens itself, it uses `O_NOFOLLOW | O_NONBLOCK`.
+- **Size:** at most 512 MB.
+
+**2. Copying.** The helper copies the bytes into a fresh file created with create-new in `updates/` (protected-location
+rule; SYSTEM or root only). `updates/` is `%ProgramData%\Dyno\Helper\updates\`,
+`/Library/Application Support/Dyno/Helper/updates/` or `/var/lib/dyno-helper/updates/`.
+
+- The copy runs on a worker with a 120 s deadline. On Windows the deadline uses `CancelIoEx`. A read stuck in a FUSE
+  file on Linux cannot be cancelled: the worker is abandoned, and with one update at a time at most one worker is lost.
+- Before copying, the helper checks free space: at least three times the package size on the `updates/` volume and on
+  the install volume.
+- The source is never read again.
+- A rejected copy is deleted at once. After a run, only the current update's folder is kept, until the next start.
+
+**3. Verifying the copy** with minisign against `UPDATE_PUBKEY`, the **Dyno-only update key** (review P1-5),
+compiled into the helper. It is never the family's Tauri updater key, which every Paddock app's workflow can read. A
+build without the key refuses every update: "This build cannot update itself." The signature text the helper accepts
+is at most 1,024 bytes.
+
+**4. Checking the signed trusted comment.** The trusted comment is covered by the global signature. It must match this
+grammar exactly: ASCII, single spaces, fields in this order, nothing else.
+
+```
+dyno-update/1 app=dyno version=<MAJOR>.<MINOR>.<PATCH> target=<windows|macos|linux>-<x86_64|aarch64> kind=<nsis|pkg|deb|rpm>
+```
+
+- `MAJOR`, `MINOR` and `PATCH` are decimal numbers without leading zeros.
+- **Pre-releases and build metadata are refused.** Update installs stable releases only; a pre-release is installed by
+  hand.
+- `app` must be `dyno`.
+- `target` and `kind` must match this machine and its install.
+- The version must be strictly greater than the helper's own (SemVer 2.0 precedence on the three numbers).
+
+This prevents downgrade and replay, and it stops another app's or another OS's package from being run.
+
+**5. Running the verified copy through a runner** that outlives the helper. The runner is a copy of the helper's own
+program, placed in `updates/<id>/` so the installer can replace the real one. It runs the package, waits for it, and
+writes the exit code into `updates/state.json`. The child's `TEMP`, `TMP` and `TMPDIR` point at `updates/<id>/tmp/`
+(review P1-3): an NSIS installer run as SYSTEM would otherwise unpack its plugins into `C:\Windows\Temp`, where any user
+can plant DLLs.
+
+- **Windows:** the runner starts outside the service's job, and runs the installer with `/S /UPDATE`. `PREINSTALL`
+  then stops the service, which ends the helper but not the runner.
+- **macOS:** a one-shot launchd job. The helper writes `updates/<id>/net.decryptology.dyno.update.plist` (root-owned,
+  `RunAtLoad`, `LaunchOnlyOnce`, program = the runner, which runs `/usr/sbin/installer -pkg <copy> -target /`) and
+  bootstraps it into the system domain. `preinstall`'s `bootout` of the helper does not touch it. The new helper boots
+  out any leftover update job at start.
+- **Linux:** `systemd-run --unit=dyno-update-<id> --collect --property=PrivateTmp=yes` runs the runner, which runs
+  `apt-get install -y --no-install-recommends <copy>` (or `dnf install -y <copy>`). It lives in its own transient unit,
+  so `prerm`'s `systemctl stop` does not kill it.
+
+**6. Recording.** The state file records the update id, the version, the time, the sessions to restart (Windows: the
+sessions with a running agent; Unix: the uids whose agents were running), the runner's pid and, at the end, the exit
+code. The update goes into the audit log before it starts, then the helper answers the caller.
+
+**7. Finishing at the next start.** The new helper (`POSTINSTALL`, `postinstall`, `postinst`) reads the state file:
+
+- **Success:** restart the agents in the recorded sessions (Windows: `WTSQueryUserToken` and `CreateProcessAsUser` of
+  the agent in `%ProgramFiles%`; Unix: the launch agent or user unit is kicked for each recorded uid). Then clean up
+  `updates/`.
+- **Failure:** an exit code other than 0, or a runner that ended without writing one (its pid is gone and the state has
+  no code). The helper writes the code and the package version to the audit log, keeps the state for Settings, and
+  shows "The update to <v> did not finish (code N). Dyno <old> is still installed. Repair, or install <v> by hand."
+- **Old helper still running** (the install never reached `PREINSTALL`): it reads the same state at its next start and
+  reports it the same way.
+
+#### Where the second signature comes from
+
+The release's normal artefacts and `latest.json` stay as they are. The macOS entry of `latest.json` now points at the
+`.pkg`, signed with the Tauri updater key as usual. The Tauri updater's `check` and `download` never look inside the
+file.
+
+A second workflow then publishes `dyno-update.json` on the release and on `dyno-latest`:
+
+```
+{ "version", "platforms": { "<target>": { "url", "kind", "signature" } } }
+```
+
+`signature` is the minisign signature by the Dyno-only key, with the trusted comment above.
+
+The agent:
+
+1. downloads the package through the Tauri updater (`check`, `download`);
+2. fetches `dyno-update.json` and takes the entry for its target;
+3. checks that `version`, `url` and `kind` agree with the `latest.json` entry;
+4. passes the open file and the signature to `Update`.
+
+If `dyno-update.json` is missing or older, the agent shows "The update is not ready yet" and tries again at the next
+check. It never falls back to the Tauri install.
+
+**The Dyno-only key, and how it is kept apart.** Gitea Actions secrets exist at user, organisation and repository level
+only (docs.gitea.com, checked 2026-10-28). There is no per-workflow or per-environment scope. A repository secret in
+`decryp7/paddock` could therefore be read by any workflow file on any branch of that repository, including a Renovate
+branch. The key therefore lives in **a separate repository, `decryp7/dyno-update-signing`**:
+
+- It holds the secret `DYNO_UPDATE_SIGNING_KEY` and its password at **repository** level.
+- Only the user can push to it, and it has one workflow: `workflow_dispatch` with a `dyno-v*` tag as input. It is run
+  after `dyno-release.yml` publishes.
+- That workflow downloads the release's artefacts and verifies each against its Tauri updater signature and its
+  published SHA-256, which proves they came from the tag build. It then signs each with the trusted comment, and
+  uploads `dyno-update.json` with a token that can write releases.
+- It checks out no code from `paddock`.
+
+The public key is a plain constant in `crates/dyno-helper` (`UPDATE_PUBKEY`), reviewed like code. An offline backup of
+the secret key is the user's to keep. Setting up the repository and the key is a one-time step for the user (D7).
+
+**The Tauri updater** keeps `check` and `download` (it checks the Tauri signature early) and is never asked to install,
+except for the AppImage (above). The agent hands the downloaded file to the helper. The UI shows the update as a job with phases
 (downloading, checking, installing, restarting) and never times it out (rules 11 and 12).
 
 **Who may trigger `Update`:** any local caller. The worst it can do is install a genuine, newer Dyno at a time that does
@@ -338,6 +490,9 @@ app is still missing, it removes itself:
 
 It writes the removal to the audit log, which goes too. An update's file swap never lasts an hour. Removing the helper
 only reduces power, so this direction is safe.
+
+The one-hour deadline is a single timed wait, not a loop. It is declared to ADR 0024's check C41 with the waiver kind
+`delay` and this ADR as its reason.
 
 #### Repair (rule 19)
 
@@ -387,8 +542,10 @@ list has a cap, and the reply's postcard size stays under the IPC's 4 MB frame l
 - External tools run through `paddock_proc::command(...).class(Background)` with a timeout.
 - **The helper has no loops and keeps no samples** (Paddock ADR 0024 §2). It reads when asked and returns cumulative
   counters, and the agent's pure core turns them into rates.
-- A machine read is cached for 1 s, keyed on the request's time, so two agents on one PC cause one read. The cache is a
-  timestamp, not a timer.
+- A machine read is cached for 1 s, keyed on the **helper's own monotonic clock** (never a time the caller sends), so
+  two agents on one PC cause one read. The cache is a timestamp, not a timer.
+- The cache holds the unscoped read inside the helper only. Each caller's scope (U3, section 6) and redaction are
+  applied to its own copy of the answer, after the read.
 
 #### `Processes(ProcessQuery)`
 
@@ -428,8 +585,12 @@ The agent still reads the caller's own command lines itself, as today. The helpe
 
 **Redaction of program paths:**
 
-- A path inside another account's profile or home folder (`C:\Users\<x>\`, `/Users/<x>/`, `/home/<x>/`) becomes
-  `<file name> (in another account's folder)`.
+- A path inside another account's profile or home folder becomes `<file name> (in another account's folder)`. The
+  folders are the real profile roots, not a guessed pattern:
+  - Windows: `ProfileImagePath` for each SID under `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList`;
+  - Unix: each account's home folder from the password database (`getpwent`).
+
+  The caller's own profile is not redacted.
 - System and Program Files paths stay.
 
 **What the helper adds per OS:**
@@ -439,9 +600,20 @@ The agent still reads the caller's own command lines itself, as today. The helpe
 - Windows: protected and service processes, other accounts' private working sets and owner names.
 
 **Linux `hidepid`:** when `/proc` is mounted with `hidepid=` or `subset=pid`, the helper respects the administrator's
-choice. It answers only the caller's own processes, with no total for other accounts.
+choice. It answers only the caller's own processes, with no total for other accounts. If the mount has a `gid=` option
+and the caller is in that group, the caller is treated as allowed by that choice and gets the normal U3 answer.
 
-**Paddock ADR 0024 §4:** this is a whole-machine table by design, under the `machine-table` waiver Dyno already has.
+**Paddock ADR 0024 §4:** this is a whole-machine table by design. It is declared with the waiver kind `machine-table`,
+the one Dyno's process list already uses.
+
+#### `Traffic`
+
+Per-program counters are scoped like `Processes`:
+
+- The caller's own programs and system or service programs are in detail.
+- Other accounts' programs are one "Other users" total of bytes sent and received.
+- Administrators see everything.
+- At most 4,096 entries, which is the current `MAX_COUNTERS`.
 
 #### `Counters(CounterQuery { ids: Vec<CounterId>, class })`
 
@@ -496,17 +668,22 @@ shows their arguments, documents, URLs, window titles or files.
 **Under U3,** other people's processes collapse into one "Other users" total for non-administrators. Administrators still
 see everything, which they could get anyway.
 
-**Recommendation: U3.** It keeps the user's decision (any local user may install, call and use Dyno) and is materially
-safer on shared PCs at no cost on a single-person PC. Because the user chose "any local user" with U2 in mind, this is
-flagged as **D6** for the user.
+**Decided: U3** (D6, the user, 2026-10-28). Any local user may install, call and use Dyno. A non-administrator sees in
+detail only their own processes and traffic and those of system and service accounts. Other people appear as one
+"Other users" total.
+
+**What administrators see:** every process and every program's traffic of every account, in detail and with the same
+field allow-list and redaction, plus the audit log. An administrator could read all of that anyway.
 
 **A machine policy file** lets an administrator change the default without a rebuild: `%ProgramData%\Dyno\Helper\policy.toml`
 or `/etc/dyno/helper.toml`, writable by administrators only, parsed with limits.
 
 - `others = "total" | "detail" | "hidden"`.
-- The default comes from D6.
-- The helper reads it at start and on a file event. Rule 21 calls it a tunable; it is a file and not a Settings page,
-  because Settings runs as the user.
+- The default is `total` (U3).
+- The helper reads it at start and on a file event, after checking it with the protected-location rule (section 2).
+- **Exception to rule 21** ("tunables are Settings"), declared here: this tunable is a file an administrator edits, not
+  a Settings page. Settings runs as the user, and letting a user's Settings widen what that user can see of others
+  would defeat the setting.
 
 ## Consequences
 
@@ -523,8 +700,10 @@ or `/etc/dyno/helper.toml`, writable by administrators only, parsed with limits.
   Problem 1 is closed for install, update and repair, without any certificate.
 - What remains is same-user injection into the agent, bounded by the read scope (U3) and by `Update` accepting only
   signed, newer packages.
-- The helper gains one write (installing Dyno's own signed updates), a named exception to ADR 0021 point 4, alongside
-  the existing `SetPerTcpConnectionEStats` exception.
+- The helper gains one write (installing Dyno's own signed updates, D5), a named exception to ADR 0021 point 4,
+  alongside the existing `SetPerTcpConnectionEStats` exception.
+- Root and SYSTEM trust exactly one signing key, kept in a separate repository that only the user can push to. No
+  Paddock workflow can produce a package the helper accepts.
 
 **Records to update:** ADR 0016's single authorised user, its token and `Uninstall` request are replaced. Its closed
 request list, the audit log, the fixed endpoint and the peer-program check stand.
@@ -539,7 +718,7 @@ Sizes: S is up to half a day, M one to two days, L three to five days. The range
 | 2 | `dyno-helper` CLI: `install --machine --agent-exe`, `uninstall [--all]`; `config.json` schema 2 (no user); drop the token | M | 1-2 |
 | 3 | Callers: the endpoint ACL; peer facts per OS (macOS audit token, Linux pidfd, Windows pipe pid and handle); administrator status per OS; U3 scoping and `others` policy | M | 1.5-2.5 |
 | 4 | Protected-location rule (section 2), pure over `FileFacts`; Windows ACL reading in one FFI module (`GetNamedSecurityInfoW`, `// SAFETY:`) | L | 2-4 |
-| 5 | Install plans per OS in place: Windows `icacls` and service security descriptor, 0.x service removal; macOS paths outside the bundle and `AbandonProcessGroup`; Linux unit as a package file | M | 1.5-2.5 |
+| 5 | Install plans per OS in place: Windows `icacls` and service security descriptor, 0.x service removal; macOS paths outside the bundle and the one-shot launchd update job; Linux unit as a package file | M | 1.5-2.5 |
 | 6 | Orphan watch: start check, file event, one-shot confirmation, full removal (macOS too) | M | 1-2 |
 | 7 | NSIS: `perMachine`, Program Files guard, `sc` stop, wait and kill, `$UpdateMode`, idempotent `POSTINSTALL` | M | 1.5-2.5 |
 | 8 | `dyno_agent::helper_centre`: delete install and uninstall; add Start and Repair. `dyno_platform::elevate`: keep elevation for Repair only; delete the other pkexec and osascript strings; update `docs/linux.md` and `docs/macos.md` | S | 0.5-1 |
@@ -549,17 +728,22 @@ Sizes: S is up to half a day, M one to two days, L three to five days. The range
 | 12 | `Processes` per OS (field allow-list, path redaction, paging, `hidepid`, rule 26 memory), plus a fuzz target for the decoder | L | 3-5 |
 | 13 | `Counters` (Windows disk health and thermal, macOS `powermetrics` parser, Linux RAPL and NVMe) and `MemoryModules` (DMI parser with a fuzz target) | L | 3-5 |
 | 14 | Agent: merge helper pages into the sampler, rates in the core, the "Other users" row, class per request | M | 1.5-2.5 |
-| 15 | `Update` in the helper: copy, then verify, then check the trusted comment and version, then a detached run per OS, then restart agents in sessions (Windows). A Rust signing step in CI for `update.sig` | L | 3-5 |
+| 15 | `Update` in the helper on 3 OS: handle checks, copy with deadline and free-space check, verify, grammar and version, runner copy with protected `TEMP`, per-OS launch (detached process, one-shot launchd job, `systemd-run`), state file, finishing at the next start, restarting agents per session or uid, clean-up | L | 6-9 |
 | 16 | App updater: `check` and `download` only, hand the file to the agent and the helper | S | 0.5-1 |
 | 17 | macOS `.pkg` in CI (`pkgbuild`/`productbuild`, payload layout, scripts, ad-hoc signing of the programs outside the bundle, verification); the app and the launch agent use the fixed agent path; the DMG retired | L | 2.5-4 |
 | 18 | Linux `.deb` maintainer scripts and the unit | S | 0.5-1 |
 | 19 | CI test tools: `.deb` scripts in a throwaway container, `.pkg` expansion checks, Windows ACL tests | M | 1.5-2.5 |
+| 20 | `dyno-ipc`: descriptor passing (`SCM_RIGHTS`) on Unix; handle duplication from the verified peer on Windows | M | 1.5-2.5 |
+| 21 | Release: the `dyno-update-signing` repository and workflow (verify the artefacts, sign, publish `dyno-update.json`); the `.pkg` in `latest.json` and signed with the Tauri key; the agent reads `dyno-update.json` | M | 2-3 |
+| 22 | Policy file: parse with limits, check by handle, reload on a file event, U3 default, tests | S | 1-1.5 |
+| 23 | Trustworthy data folders: `%ProgramData%\Dyno` checks and recreation with an explicit descriptor; config, policy and updates checked by handle (Unix too) | S | 0.5-1 |
 
 **Totals:**
 
-- Implementation: **28 to 47 days**.
-- The local VM matrix below: **5 to 7 days** (a first pass of about 4.5 days on three OS, then a re-run after fixes).
-- Together: **33 to 54 days**.
+- Implementation: **36 to 59 days** (rows 1 to 23; row 15 re-estimated for three OS; rows 20 to 23 added in revision
+  3).
+- The local VM matrix below: **6 to 8 days** (a first pass of about 5 days on three OS, then a re-run after fixes).
+- Together: **42 to 67 days**.
 - For comparison, rows 1-11 of the first draft summed to 8.5 to 14.5 days (review P2).
 
 **Tests in CI** (nothing is installed on a runner; rule 7):
@@ -573,10 +757,18 @@ Sizes: S is up to half a day, M one to two days, L three to five days. The range
   - every case listed in section 2, over fake `FileFacts`;
   - real ACLs on temporary folders the test creates, on the Windows runner;
   - real modes, on the Unix runners.
+- **Data folders:** a pre-created `%ProgramData%\Dyno` owned by a user, and one with a junction inside, on the Windows
+  runner in a temporary root the test creates. Both are renamed aside and recreated.
 - **Callers and policy:**
   - U3 scoping for a caller, a system account, another user, an administrator, and the `hidden` and `detail` policies;
   - remote pipe clients refused;
-  - Audit refused for non-administrators.
+  - Audit refused for non-administrators;
+  - U3 for `Traffic`;
+  - redaction by profile roots read through a fake `ProfileList` and a fake `getpwent`;
+  - `hidepid` with and without a `gid=` match;
+  - supplementary groups (fake `SO_PEERGROUPS`);
+  - the polkit rule file: a text test for the exact unit, verb and subject conditions;
+  - the cache uses the helper's clock and scopes per caller (a test with two callers in 1 s).
 - **Request shapes:**
   - every cap (limit 0 and 1,025, 9 counter ids, unknown field bits);
   - postcard size under the frame limit at the caps;
@@ -587,6 +779,16 @@ Sizes: S is up to half a day, M one to two days, L three to five days. The range
 - **`Update`:**
   - a tampered copy, a wrong key, an older version, a wrong target or kind;
   - a link or a 513 MB file as the source;
+  - a UNC, `\\?\` or device handle, a FIFO, a FUSE file and a network volume, all refused by handle;
+  - an oplock or a stalled read: the deadline fires and the update is refused;
+  - a second concurrent `Update`;
+  - too little free space;
+  - a 1,025-byte signature;
+  - the grammar: a missing field, fields in the wrong order, `app=pitwall`, a pre-release, build metadata, a leading
+    zero, an equal version;
+  - a signature made with the family Tauri key (refused);
+  - the child's environment: `TEMP`, `TMP` and `TMPDIR` point into `updates/<id>/tmp`;
+  - the state file: success, a failure code, and a runner that died, each finished at the next start;
   - the source swapped after the copy, which must not change what runs;
   - a build without a key;
   - all against a fake runner, with nothing installed.
@@ -597,7 +799,11 @@ Sizes: S is up to half a day, M one to two days, L three to five days. The range
 - **Packages:**
   - the `.deb` scripts in a container this job creates and removes (install, upgrade, downgrade, remove, purge, no
     systemd), plus `shellcheck`;
-  - the `.pkg` expanded with `pkgutil --expand`, checking payload paths, owners and scripts.
+  - the `.pkg` expanded with `pkgutil --expand`, checking payload paths, owners and scripts;
+  - `codesign -d` showing the `runtime` flag on the three out-of-bundle programs, and `otool -L` showing only system
+    libraries.
+- **Release:** the signing workflow refuses an artefact whose Tauri signature or SHA-256 does not match, using
+  invented test keys in a dry run.
 - **UI:** specs for every state, the degraded notes and the update job.
 
 **Tests in the local VMs only** (the user, before the release; written into docs/testing-manual.md):
@@ -610,6 +816,9 @@ Sizes: S is up to half a day, M one to two days, L three to five days. The range
   - as the standard account, replacing `dyno-agent.exe`, planting a DLL in `$INSTDIR`, or swapping the downloaded
     update file during `Update` must all fail to take effect;
   - update N-1 to N through the helper: no prompt, both accounts' agents back;
+  - an update that fails part-way (the VM's disk filled by the tester): the message on the next start, then Repair;
+  - a pre-created `%ProgramData%\Dyno` from a standard account before the install;
+  - Process Monitor shows the installer's plugins unpacked under `updates\<id>\tmp`, not `C:\Windows\Temp`;
   - downgrade by hand; an "uninstall first" reinstall; a 0.x per-user copy and a 0.x click-installed service present;
   - uninstall: the service and `%ProgramData%\Dyno\Helper` are gone;
   - delete `%ProgramFiles%\Dyno` by hand: the orphan removal happens after an hour;
@@ -620,12 +829,14 @@ Sizes: S is up to half a day, M one to two days, L three to five days. The range
   - the daemon runs from `/Library/Application Support/Dyno/bin`;
   - all processes and `powermetrics` work;
   - update N-1 to N through the helper with no password;
+  - `DYLD_INSERT_LIBRARIES` on the agent has no effect;
   - a second account sees the total only;
   - dragging Dyno to the Bin leads to full removal within an hour;
   - Remove Dyno.
 - **Linux VM** (Ubuntu; Fedora only if `rpm` is built):
   - `apt install`, upgrade, downgrade with `--allow-downgrades`, remove, purge;
   - update through the helper (`systemd-run`);
+  - `pkcheck` for start (allowed) and stop (asked) of `dyno-helper.service` from a desktop session and over SSH (asked);
   - DMI memory, RAPL, NVMe;
   - a second account over SSH sees the total only;
   - `hidepid=2` respected;
@@ -639,17 +850,15 @@ Decided on 2026-10-28:
 - **D2:** a per-machine Windows install.
 - **D3 and D4:** no signing purchases.
 - **Callers:** any local user.
+- **D5:** the helper installs Dyno's own signed, newer updates (P1). This is a second named exception to ADR 0021.
+- **D6:** scope U3. Other people appear as one total to non-administrators. The policy file can change it.
 
 Still open:
 
-- **D5.** The helper installs Dyno's own updates (`Update`: only packages signed with the release key, only newer
-  versions). It is the only design found that closes the update escalation without a certificate. It is a second named
-  exception to ADR 0021's "nothing the helper accepts changes the machine". The alternative is P2, which leaves a SYSTEM
-  or root escalation at every update until D3 and D4 are bought, and even then the swap race stays. Recommended: accept
-  P1.
-- **D6.** U3 instead of U2. Any local user may still use Dyno, but a non-administrator sees other people's processes and
-  traffic only as one total; administrators see all. It is materially safer on shared, RDP and SSH machines and costs
-  nothing on a one-person PC. Recommended: U3, with the policy file for an administrator who wants `detail`.
+- **D7 (setup, one time).** Create `decryp7/dyno-update-signing`, generate the Dyno-only minisign key, store it as that
+  repository's secret, and keep an offline backup. The public key goes into `crates/dyno-helper`.
+- **Rule 23 exception.** The hardened runtime on the three ad-hoc signed programs outside the macOS bundle (section 1).
+  It is proposed here; the user confirms it with this ADR.
 - **Later, unchanged:** D3 (Windows signing: Artifact Signing is for individuals in the US and Canada only, on a paid
   Azure subscription, Basic tier roughly USD 10 a month, amount not shown on the pricing page; or an OV certificate) and
   D4 (Apple Developer Program, USD 99 a year). Either would add a named publisher and make Gatekeeper and SmartScreen
@@ -689,6 +898,8 @@ Still open:
   - Azure pricing page (tiers; the amount was not shown);
   - SetPerTcpConnectionEStats (as cited in ADR 0021).
 - **Paddock ADR 0024** (accepted 2026-10-28) §1, §2 and §4; `dyno-ipc` `MAX_FRAME` (4 MB).
+- **Gitea documentation**, "Secrets" (docs.gitea.com/usage/actions/secrets): user, organisation and repository levels
+  only. No per-workflow or environment scope is documented.
 - **Not verified, left to the VM checks:**
   - that `/usr/sbin/installer` run as root applies no Gatekeeper check to an unquarantined package;
   - that Installer does not pass quarantine on to the payload;
