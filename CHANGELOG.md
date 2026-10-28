@@ -4,6 +4,19 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### One shared Material theme (WP-0 of the Material migration, rule 47)
+- `css/material.css` (`scss/entry-material.scss`) is now the whole Material look: one Material 3 `mat.theme` (density -3) whose system
+  and component tokens all resolve to `--pd-*`, so theme, accent, contrast and density follow our tokens and an app carries no
+  Material theme of its own. New bridge tokens: table, sort header, paginator, tree, button toggle, badge, list, expansion, timepicker,
+  slider, chips, tabs, progress bar and every `matButton` variant (filled = primary, outlined = secondary with the surface-2 fill, text,
+  tonal, elevated; danger is the class `pd-button-danger` on any of them; no ripple).
+- New secondary entry `@decryp7/paddock-ui/material`: `providePaddockMaterial()` makes every `mat-form-field` `appearance="outline"` with
+  `floatLabel="always"` and turns ripples off. `@angular/material` is an optional peer dependency (`^22.2.3`) of `@decryp7/paddock-ui`.
+- `npm run test:tokens` measures the contrast of every bridged Material component in light and dark for all accents (text 4.5:1,
+  icons, borders and indicators 3:1). It found the snack bar action (accent on the inverse surface, 1.9:1 to 2.4:1): it now takes the
+  surface ink. `npm run build:css` resolves `@angular/material` from the repo's `node_modules`.
+- Gallery: a "Material controls" section shows every bridged component (`e2e/material.spec.ts`: axe, token checks, real overlays).
+
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,
   Chromium e2e in two shards, WebKit e2e) and releases through the shared `app-release.yml` from a thin `dyno-release.yml` (nightly
