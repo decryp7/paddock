@@ -1,4 +1,4 @@
-// C40: a dialog contract names a command only through its `dialog_callable::<name>` marker (ADR 0026 §3), never by a
+// C45: a dialog contract names a command only through its `dialog_callable::<name>` marker (ADR 0026 §3), never by a
 // string. `DialogCallable::__command(..)` and `__prefix(..)` are the constructors the markers and the `command_table!`
 // macros expand to; they are `#[doc(hidden)]` public because a macro has to reach them, so only the compiler stops an
 // ordinary call. Flagged, in any Rust file outside `crates/paddock-commands` (their home): a `__command(` or `__prefix(`
@@ -24,7 +24,7 @@ export function hiddenConstructorCalls(source) {
 }
 
 export default {
-  id: 'C40',
+  id: 'C45',
   title: 'Dialog contracts use the dialog_callable markers, never the hidden constructors',
   rule: 40,
   run(ctx) {
@@ -34,7 +34,7 @@ export default {
       const text = ctx.read(f);
       if (!text || !/__(?:command|prefix)\s*\(/.test(text)) continue;
       for (const c of hiddenConstructorCalls(text)) {
-        out.push(error('C40', 40, f, c.line, `${c.name}(..) is called outside paddock-commands`, 'Name the command by its marker: `commands::dialog_callable::<name>` (declared with `#[dialog_callable]` on the command), `prefix(..)` or `plugin(..)` from `paddock_commands`.'));
+        out.push(error('C45', 40, f, c.line, `${c.name}(..) is called outside paddock-commands`, 'Name the command by its marker: `commands::dialog_callable::<name>` (declared with `#[dialog_callable]` on the command), `prefix(..)` or `plugin(..)` from `paddock_commands`.'));
       }
     }
     return out;

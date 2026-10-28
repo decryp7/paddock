@@ -44,7 +44,7 @@ Conventional Commits; one semver tag for the whole repo.
 - `DialogInfo` has `pending` (the window is not on screen yet): an existing window that is still pending no longer
   unblocks its opener before its `paddock://dialog-shown` event (`WindowDialogBackend`); a closed window's early-shown
   mark is forgotten.
-- Conformance C40: `__command(` and `__prefix(` are called nowhere outside `crates/paddock-commands` (test code and
+- Conformance C45 (C40 to C44 are taken by ADR 0024 and other branches): `__command(` and `__prefix(` are called nowhere outside `crates/paddock-commands` (test code and
   doctests excepted).
 - The real-window probe boots the built shell-demo's real dialog frame (`PADDOCK_PROBE_DIST`) and runs nightly on macOS,
   Windows and Linux (`nightly.yml`, job `dialog-window-probe`; Linux under `xvfb-run`).

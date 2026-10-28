@@ -460,6 +460,7 @@ export class DialogFrame {
       content: { width: Math.ceil(width), height: content },
       minContent: { width: Math.ceil(Math.max(buttons, DIALOG_MIN.width)), height: Math.ceil(Math.min(content, chrome + minBody)) },
       viewportHeight: typeof window === 'undefined' ? undefined : window.innerHeight || undefined,
+      devicePixelRatio: typeof window === 'undefined' ? undefined : window.devicePixelRatio || undefined,
     };
   }
 

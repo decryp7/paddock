@@ -745,6 +745,8 @@ describe('a dialog window', () => {
     // Method d: measured at the contract's width, whatever the (hidden) window's viewport was; released once shown.
     expect(io.readied!.content.width).toBe(DECISION.width);
     expect(io.readied!.viewportHeight).toBe(window.innerHeight);
+    // Rust undoes the webview zoom with it (devicePixelRatio over the window's scale factor).
+    expect(io.readied!.devicePixelRatio).toBe(window.devicePixelRatio);
     expect(root.querySelector<HTMLElement>('pd-dialog-frame')!.classList).not.toContain('pd-frame--pinned');
     root.querySelector<HTMLElement>('[data-testid=dialog-action-ok]')!.click();
     root.querySelector<HTMLElement>('[data-testid=dialog-action-ok]')!.click();
