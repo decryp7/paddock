@@ -16,7 +16,7 @@ runs:
             Windows-x86_64)   A=x86_64-pc-windows-msvc.zip;     SUM=bf904b85c7c5c2a29c340053a8d9d8e8027ff0d55a2bf7cef7d23032f8166438; BIN=cargo-nextest.exe ;;
             *) echo "::error::no pinned cargo-nextest for $RUNNER_OS $(uname -m)"; exit 1 ;;
           esac
-          ci_home="$(bash "$GITHUB_ACTION_PATH/../../../conformance/ci/ci-home.sh")"  # the one implementation: fails when a relocated home is missing
+          ci_home="$(bash "${{ github.action_path }}/../../../conformance/ci/ci-home.sh")"  # the one implementation: fails when a relocated home is missing
           DEST="$ci_home/tools/cargo-nextest/$VERSION"
           if [ ! -x "$DEST/$BIN" ]; then
             TMP=$(mktemp -d)

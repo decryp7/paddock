@@ -325,11 +325,11 @@ function runSccacheStep(env, shim = 'true') {
   mkdirSync(join(dir, 'bin'));
   writeFileSync(join(dir, 'bin', 'sccache'), `#!/bin/sh\n[ "$1" = --version ] && echo sccache 0.19.0\n${shim}\nexit 0\n`);
   chmodSync(join(dir, 'bin', 'sccache'), 0o755);
-  writeFileSync(join(dir, 'step.sh'), body);
+  writeFileSync(join(dir, 'step.sh'), body.replaceAll('${{ github.action_path }}', join(ACTIONS, 'setup-rust')));
   const ghEnv = join(dir, 'github-env');
   writeFileSync(ghEnv, '');
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(dir, 'step.sh')], {
-    env: { PATH: `${join(dir, 'bin')}:/usr/bin:/bin`, HOME: dir, RUNNER_OS: 'macOS', GITHUB_ENV: ghEnv, BACKEND: 'auto', REDIS_ENDPOINT: '', REDIS_DB: '', ACTION_DIR: action, GITHUB_ACTION_PATH: join(ACTIONS, 'setup-rust'), ...env },
+    env: { PATH: `${join(dir, 'bin')}:/usr/bin:/bin`, HOME: dir, RUNNER_OS: 'macOS', GITHUB_ENV: ghEnv, BACKEND: 'auto', REDIS_ENDPOINT: '', REDIS_DB: '', ACTION_DIR: action, ...env },
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr + r.stdout);
@@ -479,9 +479,9 @@ function runStableWorkspace(os, root, over = {}) {
   const text = read(join(ACTIONS, 'stable-workspace', 'action.yml'));
   const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   const script = join(root, 'step.sh');
-  writeFileSync(script, body);
+  writeFileSync(script, body.replaceAll('${{ github.action_path }}', join(ACTIONS, 'stable-workspace')));
   return spawnSync('bash', ['-e', '-o', 'pipefail', script], {
-    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_WORKSPACE: join(root, 'work', 'abc', 'hostexecutor'), GITHUB_ENV: join(root, 'github-env'), NAME: 'decryp7/paddock-crate', GITHUB_ACTION_PATH: join(ACTIONS, 'stable-workspace'), ...over },
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_WORKSPACE: join(root, 'work', 'abc', 'hostexecutor'), GITHUB_ENV: join(root, 'github-env'), NAME: 'decryp7/paddock-crate', ...over },
     encoding: 'utf8',
     cwd: join(root, 'work', 'abc', 'hostexecutor'),
   });
@@ -635,9 +635,9 @@ function runHostTools(os, { kept = null, onPath = null } = {}) {
   writeFileSync(join(bin, 'curl'), '#!/bin/sh\necho "curl was called" >&2\nexit 7\n', { mode: 0o755 });
   if (kept) shim(join(root, 'home', '.paddock-ci', 'tools', 'cargo-nextest', version), kept === 'pin' ? version : kept);
   if (onPath) shim(bin, onPath === 'pin' ? version : onPath);
-  writeFileSync(join(root, 'step.sh'), body);
+  writeFileSync(join(root, 'step.sh'), body.replaceAll('${{ github.action_path }}', join(ACTIONS, 'host-tools')));
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(root, 'step.sh')], {
-    env: { PATH: `${bin}:/usr/bin:/bin`, HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_PATH: join(root, 'github-path'), GITHUB_ACTION_PATH: join(ACTIONS, 'host-tools') },
+    env: { PATH: `${bin}:/usr/bin:/bin`, HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_PATH: join(root, 'github-path') },
     encoding: 'utf8',
   });
   return { ...r, root, version };
@@ -944,9 +944,9 @@ function runNodeCaches(os, env = {}) {
   const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   mkdirSync(join(root, 'ws', 'ui', '.angular', 'cache'), { recursive: true });
   writeFileSync(join(root, 'ws', 'ui', '.angular', 'cache', 'stale'), '');
-  writeFileSync(join(root, 'step.sh'), body);
+  writeFileSync(join(root, 'step.sh'), body.replaceAll('${{ github.action_path }}', join(ACTIONS, 'node-caches')));
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(root, 'step.sh')], {
-    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_WORKSPACE: join(root, 'ws'), GITHUB_ENV: join(root, 'github-env'), ANGULAR_DIR: 'ui', NAME: 'e2e-1', PADDOCK_CI_MOUNT: join(root, 'no-mount'), GITHUB_ACTION_PATH: join(ACTIONS, 'node-caches'), ...env },
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_WORKSPACE: join(root, 'ws'), GITHUB_ENV: join(root, 'github-env'), ANGULAR_DIR: 'ui', NAME: 'e2e-1', PADDOCK_CI_MOUNT: join(root, 'no-mount'), ...env },
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr + r.stdout);

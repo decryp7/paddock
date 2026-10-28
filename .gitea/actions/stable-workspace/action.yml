@@ -18,7 +18,7 @@ runs:
         if [ -L "$GITHUB_WORKSPACE" ]; then echo "stable-workspace: already linked"; exit 0; fi
         ws=$(cd "$GITHUB_WORKSPACE" && pwd -P)
         folder=$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '_')
-        ci_home="$(bash "$GITHUB_ACTION_PATH/../../../conformance/ci/ci-home.sh")"  # the one implementation: fails when a relocated home is missing
+        ci_home="$(bash "${{ github.action_path }}/../../../conformance/ci/ci-home.sh")"  # the one implementation: fails when a relocated home is missing
         root="$ci_home/src"
         stable="$root/$folder"
         # The folder later steps build from: PADDOCK_WORKSPACE, which a step uses as its working-directory (falling back to the
