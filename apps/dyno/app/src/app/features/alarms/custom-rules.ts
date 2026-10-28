@@ -2,7 +2,8 @@ import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@an
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import type { CommandError, CustomAlertRule } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { Dialogs } from '../../shared/dialog';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
 import { Switch } from '../../shared/switch';
@@ -10,7 +11,9 @@ import { AlarmsStore } from '../../state/alarms.store';
 import { SettingsStore } from '../../state/settings.store';
 import { TABLE_CSS } from './alarms-css';
 import { ruleSummary, severityWord } from './alarms-model';
-import { RuleDialog, type RuleDialogData } from './rule-dialog';
+
+/** The id of the rule form's window (its contract is in `src-tauri/src/dialogs.rs`). */
+const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
 
 /** The user's own alert rules from the settings: add, edit, enable and delete. The engine validates every save. */
 @Component({
@@ -72,7 +75,7 @@ import { RuleDialog, type RuleDialogData } from './rule-dialog';
 export class CustomRules {
   protected readonly settings = inject(SettingsStore);
   protected readonly alarms = inject(AlarmsStore);
-  private readonly dialogs = inject(Dialogs);
+  private readonly dialogs = inject(DialogService);
   private readonly notifier = inject(Notifier);
   protected readonly rules = computed(() => this.settings.settings()?.customAlerts ?? []);
   protected readonly summary = ruleSummary;
@@ -82,14 +85,13 @@ export class CustomRules {
     return this.alarms.updateSettings((s) => ({ ...s, customAlerts: next }));
   }
 
-  protected edit(rule: CustomAlertRule | null): void {
-    const takenIds = this.rules().map((r) => r.id);
-    const data: RuleDialogData = {
-      rule,
-      takenIds,
-      save: (saved) => this.write(rule ? this.rules().map((r) => (r.id === rule.id ? saved : r)) : [...this.rules(), saved]),
-    };
-    this.dialogs.open<boolean, RuleDialogData>(RuleDialog, data);
+  /** Opens the rule's window (a real OS window, ADR 0026); once the rule is stored the settings are read again. */
+  protected async edit(rule: CustomAlertRule | null): Promise<void> {
+    const outcome = await this.dialogs.open<true>(ALERT_RULE_DIALOG_ID, {
+      inputs: { rule, takenIds: this.rules().map((r) => r.id) },
+      title: rule ? 'Edit alert rule' : 'Add alert rule',
+    }).closed;
+    if (outcome.kind === 'answered') await this.settings.load();
   }
 
   protected async toggle(rule: CustomAlertRule, enabled: boolean): Promise<void> {
@@ -98,7 +100,12 @@ export class CustomRules {
   }
 
   protected async remove(rule: CustomAlertRule): Promise<void> {
-    const yes = await this.dialogs.confirm({ title: `Delete “${rule.name}”?`, message: 'The rule stops raising alarms. Alarms it already raised stay until you acknowledge them.', confirmLabel: 'Delete rule', danger: true, details: [this.summary(rule)] });
+    const yes = await confirm(this.dialogs, {
+      heading: `Delete “${rule.name}”?`,
+      message: 'The rule stops raising alarms. Alarms it already raised stay until you acknowledge them.',
+      details: [this.summary(rule)],
+      confirm: { label: 'Delete rule', destructive: true },
+    });
     if (!yes) return;
     const error = await this.write(this.rules().filter((r) => r.id !== rule.id));
     if (error) this.notifier.error(error);

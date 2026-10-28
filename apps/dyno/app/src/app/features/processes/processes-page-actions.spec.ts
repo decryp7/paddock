@@ -1,13 +1,11 @@
 import { TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
-import { Dialogs } from '../../shared/dialog';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { provideIcons } from '../../shared/icons';
 import { LiveStore } from '../../state/live.store';
 import { Lookups } from '../lookup/lookups';
 import { ProcessesStore } from '../../state/processes.store';
-import { LockersDialog } from './process-dialogs';
 import { ProcessesPage } from './processes-page';
 
 const NOW = 1_700_000_000_000;
@@ -24,7 +22,7 @@ async function make(os: 'windows' | 'macos' = 'windows', fail?: Set<string>) {
   f.detectChanges();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const c = f.componentInstance as any;
-  const dialogs = TestBed.inject(Dialogs);
+  const dialogs = TestBed.inject(DialogService);
   const processRow = () => {
     store.setMode('flat');
     return store.rows().find((r) => r.kind === 'process')!;
@@ -46,9 +44,9 @@ describe('ProcessesPage actions', () => {
 
   it('lockers opens the lockers dialog; details selects a process; groups are ignored', async () => {
     const { c, dialogs, store, processRow } = await make();
-    const open = vi.spyOn(dialogs, 'open').mockReturnValue({ closed: of(undefined) } as never);
+    const open = vi.spyOn(dialogs, 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'dismissed' }), dismiss() {} } as never);
     c.lockers();
-    expect(open).toHaveBeenCalledWith(LockersDialog);
+    expect(open).toHaveBeenCalledWith('dy.lockers');
     const select = vi.spyOn(store, 'select');
     const row = processRow();
     c.details(row);

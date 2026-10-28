@@ -15,7 +15,6 @@ import type {
   SavedDiagnostics,
   ShelveFor,
   Anomaly,
-  AppInfo,
   Diagnosis,
   HealthReport,
   History,
@@ -206,10 +205,6 @@ export class TauriBackend implements DynoBackend {
       this.sentDetail = null;
       console.error('Could not subscribe to live updates', toCommandError(e).message);
     });
-  }
-
-  appInfo(): Promise<AppInfo> {
-    return this.command<AppInfo>('app_info');
   }
 
   // ------------------------------------------------------------------------------------------------ processes
@@ -469,16 +464,22 @@ export class TauriBackend implements DynoBackend {
 
   // ----------------------------------------------------------------------------------------------------- tray
 
-  trayOpenMain(): Promise<void> {
-    return this.command<void>('tray_open_main');
+  /** The shell's `window_focus` raises the main window; the popover then closes. */
+  async showMainWindow(): Promise<void> {
+    await this.command<void>('plugin:paddock-shell|window_focus', { label: 'main' });
+    await this.hideTray();
   }
 
-  popoverResize(height: number): Promise<void> {
-    return this.command<void>('popover_resize', { height });
+  fitTray(height: number): Promise<void> {
+    return this.command<void>('plugin:paddock-shell|tray_fit_height', { height });
   }
 
-  trayQuit(): Promise<void> {
-    return this.command<void>('tray_quit');
+  hideTray(): Promise<void> {
+    return this.command<void>('plugin:paddock-shell|tray_close');
+  }
+
+  quitApp(): Promise<void> {
+    return this.command<void>('plugin:paddock-shell|app_quit');
   }
 
   // ----------------------------------------------------------------------------------------------- extras, backup

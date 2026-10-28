@@ -57,7 +57,7 @@ describe('NetworkStore', () => {
     const { mock, store, notifier } = setup();
     await store.lookup('192.168.1.5');
     expect(mock.opened).toEqual([]);
-    expect(notifier.toasts().at(-1)?.text).toContain('nothing to look up');
+    expect(notifier.recent().at(-1)?.text).toContain('nothing to look up');
     await store.lookup('8.8.8.8');
     expect(mock.opened).toEqual(['https://ipinfo.io/8.8.8.8']);
   });

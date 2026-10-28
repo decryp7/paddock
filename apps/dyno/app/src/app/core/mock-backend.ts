@@ -15,7 +15,6 @@ import type {
   AgentStatus,
   Alert,
   Anomaly,
-  AppInfo,
   CommandError,
   Diagnosis,
   HealthReport,
@@ -280,10 +279,6 @@ export class MockBackend implements DynoBackend {
     const wantsProcesses = [...this.liveListeners.values()].includes('processes');
     const update = this.liveUpdate(wantsProcesses ? 'processes' : 'summary');
     for (const [listener, detail] of this.liveListeners) listener(detail === 'processes' || !wantsProcesses ? update : { ...update, processes: null, groups: null });
-  }
-
-  appInfo(): Promise<AppInfo> {
-    return this.reply('appInfo', () => ({ version: '0.1.0', os: this.profile.os, updatesAvailable: false, updatesReason: 'Updates are not configured for this build (no signing key).' }));
   }
 
   /** The live sample at the current second. */
@@ -1052,16 +1047,20 @@ export class MockBackend implements DynoBackend {
     return this.reply('plugins', () => demoPlugins());
   }
 
-  trayOpenMain(): Promise<void> {
-    return this.reply('trayOpenMain', () => undefined);
+  showMainWindow(): Promise<void> {
+    return this.reply('showMainWindow', () => undefined);
   }
 
-  popoverResize(_height: number): Promise<void> {
+  fitTray(_height: number): Promise<void> {
     return Promise.resolve();
   }
 
-  trayQuit(): Promise<void> {
-    return this.reply('trayQuit', () => undefined);
+  hideTray(): Promise<void> {
+    return this.reply('hideTray', () => undefined);
+  }
+
+  quitApp(): Promise<void> {
+    return this.reply('quitApp', () => undefined);
   }
 
   // ----------------------------------------------------------------------------------------- extras, backup

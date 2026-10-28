@@ -41,7 +41,7 @@ describe('dy-diagnostics-page', () => {
     await settle(f);
     expect(mock.savedBundles).toHaveLength(1);
     expect(el.querySelector('.note.ok .path')?.textContent).toBe(mock.savedBundles[0]!.path);
-    expect(TestBed.inject(Notifier).toasts()[0]!.text).toContain('Saved dyno-diagnostics.zip');
+    expect(TestBed.inject(Notifier).recent()[0]!.text).toContain('Saved dyno-diagnostics.zip');
     el.querySelector<HTMLButtonElement>('[aria-label="Copy the saved path"]')!.click();
     await settle(f);
     expect(writeText).toHaveBeenCalledWith(mock.savedBundles[0]!.path);

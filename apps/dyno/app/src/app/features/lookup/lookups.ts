@@ -1,24 +1,21 @@
 import { Injectable, inject } from '@angular/core';
-import { firstValueFrom } from 'rxjs';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import type { HashSource } from '../../core/api.types';
-import { Dialogs } from '../../shared/dialog';
-import { HashSearchDialog, type HashSearchData } from './hash-search-dialog';
-import { WebSearchDialog, type WebSearchData } from './web-search-dialog';
 
-/** The two right-click lookups, opened from a context menu: a web search and a hash search. */
+/** The two right-click lookups, opened from a context menu: a web search and a hash search, each a real OS window. */
 @Injectable({ providedIn: 'root' })
 export class Lookups {
-  private readonly dialogs = inject(Dialogs);
+  private readonly dialogs = inject(DialogService);
 
   /** "Search the web…" about `text` (a program name, an issue title); resolves `true` when the browser was opened. */
   async searchWeb(text: string, subject: string): Promise<boolean> {
-    const ref = this.dialogs.open<boolean, WebSearchData>(WebSearchDialog, { text, subject });
-    return (await firstValueFrom(ref.closed)) === true;
+    const outcome = await this.dialogs.open<true>('dy.web-search', { inputs: { text, subject }, title: `Search the web: ${subject}` }).closed;
+    return outcome.kind === 'answered';
   }
 
   /** "Search this file's hash on VirusTotal…" for a program; resolves `true` when the browser was opened. */
   async searchHash(source: HashSource, name: string): Promise<boolean> {
-    const ref = this.dialogs.open<boolean, HashSearchData>(HashSearchDialog, { source, name });
-    return (await firstValueFrom(ref.closed)) === true;
+    const outcome = await this.dialogs.open<true>('dy.file-hash', { inputs: { source, name }, title: `Search the file's hash: ${name}` }).closed;
+    return outcome.kind === 'answered';
   }
 }

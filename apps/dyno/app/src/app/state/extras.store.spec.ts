@@ -122,7 +122,7 @@ describe('ExtrasStore: inventory report and maintenance', () => {
     await Promise.all([store.exportReport('markdown'), store.exportReport('markdown')]);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(store.saved()?.path).toMatch(/dyno-inventory\.md$/);
-    expect(notifier.toasts().at(-1)?.text).toContain('dyno-inventory.md');
+    expect(notifier.recent().at(-1)?.text).toContain('dyno-inventory.md');
   });
 
   it('a cancelled save changes nothing and a failed one is kept', async () => {
