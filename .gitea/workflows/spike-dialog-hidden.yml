@@ -31,12 +31,15 @@ jobs:
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
           (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
+          rem `query session` leaves ERRORLEVEL 1 and echo does not reset it
+          exit /b 0
 
       - name: Tools
         run: |
           rustc --version
           cargo --version
           node --version
+          powershell -NoProfile -Command "\"job session: $((Get-Process -Id $PID).SessionId)\""
           reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" //v pv 2>/dev/null || true
 
       - name: Build the probe
