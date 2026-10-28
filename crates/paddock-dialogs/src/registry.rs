@@ -6,8 +6,8 @@
 //! exists per dialog id, opener and instance key: opening it again focuses the existing one.
 
 use crate::contract::{Contracts, Grant, Kind, Modality};
-use crate::placement::Bounds;
-use crate::window::{DEFAULT_ROUTE, DialogError, DialogErrorCode, MAX_OPEN_PER_HOST};
+use crate::placement::{Bounds, ScreenPosition};
+use crate::window::{DEFAULT_ROUTE, DialogError, DialogErrorCode, MAX_OPEN_PER_HOST, Measure};
 use paddock_commands::labels::{DIALOG_PREFIX, Label};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -18,6 +18,34 @@ use std::time::{Duration, Instant};
 /// A dialog that did not answer a close request this long is closed on the next request (a hung webview must not trap
 /// the user).
 pub const CLOSE_GRACE: Duration = Duration::from_millis(1500);
+
+/// How long after its window is created a dialog may take to report `dialog_ready` before it is shown anyway at its
+/// placed size (ADR 0026 §4.4). `paddock-startup`'s `Config::dialog_show_deadline` has the same default; the app passes
+/// its configured value to [`Dialogs::with_show_deadline`].
+pub const SHOW_DEADLINE: Duration = Duration::from_secs(1);
+
+/// Runs a job once after a delay. The Tauri adapter schedules the show deadline through it, so tests inject a manual
+/// one and never sleep (ER-12).
+pub trait Scheduler: std::fmt::Debug + Send + Sync {
+    /// Runs `job` after `delay`, on any thread.
+    fn after(&self, delay: Duration, job: Box<dyn FnOnce() + Send + 'static>);
+}
+
+/// The scheduler of the running app: one short-lived thread per job.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ThreadScheduler;
+
+impl Scheduler for ThreadScheduler {
+    fn after(&self, delay: Duration, job: Box<dyn FnOnce() + Send + 'static>) {
+        // A failed spawn only loses the safety net: the dialog is still shown by its own `dialog_ready`.
+        let _ = std::thread::Builder::new()
+            .name("paddock-dialog-deadline".into())
+            .spawn(move || {
+                std::thread::sleep(delay);
+                job();
+            });
+    }
+}
 
 /// One open dialog window.
 #[derive(Debug, Clone, PartialEq)]
@@ -40,6 +68,13 @@ pub struct OpenDialog {
     pub asked: Option<Instant>,
     /// The window watchdog found its page not answering: nobody can make a required choice, so the OS close may.
     pub unresponsive: bool,
+    /// The window is on screen. A window starts pending (hidden, or off-screen) and is shown once, on `dialog_ready`
+    /// or at the show deadline; its parent is disabled and a second open focuses it only from then on.
+    pub shown: bool,
+    /// Where it goes when it is shown (the placement; used by the off-screen show mechanism).
+    pub at: Option<ScreenPosition>,
+    /// The last measure its page reported, for a refit when the scale factor changes.
+    pub measure: Option<Measure>,
 }
 
 impl OpenDialog {
@@ -63,6 +98,9 @@ impl OpenDialog {
             bounds: None,
             asked: None,
             unresponsive: false,
+            shown: false,
+            at: None,
+            measure: None,
         }
     }
 }
@@ -87,6 +125,8 @@ pub struct Dialogs {
     contracts: Arc<Contracts>,
     route: String,
     exiting: AtomicBool,
+    show_deadline: Duration,
+    scheduler: Arc<dyn Scheduler>,
 }
 
 impl Dialogs {
@@ -104,7 +144,31 @@ impl Dialogs {
             contracts,
             route: route.into(),
             exiting: AtomicBool::new(false),
+            show_deadline: SHOW_DEADLINE,
+            scheduler: Arc::new(ThreadScheduler),
         }
+    }
+
+    /// How long a dialog may take to report ready before it is shown anyway (default [`SHOW_DEADLINE`]).
+    pub fn with_show_deadline(mut self, deadline: Duration) -> Self {
+        self.show_deadline = deadline;
+        self
+    }
+
+    /// Schedules the show deadline through `scheduler` (default [`ThreadScheduler`]); for tests.
+    pub fn with_scheduler(mut self, scheduler: Arc<dyn Scheduler>) -> Self {
+        self.scheduler = scheduler;
+        self
+    }
+
+    /// The show deadline.
+    pub fn show_deadline(&self) -> Duration {
+        self.show_deadline
+    }
+
+    /// The scheduler of the show deadline.
+    pub fn scheduler(&self) -> &Arc<dyn Scheduler> {
+        &self.scheduler
     }
 
     /// Dialogs governed by the owners' static tables (the shell's, a feature's, the app's): two tables declaring one id
@@ -237,6 +301,33 @@ impl Dialogs {
     pub fn set_bounds(&self, label: &str, bounds: Option<Bounds>) {
         if let Some(e) = self.lock().get_mut(label) {
             e.bounds = bounds;
+        }
+    }
+
+    /// Marks the dialog window `label` as shown. `Some(true)` the first time (the caller shows the window), `Some(false)`
+    /// when it was shown already, `None` for a window that is not an open dialog.
+    pub fn mark_shown(&self, label: &str) -> Option<bool> {
+        self.lock()
+            .get_mut(label)
+            .map(|e| !std::mem::replace(&mut e.shown, true))
+    }
+
+    /// Whether `label` is an open dialog whose window has not been shown yet.
+    pub fn is_pending(&self, label: &str) -> bool {
+        self.lock().get(label).is_some_and(|e| !e.shown)
+    }
+
+    /// Records where the pending dialog `label` goes when it is shown.
+    pub fn set_at(&self, label: &str, at: ScreenPosition) {
+        if let Some(e) = self.lock().get_mut(label) {
+            e.at = Some(at);
+        }
+    }
+
+    /// Records the last measure the page of `label` reported.
+    pub fn set_measure(&self, label: &str, measure: Measure) {
+        if let Some(e) = self.lock().get_mut(label) {
+            e.measure = Some(measure);
         }
     }
 

@@ -408,12 +408,12 @@ Denies the dialog_close command without any pre-configured scope.
 <tr>
 <td>
 
-`paddock-shell:allow-dialog-fit-height`
+`paddock-shell:allow-dialog-fit`
 
 </td>
 <td>
 
-Enables the dialog_fit_height command without any pre-configured scope.
+Enables the dialog_fit command without any pre-configured scope.
 
 </td>
 </tr>
@@ -421,12 +421,12 @@ Enables the dialog_fit_height command without any pre-configured scope.
 <tr>
 <td>
 
-`paddock-shell:deny-dialog-fit-height`
+`paddock-shell:deny-dialog-fit`
 
 </td>
 <td>
 
-Denies the dialog_fit_height command without any pre-configured scope.
+Denies the dialog_fit command without any pre-configured scope.
 
 </td>
 </tr>
@@ -453,6 +453,32 @@ Enables the dialog_open command without any pre-configured scope.
 <td>
 
 Denies the dialog_open command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-dialog-ready`
+
+</td>
+<td>
+
+Enables the dialog_ready command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-dialog-ready`
+
+</td>
+<td>
+
+Denies the dialog_ready command without any pre-configured scope.
 
 </td>
 </tr>

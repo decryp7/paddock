@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::contract::Contracts;
+use crate::registry::Scheduler;
 use crate::window::{MAX_OPEN_PER_HOST, Parenting};
 use ::tauri::ipc::{CallbackFn, InvokeBody};
 use ::tauri::test::{
@@ -14,6 +15,7 @@ use paddock_commands::tauri::Guard;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[::tauri::command]
 async fn app_secret() -> String {
@@ -30,7 +32,8 @@ paddock_commands::command_table! {
     Mutation [MAIN | DIALOG] limit 9 * paddock_commands::MIB => crate::tauri::dialog_open,
     Query [DIALOG] => crate::tauri::dialog_take_input,
     Mutation [DIALOG] limit 2 * paddock_commands::MIB => crate::tauri::dialog_close,
-    Quiet [DIALOG] => crate::tauri::dialog_fit_height,
+    Quiet [DIALOG] => crate::tauri::dialog_ready,
+    Quiet [DIALOG] => crate::tauri::dialog_fit,
     Query [WINDOW] => app_status,
     Query [WINDOW] => app_secret,
 }
@@ -444,6 +447,14 @@ fn closing_the_host_closes_its_dialogs_and_hiding_it_hides_them() {
     on_window_event(&os_window(&app, "w-2"), &WindowEvent::Focused(true));
 }
 
+fn measure(content_h: f64, min_h: f64) -> Measure {
+    let size = |width, height| crate::Size { width, height };
+    Measure {
+        content: size(720.0, content_h),
+        min_content: size(400.0, min_h),
+    }
+}
+
 #[test]
 fn a_refit_sizes_the_window_by_kind_on_its_own_monitor() {
     let app = app();
@@ -461,13 +472,358 @@ fn a_refit_sizes_the_window_by_kind_on_its_own_monitor() {
         scale: 1.0,
     };
     for os in ["windows", "macos"] {
-        assert_eq!(fit_height(&h, &dialog, 700.0, Some(m), os), Ok(()));
+        assert_eq!(fit(&h, &dialog, measure(700.0, 200.0), Some(m), os), Ok(()));
     }
-    assert_eq!(fit_height(&h, &dialog, 700.0, None, "linux"), Ok(()));
-    let e = fit_height(&h, &dialog, f64::NAN, None, "linux").unwrap_err();
+    assert_eq!(
+        fit(&h, &dialog, measure(700.0, 200.0), None, "linux"),
+        Ok(())
+    );
+    assert_eq!(
+        state(&app).get("d-main-1").unwrap().measure,
+        Some(measure(700.0, 200.0)),
+        "the last measure is kept for a scale change"
+    );
+    let e = fit(&h, &dialog, measure(f64::NAN, 200.0), None, "linux").unwrap_err();
     assert_eq!(e.code, DialogErrorCode::Invalid);
-    let e = fit_height(&h, &os_window(&app, "main"), 300.0, None, "linux").unwrap_err();
+    let e = fit(
+        &h,
+        &os_window(&app, "main"),
+        measure(300.0, 100.0),
+        None,
+        "linux",
+    )
+    .unwrap_err();
     assert_eq!(e.code, DialogErrorCode::NotADialog);
+}
+
+/// Runs the show deadline's job by hand: the tests never sleep (ER-12).
+#[derive(Default)]
+struct Manual(Mutex<Vec<Job>>);
+
+type Job = (Duration, Box<dyn FnOnce() + Send>);
+
+impl std::fmt::Debug for Manual {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Manual({} jobs)", self.0.lock().unwrap().len())
+    }
+}
+
+impl Scheduler for Manual {
+    fn after(&self, delay: Duration, job: Box<dyn FnOnce() + Send + 'static>) {
+        self.0.lock().unwrap().push((delay, job));
+    }
+}
+
+impl Manual {
+    /// The deadline passes: every scheduled job runs.
+    fn deadline_passes(&self) {
+        let jobs: Vec<_> = self.0.lock().unwrap().drain(..).collect();
+        for (_, job) in jobs {
+            job();
+        }
+    }
+
+    fn delays(&self) -> Vec<Duration> {
+        self.0.lock().unwrap().iter().map(|j| j.0).collect()
+    }
+}
+
+fn manual_app() -> (::tauri::App<MockRuntime>, Arc<Manual>) {
+    let timer = Arc::new(Manual::default());
+    let dialogs = Dialogs::new(contracts()).with_scheduler(timer.clone());
+    (app_with(Some(dialogs)), timer)
+}
+
+/// What the lifecycle did natively on this thread since `mark`.
+fn native_since(mark: usize) -> Vec<String> {
+    NATIVE.with(|n| n.borrow()[mark..].to_vec())
+}
+
+fn native_mark() -> usize {
+    NATIVE.with(|n| n.borrow().len())
+}
+
+#[test]
+fn a_dialog_is_not_shown_before_its_page_is_ready_and_is_shown_focused_once_it_is() {
+    for os in ["linux", "windows", "macos"] {
+        let (app, timer) = manual_app();
+        let h = app.handle().clone();
+        let mark = native_mark();
+        let info = open_on(&h, "main", request("ai-setup"), os).unwrap();
+        assert!(state(&app).is_pending(&info.label), "{os}");
+        let seen = native_since(mark);
+        assert!(
+            !seen.iter().any(|o| o.starts_with("show")),
+            "{os}: {seen:?}"
+        );
+        assert_eq!(
+            timer.delays(),
+            [crate::SHOW_DEADLINE],
+            "the deadline is scheduled at create"
+        );
+        // The page reports: the window is sized, shown and focused, once.
+        let dialog = os_window(&app, &info.label);
+        ready(&h, &dialog, measure(400.0, 150.0), os, show_mechanism(os)).unwrap();
+        assert!(!state(&app).is_pending(&info.label));
+        let seen = native_since(mark);
+        assert!(
+            seen.contains(&format!("show:{}", info.label))
+                && seen.contains(&format!("focus:{}", info.label)),
+            "{os}: {seen:?}"
+        );
+        // A second ready (a late one) fits but does not show again; the deadline finds it shown.
+        let before = native_since(mark).len();
+        ready(&h, &dialog, measure(420.0, 150.0), os, show_mechanism(os)).unwrap();
+        timer.deadline_passes();
+        assert_eq!(native_since(mark).len(), before, "{os}");
+    }
+}
+
+#[test]
+fn a_page_that_never_reports_is_shown_at_the_deadline_and_a_late_ready_fits_it_once() {
+    let (app, timer) = manual_app();
+    let h = app.handle().clone();
+    let mark = native_mark();
+    let info = open(&h, "main", request("ai-setup")).unwrap();
+    assert!(state(&app).is_pending(&info.label));
+    timer.deadline_passes();
+    assert!(!state(&app).is_pending(&info.label));
+    let shown: Vec<_> = native_since(mark)
+        .into_iter()
+        .filter(|o| o.starts_with("show"))
+        .collect();
+    assert_eq!(shown, [format!("show:{}", info.label)]);
+    // The page wakes up late: it is fitted, not shown again.
+    let dialog = os_window(&app, &info.label);
+    ready(
+        &h,
+        &dialog,
+        measure(300.0, 120.0),
+        "linux",
+        show_mechanism("linux"),
+    )
+    .unwrap();
+    assert_eq!(
+        native_since(mark)
+            .iter()
+            .filter(|o| o.starts_with("show"))
+            .count(),
+        1
+    );
+    assert!(state(&app).get(&info.label).unwrap().measure.is_some());
+    // A dialog closed before its deadline is simply gone when the deadline passes.
+    let gone = open(&h, "main", request("settings")).unwrap();
+    on_destroyed(&h, &gone.label);
+    timer.deadline_passes();
+    assert!(!native_since(mark).contains(&format!("show:{}", gone.label)));
+}
+
+#[test]
+fn showing_what_is_gone_does_nothing() {
+    let (app, _timer) = manual_app();
+    let h = app.handle().clone();
+    let mark = native_mark();
+    // Unknown label; a record without a window (its webview never reached the manager); no dialogs state at all.
+    show(&h, "d-main-9", "linux", ShowMechanism::ReadyThenShow, true);
+    let about = state(&app).contracts().get("about").unwrap().clone();
+    let orphan = state(&app)
+        .reserve(OpenDialog::new("main", "main", "about", &about))
+        .unwrap();
+    show(&h, &orphan, "linux", ShowMechanism::ReadyThenShow, false);
+    let bare = app_with(None);
+    show(
+        bare.handle(),
+        "d-main-1",
+        "linux",
+        ShowMechanism::ReadyThenShow,
+        true,
+    );
+    assert!(native_since(mark).is_empty());
+}
+
+#[test]
+fn decorations_are_the_outer_size_less_the_inner_one() {
+    let size = |w, h| PhysicalSize::new(w, h);
+    let d = decor(size(840, 656), size(800, 600), 2.0);
+    assert_eq!((d.width, d.height), (20.0, 28.0));
+    // A platform that reports the inner as the larger one (or both as zero) has none.
+    let d = decor(size(0, 0), size(800, 600), 1.0);
+    assert_eq!((d.width, d.height), (0.0, 0.0));
+}
+
+#[test]
+fn the_deadline_is_configurable() {
+    let timer = Arc::new(Manual::default());
+    let dialogs = Dialogs::new(contracts())
+        .with_scheduler(timer.clone())
+        .with_show_deadline(Duration::from_millis(250));
+    let app = app_with(Some(dialogs));
+    open(app.handle(), "main", request("about")).unwrap();
+    assert_eq!(timer.delays(), [Duration::from_millis(250)]);
+    assert_eq!(state(&app).show_deadline(), Duration::from_millis(250));
+}
+
+#[test]
+fn the_parent_stays_enabled_until_the_dialog_is_shown() {
+    for os in ["windows", "linux", "macos"] {
+        let (app, timer) = manual_app();
+        let h = app.handle().clone();
+        let mark = native_mark();
+        let info = open_on(&h, "main", request("unsaved-changes"), os).unwrap();
+        let disabled = |m: usize| native_since(m).contains(&"disable:main".to_string());
+        assert!(
+            !disabled(mark),
+            "{os}: opening a modal does not lock its parent"
+        );
+        // Closed before it ever showed: the parent was never locked.
+        on_destroyed_on(&h, &info.label, os);
+        timer.deadline_passes();
+        assert!(!disabled(mark), "{os}");
+        // Shown: now it is (never on macOS, where the UI's scrim does it).
+        let info = open_on(&h, "main", request("confirm-x"), os).unwrap();
+        ready(
+            &h,
+            &os_window(&app, &info.label),
+            measure(200.0, 100.0),
+            os,
+            show_mechanism(os),
+        )
+        .unwrap();
+        assert_eq!(disabled(mark), os != "macos", "{os}");
+    }
+}
+
+#[test]
+fn opening_a_pending_dialog_again_creates_no_window_and_does_not_show_it_early() {
+    let (app, _timer) = manual_app();
+    let h = app.handle().clone();
+    let mark = native_mark();
+    let first = open(&h, "main", request("ai-setup")).unwrap();
+    let windows = h.webview_windows().len();
+    let again = open(&h, "main", request("ai-setup")).unwrap();
+    assert_eq!(
+        (again.label.as_str(), again.existing),
+        (first.label.as_str(), true)
+    );
+    assert_eq!(h.webview_windows().len(), windows, "no second window");
+    assert!(
+        !native_since(mark)
+            .iter()
+            .any(|o| o.starts_with("focus") || o.starts_with("show")),
+        "a pending window is not focused (that would show it unfitted): {:?}",
+        native_since(mark)
+    );
+    // Once shown, opening it again focuses it.
+    ready(
+        &h,
+        &os_window(&app, &first.label),
+        measure(300.0, 100.0),
+        "linux",
+        show_mechanism("linux"),
+    )
+    .unwrap();
+    let mark = native_mark();
+    assert!(open(&h, "main", request("ai-setup")).unwrap().existing);
+    assert_eq!(native_since(mark), [format!("focus:{}", first.label)]);
+}
+
+#[test]
+fn the_offscreen_mechanism_waits_off_screen_and_moves_into_place_when_shown() {
+    let (app, _timer) = manual_app();
+    let h = app.handle().clone();
+    let mark = native_mark();
+    let info = open_with(
+        &h,
+        "main",
+        request("ai-setup"),
+        "windows",
+        ShowMechanism::OffscreenThenShow,
+    )
+    .unwrap();
+    assert!(!native_since(mark).iter().any(|o| o.starts_with("place")));
+    ready(
+        &h,
+        &os_window(&app, &info.label),
+        measure(300.0, 100.0),
+        "windows",
+        ShowMechanism::OffscreenThenShow,
+    )
+    .unwrap();
+    let seen = native_since(mark);
+    let place = seen
+        .iter()
+        .position(|o| o == &format!("place:{}", info.label));
+    let show = seen
+        .iter()
+        .position(|o| o == &format!("show:{}", info.label));
+    assert!(place.is_some() && place < show, "{seen:?}");
+}
+
+#[test]
+fn a_child_window_that_macos_orders_in_with_its_parent_is_hidden_again_at_once() {
+    let (app, _t) = manual_app();
+    let h = app.handle().clone();
+    let mark = native_mark();
+    let modal = open_on(&h, "main", request("unsaved-changes"), "macos").unwrap();
+    // A modeless dialog is independent on macOS: nothing orders it in.
+    let modeless = open_on(&h, "main", request("settings"), "macos").unwrap();
+    let hides: Vec<_> = native_since(mark)
+        .into_iter()
+        .filter(|o| o.starts_with("hide"))
+        .collect();
+    assert_eq!(
+        hides,
+        [format!("hide:{}", modal.label)],
+        "{}",
+        modeless.label
+    );
+    let mark = native_mark();
+    open_on(&h, "main", request("about"), "linux").unwrap();
+    assert!(native_since(mark).iter().all(|o| !o.starts_with("hide")));
+}
+
+#[test]
+fn a_scale_change_refits_a_dialog_from_its_last_measure() {
+    let (app, _t) = manual_app();
+    let h = app.handle().clone();
+    let info = open(&h, "main", request("ai-setup")).unwrap();
+    let dialog = os_window(&app, &info.label);
+    // (`WindowEvent::ScaleFactorChanged` is non-exhaustive and cannot be built here; the event arm only calls this.)
+    // Nothing reported yet: nothing to refit, and nothing fails.
+    scale_changed(&dialog);
+    assert!(state(&app).get(&info.label).unwrap().measure.is_none());
+    ready(
+        &h,
+        &dialog,
+        measure(300.0, 100.0),
+        "linux",
+        show_mechanism("linux"),
+    )
+    .unwrap();
+    scale_changed(&dialog);
+    // A window that is not a dialog has nothing to refit.
+    scale_changed(&os_window(&app, "main"));
+    // A refit that fails (a measure that is not a size) is logged, not raised.
+    let bad = crate::Size {
+        width: f64::NAN,
+        height: 1.0,
+    };
+    state(&app).set_measure(
+        &info.label,
+        Measure {
+            content: bad,
+            min_content: bad,
+        },
+    );
+    scale_changed(&dialog);
+}
+
+#[test]
+fn the_thread_scheduler_runs_its_job() {
+    use crate::registry::ThreadScheduler;
+    let (tx, rx) = std::sync::mpsc::channel();
+    ThreadScheduler.after(Duration::ZERO, Box::new(move || tx.send(7).unwrap()));
+    assert_eq!(rx.recv_timeout(Duration::from_secs(30)), Ok(7));
 }
 
 #[test]
@@ -589,8 +945,13 @@ fn the_guard_holds_each_dialog_to_its_contract_on_the_invoke_path() {
         (Some("settings"), Some("tool"))
     );
     assert_eq!(invoke(&dialog, "app_status", json!({})), Ok(json!("ok")));
+    let measure = json!({ "content": { "width": 960, "height": 400 }, "minContent": { "width": 500, "height": 200 } });
     assert_eq!(
-        invoke(&dialog, "dialog_fit_height", json!({ "content": 400.0 })),
+        invoke(&dialog, "dialog_ready", json!({ "measure": measure })),
+        Ok(Value::Null)
+    );
+    assert_eq!(
+        invoke(&dialog, "dialog_fit", json!({ "measure": measure })),
         Ok(Value::Null)
     );
     assert!(
@@ -620,7 +981,19 @@ fn the_guard_holds_each_dialog_to_its_contract_on_the_invoke_path() {
     );
     // Malformed arguments are refused before the handler.
     assert!(invoke(&main, "dialog_open", json!({})).is_err());
-    assert!(invoke(&dialog, "dialog_fit_height", json!({ "content": "tall" })).is_err());
+    assert!(
+        invoke(
+            &dialog,
+            "dialog_fit",
+            json!({ "measure": { "content": "tall" } })
+        )
+        .is_err()
+    );
+    let nan = json!({ "content": { "width": 1, "height": 0 }, "minContent": { "width": 1, "height": 1 } });
+    assert_eq!(
+        invoke(&dialog, "dialog_fit", json!({ "measure": nan })).unwrap_err()["code"],
+        "invalid"
+    );
     // A dialog's own command errors come back typed.
     let e = invoke(
         &main,

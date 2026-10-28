@@ -21,6 +21,7 @@ fn text() -> String {
         crate::Kind::decl(),
         crate::Modality::decl(),
         crate::Size::decl(),
+        crate::Measure::decl(),
         crate::Remembered::decl(),
         crate::DialogRequest::decl(),
         crate::DialogInfo::decl(),

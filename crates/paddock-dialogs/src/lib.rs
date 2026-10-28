@@ -13,9 +13,9 @@
 //! - [`placement`]: where a dialog opens, as pure geometry in physical px: on the parent's monitor (never the primary
 //!   display as such), a remembered offset from the parent only when the whole dialog stays on that monitor's work
 //!   area, shrunk to fit, mixed DPI and negative coordinates included.
-//! - [`window`]: the wire types (`DialogRequest`, `DialogStart`, ...), request validation, geometry by kind, the window
-//!   configuration (no title-bar buttons; owned or independent per OS) and the fit-to-content rules (a viewer only
-//!   grows).
+//! - [`window`]: the wire types (`DialogRequest`, `DialogStart`, `Measure`, ...), request validation, geometry by kind,
+//!   the window configuration (no title-bar buttons; owned or independent per OS; created unseen), the show mechanism
+//!   per OS ([`show_mechanism`]) and the fit rules (`plan_fit`: the cap, the minimum content, a viewer only grows).
 //! - [`registry`]: [`Dialogs`], the open dialog windows by label (`d-<host>-<n>`), with the close-request rules
 //!   (forwarded as Close/Cancel, a required choice kept unless its page does not answer).
 //!
@@ -54,11 +54,12 @@ pub use contract::{
 };
 pub use paddock_commands::DialogCallable;
 pub use placement::{Bounds, Monitor, Placement, Rect, Remembered, ScreenPosition};
-pub use registry::{CloseDecision, Dialogs, OpenDialog};
+pub use registry::{CloseDecision, Dialogs, OpenDialog, SHOW_DEADLINE, Scheduler, ThreadScheduler};
 pub use table::{DialogTable, Entry, Shape, Width};
 pub use window::{
     CLOSE_REQUESTED_EVENT, CLOSED_EVENT, DialogClosed, DialogError, DialogErrorCode, DialogInfo,
-    DialogRequest, DialogResult, DialogStart, Parenting, RESULT_EVENT, WindowConfig,
+    DialogRequest, DialogResult, DialogStart, Measure, Parenting, RESULT_EVENT, ShowMechanism,
+    WindowConfig, show_mechanism,
 };
 
 #[cfg(feature = "tauri")]
@@ -74,8 +75,10 @@ paddock_commands::command_table! {
     Query [DIALOG] => tauri::dialog_take_input,
     /// Closes the calling dialog with its result.
     Mutation [DIALOG] limit 2 * paddock_commands::MIB => tauri::dialog_close,
-    /// Sizes the calling dialog to its content.
-    Quiet [DIALOG] => tauri::dialog_fit_height,
+    /// The calling dialog's page measured itself: sizes its window, makes the minimum content the OS minimum, shows it.
+    Quiet [DIALOG] => tauri::dialog_ready,
+    /// Refits the calling dialog to a new measure.
+    Quiet [DIALOG] => tauri::dialog_fit,
 }
 
 #[cfg(test)]
