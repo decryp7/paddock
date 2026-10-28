@@ -4,10 +4,13 @@
 use crate::discover::{self, Browser, Flavor, Os};
 use crate::manifest::{Manifest, Pinned};
 use crate::{Error, Result};
+use paddock_download::{DownloadError, Downloader, Integrity, Request, Sha256Digest};
+use paddock_jobs::JobContext;
 use sha2::{Digest, Sha256};
 use spotter_core::job::{Job, Phase, Unit};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Largest total size an archive may expand to.
@@ -200,91 +203,54 @@ pub fn self_test(exe: &Path) -> Result<String> {
     Ok(s.trim().to_string())
 }
 
-/// Awaits `work`, giving up with [`Error::Cancelled`] soon after the job is cancelled (a stalled connection must not hold Cancel).
-async fn or_cancel<T>(job: &Job, work: impl std::future::Future<Output = T>) -> Result<T> {
-    tokio::pin!(work);
-    loop {
-        tokio::select! {
-            out = &mut work => return Ok(out),
-            () = tokio::time::sleep(Duration::from_millis(50)) => {
-                if job.is_cancelled() {
-                    return Err(Error::Cancelled);
-                }
-            }
-        }
+/// The Spotter error for a download that ended without a file.
+fn download_error(e: DownloadError) -> Error {
+    match e {
+        DownloadError::Cancelled(_) => Error::Cancelled,
+        DownloadError::ChecksumMismatch { .. } => err("the download does not match its pinned checksum and was discarded"),
+        DownloadError::TooLarge { .. } => err("the download is larger than the allowed size"),
+        other => err(format!("the download failed: {other}")),
     }
-}
-
-/// Downloads `url` to `dest`, hashing as it goes (the one and only pass over the data) and reporting
-/// [`Phase::Downloading`] in bytes from the first moment. Redirects are not followed off the original scheme rules of
-/// reqwest's default policy (limited); the size is capped by [`MAX_DOWNLOAD`].
-pub async fn download(url: &str, dest: &Path, job: &Job) -> Result<String> {
-    use tokio::io::AsyncWriteExt;
-    job.report(Phase::Downloading, Unit::Bytes, 0, None);
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(20))
-        .timeout(Duration::from_secs(60 * 30))
-        .build()
-        .map_err(|e| err(e.to_string()))?;
-    let mut resp = or_cancel(job, client.get(url).send())
-        .await?
-        .map_err(|e| err(format!("the download failed: {e}")))?
-        .error_for_status()
-        .map_err(|e| err(format!("the download failed: {e}")))?;
-    let total = resp.content_length();
-    if total.is_some_and(|t| t > MAX_DOWNLOAD) {
-        return Err(err("the download is larger than the allowed size"));
-    }
-    job.report_done(Phase::Downloading, Unit::Bytes, 0, total);
-    let mut file = tokio::fs::File::create(dest).await.map_err(|e| err(e.to_string()))?;
-    let mut hash = Sha256::new();
-    let mut done = 0u64;
-    while let Some(chunk) = or_cancel(job, resp.chunk())
-        .await?
-        .map_err(|e| err(format!("the download failed: {e}")))?
-    {
-        if job.is_cancelled() {
-            return Err(Error::Cancelled);
-        }
-        done += chunk.len() as u64;
-        if done > MAX_DOWNLOAD {
-            return Err(err("the download is larger than the allowed size"));
-        }
-        hash.update(&chunk);
-        file.write_all(&chunk).await.map_err(|e| err(e.to_string()))?;
-        job.report(Phase::Downloading, Unit::Bytes, done, total);
-    }
-    file.flush().await.map_err(|e| err(e.to_string()))?;
-    job.report_done(Phase::Downloading, Unit::Bytes, done, Some(done));
-    Ok(hex(&hash.finalize()))
 }
 
 /// Downloads the pinned build for this platform from the embedded manifest into `data_dir` and returns the browser.
-pub async fn install(data_dir: &Path, job: &Job) -> Result<Browser> {
+/// `downloader` is the app's one (its per-host caps hold across downloads); `ctx` is the shell job the download reports
+/// its phases to; `job` carries the unpacking and the self-test.
+pub async fn install(data_dir: &Path, downloader: &Arc<Downloader>, ctx: &JobContext, job: &Job) -> Result<Browser> {
     let pinned = Manifest::embedded().pinned(&crate::manifest::platform_key())?;
-    install_pinned(&pinned, Os::CURRENT, data_dir, &self_test, job).await
+    install_pinned(&pinned, Os::CURRENT, data_dir, &self_test, downloader, ctx, job).await
 }
 
-/// [`install`] for an explicit pinned entry, OS and self-test (tests use a local server and a fake archive). Three
-/// phases, each on its own scale: Downloading (bytes, hashed while written), Unpacking (bytes of the expanded size,
-/// no second hash) and Testing. The old install stays until the new one verified, then it is replaced.
+/// [`install`] for an explicit pinned entry, OS and self-test (tests use a local server and a fake archive). Phases, each
+/// on its own scale: connecting, resuming a kept part, downloading (segmented, hashed while written, by
+/// `paddock-download`), verifying, unpacking (bytes of the expanded size, no second hash) and testing. The archive's
+/// `.part` stays in the data folder when the install is cancelled or the connection drops, so the next run resumes it; the
+/// old install stays until the new one verified, then it is replaced.
 pub async fn install_pinned(
     pinned: &Pinned,
     os: Os,
     data_dir: &Path,
     verify: &(dyn Fn(&Path) -> Result<String> + Sync),
+    downloader: &Arc<Downloader>,
+    ctx: &JobContext,
     job: &Job,
 ) -> Result<Browser> {
     let final_dir = discover::downloaded_dir(data_dir);
     let work = data_dir.join("chromium.work");
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).map_err(|e| err(format!("the install folder could not be created: {e}")))?;
+    // Outside the work folder, which is wiped: a kept `.part` is what a later run resumes.
+    let archive = data_dir.join(format!("chromium-{}.zip", pinned.version));
     let result = async {
-        let archive = work.join("download.zip");
-        let got = download(&pinned.url, &archive, job).await?;
-        if !got.eq_ignore_ascii_case(&pinned.sha256) {
-            return Err(err("the download does not match its pinned checksum and was discarded"));
-        }
+        let digest = Sha256Digest::from_hex(&pinned.sha256).map_err(download_error)?;
+        let request = Request::new(&pinned.url, &archive, Integrity::Sha256(digest))
+            .map_err(download_error)?
+            .max_bytes(MAX_DOWNLOAD);
+        let (d, c) = (downloader.clone(), ctx.clone());
+        tokio::task::spawn_blocking(move || d.download(&c, &request))
+            .await
+            .map_err(|e| err(e.to_string()))?
+            .map_err(download_error)?;
         let (a, w, j) = (archive.clone(), work.join("tree"), job.clone());
         tokio::task::spawn_blocking(move || extract(&a, &w, &j))
             .await

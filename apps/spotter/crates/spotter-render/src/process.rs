@@ -1,9 +1,36 @@
 //! A supervised child process: its whole process tree is ended on drop, on timeout and when it exceeds a memory
 //! cap, so nothing leaks. No `unsafe`: Unix signals the process group through `kill(1)`, Windows uses `taskkill`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::{Child, Command};
+use std::sync::{Mutex, PoisonError};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+
+/// The root pids of the supervised processes that run now, so the app can end them all when it quits.
+static LIVE: Mutex<Option<HashSet<u32>>> = Mutex::new(None);
+
+fn live() -> std::sync::MutexGuard<'static, Option<HashSet<u32>>> {
+    LIVE.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The root pids of the supervised processes that have not been ended yet.
+pub fn live_ids() -> Vec<u32> {
+    let mut ids: Vec<u32> = live().as_ref().map(|s| s.iter().copied().collect()).unwrap_or_default();
+    ids.sort_unstable();
+    ids
+}
+
+/// Ends the trees of `ids` now. Used at quit: a render that is stuck must not keep its browser, or hold up Quit.
+pub fn end_trees(ids: &[u32]) {
+    for id in ids {
+        kill_tree(*id);
+    }
+}
+
+/// Ends every supervised process tree that still runs (what Quit does after it asked the jobs to stop).
+pub fn end_all() {
+    end_trees(&live_ids());
+}
 
 /// A child that is killed with its helpers when dropped.
 pub struct Supervised {
@@ -23,7 +50,9 @@ impl Supervised {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        Ok(Supervised { child: Some(cmd.spawn()?) })
+        let child = cmd.spawn()?;
+        live().get_or_insert_with(HashSet::new).insert(child.id());
+        Ok(Supervised { child: Some(child) })
     }
 
     /// The process id while it has not been killed.
@@ -64,6 +93,9 @@ impl Supervised {
     /// Ends the process tree now and reaps it. Idempotent.
     pub fn kill(&mut self) {
         let Some(mut c) = self.child.take() else { return };
+        if let Some(set) = live().as_mut() {
+            set.remove(&c.id());
+        }
         kill_tree(c.id());
         let _ = c.kill();
         let _ = c.wait();
@@ -210,6 +242,24 @@ pub fn processes_mentioning(needle: &str) -> Vec<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn quit_ends_a_process_that_is_still_running_and_forgets_it() {
+        let mut cmd = Command::new("sleep");
+        cmd.arg("30");
+        let mut stuck = Supervised::spawn(cmd).unwrap();
+        let id = stuck.id().unwrap();
+        assert!(live_ids().contains(&id), "a running process is listed");
+        end_trees(&[id]);
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while stuck.is_running() && std::time::Instant::now() < end {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(!stuck.is_running(), "the stuck process was ended");
+        stuck.kill();
+        assert!(!live_ids().contains(&id), "an ended process is no longer listed");
+    }
 
     #[test]
     fn tree_math() {
