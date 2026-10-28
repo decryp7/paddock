@@ -5,6 +5,7 @@ import { dialogBaseProviders } from './app/dialog-base';
 import { provideSettingsAppearance } from '@decryp7/paddock-ui/shell/settings';
 import { provideDemoAppearance } from './app/demo-appearance';
 import { tauriBridge } from './app/demo-ipc';
+import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 import { demoSettingsBackend } from './app/demo-settings';
 
 /** A dialog window of the demo: the dialog shell, the demo's small base set and the dialog's own providers. */
@@ -19,7 +20,7 @@ export function bootDialogWindow(route: DialogRoute): Promise<unknown> {
     DialogShell,
     dialogWindowConfig({
       dialogs: DEMO_DIALOGS,
-      providers: [...dialogBaseProviders(), ...appearance],
+      providers: [...dialogBaseProviders(), ...appearance, providePaddockMaterial()],
       route,
       ...(bridge ? { io: () => tauriDialogIo(bridge) } : {}),
     }),
