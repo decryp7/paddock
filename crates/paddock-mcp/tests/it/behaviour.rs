@@ -228,13 +228,17 @@ fn a_tool_that_hangs_is_cancelled_at_its_time_limit_and_slow_calls_cannot_pile_u
     // The handler blocks until the test releases it, then reports whether its token had been cancelled.
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let (report_tx, report_rx) = mpsc::channel::<bool>();
+    // After reporting it stays inside the handler until the test lets it end, so the test controls when the abandoned call ends.
+    let (end_tx, end_rx) = mpsc::channel::<()>();
     let release_rx = Mutex::new(release_rx);
     let report_tx = Mutex::new(report_tx);
+    let end_rx = Mutex::new(end_rx);
     server
         .add_tool(
             ToolDef::read_only("slow", "Hangs.", json!({"type":"object"}), move |ctx, _| {
                 let _ = release_rx.lock().unwrap().recv();
                 let _ = report_tx.lock().unwrap().send(ctx.cancel.is_cancelled());
+                let _ = end_rx.lock().unwrap().recv();
                 Ok(ToolOutput::text("late"))
             })
             .timeout(Duration::from_millis(5)),
@@ -258,25 +262,27 @@ fn a_tool_that_hangs_is_cancelled_at_its_time_limit_and_slow_calls_cannot_pile_u
         text(&busy).contains("busy finishing earlier slow calls"),
         "{busy}"
     );
+    // Snapshot the audit before any retry: the log is a ring buffer, so later refusals would evict the timeout.
+    let outcomes: Vec<Outcome> = audit.entries().iter().map(|e| e.outcome).take(2).collect();
+    assert_eq!(outcomes, [Outcome::TimedOut, Outcome::Refused]);
     release_tx.send(()).unwrap();
     assert!(
         report_rx.recv().unwrap(),
         "the hung call saw its cancel token cancelled"
     );
-    // Once the abandoned call really ends the server takes calls again (wait for that without sleeping).
-    let mut id = 3;
-    let reply = loop {
-        let reply = call(&server, &s, id, "quick", json!({}));
-        if reply["result"]["isError"] != true {
-            break reply;
-        }
-        id += 1;
-        assert!(id < 100_000, "the abandoned call never ended"); // conformance: hang-guard
-        std::thread::yield_now();
-    };
+    // Many refused retries while the abandoned call is still running (more than the audit log holds) stay refused.
+    for id in 3..13 {
+        let again = call(&server, &s, id, "quick", json!({}));
+        assert!(
+            text(&again).contains("busy finishing earlier slow calls"),
+            "{again}"
+        );
+    }
+    // Let the abandoned call end and wait for the server to uncount it (an event, not a time).
+    end_tx.send(()).unwrap();
+    server.wait_for_abandoned_calls();
+    let reply = call(&server, &s, 13, "quick", json!({}));
     assert_eq!(text(&reply), "q");
-    let outcomes: Vec<Outcome> = audit.entries().iter().map(|e| e.outcome).take(2).collect();
-    assert_eq!(outcomes, [Outcome::TimedOut, Outcome::Refused]);
 }
 
 #[test]

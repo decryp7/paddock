@@ -17,7 +17,7 @@ use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard, mpsc};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The server's bounds (ADR 0007 rule 4).
@@ -119,6 +119,8 @@ pub struct Server {
     audit: Arc<dyn AuditSink>,
     redactor: Arc<dyn Redact>,
     abandoned: Arc<AtomicUsize>,
+    /// Signalled each time an abandoned call's thread has ended and been uncounted.
+    abandoned_ended: Arc<(Mutex<()>, Condvar)>,
 }
 
 fn read<T>(l: &RwLock<T>) -> RwLockReadGuard<'_, T> {
@@ -162,6 +164,7 @@ impl Server {
             audit,
             redactor,
             abandoned: Arc::new(AtomicUsize::new(0)),
+            abandoned_ended: Arc::new((Mutex::new(()), Condvar::new())),
         }
     }
 
@@ -605,10 +608,11 @@ impl Server {
         rx: mpsc::Receiver<Msg>,
     ) -> Run {
         let state = Arc::new(AtomicU8::new(RUNNING));
-        let (handler, cancel, abandoned, st) = (
+        let (handler, cancel, abandoned, ended, st) = (
             tool.handler.clone(),
             ctx.cancel.clone(),
             self.abandoned.clone(),
+            self.abandoned_ended.clone(),
             state.clone(),
         );
         std::thread::spawn(move || {
@@ -619,9 +623,26 @@ impl Server {
                 .is_err()
             {
                 abandoned.fetch_sub(1, Ordering::SeqCst);
+                let _guard = ended
+                    .0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                ended.1.notify_all();
             }
         });
         wait(&rx, &state, &cancel, &self.abandoned, timeout)
+    }
+
+    /// Blocks until every abandoned call (one past its time limit or cancelled by the client) has really ended, so the server takes
+    /// calls again. Returns at once when none is running; the wait is on the end of the calls, not on a time.
+    pub fn wait_for_abandoned_calls(&self) {
+        let (m, cv) = &*self.abandoned_ended;
+        let mut guard = m.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        while self.abandoned.load(Ordering::SeqCst) > 0 {
+            guard = cv
+                .wait(guard)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
     }
 
     /// The calendar time the server's clock reports.
