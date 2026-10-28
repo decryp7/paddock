@@ -8,6 +8,7 @@ pub mod app_menu;
 pub mod app_state;
 pub mod commands;
 pub mod credentials;
+pub mod jobs;
 pub mod live;
 pub mod native_feel;
 pub mod quit;
@@ -121,6 +122,7 @@ pub fn run() {
         .manage(client.clone())
         .manage(model.clone())
         .manage(Arc::new(commands::Streams::default()))
+        .manage(Arc::new(jobs::Jobs::default()))
         .manage(tray::Drawn::default())
         .manage(quit::PendingAsk::default())
         .manage(updater::Pending::default())
@@ -202,6 +204,12 @@ pub fn run() {
             app_commands::repair_service,
             app_commands::get_autostart,
             app_commands::set_autostart,
+            app_commands::start_load_model,
+            app_commands::start_benchmark,
+            app_commands::start_install_service,
+            app_commands::start_uninstall_service,
+            app_commands::start_app_update,
+            app_commands::job_cancel,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
