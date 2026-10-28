@@ -3,7 +3,6 @@
 //! and cleanups come from Dyno's own activity log (everything Dyno changed is already recorded there).
 
 use super::software::SoftwareItem;
-use crate::activity::{ActivityEntry, ActivityKind};
 use crate::time::{Timestamp, HOUR};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -157,26 +156,6 @@ pub fn diff_startup(previous: &[(String, String)], current: &[(String, String)],
     out
 }
 
-/// The activity entries that are changes to the machine (startup, tuning, cleanups).
-pub fn from_activity(entries: &[ActivityEntry]) -> Vec<Change> {
-    entries
-        .iter()
-        .filter_map(|e| {
-            let kind = match e.kind {
-                ActivityKind::Startup | ActivityKind::Tuning => ChangeKind::Setting,
-                ActivityKind::Cleanup => ChangeKind::Cleanup,
-                _ => return None,
-            };
-            Some(Change {
-                at: e.at,
-                kind,
-                title: e.title.clone(),
-                detail: e.detail.clone(),
-            })
-        })
-        .collect()
-}
-
 /// Merges changes into the timeline for `query`: inside the window, newest first, capped.
 pub fn timeline(query: &ChangesQuery, now: Timestamp, watching_since: Option<Timestamp>, mut all: Vec<Change>) -> ChangeTimeline {
     let (from, to) = query.window(now);
@@ -194,7 +173,6 @@ pub fn timeline(query: &ChangesQuery, now: Timestamp, watching_since: Option<Tim
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::activity::UndoState;
 
     fn sw(n: &str, v: &str) -> SoftwareItem {
         SoftwareItem {
@@ -226,32 +204,6 @@ mod tests {
         assert_eq!(d.len(), 2);
         assert_eq!(d[0].kind, ChangeKind::StartupAdded);
         assert_eq!(d[1].kind, ChangeKind::StartupRemoved);
-    }
-
-    fn entry(kind: ActivityKind, at: i64) -> ActivityEntry {
-        ActivityEntry {
-            id: format!("e{at}"),
-            at: Timestamp(at),
-            kind,
-            title: format!("t{at}"),
-            detail: String::new(),
-            undo: UndoState::NotUndoable,
-            bytes: None,
-        }
-    }
-
-    #[test]
-    fn only_machine_changes_come_from_the_activity_log() {
-        let list = [
-            entry(ActivityKind::Startup, 1),
-            entry(ActivityKind::Tuning, 2),
-            entry(ActivityKind::Cleanup, 3),
-            entry(ActivityKind::Rule, 4),
-            entry(ActivityKind::Manual, 5),
-        ];
-        let c = from_activity(&list);
-        assert_eq!(c.len(), 3);
-        assert_eq!(c[2].kind, ChangeKind::Cleanup);
     }
 
     #[test]

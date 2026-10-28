@@ -18,7 +18,7 @@ use dyno_core::ports::{
     FactsSource, FileLocks, NetworkLinks, PlatformError, ProcessControl, ProcessSource, StartupItems, SystemSensors, UserActivity,
 };
 use dyno_core::process::{ListOrReason, Locker, Pid, ProcessAction, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo};
-use dyno_core::startup::{StartupEntry, StartupState};
+use dyno_core::startup::StartupEntry;
 use dyno_core::time::Timestamp;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -35,8 +35,6 @@ pub enum FakeOp {
     Lockers,
     /// [`StartupItems::list`].
     StartupList,
-    /// [`StartupItems::set_state`].
-    StartupSet,
 }
 
 /// Everything the fakes read and record. Tests reach it through [`Fake::with`].
@@ -241,24 +239,6 @@ impl StartupItems for Fake {
         st.failure(FakeOp::StartupList)?;
         Ok(st.startup.clone())
     }
-
-    fn set_state(&mut self, entry: &StartupEntry, state: StartupState) -> Result<(), PlatformError> {
-        let mut st = self.lock();
-        st.failure(FakeOp::StartupSet)?;
-        if entry.location.needs_admin() {
-            return Err(PlatformError::AccessDenied(format!(
-                "Changing {} needs the Dyno helper.",
-                entry.name
-            )));
-        }
-        let e = st
-            .startup
-            .iter_mut()
-            .find(|e| e.id == entry.id)
-            .ok_or_else(|| PlatformError::NotFound(format!("{} is no longer a startup entry.", entry.name)))?;
-        e.state = state;
-        Ok(())
-    }
 }
 
 impl FactsSource for Fake {
@@ -364,7 +344,7 @@ mod tests {
             command: "x.exe".into(),
             exe: Some("x.exe".into()),
             location,
-            state: StartupState::Enabled,
+            state: dyno_core::startup::StartupState::Enabled,
             publisher: None,
             impact: StartupImpact {
                 cpu_secs: 0.0,
@@ -449,22 +429,9 @@ mod tests {
             s.lockers.insert(PathBuf::from("f"), Vec::new());
         });
         let mut p = fake.platform();
-        let list = p.startup.list().unwrap();
-        p.startup.set_state(&list[0], StartupState::Disabled).unwrap();
-        assert_eq!(p.startup.list().unwrap()[0].state, StartupState::Disabled);
-        assert!(matches!(
-            p.startup.set_state(&list[1], StartupState::Disabled),
-            Err(PlatformError::AccessDenied(_))
-        ));
-        let gone = entry("gone", StartupLocation::UserStartupFolder);
-        assert!(matches!(
-            p.startup.set_state(&gone, StartupState::Disabled),
-            Err(PlatformError::NotFound(_))
-        ));
+        assert_eq!(p.startup.list().unwrap().len(), 2);
         fake.fail(FakeOp::StartupList, PlatformError::Failed("x".into()));
-        fake.fail(FakeOp::StartupSet, PlatformError::Failed("x".into()));
         assert!(p.startup.list().is_err());
-        assert!(p.startup.set_state(&list[0], StartupState::Enabled).is_err());
         assert_eq!(p.facts.facts().os, "Fake OS 1.0");
         assert_eq!(p.activity.idle_secs(), Some(30));
         assert_eq!(p.activity.foreground_pid(), Some(7));

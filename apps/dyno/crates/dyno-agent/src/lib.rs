@@ -32,7 +32,6 @@ pub mod sampler;
 pub mod server;
 pub mod service;
 pub mod store;
-pub mod tuning;
 pub mod unusual;
 pub mod watch;
 

@@ -7,10 +7,9 @@
 //! fails with [`PlatformError::NotFound`] (the pid was reused).
 
 use crate::facts::SystemFacts;
-use crate::helper::{HelperAction, TuningHost};
 use crate::metrics::SystemSample;
 use crate::process::{Locker, ProcessAction, ProcessDetails, ProcessRef, ProcessSample};
-use crate::startup::{StartupEntry, StartupState};
+use crate::startup::StartupEntry;
 use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -105,28 +104,12 @@ pub trait FileLocks: Send {
 pub trait StartupItems: Send {
     /// Everything that starts at login (impact is filled in by the agent from its measurements).
     fn list(&mut self) -> Result<Vec<StartupEntry>, PlatformError>;
-    /// Enables or disables an entry that needs no administrator rights ([`crate::startup::StartupLocation::needs_admin`]
-    /// is false). Others go through the privileged helper.
-    fn set_state(&mut self, entry: &StartupEntry, state: StartupState) -> Result<(), PlatformError>;
 }
 
 /// Slow-changing facts (disk health, pending updates, power plan…). Called every few minutes off the sampling path.
 pub trait FactsSource: Send {
     /// Gathers the facts; each one that fails is an unavailable reading, never an error for the whole.
     fn facts(&mut self) -> SystemFacts;
-}
-
-/// Reads and changes the few system settings tuning is allowed to touch. The set of changes is closed and typed
-/// ([`HelperAction`]); an implementation never runs text it was handed. Settings that need administrator rights fail
-/// with [`PlatformError::AccessDenied`]; settings this system lacks with [`PlatformError::Unsupported`].
-pub trait TuningSystem: Send {
-    /// The operating system the settings belong to.
-    fn host(&self) -> TuningHost;
-    /// The value of the setting `action` would change, as a short comparable text (for example `15` minutes or
-    /// `balanced`). Reading changes nothing.
-    fn read(&mut self, action: &HelperAction) -> Result<String, PlatformError>;
-    /// Makes the change. The caller has validated it and shown the user its preview.
-    fn apply(&mut self, action: &HelperAction) -> Result<(), PlatformError>;
 }
 
 // ---- throttling and hardware life (WP-23, WP-24) ----

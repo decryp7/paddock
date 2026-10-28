@@ -4,11 +4,11 @@
 //! [`HelperControl::status`] (state `installing` until the prompt is answered).
 
 use crate::helper_link::HelperLink;
-use dyno_core::helper::TuningHost;
+use dyno_core::helper::HelperHost;
 use dyno_core::helper_wire::{assess, prompt_text, HelperState, HelperStatus, HelperUser, Probe};
 use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_platform::elevate::{Elevator, OsElevator};
-use dyno_platform::tuning::{SystemRunner, Tool, ToolRunner};
+use dyno_platform::runner::{SystemRunner, Tool, ToolRunner};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -50,7 +50,7 @@ pub fn parse_id_u(text: &str) -> Option<HelperUser> {
 
 /// The real environment.
 pub struct SystemEnv {
-    host: TuningHost,
+    host: HelperHost,
 }
 
 impl SystemEnv {
@@ -72,13 +72,13 @@ impl InstallEnv for SystemEnv {
     fn supported(&self) -> Result<(), String> {
         let file = |p: &str| std::path::Path::new(p).is_file();
         match self.host {
-            TuningHost::Macos if !file("/usr/bin/osascript") => {
+            HelperHost::Macos if !file("/usr/bin/osascript") => {
                 Err("macOS did not provide osascript, so Dyno cannot ask for your password.".into())
             }
-            TuningHost::Linux if !std::path::Path::new("/run/systemd/system").is_dir() => {
+            HelperHost::Linux if !std::path::Path::new("/run/systemd/system").is_dir() => {
                 Err("The helper runs as a systemd service, and this computer does not use systemd.".into())
             }
-            TuningHost::Linux if !file("/usr/bin/pkexec") && !file("/bin/pkexec") => {
+            HelperHost::Linux if !file("/usr/bin/pkexec") && !file("/bin/pkexec") => {
                 Err("pkexec (polkit) is not installed, so Dyno cannot ask for your permission. Install polkit to use the helper.".into())
             }
             _ => self.helper_exe().map(|_| ()),
@@ -134,7 +134,7 @@ struct Job {
 
 /// The helper's lifecycle over a link, an elevator and an environment.
 pub struct HelperCentre {
-    host: TuningHost,
+    host: HelperHost,
     link: Arc<dyn HelperLink>,
     elevator: Arc<dyn Elevator>,
     env: Arc<dyn InstallEnv>,
@@ -186,7 +186,7 @@ impl HelperCentre {
     }
 
     /// A centre with every part given (tests).
-    pub fn new(host: TuningHost, link: Arc<dyn HelperLink>, elevator: Arc<dyn Elevator>, env: Arc<dyn InstallEnv>) -> HelperCentre {
+    pub fn new(host: HelperHost, link: Arc<dyn HelperLink>, elevator: Arc<dyn Elevator>, env: Arc<dyn InstallEnv>) -> HelperCentre {
         HelperCentre {
             host,
             link,
@@ -203,7 +203,7 @@ impl HelperCentre {
     }
 
     /// Runs the install: the OS prompt, then a check that the helper answers. Blocks until the prompt is answered.
-    fn run_install(env: &dyn InstallEnv, elevator: &dyn Elevator, link: &dyn HelperLink, host: TuningHost) -> Result<(), String> {
+    fn run_install(env: &dyn InstallEnv, elevator: &dyn Elevator, link: &dyn HelperLink, host: HelperHost) -> Result<(), String> {
         env.supported()?;
         let (helper, agent, user) = (env.helper_exe()?, env.agent_exe()?, env.user()?);
         let args = [
@@ -300,7 +300,7 @@ impl HelperControl for HelperCentre {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dyno_core::helper::{HelperAction, TuningHost};
+    use dyno_core::helper::HelperHost;
     use dyno_core::helper_wire::{HelperInfo, HELPER_API};
     use dyno_core::network_traffic::TrafficCounter;
     use dyno_core::ports::PlatformError;
@@ -337,7 +337,7 @@ mod tests {
                     HelperInfo {
                         version: self.version.clone(),
                         api: HELPER_API,
-                        host: TuningHost::Macos,
+                        host: HelperHost::Macos,
                         agent_exe: "/app/dyno-agent".into(),
                     },
                     vec![],
@@ -345,12 +345,6 @@ mod tests {
             } else {
                 Probe::Absent
             }
-        }
-        fn apply(&self, _: &HelperAction) -> Result<(), PlatformError> {
-            Ok(())
-        }
-        fn read(&self, _: &HelperAction) -> Result<String, PlatformError> {
-            Ok(String::new())
         }
         fn traffic(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
             Ok(vec![])
@@ -390,7 +384,7 @@ mod tests {
             ran: Mutex::new(vec![]),
         });
         (
-            HelperCentre::new(TuningHost::Macos, link.clone(), elev.clone(), Arc::new(Env { supported })),
+            HelperCentre::new(HelperHost::Macos, link.clone(), elev.clone(), Arc::new(Env { supported })),
             elev,
             link,
         )
@@ -455,7 +449,7 @@ mod tests {
             removed_calls: Mutex::new(0),
             version: "1".into(),
         });
-        let mut c = HelperCentre::new(TuningHost::Macos, link, Arc::new(Nothing), Arc::new(Env { supported: Ok(()) }));
+        let mut c = HelperCentre::new(HelperHost::Macos, link, Arc::new(Nothing), Arc::new(Env { supported: Ok(()) }));
         c.install().unwrap();
         assert!(wait_until_done(&mut c).error.unwrap().contains("not there"));
     }
@@ -476,7 +470,7 @@ mod tests {
             version: "1".into(),
         });
         let mut c = HelperCentre::new(
-            TuningHost::Macos,
+            HelperHost::Macos,
             link,
             Arc::new(Slow(Mutex::new(rx))),
             Arc::new(Env { supported: Ok(()) }),

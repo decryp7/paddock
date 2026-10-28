@@ -22,10 +22,9 @@ pub mod network;
 pub mod parse;
 pub mod process;
 pub mod processes;
+pub mod runner;
 pub mod sensors;
 pub mod toolpath;
-pub mod tuning;
-pub mod tuning_admin;
 #[cfg(unix)]
 #[allow(unsafe_code)]
 pub mod unix_control;

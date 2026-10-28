@@ -1,8 +1,6 @@
 //! The activity log: every action Dyno took (by a rule or a click), with what is needed to undo it.
 
-use crate::helper::HelperAction;
 use crate::process::{Priority, ProcessAction, ProcessRef};
-use crate::startup::StartupState;
 use crate::time::{Timestamp, DAY};
 use serde::{Deserialize, Serialize};
 
@@ -18,10 +16,6 @@ pub enum ActivityKind {
     Manual,
     /// A cleanup ran.
     Cleanup,
-    /// A tuning change was applied or reverted.
-    Tuning,
-    /// A startup entry changed.
-    Startup,
     /// An alert fired.
     Alert,
     /// Dyno itself (started, profile switched, rules paused).
@@ -76,24 +70,6 @@ pub enum UndoRecord {
         actions: Vec<ProcessAction>,
         /// (rule id, app group id) when a rule did it.
         rule: Option<(String, String)>,
-    },
-    /// Put a startup entry back.
-    Startup {
-        /// Entry id.
-        entry_id: String,
-        /// Its state before.
-        previous: StartupState,
-    },
-    /// Revert a tuning change.
-    Tuning {
-        /// Suggestion id.
-        id: String,
-        /// The change that was applied (its setting is read again before undoing).
-        apply: HelperAction,
-        /// The change that puts the previous setting back.
-        revert: HelperAction,
-        /// The setting as Dyno left it; a different value later means someone changed it since.
-        after: String,
     },
     /// Restore a quarantined cleanup.
     Quarantine {
@@ -222,18 +198,6 @@ mod tests {
         };
         assert_eq!(undo_state(&q, false, now, |_| true), UndoState::Available);
         assert_eq!(undo_state(&q, false, Timestamp(8 * DAY), |_| true), UndoState::Expired);
-        let t = UndoRecord::Tuning {
-            id: "x".into(),
-            apply: HelperAction::SetHibernate(false),
-            revert: HelperAction::SetHibernate(true),
-            after: "off".into(),
-        };
-        assert_eq!(undo_state(&t, false, now, |_| false), UndoState::Available);
-        let s = UndoRecord::Startup {
-            entry_id: "e".into(),
-            previous: StartupState::Enabled,
-        };
-        assert_eq!(undo_state(&s, false, now, |_| false), UndoState::Available);
         const { assert!(MAX_ENTRIES > 100) };
     }
 }

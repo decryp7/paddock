@@ -3,18 +3,16 @@
 //! The privileged helper end to end, in process: a real agent (fake platform), a real helper daemon on a private
 //! endpoint with its real authentication (the user's id, the program's path, the token), the agent's real link, and
 //! fakes for the operating system and for the permission prompt. Nothing here installs anything or touches the
-//! machine: the "system" is a fake tuning system both sides share.
+//! machine.
 
 use dyno_agent::agent::lock;
 use dyno_agent::cli::{ask, connect};
 use dyno_agent::helper_centre::{HelperCentre, InstallEnv};
-use dyno_agent::helper_link::{ElevatedTuning, HelperLink, IpcHelperLink};
+use dyno_agent::helper_link::{HelperLink, IpcHelperLink};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
-use dyno_core::activity::UndoState;
-use dyno_core::helper::{HelperAction, SleepSource, TuningHost};
-use dyno_core::helper_wire::{AuditVerdict, HelperInfo, HelperState, HelperUser, Probe, HELPER_API};
-use dyno_core::metrics::{BatterySample, PowerSource, Reading};
+use dyno_core::helper::HelperHost;
+use dyno_core::helper_wire::{HelperInfo, HelperState, HelperUser, Probe, HELPER_API};
 use dyno_core::protocol::{Message, Reply, Request};
 use dyno_core::time::Timestamp;
 use dyno_helper::audit::AuditLog;
@@ -24,7 +22,6 @@ use dyno_helper::server::Daemon;
 use dyno_ipc::{Host, Peer};
 use dyno_platform::elevate::{ElevationError, Elevator};
 use dyno_platform::fake::{quiet_sample, Fake};
-use dyno_platform::tuning::FakeTuning;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -52,7 +49,7 @@ struct Helper {
     thread: Option<std::thread::JoinHandle<Result<(), String>>>,
 }
 
-fn start_helper(dir: &Path, system: FakeTuning, agent_exe: PathBuf) -> Helper {
+fn start_helper(dir: &Path, agent_exe: PathBuf) -> Helper {
     let host = Host::listen().unwrap();
     let (endpoint, token) = (host.name().to_string(), host.token().clone());
     let token_file = dir.join("token");
@@ -61,10 +58,9 @@ fn start_helper(dir: &Path, system: FakeTuning, agent_exe: PathBuf) -> Helper {
         info: HelperInfo {
             version: env!("CARGO_PKG_VERSION").into(),
             api: HELPER_API,
-            host: system_host(&system),
+            host: HelperHost::Macos,
             agent_exe: agent_exe.to_string_lossy().into_owned(),
         },
-        tuning: Box::new(system),
         traffic: Box::new(NoTraffic),
         audit: AuditLog::new(dir.join("audit.jsonl")),
         clock: Box::new(|| 1_000),
@@ -89,11 +85,6 @@ fn start_helper(dir: &Path, system: FakeTuning, agent_exe: PathBuf) -> Helper {
     }
 }
 
-fn system_host(t: &FakeTuning) -> TuningHost {
-    use dyno_core::ports::TuningSystem;
-    t.clone().host()
-}
-
 struct NoTraffic;
 impl dyno_core::ports::ProcessTraffic for NoTraffic {
     fn counters(&self) -> Result<Vec<dyno_core::network_traffic::TrafficCounter>, dyno_core::ports::PlatformError> {
@@ -110,54 +101,29 @@ impl Drop for Helper {
     }
 }
 
-fn battery() -> Reading<BatterySample> {
-    Reading::Available(BatterySample {
-        charge: 80.0,
-        source: PowerSource::Battery,
-        health: 95.0,
-        cycles: None,
-        seconds_to_empty: None,
-    })
-}
-
 struct Rig {
     running: Option<Running>,
     peer: Peer<Message>,
-    system: FakeTuning,
     _helper: Option<Helper>,
-    link: Arc<IpcHelperLink>,
     _tmp: tempfile::TempDir,
 }
 
-fn sleep(minutes: u32) -> HelperAction {
-    HelperAction::SetSleepMinutes {
-        source: SleepSource::Battery,
-        minutes,
-    }
-}
-
-/// A macOS laptop whose sleep timer needs the helper. `with_helper` starts the daemon first.
+/// A macOS laptop. `with_helper` starts the daemon first.
 fn rig(with_helper: bool) -> Rig {
     let tmp = tempfile::tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let fake = Fake::new();
-    let mut sample = quiet_sample(Timestamp(0));
-    sample.battery = battery();
-    fake.push_sample(sample);
+    fake.push_sample(quiet_sample(Timestamp(0)));
     let running = Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
-    let system = FakeTuning::new(TuningHost::Macos);
-    system.set_value(&sleep(0), "0");
     std::fs::create_dir_all(tmp.path().join("helper")).unwrap();
-    let helper = with_helper.then(|| start_helper(&tmp.path().join("helper"), system.clone(), std::env::current_exe().unwrap()));
+    let helper = with_helper.then(|| start_helper(&tmp.path().join("helper"), std::env::current_exe().unwrap()));
     let link = Arc::new(match &helper {
         Some(h) => IpcHelperLink::new(h.endpoint.clone(), h.token_file.clone()),
         None => IpcHelperLink::new("/nonexistent/dyno-test.sock", tmp.path().join("no-token")),
     });
-    // The agent's own tuning sees the same fake system the helper changes; it never changes it itself.
-    *lock(&running.shared.ports.tuning) = Box::new(ElevatedTuning::new(system.clone(), link.clone()));
     // Never the real helper or the real prompt: a helper that can be installed here, and a prompt nobody answers.
     *lock(&running.shared.ports.helper) = Box::new(HelperCentre::new(
-        TuningHost::Macos,
+        HelperHost::Macos,
         link.clone(),
         Arc::new(NoPrompt),
         Arc::new(Env),
@@ -166,9 +132,7 @@ fn rig(with_helper: bool) -> Rig {
     let rig = Rig {
         running: Some(running),
         peer,
-        system,
         _helper: helper,
-        link,
         _tmp: tmp,
     };
     for _ in 0..100 {
@@ -186,68 +150,6 @@ impl Drop for Rig {
             r.stop();
         }
     }
-}
-
-fn applied(rig: &Rig) -> Vec<HelperAction> {
-    rig.system.applied()
-}
-
-#[test]
-fn an_administrator_item_is_applied_by_the_helper_logged_and_undone_through_it() {
-    let rig = rig(true);
-    let Reply::Tuning(list) = ask(&rig.peer, Request::Tuning).unwrap() else {
-        panic!()
-    };
-    let item = list.iter().find(|s| s.id == "sleepOnBattery").unwrap();
-    assert!(item.needs_admin);
-    let Reply::Activity(entry) = ask(
-        &rig.peer,
-        Request::ApplyTuning {
-            id: "sleepOnBattery".into(),
-        },
-    )
-    .unwrap() else {
-        panic!()
-    };
-    assert_eq!(applied(&rig), [sleep(15)], "the change reached the system through the helper");
-    // The helper's own audit log saw it, with the value before.
-    let Probe::Answered(_, recent) = rig.link.probe() else {
-        panic!("the helper should answer")
-    };
-    assert_eq!(recent[0].verdict, AuditVerdict::Applied);
-    assert_eq!((recent[0].before.as_deref(), recent[0].after.as_deref()), (Some("0"), Some("15")));
-    // And the activity log can undo it, again through the helper.
-    let Reply::Activity(undone) = ask(&rig.peer, Request::Undo { activity_id: entry.id }).unwrap() else {
-        panic!()
-    };
-    assert_eq!(undone.undo, UndoState::Undone);
-    assert_eq!(applied(&rig), [sleep(15), sleep(0)]);
-}
-
-#[test]
-fn without_a_helper_the_click_gets_a_clear_next_step_and_nothing_changes() {
-    let rig = rig(false);
-    let err = ask(
-        &rig.peer,
-        Request::ApplyTuning {
-            id: "sleepOnBattery".into(),
-        },
-    )
-    .unwrap_err();
-    assert!(err.contains("Settings > Helper"), "{err}");
-    assert!(applied(&rig).is_empty());
-    assert!(!matches!(rig.link.probe(), Probe::Answered(..)));
-}
-
-#[test]
-fn a_helper_that_serves_another_program_refuses_this_agent_and_the_item_says_so() {
-    let tmp = tempfile::tempdir().unwrap();
-    let system = FakeTuning::new(TuningHost::Macos);
-    let helper = start_helper(tmp.path(), system.clone(), PathBuf::from("/opt/not-dyno/dyno-agent"));
-    let link = IpcHelperLink::new(helper.endpoint.clone(), helper.token_file.clone());
-    let err = dyno_core::ports::TuningSystem::apply(&mut ElevatedTuning::new(system.clone(), Arc::new(link)), &sleep(5)).unwrap_err();
-    assert!(err.to_string().contains("did not answer"), "{err}");
-    assert!(system.applied().is_empty());
 }
 
 /// A permission prompt that nobody answers.
@@ -279,7 +181,6 @@ impl InstallEnv for Env {
 struct Prompt {
     approve: bool,
     dir: PathBuf,
-    system: FakeTuning,
     started: Mutex<Option<Helper>>,
     link_target: Arc<Mutex<Option<(String, PathBuf)>>>,
 }
@@ -289,7 +190,7 @@ impl Elevator for Prompt {
             return Err(ElevationError::Declined);
         }
         assert_eq!(args[0], "install");
-        let h = start_helper(&self.dir, self.system.clone(), std::env::current_exe().unwrap());
+        let h = start_helper(&self.dir, std::env::current_exe().unwrap());
         *self.link_target.lock().unwrap() = Some((h.endpoint.clone(), h.token_file.clone()));
         *self.started.lock().unwrap() = Some(h);
         Ok(())
@@ -309,12 +210,6 @@ impl FollowingLink {
 impl HelperLink for FollowingLink {
     fn probe(&self) -> Probe {
         self.current().probe()
-    }
-    fn apply(&self, a: &HelperAction) -> Result<(), dyno_core::ports::PlatformError> {
-        self.current().apply(a)
-    }
-    fn read(&self, a: &HelperAction) -> Result<String, dyno_core::ports::PlatformError> {
-        self.current().read(a)
     }
     fn traffic(&self) -> Result<Vec<dyno_core::network_traffic::TrafficCounter>, dyno_core::ports::PlatformError> {
         self.current().traffic()
@@ -346,12 +241,11 @@ fn the_install_click_prompts_once_and_then_the_helper_answers_but_declining_chan
         let prompt = Arc::new(Prompt {
             approve,
             dir: tmp.path().to_path_buf(),
-            system: rig.system.clone(),
             started: Mutex::new(None),
             link_target: target.clone(),
         });
         *lock(&rig.running.as_ref().unwrap().shared.ports.helper) = Box::new(HelperCentre::new(
-            TuningHost::Macos,
+            HelperHost::Macos,
             Arc::new(FollowingLink(target)),
             prompt.clone(),
             Arc::new(Env),

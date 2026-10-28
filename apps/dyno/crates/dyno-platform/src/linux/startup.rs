@@ -1,7 +1,5 @@
 //! What starts at login on Linux: XDG autostart `.desktop` files (the user's own and the system's) and enabled
-//! systemd **user** services. Listing is read-only. Changing an entry touches only the user's own files: a `.desktop`
-//! file in `~/.config/autostart` (a system entry is switched off by an override file with `Hidden=true`, which is how
-//! desktops do it), or `systemctl --user enable|disable` for user services. System files are never written.
+//! systemd **user** services. Read-only: nothing here writes a file or runs `systemctl enable`.
 
 use super::paths::{home_dir, read_text};
 use super::tools::Tools;
@@ -15,61 +13,10 @@ use std::time::Duration;
 
 /// Most files read from one autostart folder.
 const MAX_FILES: usize = 1_000;
-/// Most bytes of the user's own autostart file rewritten (larger ones are not desktop entries).
-const MAX_ENTRY_BYTES: usize = 64 * 1024;
-/// How long `systemctl` may take.
-const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(10);
 
 const USER_PREFIX: &str = "autostart:";
 const SYSTEM_PREFIX: &str = "autostart-system:";
 const UNIT_PREFIX: &str = "systemd-user:";
-
-/// What an entry id refers to, parsed once from the untrusted id.
-#[derive(Debug, PartialEq, Eq)]
-enum Key {
-    /// A file in the user's autostart folder.
-    UserFile(String),
-    /// A file in a system autostart folder (switched through a user override).
-    SystemFile(String),
-    /// A systemd user service.
-    Unit(String),
-}
-
-impl Key {
-    fn parse(id: &str) -> Result<Key, PlatformError> {
-        let bad = || PlatformError::Failed(format!("\"{id}\" is not a startup entry Dyno can change on Linux."));
-        if let Some(f) = id.strip_prefix(USER_PREFIX) {
-            return plain_desktop_name(f).map(|f| Key::UserFile(f.to_string())).ok_or_else(bad);
-        }
-        if let Some(f) = id.strip_prefix(SYSTEM_PREFIX) {
-            return plain_desktop_name(f).map(|f| Key::SystemFile(f.to_string())).ok_or_else(bad);
-        }
-        if let Some(u) = id.strip_prefix(UNIT_PREFIX) {
-            return plain_unit_name(u).then(|| Key::Unit(u.to_string())).ok_or_else(bad);
-        }
-        Err(bad())
-    }
-}
-
-/// A file name that is a `.desktop` file directly in a folder (no separators, no dot-files, no `..`).
-fn plain_desktop_name(name: &str) -> Option<&str> {
-    let ok = name.len() <= 255
-        && name.ends_with(".desktop")
-        && name.len() > ".desktop".len()
-        && !name.starts_with('.')
-        && !name.contains(['/', '\\', '\0']);
-    ok.then_some(name)
-}
-
-/// A systemd service name: letters, digits and `:_.@\-`, ending in `.service`, not starting with `-` or `.`.
-fn plain_unit_name(name: &str) -> bool {
-    name.ends_with(".service")
-        && name.len() <= 256
-        && !name.starts_with(['-', '.'])
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '_' | '.' | '@' | '\\' | '-'))
-}
 
 /// Startup items for Linux.
 pub struct LinuxStartup {
@@ -161,64 +108,6 @@ impl LinuxStartup {
             })
             .collect()
     }
-
-    fn write_user_file(&self, name: &str, text: &str) -> Result<(), PlatformError> {
-        std::fs::create_dir_all(&self.user_dir)
-            .map_err(|e| PlatformError::Failed(format!("Could not create {}: {e}", self.user_dir.display())))?;
-        let target = self.user_dir.join(name);
-        let tmp = self.user_dir.join(format!(".{name}.dyno-tmp"));
-        std::fs::write(&tmp, text).map_err(|e| PlatformError::Failed(format!("Could not write {}: {e}", target.display())))?;
-        std::fs::rename(&tmp, &target).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            PlatformError::Failed(format!("Could not update {}: {e}", target.display()))
-        })
-    }
-
-    fn set_file(&self, name: &str, enable: bool) -> Result<(), PlatformError> {
-        let user_path = self.user_dir.join(name);
-        match read_text(&user_path) {
-            Some(text) if text.len() <= MAX_ENTRY_BYTES => {
-                if enable && !desktop_entry::parse(&text).has_exec {
-                    // A pure override of a system entry: removing it hands control back to the system file.
-                    return std::fs::remove_file(&user_path)
-                        .map_err(|e| PlatformError::Failed(format!("Could not remove {}: {e}", user_path.display())));
-                }
-                self.write_user_file(name, &desktop_entry::set_hidden(&text, !enable))
-            }
-            Some(_) => Err(PlatformError::Failed(format!(
-                "{} is too large to be an autostart entry.",
-                user_path.display()
-            ))),
-            None => {
-                let system = self
-                    .system_dirs
-                    .iter()
-                    .find_map(|d| read_text(&d.join(name)).map(|t| desktop_entry::parse(&t)));
-                match (system, enable) {
-                    (None, _) => Err(PlatformError::NotFound(format!("{name} no longer exists."))),
-                    // Already on: nothing to write.
-                    (Some(_), true) => Ok(()),
-                    (Some(e), false) => {
-                        let label = if e.name.is_empty() { name.to_string() } else { e.name };
-                        self.write_user_file(name, &desktop_entry::override_hidden(&label))
-                    }
-                }
-            }
-        }
-    }
-
-    fn set_unit(&self, unit: &str, enable: bool) -> Result<(), PlatformError> {
-        let verb = if enable { "enable" } else { "disable" };
-        let out = self.tools.run("systemctl", &["--user", verb, "--", unit], SYSTEMCTL_TIMEOUT)?;
-        if out.ok {
-            Ok(())
-        } else {
-            Err(PlatformError::Failed(format!(
-                "systemctl could not {verb} {unit}: {}",
-                out.first_error_line()
-            )))
-        }
-    }
 }
 
 fn display_name(entry: &DesktopEntry, file: &str) -> String {
@@ -264,22 +153,6 @@ impl StartupItems for LinuxStartup {
         }
         out.extend(self.list_units());
         Ok(out)
-    }
-
-    fn set_state(&mut self, entry: &StartupEntry, state: StartupState) -> Result<(), PlatformError> {
-        let enable = match state {
-            StartupState::Enabled => true,
-            StartupState::Disabled => false,
-            StartupState::Delayed(_) => {
-                return Err(PlatformError::Unsupported(
-                    "Linux has no delayed start for login entries; turn the entry off or on.".into(),
-                ))
-            }
-        };
-        match Key::parse(&entry.id)? {
-            Key::UserFile(name) | Key::SystemFile(name) => self.set_file(&name, enable),
-            Key::Unit(unit) => self.set_unit(&unit, enable),
-        }
     }
 }
 
@@ -413,57 +286,6 @@ mod tests {
         assert_eq!(e.startup.list().unwrap(), vec![]);
     }
 
-    #[test]
-    fn turning_a_user_entry_off_and_on_edits_only_the_flag() {
-        let mut e = env();
-        w(&e.user, "mine.desktop", "[Desktop Entry]\nName=Mine\nExec=mine\nComment=keep me\n");
-        let entry = find(&e.startup.list().unwrap(), "autostart:mine.desktop").clone();
-        e.startup.set_state(&entry, StartupState::Disabled).unwrap();
-        let text = std::fs::read_to_string(e.user.join("mine.desktop")).unwrap();
-        assert!(text.contains("Hidden=true") && text.contains("Comment=keep me"), "{text}");
-        assert_eq!(
-            find(&e.startup.list().unwrap(), "autostart:mine.desktop").state,
-            StartupState::Disabled
-        );
-        e.startup.set_state(&entry, StartupState::Enabled).unwrap();
-        assert_eq!(
-            find(&e.startup.list().unwrap(), "autostart:mine.desktop").state,
-            StartupState::Enabled
-        );
-        assert!(!std::fs::read_dir(&e.user)
-            .unwrap()
-            .flatten()
-            .any(|f| f.file_name().to_string_lossy().contains("dyno-tmp")));
-    }
-
-    #[test]
-    fn a_system_entry_is_switched_by_a_user_override_and_the_system_file_is_untouched() {
-        let mut e = env();
-        let sys = "[Desktop Entry]\nName=Print applet\nExec=print-applet\n";
-        w(&e.system, "print.desktop", sys);
-        let entry = find(&e.startup.list().unwrap(), "autostart-system:print.desktop").clone();
-        e.startup.set_state(&entry, StartupState::Disabled).unwrap();
-        assert_eq!(std::fs::read_to_string(e.system.join("print.desktop")).unwrap(), sys);
-        let ov = std::fs::read_to_string(e.user.join("print.desktop")).unwrap();
-        assert!(ov.contains("Hidden=true") && ov.contains("Name=Print applet"), "{ov}");
-        assert_eq!(
-            find(&e.startup.list().unwrap(), "autostart-system:print.desktop").state,
-            StartupState::Disabled
-        );
-        e.startup.set_state(&entry, StartupState::Enabled).unwrap();
-        assert!(
-            !e.user.join("print.desktop").exists(),
-            "the override is removed, not left half-edited"
-        );
-        assert_eq!(
-            find(&e.startup.list().unwrap(), "autostart-system:print.desktop").state,
-            StartupState::Enabled
-        );
-        // Enabling what is already on writes nothing.
-        e.startup.set_state(&entry, StartupState::Enabled).unwrap();
-        assert!(!e.user.join("print.desktop").exists());
-    }
-
     fn unit_entry(unit: &str) -> StartupEntry {
         LinuxStartup::entry(
             format!("{UNIT_PREFIX}{unit}"),
@@ -472,100 +294,5 @@ mod tests {
             StartupLocation::LoginItem,
             true,
         )
-    }
-
-    #[test]
-    fn systemd_user_units_use_systemctl_and_report_failures() {
-        let mut e = env();
-        e.tools.answer("systemctl", ok(""));
-        let entry = unit_entry("syncthing.service");
-        e.startup.set_state(&entry, StartupState::Disabled).unwrap();
-        e.startup.set_state(&entry, StartupState::Enabled).unwrap();
-        assert_eq!(
-            e.tools.calls(),
-            [
-                "systemctl --user disable -- syncthing.service",
-                "systemctl --user enable -- syncthing.service"
-            ]
-        );
-        e.tools.answer(
-            "systemctl",
-            Ok(ToolOutput {
-                ok: false,
-                stdout: String::new(),
-                stderr: "Unit file x does not exist.\n".into(),
-            }),
-        );
-        assert!(
-            matches!(e.startup.set_state(&entry, StartupState::Disabled), Err(PlatformError::Failed(m)) if m.contains("does not exist"))
-        );
-        e.tools.answer(
-            "systemctl",
-            Err(PlatformError::Timeout("systemctl did not finish within 10 s.".into())),
-        );
-        assert!(matches!(
-            e.startup.set_state(&entry, StartupState::Disabled),
-            Err(PlatformError::Timeout(_))
-        ));
-    }
-
-    #[test]
-    fn hostile_ids_and_unsupported_states_are_refused_before_touching_anything() {
-        let mut e = env();
-        for id in [
-            "autostart:../../../etc/passwd.desktop",
-            "autostart:a/b.desktop",
-            "autostart:.hidden.desktop",
-            "autostart:.desktop",
-            "autostart:x.txt",
-            "autostart-system:/etc/x.desktop",
-            "systemd-user:--now.service",
-            "systemd-user:a b.service",
-            "systemd-user:x.timer",
-            "random",
-            "",
-        ] {
-            let entry = LinuxStartup::entry(id.into(), "x".into(), "x".into(), StartupLocation::UserStartupFolder, true);
-            assert!(
-                matches!(e.startup.set_state(&entry, StartupState::Disabled), Err(PlatformError::Failed(_))),
-                "{id}"
-            );
-        }
-        assert!(e.tools.calls().is_empty());
-        assert!(!e.user.exists());
-        let entry = LinuxStartup::entry(
-            "autostart:x.desktop".into(),
-            "x".into(),
-            "x".into(),
-            StartupLocation::UserStartupFolder,
-            true,
-        );
-        assert!(matches!(
-            e.startup.set_state(&entry, StartupState::Delayed(30)),
-            Err(PlatformError::Unsupported(_))
-        ));
-        assert!(
-            matches!(e.startup.set_state(&entry, StartupState::Disabled), Err(PlatformError::NotFound(_))),
-            "an entry that vanished"
-        );
-        assert!(!e.user.exists());
-    }
-
-    #[test]
-    fn oversized_files_are_not_rewritten() {
-        let mut e = env();
-        w(
-            &e.user,
-            "big.desktop",
-            &format!("[Desktop Entry]\nExec=x\n#{}\n", "a".repeat(MAX_ENTRY_BYTES)),
-        );
-        let entry = LinuxStartup::entry(
-            "autostart:big.desktop".into(),
-            "big".into(),
-            "x".into(),
-            StartupLocation::UserStartupFolder,
-            true,
-        );
-        assert!(matches!(e.startup.set_state(&entry, StartupState::Disabled), Err(PlatformError::Failed(m)) if m.contains("too large")));
     }
 }

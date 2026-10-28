@@ -17,9 +17,8 @@ use crate::report::WeeklyReport;
 use crate::rules::{ActiveAction, ProfileId, RuleSet};
 use crate::settings::Settings;
 use crate::snapshot::{SnapshotDiff, SnapshotInfo};
-use crate::startup::{StartupEntry, StartupState};
+use crate::startup::StartupEntry;
 use crate::time::Timestamp;
-use crate::tuning::TuningSuggestion;
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any incompatible change.
@@ -161,30 +160,8 @@ pub enum Request {
     },
     /// The health report.
     Health,
-    /// Tuning suggestions.
-    Tuning,
-    /// Apply a tuning suggestion.
-    ApplyTuning {
-        /// Its id.
-        id: String,
-    },
-    /// Revert a tuning suggestion.
-    RevertTuning {
-        /// Its id.
-        id: String,
-        /// Put the previous setting back even though something else changed it since Dyno applied it.
-        #[serde(default)]
-        force: bool,
-    },
     /// Startup entries.
     StartupEntries,
-    /// Change a startup entry.
-    SetStartupState {
-        /// The entry.
-        id: String,
-        /// The new state.
-        state: StartupState,
-    },
     /// The weekly report for the seven days ending `weeks_ago` weeks before now (0 = the last seven days; at most 52).
     WeeklyReport {
         /// How many weeks back the week ends.
@@ -592,8 +569,6 @@ pub enum TimelineEventKind {
     Release,
     /// A cleanup ran.
     Cleanup,
-    /// A tuning change.
-    Tuning,
     /// An alert.
     Alert,
     /// The machine started.
@@ -727,8 +702,6 @@ pub enum Reply {
     SizeTree(Box<SizeNode>),
     /// The health report.
     Health(Box<HealthReport>),
-    /// Tuning suggestions.
-    Tuning(Vec<TuningSuggestion>),
     /// Startup entries.
     Startup(Vec<StartupEntry>),
     /// The weekly report.
@@ -869,7 +842,6 @@ impl Reply {
             Reply::Quarantines(x) => v(x),
             Reply::SizeTree(x) => v(x),
             Reply::Health(x) => v(x),
-            Reply::Tuning(x) => v(x),
             Reply::Startup(x) => v(x),
             Reply::Report(x) => v(x),
             Reply::Alerts(x) => v(x),
@@ -1010,20 +982,6 @@ mod tests {
     }
 
     #[test]
-    fn a_revert_without_force_does_not_overwrite_a_changed_setting() {
-        let r: Request = serde_json::from_str(r#"{"revertTuning":{"id":"powerPlan"}}"#).unwrap();
-        assert_eq!(
-            r,
-            Request::RevertTuning {
-                id: "powerPlan".into(),
-                force: false
-            }
-        );
-        let forced: Request = serde_json::from_str(r#"{"revertTuning":{"id":"x","force":true}}"#).unwrap();
-        assert!(matches!(forced, Request::RevertTuning { force: true, .. }));
-    }
-
-    #[test]
     fn requests_have_the_json_shape_of_api_types() {
         let j = serde_json::to_value(Request::Act {
             target: ProcessRef {
@@ -1066,14 +1024,6 @@ mod tests {
                 end: None
             }
         );
-        let r: Request = serde_json::from_value(serde_json::json!({"setStartupState": {"id": "x", "state": {"delayed": 30}}})).unwrap();
-        assert!(matches!(
-            r,
-            Request::SetStartupState {
-                state: StartupState::Delayed(30),
-                ..
-            }
-        ));
     }
 
     #[test]
@@ -1128,7 +1078,6 @@ mod tests {
             Reply::Anomalies(vec![]),
             Reply::Categories(vec![]),
             Reply::Quarantines(vec![]),
-            Reply::Tuning(vec![]),
             Reply::Startup(vec![]),
             Reply::Alerts(vec![]),
             Reply::Plugins(vec![]),
@@ -1172,7 +1121,7 @@ mod tests {
             Reply::Url("https://example.com/".into()),
             Reply::RecorderSnapshots(vec![]),
             Reply::Helper(Box::new(crate::helper_wire::assess(
-                crate::helper::TuningHost::Linux,
+                crate::helper::HelperHost::Linux,
                 Ok(()),
                 crate::helper_wire::Probe::Absent,
                 "1",
@@ -1212,7 +1161,7 @@ mod tests {
             assert_eq!(serde_json::to_value(&r).unwrap(), name);
             assert_eq!(serde_json::from_value::<Request>(serde_json::json!(name)).unwrap(), r);
         }
-        let status = crate::helper_wire::assess(crate::helper::TuningHost::Macos, Ok(()), crate::helper_wire::Probe::Absent, "1");
+        let status = crate::helper_wire::assess(crate::helper::HelperHost::Macos, Ok(()), crate::helper_wire::Probe::Absent, "1");
         let j = Reply::Helper(Box::new(status)).into_json().unwrap();
         assert_eq!(j["state"], "notInstalled");
         assert_eq!(j["error"], serde_json::Value::Null);

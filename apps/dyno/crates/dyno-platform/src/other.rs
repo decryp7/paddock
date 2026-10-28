@@ -30,9 +30,6 @@ impl StartupItems for Unsupported {
     fn list(&mut self) -> Result<Vec<StartupEntry>, PlatformError> {
         Err(PlatformError::Unsupported(NOT_YET.into()))
     }
-    fn set_state(&mut self, _entry: &StartupEntry, _state: StartupState) -> Result<(), PlatformError> {
-        Err(PlatformError::Unsupported(NOT_YET.into()))
-    }
 }
 
 impl FactsSource for Unsupported {

@@ -10,7 +10,7 @@ use crate::agent::{lock, now, Shared};
 use dyno_core::activity::{ActivityKind, UndoRecord};
 use dyno_core::cleanup::{CleanupOutcome, DeleteMode};
 use dyno_core::extras::boot::{self, BootReport, BootRow, SettleTracker};
-use dyno_core::extras::changes::{diff_software, diff_startup, from_activity, timeline, Change, ChangesQuery};
+use dyno_core::extras::changes::{diff_software, diff_startup, timeline, Change, ChangesQuery};
 use dyno_core::extras::files::{FinderQuery, FinderResult};
 use dyno_core::extras::gpu::GpuReport;
 use dyno_core::extras::software::{render_report, validate_destination, InventoryFormat, SoftwareInventory, SoftwareItem};
@@ -162,10 +162,7 @@ fn changes(shared: &Shared, query: ChangesQuery) -> Result<dyno_core::extras::ch
     let t = now();
     let (from, to) = query.window(t);
     let core = lock(&shared.core);
-    let mut all = core.store.changes(from, to).map_err(internal)?;
-    let activity = core.store.activity(500).map_err(internal)?;
-    let entries: Vec<_> = activity.into_iter().map(|(e, _, _)| e).collect();
-    all.extend(from_activity(&entries));
+    let all = core.store.changes(from, to).map_err(internal)?;
     let since = core
         .store
         .meta(KEY_SINCE)

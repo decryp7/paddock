@@ -4,10 +4,10 @@
 //! except by `dyno-helper install` on the user's click.
 
 use crate::paths::{join_windows, HelperPaths, WindowsRoots, LINUX_UNIT, MAC_LABEL, WINDOWS_SERVICE};
-use dyno_core::helper::TuningHost;
+use dyno_core::helper::HelperHost;
 use dyno_core::helper_wire::HelperUser;
 use dyno_ipc::Token;
-use dyno_platform::tuning::{SystemRunner, Tool, ToolRunner};
+use dyno_platform::runner::{SystemRunner, Tool, ToolRunner};
 use std::path::{Path, PathBuf};
 
 /// One thing the installer does.
@@ -210,7 +210,7 @@ pub fn install_plan(paths: &HelperPaths, windows: &WindowsRoots, params: &Instal
         return Err("The agent program must be given as a full path.".into());
     }
     match (&params.user, paths.host) {
-        (HelperUser::Uid(_), TuningHost::Windows) | (HelperUser::Sid(_), TuningHost::Macos | TuningHost::Linux) => {
+        (HelperUser::Uid(_), HelperHost::Windows) | (HelperUser::Sid(_), HelperHost::Macos | HelperHost::Linux) => {
             return Err("The account does not belong to this system.".into())
         }
         _ => {}
@@ -224,7 +224,7 @@ pub fn install_plan(paths: &HelperPaths, windows: &WindowsRoots, params: &Instal
     let parent = |p: &Path| p.parent().map(Path::to_path_buf).unwrap_or_default();
     let mut steps = Vec::new();
     match paths.host {
-        TuningHost::Macos => {
+        HelperHost::Macos => {
             let registration = paths.registration.clone().unwrap_or_default();
             let target = format!("system/{MAC_LABEL}");
             steps.push(run_if_present("/bin/launchctl", &["bootout", &target]));
@@ -257,7 +257,7 @@ pub fn install_plan(paths: &HelperPaths, windows: &WindowsRoots, params: &Instal
             steps.push(run("/bin/launchctl", &["bootstrap", "system", &registration.to_string_lossy()]));
             steps.push(run_if_present("/bin/launchctl", &["kickstart", "-k", &target]));
         }
-        TuningHost::Linux => {
+        HelperHost::Linux => {
             let registration = paths.registration.clone().unwrap_or_default();
             steps.push(run_if_present("/usr/bin/systemctl", &["stop", LINUX_UNIT]));
             steps.push(Step::CreateDir {
@@ -290,7 +290,7 @@ pub fn install_plan(paths: &HelperPaths, windows: &WindowsRoots, params: &Instal
             steps.push(run("/usr/bin/systemctl", &["enable", LINUX_UNIT]));
             steps.push(run("/usr/bin/systemctl", &["restart", LINUX_UNIT]));
         }
-        TuningHost::Windows => {
+        HelperHost::Windows => {
             let HelperUser::Sid(sid) = &params.user else {
                 return Err("The account does not belong to this system.".into());
             };
@@ -379,13 +379,13 @@ pub fn install_plan(paths: &HelperPaths, windows: &WindowsRoots, params: &Instal
 pub fn uninstall_plan(paths: &HelperPaths, windows: &WindowsRoots) -> Vec<Step> {
     let mut steps = Vec::new();
     match paths.host {
-        TuningHost::Macos => {
+        HelperHost::Macos => {
             steps.push(Step::RemoveTree(paths.data_dir.clone()));
             steps.push(Step::RemoveFile(paths.registration.clone().unwrap_or_default()));
             steps.push(Step::RemoveFile(paths.binary.clone()));
             steps.push(run_if_present("/bin/launchctl", &["bootout", &format!("system/{MAC_LABEL}")]));
         }
-        TuningHost::Linux => {
+        HelperHost::Linux => {
             steps.push(run_if_present("/usr/bin/systemctl", &["disable", LINUX_UNIT]));
             steps.push(Step::RemoveFile(paths.registration.clone().unwrap_or_default()));
             steps.push(Step::RemoveTree(paths.data_dir.clone()));
@@ -393,7 +393,7 @@ pub fn uninstall_plan(paths: &HelperPaths, windows: &WindowsRoots) -> Vec<Step> 
             steps.push(run_if_present("/usr/bin/systemctl", &["daemon-reload"]));
             steps.push(run_if_present("/usr/bin/systemctl", &["stop", LINUX_UNIT]));
         }
-        TuningHost::Windows => {
+        HelperHost::Windows => {
             let sys32 = join_windows(&windows.system_root, "System32");
             let dir = windows_parent(&paths.binary);
             steps.push(Step::RemoveTree(paths.data_dir.clone()));
@@ -539,7 +539,7 @@ impl Machine for SystemMachine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dyno_platform::tuning::ToolOutput;
+    use dyno_platform::runner::ToolOutput;
     use std::sync::{Arc, Mutex};
 
     fn roots() -> WindowsRoots {
@@ -579,7 +579,7 @@ mod tests {
 
     #[test]
     fn the_launchd_plist_runs_the_installed_copy_and_restarts_it_after_a_crash() {
-        let p = HelperPaths::for_host(TuningHost::Macos, &roots());
+        let p = HelperPaths::for_host(HelperHost::Macos, &roots());
         let plist = launchd_plist(&p);
         assert!(plist.contains("<string>net.decryptology.dyno.helper</string>"));
         assert!(
@@ -596,7 +596,7 @@ mod tests {
 
     #[test]
     fn the_systemd_unit_is_a_restarting_hardened_service_with_its_runtime_folder() {
-        let unit = systemd_unit(&HelperPaths::for_host(TuningHost::Linux, &roots()));
+        let unit = systemd_unit(&HelperPaths::for_host(HelperHost::Linux, &roots()));
         for line in [
             "ExecStart=/usr/local/libexec/dyno-helper serve",
             "Restart=on-failure",
@@ -613,7 +613,7 @@ mod tests {
 
     #[test]
     fn the_mac_plan_copies_first_registers_last_and_gives_the_token_to_the_user() {
-        let p = HelperPaths::for_host(TuningHost::Macos, &roots());
+        let p = HelperPaths::for_host(HelperHost::Macos, &roots());
         let plan = install_plan(&p, &roots(), &params(HelperUser::Uid(501))).unwrap();
         assert!(
             matches!(
@@ -661,7 +661,7 @@ mod tests {
 
     #[test]
     fn the_linux_plan_installs_a_unit_enables_and_restarts_it() {
-        let p = HelperPaths::for_host(TuningHost::Linux, &roots());
+        let p = HelperPaths::for_host(HelperHost::Linux, &roots());
         let plan = install_plan(&p, &roots(), &params(HelperUser::Uid(1000))).unwrap();
         assert_eq!(
             programs(&plan),
@@ -678,7 +678,7 @@ mod tests {
 
     #[test]
     fn the_windows_plan_locks_the_data_folder_and_creates_a_localsystem_service() {
-        let p = HelperPaths::for_host(TuningHost::Windows, &roots());
+        let p = HelperPaths::for_host(HelperHost::Windows, &roots());
         let sid = "S-1-5-21-1-2-3-1001";
         let plan = install_plan(&p, &roots(), &params(HelperUser::Sid(sid.into()))).unwrap();
         let progs = programs(&plan);
@@ -718,8 +718,8 @@ mod tests {
 
     #[test]
     fn a_plan_for_the_wrong_kind_of_account_or_a_relative_agent_is_refused() {
-        let mac = HelperPaths::for_host(TuningHost::Macos, &roots());
-        let win = HelperPaths::for_host(TuningHost::Windows, &roots());
+        let mac = HelperPaths::for_host(HelperHost::Macos, &roots());
+        let win = HelperPaths::for_host(HelperHost::Windows, &roots());
         assert!(install_plan(&mac, &roots(), &params(HelperUser::Sid("S-1-5-21-1".into()))).is_err());
         assert!(install_plan(&win, &roots(), &params(HelperUser::Uid(5))).is_err());
         let relative = InstallParams {
@@ -731,7 +731,7 @@ mod tests {
 
     #[test]
     fn removal_takes_the_data_and_the_registration_and_stops_the_helper_last() {
-        for host in [TuningHost::Macos, TuningHost::Linux, TuningHost::Windows] {
+        for host in [HelperHost::Macos, HelperHost::Linux, HelperHost::Windows] {
             let p = HelperPaths::for_host(host, &roots());
             let plan = uninstall_plan(&p, &roots());
             assert!(plan.contains(&Step::RemoveTree(p.data_dir.clone())), "{host:?}");
@@ -751,7 +751,7 @@ mod tests {
                 "removal never fails on a missing piece"
             );
         }
-        let win = uninstall_plan(&HelperPaths::for_host(TuningHost::Windows, &roots()), &roots());
+        let win = uninstall_plan(&HelperPaths::for_host(HelperHost::Windows, &roots()), &roots());
         assert!(
             matches!(&win[2], Step::Deferred(t) if t.args[2].contains("del /f /q \"C:\\Program Files\\Dyno\\Helper\\dyno-helper.exe\""))
         );

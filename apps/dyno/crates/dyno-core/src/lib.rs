@@ -50,7 +50,6 @@ pub mod throttle;
 pub mod time;
 pub mod toolpath;
 pub mod tray;
-pub mod tuning;
 pub mod units;
 pub mod unusual;
 pub mod watch;

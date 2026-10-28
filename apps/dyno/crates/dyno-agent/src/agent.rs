@@ -4,7 +4,7 @@
 
 use crate::files;
 use crate::helper_centre::HelperCentre;
-use crate::helper_link::{ElevatedStartup, ElevatedTraffic, ElevatedTuning, HelperLink, IpcHelperLink};
+use crate::helper_link::{ElevatedTraffic, HelperLink, IpcHelperLink};
 use crate::paths::Dirs;
 use crate::rollup::HistoryWriter;
 use crate::store::Store;
@@ -182,8 +182,6 @@ pub struct Ports {
     pub activity: Mutex<Box<dyn UserActivity>>,
     /// Startup entries.
     pub startup: Mutex<Box<dyn StartupItems>>,
-    /// The few system settings tuning may change (observe-only until a click).
-    pub tuning: Mutex<Box<dyn dyno_core::ports::TuningSystem>>,
     /// The network interfaces and Wi-Fi network (network change events).
     pub links: Mutex<Box<dyn dyno_core::ports::NetworkLinks>>,
     /// The privileged helper's lifecycle: its state, and installing it on a click (WP-01, ADR 0016).
@@ -345,7 +343,7 @@ impl Shared {
         }
         let unusual = crate::unusual::UnusualCentre::load(&core.store);
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-        // One link to the helper (if it is installed) serves the tuning, startup and traffic wrappers and the lifecycle.
+        // One link to the helper (if it is installed) serves the traffic wrapper and the lifecycle.
         // Only the agent of the user's own data folder talks to the real helper or opens the real permission prompt; an agent
         // started on another folder (every test) gets a link to nothing and a lifecycle that cannot install (the suite lesson
         // about production names: names derive from the data folder).
@@ -387,8 +385,7 @@ impl Shared {
                 details: Mutex::new(details),
                 facts: Mutex::new(facts),
                 activity: Mutex::new(activity),
-                startup: Mutex::new(Box::new(ElevatedStartup::new(startup, link.clone()))),
-                tuning: Mutex::new(Box::new(ElevatedTuning::new(dyno_platform::tuning::os_tuner(), link.clone()))),
+                startup: Mutex::new(startup),
                 links: Mutex::new(links),
                 helper: Mutex::new(Box::new(helper_centre)),
             },

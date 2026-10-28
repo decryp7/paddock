@@ -164,13 +164,13 @@ pub fn windows_roots() -> dyno_core::helper_paths::WindowsRoots {
 }
 
 /// The system Dyno runs on, as the tuning code names it.
-pub fn this_host() -> dyno_core::helper::TuningHost {
+pub fn this_host() -> dyno_core::helper::HelperHost {
     if cfg!(windows) {
-        dyno_core::helper::TuningHost::Windows
+        dyno_core::helper::HelperHost::Windows
     } else if cfg!(target_os = "macos") {
-        dyno_core::helper::TuningHost::Macos
+        dyno_core::helper::HelperHost::Macos
     } else {
-        dyno_core::helper::TuningHost::Linux
+        dyno_core::helper::HelperHost::Linux
     }
 }
 

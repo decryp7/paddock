@@ -1,14 +1,12 @@
-//! The agent's side of the privileged helper (WP-01, ADR 0016): the link to the daemon, and the three wrappers that
-//! route what only the helper can do (administrator tuning, all-users startup entries, Windows traffic) through it.
+//! The agent's side of the privileged helper (WP-01, ADR 0016): the link to the daemon, and the wrapper that
+//! route what only the helper can do (Windows traffic) through it.
 //!
 //! Nothing here installs anything. The link only talks to a helper that is already there; installing is
 //! [`crate::helper_centre`], started by a click. A missing or silent helper is an ordinary error with the next step.
 
-use dyno_core::helper::{HelperAction, MachineStartup, TuningHost};
 use dyno_core::helper_wire::{platform_error, AuditEntry, HelperInfo, HelperMessage, HelperReply, HelperRequest, Probe, HELPER_MISSING};
 use dyno_core::network_traffic::TrafficCounter;
-use dyno_core::ports::{PlatformError, ProcessTraffic, StartupItems, TuningSystem};
-use dyno_core::startup::{StartupEntry, StartupState};
+use dyno_core::ports::{PlatformError, ProcessTraffic};
 use dyno_ipc::{Client, IpcError, Peer, PeerOptions};
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -17,7 +15,7 @@ use std::time::Duration;
 
 /// How long one call to the helper may take (a Defender change over many folders is the slowest).
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(120);
-/// How long a "who are you" probe may take (the Settings page and the tuning list wait for it).
+/// How long a "who are you" probe may take (the Settings page waits for it).
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 /// The most audit entries the app shows.
 const RECENT: u32 = 10;
@@ -49,10 +47,6 @@ impl From<LinkError> for PlatformError {
 pub trait HelperLink: Send + Sync {
     /// Whether the helper answers, who it is and what it did lately.
     fn probe(&self) -> Probe;
-    /// Makes an administrator change.
-    fn apply(&self, action: &HelperAction) -> Result<(), PlatformError>;
-    /// Reads a setting only an administrator can read.
-    fn read(&self, action: &HelperAction) -> Result<String, PlatformError>;
     /// Per-program traffic counters.
     fn traffic(&self) -> Result<Vec<TrafficCounter>, PlatformError>;
     /// Removes the helper.
@@ -133,19 +127,6 @@ impl HelperLink for IpcHelperLink {
         Probe::Answered(info, recent)
     }
 
-    fn apply(&self, action: &HelperAction) -> Result<(), PlatformError> {
-        self.expect(HelperRequest::Apply(action.clone()), |r| {
-            matches!(r, HelperReply::Outcome(_)).then_some(())
-        })
-    }
-
-    fn read(&self, action: &HelperAction) -> Result<String, PlatformError> {
-        self.expect(HelperRequest::Read(action.clone()), |r| match r {
-            HelperReply::Value(v) => Some(v),
-            _ => None,
-        })
-    }
-
     fn traffic(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
         self.expect(HelperRequest::Traffic, |r| match r {
             HelperReply::Counters(c) => Some(c),
@@ -155,95 +136,6 @@ impl HelperLink for IpcHelperLink {
 
     fn uninstall(&self) -> Result<(), PlatformError> {
         self.expect(HelperRequest::Uninstall, |r| matches!(r, HelperReply::Bye).then_some(()))
-    }
-}
-
-/// Tuning with the helper behind the changes that need administrator rights. Everything else is the inner system.
-pub struct ElevatedTuning<T: TuningSystem> {
-    inner: T,
-    link: Arc<dyn HelperLink>,
-}
-
-impl<T: TuningSystem> ElevatedTuning<T> {
-    /// `inner` for what needs no rights, `link` for what does.
-    pub fn new(inner: T, link: Arc<dyn HelperLink>) -> Self {
-        ElevatedTuning { inner, link }
-    }
-}
-
-impl<T: TuningSystem> TuningSystem for ElevatedTuning<T> {
-    fn host(&self) -> TuningHost {
-        self.inner.host()
-    }
-
-    fn read(&mut self, action: &HelperAction) -> Result<String, PlatformError> {
-        match self.inner.read(action) {
-            Err(e) if action.needs_admin_on(self.inner.host()) => {
-                // Some settings (a Defender exclusion) only an administrator can read. A missing helper keeps the
-                // inner answer: the page then shows "cannot be read here" instead of a prompt to install.
-                action.validate().map_err(PlatformError::Failed)?;
-                self.link.read(action).map_err(|h| {
-                    if h == PlatformError::AccessDenied(HELPER_MISSING.into()) {
-                        e
-                    } else {
-                        h
-                    }
-                })
-            }
-            other => other,
-        }
-    }
-
-    fn apply(&mut self, action: &HelperAction) -> Result<(), PlatformError> {
-        if action.needs_admin_on(self.inner.host()) {
-            action.validate().map_err(PlatformError::Failed)?;
-            self.link.apply(action)
-        } else {
-            self.inner.apply(action)
-        }
-    }
-}
-
-/// Startup entries with the helper behind the all-users ones.
-pub struct ElevatedStartup {
-    inner: Box<dyn StartupItems>,
-    link: Arc<dyn HelperLink>,
-}
-
-impl ElevatedStartup {
-    /// `inner` for the user's own entries, `link` for the all-users ones.
-    pub fn new(inner: Box<dyn StartupItems>, link: Arc<dyn HelperLink>) -> Self {
-        ElevatedStartup { inner, link }
-    }
-}
-
-impl StartupItems for ElevatedStartup {
-    fn list(&mut self) -> Result<Vec<StartupEntry>, PlatformError> {
-        self.inner.list()
-    }
-
-    fn set_state(&mut self, entry: &StartupEntry, state: StartupState) -> Result<(), PlatformError> {
-        if !entry.location.needs_admin() {
-            return self.inner.set_state(entry, state);
-        }
-        let location = MachineStartup::of(&entry.location)
-            .ok_or_else(|| PlatformError::Unsupported("Dyno cannot change that kind of startup item.".into()))?;
-        let enabled = match state {
-            StartupState::Enabled => true,
-            StartupState::Disabled => false,
-            StartupState::Delayed(_) => {
-                return Err(PlatformError::Unsupported(
-                    "An item that starts for every user can be turned on or off, not delayed.".into(),
-                ))
-            }
-        };
-        let action = HelperAction::SetMachineStartupEnabled {
-            location,
-            name: entry.name.clone(),
-            enabled,
-        };
-        action.validate().map_err(PlatformError::Failed)?;
-        self.link.apply(&action)
     }
 }
 
@@ -275,38 +167,17 @@ impl<T: ProcessTraffic> ProcessTraffic for ElevatedTraffic<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dyno_core::helper::{SleepSource, BALANCED_SCHEME};
-    use dyno_core::startup::StartupLocation;
-    use dyno_platform::tuning::FakeTuning;
-    use std::sync::Mutex;
 
     /// Records what reached the helper and answers from a script.
     #[derive(Default)]
     struct FakeLink {
-        applied: Mutex<Vec<HelperAction>>,
-        reads: Mutex<Vec<HelperAction>>,
         missing: bool,
-        value: Option<String>,
         counters: Vec<TrafficCounter>,
     }
 
     impl HelperLink for FakeLink {
         fn probe(&self) -> Probe {
             Probe::Absent
-        }
-        fn apply(&self, a: &HelperAction) -> Result<(), PlatformError> {
-            if self.missing {
-                return Err(LinkError::Missing.into());
-            }
-            self.applied.lock().unwrap().push(a.clone());
-            Ok(())
-        }
-        fn read(&self, a: &HelperAction) -> Result<String, PlatformError> {
-            self.reads.lock().unwrap().push(a.clone());
-            if self.missing {
-                return Err(LinkError::Missing.into());
-            }
-            self.value.clone().ok_or_else(|| PlatformError::Failed("no".into()))
         }
         fn traffic(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
             if self.missing {
@@ -318,138 +189,6 @@ mod tests {
         fn uninstall(&self) -> Result<(), PlatformError> {
             Ok(())
         }
-    }
-
-    fn defender(excluded: bool) -> HelperAction {
-        HelperAction::SetDefenderExcluded {
-            paths: vec!["C:\\Users\\me\\src".into()],
-            excluded,
-        }
-    }
-
-    #[test]
-    fn administrator_changes_go_to_the_helper_and_the_rest_stays_local() {
-        let link = Arc::new(FakeLink::default());
-        let fake = FakeTuning::new(TuningHost::Windows);
-        let mut t = ElevatedTuning::new(fake.clone(), link.clone());
-        t.apply(&HelperAction::SetHibernate(false)).unwrap();
-        t.apply(&defender(true)).unwrap();
-        t.apply(&HelperAction::SetPowerScheme(BALANCED_SCHEME.into())).unwrap();
-        assert_eq!(link.applied.lock().unwrap().len(), 2);
-        assert_eq!(fake.applied(), [HelperAction::SetPowerScheme(BALANCED_SCHEME.into())]);
-        // macOS sleep is an administrator change there and not on Windows.
-        let sleep = HelperAction::SetSleepMinutes {
-            source: SleepSource::Ac,
-            minutes: 5,
-        };
-        let mac_link = Arc::new(FakeLink::default());
-        let mut mac = ElevatedTuning::new(FakeTuning::new(TuningHost::Macos), mac_link.clone());
-        mac.apply(&sleep).unwrap();
-        assert_eq!(mac_link.applied.lock().unwrap().len(), 1);
-        assert_eq!(t.host(), TuningHost::Windows);
-    }
-
-    #[test]
-    fn the_agent_validates_before_asking_and_a_missing_helper_says_how_to_get_it() {
-        let link = Arc::new(FakeLink {
-            missing: true,
-            ..FakeLink::default()
-        });
-        let mut t = ElevatedTuning::new(FakeTuning::new(TuningHost::Windows), link.clone());
-        let bad = HelperAction::SetDefenderExcluded {
-            paths: vec!["C:\\Windows\\System32".into()],
-            excluded: true,
-        };
-        assert!(matches!(t.apply(&bad), Err(PlatformError::Failed(_))));
-        let err = t.apply(&HelperAction::SetHibernate(true)).unwrap_err();
-        assert!(
-            matches!(&err, PlatformError::AccessDenied(m) if m.contains("Settings > Helper")),
-            "{err:?}"
-        );
-    }
-
-    #[test]
-    fn a_setting_the_system_can_read_is_not_asked_of_the_helper_but_one_it_cannot_is() {
-        let link = Arc::new(FakeLink {
-            value: Some("excluded".into()),
-            ..FakeLink::default()
-        });
-        let fake = FakeTuning::new(TuningHost::Windows);
-        fake.set_value(&HelperAction::SetHibernate(true), "on");
-        let mut t = ElevatedTuning::new(fake, link.clone());
-        assert_eq!(t.read(&HelperAction::SetHibernate(true)).unwrap(), "on");
-        assert!(link.reads.lock().unwrap().is_empty());
-        assert_eq!(t.read(&defender(true)).unwrap(), "excluded");
-        assert_eq!(link.reads.lock().unwrap().len(), 1);
-        // Without a helper the inner answer is kept (no "install it" noise for a read).
-        let gone = Arc::new(FakeLink {
-            missing: true,
-            ..FakeLink::default()
-        });
-        let mut t = ElevatedTuning::new(FakeTuning::new(TuningHost::Windows), gone);
-        assert!(matches!(t.read(&defender(true)), Err(PlatformError::Unsupported(_))));
-    }
-
-    fn entry(location: StartupLocation, name: &str) -> StartupEntry {
-        StartupEntry {
-            id: format!("x:{name}"),
-            name: name.into(),
-            command: "c".into(),
-            exe: None,
-            location,
-            state: StartupState::Enabled,
-            publisher: None,
-            impact: dyno_core::startup::StartupImpact {
-                cpu_secs: 0.0,
-                disk_bytes: 0,
-                rating: dyno_core::startup::ImpactRating::NotMeasured,
-            },
-        }
-    }
-
-    struct Inner(Arc<Mutex<Vec<String>>>);
-    impl StartupItems for Inner {
-        fn list(&mut self) -> Result<Vec<StartupEntry>, PlatformError> {
-            Ok(vec![])
-        }
-        fn set_state(&mut self, e: &StartupEntry, _: StartupState) -> Result<(), PlatformError> {
-            self.0.lock().unwrap().push(e.name.clone());
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn all_users_startup_entries_are_changed_by_the_helper_and_the_users_own_locally() {
-        let link = Arc::new(FakeLink::default());
-        let local = Arc::new(Mutex::new(Vec::new()));
-        let mut s = ElevatedStartup::new(Box::new(Inner(local.clone())), link.clone());
-        s.set_state(&entry(StartupLocation::UserRunKey, "Mine"), StartupState::Disabled)
-            .unwrap();
-        assert_eq!(*local.lock().unwrap(), ["Mine"]);
-        s.set_state(&entry(StartupLocation::MachineRunKey, "Updater"), StartupState::Disabled)
-            .unwrap();
-        s.set_state(&entry(StartupLocation::SystemLaunchAgent, "com.example.up"), StartupState::Enabled)
-            .unwrap();
-        assert_eq!(
-            *link.applied.lock().unwrap(),
-            [
-                HelperAction::SetMachineStartupEnabled {
-                    location: MachineStartup::RunKey,
-                    name: "Updater".into(),
-                    enabled: false
-                },
-                HelperAction::SetMachineStartupEnabled {
-                    location: MachineStartup::LaunchAgent,
-                    name: "com.example.up".into(),
-                    enabled: true
-                }
-            ]
-        );
-        let delayed = s.set_state(&entry(StartupLocation::MachineRunKey, "U"), StartupState::Delayed(30));
-        assert!(matches!(delayed, Err(PlatformError::Unsupported(_))));
-        let bad = s.set_state(&entry(StartupLocation::SystemLaunchAgent, "a b"), StartupState::Disabled);
-        assert!(matches!(bad, Err(PlatformError::Failed(_))));
-        assert_eq!(s.list().unwrap().len(), 0);
     }
 
     struct Needs(PlatformError);

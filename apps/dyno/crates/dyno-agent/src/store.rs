@@ -88,7 +88,6 @@ fn kind_text(k: TimelineEventKind) -> &'static str {
         TimelineEventKind::Cap => "cap",
         TimelineEventKind::Release => "release",
         TimelineEventKind::Cleanup => "cleanup",
-        TimelineEventKind::Tuning => "tuning",
         TimelineEventKind::Alert => "alert",
         TimelineEventKind::Boot => "boot",
         TimelineEventKind::Network => "network",
@@ -101,7 +100,6 @@ fn kind_from(s: &str) -> Option<TimelineEventKind> {
         "cap" => TimelineEventKind::Cap,
         "release" => TimelineEventKind::Release,
         "cleanup" => TimelineEventKind::Cleanup,
-        "tuning" => TimelineEventKind::Tuning,
         "alert" => TimelineEventKind::Alert,
         "boot" => TimelineEventKind::Boot,
         "network" => TimelineEventKind::Network,
@@ -604,7 +602,7 @@ mod tests {
         };
         s.put_event(&e).unwrap();
         assert_eq!(s.events(Timestamp(0), Timestamp(10)).unwrap(), vec![e]);
-        for k in ["throttle", "cap", "release", "cleanup", "tuning", "alert", "boot"] {
+        for k in ["throttle", "cap", "release", "cleanup", "alert", "boot"] {
             assert_eq!(kind_from(k).map(kind_text), Some(k));
         }
         assert!(kind_from("x").is_none());
@@ -651,13 +649,8 @@ mod tests {
     #[test]
     fn activity_alerts_and_snapshots() {
         let s = Store::memory().unwrap();
-        let undo = UndoRecord::Tuning {
-            id: "powerPlan".into(),
-            apply: dyno_core::helper::HelperAction::SetVisualEffects(2),
-            revert: dyno_core::helper::HelperAction::SetVisualEffects(0),
-            after: "2".into(),
-        };
-        s.put_activity(&entry("a", 1, ActivityKind::Tuning, None), &undo).unwrap();
+        let undo = UndoRecord::None;
+        s.put_activity(&entry("a", 1, ActivityKind::Rule, None), &undo).unwrap();
         s.put_activity(&entry("b", 2, ActivityKind::Cleanup, Some(500)), &UndoRecord::None)
             .unwrap();
         let all = s.activity(10).unwrap();

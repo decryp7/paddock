@@ -21,24 +21,13 @@ pub enum StartupLocation {
     ScheduledTask,
     /// `~/Library/LaunchAgents` (this user).
     UserLaunchAgent,
-    /// `/Library/LaunchAgents` (every user; needs the helper).
+    /// `/Library/LaunchAgents` (every user).
     SystemLaunchAgent,
     /// A macOS login item.
     LoginItem,
 }
 
 impl StartupLocation {
-    /// Whether changing it needs administrator rights (and so goes through the privileged helper).
-    pub fn needs_admin(&self) -> bool {
-        matches!(
-            self,
-            StartupLocation::MachineRunKey
-                | StartupLocation::CommonStartupFolder
-                | StartupLocation::ScheduledTask
-                | StartupLocation::SystemLaunchAgent
-        )
-    }
-
     /// The user-facing name.
     pub fn label(&self) -> &'static str {
         match self {
@@ -62,8 +51,6 @@ pub enum StartupState {
     Enabled,
     /// Does not run.
     Disabled,
-    /// Disabled at the OS level; Dyno starts it this many seconds after login.
-    Delayed(u32),
 }
 
 /// Measured startup cost.
@@ -258,27 +245,6 @@ pub fn overview(entries: Vec<StartupEntry>, filter: StartupFilter, os: crate::cl
     }
 }
 
-/// The most seconds a delayed start may wait.
-pub const MAX_DELAY_SECS: u32 = 600;
-
-/// Checks a requested startup state change.
-pub fn validate_change(entry: &StartupEntry, to: StartupState) -> Result<(), String> {
-    match to {
-        StartupState::Delayed(s) if s == 0 || s > MAX_DELAY_SECS => Err(format!("A delay is between 1 and {MAX_DELAY_SECS} seconds.")),
-        _ if entry.state == to => Err(format!("{} is already {}.", entry.name, state_label(to))),
-        _ => Ok(()),
-    }
-}
-
-/// The user-facing word for a state.
-pub fn state_label(s: StartupState) -> &'static str {
-    match s {
-        StartupState::Enabled => "enabled",
-        StartupState::Disabled => "disabled",
-        StartupState::Delayed(_) => "delayed",
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod fixtures {
     use super::*;
@@ -343,21 +309,7 @@ mod tests {
             StartupLocation::SystemLaunchAgent,
             StartupLocation::LoginItem,
         ];
-        let admin: Vec<bool> = all.iter().map(StartupLocation::needs_admin).collect();
-        assert_eq!(admin, [false, true, false, true, true, false, true, false]);
         assert!(all.iter().all(|l| !l.label().is_empty()));
-    }
-
-    #[test]
-    fn changes_are_checked() {
-        let e = entry("Slack", "C:\\s.exe", ImpactRating::Low);
-        assert!(validate_change(&e, StartupState::Enabled).is_err());
-        assert_eq!(validate_change(&e, StartupState::Disabled), Ok(()));
-        assert_eq!(validate_change(&e, StartupState::Delayed(30)), Ok(()));
-        assert!(validate_change(&e, StartupState::Delayed(0)).is_err());
-        assert!(validate_change(&e, StartupState::Delayed(MAX_DELAY_SECS + 1)).is_err());
-        assert_eq!(state_label(StartupState::Disabled), "disabled");
-        assert_eq!(state_label(StartupState::Delayed(3)), "delayed");
     }
 }
 

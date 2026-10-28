@@ -19,7 +19,6 @@ use dyno_core::recorder::CaptureReason;
 use dyno_core::report::{self, ReportChange, ReportDisk, ReportFormat, ReportInput, ReportIssue, SavedReport, ScorePoint, WeeklyReport};
 use dyno_core::rules::{Command as RuleCommand, Situation};
 use dyno_core::snapshot;
-use dyno_core::startup::StartupState;
 use dyno_core::time::{Timestamp, DAY, HOUR};
 use std::path::Path;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -288,7 +287,6 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         )),
         Request::Health => Ok(Reply::Health(Box::new(health(shared)?))),
         Request::StartupEntries => Ok(Reply::Startup(lock(&shared.ports.startup).list()?)),
-        Request::SetStartupState { id, state } => set_startup(shared, &id, state).map(Reply::Activity),
         Request::HelperStatus => Ok(Reply::Helper(Box::new(lock(&shared.ports.helper).status()))),
         Request::InstallHelper => lock(&shared.ports.helper).install().map(|s| Reply::Helper(Box::new(s))),
         Request::UninstallHelper => uninstall_helper(shared).map(|s| Reply::Helper(Box::new(s))),
@@ -331,9 +329,6 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         | Request::Maintenance
         | Request::Backup
         | Request::RefreshBackup) => crate::extras::handle(shared, r),
-        Request::Tuning => crate::tuning::list(shared).map(Reply::Tuning),
-        Request::ApplyTuning { id } => crate::tuning::apply(shared, &id).map(Reply::Activity),
-        Request::RevertTuning { id, force } => crate::tuning::revert(shared, &id, force).map(Reply::Activity),
         Request::WeeklyReport { weeks_ago } => weekly_report(shared, weeks_ago).map(|r| Reply::Report(Box::new(r))),
         Request::SaveReport { path, format, weeks_ago } => save_report(shared, &path, format, weeks_ago).map(Reply::ReportSaved),
     }
@@ -556,17 +551,7 @@ fn undo(shared: &Arc<Shared>, id: &str) -> Result<ActivityEntry, AgentError> {
                 let _ = core.engine.snooze(&rules, rule_id, app, &procs);
             }
         }
-        UndoRecord::Startup { entry_id, previous } => {
-            let mut startup = lock(&shared.ports.startup);
-            let list = startup.list()?;
-            let e = list
-                .iter()
-                .find(|e| &e.id == entry_id)
-                .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "That startup item no longer exists."))?;
-            startup.set_state(e, *previous)?;
-        }
         UndoRecord::Quarantine { id: q, .. } => crate::handlers_cleanup::restore(shared, q)?,
-        UndoRecord::Tuning { .. } => crate::tuning::undo_record(shared, &record, false)?,
         UndoRecord::None => return Err(bad("That cannot be undone here yet.")),
     }
     let core = lock(&shared.core);
@@ -611,34 +596,6 @@ fn release_action(shared: &Arc<Shared>, target: ProcessRef) -> Result<ActivityEn
     );
     shared.broadcast(&Message::Activity(entry.clone()));
     Ok(entry)
-}
-
-fn set_startup(shared: &Arc<Shared>, id: &str, state: StartupState) -> Result<ActivityEntry, AgentError> {
-    let mut startup = lock(&shared.ports.startup);
-    let list = startup.list()?;
-    let e = list
-        .iter()
-        .find(|e| e.id == id)
-        .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "That startup item no longer exists."))?
-        .clone();
-    startup.set_state(&e, state)?;
-    drop(startup);
-    let verb = match state {
-        StartupState::Enabled => "Turned on",
-        StartupState::Disabled => "Turned off",
-        StartupState::Delayed(_) => "Delayed",
-    };
-    Ok(lock(&shared.core).log(
-        now(),
-        ActivityKind::Startup,
-        format!("{verb} {} at login", e.name),
-        "You changed this in the startup manager.".into(),
-        UndoRecord::Startup {
-            entry_id: e.id,
-            previous: e.state,
-        },
-        None,
-    ))
 }
 
 fn history(shared: &Shared, range: dyno_core::history::HistoryRange, end: Option<Timestamp>) -> Result<History, AgentError> {
@@ -747,7 +704,6 @@ pub(crate) fn facts(shared: &Shared) -> SystemFacts {
 
 fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError> {
     let facts = facts(shared);
-    let tuning = crate::tuning::plans(shared);
     let startup = lock(&shared.ports.startup).list().unwrap_or_default();
     let anomalies = anomalies(shared);
     let core = lock(&shared.core);
@@ -779,7 +735,6 @@ fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError
             .store
             .count_issues(dyno_core::issues::IssueKind::AppCrash, t.minus(7 * DAY), t)
             .unwrap_or(0),
-        tuning: &tuning,
         lifespans: &lifespans,
     });
     // Bookkeeping for the weekly report's trend (one row per hour; a failed write loses one point, nothing else).
