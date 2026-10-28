@@ -30,7 +30,7 @@ test('a toast does not overlap a primary button in the page footer', async ({ ap
 
 // One toast area: the undo snack bar and the notification toasts stack bottom right and never overlap, at any width (design guide,
 // Toasts). The snack bar sits on the host's baseline and the host lifts itself by the snack bar's height (`ToastArea`).
-for (const width of [640, 1000, 1280]) {
+for (const width of [360, 400, 640, 1000, 1280]) {
   test(`the undo toast and the notification toasts do not overlap at ${width} px`, async ({ app, page }) => {
     await page.setViewportSize({ width, height: 800 });
     await app.frame.open();
@@ -57,8 +57,8 @@ for (const width of [640, 1000, 1280]) {
       .poll(async () => {
         const s = (await snack.locator('.mat-mdc-snackbar-surface').boundingBox())!;
         const t = (await page.getByTestId('notification').first().boundingBox())!;
-        return [Math.round(Math.abs(s.x + s.width - (t.x + t.width))), Math.round(s.width)];
+        return [Math.round(Math.abs(s.x + s.width - (t.x + t.width))), s.width <= 360.5];
       })
-      .toEqual([0, 360]);
+      .toEqual([0, true]);
   });
 }

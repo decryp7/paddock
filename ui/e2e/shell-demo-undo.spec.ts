@@ -80,8 +80,11 @@ test.describe('undo and activity (plan X44)', () => {
   test('every icon button is at least 14 px', async ({ app, page }) => {
     await app.frame.open();
     await page.getByRole('button', { name: 'Say hello' }).click();
-    const icon = (await page.getByTestId('undo-toast').locator('svg').boundingBox())!;
-    expect(icon.width).toBeGreaterThanOrEqual(14);
+    // The snack bar scales in for 150 ms, which changes a bounding box: wait for the live region, and read the layout width
+    // (transforms do not affect it).
+    await expect(page.locator('[aria-live="polite"]').getByTestId('undo-toast')).toBeVisible();
+    const width = await page.getByTestId('undo-toast').locator('svg').evaluate((e) => parseFloat(getComputedStyle(e).width));
+    expect(width).toBeGreaterThanOrEqual(14);
   });
 
   for (const width of LAYOUT_WIDTHS) {

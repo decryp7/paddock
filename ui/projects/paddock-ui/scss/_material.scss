@@ -710,7 +710,17 @@ html .mat-mdc-snack-bar-container.pd-undo-snack {
   box-sizing: border-box;
   width: auto;
   max-width: calc(100vw - 2 * var(--pd-space-4));
+  // Material's handset layout (under 600 px) centres the container: keep it at the right, as the host is.
+  justify-content: flex-end;
   margin: 0 var(--pd-space-4) calc(var(--pd-statusbar-height, 24px) + var(--pd-page-footer-safe, 56px) + var(--pd-space-2));
+}
+
+// The host's compact layout (up to 480 px) has an 8 px gutter.
+@media (max-width: 480px) {
+  html .mat-mdc-snack-bar-container.pd-undo-snack {
+    max-width: calc(100vw - 2 * var(--pd-space-2));
+    margin-inline: var(--pd-space-2);
+  }
 }
 
 html .mat-mdc-snack-bar-container.pd-undo-snack .mat-mdc-snackbar-surface {
@@ -721,7 +731,8 @@ html .mat-mdc-snack-bar-container.pd-undo-snack .mat-mdc-snackbar-surface {
 
 // A checkbox's touch-target padding puts its box about half the target's overhang to the right of the form column. Pull the box back, so
 // a column of checkboxes, inputs and labels lines up on one left edge (and the label keeps its 8 px gap). One rule for every inline form.
-html .mat-mdc-checkbox .mdc-checkbox {
+// Not in a table cell: a selection column keeps Material's centring.
+html .mat-mdc-checkbox:not(:is(.mat-mdc-cell, .mat-mdc-header-cell, .mat-mdc-footer-cell) .mat-mdc-checkbox) .mdc-checkbox {
   margin-inline-start: calc((var(--mat-checkbox-state-layer-size, 40px) - 18px) / -2);
 }
 
