@@ -1,32 +1,27 @@
-import { ChangeDetectionStrategy, Component, inject, input, linkedSignal } from '@angular/core';
-import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import { ChangeDetectionStrategy, Component, computed, input, linkedSignal } from '@angular/core';
+import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 
-/** A form (modal here): a field, a pinned footer with Cancel and Rename; Enter in the field renames. */
+/** A form (modal here): a field, and the frame's footer with Cancel and Rename; Enter in the field renames. */
 @Component({
   selector: 'sd-rename-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <form class="form" (submit)="$event.preventDefault(); save()">
+    <form class="form" (submit)="$event.preventDefault()">
       <label class="field">
         <span>Name</span>
-        <input type="text" name="name" [value]="name()" (input)="name.set($any($event.target).value)" autocomplete="off" />
+        <input type="text" name="name" data-autofocus [value]="name()" (input)="name.set($any($event.target).value)" autocomplete="off" />
       </label>
-      <div class="actions">
-        <button type="button" class="btn" data-dialog-close (click)="ref.close()">Cancel</button>
-        <button type="submit" class="btn primary" [disabled]="!name().trim()">Rename</button>
-      </div>
     </form>
   `,
   styleUrl: './dialog-content.css',
 })
-export class RenameDialog {
+export class RenameDialog implements DialogContent<string> {
   /** The name shown at first (the opener's `inputs.current`). */
   readonly current = input('Shell demo');
   protected readonly name = linkedSignal(() => this.current());
-  protected readonly ref = inject<DialogRef<string>>(DIALOG_REF);
 
-  protected save(): void {
-    const name = this.name().trim();
-    if (name) this.ref.close(name);
-  }
+  /** Rename, enabled while the name is not blank. */
+  readonly dialogActions = computed<readonly DialogAction<string>[]>(() => [
+    { kind: 'answer', id: 'rename', label: 'Rename', role: 'primary', enabled: this.name().trim() !== '', answer: () => this.name().trim() },
+  ]);
 }

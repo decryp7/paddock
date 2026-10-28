@@ -4,6 +4,31 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shared dialog API, part 2: DialogFrame, declared actions and pd.confirm (ADR 0026 §2, §4.8, §5; packages 1.2a and 1.2c)
+- **Breaking.** Every dialog renders in `DialogFrame` (`@decryp7/paddock-ui/shell/dialogs`): an optional header, a body that
+  alone scrolls and a footer the frame draws from the content's declared actions (`DialogContent.dialogActions`, a signal of
+  `AnswerAction | RunAction | DismissAction`; `dialogStatus`, `dialogMinBodyHeight`, `dialogHeader`). `layoutActions` (pure,
+  tested as a table) orders them natively per OS (macOS and Linux: Cancel left of the primary; Windows: primary, then
+  Cancel), allows one primary, one destructive and one dismiss (none for a required choice; the frame adds Cancel/Close),
+  never makes a destructive action the Enter target, and picks the first focus (a form's first field, marked
+  `data-autofocus`; a destructive decision's Cancel). Busy (spinner, `aria-busy`, inert body; abortable work is aborted on a
+  dismissal, other work finishes first, "Finishing…") and rejected states (`DialogActionError`'s message, Try again) are the
+  frame's. An invalid declaration renders one Close and is logged.
+- **Breaking.** Outcomes: `DialogRef` (what a content injects) has `answer(value)` and `dismiss()`; the opener's
+  `DialogHandle.closed` and `ShellCore.openDialog` resolve a `DialogOutcome` (`answered` with a value, or `dismissed`),
+  never an ambiguous `undefined` (`answerOf`, `answered`, `DISMISSED`). On the wire an answer is `{ answered: true, value }`.
+- A dialog window measures itself synchronously once the content and `document.fonts.ready` are there (no frame wait,
+  the 1.1-0 spike) and sends `DialogIo.ready`, then `fit` at most once per frame when its natural size, the fonts, theme or
+  density change; decisions and forms shrink as well as grow. In the page a dialog stays hidden until ready or the show
+  deadline (Loading with Close), and a modal traps the focus (CDK). Focus returns to the opener. The `keys.ts`
+  heuristics (`hasCloseAction`, `findDefaultAction`) are gone.
+- The 13 shared dialogs and the shell demo's 5 and the workbench demo's 2 declare their actions and lose their footers.
+  Destructive actions say what they destroy (Remove channel, Revoke key, Clear cache / Delete data); Updates' job controls
+  read Stop checking / Stop download.
+- New `@decryp7/paddock-ui/shell/confirm` (`pd.confirm`, `defineConfirmDialog`, `confirm()`; contract
+  `paddock_shell::DIALOGS`): the one shared confirmation (heading, message, details, a primary or destructive affirmative).
+- `shell/testing`: `renderFramed` and `createFramed` render a content in the real frame for its spec.
+
 ### Shared dialog API, part 1: contracts in Rust (ADR 0026 §1, §3; package 1.1a)
 - **Breaking.** Dialog contracts are Rust tables: `paddock_dialogs::dialogs!` (a `Shape` for kind and modality, the width
   steps `Narrow` 400 / `Medium` 560 / `Wide` 720, a tool's `Px(n)`, a viewer's or tool's preferred `height`, `instanced`,

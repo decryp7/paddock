@@ -79,9 +79,17 @@ paddock_commands::command_table! {
     ];
 }
 
+paddock_dialogs::dialogs! {
+    /// The shell's own dialogs (ADR 0026 §5): `pd.confirm`, the one shared confirmation. It calls nothing; it answers
+    /// `true` or is dismissed, and the opener acts.
+    pub static DIALOGS;
+    "pd.confirm" => Decision { instanced: true },
+}
+
 /// The shell's dialog tables (ADR 0026 §3): every app's plugin registers them; an app adds its own with
 /// [`Builder::dialogs`].
-pub static SHELL_DIALOGS: [&paddock_dialogs::DialogTable; 6] = [
+pub static SHELL_DIALOGS: [&paddock_dialogs::DialogTable; 7] = [
+    &DIALOGS,
     &paddock_channels::DIALOGS,
     &paddock_mcp::DIALOGS,
     &paddock_storage::DIALOGS,

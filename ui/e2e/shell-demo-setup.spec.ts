@@ -67,7 +67,7 @@ test.describe('set-up checklist (plan X19)', () => {
     const dialog = page.getByRole('dialog', { name: 'Set-up' });
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveAttribute('aria-modal', 'false');
-    await dialog.getByTestId('dialog-close').click();
+    await dialog.getByTestId('dialog-action-dismiss').click();
     await expect(dialog).toHaveCount(0);
     await page.reload();
     await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');

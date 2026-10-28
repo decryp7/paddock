@@ -221,7 +221,7 @@ export class PdMcpPage {
   }
 
   protected async revoke(k: KeyInfo): Promise<void> {
-    const confirmed = await this.dialogs.open<boolean>(MCP_REVOKE_DIALOG_ID, { inputs: { keyId: k.id, client: k.client } }).closed;
-    if (confirmed === true) await this.store.revoke(k.id);
+    const outcome = await this.dialogs.open<boolean>(MCP_REVOKE_DIALOG_ID, { inputs: { keyId: k.id, client: k.client } }).closed;
+    if (outcome.kind === 'answered' && outcome.value === true) await this.store.revoke(k.id);
   }
 }

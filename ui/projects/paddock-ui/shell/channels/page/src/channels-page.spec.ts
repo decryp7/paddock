@@ -1,3 +1,4 @@
+import { answered, DISMISSED } from '@decryp7/paddock-ui/shell';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
@@ -55,11 +56,11 @@ class FakeDialogs {
     const inputs = options.inputs ?? {};
     this.opened.push({ id, inputs });
     const closed = (async () => {
-      if (id === CHANNELS_REMOVE_DIALOG_ID) return this.removeAnswer;
+      if (id === CHANNELS_REMOVE_DIALOG_ID) return this.removeAnswer === undefined ? DISMISSED : answered(this.removeAnswer);
       if (this.answer) await this.memory.setSecret(String(inputs['channelId']), 'typed-elsewhere');
-      return this.answer;
+      return this.answer === undefined ? DISMISSED : answered(this.answer);
     })();
-    return { closed, close: () => undefined };
+    return { closed, dismiss: () => undefined };
   }
 }
 

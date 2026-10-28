@@ -266,13 +266,17 @@ export class ShellDialogs {
   get shell(): Locator {
     return this.page.locator('pd-dialog-shell');
   }
-  /** The shell's own Close (when the content has none). */
+  /** The frame's own Cancel/Close (when the content declares no dismiss action of its own; ADR 0026 §2). */
   get shellClose(): Locator {
-    return this.page.getByTestId('dialog-shell-close');
+    return this.shell.getByTestId('dialog-action-dismiss');
   }
-  /** A way out of the dialog: the shell's Close or the content's Close/Cancel. */
+  /** The way out of the dialog: the footer's dismiss action, the frame's or the content's own. */
   get wayOut(): Locator {
-    return this.shell.locator('[data-dialog-close]').or(this.shell.getByRole('button', { name: CLOSE_NAMES })).first();
+    return this.shell.locator('[data-testid=dialog-footer] [data-role=dismiss]').first();
+  }
+  /** The footer button of action `id` (`dialog-action-<id>`). */
+  action(id: string): Locator {
+    return this.shell.getByTestId(`dialog-action-${id}`);
   }
   /** Resolves once the window has left Loading without an error. */
   async loaded(): Promise<void> {
@@ -281,7 +285,7 @@ export class ShellDialogs {
     await expect(this.shell.getByTestId('dialog-loading')).toHaveCount(0);
     await expect(this.shell.getByTestId('dialog-error')).toHaveCount(0);
   }
-  /** What the window answered (`{"result":…}`), or null while it has not. */
+  /** What the window answered (`{"result":…}`: `null` dismissed, `{"answered":true,"value":…}` answered), or null while it has not. */
   result(): Promise<string | null> {
     return this.page.evaluate((k) => localStorage.getItem(k), DIALOG_RESULT_KEY);
   }

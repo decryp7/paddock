@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, input, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { CommandService, ContributionRegistry, defineCommand, msg, ShellContextHost, SHELL_IDLE, SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import { CommandService, ContributionRegistry, defineCommand, msg, ShellContextHost, SHELL_IDLE, SHELL_PORTS, answerOf } from '@decryp7/paddock-ui/shell';
 import { WindowReady } from '@decryp7/paddock-ui/shell/startup';
 import { FakeClock, ManualIdle, provideShellTesting, RecordingShellPorts, render, settle, shellIdle, shellPorts } from './shell-testing';
 
@@ -16,7 +16,7 @@ const GREET = defineCommand<Demo>({
     ctx.notify({ level: 'info', message: `Hello ${ctx.count()}` });
   },
 });
-const OPEN = defineCommand<Demo>({ id: 't.open', title: msg('t.open', 'Open'), run: async (ctx) => void ctx.notify({ level: 'info', message: String(await ctx.openDialog('t.rename', { current: 'x' })) }) });
+const OPEN = defineCommand<Demo>({ id: 't.open', title: msg('t.open', 'Open'), run: async (ctx) => void ctx.notify({ level: 'info', message: String(answerOf(await ctx.openDialog('t.rename', { current: 'x' }))) }) });
 
 @Component({ selector: 'pd-test-greeting', changeDetection: ChangeDetectionStrategy.OnPush, template: `<p class="who">Hello {{ name() }}</p><p class="n">{{ n() }}</p><p class="n">x</p>` })
 class Greeting {

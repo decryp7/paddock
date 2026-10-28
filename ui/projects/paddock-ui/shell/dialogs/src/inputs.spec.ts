@@ -1,6 +1,6 @@
 import { fakeDialogContract } from '@decryp7/paddock-ui/shell/testing';
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
-import { defineDialog, msg, type } from '@decryp7/paddock-ui/shell';
+import { defineDialog, msg, type, type DialogOutcome } from '@decryp7/paddock-ui/shell';
 import type { DialogService } from './dialog.service';
 import type { DialogInputsOf, DialogInputsOfDef } from './types';
 
@@ -32,7 +32,7 @@ describe('dialog inputs', () => {
       s.open(RENAME, { inputs: { notAnInput: 4 } });
       s.open('t.rename', { inputs: { anything: true } });
       s.open(UNTYPED, { inputs: { anything: true } });
-      expectTypeOf(s.open(RENAME).closed).toEqualTypeOf<Promise<string | undefined>>();
+      expectTypeOf(s.open(RENAME).closed).toEqualTypeOf<Promise<DialogOutcome<string>>>();
     };
     expect(typeof open).toBe('function');
   });

@@ -474,7 +474,7 @@ test.describe('notifications and service health (plan S4)', () => {
 // per kind; the main window shows the same dialogs in the page.
 const CONTRACTS = dialogContracts(
   'projects/shell-demo/src/app/generated/dialog-contracts.ts',
-  ...['about', 'channels', 'diagnostics', 'mcp', 'setup', 'storage'].map((p) => `projects/paddock-ui/shell/${p}/generated/dialog-contracts.ts`),
+  ...['about', 'channels', 'confirm', 'diagnostics', 'mcp', 'setup', 'storage'].map((p) => `projects/paddock-ui/shell/${p}/generated/dialog-contracts.ts`),
 );
 
 test.describe('dialogs (plan S6)', () => {
@@ -496,7 +496,7 @@ test.describe('dialogs (plan S6)', () => {
           await expect(d.shell.getByRole('button', { name: 'Formal' })).toBeVisible();
           expect(await d.result()).toBeNull();
           await d.shell.getByRole('button', { name: 'Formal' }).click();
-          await d.expectResult('{"result":"formal"}');
+          await d.expectResult('{"result":{"answered":true,"value":"formal"}}');
           return;
         }
         await expect(d.wayOut).toBeVisible();
@@ -533,6 +533,42 @@ test.describe('dialogs (plan S6)', () => {
     expect(await axeViolations(page, { idsOnly: true })).toEqual([]);
   });
 
+  test.describe('the frame keeps its footer in view (ADR 0026 §2, package 1.2a)', () => {
+    test.use({ deviceScaleFactor: 1.5, viewport: { width: 1366, height: 768 } });
+    test('sd.rename at 1.5x: the footer is hit after the content grows by 400 px and shrinks back, with a gap of at most 24 px', async ({ app, page }) => {
+      const width = CONTRACTS['sd.rename']!.width;
+      await app.dialogs.openWindow('sd.rename', { current: 'Old name' });
+      await app.dialogs.loaded();
+      await expect(page.locator('html')).toHaveAttribute('data-dialog-ready', 'true');
+      const fitted = async () => Number(await page.locator('html').getAttribute('data-fitted-height'));
+      // The window system sizes the window to what the frame asked; the footer must then be in view and on top.
+      const check = async () => {
+        const height = await fitted();
+        await page.setViewportSize({ width, height });
+        for (const id of ['dismiss', 'rename']) {
+          const box = (await app.dialogs.action(id).boundingBox())!;
+          const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('[data-testid]')?.getAttribute('data-testid') ?? null, [box.x + box.width / 2, box.y + box.height / 2]);
+          expect(hit, `${id} at ${height} px`).toBe(`dialog-action-${id}`);
+          expect(box.y + box.height).toBeLessThanOrEqual(height);
+          expect(height - (box.y + box.height), `the gap below ${id}`).toBeLessThanOrEqual(24);
+        }
+      };
+      await check();
+      const before = await fitted();
+      await page.evaluate(() => {
+        const tall = document.createElement('div');
+        tall.id = 'grow';
+        tall.style.height = '400px';
+        document.querySelector('.pd-frame-content')!.append(tall);
+      });
+      await expect.poll(fitted).toBeGreaterThanOrEqual(before + 400);
+      await check();
+      await page.evaluate(() => document.getElementById('grow')!.remove());
+      await expect.poll(fitted).toBe(before);
+      await check();
+    });
+  });
+
   test('the tool window loads its own providers and asks the engine', async ({ app, page }) => {
     await app.dialogs.openWindow('sd.inspector');
     await expect(page.getByTestId('engine-status')).toContainText('running');
@@ -544,7 +580,7 @@ test.describe('dialogs (plan S6)', () => {
     await expect(field).toHaveValue('Old name');
     await field.fill('New name');
     await field.press('Enter');
-    await app.dialogs.expectResult('{"result":"New name"}');
+    await app.dialogs.expectResult('{"result":{"answered":true,"value":"New name"}}');
   });
 
   test('in the page: a modal blocks behind a backdrop, a modeless one leaves the page usable and opens once', async ({ app, page }) => {
@@ -556,7 +592,7 @@ test.describe('dialogs (plan S6)', () => {
     const modal = d.inPage('Reset greetings?');
     await expect(modal).toHaveAttribute('aria-modal', 'true');
     await expect(d.backdrop).toBeVisible();
-    await modal.getByRole('button', { name: 'Reset' }).click();
+    await modal.getByRole('button', { name: 'Reset greetings' }).click();
     await expect(page.getByTestId('dialog-answer')).toHaveText('Reset greetings?: true');
     await expect(d.backdrop).toHaveCount(0);
 

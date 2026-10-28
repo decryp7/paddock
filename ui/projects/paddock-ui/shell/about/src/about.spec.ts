@@ -1,7 +1,7 @@
 import { Injector, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideContributions, SHELL_IDLE, SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
-import { assertContributionsValid } from '@decryp7/paddock-ui/shell/testing';
+import { DISMISSED, provideContributions, SHELL_IDLE, SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
+import { assertContributionsValid, createFramed } from '@decryp7/paddock-ui/shell/testing';
 import { MemoryJobsBackend, provideShellJobs } from '@decryp7/paddock-ui/shell/jobs';
 import type { AboutInfo, UpdateStatus, WhatsNew } from '../generated/about';
 import { ABOUT_COMMANDS } from '../generated/about-commands';
@@ -59,7 +59,7 @@ function bed(server: MemoryUpdatesOptions['server'], extra: unknown[] = [], main
   TestBed.configureTestingModule({
     providers: [
       provideZonelessChangeDetection(),
-      { provide: SHELL_PORTS, useValue: { showPage: () => undefined, openDialog: (id: string) => (opened.push(id), Promise.resolve(undefined)), notify: (n: ShellNotice) => notices.push(n) } },
+      { provide: SHELL_PORTS, useValue: { showPage: () => undefined, openDialog: (id: string) => (opened.push(id), Promise.resolve(DISMISSED)), notify: (n: ShellNotice) => notices.push(n) } },
       { provide: SHELL_IDLE, useValue: (work: () => void) => work() },
       provideShellAbout({ about: () => about, updates: () => updates, main }),
       ...(extra as never[]),
@@ -414,7 +414,7 @@ describe('the dialogs', () => {
   it('Updates walks through check, download (with the job’s progress), restart and the preferences', async () => {
     const jobs = new MemoryJobsBackend();
     const { updates } = bed('release', [provideShellJobs({ backend: () => jobs })]);
-    const fixture = TestBed.createComponent(PdUpdatesDialog);
+    const fixture = createFramed(PdUpdatesDialog);
     await settle();
     await fixture.whenStable();
     const el: HTMLElement = fixture.nativeElement;
@@ -457,7 +457,7 @@ describe('the dialogs', () => {
 
   it('Updates shows a refused signature with its next step, and nothing to press without a key', async () => {
     bed('bad-signature');
-    const fixture = TestBed.createComponent(PdUpdatesDialog);
+    const fixture = createFramed(PdUpdatesDialog);
     await settle();
     await fixture.whenStable();
     const el: HTMLElement = fixture.nativeElement;
@@ -474,19 +474,20 @@ describe('the dialogs', () => {
     expect(button(el, 'Check again')).toBeTruthy();
     TestBed.resetTestingModule();
     bed('unavailable');
-    const off = TestBed.createComponent(PdUpdatesDialog);
+    const off = createFramed(PdUpdatesDialog);
     await settle();
     await off.whenStable();
     const o: HTMLElement = off.nativeElement;
     expect(text(o)).toContain('Updates are not available in this build.');
     expect(text(o)).toContain('without an update signing key');
-    expect(o.querySelectorAll('button')).toHaveLength(0);
+    // Nothing to press but the frame's Close.
+    expect([...o.querySelectorAll('button')].map((b) => text(b))).toEqual(['Close']);
   });
 
-  it('Updates offers Cancel while checking and a Retry when the updater does not answer', async () => {
+  it('Updates offers Stop checking while checking and a Retry when the updater does not answer', async () => {
     const { updates } = bed('release');
     (updates as unknown as { schedule: (s: () => void) => void }).schedule = () => undefined;
-    const fixture = TestBed.createComponent(PdUpdatesDialog);
+    const fixture = createFramed(PdUpdatesDialog);
     await settle();
     await fixture.whenStable();
     const el: HTMLElement = fixture.nativeElement;
@@ -494,7 +495,7 @@ describe('the dialogs', () => {
     await settle();
     await fixture.whenStable();
     expect(text(el)).toContain('Checking for updates…');
-    button(el, 'Cancel').click();
+    button(el, 'Stop checking').click();
     await settle();
     await fixture.whenStable();
     expect(text(el)).toContain('Not checked yet.');
@@ -517,7 +518,7 @@ describe('the contributions', () => {
     const dialogs = defineAboutDialogs({ providers: () => Promise.resolve([]) });
     const batch = aboutContributions(dialogs);
     const opened: string[] = [];
-    const ctx = { openDialog: (id: string) => (opened.push(id), Promise.resolve(undefined)) } as never;
+    const ctx = { openDialog: (id: string) => (opened.push(id), Promise.resolve(DISMISSED)) } as never;
     for (const c of batch.commands ?? []) await c.run(ctx);
     expect(opened).toEqual(['pd.about', 'pd.updates', 'pd.whats-new']);
     const loaded = await Promise.all(dialogs.map((d) => d.load()));
@@ -557,7 +558,7 @@ describe('the edges', () => {
 
   it('Updates: up to date, offline, and install when the app quits', async () => {
     bed('none');
-    let f = TestBed.createComponent(PdUpdatesDialog);
+    let f = createFramed(PdUpdatesDialog);
     await settle();
     await f.whenStable();
     let el: HTMLElement = f.nativeElement;
@@ -568,7 +569,7 @@ describe('the edges', () => {
     expect(button(el, 'Check now')).toBeTruthy();
     TestBed.resetTestingModule();
     bed('offline');
-    f = TestBed.createComponent(PdUpdatesDialog);
+    f = createFramed(PdUpdatesDialog);
     await settle();
     await f.whenStable();
     el = f.nativeElement;
@@ -579,7 +580,7 @@ describe('the edges', () => {
     expect(button(el, 'Check again')).toBeTruthy();
     TestBed.resetTestingModule();
     const { updates } = bed('release');
-    f = TestBed.createComponent(PdUpdatesDialog);
+    f = createFramed(PdUpdatesDialog);
     await settle();
     await f.whenStable();
     el = f.nativeElement;
@@ -610,7 +611,7 @@ describe('the main window’s start-up work', () => {
       providers: [
         provideZonelessChangeDetection(),
         { provide: SHELL_IDLE, useValue: (work: () => void) => work() },
-        { provide: SHELL_PORTS, useValue: { showPage: () => undefined, openDialog: (id: string) => (opened.push(id), Promise.resolve(undefined)), notify: () => undefined } },
+        { provide: SHELL_PORTS, useValue: { showPage: () => undefined, openDialog: (id: string) => (opened.push(id), Promise.resolve(DISMISSED)), notify: () => undefined } },
         provideShellAbout({ about: () => about, updates: () => new MemoryUpdatesBackend({ currentVersion: '1', server: 'none' }), main: true, ready: () => ready }),
       ],
     });

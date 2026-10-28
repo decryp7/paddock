@@ -41,7 +41,7 @@ interface Bed {
 async function open(options: { backend?: MemorySettingsBackend; page?: string; extra?: unknown[]; pages?: typeof SPEC_PAGES; restart?: () => void } = {}): Promise<Bed> {
   const backend = options.backend ?? new MemorySettingsBackend();
   const close = vi.fn();
-  settingsBed({ backend, pages: options.pages, restart: options.restart, extra: [{ provide: DIALOG_REF, useValue: { close, closed: new Promise(() => undefined) } }, ...(options.extra ?? [])] });
+  settingsBed({ backend, pages: options.pages, restart: options.restart, extra: [{ provide: DIALOG_REF, useValue: { dismiss: close, answer: close, closed: new Promise(() => undefined) } }, ...(options.extra ?? [])] });
   const fixture = TestBed.createComponent(PdSettingsWindow);
   if (options.page) fixture.componentRef.setInput('page', options.page);
   await settle();
@@ -113,7 +113,7 @@ describe('pd-settings-window', () => {
     toggle.dispatchEvent(new Event('change'));
     await settle();
     expect(backend.values('sd.general')?.['notify']).toBe(false);
-    expect($(el, '.pd-foot .pd-status').textContent).toBe('Show a notification saved.');
+    expect(bed.fixture.componentInstance.dialogStatus()).toBe('Show a notification saved.');
     $(field(el, 'style'), 'pd-select button').click();
     await settle();
     [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=option]')].find((o) => o.textContent?.includes('Formal'))!.click();
@@ -143,7 +143,7 @@ describe('pd-settings-window', () => {
     await type(bed, $<HTMLInputElement>(field(el, 'repeat'), 'input'), '3');
     expect(backend.values('sd.general')).toMatchObject({ repeat: 3, greeting: 'Hello' });
     // Close is held, with a question.
-    $<HTMLButtonElement>(el, '.pd-foot [data-dialog-close]').click();
+    // (The frame's Close asks the content first.)
     expect(bed.fixture.componentInstance.dialogCanClose()).toBe(false);
     await bed.fixture.whenStable();
     const ask = $(el, '[data-testid="settings-unsaved"]');
@@ -183,7 +183,7 @@ describe('pd-settings-window', () => {
     await settle();
     expect(backend.values('sd.general')?.['greeting']).toBe('Hello');
     await bed.fixture.whenStable();
-    expect($(el, '.pd-foot .pd-status').textContent).toBe('General reset to defaults.');
+    expect(bed.fixture.componentInstance.dialogStatus()).toBe('General reset to defaults.');
   });
 
   it('searches every setting however it is written, and Escape clears the search', async () => {

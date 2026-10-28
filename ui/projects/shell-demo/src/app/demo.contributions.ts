@@ -22,6 +22,7 @@ import { defineStorageConfirmDialog, defineStorageSettingsPage } from '@decryp7/
 import { definePacksSettingsPage } from '@decryp7/paddock-ui/shell/packs';
 import { defineServiceSettingsPage } from '@decryp7/paddock-ui/shell/service';
 import { defineSetup } from '@decryp7/paddock-ui/shell/setup';
+import { defineConfirmDialog } from '@decryp7/paddock-ui/shell/confirm';
 import type { DemoContext } from './demo-context';
 import type { DemoStatus } from './dialogs/demo-ipc';
 import { DIALOG_CONTRACTS } from './generated/dialog-contracts';
@@ -165,7 +166,12 @@ export const SHELL_ABOUT_DIALOGS = defineAboutDialogs({ providers: () => import(
 /** Report a problem (plan X2): a decision that shows every file with its size before saving; its window boots the demo's diagnostics providers. */
 export const REPORT_PROBLEM_DIALOG = defineDiagnosticsDialog({ providers: () => import('./diagnostics.providers').then((m) => m.DIAGNOSTICS_PROVIDERS) });
 
-export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, CHANNELS_REMOVE_DIALOG, MCP_KEY_DIALOG, STORAGE_CONFIRM_DIALOG, MCP_REVOKE_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG, SETUP.dialog] as const;
+/** The shared confirmation (ADR 0026 §5): the demo asks with it before it forgets the greetings from the Dialogs page. */
+export const CONFIRM_DIALOG = defineConfirmDialog({
+  load: () => import('@decryp7/paddock-ui/shell/confirm/dialog').then((m) => m.PdConfirmDialog),
+});
+
+export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, CONFIRM_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, CHANNELS_REMOVE_DIALOG, MCP_KEY_DIALOG, STORAGE_CONFIRM_DIALOG, MCP_REVOKE_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG, SETUP.dialog] as const;
 
 /** About's commands, Help menu items and notice kind (its dialogs are among `DEMO_DIALOGS`). */
 export const SHELL_ABOUT_CONTRIBUTIONS = aboutContributions([]);

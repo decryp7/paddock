@@ -1,5 +1,6 @@
 import { inject, Injectable } from '@angular/core';
-import { DIALOG_EVENTS, type DialogClosed, type DialogRequest, type DialogResult } from '@decryp7/paddock-ui/shell';
+import { DIALOG_EVENTS, type DialogClosed, type DialogOutcome, type DialogRequest, type DialogResult } from '@decryp7/paddock-ui/shell';
+import { decodeOutcome } from './outcome';
 import { isRememberedPlace, loadDialogBounds, rememberDialogBounds } from './bounds';
 import { InPageDialogBackend } from './in-page';
 import { DIALOG_IO } from './io';
@@ -34,7 +35,8 @@ export function windowRequest(request: DialogShowRequest, remembered = loadDialo
 
 interface Pending {
   readonly dialogId: string;
-  readonly resolve: (r: unknown) => void;
+  readonly resolve: (r: DialogOutcome<unknown>) => void;
+  /** What the dialog closed with, on the wire (`null`: dismissed, also when Rust closed a page that did not answer). */
   result: unknown;
 }
 
@@ -53,8 +55,8 @@ export class WindowDialogBackend extends DialogPresenter {
   readonly windowed = true;
 
   show(request: DialogShowRequest): DialogSession {
-    let resolve!: (r: unknown) => void;
-    const closed = new Promise<unknown>((r) => (resolve = r));
+    let resolve!: (r: DialogOutcome<unknown>) => void;
+    const closed = new Promise<DialogOutcome<unknown>>((r) => (resolve = r));
     let label: string | null = null;
     let open = true;
     let fallback: DialogSession | null = null;
@@ -64,7 +66,7 @@ export class WindowDialogBackend extends DialogPresenter {
         await this.listen();
         const info = await this.io.open(sent);
         label = info.label;
-        this.pending.set(info.label, { dialogId: request.def.id, resolve, result: undefined });
+        this.pending.set(info.label, { dialogId: request.def.id, resolve, result: null });
       } catch (e) {
         console.warn(`[paddock-dialogs] the window of dialog ${request.def.id} could not open; shown in the page: ${errorText(e)}`);
         fallback = this.inPage.show(request);
@@ -77,7 +79,7 @@ export class WindowDialogBackend extends DialogPresenter {
       isOpen: () => open,
       // Opening it again focuses the window Rust has open for it.
       focus: () => void opened.then(() => (fallback ? fallback.focus() : label ? this.io.open(sent).then(() => undefined, () => undefined) : undefined)),
-      close: (result) => void opened.then(() => (fallback ? fallback.close(result) : label ? this.io.requestClose(label).catch(() => undefined) : undefined)),
+      dismiss: () => void opened.then(() => (fallback ? fallback.dismiss() : label ? this.io.requestClose(label).catch(() => undefined) : undefined)),
     };
   }
 
@@ -86,7 +88,7 @@ export class WindowDialogBackend extends DialogPresenter {
       this.io.listen(DIALOG_EVENTS.result, (p) => {
         const e = parseResult(p);
         const entry = e && this.pending.get(e.label);
-        if (e && entry) entry.result = e.result ?? undefined;
+        if (e && entry) entry.result = e.result ?? null;
       }),
       this.io.listen(DIALOG_EVENTS.closed, (p) => {
         const e = parseClosed(p);
@@ -94,7 +96,7 @@ export class WindowDialogBackend extends DialogPresenter {
         if (!e || !entry) return;
         this.pending.delete(e.label);
         if (e.remembered) rememberDialogBounds(entry.dialogId, e.remembered);
-        entry.resolve(entry.result === null ? undefined : entry.result);
+        entry.resolve(decodeOutcome(entry.result));
       }),
     ]).then(
       () => undefined,

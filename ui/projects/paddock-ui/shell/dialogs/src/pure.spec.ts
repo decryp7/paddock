@@ -3,7 +3,6 @@ import { defineDialog, DIALOG_BASE_COMMANDS, msg, type DialogDef } from '@decryp
 import { DIALOG_BOUNDS_KEY, isRememberedPlace, loadDialogBounds, MAX_REMEMBERED, rememberDialogBounds } from './bounds';
 import { allowedCommands, commandCovered } from './contracts';
 import { DeniedCommands, isDenial } from './denied';
-import { dialogKeyAction, findDefaultAction, hasCloseAction } from './keys';
 import { DIALOG_MIN, dismissOf, instanceKey, modalityOf, raiseToKindMinimum, resolveSize, TOOL_DEFAULT, VIEWER_MIN } from './kind';
 import { ModalGate } from './modal-gate';
 import { dialogHash, parseDialogRoute } from './route';
@@ -74,39 +73,6 @@ describe('dialog route', () => {
   });
 });
 
-describe('dialog keys', () => {
-  const key = (k: string, extra: Partial<Omit<KeyboardEvent, 'target'>> & { target?: unknown } = {}) => ({ key: k, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, target: null, ...extra });
-  it('dismisses on Escape and Cmd/Ctrl+W, runs the default on Enter outside controls with their own Enter', () => {
-    expect(dialogKeyAction(key('Escape'))).toBe('dismiss');
-    expect(dialogKeyAction(key('Escape', { altKey: true }))).toBeNull();
-    expect(dialogKeyAction(key('w', { metaKey: true }))).toBe('dismiss');
-    expect(dialogKeyAction(key('W', { ctrlKey: true }))).toBe('dismiss');
-    expect(dialogKeyAction(key('w', { ctrlKey: true, shiftKey: true }))).toBeNull();
-    expect(dialogKeyAction(key('Enter', { target: document.createElement('input') }))).toBe('default');
-    expect(dialogKeyAction(key('Enter', { target: document.createElement('textarea') }))).toBeNull();
-    const option = document.createElement('div');
-    option.setAttribute('role', 'option');
-    expect(dialogKeyAction(key('Enter', { target: option }))).toBeNull();
-    expect(dialogKeyAction(key('Enter', { target: { isContentEditable: true } }))).toBeNull();
-    expect(dialogKeyAction(key('Enter', { shiftKey: true }))).toBeNull();
-    expect(dialogKeyAction(key('Escape', { isComposing: true }))).toBeNull();
-    expect(dialogKeyAction(key('Escape', { defaultPrevented: true }))).toBeNull();
-    expect(dialogKeyAction(key('a'))).toBeNull();
-  });
-
-  it('finds the default action and a close action', () => {
-    const root = document.createElement('div');
-    root.innerHTML = `<button class="primary" disabled>No</button><button class="primary" id="p">Go</button><footer><button>Close</button></footer>`;
-    expect(findDefaultAction(root)?.id).toBe('p');
-    root.insertAdjacentHTML('beforeend', '<button data-default id="d">D</button>');
-    expect(findDefaultAction(root)?.id).toBe('d');
-    expect(hasCloseAction(root)).toBe(true);
-    expect(hasCloseAction(root, root.querySelector('footer'))).toBe(false);
-    root.insertAdjacentHTML('beforeend', '<span data-dialog-close></span>');
-    expect(hasCloseAction(root, root.querySelector('footer'))).toBe(true);
-  });
-});
-
 describe('remembered bounds', () => {
   const store = () => {
     const data = new Map<string, string>();
@@ -168,30 +134,5 @@ describe('modal gate and denials', () => {
     expect(isDenial(null)).toBe(false);
     expect(spy).toHaveBeenCalledTimes(2);
     spy.mockRestore();
-  });
-});
-
-describe('debounced', () => {
-  it('runs once after the last ask, and can be cancelled', async () => {
-    const { debounced } = await import('./dialog-shell');
-    vi.useFakeTimers();
-    try {
-      let runs = 0;
-      const d = debounced(() => runs++, 60);
-      d.ask();
-      vi.advanceTimersByTime(59);
-      d.ask();
-      vi.advanceTimersByTime(59);
-      expect(runs).toBe(0);
-      vi.advanceTimersByTime(1);
-      expect(runs).toBe(1);
-      d.ask();
-      d.cancel();
-      d.cancel();
-      vi.advanceTimersByTime(120);
-      expect(runs).toBe(1);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });

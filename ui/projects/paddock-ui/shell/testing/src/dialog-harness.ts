@@ -7,8 +7,6 @@ import {
   DIALOG_IO,
   DialogShell,
   dialogWindowConfig,
-  fitsContent,
-  hasCloseAction,
 } from '@decryp7/paddock-ui/shell/dialogs';
 import { FakeDialogIo } from './fake-dialog-io';
 import { recordIpc } from './ipc-recorder';
@@ -116,24 +114,24 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
     const logged = errors.filter((e) => !ignored.some((r) => r.test(e)));
     for (const e of logged.filter((x) => MISSING_PROVIDER.test(x))) if (!failed || !e.includes(failed)) problems.push(`logs a missing provider: ${e}`);
     if (!failed) for (const e of logged.filter((x) => !MISSING_PROVIDER.test(x))) problems.push(`logs an error: ${e}`);
-    const main = root.querySelector('main');
-    const content = main ? [...main.children].filter((c) => !c.matches('[data-testid=dialog-shell-foot], [data-testid=dialog-loading], [data-testid=dialog-denied]')) : [];
+    const box = root.querySelector('.pd-frame-content');
+    const content = box ? [...box.children].filter((c) => !c.matches('[data-testid=dialog-loading], [data-testid=dialog-error], [data-testid=dialog-denied]')) : [];
     if (!failed && !content.some((c) => (c.textContent ?? '').trim() !== '' || c.querySelector('input, button, select, textarea, canvas, svg'))) problems.push('has an empty body');
 
     // Every command it sent is one its contract (or the base sets) allows: what Rust's guard would refuse fails here.
     const allowed = allowedCommands(def, options.baseCommands);
     for (const c of [...new Set(ipc.sent)].filter((x) => !commandCovered(allowed, x))) problems.push(`sends ${c}, which its contract does not declare`);
 
-    // The kind's size rules: a fitted kind asks for its height once it is drawn, a tool keeps its size.
-    if (!failed && fitsContent(def) && io.fitted.length === 0) problems.push(`is a fitted ${def.kind} that never asked to be fitted`);
-    if (!fitsContent(def) && io.fitted.length > 0) problems.push(`is a ${def.kind} with a fixed size that asked to be fitted`);
+    // The ready handshake (ADR 0026 §4.2): sent once, whatever the kind; Rust sizes the window by the kind.
+    if (io.readied === null) problems.push('never sent the ready handshake');
 
     // A visible way out, and Escape per kind: a modal's Cancel, a modeless window's Close; a required choice keeps both.
-    if (def.requiredChoice !== true && !hasCloseAction(root)) problems.push('has no visible Close/Cancel');
+    const wayOut = root.querySelector('[data-testid=dialog-footer] [data-role=dismiss]');
+    if ((def.requiredChoice !== true || failed) && !wayOut) problems.push('has no visible Close/Cancel');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     await settle(fixture, turns);
-    const want = def.requiredChoice === true && !failed ? [] : [undefined];
-    if (io.closedWith.length !== want.length || io.closedWith.some((r) => r !== undefined)) {
+    const want = def.requiredChoice === true && !failed ? [] : [null];
+    if (io.closedWith.length !== want.length || io.closedWith.some((r) => r !== null)) {
       problems.push(want.length ? `does not close on Escape (closed with ${safeJson(io.closedWith)})` : 'is a required choice that Escape closed');
     }
     fixture.destroy();

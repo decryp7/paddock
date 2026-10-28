@@ -1,8 +1,8 @@
-import { ChangeDetectionStrategy, Component, inject, resource } from '@angular/core';
-import { DIALOG_REF } from '@decryp7/paddock-ui/shell/dialogs';
+import { ChangeDetectionStrategy, Component, computed, inject, resource } from '@angular/core';
+import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import { DemoEngine } from './demo-ipc';
 
-/** A tool: modeless, large, remembers its size. It reads the engine through its own providers (`demo_status`). */
+/** A tool: modeless, user-sized, remembers its size. It reads the engine through its own providers (`demo_status`). */
 @Component({
   selector: 'sd-inspector-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -24,15 +24,13 @@ import { DemoEngine } from './demo-ipc';
         }
       }
     </section>
-    <div class="actions">
-      <button type="button" class="btn" (click)="status.reload()">Refresh</button>
-      <button type="button" class="btn" data-dialog-close (click)="ref.close()">Close</button>
-    </div>
   `,
   styleUrl: './dialog-content.css',
 })
-export class InspectorDialog {
+export class InspectorDialog implements DialogContent {
   private readonly engine = inject(DemoEngine);
-  protected readonly ref = inject(DIALOG_REF);
   protected readonly status = resource({ loader: () => this.engine.status() });
+  /** Refresh at the leading edge; the frame adds Close. */
+  readonly dialogActions = computed<readonly DialogAction[]>(() => [{ kind: 'run', id: 'refresh', label: 'Refresh', role: 'secondary', lead: true, run: () => void this.status.reload() }]);
+  readonly dialogStatus = computed(() => (this.status.status() === 'resolved' ? `Queued: ${this.status.value()?.queued ?? 0}` : null));
 }

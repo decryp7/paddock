@@ -10,7 +10,7 @@ test('Help ▸ Report a problem… shows every file with its size, follows the d
   await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
   await (await app.menus.item('Help', 'Report a problem…')).click();
   const dialog = app.dialogs.inPage('Report a problem');
-  await expect(dialog).toHaveAttribute('aria-modal', 'true');
+  await expect(dialog).toHaveAttribute('aria-modal', 'false');
   await expect(dialog).toContainText('Nothing is sent anywhere.');
   const rows = dialog.locator('[data-testid="diag-files"] tbody tr');
   await expect(rows).toHaveCount(6);

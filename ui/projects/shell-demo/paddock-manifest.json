@@ -362,6 +362,15 @@
         "channels_set_secret"
       ]
     },
+    "pd.confirm": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": true,
+      "requiredChoice": false,
+      "width": 400,
+      "height": null,
+      "commands": []
+    },
     "pd.mcp.key": {
       "kind": "form",
       "modality": "modal",
@@ -549,6 +558,7 @@
     "pd.category.help": "Help",
     "pd.channels.remove.title": "Remove channel",
     "pd.channels.secret.title": "Channel secret",
+    "pd.confirm.title": "Confirm",
     "pd.diag.open": "Report a problem…",
     "pd.diag.title": "Report a problem",
     "pd.mcp.key.title": "Add a client",
