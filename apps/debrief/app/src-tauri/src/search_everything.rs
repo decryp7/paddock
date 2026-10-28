@@ -103,17 +103,6 @@ fn corpus<R: Runtime>(app: &AppHandle<R>, win: &WindowState) -> Corpus {
     Corpus { notes, knowledge }
 }
 
-/// How long a search may run. Under test it is effectively unbounded: the budget is wall clock, so a loaded machine
-/// would otherwise cut the notes search short and make the result depend on load (the budget itself is tested in
-/// `debrief_core::search_all`).
-fn budget() -> std::time::Duration {
-    if cfg!(test) {
-        std::time::Duration::from_secs(3600)
-    } else {
-        search_all::BUDGET
-    }
-}
-
 /// Searches the window's everything for `request`; `null` when the text has no words or a newer search of the
 /// window replaced this one.
 #[tauri::command]
@@ -121,6 +110,17 @@ pub async fn search_everything<R: Runtime>(
     app: AppHandle<R>,
     state: CurrentWindow,
     request: SearchAllRequest,
+) -> CmdResult<Option<SearchAllReply>> {
+    search_with(app, state, request, Some(search_all::BUDGET)).await
+}
+
+/// [`search_everything`] with its time `budget` (`None`: no limit, for tests, where wall clock would make the answer
+/// depend on the machine's load).
+pub(crate) async fn search_with<R: Runtime>(
+    app: AppHandle<R>,
+    state: CurrentWindow,
+    request: SearchAllRequest,
+    budget: Option<std::time::Duration>,
 ) -> CmdResult<Option<SearchAllReply>> {
     let label = key(&app, state.label());
     let id = begin(&label);
@@ -130,7 +130,11 @@ pub async fn search_everything<R: Runtime>(
         let label = label.clone();
         crate::sync::blocking("search everything", move || {
             let replaced = move || !is_newest(&label, id);
-            match search_all::run(store.as_ref(), &corpus, &request, &Control::new(budget(), &replaced)) {
+            let control = match budget {
+                Some(b) => Control::new(b, &replaced),
+                None => Control::unbounded(&replaced),
+            };
+            match search_all::run(store.as_ref(), &corpus, &request, &control) {
                 Ok(reply) => Ok(reply),
                 Err(SearchAllError::Cancelled) => Ok(None),
                 Err(e @ SearchAllError::Invalid(_)) => Err(CmdError::new(ErrorCode::Invalid, e.to_string())),
@@ -175,14 +179,31 @@ mod tests {
     use debrief_core::search_all::KindOutcome;
 
     fn search(app: &tauri::App<tauri::test::MockRuntime>, text: &str) -> CmdResult<Option<SearchAllReply>> {
-        block(search_everything(
+        search_in(app, text, None)
+    }
+
+    fn search_in(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        text: &str,
+        budget: Option<std::time::Duration>,
+    ) -> CmdResult<Option<SearchAllReply>> {
+        block(search_with(
             app.handle().clone(),
             main_window(app),
             SearchAllRequest {
                 text: text.into(),
                 limit: 0,
             },
+            budget,
         ))
+    }
+
+    #[test]
+    fn a_search_out_of_budget_says_which_kinds_were_not_searched() {
+        let app = test_app(None);
+        let reply = search_in(&app, "timeout", Some(std::time::Duration::ZERO)).unwrap().expect("words");
+        assert_eq!(reply.notes.outcome, KindOutcome::TimedOut);
+        assert_eq!(reply.notes.total, 0);
     }
 
     #[test]

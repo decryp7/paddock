@@ -284,6 +284,8 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
         // Gives up on a read that makes no progress for 10 s, not on a slow one: a loaded machine reads the file
         // late, and cancelling before the importer has it all ends the read (not the importer's own work).
         let mut progress = (0, Instant::now());
+        // An overall bound too, so a plugin that trickles its reads cannot hold the tool for ever.
+        let overall = Instant::now();
         loop {
             let read = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed) - read_before;
             if read >= content.len() as u64 {
@@ -292,6 +294,9 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
             if read != progress.0 {
                 progress = (read, Instant::now());
             } else if progress.1.elapsed() >= Duration::from_secs(10) {
+                break;
+            }
+            if overall.elapsed() >= Duration::from_secs(300) {
                 break;
             }
             if let Ok(StreamEvent::Done(_)) = stream.next(Some(Duration::from_millis(20))) {

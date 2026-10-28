@@ -255,7 +255,7 @@ mod tests {
         assert_eq!(w.write(&batch(&schema, 3, 4, 100)).unwrap(), [3]);
         assert_eq!(w.write(&batch(&schema, 3, 2, 104)).unwrap(), Vec::<u32>::new());
         assert_eq!((w.next_id(), w.remaining(), w.rows()), (106, 4, 6));
-        assert!(w.contains_source(3) && !w.is_old(SEGMENT_AGE));
+        assert!(w.contains_source(3) && !w.is_old(Duration::MAX));
         assert!(w.write(&batch(&schema, 4, 5, 106)).is_err(), "does not fit the block");
         assert!(dir.join(file_name(100, 0)).with_extension(TMP).is_file(), "written as .tmp");
         let seg = w.close().unwrap();
