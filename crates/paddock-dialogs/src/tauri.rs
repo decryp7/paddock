@@ -413,6 +413,18 @@ fn build_window<R: Runtime>(
     Ok(())
 }
 
+/// Runs `f` on the main thread, in the order of the calls. The mock runtime has no main thread to post to: there it runs
+/// at once, which keeps the order and lets the tests look at the result.
+#[cfg(not(any(test, feature = "mock-runtime")))]
+fn on_main_thread<R: Runtime>(app: &AppHandle<R>, f: impl FnOnce() + Send + 'static) {
+    let _ = app.run_on_main_thread(f);
+}
+
+#[cfg(any(test, feature = "mock-runtime"))]
+fn on_main_thread<R: Runtime>(_app: &AppHandle<R>, f: impl FnOnce() + Send + 'static) {
+    f();
+}
+
 /// Whether an owned dialog window is attached to its parent when it is shown rather than when it is built: macOS, where
 /// AppKit orders a child window in with its parent at once, even one built hidden (the 1.1-0 spike).
 pub(crate) fn attaches_at_show(os: &str) -> bool {
@@ -510,7 +522,27 @@ fn on_destroyed_on<R: Runtime>(app: &AppHandle<R>, label: &str, os: &str) {
     let Some(dialogs) = app.try_state::<Dialogs>() else {
         return;
     };
-    let Some(entry) = dialogs.remove(label) else {
+    // Resolved before the registry lock is taken (lock order: the registry's is always innermost).
+    let parent = dialogs
+        .get(label)
+        .and_then(|e| app.get_webview_window(&e.parent));
+    let exiting = dialogs.exiting();
+    // The parent's re-enabling is decided under the registry lock, against the shown modals only, and queued on the main
+    // thread in the same order as the disabling at show.
+    let Some(entry) = dialogs.remove_with(label, |entry, last_shown| {
+        if let Some(p) = parent.clone()
+            && !exiting
+            && entry.shown
+            && entry.modality == Modality::Modal
+            && disables_parent_natively(os)
+            && last_shown
+        {
+            on_main_thread(app, move || {
+                native("enable", p.label());
+                let _ = p.set_enabled(true);
+            });
+        }
+    }) else {
         return;
     };
     log::info!(
@@ -524,12 +556,6 @@ fn on_destroyed_on<R: Runtime>(app: &AppHandle<R>, label: &str, os: &str) {
     let Some(parent) = app.get_webview_window(&entry.parent) else {
         return;
     };
-    if entry.modality == Modality::Modal
-        && disables_parent_natively(os)
-        && dialogs.modal_children_of(&entry.parent) == 0
-    {
-        let _ = parent.set_enabled(true);
-    }
     let _ = parent.set_focus();
     let parent_os = parent.as_ref().window();
     let parent_at = parent_os
@@ -812,26 +838,31 @@ fn show<R: Runtime>(
     let Some(entry) = dialogs.get(label) else {
         return;
     };
-    if dialogs.mark_shown(label) != Some(true) {
+    let parent = app.get_webview_window(&entry.parent);
+    // Marked shown and the parent's disabling queued under the registry lock: a close racing this show is ordered
+    // against it, and one that came first leaves nothing to show.
+    let Some(entry) = dialogs.mark_shown_with(label, |entry| {
+        if let Some(p) = parent.clone()
+            && entry.modality == Modality::Modal
+            && disables_parent_natively(os)
+        {
+            on_main_thread(app, move || {
+                native("disable", p.label());
+                let _ = p.set_enabled(false);
+            });
+        }
+    }) else {
         return;
-    }
+    };
     let Some(w) = app.get_webview_window(label) else {
         return;
     };
-    let parent = app.get_webview_window(&entry.parent);
     if let Some(p) = &parent
         && attaches_at_show(os)
         && crate::Parenting::of(entry.modality, os) == crate::Parenting::Owned
     {
         native("attach", label);
         attach_child(app, p, &w);
-    }
-    if let Some(p) = &parent
-        && entry.modality == Modality::Modal
-        && disables_parent_natively(os)
-    {
-        native("disable", p.label());
-        let _ = p.set_enabled(false);
     }
     if mechanism == ShowMechanism::OffscreenThenShow
         && let Some(at) = &entry.at

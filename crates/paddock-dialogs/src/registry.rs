@@ -312,6 +312,32 @@ impl Dialogs {
             .map(|e| !std::mem::replace(&mut e.shown, true))
     }
 
+    /// Like [`Dialogs::mark_shown`], and when it is the first time runs `then` with the entry under the registry lock, so
+    /// that a close racing the show is ordered against it: whatever `then` queues (the parent's disabling) is queued
+    /// before anything a later [`Dialogs::remove_with`] queues, and a close that came first leaves nothing to show.
+    pub fn mark_shown_with(&self, label: &str, then: impl FnOnce(&OpenDialog)) -> Option<OpenDialog> {
+        let mut map = self.lock();
+        let e = map.get_mut(label)?;
+        if std::mem::replace(&mut e.shown, true) {
+            return None;
+        }
+        then(e);
+        Some(e.clone())
+    }
+
+    /// Forgets the dialog window `label` like [`Dialogs::remove`] and runs `then` under the registry lock with the
+    /// entry and whether it was the last SHOWN modal dialog of its parent (a pending modal has not locked the parent
+    /// and does not hold it).
+    pub fn remove_with(&self, label: &str, then: impl FnOnce(&OpenDialog, bool)) -> Option<OpenDialog> {
+        let mut map = self.lock();
+        let e = map.remove(label)?;
+        let last = !map
+            .values()
+            .any(|o| o.parent == e.parent && o.modality == Modality::Modal && o.shown);
+        then(&e, last);
+        Some(e)
+    }
+
     /// Whether `label` is an open dialog whose window has not been shown yet.
     pub fn is_pending(&self, label: &str) -> bool {
         self.lock().get(label).is_some_and(|e| !e.shown)

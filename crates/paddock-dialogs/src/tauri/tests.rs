@@ -695,6 +695,49 @@ fn the_parent_stays_enabled_until_the_dialog_is_shown() {
 }
 
 #[test]
+fn only_shown_modals_hold_the_parent_and_the_last_shown_one_releases_it() {
+    for os in ["windows", "linux"] {
+        let (app, timer) = manual_app();
+        let h = app.handle().clone();
+        let mark = native_mark();
+        let a = open_on(&h, "main", request("unsaved-changes"), os).unwrap();
+        let b = open_on(&h, "main", request("confirm-x"), os).unwrap();
+        let ops = || {
+            native_since(mark)
+                .into_iter()
+                .filter(|o| o.ends_with(":main"))
+                .collect::<Vec<_>>()
+        };
+        // Only A is shown (B is still pending): A closing releases the parent although B is open.
+        ready(&h, &os_window(&app, &a.label), measure(200.0, 100.0), os, show_mechanism(os)).unwrap();
+        on_destroyed_on(&h, &a.label, os);
+        assert_eq!(ops(), ["disable:main", "enable:main"], "{os}");
+        // B's deadline passes after that: it shows and holds the parent again; closing it releases it.
+        timer.deadline_passes();
+        on_destroyed_on(&h, &b.label, os);
+        assert_eq!(
+            ops(),
+            ["disable:main", "enable:main", "disable:main", "enable:main"],
+            "{os}"
+        );
+    }
+}
+
+#[test]
+fn a_deadline_that_arrives_after_the_close_never_locks_the_parent() {
+    for os in ["windows", "linux"] {
+        let (app, timer) = manual_app();
+        let h = app.handle().clone();
+        let mark = native_mark();
+        let a = open_on(&h, "main", request("unsaved-changes"), os).unwrap();
+        on_destroyed_on(&h, &a.label, os);
+        timer.deadline_passes();
+        let ops = native_since(mark);
+        assert!(!ops.iter().any(|o| o == "disable:main" || o == "enable:main"), "{os}: {ops:?}");
+    }
+}
+
+#[test]
 fn opening_a_pending_dialog_again_creates_no_window_and_does_not_show_it_early() {
     let (app, _timer) = manual_app();
     let h = app.handle().clone();
