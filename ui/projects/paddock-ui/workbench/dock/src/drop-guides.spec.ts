@@ -69,4 +69,16 @@ describe('DropGuides', () => {
     guides.dispose();
     root.remove();
   });
+
+  it('outlines itself on request and is plain again after', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const guides = new DropGuides(root);
+    const layer = root.querySelector('.pd-dock-drop-guides')!;
+    guides.setOutline(true);
+    expect(layer.getAttribute('data-redock')).toBe('outline');
+    guides.setOutline(false);
+    expect(layer.hasAttribute('data-redock')).toBe(false);
+    root.remove();
+  });
 });

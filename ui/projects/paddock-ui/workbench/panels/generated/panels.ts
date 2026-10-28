@@ -34,7 +34,9 @@ bounds: PopOutBounds | null,
  */
 monitor: string | null, keepOnTop: boolean, };
 
-export type PanelsEvent = { "kind": "returned", panel: string, label: string, } | { "kind": "changed" } | { "kind": "moved", panel: string, label: string, x: number, y: number, };
+export type Look = "opaque" | "translucent" | "outline";
+
+export type PanelsEvent = { "kind": "returned", panel: string, label: string, } | { "kind": "changed" } | { "kind": "moved", panel: string, label: string, x: number, y: number, } | { "kind": "redock", panel: string, label: string, look: Look, };
 
 export type SyncScope = "full" | "display";
 

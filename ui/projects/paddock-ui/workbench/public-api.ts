@@ -69,6 +69,7 @@ export {
   type WorkbenchPorts,
   type ShowViewOptions,
   type PanelWindowsPort,
+  type RedockLook,
   type PopOutPlacement,
   type DockPort,
   type ExplorerPlan,

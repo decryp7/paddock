@@ -97,6 +97,7 @@ pub(super) fn dragged<R: Runtime>(app: &AppHandle<R>, host: &str, label: &str) {
     else {
         return;
     };
+    super::redock::on_moved(app, host, label, &entry.panel.id());
     notify(
         app,
         host,

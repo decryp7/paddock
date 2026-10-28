@@ -76,6 +76,9 @@ pd-dock .pd-dock-ah-flyout-bottom .pd-dock-ah-grip { top: -3px; left: 0; right: 
 .pd-dock-guide-center::after { content: ''; width: 14px; height: 14px; border: 2px solid var(--pd-accent); border-radius: 2px; }
 .pd-dock-guide.hot { background: var(--pd-accent-fill); color: var(--pd-on-accent); }
 .pd-dock-guide-center.hot::after { border-color: var(--pd-on-accent); }
+/* A pop-out over the window reduced transparency: it stays opaque, so the guides outline themselves instead. */
+.pd-dock-drop-guides[data-redock='outline'] .pd-dock-guide { border-width: 2px; opacity: 1; outline: 2px solid var(--pd-accent); outline-offset: 1px; }
+.pd-dock-drop-guides[data-redock='outline'] .pd-dock-guide.hot { outline-color: var(--pd-on-accent); }
 /* The cue of a tab dragged off the drop zones: a ghost of the floating panel (or new window) and the hint. */
 .pd-dock-float-cue {
   position: fixed; z-index: 1001; pointer-events: none; display: flex; align-items: flex-start; justify-content: center;

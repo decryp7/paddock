@@ -251,6 +251,7 @@ function windowsPort(result: boolean | 'throws' = true) {
     focus: vi.fn(),
     poppedOut: popped,
     onReturned: () => () => undefined,
+    onRedock: () => () => undefined,
   };
   return { port, calls };
 }

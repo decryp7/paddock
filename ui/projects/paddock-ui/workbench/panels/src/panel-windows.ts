@@ -1,6 +1,6 @@
 import { computed, DestroyRef, inject, Injectable, InjectionToken, Injector, signal, type Signal } from '@angular/core';
 import { SHELL_PORTS, ShellContextHost } from '@decryp7/paddock-ui/shell';
-import { panelTitle, WORKBENCH_PORTS, WorkbenchRegistry, type PanelWindowsPort, type PopOutPlacement } from '@decryp7/paddock-ui/workbench';
+import { panelTitle, WORKBENCH_PORTS, WorkbenchRegistry, type PanelWindowsPort, type PopOutPlacement, type RedockLook } from '@decryp7/paddock-ui/workbench';
 import { PANEL_LIMITS, type GhostRequest, type PanelsEvent, type PopOutInfo } from '../generated/panels';
 import { GhostSession, type DragOutPreview } from './ghost-session';
 import { PANELS_IO } from './io';
@@ -41,6 +41,7 @@ export class PanelWindows implements PanelWindowsPort {
   private readonly popped = signal<ReadonlyMap<string, PopOutInfo>>(new Map());
   private readonly opening = new Set<string>();
   private readonly returnedListeners = new Set<(panel: string) => void>();
+  private readonly redockListeners = new Set<(look: RedockLook, panel: string) => void>();
   private readonly movedListeners = new Set<(e: PopOutMoved) => void>();
   private readonly endListeners = new Set<(label: string) => void>();
   private started: Promise<void> | null = null;
@@ -96,6 +97,9 @@ export class PanelWindows implements PanelWindowsPort {
         break;
       case 'moved':
         this.moved({ panel: e.panel, label: e.label, x: e.x, y: e.y, source: 'os' });
+        break;
+      case 'redock':
+        for (const l of [...this.redockListeners]) l(e.look, e.panel);
         break;
     }
   }
@@ -155,6 +159,11 @@ export class PanelWindows implements PanelWindowsPort {
   onReturned(listener: (panel: string) => void): () => void {
     this.returnedListeners.add(listener);
     return () => this.returnedListeners.delete(listener);
+  }
+
+  onRedock(listener: (look: RedockLook, panel: string) => void): () => void {
+    this.redockListeners.add(listener);
+    return () => this.redockListeners.delete(listener);
   }
 
   private moved(e: PopOutMoved): void {

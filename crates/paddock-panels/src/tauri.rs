@@ -23,6 +23,7 @@ mod events;
 mod ghost;
 mod native;
 mod popout;
+mod redock;
 mod relay;
 
 pub use commands::{
@@ -37,6 +38,7 @@ pub use popout::{dock_back, focus, list, monitors_from, open, set_keep_on_top};
 pub use relay::publish;
 
 use crate::ghost::State;
+use crate::redock::Opacity;
 use crate::registry::{Memory, PopOuts};
 use crate::sync::Limiter;
 use ::tauri::{AppHandle, Runtime, WebviewWindow, WebviewWindowBuilder};
@@ -99,6 +101,7 @@ impl<R: Runtime> WindowHooks<R> {
 pub struct PanelsBuilder {
     route: String,
     bounds_file: Option<PathBuf>,
+    redock_opacity: Opacity,
 }
 
 impl PanelsBuilder {
@@ -114,6 +117,13 @@ impl PanelsBuilder {
         self
     }
 
+    /// How opaque a pop-out dragged back over its host is (default 0.5, kept within 0.25 to 0.9). The system's "reduce
+    /// transparency" setting wins: the window stays opaque and the dock guides get an outline.
+    pub fn redock_opacity(mut self, opacity: f64) -> Self {
+        self.redock_opacity = Opacity::new(opacity);
+        self
+    }
+
     /// The managed state: `app.manage(builder.build())`.
     pub fn build(self) -> Panels {
         Panels {
@@ -125,6 +135,8 @@ impl PanelsBuilder {
             limiter: Limiter::default(),
             ghost: Mutex::new(State::default()),
             exiting: AtomicBool::new(false),
+            redock: redock::State::default(),
+            redock_opacity: self.redock_opacity,
             started: Instant::now(),
         }
     }
@@ -138,6 +150,8 @@ pub struct Panels {
     pub(crate) limiter: Limiter,
     ghost: Mutex<State>,
     exiting: AtomicBool,
+    pub(crate) redock: redock::State,
+    pub(crate) redock_opacity: Opacity,
     started: Instant,
 }
 
@@ -147,6 +161,7 @@ impl Panels {
         PanelsBuilder {
             route: DEFAULT_ROUTE.to_string(),
             bounds_file: None,
+            redock_opacity: Opacity::default(),
         }
     }
 

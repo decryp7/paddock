@@ -172,6 +172,23 @@ describe('PanelWindows', () => {
     expect(parseDragOver('{"label":1}')).toBeNull();
   });
 
+  it('tells the dock how the pop-out dragged over its window looks', async () => {
+    const { windows, desktop } = setup();
+    await TestBed.inject(ShellContextHost).load();
+    await windows.popOut('wt.log');
+    const looks: [string, string][] = [];
+    const off = windows.onRedock((look, panel) => looks.push([look, panel]));
+    const host = (desktop as unknown as { windows: Map<string, { emitPanels(e: unknown): void }> }).windows.get('main')!;
+    host.emitPanels({ kind: 'redock', panel: 'wt.log', label: 'p-main-1', look: 'translucent' });
+    host.emitPanels({ kind: 'redock', panel: 'wt.log', label: 'p-main-1', look: 'opaque' });
+    await settle();
+    expect(looks).toEqual([['translucent', 'wt.log'], ['opaque', 'wt.log']]);
+    off();
+    host.emitPanels({ kind: 'redock', panel: 'wt.log', label: 'p-main-1', look: 'outline' });
+    await settle();
+    expect(looks).toHaveLength(2);
+  });
+
   it('runs the commands a pop-out forwards: show a view always, others only when allowed', async () => {
     const { windows, desktop, shown, ctx } = setup({ hostCommands: (id) => id === 'wt.undo' });
     await TestBed.inject(ShellContextHost).load();

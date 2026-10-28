@@ -88,7 +88,16 @@ export interface PanelWindowsPort {
   readonly poppedOut: Signal<readonly string[]>;
   /** Called with a panel whose window closed or asked to dock back; returns the unsubscribe function. */
   onReturned(listener: (panel: string) => void): () => void;
+  /**
+   * Called when a pop-out dragged over this window changes its look (`RedockLook`): it turns translucent over the
+   * window so the drop guides show, back to opaque when it leaves or the drag ends; `outline` when the system reduces
+   * transparency (the guides then get a clear outline). Returns the unsubscribe function.
+   */
+  onRedock(listener: (look: RedockLook, panel: string) => void): () => void;
 }
+
+/** How a pop-out window being dragged over its host looks: see `PanelWindowsPort.onRedock`. */
+export type RedockLook = 'opaque' | 'translucent' | 'outline';
 
 /** Provided by `workbench/panels`; optional (null: no pop-outs in this window, as in a pop-out window itself). */
 export const PANEL_WINDOWS = new InjectionToken<PanelWindowsPort | null>('PADDOCK_PANEL_WINDOWS', { providedIn: 'root', factory: () => null });

@@ -5,6 +5,7 @@
 
 use super::ghost::step;
 use super::{Builder, TARGET};
+use crate::redock::OpacityError;
 use ::tauri::{AppHandle, Manager, Runtime, Window};
 use std::time::Instant;
 
@@ -131,4 +132,107 @@ pub(super) fn on_page_load<R: Runtime>(
     if payload.event() == ::tauri::webview::PageLoadEvent::Finished {
         super::ghost::page_loaded(w.app_handle());
     }
+}
+
+/// Sets the window's opacity (1.0 is fully opaque). Call on the main thread.
+#[cfg(target_os = "macos")]
+pub(super) fn set_window_opacity<R: Runtime>(
+    w: &Window<R>,
+    opacity: f64,
+) -> Result<(), OpacityError> {
+    let ptr = w
+        .ns_window()
+        .map_err(|e| OpacityError::Failed(e.to_string()))?;
+    if ptr.is_null() {
+        return Err(OpacityError::Failed("the window has no NSWindow".into()));
+    }
+    // SAFETY: Tauri hands out the live NSWindow of this window; this runs on the main thread, as AppKit requires, and the
+    // reference does not outlive the call.
+    let ns_window = unsafe { &*ptr.cast::<objc2_app_kit::NSWindow>() };
+    ns_window.setAlphaValue(opacity);
+    Ok(())
+}
+
+#[cfg(windows)]
+pub(super) fn set_window_opacity<R: Runtime>(
+    w: &Window<R>,
+    opacity: f64,
+) -> Result<(), OpacityError> {
+    use windows::Win32::Foundation::COLORREF;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetWindowLongPtrW, LWA_ALPHA, SetLayeredWindowAttributes, SetWindowLongPtrW,
+        WS_EX_LAYERED,
+    };
+    let hwnd = w.hwnd().map_err(|e| OpacityError::Failed(e.to_string()))?;
+    let layered = WS_EX_LAYERED.0 as isize;
+    // SAFETY: the handle is the live window's; these calls only change its extended style and alpha.
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if opacity >= 1.0 {
+            // Back to a plain window (a layered window costs the compositor more than an ordinary one).
+            if style & layered != 0 {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style & !layered);
+            }
+            return Ok(());
+        }
+        if style & layered == 0 {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | layered);
+        }
+        let alpha = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+        SetLayeredWindowAttributes(hwnd, COLORREF(0), alpha, LWA_ALPHA)
+            .map_err(|e| OpacityError::Failed(e.to_string()))
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+pub(super) fn set_window_opacity<R: Runtime>(
+    w: &Window<R>,
+    opacity: f64,
+) -> Result<(), OpacityError> {
+    use gtk::prelude::WidgetExt;
+    let window = w
+        .gtk_window()
+        .map_err(|e| OpacityError::Failed(e.to_string()))?;
+    // Without a compositing screen GTK ignores the opacity: then there is nothing to show, and the guides get an outline.
+    if !window.screen().is_some_and(|s| s.is_composited()) {
+        return Err(OpacityError::Unsupported(
+            "the screen has no compositing manager".into(),
+        ));
+    }
+    window.set_opacity(opacity);
+    Ok(())
+}
+
+/// Does the user ask the system to reduce transparency? (macOS "Reduce transparency", Windows "Transparency effects"
+/// off.) Other platforms expose nothing: false.
+#[cfg(target_os = "macos")]
+pub(super) fn reduce_transparency() -> bool {
+    objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceTransparency()
+}
+
+#[cfg(windows)]
+pub(super) fn reduce_transparency() -> bool {
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+    use windows::core::w;
+    let mut data = 1u32;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    // SAFETY: `data` and `size` live through the call and `size` is its byte length.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+            w!("EnableTransparency"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some((&raw mut data).cast()),
+            Some(&raw mut size),
+        )
+    };
+    // A missing value means the default: transparency on.
+    status.is_ok() && data == 0
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+pub(super) fn reduce_transparency() -> bool {
+    false
 }

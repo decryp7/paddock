@@ -23,9 +23,12 @@ describe('parsePanelsEvent', () => {
     expect(parsePanelsEvent({ kind: 'returned', panel: 'pn.code', label: 'p-main-1' })).toEqual({ kind: 'returned', panel: 'pn.code', label: 'p-main-1' });
     expect(parsePanelsEvent({ kind: 'changed', extra: 1 })).toEqual({ kind: 'changed' });
     expect(parsePanelsEvent({ kind: 'moved', panel: 'pn.code', label: 'p-main-1', x: 1, y: 2 })).toEqual({ kind: 'moved', panel: 'pn.code', label: 'p-main-1', x: 1, y: 2 });
+    for (const look of ['opaque', 'translucent', 'outline'] as const) {
+      expect(parsePanelsEvent({ kind: 'redock', panel: 'pn.code', label: 'p-main-1', look })).toEqual({ kind: 'redock', panel: 'pn.code', label: 'p-main-1', look });
+    }
   });
 
-  it.each([null, undefined, 'x', 5, [], {}, { kind: 'other' }, { kind: 'returned', panel: 'a.b' }, { kind: 'moved', panel: 'a.b', label: 'l', x: 'a', y: 1 }, { kind: 'moved', panel: '', label: 'l', x: 1, y: 1 }])('refuses %j', (raw) => {
+  it.each([null, undefined, 'x', 5, [], {}, { kind: 'other' }, { kind: 'returned', panel: 'a.b' }, { kind: 'moved', panel: 'a.b', label: 'l', x: 'a', y: 1 }, { kind: 'moved', panel: '', label: 'l', x: 1, y: 1 }, { kind: 'redock', panel: 'a.b', label: 'l', look: 'glass' }, { kind: 'redock', panel: 'a.b', label: 'l' }])('refuses %j', (raw) => {
     expect(parsePanelsEvent(raw)).toBeNull();
   });
 });

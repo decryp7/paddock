@@ -1,7 +1,7 @@
 import { panelTitle } from '@decryp7/paddock-ui/workbench';
 import { afterNextRender, ApplicationRef, computed, createComponent, EnvironmentInjector, inject, Injectable, Injector, signal, type Signal } from '@angular/core';
 import { PdIcon } from '@decryp7/paddock-ui/shell';
-import { panelId as makePanelId, WorkbenchRegistry, type PerspectiveDef, type ShowViewOptions } from '@decryp7/paddock-ui/workbench';
+import { panelId as makePanelId, WorkbenchRegistry, type PerspectiveDef, type RedockLook, type ShowViewOptions } from '@decryp7/paddock-ui/workbench';
 import type { DockviewApi, DockviewGroupPanel } from 'dockview';
 import { dockview, loadDockview } from './dockview-loader';
 import { AngularContentRenderer, MissingViewRenderer } from './angular-panel';
@@ -9,6 +9,7 @@ import { AutoHideEvent, autoHideReduce, EMPTY_AUTO_HIDE } from './auto-hide';
 import { DockAutoHide } from './dock-auto-hide';
 import { DockContext } from './dock-context';
 import { keepActiveTabVisible, keepGroupsUnscrolled, labelTabOverflow, observeFloatingAria } from './dock-dom';
+import { redockGuides } from './redock-look';
 import { DockSlot, isLayoutTarget, Point, Rect, resolveGuideDrop, Side } from './dock-geometry';
 import { DockLayout } from './dock-layout';
 import { DockMenu } from './dock-menu';
@@ -283,7 +284,15 @@ export class WorkbenchDock {
       // A restored layout raises no activation: the panel in front is the active one from the start (review 2 P2-F).
       this.activeView.set(api.activePanel?.id ?? null);
     });
-    this.unreturned = this.ctx.windows()?.onReturned((panel) => this.returned(panel)) ?? null;
+    const windows = this.ctx.windows();
+    const stopReturned = windows?.onReturned((panel) => this.returned(panel));
+    const stopRedock = windows?.onRedock((look) => this.redock(look));
+    this.unreturned = windows ? () => (stopReturned?.(), stopRedock?.()) : null;
+  }
+
+  /** A pop-out dragged over this window changed its look: the guides outline themselves when it cannot be seen through. */
+  private redock(look: RedockLook): void {
+    this.ctx.guides?.setOutline(redockGuides(look).outline);
   }
 
   /** Builds the first arrangement (the saved one when it restores, else the default) and starts fitting it to the window. */

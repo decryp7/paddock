@@ -9,7 +9,7 @@ publish = ["decryp7"]
 
 [features]
 # The Tauri adapter (`paddock_panels::tauri`); the core above it never depends on Tauri.
-tauri = ["dep:tauri", "paddock-commands/tauri", "paddock-dialogs/tauri", "dep:windows", "dep:objc2-app-kit"]
+tauri = ["dep:tauri", "paddock-commands/tauri", "paddock-dialogs/tauri", "dep:windows", "dep:objc2-app-kit", "dep:gtk"]
 # For other crates' tests on Tauri's mock runtime: pop-outs are not owned by a native window. Never in an app.
 mock-runtime = ["tauri"]
 
@@ -26,12 +26,16 @@ tauri = { workspace = true, optional = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [target.'cfg(windows)'.dependencies]
-# The drag ghost is shown without taking the focus, and the primary mouse button is read outside any webview.
-windows = { version = "0.62", optional = true, features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+# A dragged pop-out turns translucent (a layered window) and the transparency setting is read from the registry. The drag ghost is shown without taking the focus, and the primary mouse button is read outside any webview.
+windows = { version = "0.62", optional = true, features = ["Win32_Foundation", "Win32_System_Registry", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# The primary mouse button outside any webview (NSEvent.pressedMouseButtons).
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSEvent"], optional = true }
+# The primary mouse button outside any webview (NSEvent.pressedMouseButtons), a window's alpha and the reduce-transparency setting.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAccessibility", "NSEvent", "NSResponder", "NSWindow", "NSWorkspace"], optional = true }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+# A pop-out dragged over its host turns translucent (gtk_widget_set_opacity); the version Tauri's GTK backend uses.
+gtk = { version = "0.18", optional = true }
 
 [dev-dependencies]
 # The adapter is tested on Tauri's mock runtime: no window ever reaches the desktop.

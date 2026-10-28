@@ -71,6 +71,10 @@ export function parsePanelsEvent(payload: unknown): PanelsEvent | null {
       return text(payload['panel']) && text(payload['label']) && Number.isFinite(payload['x']) && Number.isFinite(payload['y'])
         ? { kind: 'moved', panel: payload['panel'], label: payload['label'], x: payload['x'] as number, y: payload['y'] as number }
         : null;
+    case 'redock':
+      return text(payload['panel']) && text(payload['label']) && (payload['look'] === 'opaque' || payload['look'] === 'translucent' || payload['look'] === 'outline')
+        ? { kind: 'redock', panel: payload['panel'], label: payload['label'], look: payload['look'] }
+        : null;
     default:
       return null;
   }

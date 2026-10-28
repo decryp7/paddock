@@ -22,6 +22,7 @@ fn types() -> String {
         crate::PopOutBounds::decl(),
         crate::PopOutRequest::decl(),
         crate::PopOutInfo::decl(),
+        crate::Look::decl(),
         crate::PanelsEvent::decl(),
         crate::SyncScope::decl(),
         crate::SyncPublish::decl(),

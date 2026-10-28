@@ -2,7 +2,7 @@ import { Injector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { CommandService } from '@decryp7/paddock-ui/shell';
 import { RecordingShellPorts, settle } from '@decryp7/paddock-ui/shell/testing';
-import type { PanelWindowsPort } from '@decryp7/paddock-ui/workbench';
+import type { PanelWindowsPort, RedockLook } from '@decryp7/paddock-ui/workbench';
 import { DOCK_COMMANDS } from './dock-contributions';
 import { DockMenu } from './dock-menu';
 import { DOCK_STYLES } from './dock-styles';
@@ -20,6 +20,7 @@ function windows(answer: (panel: string) => boolean | 'throws' = () => true) {
   const popped = signal<readonly string[]>([]);
   const opened: [string, unknown][] = [];
   const returned = new Set<(panel: string) => void>();
+  const redock = new Set<(look: RedockLook, panel: string) => void>();
   const port: PanelWindowsPort = {
     popOut: (panel, placement) => {
       opened.push([panel, placement]);
@@ -31,9 +32,31 @@ function windows(answer: (panel: string) => boolean | 'throws' = () => true) {
     focus: vi.fn(),
     poppedOut: popped,
     onReturned: (l) => (returned.add(l), () => returned.delete(l)),
+    onRedock: (l) => (redock.add(l), () => redock.delete(l)),
   };
-  return { port, opened, popped, close: (panel: string) => returned.forEach((l) => l(panel)) };
+  return { port, opened, popped, redock: (look: RedockLook) => redock.forEach((l) => l(look, 'a.two')), listening: () => redock.size, close: (panel: string) => returned.forEach((l) => l(panel)) };
 }
+
+describe('a pop-out dragged over the dock (redock)', () => {
+  it('outlines the drop guides when the dragged window stays opaque, and plain again when it ends', async () => {
+    const w = windows();
+    const { rendered, dock } = await mountDock({ views: VIEWS, windows: w.port });
+    await dock.showView('a.one');
+    await settle(rendered.fixture);
+    const layer = rendered.one<HTMLElement>('.pd-dock-drop-guides');
+    expect(w.listening()).toBe(1);
+    expect(layer.hasAttribute('data-redock')).toBe(false);
+    w.redock('translucent');
+    expect(layer.hasAttribute('data-redock')).toBe(false);
+    w.redock('outline');
+    expect(layer.getAttribute('data-redock')).toBe('outline');
+    w.redock('opaque');
+    expect(layer.hasAttribute('data-redock')).toBe(false);
+    w.redock('outline');
+    rendered.fixture.destroy();
+    expect(w.listening()).toBe(0);
+  });
+});
 
 describe('the dock before it has a layout (P2-K)', () => {
   it('draws a dock skeleton and no data-ready until the layout is restored, then removes it', async () => {

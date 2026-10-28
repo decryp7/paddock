@@ -11,6 +11,7 @@
 //!   versioned file).
 //! - [`sync`]: who receives forwarded UI state (only the windows of the sender's host; dialogs get display state only),
 //!   the size limit and the rate limit.
+//! - [`redock`]: a pop-out dragged back over its host turns translucent (pure look decision, the opacity port and its controller).
 //! - [`ghost`]: the drag ghost's session state machine, geometry, request parsing and static page.
 //! - [`wire`]: the wire types and the events (`paddock://panels`, `paddock://ui-sync`).
 //!
@@ -33,6 +34,7 @@
 pub mod ghost;
 pub mod panel;
 pub mod place;
+pub mod redock;
 pub mod registry;
 pub mod sync;
 pub mod wire;
@@ -40,8 +42,8 @@ pub mod wire;
 pub use panel::{MAX_KEY, Panel, PanelProblem};
 pub use registry::{MAX_POPOUTS, Memory, PopOut, PopOuts};
 pub use wire::{
-    GhostRequest, PANELS_EVENT, PanelError, PanelErrorCode, PanelsEvent, PopOutBounds, PopOutInfo,
-    PopOutRequest, SyncPublish, SyncScope, UI_SYNC_EVENT,
+    GhostRequest, Look, PANELS_EVENT, PanelError, PanelErrorCode, PanelsEvent, PopOutBounds,
+    PopOutInfo, PopOutRequest, SyncPublish, SyncScope, UI_SYNC_EVENT,
 };
 
 paddock_commands::command_table! {

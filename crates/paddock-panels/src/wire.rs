@@ -28,6 +28,27 @@ pub enum PanelsEvent {
         x: f64,
         y: f64,
     },
+    /// The dragged pop-out window turned translucent over this window, opaque again, or (when the system reduces
+    /// transparency) stays opaque and wants a clear outline on the dock guides. `Opaque` also ends it.
+    #[serde(rename_all = "camelCase")]
+    Redock {
+        panel: String,
+        label: String,
+        look: Look,
+    },
+}
+
+/// How a pop-out window dragged over its host looks (see [`crate::redock`]).
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Look {
+    /// Fully opaque: not over the host, or the drag is over.
+    Opaque,
+    /// Translucent, so the guides under it show.
+    Translucent,
+    /// Opaque, with a clear outline on the guides (reduced transparency).
+    Outline,
 }
 
 /// A window's place the UI asks for or reports (logical px). With a `scale`, `x`/`y` are logical px of the display with

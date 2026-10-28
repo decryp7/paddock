@@ -1,3 +1,4 @@
+import { REDOCK_ATTRIBUTE } from './redock-look';
 import { compassCells, edgeCells, GuideCell, hitGuide, Point, previewRect, Rect } from './dock-geometry';
 import { DRAG_THRESHOLD } from './dock-target';
 import { isFloatingMovePress } from './floating-move';
@@ -81,6 +82,12 @@ export class DropGuides {
     if (!this.active) this.start();
     this.draw(point);
     this.setPreview(preview);
+  }
+
+  /** Draws the guides with a clear outline (a pop-out over the window cannot be seen through) or plain. */
+  setOutline(on: boolean): void {
+    if (on) this.layer.setAttribute(REDOCK_ATTRIBUTE, 'outline');
+    else this.layer.removeAttribute(REDOCK_ATTRIBUTE);
   }
 
   hide(): void {

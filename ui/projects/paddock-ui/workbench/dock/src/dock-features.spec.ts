@@ -191,6 +191,7 @@ describe('pop-out windows', () => {
         returned = l;
         return () => undefined;
       },
+      onRedock: () => () => undefined,
     };
     return { port, popped, giveBack: (id: string) => { popped.update((p) => p.filter((x) => x !== id)); returned(id); } };
   }
