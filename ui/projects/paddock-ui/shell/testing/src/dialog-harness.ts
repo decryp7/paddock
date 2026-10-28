@@ -7,6 +7,8 @@ import {
   DIALOG_IO,
   DialogShell,
   dialogWindowConfig,
+  layoutActions,
+  type DialogContent,
 } from '@decryp7/paddock-ui/shell/dialogs';
 import { FakeDialogIo } from './fake-dialog-io';
 import { recordIpc } from './ipc-recorder';
@@ -110,6 +112,16 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
     // The ready handshake (ADR 0026 §4.2): sent once, whatever the kind; Rust sizes the window by the kind.
     if (io.readied === null) problems.push('never sent the ready handshake');
     else if (io.readied.minContent.height > io.readied.content.height || io.readied.minContent.width <= 0) problems.push(`sent a ready measure whose minimum exceeds its content: ${safeJson(io.readied)}`);
+
+    // The declared actions (ADR 0026 §2): the layout's problems, and Enter never on a destructive action, on every OS.
+    const mounted = (fixture.componentInstance as unknown as { content(): DialogContent | null }).content();
+    const actions = mounted?.dialogActions?.() ?? [];
+    for (const platform of ['macos', 'windows'] as const) {
+      const layout = layoutActions(def.kind, def.modality, def.requiredChoice === true, actions, platform, { cancel: 'Cancel', close: 'Close' });
+      if (platform === 'macos') for (const p of layout.problems) problems.push(`declares invalid actions: ${p}`);
+      const enter = actions.find((a) => a.id === layout.enterTarget);
+      if (enter?.kind === 'answer' && enter.role === 'destructive') problems.push(`Enter would run the destructive action ${enter.id}`);
+    }
 
     // The frame draws the footer from the declared actions (ADR 0026 §2): a content that draws its own is reported.
     if (box) for (const f of ownFooter(box)) problems.push(`draws its own footer: ${f}`);

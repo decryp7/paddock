@@ -42,6 +42,15 @@ class ChoiceContent {
   readonly dialogActions = signal<readonly DialogAction[]>([{ kind: 'answer', id: 'a', label: 'A', role: 'primary', answer: () => 'a' }]);
 }
 
+/** Two primaries: an invalid declaration the frame replaces by one Close. */
+@Component({ selector: 'pd-test-two-primaries', changeDetection: ChangeDetectionStrategy.OnPush, template: `<p>Pick</p>` })
+class TwoPrimariesContent {
+  readonly dialogActions = signal<readonly DialogAction[]>([
+    { kind: 'answer', id: 'a', label: 'A', role: 'primary', answer: () => 'a' },
+    { kind: 'answer', id: 'b', label: 'B', role: 'primary', answer: () => 'b' },
+  ]);
+}
+
 /** Today's shape of a content that predates the frame: its own actions row with Cancel. */
 @Component({ selector: 'pd-test-footer', changeDetection: ChangeDetectionStrategy.OnPush, template: `<p>Remove?</p><div class="pd-rm__actions"><button type="button">Cancel</button></div>` })
 class OwnFooterContent {}
@@ -69,7 +78,8 @@ const CHOICE = dialog('t.choice', 'decision', () => Promise.resolve(ChoiceConten
 const EMPTY = dialog('t.empty', 'form', () => Promise.resolve(EmptyContent));
 const LOGS = dialog('t.logs', 'viewer', () => Promise.resolve(LogsContent));
 const FOOTER = dialog('t.footer', 'decision', () => Promise.resolve(OwnFooterContent));
-const ALL = [OK, OK_TOOL, MISSING, SNEAKY, CHOICE, EMPTY, LOGS, FOOTER];
+const TWO = dialog('t.two', 'decision', () => Promise.resolve(TwoPrimariesContent));
+const ALL = [OK, OK_TOOL, MISSING, SNEAKY, CHOICE, EMPTY, LOGS, FOOTER, TWO];
 
 describe('the boot-every-dialog harness', () => {
   it('passes a dialog that boots, sends only declared commands, has a Cancel and closes on Escape', async () => {
@@ -101,6 +111,11 @@ describe('the boot-every-dialog harness', () => {
   it('fails a content that draws its own footer (ADR 0026 §2)', async () => {
     const report = await bootDialog(FOOTER, { dialogs: ALL });
     expect(report.problems).toEqual(['draws its own footer: .pd-rm__actions', 'draws its own footer: a "Cancel" button']);
+  });
+
+  it('fails a declaration the frame cannot lay out', async () => {
+    const report = await bootDialog(TWO, { dialogs: ALL, ignoreErrors: [/declares invalid actions/] });
+    expect(report.problems).toEqual(['declares invalid actions: 2 primary actions (at most one)']);
   });
 
   it('fails an empty body', async () => {
