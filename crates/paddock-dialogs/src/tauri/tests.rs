@@ -676,6 +676,37 @@ fn the_parent_stays_enabled_until_the_dialog_is_shown() {
 }
 
 #[test]
+fn the_opener_is_told_when_the_window_is_shown_once_not_when_it_is_opened() {
+    let (app, timer) = manual_app();
+    let h = app.handle().clone();
+    let shown = recorder(&window(&app, "main"), SHOWN_EVENT);
+    let info = open(&h, "main", request("unsaved-changes")).unwrap();
+    assert!(shown.lock().unwrap().is_empty(), "opening shows nothing");
+    ready(
+        &h,
+        &os_window(&app, &info.label),
+        measure(200.0, 100.0),
+        "linux",
+    )
+    .unwrap();
+    // The deadline passing afterwards, and a second ready, show nothing again.
+    timer.deadline_passes();
+    ready(
+        &h,
+        &os_window(&app, &info.label),
+        measure(200.0, 100.0),
+        "linux",
+    )
+    .unwrap();
+    let seen = shown.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert!(
+        seen[0].contains(&info.label) && seen[0].contains("unsaved-changes"),
+        "{seen:?}"
+    );
+}
+
+#[test]
 fn only_shown_modals_hold_the_parent_and_the_last_shown_one_releases_it() {
     for os in ["windows", "linux"] {
         let (app, timer) = manual_app();

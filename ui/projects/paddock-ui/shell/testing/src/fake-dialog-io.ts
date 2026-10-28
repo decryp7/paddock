@@ -79,6 +79,10 @@ export class FakeDialogIo implements DialogIo {
     for (const [k, v] of this.labels) if (v === label) this.labels.delete(k);
     this.emit(DIALOG_EVENTS.closed, { label, dialogId, remembered });
   }
+  /** The window `label` of dialog `dialogId` was shown (the opener's scrim for a macOS parent starts here). */
+  shown(label: string, dialogId: string): void {
+    this.emit(DIALOG_EVENTS.shown, { label, dialogId });
+  }
   /** A close request reached this dialog window (the OS close, or the opener's `close`). */
   closeRequested(): void {
     this.emit(DIALOG_EVENTS.closeRequested, null);

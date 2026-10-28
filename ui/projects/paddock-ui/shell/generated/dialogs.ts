@@ -52,6 +52,8 @@ requiredChoice: boolean, input: unknown, };
 
 export type DialogResult = { label: string, dialogId: string, result: unknown, };
 
+export type DialogShown = { label: string, dialogId: string, };
+
 export type DialogClosed = { label: string, dialogId: string, 
 /**
  * Its size and its offset from the parent window when it closed (logical px), for remembering.
@@ -70,9 +72,10 @@ message: string,
  */
 retryable: boolean, };
 
-/** The events of the dialog layer: to the opener (`result`, `closed`) and to the dialog (`closeRequested`). */
+/** The events of the dialog layer: to the opener (`result`, `shown`, `closed`) and to the dialog (`closeRequested`). */
 export const DIALOG_EVENTS = {
   result: 'paddock://dialog-result',
+  shown: 'paddock://dialog-shown',
   closed: 'paddock://dialog-closed',
   closeRequested: 'paddock://dialog-close-requested',
 } as const;

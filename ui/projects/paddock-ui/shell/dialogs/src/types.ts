@@ -87,6 +87,12 @@ export interface DialogShowRequest {
 export interface DialogSession {
   /** Resolves when the dialog is gone, with its outcome. Never rejects. */
   readonly closed: Promise<DialogOutcome<unknown>>;
+  /**
+   * Resolves when the dialog is on screen: at once in the page, when the OS window is shown (the `shown` event) for a
+   * window. A windowed modal blocks its parent from then on (the scrim over a macOS parent appears with the window, not
+   * before). Never rejects; absent means shown at once.
+   */
+  readonly shown?: Promise<void>;
   /** False once the dialog is gone, before `closed` has been observed. */
   isOpen(): boolean;
   /** Brings the dialog to the front. */

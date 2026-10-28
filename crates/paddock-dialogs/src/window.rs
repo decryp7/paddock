@@ -16,6 +16,10 @@ use std::fmt;
 pub const RESULT_EVENT: &str = "paddock://dialog-result";
 /// To the window that opened the dialog: it is gone (with or without a result). Payload: [`DialogClosed`].
 pub const CLOSED_EVENT: &str = "paddock://dialog-closed";
+/// To the window that opened the dialog: its window is on screen now (shown on ready, or at the show deadline). The
+/// opener's in-app scrim over a macOS parent (which the OS does not disable) starts here, not at open. Payload:
+/// [`DialogShown`].
+pub const SHOWN_EVENT: &str = "paddock://dialog-shown";
 /// To the dialog: the user asked to close it (Cmd/Ctrl+W, a window-manager close); the dialog decides and calls
 /// `dialog_close`. No payload.
 pub const CLOSE_REQUESTED_EVENT: &str = "paddock://dialog-close-requested";
@@ -104,6 +108,15 @@ pub struct DialogResult {
     pub dialog_id: String,
     #[cfg_attr(test, ts(type = "unknown"))]
     pub result: Option<Value>,
+}
+
+/// The payload of [`SHOWN_EVENT`].
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DialogShown {
+    pub label: String,
+    pub dialog_id: String,
 }
 
 /// The payload of [`CLOSED_EVENT`].

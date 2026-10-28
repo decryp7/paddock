@@ -48,9 +48,9 @@ use crate::placement::{self, Bounds, Monitor, Placement, Rect, ScreenPosition};
 use crate::registry::{CloseDecision, Dialogs, OpenDialog};
 use crate::window::{
     Around, CLOSE_REQUESTED_EVENT, CLOSED_EVENT, DialogClosed, DialogError, DialogErrorCode,
-    DialogInfo, DialogRequest, DialogResult, DialogStart, MAX_RESULT_BYTES, Measure, RESULT_EVENT,
-    WindowSpec, clean_title, disables_parent_natively, geometry, json_len, plan_fit, validate,
-    window_config,
+    DialogInfo, DialogRequest, DialogResult, DialogShown, DialogStart, MAX_RESULT_BYTES, Measure,
+    RESULT_EVENT, SHOWN_EVENT, WindowSpec, clean_title, disables_parent_natively, geometry,
+    json_len, plan_fit, validate, window_config,
 };
 use ::tauri::window::Color;
 use ::tauri::{
@@ -853,6 +853,14 @@ fn show<R: Runtime>(app: &AppHandle<R>, label: &str, os: &str, deadline: bool) {
     let _ = w.show();
     native("focus", label);
     let _ = w.set_focus();
+    let _ = app.emit_to(
+        entry.parent.as_str(),
+        SHOWN_EVENT,
+        DialogShown {
+            label: label.to_string(),
+            dialog_id: entry.dialog_id.clone(),
+        },
+    );
     if deadline {
         log::warn!(
             target: TARGET,

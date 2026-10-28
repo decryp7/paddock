@@ -28,6 +28,7 @@ fn text() -> String {
         crate::DialogInfo::decl(),
         crate::DialogStart::decl(),
         crate::DialogResult::decl(),
+        crate::DialogShown::decl(),
         crate::DialogClosed::decl(),
         crate::DialogErrorCode::decl(),
         crate::DialogError::decl(),
@@ -43,9 +44,10 @@ fn text() -> String {
         .join(", ");
     format!(
         "{header}{types}\
-/** The events of the dialog layer: to the opener (`result`, `closed`) and to the dialog (`closeRequested`). */
+/** The events of the dialog layer: to the opener (`result`, `shown`, `closed`) and to the dialog (`closeRequested`). */
 export const DIALOG_EVENTS = {{
   result: '{}',
+  shown: '{}',
   closed: '{}',
   closeRequested: '{}',
 }} as const;
@@ -54,6 +56,7 @@ export const DIALOG_EVENTS = {{
 export const DIALOG_BASE_COMMANDS = [{base}] as const;
 ",
         crate::RESULT_EVENT,
+        crate::SHOWN_EVENT,
         crate::CLOSED_EVENT,
         crate::CLOSE_REQUESTED_EVENT,
     )

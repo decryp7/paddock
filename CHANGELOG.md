@@ -16,6 +16,16 @@ Conventional Commits; one semver tag for the whole repo.
   `DialogCallableKind`, read with `kind()`): a contract can only name a `dialog_callable::<name>` marker, `prefix` or
   `plugin`; `DialogCallable::Command("x")` no longer compiles (compile_fail doctest).
 
+- `DialogRequest` has an optional `theme` (`'light' | 'dark'`, the opener's `data-theme`, else its system scheme; sent by
+  the window backend): a dialog window's background before its page paints is that theme's `--pd-surface-2`, a test
+  compares Rust's two values with `_tokens.scss`. Without it Rust falls back to the parent's OS theme.
+- Every dialog page gets `<html data-platform="macos|windows|linux">` from an initialization script, so the footer's
+  button order follows the shell's platform, not the user agent.
+- New event `paddock://dialog-shown` (`DIALOG_EVENTS.shown`, payload `DialogShown { label, dialogId }`) when the window is
+  shown. `DialogSession` has an optional `shown` promise: a windowed modal blocks its parent (the scrim over a macOS
+  parent) once its window is on screen, not when it is opened; one closed before that never blocks. `FakeDialogIo.shown()`
+  plays the event.
+
 ### Shared dialog API, part 5: macOS attach at show and the configured deadline
 - macOS: an owned dialog window is built without a parent and attached with `addChildWindow:ordered:` when it is shown
   (`objc2-app-kit`, a macOS-only dependency of `paddock-dialogs`, already in every app's tree through Tauri), instead of
