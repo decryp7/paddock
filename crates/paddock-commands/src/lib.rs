@@ -65,8 +65,8 @@ pub use error::{CommandError, ErrorCode};
 pub use guard::{DialogGrant, Refusal, RefusalCode, check};
 pub use labels::{Label, WindowClass, class_of};
 pub use table::{
-    CommandInfo, DEFAULT_LIMIT, DialogCallable, KIB, Kind, MAX_LIMIT, MIB, MIN_LIMIT, Spec, Table,
-    TableError, Windows, limit, plugin, prefix,
+    CommandInfo, DEFAULT_LIMIT, DialogCallable, DialogCallableKind, KIB, Kind, MAX_LIMIT, MIB,
+    MIN_LIMIT, Spec, Table, TableError, Windows, limit, plugin, prefix,
 };
 
 #[cfg(feature = "tauri")]
@@ -139,7 +139,7 @@ pub mod tauri;
 ///     Query [MAIN | DIALOG] => app::app_status,
 ///     Mutation [MAIN] => app::app_quit,
 /// }
-/// assert_eq!(dialog_callable::app_status, paddock_commands::DialogCallable::Command("app_status"));
+/// assert_eq!(dialog_callable::app_status, paddock_commands::DialogCallable::__command("app_status"));
 /// assert_eq!(dialog_callable::ALL, ["app_status"]);
 /// const SETTINGS: paddock_commands::DialogCallable = paddock_commands::prefix(dialog_callable::ALL, "app_");
 /// assert_eq!(SETTINGS.wire(), "app_*");
@@ -227,7 +227,7 @@ macro_rules! __dialog_marker {
     ([] $name:ident) => {};
     ([DIALOG $($win:ident)*] $name:ident) => {
         #[doc = concat!("The command `", stringify!($name), "`, open to dialogs.")]
-        pub const $name: $crate::DialogCallable = $crate::DialogCallable::Command(stringify!($name));
+        pub const $name: $crate::DialogCallable = $crate::DialogCallable::__command(stringify!($name));
     };
     ([WINDOW $($win:ident)*] $name:ident) => { $crate::__dialog_marker! { [DIALOG] $name } };
     ([$other:ident $($win:ident)*] $name:ident) => { $crate::__dialog_marker! { [$($win)*] $name } };

@@ -125,12 +125,12 @@ mod tests {
     use super::*;
 
     crate::dialogs! {
-        static T, base &[paddock_commands::DialogCallable::Command("window_ready")];
+        static T, base &[paddock_commands::DialogCallable::__command("window_ready")];
         "a.ask" => Decision { instanced: true },
         "a.tool" => Tool {
             width: Some(Px(880)),
             height: Some(620),
-            commands: &[paddock_commands::DialogCallable::Command("b_x"), paddock_commands::DialogCallable::Command("a_x"), paddock_commands::DialogCallable::Command("a_x")],
+            commands: &[paddock_commands::DialogCallable::__command("b_x"), paddock_commands::DialogCallable::__command("a_x"), paddock_commands::DialogCallable::__command("a_x")],
         },
     }
 

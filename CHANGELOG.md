@@ -12,6 +12,10 @@ Conventional Commits; one semver tag for the whole repo.
 - A modal's parent is disabled and re-enabled under the registry lock, on the main thread, and only shown modals hold
   it: a deadline that fires after a close, or a pending modal, can no longer leave the parent disabled.
 
+- **Breaking.** `paddock_commands::DialogCallable` is a struct with a private field (its old variants are now
+  `DialogCallableKind`, read with `kind()`): a contract can only name a `dialog_callable::<name>` marker, `prefix` or
+  `plugin`; `DialogCallable::Command("x")` no longer compiles (compile_fail doctest).
+
 ### Shared dialog API, part 5: macOS attach at show and the configured deadline
 - macOS: an owned dialog window is built without a parent and attached with `addChildWindow:ordered:` when it is shown
   (`objc2-app-kit`, a macOS-only dependency of `paddock-dialogs`, already in every app's tree through Tauri), instead of

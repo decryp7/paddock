@@ -317,19 +317,26 @@ mod tests {
                     .to_string()
             ]
         );
-        use paddock_commands::DialogCallable::{Command, Prefix};
+        use paddock_commands::DialogCallable;
+        const A: &[DialogCallable] = &[
+            DialogCallable::__command("app_status"),
+            DialogCallable::__prefix("settings_"),
+        ];
+        const BASE: &[DialogCallable] = &[
+            DialogCallable::__command("window_ready"),
+            DialogCallable::__command("gone"),
+        ];
         use paddock_dialogs::{Entry, Shape};
         let tool = |id, commands| Entry {
             commands,
             ..Entry::new(id, Shape::Tool)
         };
         let entries = [
-            tool("sd.a", &[Command("app_status"), Prefix("settings_")]),
+            tool("sd.a", A),
             tool("sd.b", &[]),
             tool("pd.shell-only", &[]),
         ];
-        let c =
-            Contracts::from_entries(&entries, &[Command("window_ready"), Command("gone")]).unwrap();
+        let c = Contracts::from_entries(&entries, BASE).unwrap();
         assert_eq!(
             contract_problems(&c, &APP),
             vec!["base declares gone, which neither the shell nor the app serves".to_string()]

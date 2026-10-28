@@ -42,7 +42,7 @@ paddock_commands::command_table! {
 fn contracts() -> Arc<Contracts> {
     use crate::table::{Entry, Shape};
     const STATUS: &[paddock_commands::DialogCallable] =
-        &[paddock_commands::DialogCallable::Command("app_status")];
+        &[paddock_commands::DialogCallable::__command("app_status")];
     let form = Shape::Form(crate::Modality::Modeless);
     let entry = |id: &'static str, shape: Shape| Entry {
         commands: STATUS,

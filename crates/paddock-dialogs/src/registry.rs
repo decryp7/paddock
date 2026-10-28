@@ -373,7 +373,7 @@ mod tests {
 
     crate::dialogs! {
         static TABLE;
-        "settings" => Tool { commands: &[paddock_commands::DialogCallable::Command("settings_set")] },
+        "settings" => Tool { commands: &[paddock_commands::DialogCallable::__command("settings_set")] },
         "close-prompt" => Decision { required_choice: true },
         "ask" => Decision,
     }

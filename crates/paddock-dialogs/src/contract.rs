@@ -521,10 +521,10 @@ mod tests {
         let d = Contract::of(&Entry::new("d", Shape::Decision));
         assert_eq!((d.width, d.height, d.floor()), (400.0, None, DIALOG_MIN));
         let p = Contract::of(&Entry {
-            commands: &[DialogCallable::Plugin {
-                plugin: "dialog",
-                command: "open",
-            }],
+            commands: {
+                const C: &[DialogCallable] = &[paddock_commands::plugin("dialog", "open")];
+                C
+            },
             ..Entry::new("p", Shape::Tool)
         });
         assert_eq!(p.commands, ["plugin:dialog|open"]);
