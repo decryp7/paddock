@@ -3,43 +3,6 @@ import { P, save, link, pair, dot } from './common.mjs';
 const st = (d, id, x, y, w, h, name, desc) => d.node(id, x, y, w, h, 'accent', { name, desc });
 const E = (d, a, sa, ta, b, sb, tb, via = [], o = {}) => d.edge(a, b, d.port(a, sa, ta), d.port(b, sb, tb), { via, ...o });
 
-// ---------- rule engine ----------
-{
-  const d = P({ title: 'Rule engine, per rule and application', kind: 'UML · State machine', w: 1488,
-    desc: 'One small state machine per (rule, app), fed a tick at a time. Steps add up and are undone in reverse order; protected processes and the foreground app are never touched.' });
-  const W = 216, H = 104, G = 144, X0 = 96, cx = (i) => X0 + i * (W + G), R0 = 232, R1 = R0 + H + 80, busY = R1 + H + 72;
-  dot(d, 'ini', 48, R0 + H / 2 - 8, 'start');
-  st(d, 'idle', cx(0), R0, W, H, 'Idle', 'The rule does not apply, or the app is below the threshold.');
-  st(d, 'watch', cx(1), R0, W, H, 'Watching', 'Above the threshold since t.');
-  st(d, 'act', cx(2), R0, W, H, 'Acting, step n', 'Steps 1…n applied to every member.');
-  st(d, 'rel', cx(3), R0, W, H, 'Releasing', 'Below the threshold since t.');
-  st(d, 'snooze', cx(1), R1, W, H, 'Snoozed', 'After a manual undo; the rule waits for the app to settle.');
-  E(d, 'ini', 'R', 0.5, 'idle', 'L', 0.5);
-  pair(d, 'idle', 'watch', 'Above threshold', 'Drops below');
-  link(d, 'watch', 'R', 'act', 'L', { label: 'Held for_secs' });
-  pair(d, 'act', 'rel', 'Below threshold', 'Above again');
-  // next step: a loop over the top of Acting
-  const ax = cx(2), top = R0 - 40;
-  d.edge('act', 'act', [Math.round(ax + W * 0.3), R0], [Math.round(ax + W * 0.7), R0], { via: [[Math.round(ax + W * 0.3), top], [Math.round(ax + W * 0.7), top]] });
-  d.lbl('Next step after after_secs', ax + W / 2, top, 'a', { maxw: 240 });
-  // user undoes: Acting -> Snoozed
-  const sy = R1 + H / 2;
-  E(d, 'act', 'B', 0.2, 'snooze', 'R', 0.5, [[Math.round(ax + W * 0.2), sy]]);
-  d.lbl('User undoes', ax + W * 0.2 + 8, R0 + H + 28, 'r');
-  // Snoozed -> Idle
-  E(d, 'snooze', 'L', 0.5, 'idle', 'B', 0.7, [[Math.round(cx(0) + W * 0.7), sy]]);
-  d.lbl('Below threshold', cx(0) + W * 0.7 + 8, sy - 4, 'ar', { maxw: 120 });
-  // one merged bus: undo all in reverse order
-  const bx1 = Math.round(cx(0) + W * 0.3);
-  E(d, 'act', 'B', 0.8, 'idle', 'B', 0.3, [[Math.round(ax + W * 0.8), busY], [bx1, busY]]);
-  E(d, 'rel', 'B', 0.5, 'idle', 'B', 0.3, [[Math.round(cx(3) + W * 0.5), busY], [bx1, busY]]);
-  d.lbl('Undo all (reverse order)', (bx1 + ax + W * 0.8) / 2, busY, 'b', { maxw: 260 });
-  const ny = busY + 56;
-  d.note('n', cx(0), ny, 4 * W + 3 * G, 'Undo all also runs when the rule is disabled or paused, another profile is chosen, the context turns false or the app comes to the front. A process that joins while Acting gets the steps already taken. Steps are LowerPriority, EfficiencyMode, CpuCap(percent) and Notify; Notify has no inverse.');
-  d.legend([{ kind: 'accent', label: 'State' }, { kind: 'line', label: 'Event' }]);
-  save('uml-state-rule', d, ny + d.rect.n[3]);
-}
-
 // ---------- service registration ----------
 {
   const d = P({ title: 'Service registration', kind: 'UML · State machine', w: 1344,
@@ -83,7 +46,7 @@ const E = (d, a, sa, ta, b, sb, tb, via = [], o = {}) => d.edge(a, b, d.port(a, 
   d.lbl('Quit', cx(2) + W / 2 + 8, R1 + H / 2 - 4, 'ar', { maxw: 80 });
   E(d, 'quit', 'B', 0.5, 'fin', 'T', 0.5);
   const ny = R1 + H + 56 + 24 + 56;
-  d.note('n', cx(0), ny, 3 * W + 2 * G, 'Every backend request has a timeout and an inline error with Retry; initialisers start work in the background and return, so a reopened window is never blank for good. The agent keeps sampling and keeps rules applied after the app exits.');
+  d.note('n', cx(0), ny, 3 * W + 2 * G, 'Every backend request has a timeout and an inline error with Retry; initialisers start work in the background and return, so a reopened window is never blank for good. The agent keeps sampling and raising alarms after the app exits.');
   d.legend([{ kind: 'accent', label: 'State' }, { kind: 'line', label: 'Event' }]);
   save('uml-state-window', d, ny + d.rect.n[3]);
 }

@@ -1,7 +1,8 @@
 # User guide
 
-Dyno measures your PC, explains why it is slow and, when you ask, calms a program, cleans up or tunes. This guide covers
-what works today; screens marked *placeholder* are described in [features.md](features.md) and [roadmap.md](roadmap.md).
+Dyno measures your PC and explains why it is slow. It only watches: it never changes your machine, ends a program,
+deletes a file or alters a setting ([ADR 0021](adr/0021-monitoring-only.md)). This guide covers what works today; screens
+marked *placeholder* are described in [features.md](features.md) and [roadmap.md](roadmap.md).
 
 ## Glossary
 
@@ -10,11 +11,7 @@ what works today; screens marked *placeholder* are described in [features.md](fe
 | Agent | `dyno-agent`, the background program that measures and keeps your history, also when the window is closed |
 | App | The Dyno window and tray icon |
 | Application (group) | All processes of one program (Chrome and its 40 helpers) shown as one |
-| Protected | A process Dyno never touches: critical OS processes, antivirus, the audio engine, Dyno itself, your own entries |
-| Rule | A CPU taming rule: when an app uses too much CPU for a while, lower its priority, then use efficiency mode, then cap it |
-| Profile | A set of active rules (Normal, Gaming, Meeting, On battery, Building code) |
-| Activity | The log of everything Dyno did, each with an Undo |
-| Observe-only | Dyno's default: it measures and explains; it changes something only from an enabled rule or your click |
+| Read-only | What Dyno is: it measures, explains and notifies; it writes only its own data (history, settings, alarm notes) |
 
 ## Install
 
@@ -27,8 +24,7 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
 
 1. Open **Dashboard**. Tiles show CPU, memory, disk, network and, where your machine has them, GPU, battery, temperatures and
    fans. A tile that cannot be read says why (for example "no battery") instead of showing zero.
-2. Press **Check now** to get the diagnosis: the likeliest cause of slowness, with evidence and suggestions. Nothing runs until
-   you click a suggestion, and each one previews what it will do.
+2. Press **Check now** to get the diagnosis: the likeliest cause of slowness, with evidence and suggestions in words.
 3. Look at **Processes** to see which applications use the most.
 4. In **Settings**, choose the theme, what the tray icon shows and how long history is kept.
 
@@ -37,41 +33,26 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
 - **Dashboard.** Live tiles with sparklines, the history chart (hover for min, average and max; short spikes stay visible),
   the top applications, the health score and "Dyno: x % CPU, y MB" at the bottom, which is what Dyno itself costs.
 - **Processes.** Applications are grouped; expand one to see its processes. Select a row for details (command line, working
-  directory, modules, connections, signer). Right-click or use the toolbar for end, suspend, resume, priority, efficiency mode and
-  a CPU cap, on one process or the whole application. Dyno asks first for anything destructive. Protected processes show a
-  lock and the reason; they cannot be changed. Every action appears in **Activity** with **Undo**.
+  directory, modules, connections, signer), what is locking a file, and **Open location**. Take a snapshot and compare it with a
+  later one. Dyno cannot end, suspend or change a process; use your system's own task manager for that.
 - **Command palette.** Ctrl or Cmd + K jumps to a screen or action.
 - **Tray.** The icon shows the metric you chose; its dropdown is a compact dashboard. Closing the window keeps Dyno in the
   tray and the agent measuring; **Quit** closes the app (the agent keeps measuring until you stop it).
-- **Tuning.** Suggestions grouped by topic (power, sleep and hibernation, battery, developer folders, appearance). Nothing
-  changes when you open the page. **Review...** shows exactly what Dyno will change and exactly how it will undo it; only
-  **Apply** changes anything, and the change appears in **Activity** with **Undo**. If something else changed the setting
-  afterwards, **Revert** asks before overwriting it (**Revert anyway**). Changes that need administrator rights ask to
-  install the **helper** first (see below), then work like any other.
-- **CPU taming, Cleanup, Reports, Why slow** are placeholders for now. Their engine parts exist (see
-- **Cleanup.** Tick what to scan and press Scan: nothing is deleted. Review the list (every item, its size and why it is offered),
-  untick what you want to keep, press Clean selected and confirm. Items wait 7 days in the quarantine (Undo, or Put back in the
-  list below) or go to the Recycle Bin / Trash. A scan older than an hour must be repeated; files in use are skipped and named.
-- **CPU taming, Health and tuning, Reports, Why slow** are placeholders for now. Their engine parts exist (see
-  features.md); rules ship disabled and cannot act until you enable them.
-- **Why slow** explains the likeliest cause of a slow PC: what was measured, which apps are behind it, where to look closer and
-  the fixes Dyno proposes. Fixes that change a process show what they will do and wait for your click. **Run again** checks anew;
-  **Copy as text** puts the result on the clipboard.
+- **Why slow** explains the likeliest cause of a slow PC: what was measured, which apps are behind it, where to look closer.
+  **Run again** checks anew; **Copy as text** puts the result on the clipboard.
 - **Reports** shows a summary of the week (pick the week at the top): health score and trend, the busiest apps, disk space and
   how soon a disk fills, what needed attention and what changed. **Export** saves it as Markdown or a web page wherever you
   choose; nothing is sent anywhere. A week without history says "Nothing to report".
-- **CPU taming, Cleanup and Health and tuning** may still be placeholders; rules ship disabled and cannot act until you enable
-  them (see features.md).
-
 - **Throttling** says whether the processor is running slower than it could while it is busy, and why (heat, a power limit,
   battery saver, or unknown), how much speed it costs and how sure Dyno is. Below it are the episodes of the last 30 days and a list of
   what your machine does and does not report; when it reports too little, the page says "cannot tell" rather than guess.
 - **Lifespan** shows how long your SSD and battery should last as a range ("about 23 months, 17 to 31"), what the estimate stands on
   and how sure it is. A new install needs a couple of weeks of readings first. If Dyno cannot read your SSD's wear it says what to
-  install (smartmontools) or that the helper will do it later. A replaced disk or battery starts a new forecast.
+  install (smartmontools). A replaced disk or battery starts a new forecast.
 - **Is this normal?** appears on the dashboard once Dyno has learned your usual week (7 days by default). It lists only what is out
   of the ordinary right now, in words ("CPU: higher than usual for Tuesday mornings, 71% against about 14%"). Change the learning
   period or switch alarms on in **Settings, Hardware and baselines**.
+
 ## Issues and new programs
 
 Open **Issues** to see what your system itself recorded going wrong: crashes, apps that stopped responding, unexpected
@@ -81,41 +62,27 @@ period as a file you can open in Debrief. If a log could not be read, the page s
 
 **New and unusual** lists programs Dyno has not seen on this PC. For the first week (Settings, New programs) it only learns.
 Each program says why it is listed; a program that runs from a temporary folder or is not signed is "unusual because it...",
-which is a reason to look, not a verdict. **Protect** adds it to the list rules never touch, **Hide** removes it from the list,
+which is a reason to look, not a verdict. **Hide** removes it from the list,
 and **Forget** in the menu starts learning again. Dyno never ends or removes a program because of this list.
 
-## Searching, hashes and watched folders
+## Searching and hashes
 
 Right-click a process, a connection, an issue or a program and choose **Search the web…**: the text is shown with private details
 removed; edit it, then **Search** opens your browser. **Search file hash on VirusTotal…** shows the file's SHA-256 (computed on your
 computer) and opens VirusTotal's page for it; the file is never uploaded.
 
-**Watched folders** moves old files to the quarantine. Click **Add folder**, choose what to watch and for how long, then pick the folder
-in the system dialog. It starts off: open **See what would move** and use **Turn on**. A shorter keep time or adding subfolders needs a
-new preview. Undo a sweep from Activity; stopping a watch leaves the files alone. **Health** can hide system and signed startup entries.
 ## Extras and backup health
 
 **Extras** (one page, eight tabs) answers small questions without changing anything: *What changed* before things got slow, *Sleep*
 (why the computer will not sleep and what woke it), *Boot* (how long start-up took and what slowed it), *Apps* (network and energy
 per app), *GPU*, *Files* (large and duplicate files in a folder you choose), *Inventory* (installed software, with an export) and
 *Maintenance* (when Dyno's heavier background work may run). If your system does not tell Dyno something, the tab says what and
-why. In *Files*, Dyno pre-selects every copy but the oldest; removing moves files to the Trash or the 7-day quarantine, and one copy
-of each duplicate always stays.
+why. In *Files*, Dyno lists duplicates and where they are; it removes nothing.
 
 **Backup health** shows whether your backups ran: Time Machine, Windows Backup, File History, restic and Borg. It never starts or
 changes a backup. A backup older than the limit you set (Settings, Backup health; 48 hours by default) raises an alarm. For restic
 and Borg export their repository variables in your shell profile, or give Dyno the tool's folder in Settings. "No backup tool found"
 is a normal answer.
-
-A CPU taming rule can be **temporary** (Rules: Temporary): it ends at the time you chose, gives everything back and switches itself
-off. Activity shows what each rule achieved, for example "Chrome used 78% CPU before and 31% after 21 s".
-
-## Undo
-
-Everything Dyno does to a process, a startup entry or (later) a file or setting is logged in **Activity** with an **Undo**
-button where the OS allows. Rule actions release themselves when the program calms down, when the rule stops applying, when you
-quit the app and when the agent stops, including after a crash. A process Dyno stopped or capped is never left that way: the
-next agent start releases leftovers.
 
 ## Settings
 
@@ -126,7 +93,7 @@ next agent start releases leftovers.
 | Tray metric and style | What the tray icon shows |
 | Sampling | System and process intervals (Dyno slows itself down when nobody is watching or on battery) |
 | History retention | How long raw points and each rollup tier are kept |
-| Alerts | Which conditions raise an alert |
+| Alarms | Which conditions raise an alarm, quiet hours |
 | Hardware and baselines | Whether and how long Dyno learns what is normal, and which hardware findings (throttling, disk and battery life, far-above-usual values) may raise an alarm |
 
 Settings are versioned and saved with a backup; a damaged file falls back to the backup and then to the defaults.
@@ -151,39 +118,39 @@ dyno status --json                 # how the PC is doing, as JSON
 dyno top --by memory -n 5          # the busiest apps
 dyno why-slow                      # the diagnosis in words
 dyno counters search disk queue    # find a performance counter
-dyno end 4242 --yes                # changes something: only with --yes
 ```
 
 ## Counters
 
 Open **Counters** in the sidebar. Search for a counter by words, or open an object and pick an instance, then choose **+** to chart
-it. The chart marks what Dyno did (cleanups, rule actions, alerts) so you can see whether a spike followed one. Pin a counter to
+it. The chart marks Dyno's alarms and issues so you can see whether a spike followed one. Pin a counter to
 keep it listed (Dyno then reads it every 15 seconds in the background, so its line already has history when you open the page), save the charted ones as a **set**, or use the row's **...** menu to add one to the dashboard. A counter that has
 disappeared shows *Unavailable* with the reason. Rates (per second) need two readings, so a new line starts a moment later.
 
 ## Files and logs
 
 - Data folder: `%LOCALAPPDATA%\Dyno`, `~/Library/Application Support/Dyno` or `~/.local/share/dyno`: `dyno.db` (history),
-  `settings.json`, `rules.json`, `process-control.json`, `agent.json`, `logs/`.
+  `settings.json`, `agent.json`, `logs/`.
 - Logs: the app's `logs/app.log` (small, rotating); the agent writes to its standard error, which the service keeps:
   `~/Library/Logs/Dyno/agent.log` on macOS, `journalctl --user -u dyno-agent` on Linux. Logs never contain file contents or
   command lines.
 - Deleting `dyno.db` is safe: history starts again.
 
-## The helper (administrator changes)
+## Running with your own rights
 
-Dyno never runs as administrator. A few changes need it anyway (hibernation, the sleep timer and Low Power Mode on a Mac, the
-battery charge limit, Microsoft Defender exclusions, startup items for every user, and programs' network traffic on Windows). For
-those Dyno uses a small separate **helper**:
+Dyno 1.0 has no privileged helper. The app and the agent run with your own rights, install per user, and never need
+administrator rights to install or to run. What the OS shows only to administrators, or only to the account that owns a
+process, is never guessed and never shown as zero: the figure says *Unavailable* with a plain reason (for example "Windows
+shows this only to administrators").
 
-1. The first time you review such a change, Dyno explains the helper and shows what the system will ask (a Windows UAC prompt, the
-   macOS password dialog, the Linux polkit prompt). Nothing is installed until you press **Install the helper** and answer the
-   system's prompt. **Not now** (or closing the prompt) changes nothing and Dyno keeps working.
-2. The helper serves your account and Dyno's agent only. Every change shows what it will do and how to undo it, is checked again
-   by the helper, is read back, and is written to the helper's own log (Settings > Helper, "What the helper did lately") besides
-   the Activity list with its Undo.
-3. **Settings > Helper** shows whether it is installed and current, and has **Update** (after a Dyno update), **Repair** and
-   **Remove**. Changes it made stay in force when you remove it; undoing them from Activity then needs the helper again.
+Processes are grouped three ways. Yours and the system's are listed one by one. Other people's accounts form one **Other
+users** row with whatever totals the OS allows. On Linux, a system that hides other accounts' processes (`hidepid`) says so
+in one line above the list.
+
+For one session you can choose **Run as administrator**. Dyno asks the OS (a UAC prompt on Windows, the password dialog on
+macOS, `pkexec` on Linux) and restarts the agent elevated until you quit Dyno. The next start is back to your own rights.
+Nothing is installed or registered. Starting as administrator at login, and a read-only helper that gives the same readings
+without a prompt each time, are planned for Dyno 1.1.
 
 ## Troubleshooting
 
@@ -191,11 +158,8 @@ those Dyno uses a small separate **helper**:
 | --- | --- |
 | The window shows an error with **Retry** | The agent did not answer in 15 s. Retry; if it persists run `dyno-agent status`, then `dyno-agent run` in a terminal to see why |
 | No history after a reboot | The agent was not registered to start at login: turn on Launch at login |
-| A tile says "unavailable" | Read the reason; the OS or hardware does not provide it (no battery, no sensor, needs rights) |
-| A change says "needs Dyno's helper" | Install it under Settings > Helper (the system asks for your permission once). If it says the helper cannot be installed, read the reason: Linux needs polkit (`pkexec`) and systemd |
-| The helper "did not answer" | Settings > Helper > Repair (one more permission prompt). Updating Dyno can need it too: the helper must be the same version |
-| An action on another user's process says it needs the helper | Dyno never elevates processes by itself; the helper changes settings, not other users' processes |
-| An action says the process "has exited" | Its id was reused or it ended; Dyno refuses to act on a different process with the same id |
+| A tile or column says "Unavailable" | Read the reason: the OS or hardware does not provide it (no battery, no sensor), or shows it only to administrators or to the owner of a process. **Run as administrator** (this session only) can show more |
+| **Run as administrator** does nothing, or the prompt is refused | Dyno keeps running with your own rights. On Linux `pkexec` needs a polkit authentication agent in your session |
 | macOS: the agent does not start after an update | Dyno registers it again by itself; or `dyno-agent service ensure`; see macos.md |
 | Linux: no tray icon | Install a status-notifier host (GNOME: the AppIndicator extension) |
 | Windows: details, locks and startup are empty | Those adapters are not built yet (roadmap G8) |

@@ -1,6 +1,6 @@
 # 7. Extensibility in three tiers: built-in core, declarative TOML packs, out-of-process plugins for native code
 
-- Status: accepted (2026-10-23); supersedes the earlier note "drop Dyno's plugin system"
+- Status: accepted (2026-10-23); amended by ADR 0021 (2026-10-28: packs and plugins are read-only, no CleanupProvider or ActionProvider); supersedes the earlier note "drop Dyno's plugin system"
 - Related: ADR 0001, ADR 0005, `dyno-plugin-api`, `dyno-plugin-host`, docs/plugins.md (Debrief's ADR 0017 for the process model)
 
 ## Context

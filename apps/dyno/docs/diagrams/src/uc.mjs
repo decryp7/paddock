@@ -29,15 +29,15 @@ function useCases(file, { title, desc, owner, rows, ext }) {
     actor(d, 'x', ex, Math.round(cy(i) - 32), ext.name);
     d.edge('x', `u${i}`, [ex, Math.round(cy(i))], [bx + 24 + UW, cy(i)], { arrow: 'none', via: [] });
   }
-  d.legend([{ kind: 'accent', label: 'Use case' }, { kind: 'planned', label: 'Planned' }, { kind: 'line', label: 'Association' }]);
+  d.legend([{ kind: 'accent', label: 'Use case' }, ...(rows.some(([, p]) => p) ? [{ kind: 'planned', label: 'Planned' }] : []), { kind: 'line', label: 'Association', arrow: 'none' }]);
   save(file, d, y0 + bh);
 }
 useCases('uml-use-cases-observe', {
-  title: 'Use cases — see and understand', desc: 'What the PC owner learns about the machine. Nothing here changes it. Dashed ellipses are planned.', owner: 'PC owner',
-  rows: [['Watch live performance'], ['Browse and sort processes'], ['Ask "why is my PC slow?"'], ['Review history and spikes'], ['Check health and read the reasons'], ['Receive alerts and anomalies'], ['Browse Issues and unusual processes'], ['Read the weekly report'], ['Browse performance counters'], ['Check throttling, disk and battery life'], ['Ask "is this normal?"'], ['Use Extras; see backup and network changes']],
+  title: 'Use cases — see and understand', desc: 'What the PC owner learns about the machine. Nothing here changes it.', owner: 'PC owner',
+  rows: [['Watch live performance and history'], ['Browse and sort processes'], ['Ask "why is my PC slow?" or "is this normal?"'], ['Check health and read the reasons'], ['See what starts at login'], ['Receive alarms and anomalies'], ['Browse Issues and unusual processes'], ['Read the weekly report'], ['Browse performance counters'], ['Check throttling, disk and battery life'], ['Browse hardware and software inventory'], ['Use Extras; see backup and network changes']],
 });
-useCases('uml-use-cases-act', {
-  title: 'Use cases — change and tune', desc: 'Everything that changes the machine needs an enabled rule or an explicit click, and is undoable where the OS allows. Dashed ellipses are planned.', owner: 'PC owner',
-  rows: [['End, suspend or re-prioritise an app'], ['Tame an app with a rule, profile or timer'], ['Manage startup items'], ['Undo an action from Activity'], ['Set tray metric, theme, sampling'], ['Install the helper, approve an admin change'], ['Start the agent at login'], ['Clean up disk with quarantine'], ['Apply a tuning suggestion'], ['Run a benchmark on click'], ['Watch folders with keep-for times'], ['Search the web or a hash on click']],
-  ext: { name: 'OS (login, power)', row: 6 },
+useCases('uml-use-cases-setup', {
+  title: 'Use cases — run and set up', desc: 'What the PC owner runs or sets up; benchmarks and Explain this start only on a click. None of it changes the machine; Dyno writes only its own data.', owner: 'PC owner',
+  rows: [['Acknowledge, mute or note an alarm'], ['Run a benchmark and compare'], ['Explain this in Pitwall (redacted summary)'], ['Save the flight recorder'], ['Map the disk and drill into folders'], ['Export a diagnostics bundle'], ['Search the web or a hash in the browser'], ['Use the dyno command line'], ['Export the inventory report'], ['Set tray metric, theme, sampling'], ['Start the agent at login'], ['Run as administrator (this session)']],
+  ext: { name: 'OS (login)', row: 10 },
 });

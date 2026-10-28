@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1328 1136" width="1328" height="1136" role="img" aria-labelledby="t d">
   <title id="t">Dyno architecture overview</title>
-  <desc id="d">The Dyno app (an Angular window and a tray in a Tauri shell) talks over one local IPC to a per-user agent. The agent samples, serves requests, hosts plugins, applies rules, runs benchmarks in a child process and keeps history, alarms and a flight recorder in SQLite. Around the agent are the platform adapters for Windows, macOS and Linux, the operating system, out-of-process plugins, a planned privileged helper, the benchmark process and the data folder. A pure Rust core holds every decision.</desc>
+  <desc id="d">Dyno only watches. The Dyno app (an Angular window and a tray in a Tauri shell) and the dyno command line talk over one local IPC to a per-user agent. The agent samples, answers requests, hosts sensor plugins, can restart itself elevated for one session when you choose Run as administrator, runs benchmarks in a child process on a click and keeps history, alarms, issues and a flight recorder in SQLite. Around the agent are the platform adapters for Windows, macOS and Linux, the operating system, out-of-process plugins, the OS prompt used by Run as administrator, the benchmark process and the data folder. A pure Rust core holds every decision.</desc>
   <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah"/></marker></defs>
   <style>
     :root{--acc-s:#B01E6E;--acc-f:#F7E9F1;--ui-s:#4C5BD4;--ui-f:#EDEFFB;--core-s:#007A5E;--core-f:#E6F2EF;--pro-s:#565E6B;--pro-f:#F0F2F5;--ext-s:#6B7380;--ext-f:#F4F5F7;--grp-s:#C4C7CD;--grp-f:#F8F9FA;--plg-s:#0072B2;--plg-f:#E6F1F7;--ink:#14171C;--mut:#565E6B;--line:#565E6B;--bg:#FFFFFF;}
@@ -18,19 +18,19 @@
     .e{stroke:var(--line);stroke-width:1.5;fill:none}.e.d{stroke-dasharray:6 4}.ah{fill:var(--line)}
   </style>
 <text x="48" y="64" class="title">Dyno</text>
-<text x="48" y="94" class="sub">Measures, explains and tunes one PC: a per-user agent keeps the history, a window and tray show it</text>
-<text x="48" y="118" class="desc">Observe first, ask before changing, undo everything · Windows, macOS and Linux</text>
+<text x="48" y="94" class="sub">Watches one PC, read-only: a per-user agent keeps the history, a window, tray and command line show it</text>
+<text x="48" y="118" class="desc">Live and history, why slow, alarms, a disk map and benchmarks · never changes the machine · Windows, macOS and Linux</text>
 <rect x="48" y="160" width="304" height="512" rx="10" class="g"/>
-<text x="64" y="188" class="gl">Dyno app [user session]</text>
+<text x="64" y="188" class="gl">Dyno app and command line</text>
 <rect x="472" y="160" width="416" height="752" rx="10" class="g"/>
 <text x="488" y="188" class="gl">Dyno agent [one per user, started at login]</text>
 <rect x="1008" y="160" width="272" height="752" rx="10" class="g"/>
 <text x="1024" y="188" class="gl">Around the agent</text>
 <rect x="72" y="208" width="256" height="88" rx="6" class="n ui"/>
 <text x="88" y="236" class="h">Window</text>
-<text x="88" y="258" class="t">Angular 22: widgets, processes,</text>
-<text x="88" y="274" class="t">history, counters, throttling,</text>
-<text x="88" y="290" class="t">lifespan, settings; light and dark.</text>
+<text x="88" y="258" class="t">Angular 22: live and history,</text>
+<text x="88" y="274" class="t">processes, why slow, alarms, disk</text>
+<text x="88" y="290" class="t">map, counters, benchmarks.</text>
 <rect x="72" y="328" width="256" height="88" rx="6" class="n acc"/>
 <text x="88" y="356" class="h">Tauri shell</text>
 <text x="88" y="378" class="t">Commands; validates every request</text>
@@ -39,10 +39,10 @@
 <text x="88" y="476" class="h">Tray</text>
 <text x="88" y="498" class="t">A live metric and a compact menu;</text>
 <text x="88" y="514" class="t">stays when the window closes.</text>
-<rect x="72" y="568" width="256" height="88" rx="6" class="n pro"/>
-<text x="88" y="596" class="h">Close it, crash it</text>
-<text x="88" y="618" class="t">The agent goes on sampling and</text>
-<text x="88" y="634" class="t">keeps rules applied.</text>
+<rect x="72" y="568" width="256" height="88" rx="6" class="n acc"/>
+<text x="88" y="596" class="h">dyno command</text>
+<text x="88" y="618" class="t">status, why-slow, top, alarms,</text>
+<text x="88" y="634" class="t">snapshot, counters. Reads only.</text>
 <path d="M96 296 L96 328" class="e" marker-end="url(#a)"/>
 <text x="106" y="316" class="m">commands</text>
 <path d="M96 416 L96 448" class="e" marker-end="url(#a)"/>
@@ -50,73 +50,74 @@
 <rect x="496" y="208" width="368" height="88" rx="6" class="n acc"/>
 <text x="512" y="236" class="h">Sampler</text>
 <text x="512" y="258" class="t">Adaptive intervals: sensors, processes, grouping,</text>
-<text x="512" y="274" class="t">diagnosis; measures its own overhead.</text>
+<text x="512" y="274" class="t">diagnosis, baselines; measures its own overhead.</text>
 <rect x="496" y="328" width="368" height="88" rx="6" class="n acc"/>
 <text x="512" y="356" class="h">IPC server and handlers</text>
-<text x="512" y="378" class="t">One thread per connection, bounded push queue; the</text>
-<text x="512" y="394" class="t">app and the dyno command are its clients.</text>
+<text x="512" y="378" class="t">One thread per connection, bounded push queue;</text>
+<text x="512" y="394" class="t">answers from measured or stored data.</text>
 <rect x="496" y="448" width="368" height="88" rx="6" class="n acc"/>
 <text x="512" y="476" class="h">Plugin host</text>
-<text x="512" y="498" class="t">Starts plugins on first use; a plugin that crashes is</text>
-<text x="512" y="514" class="t">quarantined.</text>
+<text x="512" y="498" class="t">Starts sensor plugins on first use; a plugin that</text>
+<text x="512" y="514" class="t">crashes is quarantined.</text>
 <rect x="496" y="568" width="368" height="88" rx="6" class="n acc"/>
-<text x="512" y="596" class="h">Rules and protection</text>
-<text x="512" y="618" class="t">Rules ship disabled; a protected list nothing can</text>
-<text x="512" y="634" class="t">override; steps are undone in reverse.</text>
+<text x="512" y="596" class="h">Run as administrator</text>
+<text x="512" y="618" class="t">Optional, one session: restarts the agent elevated</text>
+<text x="512" y="634" class="t">after the OS prompt. Nothing is installed.</text>
 <rect x="496" y="688" width="368" height="88" rx="6" class="n acc"/>
 <text x="512" y="716" class="h">Benchmarks</text>
 <text x="512" y="738" class="t">Only on a click, one kind at a time, in a child process</text>
 <text x="512" y="754" class="t">with a timeout.</text>
 <rect x="496" y="808" width="368" height="88" rx="6" class="n acc"/>
 <text x="512" y="836" class="h">History, alarms, recorder</text>
-<text x="512" y="858" class="t">SQLite with min, average and max rollups; alarm</text>
-<text x="512" y="874" class="t">centre; ten-minute flight recorder.</text>
+<text x="512" y="858" class="t">SQLite rollups (min, average, max); alarms that</text>
+<text x="512" y="874" class="t">notify; issues; ten-minute flight recorder.</text>
 <rect x="1032" y="208" width="224" height="88" rx="6" class="n acc"/>
 <text x="1048" y="236" class="h">Platform adapters</text>
 <text x="1048" y="258" class="t">Windows, macOS, Linux behind</text>
 <text x="1048" y="274" class="t">the core's ports.</text>
 <rect x="1032" y="328" width="224" height="88" rx="6" class="n pro"/>
 <text x="1048" y="356" class="h">Operating system</text>
-<text x="1048" y="378" class="t">Counters, /proc, job objects,</text>
-<text x="1048" y="394" class="t">launchd, systemd.</text>
+<text x="1048" y="378" class="t">Counters, /proc and /sys, OS</text>
+<text x="1048" y="394" class="t">logs, launchd, systemd.</text>
 <rect x="1032" y="448" width="224" height="88" rx="6" class="n plg"/>
 <text x="1048" y="476" class="h">Plugins</text>
 <text x="1048" y="498" class="t">Vendor sensors; out of</text>
 <text x="1048" y="514" class="t">process.</text>
-<rect x="1032" y="568" width="224" height="88" rx="6" class="n pro pl"/>
-<text x="1048" y="596" class="h">Privileged helper</text>
-<rect x="1189" y="578" width="59" height="18" rx="9" class="tag"/>
-<text x="1218.5" y="591" class="tg">planned</text>
-<text x="1048" y="618" class="t">Admin actions, each with an</text>
-<text x="1048" y="634" class="t">inverse.</text>
+<rect x="1032" y="568" width="224" height="88" rx="6" class="n pro"/>
+<text x="1048" y="596" class="h">OS prompt</text>
+<text x="1048" y="618" class="t">UAC, password dialog or</text>
+<text x="1048" y="634" class="t">pkexec; asked only on your</text>
+<text x="1048" y="650" class="t">click.</text>
 <rect x="1032" y="688" width="224" height="88" rx="6" class="n pro"/>
 <text x="1048" y="716" class="h">dyno-bench</text>
 <text x="1048" y="738" class="t">CPU, memory and disk tests.</text>
 <rect x="1032" y="808" width="224" height="88" rx="6" class="n pro"/>
 <text x="1048" y="836" class="h">Data folder</text>
-<text x="1048" y="858" class="t">dyno.db and JSON; never</text>
-<text x="1048" y="874" class="t">uploaded.</text>
+<text x="1048" y="858" class="t">Dyno's own data: dyno.db and</text>
+<text x="1048" y="874" class="t">JSON; never uploaded.</text>
 <path d="M1056 296 L1056 328" class="e" marker-end="url(#a)"/>
-<text x="1066" y="316" class="m">reads, acts</text>
-<path d="M328 358 L496 358" class="e" marker-end="url(#a)"/>
-<text x="382" y="350" class="m">requests</text>
-<path d="M496 386 L328 386" class="e" marker-end="url(#a)"/>
-<text x="389" y="378" class="m">pushes</text>
+<text x="1066" y="316" class="m">reads</text>
+<path d="M328 350 L496 350" class="e" marker-end="url(#a)"/>
+<text x="382" y="342" class="m">requests</text>
+<path d="M496 378 L328 378" class="e" marker-end="url(#a)"/>
+<text x="389" y="370" class="m">pushes</text>
+<path d="M328 612 L392 612 Q400 612 400 604 L400 408 Q400 400 408 400 L496 400" class="e" marker-end="url(#a)"/>
+<text x="408" y="556" class="m">requests</text>
 <path d="M864 252 L1032 252" class="e" marker-end="url(#a)"/>
 <text x="921" y="244" class="m">samples</text>
 <path d="M864 492 L1032 492" class="e" marker-end="url(#a)"/>
 <text x="932" y="484" class="m">calls</text>
-<path d="M864 612 L1032 612" class="e d" marker-end="url(#a)"/>
-<text x="903" y="604" class="m">admin actions</text>
+<path d="M864 612 L1032 612" class="e" marker-end="url(#a)"/>
+<text x="932" y="604" class="m">asks</text>
 <path d="M864 732 L1032 732" class="e" marker-end="url(#a)"/>
 <text x="923" y="724" class="m">spawns</text>
 <path d="M864 852 L1032 852" class="e" marker-end="url(#a)"/>
 <text x="924" y="844" class="m">writes</text>
 <rect x="48" y="952" width="1232" height="88" rx="6" class="n core"/>
 <text x="64" y="980" class="h">dyno-core: pure Rust, no I/O, no clock</text>
-<text x="64" y="1004" class="t">Grouping, diagnosis, the rules engine, protection, cleanup policy, health, alarms, history tiers, protocol.</text>
+<text x="64" y="1004" class="t">Grouping, diagnosis, baselines, health reasons, alarms, issues, history tiers, protocol.</text>
 <text x="64" y="1024" class="t">Time comes in as values. The agent and the app both use it; the platform adapters implement its ports.</text>
-<rect x="48" y="1068" width="960" height="40" rx="14" class="g"/>
+<rect x="48" y="1068" width="677" height="40" rx="14" class="g"/>
 <rect x="68" y="1080" width="28" height="16" rx="4" class="n ui"/>
 <text x="104" y="1092" class="m">Window</text>
 <rect x="192" y="1080" width="28" height="16" rx="4" class="n acc"/>
@@ -127,7 +128,5 @@
 <text x="471" y="1092" class="m">Plugin</text>
 <rect x="549" y="1080" width="28" height="16" rx="4" class="n pro"/>
 <text x="585" y="1092" class="m">Process · OS · data</text>
-<rect x="749" y="1080" width="28" height="16" rx="4" class="n pro pl"/>
-<text x="785" y="1092" class="m">Planned</text>
-<text x="1280" y="1092" class="foot">Dyno · updated 2026-10-23</text>
+<text x="1280" y="1092" class="foot">Dyno · updated 2026-10-28</text>
 </svg>

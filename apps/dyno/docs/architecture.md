@@ -1,7 +1,7 @@
 # Dyno architecture
 
 Dyno is built from a pure Rust core, thin OS adapters, a per-user agent that measures and keeps history, a Tauri app that
-shows it, and a privileged helper that exists only after the user installed it. This page describes how the pieces fit and what is true today; the diagrams
+shows it. There is no privileged helper in 1.0: everything runs with the user's own rights. Dyno only watches ([ADR 0021](adr/0021-monitoring-only.md)). This page describes how the pieces fit and what is true today; the diagrams
 are in [design.md](design.md) and the reasoning is in the [ADRs](adr/README.md). Anything marked *planned* is not in the
 code.
 
@@ -16,9 +16,8 @@ code.
 | Core | `crates/dyno-core` | library | Every decision, as pure functions over values (no I/O, no clock) |
 | Adapters | `crates/dyno-platform` | library | The core's ports per OS (Windows, macOS, Linux), plus fakes for tests |
 | IPC | `crates/dyno-ipc` | library | The one local IPC: length-prefixed postcard frames, token handshake |
-| Agent | `crates/dyno-agent` (`dyno-agent`) | user process, started at login | Sampling, SQLite history, rules, process control, request handlers |
-| Helper | `crates/dyno-helper` | a system service (root / LocalSystem) installed on a click | The administrator changes: a closed set of `HelperAction`s, authenticated caller, audit log (ADR 0006, 0016) |
-| Plugin API and host | `crates/dyno-plugin-api`, `dyno-plugin-host`, `plugins/` | out-of-process | Vendor sensors, benchmarks; guarded (ADR 0007) |
+| Agent | `crates/dyno-agent` (`dyno-agent`) | user process, started at login | Sampling, SQLite history, alarms, request handlers |
+| Plugin API and host | `crates/dyno-plugin-api`, `dyno-plugin-host`, `plugins/` | out-of-process | Vendor sensors; guarded (ADR 0007) |
 | Shell | `app/src-tauri` | user process | Window and tray, commands, the link to the agent, native feel |
 | UI | `app/src` | webview | Angular presentation: pages, SignalStores, charts |
 
@@ -27,11 +26,9 @@ code.
 ### Core
 
 `dyno_core` holds the model (`metrics`, `process`), `grouping` (ADR 0003), `protect` (the absolute protected list),
-`rules` (rule model, profiles, the `Engine` state machine, ADR 0004), `diagnosis`, `anomaly`, `forecast`, `health`,
-`tuning`, `history` (tiers and min/avg/max downsampling), `sampling` (adaptive intervals), `cleanup` (catalogue and
-admission policy, ADR 0005), `activity` (undo records), `helper` (action types and validation), `helper_wire` (the helper's requests, replies, audit entries and state), `helper_paths`, `startup`, `alerts`,
+`diagnosis`, `anomaly`, `forecast`, `health`, `history` (tiers and min/avg/max downsampling), `sampling` (adaptive intervals), `startup` (view), `alerts`,
 `report`, `issues` (OS problem events, the stability score), `unusual` (the baseline of programs), `extras` (parsers for the sleep, boot, energy, GPU, software, changes and file-finder views, and maintenance windows), `backup` (backup health judgement) and `toolpath` (the search list for the user's tools), `snapshot`, `settings` (versioned), `tray` and `units` (pure formatting), and `protocol` (the app-agent
-contract, `PROTOCOL_VERSION`). The ports are in `ports.rs`: `SystemSensors`, `ProcessSource`, `ProcessControl`,
+contract, `PROTOCOL_VERSION`). The ports are in `ports.rs`: `SystemSensors`, `ProcessSource`,
 `FileLocks`, `StartupItems`, `FactsSource`, `UserActivity`, with `PlatformError`. Their contract (no panics, unavailable
 readings with a reason, bounded calls, start-time check on every `ProcessRef`) is documented there and binding on every
 adapter.
@@ -41,17 +38,13 @@ adapter.
 `dyno_platform::platform()` wires the ports for the current OS:
 
 - **Everywhere:** sysinfo-based sensors and process table.
-- **Windows:** performance counters (PDH) behind the sensors, network, Win32 process control (priority, affinity,
-  EcoQoS, suspend of every thread, named job objects for hard CPU caps) and user activity (idle time, foreground
+- **Windows:** performance counters (PDH) behind the sensors, network and user activity (idle time, foreground
   window). Process details (`NoDetails`), file locks (Restart Manager), startup entries and facts are **not wired yet**:
   the Windows platform still uses the in-memory fakes for them, so those screens are empty on Windows.
-- **macOS:** libc signals, `setpriority` with the Darwin background policy, `lsof`, `codesign`, launch agents and login
+- **macOS:** `lsof`, `codesign`, launch agents and login
   items for startup, `pmset`/`sw_vers` facts, CoreGraphics idle time.
 - **Linux:** PSI, `/proc` and `/sys` through `HostPaths` (so tests use temporary trees), hwmon and GPU sensors, process
-  details from `/proc`, locks, autostart and systemd user units, package facts, per-thread `nice` and affinity.
-- **Unix control** (`unix_control.rs`) is shared by macOS and Linux: `SIGTERM`/`SIGKILL`, `SIGSTOP`/`SIGCONT`, `setpriority`,
-  and CPU caps as a duty cycle of 100 ms (ADR 0004). A `ControlState` file records what outlives the call.
-
+  details from `/proc`, locks, autostart and systemd user units, package facts.
 Windows-only and macOS-only code stays in small modules; `unsafe` is denied workspace-wide except in those modules, each
 block with a `// SAFETY:` comment.
 
@@ -61,23 +54,21 @@ block with a `// SAFETY:` comment.
 
 - **`sampler`**: one thread. Each tick it reads `SystemSensors` at the system interval and `ProcessSource` at the process
   interval (`sampling::intervals`: faster when someone is watching, slower when nobody is, doubled on battery,
-  stretched when the agent's own CPU exceeds its budget), groups the processes, feeds the rules `Engine`, runs the
+  stretched when the agent's own CPU exceeds its budget), groups the processes, runs the
   diagnosis and anomaly checks, records history, and pushes a `LiveUpdate`. Slow facts (`FactsSource`: disk health, pending updates, power plan) are gathered on demand for the
   health report and cached, never on this thread. A panic in one tick is caught and counted.
 - **`server`**: binds the private endpoint, accepts connections (token, protocol version and, where the OS tells, peer pid),
   one thread per connection, and a bounded push queue per subscriber.
-- **`handlers`**: one function per `Request`. Every action is validated, checked against the protected list, applied to
-  a `ProcessRef`, and recorded as an `ActivityEntry` with its inverse. A panic becomes an internal error for that request.
-  The helper requests (`HelperStatus`, `InstallHelper`, `UninstallHelper`) are answered by the helper centre.
+- **`handlers`**: one function per `Request`. Every request is validated and answered from stored or measured data; none changes the machine. A panic becomes an internal error for that request.
 - **`issues`** and **`unusual`**: two background threads. The first reads the platform's `IssueSource`s every 15 minutes
   (panic-contained, "unavailable: reason" per source), stores new events and raises alarms; the second compares the process
   table with the baseline every 30 s ([ADR 0017](adr/0017-issues-and-the-program-baseline.md)).
-- **`extras`**: the extras (WP-13) and backup health checks (WP-14): runs read-only OS tools through a `ToolRunner` with the user's login-shell `PATH`, records what changed, answers the requests, removes selected finder results through the cleanup policy; a background thread records the boot and checks backups inside the maintenance windows ([ADR 0020](adr/0020-extras-backup-checks-and-taming-proof.md)).
+- **`extras`**: the extras (WP-13) and backup health checks (WP-14): runs read-only OS tools through a `ToolRunner` with the user's login-shell `PATH`, records what changed, answers the requests; a background thread records the boot and checks backups inside the maintenance windows ([ADR 0020](adr/0020-extras-backup-checks-and-taming-proof.md)).
 - **`store`** and **`rollup`**: the SQLite store (ADR 0008) and the `HistoryWriter` that records raw points and rolls
   closed buckets up through the minute, 15-minute and hour tiers.
 - **`service`**: install, uninstall, status and `ensure` of the per-user registration (ADR 0010); the unit text is pure.
 - **`discovery`**, **`paths`**, **`files`**: `agent.json`, the data-folder layout and atomic JSON writes with a backup.
-- **`cleanup`**: root resolution per OS (pure). Scanning and deleting are *planned*.
+- **`diskusage`**: the bounded disk-space map.
 - **`cli`**: `run`, `status`, `stop`, `once`, `bench`, `service …`.
 
 ### App
@@ -87,24 +78,25 @@ and the **link** to the agent: it reads `agent.json`, starts an agent when none 
 forwards the webview's requests with a 15 s timeout, fans pushes out to the windows, reconnects with backoff and
 replaces an agent of another build. The UI never calls `invoke` directly: it uses the `BACKEND` token, whose real
 implementation calls the shell's one `dyno` command and whose mock serves the browser build. State lives in SignalStores
-(`live`, `history`, `processes`, `activity`, `alerts`, `diagnosis`, `health`, `rules`, `settings`).
+(`live`, `history`, `processes`, `alerts`, `diagnosis`, `health`, `settings`).
 
-### Helper and plugins
+### Privileges and plugins
 
-The helper (ADR 0006, 0016) is `dyno-helper`, one program with three commands: `serve` (the daemon), `install` and `uninstall`.
-The agent never elevates itself: on the user's click it asks the OS to run `dyno-helper install --user … --agent-exe …`
-elevated (`dyno_platform::elevate`: `osascript` on macOS, `pkexec` on Linux, `ShellExecuteExW runas` on Windows), and that
-command copies the helper to a system-owned folder, writes its configuration and a token readable by the user, and registers
-a LaunchDaemon, a systemd unit or a Windows service. The daemon speaks `dyno-ipc` on a fixed endpoint
-(`HelperMessage`), accepts a connection only from the authorised user (kernel-reported uid; a pipe ACL on Windows) running the
-recorded agent program with the token, accepts only the typed administrator `HelperAction`s, validates them again, applies them
-through `dyno_platform::tuning_admin::AdminTuner`, reads the setting back and writes an audit line before and after.
-On the agent side `dyno_agent::helper_link` holds the link and three wrappers that route what needs the helper
-(`ElevatedTuning`, `ElevatedStartup`, `ElevatedTraffic`), and `dyno_agent::helper_centre` the lifecycle (status, install on a
-click in the background, remove). Plugins are
-out-of-process Rust programs speaking `dyno-ipc`; the agent starts the host on first use of the plugins page
-(`Request::Plugins`) and the host guards them (timeouts, memory cap, quarantine). Plugin wiring into sensors and cleanup
-proposals is minimal today ([roadmap](roadmap.md#known-gaps-in-the-foundation)).
+Dyno 1.0 has no privileged helper (ADR 0021; the helper design is ADR 0022, planned for 1.1). The app and the agent run with the
+user's own rights and install per user. A reading the OS gives only to administrators or to a process's owner is a
+`Reading::Unavailable` with a plain reason, never a zero. The platform adapters tell three groups apart: the user's own
+processes and the system's are listed one by one, and every other account's processes form one **Other users** row with whatever
+totals the OS allows (by session on Windows, by uid on macOS and Linux). On Windows the adapter reads
+`NtQuerySystemInformation` and trusts its undocumented CPU and I/O fields only when a start-up self-check against the documented
+calls agrees.
+
+**Run as administrator** is a session-only elevation. On the user's click the app asks the OS to start the agent elevated
+(`dyno_platform::elevate`: `osascript` on macOS, `pkexec` on Linux, `ShellExecuteExW runas` on Windows) and the elevated agent
+serves the app until Dyno quits; nothing is installed or registered, and the next start is unprivileged. Starting as
+administrator at login and the read-only helper are planned for 1.1.
+
+Plugins are out-of-process Rust programs speaking `dyno-ipc` that add sensors; the agent starts the host on
+first use of the plugins page (`Request::Plugins`) and the host guards them (timeouts, memory cap, quarantine).
 
 ![dyno-core components](../diagrams/svg/c4-3-components-core.svg)
 
@@ -112,15 +104,14 @@ proposals is minimal today ([roadmap](roadmap.md#known-gaps-in-the-foundation)).
 
 | ADR | Decision |
 | --- | --- |
-| [0001](adr/0001-architecture.md) | Ports and adapters; app, agent, helper, plugins; one IPC |
+| [0001](adr/0001-architecture.md) | Ports and adapters; app, agent, plugins (and the helper, not in 1.0); one IPC |
 | [0002](adr/0002-sampling-architecture.md) | A per-user agent samples; pushed updates; adaptive intervals; own overhead measured |
 | [0003](adr/0003-process-grouping.md) | Processes grouped by application |
-| [0004](adr/0004-cpu-taming-and-throttling-methods.md) | Rules with an escalation ladder; job objects and SIGSTOP duty cycles; crash recovery |
-| [0005](adr/0005-cleanup-safety.md) | Admission policy, preview, re-check, recoverable deletes |
-| [0006](adr/0006-privileged-helper-and-observe-only.md) | Observe-only default; helper installed on first admin use |
-| [0016](adr/0016-privileged-helper-install-and-ipc.md) | The helper: a system service installed on a click, one authorised user and program, audit log |
+| [0006](adr/0006-privileged-helper-and-observe-only.md) | Observe-only default (write parts superseded by 0021; the helper is not in 1.0) |
+| [0016](adr/0016-privileged-helper-install-and-ipc.md) | The helper: a system service installed on a click, one authorised user and program, audit log; not in 1.0 (planned for 1.1) |
+| [0021](adr/0021-monitoring-only.md) | Monitoring only: no taming, cleanup or tuning; no helper in 1.0 |
 | [0017](adr/0017-issues-and-the-program-baseline.md) | Issues from the OS logs behind a port; a baseline of programs that explains, never accuses |
-| [0020](adr/0020-extras-backup-checks-and-taming-proof.md) | Extras and backup health behind a ToolRunner; the login-shell PATH resolver; taming rules that expire and prove their effect |
+| [0020](adr/0020-extras-backup-checks-and-taming-proof.md) | Extras and backup health behind a ToolRunner; the login-shell PATH resolver |
 | [0007](adr/0007-extensibility-three-tiers.md) | Core, TOML packs, out-of-process plugins |
 | [0008](adr/0008-storage-sqlite-and-retention.md) | SQLite, tiers, versioned schema |
 | [0009](adr/0009-native-feel.md) | Desktop feel in a webview |
@@ -133,24 +124,9 @@ proposals is minimal today ([roadmap](roadmap.md#known-gaps-in-the-foundation)).
 
 The app subscribes once (`Request::Subscribe { detail }`; `Summary` for the dashboard, `Processes` while the task manager
 is open). The sampler measures at the adaptive interval and the agent pushes a `LiveUpdate` (system sample, memory
-pressure, top apps by CPU and memory, the agent's own overhead, the active profile, active rule actions, and, for
+pressure, top apps by CPU and memory, the agent's own overhead, and, for
 `Processes`, the full process list and groups) to each subscriber at its detail level. A subscriber that cannot keep up
 loses frames; nothing is buffered without limit. Frames are bounded (`MAX_FRAME` 4 MiB).
-
-### Acting on a process
-
-`Request::Act` or `ActOnGroup` is validated (`ProcessAction::validate`), each target is checked against the protected
-list, applied through `ProcessControl` (which first compares the live process's start time, so a reused pid is never
-hit) and recorded with an `UndoRecord`. `Undo` applies the inverse. Rule steps work the same way, driven by the `Engine`,
-and are released when the rule stops holding, when the app exits and when the agent stops (`release_all`, which also reads
-the control-state file to undo what a crashed run left).
-
-### CPU taming
-
-See ADR 0004. The engine is a state machine per (rule, app): Watching, Acting at step n, Releasing, Snoozed. The per-OS
-methods are job objects (Windows) and a 100 ms SIGSTOP/SIGCONT duty cycle (macOS, Linux), background QoS / EcoQoS / nice
-for efficiency mode. After a crash, Windows keeps the named job alive through a query-only handle held by the capped
-process; on Unix a process left stopped is continued by the next run's `release_all` from the state file.
 
 ### History
 
@@ -171,18 +147,13 @@ One folder per user (`DYNO_DATA_DIR` overrides it): `%LOCALAPPDATA%\Dyno`, `~/Li
 
 | File | Content | Written by |
 | --- | --- | --- |
-| `dyno.db` | History tiers, per-app minutes, disk space, events, activity with undo records, alerts, snapshots, boots (SQLite, WAL, versioned) | agent |
+| `dyno.db` | History tiers, per-app minutes, disk space, events, alerts, snapshots, boots (SQLite, WAL, versioned) | agent |
 | `settings.json` | Versioned settings (`SCHEMA_VERSION`), atomic write with backup | agent |
-| `rules.json` | Rules, protected list, profile, pause switch | agent |
-| `process-control.json` | What process control applied that outlives the agent (caps, suspensions) | agent control |
 | `agent.json` | Endpoint, token, pid, start time, version, protocol; owner-only; removed on exit | agent |
 | `logs/` | The shell's small rotating log (`app.log`); the agent writes to stderr (the service's log: `~/Library/Logs/Dyno/agent.log` on macOS, the journal on Linux) | shell, service manager |
 | `plugins/<id>/plugin.toml` | Installed plugins | user |
 
-Process-control state is under the same folder on Windows and macOS and under `$XDG_STATE_HOME/dyno` on Linux when the
-agent is started by the CLI default (the agent passes its own folder).
-
-Every persistent file is versioned and tolerates damage: settings and rules fall back to the backup, then the defaults;
+Every persistent file is versioned and tolerates damage: settings fall back to the backup, then the defaults;
 a damaged database is moved aside and recreated with an alert; when the folder is not writable the agent says so and keeps
 working in memory.
 
@@ -192,8 +163,7 @@ working in memory.
   again. Open only what the user chose.
 - **Never trust another process.** Frames are bounded; the handshake needs the per-launch token (constant-time compare)
   and, where the OS tells, the peer pid. The discovery file is owner-only.
-- **Least privilege.** Nothing Dyno runs is elevated; the helper has a closed action set, serves one user and one program, validates again and
-  audits every change. Tauri capabilities grant only events and window dragging; the CSP has no `unsafe-eval` and no remote
+- **Least privilege.** Nothing Dyno runs is elevated unless the user chooses Run as administrator, and then only until Dyno quits; Dyno changes nothing on the machine and installs no service or helper. Tauri capabilities grant only events and window dragging; the CSP has no `unsafe-eval` and no remote
   origin; `scripts/check-capabilities.mjs` enforces it in CI.
 - **Contain failures.** Per-request and per-tick panics are caught, locks recover from poisoning, plugins are guarded and
   quarantined, a failing sensor is an unavailable reading, the app restarts a dead agent and an agent without an app keeps
@@ -224,6 +194,6 @@ one-core figure, which is stricter, and the adaptive intervals stretch when it i
 ## Extension points
 
 - A new OS: a new `dyno-platform` adapter behind the existing ports.
-- A new cleanup category: a catalogue entry (a declarative pack later), admitted by the same policy.
-- A new user-facing behaviour: a rule, a profile or a setting, not a special case.
+- A new read-only sensor or view: a port and an adapter, or a plugin.
+- A new user-facing behaviour: a setting, not a special case.
 - Native or untrusted code: an out-of-process plugin (docs/plugins.md); everything else is the core or a pack (ADR 0007).
