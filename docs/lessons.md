@@ -554,3 +554,14 @@ left to the runner's test timeout, which names the test (rule 5).
 Hand-rolled components (for example `pd-table`'s sticky header over virtual scroll) cost us bugs that the Angular
 Material and CDK equivalents already solve and test. **Rule:** use a Material component wherever one fits and CDK for
 the behaviour Material lacks; hand-roll only what neither provides, with the reason in the doc comment (rule 47).
+
+## Shell moves repeat the same review findings: screenshots, lost height, clipped buttons, doubled toasts (2026-10-28, ER-21)
+The Spotter and Pitcrew moves onto the shell got the same independent-review findings: screenshots taken before content loaded,
+cut mid-element, scrolled in the frame or covered; a page losing its height under the shell host (a virtual viewport at 0);
+a dialog's primary button clipped; success toasts for trivial actions and double job announcements (the app's own
+`paddock://jobs` listener next to the shell's `JobsStore`); copy for removed UI. Fixing instances each time never ends.
+**Rule (no new numbered rule; the mechanisms apply rules 40 and 42):** a shell move starts from
+[docs/plans/shell-adoption-checklist.md](plans/shell-adoption-checklist.md); screenshots go through `captureScreen`,
+layout through `expectFullyVisible` and `expectPageFillsHost` (`@decryp7/paddock-e2e`), the shell's page host gives routed
+pages a definite height, and conformance C44 fails an app that bypasses the shell's job follow. The helpers are heuristics
+that catch these findings; the independent review stays (ER-23). An ADR only when a check changes a rule.

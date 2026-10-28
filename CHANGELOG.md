@@ -12,8 +12,15 @@ Conventional Commits; one semver tag for the whole repo.
   `cdk-virtual-scroll-viewport`). Tested against fixture pages in `selftest/capture.spec.ts`.
 - `pd-page-host` is a flex column that fills `<main>` (`height: 100%`, `min-height: 0`), and the loaded page's box is a shrinkable
   flex item, so `height: 100%` inside a routed page resolves instead of collapsing to 0.
-- Conformance C44: an app TypeScript file must not name `paddock://jobs` / `JOBS_EVENT`; apps wait for jobs through
-  `JobFollow` / `JobsStore.follow` (documented in `shell/jobs`), which avoids doubled announcements.
+- Conformance C44 (rule 42): an app must not name `paddock://jobs` or a `JOBS_EVENT` imported from paddock-ui (aliases and
+  namespaces too; an app's own constant of that name is fine), nor use `JobsBackend`/`TauriJobsBackend`/`MemoryJobsBackend`
+  outside `provide*.ts`, `*.config.ts`, `main.ts`; apps wait through `JobFollow` / `JobsStore.follow` (documented in
+  `shell/jobs`). It runs in every app's gates (`app-gates` action) and in Paddock's conformance job; the e2e kit's self-test
+  runs in the `ui` job of ci.yml.
+- `captureDocScreens` goes through `captureScreen` (settled, not cut, not scrolled, no cover); its `element` and `clip` crops
+  are removed (a crop can hide content). `FRAME_MAX_HEIGHT` moved to `capture.ts` (still exported from the package).
+- Behaviour change: a routed page with `height: 100%` and `overflow: hidden` is clipped to the host instead of making `<main>`
+  scroll; use `overflow: auto` or no fixed height. The page box's rule lives in `pd-part-outlet`'s `:host(.pd-page)`.
 - New [docs/plans/shell-adoption-checklist.md](docs/plans/shell-adoption-checklist.md), linked from AGENTS.md.
 
 ### Shell toasts keep a page-footer safe area

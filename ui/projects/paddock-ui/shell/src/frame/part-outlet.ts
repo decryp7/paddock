@@ -56,7 +56,9 @@ export type PartStatus = { readonly kind: 'loading' } | { readonly kind: 'loaded
   `,
   styles: `
     :host { display: contents; }
-    :host(.pd-page) { display: block; min-width: 0; }
+    /* A routed page's box (ADR 0012): a flex item of pd-page-host's column that may shrink to the host, so the page's own
+       height: 100% resolves. A page with height: 100% and overflow: hidden is clipped to the host, not scrolled. */
+    :host(.pd-page) { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; }
     .pd-loading { display: flex; flex-direction: column; gap: var(--pd-space-3); padding: var(--pd-space-6); max-width: var(--pd-content-max); }
     .pd-retry { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 1px solid var(--pd-danger); border-radius: var(--pd-radius-pill); background: transparent; color: var(--pd-danger); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); cursor: pointer; }
     .pd-retry:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }

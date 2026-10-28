@@ -605,7 +605,7 @@ describe('pd-page-host and the title strategy alone', () => {
     expect(host).toMatch(/flex-direction:\s*column/);
     expect(host).toMatch(/height:\s*100%/);
     expect(host).toMatch(/min-height:\s*0/);
-    expect(css).toMatch(/pd-part-outlet\.pd-page[^{]*\{[^}]*min-height:\s*0/);
+
   });
 
   it('a route without a title is titled with the app’s name', () => {

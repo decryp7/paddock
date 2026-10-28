@@ -26,7 +26,10 @@ test.describe('pages frame (plan S14)', () => {
       await app.sidebar.link(name).click();
       await expect(app.sidebar.link(name)).toHaveAttribute('aria-current', 'page');
       await expect(page.locator('pd-part-outlet.pd-page[data-part-status=loaded]')).toBeVisible();
+      // The shell's own guard: the loaded page's box fills the host. The demo's pages are content-high, so their own
+      // component is checked for collapsed viewports only (an app page that must fill uses the default, fill: true).
       await expectPageFillsHost(page, { page: 'pd-part-outlet.pd-page' });
+      await expectPageFillsHost(page, { fill: false });
     }
   });
 
