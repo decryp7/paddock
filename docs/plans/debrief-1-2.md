@@ -199,23 +199,22 @@ minutes (H2) and at 7.6 GB the name layer is never built (`catalogue(all)` runs 
 catalogue scan costs 2.5x the import's CPU (H4); the name merge is quadratic (H5). The packages below follow the plan's
 conventions (failing test first, wave-0 markers, own worktree, one declared line in shared integration points). They do
 not duplicate 4.3 (import footprint), 2.6/4.4 (plugin lifecycle), PH4/3.4 (evtx streaming) or 5.2 (deferral), which stay
-as they are; P2 is ADR 0020 WP-8's store-duck item, done now.
+as they are; P2 is ADR 0020 WP-8's store-duck item, done now. Updated 2026-10-28 after the user's decisions: D7 (the
+budgets are gates) and D11 (one family ADR) taken; the background alias job is removed, `autoload` is off by default and
+rule 46 forbids LLMs for large jobs, so the naming-model tuning packages are dropped (the names pack, about 1,500
+entries for all OS, is the LLM research's N3 on `docs/research-debrief-llm`, not repeated here). Ids `NR`/`BP` avoid the
+LLM research's `N` ids.
 
 | # | Package | Owned files | Role | Depends on | Acceptance | Days | Wave |
 |---|---|---|---|---|---|---|---|
-| A1 | **ADR: the background-work contract** (rule 40): no background work outside jobs or the executor, no polling without wake-ups, per-pid probes, an idempotency key per job kind, background priority for child processes, bounded queries bound memory; amends ADRs 0008, 0018, 0020 | `docs/adr/0023-background-work-contract.md` | designer + reviewer | - | reviewer verdict without P1 | 1 | 0 |
-| P0 | **Failing perf tests** (with 0.3): counting tests for H1 (0 process tables per watcher tick), H2 (0 `catalogue(all)` while not built), H3 (1.6 M-row catalogue within 192 MB), H5 (`merge_scaling` bench gate), H6 (0 statements in idle turns), H10 (background launch class and threads), H11 (one id for two identical Summarize), H12 (progress per batch) | `crates/paddock-proc/tests/`, `crates/debrief-store-duck/tests/regress_1_2.rs`, `crates/debrief-core/tests/it/names_perf.rs`, `app/src-tauri/src/{names.rs,jobs/tests.rs}` tests, `crates/debrief-ai-worker/src/server.rs` tests | implementer | 0.1 | each fails today for the measured reason | 1.5 | 0 |
+| A1 | **ADR 0024, the background-work contract** (rule 40; drafted on `docs/debrief-perf`, Proposed): background priority for threads and child processes through `paddock-proc`, no polling without wake-ups, long work as keyed jobs in the executor, per-pid monitoring; checks C39-C41 in warning mode; review and acceptance | `docs/adr/0024-background-work-contract.md`, `conformance/src/{priority,polls,threads}.mjs` | reviewer, then implementer for the checks | - | reviewer verdict without P1; the three checks list Debrief's instances | 1.5 | 0 |
+| P0 | **Failing perf tests** (with 0.3): counting tests for H1 (0 process tables per watcher tick), H2 (0 `catalogue(all)` while not built), H3 (1.6 M-row catalogue within 192 MB), H5 (`merge_scaling` bench gate), H6 (0 statements in idle turns), ADR 0024 rule 1 (a Background launch carries the class and `threads()` count), H11 (one id for two identical Summarize) | `crates/paddock-proc/tests/`, `crates/debrief-store-duck/tests/regress_1_2.rs`, `crates/debrief-core/tests/it/names_perf.rs`, `app/src-tauri/src/{names.rs,jobs/tests.rs}` tests, `crates/debrief-ai-worker/src/server.rs` tests | implementer | 0.1 | each fails today for the measured reason | 1.5 | 0 |
 | P1 | **Per-pid memory probe, one watcher for all children** (H1) | `crates/paddock-proc/src/{usage,sys,supervised}.rs`, `crates/debrief-ipc/src/process.rs` (until PH1 deletes it) | implementer | P0, with 2.2 | P0's H1 test passes; idle app stand-in ≤ 0.5 % of a core | 1.5 | 2 |
 | P2 | **Store loops without polling** (H6) | `crates/debrief-store-duck/src/{catalogue,fts}.rs` (loops) | implementer | P0 | 0 statements in 100 idle turns; removal still tidies | 1 | 2 |
 | P3 | **Bounded catalogue read and `catalogue_status`** (H3, H2): per-source totals, top-N from them, a blocking status call | `crates/debrief-store-duck/src/catalogue.rs`, `crates/debrief-core/src/ports/mod.rs` (one method), `crates/debrief-store-client/src/port_table.rs` (one line) | designer | P2, D-0 | P0's H3 test passes; status wakes on commit | 2 | 3 |
-| N1 | **Names rebuild as a job** (H2, H5): merge only co-occurring groups with trigram blocking; bounded co-occurrence queries; single-flight rebuild keyed on the catalogue generation with phases and Cancel; requests never rebuild | `crates/debrief-core/src/names/{group,build}.rs`, `app/src-tauri/src/names.rs`, call sites in `search_everything.rs`, `ai/commands.rs` | designer | P3 | `merge_scaling` 8,000 groups < 0.5 s; a search during a rebuild returns at once | 2.5 | 3 |
-| N2 | **Background priority and threads for AI background work** (H10): OS background class for the llama-server serving background jobs, threads physical − 1 (chat) and half (background), pause on user activity or machine load, aliases default per D8 | `crates/debrief-ai-worker/src/{server,child,main}.rs`, `crates/debrief-core/src/process.rs`, `crates/debrief-ai/src/settings.rs`, `app/src-tauri/src/names.rs` (`Polite`) | designer | M2c, 2.2 | args and fake-activity tests; priority class checked on the Windows runner | 2 | 3 |
+| NR1 | **Names rebuild as a job** (H2, H5; the log-name harvest of the LLM research's N4 feeds P4's tally): merge only co-occurring groups with trigram blocking; bounded co-occurrence queries; single-flight rebuild keyed on the catalogue generation with phases and Cancel; requests never rebuild | `crates/debrief-core/src/names/{group,build}.rs`, `app/src-tauri/src/names.rs`, call sites in `search_everything.rs`, `ai/commands.rs` | designer | P3 | `merge_scaling` 8,000 groups < 0.5 s; a search during a rebuild returns at once | 2.5 | 3 |
+| BP1 | **Background priority and thread bounds in Debrief** (ADR 0024 rule 1, H10): `paddock-proc` `Priority` and `threads()` (built in P1's change); llama-server `User` for chat and `Background` for confirmed batch jobs (rule 46, e.g. describing frames), `--threads` from `threads()`; catalogue, index and compaction threads `Background`; the store worker's per-call class with ADR 0020 WP-9 | `crates/paddock-proc/src/{command,sys,priority}.rs`, `crates/debrief-ai-worker/src/{server,child,main}.rs`, `crates/debrief-core/src/threads.rs`, `crates/debrief-ai/src/models/priority.rs` | designer | P1, 2.2 | class and thread tests per OS on each runner; no direct priority call left in Debrief (C39) | 2 | 3 |
 | J1 | **Idempotency key on jobs** (H11), in `paddock-jobs` and adopted | `crates/paddock-jobs/src/` (queue), `app/src-tauri/src/ai/requests.rs`, job call sites | implementer | M2a | two identical submits give one id | 1.5 | 3 |
-| N3 | **Alias job progress and compact reply** (H9, H12): progress per batch, name + ≤ 3 aliases, 16 tokens per name, no pause, `-c 2048` for naming | `crates/debrief-core/src/names/alias_job.rs`, `crates/debrief-ai/src/names_model.rs`, `app/src-tauri/src/names.rs` | implementer | N1 | monotonic progress per batch; token budget per name | 1.5 | 4 |
-| N4 | **Names pack and cross-workspace alias cache** (H9; rule 21) | `crates/debrief-core/src/names/{book,pack}.rs`, `apps/debrief/packs/names/`, `app/src-tauri/src/names.rs` | implementer | N3, D10 | covered names make 0 model calls; reload without restart | 2.5 | 5 |
-| N5 | **Slots and batches for naming** (H9): `--parallel` 2-4 bounded per rule 13, batches of 32 | `crates/debrief-ai-worker/src/server.rs`, `crates/debrief-ai/src/names_model.rs`, `alias_job.rs` | implementer | N3, N2 | ≤ slots requests in flight (fake model) | 1 | 5 |
-| N6 | **On-demand naming priority** (H9): searched and assistant-hit names first | `alias_job.rs`, `names/build.rs`, `app/src-tauri/src/names.rs` | implementer | N3 | a searched group is in the next batch | 1 | 5 |
-| N7 | **Model memory for background naming** (H8): naming model or `-c 2048`, unload a background-only load at the job's end, autoload per D9 | `crates/debrief-ai/src/{settings.rs,llm/lazy.rs}`, `app/src-tauri/src/ai/core.rs` | implementer | N2, D9 | lazy-provider unload test; settings migration test | 1.5 | 6 |
 | P4 | **Catalogue built during the import** (H4): entity tally in the parse threads, committed with the segment; the old scan only for older stores, as a background job with progress | `crates/debrief-core/src/ingest/{parallel,batcher}.rs` (one hook), `crates/debrief-store-duck/src/{catalogue,writer}.rs` | designer | P3, 4.3 | catalogue equal on `/samples`; post-import ≤ 20 CPU-s/GB | 3 | 7 |
 | B1 | **Bench gates** (section 4 of the note) in `debrief-bench.yml` through `paddock-bench`: idle CPU and wake-ups, phase footprints, s/GB and CPU-s/GB, names timings | `.gitea/workflows/debrief-bench.yml`, `apps/debrief/bench/budgets.toml`, the harness tests | implementer | 4.3, P1-P4 | `paddock-bench check` fails on a planted 2x regression | 1.5 | 8 |
 
@@ -295,8 +294,8 @@ All of it runs once on the combined result before the local build and the tag (r
 | 7 | 4.1, 4.3, 4.4, 4.5, 3.7 | 17 | 4 |
 | 8 | 5.1, 5.2, D-b, 5.4 | 9 | 4 |
 | 9 | M5, R, F | 5.5 | 2.5 |
-| P (performance) | A1, P0-P4, N1-N7, J1, B1 | 25 | 3 |
-| **Total** | 62 packages | **about 149 agent-days**, plus ±20 % for review rounds and CI fixes: **about 175-180** | |
+| P (performance) | A1, P0-P4, NR1, BP1, J1, B1 | 18 | 3 |
+| **Total** | 57 packages | **about 142 agent-days**, plus ±20 % for review rounds and CI fixes: **about 165-170** | |
 
 Against the first version of this plan (112 agent-days) the plugin move adds PH1-PH4 (11 days) and removes the
 Debrief-only plugin patches it replaces (about 3 days): net +8. Listing DuckDB's remaining work (D-a, D-b) adds 2 and
@@ -330,12 +329,10 @@ Still open, decided inside a package:
 | D5 | `Limit`/`Page`/`Truncated` inside `paddock-view` or a new `paddock-query` | **Decide in 0.5** after reading `paddock-view`'s surface; a new crate only if `paddock-view` would gain store-shaped types |
 | D6 | `SHOW <setting>` in the SQL console on DuckDB 2.0 | **Refuse it** in D-a unless a user need appears (it can reveal paths such as `temp_directory`) |
 
-Open for the user, from the performance research (its section 7):
+From the performance research (its section 7), decided 2026-10-28:
 
-| # | Decision | Recommendation |
+| # | Decision | Taken |
 |---|---|---|
-| D7 | The performance budgets (idle ≤ 0.5 % of a core per process; worker ≤ 768 MB at 7.6 GB; ≤ 6 s and ≤ 32 CPU-s per GB; post-import ≤ 20 CPU-s per GB) as nightly gates | Yes |
-| D8 | AI aliases by default on CPU-only PCs and integrated-GPU Vulkan | Off there; on with Metal, CUDA or a discrete GPU |
-| D9 | Model memory for naming, and autoload at start (today 7-8 GB from launch) | Chat model at `-c 2048` now, an optional small naming model later; autoload off |
-| D10 | A built-in names pack for common Windows, macOS and Linux programs | Yes, Windows first |
-| D11 | One family ADR for the background-work patterns (A1) | Yes, in wave 0 |
+| D7 | The performance budgets (idle ≤ 0.5 % of a core and ≤ 1 wake-up/s per process; worker ≤ 768 MB at 7.6 GB; ≤ 6 s and ≤ 32 CPU-s per GB; post-import ≤ 20 CPU-s per GB) | **Gates**: counting tests on PRs, the nightly regression gate in `debrief-bench.yml` (B1) |
+| D8-D10 | Naming defaults, naming model, names pack | Superseded by the LLM research and rule 46: no background alias job, `autoload` off, a ~1,500-entry names pack for all OS |
+| D11 | One family ADR for the background-work patterns | **Yes**: ADR 0024 (Proposed, A1) |
