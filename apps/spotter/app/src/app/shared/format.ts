@@ -42,20 +42,6 @@ export function formatInterval(secs: number): string {
   return `every ${spanText(secs * SECOND)}`;
 }
 
-/** Byte counts with binary units. */
-export function formatBytes(bytes: number | null | undefined): string {
-  if (bytes === null || bytes === undefined) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
-  let v = bytes / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v.toFixed(1)} ${units[i]}`;
-}
-
 /** A date and time in the user's locale; `—` when unknown. */
 export function formatDateTime(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return '—';
@@ -90,13 +76,6 @@ export function formatShortDateTime(ms: number | null | undefined, now: number):
   const d = new Date(ms);
   const sameYear = d.getFullYear() === new Date(now).getFullYear();
   return d.toLocaleString(undefined, sameYear ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } : { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-/** Bytes as a number of MiB with the unit left to the column header: `25.5` (always one decimal, like [formatBytes]); `—` when unknown. */
-export function mebibytes(bytes: number | null | undefined): string {
-  if (bytes === null || bytes === undefined) return '—';
-  const v = bytes / 1048576;
-  return v.toFixed(1);
 }
 
 /** A compact ago for a table cell: `20 min`, `3 h`, `2 days`; `—` when unknown. */

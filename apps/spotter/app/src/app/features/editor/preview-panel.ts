@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 import { SuStatusPill } from '@decryp7/paddock-ui';
-import { formatBytes, formatDuration } from '../../shared/format';
+import { formatBytes } from '@decryp7/paddock-ui/format';
+import { formatDuration } from '../../shared/format';
 import { statusView } from '../../shared/labels';
 import type { SourcePreview } from '../../core/api.types';
 import type { Loadable } from '../../state/loadable';

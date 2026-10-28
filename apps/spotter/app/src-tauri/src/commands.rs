@@ -517,7 +517,7 @@ pub async fn install_renderer<R: Runtime>(app: AppHandle<R>, state: State<'_, Sh
 pub async fn import_list(state: State<'_, Shared>, format: String, text: String) -> Out<ImportResultDto> {
     text_ok("format", &format)?;
     if text.len() > MAX_IMPORT_TEXT {
-        return Err(CommandError::bad("The list is larger than 2 MiB."));
+        return Err(CommandError::bad("The list is larger than 2 MB."));
     }
     let imported = state.engine.import_list(&format, &text)?;
     Ok(ImportResultDto {
