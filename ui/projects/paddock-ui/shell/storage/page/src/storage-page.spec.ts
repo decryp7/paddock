@@ -79,7 +79,7 @@ describe('the Storage page', () => {
       await flush();
       return items;
     };
-    return { h, dialogs, el, q, click, flush, row, inline, menu, menuItems };
+    return { fixture, h, dialogs, el, q, click, flush, row, inline, menu, menuItems };
   }
 
   it('lists what the app keeps in one shared table, one line per row, grouped by what it is, with lower bounds written in words', async () => {
@@ -214,6 +214,7 @@ describe('the Storage page', () => {
     await p.h.next();
     await p.flush();
     expect(text(p.q('storage-working')!)).toContain('Measuring Cache');
+    expect(p.q('storage-working')!.querySelector('mat-progress-bar')?.getAttribute('role')).toBe('progressbar');
     await p.h.all();
     await p.flush();
     const tree = p.q('storage-tree')!;
@@ -246,5 +247,14 @@ describe('the Storage page', () => {
     p.h.memory.send({ state: 'tree', tree: { id: 'models', capped: true, root: { name: 'Models', bytes: 5, folded: 0, children: [] } } });
     await p.flush();
     expect(p.q('storage-tree-capped')?.textContent).toContain('stopped early');
+  });
+
+  it('fills the progress bar from the counts, and leaves it empty (indeterminate) while the total is unknown', async () => {
+    const p = await open();
+    const percent = (p.fixture.componentInstance as unknown as { percent(x: { done: number; total: number | null }): number }).percent;
+    expect(percent({ done: 5, total: 20 })).toBe(25);
+    expect(percent({ done: 30, total: 20 })).toBe(100);
+    expect(percent({ done: 3, total: null })).toBe(0);
+    expect(percent({ done: 0, total: 0 })).toBe(0);
   });
 });
