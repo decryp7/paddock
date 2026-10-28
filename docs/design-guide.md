@@ -34,7 +34,7 @@ product-reference points come from established knowledge (marked "[k]" in Source
 - 4 px base grid. Spacing scale: 2, 4, 8, 12, 16, 24, 32, 48. Card padding 16 (Standard) / 12 (Compact) / 20 (Comfortable).
   Gap between cards 16 (12 compact). Page gutter 24, max content width 1440 for dashboards, 880 for forms/settings.
 - Dashboard grid: 12 columns, tiles span 3/4/6/12; row heights snap to 8 px. Align baselines of hero numbers across a row.
-- Sidebar 216 px (collapsed 56), toolbar 44 px (Debrief 40), status bar 24 px, dialog widths 400/560/720.
+- Sidebar 216 px (collapsed 56), toolbar 44 px (Debrief 40), status bar 24 px, page-footer safe area 56 px, dialog widths 400/560/720.
 - Title bar 40 px, its own height (not a toolbar): app name and, on Windows, Linux and in the browser, the in-app menu
   bar; on macOS the menus are in the native menu bar only and the title bar keeps 78 px clear for the window buttons.
 - A sidebar shown over the page (narrow windows) is modal: it and its scrim cover everything below the title bar,
@@ -263,7 +263,8 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
 - **Dialogs**: modal for decisions only; title 18, one sentence, primary on the right, cancel left of it; destructive
   dialog names the thing and the consequence ("Delete 3 runners and their folders"); Esc closes, focus returns to the
   trigger. Prefer inline panels or popovers over dialogs.
-- **Toasts**: bottom-right, 360 max, auto-dismiss 5 s (errors persist until dismissed), at most 3 stacked, with Undo
+- **Toasts**: bottom-right, kept clear of the status bar and of the page footer (`--pd-page-footer-safe`, 56 px: a footer up to 56 px
+  tall, such as a wizard's Next, is not covered), 360 max, auto-dismiss 5 s (errors persist until dismissed), at most 3 stacked, with Undo
   where the action is reversible; `role=status` (errors `role=alert`).
 - **Badges**: 20 px high, 12/500, pill, tint bg + status colour text + 12 px icon + word. Counts in nav: neutral
   surface-3 pill; use status tint only if the count means a problem. Never more than 2 badges in one table cell.
@@ -291,6 +292,9 @@ server. Check the URL in Settings, then Retry."). No exclamation marks, no jokes
 units and thousands separators; relative time under 24 h with absolute on hover; "3 min ago" not "3m". Empty states
 start with the benefit, not the lack. Pitwall may be slightly technical, Dyno slightly warmer, Debrief terse, Pitcrew
 operational, Spotter concise.
+
+"Label: value" pairs (a status chip's "Log store: stopped", a fact list's "Version: 1.2") use a lower-case value unless it is a
+proper noun or a name; the label starts the sentence, the value continues it.
 
 ## 11. Native-feel rules (Debrief ADR 0028 for the whole Paddock family)
 

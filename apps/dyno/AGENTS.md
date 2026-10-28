@@ -189,7 +189,7 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
 - UI: standalone components, signals, OnPush, CSS custom properties for theme tokens (dark and light), accessible
   markup (real buttons, labels, aria-labels on icon buttons), the `dy` selector prefix.
 - UI building blocks: use **Angular CDK** for behaviour and accessibility (menus, overlays, dialogs, listbox,
-  scrolling) instead of hand-rolling them, and **Angular Material** selectively for complex inputs, themed through
+  scrolling) instead of hand-rolling them, and **Angular Material first** (rule 47: a Material component wherever one fits), themed through
   Dyno's CSS tokens. Icons use Material's `MatIconRegistry` with Dyno's own SVGs registered as literals in the `dy`
   namespace; no icon fonts and no icon URLs fetched at run time (the CSP forbids it).
 - Charts use Apache ECharts with the CVD-checked categorical palette. Status colours always come with words or

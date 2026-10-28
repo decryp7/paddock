@@ -2,3 +2,20 @@
 # (build.target-dir: the job's build folder outside the checkout, as configuration because sccache hashes CARGO_TARGET_DIR).
 # The repo root's .cargo/config.toml (linker, registry) applies as well.
 include = [{ path = "ci.toml", optional = true }]
+
+# aws-lc (the crypto under rustls here: lettre's mail TLS, reqwest) is built without CPU Jitter Entropy. With it, aws-lc
+# seeds its random generator from timing jitter as well as the OS and calls abort() when the jitter source fails its
+# health tests three times in a row, killing the whole app: on Windows the CRT turns that into exit 0xc0000409. That is
+# the probable cause (same exit code, the first random draw, the retry time; not caught in a dump) of Spotter's first TLS
+# handshake (spotter-engine's mail_delivery test) dying on the Windows CI runner, a VM, in runs 6457 and 6628. Upstream:
+# https://github.com/aws/aws-lc-rs/issues/1072 (opened 2026-03-22, still open on 2026-10-28: aborts in
+# tree_jitter_initialize_once on Windows VMs and at early boot); the maintainer names this switch as the way out, the OS
+# generator alone (ProcessPrng/BCryptGenRandom on Windows, getentropy on macOS, getrandom on Linux) being "still sound".
+# aws-lc-sys 0.46 reads it in its build script (builder/main.rs, NO_JITTER_ENTROPY; rerun-if-env-changed) and compiles
+# with DISABLE_CPU_JITTER_ENTROPY. Here, not in the repo root, because only Spotter links aws-lc; every Spotter build runs
+# below apps/spotter (the ci.toml include above relies on that too). `force` stops a shell AWS_LC_SYS_NO_JITTER_ENTROPY
+# from overriding it, but the build script reads AWS_LC_SYS_NO_JITTER_ENTROPY_<target> (e.g. ..._x86_64_pc_windows_msvc)
+# first, so a set target-suffixed variable can still turn jitter back on: never set one. The test
+# aws_lc_is_built_without_jitter_entropy_which_can_abort_the_process (spotter-engine) checks the [env] value reaches rustc.
+[env]
+AWS_LC_SYS_NO_JITTER_ENTROPY = { value = "1", force = true }
