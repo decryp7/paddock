@@ -404,7 +404,8 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
-          echo "PADDOCK_TEST_BROWSER_DIR=$(bash conformance/ci/ci-home.sh)/test-browser" >> "$GITHUB_ENV"  # outside the checkout, which stable-workspace moves; the installer stamps the pinned version in it
+          home="$(bash conformance/ci/ci-home.sh)"
+          echo "PADDOCK_TEST_BROWSER_DIR=$home/test-browser" >> "$GITHUB_ENV"  # outside the checkout, which stable-workspace moves; the installer stamps the pinned version in it
 
       # Host runners check out into a per-job hashed folder; sccache keys a compile on its folder, so the workspace crates miss
       # on every run. Build from the same physical path every time: PADDOCK_WORKSPACE, the cargo steps' working-directory

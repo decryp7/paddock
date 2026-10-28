@@ -22,8 +22,7 @@ runs:
           if [ -d "$mount" ] && [ -w "$mount" ]; then base="$mount"
           else echo "::notice::no /sccache mount in this container; the npm and Angular caches live and die with the job."; exit 0; fi
         else
-          ci_home="${PADDOCK_CI_HOME:-$HOME/.paddock-ci}"
-          if [ -n "${PADDOCK_CI_HOME:-}" ] && [ ! -d "$ci_home" ]; then echo "::error::PADDOCK_CI_HOME ($ci_home) does not exist: is its disk mounted? The job stops here rather than fill the internal disk." >&2; exit 1; fi
+          ci_home="$(bash "$GITHUB_ACTION_PATH/../../../conformance/ci/ci-home.sh")"  # the one implementation: fails when a relocated home is missing
           base="$ci_home"
         fi
         npm_cache="$base/npm"
