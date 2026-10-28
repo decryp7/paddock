@@ -121,7 +121,6 @@ jobs:
       cargo-dir: apps/spotter
       tag-prefix: spotter-
       latest-tag: spotter-latest
-      notes-extra: "**Existing installs:** download this version once by hand. Spotter now updates from the Paddock releases, which a copy installed before this version does not look at."
       # Spotter's UI imports the shared library from ui/dist, which the app build needs.
       prepare: npm run build -w ui
       cliff-config: apps/spotter/cliff.toml

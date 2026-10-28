@@ -23,7 +23,7 @@ This is about **Spotter's own** updates, not the releases Spotter watches for.
   manual check always works. The check and the install are built: Settings > Spotter updates shows the version, "Check for
   updates", the release notes and the install; a build without the public key says so and never checks.
 - **One endpoint.** A check is one HTTPS GET of
-  `https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json` (the moving `spotter-latest` release of the Paddock monorepo; copies installed before the move are reinstalled once by hand)
+  `https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json` (the moving `spotter-latest` release of the Paddock monorepo)
   (`plugins.updater.endpoints` in `tauri.conf.json`). It carries no identifier or usage data.
 - **Signatures are mandatory.** Every update is verified with the minisign public key built into the app before it
   is installed, and `requireSignedVersion` binds each signature to its version (GHSA-j38x-g3m3-95fr). A build without
@@ -66,7 +66,7 @@ from the releases page, and replace the secrets. Because the key is shared, this
 - The moving release `spotter-latest` carries the same `latest.json`; installed copies read
   `https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json`.
 - `THIRD_PARTY_NOTICES.md` (Rust crates and production npm packages with their licence texts) is bundled as a resource.
-  Regenerate it with `apps/spotter/scripts/notices/generate.sh` after a dependency change; the `licences` job of
+  Regenerate it with `apps/spotter/scripts/notices/generate.sh` after a dependency change; the `plan` job of
   `spotter-release.yml` runs `cargo deny` and fails when the committed file is stale.
 
 ## The macOS bundle
