@@ -505,8 +505,9 @@ reinstalled once by hand. This replaces the transition release (amendment "one u
 - No `latest.json` is written to an old repository: `conformance/release/publish.mjs` has no `--newest` mode any more,
   and the release jobs publish only the tag's release and the moving `<app>-latest` release in `paddock`.
 - An app's `plugins.updater.endpoints` lists only `https://dev.decryptology.net/decryp7/paddock/releases/download/<app>-latest/latest.json`.
-- Every release's notes keep the First launch section with "Existing installs: download this version once by hand";
-  a copy installed before the monorepo reads the old repo's endpoint, which no longer changes, and could not verify the
+- Every release's notes keep the First launch section with "Existing installs: download this version once by hand",
+  except for the apps that have never been released (Dyno and Spotter: no installs to reinstall, declared as `NEVER_RELEASED`
+  in `conformance/test/ci-actions.test.mjs`); a copy installed before the monorepo reads the old repo's endpoint, which no longer changes, and could not verify the
   shared key in any case.
 - Old repositories are archived after the app's first monorepo release; nothing waits for a bridge period.
 
