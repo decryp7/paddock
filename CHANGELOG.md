@@ -17,6 +17,8 @@ Conventional Commits; one semver tag for the whole repo.
   pd.storage.confirm's button repeats its heading ("Delete logs?" / "Delete logs"). sd.inspector says "Running".
   Report a problem breaks long file names without hyphens. Set-up says "Get Pitwall" when Pitwall is not installed. The
   channel secret's Show button is as tall as its input. `SuEmptyState`'s description uses `text-wrap: pretty` (no widows).
+- The dialog harness takes `interact` (what the user does once a dialog booted, by id): the shell demo's boot follows
+  About's releases link, so `files_open_url` is sent and the unexercised count stays at 32.
 
 ### Shared dialog API: About opens its releases page in the system browser
 

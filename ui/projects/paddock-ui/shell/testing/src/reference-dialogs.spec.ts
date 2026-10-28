@@ -10,6 +10,19 @@ import { MCP_COMMANDS } from '@decryp7/paddock-ui/shell/mcp';
 // The shell demo's dialogs (one per kind) through the boot-every-dialog harness and its command table: what every app runs
 // over its own registry (ADR 0009 §4). The contracts are Rust's (ADR 0026 §3): the registry reads the generated ones.
 const DIALOGS = DEMO_DIALOGS as readonly DialogDef[];
+/** About's facts as the engine sends them, with a releases page to follow. */
+const ABOUT_INFO = {
+  appName: 'Paddock Shell Demo',
+  version: '0.1.0',
+  os: 'macos',
+  arch: 'aarch64',
+  commit: null,
+  built: null,
+  homepage: null,
+  releasesPage: 'https://updates.example/releases',
+  legal: [],
+  updatesAvailable: false,
+};
 
 /** Node's `fs`, loaded at run time (the spec programme has no Node types). */
 interface NodeFs {
@@ -33,13 +46,22 @@ describe('shell-demo dialogs', () => {
         // Called with the IPC recorder in place: the window takes its Tauri backends, as in the desktop build.
         providers: dialogBaseProviders,
         baseCommands: DIALOG_BASE_COMMANDS,
-        answers: { window_ready: { recovered: null, ui: null } },
+        answers: { window_ready: { recovered: null, ui: null }, about_info: ABOUT_INFO },
+        // The user follows About's releases link: the window asks the engine to open it (files_open_url).
+        interact: {
+          'pd.about': (root) => {
+            const link = root.querySelector<HTMLAnchorElement>('[data-testid=about-releases]');
+            if (!link) throw new Error('About shows no releases link');
+            link.click();
+          },
+        },
         inputs: { 'sd.rename': { current: 'Demo' }, 'pd.channels.secret': { channelId: 'slack', label: 'Slack', kind: 'token' }, 'pd.channels.remove': { channelId: 'slack', name: 'Slack' }, 'pd.mcp.revoke': { keyId: 1, client: 'Pitwall' }, 'pd.confirm': { heading: 'Forget?', message: 'It goes.', confirm: { label: 'Forget greetings', destructive: true } } },
       });
       expect(report.sent).toContain('window_ready');
       if (def.id === 'sd.inspector') expect(report.sent).toContain('demo_status');
       if (def.id === 'pd.settings') expect(report.sent).toContain('settings_overview');
       if (def.id === 'pd.setup') expect(report.sent).toContain('setup_state');
+      if (def.id === 'pd.about') expect(report.sent).toContain('files_open_url');
     });
   }
 

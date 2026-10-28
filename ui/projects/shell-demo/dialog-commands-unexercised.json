@@ -1,7 +1,6 @@
 {
   "pd.about": {
-    "about_legal": "sent when the user opens a licence document in About; the boot shows the version only",
-    "files_open_url": "sent when the user follows About's releases link; the boot does not click it (about.spec drives it)"
+    "about_legal": "sent when the user opens a licence document in About; the boot shows the version only"
   },
   "pd.channels.secret": {
     "channels_set_secret": "sent by Save once a secret is typed; the boot does not type one (channel-secret-dialog.spec drives Save against the memory backend)"

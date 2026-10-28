@@ -39,6 +39,11 @@ export interface DialogHarnessOptions {
   readonly answers?: Readonly<Record<string, unknown>>;
   /** Console errors that are expected (the mock refusing a fixture path); matched against each message. */
   readonly ignoreErrors?: readonly RegExp[];
+  /**
+   * What the user does once a dialog has booted, by dialog id (follow a link, open a section), so the commands it sends
+   * are checked against its contract and recorded for the nightly "declared but never sent" check.
+   */
+  readonly interact?: Readonly<Record<string, (root: HTMLElement) => void | Promise<void>>>;
 }
 
 /** What booting one dialog found. `problems` is empty when the dialog passed every check. */
@@ -92,6 +97,11 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
     const root = fixture.nativeElement as HTMLElement;
     // The shell registers its start (and the content's resources) as pending tasks: no turn or time budget, a slow import just takes as long as it takes.
     await fixture.whenStable();
+    const interact = options.interact?.[def.id];
+    if (interact) {
+      await interact(root);
+      await fixture.whenStable();
+    }
 
     const failed = root.querySelector('[data-testid=dialog-error-reason]')?.textContent?.trim();
     if (failed) problems.push(`does not open: ${failed}`);
