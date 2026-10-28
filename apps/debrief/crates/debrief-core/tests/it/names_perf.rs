@@ -133,3 +133,28 @@ fn timings_at_fifty_thousand_entities() {
     );
     let _ = Vocabulary::builtin();
 }
+
+/// Cost of the co-occurrence merge (`group::merge_cooccurring`) against the number of groups of one scope: it compares
+/// every pair (trigram sets built per comparison), so it grows with the square of the groups. Ignored by default
+/// (timings); run with `cargo test -p debrief-core --release --test it names_perf::merge_scaling -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn merge_scaling() {
+    use debrief_core::names::group::merge_cooccurring;
+    use debrief_core::names::Cooccurrence;
+    let cands = names(50_000);
+    let vocab = vocabulary_from(&cands);
+    let all = group(&cands, &vocab);
+    println!("groups available: {}", all.len());
+    let mut cooc = Cooccurrence::default();
+    for g in all.iter().take(200) {
+        cooc.add_event(&[g.canonical().to_string(), format!("{}.dll", g.key.replace(' ', ""))]);
+    }
+    for n in [500usize, 1_000, 2_000, 4_000, 8_000] {
+        let mut groups: Vec<_> = all.iter().take(n).cloned().collect();
+        let t = Instant::now();
+        let merged = merge_cooccurring(&mut groups, &cooc, 0.6);
+        let d = t.elapsed();
+        println!("merge_cooccurring over {n} groups: {d:?} ({merged} merges)");
+    }
+}
