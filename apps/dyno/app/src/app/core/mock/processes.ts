@@ -22,37 +22,34 @@ export interface AppSpec {
   swing?: number;
   /** The group whose first process is this app's parent. */
   parent?: string;
-  protectedReason?: string;
+  system?: boolean;
   /** Started this many seconds before the mock's start. */
   ageSecs: number;
 }
 
-const SYS = 'Protected: a Windows system process';
-const SEC = 'Protected: Microsoft Defender (tamper protection)';
-const ME = 'Protected: Dyno itself';
 const USER = 'DEV-LAPTOP\\alex';
 
 /** A developer's Windows 11 laptop during a `cargo build`, ~200 processes. Order matters: parents come first. */
 export const APP_SPECS: AppSpec[] = [
-  { group: 'system', groupName: 'System', name: 'System', exe: null, user: 'SYSTEM', count: 1, cpu: 0.6, memory: 6 * MB, disk: 1.2 * MB, protectedReason: SYS, ageSecs: 1_040_000 },
-  { group: 'registry', groupName: 'Registry', name: 'Registry', exe: null, user: 'SYSTEM', count: 1, cpu: 0, memory: 74 * MB, disk: 0, parent: 'system', protectedReason: SYS, ageSecs: 1_040_000 },
-  { group: 'memcompression', groupName: 'Memory Compression', name: 'MemCompression', exe: null, user: 'SYSTEM', count: 1, cpu: 0.2, memory: 820 * MB, disk: 0, parent: 'system', protectedReason: SYS, ageSecs: 1_040_000 },
-  { group: 'smss', groupName: 'Session Manager', name: 'smss.exe', exe: 'C:\\Windows\\System32\\smss.exe', user: 'SYSTEM', count: 1, cpu: 0, memory: 1 * MB, disk: 0, parent: 'system', protectedReason: SYS, ageSecs: 1_040_000 },
-  { group: 'csrss', groupName: 'Client Server Runtime', name: 'csrss.exe', exe: 'C:\\Windows\\System32\\csrss.exe', user: 'SYSTEM', count: 2, cpu: 0.1, memory: 12 * MB, disk: 0, parent: 'smss', protectedReason: SYS, ageSecs: 1_039_990 },
-  { group: 'wininit', groupName: 'Windows Start-Up', name: 'wininit.exe', exe: 'C:\\Windows\\System32\\wininit.exe', user: 'SYSTEM', count: 1, cpu: 0, memory: 7 * MB, disk: 0, parent: 'smss', protectedReason: SYS, ageSecs: 1_039_990 },
-  { group: 'services', groupName: 'Services and Controller', name: 'services.exe', exe: 'C:\\Windows\\System32\\services.exe', user: 'SYSTEM', count: 1, cpu: 0.1, memory: 11 * MB, disk: 0, parent: 'wininit', protectedReason: SYS, ageSecs: 1_039_985 },
-  { group: 'lsass', groupName: 'Local Security Authority', name: 'lsass.exe', exe: 'C:\\Windows\\System32\\lsass.exe', user: 'SYSTEM', count: 1, cpu: 0.1, memory: 28 * MB, disk: 0, parent: 'wininit', protectedReason: SYS, ageSecs: 1_039_985 },
-  { group: 'winlogon', groupName: 'Windows Logon', name: 'winlogon.exe', exe: 'C:\\Windows\\System32\\winlogon.exe', user: 'SYSTEM', count: 1, cpu: 0, memory: 9 * MB, disk: 0, parent: 'smss', protectedReason: SYS, ageSecs: 1_039_980 },
-  { group: 'dwm', groupName: 'Desktop Window Manager', name: 'dwm.exe', exe: 'C:\\Windows\\System32\\dwm.exe', user: 'DWM-1', count: 1, cpu: 1.4, memory: 142 * MB, disk: 0, parent: 'winlogon', protectedReason: SYS, swing: 0.6, ageSecs: 1_039_980 },
-  { group: 'fontdrvhost', groupName: 'Font Driver Host', name: 'fontdrvhost.exe', exe: 'C:\\Windows\\System32\\fontdrvhost.exe', user: 'UMFD-0', count: 2, cpu: 0, memory: 8 * MB, disk: 0, parent: 'wininit', protectedReason: SYS, ageSecs: 1_039_980 },
-  { group: 'svchost', groupName: 'Windows services', name: 'svchost.exe', exe: 'C:\\Windows\\System32\\svchost.exe', user: 'SYSTEM', count: 70, cpu: 2.1, memory: 1.35 * GB, disk: 2.4 * MB, parent: 'services', protectedReason: SYS, swing: 0.5, ageSecs: 1_039_970 },
+  { group: 'system', groupName: 'System', name: 'System', exe: null, user: 'SYSTEM', count: 1, cpu: 0.6, memory: 6 * MB, disk: 1.2 * MB, system: true, ageSecs: 1_040_000 },
+  { group: 'registry', groupName: 'Registry', name: 'Registry', exe: null, user: 'SYSTEM', count: 1, cpu: 0, memory: 74 * MB, disk: 0, parent: 'system', system: true, ageSecs: 1_040_000 },
+  { group: 'memcompression', groupName: 'Memory Compression', name: 'MemCompression', exe: null, user: 'SYSTEM', count: 1, cpu: 0.2, memory: 820 * MB, disk: 0, parent: 'system', system: true, ageSecs: 1_040_000 },
+  { group: 'smss', groupName: 'Session Manager', name: 'smss.exe', exe: 'C:\\Windows\\System32\\smss.exe', user: 'SYSTEM', count: 1, cpu: 0, memory: 1 * MB, disk: 0, parent: 'system', system: true, ageSecs: 1_040_000 },
+  { group: 'csrss', groupName: 'Client Server Runtime', name: 'csrss.exe', exe: 'C:\\Windows\\System32\\csrss.exe', user: 'SYSTEM', count: 2, cpu: 0.1, memory: 12 * MB, disk: 0, parent: 'smss', system: true, ageSecs: 1_039_990 },
+  { group: 'wininit', groupName: 'Windows Start-Up', name: 'wininit.exe', exe: 'C:\\Windows\\System32\\wininit.exe', user: 'SYSTEM', count: 1, cpu: 0, memory: 7 * MB, disk: 0, parent: 'smss', system: true, ageSecs: 1_039_990 },
+  { group: 'services', groupName: 'Services and Controller', name: 'services.exe', exe: 'C:\\Windows\\System32\\services.exe', user: 'SYSTEM', count: 1, cpu: 0.1, memory: 11 * MB, disk: 0, parent: 'wininit', system: true, ageSecs: 1_039_985 },
+  { group: 'lsass', groupName: 'Local Security Authority', name: 'lsass.exe', exe: 'C:\\Windows\\System32\\lsass.exe', user: 'SYSTEM', count: 1, cpu: 0.1, memory: 28 * MB, disk: 0, parent: 'wininit', system: true, ageSecs: 1_039_985 },
+  { group: 'winlogon', groupName: 'Windows Logon', name: 'winlogon.exe', exe: 'C:\\Windows\\System32\\winlogon.exe', user: 'SYSTEM', count: 1, cpu: 0, memory: 9 * MB, disk: 0, parent: 'smss', system: true, ageSecs: 1_039_980 },
+  { group: 'dwm', groupName: 'Desktop Window Manager', name: 'dwm.exe', exe: 'C:\\Windows\\System32\\dwm.exe', user: 'DWM-1', count: 1, cpu: 1.4, memory: 142 * MB, disk: 0, parent: 'winlogon', system: true, swing: 0.6, ageSecs: 1_039_980 },
+  { group: 'fontdrvhost', groupName: 'Font Driver Host', name: 'fontdrvhost.exe', exe: 'C:\\Windows\\System32\\fontdrvhost.exe', user: 'UMFD-0', count: 2, cpu: 0, memory: 8 * MB, disk: 0, parent: 'wininit', system: true, ageSecs: 1_039_980 },
+  { group: 'svchost', groupName: 'Windows services', name: 'svchost.exe', exe: 'C:\\Windows\\System32\\svchost.exe', user: 'SYSTEM', count: 70, cpu: 2.1, memory: 1.35 * GB, disk: 2.4 * MB, parent: 'services', system: true, swing: 0.5, ageSecs: 1_039_970 },
   { group: 'spoolsv', groupName: 'Print Spooler', name: 'spoolsv.exe', exe: 'C:\\Windows\\System32\\spoolsv.exe', user: 'SYSTEM', count: 1, cpu: 0, memory: 14 * MB, disk: 0, parent: 'services', ageSecs: 1_039_960 },
-  { group: 'defender', groupName: 'Microsoft Defender', name: 'MsMpEng.exe', exe: 'C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.24090.11-0\\MsMpEng.exe', user: 'SYSTEM', count: 1, cpu: 4.1, memory: 386 * MB, disk: 9.5 * MB, parent: 'services', protectedReason: SEC, swing: 0.5, ageSecs: 1_039_950 },
+  { group: 'defender', groupName: 'Microsoft Defender', name: 'MsMpEng.exe', exe: 'C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.24090.11-0\\MsMpEng.exe', user: 'SYSTEM', count: 1, cpu: 4.1, memory: 386 * MB, disk: 9.5 * MB, parent: 'services', system: true, swing: 0.5, ageSecs: 1_039_950 },
   { group: 'search', groupName: 'Windows Search', name: 'SearchIndexer.exe', exe: 'C:\\Windows\\System32\\SearchIndexer.exe', user: 'SYSTEM', count: 3, cpu: 1.6, memory: 96 * MB, disk: 3.1 * MB, parent: 'services', swing: 0.9, ageSecs: 1_039_950 },
   { group: 'nvidia', groupName: 'NVIDIA Container', name: 'NVDisplay.Container.exe', exe: 'C:\\Windows\\System32\\DriverStore\\FileRepository\\nv_dispi.inf_amd64\\Display.NvContainer\\NVDisplay.Container.exe', user: 'SYSTEM', count: 3, cpu: 0.2, memory: 64 * MB, disk: 0, parent: 'services', ageSecs: 1_039_940 },
   { group: 'wmi', groupName: 'WMI Provider Host', name: 'WmiPrvSE.exe', exe: 'C:\\Windows\\System32\\wbem\\WmiPrvSE.exe', user: 'NETWORK SERVICE', count: 2, cpu: 0.3, memory: 22 * MB, disk: 0, parent: 'services', ageSecs: 640_000 },
-  { group: 'audiodg', groupName: 'Windows Audio', name: 'audiodg.exe', exe: 'C:\\Windows\\System32\\audiodg.exe', user: 'LOCAL SERVICE', count: 1, cpu: 0.3, memory: 18 * MB, disk: 0, parent: 'services', protectedReason: SYS, ageSecs: 9_000 },
-  { group: 'dyno-agent', groupName: 'Dyno agent', name: 'dyno-agent.exe', exe: 'C:\\Program Files\\Dyno\\dyno-agent.exe', user: 'SYSTEM', count: 1, cpu: 0.4, memory: 38 * MB, disk: 0.05 * MB, parent: 'services', protectedReason: ME, swing: 0.2, ageSecs: 1_039_900 },
+  { group: 'audiodg', groupName: 'Windows Audio', name: 'audiodg.exe', exe: 'C:\\Windows\\System32\\audiodg.exe', user: 'LOCAL SERVICE', count: 1, cpu: 0.3, memory: 18 * MB, disk: 0, parent: 'services', system: true, ageSecs: 9_000 },
+  { group: 'dyno-agent', groupName: 'Dyno agent', name: 'dyno-agent.exe', exe: 'C:\\Program Files\\Dyno\\dyno-agent.exe', user: 'SYSTEM', count: 1, cpu: 0.4, memory: 38 * MB, disk: 0.05 * MB, parent: 'services', system: true, swing: 0.2, ageSecs: 1_039_900 },
   { group: 'explorer', groupName: 'Windows Explorer', name: 'explorer.exe', exe: 'C:\\Windows\\explorer.exe', user: USER, count: 1, cpu: 0.6, memory: 212 * MB, disk: 0.2 * MB, parent: 'winlogon', ageSecs: 1_039_800 },
   { group: 'shell', groupName: 'Windows shell', name: 'StartMenuExperienceHost.exe', exe: 'C:\\Windows\\SystemApps\\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\\StartMenuExperienceHost.exe', user: USER, count: 5, cpu: 0.2, memory: 310 * MB, disk: 0, parent: 'svchost', ageSecs: 1_039_790 },
   { group: 'runtimebroker', groupName: 'Runtime Broker', name: 'RuntimeBroker.exe', exe: 'C:\\Windows\\System32\\RuntimeBroker.exe', user: USER, count: 6, cpu: 0.1, memory: 96 * MB, disk: 0, parent: 'svchost', ageSecs: 1_039_700 },
@@ -73,7 +70,7 @@ export const APP_SPECS: AppSpec[] = [
   { group: 'outlook', groupName: 'Outlook', name: 'OUTLOOK.EXE', exe: 'C:\\Program Files\\Microsoft Office\\root\\Office16\\OUTLOOK.EXE', user: USER, count: 1, cpu: 0.7, memory: 390 * MB, disk: 0.4 * MB, parent: 'explorer', ageSecs: 302_000 },
   { group: 'spotify', groupName: 'Spotify', name: 'Spotify.exe', exe: 'C:\\Users\\alex\\AppData\\Roaming\\Spotify\\Spotify.exe', user: USER, count: 5, cpu: 1.1, memory: 470 * MB, disk: 0.2 * MB, parent: 'explorer', ageSecs: 26_000 },
   { group: 'onedrive', groupName: 'OneDrive', name: 'OneDrive.exe', exe: 'C:\\Program Files\\Microsoft OneDrive\\OneDrive.exe', user: USER, count: 1, cpu: 0.2, memory: 120 * MB, disk: 0.5 * MB, parent: 'explorer', ageSecs: 1_039_700 },
-  { group: 'dyno', groupName: 'Dyno', name: 'Dyno.exe', exe: 'C:\\Program Files\\Dyno\\Dyno.exe', user: USER, count: 2, cpu: 0.3, memory: 96 * MB, disk: 0, parent: 'explorer', protectedReason: ME, ageSecs: 3_000 },
+  { group: 'dyno', groupName: 'Dyno', name: 'Dyno.exe', exe: 'C:\\Program Files\\Dyno\\Dyno.exe', user: USER, count: 2, cpu: 0.3, memory: 96 * MB, disk: 0, parent: 'explorer', system: true, ageSecs: 3_000 },
 ];
 
 /** A process in the mock with the state Dyno's actions change. */
@@ -92,7 +89,7 @@ export interface MockProcess {
   swing: number;
   seed: number;
   started: number;
-  protectedReason: string | null;
+  system: boolean;
   state: RunState;
 }
 
@@ -131,7 +128,7 @@ export function buildProcesses(start: number, specs: readonly AppSpec[] = APP_SP
         swing: spec.swing ?? 0.3,
         seed: seedOf(`${spec.name}#${i}`),
         started: start - (spec.ageSecs - i * 3) * 1000,
-        protectedReason: spec.protectedReason ?? null,
+        system: spec.system ?? false,
         state: 'running',
       });
     }
@@ -158,7 +155,6 @@ export function sampleProcess(p: MockProcess, t: number, cap: number | null, cpu
     diskWriteBps: Math.round(disk * 0.65),
     started: p.started,
     state: suspended ? 'suspended' : cpu < 0.05 ? 'sleeping' : 'running',
-    protectedReason: p.protectedReason,
   };
 }
 

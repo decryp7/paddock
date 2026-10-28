@@ -59,7 +59,7 @@ describe('dy-helper-card', () => {
     clickIn(el, 'Remove the helper');
     await settle(f);
     const confirm = document.querySelector('dy-confirm-dialog') as HTMLElement;
-    expect(confirm.textContent).toContain('Changes it made stay in force');
+    expect(confirm.textContent).toContain('Dyno keeps working without it');
     clickIn(confirm, 'Remove the helper');
     await settle(f);
     expect(text(el)).toContain('Not installed');
@@ -73,8 +73,8 @@ describe('dy-helper-card', () => {
       prompt: 'p',
       error: null,
       recent: [
-        { at: 1_700_000_000, peer: 4, what: 'Turn hibernation off', verdict: 'applied', before: 'on', after: 'off', detail: '' },
-        { at: 1_699_999_000, peer: 4, what: 'A connection was refused', verdict: 'refused', before: null, after: null, detail: 'process 9 is not the Dyno agent' },
+        { at: 1_700_000_000, peer: 4, what: 'Turn hibernation off', verdict: 'applied', detail: '' },
+        { at: 1_699_999_000, peer: 4, what: 'A connection was refused', verdict: 'refused', detail: 'process 9 is not the Dyno agent' },
       ],
     }));
     await settle(f);

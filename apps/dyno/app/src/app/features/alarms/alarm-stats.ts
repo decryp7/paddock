@@ -4,7 +4,7 @@ import { formatDuration } from '../../shared/format';
 import { AlarmsStore } from '../../state/alarms.store';
 import { TABLE_CSS } from './alarms-css';
 
-/** How the built-in alerts behave: time to acknowledge, the noisiest rules (with Mute) and the engine's tuning suggestions. */
+/** How the built-in alerts behave: time to acknowledge, the noisiest rules (with Mute) and the engine's suggestions. */
 @Component({
   selector: 'dy-alarm-stats',
   imports: [AsyncState],

@@ -5,7 +5,6 @@ const CODES: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
   'notFound',
   'accessDenied',
   'unsupported',
-  'protected',
   'badRequest',
   'timeout',
   'busy',
@@ -30,9 +29,7 @@ export function errorHint(code: ErrorCode): string | null {
     case 'agentUnavailable':
       return 'The Dyno agent is not running. It restarts automatically; try again in a moment.';
     case 'accessDenied':
-      return 'Windows or macOS refused. Some actions need the Dyno helper (an administrator prompt).';
-    case 'protected':
-      return 'Dyno never touches protected processes. Edit the protected list in Rules.';
+      return 'Windows or macOS refused. Some readings need the Dyno helper (an administrator prompt).';
     case 'timeout':
       return 'The request took too long. Try again.';
     case 'busy':

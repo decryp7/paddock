@@ -35,7 +35,6 @@ describe('dy-reports-page', () => {
     expect(el.querySelectorAll('[aria-label="Busiest apps"] tbody tr')).toHaveLength(5);
     expect(el.querySelector('[aria-label="Disks"]')!.textContent).toContain('Full in ~41 days');
     expect(el.querySelector('[aria-label="Issues"]')!.textContent).toContain('Drive is getting full');
-    expect(el.querySelector('[aria-label="What changed"]')!.textContent).toContain('Turned off Updater at login');
     expect(el.querySelector('.range')?.textContent).toContain(' to ');
   });
 

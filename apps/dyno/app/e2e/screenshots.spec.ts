@@ -203,7 +203,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     size: { width: 1440, height: 1500 },
     ready: async (page) => {
       await expect(page.getByRole('heading', { name: 'Health', exact: true })).toBeVisible();
-      await expect(page.getByRole('region', { name: 'Startup manager' }).getByRole('table')).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Start-up items' }).getByRole('table')).toBeVisible();
     },
   },
   { name: 'backup', path: '/#/backup', ready: async (page) => void (await expect(page.getByRole('table', { name: 'Backup tools' })).toBeVisible()) },
@@ -255,17 +255,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/extras?tab=maintenance',
     ready: async (page) => void (await expect(page.getByRole('region', { name: 'Maintenance windows' })).toContainText('Mon to Fri')),
   },
-  {
-    name: 'rules-temporary',
-    path: '/#/rules',
-    size: { width: 1440, height: 1100 },
-    ready: async (page) => {
-      await expect(page.getByRole('region', { name: 'In effect now' })).toContainText('CPU 78% → 31%');
-      await expect(page.getByRole('row', { name: /Browsers in the background/ })).toContainText('Ends in 2 h 10 min');
-    },
-  },
   { name: 'settings', path: '/#/settings', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()) },
-  { name: 'rules', path: '/#/rules', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'CPU taming' })).toBeVisible()) },
   { name: 'alarms', path: '/#/alarms', ready: async (page) => void (await expect(page.getByRole('button', { name: /Acknowledge all/ })).toBeVisible()) },
   {
     name: 'alarms-rules',
@@ -278,44 +268,6 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
   },
   { name: 'recorder', path: '/#/recorder', size: { width: 1440, height: 1100 }, ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Flight recorder' })).toBeVisible()) },
   { name: 'diagnostics', path: '/#/diagnostics', ready: async (page) => void (await expect(page.getByRole('button', { name: /Save bundle/ })).toBeVisible()) },
-  { name: 'tuning', path: '/#/tuning', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Tuning', exact: true })).toBeVisible()) },
-  { name: 'cleanup', path: '/#/cleanup', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Cleanup', exact: true })).toBeVisible()) },
-  {
-    name: 'cleanup-scanned',
-    path: '/#/cleanup',
-    size: { width: 1440, height: 1100 },
-    ready: async (page) => {
-      await page.getByRole('button', { name: /^Scan / }).click();
-      await page.clock.runFor(3_000);
-      await expect(page.getByText(/Scanning…/)).toHaveCount(0);
-      await page.getByRole('region', { name: 'Preview' }).scrollIntoViewIfNeeded();
-      await page.clock.runFor(500);
-    },
-  },
-  {
-    name: 'watched-folders',
-    path: '/#/watched',
-    ready: async (page) => {
-      await expect(page.getByRole('table', { name: 'Watched folders' }).locator('tbody tr')).toHaveCount(3);
-      await page.getByRole('row', { name: /Downloads/ }).hover();
-    },
-  },
-  {
-    name: 'watched-folders-preview',
-    path: '/#/watched',
-    ready: async (page) => {
-      await page.getByRole('button', { name: 'See what would move in Downloads' }).click({ force: true });
-      await expect(page.getByRole('dialog', { name: 'What would move' }).locator('tbody tr').first()).toBeVisible();
-    },
-  },
-  {
-    name: 'watched-folders-add',
-    path: '/#/watched',
-    ready: async (page) => {
-      await page.getByRole('button', { name: 'Add folder' }).click();
-      await expect(page.getByRole('dialog', { name: 'Watch a folder' })).toBeVisible();
-    },
-  },
   {
     name: 'web-search',
     path: '/#/issues',

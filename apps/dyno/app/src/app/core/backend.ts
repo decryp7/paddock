@@ -15,10 +15,6 @@ import type {
   ShelveFor,
   Anomaly,
   AppInfo,
-  CleanupCategory,
-  CleanupOutcome,
-  CleanupScan,
-  DeleteMode,
   Diagnosis,
   HealthReport,
   History,
@@ -27,18 +23,13 @@ import type {
   LiveUpdate,
   Locker,
   PluginInfo,
-  ProcessAction,
   ProcessDetails,
   ProcessRef,
-  ProfileId,
-  QuarantineEntry,
-  RuleSet,
   Settings,
   SizeNode,
   SnapshotDiff,
   SnapshotInfo,
   StartupEntry,
-  StartupState,
   SystemInventory,
   ThrottleOverview,
   LifespanOverview,
@@ -55,7 +46,6 @@ import type {
   StartBenchmark,
   Timestamp,
   HelperStatus,
-  TuningSuggestion,
   WeeklyReport,
   ReportFormat,
   SavedReport,
@@ -75,17 +65,12 @@ import type {
   IssuesOverview,
   IssuesQuery,
   SavedIssues,
-  UnusualAction,
   UnusualOverview,
-  AddWatchedFolder,
   FileHashInfo,
   HashSource,
   SearchSeed,
   StartupFilter,
   StartupOverview,
-  WatchChange,
-  WatchOverview,
-  WatchPreview,
 } from './api.types';
 
 /** Stops a subscription. */
@@ -109,10 +94,6 @@ export interface DynoBackend {
 
   // Processes.
   processDetails(target: ProcessRef): Promise<ProcessDetails>;
-  /** Acts on a process; resolves with the activity entry it logged. */
-  act(target: ProcessRef, action: ProcessAction): Promise<ActivityEntry>;
-  /** Acts on every process of an app group. */
-  actOnGroup(groupId: string, action: ProcessAction): Promise<ActivityEntry>;
   lockers(path: string): Promise<Locker[]>;
   openLocation(target: ProcessRef): Promise<void>;
   takeSnapshot(label: string): Promise<SnapshotInfo>;
@@ -124,30 +105,11 @@ export interface DynoBackend {
   anomalies(): Promise<Anomaly[]>;
   history(range: HistoryRange, end: Timestamp | null): Promise<History>;
   activity(limit: number): Promise<ActivityEntry[]>;
-  undo(activityId: string): Promise<ActivityEntry>;
-  /** Releases what a rule is doing to a process now (priority, efficiency mode, cap), without waiting for the rule. */
-  releaseAction(target: ProcessRef): Promise<ActivityEntry>;
 
-  // Rules.
-  rules(): Promise<RuleSet>;
-  saveRules(rules: RuleSet): Promise<RuleSet>;
-  setProfile(profile: ProfileId): Promise<RuleSet>;
-  pauseRules(paused: boolean): Promise<RuleSet>;
-
-  // Cleanup.
-  cleanupCategories(): Promise<CleanupCategory[]>;
-  scanCleanup(categories: string[]): Promise<CleanupScan>;
-  runCleanup(scanId: string, itemIds: string[], mode: DeleteMode): Promise<CleanupOutcome>;
-  quarantine(): Promise<QuarantineEntry[]>;
-  restoreQuarantine(id: string): Promise<void>;
-  diskUsage(path: string | null): Promise<SizeNode>;
-
-  // Health and tuning.
+  // Health.
   health(): Promise<HealthReport>;
-  tuning(): Promise<TuningSuggestion[]>;
-  applyTuning(id: string): Promise<ActivityEntry>;
-  /** Puts the previous setting back; `force` overwrites a setting something else changed since Dyno applied it. */
-  revertTuning(id: string, force?: boolean): Promise<ActivityEntry>;
+  /** The disk map: a folder's size with its biggest children (the system drive when `null`). */
+  diskUsage(path: string | null): Promise<SizeNode>;
 
   // The privileged helper (ADR 0016). Installing happens only from the confirmation dialog.
   helperStatus(): Promise<HelperStatus>;
@@ -155,7 +117,6 @@ export interface DynoBackend {
   installHelper(): Promise<HelperStatus>;
   uninstallHelper(): Promise<HelperStatus>;
   startupEntries(): Promise<StartupEntry[]>;
-  setStartupState(id: string, state: StartupState): Promise<ActivityEntry>;
 
   // What is installed (memory modules, CPU, disks) and hints.
   inventory(): Promise<SystemInventory>;
@@ -227,9 +188,7 @@ export interface DynoBackend {
   /** Asks where to save (the OS save dialog) and writes the last `days` days as JSON lines for Debrief; `null` when they cancel. */
   saveIssues(days: number): Promise<SavedIssues | null>;
   /** Programs that are new or unusual on this computer. */
-  unusual(includeIgnored: boolean): Promise<UnusualOverview>;
-  /** Ignores, protects (adds to the protected list) or restores a program on the list. */
-  unusualAct(key: string, action: UnusualAction): Promise<UnusualOverview>;
+  unusual(): Promise<UnusualOverview>;
   /** Forgets the baseline of programs; learning starts again. */
   forgetBaseline(): Promise<UnusualOverview>;
 
@@ -246,17 +205,6 @@ export interface DynoBackend {
   /** The startup entries after hiding the OS's and signed ones, with the counts. */
   startupOverview(filter: StartupFilter): Promise<StartupOverview>;
 
-  // Watched folders (WP-10): files older than the keep-for time move to the 7-day quarantine, only in folders the person
-  // chose, configured, previewed and turned on.
-  watchedFolders(): Promise<WatchOverview>;
-  /** Opens the OS folder dialog and adds the chosen folder (switched off); `null` when they cancel. */
-  addWatchedFolder(request: AddWatchedFolder): Promise<WatchOverview | null>;
-  setWatchedFolder(id: string, change: WatchChange): Promise<WatchOverview>;
-  removeWatchedFolder(id: string): Promise<WatchOverview>;
-  /** A dry run: what a sweep would move now. Needed before a folder can be turned on. */
-  previewWatchedFolder(id: string): Promise<WatchPreview>;
-  /** Sweeps now (after the preview); answers the list. */
-  sweepWatchedFolder(id: string): Promise<WatchOverview>;
   // Extras (read-only views) and backup health.
   /** Installs, updates, new start-up items and setting changes in a window. */
   changes(query: ChangesQuery): Promise<ChangeTimeline>;
@@ -276,8 +224,6 @@ export interface DynoBackend {
   pickFolder(): Promise<string | null>;
   /** Looks for large and duplicate files in a folder the person chose. Deletes nothing. */
   findFiles(query: FinderQuery): Promise<FinderResult>;
-  /** Removes selected files of a finder result through the cleanup policy; the engine keeps one copy of every duplicate group. */
-  removeFoundFiles(scanId: string, ids: string[], mode: DeleteMode): Promise<CleanupOutcome>;
   /** Where the maintenance windows stand now. */
   maintenance(): Promise<MaintenanceStatus>;
   /** The last backup check (the engine runs one when there is none yet). */

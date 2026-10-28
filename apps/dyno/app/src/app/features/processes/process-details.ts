@@ -39,9 +39,6 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
         <div class="skeletons" aria-busy="true"><div class="skeleton"></div><div class="skeleton" style="width: 70%"></div><div class="skeleton"></div></div>
       } @else {
         @if (d(); as x) {
-          @if (x.process.protectedReason; as why) {
-            <p class="lock"><dy-icon name="lock" /> {{ why }}. Dyno never changes it.</p>
-          }
           <div class="tabs" role="tablist" aria-label="Details">
             @for (t of tabs; track t.id) {
               <button type="button" role="tab" [attr.aria-selected]="tab() === t.id" (click)="pickTab(t.id)">{{ t.label }}</button>

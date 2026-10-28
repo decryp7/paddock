@@ -13,14 +13,14 @@ import { HelperStore } from '../../state/helper.store';
   imports: [DialogFrame, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <dy-dialog [title]="title()" subtitle="Some changes need administrator rights. Dyno itself never runs as administrator." icon="shield">
+    <dy-dialog [title]="title()" subtitle="Some readings need administrator rights. Dyno itself never runs as administrator." icon="shield">
       @if (unsupported()) {
         <p class="msg" role="status">{{ store.status()?.message }}</p>
       } @else {
-        <p class="msg">A small separate helper makes only those changes, for your account only, and only when you approve one.</p>
+        <p class="msg">A small separate helper answers only those questions, for your account only. It changes nothing on your computer.</p>
         <ul>
-          <li>It can do a fixed list of things: hibernation, the sleep timer and Low Power Mode on macOS, the battery charge limit, Microsoft Defender exclusions, startup items for every user, and programs' network traffic on Windows.</li>
-          <li>Each change shows what it will do and how to undo it first, and is written to the helper's own log.</li>
+          <li>It can read a fixed list of things, such as programs' network traffic on Windows, and remove itself.</li>
+          <li>Every request is written to the helper's own log, which Settings shows.</li>
           <li>You can remove it any time under Settings, Helper. Nothing else in Dyno needs it.</li>
         </ul>
         <p class="prompt"><dy-icon name="info" /> {{ store.status()?.prompt }}</p>

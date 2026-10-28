@@ -3,7 +3,7 @@ import { type Row, type RowInput, type Sort, buildRows, compareRows, matches } f
 
 const sample = (pid: number, name: string, extra: Partial<ProcessSample> = {}): ProcessSample => ({
   pid, parent: null, name, exe: `/bin/${name}`, user: 'alex', cpu: 1, memory: 100, diskReadBps: 0, diskWriteBps: 0,
-  started: 1000 + pid, state: 'running', protectedReason: null, ...extra,
+  started: 1000 + pid, state: 'running', ...extra,
 });
 const group = (id: string, name: string, pids: number[], cpu = 0, memory = 0): AppGroup => ({ id, name, exe: null, pids, cpu, memory, diskBps: 0 });
 const input = (over: Partial<RowInput>): RowInput => ({
@@ -35,7 +35,7 @@ describe('matches', () => {
 describe('compareRows', () => {
   const row = (name: string, extra: Partial<Row> = {}): Row => ({
     key: name, kind: 'process', depth: 0, name, count: 1, cpu: 0, memory: 0, disk: 0, user: null, pid: null, ref: null,
-    groupId: null, expandable: false, expanded: false, protectedReason: null, suspended: false, ...extra,
+    groupId: null, expandable: false, expanded: false, suspended: false, ...extra,
   });
   it('sorts numerically in both directions', () => {
     const lo = row('a', { cpu: 1 });
@@ -59,12 +59,12 @@ describe('compareRows', () => {
 });
 
 describe('buildRows: flat', () => {
-  const processes = [sample(1, 'b', { cpu: 5 }), sample(2, 'a', { cpu: 9 }), sample(3, 'c', { cpu: 1, state: 'suspended', protectedReason: 'sys' })];
+  const processes = [sample(1, 'b', { cpu: 5 }), sample(2, 'a', { cpu: 9 }), sample(3, 'c', { cpu: 1, state: 'suspended' })];
   it('lists processes sorted', () => {
     const rows = buildRows(input({ mode: 'flat', processes }));
     expect(names(rows)).toEqual(['a', 'b', 'c']);
     expect(rows.every((r) => r.depth === 0 && !r.expandable && r.kind === 'process')).toBe(true);
-    expect(rows[2]).toMatchObject({ suspended: true, protectedReason: 'sys', ref: { pid: 3, started: 1003 }, key: 'p3' });
+    expect(rows[2]).toMatchObject({ suspended: true, ref: { pid: 3, started: 1003 }, key: 'p3' });
   });
   it('sums disk and filters by the query', () => {
     const rows = buildRows(input({ mode: 'flat', processes: [sample(1, 'x', { diskReadBps: 3, diskWriteBps: 4 })], query: 'x' }));
@@ -78,7 +78,7 @@ describe('buildRows: groups', () => {
     sample(1, 'chrome', { cpu: 2, user: 'alex' }),
     sample(2, 'chrome', { cpu: 6 }),
     sample(3, 'code', { cpu: 1, user: 'bob' }),
-    sample(4, 'svc', { protectedReason: 'sys', state: 'suspended' }),
+    sample(4, 'svc', { state: 'suspended' }),
   ];
   const groups = [group('code', 'Code', [3], 1, 100), group('chrome', 'Chrome', [1, 2], 8, 200), group('svc', 'Services', [4], 0.5), group('gone', 'Gone', [99])];
 
@@ -110,8 +110,8 @@ describe('buildRows: groups', () => {
   });
   it('protected / suspended only when every member is', () => {
     const rows = buildRows(input({ processes, groups }));
-    expect(rows.find((r) => r.name === 'Services')).toMatchObject({ protectedReason: 'sys', suspended: true });
-    expect(rows.find((r) => r.name === 'Chrome')).toMatchObject({ protectedReason: null, suspended: false });
+    expect(rows.find((r) => r.name === 'Services')).toMatchObject({ suspended: true });
+    expect(rows.find((r) => r.name === 'Chrome')).toMatchObject({ suspended: false });
   });
   it('sorts groups by name ascending', () => {
     expect(names(buildRows(input({ processes, groups, sort: { key: 'name', dir: 'asc' } })))).toEqual(['Chrome', 'Code', 'Services']);

@@ -16,7 +16,7 @@ const STATE_LABEL: Record<HelperState, string> = {
   installing: 'Installing',
 };
 const STATE_TONE: Record<HelperState, Tone> = { unsupported: 'muted', notInstalled: 'muted', ready: 'ok', outdated: 'warn', unreachable: 'bad', installing: 'warn' };
-const VERDICT_LABEL: Record<HelperAuditEntry['verdict'], string> = { started: 'Started', applied: 'Done', refused: 'Refused', failed: 'Failed', interrupted: 'Interrupted' };
+const VERDICT_LABEL: Record<HelperAuditEntry['verdict'], string> = { applied: 'Done', refused: 'Refused', failed: 'Failed' };
 
 /**
  * Settings, Helper: whether the privileged helper is installed, install / update / repair / remove (each its own click, the system
@@ -30,8 +30,8 @@ const VERDICT_LABEL: Record<HelperAuditEntry['verdict'], string> = { started: 'S
       <h2>Helper</h2>
       <div class="row">
         <div class="lbl">
-          <strong>Administrator changes</strong>
-          <small>Dyno never runs as administrator. A small helper makes the few changes that need it (hibernation, Defender exclusions, startup items for every user, charge limit, programs' traffic on Windows) only when you approve one.</small>
+          <strong>Administrator readings</strong>
+          <small>Dyno never runs as administrator and changes nothing on your computer. A small helper reads the few things that need administrator rights (programs' network traffic on Windows) for your account only.</small>
         </div>
         @if (store.status(); as s) {
           <span class="badge" [attr.data-tone]="tone(s.state)">{{ label(s.state) }}</span>
@@ -51,7 +51,7 @@ const VERDICT_LABEL: Record<HelperAuditEntry['verdict'], string> = { started: 'S
           }
         </div>
         @if (s.recent.length > 0) {
-          <h3>What the helper did lately</h3>
+          <h3>What the helper logged lately</h3>
           <table class="table" aria-label="The helper's log">
             <thead><tr><th>When</th><th>What</th><th>Result</th></tr></thead>
             <tbody>
@@ -112,7 +112,7 @@ export class HelperCard implements OnInit {
   protected async remove(): Promise<void> {
     const ok = await this.dialogs.confirm({
       title: 'Remove the helper?',
-      message: 'Changes it made stay in force, but undoing them from Activity needs the helper again. You can install it again any time.',
+      message: 'Dyno keeps working without it; only the readings that need administrator rights go away. You can install it again any time.',
       confirmLabel: 'Remove the helper',
       icon: 'shield',
     });

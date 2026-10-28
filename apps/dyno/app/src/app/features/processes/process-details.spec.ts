@@ -40,7 +40,7 @@ describe('ProcessDetailsPanel', () => {
 
   it('shows the overview of the selected process', async () => {
     const { f, el, store, settle } = await make();
-    const p = store.processes().find((x) => x.protectedReason === null)!;
+    const p = store.processes().find((x) => x.name.startsWith('rustc'))!;
     await store.select({ pid: p.pid, started: p.started });
     f.detectChanges();
     await settle();
@@ -53,7 +53,7 @@ describe('ProcessDetailsPanel', () => {
 
   it('walks the tabs: parents, files, network, libraries', async () => {
     const { f, el, store, settle, tab } = await make();
-    const withParent = store.processes().find((x) => x.protectedReason === null && x.parent !== null)!;
+    const withParent = store.processes().find((x) => x.parent !== null && x.name.startsWith('rustc'))!;
     await store.select({ pid: withParent.pid, started: withParent.started });
     f.detectChanges();
     await settle();
@@ -96,25 +96,9 @@ describe('ProcessDetailsPanel', () => {
     expect(mock).toBeDefined();
   });
 
-  it('explains what the OS does not allow for a protected process', async () => {
-    const { f, el, store, settle, tab } = await make();
-    const sys = store.processes().find((x) => x.protectedReason !== null)!;
-    await store.select({ pid: sys.pid, started: sys.started });
-    f.detectChanges();
-    await settle();
-    expect(el.querySelector('.lock')?.textContent).toContain('Dyno never changes it');
-    await tab('Files');
-    expect(el.querySelector('.na')).not.toBeNull();
-    await tab('Network');
-    await settle();
-    expect(el.textContent).toContain('Nothing is listening');
-    await tab('Libraries');
-    expect(el.querySelector('.na')).not.toBeNull();
-  });
-
   it('shows "Not available" for cores and priority-less data on macOS', async () => {
     const { f, el, store, settle } = await make('macos');
-    const p = store.processes().find((x) => x.protectedReason === null)!;
+    const p = store.processes().find((x) => x.name.startsWith('rustc'))!;
     await store.select({ pid: p.pid, started: p.started });
     f.detectChanges();
     await settle();
@@ -123,7 +107,7 @@ describe('ProcessDetailsPanel', () => {
 
   it('shows the error with a hint and Retry reloads', async () => {
     const { f, el, store, settle } = await make('windows', new Set(['processDetails']));
-    const p = store.processes()[0]!;
+    const p = store.processes().find((x) => x.name.startsWith('rustc'))!;
     await store.select({ pid: p.pid, started: p.started });
     f.detectChanges();
     await settle();
@@ -136,7 +120,7 @@ describe('ProcessDetailsPanel', () => {
 
   it('close clears the selection; reload without selection does nothing; open ignores unknown pids', async () => {
     const { f, el, store, settle } = await make();
-    const p = store.processes().find((x) => x.protectedReason === null)!;
+    const p = store.processes().find((x) => x.name.startsWith('rustc'))!;
     await store.select({ pid: p.pid, started: p.started });
     f.detectChanges();
     await settle();

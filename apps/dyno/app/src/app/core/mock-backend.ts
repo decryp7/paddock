@@ -9,17 +9,12 @@ import type {
   RecorderSnapshotInfo,
   SavedDiagnostics,
   ShelveFor,
-  ActiveAction,
   ActivityEntry,
   AgentStatus,
   Alert,
   Anomaly,
   AppInfo,
-  CleanupCategory,
-  CleanupOutcome,
-  CleanupScan,
   CommandError,
-  DeleteMode,
   Diagnosis,
   HealthReport,
   History,
@@ -28,20 +23,14 @@ import type {
   LiveUpdate,
   Locker,
   PluginInfo,
-  Priority,
-  ProcessAction,
   ProcessDetails,
   ProcessRef,
   ProcessSample,
-  ProfileId,
-  QuarantineEntry,
-  RuleSet,
   Settings,
   SizeNode,
   SnapshotDiff,
   SnapshotInfo,
   StartupEntry,
-  StartupState,
   SystemInventory,
   ThrottleOverview,
   LifespanOverview,
@@ -61,7 +50,6 @@ import type {
   SystemSample,
   Timestamp,
   HelperStatus,
-  TuningSuggestion,
   WeeklyReport,
   ReportFormat,
   SavedReport,
@@ -81,44 +69,33 @@ import type {
   IssuesOverview,
   IssuesQuery,
   SavedIssues,
-  UnusualAction,
   UnusualItem,
   UnusualOverview,
-  AddWatchedFolder,
   FileHashInfo,
   HashSource,
   SearchSeed,
   StartupFilter,
   StartupOverview,
-  WatchChange,
-  WatchOverview,
-  WatchPreview,
 } from './api.types';
 import type { DynoBackend, Unsubscribe } from './backend';
 import {
-  BUILT_IN_PROTECTED,
-  CLEANUP_CATEGORIES,
-  PROFILES,
-  cleanupItems,
   demoActivity,
   demoAlerts,
   demoAnomalies,
   demoPlugins,
-  demoRules,
   demoSettings,
   demoStartup,
-  demoTuning,
   diskTree,
   healthReasons,
 } from './mock/data';
 import { demoAlarms, demoBundlePreview, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
 import { MockCounters, demoCounterSettings } from './mock/counters';
 import { mockHostName, mockNetwork } from './mock/network';
-import { FINDER_GROUPS, FINDER_IDS, mockBoot, mockChanges, mockFinder, mockGpu, mockMaintenanceProblem, mockMaintenanceStatus, mockSleep, mockSoftware, mockUsage } from './mock/extras';
+import { mockBoot, mockChanges, mockFinder, mockGpu, mockMaintenanceProblem, mockMaintenanceStatus, mockSleep, mockSoftware, mockUsage } from './mock/extras';
 import { type MockBackupVariant, mockBackupProblem, mockBackupReport } from './mock/backup';
 import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
 import { mockCompare, mockKindResult, mockRun } from './mock/bench';
-import { MockWatch, mockHash, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './mock/lookups';
+import { mockHash, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './mock/lookups';
 import { mockHistory } from './mock/history';
 import { mockBaselines, mockLifespan, mockThrottling } from './mock/hardware';
 import { mockInventory } from './mock/inventory';
@@ -186,8 +163,8 @@ export function applyMockPlatform(search: string, root: HTMLElement): void {
 
 /**
  * The backend for browser development and UI tests: a developer's laptop (macOS by default) in the middle of a `cargo
- * build`. Live values are a deterministic function of the clock; mutations change the mock's state so flows (undo,
- * profiles, pause, cleanup) can be exercised. It mimics the contract; it is never the reference for behaviour.
+ * build`. Live values are a deterministic function of the clock; the few requests that change anything (helper, settings,
+ * snapshots, benchmarks) change the mock's state so those flows can be exercised. It mimics the contract; it is never the reference for behaviour.
  */
 export class MockBackend implements DynoBackend {
   private readonly machine: MockMachine;
@@ -199,22 +176,12 @@ export class MockBackend implements DynoBackend {
   private readonly kinds: ('performance' | 'efficiency')[];
 
   private processes: MockProcess[];
-  private readonly priorities = new Map<number, Priority>();
-  private readonly affinities = new Map<number, number>();
-  private readonly efficiency = new Set<number>();
-  private readonly caps = new Map<number, number>();
-  private ruleSet: RuleSet;
-  private activeActions: ActiveAction[] = [];
   private activityLog: ActivityEntry[];
   private alertLog: Alert[];
   private settingsValue: Settings = demoSettings();
   private counters!: MockCounters;
-  private tuningList: TuningSuggestion[] = demoTuning();
   private helperValue: HelperStatus = mockHelper('notInstalled');
   private startup: StartupEntry[] = demoStartup();
-  private categories: CleanupCategory[] = copy(CLEANUP_CATEGORIES);
-  private quarantined: QuarantineEntry[];
-  private readonly scans = new Map<string, CleanupScan>();
   private snapshotList: SnapshotInfo[];
   private readonly snapshotData = new Map<string, ProcessSample[]>();
   private nextId = 100;
@@ -234,7 +201,6 @@ export class MockBackend implements DynoBackend {
   pickedFolders = 0;
   private readonly backupVariant: MockBackupVariant;
   private backupCheckedAt: number;
-  private readonly removedFound = new Set<string>();
   private alarmList: Alarm[] | null = null;
   private snapshotInfos: RecorderSnapshotInfo[] | null = null;
   /** Bundles the mock "saved", for tests. */
@@ -256,32 +222,8 @@ export class MockBackend implements DynoBackend {
     this.backupVariant = options.backup ?? 'mixed';
     this.backupCheckedAt = this.start - 40 * MIN;
     this.processes = buildProcesses(this.start, this.profile.specs, this.profile.rootPid);
-    this.ruleSet = {
-      rules: demoRules(this.start),
-      protected: [this.profile.os === 'windows' ? 'Spotify.exe' : 'Spotify', 'OBS'],
-      builtInProtected: BUILT_IN_PROTECTED,
-      profile: 'normal',
-      profiles: PROFILES,
-      paused: false,
-    };
-    const rustc = this.processes.find((p) => p.name === this.profile.names.rustc)!;
-    this.priorities.set(rustc.pid, 'belowNormal');
-    this.activeActions = [
-      {
-        target: { pid: rustc.pid, started: rustc.started },
-        app: 'Rust build (cargo)',
-        ruleId: 'tame-long-hogs',
-        ruleName: 'Tame long CPU hogs',
-        step: 0,
-        description: 'Priority lowered to Below normal',
-        since: this.start - 4 * MIN,
-        cpuBefore: 78,
-        cpuAfter: 31,
-      },
-    ];
     this.activityLog = demoActivity(this.start);
     this.alertLog = demoAlerts(this.start);
-    this.quarantined = [{ id: 'q-1', at: this.start - 72 * MIN, bytes: Math.round(4.6 * GB), itemCount: 9, expires: this.start - 72 * MIN + 7 * DAY }];
     this.snapshotList = [
       { id: 'snap-1', at: this.start - 3 * 60 * MIN, label: 'Before the build', processCount: this.processes.length - 7 },
       { id: 'snap-2', at: this.start - 20 * MIN, label: 'Morning baseline', processCount: this.processes.length - 2 },
@@ -360,18 +302,13 @@ export class MockBackend implements DynoBackend {
         samplingIntervalMs: this.settingsValue.sampling.intervalMs,
         processIntervalMs: this.settingsValue.sampling.processIntervalMs,
       },
-      profile: this.ruleSet.profile,
-      rulesPaused: this.ruleSet.paused,
-      activeActions: copy(this.activeActions),
       processes: detail === 'processes' ? samples : null,
       groups: detail === 'processes' ? groups : null,
     };
   }
 
   private samplesAt(t: number): ProcessSample[] {
-    // Rules off: the build gets more CPU; during a meeting the build steps aside.
-    const buildScale = this.ruleSet.paused ? 1.15 : this.ruleSet.profile === 'meeting' ? 0.6 : 1;
-    return this.processes.map((p) => sampleProcess(p, t, this.caps.get(p.pid) ?? null, p.group === 'cargo' ? buildScale : 1));
+    return this.processes.map((p) => sampleProcess(p, t, null, 1));
   }
 
   private system(t: number, samples: ProcessSample[]): SystemSample {
@@ -453,7 +390,7 @@ export class MockBackend implements DynoBackend {
   processDetails(target: ProcessRef): Promise<ProcessDetails> {
     return this.reply('processDetails', () => {
       const p = this.find(target);
-      const sample = sampleProcess(p, Math.floor(this.now() / 1000), this.caps.get(p.pid) ?? null, 1);
+      const sample = sampleProcess(p, Math.floor(this.now() / 1000), null, 1);
       const parents: { pid: number; name: string }[] = [];
       for (let cur = p.parent; cur !== null; ) {
         const parent = this.processes.find((x) => x.pid === cur);
@@ -462,7 +399,7 @@ export class MockBackend implements DynoBackend {
         cur = parent.parent;
       }
       const pr = this.profile;
-      const system = p.protectedReason !== null && p.protectedReason !== 'Protected: Dyno itself' ? true : p.exe === null;
+      const system = p.system || p.exe === null;
       const browser = p.name === pr.names.chrome;
       const sep = pr.os === 'windows' ? '\\' : '/';
       const dir = p.exe ? p.exe.slice(0, Math.max(p.exe.lastIndexOf(sep), 0)) : null;
@@ -476,9 +413,9 @@ export class MockBackend implements DynoBackend {
         process: sample,
         commandLine: this.commandLine(p),
         cwd: system ? null : dir,
-        priority: this.priorities.get(p.pid) ?? 'normal',
-        affinity: pr.os === 'macos' ? null : (this.affinities.get(p.pid) ?? 2 ** pr.cores - 1),
-        efficiencyMode: this.efficiency.has(p.pid),
+        priority: p.group === 'cargo' ? 'belowNormal' : 'normal',
+        affinity: pr.os === 'macos' ? null : 2 ** pr.cores - 1,
+        efficiencyMode: false,
         threads: Math.round(8 + (p.memory / MB) * 0.08),
         handles: Math.round(180 + (p.memory / MB) * 1.4),
         parents,
@@ -535,58 +472,6 @@ export class MockBackend implements DynoBackend {
       default:
         return [exe];
     }
-  }
-
-  act(target: ProcessRef, action: ProcessAction): Promise<ActivityEntry> {
-    return this.reply('act', () => {
-      const p = this.find(target);
-      if (p.protectedReason) throw err('protected', `${p.name} is protected. ${p.protectedReason.replace('Protected: ', 'It is ')}.`);
-      return this.apply([p], action, p.name);
-    });
-  }
-
-  actOnGroup(groupId: string, action: ProcessAction): Promise<ActivityEntry> {
-    return this.reply('actOnGroup', () => {
-      const members = this.processes.filter((p) => p.group === groupId);
-      if (members.length === 0) throw err('notFound', 'That app is no longer running.');
-      if (members.some((p) => p.protectedReason)) throw err('protected', `${members[0]!.groupName} is protected.`);
-      return this.apply(members, action, `${members[0]!.name} (${members.length})`);
-    });
-  }
-
-  private apply(targets: MockProcess[], action: ProcessAction, label: string): ActivityEntry {
-    let title: string;
-    let undo: ActivityEntry['undo'] = 'available';
-    if (action === 'end') {
-      const pids = new Set(targets.map((p) => p.pid));
-      this.processes = this.processes.filter((p) => !pids.has(p.pid));
-      title = `Ended ${label}`;
-      undo = 'notUndoable';
-    } else if (action === 'suspend' || action === 'resume') {
-      for (const p of targets) p.state = action === 'suspend' ? 'suspended' : 'running';
-      title = `${action === 'suspend' ? 'Suspended' : 'Resumed'} ${label}`;
-    } else if ('setPriority' in action) {
-      for (const p of targets) this.priorities.set(p.pid, action.setPriority);
-      title = `Set priority of ${label} to ${action.setPriority}`;
-    } else if ('setAffinity' in action) {
-      for (const p of targets) this.affinities.set(p.pid, action.setAffinity);
-      title = `Changed the cores ${label} may use`;
-    } else if ('setEfficiencyMode' in action) {
-      for (const p of targets) {
-        if (action.setEfficiencyMode) this.efficiency.add(p.pid);
-        else this.efficiency.delete(p.pid);
-      }
-      title = `Efficiency mode ${action.setEfficiencyMode ? 'on' : 'off'} for ${label}`;
-    } else {
-      const cap = action.setCpuCap;
-      const share = cap === null ? 0 : cap / targets.length;
-      for (const p of targets) {
-        if (cap === null) this.caps.delete(p.pid);
-        else this.caps.set(p.pid, share);
-      }
-      title = cap === null ? `Removed the CPU cap of ${label}` : `Capped ${label} at ${cap}% CPU`;
-    }
-    return this.log('manual', title, 'From the task manager', undo);
   }
 
   lockers(path: string): Promise<Locker[]> {
@@ -663,11 +548,10 @@ export class MockBackend implements DynoBackend {
       const samples = this.samplesAt(t);
       const rustc = samples.filter((s) => s.name === this.profile.names.rustc);
       const rustcCpu = rustc.reduce((a, s) => a + s.cpu, 0);
-      const cargo = this.processes.find((p) => p.name === this.profile.names.cargo);
       const io = this.system(t, samples).diskIo;
       const queue = 'available' in io.queue ? io.queue.available : 0;
       if (rustc.length === 0 || rustcCpu < 5) {
-        return { at: now, windowSecs: 55, headline: 'Nothing is slowing your PC down right now', causes: [{ kind: 'nothingWrong', title: 'All quiet', explanation: 'CPU, memory and disk all have room to spare.', confidence: 0.9, evidence: [], suggestions: [], involved: [] }] };
+        return { at: now, windowSecs: 55, headline: 'Nothing is slowing your PC down right now', causes: [{ kind: 'nothingWrong', title: 'All quiet', explanation: 'CPU, memory and disk all have room to spare.', confidence: 0.9, evidence: [], hints: [], involved: [] }] };
       }
       return {
         at: now,
@@ -684,12 +568,7 @@ export class MockBackend implements DynoBackend {
               { label: 'CPU total', value: `${Math.round(this.system(t, samples).cpu.total)}%` },
               { label: 'For', value: '6 min' },
             ],
-            suggestions: cargo
-              ? [
-                  { label: 'Lower the build’s priority', action: { process: { target: { pid: cargo.pid, started: cargo.started }, name: this.profile.names.cargo, action: { setPriority: 'belowNormal' } } } },
-                  { label: 'Open the task manager', action: 'openTaskManager' },
-                ]
-              : [{ label: 'Open the task manager', action: 'openTaskManager' }],
+            hints: [{ text: 'Open the task manager', link: 'taskManager' }],
             involved: [
               { id: this.profile.names.rustc, name: this.profile.names.rustc, share: `${Math.round(rustcCpu)}% CPU` },
               { id: this.profile.names.cargo, name: this.profile.names.cargo, share: '2% CPU' },
@@ -705,7 +584,7 @@ export class MockBackend implements DynoBackend {
               { label: 'Disk busy', value: '92%' },
               { label: 'Writes', value: `121 MB/s by ${this.profile.names.rustc}` },
             ],
-            suggestions: [{ label: 'Wait for the build to finish', action: 'wait' }],
+            hints: [{ text: 'Wait for the build to finish', link: null }],
             involved: [{ id: this.profile.names.rustc, name: this.profile.names.rustc, share: '121 MB/s' }],
           },
           {
@@ -717,7 +596,7 @@ export class MockBackend implements DynoBackend {
               { label: this.profile.names.indexer, value: '4.1% CPU' },
               { label: 'Scanning', value: `${this.profile.projectDir}${this.profile.os === 'windows' ? '\\' : '/'}target` },
             ],
-            suggestions: [{ label: 'See tuning suggestions', action: 'openStartup' }],
+            hints: [{ text: 'See what starts at sign-in', link: 'startup' }],
             involved: [{ id: this.profile.names.indexer, name: this.profile.names.indexer, share: '4% CPU' }],
           },
           {
@@ -726,7 +605,7 @@ export class MockBackend implements DynoBackend {
             explanation: 'Not slowing you down yet, but Windows needs free space for updates and the page file.',
             confidence: 0.22,
             evidence: [{ label: 'Free', value: '210 GB of 953 GB' }],
-            suggestions: [{ label: 'Free up space', action: 'openCleanup' }],
+            hints: [],
             involved: [],
           },
         ],
@@ -753,179 +632,20 @@ export class MockBackend implements DynoBackend {
     return this.reply('activity', () => this.activityLog.slice(0, Math.max(0, limit)));
   }
 
-  undo(activityId: string): Promise<ActivityEntry> {
-    return this.reply('undo', () => {
-      const entry = this.activityLog.find((e) => e.id === activityId);
-      if (!entry) throw err('notFound', 'That activity is no longer in the log.');
-      if (entry.undo !== 'available') throw err('badRequest', entry.undo === 'expired' ? 'It can no longer be undone (the process exited or the quarantine expired).' : 'It cannot be undone.');
-      entry.undo = 'undone';
-      if (entry.kind === 'rule') this.activeActions = this.activeActions.filter((a) => !entry.title.includes(this.processes.find((p) => p.pid === a.target.pid)?.name ?? '\u0000'));
-      this.emitActivity(entry);
-      return this.log(entry.kind === 'rule' ? 'release' : 'manual', `Undid: ${entry.title}`, entry.detail, 'notUndoable');
-    });
-  }
-
-  releaseAction(target: ProcessRef): Promise<ActivityEntry> {
-    return this.reply('releaseAction', () => {
-      const action = this.activeActions.find((a) => a.target.pid === target.pid);
-      if (!action) throw err('notFound', 'That action was already released.');
-      this.activeActions = this.activeActions.filter((a) => a !== action);
-      this.priorities.delete(target.pid);
-      this.caps.delete(target.pid);
-      this.efficiency.delete(target.pid);
-      const name = this.processes.find((p) => p.pid === target.pid)?.name ?? action.app;
-      return this.log('release', `Released ${name}`, `${action.ruleName}: released by you`, 'notUndoable');
-    });
-  }
-
   // ------------------------------------------------------------------------------------------------- rules
-
-  rules(): Promise<RuleSet> {
-    return this.reply('rules', () => copy(this.ruleSet));
-  }
-
-  saveRules(rules: RuleSet): Promise<RuleSet> {
-    return this.reply('saveRules', () => {
-      for (const r of rules.rules) {
-        if (!r.name.trim()) throw err('badRequest', 'Every rule needs a name.');
-        if (r.condition.cpuAbove <= 0 || r.condition.cpuAbove > 100) throw err('badRequest', `“${r.name}”: the CPU threshold must be between 1 and 100%.`);
-        if (r.ladder.length === 0) throw err('badRequest', `“${r.name}”: add at least one step.`);
-      }
-      this.ruleSet = { ...copy(rules), builtInProtected: BUILT_IN_PROTECTED, profiles: PROFILES };
-      // A rule that is off (or gone) holds nothing: the real engine releases what it had in effect.
-      const on = new Set(this.ruleSet.rules.filter((r) => r.enabled).map((r) => r.id));
-      this.activeActions = this.activeActions.filter((a) => on.has(a.ruleId));
-      return copy(this.ruleSet);
-    });
-  }
-
-  setProfile(profile: ProfileId): Promise<RuleSet> {
-    return this.reply('setProfile', () => {
-      if (!PROFILES.some((p) => p.id === profile)) throw err('badRequest', 'Unknown profile.');
-      this.ruleSet = { ...this.ruleSet, profile };
-      this.log('system', `Switched to the ${PROFILES.find((p) => p.id === profile)!.name} profile`, 'Rules for this profile are active now', 'notUndoable');
-      return copy(this.ruleSet);
-    });
-  }
-
-  pauseRules(paused: boolean): Promise<RuleSet> {
-    return this.reply('pauseRules', () => {
-      this.ruleSet = { ...this.ruleSet, paused };
-      if (paused) this.activeActions = [];
-      this.log('system', paused ? 'Paused all rules' : 'Resumed rules', paused ? 'Everything Dyno did was released' : 'Rules apply again', 'notUndoable');
-      return copy(this.ruleSet);
-    });
-  }
-
-  // ----------------------------------------------------------------------------------------------- cleanup
-
-  cleanupCategories(): Promise<CleanupCategory[]> {
-    return this.reply('cleanupCategories', () => this.categories.map((c) => ({ ...c, scheduled: this.settingsValue.cleanup.categories.includes(c.id) })));
-  }
-
-  scanCleanup(categories: string[]): Promise<CleanupScan> {
-    return this.reply('scanCleanup', () => {
-      const ids = categories.length ? categories : this.categories.map((c) => c.id);
-      const now = this.now();
-      const results = ids.map((id) => {
-        const items = cleanupItems(id, now);
-        const docker = id === 'docker-images';
-        return {
-          category: id,
-          bytes: items.reduce((a, i) => a + i.bytes, 0),
-          itemCount: items.length,
-          items,
-          truncated: false,
-          note: docker ? 'Docker removes images itself: they skip the Recycle Bin and quarantine.' : null,
-        };
-      });
-      const scan: CleanupScan = { id: `scan-${this.nextId++}`, at: now, results, totalBytes: results.reduce((a, r) => a + r.bytes, 0) };
-      this.scans.set(scan.id, scan);
-      return scan;
-    }, 900);
-  }
-
-  runCleanup(scanId: string, itemIds: string[], mode: DeleteMode): Promise<CleanupOutcome> {
-    return this.reply('runCleanup', () => {
-      const scan = this.scans.get(scanId);
-      if (!scan) throw err('notFound', 'That scan expired. Scan again.');
-      const wanted = new Set(itemIds);
-      const items = scan.results.flatMap((r) => r.items).filter((i) => wanted.has(i.id));
-      // A file in use cannot be deleted: the mock pretends Chrome holds its cache open.
-      const failed = items.filter((i) => i.path.includes('Chrome\\User Data\\Default\\Cache')).map((i) => ({ path: i.path, reason: 'In use by chrome.exe (close Chrome and try again)' }));
-      const failedPaths = new Set(failed.map((f) => f.path));
-      const done = items.filter((i) => !failedPaths.has(i.path));
-      const freed = done.reduce((a, i) => a + i.bytes, 0);
-      let quarantineId: string | null = null;
-      if (mode === 'quarantine' && done.length) {
-        quarantineId = `q-${this.nextId++}`;
-        this.quarantined = [{ id: quarantineId, at: this.now(), bytes: freed, itemCount: done.length, expires: this.now() + 7 * DAY }, ...this.quarantined];
-      }
-      this.scans.delete(scanId);
-      const entry = this.log('cleanup', `Cleaned ${done.length} items`, mode === 'quarantine' ? 'To the 7-day quarantine' : 'To the Recycle Bin', mode === 'quarantine' ? 'available' : 'notUndoable');
-      entry.bytes = freed;
-      return { freedBytes: freed, deleted: done.length, failed, quarantineId };
-    }, 700);
-  }
-
-  quarantine(): Promise<QuarantineEntry[]> {
-    return this.reply('quarantine', () => this.quarantined);
-  }
-
-  restoreQuarantine(id: string): Promise<void> {
-    return this.reply('restoreQuarantine', () => {
-      const q = this.quarantined.find((e) => e.id === id);
-      if (!q) throw err('notFound', 'That quarantine was already restored or expired.');
-      this.quarantined = this.quarantined.filter((e) => e !== q);
-      this.log('cleanup', `Restored ${q.itemCount} items from the quarantine`, 'Back where they were', 'notUndoable');
-    });
-  }
 
   diskUsage(path: string | null): Promise<SizeNode> {
     return this.reply('diskUsage', () => diskTree(path), 400);
   }
 
-  // ------------------------------------------------------------------------------------- health and tuning
+  // ------------------------------------------------------------------------------------- health
 
   health(): Promise<HealthReport> {
     return this.reply('health', () => {
-      const applied = new Set(this.tuningList.filter((t) => t.applied).map((t) => t.id));
-      const reasons = healthReasons().filter((r) => !(r.fix && typeof r.fix.kind === 'object' && applied.has(r.fix.kind.tuning)));
+      const reasons = healthReasons();
       const score = 100 - reasons.reduce((a, r) => a + r.impact, 0);
       return { at: this.now(), score, grade: score >= 80 ? 'good' : score >= 60 ? 'fair' : 'poor', reasons };
     });
-  }
-
-  tuning(): Promise<TuningSuggestion[]> {
-    return this.reply('tuning', () => this.tuningList);
-  }
-
-  applyTuning(id: string): Promise<ActivityEntry> {
-    return this.reply('applyTuning', () => this.setTuning(id, true), 500);
-  }
-
-  revertTuning(id: string, force = false): Promise<ActivityEntry> {
-    return this.reply('revertTuning', () => this.setTuning(id, false, force), 500);
-  }
-
-  /** Makes the setting of an applied suggestion read differently, as if another program changed it (browser development and tests). */
-  changeTuningOutside(id: string): void {
-    const t = this.tuningList.find((x) => x.id === id);
-    if (t?.applied) t.changedOutside = true;
-  }
-
-  private setTuning(id: string, applied: boolean, force = false): ActivityEntry {
-    const t = this.tuningList.find((x) => x.id === id);
-    if (!t) throw err('notFound', 'Unknown tuning suggestion.');
-    if (t.applied === applied) throw err('badRequest', applied ? 'It is already applied.' : 'It is not applied.');
-    if (applied && t.blocked) throw err('accessDenied', t.blocked);
-    if (applied && t.needsAdmin) this.needHelper();
-    if (!applied && t.changedOutside && !force) {
-      throw err('badRequest', 'Something else changed this setting since Dyno applied it. Revert anyway to put the earlier setting back.');
-    }
-    t.applied = applied;
-    t.changedOutside = false;
-    return this.log('tuning', applied ? t.title : `Reverted: ${t.title}`, applied ? t.preview.join('; ') : t.undoPreview.join('; '), applied ? 'available' : 'notUndoable');
   }
 
   // ------------------------------------------------------------------------------------ the privileged helper
@@ -950,6 +670,7 @@ export class MockBackend implements DynoBackend {
   uninstallHelper(): Promise<HelperStatus> {
     return this.reply('uninstallHelper', () => {
       this.helperValue = mockHelper('notInstalled');
+      this.log('system', 'Removed the privileged helper', 'The helper is gone; Dyno keeps working without it.');
       return this.helperValue;
     });
   }
@@ -962,17 +683,6 @@ export class MockBackend implements DynoBackend {
 
   startupEntries(): Promise<StartupEntry[]> {
     return this.reply('startupEntries', () => this.startup);
-  }
-
-  setStartupState(id: string, state: StartupState): Promise<ActivityEntry> {
-    return this.reply('setStartupState', () => {
-      const e = this.startup.find((x) => x.id === id);
-      if (!e) throw err('notFound', 'That startup entry was removed.');
-      if (e.needsAdmin) this.needHelper();
-      e.state = state;
-      const what = state === 'enabled' ? 'Enabled' : state === 'disabled' ? 'Disabled' : `Delayed by ${state.delayed} s:`;
-      return this.log('startup', `${what} ${e.name} at sign-in`, 'Startup manager', 'available');
-    });
   }
 
   // ------------------------------------------------------------------------------- reports, settings, plugins
@@ -1150,13 +860,6 @@ export class MockBackend implements DynoBackend {
     });
   }
 
-  private watchValue: MockWatch | null = null;
-
-  /** Created on first use, because the clock is set by the constructor. */
-  private get watch(): MockWatch {
-    return (this.watchValue ??= new MockWatch(() => this.now()));
-  }
-
   searchSeed(text: string): Promise<SearchSeed> {
     return this.reply('searchSeed', () => mockSearchSeed(text));
   }
@@ -1188,39 +891,6 @@ export class MockBackend implements DynoBackend {
 
   startupOverview(filter: StartupFilter): Promise<StartupOverview> {
     return this.reply('startupOverview', () => copy(mockStartupOverview(this.startup, filter)));
-  }
-
-  watchedFolders(): Promise<WatchOverview> {
-    return this.reply('watchedFolders', () => this.watch.overview());
-  }
-
-  addWatchedFolder(request: AddWatchedFolder): Promise<WatchOverview | null> {
-    return this.reply('addWatchedFolder', () => this.guard(() => this.watch.add(request.template, request.keepForSecs, request.recursive)));
-  }
-
-  setWatchedFolder(id: string, change: WatchChange): Promise<WatchOverview> {
-    return this.reply('setWatchedFolder', () => this.guard(() => this.watch.change(id, change)));
-  }
-
-  removeWatchedFolder(id: string): Promise<WatchOverview> {
-    return this.reply('removeWatchedFolder', () => this.guard(() => this.watch.remove(id)));
-  }
-
-  previewWatchedFolder(id: string): Promise<WatchPreview> {
-    return this.reply('previewWatchedFolder', () => this.guard(() => this.watch.preview(id)));
-  }
-
-  sweepWatchedFolder(id: string): Promise<WatchOverview> {
-    return this.reply('sweepWatchedFolder', () =>
-      this.guard(() => {
-        const out = this.watch.sweep(id);
-        const f = out.folders.find((v) => v.folder.id === id)?.folder;
-        if (f?.lastSweep && f.lastSweep.moved > 0) {
-          this.log('cleanup', `Moved ${f.lastSweep.moved} old files out of ${f.path.split('/').pop()}`, 'Held in the 7-day quarantine. Undo puts them back.', 'available');
-        }
-        return out;
-      }),
-    );
   }
 
   /** Turns a plain Error from the pure mock helpers into the contract's bad-request error. */
@@ -1311,7 +981,7 @@ export class MockBackend implements DynoBackend {
       const from = to - 7 * DAY;
       // Dyno has been collecting for about five weeks: older weeks are empty and say so.
       if (weeksAgo >= 5) {
-        return { from, to, score: null, scoreChange: 0, avgCpu: 0, peakCpu: 0, avgMemory: 0, topApps: [], ruleActions: 0, cleanedBytes: 0, crashes: 0, alerts: 0, highlights: ['Dyno has no history for this week yet.'], scoreTrend: [], disks: [], issues: [], changes: [], hardware: [], nothingToReport: true };
+        return { from, to, score: null, scoreChange: 0, avgCpu: 0, peakCpu: 0, avgMemory: 0, topApps: [], crashes: 0, alerts: 0, highlights: ['Dyno has no history for this week yet.'], scoreTrend: [], disks: [], issues: [], hardware: [], nothingToReport: true };
       }
       const issueAt = (h: number): number => to - h * 60 * MIN;
       return {
@@ -1323,13 +993,10 @@ export class MockBackend implements DynoBackend {
         peakCpu: 99,
         avgMemory: 58.2,
         topApps: mockHistory('week', null, this.now()).topConsumers.slice(0, 5),
-        ruleActions: 41,
-        cleanedBytes: Math.round(10.7 * GB),
         crashes: 9,
         alerts: 2,
         highlights: [
-          'Rules tamed 23 long builds; your apps stayed responsive.',
-          'Cleanup freed 10.7 GB (temp files, crash dumps, npm cache).',
+          'Your PC averaged 38% CPU and 61% memory, peaking at 94% CPU.',
           'Docker’s backend crashed 6 times today: check its WSL integration.',
           'Sign-in takes 9 s longer than a month ago: 2 new startup apps.',
         ],
@@ -1341,10 +1008,6 @@ export class MockBackend implements DynoBackend {
         issues: [
           { at: issueAt(6 * 60), severity: 'warning', title: 'Drive is getting full', detail: '210 GB free of 953 GB; at this rate it is full in about 41 days.' },
           { at: issueAt(30 * 60), severity: 'info', title: 'A build used a lot of CPU for a long time', detail: 'rustc averaged 74% for 32 minutes.' },
-        ],
-        changes: [
-          { at: issueAt(4 * 60), title: 'Cleanup removed temp files', detail: '10.7 GB freed; you can undo this from Activity.' },
-          { at: issueAt(20 * 60), title: 'Turned off Updater at login', detail: 'You changed this in the startup manager.' },
         ],
         hardware: ['The CPU ran slower than it should for 52 min this week (52 min of heat).', 'Battery: replace in about 23 months (17 to 31 months) (confidence medium).'],
         nothingToReport: false,
@@ -1370,36 +1033,22 @@ export class MockBackend implements DynoBackend {
     });
   }
 
-  unusual(includeIgnored: boolean): Promise<UnusualOverview> {
-    return this.reply('unusual', () => this.unusualView(includeIgnored));
-  }
-
-  unusualAct(key: string, action: UnusualAction): Promise<UnusualOverview> {
-    return this.reply('unusualAct', () => {
-      const item = this.unusualItems.find((i) => i.key === key);
-      if (!item) throw err('notFound', 'Dyno no longer lists that program.');
-      if (action === 'ignore') item.status = 'ignored';
-      else if (action === 'protect') {
-        item.status = 'protected';
-        const target = item.exe ?? item.name;
-        if (!this.ruleSet.protected.includes(target)) this.ruleSet = { ...this.ruleSet, protected: [...this.ruleSet.protected, target] };
-      } else if (item.status === 'ignored' || item.status === 'protected') item.status = 'new';
-      return this.unusualView(false);
-    });
+  unusual(): Promise<UnusualOverview> {
+    return this.reply('unusual', () => this.unusualView());
   }
 
   forgetBaseline(): Promise<UnusualOverview> {
     return this.reply('forgetBaseline', () => {
       this.unusualItems = [];
       this.unusualForgotten = true;
-      return this.unusualView(false);
+      return this.unusualView();
     });
   }
 
-  private unusualView(includeIgnored: boolean): UnusualOverview {
-    const view = mockUnusual(this.unusualItems, this.now(), includeIgnored, 2);
+  private unusualView(): UnusualOverview {
+    const view = mockUnusual(this.unusualItems, this.now(), 2);
     if (!this.unusualForgotten) return view;
-    return { ...view, known: 0, ignored: 0, learning: { active: true, until: this.now() + this.settingsValue.unusual!.learningDays * DAY } };
+    return { ...view, known: 0, learning: { active: true, until: this.now() + this.settingsValue.unusual!.learningDays * DAY } };
   }
 
   saveReport(format: ReportFormat, weeksAgo: number): Promise<SavedReport | null> {
@@ -1487,22 +1136,7 @@ export class MockBackend implements DynoBackend {
   findFiles(query: FinderQuery): Promise<FinderResult> {
     return this.reply('findFiles', () => {
       if (!query.folder.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(query.folder)) throw err('badRequest', 'Choose a folder with a full path.');
-      return mockFinder({ ...query, minBytes: Math.max(query.minBytes, MB) }, this.now(), this.removedFound);
-    });
-  }
-
-  removeFoundFiles(scanId: string, ids: string[], mode: DeleteMode): Promise<CleanupOutcome> {
-    return this.reply('removeFoundFiles', () => {
-      if (scanId !== 'scan-1') throw err('notFound', 'This search is too old. Search the folder again.');
-      if (ids.length === 0 || ids.some((id) => !FINDER_IDS.includes(id))) throw err('badRequest', 'Some of the chosen files are not in the search result.');
-      if (FINDER_GROUPS.some((g) => g.every((id) => ids.includes(id) || this.removedFound.has(id)))) {
-        throw err('badRequest', 'Keep at least one copy of every group of duplicates: all copies of one file were selected.');
-      }
-      for (const id of ids) this.removedFound.add(id);
-      const bytes = mockFinder({ folder: '/x', mode: 'both', minBytes: 0 }, this.now(), new Set());
-      const all = [...bytes.large, ...bytes.duplicates.flatMap((g) => g.files)];
-      const freed = all.filter((f) => ids.includes(f.id)).reduce((a, f) => a + f.bytes, 0);
-      return { freedBytes: freed, deleted: ids.length, failed: [], quarantineId: mode === 'quarantine' ? 'q-find-1' : null };
+      return mockFinder({ ...query, minBytes: Math.max(query.minBytes, MB) }, this.now());
     });
   }
 
@@ -1540,8 +1174,8 @@ export class MockBackend implements DynoBackend {
     return p;
   }
 
-  private log(kind: ActivityEntry['kind'], title: string, detail: string, undo: ActivityEntry['undo']): ActivityEntry {
-    const entry: ActivityEntry = { id: `act-${this.nextId++}`, at: this.now(), kind, title, detail, undo, bytes: null };
+  private log(kind: ActivityEntry['kind'], title: string, detail: string): ActivityEntry {
+    const entry: ActivityEntry = { id: `act-${this.nextId++}`, at: this.now(), kind, title, detail };
     this.activityLog = [entry, ...this.activityLog];
     queueMicrotask(() => this.emitActivity(entry));
     return entry;

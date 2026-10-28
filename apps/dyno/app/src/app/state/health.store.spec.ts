@@ -57,22 +57,4 @@ describe('HealthStore', () => {
     await store.loadStartup({ hideOs: true, hideSigned: true });
     expect(store.startup().length).toBe(all - os - signed);
   });
-  it('changes a startup entry in place', async () => {
-    const { store, notifier, activity } = setup();
-    await store.loadStartup();
-    const e = store.startup()[0]!;
-    expect(await store.setStartup(e.id, 'disabled')).toBe(true);
-    expect(store.startup()[0]!.state).toBe('disabled');
-    expect(activity.entries()[0]?.title).toContain('Disabled');
-    expect(notifier.toasts().at(-1)?.tone).toBe('ok');
-    expect(store.busy()).toEqual([]);
-  });
-  it('a failed startup change keeps the list', async () => {
-    const { store, notifier } = setup();
-    await store.loadStartup();
-    const snapshot = structuredClone(store.startup());
-    expect(await store.setStartup('ghost', 'disabled')).toBe(false);
-    expect(store.startup()).toEqual(snapshot);
-    expect(notifier.toasts().at(-1)?.tone).toBe('bad');
-  });
 });

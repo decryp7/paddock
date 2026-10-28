@@ -12,15 +12,12 @@ test.describe('screens', () => {
       ['Processes', 'Processes'],
       ['Throttling', 'Throttling'],
       ['Inventory', 'Inventory'],
-      ['CPU taming', 'CPU taming'],
       ['Alarms', 'Alarms'],
       ['Flight recorder', 'Flight recorder'],
       ['Health', 'Health'],
-      ['Watched folders', 'Watched folders'],
       ['Backup health', 'Backup health'],
       ['Extras', 'Extras'],
       ['Lifespan', 'Disk and battery life'],
-      ['Tuning', 'Tuning'],
       ['Diagnostics', 'Diagnostics bundle'],
       ['Settings', 'Settings'],
       ['Dashboard', 'Dashboard'],
@@ -33,24 +30,8 @@ test.describe('screens', () => {
   test('with nothing unbuilt there is no Coming button, and an unknown route lands on the dashboard', async ({ page }) => {
     await page.goto(url());
     await expect(page.getByRole('button', { name: /Coming/ })).toHaveCount(0);
-    await page.goto(url('/tuning-admin'));
+    await page.goto(url('/no-such-screen'));
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
-  });
-
-  test('an administrator tuning item installs the helper only after the explanation, then reviews the change', async ({ page }) => {
-    await page.goto(url('/tuning'));
-    await page.getByRole('button', { name: 'Review Turn off hibernation to free disk space' }).click();
-    const helper = page.getByRole('dialog');
-    await expect(helper.getByText('Install the Dyno helper')).toBeVisible();
-    await expect(helper.getByText('Dyno itself never runs as administrator')).toBeVisible();
-    await helper.getByRole('button', { name: 'Not now' }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Review Turn off hibernation to free disk space' }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Install the helper' }).click();
-    const review = page.getByRole('dialog');
-    await expect(review.getByText('Turn hibernation off')).toBeVisible();
-    await review.getByRole('button', { name: 'Apply' }).click();
-    await expect(page.getByRole('button', { name: 'Revert Turn off hibernation to free disk space' })).toBeVisible();
   });
 
   test('Settings shows the helper and removes it again', async ({ page }) => {
@@ -116,14 +97,6 @@ test.describe('dashboard', () => {
     await expect(alert.getByRole('button', { name: 'Retry' })).toBeVisible();
   });
 
-  test('a health fix explains and previews itself before anything changes', async ({ page }) => {
-    await page.goto(url());
-    await page.getByRole('button', { name: 'Review cleanup' }).click();
-    const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText('What will change')).toBeVisible();
-    await dialog.getByRole('button', { name: 'Not now' }).click();
-    await expect(dialog).toBeHidden();
-  });
 });
 
 test.describe('cpu per core', () => {
@@ -157,7 +130,7 @@ test.describe('cpu per core', () => {
 });
 
 test.describe('processes', () => {
-  test('groups, expands, shows details and takes an action that can be undone', async ({ page }) => {
+  test('groups, expands and shows details', async ({ page }) => {
     await page.goto(url('/processes'));
     await expect(page.getByRole('treegrid')).toBeVisible();
     await page.getByRole('button', { name: 'Expand Rust build (cargo)' }).click();
@@ -167,37 +140,11 @@ test.describe('processes', () => {
     await expect(details.getByText('Command line')).toBeVisible();
     await details.getByRole('tab', { name: 'Libraries' }).click();
     await expect(details.locator('.mono').first()).toBeVisible();
-
     await row.getByRole('button', { name: /Actions for/ }).click();
-    await page.getByRole('menuitem', { name: 'Suspend' }).click();
-    await expect(page.getByText(/Suspended/).first()).toBeVisible();
-    await page.getByRole('button', { name: 'Undo' }).first().click();
-    await expect(page.getByText(/Undid/).first()).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Details' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: /End|Suspend|Priority|Cap CPU/ })).toHaveCount(0);
   });
 
-  test('protected processes are locked with the reason', async ({ page }) => {
-    await page.goto(url('/processes', '&mock=macos'));
-    await page.getByLabel('Filter processes').fill('WindowServer');
-    const row = page.locator('[role=row][data-key^="g"]').first();
-    await expect(row).toBeVisible();
-    await row.getByRole('button', { name: /Actions for/ }).click();
-    await expect(page.getByRole('menuitem', { name: 'End…' })).toHaveAttribute('aria-disabled', 'true');
-    await expect(page.getByText(/Dyno never changes it/)).toBeVisible();
-  });
-
-  test('ending a process asks first and sorting changes the order', async ({ page }) => {
-    await page.goto(url('/processes'));
-    await page.getByRole('button', { name: 'All', exact: true }).click();
-    await page.getByRole('button', { name: 'Sort by Name' }).click();
-    await expect(page.getByRole('columnheader', { name: /Name/ })).toHaveAttribute('aria-sort', 'ascending');
-    await page.getByLabel('Filter processes').fill('rustc');
-    await page.locator('[role=row][data-key^="p"]').first().getByRole('button', { name: /Actions for/ }).click();
-    await page.getByRole('menuitem', { name: 'End…' }).click();
-    const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText('Unsaved work in it is lost.')).toBeVisible();
-    await dialog.getByRole('button', { name: 'Cancel' }).click();
-    await expect(dialog).toBeHidden();
-  });
 });
 
 test.describe('settings', () => {
@@ -343,7 +290,7 @@ test.describe('counters', () => {
     await page.getByRole('button', { name: 'Chart Bytes Sent' }).click();
     const table = page.getByRole('table', { name: 'Charted counters' });
     await expect(table.getByRole('row', { name: /Bytes Sent \(en0\)/ })).toBeVisible();
-    await expect(page.getByRole('group', { name: 'Events on the timeline' })).toContainText('Cleanup');
+    await expect(page.getByRole('group', { name: 'Events on the timeline' })).toContainText('Network');
     await expect(page.locator('dy-chart canvas').first()).toBeVisible();
     await page.getByRole('button', { name: 'Pin Bytes Sent (en0)' }).click();
     await expect(page.getByText('Counter pinned')).toBeVisible();
@@ -505,17 +452,13 @@ test.describe('issues', () => {
     await expect(table.getByRole('row', { name: /Slack/ }).first()).toBeVisible();
   });
 
-  test('the new and unusual view lists reasons, protects one and hides another', async ({ page }) => {
+  test('the new and unusual view lists reasons and offers no action on a program', async ({ page }) => {
     await page.goto(url('/issues'));
     await page.getByRole('button', { name: /New and unusual/ }).click();
     const table = page.getByRole('table', { name: 'New and unusual programs' });
     await expect(table.getByRole('row', { name: /updater-helper/ })).toContainText('Unusual because it runs from a temporary folder');
-    await page.getByRole('button', { name: 'Protect updater-helper' }).click({ force: true });
-    await expect(page.getByText('updater-helper is protected')).toBeVisible();
-    await expect(table.getByRole('row', { name: /updater-helper/ })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Hide ngrok' }).click({ force: true });
-    await expect(table.getByRole('row', { name: /ngrok/ })).toHaveCount(0);
-    await page.getByRole('button', { name: /Show hidden/ }).click();
+    await expect(page.getByRole('button', { name: 'Protect updater-helper' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Hide ngrok' })).toHaveCount(0);
     await expect(table.getByRole('row', { name: /ngrok/ })).toBeVisible();
   });
 
@@ -572,7 +515,7 @@ test.describe('right-click search (nothing is sent until the click)', () => {
 test.describe('startup filter', () => {
   test('hides the system and signed entries, shows the counts and remembers the choice', async ({ page }) => {
     await page.goto(url('/health'));
-    const section = page.getByRole('region', { name: 'Startup manager' });
+    const section = page.getByRole('region', { name: 'Start-up items' });
     const rows = section.locator('tbody tr');
     await expect(rows.first()).toBeVisible();
     await expect(section.getByText(/Showing \d+ of \d+ entries\./)).toBeVisible();
@@ -584,69 +527,10 @@ test.describe('startup filter', () => {
     await expect(rows).toHaveCount(before - 1);
     await expect(section.getByText(/Showing \d+ of \d+ entries, 1 hidden by the filter/)).toBeVisible();
     await page.reload();
-    await expect(page.getByRole('region', { name: 'Startup manager' }).getByRole('button', { name: /Hide system entries/ })).toHaveAttribute('aria-pressed', 'true');
-    await page.getByRole('region', { name: 'Startup manager' }).getByRole('button', { name: /Hide signed apps/ }).click();
+    await expect(page.getByRole('region', { name: 'Start-up items' }).getByRole('button', { name: /Hide system entries/ })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('region', { name: 'Start-up items' }).getByRole('button', { name: /Hide signed apps/ }).click();
     // The demo list has no unsigned entry, so hiding both leaves nothing, and the page says why instead of claiming nothing starts.
-    await expect(page.getByRole('region', { name: 'Startup manager' }).getByText('Everything is hidden by the filter')).toBeVisible();
-  });
-});
-
-test.describe('watched folders', () => {
-  test('lists the folders, previews before turning one on, changes the time and stops watching with a confirmation', async ({ page }) => {
-    await page.goto(url('/watched'));
-    await expect(page.getByRole('heading', { level: 1, name: 'Watched folders' })).toBeVisible();
-    const table = page.getByRole('table', { name: 'Watched folders' });
-    await expect(table.locator('tbody tr')).toHaveCount(3);
-    await expect(table.getByRole('row', { name: /Downloads/ })).toContainText('On');
-    const build = table.getByRole('row', { name: /build/ });
-    await expect(build).toContainText('Off, not previewed');
-
-    // Turning on opens the preview first; its Turn on button is the only way.
-    await build.getByRole('button', { name: 'Actions for build' }).click();
-    await page.getByRole('menuitem', { name: 'Turn on…' }).click();
-    const preview = page.getByRole('dialog', { name: 'What would move' });
-    await expect(preview.getByText(/would move to the 7-day quarantine|Nothing is older than/)).toBeVisible();
-    await expect(preview.getByText(/put back from Activity/)).toBeVisible();
-    await preview.getByRole('button', { name: 'Turn on' }).click();
-    await expect(preview).toBeHidden();
-    await expect(table.getByRole('row', { name: /build/ })).toContainText('On');
-
-    // A shorter keep time turns it off until it is previewed again.
-    await table.getByRole('row', { name: /build/ }).getByRole('button', { name: 'Actions for build' }).click();
-    await page.getByRole('menuitem', { name: /^Keep for/ }).hover();
-    await page.getByRole('menuitem', { name: '10 minutes' }).click();
-    await expect(table.getByRole('row', { name: /build/ })).toContainText('10 minutes');
-    await expect(table.getByRole('row', { name: /build/ })).toContainText('Off, not previewed');
-
-    // Stopping the watch asks first and says the files stay.
-    await table.getByRole('row', { name: /build/ }).getByRole('button', { name: 'Actions for build' }).click();
-    await page.getByRole('menuitem', { name: 'Stop watching…' }).click();
-    const confirm = page.getByRole('dialog');
-    await expect(confirm.getByText('The files stay where they are')).toBeVisible();
-    await confirm.getByRole('button', { name: 'Stop watching' }).click();
-    await expect(table.locator('tbody tr')).toHaveCount(2);
-  });
-
-  test('adds a folder through the folder dialog, switched off', async ({ page }) => {
-    await page.goto(url('/watched'));
-    await page.getByRole('button', { name: 'Add folder' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Watch a folder' });
-    await dialog.getByRole('radio', { name: /Screenshots/ }).click();
-    await dialog.getByRole('button', { name: /Choose folder/ }).click();
-    await expect(dialog).toBeHidden();
-    const table = page.getByRole('table', { name: 'Watched folders' });
-    await expect(table.locator('tbody tr')).toHaveCount(4);
-    await expect(table.locator('tbody tr').last()).toContainText('Off, not previewed');
-  });
-
-  test('moving the files now needs the preview and tells where they went', async ({ page }) => {
-    await page.goto(url('/watched'));
-    const table = page.getByRole('table', { name: 'Watched folders' });
-    await table.getByRole('row', { name: /Downloads/ }).getByRole('button', { name: 'See what would move in Downloads' }).click();
-    const preview = page.getByRole('dialog', { name: 'What would move' });
-    await expect(preview.locator('tbody tr').first()).toBeVisible();
-    await preview.getByRole('button', { name: /^Move \d+ now/ }).click();
-    await expect(page.getByText('Swept the folder')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Start-up items' }).getByText('Everything is hidden by the filter')).toBeVisible();
   });
 });
 
@@ -714,21 +598,6 @@ test.describe('extras', () => {
     await expect(page.getByRole('region', { name: 'Maintenance windows' })).toContainText('Mon to Fri, 22:00 to 02:00 the next day');
   });
 
-  test('Files: choose a folder, keep one copy of each group, confirm and move', async ({ page }) => {
-    await page.goto(url('/extras', '').replace('#/extras', '#/extras?tab=files'));
-    await page.getByRole('button', { name: 'Choose a folder' }).click();
-    const table = page.getByRole('table', { name: 'Large and duplicate files' });
-    await expect(table).toContainText('3 copies of site-redesign.psd');
-    await expect(page.getByRole('group', { name: 'Selection' })).toContainText('3 files selected');
-    await table.getByRole('checkbox', { name: 'Select brand-video-final.mov' }).check();
-    await page.getByRole('button', { name: /Quarantine/ }).click();
-    const dialog = page.getByRole('dialog');
-    await expect(dialog).toContainText('4 items');
-    await dialog.getByRole('button', { name: 'Move to quarantine' }).click();
-    await expect(page.getByText(/Moved 4 files/)).toBeVisible();
-    await expect(table).not.toContainText('brand-video-final.mov');
-  });
-
   test('Inventory exports a report and says where it went', async ({ page }) => {
     await page.goto(url('/extras', '').replace('#/extras', '#/extras?tab=inventory'));
     await page.getByRole('button', { name: /Export report/ }).click();
@@ -741,19 +610,5 @@ test.describe('extras', () => {
     await page.getByRole('button', { name: 'Saturday' }).first().click();
     await page.getByRole('button', { name: 'Save windows' }).click();
     await expect(page.getByText('Maintenance windows saved')).toBeVisible();
-  });
-});
-
-test.describe('temporary rules', () => {
-  test('a rule can be made temporary, shows its remaining time and the fixed note', async ({ page }) => {
-    await page.goto(url('/rules'));
-    await expect(page.getByText('Never touches the app in front; gives it back its CPU the moment you switch to it.')).toBeVisible();
-    const row = page.locator('tr[data-id="tame-long-hogs"]');
-    await expect(row).toContainText('Until turned off');
-    await row.getByRole('button', { name: 'How long Tame long CPU hogs stays on' }).click();
-    await page.getByRole('menuitem', { name: '4 hours' }).click();
-    await expect(row).toContainText(/Ends in (3 h 5\d min|4 h)/);
-    await expect(page.getByRole('region', { name: 'In effect now' })).toContainText('CPU 78% → 31%');
-    await expect(page.getByRole('region', { name: 'Recent activity' })).toContainText('Measured: Chrome used 78 % CPU before and 31 % 21 s after.');
   });
 });

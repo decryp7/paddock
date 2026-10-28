@@ -65,11 +65,10 @@ describe('sampleProcess', () => {
     const s = sampleProcess({ ...p!, state: 'suspended' }, 5, null, 1);
     expect(s).toMatchObject({ cpu: 0, diskReadBps: 0, diskWriteBps: 0, state: 'suspended' });
   });
-  it('an idle process is sleeping, a busy one running; protection is carried over', () => {
+  it('an idle process is sleeping, a busy one running', () => {
     expect(sampleProcess({ ...p!, cpu: 0 }, 5, null, 1).state).toBe('sleeping');
     expect(sampleProcess(p!, 5, null, 1).state).toBe('running');
-    expect(sampleProcess({ ...p!, protectedReason: 'sys' }, 5, null, 1).protectedReason).toBe('sys');
-  });
+      });
   it('splits disk throughput 35/65', () => {
     const s = sampleProcess(p!, 5, null, 1);
     expect(s.diskWriteBps).toBeGreaterThanOrEqual(s.diskReadBps);

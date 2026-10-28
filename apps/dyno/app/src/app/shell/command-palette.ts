@@ -7,9 +7,7 @@ import { PlatformService } from '../core/platform';
 import { formatBytes, formatPercent } from '../shared/format';
 import { Icon } from '../shared/icon';
 import type { IconName } from '../shared/icons';
-import { PROFILE_ICON } from '../shared/labels';
 import { DiagnosisStore } from '../state/diagnosis.store';
-import { RulesStore } from '../state/rules.store';
 import { NAV } from './nav';
 
 export interface PaletteItem {
@@ -43,7 +41,7 @@ export function rankItems<T extends { label: string; keywords: string }>(items: 
 }
 
 /**
- * Ctrl+K / ⌘K: jump to a screen, find a running app, run "Why is my PC slow?", switch profile or pause rules. A
+ * Ctrl+K / ⌘K: jump to a screen, find a running app, run "Why is my PC slow?". A
  * combobox with a listbox (arrow keys, Enter, Escape); while open it subscribes to the full process list.
  */
 @Component({
@@ -127,7 +125,6 @@ export function rankItems<T extends { label: string; keywords: string }>(items: 
 export class CommandPalette {
   private readonly ref = inject(DialogRef);
   private readonly router = inject(Router);
-  private readonly rules = inject(RulesStore);
   private readonly diagnosis = inject(DiagnosisStore);
   protected readonly platform = inject(PlatformService);
   protected readonly query = signal('');
@@ -137,7 +134,6 @@ export class CommandPalette {
   constructor() {
     const stop = inject(BACKEND).onLive('processes', (u) => this.groups.set(u.groups ?? []));
     inject(DestroyRef).onDestroy(stop);
-    void this.rules.ensure();
   }
 
   private readonly items = computed<PaletteItem[]>(() => {
@@ -157,24 +153,6 @@ export class CommandPalette {
           void this.router.navigateByUrl('/why-slow');
         },
       },
-      {
-        id: 'pause',
-        section: 'Actions',
-        label: this.rules.paused() ? 'Resume rules' : 'Pause all rules',
-        hint: '',
-        icon: this.rules.paused() ? 'play' : 'pause',
-        keywords: 'pause resume rules taming stop',
-        run: () => void this.rules.pause(!this.rules.paused()),
-      },
-      ...this.rules.profiles().map<PaletteItem>((p) => ({
-        id: `profile-${p.id}`,
-        section: 'Actions',
-        label: `Switch to ${p.name}`,
-        hint: p.id === this.rules.profile() ? 'Active' : 'Profile',
-        icon: PROFILE_ICON[p.id],
-        keywords: `profile mode ${p.name}`,
-        run: () => void this.rules.setProfile(p.id),
-      })),
     ];
     const apps: PaletteItem[] = [...this.groups()]
       .sort((a, b) => b.cpu - a.cpu)

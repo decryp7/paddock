@@ -50,7 +50,7 @@ const GLYPH: Record<string, string> = { triangle: '▲', rect: '■', circle: '�
               {{ label(e.kind) }} <span class="n num">{{ e.count }}</span>
             </button>
           } @empty {
-            <span class="faint">No rule actions, cleanups or alerts in this range.</span>
+            <span class="faint">No alerts, restarts or network changes in this range.</span>
           }
         </div>
       </dy-async>

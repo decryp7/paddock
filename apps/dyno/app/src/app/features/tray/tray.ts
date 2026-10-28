@@ -9,19 +9,17 @@ import { GRADE_LABEL, GRADE_TONE } from '../../shared/labels';
 import { Notifier, Toasts } from '../../shared/notifier';
 import { Popover } from '../../shared/popover';
 import { Sparkline } from '../../shared/sparkline';
-import { ProfileSwitcher } from '../../shell/profile-switcher';
 import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
-import { RulesStore } from '../../state/rules.store';
 import { SettingsStore } from '../../state/settings.store';
 
 /**
  * The tray dropdown (360 x 520, frameless): a compact dashboard with the health score when the engine has one, four
- * live sparklines, the top five apps, the profile and the three buttons. The tray / menu-bar icon itself is drawn by the shell.
+ * live sparklines, the top five apps, and the buttons. The tray / menu-bar icon itself is drawn by the shell.
  */
 @Component({
   selector: 'dy-tray',
-  imports: [Icon, Sparkline, Popover, ProfileSwitcher, Toasts, MatTooltip],
+  imports: [Icon, Sparkline, Popover, Toasts, MatTooltip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-popover [maxHeight]="560">
@@ -71,8 +69,6 @@ import { SettingsStore } from '../../state/settings.store';
         </section>
 
         <footer>
-          <dy-profile-switcher [compact]="true" />
-          <button type="button" class="btn sm icon ghost" [disabled]="!rules.loaded() || rules.saving()" (click)="rules.pause(!rules.paused())" [attr.aria-label]="rules.paused() ? 'Resume rules' : 'Pause rules'" [matTooltip]="rules.paused() ? 'Resume rules' : 'Pause all rules'"><dy-icon [name]="rules.paused() ? 'play' : 'pause'" /></button>
           <span class="spacer"></span>
           <button type="button" class="btn sm primary" (click)="openMain()"><dy-icon name="arrow-right" /> Open Dyno</button>
           <button type="button" class="btn sm icon ghost" (click)="quit()" aria-label="Quit Dyno" matTooltip="Quit the Dyno app (the background agent keeps measuring)"><dy-icon name="power" /></button>
@@ -116,7 +112,6 @@ import { SettingsStore } from '../../state/settings.store';
 })
 export class Tray implements OnInit, OnDestroy {
   protected readonly live = inject(LiveStore);
-  protected readonly rules = inject(RulesStore);
   protected readonly health = inject(HealthStore);
   private readonly settings = inject(SettingsStore);
   private readonly backend = inject(BACKEND);
@@ -144,7 +139,6 @@ export class Tray implements OnInit, OnDestroy {
     this.root.dataset['surface'] = 'popover';
     // Theme first, then the rest; nothing here blocks the first paint.
     void this.settings.load();
-    void this.rules.ensure();
     // A score the engine does not provide yet is simply left out (the card only renders with a report).
     void this.health.loadReport();
   }

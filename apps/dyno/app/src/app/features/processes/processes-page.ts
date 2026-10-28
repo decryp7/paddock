@@ -2,18 +2,15 @@ import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@an
 import { CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf } from '@angular/cdk/scrolling';
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, input } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { firstValueFrom } from 'rxjs';
-import type { Priority } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
 import { Dialogs } from '../../shared/dialog';
 import { formatBytes, formatCount, formatPercent, formatRate, plural } from '../../shared/format';
 import { bar } from '../../shared/heat';
 import { Icon } from '../../shared/icon';
-import { PRIORITIES, PRIORITY_LABEL } from '../../shared/labels';
 import { LiveStore } from '../../state/live.store';
 import { Lookups } from '../lookup/lookups';
 import { ProcessesStore } from '../../state/processes.store';
-import { AffinityDialog, CapDialog, LockersDialog } from './process-dialogs';
+import { LockersDialog } from './process-dialogs';
 import { ProcessDetailsPanel } from './process-details';
 import { type Row, type SortKey, type ViewMode } from './process-rows';
 
@@ -26,7 +23,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
   { key: 'pid', label: 'PID', align: 'r' },
 ];
 
-/** The task manager: every app and process, grouped by app, as a tree or flat; sortable, searchable, with actions and a details panel. */
+/** The task manager: every app and process, grouped by app, as a tree or flat; sortable, searchable, with a details panel and lookups. Read-only: nothing here changes a process. */
 @Component({
   selector: 'dy-processes-page',
   imports: [Icon, FormsModule, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger, ProcessDetailsPanel],
@@ -103,9 +100,6 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                   } @else {
                     <span class="chev-space"></span>
                   }
-                  @if (r.protectedReason) {
-                    <dy-icon name="lock" class="lock" [label]="'Protected: ' + r.protectedReason" />
-                  }
                   <span class="nm truncate" [title]="r.name">{{ r.name }}</span>
                   @if (r.kind === 'group' && r.count > 1) {
                     <span class="badge">{{ num(r.count) }}</span>
@@ -134,36 +128,15 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
 
     <ng-template #menu let-row="row">
       <div class="menu wide" cdkMenu [attr.aria-label]="'Actions for ' + row.name">
-        @if (row.protectedReason; as why) {
-          <div class="menu-note"><dy-icon name="lock" /> <span>{{ why }}. Dyno never changes it.</span></div>
-        }
         @if (row.ref) {
           <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="details(row)"><dy-icon name="info" /> Details</button>
         }
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!!row.protectedReason || store.busy()" (cdkMenuItemTriggered)="end(row)"><dy-icon name="stop" /> End…</button>
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!!row.protectedReason || store.busy()" (cdkMenuItemTriggered)="store.act(row, row.suspended ? 'resume' : 'suspend')">
-          <dy-icon [name]="row.suspended ? 'play' : 'pause'" /> {{ row.suspended ? 'Resume' : 'Suspend' }}
-        </button>
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!!row.protectedReason" [cdkMenuTriggerFor]="priority" [cdkMenuTriggerData]="{ row }"><dy-icon name="gauge" /> Priority <dy-icon name="chevron-right" class="trail" /></button>
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!!row.protectedReason" (cdkMenuItemTriggered)="affinity(row)"><dy-icon name="cpu" /> Choose cores…</button>
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!!row.protectedReason" (cdkMenuItemTriggered)="store.act(row, { setEfficiencyMode: true })"><dy-icon name="bolt" /> Efficiency mode on</button>
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!!row.protectedReason" (cdkMenuItemTriggered)="store.act(row, { setEfficiencyMode: false })"><dy-icon name="bolt" /> Efficiency mode off</button>
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!!row.protectedReason" (cdkMenuItemTriggered)="cap(row)"><dy-icon name="gauge" /> Cap CPU…</button>
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!!row.protectedReason" (cdkMenuItemTriggered)="store.act(row, { setCpuCap: null })"><dy-icon name="undo" /> Remove CPU cap</button>
-        <div class="menu-sep"></div>
         @if (row.ref) {
           <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.openLocation(row.ref)"><dy-icon name="folder" /> Open file location</button>
         }
         <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchWeb(row)"><dy-icon name="search" /> Search the web…</button>
         @if (row.ref) {
           <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchHash(row)"><dy-icon name="shield" /> Search file hash on VirusTotal…</button>
-        }
-      </div>
-    </ng-template>
-    <ng-template #priority let-row="row">
-      <div class="menu" cdkMenu aria-label="Priority">
-        @for (p of priorities; track p) {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.act(row, { setPriority: p })">{{ prioLabel(p) }}</button>
         }
       </div>
     </ng-template>
@@ -202,13 +175,11 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
     .chev { all: unset; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; color: var(--text-3); cursor: default; flex: none; }
     .chev:hover { background: var(--surface-active); } .chev:focus-visible { outline: 2px solid var(--focus); }
     .chev dy-icon { --icon-size: 14px; } .chev-space { width: 18px; flex: none; }
-    .lock { --icon-size: 13px; color: var(--text-3); flex: none; }
     .heat { border-radius: 0; }
     .faint { color: var(--text-3); }
     .act { padding: 0 !important; display: grid; place-items: center; }
     .skeletons { display: grid; gap: var(--sp-2); padding: var(--sp-4); } .skeleton { height: 20px; }
     .empty { display: grid; justify-items: center; gap: var(--sp-2); padding: var(--sp-10); color: var(--text-2); }
-    .menu-note { display: flex; gap: var(--sp-2); padding: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); white-space: normal; border-bottom: 1px solid var(--border); margin-bottom: var(--sp-1); }
   `,
 })
 export class ProcessesPage implements OnInit, OnDestroy {
@@ -220,7 +191,6 @@ export class ProcessesPage implements OnInit, OnDestroy {
   readonly q = input<string>();
 
   protected readonly columns = COLUMNS;
-  protected readonly priorities = PRIORITIES;
   protected readonly placeholders = Array.from({ length: 12 }, (_, i) => i);
   protected readonly modes: { id: ViewMode; label: string; icon: 'layers' | 'rules' | 'processes' }[] = [
     { id: 'groups', label: 'Apps', icon: 'layers' },
@@ -232,7 +202,6 @@ export class ProcessesPage implements OnInit, OnDestroy {
   protected readonly rate = formatRate;
   protected readonly bar = bar;
   protected readonly sortKey = computed(() => this.store.sort().key);
-  protected readonly prioLabel = (p: Priority) => PRIORITY_LABEL[p];
   protected readonly hint = computed(() => {
     const e = this.store.actionError();
     return e ? errorHint(e.code) : null;
@@ -245,7 +214,6 @@ export class ProcessesPage implements OnInit, OnDestroy {
   protected readonly trackRow = (_: number, r: Row) => r.key;
   protected readonly num = formatCount;
   protected readonly pid = (r: Row) => (r.pid === null ? '' : String(r.pid));
-  private readonly cores = computed(() => this.live.system()?.cpu.perCore.length ?? 1);
 
   constructor() {
     effect(() => {
@@ -276,31 +244,6 @@ export class ProcessesPage implements OnInit, OnDestroy {
     if (r.ref) void this.store.select(r.ref);
   }
 
-  protected async end(r: Row): Promise<void> {
-    const group = r.kind === 'group';
-    const ok = await this.dialogs.confirm({
-      title: group ? `End all of ${r.name}?` : `End ${r.name}?`,
-      message: group ? `This ends ${plural(r.count, 'process', 'processes')}. Unsaved work in the app is lost.` : 'Unsaved work in it is lost.',
-      confirmLabel: group ? 'End all' : 'End',
-      danger: true,
-      details: ['Ending cannot be undone.', 'Protected system processes are never touched.'],
-    });
-    if (ok) await this.store.act(r, 'end');
-  }
-
-  protected async affinity(r: Row): Promise<void> {
-    const mask = this.store.details()?.process.pid === r.pid ? this.store.details()!.affinity : null;
-    const ref = this.dialogs.open<number>(AffinityDialog, { name: r.name, cores: this.cores(), mask });
-    const result = await firstValueFrom(ref.closed);
-    if (typeof result === 'number') await this.store.act(r, { setAffinity: result });
-  }
-
-  protected async cap(r: Row): Promise<void> {
-    const ref = this.dialogs.open<number>(CapDialog, r.name);
-    const result = await firstValueFrom(ref.closed);
-    if (typeof result === 'number') await this.store.act(r, { setCpuCap: result });
-  }
-
   protected searchWeb(r: Row): void {
     void this.lookups.searchWeb(r.name, r.name);
   }
@@ -313,7 +256,7 @@ export class ProcessesPage implements OnInit, OnDestroy {
     this.dialogs.open(LockersDialog);
   }
 
-  /** Arrow keys move between rows, Right/Left open and close, Enter shows details, Delete ends. */
+  /** Arrow keys move between rows, Right/Left open and close, Enter shows details. */
   protected key(e: KeyboardEvent): void {
     const el = e.target instanceof HTMLElement ? e.target.closest<HTMLElement>('[role=row]') : null;
     if (!el) return;
@@ -339,9 +282,6 @@ export class ProcessesPage implements OnInit, OnDestroy {
       case 'Enter':
         e.preventDefault();
         return this.rowClick(row);
-      case 'Delete':
-        if (!row.protectedReason) void this.end(row);
-        return;
     }
   }
 }

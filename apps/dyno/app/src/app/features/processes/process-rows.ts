@@ -24,7 +24,6 @@ export interface Row {
   groupId: string | null;
   expandable: boolean;
   expanded: boolean;
-  protectedReason: string | null;
   suspended: boolean;
 }
 
@@ -65,7 +64,6 @@ function processRow(p: ProcessSample, depth: number, expandable = false, expande
     groupId: null,
     expandable,
     expanded,
-    protectedReason: p.protectedReason,
     suspended: p.state === 'suspended',
   };
 }
@@ -102,7 +100,6 @@ export function buildRows(input: RowInput): Row[] {
       const members = g.pids.map((pid) => byPid.get(pid)).filter((p): p is ProcessSample => !!p);
       if (members.length === 0) continue;
       const open = searching || expanded.has(`g${g.id}`);
-      const reason = members.find((m) => m.protectedReason)?.protectedReason ?? null;
       const group: Row = {
         key: `g${g.id}`,
         kind: 'group',
@@ -118,7 +115,6 @@ export function buildRows(input: RowInput): Row[] {
         groupId: g.id,
         expandable: g.pids.length > 1,
         expanded: open && g.pids.length > 1,
-        protectedReason: members.every((m) => m.protectedReason) ? reason : null,
         suspended: members.every((m) => m.state === 'suspended'),
       };
       const children = group.expanded ? members.map((m) => processRow(m, 1)).sort((a, b) => compareRows(a, b, sort)) : [];
