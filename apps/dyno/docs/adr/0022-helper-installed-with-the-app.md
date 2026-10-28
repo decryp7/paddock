@@ -32,14 +32,50 @@ Dyno 1.0 has no privileged helper:
 
 What follows is what 1.0 cannot show, and how the UI marks it.
 
-> **Placeholder:** the per-OS facts (what an unelevated agent cannot read on Windows, macOS and Linux) come from the
-> researcher's note, and are filled in here when it arrives.
+Facts from the researcher (2026-10-28). Dyno uses `sysinfo` 0.39.6 today, which shows a denied value as 0. That is
+replaced, as the user decided on 2026-10-28:
+
+- **Grouping.** The user's own processes and system processes are listed one by one. Other people's processes are
+  grouped as **one "Other users" row**, carrying whatever totals the OS allows.
+- **Unreadable values** show "Unavailable" with a reason, never 0.
+- **Windows** reads `NtQuerySystemInformation(SystemProcessInformation)`, including its undocumented CPU and I/O
+  fields. A self-check at start decides whether those fields are trusted (below).
+- **macOS** adds the short BSD info (`PROC_PIDT_SHORTBSDINFO`) for processes of other accounts.
+
+**How "own", "system" and "other users" are told apart.** A process the agent cannot open still has to be put in one of
+the three groups:
+
+- Windows: by session, from the same `NtQuerySystemInformation` record. Session 0 is system (services). The agent's own
+  session is own. Any other session is other users.
+- macOS: by uid. Below 500 is system. The agent's uid is own. Any other uid is other users.
+- Linux: by uid. Below `UID_MIN` from `/etc/login.defs` (default 1000) is system. The agent's uid is own. Any other uid
+  is other users.
 
 | OS | Not available in 1.0 (user rights only) | How the UI marks it |
 | --- | --- | --- |
-| Windows | _to be filled in from the research note_ | _to be filled in_ |
-| macOS | _to be filled in from the research note_ | _to be filled in_ |
-| Linux | _to be filled in from the research note_ | _to be filled in_ |
+| Windows | **Other accounts' and SYSTEM processes cannot be opened.** Without a handle there is no program path and no owner account. The same `NtQuerySystemInformation` record still gives memory (documented fields) and CPU time and disk I/O (undocumented fields) for every process. Also not available: per-program network traffic (the TCP statistics need administrator rights, ADR 0021). | System processes are listed one by one. Name, memory, CPU and disk come from `NtQuerySystemInformation`. Path and owner show "Unavailable: Windows shows this only to administrators". Other sessions form the "Other users" row: number of processes, CPU, memory, disk. If the self-check fails, CPU and disk show "Unavailable: Windows did not report this in a form Dyno could check". Per-program traffic keeps its existing "needs administrator rights" reason, without an install step |
+| macOS | **No CPU, memory or disk for other uids, including root's system processes** (`PROC_PIDTASKINFO` and `PROC_PIDTBSDINFO` fail; `proc_pid_rusage` succeeds only rarely). Name, path, owner and parent are available (`PROC_PIDT_SHORTBSDINFO`, `proc_pidpath`). | System processes are listed one by one with name, path, owner and parent. Their CPU, memory and disk show "Unavailable: macOS shows this only for your own processes". When `proc_pid_rusage` does succeed, the value is shown. The "Other users" row shows the number of processes. Its CPU, memory and disk totals are "Unavailable" with the same reason |
+| Linux | **With `hidepid=0` (the default):** `stat`, `statm` and `status` give CPU, memory and owner for every process. `io` and the program path (`exe`) need ptrace rights, so disk I/O and path are missing for other accounts' and system processes. **With `hidepid=1`** other accounts' details are hidden. **With `hidepid=2`** their processes are invisible. Also unavailable for others: the PSS memory figure rule 26 requires (`smaps_rollup` needs ptrace rights) | System processes are listed one by one with name, owner and CPU. Disk and path show "Unavailable: Linux shows this only for your own processes". The "Other users" row shows the number of processes and CPU. Memory for both, see the note below. With `hidepid`, the list's one-line note says "This system hides other accounts' processes" (and, for `hidepid=2`, that they cannot be counted) |
+
+**Windows self-check.** At start, the agent reads its own process (and the children it started) both ways:
+
+- through `NtQuerySystemInformation`;
+- through the documented calls: `GetProcessTimes`, `GetProcessIoCounters`, and `GetProcessMemoryInfo` with
+  `PROCESS_MEMORY_COUNTERS_EX2` for the private working set.
+
+The undocumented CPU and I/O fields are trusted only when they agree within a small tolerance. Otherwise those fields
+are `Unavailable` until the next start, and the diagnostics page records the mismatch. Tests run on the Windows CI
+runner against the test's own processes only.
+
+**Linux memory needs a decision.** For other accounts' processes, the only memory figure without ptrace rights is RSS
+(`statm`). Rule 26 says caps, budgets and displays never use RSS. So either:
+
+- memory for other accounts' and system processes on Linux shows "Unavailable: Linux gives Dyno only resident memory
+  for these, which overstates shared memory" (the default this ADR assumes); or
+- the user allows a narrowly labelled RSS figure ("resident, includes shared") for those rows as an exception to rule
+  26.
+
+This is the coordinator's to put to the user.
 
 **How the UI marks it,** on every OS:
 
