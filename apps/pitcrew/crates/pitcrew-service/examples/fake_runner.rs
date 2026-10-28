@@ -132,12 +132,28 @@ fn gate(dir: &std::path::Path) {
 /// reads it empty or half written (it polls for the file to exist).
 fn publish_env(dir: &std::path::Path, dump: &str, held: bool) {
     let part = dir.join("env.txt.part");
-    let _ = std::fs::write(&part, dump);
+    std::fs::write(&part, dump).expect("the fake runner writes env.txt.part");
     if held {
         gate(dir);
     }
-    let _ = std::fs::rename(&part, dir.join("env.txt"));
+    let dest = dir.join("env.txt");
+    // On Windows a rename over a file a test has open for reading fails with PermissionDenied until the reader closes
+    // it (a restarted runner rewriting the dump): try again a bounded number of times, then fail loudly.
+    let mut attempts = 0;
+    loop {
+        match std::fs::rename(&part, &dest) {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && attempts < RENAME_ATTEMPTS => {
+                attempts += 1;
+                std::thread::yield_now();
+            }
+            Err(e) => panic!("the fake runner could not publish {} after {attempts} retries: {e}", dest.display()),
+        }
+    }
 }
+
+/// How often a refused rename of `env.txt` is tried again (each try is one rename call, after yielding the CPU).
+const RENAME_ATTEMPTS: u32 = 100_000;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
