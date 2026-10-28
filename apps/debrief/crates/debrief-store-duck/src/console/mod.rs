@@ -720,7 +720,9 @@ mod tests {
     fn the_guard_judges_the_trees_the_real_parser_makes() {
         let conn = Connection::open_in_memory().unwrap();
         let parse = |sql: &str| -> Value {
-            let text: String = conn.query_row("SELECT json_serialize_sql(?::VARCHAR)", [sql], |r| r.get(0)).unwrap();
+            let text: String = conn
+                .query_row("SELECT json_serialize_sql(?::VARCHAR)", [sql], |r| r.get(0))
+                .unwrap();
             serde_json::from_str(&text).unwrap()
         };
         for ok in [

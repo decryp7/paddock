@@ -868,3 +868,28 @@ analyses 220-237 MB -> 206-216 MB (release build), each analysis's start 265-280
 set (about +75-100 MB over the baseline, DuckDB's limit plus its threads' caches) is its main consumer.
 
 The 300 MB query budget is measured on a release build (unoptimised code keeps about 50 MB more resident): `analysis_memory` skips itself in debug builds and CI runs it with `cargo test --release` on Linux.
+
+## Amendment 2026-10-28: DuckDB 2.0
+
+The store runs on DuckDB 2.0.0 (released 2026-10-21, an LTS release) through duckdb-rs `=1.20000.0` (crates.io,
+2026-10-22; the versions 1.10506.x of this ADR are DuckDB 1.5.6). The research is
+`docs/research/2026-10-duckdb-2-and-large-data.md` (family docs). Decisions:
+
+- **Arrow and Parquet 60** (duckdb-rs 2.0 links Arrow 60); Arrow 60 names the entries of a map `key` and `value` (58 used `keys`
+  and `values`), so `debrief-batch`'s `extra` field says so. Old Parquet segments are unaffected: DuckDB reads Parquet maps by
+  their Parquet names. This also removes zstd 0.13 and zstd-safe 7, so the three RUSTSEC ignores in `deny.toml` are gone.
+- **`default-features = false` stays**: the pinned, checksummed prebuilt library is the only one linked. The release assets are
+  now `duckdb-shared-libs-<platform>.tar.gz` (the fetch script, `libduckdb.mjs` and `cargo xtask libduckdb` read the pins from
+  `fetch-libduckdb.sh`). No extension is bundled and none is loaded (the console sandbox forbids it).
+- **Storage format pinned at open.** `open_db` sets `storage_compatibility_version = 'v1.5.0'` (and `COPY FROM DATABASE` for a
+  shared project attaches its target with `STORAGE_VERSION 'v1.5.0'`), so a catalog created now is still readable by Debrief on
+  DuckDB 1.5. 2.0 keeps the version of a 1.x file it opens (tested with a catalog written by the 1.5.6 CLI). DuckDB's "version
+  number N" error for a catalog written by something newer becomes the existing "saved by a newer Debrief" message. The pin is
+  lifted by a `FORMAT_VERSION` bump that rebuilds the catalog.
+- **`async_threads`** (DuckDB 2.0's I/O pool for Parquet and CSV, four per core by default, independent of `threads`) is set to
+  the Performance threads setting for the store and for the console sandbox.
+- **macOS is Apple silicon only** (DuckDB 2.1 drops Intel; user decision 2026-10-27): the fetch scripts refuse Intel Macs and the
+  universal archive is no longer pinned. Linux x86_64 and aarch64 and Windows x64 are as before (Windows aarch64 is pinned too).
+- **Not needed**: the console guard still works on the 2.0 syntax tree (a test now runs it on trees from the real parser); the
+  generated SQL used no changed syntax. The duckdb-rs Arrow-scan insert measured in the R2b bake-off no longer exists in the
+  crate; that variant was rejected on speed.
