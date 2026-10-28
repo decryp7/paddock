@@ -31,6 +31,10 @@ test.describe('notification channels (plan X17)', () => {
     await expect(input).toHaveAttribute('type', 'password');
     await expect(dialog.getByTestId('dialog-action-save')).toBeDisabled();
     await input.fill('xoxb-secret-token');
+    // The Show button is exactly as tall as the input.
+    const [inputBox, toggleBox] = await Promise.all([input.boundingBox(), dialog.getByTestId('channel-secret-toggle').boundingBox()]);
+    expect(toggleBox!.height).toBe(inputBox!.height);
+    expect(Math.abs(toggleBox!.y - inputBox!.y)).toBeLessThanOrEqual(0.5);
     await dialog.getByTestId('channel-secret-toggle').click();
     await expect(input).toHaveAttribute('type', 'text');
     await input.press('Enter');
