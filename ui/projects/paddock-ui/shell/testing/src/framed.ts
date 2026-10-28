@@ -50,12 +50,12 @@ class FramedHost {}
 export async function renderFramed(component: Type<unknown>, options: FramedOptions = {}): Promise<Framed> {
   const id = options.id ?? 't.framed';
   const def: DialogDef = defineDialog(fakeDialogContract({ id, kind: options.kind ?? 'decision', modality: options.modality, requiredChoice: options.requiredChoice }), {
-    title: msg(id, options.title ?? 'Dialog'),
+    title: msg('pd.testing.framed', 'Dialog'),
     load: () => Promise.resolve(component),
   });
   TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), { provide: DIALOG_LOOKUP, useValue: (x: string) => (x === id ? def : undefined) }, ...(options.providers ?? [])] });
   const fixture = TestBed.createComponent(FramedHost) as ComponentFixture<unknown>;
-  const handle = TestBed.inject(DialogService).open(id, { inputs: options.inputs ?? {} });
+  const handle = TestBed.inject(DialogService).open(id, { inputs: options.inputs ?? {}, ...(options.title ? { title: options.title } : {}) });
   let outcome: DialogOutcome<unknown> | null = null;
   void handle.closed.then((o) => (outcome = o));
   const stable = async () => {

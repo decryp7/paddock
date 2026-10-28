@@ -2,6 +2,7 @@ import { dialogCommandLedger, dialogCommandsSeenJson, recordDialogCommand, reset
 import { shellInvoke } from './plugin';
 
 describe('the dialog command recorder (ADR 0026 §3)', () => {
+  beforeEach(() => resetDialogCommands());
   afterEach(() => resetDialogCommands());
 
   it('records each command once per dialog, ignores other plugins and writes the seen file sorted', () => {
