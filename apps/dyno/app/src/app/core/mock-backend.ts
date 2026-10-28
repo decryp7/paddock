@@ -27,6 +27,7 @@ import type {
   ProcessDetails,
   ProcessRef,
   ProcessSample,
+  CustomAlertRule,
   Settings,
   SizeNode,
   SnapshotDiff,
@@ -1039,6 +1040,23 @@ export class MockBackend implements DynoBackend {
       const extras = mockMaintenanceProblem(settings.maintenance) ?? mockBackupProblem(settings.backup);
       if (extras) throw err('badRequest', extras);
       this.settingsValue = copy(settings);
+      return this.settingsValue;
+    });
+  }
+
+  upsertAlertRule(rule: CustomAlertRule): Promise<Settings> {
+    return this.reply('upsertAlertRule', () => {
+      if (!rule.name.trim()) throw err('badRequest', 'Give the rule a name.');
+      const rules = this.settingsValue.customAlerts ?? [];
+      const exists = rules.some((r) => r.id === rule.id);
+      this.settingsValue = copy({ ...this.settingsValue, customAlerts: exists ? rules.map((r) => (r.id === rule.id ? rule : r)) : [...rules, rule] });
+      return this.settingsValue;
+    });
+  }
+
+  deleteAlertRule(id: string): Promise<Settings> {
+    return this.reply('deleteAlertRule', () => {
+      this.settingsValue = copy({ ...this.settingsValue, customAlerts: (this.settingsValue.customAlerts ?? []).filter((r) => r.id !== id) });
       return this.settingsValue;
     });
   }

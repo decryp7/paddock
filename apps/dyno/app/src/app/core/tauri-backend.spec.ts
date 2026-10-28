@@ -1,7 +1,7 @@
 import { EVENTS, REQUEST_TIMEOUT_MS, TauriBackend, type InvokeFn, type ListenFn } from './tauri-backend';
 
 const REF = { pid: 7, started: 1000 };
-const SETTINGS = { theme: 'dark' } as never;
+const SETTINGS = { launchAtLogin: true } as never;
 
 function fake() {
   const invoke = vi.fn().mockResolvedValue('ok');

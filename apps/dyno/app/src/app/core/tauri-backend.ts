@@ -25,6 +25,7 @@ import type {
   PluginInfo,
   ProcessDetails,
   ProcessRef,
+  CustomAlertRule,
   Settings,
   SizeNode,
   SnapshotDiff,
@@ -456,6 +457,14 @@ export class TauriBackend implements DynoBackend {
 
   saveSettings(settings: Settings): Promise<Settings> {
     return this.request({ saveSettings: { settings } });
+  }
+
+  upsertAlertRule(rule: CustomAlertRule): Promise<Settings> {
+    return this.request({ upsertAlertRule: { rule } });
+  }
+
+  deleteAlertRule(id: string): Promise<Settings> {
+    return this.request({ deleteAlertRule: { id } });
   }
 
   plugins(): Promise<PluginInfo[]> {

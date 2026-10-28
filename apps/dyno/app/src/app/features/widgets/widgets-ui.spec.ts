@@ -157,7 +157,7 @@ describe('dy-tray-items-editor', () => {
   it('adds, changes style and metric, reorders and removes items, up to four', () => {
     env();
     const f = TestBed.createComponent(TrayItemsEditor);
-    let items = [{ id: 'cpu', metric: 'cpuTotal' as const, style: 'verticalBars' as const, opens: 'ownPopover' as const }];
+    let items = [{ id: 'cpu', metric: 'cpuTotal' as const, style: 'verticalBars' as const }];
     f.componentRef.setInput('items', items);
     f.componentInstance.itemsChange.subscribe((v) => {
       items = v as typeof items;

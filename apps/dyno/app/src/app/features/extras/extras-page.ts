@@ -24,7 +24,7 @@ import { ExtrasSleep } from './extras-sleep';
       <header class="page-head">
         <div class="titles">
           <h1>Extras</h1>
-          <p>More ways to look at this computer. Dyno only reads; files move only when you pick them and confirm.</p>
+          <p>More ways to look at this computer. Dyno only reads; it changes nothing.</p>
         </div>
       </header>
 

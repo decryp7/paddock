@@ -328,7 +328,7 @@ describe('dy-alarms-page, Rules', () => {
     const { f, el, mock } = render();
     await settle(f);
     await tab(f, el, 'Rules');
-    vi.spyOn(mock, 'saveSettings').mockRejectedValueOnce({ code: 'badRequest', message: 'No way.' });
+    vi.spyOn(mock, 'upsertAlertRule').mockRejectedValueOnce({ code: 'badRequest', message: 'No way.' });
     (rows(el).find((r) => text(r).includes('GPU limit'))!.querySelector('button[role="switch"]') as HTMLButtonElement).click();
     await settle(f);
     expect(TestBed.inject(SettingsStore).settings()?.customAlerts?.[0]?.enabled).toBe(true);
@@ -389,7 +389,7 @@ describe('dy-alarms-page, Rules', () => {
     await settle(f);
     await tab(f, el, 'Rules');
     vi.spyOn(TestBed.inject(DialogService), 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'answered', value: true }), dismiss() {} } as never);
-    vi.spyOn(mock, 'saveSettings').mockRejectedValueOnce({ code: 'internal', message: 'Disk full.' });
+    vi.spyOn(mock, 'deleteAlertRule').mockRejectedValueOnce({ code: 'internal', message: 'Disk full.' });
     button(el, /^More actions for GPU limit/)!.click();
     await settle(f);
     menuItem('Delete…')!.click();

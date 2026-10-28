@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
-import { Notifier, UNDO_ACTION } from './notifier';
+import { Notifier, NOTICE_ACTION } from './notifier';
 
 function setup() {
   const notices: ShellNotice[] = [];
@@ -30,7 +30,7 @@ describe('Notifier (the shell’s notification host)', () => {
     const run = vi.fn();
     notifier.show('Deleted', 'ok', { label: 'Undo', run });
     const action = notices[0]!.action as { type: string; id: number; label: string };
-    expect(action).toMatchObject({ type: UNDO_ACTION, label: 'Undo' });
+    expect(action).toMatchObject({ type: NOTICE_ACTION, label: 'Undo' });
     notifier.runAction(action.id);
     notifier.runAction(action.id);
     expect(run).toHaveBeenCalledTimes(1);

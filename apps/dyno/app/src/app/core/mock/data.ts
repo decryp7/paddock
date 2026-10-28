@@ -164,7 +164,6 @@ export function demoPlugins(): PluginInfo[] {
 export function demoSettings(): Settings {
   return {
     version: 1,
-    theme: 'system',
     launchAtLogin: true,
     sampling: { intervalMs: 1000, processIntervalMs: 2000 },
     retention: { rawHours: 24, minuteDays: 14, quarterHourDays: 90, hourDays: 730 },

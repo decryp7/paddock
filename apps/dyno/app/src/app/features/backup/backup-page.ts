@@ -42,7 +42,7 @@ import { BACKUP_STATE_LABEL, type DotTone, checkedText, heroTone, hue, initial, 
             <div class="none">
               <dy-icon name="restore" />
               <strong>No backup tool found</strong>
-              <span>Dyno looks for Time Machine, Windows Backup, File History, restic, Borg and Duplicati. It only reads their state; it never runs or manages a backup.</span>
+              <span>Dyno looks for Time Machine, Windows Backup, File History, restic, Borg and Duplicati.</span>
               <button type="button" class="btn" [disabled]="store.busy()" (click)="store.check()">Check again</button>
             </div>
           } @else {
@@ -63,11 +63,7 @@ import { BACKUP_STATE_LABEL, type DotTone, checkedText, heroTone, hue, initial, 
                         <td class="tool"><span class="tile" aria-hidden="true" [style.background]="tile(s.name)">{{ initial(s.name) }}</span><strong>{{ s.name }}</strong></td>
                         <td class="state">
                           <span class="dot" [attr.data-tone]="dot(s)" aria-hidden="true"></span>
-                          @if (s.state === 'healthy') {
-                            <span class="visually-hidden">{{ label(s) }}</span>
-                          } @else {
-                            {{ label(s) }}
-                          }
+                          {{ label(s) }}
                         </td>
                         <td class="when num muted" [title]="fullDate(s)">{{ last(s) }}</td>
                         <td class="muted"><span class="ell" [title]="s.summary">{{ s.summary }}</span></td>

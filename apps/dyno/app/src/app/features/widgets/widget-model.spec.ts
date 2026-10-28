@@ -112,7 +112,7 @@ describe('widget model', () => {
     expect(metricLabel('cpuTotal')).toBe('CPU');
     expect(metricLabel({ process: 'node' })).toBe('Process node');
     expect(metricLabel({ perfCounter: 'x' })).toBe('Counter x');
-    expect(trayStyleId({ id: 'a', metric: 'cpuTotal', style: { number: { unit: '%', label: 'C' } }, opens: 'ownPopover' })).toBe('number');
+    expect(trayStyleId({ id: 'a', metric: 'cpuTotal', style: { number: { unit: '%', label: 'C' } } })).toBe('number');
     expect(styleFromId('ring')).toBe('ring');
     expect(styleFromId('number', '%', 'CPU')).toEqual({ number: { unit: '%', label: 'CPU' } });
     const items = [newTrayItem('cpuTotal', 'lineGraph', [])];

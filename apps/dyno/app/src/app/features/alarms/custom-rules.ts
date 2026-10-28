@@ -81,10 +81,6 @@ export class CustomRules {
   protected readonly summary = ruleSummary;
   protected readonly word = (r: CustomAlertRule) => severityWord(r.severity);
 
-  private async write(next: CustomAlertRule[]): Promise<CommandError | null> {
-    return this.alarms.updateSettings((s) => ({ ...s, customAlerts: next }));
-  }
-
   /** Opens the rule's window (a real OS window, ADR 0026); once the rule is stored the settings are read again. */
   protected async edit(rule: CustomAlertRule | null): Promise<void> {
     const outcome = await this.dialogs.open<true>(ALERT_RULE_DIALOG_ID, {
@@ -95,7 +91,7 @@ export class CustomRules {
   }
 
   protected async toggle(rule: CustomAlertRule, enabled: boolean): Promise<void> {
-    const error = await this.write(this.rules().map((r) => (r.id === rule.id ? { ...r, enabled } : r)));
+    const error = await this.alarms.upsertRule({ ...rule, enabled });
     if (error) this.notifier.error(error);
   }
 
@@ -107,7 +103,7 @@ export class CustomRules {
       confirm: { label: 'Delete rule', destructive: true },
     });
     if (!yes) return;
-    const error = await this.write(this.rules().filter((r) => r.id !== rule.id));
+    const error = await this.alarms.deleteRule(rule.id);
     if (error) this.notifier.error(error);
   }
 }
