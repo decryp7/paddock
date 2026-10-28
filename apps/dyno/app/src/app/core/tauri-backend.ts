@@ -105,6 +105,7 @@ export const EVENTS = {
   agent: 'dyno://agent',
   alarm: 'dyno://alarm',
   diskScan: 'dyno://disk-scan',
+  diskVolumes: 'dyno://disk-volumes',
 } as const;
 
 /** One Tauri event shared by every UI listener: a single `listen`, fanned out, stopped with the last listener. */
@@ -147,6 +148,7 @@ export class TauriBackend implements DynoBackend {
   private readonly agentChannel: EventChannel<AgentStatus>;
   private readonly alarmChannel: EventChannel<AlarmChange>;
   private readonly diskScanChannel: EventChannel<DiskScanStatus>;
+  private readonly diskVolumesChannel: EventChannel<Volume[]>;
   /** How many live listeners want the full process list; the agent sends it only while one does. */
   private processListeners = 0;
   private liveListeners = 0;
@@ -164,6 +166,7 @@ export class TauriBackend implements DynoBackend {
     this.agentChannel = new EventChannel(listenFn, EVENTS.agent);
     this.alarmChannel = new EventChannel(listenFn, EVENTS.alarm);
     this.diskScanChannel = new EventChannel(listenFn, EVENTS.diskScan);
+    this.diskVolumesChannel = new EventChannel(listenFn, EVENTS.diskVolumes);
   }
 
   // ------------------------------------------------------------------------------------------------ live data
@@ -202,6 +205,10 @@ export class TauriBackend implements DynoBackend {
 
   onDiskScan(listener: (s: DiskScanStatus) => void): Unsubscribe {
     return this.diskScanChannel.add(listener);
+  }
+
+  onDiskVolumes(listener: (v: Volume[]) => void): Unsubscribe {
+    return this.diskVolumesChannel.add(listener);
   }
 
   /** Tells the agent the detail level the UI needs now (only when it changed; nothing once nobody listens). */

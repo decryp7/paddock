@@ -95,6 +95,8 @@ export interface DynoBackend {
   onAlarm(listener: (c: AlarmChange) => void): Unsubscribe;
   /** A disk scan's status changed (at most four a second per scan, one final); keep the highest `seq`. No polling. */
   onDiskScan(listener: (s: DiskScanStatus) => void): Unsubscribe;
+  /** The volumes mounted now changed (one came, one went, one stopped answering); the new list. */
+  onDiskVolumes(listener: (v: Volume[]) => void): Unsubscribe;
 
   appInfo(): Promise<AppInfo>;
 

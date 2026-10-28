@@ -866,6 +866,8 @@ pub enum Message {
     Alarm(crate::alarms::AlarmChange),
     /// Agent → app: a disk scan's status changed (at most four per second per scan, a final one at the end). Appended.
     DiskScan(Box<crate::disk::scan::DiskScanStatus>),
+    /// Agent → app: the volumes mounted now changed (one came, one went, one stopped answering). Appended.
+    DiskVolumes(Vec<crate::disk::volume::Volume>),
 }
 
 #[cfg(test)]
@@ -1082,6 +1084,8 @@ mod tests {
         }
         let push = Message::DiskScan(Box::new(disk_status()));
         assert_eq!(round(&push), push);
+        let volumes = Message::DiskVolumes(vec![]);
+        assert_eq!(round(&volumes), volumes);
     }
 
     #[test]

@@ -642,6 +642,11 @@ export class MockBackend implements DynoBackend {
 
   // ------------------------------------------------------------------------------------------------- rules
 
+  /** The mock's volumes never change. */
+  onDiskVolumes(_listener: (v: Volume[]) => void): Unsubscribe {
+    return () => undefined;
+  }
+
   onDiskScan(listener: (s: DiskScanStatus) => void): Unsubscribe {
     return this.disk.onStatus(listener);
   }

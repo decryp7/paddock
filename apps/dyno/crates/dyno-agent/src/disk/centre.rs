@@ -37,6 +37,8 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 pub trait StatusSink: Send + Sync {
     /// A scan's status changed.
     fn status(&self, status: DiskScanStatus);
+    /// The volumes mounted now differ from the last listing (one came, one went, one stopped or started answering).
+    fn volumes_changed(&self, _volumes: Vec<Volume>) {}
 }
 
 /// Whether the OS has given Dyno the right to read the whole disk (a privacy permission on macOS).
@@ -261,6 +263,8 @@ pub struct DiskCentre {
     starting: Mutex<HashSet<String>>,
     kept_nodes: AtomicUsize,
     refreshing: std::sync::atomic::AtomicBool,
+    listing_ticket: AtomicU64,
+    listing_applied: AtomicU64,
     next: AtomicU64,
     scans: Mutex<Vec<Arc<Entry>>>,
     live: Mutex<HashMap<String, Arc<LiveWorkers>>>,
@@ -293,6 +297,8 @@ impl DiskCentre {
             starting: Mutex::new(HashSet::new()),
             kept_nodes: AtomicUsize::new(MAX_KEPT_NODES),
             refreshing: std::sync::atomic::AtomicBool::new(false),
+            listing_ticket: AtomicU64::new(0),
+            listing_applied: AtomicU64::new(0),
             next: AtomicU64::new(1),
             scans: Mutex::new(Vec::new()),
             live: Mutex::new(HashMap::new()),
@@ -339,9 +345,25 @@ impl DiskCentre {
         }
     }
 
+    /// Asks the lister and keeps the answer unless a later question has already been answered (two listings can overlap, and the
+    /// older one may come back last). Tells the sink when the set of volumes differs from the one kept before.
     fn refresh(&self) -> Vec<ListedVolume> {
+        let ticket = self.listing_ticket.fetch_add(1, Ordering::SeqCst) + 1;
         let listed = self.lister.list();
-        *lock(&self.known) = Some(listed.clone());
+        let changed = {
+            let mut known = lock(&self.known);
+            if ticket <= self.listing_applied.load(Ordering::SeqCst) {
+                return listed;
+            }
+            self.listing_applied.store(ticket, Ordering::SeqCst);
+            let identity = |l: &Vec<ListedVolume>| l.iter().map(|v| (v.volume.id.clone(), v.volume.reachable)).collect::<Vec<_>>();
+            let changed = known.as_ref().is_some_and(|old| identity(old) != identity(&listed));
+            *known = Some(listed.clone());
+            changed
+        };
+        if changed {
+            self.sink.volumes_changed(listed.iter().map(|l| l.volume.clone()).collect());
+        }
         listed
     }
 
@@ -366,18 +388,33 @@ impl DiskCentre {
                 if !volume.reachable {
                     return Err(err(ErrorCode::Timeout, format!("{} is not answering.", volume.name)));
                 }
+                // The used space as of now, not as of the last listing, is what the progress is measured against.
+                let listed = ListedVolume { volume, root };
+                let used_now = self.lister.capacity_now(&listed).map(|(total, free)| total.saturating_sub(free));
+                let ListedVolume { volume, root } = listed;
                 Ok(Resolved {
                     name: volume.name.clone(),
                     root,
                     location: volume.location.clone(),
                     rotational: volume.rotational,
                     host: host_of(&volume.location),
-                    total_bytes: volume.whole_volume.then(|| volume.used()).flatten(),
+                    total_bytes: volume.whole_volume.then(|| used_now.or_else(|| volume.used())).flatten(),
                     volume: Some(volume),
                 })
             }
             DiskTarget::Folder { path } => {
-                let root = folder::check(path).map_err(|m| err(ErrorCode::BadRequest, m))?;
+                // Resolving the path touches the file system (a share that has gone away can hold the call): it gets the same bounded
+                // treatment as the first look at the root, and a thread that never returns counts against this computer.
+                let (alive, p) = (
+                    lock(&self.live).entry("this computer".to_string()).or_default().enter(),
+                    path.clone(),
+                );
+                let root = super::volumes::within(STAT_LIMIT, move || {
+                    let _alive = alive;
+                    folder::check(&p)
+                })
+                .ok_or_else(|| err(ErrorCode::Timeout, "That folder did not answer in time."))?
+                .map_err(|m| err(ErrorCode::BadRequest, m))?;
                 let home = self
                     .listed(false)
                     .into_iter()
@@ -511,7 +548,20 @@ impl DiskCentre {
     /// Drops the oldest finished scans until there are at most [`MAX_KEPT`] with the new one, and the nodes they hold, with room
     /// for a new scan of up to `incoming` nodes, stay within [`MAX_KEPT_NODES`]. A running scan is never dropped.
     fn evict(&self, scans: &mut Vec<Arc<Entry>>, incoming: u32) {
-        let nodes = |scans: &Vec<Arc<Entry>>| scans.iter().map(|e| e.walk.with_index(DiskIndex::len)).sum::<usize>() + incoming as usize;
+        // A finished scan holds what it has; a running one may grow to its own limit, so that much is reserved for it.
+        let nodes = |scans: &Vec<Arc<Entry>>| {
+            scans
+                .iter()
+                .map(|e| {
+                    if e.running() {
+                        e.walk.with_index(|i| i.limits().max_nodes as usize)
+                    } else {
+                        e.walk.with_index(DiskIndex::len)
+                    }
+                })
+                .sum::<usize>()
+                + incoming as usize
+        };
         while scans.len() >= MAX_KEPT || nodes(scans) > self.kept_nodes.load(Ordering::Relaxed) {
             match scans.iter().position(|e| !e.running()) {
                 Some(old) => {
@@ -621,11 +671,15 @@ mod tests {
     const MB: u64 = 1024 * 1024;
 
     #[derive(Default)]
-    struct Events(Mutex<Vec<DiskScanStatus>>);
+    struct Events(Mutex<Vec<DiskScanStatus>>, Mutex<Vec<Vec<Volume>>>);
 
     impl StatusSink for Events {
         fn status(&self, s: DiskScanStatus) {
             lock(&self.0).push(s);
+        }
+
+        fn volumes_changed(&self, v: Vec<Volume>) {
+            lock(&self.1).push(v);
         }
     }
 
@@ -648,12 +702,16 @@ mod tests {
     }
 
     /// A fixed volume list that counts how often it was asked.
-    struct Fixed(Mutex<Vec<ListedVolume>>, AtomicUsize);
+    struct Fixed(Mutex<Vec<ListedVolume>>, AtomicUsize, Mutex<Option<(u64, u64)>>);
 
     impl VolumeLister for Fixed {
         fn list(&self) -> Vec<ListedVolume> {
             self.1.fetch_add(1, Ordering::SeqCst);
             lock(&self.0).clone()
+        }
+
+        fn capacity_now(&self, _: &ListedVolume) -> Option<(u64, u64)> {
+            *lock(&self.2)
         }
     }
 
@@ -715,7 +773,7 @@ mod tests {
             Arc::new(Manual::default()),
             Arc::new(Access::default()),
         );
-        let lister = Arc::new(Fixed(Mutex::new(volumes), AtomicUsize::new(0)));
+        let lister = Arc::new(Fixed(Mutex::new(volumes), AtomicUsize::new(0), Mutex::new(None)));
         let centre = DiskCentre::new(
             source,
             lister.clone(),
@@ -1280,8 +1338,11 @@ mod tests {
             c.0.fetch_add(3_000, Ordering::SeqCst);
         });
         let s = r.centre.start(DiskTarget::Volume { id: "V".into() }).unwrap();
+        // The first event is sent before anything is read: nothing to say yet. (The status returned by `start` may already be
+        // later, because the walk runs on its own threads.)
+        let first = r.events.all().remove(0);
         assert_eq!(
-            (s.items_per_second, s.eta_seconds, s.hidden_bytes, s.scanned_at),
+            (first.items_per_second, first.eta_seconds, first.hidden_bytes, first.scanned_at),
             (None, None, None, None)
         );
         let done = wait_final(&r, s.scan);
@@ -1443,6 +1504,124 @@ mod tests {
         wait_final(&r, second.scan);
         let kept: Vec<u64> = r.centre.scans().iter().map(|s| s.scan).collect();
         assert_eq!(kept, vec![second.scan]);
+    }
+
+    #[test]
+    fn a_change_in_the_volumes_is_announced_but_not_a_change_in_free_space() {
+        let fs = Arc::new(FakeFs::new());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        r.centre.refresh();
+        assert!(lock(&r.events.1).is_empty(), "the first listing is not a change");
+        lock(&r.lister.0)[0].volume.free = Some(1);
+        r.centre.refresh();
+        assert!(lock(&r.events.1).is_empty(), "free space moves all the time");
+        lock(&r.lister.0).push(vol("W", &fs.root(), VolumeLocation::External { bus: None }));
+        r.centre.refresh();
+        let seen = lock(&r.events.1).clone();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].iter().map(|v| v.id.as_str()).collect::<Vec<_>>(), ["V", "W"]);
+        lock(&r.lister.0)[1].volume.reachable = false;
+        r.centre.refresh();
+        assert_eq!(lock(&r.events.1).len(), 2, "a volume that stopped answering is a change");
+    }
+
+    /// A lister whose first answer is held (an older question that comes back last).
+    struct Overlapping {
+        calls: AtomicUsize,
+        hold: Arc<Gate>,
+        first_asked: Mutex<std::sync::mpsc::Sender<()>>,
+        old: Vec<ListedVolume>,
+        new: Vec<ListedVolume>,
+    }
+
+    impl VolumeLister for Overlapping {
+        fn list(&self) -> Vec<ListedVolume> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                let _ = lock(&self.first_asked).send(());
+                self.hold.pass();
+                self.old.clone()
+            } else {
+                self.new.clone()
+            }
+        }
+    }
+
+    #[test]
+    fn an_older_listing_that_comes_back_last_does_not_overwrite_a_newer_one() {
+        let fs = Arc::new(FakeFs::new());
+        let (tx, asked) = std::sync::mpsc::channel();
+        let hold = Gate::new();
+        let lister = Arc::new(Overlapping {
+            calls: AtomicUsize::new(0),
+            hold: hold.clone(),
+            first_asked: Mutex::new(tx),
+            old: vec![vol("OLD", &fs.root(), VolumeLocation::Internal)],
+            new: vec![vol("NEW", &fs.root(), VolumeLocation::Internal)],
+        });
+        let centre = Arc::new(DiskCentre::new(
+            fs.clone(),
+            lister,
+            Arc::new(Events::default()),
+            Arc::new(Manual::default()),
+            Arc::new(Access::default()),
+            8,
+            ScanLimits::default(),
+        ));
+        let first = centre.clone();
+        let t = std::thread::spawn(move || first.refresh());
+        asked.recv().unwrap();
+        centre.refresh();
+        hold.open();
+        t.join().unwrap();
+        let names: Vec<String> = lock(&centre.known).clone().unwrap().iter().map(|l| l.volume.id.clone()).collect();
+        assert_eq!(names, ["NEW"]);
+    }
+
+    #[test]
+    fn a_whole_volume_scan_measures_against_the_used_space_of_now() {
+        let fs = Arc::new(FakeFs::new());
+        tree(&fs, &fs.root());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        *lock(&r.lister.2) = Some((1000 * MB, 100 * MB));
+        let s = r.centre.start(DiskTarget::Volume { id: "V".into() }).unwrap();
+        assert_eq!(
+            r.events.all()[0].progress.total_bytes,
+            Some(900 * MB),
+            "not the 600 MB of the listing"
+        );
+        wait_final(&r, s.scan);
+    }
+
+    #[test]
+    fn running_scans_keep_room_for_their_growth_in_the_node_budget() {
+        let fs = Arc::new(FakeFs::new());
+        let root = fs.root();
+        let (a, b, c) = (fs.dir(&root, "a"), fs.dir(&root, "b"), fs.dir(&root, "c"));
+        let r = rig(
+            fs.clone(),
+            vec![
+                vol("A", &a, VolumeLocation::Internal),
+                vol("B", &b, VolumeLocation::Internal),
+                vol("C", &c, VolumeLocation::Internal),
+            ],
+        );
+        // Budget for one scan of 10_000 nodes and a little more.
+        r.centre.set_kept_nodes(15_000);
+        let done = r.centre.start(DiskTarget::Volume { id: "A".into() }).unwrap();
+        wait_final(&r, done.scan);
+        let gate = Gate::new();
+        let g = gate.clone();
+        fs.on_read(move |_| g.pass());
+        let running = r.centre.start(DiskTarget::Volume { id: "B".into() }).unwrap();
+        gate.wait_arrived(1);
+        // The running scan may grow to 10_000, so with a third of 10_000 the finished one has to go.
+        let third = r.centre.start(DiskTarget::Volume { id: "C".into() }).unwrap();
+        let kept: Vec<u64> = r.centre.scans().iter().map(|s| s.scan).collect();
+        assert!(!kept.contains(&done.scan), "the finished scan made room");
+        assert!(kept.contains(&running.scan) && kept.contains(&third.scan));
+        gate.open();
+        wait_final(&r, running.scan);
+        wait_final(&r, third.scan);
     }
 
     #[test]

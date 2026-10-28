@@ -70,13 +70,15 @@ impl LiveWorkers {
         }
     }
 
-    fn enter(self: &Arc<Self>) -> LiveGuard {
+    /// Counts one more live thread until the guard is dropped.
+    pub fn enter(self: &Arc<Self>) -> LiveGuard {
         *lock(&self.count) += 1;
         LiveGuard(self.clone())
     }
 }
 
-struct LiveGuard(Arc<LiveWorkers>);
+/// Counts a thread of the host as alive until it is dropped.
+pub struct LiveGuard(Arc<LiveWorkers>);
 
 impl Drop for LiveGuard {
     fn drop(&mut self) {
@@ -125,6 +127,8 @@ struct Task {
     path: PathBuf,
     /// A second try of a refused folder: "not found" then means the path could not be rebuilt, not that the folder is empty.
     retry: bool,
+    /// Part of a retry pass: the folders it creates are tracked in `reopened` until read, so a pass cut short can mark them.
+    track: bool,
 }
 
 #[derive(Default)]
@@ -201,8 +205,14 @@ impl Walk {
     ) -> Result<Arc<Walk>, ReadError> {
         let me = {
             let (src, path) = (source.clone(), root.clone());
-            super::volumes::within(cfg.stat_limit, move || src.stat(&path))
-                .ok_or_else(|| ReadError::Unreachable("the first look at the folder did not return in time".into()))??
+            // The thread that looks is one of the host's live threads while it is inside the call: if the call never returns,
+            // later starts see it as abandoned and are refused after a few, instead of piling up.
+            let alive = cfg.live.enter();
+            super::volumes::within(cfg.stat_limit, move || {
+                let _alive = alive;
+                src.stat(&path)
+            })
+            .ok_or_else(|| ReadError::Unreachable("the first look at the folder did not return in time".into()))??
         };
         if me.kind != EntryKind::Dir {
             return Err(ReadError::Other("that is not a folder".into()));
@@ -222,6 +232,7 @@ impl Walk {
                     node: root_node,
                     path: root,
                     retry: false,
+                    track: false,
                 }],
                 ..Queue::default()
             }),
@@ -323,6 +334,7 @@ impl Walk {
                     node,
                     path: super::names::join_components(&self.root, &names),
                     retry: true,
+                    track: true,
                 })
                 .collect()
         };
@@ -513,6 +525,11 @@ impl Walk {
             }
             {
                 let mut q = lock(&self.queue);
+                // Looked at again under the lock that a new pass resets: a worker of an earlier pass must not count itself out of
+                // the new pass's queue.
+                if stale() {
+                    return;
+                }
                 q.in_flight -= 1;
                 q.stack.extend(children);
             }
@@ -529,9 +546,15 @@ impl Walk {
         }
     }
 
-    /// Whether a multi-link file was already counted under another name.
+    /// Whether a file has several names and a file id (it must be counted once, which is decided when the folder is committed).
+    fn is_linked(e: &DirEntryInfo) -> bool {
+        e.links > 1 && e.ino != 0
+    }
+
+    /// Whether a multi-link file was already counted under another name; if not, it is counted now. Called only while the
+    /// folder that holds it is being committed, so a discarded listing leaves no mark behind.
     fn already_counted(&self, e: &DirEntryInfo) -> bool {
-        if e.links <= 1 || e.ino == 0 {
+        if !Self::is_linked(e) {
             return false;
         }
         let mut seen = lock(&self.linked);
@@ -550,6 +573,8 @@ impl Walk {
         let (mut small, mut small_items, mut small_newest) = (Sizes::default(), 0u64, Timestamp(0));
         let mut unreachable: Option<String> = None;
         let mut entry_denied = false;
+        let mut linked: Vec<DirEntryInfo> = Vec::new();
+        let mut listing_ids: HashSet<(u64, u64)> = HashSet::new();
         // Entries seen that will be committed: counted at once as pending, so a huge folder shows its progress while it is read.
         let mut seen = 0u64;
         let every = self.cfg.listing_progress_every.max(1);
@@ -566,10 +591,8 @@ impl Walk {
             match entry {
                 Ok(e) => match e.kind {
                     EntryKind::Link | EntryKind::Other => {}
+                    EntryKind::File if Self::is_linked(&e) => linked.push(e),
                     EntryKind::File => {
-                        if self.already_counted(&e) {
-                            return true;
-                        }
                         seen += 1;
                         self.pending_items.fetch_add(1, Ordering::Relaxed);
                         if e.bytes >= notable {
@@ -588,7 +611,8 @@ impl Walk {
                             seen += 1;
                             self.pending_items.fetch_add(1, Ordering::Relaxed);
                             mounts.push(e.name);
-                        } else if e.ino == 0 || lock(&self.entered).insert((e.dev, e.ino)) {
+                        } else if e.ino == 0 || listing_ids.insert((e.dev, e.ino)) {
+                            // Only a note of this listing; the folder is claimed for good when the listing is committed.
                             seen += 1;
                             self.pending_items.fetch_add(1, Ordering::Relaxed);
                             dirs.push(e);
@@ -637,13 +661,37 @@ impl Walk {
                 self.pending_items.fetch_sub(seen, Ordering::Relaxed);
                 return Vec::new();
             }
+            // Claim what this listing found: a folder some other path already entered is not entered again, and a file that has
+            // another name already counted adds nothing. Done here, once the listing is known to count, so a listing that is
+            // discarded (cancel, a newer pass, a dropped share) marks nothing and a retry sees the folder as it was.
+            {
+                let mut entered = lock(&self.entered);
+                dirs.retain(|d| d.ino == 0 || entered.insert((d.dev, d.ino)));
+            }
+            for f in linked {
+                if self.already_counted(&f) {
+                    continue;
+                }
+                if f.bytes >= notable {
+                    big.push(f);
+                } else {
+                    small.on_disk = small.on_disk.saturating_add(f.bytes);
+                    small.logical = small.logical.saturating_add(f.logical);
+                    small_items += 1;
+                    small_newest = small_newest.max(f.mtime);
+                }
+            }
             for d in &dirs {
                 if let Some(node) = i.add_folder(task.node, &d.name) {
                     next.push(Task {
                         node,
                         path: task.path.join(&d.name),
                         retry: false,
+                        track: task.track,
                     });
+                    if task.track {
+                        lock(&self.reopened).insert(node, task.path.join(&d.name));
+                    }
                 }
             }
             for m in &mounts {
@@ -1229,6 +1277,97 @@ mod tests {
             vec!["ended", "restarted", "ended"],
             "never ended before it was announced as started"
         );
+    }
+
+    #[test]
+    fn a_listing_that_is_discarded_marks_nothing_so_the_next_retry_sees_the_folder_as_it_was() {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        let lib = fs.dir(&r, "Library");
+        fs.linked_file(&lib, "first-name", 40, 700);
+        let sub = fs.dir(&lib, "sub");
+        fs.file(&sub, "inside", 7);
+        fs.linked_file(&lib, "second-name", 40, 700);
+        fs.fail_open(&lib, ReadError::PermissionDenied);
+        let fs = Arc::new(fs);
+        let (w, _, _) = run(fs.clone(), r, cfg(1));
+        assert!(!w.with_index(DiskIndex::is_complete));
+        fs.allow_open(&lib);
+        // The retry stops half way through the folder: the subfolder and the first name have been seen, nothing committed.
+        let gate = Gate::new();
+        let g = gate.clone();
+        let stop_at = sub.clone();
+        fs.on_entry(move |p| {
+            if p == stop_at {
+                g.pass();
+            }
+        });
+        w.retry().unwrap();
+        gate.wait_arrived(1);
+        w.cancel();
+        gate.open();
+        assert_eq!(w.wait(), End::Cancelled);
+        fs.on_entry(|_| {});
+        // The next retry must find the subfolder and the linked file as if the first had never looked.
+        w.retry().unwrap();
+        assert_eq!(w.wait(), End::Done);
+        assert!(w.with_index(DiskIndex::is_complete), "nothing was left out");
+        assert_eq!(
+            w.snapshot().progress.bytes,
+            40 + 7,
+            "the linked file once, the subfolder's file counted"
+        );
+    }
+
+    #[test]
+    fn a_retry_cut_short_also_remembers_the_subfolders_it_had_made() {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        let lib = fs.dir(&r, "Library");
+        let a = fs.dir(&lib, "a");
+        fs.file(&a, "x", 5);
+        let b = fs.dir(&lib, "b");
+        fs.file(&b, "y", 6);
+        fs.fail_open(&lib, ReadError::PermissionDenied);
+        let fs = Arc::new(fs);
+        let (w, _, _) = run(fs.clone(), r, cfg(1));
+        fs.allow_open(&lib);
+        // Hold the pass when it starts reading the subfolders: Library is committed (its two subfolders exist), they are not read.
+        let gate = Gate::new();
+        let g = gate.clone();
+        let (a2, b2) = (a.clone(), b.clone());
+        fs.on_read(move |p| {
+            if p == a2 || p == b2 {
+                g.pass();
+            }
+        });
+        w.retry().unwrap();
+        gate.wait_arrived(1);
+        w.cancel();
+        gate.open();
+        assert_eq!(w.wait(), End::Cancelled);
+        assert!(!w.with_index(DiskIndex::is_complete));
+        fs.on_read(|_| {});
+        w.retry().unwrap();
+        assert_eq!(w.wait(), End::Done, "the folders the cut-short pass made are read by the next one");
+        assert!(w.with_index(DiskIndex::is_complete));
+        assert_eq!(w.snapshot().progress.bytes, 11);
+    }
+
+    #[test]
+    fn a_first_look_that_never_returns_stays_counted_as_a_live_thread() {
+        let fs = FakeFs::new();
+        let gate = Gate::new();
+        let g = gate.clone();
+        fs.on_stat(move |_| g.pass());
+        let mut c = cfg(1);
+        c.stat_limit = std::time::Duration::from_millis(0);
+        let live = c.live.clone();
+        let fs = Arc::new(fs);
+        assert!(Walk::start(fs.clone(), fs.root(), "vol", c, Arc::new(Rec::default())).is_err());
+        assert_eq!(live.count(), 1, "the thread inside the call is on the host's books");
+        gate.open();
+        live.wait_zero();
     }
 
     #[test]

@@ -182,8 +182,16 @@ pub struct DiskIndex {
     skipped_folders: u64,
 }
 
+/// What a name too long to be real is stored as. No supported file system has such a name, so this is never a path to walk; it
+/// is stored whole rather than cut, because a cut could split a character and the bytes are rebuilt into a path unchecked.
+const TOO_LONG: &[u8] = b"(name too long)";
+
 fn clamp_name(name: &[u8]) -> &[u8] {
-    &name[..name.len().min(MAX_NAME)]
+    if name.len() > MAX_NAME {
+        TOO_LONG
+    } else {
+        name
+    }
 }
 
 impl DiskIndex {
@@ -465,13 +473,9 @@ impl DiskIndex {
         Ok(out)
     }
 
-    /// One page of the children of `id`, biggest first. Children below `min_fraction` of the folder's size (0 shows all)
-    /// are folded into [`DiskChildren::other`]; `limit` is clamped to 1..=[`MAX_PAGE`].
-    pub fn children(&self, id: NodeId, offset: u32, limit: u32, min_fraction: f64) -> Result<DiskChildren, IndexError> {
-        if (id.0 as usize) >= self.nodes.len() {
-            return Err(IndexError::NoSuchNode);
-        }
-        let parent = &self.nodes[id.0 as usize];
+    /// The ids of the children of `id`, biggest first (equal sizes by name bytes, then by id).
+    fn sorted_kids(&self, id: u32) -> Vec<u32> {
+        let parent = &self.nodes[id as usize];
         let mut kids: Vec<u32> = Vec::with_capacity(parent.child_count as usize);
         let mut at = parent.first_child;
         while at != NONE {
@@ -485,6 +489,17 @@ impl DiskIndex {
                 .then_with(|| self.name_bytes(*a).cmp(self.name_bytes(*b)))
                 .then(a.cmp(b))
         });
+        kids
+    }
+
+    /// One page of the children of `id`, biggest first. Children below `min_fraction` of the folder's size (0 shows all)
+    /// are folded into [`DiskChildren::other`]; `limit` is clamped to 1..=[`MAX_PAGE`].
+    pub fn children(&self, id: NodeId, offset: u32, limit: u32, min_fraction: f64) -> Result<DiskChildren, IndexError> {
+        if (id.0 as usize) >= self.nodes.len() {
+            return Err(IndexError::NoSuchNode);
+        }
+        let parent = &self.nodes[id.0 as usize];
+        let kids = self.sorted_kids(id.0);
         let min_bytes = if min_fraction > 0.0 {
             (parent.bytes as f64 * min_fraction.min(1.0)).ceil() as u64
         } else {
@@ -858,8 +873,11 @@ mod tests {
         assert_eq!(
             i.path_components(g).unwrap()[1].len(),
             1000,
-            "a name no file system allows is cut only past 1024 bytes"
+            "a long name is kept whole up to 1024 bytes"
         );
+        let absurd = "é".repeat(600);
+        let h = i.add_folder(i.root(), &absurd).unwrap();
+        assert_eq!(i.node(h).unwrap().name, "(name too long)", "never cut in the middle of a character");
     }
 
     /// A name that is not valid text where the platform allows one (Unix); a plain one elsewhere.

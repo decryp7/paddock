@@ -236,7 +236,7 @@ impl Shared {
     /// defaults with a note in the activity log). Returns the sampler's two ports separately. `details` is a second
     /// process source used only for on-demand details, so a slow `lsof` never delays a sampling tick.
     pub fn build(dirs: Dirs, platform: Platform, details: Box<dyn ProcessSource>, reveal: Reveal) -> Result<Built, String> {
-        Shared::build_with(dirs, platform, details, reveal, crate::disk::DiskPorts::os())
+        Shared::build_with(dirs, platform, details, reveal, crate::disk::DiskPorts::none())
     }
 
     /// [`Shared::build`] with the disk map's machine ports given (tests pass fixed ones).

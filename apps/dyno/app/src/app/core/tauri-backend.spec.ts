@@ -255,6 +255,7 @@ describe('TauriBackend: live subscription', () => {
 describe('TauriBackend: push channels', () => {
   it('the disk scan event has the name the shell emits', () => {
     expect(EVENTS.diskScan).toBe('dyno://disk-scan');
+    expect(EVENTS.diskVolumes).toBe('dyno://disk-volumes');
   });
 
 
@@ -263,6 +264,7 @@ describe('TauriBackend: push channels', () => {
     ['onActivity', EVENTS.activity],
     ['onAgentStatus', EVENTS.agent],
     ['onDiskScan', EVENTS.diskScan],
+    ['onDiskVolumes', EVENTS.diskVolumes],
   ] as const)('%s listens to its own event', async (method, event) => {
     const { backend, emit, listen, stops } = fake();
     const l = vi.fn();

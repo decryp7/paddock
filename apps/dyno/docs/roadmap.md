@@ -491,7 +491,11 @@ Not part of v1; anything new goes here.
 - **Disk map on Windows, faster (open, after 1.0).** Each file is opened once (`CreateFileW`, then two queries) to get its volume
   serial, file index, link count and allocation size. Reading ids and allocation sizes for a whole folder from one folder handle
   (`GetFileInformationByHandleEx` with `FileIdExtdDirectoryInfo`) would cut that, but it carries no link count, so hard links
-  would need another way to be found. Measure on a real Windows disk before choosing.
+  would need another way to be found. Measure on a real Windows disk before choosing. Follow-ups: take the folder id and the
+  allocation size from enumeration and open a handle only for files (for their link count); on Windows 11 24H2 and later,
+  `GetFileInformationByName` reads those without opening the file at all.
+- **1.0 manual check, disk map on Windows:** measure files per second on a real NTFS volume with Defender on (real-time
+  protection scans every open), and compare with the figure on macOS before the release.
 - Further ideas land here as they come up.
 
 ## Screenshot checklist

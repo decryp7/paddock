@@ -52,8 +52,40 @@ pub struct DiskPorts {
     pub access: std::sync::Arc<dyn centre::AccessProbe>,
 }
 
+/// No volumes and no access rights to ask about: what an agent over a fake platform (tests, embedding) gets, so it never reads
+/// the machine's mount table, runs `diskutil` or probes a share.
+struct NoVolumes;
+
+impl volumes::VolumeLister for NoVolumes {
+    fn list(&self) -> Vec<volumes::ListedVolume> {
+        Vec::new()
+    }
+}
+
+struct NoAccessRights;
+
+impl centre::AccessProbe for NoAccessRights {
+    fn full_disk_access_missing(&self) -> bool {
+        false
+    }
+
+    fn open_settings(&self) -> Result<(), dyno_core::ports::PlatformError> {
+        Err(dyno_core::ports::PlatformError::Unsupported(
+            "This agent has no system to ask.".into(),
+        ))
+    }
+}
+
 impl DiskPorts {
-    /// The machine's own.
+    /// Nothing of the machine (the default of [`Running::start`](crate::Running::start)).
+    pub fn none() -> DiskPorts {
+        DiskPorts {
+            volumes: std::sync::Arc::new(NoVolumes),
+            access: std::sync::Arc::new(NoAccessRights),
+        }
+    }
+
+    /// The machine's own: only the real agent binaries use it (`Running::start_os`).
     pub fn os() -> DiskPorts {
         DiskPorts {
             volumes: std::sync::Arc::new(volumes::OsVolumes::default()),
@@ -66,6 +98,12 @@ impl DiskPorts {
 pub struct BroadcastStatus(pub std::sync::Weak<crate::agent::Shared>);
 
 impl centre::StatusSink for BroadcastStatus {
+    fn volumes_changed(&self, volumes: Vec<dyno_core::disk::volume::Volume>) {
+        if let Some(shared) = self.0.upgrade() {
+            shared.broadcast(&dyno_core::protocol::Message::DiskVolumes(volumes));
+        }
+    }
+
     fn status(&self, status: dyno_core::disk::scan::DiskScanStatus) {
         if let Some(shared) = self.0.upgrade() {
             shared.broadcast_scan(&status);

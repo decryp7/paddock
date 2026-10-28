@@ -24,6 +24,11 @@ pub struct ListedVolume {
 pub trait VolumeLister: Send + Sync {
     /// The volumes mounted now.
     fn list(&self) -> Vec<ListedVolume>;
+    /// The capacity and free bytes of one local volume right now (a scan's total is the used space as of its start, not as of
+    /// the last listing). `None` when the lister cannot say quickly; the listing's numbers are used then.
+    fn capacity_now(&self, _volume: &ListedVolume) -> Option<(u64, u64)> {
+        None
+    }
 }
 
 /// Runs `f` on its own thread and waits at most `limit` for the answer; `None` when it did not come in time (the thread
@@ -127,6 +132,14 @@ pub struct OsVolumes {
 }
 
 impl VolumeLister for OsVolumes {
+    fn capacity_now(&self, volume: &ListedVolume) -> Option<(u64, u64)> {
+        // A network volume may block in the kernel for as long as the server is gone: only local volumes are asked here.
+        if matches!(volume.volume.location, dyno_core::disk::volume::VolumeLocation::Network { .. }) {
+            return None;
+        }
+        dyno_platform::volumes::capacity(&volume.volume.mount)
+    }
+
     fn list(&self) -> Vec<ListedVolume> {
         list_mounts(
             dyno_platform::volumes::mounts(),

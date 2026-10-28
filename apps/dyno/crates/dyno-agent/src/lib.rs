@@ -45,8 +45,19 @@ pub struct Running {
 }
 
 impl Running {
-    /// Starts the agent over `platform`'s ports in `dirs`.
+    /// Starts the agent over `platform`'s ports in `dirs`, with a disk map that sees no volumes (see [`disk::DiskPorts::none`]).
+    /// The real agent uses [`Running::start_os`].
     pub fn start(
+        dirs: paths::Dirs,
+        platform: dyno_platform::Platform,
+        details: Box<dyn dyno_core::ports::ProcessSource>,
+        reveal: agent::Reveal,
+    ) -> Result<Running, String> {
+        Running::start_with(dirs, platform, details, reveal, disk::DiskPorts::none())
+    }
+
+    /// [`Running::start`] for the real machine: the disk map lists the real volumes and asks the OS for access rights.
+    pub fn start_os(
         dirs: paths::Dirs,
         platform: dyno_platform::Platform,
         details: Box<dyn dyno_core::ports::ProcessSource>,

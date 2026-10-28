@@ -29,6 +29,8 @@ pub mod events {
     pub const ALARM: &str = "dyno://alarm";
     /// `DiskScanStatus`.
     pub const DISK_SCAN: &str = "dyno://disk-scan";
+    /// `Vec<Volume>`.
+    pub const DISK_VOLUMES: &str = "dyno://disk-volumes";
 }
 
 /// The icons are redrawn at most this often (and only when their picture changed).
@@ -186,6 +188,10 @@ impl Sink for Shell {
 
     fn disk_scan(&self, status: dyno_core::disk::scan::DiskScanStatus) {
         self.emit(events::DISK_SCAN, status);
+    }
+
+    fn disk_volumes(&self, volumes: Vec<dyno_core::disk::volume::Volume>) {
+        self.emit(events::DISK_VOLUMES, volumes);
     }
 
     fn agent(&self, status: AgentStatus) {

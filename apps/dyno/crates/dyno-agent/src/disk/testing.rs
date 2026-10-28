@@ -20,6 +20,7 @@ pub struct FakeFs {
     entry_errors: Mutex<HashMap<PathBuf, Vec<ReadError>>>,
     hook: Mutex<Option<Hook>>,
     stat_hook: Mutex<Option<Hook>>,
+    entry_hook: Mutex<Option<Hook>>,
     next_ino: AtomicU64,
     pub reads: AtomicU64,
 }
@@ -34,6 +35,7 @@ impl FakeFs {
             entry_errors: Mutex::new(HashMap::new()),
             hook: Mutex::new(None),
             stat_hook: Mutex::new(None),
+            entry_hook: Mutex::new(None),
             next_ino: AtomicU64::new(100),
             reads: AtomicU64::new(0),
         };
@@ -123,6 +125,11 @@ impl FakeFs {
         self.entry_errors.lock().unwrap().insert(path.to_path_buf(), errors);
     }
 
+    /// Runs after every entry of a folder has been handed to the reader, with the entry's path (to stop a listing half way).
+    pub fn on_entry(&self, f: impl Fn(&Path) + Send + Sync + 'static) {
+        *self.entry_hook.lock().unwrap() = Some(Arc::new(f));
+    }
+
     /// Runs before every `stat` (to hold the first look at a root at a known point).
     pub fn on_stat(&self, f: impl Fn(&Path) + Send + Sync + 'static) {
         *self.stat_hook.lock().unwrap() = Some(Arc::new(f));
@@ -165,9 +172,14 @@ impl DirSource for FakeFs {
             return Err(e.clone());
         }
         let list = self.entries.lock().unwrap().get(path).cloned().ok_or(ReadError::NotFound)?;
+        let entry_hook = self.entry_hook.lock().unwrap().clone();
         for e in list {
+            let name = e.name.clone();
             if !each(Ok(e)) {
                 return Ok(());
+            }
+            if let Some(h) = &entry_hook {
+                h(&path.join(name));
             }
         }
         let errors = self.entry_errors.lock().unwrap().get(path).cloned().unwrap_or_default();
