@@ -253,11 +253,12 @@ fn a_lost_service_is_one_outage_with_a_repair_and_a_return_ends_it() {
     let app = app(dir.path());
     let main = window(&app, "main");
     let events = events(&app, "paddock://service-health");
-    health::report(
+    health::report_with(
         app.handle(),
         &ConnectionState::Unavailable {
             message: "not running".into(),
         },
+        true,
     );
     let down = wait_for(&events, "the outage", |s| service(s, health::SERVICE)["state"] == "down");
     assert_eq!(service(&down, health::SERVICE)["repair"], "restart");
@@ -271,6 +272,18 @@ fn a_lost_service_is_one_outage_with_a_repair_and_a_return_ends_it() {
         },
     );
     wait_for(&events, "the recovery", |s| service(s, health::SERVICE)["state"] == "ok");
+    // A service that was never installed is its own outage, with the OS prompt named.
+    health::report_with(
+        app.handle(),
+        &ConnectionState::Unavailable {
+            message: "not found".into(),
+        },
+        false,
+    );
+    let down = wait_for(&events, "the not-installed outage", |s| {
+        service(s, health::SERVICE)["state"] == "down"
+    });
+    assert_eq!(service(&down, health::SERVICE)["cause"]["code"], "pc.service.not-installed");
 }
 
 #[test]

@@ -18,11 +18,12 @@ import { EventsFeed } from './events-feed';
 import { feedItems } from './feed';
 import { MachineTiles } from './machine-tiles';
 import { RunnerTile } from './runner-tile';
+import { ServiceOffline } from './service-offline';
 
 /** The home screen: live runner tiles, the machine, history charts and the events feed. */
 @Component({
   selector: 'pc-dashboard-page',
-  imports: [MatIcon, RouterLink, RunnerTile, MachineTiles, Chart, Timeline, EventsFeed, LoadState, EmptyState],
+  imports: [MatIcon, RouterLink, RunnerTile, MachineTiles, Chart, Timeline, EventsFeed, LoadState, EmptyState, ServiceOffline],
   providers: [DashboardStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './dashboard-page.html',

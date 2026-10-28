@@ -112,11 +112,29 @@ describe('DashboardPage', () => {
     expect(text(el.querySelector('.subtitle'))).toBe('No runners yet');
   });
 
-  it('waits for the service when it is unreachable', async () => {
+  it('says what is wrong when the service is unreachable, without pointing at a banner that no longer exists', async () => {
     configure({ scenario: 'unavailable' });
     const { el } = await mount();
-    expect(text(el)).toContain('Waiting for the Pitcrew service');
+    expect(text(el)).toContain('Pitcrew cannot reach its service');
+    expect(text(el)).not.toMatch(/banner/i);
     expect(text(el.querySelector('.subtitle'))).toBe('Not connected to the Pitcrew service');
+    expect(byText<HTMLButtonElement>(el, 'pc-service-offline button', 'Retry')).toBeTruthy();
+  });
+
+  it('offers Install service, with the OS prompt it brings, when the service was never installed', async () => {
+    configure({ scenario: 'notInstalled' });
+    const { f, el } = await mount();
+    await settle(f);
+    expect(text(el)).toContain('The Pitcrew service is not installed');
+    expect(text(el)).toMatch(/UAC|System Settings/);
+    expect(byText<HTMLButtonElement>(el, 'pc-service-offline button', 'Install service')).toBeTruthy();
+  });
+
+  it('names a version mismatch in its title and offers Retry', async () => {
+    configure({ scenario: 'mismatch' });
+    const { el } = await mount();
+    expect(text(el)).toContain('The app and the service are different versions');
+    expect(byText<HTMLButtonElement>(el, 'pc-service-offline button', 'Retry')).toBeTruthy();
   });
 
   it('shows skeletons while connecting', async () => {

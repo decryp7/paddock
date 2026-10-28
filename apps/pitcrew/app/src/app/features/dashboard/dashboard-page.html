@@ -13,7 +13,7 @@
 
   @if (!status.status() && status.offline()) {
     <section class="card">
-      <pc-empty-state [brand]="true" title="Waiting for the Pitcrew service" text="The runners, their jobs and their history appear here once Pitcrew can reach its service. The banner above says what is wrong and how to fix it." />
+      <pc-service-offline />
     </section>
   } @else if (!status.status()) {
     <div class="tiles">

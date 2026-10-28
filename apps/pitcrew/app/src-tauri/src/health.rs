@@ -9,13 +9,11 @@ use paddock_health::{Cause, Health, RepairAction, ServiceSpec};
 use pitcrew_core::protocol::Request;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::{AppHandle, Manager, Runtime};
 
 /// The service's id in the health registry (and `defineHealthService` in the UI).
 pub const SERVICE: &str = "pc.service";
-/// How long a repair waits for the service to answer again.
-const WAIT: Duration = Duration::from_secs(120);
 const POLL: Duration = Duration::from_secs(2);
 
 static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -33,9 +31,19 @@ pub fn spec() -> ServiceSpec {
 }
 
 /// What the connection means for the chip: `None` while connecting (not an outage).
-pub fn cause_of(c: &ConnectionState) -> Option<(Cause, RepairAction)> {
+///
+/// `installed` is whether the OS has the service registered: a service that was never installed is a different outage from one
+/// that does not answer, and its repair names the prompt the install brings.
+pub fn cause_of(c: &ConnectionState, installed: bool) -> Option<(Cause, RepairAction)> {
     match c {
         ConnectionState::Connecting | ConnectionState::Connected { .. } => None,
+        ConnectionState::Unavailable { message } if !installed => Some((
+            Cause::new("The Pitcrew service is not installed, so runners are not being managed.")
+                .hint(install_hint())
+                .detail(message.clone())
+                .code("pc.service.not-installed"),
+            RepairAction::Restart,
+        )),
         ConnectionState::Unavailable { message } => Some((
             Cause::new("Pitcrew cannot reach its background service, so runners are not being managed.")
                 .hint("Choose Restart to register and start the service again (it is installed first when it never was).")
@@ -53,10 +61,25 @@ pub fn cause_of(c: &ConnectionState) -> Option<(Cause, RepairAction)> {
     }
 }
 
+/// What Restart does for a service that was never installed, and the OS prompt it brings.
+fn install_hint() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Choose Restart to install it; macOS asks you to approve Pitcrew in System Settings > General > Login Items."
+    } else {
+        "Choose Restart to install it; Windows asks for administrator permission (a UAC prompt)."
+    }
+}
+
 /// Tells the registry how the connection is (called by the event thread on every change).
 pub fn report<R: Runtime>(app: &AppHandle<R>, c: &ConnectionState) {
+    let installed = !matches!(c, ConnectionState::Unavailable { .. }) || crate::service_install::state().installed;
+    report_with(app, c, installed);
+}
+
+/// [`report`] with the OS's answer to "is the service registered" given (tests never ask the machine, rule 14).
+pub fn report_with<R: Runtime>(app: &AppHandle<R>, c: &ConnectionState, installed: bool) {
     let Some(health) = app.try_state::<Arc<Health>>() else { return };
-    match (c, cause_of(c)) {
+    match (c, cause_of(c, installed)) {
         (ConnectionState::Connected { .. }, _) => {
             health.ok(SERVICE);
         }
@@ -93,19 +116,24 @@ fn repair(data_dir: Option<&std::path::Path>) -> Result<(), Cause> {
             crate::service_install::note_registered(dir);
         }
     }
-    wait_until_answers(&LocalServiceClient, WAIT, POLL).then_some(()).ok_or_else(|| {
-        failed("The service did not start. Check System Settings > Login Items (macOS) or the Services list, then try again.".into())
-    })
+    wait_until_answers(&LocalServiceClient, || crate::service_install::state().installed, POLL)
+        .then_some(())
+        .ok_or_else(|| {
+            failed(
+                "The service is not registered any more. Check System Settings > Login Items (macOS) or the Services list, then try again."
+                    .into(),
+            )
+        })
 }
 
-/// Polls until the service answers, at most `limit`.
-pub fn wait_until_answers(client: &dyn ServiceClient, limit: Duration, poll: Duration) -> bool {
-    let start = Instant::now();
+/// Polls until the service answers. There is no time limit (rule 19: a running repair is never abandoned; the shell shows
+/// "Still working"); it ends early only when `can_still_come_up` says the registration is gone.
+pub fn wait_until_answers(client: &dyn ServiceClient, can_still_come_up: impl Fn() -> bool, poll: Duration) -> bool {
     loop {
         if client.request(Request::Status).is_ok() {
             return true;
         }
-        if start.elapsed() >= limit {
+        if !can_still_come_up() {
             return false;
         }
         std::thread::sleep(poll);
@@ -120,15 +148,31 @@ mod tests {
 
     #[test]
     fn only_a_lost_service_is_an_outage() {
-        assert!(cause_of(&ConnectionState::Connecting).is_none());
-        assert!(cause_of(&ConnectionState::Connected {
-            service_version: "1".into()
-        })
+        assert!(cause_of(&ConnectionState::Connecting, true).is_none());
+        assert!(cause_of(
+            &ConnectionState::Connected {
+                service_version: "1".into()
+            },
+            true
+        )
         .is_none());
-        let (c, a) = cause_of(&ConnectionState::Unavailable { message: "x".into() }).unwrap();
+        let (c, a) = cause_of(&ConnectionState::Unavailable { message: "x".into() }, true).unwrap();
         assert_eq!(a, RepairAction::Restart);
         assert_eq!(c.code.as_deref(), Some("pc.service.unavailable"));
-        assert!(cause_of(&ConnectionState::Mismatch { message: "x".into() }).is_some());
+        assert!(cause_of(&ConnectionState::Mismatch { message: "x".into() }, true).is_some());
+    }
+
+    #[test]
+    fn a_service_that_was_never_installed_says_so_and_names_the_prompt_the_install_brings() {
+        let (c, a) = cause_of(&ConnectionState::Unavailable { message: "x".into() }, false).unwrap();
+        assert_eq!(a, RepairAction::Restart);
+        assert_eq!(c.code.as_deref(), Some("pc.service.not-installed"));
+        let text = format!("{c:?}");
+        assert!(text.contains("not installed"), "{text}");
+        assert!(text.contains("UAC") || text.contains("System Settings"), "{text}");
+        // An installed service that does not answer is not "not installed".
+        let (c, _) = cause_of(&ConnectionState::Unavailable { message: "x".into() }, true).unwrap();
+        assert_eq!(c.code.as_deref(), Some("pc.service.unavailable"));
     }
 
     struct Later(std::sync::atomic::AtomicU32, u32);
@@ -143,16 +187,10 @@ mod tests {
     }
 
     #[test]
-    fn a_repair_waits_for_the_service_but_not_forever() {
-        assert!(wait_until_answers(
-            &Later(Default::default(), 2),
-            Duration::from_secs(5),
-            Duration::ZERO
-        ));
-        assert!(!wait_until_answers(
-            &Later(Default::default(), u32::MAX),
-            Duration::ZERO,
-            Duration::ZERO
-        ));
+    fn a_repair_waits_for_the_service_for_as_long_as_it_can_still_come_up() {
+        // No time limit (ER-19: the UI says "Still working", it never gives up on a running repair): it ends when the
+        // service answers, or when there is nothing left to wait for (the registration is gone).
+        assert!(wait_until_answers(&Later(Default::default(), 2), || true, Duration::ZERO));
+        assert!(!wait_until_answers(&Later(Default::default(), u32::MAX), || false, Duration::ZERO));
     }
 }
