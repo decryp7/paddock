@@ -12,6 +12,11 @@ export type Unlisten = () => void;
 export interface DialogMeasure {
   readonly content: DialogSize;
   readonly minContent: DialogSize;
+  /**
+   * The page's `innerHeight` when it measured, CSS px: Rust adds what the window's inner height has beyond it (the spike
+   * saw a viewport 32 px short of the window on a Mac, cutting the footer off).
+   */
+  readonly viewportHeight?: number;
 }
 
 /**
@@ -85,7 +90,7 @@ export const BROWSER_DIALOG_RESULT_KEY = 'paddock.dialog.browserResult';
  * URL (`#/dialog?id=<id>&host=main&label=d-main-1&title=<title>&modality=<m>&dialogInput=<json>`), so e2e boots each
  * dialog with only its window's providers. The answer goes to `localStorage` and the tab asks to close. The ready
  * handshake sets `data-dialog-ready` on `<html>`; a measured height is published as `data-fitted-height` (and every height
- * asked for in order as `data-fit-history`), the minimum as `data-min-content` (`<width>x<height>`).
+ * asked for in order as `data-fit-history`), the width as `data-content-width`, the minimum as `data-min-content` (`<width>x<height>`).
  */
 export function browserDialogIo(loc: Pick<Location, 'hash'> = location): DialogIo {
   const params = () => new URLSearchParams(loc.hash.split('?')[1] ?? '');
@@ -136,6 +141,7 @@ function publishMeasure(m: DialogMeasure): void {
   data['fittedHeight'] = px;
   data['fitHistory'] = data['fitHistory'] ? `${data['fitHistory']},${px}` : px;
   data['minContent'] = `${m.minContent.width}x${m.minContent.height}`;
+  data['contentWidth'] = String(m.content.width);
 }
 
 /** The window system of this window. Defaults to the browser build's; a desktop app provides `tauriDialogIo`. */

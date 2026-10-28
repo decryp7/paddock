@@ -760,26 +760,63 @@ fn the_offscreen_mechanism_waits_off_screen_and_moves_into_place_when_shown() {
 }
 
 #[test]
-fn a_child_window_that_macos_orders_in_with_its_parent_is_hidden_again_at_once() {
+fn macos_attaches_an_owned_dialog_to_its_parent_when_it_shows_never_when_it_is_built() {
     let (app, _t) = manual_app();
     let h = app.handle().clone();
     let mark = native_mark();
     let modal = open_on(&h, "main", request("unsaved-changes"), "macos").unwrap();
-    // A modeless dialog is independent on macOS: nothing orders it in.
+    // A modeless dialog is independent on macOS: it is never attached.
     let modeless = open_on(&h, "main", request("settings"), "macos").unwrap();
-    let hides: Vec<_> = native_since(mark)
-        .into_iter()
-        .filter(|o| o.starts_with("hide"))
-        .collect();
-    assert_eq!(
-        hides,
-        [format!("hide:{}", modal.label)],
-        "{}",
-        modeless.label
+    let seen = native_since(mark);
+    assert!(
+        seen.iter()
+            .all(|o| !o.starts_with("hide") && !o.starts_with("attach")),
+        "{seen:?}"
     );
     let mark = native_mark();
-    open_on(&h, "main", request("about"), "linux").unwrap();
-    assert!(native_since(mark).iter().all(|o| !o.starts_with("hide")));
+    ready(
+        &h,
+        &os_window(&app, &modal.label),
+        measure(300.0, 200.0),
+        "macos",
+        ShowMechanism::ReadyThenShow,
+    )
+    .unwrap();
+    ready(
+        &h,
+        &os_window(&app, &modeless.label),
+        measure(300.0, 200.0),
+        "macos",
+        ShowMechanism::ReadyThenShow,
+    )
+    .unwrap();
+    let seen = native_since(mark);
+    let attach = seen
+        .iter()
+        .position(|o| o == &format!("attach:{}", modal.label));
+    let show = seen
+        .iter()
+        .position(|o| o == &format!("show:{}", modal.label));
+    assert!(attach.is_some() && attach < show, "{seen:?}");
+    assert!(
+        !seen.contains(&format!("attach:{}", modeless.label)),
+        "{seen:?}"
+    );
+    // Elsewhere the parent is attached when the window is built, never at show.
+    let mark = native_mark();
+    let linux = open_on(&h, "main", request("about"), "linux").unwrap();
+    ready(
+        &h,
+        &os_window(&app, &linux.label),
+        measure(300.0, 200.0),
+        "linux",
+        ShowMechanism::ReadyThenShow,
+    )
+    .unwrap();
+    assert!(native_since(mark).iter().all(|o| !o.starts_with("attach")));
+    assert!(
+        attaches_at_show("macos") && !attaches_at_show("windows") && !attaches_at_show("linux")
+    );
 }
 
 #[test]

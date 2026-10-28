@@ -30,7 +30,7 @@ Widths are the named steps `narrow` (400), `medium` (560) and `wide` (720). "Act
 |---|---|---|---|---|
 | `pd.confirm` (new, §5 of the ADR) | decision | modal | narrow | C; P or D (`confirm.destructive`) |
 | `pd.about`, `pd.whats-new` | viewer | modeless | wide | C |
-| `pd.updates`, `pd.settings`, `pd.setup`, `pd.wb.dock.layout-manage` | tool | modeless | 960 x 680 (setup 560 x 520) | C; status line |
+| `pd.updates`, `pd.settings`, `pd.setup`, `pd.wb.dock.layout-manage` | tool | modeless | own sizes: updates 560 x 480, settings 880 x 620, setup 560 x 520, layout-manage 480 x 360 (user, 2026-10-28) | C; status line |
 | `pd.channels.secret`, `pd.mcp.key`, `pd.wb.dock.layout-save` | form | modal | narrow | C, P |
 | `pd.channels.remove`, `pd.mcp.revoke`, `pd.storage.confirm` | decision | modal | narrow | C (Enter), D |
 | `pd.report-problem` | decision → **form**, **modeless** (a text area, a report that loads and saves; the user may look at the app while writing) | modeless | wide (680 today) | C, P "Save report"; after saving, P "Done" |

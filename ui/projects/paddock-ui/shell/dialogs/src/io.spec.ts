@@ -42,6 +42,7 @@ describe('browserDialogIo', () => {
     delete document.documentElement.dataset['fitHistory'];
     delete document.documentElement.dataset['dialogReady'];
     delete document.documentElement.dataset['minContent'];
+    delete document.documentElement.dataset['contentWidth'];
   });
 
   it('reads its start from the route and leaves the answer for e2e', async () => {
@@ -60,7 +61,7 @@ describe('browserDialogIo', () => {
     await io.ready({ content: { width: 400, height: 200 }, minContent: { width: 320, height: 120 } });
     await io.fit({ content: { width: 400, height: 260 }, minContent: { width: 330, height: 120 } });
     const data = document.documentElement.dataset;
-    expect([data['dialogReady'], data['fittedHeight'], data['fitHistory'], data['minContent']]).toEqual(['true', '260', '200,260', '330x120']);
+    expect([data['dialogReady'], data['fittedHeight'], data['fitHistory'], data['minContent'], data['contentWidth']]).toEqual(['true', '260', '200,260', '330x120', '400']);
   });
 
   it('tolerates a route without input, a bad input and a full storage', async () => {

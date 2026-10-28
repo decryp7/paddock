@@ -136,6 +136,7 @@ export function oncePerFrame(work: () => void, doc: Pick<Document, 'visibilitySt
   `,
   styles: `
     :host { box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; height: 100%; color: var(--pd-text); }
+    :host(.pd-frame--pinned) { flex: none; max-width: none; width: var(--pd-frame-pinned-width); }
     .pd-frame-alert { flex: none; display: flex; align-items: center; gap: var(--pd-space-3, 12px); margin: var(--pd-space-3, 12px) var(--pd-space-4, 16px) 0; padding: var(--pd-space-2, 8px) var(--pd-space-3, 12px); border-radius: var(--pd-radius-control, 6px); border: 1px solid var(--pd-danger); background: var(--pd-danger-tint); }
     .pd-frame-alert-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
     .pd-frame-head { flex: none; padding: var(--pd-space-3, 12px) var(--pd-space-4, 16px) 0; }
@@ -183,6 +184,8 @@ export class DialogFrame {
   /** The mounted content (its declared actions, status, header and minimum body height). */
   readonly content = input<DialogContent | null>(null);
   readonly platform = input<DialogPlatform>(dialogPlatform());
+  /** The contract's width, logical px: what the frame is measured at. */
+  readonly declaredWidth = input(0);
 
   /** The dialog answered. The host closes it with the value (no `dialogCanClose`: the content answered). */
   readonly answered = output<{ readonly value: unknown }>();
@@ -395,11 +398,33 @@ export class DialogFrame {
     const footPad = (parseFloat(foot.paddingLeft) || 0) + (parseFloat(foot.paddingRight) || 0);
     const gap = parseFloat(foot.columnGap) || 0;
     const buttons = this.leadEl().nativeElement.getBoundingClientRect().width + this.trailEl().nativeElement.getBoundingClientRect().width + gap * 2 + footPad;
+    // The width is the contract's (pinned while measuring), never what a hidden or not yet sized window happens to be.
+    const width = this.pinnedWidth ?? this.declaredWidth();
     return {
-      content: { width: Math.ceil(host.getBoundingClientRect().width), height: content },
+      content: { width: Math.ceil(width), height: content },
       minContent: { width: Math.ceil(Math.max(buttons, DIALOG_MIN.width)), height: Math.ceil(Math.min(content, chrome + minBody)) },
+      viewportHeight: typeof window === 'undefined' ? undefined : window.innerHeight || undefined,
     };
   }
+
+  /**
+   * Lays the frame out at `width` logical px (the contract's) for measuring, whatever the window's viewport is now
+   * (method d of the 1.1-0 spike: a hidden window may report any width, even 0). CSS zoom on the document is undone.
+   * `null` releases it once the window is shown at its size, by dropping a class.
+   */
+  pinWidth(width: number | null): void {
+    const host = this.host.nativeElement;
+    this.pinnedWidth = width;
+    if (width !== null) {
+      // The width goes into a custom property once; pinning and releasing toggle a class only, so nothing that declares
+      // the font is rewritten at show (the spike: a rewritten style reloaded the font on Windows).
+      const zoom = typeof document === 'undefined' ? 1 : parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+      host.style.setProperty('--pd-frame-pinned-width', `${width / zoom}px`);
+    }
+    host.classList.toggle('pd-frame--pinned', width !== null);
+  }
+
+  private pinnedWidth: number | null = null;
 
   /**
    * Watches what changes the size after the first measure (ADR 0026 §2): the content's natural size, the footer and

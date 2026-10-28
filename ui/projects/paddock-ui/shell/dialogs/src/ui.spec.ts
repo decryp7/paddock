@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, Injectable, input, provideZonelessChangeDetection, signal, viewChild, type TemplateRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { defineDialog, DIALOG_EVENTS, msg, provideContributions, SHELL_PORTS, type DialogDef } from '@decryp7/paddock-ui/shell';
+import { defineDialog, DIALOG_EVENTS, dialogCommandLedger, msg, provideContributions, resetDialogCommands, SHELL_PORTS, type DialogDef } from '@decryp7/paddock-ui/shell';
 import { fakeDialogContract, FakeDialogIo, renderFramed } from '@decryp7/paddock-ui/shell/testing';
 import { DialogActionError, type DialogAction } from './actions';
 import { loadDialogBounds, rememberDialogBounds } from './bounds';
@@ -638,10 +638,52 @@ describe('a dialog window', () => {
     expect(io.measures).toHaveLength(1);
     expect(io.readied!.minContent.width).toBeGreaterThanOrEqual(320);
     expect(io.readied!.minContent.height).toBeLessThanOrEqual(io.readied!.content.height);
+    // Method d: measured at the contract's width, whatever the (hidden) window's viewport was; released once shown.
+    expect(io.readied!.content.width).toBe(DECISION.width);
+    expect(io.readied!.viewportHeight).toBe(window.innerHeight);
+    expect(root.querySelector<HTMLElement>('pd-dialog-frame')!.classList).not.toContain('pd-frame--pinned');
     root.querySelector<HTMLElement>('[data-testid=dialog-action-ok]')!.click();
     root.querySelector<HTMLElement>('[data-testid=dialog-action-ok]')!.click();
     await settle();
     expect(io.closedWith).toEqual([{ answered: true, value: 'yes' }]);
+  });
+
+  it('lays the frame out at the contract width while it measures, and reads again when a font loads meanwhile', async () => {
+    // The fonts are ready at first; the content then starts loading one, which the handshake waits for.
+    const late = deferred<unknown>();
+    let reads = 0;
+    const fake = {
+      get status() {
+        return reads > 1 ? 'loaded' : 'loading';
+      },
+      get ready() {
+        reads++;
+        return reads === 1 ? Promise.resolve() : late.promise;
+      },
+    };
+    const had = Object.getOwnPropertyDescriptor(document, 'fonts');
+    Object.defineProperty(document, 'fonts', { configurable: true, value: fake });
+    try {
+      const widths: string[] = [];
+      const { io, root, settle } = boot(DECISION);
+      const original = io.ready.bind(io);
+      io.ready = (m) => {
+        const el = root.querySelector<HTMLElement>('pd-dialog-frame')!;
+        widths.push(el.classList.contains('pd-frame--pinned') ? el.style.getPropertyValue('--pd-frame-pinned-width') : 'unpinned');
+        return original(m);
+      };
+      // The start is a pending task until the handshake: whenStable would wait for the font.
+      await tick(5);
+      expect(io.readied).toBeNull();
+      late.resolve(undefined);
+      await settle();
+      expect(io.readied!.content.width).toBe(400);
+      expect(widths).toEqual(['400px']);
+      expect(reads).toBe(2);
+    } finally {
+      if (had) Object.defineProperty(document, 'fonts', had);
+      else delete (document as { fonts?: unknown }).fonts;
+    }
   });
 
   it('takes the title the content sets at run time: heading, page title and the OS title bar; blank titles are ignored', async () => {
@@ -847,6 +889,9 @@ describe('dialog bootstraps', () => {
     expect(TestBed.inject(DIALOG_ROUTE)?.id).toBe('t.decision');
     expect(TestBed.inject(DIALOG_LOOKUP)('t.decision')).toBe(DECISION);
     expect(TestBed.inject('base' as never)).toBe(1);
+    // The window's commands are recorded for its dialog, against its contract (ADR 0026 §3).
+    expect([dialogCommandLedger().active, dialogCommandLedger().allowed?.includes('dialog_close')]).toEqual(['t.decision', true]);
+    resetDialogCommands();
     expect(TestBed.inject(DialogPresenter).windowed).toBe(false);
     TestBed.resetTestingModule();
     location.hash = '#/dialog?id=t.decision&host=main&label=d-main-2';
