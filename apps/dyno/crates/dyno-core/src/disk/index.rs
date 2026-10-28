@@ -9,6 +9,9 @@ use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 
+mod rings;
+pub use rings::{DiskRings, RingNode, MAX_RINGS, MAX_RING_NODES};
+
 const NONE: u32 = u32::MAX;
 /// The most nodes any scan may hold, whatever the Setting says (about 400 MB at the bound).
 pub const HARD_MAX_NODES: u32 = 5_000_000;

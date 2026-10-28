@@ -28,6 +28,8 @@ import type {
   Settings,
   DiskChildren,
   DiskChildrenQuery,
+  DiskRings,
+  DiskRingsQuery,
   DiskScanStatus,
   DiskTarget,
   Volume,
@@ -127,6 +129,8 @@ export interface DynoBackend {
   diskScans(): Promise<DiskScanStatus[]>;
   /** One page of one level of a scan. */
   diskChildren(query: DiskChildrenQuery): Promise<DiskChildren>;
+  /** Several levels under a folder in one answer (the sunburst's rings). */
+  diskRings(query: DiskRingsQuery): Promise<DiskRings>;
   /** The full path of a node (Reveal, Copy path). */
   diskPath(scan: number, node: number): Promise<string>;
   /** Reads the folders a finished scan could not open once more, and only those; resolves at once with the status (the scan runs again). */

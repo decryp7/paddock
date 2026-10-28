@@ -8,6 +8,9 @@ import type {
   DiskChildren,
   DiskChildrenQuery,
   DiskNode,
+  DiskRings,
+  DiskRingsQuery,
+  RingNode,
   DiskScanStatus,
   DiskTarget,
   Folded,
@@ -160,6 +163,39 @@ export class MockTree {
     const end = Math.min(start + limit, shown.length);
     const loose: Folded = { count: parent.loose > 0 ? 1 : 0, bytes: parent.loose, logicalBytes: looseLogical(parent.loose), items: parent.loose > 0 ? 1 : 0 };
     return { node: this.info(id), children: shown.slice(start, end).map((k) => this.info(k)), other, loose, shown: shown.length, offset: start, nextOffset: end < shown.length ? end : null };
+  }
+
+  /** The levels under `id` nested, like the engine's `rings`: breadth first, biggest first, folded by share of the centre. */
+  rings(id: number, rings: number, minShare: number, maxNodes: number): DiskRings | null {
+    const centre = this.nodes[id];
+    if (!centre) return null;
+    const floor = minShare > 0 ? Math.max(1, Math.ceil(centre.bytes * Math.min(minShare, 1))) : 0;
+    const made = (nodeId: number): RingNode => {
+      const n = this.nodes[nodeId]!;
+      return { node: this.info(nodeId), children: [], other: { count: 0, bytes: 0, logicalBytes: 0, items: 0 }, loose: { count: n.loose > 0 ? 1 : 0, bytes: n.loose, logicalBytes: looseLogical(n.loose), items: n.loose > 0 ? 1 : 0 } };
+    };
+    const root = made(id);
+    let count = 1;
+    let capped = false;
+    const queue: Array<{ out: RingNode; id: number; depth: number }> = [{ out: root, id, depth: 0 }];
+    for (let head = 0; head < queue.length; head++) {
+      const { out, id: at, depth } = queue[head]!;
+      if (depth >= rings) continue;
+      const kids = [...this.nodes[at]!.kids].sort((a, b) => this.nodes[b]!.bytes - this.nodes[a]!.bytes || this.nodes[a]!.name.localeCompare(this.nodes[b]!.name));
+      for (const k of kids) {
+        const kid = this.nodes[k]!;
+        if (kid.bytes < floor || count >= maxNodes) {
+          if (kid.bytes >= floor) capped = true;
+          out.other = { count: out.other.count + 1, bytes: out.other.bytes + kid.bytes, logicalBytes: out.other.logicalBytes + kid.logical, items: out.other.items + kid.items };
+        } else {
+          const child = made(k);
+          out.children.push(child);
+          count++;
+          queue.push({ out: child, id: k, depth: depth + 1 });
+        }
+      }
+    }
+    return { root, count, capped };
   }
 
   path(id: number, root: string): string | null {
@@ -326,6 +362,15 @@ export class MockDiskMap {
     const page = this.find(q.scan).tree.children(q);
     if (!page) throw this.error('notFound', 'That folder is not in this scan.');
     return page;
+  }
+
+  rings(q: DiskRingsQuery): DiskRings {
+    if (!(q.rings >= 1 && q.rings <= 6)) throw this.error('badRequest', 'Ask for 1 to 6 rings.');
+    if (!(q.minShare >= 0 && q.minShare <= 1)) throw this.error('badRequest', 'The smallest share shown must be between 0 and 1.');
+    if (!(q.maxNodes >= 1 && q.maxNodes <= 2000)) throw this.error('badRequest', 'Ask for 1 to 2000 nodes.');
+    const out = this.find(q.scan).tree.rings(q.node ?? 0, q.rings, q.minShare, q.maxNodes);
+    if (!out) throw this.error('notFound', 'That folder is not in this scan.');
+    return out;
   }
 
   path(scan: number, node: number): string {

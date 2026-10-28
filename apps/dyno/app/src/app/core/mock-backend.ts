@@ -29,6 +29,8 @@ import type {
   Settings,
   DiskChildren,
   DiskChildrenQuery,
+  DiskRings,
+  DiskRingsQuery,
   DiskScanStatus,
   DiskTarget,
   Volume,
@@ -669,6 +671,10 @@ export class MockBackend implements DynoBackend {
 
   diskChildren(query: DiskChildrenQuery): Promise<DiskChildren> {
     return this.reply('diskChildren', () => this.disk.children(query));
+  }
+
+  diskRings(query: DiskRingsQuery): Promise<DiskRings> {
+    return this.reply('diskRings', () => this.disk.rings(query));
   }
 
   diskPath(scan: number, node: number): Promise<string> {

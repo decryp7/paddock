@@ -1,4 +1,4 @@
-import type { DiskChildren, DiskSettings, DiskScanStatus, DiskTarget, ScanPhase, Volume } from './api.types';
+import type { DiskChildren, DiskRings, DiskSettings, RingNode, DiskScanStatus, DiskTarget, ScanPhase, Volume } from './api.types';
 import wire from './disk-map.wire.json';
 
 /**
@@ -70,6 +70,24 @@ const children: DiskChildren = {
   nextOffset: null,
 };
 
+const none = { count: 0, bytes: 0, logicalBytes: 0, items: 0 };
+const ringNode = (node: DiskChildren['node'], kids: RingNode[] = [], loose = none): RingNode => ({ node, children: kids, other: none, loose });
+const rings: DiskRings = {
+  root: ringNode(
+    { id: 0, name: 'Macintosh HD', kind: 'folder', bytes: 503, logicalBytes: 483, items: 4, newestChange: 1_700_000_000_000, complete: false, hasChildren: true },
+    [
+      ringNode(
+        { id: 1, name: 'Users', kind: 'folder', bytes: 503, logicalBytes: 483, items: 2, newestChange: 1_700_000_000_000, complete: true, hasChildren: true },
+        [ringNode({ id: 2, name: 'disk-image.dmg', kind: 'file', bytes: 500, logicalBytes: 480, items: 1, newestChange: 1_700_000_000_000, complete: true, hasChildren: false })],
+        { count: 1, bytes: 3, logicalBytes: 3, items: 1 },
+      ),
+      ringNode({ id: 3, name: 'private', kind: 'unreadable', bytes: 0, logicalBytes: 0, items: 0, newestChange: 0, complete: false, hasChildren: false }),
+    ],
+  ),
+  count: 4,
+  capped: false,
+};
+
 const settings: DiskSettings = { scanFolders: 2_000_000, notableFileMib: 10 };
 
 const expected = {
@@ -83,6 +101,8 @@ const expected = {
     childrenOfRoot: { diskChildren: { scan: 7, node: null, offset: 48, limit: 48, minFraction: 0 } },
     path: { diskPath: { scan: 7, node: 4 } },
     retry: { retryDiskScan: { scan: 7 } },
+    rings: { diskRings: { scan: 7, node: 4, rings: 3, minShare: 0.01, maxNodes: 500 } },
+    ringsOfRoot: { diskRings: { scan: 7, node: null, rings: 6, minShare: 0, maxNodes: 2000 } },
     openFullDiskAccess: 'openFullDiskAccessSettings',
     reveal: { diskReveal: { scan: 7, node: 4 } },
   },
@@ -96,6 +116,7 @@ const expected = {
     status({ failed: { failure: { internal: { detail: 'bug' } } } }, null),
   ],
   settings,
+  rings,
   phases,
   children,
 };

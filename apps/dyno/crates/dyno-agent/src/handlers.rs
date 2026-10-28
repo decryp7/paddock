@@ -292,6 +292,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         | Request::DiskPath { .. }
         | Request::RetryDiskScan { .. }
         | Request::DiskReveal { .. }
+        | Request::DiskRings { .. }
         | Request::OpenFullDiskAccessSettings) => crate::disk::handle(shared, r),
         r @ (Request::SearchSeed { .. }
         | Request::WebSearch { .. }

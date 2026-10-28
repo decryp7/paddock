@@ -84,6 +84,34 @@ fn children() -> Value {
     to_value(i.children(root, 0, 10, 0.0).unwrap()).unwrap()
 }
 
+/// The same index as `children()`, as the nested answer.
+fn rings() -> Value {
+    let mut i = DiskIndex::new(
+        "Macintosh HD",
+        ScanLimits {
+            max_nodes: 100,
+            notable_bytes: 10,
+            max_hard_links: 10,
+        },
+    );
+    let root = i.root();
+    let users = i.add_folder(root, "Users").unwrap();
+    i.add_file(
+        users,
+        "disk-image.dmg",
+        Sizes {
+            on_disk: 500,
+            logical: 480,
+        },
+        Timestamp(1_700_000_000_000),
+    );
+    i.add_file(users, "notes", Sizes::same(3), Timestamp(1_700_000_000_000));
+    let locked = i.add_folder(root, "private").unwrap();
+    i.mark_unreadable(locked);
+    i.finish_listing(users);
+    to_value(i.rings(root, 2, 0.0, 10).unwrap()).unwrap()
+}
+
 fn sample() -> Value {
     let internal = volume("Macintosh HD", VolumeLocation::Internal, true);
     let usb = volume("Photos", VolumeLocation::External { bus: Some("USB".into()) }, true);
@@ -111,6 +139,8 @@ fn sample() -> Value {
             "childrenOfRoot": to_value(Request::DiskChildren { scan: 7, node: None, offset: 48, limit: 48, min_fraction: 0.0 }).unwrap(),
             "path": to_value(Request::DiskPath { scan: 7, node: 4 }).unwrap(),
             "retry": to_value(Request::RetryDiskScan { scan: 7 }).unwrap(),
+            "rings": to_value(Request::DiskRings { scan: 7, node: Some(4), rings: 3, min_share: 0.01, max_nodes: 500 }).unwrap(),
+            "ringsOfRoot": to_value(Request::DiskRings { scan: 7, node: None, rings: 6, min_share: 0.0, max_nodes: 2000 }).unwrap(),
             "openFullDiskAccess": to_value(Request::OpenFullDiskAccessSettings).unwrap(),
             "reveal": to_value(Request::DiskReveal { scan: 7, node: 4 }).unwrap(),
         },
@@ -124,6 +154,7 @@ fn sample() -> Value {
             to_value(status(7, ScanState::Failed { failure: ScanFailure::Internal { detail: "bug".into() } }, None)).unwrap(),
         ],
         "settings": to_value(dyno_core::disk::settings::DiskSettings::default()).unwrap(),
+        "rings": rings(),
         "phases": [to_value(ScanPhase::ReadingVolumeFacts).unwrap(), to_value(ScanPhase::ReadingFolders).unwrap()],
         "children": children(),
     })

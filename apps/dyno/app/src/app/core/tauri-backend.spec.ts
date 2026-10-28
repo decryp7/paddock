@@ -37,6 +37,7 @@ describe('TauriBackend: request shapes', () => {
     ['cancelDiskScan', (b) => b.cancelDiskScan(7), { cancelDiskScan: { scan: 7 } }],
     ['diskScans', (b) => b.diskScans(), 'diskScans'],
     ['diskChildren', (b) => b.diskChildren({ scan: 7, node: null, offset: 48, limit: 48, minFraction: 0.004 }), { diskChildren: { scan: 7, node: null, offset: 48, limit: 48, minFraction: 0.004 } }],
+    ['diskRings', (b) => b.diskRings({ scan: 7, node: null, rings: 3, minShare: 0.01, maxNodes: 500 }), { diskRings: { scan: 7, node: null, rings: 3, minShare: 0.01, maxNodes: 500 } }],
     ['diskPath', (b) => b.diskPath(7, 4), { diskPath: { scan: 7, node: 4 } }],
     ['retryDiskScan', (b) => b.retryDiskScan(7), { retryDiskScan: { scan: 7 } }],
     ['openFullDiskAccessSettings', (b) => b.openFullDiskAccessSettings(), 'openFullDiskAccessSettings'],

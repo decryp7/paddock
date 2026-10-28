@@ -29,6 +29,8 @@ import type {
   Settings,
   DiskChildren,
   DiskChildrenQuery,
+  DiskRings,
+  DiskRingsQuery,
   DiskScanStatus,
   DiskTarget,
   Volume,
@@ -293,6 +295,10 @@ export class TauriBackend implements DynoBackend {
 
   diskChildren(q: DiskChildrenQuery): Promise<DiskChildren> {
     return this.request({ diskChildren: { scan: q.scan, node: q.node, offset: q.offset, limit: q.limit, minFraction: q.minFraction } });
+  }
+
+  diskRings(q: DiskRingsQuery): Promise<DiskRings> {
+    return this.request({ diskRings: { scan: q.scan, node: q.node, rings: q.rings, minShare: q.minShare, maxNodes: q.maxNodes } });
   }
 
   diskPath(scan: number, node: number): Promise<string> {

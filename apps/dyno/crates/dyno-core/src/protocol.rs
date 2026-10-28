@@ -408,6 +408,21 @@ pub enum Request {
         /// The node.
         node: u32,
     },
+    /// Several levels of a scan under a folder in one answer: the nested children down to `rings` deep (1 to 6), those with at
+    /// least `min_share` of the folder (0 to 1) shown and the rest folded into each level's "other", at most `max_nodes` nodes
+    /// (1 to 2000) in all. Appended.
+    DiskRings {
+        /// The scan.
+        scan: u64,
+        /// The centre (the scan's root when absent).
+        node: Option<u32>,
+        /// How many levels.
+        rings: u8,
+        /// The smallest share of the centre a child may have to be shown.
+        min_share: f64,
+        /// The most nodes in the answer.
+        max_nodes: u32,
+    },
     /// Reads the folders a finished scan could not open once more, and only those; answers the scan's status at once. The
     /// scan runs again as a job (same id, new events). Appended.
     RetryDiskScan {
@@ -708,6 +723,8 @@ pub enum Reply {
     DiskChildren(Box<crate::disk::index::DiskChildren>),
     /// A node's full path. Appended.
     DiskPath(String),
+    /// Several levels of a scan.
+    DiskRings(Box<crate::disk::index::DiskRings>),
 }
 
 /// The inventory report that was written.
@@ -787,6 +804,7 @@ impl Reply {
             Reply::DiskScans(x) => v(x),
             Reply::DiskChildren(x) => v(x),
             Reply::DiskPath(x) => v(x),
+            Reply::DiskRings(x) => v(x),
         }
     }
 }
@@ -1053,6 +1071,7 @@ mod tests {
             Reply::DiskScans(vec![disk_status()]),
             Reply::DiskChildren(Box::new(page)),
             Reply::DiskPath("/x".into()),
+            Reply::DiskRings(Box::new(index.rings(index.root(), 2, 0.0, 10).unwrap())),
         ];
         for r in replies {
             let m = Message::Reply(Box::new(Ok(r.clone())));
@@ -1077,6 +1096,13 @@ mod tests {
             Request::RetryDiskScan { scan: 1 },
             Request::DiskReveal { scan: 1, node: 2 },
             Request::OpenFullDiskAccessSettings,
+            Request::DiskRings {
+                scan: 1,
+                node: Some(2),
+                rings: 3,
+                min_share: 0.01,
+                max_nodes: 500,
+            },
         ];
         for r in requests {
             let m = Message::Request(Box::new(r));

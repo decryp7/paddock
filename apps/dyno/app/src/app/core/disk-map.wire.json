@@ -120,6 +120,24 @@
         "scan": 7
       }
     },
+    "rings": {
+      "diskRings": {
+        "maxNodes": 500,
+        "minShare": 0.01,
+        "node": 4,
+        "rings": 3,
+        "scan": 7
+      }
+    },
+    "ringsOfRoot": {
+      "diskRings": {
+        "maxNodes": 2000,
+        "minShare": 0.0,
+        "node": null,
+        "rings": 6,
+        "scan": 7
+      }
+    },
     "scans": "diskScans",
     "startFolder": {
       "startDiskScan": {
@@ -137,6 +155,116 @@
             "id": "Macintosh HD"
           }
         }
+      }
+    }
+  },
+  "rings": {
+    "capped": false,
+    "count": 4,
+    "root": {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [],
+              "loose": {
+                "bytes": 0,
+                "count": 0,
+                "items": 0,
+                "logicalBytes": 0
+              },
+              "node": {
+                "bytes": 500,
+                "complete": true,
+                "hasChildren": false,
+                "id": 2,
+                "items": 1,
+                "kind": "file",
+                "logicalBytes": 480,
+                "name": "disk-image.dmg",
+                "newestChange": 1700000000000
+              },
+              "other": {
+                "bytes": 0,
+                "count": 0,
+                "items": 0,
+                "logicalBytes": 0
+              }
+            }
+          ],
+          "loose": {
+            "bytes": 3,
+            "count": 1,
+            "items": 1,
+            "logicalBytes": 3
+          },
+          "node": {
+            "bytes": 503,
+            "complete": true,
+            "hasChildren": true,
+            "id": 1,
+            "items": 2,
+            "kind": "folder",
+            "logicalBytes": 483,
+            "name": "Users",
+            "newestChange": 1700000000000
+          },
+          "other": {
+            "bytes": 0,
+            "count": 0,
+            "items": 0,
+            "logicalBytes": 0
+          }
+        },
+        {
+          "children": [],
+          "loose": {
+            "bytes": 0,
+            "count": 0,
+            "items": 0,
+            "logicalBytes": 0
+          },
+          "node": {
+            "bytes": 0,
+            "complete": false,
+            "hasChildren": false,
+            "id": 3,
+            "items": 0,
+            "kind": "unreadable",
+            "logicalBytes": 0,
+            "name": "private",
+            "newestChange": 0
+          },
+          "other": {
+            "bytes": 0,
+            "count": 0,
+            "items": 0,
+            "logicalBytes": 0
+          }
+        }
+      ],
+      "loose": {
+        "bytes": 0,
+        "count": 0,
+        "items": 0,
+        "logicalBytes": 0
+      },
+      "node": {
+        "bytes": 503,
+        "complete": false,
+        "hasChildren": true,
+        "id": 0,
+        "items": 4,
+        "kind": "folder",
+        "logicalBytes": 483,
+        "name": "Macintosh HD",
+        "newestChange": 1700000000000
+      },
+      "other": {
+        "bytes": 0,
+        "count": 0,
+        "items": 0,
+        "logicalBytes": 0
       }
     }
   },

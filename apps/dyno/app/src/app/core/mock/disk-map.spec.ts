@@ -138,6 +138,34 @@ describe('the mock disk map', () => {
     expect([...kinds].sort()).toEqual(['file', 'folder', 'mountPoint', 'unreadable']);
   });
 
+  it('answers several levels at once, nested, and keeps to the caps', async () => {
+    const b = make();
+    const { first } = await runScan(b, { volume: { id: '/' } });
+    const q = { scan: first.scan, node: null, rings: 3, minShare: 0, maxNodes: 2000 };
+    const out = await b.diskRings(q);
+    expect(keys(out)).toEqual(keys(wire.rings));
+    expect(keys(out.root)).toEqual(keys(wire.rings.root));
+    const level = await b.diskChildren({ scan: first.scan, node: null, offset: 0, limit: 256, minFraction: 0 });
+    expect(out.root.children.map((c) => c.node.id)).toEqual(level.children.map((c) => c.id));
+    const count = (n: (typeof out)['root']): number => 1 + n.children.reduce((a, c) => a + count(c), 0);
+    expect(out.count).toBe(count(out.root));
+    const depth = (n: (typeof out)['root']): number => (n.children.length ? 1 + Math.max(...n.children.map(depth)) : 0);
+    expect(depth(out.root)).toBe(3);
+    const capped = await b.diskRings({ ...q, maxNodes: 5 });
+    expect(capped.count).toBe(5);
+    expect(capped.capped).toBe(true);
+    const shown = await b.diskRings({ ...q, minShare: 0.2 });
+    expect(shown.root.other.count).toBeGreaterThan(0);
+    for (const n of [shown.root, ...shown.root.children]) {
+      expect(n.children.reduce((a, c) => a + c.node.bytes, 0) + n.other.bytes + n.loose.bytes).toBe(n.node.bytes);
+    }
+    await expect(b.diskRings({ ...q, rings: 0 })).rejects.toMatchObject({ code: 'badRequest' });
+    await expect(b.diskRings({ ...q, minShare: 2 })).rejects.toMatchObject({ code: 'badRequest' });
+    await expect(b.diskRings({ ...q, maxNodes: 2001 })).rejects.toMatchObject({ code: 'badRequest' });
+    await expect(b.diskRings({ ...q, node: 99999 })).rejects.toMatchObject({ code: 'notFound' });
+    await expect(b.diskRings({ ...q, scan: 99 })).rejects.toMatchObject({ code: 'notFound' });
+  });
+
   it('gives the full path of a node, and a root path that is never empty', async () => {
     const b = make();
     const start = await runScan(b, { volume: { id: '/' } });

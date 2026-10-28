@@ -4,7 +4,7 @@
 use super::engine::{End, LiveWorkers, RetryError, Snapshot, Walk, WalkConfig, WalkHooks};
 use super::folder;
 use super::volumes::{ListedVolume, VolumeLister};
-use dyno_core::disk::index::{DiskChildren, DiskIndex, NodeId, ScanLimits};
+use dyno_core::disk::index::{DiskChildren, DiskIndex, DiskRings, NodeId, ScanLimits, MAX_RINGS, MAX_RING_NODES};
 use dyno_core::disk::scan::{
     eta_seconds, hidden_bytes, per_second, walk_threads, DiskScanStatus, DiskTarget, EventGate, ScanFailure, ScanPhase, ScanProgress,
     ScanState,
@@ -630,6 +630,24 @@ impl DiskCentre {
         let e = self.entry(scan)?;
         e.walk
             .with_index(|i| i.children(node.map_or_else(|| i.root(), NodeId), offset, limit, min_fraction))
+            .map_err(|x| err(ErrorCode::NotFound, x.to_string()))
+    }
+
+    /// Several levels of a scan under `node` (the root when `None`) in one answer. The index is locked once, for one pass that
+    /// visits at most `max_nodes` nodes and the children of the folders it opens.
+    pub fn rings(&self, scan: u64, node: Option<u32>, rings: u8, min_share: f64, max_nodes: u32) -> Result<DiskRings, AgentError> {
+        if !(1..=MAX_RINGS).contains(&rings) {
+            return Err(err(ErrorCode::BadRequest, format!("Ask for 1 to {MAX_RINGS} rings.")));
+        }
+        if !(0.0..=1.0).contains(&min_share) {
+            return Err(err(ErrorCode::BadRequest, "The smallest share shown must be between 0 and 1."));
+        }
+        if !(1..=MAX_RING_NODES).contains(&max_nodes) {
+            return Err(err(ErrorCode::BadRequest, format!("Ask for 1 to {MAX_RING_NODES} nodes.")));
+        }
+        let e = self.entry(scan)?;
+        e.walk
+            .with_index(|i| i.rings(node.map_or_else(|| i.root(), NodeId), rings, min_share, max_nodes))
             .map_err(|x| err(ErrorCode::NotFound, x.to_string()))
     }
 
@@ -1622,6 +1640,57 @@ mod tests {
         gate.open();
         wait_final(&r, running.scan);
         wait_final(&r, third.scan);
+    }
+
+    #[test]
+    fn rings_answer_several_levels_at_once_and_refuse_what_is_out_of_range() {
+        let fs = Arc::new(FakeFs::new());
+        tree(&fs, &fs.root());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        let s = r.centre.start(DiskTarget::Volume { id: "V".into() }).unwrap();
+        wait_final(&r, s.scan);
+        let all = r.centre.rings(s.scan, None, 3, 0.0, 100).unwrap();
+        let one = r.centre.children(s.scan, None, 0, 256, 0.0).unwrap();
+        assert_eq!(
+            all.root.children.len(),
+            one.children.len(),
+            "the first ring is the one-level answer"
+        );
+        assert_eq!(all.root.node.bytes, one.node.bytes);
+        let inner = r.centre.rings(s.scan, Some(one.children[0].id), 1, 0.0, 10).unwrap();
+        assert_eq!(inner.root.node.id, one.children[0].id);
+        let bad = |rings, share, nodes| r.centre.rings(s.scan, None, rings, share, nodes).unwrap_err().code;
+        assert_eq!(bad(0, 0.0, 10), ErrorCode::BadRequest);
+        assert_eq!(bad(7, 0.0, 10), ErrorCode::BadRequest);
+        assert_eq!(bad(2, 1.5, 10), ErrorCode::BadRequest);
+        assert_eq!(bad(2, 0.0, 0), ErrorCode::BadRequest);
+        assert_eq!(bad(2, 0.0, 2001), ErrorCode::BadRequest);
+        assert_eq!(r.centre.rings(99, None, 2, 0.0, 10).unwrap_err().code, ErrorCode::NotFound);
+        assert_eq!(
+            r.centre.rings(s.scan, Some(9999), 2, 0.0, 10).unwrap_err().code,
+            ErrorCode::NotFound
+        );
+    }
+
+    #[test]
+    fn rings_of_a_cancelled_scan_are_its_partial_tree() {
+        let fs = Arc::new(FakeFs::new());
+        tree(&fs, &fs.root());
+        let gate = Gate::new();
+        let g = gate.clone();
+        fs.on_read(move |_| g.pass());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        let s = r.centre.start(DiskTarget::Volume { id: "V".into() }).unwrap();
+        gate.wait_arrived(1);
+        r.centre.cancel(s.scan).unwrap();
+        gate.open();
+        wait_final(&r, s.scan);
+        let out = r.centre.rings(s.scan, None, 4, 0.0, 50).unwrap();
+        assert!(!out.root.node.complete, "a cancelled scan is incomplete");
+        assert_eq!(
+            out.root.node.bytes,
+            out.root.children.iter().map(|c| c.node.bytes).sum::<u64>() + out.root.other.bytes + out.root.loose.bytes
+        );
     }
 
     #[test]

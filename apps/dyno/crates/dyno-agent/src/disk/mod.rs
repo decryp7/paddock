@@ -30,6 +30,15 @@ pub fn handle(shared: &crate::agent::Shared, request: Request) -> Result<Reply, 
             .children(scan, node, offset, limit, min_fraction)
             .map(|c| Reply::DiskChildren(Box::new(c))),
         Request::DiskPath { scan, node } => d.path(scan, node).map(Reply::DiskPath),
+        Request::DiskRings {
+            scan,
+            node,
+            rings,
+            min_share,
+            max_nodes,
+        } => d
+            .rings(scan, node, rings, min_share, max_nodes)
+            .map(|r| Reply::DiskRings(Box::new(r))),
         Request::RetryDiskScan { scan } => d.retry(scan).map(|s| Reply::DiskScan(Box::new(s))),
         Request::OpenFullDiskAccessSettings => shared.disk.open_access_settings().map(|()| Reply::Ok),
         // The path is the scan's own, never the caller's: only a node of a kept scan can be shown.

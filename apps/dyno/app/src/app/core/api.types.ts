@@ -538,6 +538,36 @@ export interface DiskChildren {
   nextOffset: number | null;
 }
 
+/** A folder or file with what is shown inside it, nested. */
+export interface RingNode {
+  node: DiskNode;
+  /** Shown children, biggest first. */
+  children: RingNode[];
+  /** Children not shown: below the minimum share, or past the node cap. */
+  other: Folded;
+  /** Small files directly inside that have no node of their own. */
+  loose: Folded;
+}
+
+/** Several levels of a scan under a folder, in one answer. */
+export interface DiskRings {
+  root: RingNode;
+  /** Nodes in the answer, the centre included. */
+  count: number;
+  /** The node cap left out children that were big enough to show. */
+  capped: boolean;
+}
+
+/** What to read: `rings` 1 to 6, `minShare` 0 to 1 of the centre, `maxNodes` 1 to 2000. */
+export interface DiskRingsQuery {
+  scan: number;
+  /** The centre; `null` for the scan's root. */
+  node: number | null;
+  rings: number;
+  minShare: number;
+  maxNodes: number;
+}
+
 /** Which page of which level. */
 export interface DiskChildrenQuery {
   scan: number;
