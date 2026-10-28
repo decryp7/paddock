@@ -666,6 +666,8 @@ test('the host-tools pin is a release version with SHA-256 sums', () => {
 // ---- The apps on the shared kit (ci.yml's app leg through paddock.ci.json, <app>-release.yml through app-release.yml) ----
 import { parseJobs } from '../src/util/workflows.mjs';
 const KIT_APPS = ['pitcrew', 'spotter', 'pitwall', 'dyno'];
+// Apps with no release yet (their repositories have none): no "Existing installs" note in their release notes.
+const NEVER_RELEASED = ['dyno', 'spotter'];
 const ciContract = (app) => JSON.parse(read(join(PADDOCK, 'apps', app, 'paddock.ci.json')));
 
 /** Runs conformance/ci/build-folder.sh for `os` on a scratch Cargo workspace; returns what it wrote. */
@@ -803,9 +805,9 @@ test('a kit app lists the OS legs its old workflow had, keeps its build folder o
       assert.match(wf, new RegExp(`TAURI_${k}: \\$\\{\\{ secrets\\.PADDOCK_TAURI_${k} \\}\\}`), `${app}: the family's ${k} reaches the kit under its Tauri name`);
     }
     assert.doesNotMatch(wf, /TRANSITION_SIGNING_KEY|OLD_REPO|--newest/, `${app}: one key for the family, no bridge release in the old repo`);
-    // Dyno has never been released, so it has no installs that must reinstall; every other kit app is moving from its own repository.
-    if (app !== 'dyno') assert.match(wf, /Existing installs/, `${app}: the First launch notes say to reinstall once`);
-    else assert.doesNotMatch(wf, /Existing installs/, 'dyno: never released, no reinstall note');
+    // An app that has never been released has no installs that must reinstall; every other kit app is moving from its own repository.
+    if (NEVER_RELEASED.includes(app)) assert.doesNotMatch(wf, /Existing installs/, `${app}: never released, no reinstall note`);
+    else assert.match(wf, /Existing installs/, `${app}: the First launch notes say to reinstall once`);
     const conf = JSON.parse(read(join(PADDOCK, 'apps', app, 'app', 'src-tauri', 'tauri.conf.json')));
     assert.deepEqual(conf.plugins.updater.endpoints, [`https://dev.decryptology.net/decryp7/paddock/releases/download/${app}-latest/latest.json`], `${app}: the updater reads only Paddock's ${app}-latest`);
   }

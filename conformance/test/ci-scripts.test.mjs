@@ -66,13 +66,16 @@ test('build-env CLI appends to GITHUB_ENV', () => {
 // ---- release notes ----------------------------------------------------------------------------------------------------
 test('release notes: the changelog, then the First launch block with the product name', () => {
   const notes = releaseNotes({ appName: 'Pitwall', changelog: '### Fixes\n\n- one\n\n\n' });
-  assert.match(notes, /^### Fixes\n\n- one\n\n### First launch\n\nPitwall is not code-signed yet/);
+  assert.match(notes, /^### First launch\n\nPitwall is not code-signed yet/);
+  assert.match(notes, /\n\n### Fixes\n\n- one\n$/, 'the changelog follows the block');
   assert.match(notes, /Open Anyway\*\* ?\n?/);
   assert.match(notes, /Windows protected your PC/);
   assert.ok(notes.endsWith('\n') && !notes.endsWith('\n\n'));
   assert.equal(releaseNotes({ appName: 'X', changelog: 'a\n', withFirstLaunch: false }), 'a\n');
   const extra = releaseNotes({ appName: 'Pitcrew', changelog: '- one\n', extra: '  **Existing installs:** reinstall once.\n' });
-  assert.match(extra, /Open Anyway[^\n]*\n[^\n]*SmartScreen[^\n]*\n\n\*\*Existing installs:\*\* reinstall once\.\n$/, 'an app\'s own paragraph follows the block');
+  assert.match(extra, /Open Anyway[^\n]*\n[^\n]*SmartScreen[^\n]*\n\n\*\*Existing installs:\*\* reinstall once\.\n\n- one\n$/, 'an app\'s own paragraph follows the block, before the changelog');
+  const long = releaseNotes({ appName: 'X', changelog: '- commit\n'.repeat(5000) });
+  assert.ok(long.slice(0, 20000).includes('### First launch'), 'the block survives latest.json\'s 20000-character cut');
   assert.equal(releaseNotes({ appName: 'X', changelog: 'a\n', withFirstLaunch: false, extra: '   ' }), 'a\n', 'a blank extra adds nothing');
   assert.throws(() => firstLaunch('bad\nname'), /not a product name/);
   assert.throws(() => firstLaunch('X', '/nonexistent/file.md'));
@@ -85,7 +88,7 @@ test('release notes CLI', () => {
   assert.match(readFileSync(out, 'utf8'), /Dyno is not code-signed yet/);
   const withExtra = join(dir, 'EXTRA.md');
   assert.equal(node('release-notes.mjs', ['--app', 'Dyno', '--changelog', join(dir, 'c.md'), '--out', withExtra, '--extra', 'Reinstall once.']).status, 0);
-  assert.match(readFileSync(withExtra, 'utf8'), /\n\nReinstall once\.\n$/);
+  assert.match(readFileSync(withExtra, 'utf8'), /\n\nReinstall once\.\n\n- fix\n$/);
   assert.equal(node('release-notes.mjs', ['--app', 'Dyno']).status, 2);
   assert.equal(node('release-notes.mjs', ['--wat']).status, 2);
 });

@@ -12,7 +12,7 @@
 # Runner labels: ubuntu-latest (the paddock-ci image), windows-latest and macos-latest (host runners; they install nothing
 # system-wide and leave no processes or launch agents behind). Secrets: the family's updater key
 # (PADDOCK_TAURI_SIGNING_PRIVATE_KEY, PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD, PADDOCK_TAURI_UPDATER_PUBKEY), RELEASE_TOKEN
-# (a Gitea access token with write:repository) and, once there is a Developer ID, APPLE_SIGNING_IDENTITY.
+# (optional: a user-level Gitea access token with write:repository; without it the job token publishes) and, once there is a Developer ID, APPLE_SIGNING_IDENTITY.
 
 name: dyno-release
 

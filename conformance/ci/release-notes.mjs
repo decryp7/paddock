@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Release notes: the git-cliff changelog of the release plus the "First launch" block (plan X10 gap: it was a heredoc in
+// Release notes: the "First launch" block (first, so latest.json's cut cannot drop it) plus the git-cliff changelog of the release (plan X10 gap: it was a heredoc in
 // five workflows). The block is Paddock's docs/blocks/first-launch.md with the product name filled in; it stays until the
 // apps are signed (decision 2026-10-23).
 //
@@ -17,11 +17,14 @@ export function firstLaunch(appName, source = join(here, '..', '..', 'docs', 'bl
   return readFileSync(source, 'utf8').replaceAll('{{AppName}}', appName).replace(/\n+$/, '');
 }
 
-/** The notes: changelog text, a blank line, the First launch block, an app's own paragraph (`extra`), one final newline. */
+/**
+ * The notes: the First launch block, an app's own paragraph (`extra`), a blank line, the changelog, one final newline. The block
+ * comes first so latest.json's cut at MAX_NOTES (latest-json.mjs) can only ever drop the end of a long commit list.
+ */
 export function releaseNotes({ appName, changelog, withFirstLaunch = true, source, extra = '' }) {
   const body = changelog.replace(/\s+$/, '');
-  const notes = withFirstLaunch ? `${body}\n\n${firstLaunch(appName, source)}` : body;
-  return `${extra.trim() ? `${notes}\n\n${extra.trim()}` : notes}\n`;
+  const head = [withFirstLaunch ? firstLaunch(appName, source) : '', extra.trim()].filter(Boolean);
+  return `${[...head, body].filter(Boolean).join('\n\n')}\n`;
 }
 
 function main(argv) {

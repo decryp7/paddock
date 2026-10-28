@@ -512,3 +512,10 @@ reinstalled once by hand. This replaces the transition release (amendment "one u
 
 Why: a transition release would have needed each app's old private key in `paddock`'s secrets and a cross-repository
 write for months, for a handful of installed copies that can be reinstalled in a minute.
+
+## Amendment: app release notes list the app's own paths only (2026-10-28)
+
+An app's release notes are git-cliff over `apps/<app>/**` only (`cliff-paths` in its release workflow). Trade-off: a fix in a
+shared crate or in `ui/` that reaches the app does not appear in that app's notes, only in the commits of the shared code.
+We accept this because including `crates/**` and `ui/**` would list every other app's shared changes in each app's notes; an
+app's commit that adopts a shared change (a shared change and its adoption land in one change) is under `apps/<app>/` and appears.

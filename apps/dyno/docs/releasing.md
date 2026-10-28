@@ -8,12 +8,11 @@ of `main` and manual runs (`workflow_dispatch`), and are uploaded as workflow ar
 Gitea Actions supports).
 
 ```sh
-git tag dyno-v0.2.0 && git push origin dyno-v0.2.0
+git tag dyno-vX.Y.Z && git push origin dyno-vX.Y.Z   # X.Y.Z = the version in tauri.conf.json
 ```
 
 The version in the tag must match `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml`. Pre-releases are not
-offered to users: updaters read `latest.json` of the *latest* release. The `release` job needs every other job to pass
-(lint, tests on Linux, Windows and macOS, licences, frontend, browser flows, all three bundles).
+offered to users: updaters read `latest.json` of the *latest* release. The `release` job needs `plan`, `gates` (lint, tests on Linux, Windows and macOS, frontend, browser flows) and all three `bundle` jobs to pass; the licence and notices checks run in `plan`.
 
 ## What a build contains
 
@@ -46,40 +45,43 @@ folders (never a build directory), the macOS seal must verify, and `dyno-agent` 
   installed. A build without the public key says "Updates are not available in this build" and never checks.
 - `latest.json` is written by the shared `publish-release` action (`conformance/release/`) from the signed installers (`*.sig` next to each); its tests are in `conformance/`.
 
-## One-time set-up: Dyno's own signing key
+## Signing key and secrets
 
-Dyno needs its **own** key pair; never reuse another product's updater key.
+Dyno uses the **family's shared updater key** (one minisign key pair for every Paddock app), kept as secrets of the
+`decryp7/paddock` repository (Settings > Actions > Secrets), not as per-app secrets and not in `decryp7/dyno`:
 
-1. Generate it on a trusted machine, with a strong password:
+| Secret | Value |
+| --- | --- |
+| `PADDOCK_TAURI_SIGNING_PRIVATE_KEY` | the contents of the private key file |
+| `PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
+| `PADDOCK_TAURI_UPDATER_PUBKEY` | the contents of the public key file |
+| `RELEASE_TOKEN` | optional, a user-level secret: a Gitea access token with `write:repository`; without it the release is published with the run's job token (`github.token`) |
+| `APPLE_SIGNING_IDENTITY` | empty while the builds are ad-hoc sealed |
 
-   ```sh
-   cd app
-   npx tauri signer generate -w ~/.tauri/dyno-updater.key
-   ```
+`dyno-release.yml` maps the `PADDOCK_TAURI_*` names to the `TAURI_*` names the shared `app-release.yml` expects. The bundle jobs
+then build with `createUpdaterArtifacts` and the public key (passed as `tauri build --config`). **Without the key, a push,
+nightly or manual run (forks, pull requests, a fresh repository) still builds unsigned installers without update support and
+publishes no `latest.json`; a `dyno-v*` tag run fails** ("nothing is released"), so a release can never go out without
+update support. The committed `tauri.conf.json` keeps `pubkey` empty, so local `npx tauri build` works without the private key.
 
-2. Set three **repository secrets** (and optionally a fourth) in Gitea (Settings > Actions > Secrets) of `decryp7/dyno`:
+**Back up the private key and its password** (password manager plus an offline copy). Never commit it. **If it is lost**, no
+further update can be signed for the key built into installed copies: users install the next version by hand. **If it
+leaks**, generate a new pair (`npx tauri signer generate`), publish a release signed with the new key, tell users to
+reinstall from the releases page, and replace the secrets. Because the key is shared, this affects every Paddock app.
 
-   | Secret | Value |
-   | --- | --- |
-   | `TAURI_SIGNING_PRIVATE_KEY` | the contents of `dyno-updater.key` |
-   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
-   | `TAURI_UPDATER_PUBKEY` | the contents of `dyno-updater.key.pub` |
-   | `RELEASE_TOKEN` | optional: a Gitea access token with `write:repository` scope used to publish the release; without it the job token (`github.token`) publishes |
+## What a release publishes
 
-   With the first three set, the bundle jobs build with `createUpdaterArtifacts` and the public key (passed as
-   `tauri build --config`). **Without them (forks, pull requests, a fresh repository) every build still works**: installers are
-   produced unsigned and without update support, and the release job publishes no `latest.json`. The committed
-   `tauri.conf.json` keeps `pubkey` empty, so local `npx tauri build` works without the private key.
-
-3. **Back up the private key and its password** (password manager plus an offline copy). Never commit it.
-
-**If the private key is lost**, no further update can be signed for the key built into installed copies: users install the
-next version by hand. **If it leaks**, generate a new pair, publish a release signed with the new key, tell users to
-reinstall from the releases page, and revoke the old secrets.
+- Tag `dyno-vX.Y.Z` (the version in `tauri.conf.json`, `app/package.json` and the workspace `Cargo.toml` must all equal X.Y.Z),
+  pushed from `main`; releases are made only by this workflow, never from a workstation.
+- A Gitea release in `decryp7/paddock` with the installers, their `.sig` files, `RELEASE_NOTES.md` (the First launch block,
+  then git-cliff over `apps/dyno/**` only, so the notes list Dyno's commits) and `latest.json`.
+- The moving release `dyno-latest` carries the same `latest.json`; installed copies read
+  `https://dev.decryptology.net/decryp7/paddock/releases/download/dyno-latest/latest.json`.
+- The release is created as a draft and published only when every installer is signed and listed in `latest.json`.
 
 ## Before tagging
 
-- `main` is green (all jobs of `build.yml`).
+- `main` is green: the `plan` and `gates` jobs of `dyno-release.yml` (Dyno's legs of `ci.yml`) and the `bundle` jobs of the shared `app-release.yml`.
 - `CHANGELOG`/release notes read well: `git cliff --latest` (Conventional Commits; no attribution trailers).
 - The overhead numbers in `docs/architecture.md` were re-measured on a quiet machine for this release (roadmap G13).
 - `docs/screenshots` match the built screens (`npm run screenshots` in `app/`).
