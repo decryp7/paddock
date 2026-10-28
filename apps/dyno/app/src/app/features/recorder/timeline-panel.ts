@@ -5,12 +5,12 @@ import { Chart } from '../../shared/chart';
 import { formatBytes } from '../../shared/format';
 import { clockSeconds, momentInRange, overviewPoints, panelHeadings, rangeFromDrag, timelineOption, timelineSummary, TIMELINE_HEIGHT, type SampleRange } from './recorder-options';
 import { MatButton } from '@angular/material/button';
-import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /** One snapshot's timeline (stacked charts on one time axis) and the busiest processes at the picked moment. */
 @Component({
   selector: 'dy-timeline-panel',
-  imports: [MatTooltip, MatButton, Chart],
+  imports: [FullTextTip, MatButton, Chart],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="plot" tabindex="0" role="group" aria-label="Timeline. Left and right arrow keys move the picked moment." (keydown)="onKey($event)">
@@ -49,7 +49,7 @@ import { MatTooltip } from '@angular/material/tooltip';
         <thead><tr><th>Process</th><th class="r">CPU, % of machine</th><th class="r">Memory</th></tr></thead>
         <tbody>
           @for (p of top(); track p.name) {
-            <tr><td class="name" [matTooltip]="p.name">{{ p.name }}</td><td class="r">{{ p.cpu.toFixed(1) }}</td><td class="r">{{ bytes(p.memory) }}</td></tr>
+            <tr><td class="name" [dyFullText]="p.name">{{ p.name }}</td><td class="r">{{ p.cpu.toFixed(1) }}</td><td class="r">{{ bytes(p.memory) }}</td></tr>
           } @empty {
             <tr><td colspan="3" class="muted">No process detail was recorded for this second.</td></tr>
           }

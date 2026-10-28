@@ -6,12 +6,12 @@ import { ExtrasStore } from '../../state/extras.store';
 import { CHANGE_KIND_LABEL, CHANGE_WINDOWS, changeRows, changeTone, watchingNote } from './extras-model';
 import { EXTRAS_STYLES } from './extras-styles';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
-import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /** What changed on this computer: installs, updates, new start-up items and setting changes, grouped by day. */
 @Component({
   selector: 'dy-extras-changes',
-  imports: [MatTooltip, SuSegmentedControl, AsyncState, Icon],
+  imports: [FullTextTip, SuSegmentedControl, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Window">
@@ -39,8 +39,8 @@ import { MatTooltip } from '@angular/material/tooltip';
                     <tr>
                       <td class="time num muted">{{ clock(r.change.at) }}</td>
                       <td class="kind"><span class="dot" [attr.data-tone]="tone(r.change.kind)" aria-hidden="true"></span>{{ kindLabel(r.change.kind) }}</td>
-                      <td><span class="ell" [matTooltip]="r.change.title">{{ r.change.title }}</span></td>
-                      <td class="muted"><span class="ell" [matTooltip]="r.change.detail">{{ r.change.detail }}</span></td>
+                      <td><span class="ell" [dyFullText]="r.change.title">{{ r.change.title }}</span></td>
+                      <td class="muted"><span class="ell" [dyFullText]="r.change.detail">{{ r.change.detail }}</span></td>
                     </tr>
                   }
                 }

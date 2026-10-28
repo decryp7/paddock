@@ -11,6 +11,7 @@ import { BackupStore } from '../../state/backup.store';
 import { BACKUP_STATE_LABEL, type DotTone, checkedText, heroTone, hue, initial, lastBackupText, stateTone } from './backup-model';
 import { MatButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /**
  * Backup health: whether the backups of the tools Dyno can read (Time Machine, Windows Backup, File History, restic, Borg,
@@ -19,7 +20,7 @@ import { MatTooltip } from '@angular/material/tooltip';
  */
 @Component({
   selector: 'dy-backup-page',
-  imports: [MatTooltip, MatButton, AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [FullTextTip, MatTooltip, MatButton, AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -68,7 +69,7 @@ import { MatTooltip } from '@angular/material/tooltip';
                           {{ label(s) }}
                         </td>
                         <td class="when num muted" [matTooltip]="fullDate(s)">{{ last(s) }}</td>
-                        <td class="muted"><span class="ell" [matTooltip]="s.summary">{{ s.summary }}</span></td>
+                        <td class="muted"><span class="ell" [dyFullText]="s.summary">{{ s.summary }}</span></td>
                         <td class="acts"><button type="button" class="ib" [attr.aria-label]="'Details of ' + s.name" matTooltip="Details" (click)="select(s); $event.stopPropagation()"><dy-icon name="info" /></button></td>
                       </tr>
                     }

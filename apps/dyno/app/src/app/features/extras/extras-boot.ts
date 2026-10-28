@@ -7,12 +7,12 @@ import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
 import { bootOption } from './extras-model';
 import { EXTRAS_STYLES } from './extras-styles';
-import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /** How long the last start-up took, how recent boots compare, and what slowed the last one. */
 @Component({
   selector: 'dy-extras-boot',
-  imports: [MatTooltip, AsyncState, Chart, Icon],
+  imports: [FullTextTip, AsyncState, Chart, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="!!data()" [error]="store.boot().error" what="start-up information" [rows]="5" (retry)="store.loadBoot()">
@@ -43,7 +43,7 @@ import { MatTooltip } from '@angular/material/tooltip';
                 <thead><tr><th>Service or program</th><th class="r w-secs">Delay</th></tr></thead>
                 <tbody>
                   @for (s of b.slowest; track s.name) {
-                    <tr><td><span class="ell" [matTooltip]="s.name">{{ s.name }}</span></td><td class="r num">{{ secs(s.secs) }}</td></tr>
+                    <tr><td><span class="ell" [dyFullText]="s.name">{{ s.name }}</span></td><td class="r num">{{ secs(s.secs) }}</td></tr>
                   }
                 </tbody>
               </table>

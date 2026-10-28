@@ -17,6 +17,7 @@ import { MatInput } from '@angular/material/input';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /**
  * Performance counters: browse what the OS offers (objects, then counters with their instances), search by name, chart
@@ -25,7 +26,7 @@ import { MatTooltip } from '@angular/material/tooltip';
  */
 @Component({
   selector: 'dy-counters-page',
-  imports: [MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatPrefix, MatButton, MatIconButton, AsyncState, Icon, Chart, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
+  imports: [FullTextTip, MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatPrefix, MatButton, MatIconButton, AsyncState, Icon, Chart, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -71,7 +72,7 @@ import { MatTooltip } from '@angular/material/tooltip';
           } @else if (store.opened(); as o) {
             <div class="card-head">
               <button type="button" matIconButton aria-label="Back to all objects" (click)="store.closeObject()"><dy-icon name="chevron-left" /></button>
-              <h2 class="truncate" [matTooltip]="o.name">{{ o.name }}</h2>
+              <h2 class="truncate" [dyFullText]="o.name">{{ o.name }}</h2>
               <span class="spacer"></span>
               <span class="sub">{{ o.counters.length }} counters</span>
             </div>
@@ -104,7 +105,7 @@ import { MatTooltip } from '@angular/material/tooltip';
                 @for (o of store.objects()?.objects; track o.name) {
                   <li>
                     <button type="button" class="item obj" (click)="store.open(o.name)">
-                      <span class="name truncate" [matTooltip]="o.name">{{ o.name }}</span>
+                      <span class="name truncate" [dyFullText]="o.name">{{ o.name }}</span>
                       <span class="meta num">{{ o.counters }}</span>
                       <dy-icon name="chevron-right" />
                     </button>
@@ -169,7 +170,7 @@ import { MatTooltip } from '@angular/material/tooltip';
                       <span class="truncate" [matTooltip]="p">{{ title(p) }}</span>
                       @if (store.isPinned(p)) { <dy-icon class="pinned" name="pin" aria-label="Pinned" /> }
                     </span>
-                    <span class="cell muted truncate" role="cell" [matTooltip]="object(p)">{{ object(p) }}</span>
+                    <span class="cell muted truncate" role="cell" [dyFullText]="object(p)">{{ object(p) }}</span>
                     <span class="cell r num" role="cell">
                       @if (value(p); as v) {
                         <b>{{ v[0] }}</b><small>{{ v[1] }}</small>

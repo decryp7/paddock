@@ -10,6 +10,7 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
 import { causeLinks, diagnosisText, hintPath, historyLine, windowText } from './why-slow-model';
 import { MatButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /**
  * "Why is my PC slow?" in full: the engine's likeliest causes with what was measured, the apps behind each, pages to look
@@ -17,7 +18,7 @@ import { MatTooltip } from '@angular/material/tooltip';
  */
 @Component({
   selector: 'dy-why-slow-page',
-  imports: [MatTooltip, MatButton, Icon, RouterLink],
+  imports: [FullTextTip, MatTooltip, MatButton, Icon, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -76,7 +77,7 @@ import { MatTooltip } from '@angular/material/tooltip';
                   <h4>Apps involved</h4>
                   <ul class="apps">
                     @for (a of c.involved; track a.id) {
-                      <li><span class="n truncate" [matTooltip]="a.name">{{ a.name }}</span><span class="num">{{ a.share }}</span></li>
+                      <li><span class="n truncate" [dyFullText]="a.name">{{ a.name }}</span><span class="num">{{ a.share }}</span></li>
                     }
                   </ul>
                 </div>

@@ -12,11 +12,12 @@ import { MatButton } from '@angular/material/button';
 import { MatFormField, MatPrefix } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
 import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /** The installed software, searchable, and a report of the hardware and software saved through the OS save dialog. */
 @Component({
   selector: 'dy-extras-inventory',
-  imports: [MatTooltip, MatFormField, MatInput, MatPrefix, MatButton, AsyncState, Icon, CdkMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [FullTextTip, MatTooltip, MatFormField, MatInput, MatPrefix, MatButton, AsyncState, Icon, CdkMenuTrigger, CdkMenu, CdkMenuItem],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Software">
@@ -48,7 +49,7 @@ import { MatTooltip } from '@angular/material/tooltip';
               <tbody>
                 @for (i of rows(); track i.name) {
                   <tr>
-                    <td><span class="tile" aria-hidden="true" [style.background]="tile(i.name)">{{ initial(i.name) }}</span><span class="nm" [matTooltip]="i.name">{{ i.name }}</span></td>
+                    <td><span class="tile" aria-hidden="true" [style.background]="tile(i.name)">{{ initial(i.name) }}</span><span class="nm" [dyFullText]="i.name">{{ i.name }}</span></td>
                     <td class="num">{{ i.version ?? '—' }}</td>
                     <td class="muted"><span class="ell" [matTooltip]="i.publisher ?? ''">{{ i.publisher ?? '—' }}</span></td>
                   </tr>

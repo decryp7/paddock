@@ -13,6 +13,7 @@ import { TABLE_CSS } from './alarms-css';
 import { ruleSummary, severityWord } from './alarms-model';
 import { MatButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /** The id of the rule form's window (its contract is in `src-tauri/src/dialogs.rs`). */
 const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
@@ -20,7 +21,7 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
 /** The user's own alert rules from the settings: add, edit, enable and delete. The engine validates every save. */
 @Component({
   selector: 'dy-custom-rules',
-  imports: [MatTooltip, MatButton, AsyncState, Icon, MatSlideToggle, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
+  imports: [FullTextTip, MatTooltip, MatButton, AsyncState, Icon, MatSlideToggle, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="custom-h">
@@ -39,8 +40,8 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
           </div>
           @for (r of rules(); track r.id) {
             <div class="row" role="row" [class.off]="!r.enabled" [cdkContextMenuTriggerFor]="menu" [cdkContextMenuTriggerData]="{ rule: r }">
-              <span class="cell" role="cell"><span class="truncate" [matTooltip]="r.name">{{ r.name }}</span></span>
-              <span class="cell muted" role="cell"><span class="truncate" [matTooltip]="summary(r)">{{ summary(r) }}</span></span>
+              <span class="cell" role="cell"><span class="truncate" [dyFullText]="r.name">{{ r.name }}</span></span>
+              <span class="cell muted" role="cell"><span class="truncate" [dyFullText]="summary(r)">{{ summary(r) }}</span></span>
               <span class="cell" role="cell"><span class="dot" [attr.data-tone]="r.severity === 'critical' ? 'bad' : r.severity === 'warning' ? 'warn' : 'info'" aria-hidden="true"></span><span [class.muted]="r.severity !== 'critical'">{{ word(r) }}</span></span>
               <span class="cell" role="cell"><mat-slide-toggle [checked]="r.enabled" [disabled]="alarms.saving()" [aria-label]="'Enable ' + r.name" (change)="toggle(r, $event.checked)" /></span>
               <span class="cell acts" role="cell">

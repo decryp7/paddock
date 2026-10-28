@@ -8,12 +8,12 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
 import { LiveStore } from '../../state/live.store';
 import { hintPath } from '../why-slow/why-slow-model';
 import { MatButton } from '@angular/material/button';
-import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /** "Why is my PC slow?": one button, and the engine's latest answer (headline, top cause, evidence, what to do). */
 @Component({
   selector: 'dy-diagnosis-card',
-  imports: [MatTooltip, MatButton, Icon, RouterLink],
+  imports: [FullTextTip, MatButton, Icon, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" aria-label="Why is my PC slow?">
@@ -79,7 +79,7 @@ import { MatTooltip } from '@angular/material/tooltip';
       @if (stats(); as st) {
         <dl class="stats num" aria-label="Right now">
           @for (x of st; track x.k) {
-            <div><dt>{{ x.k }}</dt><dd [matTooltip]="x.v">{{ x.v }}</dd></div>
+            <div><dt>{{ x.k }}</dt><dd [dyFullText]="x.v">{{ x.v }}</dd></div>
           }
         </dl>
       }

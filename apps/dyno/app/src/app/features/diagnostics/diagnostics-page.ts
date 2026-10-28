@@ -6,6 +6,7 @@ import { DiagnosticsStore } from '../../state/diagnostics.store';
 import { middlePath, redactionRows, redactionTotal, sizeInKb } from './diagnostics-model';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 const NEVER = [
   'The contents of your documents or any file outside Dyno',
@@ -17,7 +18,7 @@ const NEVER = [
 /** The diagnostics bundle: a preview of what a bug-report zip contains and one button that asks where to save it. Nothing is sent anywhere. */
 @Component({
   selector: 'dy-diagnostics-page',
-  imports: [MatTooltip, MatButton, MatIconButton, AsyncState, Icon],
+  imports: [FullTextTip, MatTooltip, MatButton, MatIconButton, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -69,7 +70,7 @@ const NEVER = [
                   @for (f of p.files; track f.path) {
                     <tr>
                       <td><span class="mono ell" [matTooltip]="f.path">{{ short(f.path) }}</span></td>
-                      <td><span class="ell" [matTooltip]="f.description">{{ f.description }}</span></td>
+                      <td><span class="ell" [dyFullText]="f.description">{{ f.description }}</span></td>
                       <td class="r">{{ kb(f.bytes) }}</td>
                     </tr>
                   }

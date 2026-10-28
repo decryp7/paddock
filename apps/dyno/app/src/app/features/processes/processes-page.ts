@@ -15,6 +15,7 @@ import { type Row, type SortKey, type ViewMode } from './process-rows';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
   { key: 'name', label: 'Name', align: 'l' },
@@ -28,7 +29,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
 /** The task manager: every app and process, grouped by app, as a tree or flat; sortable, searchable, with a details panel and lookups. Read-only: nothing here changes a process. */
 @Component({
   selector: 'dy-processes-page',
-  imports: [MatTooltip, SuSegmentedControl, MatButton, MatIconButton, Icon, FormsModule, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger, ProcessDetailsPanel],
+  imports: [FullTextTip, MatTooltip, SuSegmentedControl, MatButton, MatIconButton, Icon, FormsModule, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger, ProcessDetailsPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap">
@@ -105,7 +106,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                   } @else {
                     <span class="chev-space"></span>
                   }
-                  <span class="nm truncate" [matTooltip]="r.name">{{ r.name }}</span>
+                  <span class="nm truncate" [dyFullText]="r.name">{{ r.name }}</span>
                   @if (r.kind !== 'process' && r.count > 1) {
                     <span class="badge">{{ num(r.count) }}</span>
                   }

@@ -5,12 +5,12 @@ import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
 import { PREVENTS_LABEL, heldForText, wakeTimeText } from './extras-model';
 import { EXTRAS_STYLES } from './extras-styles';
-import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /** Why the computer will not sleep (what holds it awake and for how long) and what woke it recently. */
 @Component({
   selector: 'dy-extras-sleep',
-  imports: [MatTooltip, AsyncState, Icon],
+  imports: [FullTextTip, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="!!data()" [error]="store.sleep().error" what="sleep information" [rows]="5" (retry)="store.loadSleep()">
@@ -27,9 +27,9 @@ import { MatTooltip } from '@angular/material/tooltip';
               <tbody>
                 @for (b of s.blockers; track b.name + $index) {
                   <tr>
-                    <td><span class="ell" [matTooltip]="b.name"><strong class="name">{{ b.name }}</strong></span></td>
+                    <td><span class="ell" [dyFullText]="b.name"><strong class="name">{{ b.name }}</strong></span></td>
                     <td>{{ prevents(b.prevents) }}</td>
-                    <td class="muted"><span class="ell" [matTooltip]="b.reason">{{ b.reason }}</span></td>
+                    <td class="muted"><span class="ell" [dyFullText]="b.reason">{{ b.reason }}</span></td>
                     <td class="r num muted">{{ held(b.heldFor) }}</td>
                   </tr>
                 }
@@ -49,7 +49,7 @@ import { MatTooltip } from '@angular/material/tooltip';
               <thead><tr><th class="w-when">When</th><th>What woke it</th></tr></thead>
               <tbody>
                 @for (w of s.wakes; track $index) {
-                  <tr><td class="num muted">{{ when(w.when) }}</td><td><span class="ell" [matTooltip]="w.reason">{{ w.reason }}</span></td></tr>
+                  <tr><td class="num muted">{{ when(w.when) }}</td><td><span class="ell" [dyFullText]="w.reason">{{ w.reason }}</span></td></tr>
                 }
               </tbody>
             </table>

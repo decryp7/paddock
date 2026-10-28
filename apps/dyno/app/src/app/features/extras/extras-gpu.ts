@@ -4,12 +4,12 @@ import { formatBytes, formatPercent } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
 import { EXTRAS_STYLES } from './extras-styles';
-import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /** Which processes use the graphics processor, and how much of it and its memory. */
 @Component({
   selector: 'dy-extras-gpu',
-  imports: [MatTooltip, AsyncState, Icon],
+  imports: [FullTextTip, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="!!data()" [error]="store.gpu().error" what="GPU use" [rows]="5" (retry)="store.loadGpu()">
@@ -25,7 +25,7 @@ import { MatTooltip } from '@angular/material/tooltip';
               <tbody>
                 @for (p of g.processes; track p.pid) {
                   <tr>
-                    <td><span class="ell" [matTooltip]="p.name">{{ p.name }}</span></td>
+                    <td><span class="ell" [dyFullText]="p.name">{{ p.name }}</span></td>
                     <td class="r">{{ percent(p.gpuPercent) }}</td>
                     <td class="r">{{ bytes(p.memoryBytes) }}</td>
                   </tr>

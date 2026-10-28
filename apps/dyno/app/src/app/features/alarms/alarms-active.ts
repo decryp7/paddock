@@ -9,6 +9,7 @@ import { TABLE_CSS } from './alarms-css';
 import { AlarmDetail } from './alarm-detail';
 import { MatButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /**
  * The open alarms as one table (newest first) with a detail panel beside it. The section action acknowledges everything that is
@@ -16,7 +17,7 @@ import { MatTooltip } from '@angular/material/tooltip';
  */
 @Component({
   selector: 'dy-alarms-active',
-  imports: [MatTooltip, MatButton, AsyncState, Icon, AlarmDetail, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
+  imports: [FullTextTip, MatTooltip, MatButton, AsyncState, Icon, AlarmDetail, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="store.loaded()" [error]="store.error()" [empty]="store.alarms().length === 0" emptyTitle="No open alarms" emptyText="When a rule fires, its alarm waits here until you acknowledge it." emptyIcon="bell" what="alarms" [rows]="4" (retry)="store.load()">
@@ -57,11 +58,11 @@ import { MatTooltip } from '@angular/material/tooltip';
               <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="a.severity === 'critical' ? 'bad' : a.severity === 'warning' ? 'warn' : 'info'" [attr.aria-label]="sev(a)" role="img"></span><span [class.muted]="a.severity === 'info'">{{ sev(a) }}</span></span>
               <span class="cell title-cell" role="gridcell">
                 <span class="two">
-                  <span class="line"><span class="t truncate" [matTooltip]="a.title">{{ a.title }}</span>@if (suffix(a); as s) {<span class="sfx">{{ s }}</span>}</span>
-                  <span class="d truncate" [matTooltip]="a.detail">{{ a.detail }}</span>
+                  <span class="line"><span class="t truncate" [dyFullText]="a.title">{{ a.title }}</span>@if (suffix(a); as s) {<span class="sfx">{{ s }}</span>}</span>
+                  <span class="d truncate" [dyFullText]="a.detail">{{ a.detail }}</span>
                 </span>
               </span>
-              <span class="cell c-rule muted" role="gridcell"><span class="truncate id" [matTooltip]="a.rule">{{ a.rule }}</span></span>
+              <span class="cell c-rule muted" role="gridcell"><span class="truncate id" [dyFullText]="a.rule">{{ a.rule }}</span></span>
               <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="tone(a)" aria-hidden="true"></span><span [class.muted]="tone(a) === 'calm'">{{ state(a) }}</span></span>
               <span class="cell c-first muted num" role="gridcell">{{ time(a.firstSeen) }}</span>
               <span class="cell muted num" role="gridcell">{{ time(a.lastSeen) }}</span>

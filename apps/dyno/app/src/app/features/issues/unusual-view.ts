@@ -13,6 +13,7 @@ import { Lookups } from '../lookup/lookups';
 import { hue, initial, learningText, whyText } from './issues-model';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /**
  * Programs that are new on this computer, and why some of them may be worth a look. A transparency tool: it lists reasons
@@ -21,7 +22,7 @@ import { MatTooltip } from '@angular/material/tooltip';
  */
 @Component({
   selector: 'dy-unusual-view',
-  imports: [MatTooltip, MatButton, MatIconButton, AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger],
+  imports: [FullTextTip, MatTooltip, MatButton, MatIconButton, AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -55,7 +56,7 @@ import { MatTooltip } from '@angular/material/tooltip';
                           <span class="ell" [matTooltip]="i.exe ?? i.name">{{ i.name }}</span>
                         </span>
                       </td>
-                      <td><span class="why"><span class="dot" [attr.data-tone]="i.level === 'unusual' ? 'warn' : null" aria-hidden="true"></span><span class="ell" [matTooltip]="why(i)">{{ why(i) }}</span></span></td>
+                      <td><span class="why"><span class="dot" [attr.data-tone]="i.level === 'unusual' ? 'warn' : null" aria-hidden="true"></span><span class="ell" [dyFullText]="why(i)">{{ why(i) }}</span></span></td>
                       <td class="when muted">{{ since(i) }}</td>
                       <td class="state muted">{{ i.running ? 'Running' : 'Not running' }}</td>
                     </tr>
@@ -75,7 +76,7 @@ import { MatTooltip } from '@angular/material/tooltip';
                   <ul class="reasons">@for (r of s.reasons; track r) { <li>It {{ r }}.</li> }</ul>
                 }
                 <dl>
-                  @if (s.exe) { <dt>Path</dt><dd class="sel mono" [matTooltip]="s.exe">{{ s.exe }}</dd> }
+                  @if (s.exe) { <dt>Path</dt><dd class="sel mono" [dyFullText]="s.exe">{{ s.exe }}</dd> }
                   @if (s.publisher) { <dt>Publisher</dt><dd class="sel">{{ s.publisher }}</dd> }
                   <dt>First seen</dt><dd>{{ firstSeenFull(s) }}</dd>
                   <dt>Last seen</dt><dd>{{ s.lastSeen > 0 ? (s.running ? 'Running now' : ago(s.lastSeen)) : 'Has not run since' }}</dd>

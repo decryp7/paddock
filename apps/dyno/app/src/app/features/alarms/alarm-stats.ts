@@ -4,12 +4,12 @@ import { formatDuration } from '../../shared/format';
 import { AlarmsStore } from '../../state/alarms.store';
 import { TABLE_CSS } from './alarms-css';
 import { MatButton } from '@angular/material/button';
-import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /** How the built-in alerts behave: time to acknowledge, the noisiest rules (with Mute) and the engine's suggestions. */
 @Component({
   selector: 'dy-alarm-stats',
-  imports: [MatTooltip, MatButton, AsyncState],
+  imports: [FullTextTip, MatButton, AsyncState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="stats-h">
@@ -30,7 +30,7 @@ import { MatTooltip } from '@angular/material/tooltip';
                   <div class="head" role="row"><span role="columnheader">Rule</span><span role="columnheader" class="r">Fired</span><span role="columnheader"><span class="visually-hidden">Actions</span></span></div>
                   @for (n of s.noisiest; track n.rule) {
                     <div class="row" role="row">
-                      <span class="cell" role="cell"><span class="truncate id" [matTooltip]="n.rule">{{ n.rule }}</span>@if (muted(n.rule)) {<span class="faint sfx">Muted</span>}</span>
+                      <span class="cell" role="cell"><span class="truncate id" [dyFullText]="n.rule">{{ n.rule }}</span>@if (muted(n.rule)) {<span class="faint sfx">Muted</span>}</span>
                       <span class="cell r num" role="cell">×{{ n.occurrences }}</span>
                       <span class="cell acts" role="cell"><button type="button" matButton="text" class="text-act" [attr.aria-label]="(muted(n.rule) ? 'Unmute ' : 'Mute ') + n.rule" (click)="store.mute(n.rule, !muted(n.rule))">{{ muted(n.rule) ? 'Unmute' : 'Mute' }}</button></span>
                     </div>
