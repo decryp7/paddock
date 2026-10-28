@@ -188,12 +188,12 @@ impl fmt::Display for DownloadError {
             DownloadError::NotEnoughSpace { needed, free, path } => write!(
                 f,
                 "the download needs {} of free space in {}{}, {} is free; free some space there or choose another folder, then run it again",
-                human_bytes(*needed),
+                paddock_units::format_bytes(*needed, paddock_units::Kind::Storage),
                 path.display(),
                 drive_of(path)
                     .map(|d| format!(" (drive {d})"))
                     .unwrap_or_default(),
-                human_bytes(*free)
+                paddock_units::format_bytes(*free, paddock_units::Kind::Storage)
             ),
             DownloadError::Io(e) => write!(f, "the file could not be written ({e})"),
         }
@@ -218,22 +218,6 @@ fn drive_of(path: &Path) -> Option<String> {
             _ => None,
         },
         _ => None,
-    }
-}
-
-/// A size for people, in decimal units as the operating systems show disk space: `1.5 GB`, `700 MB`, `12 bytes`.
-pub fn human_bytes(n: u64) -> String {
-    const UNITS: [(u64, &str); 3] = [(1_000_000_000, "GB"), (1_000_000, "MB"), (1_000, "KB")];
-    match UNITS.iter().find(|(size, _)| n >= *size) {
-        Some((size, unit)) => {
-            let tenths = (n as u128 * 10 + *size as u128 / 2) / *size as u128;
-            if tenths >= 1000 || tenths.is_multiple_of(10) {
-                format!("{} {unit}", (tenths + 5) / 10)
-            } else {
-                format!("{}.{} {unit}", tenths / 10, tenths % 10)
-            }
-        }
-        None => format!("{n} bytes"),
     }
 }
 

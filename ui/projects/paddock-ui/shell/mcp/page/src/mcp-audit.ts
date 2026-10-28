@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { formatBytes } from '@decryp7/paddock-ui/format';
 import { PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { AuditRow, Outcome } from '@decryp7/paddock-ui/shell/mcp';
 
@@ -18,8 +19,7 @@ const OUTCOME_WORDS: Readonly<Record<Outcome, string>> = {
 };
 
 function size(bytes: number): string {
-  if (bytes < 1000) return `${bytes} B`;
-  return bytes < 1e6 ? `${(bytes / 1e3).toFixed(1)} KB` : `${(bytes / 1e6).toFixed(1)} MB`;
+  return formatBytes(bytes, 'storage');
 }
 
 /**

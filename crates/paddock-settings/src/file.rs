@@ -21,7 +21,7 @@ pub const FILE_NAME: &str = "settings.json";
 /// The format this crate writes and reads.
 pub const FORMAT_VERSION: u32 = 1;
 /// Largest settings file read; a larger one is not a settings file.
-pub const MAX_FILE_BYTES: u64 = 1 << 20;
+pub const MAX_FILE_BYTES: u64 = 1_000_000;
 /// How many damaged copies are kept beside the file (`.corrupt`, `.corrupt.1`, ...); the oldest slot is reused.
 const MAX_KEPT: u32 = 5;
 
@@ -145,8 +145,8 @@ fn read(path: &Path) -> Result<Option<SettingsFile>, Failure> {
         .map_err(|e| Failure::Unreadable(e.to_string()))?;
     if bytes.len() as u64 > MAX_FILE_BYTES {
         return Err(Failure::Damaged(format!(
-            "larger than {} KB",
-            MAX_FILE_BYTES / 1024
+            "larger than {}",
+            paddock_units::format_whole(MAX_FILE_BYTES, paddock_units::Kind::Storage)
         )));
     }
     let value: Value =

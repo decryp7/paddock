@@ -15,6 +15,7 @@ tauri = ["dep:tauri", "paddock-commands/tauri", "paddock-jobs/tauri"]
 dialog = ["tauri", "dep:tauri-plugin-dialog"]
 
 [dependencies]
+paddock-units = { workspace = true }
 paddock-commands = { workspace = true }
 paddock-env = { workspace = true }
 paddock-jobs = { workspace = true }

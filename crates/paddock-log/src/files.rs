@@ -169,8 +169,8 @@ impl LineSink for DailyFiles {
         if !admitted && !st.warned {
             st.warned = true;
             let notice = format!(
-                "The log reached its daily limit of {} MB; only errors are written until tomorrow",
-                self.max_bytes / (1024 * 1024)
+                "The log reached its daily limit of {}; only errors are written until tomorrow",
+                paddock_units::format_bytes(self.max_bytes, paddock_units::Kind::Storage)
             );
             out.push_str(&format_event(
                 now,

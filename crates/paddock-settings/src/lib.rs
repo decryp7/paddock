@@ -46,9 +46,9 @@ pub mod values;
 pub use file::{
     FILE_NAME, FORMAT_VERSION, LoadProblem, LoadProblemKind, MAX_FILE_BYTES, SettingsFile,
 };
-pub use format::{format_bytes, format_ms};
+pub use format::format_ms;
 pub use schema::{
-    EnumOption, FieldKind, MAX_DESCRIPTION_LEN, MAX_FIELDS, MAX_ID_LEN, MAX_ITEM_LEN,
+    ByteKind, EnumOption, FieldKind, MAX_DESCRIPTION_LEN, MAX_FIELDS, MAX_ID_LEN, MAX_ITEM_LEN,
     MAX_LABEL_LEN, MAX_LIST_ITEMS, MAX_OPTIONS, MAX_PATH_LEN, MAX_PATTERN_LEN, MAX_TEXT_LEN,
     SchemaError, SectionOwner, SettingField, SettingsSection, valid_id,
 };

@@ -3,7 +3,7 @@
 //! and range problem is reported per field with a message the user can act on. [`ValidValues::decode`] then gives the
 //! app its own typed struct.
 
-use crate::format::{format_bytes, format_ms};
+use crate::format::format_ms;
 use crate::schema::{
     FieldKind, MAX_ITEM_LEN, MAX_PATH_LEN, SettingField, SettingsSection, anchored,
 };
@@ -228,6 +228,7 @@ pub fn validate_field(field: &SettingField, value: &Value) -> Result<Value, Stri
             Ok(Value::from(n))
         }
         FieldKind::Size {
+            kind,
             min_bytes,
             max_bytes,
         } => {
@@ -235,8 +236,8 @@ pub fn validate_field(field: &SettingField, value: &Value) -> Result<Value, Stri
             if n < *min_bytes || n > *max_bytes {
                 return Err(format!(
                     "Must be between {} and {}.",
-                    format_bytes(*min_bytes),
-                    format_bytes(*max_bytes)
+                    paddock_units::format_whole(*min_bytes, (*kind).into()),
+                    paddock_units::format_whole(*max_bytes, (*kind).into())
                 ));
             }
             Ok(Value::from(n))
@@ -301,7 +302,7 @@ fn with_unit<T: std::fmt::Display>(n: T, unit: &Option<String>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{EnumOption, SectionOwner};
+    use crate::schema::{ByteKind, EnumOption, SectionOwner};
     use serde_json::json;
 
     fn field(kind: FieldKind, default: Value) -> SettingField {
@@ -452,12 +453,22 @@ mod tests {
         );
 
         let size = FieldKind::Size {
+            kind: ByteKind::Storage,
+            min_bytes: 1000,
+            max_bytes: 1_000_000_000,
+        };
+        assert_eq!(check(size.clone(), json!(2000.0)), Ok(json!(2000)));
+        assert_eq!(
+            check(size.clone(), json!(10)).unwrap_err(),
+            "Must be between 1 KB and 1 GB."
+        );
+        let memory = FieldKind::Size {
+            kind: ByteKind::Memory,
             min_bytes: 1024,
             max_bytes: 1 << 30,
         };
-        assert_eq!(check(size.clone(), json!(2048.0)), Ok(json!(2048)));
         assert_eq!(
-            check(size.clone(), json!(10)).unwrap_err(),
+            check(memory, json!(10)).unwrap_err(),
             "Must be between 1 KB and 1 GB."
         );
         assert!(
@@ -576,6 +587,7 @@ mod tests {
                 "cap",
                 "C",
                 FieldKind::Size {
+                    kind: ByteKind::Storage,
                     min_bytes: 0,
                     max_bytes: 9000,
                 },

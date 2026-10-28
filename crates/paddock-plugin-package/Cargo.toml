@@ -10,6 +10,7 @@ publish = ["decryp7"]
 exclude = ["fuzz"]
 
 [dependencies]
+paddock-units = { workspace = true }
 paddock-env = { workspace = true }
 # The one `ProtocolVersion` rule (paddock-ipc owns it) and the one `GrantRef` (paddock-view owns it).
 paddock-ipc = { workspace = true }

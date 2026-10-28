@@ -27,7 +27,7 @@ pub const MAX_FILES: usize = 64;
 /// Largest single file, bytes; a longer one is cut and says so.
 pub const MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
 /// Largest report in total, bytes (uncompressed); a file that would pass it is left out and noted.
-pub const MAX_TOTAL_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_TOTAL_BYTES: usize = 16_000_000;
 /// Longest path inside the zip, characters.
 pub const MAX_NAME_CHARS: usize = 100;
 /// Longest description kept, bytes.
@@ -187,9 +187,12 @@ impl Collected {
                 }
                 if total + data.len() > limits.max_total_bytes {
                     out.notes.push(note(format!(
-                        "{} was left out: a report holds at most {} KB.",
+                        "{} was left out: a report holds at most {}.",
                         file.name,
-                        limits.max_total_bytes / 1024
+                        paddock_units::format_bytes(
+                            limits.max_total_bytes as u64,
+                            paddock_units::Kind::Storage
+                        )
                     )));
                     continue;
                 }

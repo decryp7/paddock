@@ -32,13 +32,13 @@ const field = (kind: FieldKind, extra: Partial<SettingField> = {}): SettingField
 describe('settings model', () => {
   it('writes durations and sizes in their largest whole unit, as Rust does', () => {
     expect([formatMs(0), formatMs(1500), formatMs(90_000), formatMs(120_000), formatMs(7_200_000)]).toEqual(['0 ms', '1500 ms', '90 s', '2 min', '2 h']);
-    expect([formatBytes(1000), formatBytes(2048), formatBytes(10 << 20), formatBytes(3 * 2 ** 30)]).toEqual(['1000 bytes', '2 KB', '10 MB', '3 GB']);
+    expect([formatBytes(1500, 'storage'), formatBytes(2000, 'storage'), formatBytes(10_000_000, 'storage'), formatBytes(2048, 'memory'), formatBytes(10 << 20, 'memory')]).toEqual(['1500 bytes', '2 KB', '10 MB', '2 KB', '10 MB']);
   });
 
   it('edits durations and sizes in the unit both limits are multiples of', () => {
     expect(editUnit({ type: 'duration', minMs: 60_000, maxMs: 86_400_000 })).toEqual({ factor: 60_000, label: 'min' });
     expect(editUnit({ type: 'duration', minMs: 0, maxMs: 1500 })).toEqual({ factor: 1, label: 'ms' });
-    expect(editUnit({ type: 'size', minBytes: 1 << 20, maxBytes: 1 << 30 })).toEqual({ factor: 1 << 20, label: 'MB' });
+    expect(editUnit({ type: 'size', kind: 'memory', minBytes: 1 << 20, maxBytes: 1 << 30 })).toEqual({ factor: 1 << 20, label: 'MB' });
     expect(editUnit({ type: 'bool' })).toBeNull();
   });
 
@@ -46,7 +46,7 @@ describe('settings model', () => {
     expect(rangeHint({ type: 'int', min: 1, max: 10, step: 1, unit: 'times' })).toBe('1–10 times');
     expect(rangeHint({ type: 'float', min: 0, max: 1, step: 0.1, unit: null })).toBe('0–1');
     expect(rangeHint({ type: 'duration', minMs: 60_000, maxMs: 86_400_000 })).toBe('1 min – 24 h');
-    expect(rangeHint({ type: 'size', minBytes: 1 << 20, maxBytes: 1 << 30 })).toBe('1 MB – 1 GB');
+    expect(rangeHint({ type: 'size', kind: 'memory', minBytes: 1 << 20, maxBytes: 1 << 30 })).toBe('1 MB – 1 GB');
     expect(rangeHint({ type: 'text', maxLen: 40, pattern: null })).toBe('up to 40 characters');
     expect(rangeHint({ type: 'stringList', maxItems: 20 })).toBe('up to 20 items, one per line');
     expect([rangeHint({ type: 'path', dir: true }), rangeHint({ type: 'path', dir: false })]).toEqual(['folder', 'file']);
@@ -57,7 +57,7 @@ describe('settings model', () => {
     expect(displayValue(field({ type: 'bool' }), true)).toBe('on');
     expect(displayValue(field({ type: 'bool' }), false)).toBe('off');
     expect(displayValue(field({ type: 'duration', minMs: 0, maxMs: 1 }), 3_600_000)).toBe('1 h');
-    expect(displayValue(field({ type: 'size', minBytes: 0, maxBytes: 1 }), 64 << 20)).toBe('64 MB');
+    expect(displayValue(field({ type: 'size', kind: 'memory', minBytes: 0, maxBytes: 1 }), 64 << 20)).toBe('64 MB');
     expect(displayValue(field({ type: 'enum', options: [{ value: 'a', label: 'Alpha' }] }), 'a')).toBe('Alpha');
     expect(displayValue(field({ type: 'enum', options: [] }), 'z')).toBe('z');
     expect(displayValue(field({ type: 'stringList', maxItems: 3 }), ['a', 'b'])).toBe('a, b');
@@ -75,7 +75,7 @@ describe('settings model', () => {
     expect([precheck(float, 0.5), precheck(float, 2)]).toEqual([null, 'Between 0–1.']);
     const dur = field({ type: 'duration', minMs: 1000, maxMs: 2000 });
     expect([precheck(dur, 1500), precheck(dur, 10), precheck(dur, 'x')]).toEqual([null, 'Between 1 s – 2 s.', 'Enter a number.']);
-    const size = field({ type: 'size', minBytes: 1024, maxBytes: 2048 });
+    const size = field({ type: 'size', kind: 'memory', minBytes: 1024, maxBytes: 2048 });
     expect(precheck(size, 4096)).toBe('Between 1 KB – 2 KB.');
     expect(precheck(field({ type: 'text', maxLen: 2, pattern: null }), 'abc')).toBe('At most 2 characters.');
     expect(precheck(field({ type: 'text', maxLen: 2, pattern: '[a]+' }), 'b')).toBeNull();

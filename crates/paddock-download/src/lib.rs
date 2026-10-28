@@ -75,7 +75,7 @@ pub mod tauri;
 
 pub use config::{Config, MAX_CONNECTIONS};
 pub use engine::{Downloaded, Downloader, FreeSpace, phases};
-pub use error::{DownloadError, TransportError, TransportErrorKind, human_bytes};
+pub use error::{DownloadError, TransportError, TransportErrorKind};
 pub use fetch::Fetch;
 pub use hosts::{DEFAULT_HOST_CAP, HostCaps, MAX_HOST_CAP};
 #[cfg(feature = "http")]

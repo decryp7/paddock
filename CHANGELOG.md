@@ -4,11 +4,18 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
-### Byte sizes are decimal
-- Byte sizes are decimal across the family (1 KB = 1000 bytes, like the macOS Finder): `formatBytes` in `@decryp7/paddock-ui/format`
-  (and its callers `formatRate`, the job formatters, the storage page's lower bounds and the MCP audit sizes) divides by 1000, not
-  1024 while labelling KB / MB. The apps' own formatters (Debrief, Dyno, Pitcrew, Pitwall, Spotter) and their chart axes follow;
-  Spotter's KiB / MiB labels are KB / MB.
+### Byte sizes are decimal (storage) or binary (memory), from one definition
+- Byte sizes have two kinds: storage (files, disks, downloads, caches, imports, logs, network) is decimal, 1 KB = 1000 bytes, like the
+  macOS Finder; memory (RAM, process memory, heap, GPU memory) is binary under the same labels, like Activity Monitor (16 GiB reads
+  "16 GB"). `formatBytes(bytes, kind = 'storage')` in `@decryp7/paddock-ui/format` gains `formatWholeBytes`, `parseSize`, `byteStep` and
+  `ByteKind`; the new crate `paddock-units` is its Rust twin (`format_bytes`, `format_whole`, `parse_size`, `Kind`), and
+  `crates/paddock-units/cases.json` is the one case table both and every app's formatter are tested against (ER-21).
+- `paddock-settings`: `FieldKind::Size` has a `kind` (`ByteKind`, generated TypeScript updated) and `format_bytes` is gone (use
+  `paddock_units::format_whole`); `paddock-cli` `format_size` / `parse_size` and the settings window take the kind;
+  `paddock_download::human_bytes` is removed (use `paddock_units::format_bytes`).
+- User-visible storage limits are round decimal numbers now: settings file 1 MB, update manifest 1 MB, workbench layout value 1 MB
+  (`LAYOUT_VALUE_MAX` in the UI too), UI state message 512 KB, ghost snapshot 2 MB, diagnostics report 16 MB and settings file 1 MB.
+  The apps' formatters (Debrief, Dyno, Pitcrew, Pitwall, Spotter) follow, with the kind chosen per call site.
 
 ### Shell: About, health chip, notices and jobs popover fixes
 - About, Updates and What's new are styled again: `ABOUT_STYLES` selected the pre-`pd-` class names (b88a387a1). A new spec

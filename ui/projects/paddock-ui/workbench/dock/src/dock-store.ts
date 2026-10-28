@@ -14,7 +14,7 @@ export interface DockLayoutStore {
 /** What the engine accepts as a key. */
 export const LAYOUT_KEY_PATTERN = /^[a-z0-9._:-]{1,64}$/;
 /** The largest value the engine stores, in bytes of its JSON text. */
-export const LAYOUT_VALUE_MAX = 1024 * 1024;
+export const LAYOUT_VALUE_MAX = 1_000_000;
 
 /** Whether `key` and `value` would be accepted by the engine (checked before any write, so a refusal is local and quiet). */
 export function layoutEntryProblem(key: string, value: unknown): string | null {

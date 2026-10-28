@@ -8,6 +8,7 @@ repository.workspace = true
 publish = ["decryp7"]
 
 [dependencies]
+paddock-units = { workspace = true }
 paddock-env = { workspace = true }
 paddock-guard = { workspace = true }
 paddock-ipc = { workspace = true }

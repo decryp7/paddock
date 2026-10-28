@@ -16,6 +16,7 @@ tauri = ["dep:tauri", "dep:log", "paddock-commands/tauri", "paddock-jobs/tauri",
 install = ["tauri", "dep:tauri-plugin-updater"]
 
 [dependencies]
+paddock-units = { workspace = true }
 paddock-commands = { workspace = true }
 paddock-download = { workspace = true }
 paddock-jobs = { workspace = true }

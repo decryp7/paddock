@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 
 /// The largest message (serialised JSON bytes): a selected record with huge fields should not flood every window.
-pub const MAX_MESSAGE_BYTES: usize = 512 * 1024;
+pub const MAX_MESSAGE_BYTES: usize = 512_000;
 /// Messages a window may send per second, on average (the UI sends a pointer-following value at most every 50 ms).
 pub const RATE: u32 = 200;
 /// How many messages a window may send at once before the rate applies.
@@ -60,8 +60,8 @@ pub fn check_message(message: &Value) -> Result<(), PanelError> {
         return Err(PanelError::new(
             PanelErrorCode::TooLarge,
             format!(
-                "the UI state is larger than {} KiB; it is not shared",
-                MAX_MESSAGE_BYTES / 1024
+                "the UI state is larger than {}; it is not shared",
+                paddock_units::format_whole(MAX_MESSAGE_BYTES as u64, paddock_units::Kind::Storage)
             ),
         ));
     }
@@ -176,7 +176,7 @@ mod tests {
         let big = json!({ "t": "state", "value": "x".repeat(MAX_MESSAGE_BYTES) });
         let e = check_message(&big).unwrap_err();
         assert_eq!(e.code, PanelErrorCode::TooLarge);
-        assert!(e.message.contains("512 KiB"), "{e}");
+        assert!(e.message.contains("512 KB"), "{e}");
         let just = json!({ "v": "x".repeat(MAX_MESSAGE_BYTES - 10) });
         assert!(check_message(&just).is_ok());
     }

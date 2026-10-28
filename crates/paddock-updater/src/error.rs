@@ -2,7 +2,7 @@
 //! network are classified once, here ([`UpdateError::from_download`], [`UpdateError::from_transport`]); everything after
 //! works with [`UpdateError`].
 
-use paddock_download::{DownloadError, TransportError, TransportErrorKind, human_bytes};
+use paddock_download::{DownloadError, TransportError, TransportErrorKind};
 use serde::Serialize;
 
 /// Update downloads larger than this are refused unless the app sets another limit (an installer is well under 200 MB).
@@ -128,7 +128,7 @@ impl UpdateError {
             UpdateError::TooLarge { limit } => {
                 format!(
                     "The update is larger than {}, so it was not downloaded.",
-                    human_bytes(*limit)
+                    paddock_units::format_whole(*limit, paddock_units::Kind::Storage)
                 )
             }
             UpdateError::DiskFull { .. } => "There is not enough disk space for the update.".into(),

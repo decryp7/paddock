@@ -24,6 +24,7 @@ tauri = [
 ]
 
 [dependencies]
+paddock-units = { workspace = true }
 paddock-commands = { workspace = true }
 paddock-env = { workspace = true }
 paddock-panels = { workspace = true, optional = true }

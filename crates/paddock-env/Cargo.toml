@@ -8,6 +8,7 @@ repository.workspace = true
 publish = ["decryp7"]
 
 [dependencies]
+paddock-units = { workspace = true }
 serde = "1"
 serde_json = "1"
 log = "0.4"

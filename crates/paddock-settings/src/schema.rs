@@ -61,6 +61,27 @@ impl EnumOption {
     }
 }
 
+/// Which convention a size follows: files, disks and caches are `storage` (1 KB = 1000 bytes), RAM and process memory are
+/// `memory` (1 KB = 1024 bytes). The wire twin of [`paddock_units::Kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub enum ByteKind {
+    /// Files, disks, downloads, caches, logs: decimal steps.
+    Storage,
+    /// RAM, process memory, heap, GPU memory: binary steps under the same labels.
+    Memory,
+}
+
+impl From<ByteKind> for paddock_units::Kind {
+    fn from(kind: ByteKind) -> Self {
+        match kind {
+            ByteKind::Storage => paddock_units::Kind::Storage,
+            ByteKind::Memory => paddock_units::Kind::Memory,
+        }
+    }
+}
+
 /// The type of a field and its limits. Durations are stored as milliseconds and sizes as bytes, so values are plain JSON
 /// integers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -115,8 +136,9 @@ pub enum FieldKind {
         #[cfg_attr(test, ts(type = "number"))]
         max_ms: u64,
     },
-    /// A size, stored as bytes.
+    /// A size, stored as bytes; `kind` says whether KB / MB / GB are decimal (storage) or binary (memory).
     Size {
+        kind: ByteKind,
         #[cfg_attr(test, ts(type = "number"))]
         min_bytes: u64,
         #[cfg_attr(test, ts(type = "number"))]
@@ -352,6 +374,7 @@ fn check_kind(kind: &FieldKind) -> Result<(), SchemaError> {
         FieldKind::Size {
             min_bytes,
             max_bytes,
+            ..
         } if min_bytes > max_bytes => fail("needs min_bytes <= max_bytes".into()),
         FieldKind::StringList { max_items } if *max_items == 0 || *max_items > MAX_LIST_ITEMS => {
             fail(format!("max_items must be 1-{MAX_LIST_ITEMS}"))
@@ -567,6 +590,7 @@ mod tests {
         assert!(
             problem(
                 FieldKind::Size {
+                    kind: ByteKind::Storage,
                     min_bytes: 2,
                     max_bytes: 1
                 },

@@ -869,8 +869,8 @@ fn check_patch(patch: &ViewPatch) -> Result<(), paddock_view::ViewError> {
 fn ended_text(over_memory: Option<u64>) -> String {
     match over_memory {
         Some(limit) => format!(
-            "it used more than {} MiB of memory and was stopped",
-            limit >> 20
+            "it used more than {} of memory and was stopped",
+            paddock_units::format_whole(limit, paddock_units::Kind::Memory)
         ),
         None => "its process ended unexpectedly".to_string(),
     }
@@ -1120,7 +1120,7 @@ mod tests {
         assert_eq!(ended_text(None), "its process ended unexpectedly");
         assert_eq!(
             ended_text(Some(256 << 20)),
-            "it used more than 256 MiB of memory and was stopped"
+            "it used more than 256 MB of memory and was stopped"
         );
     }
 

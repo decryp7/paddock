@@ -213,7 +213,10 @@ impl<T: Serialize + DeserializeOwned + Default> VersionedFile<T> {
             }
             Ok(Some(bytes)) => bytes,
             Err(Read::Large) => {
-                return self.damaged(format!("larger than {} KB", self.max_bytes / 1024));
+                return self.damaged(format!(
+                    "larger than {}",
+                    paddock_units::format_whole(self.max_bytes, paddock_units::Kind::Storage)
+                ));
             }
             Err(Read::Io(reason)) => {
                 *self.lock() = Some(ReadOnly::Other(format!("it could not be read ({reason})")));

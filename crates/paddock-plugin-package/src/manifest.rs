@@ -196,7 +196,10 @@ impl Permission {
                 list(o.iter().map(String::as_str).collect())
             ),
             Permission::McpExpose => "offer read-only tools to AI assistants over MCP".into(),
-            Permission::Memory { mib } => format!("use up to {mib} MiB of memory"),
+            Permission::Memory { mib } => format!(
+                "use up to {} of memory",
+                paddock_units::format_whole(u64::from(*mib) << 20, paddock_units::Kind::Memory)
+            ),
             Permission::Cpu { percent } => format!("use up to {percent}% of the processor budget"),
         }
     }

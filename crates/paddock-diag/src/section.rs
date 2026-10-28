@@ -102,7 +102,7 @@ pub mod builtin {
     use std::sync::Arc;
 
     /// Largest settings file read.
-    pub const MAX_SETTINGS_FILE: u64 = 1024 * 1024;
+    pub const MAX_SETTINGS_FILE: u64 = 1_000_000;
 
     /// The app, build and machine: `system-info.json`.
     pub struct SystemInfo;
@@ -160,8 +160,8 @@ pub mod builtin {
             };
             if meta.len() > MAX_SETTINGS_FILE {
                 return SectionOutput::note(format!(
-                    "The settings file is larger than {} KB and was left out.",
-                    MAX_SETTINGS_FILE / 1024
+                    "The settings file is larger than {} and was left out.",
+                    paddock_units::format_whole(MAX_SETTINGS_FILE, paddock_units::Kind::Storage)
                 ));
             }
             let parsed = std::fs::read(&path)

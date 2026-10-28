@@ -256,12 +256,13 @@ export const SETTINGS_OVERVIEW_FIXTURE: SettingsOverview = {
         },
         {
           "advanced": false,
-          "default": 67108864,
+          "default": 64000000,
           "description": "",
           "key": "cache",
           "kind": {
-            "maxBytes": 1073741824,
-            "minBytes": 1048576,
+            "kind": "storage",
+            "maxBytes": 1000000000,
+            "minBytes": 1000000,
             "type": "size"
           },
           "label": "Cache size",
@@ -286,7 +287,7 @@ export const SETTINGS_OVERVIEW_FIXTURE: SettingsOverview = {
       "owner": "app",
       "title": "Storage",
       "values": {
-        "cache": 67108864,
+        "cache": 64000000,
         "folder": "",
         "ignore": [
           "*.tmp"

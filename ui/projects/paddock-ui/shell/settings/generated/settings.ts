@@ -5,6 +5,8 @@ export type SettingValue = boolean | number | string | string[];
 
 export type SectionOwner = "shell" | "app";
 
+export type ByteKind = "storage" | "memory";
+
 export type EnumOption = { 
 /**
  * The stored value.
@@ -39,7 +41,7 @@ pattern: string | null, } | { "type": "enum",
 /**
  * At least one, with unique values.
  */
-options: Array<EnumOption>, } | { "type": "path", dir: boolean, } | { "type": "duration", minMs: number, maxMs: number, } | { "type": "size", minBytes: number, maxBytes: number, } | { "type": "stringList", 
+options: Array<EnumOption>, } | { "type": "path", dir: boolean, } | { "type": "duration", minMs: number, maxMs: number, } | { "type": "size", kind: ByteKind, minBytes: number, maxBytes: number, } | { "type": "stringList", 
 /**
  * 1 to [`MAX_LIST_ITEMS`].
  */

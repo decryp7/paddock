@@ -293,9 +293,12 @@ units and thousands separators; relative time under 24 h with absolute on hover;
 start with the benefit, not the lack. Pitwall may be slightly technical, Dyno slightly warmer, Debrief terse, Pitcrew
 operational, Spotter concise.
 
-Byte sizes are decimal across the family (1 KB = 1000 bytes, KB / MB / GB / TB, as the macOS Finder shows them; `formatBytes` in
-`@decryp7/paddock-ui/format`): Windows tools such as Explorer and Task Manager show binary steps under the same labels, so a size can
-differ by a few percent from what they show; free space and capacities must use the same convention as the rest of the app.
+Byte sizes have two kinds and every call site picks one (`formatBytes(n, kind)` in `@decryp7/paddock-ui/format`,
+`paddock_units::format_bytes(n, Kind)` in Rust, one case table `crates/paddock-units/cases.json`): `storage` (files, disks, downloads,
+caches, imports, logs, network transfer) is decimal, 1 KB = 1000 bytes, as the macOS Finder shows it; `memory` (RAM, process memory,
+working set, heap, GPU memory) is binary under the same labels, as Activity Monitor does (16 GiB reads "16 GB"). Windows tools show
+binary steps for files too, so a file size can differ by a few percent from Explorer; free space and capacities follow the storage
+kind. A rate follows its quantity. Limits shown to people are round decimal numbers (8 MB, 64 KB), memory limits binary.
 
 "Label: value" pairs (a status chip's "Log store: stopped", a fact list's "Version: 1.2") use a lower-case value unless it is a
 proper noun or a name; the label starts the sentence, the value continues it.

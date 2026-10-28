@@ -6,7 +6,7 @@
 //!   produced by this crate's own code (Rust round trips), for the UI's specs and the shell demo's in-memory backend.
 //! - `settings-commands.ts` (with the `tauri` feature): the adapter's command names.
 
-use crate::schema::{EnumOption, FieldKind, SectionOwner, SettingField, SettingsSection};
+use crate::schema::{ByteKind, EnumOption, FieldKind, SectionOwner, SettingField, SettingsSection};
 use crate::{Settings, file};
 use paddock_commands::testing::{WriteMode, sync_generated};
 use serde_json::json;
@@ -30,6 +30,7 @@ fn sync(name: &str, text: &str) {
 fn types() -> String {
     let decls = [
         crate::SectionOwner::decl(),
+        crate::ByteKind::decl(),
         crate::EnumOption::decl(),
         crate::FieldKind::decl(),
         crate::SettingField::decl(),
@@ -148,10 +149,11 @@ fn demo_sections() -> Vec<SettingsSection> {
             "cache",
             "Cache size",
             FieldKind::Size {
-                min_bytes: 1 << 20,
-                max_bytes: 1 << 30,
+                kind: ByteKind::Storage,
+                min_bytes: 1_000_000,
+                max_bytes: 1_000_000_000,
             },
-            64 << 20,
+            64_000_000,
         ))
         .field(
             SettingField::new(

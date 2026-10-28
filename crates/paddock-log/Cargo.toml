@@ -8,6 +8,7 @@ repository.workspace = true
 publish = ["decryp7"]
 
 [dependencies]
+paddock-units = { workspace = true }
 paddock-env = { workspace = true }
 # The family's clock port (`paddock_jobs::time`).
 paddock-jobs = { workspace = true }

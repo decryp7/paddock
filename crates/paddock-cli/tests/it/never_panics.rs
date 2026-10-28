@@ -14,7 +14,7 @@ fn sizes_times_and_formats_survive_hostile_text() {
         ],
         |b| {
             let text = String::from_utf8_lossy(b);
-            let _ = parse_size(&text);
+            let _ = parse_size(&text, paddock_units::Kind::Storage);
             let _ = parse_time(&text);
             let _ = TableFormat::parse(&text);
         },

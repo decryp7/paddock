@@ -1,3 +1,5 @@
+import { byteStep } from '@decryp7/paddock-ui/format';
+const STEP = byteStep('storage');
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
 
 /**
@@ -8,8 +10,8 @@ export function floorBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '—';
   let value = bytes;
   let unit = 0;
-  while (value >= 1000 && unit < UNITS.length - 1) {
-    value /= 1000;
+  while (value >= STEP && unit < UNITS.length - 1) {
+    value /= STEP;
     unit++;
   }
   if (unit === 0) return `${Math.floor(value)} B`;

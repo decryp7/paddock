@@ -23,7 +23,7 @@ pub const FILE_VERSION: u32 = 1;
 /// The longest key.
 pub const MAX_KEY_LEN: usize = 64;
 /// The largest value, serialized.
-pub const MAX_VALUE_BYTES: usize = 1024 * 1024;
+pub const MAX_VALUE_BYTES: usize = 1_000_000;
 /// The most keys.
 pub const MAX_KEYS: usize = 128;
 /// The largest file, serialized (all values together).
@@ -63,8 +63,8 @@ impl fmt::Display for LayoutError {
             LayoutError::NotAnObject => f.write_str("A layout must be a JSON object."),
             LayoutError::TooLarge => write!(
                 f,
-                "The layout is larger than {} KiB.",
-                MAX_VALUE_BYTES / 1024
+                "The layout is larger than {}.",
+                paddock_units::format_whole(MAX_VALUE_BYTES as u64, paddock_units::Kind::Storage)
             ),
             LayoutError::Full => f.write_str(
                 "There are too many saved layouts. Delete some named layouts and try again.",

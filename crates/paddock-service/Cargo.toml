@@ -14,6 +14,7 @@ publish = ["decryp7"]
 tauri = ["dep:tauri", "paddock-commands/tauri"]
 
 [dependencies]
+paddock-units = { workspace = true }
 paddock-cli = { workspace = true }
 paddock-commands = { workspace = true }
 paddock-env = { workspace = true }

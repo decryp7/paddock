@@ -1,5 +1,6 @@
+import { byteStep, formatWholeBytes } from '@decryp7/paddock-ui/format';
 import type { SettingsGroup, SettingsPageDef } from '@decryp7/paddock-ui/shell';
-import type { FieldKind, SectionView, SettingField, SettingValue } from '../generated/settings';
+import type { ByteKind, FieldKind, SectionView, SettingField, SettingValue } from '../generated/settings';
 
 /*
  * Pure helpers of the Settings window: units and hints for the controls, the convenience pre-check while typing (the
@@ -12,10 +13,11 @@ const UNITS_MS: readonly (readonly [number, string])[] = [
   [60_000, 'min'],
   [1000, 's'],
 ];
-const UNITS_BYTES: readonly (readonly [number, string])[] = [
-  [1 << 30, 'GB'],
-  [1 << 20, 'MB'],
-  [1 << 10, 'KB'],
+/** The edit units of a size, largest first, in the steps of its kind (decimal for storage, binary for memory). */
+const unitsBytes = (kind: ByteKind): readonly (readonly [number, string])[] => [
+  [byteStep(kind) ** 3, 'GB'],
+  [byteStep(kind) ** 2, 'MB'],
+  [byteStep(kind), 'KB'],
 ];
 
 function largest(n: number, units: readonly (readonly [number, string])[], base: string): string {
@@ -28,9 +30,9 @@ export function formatMs(ms: number): string {
   return largest(ms, UNITS_MS, 'ms');
 }
 
-/** `10485760` → `"10 MB"`, binary units (as `paddock_settings::format_bytes`). */
-export function formatBytes(bytes: number): string {
-  return largest(bytes, UNITS_BYTES, 'bytes');
+/** `10_000_000` → `"10 MB"` (storage), `10485760` → `"10 MB"` (memory): `paddock_units::format_whole`. */
+export function formatBytes(bytes: number, kind: ByteKind): string {
+  return formatWholeBytes(bytes, kind);
 }
 
 /** The unit a duration or size is edited in: the largest one both limits are whole multiples of. */
@@ -45,7 +47,7 @@ export function editUnit(kind: FieldKind): EditUnit | null {
     return u ? { factor: u[0], label: u[1] } : { factor: 1, label: base };
   };
   if (kind.type === 'duration') return pick(kind.minMs, kind.maxMs, UNITS_MS, 'ms');
-  if (kind.type === 'size') return pick(kind.minBytes, kind.maxBytes, UNITS_BYTES, 'bytes');
+  if (kind.type === 'size') return pick(kind.minBytes, kind.maxBytes, unitsBytes(kind.kind), 'bytes');
   return null;
 }
 
@@ -59,7 +61,7 @@ export function rangeHint(kind: FieldKind): string {
     case 'duration':
       return `${formatMs(kind.minMs)} – ${formatMs(kind.maxMs)}`;
     case 'size':
-      return `${formatBytes(kind.minBytes)} – ${formatBytes(kind.maxBytes)}`;
+      return `${formatBytes(kind.minBytes, kind.kind)} – ${formatBytes(kind.maxBytes, kind.kind)}`;
     case 'text':
       return $localize`:@@pd.settings.hint.text:up to ${kind.maxLen}:count: characters`;
     case 'stringList':
@@ -76,7 +78,7 @@ export function displayValue(field: SettingField, value: SettingValue): string {
   const k = field.kind;
   if (k.type === 'bool') return value ? 'on' : 'off';
   if (k.type === 'duration' && typeof value === 'number') return formatMs(value);
-  if (k.type === 'size' && typeof value === 'number') return formatBytes(value);
+  if (k.type === 'size' && typeof value === 'number') return formatBytes(value, k.kind);
   if (k.type === 'enum') return k.options.find((o) => o.value === value)?.label ?? String(value);
   if (Array.isArray(value)) return value.length ? value.join(', ') : 'none';
   if ((k.type === 'int' || k.type === 'float') && k.unit) return `${value} ${k.unit}`;

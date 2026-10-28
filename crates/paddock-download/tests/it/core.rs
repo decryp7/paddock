@@ -1031,7 +1031,7 @@ fn the_platform_free_space_is_read_and_sizes_read_well() {
         (1_550_000, "1.6 MB"),
         (999_000, "999 KB"),
         (2_000_000_000, "2 GB"),
-        (1_234_000_000_000, "1234 GB"),
+        (1_234_000_000_000, "1.2 TB"),
     ] {
         assert_eq!(
             DownloadError::NotEnoughSpace {

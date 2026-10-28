@@ -27,45 +27,14 @@ pub fn parse_time(text: &str) -> Result<i64, String> {
     ))
 }
 
-/// A byte count as text ("3.2 GB"), binary steps.
-pub fn format_size(bytes: u64) -> String {
-    let (mut v, mut u) = (bytes as f64, 0);
-    while v >= 1024.0 && u < 4 {
-        v /= 1024.0;
-        u += 1;
-    }
-    if u == 0 {
-        format!("{bytes} B")
-    } else {
-        format!("{v:.1} {}", ["B", "KB", "MB", "GB", "TB"][u])
-    }
+/// A byte count as text ("3.2 GB"): `Kind::Storage` for files and disks, `Kind::Memory` for RAM (`paddock_units`).
+pub fn format_size(bytes: u64, kind: paddock_units::Kind) -> String {
+    paddock_units::format_bytes(bytes, kind)
 }
 
-/// A size such as `512`, `64k`, `10MB`, `1.5g` (binary steps; a bare number is bytes) read into bytes.
-pub fn parse_size(text: &str) -> Result<u64, String> {
-    let bad = || {
-        format!(
-            "\"{text}\" is not a size: write a number of bytes or a number with k, M, G or T (for example 512M)"
-        )
-    };
-    let t = text.trim().to_ascii_lowercase();
-    let t = t.strip_suffix('b').unwrap_or(&t);
-    let (num, mult) = match t.chars().last() {
-        Some('k') => (&t[..t.len() - 1], 1u64 << 10),
-        Some('m') => (&t[..t.len() - 1], 1 << 20),
-        Some('g') => (&t[..t.len() - 1], 1 << 30),
-        Some('t') => (&t[..t.len() - 1], 1 << 40),
-        _ => (t, 1),
-    };
-    let n: f64 = num.trim().parse().map_err(|_| bad())?;
-    if !n.is_finite() || n < 0.0 {
-        return Err(bad());
-    }
-    let bytes = n * mult as f64;
-    if bytes >= u64::MAX as f64 {
-        return Err(bad());
-    }
-    Ok(bytes as u64)
+/// A size such as `512`, `64k`, `10MB`, `1.5g`, `2GiB` (a bare number is bytes) read into bytes with the steps of `kind`.
+pub fn parse_size(text: &str, kind: paddock_units::Kind) -> Result<u64, String> {
+    paddock_units::parse_size(text, kind)
 }
 
 #[cfg(test)]
@@ -85,23 +54,21 @@ mod tests {
     }
 
     #[test]
-    fn sizes_round_trip_in_binary_steps() {
-        assert_eq!(format_size(0), "0 B");
-        assert_eq!(format_size(1023), "1023 B");
-        assert_eq!(format_size(1536), "1.5 KB");
-        assert_eq!(format_size(3 * (1 << 30)), "3.0 GB");
-        assert_eq!(format_size(u64::MAX), "16777216.0 TB");
-        assert_eq!(parse_size("512").unwrap(), 512);
-        assert_eq!(parse_size("64k").unwrap(), 64 * 1024);
-        assert_eq!(parse_size("10MB").unwrap(), 10 << 20);
-        assert_eq!(parse_size(" 1.5g ").unwrap(), 3 << 29);
-        assert_eq!(parse_size("2T").unwrap(), 2 << 40);
+    fn sizes_follow_the_kind() {
+        use paddock_units::Kind::{Memory, Storage};
+        assert_eq!(format_size(1536, Storage), "1.5 KB");
+        assert_eq!(format_size(3 << 30, Memory), "3 GB");
+        assert_eq!(parse_size("512", Storage).unwrap(), 512);
+        assert_eq!(parse_size("64k", Storage).unwrap(), 64_000);
+        assert_eq!(parse_size("10MB", Memory).unwrap(), 10 << 20);
+        assert_eq!(parse_size(" 1.5g ", Storage).unwrap(), 1_500_000_000);
+        assert_eq!(parse_size("2GiB", Storage).unwrap(), 2 << 30);
     }
 
     #[test]
     fn bad_sizes_say_what_to_write() {
         for bad in ["", "abc", "-1", "k", "1e999", "99999999999999999T", "nan"] {
-            let e = parse_size(bad).unwrap_err();
+            let e = parse_size(bad, paddock_units::Kind::Storage).unwrap_err();
             assert!(e.contains("is not a size"), "{bad}: {e}");
         }
     }

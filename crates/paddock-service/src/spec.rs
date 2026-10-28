@@ -311,7 +311,7 @@ impl SpecBuilder {
         if let Some(mb) = s.memory_high_mb
             && !(16..=65536).contains(&mb)
         {
-            return Err(SpecError::new("memory high", "must be 16 to 65536 MiB"));
+            return Err(SpecError::new("memory high", "must be 16 to 65536 MB"));
         }
         if let Some(u) = &s.docs_url {
             let ok = u.starts_with("https://")
