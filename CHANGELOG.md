@@ -52,8 +52,16 @@ Conventional Commits; one semver tag for the whole repo.
   mark is forgotten.
 - Conformance C45 (C40 to C44 are taken by ADR 0024 and other branches): `__command(` and `__prefix(` are called nowhere outside `crates/paddock-commands` (test code and
   doctests excepted).
-- The real-window probe boots the built shell-demo's real dialog frame (`PADDOCK_PROBE_DIST`) and runs nightly on macOS,
-  Windows and Linux (`nightly.yml`, job `dialog-window-probe`; Linux under `xvfb-run`).
+- The real-window probe boots the built shell-demo's real dialog frame (`PADDOCK_PROBE_DIST`) with a visible host and a
+  modal dialog, asserts the dialog window is hidden until its `dialog_ready` arrives, and reports from a synchronous read
+  and a timer (no animation frames). Its job `dialog-window-probe` (`nightly.yml`) is off by default and gates nothing:
+  it runs on a manual run or with the variable `PADDOCK_REAL_WINDOW_PROBE=true`, because it opens real windows (ER-14)
+  and the Mac host's displays sleep at night. Built with `--features tauri`, not `--all-features`.
+- A destroyed window, and a host whose dialogs close, are forgotten in the applied parent state (`Dialogs::forget_applied`);
+  the applied state is recorded only after `set_enabled` returned Ok (`Dialogs::applied`), so a failed call is retried.
+- The webview zoom is kept on the dialog entry from `dialog_ready` and changes only when the page's `devicePixelRatio`
+  changes at an unchanged scale factor (`zoom_after`); a monitor move keeps it, so a fit is not off by
+  `dpr_old / scale_new`.
 
 - **Breaking.** `paddock_commands::DialogCallable` is a struct with a private field (its old variants are now
   `DialogCallableKind`, read with `kind()`): a contract can only name a `dialog_callable::<name>` marker, `prefix` or

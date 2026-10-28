@@ -5,17 +5,21 @@
 //! and that the footer is fully visible. It needs the real webview, a window system and the built UI, so the ordinary
 //! test run skips it: it exits 0 at once unless `PADDOCK_REAL_WINDOWS=1`, and with a message unless `PADDOCK_PROBE_DIST`
 //! names the built shell-demo (`npm run build -w ui` then `npx ng build shell-demo` in `ui`: `ui/dist/shell-demo/browser`).
-//! The nightly workflow sets both on macOS, Windows and Linux (under `xvfb-run`).
+//! The workflow job `dialog-window-probe` (manual runs, or opt-in with the variable `PADDOCK_REAL_WINDOW_PROBE`) sets
+//! both. The parent is a visible host window and the dialog is modal; the probe also asserts that the dialog window is
+//! still hidden when its page's `dialog_ready` reaches Rust (it is shown by that ready, not before).
 //!
-//! Run it: `PADDOCK_REAL_WINDOWS=1 PADDOCK_PROBE_DIST=ui/dist/shell-demo/browser cargo test -p paddock-dialogs
-//! --all-features --test show_probe`. A Tauri app owns the main thread, hence `harness = false`; the result is the exit
+//! Run it (from `crates`; `--features tauri`, NOT `--all-features`, which pulls in the mock runtime):
+//! `PADDOCK_REAL_WINDOWS=1 PADDOCK_PROBE_DIST=../ui/dist/shell-demo/browser cargo test -p paddock-dialogs
+//! --features tauri --test show_probe -- --nocapture`. A Tauri app owns the main thread, hence `harness = false`; the result is the exit
 //! code (0 pass, 1 failed, 2 timed out).
 
 use paddock_dialogs::tauri::WindowHooks;
 use paddock_dialogs::{Contracts, DialogRequest, Dialogs, Entry, Shape, Width};
 use std::borrow::Cow;
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 use tauri::test::mock_context;
 use tauri::utils::assets::{AssetKey, AssetsIter, CspHash};
@@ -29,16 +33,18 @@ const GIVE_UP: Duration = Duration::from_secs(90);
 /// The hidden host window's page: the dialog's parent needs none of the demo.
 const HOST: &str = "<!doctype html><html><head><meta charset=\"utf-8\"></head><body></body></html>";
 
-/// Sent to the shown dialog window: after two frames (a hidden window runs none), what the user sees.
+/// Sent to the shown dialog window: what the user sees, read at once and once more from a short timer. Not from
+/// animation frames: a sleeping display runs none, and the report must still come (ER-12: it waits on the event).
 const REPORT_SCRIPT: &str = r#"(() => {
-  const send = () => {
+  const send = (phase) => {
     const f = document.querySelector('[data-testid=dialog-footer]');
     const r = f ? f.getBoundingClientRect() : null;
     window.__TAURI_INTERNALS__.invoke('probe_report', {
-      inner: window.innerHeight, scroll: document.scrollingElement.scrollHeight,
+      phase, inner: window.innerHeight, scroll: document.scrollingElement.scrollHeight,
       footerBottom: r ? r.bottom : -1, footerHeight: r ? r.height : 0 });
   };
-  requestAnimationFrame(() => requestAnimationFrame(send));
+  send('now');
+  setTimeout(() => send('timer'), 50);
 })();"#;
 
 /// The built shell-demo, served from disk as the app's assets.
@@ -79,6 +85,7 @@ paddock_commands::command_table! {
 #[derive(serde::Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct Report {
+    phase: String,
     inner: f64,
     scroll: f64,
     footer_bottom: f64,
@@ -112,6 +119,10 @@ fn main() {
         paddock_commands::tauri::Guard::new(&TABLE).dialog_grants(paddock_dialogs::tauri::grant_of);
     let guarded = guard.wrap(handler!());
     let report_tx = std::sync::Mutex::new(report_tx);
+    // Whether the dialog window was still hidden when its page's `dialog_ready` arrived (checked before it is handled).
+    let hidden_at_ready = Arc::new(AtomicBool::new(false));
+    let saw_ready = Arc::new(AtomicBool::new(false));
+    let (hidden_flag, ready_flag) = (hidden_at_ready.clone(), saw_ready.clone());
     let app = tauri::Builder::<Wry>::new()
         .invoke_handler(move |invoke| match invoke.message.command() {
             "probe_report" => {
@@ -128,6 +139,18 @@ fn main() {
                 invoke.resolver.resolve(());
                 true
             }
+            "dialog_ready" => {
+                let hidden = invoke
+                    .message
+                    .webview()
+                    .window()
+                    .is_visible()
+                    .map(|v| !v)
+                    .unwrap_or(false);
+                hidden_flag.store(hidden, Ordering::SeqCst);
+                ready_flag.store(true, Ordering::SeqCst);
+                guarded(invoke)
+            }
             _ => guarded(invoke),
         })
         .build(mock_context(DistAssets { dist }))
@@ -140,9 +163,9 @@ fn main() {
     let contracts = Contracts::from_entries(&[rename], &[]).expect("contract");
     app.manage(Dialogs::new(std::sync::Arc::new(contracts)).with_show_deadline(DEADLINE));
     app.manage(WindowHooks::<Wry>::new());
-    // The host window stays hidden: the probe disturbs nobody's desktop more than the dialog itself does.
+    // A visible host window: the modal's parent, as in an app.
     WebviewWindowBuilder::new(&app, "main", WebviewUrl::App("host.html".into()))
-        .visible(false)
+        .visible(true)
         .build()
         .expect("host window");
 
@@ -172,8 +195,18 @@ fn main() {
     std::thread::spawn({
         let handle = handle.clone();
         move || {
+            // The first report (read at once) decides when it holds; if not, the second (from the timer) gets a say:
+            // the layout of a just-shown window can take a moment, and neither is awaited by sleeping.
             let code = match report_rx.recv() {
-                Ok(r) => check(&handle, &r),
+                Ok(first) => {
+                    let mut failures = check(&handle, &first, &hidden_at_ready, &saw_ready);
+                    if !failures.is_empty()
+                        && let Ok(second) = report_rx.recv()
+                    {
+                        failures = check(&handle, &second, &hidden_at_ready, &saw_ready);
+                    }
+                    finish(&failures)
+                }
                 Err(_) => 1,
             };
             let _ = done_tx.send(());
@@ -199,22 +232,32 @@ fn main() {
     });
 }
 
-/// 0 when the probe's expectations hold.
-fn check(app: &tauri::AppHandle<Wry>, r: &Report) -> i32 {
+/// What the report shows is wrong (empty: the probe's expectations hold).
+fn check(
+    app: &tauri::AppHandle<Wry>,
+    r: &Report,
+    hidden_at_ready: &AtomicBool,
+    saw_ready: &AtomicBool,
+) -> Vec<String> {
     let dialogs = app.state::<Dialogs>();
     let Some(label) = dialogs.of_host("main").into_iter().next() else {
-        eprintln!("show_probe: the dialog is gone");
-        return 1;
+        return vec!["the dialog is gone".into()];
     };
     let entry = dialogs.get(&label).expect("open dialog");
     let mut failures = Vec::new();
+    if !saw_ready.load(Ordering::SeqCst) {
+        failures.push("the page never sent dialog_ready".to_string());
+    } else if !hidden_at_ready.load(Ordering::SeqCst) {
+        failures
+            .push("the dialog window was already visible when dialog_ready arrived".to_string());
+    }
     // Shown by the page's ready (the deadline is minutes away), and ready recorded the frame's measure.
     if !entry.shown {
         failures.push("the window was not shown".to_string());
     }
     let Some(measured) = entry.measure.map(|m| m.content.height) else {
-        eprintln!("show_probe: FAILED: ready did not record a measure");
-        return 1;
+        failures.push("ready did not record a measure".to_string());
+        return failures;
     };
     // Exact after the show: the viewport is the measured content height (nothing cut off, no scroll) and the whole
     // footer is inside it.
@@ -237,12 +280,18 @@ fn check(app: &tauri::AppHandle<Wry>, r: &Report) -> i32 {
         ));
     }
     if failures.is_empty() {
-        eprintln!("show_probe: ok ({r:?}, measured {measured} px)");
-        0
-    } else {
-        for f in &failures {
-            eprintln!("show_probe: FAILED: {f}");
-        }
-        1
+        eprintln!(
+            "show_probe: ok on the {} report ({r:?}, measured {measured} px)",
+            r.phase
+        );
     }
+    failures
+}
+
+/// The exit code for the failures found.
+fn finish(failures: &[String]) -> i32 {
+    for f in failures {
+        eprintln!("show_probe: FAILED: {f}");
+    }
+    i32::from(!failures.is_empty())
 }

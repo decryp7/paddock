@@ -73,11 +73,16 @@ jobs:
 
   # ADR 0026 section 6: the real-window probe. It opens the built shell-demo's real dialog frame in a real (hidden, then
   # shown) window and checks the window's height against the frame's measure, so it needs a webview and a display: the
-  # host runners have one, Linux gets a virtual one (xvfb-run). Nightly only, never in branch CI (ER-14: it opens windows).
+  # host runners have one, Linux gets a virtual one (xvfb-run).
+  #
+  # OFF by default, and not a gate of the green nightly (it is not in `mark`'s needs): it opens real windows on the runner
+  # hosts' desktops (ER-14), and the Mac host's displays sleep at night, so a scheduled run would hang or fail for reasons
+  # that say nothing about the code. It runs on a manual run (workflow_dispatch), or on the nightly when the repository
+  # variable PADDOCK_REAL_WINDOW_PROBE is "true".
   dialog-window-probe:
     name: dialog window probe (${{ matrix.os }})
     needs: [gate]
-    if: ${{ needs.gate.outputs.run == 'true' }}
+    if: ${{ needs.gate.outputs.run == 'true' && (github.event_name == 'workflow_dispatch' || vars.PADDOCK_REAL_WINDOW_PROBE == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -120,7 +125,7 @@ jobs:
         env:
           PADDOCK_REAL_WINDOWS: "1"
           PADDOCK_PROBE_DIST: ${{ github.workspace }}/ui/dist/shell-demo/browser
-        run: xvfb-run -a cargo test -p paddock-dialogs --all-features --test show_probe -- --nocapture
+        run: xvfb-run -a cargo test -p paddock-dialogs --features tauri --test show_probe -- --nocapture
 
       - name: Probe (macOS, Windows)
         if: runner.os != 'Linux'
@@ -128,11 +133,11 @@ jobs:
         env:
           PADDOCK_REAL_WINDOWS: "1"
           PADDOCK_PROBE_DIST: ${{ github.workspace }}/ui/dist/shell-demo/browser
-        run: cargo test -p paddock-dialogs --all-features --test show_probe -- --nocapture
+        run: cargo test -p paddock-dialogs --features tauri --test show_probe -- --nocapture
 
   mark:
     name: mark the green nightly
-    needs: [ci, dialog-commands, dialog-window-probe]
+    needs: [ci, dialog-commands]
     if: ${{ github.event_name == 'schedule' && success() }}
     runs-on: ubuntu-latest
     container:

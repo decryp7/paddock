@@ -50,7 +50,7 @@ use crate::window::{
     Around, CLOSE_REQUESTED_EVENT, CLOSED_EVENT, DialogClosed, DialogError, DialogErrorCode,
     DialogInfo, DialogRequest, DialogResult, DialogShown, DialogStart, MAX_RESULT_BYTES, Measure,
     RESULT_EVENT, SHOWN_EVENT, WindowSpec, clean_title, disables_parent_natively, geometry,
-    json_len, plan_fit, validate, viewport_delta, window_config, zoom_of,
+    json_len, plan_fit, validate, viewport_delta, window_config,
 };
 use ::tauri::window::Color;
 use ::tauri::{
@@ -455,7 +455,10 @@ fn apply_parent_state<R: Runtime>(app: &AppHandle<R>, parent: &str) {
         return;
     };
     native(if disabled { "disable" } else { "enable" }, parent);
-    let _ = p.set_enabled(!disabled);
+    // Recorded only when the window took it; an Err leaves it unrecorded so the next apply retries.
+    if p.set_enabled(!disabled).is_ok() {
+        dialogs.applied(parent, disabled);
+    }
 }
 
 /// Whether an owned dialog window is attached to its parent when it is shown rather than when it is built: macOS, where
@@ -604,8 +607,10 @@ pub fn close_all_of<R: Runtime>(app: &AppHandle<R>, host: &str) -> usize {
         return 0;
     };
     let labels = dialogs.of_host(host);
+    dialogs.forget_applied(host);
     for label in &labels {
         dialogs.remove(label);
+        dialogs.forget_applied(label);
         if let Some(w) = app.get_webview_window(label) {
             let _ = w.destroy();
         }
@@ -632,6 +637,11 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
     let label = window.label();
     let parsed = Label::parse(label);
     let is_dialog = matches!(parsed, Some(Label::Dialog { .. }));
+    if matches!(event, WindowEvent::Destroyed)
+        && let Some(dialogs) = app.try_state::<Dialogs>()
+    {
+        dialogs.forget_applied(label);
+    }
     match event {
         WindowEvent::CloseRequested { api, .. } if is_dialog => {
             if !close_requested(app, label) {
@@ -818,7 +828,10 @@ fn fit<R: Runtime>(
     // The page reports CSS px: logical px once the webview zoom is taken out. The viewport delta is measured once, on the
     // window as it is at the first fit, and kept (a later fit must not read it off a resized window).
     let measure = measure.checked()?;
-    let measure = measure.logical(zoom_of(measure.device_pixel_ratio, scale));
+    let zoom = dialogs
+        .zoom_for(window.label(), measure.device_pixel_ratio, scale)
+        .ok_or_else(not_a_dialog)?;
+    let measure = measure.logical(zoom);
     let viewport_delta = dialogs
         .viewport_delta_or(window.label(), || {
             viewport_delta(around.current.height, measure.viewport_height)

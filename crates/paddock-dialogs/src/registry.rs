@@ -7,7 +7,9 @@
 
 use crate::contract::{Contracts, Grant, Kind, Modality};
 use crate::placement::Bounds;
-use crate::window::{DEFAULT_ROUTE, DialogError, DialogErrorCode, MAX_OPEN_PER_HOST, Measure};
+use crate::window::{
+    DEFAULT_ROUTE, DialogError, DialogErrorCode, MAX_OPEN_PER_HOST, Measure, ZoomState, zoom_after,
+};
 use paddock_commands::labels::{DIALOG_PREFIX, Label};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -76,6 +78,8 @@ pub struct OpenDialog {
     /// What the window's inner height has beyond the page's viewport, logical px, taken once at the first fit
     /// (`dialog_ready`) and reused by every later one.
     pub viewport_delta: Option<f64>,
+    /// The webview zoom, taken at `dialog_ready` and changed only as [`zoom_after`] says.
+    pub zoom: Option<ZoomState>,
 }
 
 impl OpenDialog {
@@ -102,6 +106,7 @@ impl OpenDialog {
             shown: false,
             measure: None,
             viewport_delta: None,
+            zoom: None,
         }
     }
 }
@@ -333,19 +338,45 @@ impl Dialogs {
     /// Reads the latest desired state of `parent` (see [`Dialogs::parent_wants_disabled`]) and compares it with the state
     /// last applied to the window: `Some(disabled)` when the window must change, `None` when it already is as wanted.
     /// The queued main-thread task that applies it calls this, so whichever of a show and a close runs last decides, and
-    /// the answer is never stale.
+    /// the answer is never stale. It records nothing: the task calls [`Dialogs::applied`] once the window accepted the
+    /// change, so a failed `set_enabled` is retried by the next task.
     pub fn parent_change(&self, parent: &str) -> Option<bool> {
         let wanted = self.parent_wants_disabled(parent);
+        let applied = self.applied.lock().unwrap_or_else(PoisonError::into_inner);
+        (applied.contains(parent) != wanted).then_some(wanted)
+    }
+
+    /// Records that `parent`'s window now is `disabled` (called after `set_enabled` returned Ok).
+    pub fn applied(&self, parent: &str, disabled: bool) {
         let mut applied = self.applied.lock().unwrap_or_else(PoisonError::into_inner);
-        if applied.contains(parent) == wanted {
-            return None;
-        }
-        if wanted {
+        if disabled {
             applied.insert(parent.to_string());
         } else {
             applied.remove(parent);
         }
-        Some(wanted)
+    }
+
+    /// Forgets the applied state of window `label` (it was destroyed: a later window with the label starts enabled).
+    pub fn forget_applied(&self, label: &str) {
+        self.applied
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(label);
+    }
+
+    /// The zoom of `label` for a fit at `scale_factor` with the page's `device_pixel_ratio` (see [`zoom_after`]),
+    /// recorded. `None` for a window that is not an open dialog.
+    pub fn zoom_for(
+        &self,
+        label: &str,
+        device_pixel_ratio: Option<f64>,
+        scale_factor: f64,
+    ) -> Option<f64> {
+        let mut map = self.lock();
+        let e = map.get_mut(label)?;
+        let z = zoom_after(e.zoom, device_pixel_ratio, scale_factor);
+        e.zoom = Some(z);
+        Some(z.zoom)
     }
 
     /// Whether `label` is an open dialog whose window has not been shown yet.

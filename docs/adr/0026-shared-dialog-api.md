@@ -326,9 +326,12 @@ answers `answered: true` or `dismissed`, and the opener acts.
 - **Rust.**
   - The 1.1-0 spike's probe, kept as a real-window test (`paddock-dialogs/tests/show_probe.rs`) that opens the built
     shell-demo's real dialog frame (`PADDOCK_PROBE_DIST`) and checks the window was shown at the frame's measured
-    height, with no scroll and the footer fully visible. It runs nightly on macOS, Windows and Linux (under `xvfb-run`)
-    with `PADDOCK_REAL_WINDOWS=1`, never in branch CI.
-    **Results:** wired nightly (`.gitea/workflows/nightly.yml`, job `dialog-window-probe`); results to be recorded per
+    height, with no scroll and the footer fully visible, and that the modal dialog's window was still hidden when its
+    page's ready arrived. It reports without waiting for animation frames. It opens real windows (ER-14) and a sleeping
+    display would stall it, so it is **off by default**: the nightly job `dialog-window-probe` runs on a manual run
+    (`workflow_dispatch`) or when the repository variable `PADDOCK_REAL_WINDOW_PROBE` is `true`, on macOS, Windows and
+    Linux (under `xvfb-run`) with `PADDOCK_REAL_WINDOWS=1`, and is not a gate of the green nightly. Never in branch CI.
+    **Results:** wired as an opt-in job (`.gitea/workflows/nightly.yml`, job `dialog-window-probe`); results to be recorded per
     OS here, none yet. (The spike's research note, `docs/research/2026-10-28-dialog-hidden-windows.md`, lives on the
     `spike/dialog-hidden-windows` branch until it is merged; its Results section takes the same line then.)
   - A placement property test: scale 1-3, work areas 800x600 to 7680x4320, any remembered size.

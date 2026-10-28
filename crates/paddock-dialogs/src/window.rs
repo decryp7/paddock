@@ -423,6 +423,47 @@ pub fn zoom_of(device_pixel_ratio: Option<f64>, scale_factor: f64) -> f64 {
     }
 }
 
+/// The webview zoom a dialog window has, with the page ratio and window scale it was read at ([`zoom_after`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ZoomState {
+    /// The page's `devicePixelRatio` last seen (`None` until the page sent one).
+    pub device_pixel_ratio: Option<f64>,
+    /// The window's scale factor at the last fit.
+    pub scale_factor: f64,
+    /// CSS px per logical px ([`zoom_of`]).
+    pub zoom: f64,
+}
+
+/// The zoom after a fit at window scale `scale_factor` with a page that reports `device_pixel_ratio`. The first fit
+/// (`dialog_ready`) reads it as [`zoom_of`]. Later it changes only when the page's ratio changed at an unchanged scale
+/// factor (the user zoomed the page); when the scale factor changed (the window moved to another monitor) the stored
+/// zoom is kept, because the ratio the page sent may still be the old monitor's and `dpr_old / scale_new` would be a
+/// wrong zoom. A fit without a ratio (a refit from the logical measure) keeps the zoom too.
+pub fn zoom_after(
+    prev: Option<ZoomState>,
+    device_pixel_ratio: Option<f64>,
+    scale_factor: f64,
+) -> ZoomState {
+    let fresh = || ZoomState {
+        device_pixel_ratio,
+        scale_factor,
+        zoom: zoom_of(device_pixel_ratio, scale_factor),
+    };
+    let Some(prev) = prev else {
+        return fresh();
+    };
+    let same_scale = prev.scale_factor == scale_factor;
+    let same_ratio = device_pixel_ratio.is_none() || device_pixel_ratio == prev.device_pixel_ratio;
+    if same_scale && !same_ratio {
+        return fresh();
+    }
+    ZoomState {
+        device_pixel_ratio: device_pixel_ratio.or(prev.device_pixel_ratio),
+        scale_factor,
+        zoom: prev.zoom,
+    }
+}
+
 /// The most a viewport delta can be, logical px (a bigger gap is a wrong report, not a webview inset).
 pub const MAX_VIEWPORT_DELTA: f64 = 400.0;
 
@@ -768,6 +809,36 @@ mod tests {
         let mut resized = m;
         resized.viewport_height = Some(100.0);
         assert_eq!(plan_fit(Kind::Form, resized, 0.0, &a).unwrap(), fit);
+    }
+
+    #[test]
+    fn the_zoom_follows_the_page_ratio_at_a_fixed_scale_and_survives_a_monitor_change() {
+        // First fit: dpr 2 on a 2x window is zoom 1.
+        let a = zoom_after(None, Some(2.0), 2.0);
+        assert_eq!(
+            (a.zoom, a.device_pixel_ratio, a.scale_factor),
+            (1.0, Some(2.0), 2.0)
+        );
+        // The user zooms the page (dpr 3 at the same scale): zoom 1.5.
+        let b = zoom_after(Some(a), Some(3.0), 2.0);
+        assert_eq!(b.zoom, 1.5);
+        // The window moves to a 1x monitor but the page still reports the old ratio: the zoom is kept, not 3 / 1.
+        let c = zoom_after(Some(b), Some(3.0), 1.0);
+        assert_eq!((c.zoom, c.scale_factor), (1.5, 1.0));
+        // A report with the new monitor's ratio (1.5) at the new scale keeps it too (unchanged zoom, ratio recorded).
+        let d = zoom_after(Some(c), Some(1.5), 1.0);
+        assert_eq!(d.zoom, 1.5);
+        // Both ratio and scale changed at once: kept.
+        assert_eq!(zoom_after(Some(a), Some(3.0), 1.0).zoom, 1.0);
+        // Later at that scale a real page zoom is read again.
+        let e = zoom_after(Some(zoom_after(Some(a), Some(3.0), 1.0)), Some(2.0), 1.0);
+        assert_eq!(e.zoom, 2.0);
+        // A refit without a ratio keeps the zoom and the last ratio; a first fit without one is zoom 1.
+        let f = zoom_after(Some(b), None, 2.0);
+        assert_eq!((f.zoom, f.device_pixel_ratio), (1.5, Some(3.0)));
+        assert_eq!(zoom_after(None, None, 2.0).zoom, 1.0);
+        // A bad ratio on a first fit is zoom 1.
+        assert_eq!(zoom_after(None, Some(f64::NAN), 2.0).zoom, 1.0);
     }
 
     #[test]
