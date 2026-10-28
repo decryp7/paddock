@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { filesUnder, isPrerelease, parseArgs, publish } from '../release/publish.mjs';
+import { filesUnder, isPrerelease, parseArgs, pickToken, publish } from '../release/publish.mjs';
 
 const args = ['--api', 'https://h/api/v1/', '--repo', 'o/r', '--tag', 'v1.2.0', '--notes', 'n.md', '--dir', 'a'];
 
@@ -92,3 +92,12 @@ test('--replace deletes and uploads again a file the release has (the moving <ap
   ]);
 });
 
+
+test('the token comes from RELEASE_TOKEN, else from the fallback GITEA_TOKEN; blank counts as unset', () => {
+  assert.deepEqual(pickToken({ RELEASE_TOKEN: 'a', GITEA_TOKEN: 'b' }), { name: 'RELEASE_TOKEN', token: 'a' });
+  assert.deepEqual(pickToken({ RELEASE_TOKEN: '', GITEA_TOKEN: 'b' }), { name: 'GITEA_TOKEN', token: 'b' });
+  assert.deepEqual(pickToken({ RELEASE_TOKEN: '  ', GITEA_TOKEN: 'b' }), { name: 'GITEA_TOKEN', token: 'b' });
+  assert.deepEqual(pickToken({ GITEA_TOKEN: 'b' }), { name: 'GITEA_TOKEN', token: 'b' });
+  assert.equal(pickToken({ RELEASE_TOKEN: '' }), null);
+  assert.equal(pickToken({}), null);
+});

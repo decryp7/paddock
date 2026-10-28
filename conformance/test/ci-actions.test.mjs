@@ -803,7 +803,9 @@ test('a kit app lists the OS legs its old workflow had, keeps its build folder o
       assert.match(wf, new RegExp(`TAURI_${k}: \\$\\{\\{ secrets\\.PADDOCK_TAURI_${k} \\}\\}`), `${app}: the family's ${k} reaches the kit under its Tauri name`);
     }
     assert.doesNotMatch(wf, /TRANSITION_SIGNING_KEY|OLD_REPO|--newest/, `${app}: one key for the family, no bridge release in the old repo`);
-    assert.match(wf, /Existing installs/, `${app}: the First launch notes say to reinstall once`);
+    // Dyno has never been released, so it has no installs that must reinstall; every other kit app is moving from its own repository.
+    if (app !== 'dyno') assert.match(wf, /Existing installs/, `${app}: the First launch notes say to reinstall once`);
+    else assert.doesNotMatch(wf, /Existing installs/, 'dyno: never released, no reinstall note');
     const conf = JSON.parse(read(join(PADDOCK, 'apps', app, 'app', 'src-tauri', 'tauri.conf.json')));
     assert.deepEqual(conf.plugins.updater.endpoints, [`https://dev.decryptology.net/decryp7/paddock/releases/download/${app}-latest/latest.json`], `${app}: the updater reads only Paddock's ${app}-latest`);
   }

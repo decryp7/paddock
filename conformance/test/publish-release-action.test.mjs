@@ -141,16 +141,16 @@ test('publish-release: a pitcrew-v tag publishes the release and puts latest.jso
   }
 });
 
-test('publish-release: without signatures there is no latest.json and no moving release; another tag is refused (rule 9)', async () => {
+test('publish-release: without signatures a tag fails with a clear message and publishes nothing; another tag is refused (rule 9)', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'publish-release-'));
   const gitea = await fakeGitea();
   try {
     artifacts(dir);
     for (const f of ['Pitcrew_1.0.3_x64-setup.exe.sig', 'Pitcrew_aarch64.app.tar.gz.sig', 'Pitcrew_1.0.3_amd64.deb.sig', 'Pitcrew_1.0.3_amd64.AppImage.sig']) rmSync(join(dir, f));
     const unsigned = await run(gitea.url, dir, { expr: { 'github.server_url': gitea.url } });
-    assert.equal(unsigned.status, 0, unsigned.out);
-    assert.match(unsigned.out, /::warning::No signed updater artifacts/);
-    assert.deepEqual([...gitea.releases.keys()], ['pitcrew-v1.0.3'], 'no pitcrew-latest without latest.json');
+    assert.notEqual(unsigned.status, 0, unsigned.out);
+    assert.match(unsigned.out, /::error::No signed updater artifacts on tag pitcrew-v1\.0\.3: the signing key .* nothing is released/);
+    assert.deepEqual([...gitea.releases.keys()], [], 'a tag without a signing key releases nothing');
 
     const other = await run(gitea.url, dir, { expr: { 'github.server_url': gitea.url, 'github.ref': 'refs/tags/v1.0.3', 'github.ref_name': 'v1.0.3' } });
     assert.notEqual(other.status, 0);
@@ -207,6 +207,31 @@ test('plan action: the tag pattern is the app\'s, and a tagged main commit is sk
     assert.equal(run({ TAGGED: 'def456\trefs/tags/pitcrew-v1.0.2' }), 'run=true');
     assert.equal(run({ TAGGED: 'abc123\trefs/tags/pitcrew-v1.0.3', REF: 'refs/heads/feature' }), 'run=true', 'only a push to main is covered by the tag run');
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('publish-release: RELEASE_TOKEN wins, the job token is the fallback, and the log names which one without printing it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'publish-release-'));
+  const gitea = await fakeGitea();
+  try {
+    const expr = { 'github.server_url': gitea.url };
+    artifacts(dir); // each run deletes the .sig files it folds into latest.json
+    const both = await run(gitea.url, dir, { expr }, { RELEASE_TOKEN: 'release-secret', GITEA_TOKEN: 'job-secret' });
+    assert.equal(both.status, 0, both.out);
+    assert.match(both.out, /publish: using RELEASE_TOKEN\n/);
+    // An empty RELEASE_TOKEN (the secret is not set) falls back to the job token.
+    artifacts(dir);
+    const fallback = await run(gitea.url, dir, { expr }, { RELEASE_TOKEN: '', GITEA_TOKEN: 'job-secret' });
+    assert.equal(fallback.status, 0, fallback.out);
+    assert.match(fallback.out, /publish: using GITEA_TOKEN \(the job token/);
+    for (const r of [both, fallback]) assert.doesNotMatch(r.out, /release-secret|job-secret/);
+    artifacts(dir);
+    const none = await run(gitea.url, dir, { expr }, { RELEASE_TOKEN: '', GITEA_TOKEN: '' });
+    assert.equal(none.status, 2, none.out);
+    assert.match(none.out, /neither RELEASE_TOKEN nor the fallback GITEA_TOKEN/);
+  } finally {
+    await gitea.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -10,7 +10,9 @@
 // release); without it they are skipped. Nothing is ever written to an app's old repository: there is no update bridge
 // (ADR 0014, amendment 2026-10-25: installs from before the monorepo are reinstalled once by hand).
 //
-// The token needs write:repository. It is read from the environment and never printed.
+// The token needs write:repository (create a release, upload assets). It is read from the environment and never printed:
+// RELEASE_TOKEN (a personal access token) when it is set and not empty, else GITEA_TOKEN (the job's github.token, which
+// publish.yml released v0.3.0 with). The message names which one was used, never its value.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -102,14 +104,27 @@ export async function publish({ api, repo, tag, notes, dir, replace = false }, t
   return release.html_url;
 }
 
+/**
+ * The token to publish with and the name of where it came from: `RELEASE_TOKEN` when set and not blank, else the fallback
+ * `GITEA_TOKEN`; null when neither is. The caller prints the name, never the token.
+ */
+export function pickToken(env) {
+  for (const name of ['RELEASE_TOKEN', 'GITEA_TOKEN']) {
+    const value = env[name]?.trim();
+    if (value) return { name, token: value };
+  }
+  return null;
+}
+
 if (isMain(import.meta.url)) {
-  const token = process.env.GITEA_TOKEN;
-  if (!token) {
-    console.error('publish: GITEA_TOKEN is not set');
+  const picked = pickToken(process.env);
+  if (!picked) {
+    console.error('publish: neither RELEASE_TOKEN nor the fallback GITEA_TOKEN (the job token) is set');
     process.exit(2);
   }
+  console.log(`publish: using ${picked.name}${picked.name === 'GITEA_TOKEN' ? ' (the job token: RELEASE_TOKEN is not set)' : ''}`);
   try {
-    console.log(await publish(parseArgs(process.argv.slice(2)), token));
+    console.log(await publish(parseArgs(process.argv.slice(2)), picked.token));
   } catch (e) {
     console.error(`publish: ${e.message}`);
     process.exit(1);

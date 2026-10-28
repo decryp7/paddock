@@ -25,7 +25,7 @@
 #
 # Secrets: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD, TAURI_UPDATER_PUBKEY (the updater; without them the
 # build is unsigned and cannot update itself), APPLE_SIGNING_IDENTITY (empty while the apps are ad-hoc sealed, rule 23),
-# RELEASE_TOKEN (a Gitea token with write:repository). Run it by hand (workflow_dispatch in the caller) to build and verify
+# RELEASE_TOKEN (optional: a Gitea token with write:repository; without it the job token publishes). Run it by hand (workflow_dispatch in the caller) to build and verify
 # the bundles without releasing: the "one CI build with bundles" of rule 25. An app in its own repository calls it as
 # decryp7/paddock/.gitea/workflows/app-release.yml@<tag> with `paddock-ref: <tag>`, and its own `root` and `cargo-dir`.
 
@@ -291,6 +291,22 @@ jobs:
 
       - uses: ./.paddock/.gitea/actions/setup-rust
 
+      # The Rust SBOM (CycloneDX) is a release asset. cargo-cyclonedx comes with the Paddock CI image; other images build it
+      # once. An app without a Tauri crate has nothing to describe: the step does nothing.
+      - name: SBOM (CycloneDX)
+        env:
+          APP_ID: ${{ inputs.app-id }}
+          APP_DIR: ${{ inputs.app-dir }}
+        run: |
+          manifest="$APP_DIR/src-tauri/Cargo.toml"
+          if [ ! -f "$manifest" ]; then
+            echo "::notice::$manifest does not exist: no SBOM for this app."
+            exit 0
+          fi
+          command -v cargo-cyclonedx >/dev/null || cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --manifest-path "$manifest" --format json --override-filename "${APP_ID}-rust.cdx"
+          cp "$APP_DIR/src-tauri/${APP_ID}-rust.cdx.json" release/
+
       # git-cliff comes with the Paddock CI image; other images build it once.
       - name: Changelog of this release
         env:
@@ -307,6 +323,8 @@ jobs:
           done <<< "$PATHS"
           git cliff "${args[@]}"
 
+      # RELEASE_TOKEN when the repository has one, else the job token (publish.yml released v0.3.0 with it): the action
+      # names which was used, never its value.
       - uses: ./.paddock/.gitea/actions/publish-release
         with:
           app-name: ${{ inputs.app-name }}
@@ -316,3 +334,4 @@ jobs:
           latest-tag: ${{ inputs.latest-tag }}
           notes-extra: ${{ inputs.notes-extra }}
           token: ${{ secrets.RELEASE_TOKEN }}
+          fallback-token: ${{ github.token }}

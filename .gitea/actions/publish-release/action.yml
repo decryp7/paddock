@@ -11,8 +11,11 @@ inputs:
     description: Folder with the installers and their .sig files.
     default: artifacts
   token:
-    description: A Gitea token with write:repository (RELEASE_TOKEN).
-    required: true
+    description: "A Gitea token with write:repository (RELEASE_TOKEN). Empty: the fallback-token is used."
+    default: ""
+  fallback-token:
+    description: "The job token (github.token), used when token is empty. It creates releases and uploads assets in this repository, as publish.yml's v0.3.0 release did."
+    default: ""
   tag-prefix:
     description: "An app's tag prefix in the monorepo, with the dash (pitcrew-: tags are pitcrew-v1.2.3). Empty: plain v* tags."
     default: ""
@@ -30,7 +33,8 @@ runs:
   steps:
     - shell: bash
       env:
-        GITEA_TOKEN: ${{ inputs.token }}
+        RELEASE_TOKEN: ${{ inputs.token }}
+        GITEA_TOKEN: ${{ inputs.fallback-token }}
         APP_NAME: ${{ inputs.app-name }}
         CHANGELOG: ${{ inputs.changelog }}
         DIR: ${{ inputs.artifacts-dir }}
@@ -51,6 +55,10 @@ runs:
           node "$P/release/latest-json.mjs" --dir "$DIR" --version "$version" --notes "$DIR/RELEASE_NOTES.md" --base-url "$base" --out "$DIR/latest.json"
           # The signatures are in latest.json; the .sig files are not release assets.
           find "$DIR" -name '*.sig' -delete
+        elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          # A release without latest.json is invisible to every installed copy: never publish one by accident.
+          echo "::error::No signed updater artifacts on tag $tag: the signing key (TAURI_SIGNING_PRIVATE_KEY and its password) was not available to the build, so nothing is released."
+          exit 1
         else
           echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
         fi
