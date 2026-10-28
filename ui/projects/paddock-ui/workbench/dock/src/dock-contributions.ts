@@ -106,6 +106,8 @@ export function dockContributions(injector: Injector): WorkbenchBatch {
           // The window edited the stored layouts from its own window: read them again before anything is applied.
           await perspectives().refresh();
           if (result?.apply) layouts().apply(result.apply);
+          // "Save current layout" in the window: the window closes and the ordinary Save layout flow asks for the name.
+          else if (result?.save) await ctx.runCommand(DOCK_COMMANDS.layoutSave);
         },
       }),
       defineCommand({ id: DOCK_COMMANDS.layoutApply, title: msg('pd.wb.dock.cmd.layout-apply', 'Apply saved layout'), category: CATEGORY, when: () => layouts().list().length > 0, run: (_ctx, args) => void dock().applyNamedLayout(nameOf(args) ?? '') }),

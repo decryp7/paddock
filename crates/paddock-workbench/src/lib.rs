@@ -46,11 +46,7 @@ paddock_dialogs::dialogs! {
     /// layouts reads and edits the named layouts through the layout store.
     pub static DIALOGS;
     "pd.wb.dock.layout-save" => Form(Modal) { width: Some(Narrow) },
-    "pd.wb.dock.layout-manage" => Tool {
-        width: Some(Px(480)),
-        height: Some(360),
-        commands: &[dialog_callable::layout_get, dialog_callable::layout_set],
-    },
+    "pd.wb.dock.layout-manage" => Form(Modeless) { commands: &[dialog_callable::layout_get, dialog_callable::layout_set] },
 }
 
 #[cfg(feature = "tauri")]
