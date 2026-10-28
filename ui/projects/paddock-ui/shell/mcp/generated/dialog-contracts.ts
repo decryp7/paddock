@@ -11,7 +11,7 @@ export const DIALOG_CONTRACTS = {
     height: null,
     instanced: false,
     requiredChoice: false,
-    commands: ['mcp_issue_key'],
+    commands: ['mcp_get', 'mcp_issue_key'],
   },
   'pd.mcp.revoke': {
     id: 'pd.mcp.revoke',

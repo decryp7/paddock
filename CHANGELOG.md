@@ -12,6 +12,11 @@ Conventional Commits; one semver tag for the whole repo.
   affirmative; a primary beside a destructive (the save prompt) is `info` and focuses the primary.
 - Busy: the pressed button keeps its full colour with its spinner and may say `busyLabel` ("Creating…"); the inert body
   dims. Rejected: the alert has an error icon and no border; Try again shows its focus ring after the script moved focus.
+- Contents: pd.mcp.key reads the key count when it opens (its contract adds `mcp_get`) and shows the key limit as a
+  validation message with Create key disabled; Create key says "Creating…" and the channel secret's Save "Saving…".
+  pd.storage.confirm's button repeats its heading ("Delete logs?" / "Delete logs"). sd.inspector says "Running".
+  Report a problem breaks long file names without hyphens. Set-up says "Get Pitwall" when Pitwall is not installed. The
+  channel secret's Show button is as tall as its input. `SuEmptyState`'s description uses `text-wrap: pretty` (no widows).
 
 ### Shared dialog API: About opens its releases page in the system browser
 

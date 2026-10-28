@@ -380,6 +380,7 @@
       "width": 400,
       "height": null,
       "commands": [
+        "mcp_get",
         "mcp_issue_key"
       ]
     },
