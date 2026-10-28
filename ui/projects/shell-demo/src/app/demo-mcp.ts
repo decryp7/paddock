@@ -9,7 +9,7 @@ export function fakeMcp(search: string = globalThis.location?.search ?? ''): Mem
   const wanted = new URLSearchParams(search).get('mcp');
   if (wanted === 'error') return { getFailures: 1 };
   // The key dialog's rejected state: issuing a key is refused with the engine's message.
-  if (wanted === 'refuse') return { issueError: { code: 'invalid', message: '16 keys are in use. Revoke one you no longer need first.', retryable: false } };
+  if (wanted === 'refuse') return { issueError: { code: 'storeUnavailable', message: 'The key could not be stored: the settings folder is read-only. Check its permissions, then try again.', retryable: true } };
   if (wanted === 'calls') {
     return {
       calls: [
