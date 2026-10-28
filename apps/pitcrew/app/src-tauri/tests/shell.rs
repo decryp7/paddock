@@ -322,5 +322,8 @@ fn the_releases_page_lists_the_tags_the_workflow_releases_from() {
         .find_map(|l| l.trim().strip_prefix("tags: [\"")?.strip_suffix("*\"]"))
         .expect("the workflow releases from a tag pattern");
     assert_eq!(prefix, "pitcrew-v");
-    assert_eq!(RELEASES_PAGE, format!("https://dev.decryptology.net/decryp7/paddock/releases?q={prefix}"));
+    assert_eq!(
+        RELEASES_PAGE,
+        format!("https://dev.decryptology.net/decryp7/paddock/releases?q={prefix}")
+    );
 }

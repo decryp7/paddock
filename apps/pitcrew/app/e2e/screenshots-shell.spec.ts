@@ -3,8 +3,7 @@ import { loaded } from './loaded';
 
 /**
  * The shell surfaces of Pitcrew for review (`SCREENSHOTS=1 SHOTS_OUT=<folder> npx playwright test --project=screenshots`): the
- * whole 1440x900 window at 2x, in both themes, never cropped. The shell's parts (the Jobs list with a running update and
- * Cancel, a service chip that is down with its Restart, the notification centre) and the dialog windows (Settings with
+ * whole 1440x900 window at 2x, in both themes, never cropped. The shell's parts (the Jobs list with the disk clean-up, a service chip that is down with its Restart, the notification centre) and the dialog windows (Settings with
  * Pitcrew's pages beside Appearance, About, Updates, What's new, the confirm and the stop-process decisions). Every shot waits
  * for loaded content: no skeleton, no splash, fonts and images decoded, the layout still.
  */
@@ -25,12 +24,11 @@ for (const theme of ['dark', 'light'] as const) {
       await page.screenshot({ path: `${OUT}/${theme}/shell-${name}.png` });
     };
 
-    test('jobs list with a running update and Cancel', async ({ page, app }) => {
-      await page.goto('/?simulate=0#/updates');
-      const row = page.getByRole('row', { name: /ui-tests/ });
-      await row.getByRole('button', { name: 'Update ui-tests to 5.3.0' }).click();
+    test('jobs list with the disk clean-up', async ({ page, app }) => {
+      await page.goto('/?simulate=0#/runners/build-win?tab=disk');
+      await page.getByRole('button', { name: /Clean up now|Clean now/ }).first().click();
       await app.statusBar.jobs.click();
-      await expect(app.jobs.list).toContainText('Updating');
+      await expect(app.jobs.list).toContainText('Cleaning up the disk');
       await shoot(page, 'jobs');
     });
 

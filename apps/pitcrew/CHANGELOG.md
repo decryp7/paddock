@@ -11,6 +11,8 @@ from Conventional Commits by git-cliff (`cliff.toml`).
   Cancel for long work, dialogs as their own windows, and Settings, About, Updates and What's New from the shell.
 - Cleaning a disk, registering a runner, pruning the container engine and trimming the Actions cache run as jobs that show
   their progress and can be cancelled; the window no longer gives up on them after a fixed time.
+- Updates and release notes come from the Paddock releases (`pitcrew-latest`, the `pitcrew-v` tags). A copy installed before
+  this version is reinstalled once by hand.
 
 - Runner downloads and updates use the Paddock downloader: parallel ranges, per-host connection caps, back-off when a server
   answers 429 or 503, resume of a stopped download, the checksum computed while writing and compared with the publisher's
