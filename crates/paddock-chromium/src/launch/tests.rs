@@ -1,6 +1,6 @@
 use super::*;
 use crate::fake::{FakeBrowser, Mode, UserAction};
-use crate::page::Outcome;
+use crate::page::{MAX_HTML, Outcome};
 use crate::ready::{Readiness, Rule};
 use paddock_jobs::time::FakeClock;
 
