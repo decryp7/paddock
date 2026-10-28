@@ -1,9 +1,9 @@
-import { MemoryMcpBackend, TauriMcpBackend, type McpBackend, type MemoryMcpOptions } from '@decryp7/paddock-ui/shell/mcp';
+import { MAX_KEYS, MemoryMcpBackend, TauriMcpBackend, type McpBackend, type MemoryMcpOptions } from '@decryp7/paddock-ui/shell/mcp';
 import { tauriIpc } from './demo-ipc';
 
 /**
- * What the browser build starts with (`?mcp=error|calls|many-keys|refuse|slow`; nothing by default: off, no clients, an empty log).
- * `calls` has a few recorded calls, `error` fails the first ask once, `many-keys` has the key limit nearly reached.
+ * What the browser build starts with (`?mcp=error|calls|full|refuse|slow`; nothing by default: off, no clients, an empty log).
+ * `calls` has a few recorded calls, `error` fails the first ask once, `full` has every key in use (the key dialog's limit).
  */
 export function fakeMcp(search: string = globalThis.location?.search ?? ''): MemoryMcpOptions {
   const wanted = new URLSearchParams(search).get('mcp');
@@ -35,6 +35,8 @@ export function demoMcpBackend(): McpBackend {
     const engine = new MemoryMcpBackend(fakeMcp());
     // The key dialog's busy state (`?mcp=slow`): issuing a key never answers.
     if (new URLSearchParams(globalThis.location?.search ?? '').get('mcp') === 'slow') engine.issueKey = () => new Promise(() => undefined);
+    // The key dialog's limit (`?mcp=full`): every key in use, so Create key is disabled with the validation message.
+    if (new URLSearchParams(globalThis.location?.search ?? '').get('mcp') === 'full') for (let i = 1; i <= MAX_KEYS; i++) void engine.issueKey(`Client ${i}`);
     memory = engine;
     // Demo only: the browser build has no client to call a tool, so a spec (or a person in the console) plays one.
     (globalThis as { __pdDemoMcp?: MemoryMcpBackend }).__pdDemoMcp = engine;
