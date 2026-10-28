@@ -84,8 +84,6 @@ jobs:
       cliff-config: apps/pitcrew/cliff.toml
       cliff-paths: |
         apps/pitcrew/**
-        crates/**
-        ui/**
       # --version: Pitcrew's service has no --self-test; its --version loads every library and exits 0.
       sidecars: pitcrew-service:--version
       setup-node: false

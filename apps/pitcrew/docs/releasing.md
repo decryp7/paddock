@@ -20,47 +20,50 @@ projects' releases (ADR 0002), independently of this.
 ## How Pitcrew's updates work
 
 - **Opt-in.** Pitcrew never checks on its own unless the user turns on automatic update checks (off by default); a
-  manual check always works. (The checking UI is not built yet; the updater plugin is wired and the app reports
-  whether the build can update.)
+  manual check always works (the shell's Updates window). Release links go to the Paddock releases page filtered to
+  `pitcrew-v` tags (`RELEASES_PAGE`).
 - **One endpoint.** A check is one HTTPS GET of
   `https://dev.decryptology.net/decryp7/paddock/releases/download/pitcrew-latest/latest.json` (the moving `pitcrew-latest` release of the Paddock monorepo; copies installed before the move are reinstalled once by hand)
-  (`plugins.updater.endpoints` in `tauri.conf.json`). It carries no identifier or usage data.
+  (`UPDATE_FEED` in `app/src-tauri/src/lib.rs`, and `plugins.updater.endpoints` in `tauri.conf.json`; `tests/shell.rs` ties both to the
+  workflow's `latest-tag`). It carries no identifier or usage data.
 - **Signatures are mandatory.** Every update is verified with the minisign public key built into the app before it
   is installed, and `requireSignedVersion` binds each signature to its version (GHSA-j38x-g3m3-95fr). A build without
   the public key says "Updates are not available in this build" and never checks.
 - `latest.json` is written by the shared `conformance/release/latest-json.mjs` from the signed installers (`*.sig` next to
   each); `node --test conformance/test/latest-json.test.mjs` (repo root) tests it.
 
-## One-time set-up: Pitcrew's own signing key
+## One-time set-up: the family's signing key
 
-Pitcrew needs its **own** key pair — never reuse another product's updater key.
+Pitcrew signs its updates with the **Paddock family key** (one key pair for every Paddock app, kept as secrets of the
+`decryp7` user or of `decryp7/paddock`); it needs no key of its own. If the family key does not exist yet, generate it
+once on a trusted machine with a strong password:
 
-1. Generate a key pair on a trusted machine, with a strong password:
+```sh
+npx tauri signer generate -w ~/.tauri/paddock-updater.key
+```
 
-   ```sh
-   cd app
-   npx tauri signer generate -w ~/.tauri/pitcrew-updater.key
-   ```
+This writes the encrypted private key `paddock-updater.key` and the public key `paddock-updater.key.pub`.
 
-   This writes the private key `pitcrew-updater.key` (encrypted with the password) and the public key
-   `pitcrew-updater.key.pub`.
-
-2. Set three **repository secrets** in Gitea (Settings ▸ Actions ▸ Secrets) of `decryp7/Pitcrew`:
+1. The secrets (Gitea: Settings ▸ Actions ▸ Secrets) are the family's:
 
    | Secret | Value |
    | --- | --- |
-   | `TAURI_SIGNING_PRIVATE_KEY` | the contents of `pitcrew-updater.key` |
-   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
-   | `TAURI_UPDATER_PUBKEY` | the contents of `pitcrew-updater.key.pub` |
+   | `PADDOCK_TAURI_SIGNING_PRIVATE_KEY` | the contents of the private key file |
+   | `PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
+   | `PADDOCK_TAURI_UPDATER_PUBKEY` | the contents of the public key file |
 
-   Also `RELEASE_TOKEN`: a Gitea access token with `write:repository` scope, used to publish the release.
-
-   The bundle jobs then build with `createUpdaterArtifacts` and the public key (passed as `tauri build --config`,
-   and as `TAURI_UPDATER_PUBKEY` for `option_env!` in `app/src-tauri/src/updater.rs`). Without the secrets (forks,
-   pull requests) the installers are built without update support and the release job publishes no `latest.json`.
+   `pitcrew-release.yml` maps them to the `TAURI_*` names of the shared `app-release.yml`. The bundle jobs then build with
+   `createUpdaterArtifacts` and the public key (passed as `tauri build --config`, and as `TAURI_UPDATER_PUBKEY` for
+   `option_env!` in `app/src-tauri/src/lib.rs`, read by the shell's updater). Without the secrets (forks, pull requests)
+   the installers are built without update support and the release job publishes no `latest.json`.
 
    The committed `tauri.conf.json` keeps `pubkey` empty and does not set `createUpdaterArtifacts`, so local
    `npx tauri build` works without the private key.
+
+2. `RELEASE_TOKEN` (a Gitea access token with `write:repository` scope) is **optional** and, when set, a **user-level**
+   secret of `decryp7`, shared by every app's release, not one per repository. The release job uses it to publish the
+   release; without it the workflow's own token is used, which the Gitea instance may restrict. Set it only if publishing
+   fails with a permissions error.
 
 3. **Back up the private key and its password** (password manager plus an offline copy). Never commit it, never put
    it anywhere the UI is built from.
