@@ -19,6 +19,15 @@ test('C39 bad: a port read off a listener that is dropped (block, chain, drop, f
   assert.deepEqual(kinds(wrap('    let l = TcpListener::bind("127.0.0.1:0").unwrap();\n    let url = format!("http://{}/", l.local_addr().unwrap());\n    drop(l);\n    get(&url);')), ['drop']);
 });
 
+test('C39 bad: other unwrap tails, a renamed import and a socket2 socket', () => {
+  for (const tail of ['.unwrap_or_else(|e| panic!("{e}"))', '.map_err(Error::Io)?', '.context("bind")?', '.with_context(|| "bind")?']) {
+    assert.deepEqual(kinds(wrap(`    let p = TcpListener::bind("127.0.0.1:0")${tail}.local_addr().unwrap().port();`)), ['chain'], tail);
+  }
+  assert.deepEqual(kinds('use std::net::TcpListener as L;\n' + wrap('    let p = L::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();')), ['chain']);
+  const s2 = 'fn free() -> u16 {\n    let s = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();\n    s.set_reuse_address(true).unwrap();\n    s.bind(&addr.into()).unwrap();\n    s.local_addr().unwrap().as_socket().unwrap().port()\n}\n';
+  assert.deepEqual(kinds(s2), ['block']);
+});
+
 test('C39 good: a listener kept, served, moved or dropped after its last use', () => {
   // Served by a thread: the listener moves into it.
   assert.deepEqual(freedPorts(wrap('    let l = TcpListener::bind("127.0.0.1:0").unwrap();\n    let port = l.local_addr().unwrap().port();\n    std::thread::spawn(move || { let _ = l.accept(); });\n    get(port);')), []);

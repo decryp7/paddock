@@ -2,7 +2,8 @@
 // again: the OS may hand it to another process (on a shared CI runner, a concurrent test's server) before the test connects,
 // and the test then talks to that server. Flagged, in any Rust file:
 // - a chain that reads the port off a temporary listener: `TcpListener::bind(..).unwrap().local_addr()` (also `?`, `.expect(..)`,
-//   `.await`);
+//   `.unwrap_or_else(..)`, `.map_err(..)`, `.context(..)`, `.with_context(..)`, `.await`; also under a `use .. as` alias, and a
+//   socket2 `Socket::new(..)` that is bound and dropped);
 // - a block (a `{ .. }` expression or a fn body) that binds `let l = ..bind(..)` and ends with `l.local_addr()..`, using `l`
 //   for nothing else: the listener drops when the block ends;
 // - `drop(l)` of a listener whose `local_addr()` was read before.
@@ -13,7 +14,12 @@ import { error } from '../finding.mjs';
 
 const WAIVER = /conformance:\s*freed-port\s*[—–-]+\s*(\S.{2,})/;
 const BARE_WAIVER = /conformance:\s*freed-port/;
-const BIND = /\b(?:TcpListener|TcpSocket)::bind\s*\(/g;
+/** `TcpListener::bind(` and `TcpSocket::bind(`, under their own names and any `use ... as Alias` of them; `Socket::new(` (socket2). */
+function bindPattern(clean) {
+  const names = ['TcpListener', 'TcpSocket'];
+  for (const a of clean.matchAll(/\b(?:TcpListener|TcpSocket)\s+as\s+(\w+)/g)) names.push(a[1]);
+  return new RegExp(`\\b(?:(?:${names.join('|')})::bind|Socket::new)\\s*\\(`, 'g');
+}
 
 /**
  * `text` with comments and the insides of string, raw-string and char literals blanked (newlines kept). Unlike C30's mask it
@@ -89,11 +95,12 @@ function enclosingBlock(text, at) {
   return -1;
 }
 
-/** The end of a call's "unwrap tail" after `i`: `.unwrap()`, `.expect(..)`, `?`, `.await`, in any order. */
+/** The end of a call's "unwrap tail" after `i`: `.unwrap()`, `.expect(..)`, `.unwrap_or_else(..)`, `.map_err(..)`,
+ * `.context(..)`, `.with_context(..)`, `?`, `.await`, in any order. */
 function skipTail(text, i) {
   for (;;) {
     const rest = text.slice(i);
-    const m = /^\s*(?:\?|\.\s*await\b|\.\s*unwrap\s*\(\s*\)|\.\s*expect\s*\()/.exec(rest);
+    const m = /^\s*(?:\?|\.\s*await\b|\.\s*unwrap\s*\(\s*\)|\.\s*(?:expect|unwrap_or_else|map_err|context|with_context)\s*\()/.exec(rest);
     if (!m) return i;
     i += m[0].length;
     if (m[0].endsWith('(') && !m[0].endsWith('()')) {
@@ -118,7 +125,7 @@ export function freedPorts(text) {
     const waived = WAIVER.test(here) ? 'reason' : BARE_WAIVER.test(here) ? 'no-reason' : false;
     out.push({ line, kind, waived });
   };
-  for (const m of clean.matchAll(BIND)) {
+  for (const m of clean.matchAll(bindPattern(clean))) {
     const open = m.index + m[0].length - 1;
     const close = closing(clean, open);
     if (close < 0) continue;
@@ -139,7 +146,8 @@ export function freedPorts(text) {
     const end = closing(clean, block);
     if (end < 0) continue;
     const body = clean.slice(semi + 1, end);
-    const uses = [...body.matchAll(new RegExp(`\\b${esc(name)}\\b`, 'g'))];
+    // Setting a socket up (socket2: `s.bind(..)`, `s.set_*(..)`) is not a use that keeps it.
+    const uses = [...body.matchAll(new RegExp(`\\b${esc(name)}\\b(?!\\s*\\.\\s*(?:bind|set_\\w+)\\s*\\()`, 'g'))];
     const portReads = [...body.matchAll(new RegExp(`\\b${esc(name)}\\s*\\.\\s*local_addr\\s*\\(`, 'g'))];
     const dropAt = new RegExp(`\\bdrop\\s*\\(\\s*${esc(name)}\\s*\\)`).exec(body);
     if (dropAt) {
