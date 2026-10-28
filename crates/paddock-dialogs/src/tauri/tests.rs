@@ -452,6 +452,7 @@ fn measure(content_h: f64, min_h: f64) -> Measure {
     Measure {
         content: size(720.0, content_h),
         min_content: size(400.0, min_h),
+        viewport_height: None,
     }
 }
 
@@ -850,6 +851,7 @@ fn a_scale_change_refits_a_dialog_from_its_last_measure() {
         Measure {
             content: bad,
             min_content: bad,
+            viewport_height: None,
         },
     );
     scale_changed(&dialog);

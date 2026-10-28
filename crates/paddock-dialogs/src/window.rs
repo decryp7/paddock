@@ -356,6 +356,27 @@ pub fn window_config(
 pub struct Measure {
     pub content: Size,
     pub min_content: Size,
+    /// The page's `window.innerHeight` (CSS px), when the page sends it. A webview can be shorter than the window's
+    /// inner height (the 1.1-0 spike measured 32 px on a Mac whose outer and inner sizes were equal): the fit adds the
+    /// difference ([`viewport_delta`]) to the content and minimum content heights so the footer is not cut off.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub viewport_height: Option<f64>,
+}
+
+/// The most a viewport delta can be, logical px (a bigger gap is a wrong report, not a webview inset).
+pub const MAX_VIEWPORT_DELTA: f64 = 400.0;
+
+/// The part of a window's inner height the page's viewport does not see: `inner_height` less the page's reported
+/// `viewport_height`, clamped to `0..=`[`MAX_VIEWPORT_DELTA`] (a page that is taller than the window has no delta). 0
+/// when the page did not report one.
+pub fn viewport_delta(inner_height: f64, viewport_height: Option<f64>) -> f64 {
+    match viewport_height {
+        Some(v) if v.is_finite() && inner_height.is_finite() => {
+            (inner_height - v).clamp(0.0, MAX_VIEWPORT_DELTA)
+        }
+        _ => 0.0,
+    }
 }
 
 impl Measure {
@@ -367,7 +388,10 @@ impl Measure {
                 .iter()
                 .all(|v| v.is_finite() && *v > 0.0 && *v <= MAX_SIDE)
         };
-        if sane(self.content) && sane(self.min_content) {
+        let viewport_ok = self
+            .viewport_height
+            .is_none_or(|v| v.is_finite() && (1.0..=MAX_SIDE).contains(&v));
+        if sane(self.content) && sane(self.min_content) && viewport_ok {
             Ok(self)
         } else {
             Err(DialogError::new(
@@ -496,16 +520,17 @@ pub fn plan_fit(
     let (avail_w, avail_h) = work.map_or((MAX_SIDE, MAX_SIDE), |(w, h)| {
         ((w - decor.width).max(1.0), (h - decor.height).max(1.0))
     });
+    let delta = viewport_delta(current.height, measure.viewport_height);
     let min = Size {
         width: measure.min_content.width.min(avail_w),
-        height: measure.min_content.height.min(avail_h),
+        height: (measure.min_content.height + delta).min(avail_h),
     };
     let width = current.width.max(min.width);
     let height = if kind.policy().fits_content {
         let cap = work.map_or(MAX_SIDE, |(_, h)| h * CAP_FRACTION - decor.height);
         fit_target(
             kind,
-            measure.content.height,
+            measure.content.height + delta,
             cap,
             min.height,
             floor,
@@ -584,6 +609,7 @@ mod tests {
                 width: mw,
                 height: mh,
             },
+            viewport_height: None,
         }
     }
 
@@ -602,7 +628,46 @@ mod tests {
     }
 
     #[test]
+    fn the_viewport_delta_is_the_inner_height_less_the_pages_and_clamped() {
+        assert_eq!(viewport_delta(332.0, Some(300.0)), 32.0);
+        assert_eq!(viewport_delta(300.0, Some(332.0)), 0.0);
+        assert_eq!(viewport_delta(900.0, Some(100.0)), MAX_VIEWPORT_DELTA);
+        assert_eq!(viewport_delta(332.0, None), 0.0);
+        assert_eq!(viewport_delta(332.0, Some(f64::NAN)), 0.0);
+    }
+
+    #[test]
+    fn a_viewport_short_of_the_window_adds_its_delta_to_content_and_minimum() {
+        let cur = size(400.0, 332.0);
+        let none = plan_fit(
+            Kind::Form,
+            measure(400.0, 300.0, 300.0, 150.0),
+            0.0,
+            &around(cur, size(0.0, 0.0), None, "macos"),
+        )
+        .unwrap();
+        let mut m = measure(400.0, 300.0, 300.0, 150.0);
+        m.viewport_height = Some(300.0);
+        let fit = plan_fit(
+            Kind::Form,
+            m,
+            0.0,
+            &around(cur, size(0.0, 0.0), None, "macos"),
+        )
+        .unwrap();
+        assert_eq!(fit.size.height, none.size.height + 32.0);
+        assert_eq!(fit.min.height, none.min.height + 32.0);
+    }
+
+    #[test]
     fn a_measure_must_be_a_real_size() {
+        let mut v = measure(400.0, 300.0, 300.0, 150.0);
+        for bad in [Some(0.0), Some(f64::NAN), Some(MAX_SIDE + 1.0)] {
+            v.viewport_height = bad;
+            assert_eq!(v.checked().unwrap_err().code, DialogErrorCode::Invalid);
+        }
+        v.viewport_height = Some(300.0);
+        assert!(v.checked().is_ok());
         assert!(measure(400.0, 300.0, 300.0, 150.0).checked().is_ok());
         for bad in [
             measure(f64::NAN, 300.0, 300.0, 150.0),

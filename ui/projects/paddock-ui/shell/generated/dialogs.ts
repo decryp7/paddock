@@ -6,7 +6,13 @@ export type DialogModality = "modal" | "modeless";
 
 export type DialogSize = { width: number, height: number, };
 
-export type DialogMeasureWire = { content: DialogSize, minContent: DialogSize, };
+export type DialogMeasureWire = { content: DialogSize, minContent: DialogSize, 
+/**
+ * The page's `window.innerHeight` (CSS px), when the page sends it. A webview can be shorter than the window's
+ * inner height (the 1.1-0 spike measured 32 px on a Mac whose outer and inner sizes were equal): the fit adds the
+ * difference ([`viewport_delta`]) to the content and minimum content heights so the footer is not cut off.
+ */
+viewportHeight?: number, };
 
 export type DialogRemembered = { dx: number, dy: number, width: number, height: number, };
 
