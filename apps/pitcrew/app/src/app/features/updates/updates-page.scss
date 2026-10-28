@@ -157,6 +157,7 @@ tr.selected .row-actions {
   gap: var(--space-4);
   align-content: start;
   padding: var(--space-4);
+  /* conformance: not-a-header */
   position: sticky;
   top: var(--space-4);
 

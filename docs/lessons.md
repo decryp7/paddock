@@ -585,3 +585,13 @@ interactive login shell gets no `SIGTTIN` either) and `killpg`, on Windows a kil
 helpers that left the tree (`taskkill /T` misses those); otherwise `cmd /c`'s and a login shell's children outlive it
 (nextest's "leaky"). A test of a timeout gives up on a condition (the tree is complete), never on a time budget.
 Reproduce with a delay knob in the fake (`spawn_delay_ms`), not by hoping for load.
+
+## A sticky header needs a z-index above everything that scrolls under it (2026-10-28, all apps)
+"The cell covers the header when scrolling": a `position: sticky` header with `z-index: auto` paints in tree order with the
+rows, so a later cell that is positioned or makes a stacking context (opacity on muted rows or hover actions, a relative
+badge, a transform) paints over it, and a sticky column at the header's own z-index wins the tie. Fourteen tables in three
+apps and the shared shell had it (ADR 0027 lists them); none showed with the mock data, so a run-time sweep alone would not have found them.
+**Rule:** every sticky header sets a z-index from the table ladder (`--pd-z-table-header` above sticky columns above row
+actions) and an opaque background; C43 checks every instance and `expectHeaderOnTop` checks a grid at run time (ADR 0027,
+rule 40).
+

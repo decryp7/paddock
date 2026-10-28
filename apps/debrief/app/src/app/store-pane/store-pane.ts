@@ -249,7 +249,7 @@ const TAB_LABELS: Record<StoreTab, string> = {
     .table-wrap { overflow: auto; border: 1px solid var(--border-2); border-radius: 6px; }
     table { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
     th, td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--border-2); white-space: nowrap; }
-    th { position: sticky; top: 0; background: var(--bg-2); font-weight: 600; }
+    th { position: sticky; top: 0; z-index: 3; background: var(--bg-2); font-weight: 600; }
     .num { text-align: right; font-variant-numeric: tabular-nums; }
     .error { color: var(--lvl-error); display: flex; align-items: center; gap: 8px; margin: 0; }
     .gauges { display: flex; flex-direction: column; gap: 10px; max-width: 560px; }
