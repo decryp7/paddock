@@ -89,7 +89,9 @@ pub fn linux_traits(sys_root: &Path, device: &str) -> MediaTraits {
     }
 }
 
+// The field types of `statvfs` differ per OS (32 or 64 bits), so the widening is needed on some and a no-op on others.
 #[cfg(unix)]
+#[allow(clippy::useless_conversion)]
 fn statvfs(path: &Path) -> Option<(u64, u64)> {
     use std::os::unix::ffi::OsStrExt;
     let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
@@ -150,7 +152,7 @@ pub fn mounts() -> Vec<RawMount> {
 pub fn media_traits(m: &RawMount) -> MediaTraits {
     #[cfg(target_os = "macos")]
     {
-        let mut cmd = std::process::Command::new("/usr/sbin/diskutil");
+        let mut cmd = crate::process::command("/usr/sbin/diskutil");
         cmd.args(["info", "-plist", m.scan_root.as_deref().unwrap_or(&m.mount)]);
         crate::process::run_with_timeout(cmd, std::time::Duration::from_secs(5))
             .ok()
@@ -214,10 +216,13 @@ mod win {
     use super::{MediaTraits, RawMount};
     use windows::core::{PCWSTR, PWSTR};
     use windows::Win32::NetworkManagement::WNet::WNetGetConnectionW;
-    use windows::Win32::Storage::FileSystem::{
-        GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDriveStringsW, GetVolumeInformationW, DRIVE_FIXED, DRIVE_RAMDISK, DRIVE_REMOTE,
-        DRIVE_REMOVABLE,
-    };
+    use windows::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDriveStringsW, GetVolumeInformationW};
+
+    // The `GetDriveTypeW` results (winbase.h).
+    const DRIVE_REMOVABLE: u32 = 2;
+    const DRIVE_FIXED: u32 = 3;
+    const DRIVE_REMOTE: u32 = 4;
+    const DRIVE_RAMDISK: u32 = 6;
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()

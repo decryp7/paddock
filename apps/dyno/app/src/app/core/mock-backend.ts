@@ -28,6 +28,11 @@ import type {
   ProcessSample,
   Settings,
   SizeNode,
+  DiskChildren,
+  DiskChildrenQuery,
+  DiskScanStatus,
+  DiskTarget,
+  Volume,
   SnapshotDiff,
   SnapshotInfo,
   StartupEntry,
@@ -90,6 +95,7 @@ import {
 } from './mock/data';
 import { demoAlarms, demoBundlePreview, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
 import { MockCounters, demoCounterSettings } from './mock/counters';
+import { MockDiskMap } from './mock/disk-map';
 import { mockHostName, mockNetwork } from './mock/network';
 import { mockBoot, mockChanges, mockFinder, mockGpu, mockMaintenanceProblem, mockMaintenanceStatus, mockSleep, mockSoftware, mockUsage } from './mock/extras';
 import { type MockBackupVariant, mockBackupProblem, mockBackupReport } from './mock/backup';
@@ -191,6 +197,7 @@ export class MockBackend implements DynoBackend {
   private readonly activityListeners = new Set<(a: ActivityEntry) => void>();
   private readonly agentListeners = new Set<(s: AgentStatus) => void>();
   private readonly alarmListeners = new Set<(c: AlarmChange) => void>();
+  private readonly disk: MockDiskMap;
   private unusualItems: UnusualItem[] = seedUnusual();
   private unusualForgotten = false;
   /** Issue exports the mock "saved", for tests. */
@@ -218,6 +225,9 @@ export class MockBackend implements DynoBackend {
     this.latencyMs = options.latencyMs ?? 0;
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
+    // A scan reports a few times: one timer per step (zero delay with no latency, so a test sees the first status before the rest).
+    const latency = this.latencyMs;
+    this.disk = new MockDiskMap(this.now, (fn, step) => setTimeout(fn, latency === 0 ? 0 : Math.max(300, latency * 2) * step), err);
     this.start = this.now();
     this.backupVariant = options.backup ?? 'mixed';
     this.backupCheckedAt = this.start - 40 * MIN;
@@ -636,6 +646,34 @@ export class MockBackend implements DynoBackend {
 
   diskUsage(path: string | null): Promise<SizeNode> {
     return this.reply('diskUsage', () => diskTree(path), 400);
+  }
+
+  onDiskScan(listener: (s: DiskScanStatus) => void): Unsubscribe {
+    return this.disk.onStatus(listener);
+  }
+
+  diskVolumes(): Promise<Volume[]> {
+    return this.reply('diskVolumes', () => this.disk.volumes());
+  }
+
+  startDiskScan(target: DiskTarget): Promise<DiskScanStatus> {
+    return this.reply('startDiskScan', () => this.disk.start(target));
+  }
+
+  cancelDiskScan(scan: number): Promise<void> {
+    return this.reply('cancelDiskScan', () => this.disk.cancel(scan));
+  }
+
+  diskScans(): Promise<DiskScanStatus[]> {
+    return this.reply('diskScans', () => this.disk.list());
+  }
+
+  diskChildren(query: DiskChildrenQuery): Promise<DiskChildren> {
+    return this.reply('diskChildren', () => this.disk.children(query));
+  }
+
+  diskPath(scan: number, node: number): Promise<string> {
+    return this.reply('diskPath', () => this.disk.path(scan, node));
   }
 
   // ------------------------------------------------------------------------------------- health

@@ -1013,6 +1013,62 @@ mod tests {
         }
     }
 
+    fn disk_status() -> crate::disk::scan::DiskScanStatus {
+        use crate::disk::scan::*;
+        DiskScanStatus {
+            scan: 1,
+            seq: 1,
+            name: "Macintosh HD".into(),
+            target: DiskTarget::Folder { path: "/x".into() },
+            volume: None,
+            state: ScanState::Running,
+            phase: ScanPhase::ReadingFolders,
+            progress: ScanProgress::default(),
+            truncated: false,
+            unreadable_first: vec![],
+        }
+    }
+
+    #[test]
+    fn disk_map_requests_replies_and_pushes_survive_postcard_and_json() {
+        let index = crate::disk::index::DiskIndex::new("r", crate::disk::index::ScanLimits::default());
+        let page = index.children(index.root(), 0, 10, 0.0).unwrap();
+        let replies = [
+            Reply::DiskVolumes(vec![]),
+            Reply::DiskScan(Box::new(disk_status())),
+            Reply::DiskScans(vec![disk_status()]),
+            Reply::DiskChildren(Box::new(page)),
+            Reply::DiskPath("/x".into()),
+        ];
+        for r in replies {
+            let m = Message::Reply(Box::new(Ok(r.clone())));
+            assert_eq!(round(&m), m);
+            assert!(r.into_json().is_ok());
+        }
+        let requests = [
+            Request::DiskVolumes,
+            Request::StartDiskScan {
+                target: crate::disk::scan::DiskTarget::Volume { id: "/".into() },
+            },
+            Request::CancelDiskScan { scan: 1 },
+            Request::DiskScans,
+            Request::DiskChildren {
+                scan: 1,
+                node: Some(2),
+                offset: 0,
+                limit: 48,
+                min_fraction: 0.004,
+            },
+            Request::DiskPath { scan: 1, node: 2 },
+        ];
+        for r in requests {
+            let m = Message::Request(Box::new(r));
+            assert_eq!(round(&m), m);
+        }
+        let push = Message::DiskScan(Box::new(disk_status()));
+        assert_eq!(round(&push), push);
+    }
+
     #[test]
     fn helper_requests_and_status_have_the_json_shape_of_api_types() {
         for (name, r) in [

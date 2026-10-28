@@ -706,6 +706,30 @@ mod tests {
     }
 
     #[test]
+    fn two_readers_failing_at_once_report_one_failure() {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        for n in ["a", "b"] {
+            let d = fs.dir(&r, n);
+            fs.fail_open(&d, ReadError::Unreachable(format!("lost {n}")));
+        }
+        let gate = crate::disk::testing::Gate::new();
+        let g = gate.clone();
+        fs.on_read(move |p| {
+            if !p.ends_with("fake-root") {
+                g.pass();
+            }
+        });
+        let rec = Arc::new(Rec::default());
+        let w = Walk::start(Arc::new(fs), r, "vol", cfg(2), rec.clone()).unwrap();
+        gate.wait_arrived(2);
+        gate.open();
+        assert!(matches!(w.wait(), End::Failed(ScanFailure::VolumeUnreachable { .. })));
+        w.cfg.live.wait_zero();
+        assert_eq!(lock(&rec.ended).len(), 1, "the second failure changes nothing");
+    }
+
+    #[test]
     fn a_share_that_drops_mid_listing_fails_too() {
         let fs = FakeFs::new();
         let r = fs.root();

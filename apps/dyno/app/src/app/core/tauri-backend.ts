@@ -28,6 +28,11 @@ import type {
   ProcessRef,
   Settings,
   SizeNode,
+  DiskChildren,
+  DiskChildrenQuery,
+  DiskScanStatus,
+  DiskTarget,
+  Volume,
   SnapshotDiff,
   SnapshotInfo,
   StartupEntry,
@@ -100,6 +105,7 @@ export const EVENTS = {
   activity: 'dyno://activity',
   agent: 'dyno://agent',
   alarm: 'dyno://alarm',
+  diskScan: 'dyno://disk-scan',
 } as const;
 
 /** One Tauri event shared by every UI listener: a single `listen`, fanned out, stopped with the last listener. */
@@ -141,6 +147,7 @@ export class TauriBackend implements DynoBackend {
   private readonly activityChannel: EventChannel<ActivityEntry>;
   private readonly agentChannel: EventChannel<AgentStatus>;
   private readonly alarmChannel: EventChannel<AlarmChange>;
+  private readonly diskScanChannel: EventChannel<DiskScanStatus>;
   /** How many live listeners want the full process list; the agent sends it only while one does. */
   private processListeners = 0;
   private liveListeners = 0;
@@ -157,6 +164,7 @@ export class TauriBackend implements DynoBackend {
     this.activityChannel = new EventChannel(listenFn, EVENTS.activity);
     this.agentChannel = new EventChannel(listenFn, EVENTS.agent);
     this.alarmChannel = new EventChannel(listenFn, EVENTS.alarm);
+    this.diskScanChannel = new EventChannel(listenFn, EVENTS.diskScan);
   }
 
   // ------------------------------------------------------------------------------------------------ live data
@@ -191,6 +199,10 @@ export class TauriBackend implements DynoBackend {
 
   onAlarm(listener: (c: AlarmChange) => void): Unsubscribe {
     return this.alarmChannel.add(listener);
+  }
+
+  onDiskScan(listener: (s: DiskScanStatus) => void): Unsubscribe {
+    return this.diskScanChannel.add(listener);
   }
 
   /** Tells the agent the detail level the UI needs now (only when it changed; nothing once nobody listens). */
@@ -259,6 +271,30 @@ export class TauriBackend implements DynoBackend {
 
   diskUsage(path: string | null): Promise<SizeNode> {
     return this.request({ diskUsage: { path } });
+  }
+
+  diskVolumes(): Promise<Volume[]> {
+    return this.request('diskVolumes');
+  }
+
+  startDiskScan(target: DiskTarget): Promise<DiskScanStatus> {
+    return this.request({ startDiskScan: { target } });
+  }
+
+  cancelDiskScan(scan: number): Promise<void> {
+    return this.request({ cancelDiskScan: { scan } });
+  }
+
+  diskScans(): Promise<DiskScanStatus[]> {
+    return this.request('diskScans');
+  }
+
+  diskChildren(q: DiskChildrenQuery): Promise<DiskChildren> {
+    return this.request({ diskChildren: { scan: q.scan, node: q.node, offset: q.offset, limit: q.limit, minFraction: q.minFraction } });
+  }
+
+  diskPath(scan: number, node: number): Promise<string> {
+    return this.request({ diskPath: { scan, node } });
   }
 
   // ---------------------------------------------------------------------------------------- health

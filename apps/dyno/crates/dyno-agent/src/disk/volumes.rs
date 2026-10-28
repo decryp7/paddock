@@ -80,7 +80,7 @@ impl VolumeLister for OsVolumes {
         list_mounts(
             dyno_platform::volumes::mounts(),
             dyno_platform::volumes::media_traits,
-            |m| dyno_platform::volumes::capacity(m),
+            dyno_platform::volumes::capacity,
             NETWORK_PROBE,
         )
     }

@@ -420,6 +420,120 @@ export interface SizeNode {
   children: SizeNode[];
 }
 
+/** The protocol of a network volume. */
+export type NetworkProtocol = 'smb' | 'nfs' | 'afp' | 'webDav' | 'sshfs' | 'other';
+
+/** Where a volume lives (externally tagged: a unit variant is a string). */
+export type VolumeLocation = 'internal' | { external: { bus: string | null } } | { network: { protocol: NetworkProtocol; host: string } };
+
+/** A volume the disk map can scan. */
+export interface Volume {
+  /** Stable id: the mount point. */
+  id: string;
+  name: string;
+  mount: string;
+  /** File system ("apfs", "ntfs", "smbfs"). */
+  fs: string;
+  location: VolumeLocation;
+  /** Bytes; `null` when the volume cannot say. */
+  capacity: number | null;
+  free: number | null;
+  /** A spinning disk; `null` when unknown. */
+  rotational: boolean | null;
+  readOnly: boolean;
+  /** False when a network volume did not answer ("Not answering"). */
+  reachable: boolean;
+  /** Whether used space is a fixed scale for a scan; false for a network share (scanned like a folder). */
+  wholeVolume: boolean;
+}
+
+/** What a scan covers. */
+export type DiskTarget = { volume: { id: string } } | { folder: { path: string } };
+
+export type ScanPhase = 'readingVolumeFacts' | 'readingFolders';
+
+export type ScanFailure = { volumeUnreachable: { detail: string } } | { cannotStart: { reason: string } } | { internal: { detail: string } };
+
+export type ScanState = 'running' | 'done' | 'cancelled' | { failed: { failure: ScanFailure } };
+
+/** Live numbers of a scan; every one only grows. */
+export interface ScanProgress {
+  bytes: number;
+  items: number;
+  folders: number;
+  /** The bytes expected (a whole volume's used space), or `null`: the total is unknown and the count just grows. */
+  totalBytes: number | null;
+  /** Folders the OS refused to open (counted, not fatal). */
+  unreadable: number;
+}
+
+/** One scan's status: the reply to starting it and the pushed event while it runs (keep the highest `seq`). */
+export interface DiskScanStatus {
+  scan: number;
+  seq: number;
+  name: string;
+  target: DiskTarget;
+  volume: Volume | null;
+  state: ScanState;
+  phase: ScanPhase;
+  progress: ScanProgress;
+  /** A limit left folders out. */
+  truncated: boolean;
+  /** The first folders that could not be read. */
+  unreadableFirst: string[];
+}
+
+export type NodeKind = 'folder' | 'file' | 'mountPoint' | 'unreadable';
+
+/** A node of a scan. */
+export interface DiskNode {
+  id: number;
+  name: string;
+  kind: NodeKind;
+  /** Bytes on the volume, children included. */
+  bytes: number;
+  /** Files and folders inside, recursively. */
+  items: number;
+  newestChange: Timestamp;
+  /** Everything inside has been read. */
+  complete: boolean;
+  hasChildren: boolean;
+}
+
+/** A sum of folded things. */
+export interface Folded {
+  count: number;
+  bytes: number;
+  items: number;
+}
+
+/** One page of one level: the children of a folder, biggest first. children + other + loose = the folder's bytes. */
+export interface DiskChildren {
+  node: DiskNode;
+  children: DiskNode[];
+  /** Children below the minimum share, folded into one bucket (all pages). */
+  other: Folded;
+  /** Small files directly inside the folder that have no node of their own. */
+  loose: Folded;
+  /** How many children are shown across all pages. */
+  shown: number;
+  offset: number;
+  /** The offset of the next page, `null` on the last. */
+  nextOffset: number | null;
+}
+
+/** Which page of which level. */
+export interface DiskChildrenQuery {
+  scan: number;
+  /** The folder; `null` for the scan's root. */
+  node: number | null;
+  offset: number;
+  /** 1 to 256. */
+  limit: number;
+  /** Children below this share (0 to 1) of the folder are folded into `other`; 0 shows all. */
+  minFraction: number;
+}
+
 // ------------------------------------------------------------------------------------------- health
 
 export type Grade = 'good' | 'fair' | 'poor';

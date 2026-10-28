@@ -32,6 +32,13 @@ describe('TauriBackend: request shapes', () => {
     ['history now', (b) => b.history('hour', null), { history: { range: 'hour', end: null } }],
     ['activity', (b) => b.activity(30), { activity: { limit: 30 } }],
     ['diskUsage', (b) => b.diskUsage(null), { diskUsage: { path: null } }],
+    ['diskVolumes', (b) => b.diskVolumes(), 'diskVolumes'],
+    ['startDiskScan of a volume', (b) => b.startDiskScan({ volume: { id: '/' } }), { startDiskScan: { target: { volume: { id: '/' } } } }],
+    ['startDiskScan of a folder', (b) => b.startDiskScan({ folder: { path: '/x' } }), { startDiskScan: { target: { folder: { path: '/x' } } } }],
+    ['cancelDiskScan', (b) => b.cancelDiskScan(7), { cancelDiskScan: { scan: 7 } }],
+    ['diskScans', (b) => b.diskScans(), 'diskScans'],
+    ['diskChildren', (b) => b.diskChildren({ scan: 7, node: null, offset: 48, limit: 48, minFraction: 0.004 }), { diskChildren: { scan: 7, node: null, offset: 48, limit: 48, minFraction: 0.004 } }],
+    ['diskPath', (b) => b.diskPath(7, 4), { diskPath: { scan: 7, node: 4 } }],
     ['health', (b) => b.health(), 'health'],
     ['helperStatus', (b) => b.helperStatus(), 'helperStatus'],
     ['installHelper', (b) => b.installHelper(), 'installHelper'],
@@ -244,10 +251,16 @@ describe('TauriBackend: live subscription', () => {
 });
 
 describe('TauriBackend: push channels', () => {
+  it('the disk scan event has the name the shell emits', () => {
+    expect(EVENTS.diskScan).toBe('dyno://disk-scan');
+  });
+
+
   it.each([
     ['onAlert', EVENTS.alert],
     ['onActivity', EVENTS.activity],
     ['onAgentStatus', EVENTS.agent],
+    ['onDiskScan', EVENTS.diskScan],
   ] as const)('%s listens to its own event', async (method, event) => {
     const { backend, emit, listen, stops } = fake();
     const l = vi.fn();

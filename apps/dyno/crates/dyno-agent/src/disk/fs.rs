@@ -173,6 +173,15 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn a_socket_is_neither_file_nor_folder() {
+        let t = tempfile::tempdir().unwrap();
+        let path = t.path().join("s");
+        let _listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        assert_eq!(OsDirSource.stat(&path).unwrap().kind, EntryKind::Other);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn hard_links_share_an_identity() {
         let t = tempfile::tempdir().unwrap();
         std::fs::write(t.path().join("a"), b"hello").unwrap();

@@ -36,7 +36,9 @@ pub fn handle(shared: &crate::agent::Shared, request: Request) -> Result<Reply, 
             offset,
             limit,
             min_fraction,
-        } => d.children(scan, node, offset, limit, min_fraction).map(|c| Reply::DiskChildren(Box::new(c))),
+        } => d
+            .children(scan, node, offset, limit, min_fraction)
+            .map(|c| Reply::DiskChildren(Box::new(c))),
         Request::DiskPath { scan, node } => d.path(scan, node).map(Reply::DiskPath),
         _ => Err(AgentError::new(ErrorCode::Internal, "Not a disk map request.")),
     }

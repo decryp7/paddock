@@ -294,9 +294,8 @@ impl DiskCentre {
             ));
         }
         while scans.len() >= MAX_KEPT {
-            let Some(old) = scans.iter().position(|e| !e.running()) else {
-                break;
-            };
+            // At most MAX_RUNNING (< MAX_KEPT) scans run, so a finished one is always there to drop.
+            let old = scans.iter().position(|e| !e.running()).unwrap_or(0);
             scans.remove(old);
         }
         let meta = Arc::new(Meta {

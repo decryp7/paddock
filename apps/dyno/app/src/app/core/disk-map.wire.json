@@ -1,0 +1,326 @@
+{
+  "children": {
+    "children": [
+      {
+        "bytes": 500,
+        "complete": true,
+        "hasChildren": true,
+        "id": 1,
+        "items": 1,
+        "kind": "folder",
+        "name": "Users",
+        "newestChange": 1700000000000
+      }
+    ],
+    "loose": {
+      "bytes": 4,
+      "count": 1,
+      "items": 1
+    },
+    "nextOffset": null,
+    "node": {
+      "bytes": 504,
+      "complete": false,
+      "hasChildren": true,
+      "id": 0,
+      "items": 5,
+      "kind": "folder",
+      "name": "Macintosh HD",
+      "newestChange": 1700000000000
+    },
+    "offset": 0,
+    "other": {
+      "bytes": 0,
+      "count": 2,
+      "items": 0
+    },
+    "shown": 1
+  },
+  "phases": [
+    "readingVolumeFacts",
+    "readingFolders"
+  ],
+  "requests": {
+    "cancel": {
+      "cancelDiskScan": {
+        "scan": 7
+      }
+    },
+    "children": {
+      "diskChildren": {
+        "limit": 48,
+        "minFraction": 0.004,
+        "node": 4,
+        "offset": 0,
+        "scan": 7
+      }
+    },
+    "childrenOfRoot": {
+      "diskChildren": {
+        "limit": 48,
+        "minFraction": 0.0,
+        "node": null,
+        "offset": 48,
+        "scan": 7
+      }
+    },
+    "diskVolumes": "diskVolumes",
+    "path": {
+      "diskPath": {
+        "node": 4,
+        "scan": 7
+      }
+    },
+    "scans": "diskScans",
+    "startFolder": {
+      "startDiskScan": {
+        "target": {
+          "folder": {
+            "path": "/Users/alex"
+          }
+        }
+      }
+    },
+    "startVolume": {
+      "startDiskScan": {
+        "target": {
+          "volume": {
+            "id": "Macintosh HD"
+          }
+        }
+      }
+    }
+  },
+  "statuses": [
+    {
+      "name": "Macintosh HD",
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "scan": 7,
+      "seq": 3,
+      "state": "running",
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": {
+        "capacity": 1000,
+        "free": 400,
+        "fs": "apfs",
+        "id": "Macintosh HD",
+        "location": "internal",
+        "mount": "/Volumes/Macintosh HD",
+        "name": "Macintosh HD",
+        "reachable": true,
+        "readOnly": false,
+        "rotational": false,
+        "wholeVolume": true
+      }
+    },
+    {
+      "name": "Macintosh HD",
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "scan": 7,
+      "seq": 3,
+      "state": "done",
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": null
+    },
+    {
+      "name": "Macintosh HD",
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "scan": 7,
+      "seq": 3,
+      "state": "cancelled",
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": null
+    },
+    {
+      "name": "Macintosh HD",
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "scan": 7,
+      "seq": 3,
+      "state": {
+        "failed": {
+          "failure": {
+            "volumeUnreachable": {
+              "detail": "the share stopped answering"
+            }
+          }
+        }
+      },
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": null
+    },
+    {
+      "name": "Macintosh HD",
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "scan": 7,
+      "seq": 3,
+      "state": {
+        "failed": {
+          "failure": {
+            "cannotStart": {
+              "reason": "no"
+            }
+          }
+        }
+      },
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": null
+    },
+    {
+      "name": "Macintosh HD",
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "scan": 7,
+      "seq": 3,
+      "state": {
+        "failed": {
+          "failure": {
+            "internal": {
+              "detail": "bug"
+            }
+          }
+        }
+      },
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": null
+    }
+  ],
+  "volumes": [
+    {
+      "capacity": 1000,
+      "free": 400,
+      "fs": "apfs",
+      "id": "Macintosh HD",
+      "location": "internal",
+      "mount": "/Volumes/Macintosh HD",
+      "name": "Macintosh HD",
+      "reachable": true,
+      "readOnly": false,
+      "rotational": false,
+      "wholeVolume": true
+    },
+    {
+      "capacity": 1000,
+      "free": 400,
+      "fs": "apfs",
+      "id": "Photos",
+      "location": {
+        "external": {
+          "bus": "USB"
+        }
+      },
+      "mount": "/Volumes/Photos",
+      "name": "Photos",
+      "reachable": true,
+      "readOnly": false,
+      "rotational": false,
+      "wholeVolume": true
+    },
+    {
+      "capacity": 1000,
+      "free": 400,
+      "fs": "apfs",
+      "id": "Media",
+      "location": {
+        "network": {
+          "host": "nas.local",
+          "protocol": "webDav"
+        }
+      },
+      "mount": "/Volumes/Media",
+      "name": "Media",
+      "reachable": true,
+      "readOnly": false,
+      "rotational": false,
+      "wholeVolume": false
+    }
+  ]
+}

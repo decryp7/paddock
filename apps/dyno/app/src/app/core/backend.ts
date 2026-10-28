@@ -27,6 +27,11 @@ import type {
   ProcessRef,
   Settings,
   SizeNode,
+  DiskChildren,
+  DiskChildrenQuery,
+  DiskScanStatus,
+  DiskTarget,
+  Volume,
   SnapshotDiff,
   SnapshotInfo,
   StartupEntry,
@@ -89,6 +94,8 @@ export interface DynoBackend {
   onAgentStatus(listener: (s: AgentStatus) => void): Unsubscribe;
   /** Alarm changes pushed by the agent (new, repeated, returned, acknowledged, shelved, muted, noted). */
   onAlarm(listener: (c: AlarmChange) => void): Unsubscribe;
+  /** A disk scan's status changed (at most four a second per scan, one final); keep the highest `seq`. No polling. */
+  onDiskScan(listener: (s: DiskScanStatus) => void): Unsubscribe;
 
   appInfo(): Promise<AppInfo>;
 
@@ -110,6 +117,18 @@ export interface DynoBackend {
   health(): Promise<HealthReport>;
   /** The disk map: a folder's size with its biggest children (the system drive when `null`). */
   diskUsage(path: string | null): Promise<SizeNode>;
+  /** The volumes mounted now: internal, external and network, with capacity. */
+  diskVolumes(): Promise<Volume[]>;
+  /** Starts a scan (a job) and resolves at once with its status; the same target again returns the running scan. */
+  startDiskScan(target: DiskTarget): Promise<DiskScanStatus>;
+  /** Stops a scan and resolves at once; what was counted stays. */
+  cancelDiskScan(scan: number): Promise<void>;
+  /** The status of every kept scan (a window that opens late asks once). */
+  diskScans(): Promise<DiskScanStatus[]>;
+  /** One page of one level of a scan. */
+  diskChildren(query: DiskChildrenQuery): Promise<DiskChildren>;
+  /** The full path of a node (Reveal, Copy path). */
+  diskPath(scan: number, node: number): Promise<string>;
 
   // The privileged helper (ADR 0016). Installing happens only from the confirmation dialog.
   helperStatus(): Promise<HelperStatus>;
