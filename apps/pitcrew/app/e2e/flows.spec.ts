@@ -210,6 +210,17 @@ test.describe('native feel (ADR 0008)', () => {
     await expect(page.getByRole('menuitem', { name: 'Copy' })).toBeVisible();
   });
 
+  test('the log viewer fills the page: at least 400 px tall with its lines visible, in every way into Logs', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    for (const path of ['/logs', '/logs/build-win', '/logs?runner=build-win']) {
+      await page.goto(`${APP}${path}`);
+      const viewport = page.locator('cdk-virtual-scroll-viewport[role=log]');
+      await expect(viewport).toBeVisible();
+      await expect.poll(async () => (await viewport.boundingBox())?.height ?? 0, { message: path }).toBeGreaterThanOrEqual(400);
+      await expect(page.locator('[role=log] .line .msg').first()).toBeVisible();
+    }
+  });
+
   test('edits the runner configuration, reviews the diff and saves', async ({ page }) => {
     await page.goto(`${APP}/runners/build-win?tab=config`);
     await expect(page.getByRole('heading', { name: 'Runner configuration' })).toBeVisible();

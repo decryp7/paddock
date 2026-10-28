@@ -23,6 +23,7 @@ export class RunnerRoute {
   selector: 'pc-logs-route',
   imports: [LogsPage],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  styles: ':host { display: block; height: 100%; min-height: 0; }',
   template: `<pc-logs-page [runner]="runner()" />`,
 })
 export class LogsRoute {
