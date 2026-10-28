@@ -67,6 +67,29 @@ fn arg<T: DeserializeOwned>(a: &Value, name: &str) -> R<T> {
         .map_err(|e| err(mgmt::ErrorCode::BadRequest, format!("argument \"{name}\": {e}")))
 }
 
+/// Most pending cancel marks kept (see `cancel_op`).
+const MAX_OPS: usize = 256;
+
+/// Runs `work` as an operation the caller can cancel with `cancel_op`, named by the optional `opId` argument. `None`
+/// when it was cancelled (the work is dropped); without an `opId` it runs to the end as before.
+async fn cancellable<T>(st: &AppState, a: &Value, work: impl std::future::Future<Output = R<T>>) -> R<Option<T>> {
+    let Some(op) = arg::<Option<String>>(a, "opId")? else {
+        return work.await.map(Some);
+    };
+    struct Forget<'a>(&'a AppState, String);
+    impl Drop for Forget<'_> {
+        fn drop(&mut self) {
+            lock(&self.0.ops).remove(&self.1);
+        }
+    }
+    let notify = lock(&st.ops).entry(op.clone()).or_default().clone();
+    let _forget = Forget(st, op);
+    tokio::select! {
+        r = work => r.map(Some),
+        () = notify.notified() => Ok(None),
+    }
+}
+
 fn model(a: &Value, name: &str) -> R<ModelId> {
     let s: String = arg(a, name)?;
     ModelId::parse(&s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e.to_string()))
@@ -244,16 +267,39 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "load_model" => {
             let id = model(a, "id")?;
             st.serving.retry(&id);
-            st.serving.ensure(&id).await.map_err(|e| {
-                err(
-                    if e.kind == ErrorKind::InsufficientMemory {
-                        mgmt::ErrorCode::InsufficientMemory
-                    } else {
-                        mgmt::ErrorCode::NotAvailable
-                    },
-                    e.message,
-                )
-            })?;
+            let was_loaded = st.serving.is_loaded(&id);
+            let load = async {
+                st.serving.ensure(&id).await.map(|_| ()).map_err(|e| {
+                    err(
+                        if e.kind == ErrorKind::InsufficientMemory {
+                            mgmt::ErrorCode::InsufficientMemory
+                        } else {
+                            mgmt::ErrorCode::NotAvailable
+                        },
+                        e.message,
+                    )
+                })
+            };
+            match cancellable(st, a, load).await? {
+                Some(()) => ok(()),
+                None => {
+                    // The half-started engine went with the dropped load; one that finished in the same instant is
+                    // unloaded, so a cancelled load never leaves a model behind that was not there before.
+                    if !was_loaded {
+                        st.serving.unload(&id, pitwall_core::memory::ReleaseReason::Manual);
+                    }
+                    ok(json!({ "cancelled": true }))
+                }
+            }
+        }
+        "cancel_op" => {
+            let op: String = arg(a, "opId")?;
+            let mut ops = lock(&st.ops);
+            // A cancel can arrive before its operation does; the stored permit stops it as it starts. Bounded.
+            if ops.len() >= MAX_OPS {
+                ops.clear();
+            }
+            ops.entry(op).or_default().notify_one();
             ok(())
         }
         "unload_model" => {
@@ -492,7 +538,11 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "benchmarks" => ok(lock(&st.benchmarks).clone()),
         "run_benchmark" => {
             let id = model(a, "modelId")?;
-            run_benchmark(st, id).await
+            // Dropping the run cancels its generation; nothing is recorded, so the stored results stay as they were.
+            match cancellable(st, a, run_benchmark(st, id)).await? {
+                Some(result) => Ok(result),
+                None => ok(json!({ "cancelled": true })),
+            }
         }
         "update_check_status" => ok(st.update_status()),
         "update_notices" => ok(st.update_notices()),

@@ -89,6 +89,8 @@ pub struct AppState {
     pub installs: Mutex<std::collections::BTreeMap<String, mgmt::Download>>,
     /// Count of running engine installs' cancel flags.
     pub install_cancel: Mutex<std::collections::BTreeMap<String, crate::egress::CancelFlag>>,
+    /// Cancellable operations by the caller's `opId` (a load or a benchmark): `cancel_op` notifies, the operation stops.
+    pub ops: Mutex<std::collections::BTreeMap<String, Arc<tokio::sync::Notify>>>,
     /// Benchmark results of this session.
     pub benchmarks: Mutex<Vec<mgmt::BenchmarkResult>>,
     /// Secrets of just-created apps, handed over once to the UI.
@@ -181,6 +183,7 @@ impl AppState {
             recent: Mutex::new(VecDeque::new()),
             installs: Mutex::new(Default::default()),
             install_cancel: Mutex::new(Default::default()),
+            ops: Mutex::new(Default::default()),
             benchmarks: Mutex::new(stored_benchmarks),
             new_secrets: Mutex::new(Default::default()),
             port: std::sync::atomic::AtomicU16::new(0),

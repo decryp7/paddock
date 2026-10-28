@@ -3,7 +3,7 @@
 
 use crate::app_state::{self, AppState, FirstRun};
 use crate::commands::{forward, SharedClient};
-use crate::jobs::{JobContext, JobEvent, JobSink, JobSpec, Jobs};
+use crate::jobs::{self, JobEvent, JobSink, JobSpec, Jobs, Outcome};
 use crate::service_install::{self, ServiceInstall};
 use crate::updater::{self, AppUpdateStatus, UpdateInfo};
 use pitwall_core::mgmt::{CommandError, ErrorCode};
@@ -137,8 +137,8 @@ pub async fn install_app_update(app: AppHandle) -> Result<(), CommandError> {
     updater::install(&app).await
 }
 
-// Long operations as jobs (ER-17..19). Each `start_*` returns the job id at once and reports on the channel; `job_cancel`
-// stops one. The blocking commands above stay until the UI has moved over.
+// Long operations as jobs (ER-17..19) on the shared executor. Each `start_*` returns the job id at once and reports on
+// the channel; `job_cancel` stops one. The blocking commands above stay until the UI has moved over.
 
 fn channel_sink(channel: Channel<JobEvent>) -> JobSink {
     Arc::new(move |event| {
@@ -146,31 +146,48 @@ fn channel_sink(channel: Channel<JobEvent>) -> JobSink {
     })
 }
 
-fn spec(title: &str, phase: &str, cancellable: bool) -> JobSpec {
+fn spec(kind: &'static str, title: &str, phase: &str) -> JobSpec {
     JobSpec {
+        kind,
         title: title.into(),
         phase: phase.into(),
-        cancellable,
+        not_cancellable: None,
     }
 }
 
-/// Runs one server method as a job. Cancel stops waiting for it (the server keeps what it was doing).
-fn server_job(
-    jobs: &Arc<Jobs>,
-    client: SharedClient,
-    on_event: Channel<JobEvent>,
-    spec: JobSpec,
-    method: &'static str,
-    args: Value,
-) -> u64 {
-    let phase = spec.phase.clone();
-    jobs.start(spec, channel_sink(on_event), move |ctx: JobContext| async move {
-        ctx.phase(&phase);
-        forward(client.as_ref(), method, args).await
+/// Runs one server method as a cancellable job. The call carries an `opId`; on Cancel the app sends `cancel_op` with it
+/// and the server stops the work and undoes it (a half-loaded model is not left behind, a benchmark stores nothing), then
+/// answers `{"cancelled": true}`, which ends the job as cancelled. If the server answers something else first, the work
+/// had finished and the job reports that.
+fn server_job(jobs: &Arc<Jobs>, client: SharedClient, sink: JobSink, spec: JobSpec, method: &'static str, mut args: Value) -> u64 {
+    jobs::start(jobs, spec, sink, move |ctx| async move {
+        // Unique per job and per run of the app; the server forgets it when the work ends.
+        let op_id = format!("{method}-{}", ctx.id().0);
+        args["opId"] = Value::String(op_id.clone());
+        let work = forward(client.as_ref(), method, args);
+        tokio::pin!(work);
+        let cancel = jobs::cancelled(ctx.cancel_token());
+        tokio::pin!(cancel);
+        let mut asked = false;
+        let reply = loop {
+            tokio::select! {
+                r = &mut work => break r,
+                () = &mut cancel, if !asked => {
+                    asked = true;
+                    // Best effort: when the server cannot be reached the work call fails too, which ends the job.
+                    let _ = forward(client.as_ref(), "cancel_op", serde_json::json!({ "opId": op_id })).await;
+                }
+            }
+        }?;
+        Ok(if reply.get("cancelled") == Some(&Value::Bool(true)) {
+            Outcome::Cancelled
+        } else {
+            Outcome::Done(reply)
+        })
     })
 }
 
-/// Loads a model in the background (`load_model` as a job).
+/// Loads a model in the background (`load_model` as a job). Cancel aborts the load and leaves no model behind.
 #[tauri::command]
 pub async fn start_load_model(
     client: State<'_, SharedClient>,
@@ -179,18 +196,18 @@ pub async fn start_load_model(
     on_event: Channel<JobEvent>,
 ) -> Result<u64, CommandError> {
     crate::commands::Validate::validate(&id, "id")?;
-    let spec = spec("Loading the model", "Starting the engine and loading the weights", true);
+    let spec = spec("load-model", "Loading the model", "Starting the engine and loading the weights");
     Ok(server_job(
         jobs.inner(),
         client.inner().clone(),
-        on_event,
+        channel_sink(on_event),
         spec,
         "load_model",
         serde_json::json!({ "id": id }),
     ))
 }
 
-/// Runs a benchmark in the background (`run_benchmark` as a job).
+/// Runs a benchmark in the background (`run_benchmark` as a job). Cancel stops it and stores no result.
 #[tauri::command]
 pub async fn start_benchmark(
     client: State<'_, SharedClient>,
@@ -199,15 +216,23 @@ pub async fn start_benchmark(
     on_event: Channel<JobEvent>,
 ) -> Result<u64, CommandError> {
     crate::commands::Validate::validate(&model_id, "modelId")?;
-    let spec = spec("Running the benchmark", "Benchmarking", true);
+    let spec = spec("benchmark", "Running the benchmark", "Benchmarking");
     Ok(server_job(
         jobs.inner(),
         client.inner().clone(),
-        on_event,
+        channel_sink(on_event),
         spec,
         "run_benchmark",
         serde_json::json!({ "modelId": model_id }),
     ))
+}
+
+/// The spec of a step the OS owns: Cancel is off for its whole run (`cancellable: false` with the reason in the events).
+fn os_prompt_spec(kind: &'static str, title: &str, phase: &str) -> JobSpec {
+    JobSpec {
+        not_cancellable: Some("Answer the system prompt, or wait for it to finish; it cannot be cancelled from here.".into()),
+        ..spec(kind, title, phase)
+    }
 }
 
 /// Registers and starts the service in the background (`install_service` as a job). The result is the service state.
@@ -218,16 +243,16 @@ pub async fn start_install_service(
     on_event: Channel<JobEvent>,
 ) -> Result<u64, CommandError> {
     let client = client.inner().clone();
-    // Not cancellable: the OS prompt (UAC, Login Items) is the user's to answer, and the registration is not atomic.
-    Ok(jobs.start(
-        spec("Installing the background service", "Waiting for the system to register it", false),
-        channel_sink(on_event),
-        move |_| async move {
-            blocking_install(service_install::install, "installing the service").await?;
-            mark_offered();
-            state_json(&client).await
-        },
-    ))
+    let spec = os_prompt_spec(
+        "install-service",
+        "Installing the background service",
+        "Waiting for the system to register it",
+    );
+    Ok(jobs::start(jobs.inner(), spec, channel_sink(on_event), move |_| async move {
+        blocking_install(service_install::install, "installing the service").await?;
+        mark_offered();
+        Ok(Outcome::Done(state_json(&client).await?))
+    }))
 }
 
 /// Stops and removes the service in the background (`uninstall_service` as a job).
@@ -238,14 +263,15 @@ pub async fn start_uninstall_service(
     on_event: Channel<JobEvent>,
 ) -> Result<u64, CommandError> {
     let client = client.inner().clone();
-    Ok(jobs.start(
-        spec("Removing the background service", "Waiting for the system to remove it", false),
-        channel_sink(on_event),
-        move |_| async move {
-            blocking_install(service_install::uninstall, "removing the service").await?;
-            state_json(&client).await
-        },
-    ))
+    let spec = os_prompt_spec(
+        "uninstall-service",
+        "Removing the background service",
+        "Waiting for the system to remove it",
+    );
+    Ok(jobs::start(jobs.inner(), spec, channel_sink(on_event), move |_| async move {
+        blocking_install(service_install::uninstall, "removing the service").await?;
+        Ok(Outcome::Done(state_json(&client).await?))
+    }))
 }
 
 async fn blocking_install(f: fn() -> Result<(), CommandError>, what: &str) -> Result<(), CommandError> {
@@ -259,18 +285,175 @@ async fn state_json(client: &SharedClient) -> Result<Value, CommandError> {
 }
 
 /// Downloads and installs the update in the background (`install_app_update` as a job); the app restarts when it is done.
-/// Cancel is possible until the install begins, as dropping the download leaves the old version untouched.
+/// Cancel drops the download, which leaves the installed version untouched.
 #[tauri::command]
 pub async fn start_app_update(app: AppHandle, jobs: State<'_, Arc<Jobs>>, on_event: Channel<JobEvent>) -> Result<u64, CommandError> {
-    Ok(jobs.start(
-        spec("Updating Pitwall", "Downloading and installing the update", true),
-        channel_sink(on_event),
-        move |_| async move { updater::install(&app).await.map(|()| Value::Null) },
-    ))
+    let spec = spec("app-update", "Updating Pitwall", "Downloading and installing the update");
+    Ok(jobs::start(jobs.inner(), spec, channel_sink(on_event), move |ctx| async move {
+        tokio::select! {
+            r = updater::install(&app) => r.map(|()| Outcome::Done(Value::Null)),
+            () = jobs::cancelled(ctx.cancel_token()) => Ok(Outcome::Cancelled),
+        }
+    }))
 }
 
-/// Cancels a job; an unknown or finished id is fine.
+/// Cancels a job. `true` when the request was made; `false` for an unknown or finished job, or one in a step that cannot
+/// be interrupted (its events say `cancellable: false`).
 #[tauri::command]
-pub async fn job_cancel(jobs: State<'_, Arc<Jobs>>, id: u64) -> Result<(), CommandError> {
-    jobs.cancel(id)
+pub async fn job_cancel(jobs: State<'_, Arc<Jobs>>, id: u64) -> Result<bool, CommandError> {
+    Ok(jobs.cancel(id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server_client::{BoxFuture, FrameStream, ServerClient};
+    use pitwall_core::mgmt::ErrorCode;
+    use std::sync::Mutex;
+    use std::time::Duration;
+    use tokio::sync::Notify;
+
+    /// A server whose long methods run until `cancel_op` arrives, then answer as the real one does: `{"cancelled": true}`.
+    #[derive(Default)]
+    struct CancelAware {
+        calls: Mutex<Vec<(String, Value)>>,
+        cancel: Notify,
+        /// Finish the long methods with this instead of waiting for a cancel.
+        finish_with: Mutex<Option<Value>>,
+    }
+
+    impl ServerClient for CancelAware {
+        fn call<'a>(&'a self, method: &'a str, args: Value, _timeout: Duration) -> BoxFuture<'a, Result<Value, CommandError>> {
+            Box::pin(async move {
+                self.calls.lock().unwrap().push((method.to_string(), args));
+                if method == "cancel_op" {
+                    self.cancel.notify_one();
+                    return Ok(Value::Null);
+                }
+                if let Some(v) = self.finish_with.lock().unwrap().clone() {
+                    return Ok(v);
+                }
+                self.cancel.notified().await;
+                Ok(serde_json::json!({ "cancelled": true }))
+            })
+        }
+
+        fn open_stream<'a>(
+            &'a self,
+            _: &'a str,
+            _: Option<Value>,
+            _: Duration,
+        ) -> BoxFuture<'a, Result<Box<dyn FrameStream>, CommandError>> {
+            Box::pin(async { Err(crate::server_client::unavailable()) })
+        }
+    }
+
+    fn collector() -> (JobSink, Arc<Mutex<Vec<JobEvent>>>) {
+        let events: Arc<Mutex<Vec<JobEvent>>> = Arc::default();
+        let e2 = events.clone();
+        (Arc::new(move |e| e2.lock().unwrap().push(e)), events)
+    }
+
+    async fn settle() {
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    fn jobs() -> Arc<Jobs> {
+        Arc::new(Jobs::with_clock(Arc::new(paddock_jobs::FakeClock::new()), 0))
+    }
+
+    /// Starts the job, cancels it and checks what the app told the server and the UI.
+    async fn cancelling(method: &'static str, args: Value, kind: &'static str) {
+        let server = Arc::new(CancelAware::default());
+        let client: SharedClient = server.clone();
+        let (sink, events) = collector();
+        let jobs = jobs();
+        let id = server_job(&jobs, client, sink, spec(kind, "t", "p"), method, args);
+        settle().await;
+        assert_eq!(jobs.running(), 1, "still working, no timeout");
+        assert!(jobs.cancel(id));
+        settle().await;
+        let calls = server.calls.lock().unwrap().clone();
+        let work_op = calls[0].1["opId"].as_str().unwrap().to_string();
+        assert_eq!(calls[0].0, method);
+        assert_eq!(
+            calls[1],
+            ("cancel_op".to_string(), serde_json::json!({ "opId": work_op })),
+            "the server is told to undo it"
+        );
+        assert_eq!(jobs.running(), 0);
+        let ev = events.lock().unwrap();
+        assert_eq!(ev.last(), Some(&JobEvent::Cancelled { job_id: id }));
+        assert_eq!(ev.iter().filter(|e| matches!(e, JobEvent::Cancelled { .. })).count(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelling_a_model_load_tells_the_server_to_abort_it_and_ends_cancelled() {
+        cancelling("load_model", serde_json::json!({ "id": "m" }), "load-model").await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelling_a_benchmark_tells_the_server_to_stop_it_and_ends_cancelled() {
+        cancelling("run_benchmark", serde_json::json!({ "modelId": "m" }), "benchmark").await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn work_that_finished_before_the_cancel_arrived_reports_its_result() {
+        let server = Arc::new(CancelAware::default());
+        *server.finish_with.lock().unwrap() = Some(serde_json::json!({ "genTps": 5.0 }));
+        let client: SharedClient = server.clone();
+        let (sink, events) = collector();
+        let jobs = jobs();
+        let id = server_job(
+            &jobs,
+            client,
+            sink,
+            spec("benchmark", "t", "p"),
+            "run_benchmark",
+            serde_json::json!({ "modelId": "m" }),
+        );
+        settle().await;
+        assert_eq!(
+            events.lock().unwrap().last(),
+            Some(&JobEvent::Done {
+                job_id: id,
+                result: serde_json::json!({ "genTps": 5.0 })
+            })
+        );
+        assert!(!jobs.cancel(id), "nothing left to cancel");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_server_error_fails_the_job_with_its_message() {
+        let fake = Arc::new(crate::server_client::fake::FakeServer::new());
+        fake.reply(
+            "load_model",
+            crate::server_client::fake::Reply::Err(CommandError::new(ErrorCode::InsufficientMemory, "not enough memory")),
+        );
+        let client: SharedClient = fake;
+        let (sink, events) = collector();
+        let jobs = jobs();
+        server_job(
+            &jobs,
+            client,
+            sink,
+            spec("load-model", "t", "p"),
+            "load_model",
+            serde_json::json!({ "id": "m" }),
+        );
+        settle().await;
+        assert!(matches!(
+            events.lock().unwrap().last(),
+            Some(JobEvent::Failed { error, .. }) if error.code == ErrorCode::InsufficientMemory
+        ));
+    }
+
+    #[test]
+    fn the_install_and_uninstall_specs_are_not_cancellable_with_a_reason() {
+        let s = os_prompt_spec("install-service", "t", "p");
+        assert!(s.not_cancellable.as_deref().is_some_and(|r| !r.is_empty()));
+        assert!(spec("load-model", "t", "p").not_cancellable.is_none());
+    }
 }
