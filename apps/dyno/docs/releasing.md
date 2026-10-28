@@ -57,14 +57,14 @@ Dyno needs its **own** key pair; never reuse another product's updater key.
    npx tauri signer generate -w ~/.tauri/dyno-updater.key
    ```
 
-2. Set four **repository secrets** in Gitea (Settings > Actions > Secrets) of `decryp7/dyno`:
+2. Set three **repository secrets** (and optionally a fourth) in Gitea (Settings > Actions > Secrets) of `decryp7/dyno`:
 
    | Secret | Value |
    | --- | --- |
    | `TAURI_SIGNING_PRIVATE_KEY` | the contents of `dyno-updater.key` |
    | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
    | `TAURI_UPDATER_PUBKEY` | the contents of `dyno-updater.key.pub` |
-   | `RELEASE_TOKEN` | a Gitea access token with `write:repository` scope, used to publish the release |
+   | `RELEASE_TOKEN` | optional: a Gitea access token with `write:repository` scope used to publish the release; without it the job token (`github.token`) publishes |
 
    With the first three set, the bundle jobs build with `createUpdaterArtifacts` and the public key (passed as
    `tauri build --config`). **Without them (forks, pull requests, a fresh repository) every build still works**: installers are
@@ -87,3 +87,10 @@ reinstall from the releases page, and revoke the old secrets.
 ## First launch note
 
 Apple notarization and Windows code signing are deferred until after the releases settle (decision 2026-10-23). Until then the release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
+
+## After the release: verify the installed app
+
+Step 4 of `docs/blocks/releasing.md` installs the published build and runs `tools/verify-installed.sh --name Dyno` (macOS and
+Linux: bundle, launch agent or systemd unit, socket, service answer, log tail). **Windows gap:** the script is bash only; there
+is no Windows counterpart yet, so on Windows the installed app is checked by hand (start it, `dyno --version`, the tray icon)
+until a PowerShell version is added.

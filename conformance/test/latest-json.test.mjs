@@ -21,7 +21,7 @@ test('platform keys follow the updater targets', () => {
 });
 
 test('builds the manifest from signed artifacts only, NSIS for Windows', () => {
-  const m = buildManifest({ ...base, files: [file('App_1.2.0_x64_en-US.msi'), file('App_1.2.0_x64-setup.exe'), file('App_1.2.0_amd64.deb', null)] });
+  const m = buildManifest({ ...base, files: [file('App_1.2.0_x64_en-US.msi'), file('App_1.2.0_x64-setup.exe')] });
   assert.equal(m.version, '1.2.0');
   assert.equal(m.notes, 'Fixes\n- grid');
   assert.equal(m.pub_date, '2026-10-17T12:00:00Z');
@@ -29,6 +29,12 @@ test('builds the manifest from signed artifacts only, NSIS for Windows', () => {
   assert.equal(m.platforms['windows-x86_64'].url, 'https://h/o/r/releases/download/v1.2.0/App_1.2.0_x64-setup.exe');
   assert.equal(m.platforms['windows-x86_64'].size, 42);
   assert.equal(m.platforms['windows-x86_64-nsis'].signature, 'c2ln');
+});
+
+test('an installer without a signature fails the manifest: its platform would miss the update', () => {
+  assert.throws(() => buildManifest({ ...base, files: [file('App_1.2.0_x64-setup.exe'), file('App_1.2.0_amd64.deb', null)] }), /without a signature.*App_1\.2\.0_amd64\.deb/);
+  // Not an updater artifact (a DMG, an MSI): no signature expected.
+  assert.doesNotThrow(() => buildManifest({ ...base, files: [file('App_1.2.0_x64-setup.exe'), file('App.dmg', null)] }));
 });
 
 test('refuses bad input', () => {

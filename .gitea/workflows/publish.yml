@@ -67,7 +67,7 @@ jobs:
         run: npm ci
 
       # publish.mjs publishes each crate with `cargo hakari publish` (without the workspace-hack dependency).
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2
         with:
           tool: cargo-hakari
 

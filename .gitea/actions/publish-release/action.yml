@@ -55,12 +55,11 @@ runs:
           node "$P/release/latest-json.mjs" --dir "$DIR" --version "$version" --notes "$DIR/RELEASE_NOTES.md" --base-url "$base" --out "$DIR/latest.json"
           # The signatures are in latest.json; the .sig files are not release assets.
           find "$DIR" -name '*.sig' -delete
-        elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-          # A release without latest.json is invisible to every installed copy: never publish one by accident.
+        else
+          # A release without latest.json is invisible to every installed copy: never publish one by accident. (The tag
+          # check above means this is always a tag run.)
           echo "::error::No signed updater artifacts on tag $tag: the signing key (TAURI_SIGNING_PRIVATE_KEY and its password) was not available to the build, so nothing is released."
           exit 1
-        else
-          echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
         fi
         node "$P/release/publish.mjs" --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" --tag "$tag" --notes "$DIR/RELEASE_NOTES.md" --dir "$DIR"
         # A pre-release (1.2.0-rc.1) never becomes what installed apps update to.

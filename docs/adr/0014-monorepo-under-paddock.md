@@ -490,7 +490,7 @@ Found while importing all seven apps; each point replaces the text above where t
   marks only the app for any of its workflow files.
 - **Release signing:** each app's release maps `PADDOCK_TAURI_SIGNING_PRIVATE_KEY` (and its password) and
   `PADDOCK_TAURI_UPDATER_PUBKEY` only; there is no `<APP>_TRANSITION_SIGNING_KEY` (last amendment). The release job
-  needs `RELEASE_TOKEN` (a token with `write:repository` for `paddock`'s releases).
+  may use `RELEASE_TOKEN` (optional: a token with `write:repository` for `paddock`'s releases); without it the job token (`github.token`) publishes.
 - **Imported commit messages** lose co-author and AI-session trailers (rule 8) in the filter-repo step.
 - Docs-only apps (Pacenotes, Sighter) have a `paddock.ci.json` with nothing to run: no leg, docs mark only the link check.
 - Git hooks: one root `lefthook.yml` with a `root:` per app (lefthook reads only the repo root's file).

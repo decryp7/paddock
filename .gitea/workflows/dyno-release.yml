@@ -64,9 +64,9 @@ jobs:
       # the monorepo does not have). They run in this job so a failure stops the gates and the release before anything is
       # built; the release job's condition is pinned by conformance/test/ci-actions.test.mjs.
       - if: ${{ steps.plan.outputs.run == 'true' }}
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2
         with:
-          tool: cargo-about
+          tool: cargo-about@0.9.2
       - id: licences-cache
         if: ${{ steps.plan.outputs.run == 'true' }}
         uses: actions/cache/restore@v4

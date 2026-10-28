@@ -69,6 +69,9 @@ export function buildManifest({ version, notes, pubDate, baseUrl, files, macArch
     const entry = { url: `${baseUrl.replace(/\/+$/, '')}/${encodeURIComponent(f.name)}`, signature: f.signature.trim(), size: f.size };
     for (const key of platformKeys(f.name, macArch)) platforms[key] ??= entry;
   }
+  // Every installer built must be in the manifest: an unsigned one would leave its platform without the update.
+  const unsigned = files.filter((f) => !f.signature && platformKeys(f.name, macArch)).map((f) => f.name);
+  if (unsigned.length) throw new Error(`installers without a signature (*.sig): ${unsigned.join(', ')}; their platforms would not be offered the update`);
   if (Object.keys(platforms).length === 0) throw new Error('no signed updater artifacts (*.sig) found: are TAURI_SIGNING_PRIVATE_KEY and createUpdaterArtifacts set?');
   return { version: v, notes: cleanNotes(notes), pub_date: pubDate, platforms };
 }

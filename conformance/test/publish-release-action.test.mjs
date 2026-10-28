@@ -41,9 +41,15 @@ async function fakeGitea(seed = {}) {
         const r = releases.get(decodeURIComponent(m[1]));
         return r ? send(200, r) : send(404, {});
       }
+      if (url.pathname.endsWith('/releases') && req.method === 'GET') return send(200, [...releases.values()].filter((r) => r.draft));
+      if ((m = /\/releases\/(\d+)$/.exec(url.pathname)) && req.method === 'PATCH') {
+        const r = [...releases.values()].find((x) => x.id === Number(m[1]));
+        r.draft = JSON.parse(Buffer.concat(chunks).toString()).draft;
+        return send(200, r);
+      }
       if (url.pathname.endsWith('/releases') && req.method === 'POST') {
         const input = JSON.parse(Buffer.concat(chunks).toString());
-        const r = { id: releases.size + 1, tag_name: input.tag_name, html_url: `https://x/${input.tag_name}`, prerelease: input.prerelease, assets: [] };
+        const r = { id: releases.size + 1, tag_name: input.tag_name, html_url: `https://x/${input.tag_name}`, prerelease: input.prerelease, draft: input.draft, assets: [] };
         releases.set(input.tag_name, r);
         return send(201, r);
       }
@@ -129,6 +135,7 @@ test('publish-release: a pitcrew-v tag publishes the release and puts latest.jso
 
     const tagged = gitea.releases.get('pitcrew-v1.0.3');
     assert.equal(tagged.prerelease, false, 'the app prefix does not make a pre-release');
+    assert.equal(tagged.draft, false, 'published after the last upload');
     assert.deepEqual(tagged.assets.map((a) => a.name).sort(), ['CHANGELOG-latest.md', 'Pitcrew_1.0.3_aarch64.dmg', 'Pitcrew_1.0.3_amd64.AppImage', 'Pitcrew_1.0.3_amd64.deb', 'Pitcrew_1.0.3_x64-setup.exe', 'Pitcrew_aarch64.app.tar.gz', 'RELEASE_NOTES.md', 'latest.json']);
     // The moving release got the new latest.json in place of the old: delete, then upload.
     const moving = gitea.calls.filter((c) => /releases\/\d+\/assets/.test(c) && /\/releases\/1\//.test(c));
@@ -230,6 +237,22 @@ test('publish-release: RELEASE_TOKEN wins, the job token is the fallback, and th
     const none = await run(gitea.url, dir, { expr }, { RELEASE_TOKEN: '', GITEA_TOKEN: '' });
     assert.equal(none.status, 2, none.out);
     assert.match(none.out, /neither RELEASE_TOKEN nor the fallback GITEA_TOKEN/);
+  } finally {
+    await gitea.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('publish-release: one installer without its signature stops the release before anything is created', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'publish-release-'));
+  const gitea = await fakeGitea();
+  try {
+    artifacts(dir);
+    rmSync(join(dir, 'Pitcrew_1.0.3_amd64.deb.sig'));
+    const r = await run(gitea.url, dir, { expr: { 'github.server_url': gitea.url } });
+    assert.notEqual(r.status, 0, r.out);
+    assert.match(r.out, /installers without a signature.*Pitcrew_1\.0\.3_amd64\.deb/);
+    assert.deepEqual([...gitea.releases.keys()], []);
   } finally {
     await gitea.close();
     rmSync(dir, { recursive: true, force: true });

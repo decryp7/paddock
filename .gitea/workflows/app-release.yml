@@ -303,7 +303,7 @@ jobs:
             echo "::notice::$manifest does not exist: no SBOM for this app."
             exit 0
           fi
-          command -v cargo-cyclonedx >/dev/null || cargo install cargo-cyclonedx --locked
+          command -v cargo-cyclonedx >/dev/null || cargo install cargo-cyclonedx --version 0.5.9 --locked
           cargo cyclonedx --manifest-path "$manifest" --format json --override-filename "${APP_ID}-rust.cdx"
           cp "$APP_DIR/src-tauri/${APP_ID}-rust.cdx.json" release/
 

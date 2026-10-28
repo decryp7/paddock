@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Publishes a Gitea release for a tag and uploads its files, through the Gitea API only (no Go action needed on the
-// runner). Re-running is safe: an existing release for the tag is reused and files already attached are skipped.
+// runner). The release is created as a draft and published after the last upload. Re-running is safe: an existing release (or draft) for the tag is reused and files already attached are skipped.
 //
 //   GITEA_TOKEN=... node conformance/release/publish.mjs --api https://host/api/v1 --repo owner/name --tag v1.2.0 \
 //     --notes artifacts/RELEASE_NOTES.md --dir artifacts [--replace]
@@ -78,9 +78,14 @@ export async function publish({ api, repo, tag, notes, dir, replace = false }, t
   const base = `${api}/repos/${repo}`;
   const body = readFileSync(notes, 'utf8').slice(0, MAX_NOTES);
   let release = await call(fetchImpl, token, 'GET', `${base}/releases/tags/${encodeURIComponent(tag)}`);
+  // A draft left by an interrupted run is not found by tag: look for it among the drafts.
+  if (!release) {
+    const drafts = await call(fetchImpl, token, 'GET', `${base}/releases?draft=true&limit=50`);
+    release = (drafts ?? []).find((r) => r.tag_name === tag && r.draft) ?? null;
+  }
   if (release) log(`release ${tag} exists; reusing it`);
   else {
-    release = await call(fetchImpl, token, 'POST', `${base}/releases`, { tag_name: tag, name: tag, body, draft: false, prerelease: isPrerelease(tag) });
+    release = await call(fetchImpl, token, 'POST', `${base}/releases`, { tag_name: tag, name: tag, body, draft: true, prerelease: isPrerelease(tag) });
     log(`created release ${tag}`);
   }
   const have = new Map((release.assets ?? []).map((a) => [a.name, a.id]));
@@ -100,6 +105,11 @@ export async function publish({ api, repo, tag, notes, dir, replace = false }, t
     await call(fetchImpl, token, 'POST', `${base}/releases/${release.id}/assets?name=${encodeURIComponent(name)}`, form);
     have.set(name, null);
     log(`  uploaded ${name}`);
+  }
+  // Published only now, after the last upload: nobody (and no updater) sees a release with half its files.
+  if (release.draft) {
+    release = await call(fetchImpl, token, 'PATCH', `${base}/releases/${release.id}`, { draft: false, prerelease: isPrerelease(tag) });
+    log(`published release ${tag}`);
   }
   return release.html_url;
 }
