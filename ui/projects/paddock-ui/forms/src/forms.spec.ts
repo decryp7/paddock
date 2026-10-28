@@ -2,7 +2,8 @@ import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, sig
 import { TestBed } from '@angular/core/testing';
 import { form, FormField, maxLength, min, minLength, required, validate } from '@angular/forms/signals';
 import { describe, expect, it } from 'vitest';
-import { PdField, PdFieldControl } from './field';
+import { By } from '@angular/platform-browser';
+import { PdField, PdFieldControl, PdFieldProxy } from './field';
 import { defaultErrorText, errorText, fieldMessage, showErrors, type PdFieldStateLike } from './messages';
 import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
@@ -82,6 +83,23 @@ class Host {
   });
 }
 
+@Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdField, PdFieldControl],
+  template: `
+    <pd-field label="Notes" hint="Optional"><textarea pdFieldControl rows="2" placeholder="Nothing yet"></textarea></pd-field>
+    <pd-field label="Kind"><select pdFieldControl><option>A</option></select></pd-field>
+    <pd-field label="Late">
+      @if (show()) {
+        <input pdFieldControl />
+      }
+    </pd-field>
+  `,
+})
+class Late {
+  readonly show = signal(false);
+}
+
 async function settle(f: { whenStable(): Promise<unknown> }): Promise<void> {
   await f.whenStable();
   TestBed.tick();
@@ -147,6 +165,67 @@ describe('pd-field', () => {
     port.dispatchEvent(new Event('blur'));
     await settle(f);
     expect(fields(f)[1]!.querySelector('[data-testid=field-error]')?.textContent).toContain('Pick another port.');
+  });
+
+  it('tells Material about focus, the error and a disabled control, and updates when the value is set from outside', async () => {
+    const f = await setup();
+    const name = fields(f)[0]!;
+    const input = name.querySelector('input')!;
+    input.dispatchEvent(new Event('focus'));
+    await settle(f);
+    expect(name.querySelector('.mat-focused')).not.toBeNull();
+    input.dispatchEvent(new Event('blur'));
+    await settle(f);
+    expect(name.querySelector('.mat-focused')).toBeNull();
+    expect(name.querySelector('.mat-form-field-invalid')).not.toBeNull();
+    expect(name.querySelector('.mat-form-field-disabled')).toBeNull();
+    input.disabled = true;
+    f.componentInstance.submitted.set(true); // (the host binds `disabled` in real use: any change of the host checks the field)
+    await settle(f);
+    expect(name.querySelector('.mat-form-field-disabled')).not.toBeNull();
+    input.disabled = false;
+    input.value = 'Valid';
+    input.dispatchEvent(new Event('input'));
+    await settle(f);
+    expect(name.querySelector('.mat-form-field-invalid')).toBeNull();
+    expect(name.querySelector('.mat-form-field-should-float, .mdc-text-field--no-label')).toBeDefined();
+  });
+
+  it('wraps a textarea, a select and a control that appears later, and forgets one that goes', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const f = TestBed.createComponent(Late);
+    document.body.appendChild(f.nativeElement);
+    await settle(f);
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('textarea')!.id).toMatch(/^pd-field-/);
+    expect(el.querySelectorAll('.mat-mdc-input-element')).toHaveLength(2);
+    expect(el.querySelectorAll('.mat-mdc-form-field-hint').length).toBe(1);
+    f.componentInstance.show.set(true);
+    await settle(f);
+    const late = el.querySelector<HTMLInputElement>('input')!;
+    expect(late.id).toMatch(/^pd-field-/);
+    [...el.querySelectorAll<HTMLElement>('.mat-mdc-form-field-flex')].at(-1)!.click();
+    await settle(f);
+    expect(document.activeElement).toBe(late);
+    f.componentInstance.show.set(false);
+    await settle(f);
+    expect(el.querySelector('input')).toBeNull();
+  });
+
+  it('answers Material about a control that is not there yet', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const f = TestBed.createComponent(Late);
+    document.body.appendChild(f.nativeElement);
+    await settle(f);
+    const proxies = f.debugElement.queryAllNodes(By.directive(PdFieldProxy)).map((d) => d.injector.get(PdFieldProxy));
+    const [notes, , late] = proxies;
+    expect(notes!.placeholder).toBe('Nothing yet');
+    expect([late!.placeholder, late!.value, late!.focused, late!.empty, late!.disabled]).toEqual(['', '', false, true, false]);
+    late!.onContainerClick();
+    late!.setDescribedByIds(['a', 'b']);
+    expect(f.debugElement.queryAll(By.directive(PdField))[2]!.injector.get(PdField).describedBy()).toBe('a b');
+    late!.setDescribedByIds([]);
+    expect(f.debugElement.queryAll(By.directive(PdField))[2]!.injector.get(PdField).describedBy()).toBeNull();
   });
 
   it('works for a control without a form state', async () => {

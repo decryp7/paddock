@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, model } from '@angular/core';
 import { MatButton, MatIconButton } from '@angular/material/button';
-import { MatButtonToggle, MatButtonToggleChange, MatButtonToggleGroup } from '@angular/material/button-toggle';
+import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
 import { DateAdapter, MAT_DATE_FORMATS } from '@angular/material/core';
 import { MatTimepicker, MatTimepickerInput } from '@angular/material/timepicker';
 import { MatTooltip } from '@angular/material/tooltip';
@@ -77,8 +77,8 @@ export function presetLabel(secs: number): string {
             @for (t of times(); track $index) {
               <li>
                 <pd-field size="short" [label]="timeLabel($index + 1)">
-                  <input pdFieldControl [matTimepicker]="picker" [value]="toDate(t)" [disabled]="disabled()" autocomplete="off" (valueChange)="setTimeAt($index, $event)" />
-                  <mat-timepicker #picker [options]="timeList" />
+                  <input pdFieldControl [matTimepicker]="picker" [value]="timeDates()[$index] ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTimeAt($index, $event)" />
+                  <mat-timepicker #picker panelClass="pd-timepicker-panel" [options]="timeList" />
                 </pd-field>
                 <button type="button" matIconButton [attr.aria-label]="removeLabel($index + 1)" [matTooltip]="removeText" [disabled]="disabled() || times().length < 2" (click)="removeTimeAt($index)">
                   <pd-glyph name="close" [size]="14" />
@@ -121,6 +121,10 @@ export function presetLabel(secs: number): string {
     </section>
   `,
   styles: `
+    /* Material draws no ring on the toggle button: the family's, inset so the group's rounded edge does not clip it. */
+    :host ::ng-deep .mat-button-toggle-button:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
+    /* The list is wider than the short field it opens from, so a time such as 10:00 AM stays on one line. */
+    ::ng-deep .pd-timepicker-panel { min-width: 8.5rem; }
     :host { display: grid; gap: var(--pd-space-3); min-width: 0; }
     .pd-row, .pd-stack { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); min-width: 0; }
     .pd-stack { display: grid; justify-items: start; }
@@ -157,7 +161,6 @@ export class PdScheduleEditor {
   private readonly formats = inject(MAT_DATE_FORMATS);
   /** The times the picker offers (every 30 minutes). */
   protected readonly timeList = timeOptions(this.adapter, this.formats);
-  protected readonly toDate = timeToDate;
   protected readonly modes: readonly { id: ScheduleMode; label: string }[] = [
     { id: 'every', label: $localize`:Schedule mode|@@pd.schedule.mode.every:Every…` },
     { id: 'times', label: $localize`:Schedule mode|@@pd.schedule.mode.times:At times` },
@@ -195,6 +198,8 @@ export class PdScheduleEditor {
     const v = this.value();
     return v.mode === 'times' ? v.times : [];
   });
+  /** The times as `Date`s, one object per change of `times` (a binding that made a new `Date` on every check would never settle). */
+  protected readonly timeDates = computed(() => this.times().map((t) => timeToDate(t)));
   protected readonly cron = computed(() => {
     const v = this.value();
     return v.mode === 'cron' ? v.expr : '';

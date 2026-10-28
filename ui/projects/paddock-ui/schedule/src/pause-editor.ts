@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, input, model } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, model } from '@angular/core';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { DateAdapter, MAT_DATE_FORMATS } from '@angular/material/core';
 import { MatTimepicker, MatTimepickerInput } from '@angular/material/timepicker';
@@ -32,12 +32,12 @@ import { dateToTime, TIME_PROVIDERS, timeOptions, timeToDate } from './time-valu
         <li class="pd-window" [attr.data-testid]="'pause-window-' + $index">
           <pd-day-picker [value]="w.days" [label]="daysLabel($index + 1)" [disabled]="disabled()" (valueChange)="patch($index, { days: $event })" />
           <pd-field size="short" [label]="fromText">
-            <input pdFieldControl [matTimepicker]="startPicker" [value]="toDate(w.start)" [disabled]="disabled()" autocomplete="off" (valueChange)="setTime($index, 'start', $event)" />
-            <mat-timepicker #startPicker [options]="timeList" />
+            <input pdFieldControl [matTimepicker]="startPicker" [value]="dates()[$index]?.start ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTime($index, 'start', $event)" />
+            <mat-timepicker #startPicker panelClass="pd-timepicker-panel" [options]="timeList" />
           </pd-field>
           <pd-field size="short" [label]="toText">
-            <input pdFieldControl [matTimepicker]="endPicker" [value]="toDate(w.end)" [disabled]="disabled()" autocomplete="off" (valueChange)="setTime($index, 'end', $event)" />
-            <mat-timepicker #endPicker [options]="timeList" />
+            <input pdFieldControl [matTimepicker]="endPicker" [value]="dates()[$index]?.end ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTime($index, 'end', $event)" />
+            <mat-timepicker #endPicker panelClass="pd-timepicker-panel" [options]="timeList" />
           </pd-field>
           @if (w.start > w.end) {
             <span class="pd-note">{{ overnightText }}</span>
@@ -57,6 +57,8 @@ import { dateToTime, TIME_PROVIDERS, timeOptions, timeToDate } from './time-valu
     }
   `,
   styles: `
+    /* The list is wider than the short field it opens from, so a time such as 10:00 AM stays on one line. */
+    ::ng-deep .pd-timepicker-panel { min-width: 8.5rem; }
     :host { display: grid; gap: var(--pd-space-3); justify-items: start; min-width: 0; }
     :host > .pd-zone { justify-self: stretch; }
     .pd-windows { display: grid; gap: var(--pd-space-2); width: 100%; margin: 0; padding: 0; list-style: none; }
@@ -76,7 +78,8 @@ export class PdPauseEditor {
   private readonly formats = inject(MAT_DATE_FORMATS);
   /** The times the picker offers (every 30 minutes). */
   protected readonly timeList = timeOptions(this.adapter, this.formats);
-  protected readonly toDate = timeToDate;
+  /** The windows' times as `Date`s, one object per change of `value` (a binding that made a new `Date` on every check would never settle). */
+  protected readonly dates = computed(() => this.value().windows.map((w) => ({ start: timeToDate(w.start), end: timeToDate(w.end) })));
   protected readonly max = MAX_PAUSE_WINDOWS;
   protected readonly emptyText = $localize`:Empty state|@@pd.schedule.pause.empty:No windows: nothing is paused.`;
   protected readonly fromText = $localize`:Field label|@@pd.schedule.pause.from:From`;

@@ -10,7 +10,7 @@ test.describe('schedule editors (plan X33)', () => {
     await app.frame.open('#/schedule');
     await expect(app.frame.heading).toHaveText('Schedules');
     await expect(page.getByTestId('schedule-now')).toHaveText('The demo clock stands at 2026-10-22T08:00:00.000Z.');
-    const modes = page.getByRole('radio');
+    const modes = page.getByRole('radiogroup', { name: 'Schedule type' }).getByRole('radio');
     await expect(modes).toHaveText(['Every…', 'At times', 'Cron']);
     await expect(page.getByRole('radio', { name: 'Every…' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByTestId('schedule-preview').locator('.pd-runs li')).toHaveCount(5);
@@ -27,15 +27,15 @@ test.describe('schedule editors (plan X33)', () => {
 
   test('presets and the amount change the interval; a cron with the wrong number of fields shows the engine’s problem', async ({ app, page }) => {
     await app.frame.open('#/schedule');
-    await page.getByRole('button', { name: '15 min' }).click();
-    await expect(page.getByRole('button', { name: '15 min' })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('radio', { name: '15 min' }).click();
+    await expect(page.getByRole('radio', { name: '15 min' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByTestId('schedule-preview')).toContainText('Every 15 minutes');
     const amount = page.getByTestId('schedule-every').locator('input[type=number]');
     await expect(amount).toHaveValue('15');
     await amount.fill('45');
     await amount.press('Tab');
     await expect(page.getByTestId('schedule-preview')).toContainText('Every 45 minutes');
-    await expect(page.getByRole('button', { name: '15 min' })).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByRole('radio', { name: '15 min' })).toHaveAttribute('aria-checked', 'false');
 
     await page.getByRole('radio', { name: 'Cron' }).click();
     const expr = page.getByTestId('schedule-cron').getByRole('textbox').first();
@@ -54,10 +54,10 @@ test.describe('schedule editors (plan X33)', () => {
     const remove = page.getByRole('button', { name: /^Remove time of day/ });
     await expect(remove).toBeDisabled();
     await page.getByRole('button', { name: 'Add a time' }).click();
-    await expect(page.getByRole('textbox', { name: 'Time of day 2' })).toHaveValue('10:00');
+    await expect(page.getByRole('combobox', { name: 'Time of day 2' })).toHaveValue('10:00 AM');
     await expect(remove.first()).toBeEnabled();
     await remove.first().click();
-    await expect(page.getByRole('textbox', { name: /^Time of day/ })).toHaveCount(1);
+    await expect(page.getByRole('combobox', { name: /^Time of day/ })).toHaveCount(1);
     // With no day picked the engine says what to do.
     for (const day of ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']) await page.getByTestId('schedule-times').getByRole('button', { name: day, exact: true }).click();
     await expect(page.getByTestId('schedule-preview').getByRole('alert')).toHaveText('Pick at least one day.');
@@ -69,11 +69,15 @@ test.describe('schedule editors (plan X33)', () => {
     await expect(first).toContainText('Ends the next day.');
     await page.getByRole('button', { name: 'Add a window' }).click();
     await expect(page.getByTestId('pause-window-1')).toBeVisible();
-    const times = page.getByTestId('pause-window-1').locator('input[type=time]');
-    await times.nth(0).fill('09:00');
-    await times.nth(1).fill('09:00');
+    // The timepicker takes the time in the locale's words and commits on leaving the field.
+    const times = page.getByTestId('pause-window-1').getByRole('combobox');
+    await times.nth(0).fill('9:00 AM');
+    await times.nth(0).press('Tab');
+    await times.nth(1).fill('9:00 AM');
+    await times.nth(1).press('Tab');
     await expect(page.getByRole('alert')).toContainText('differs from its end');
-    await times.nth(1).fill('10:00');
+    await times.nth(1).fill('10:00 AM');
+    await times.nth(1).press('Tab');
     await expect(page.getByRole('alert')).toHaveCount(0);
     await page.getByRole('button', { name: 'Remove window 2' }).click();
     await expect(page.getByTestId('pause-window-1')).toHaveCount(0);

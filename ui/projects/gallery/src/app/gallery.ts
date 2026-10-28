@@ -225,7 +225,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
           <div class="pd-field"><label for="g-name">Name</label><input id="g-name" class="pd-input" value="builder-01" /><span class="pd-field__hint">Shown in the sidebar.</span></div>
           <div class="pd-field"><label for="g-bad">Port</label><input id="g-bad" class="pd-input" value="99999" aria-invalid="true" aria-describedby="g-bad-error" /><span id="g-bad-error" class="pd-field__error"><pd-status-glyph status="error" [size]="14" /> Use a port from 1 to 65535.</span></div>
           <div class="pd-field"><label for="g-native">Native select</label><select id="g-native" class="pd-select"><option>Standard</option><option>Compact</option></select></div>
-          <div class="pd-field"><label for="g-themed">Themed select</label><pd-select inputId="g-themed" [options]="selectOptions" [value]="selected()" (valueChange)="selected.set($event)" /></div>
+          <pd-select label="Themed select" inputId="g-themed" [options]="selectOptions" [value]="selected()" (valueChange)="selected.set($event)" />
           <div class="pd-field pd-field--check"><span class="pd-field__label" aria-hidden="true">&nbsp;</span><label class="pd-check"><input type="checkbox" checked /> Start with the system</label></div>
         </div>
         <div class="gal-row gal-row--center">

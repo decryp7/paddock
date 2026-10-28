@@ -23,11 +23,12 @@ for (const theme of THEMES) {
 
 test('keyboard: arrows move the segmented control and Tab shows a focus ring', async ({ page }) => {
   await open(page, 'dark', 'debrief');
-  const seg = page.getByRole('radiogroup', { name: 'Time range' });
+  const seg = page.getByTestId('segmented-control').getByRole('radiogroup', { name: 'Time range' });
   await seg.getByRole('radio', { name: '24 h' }).focus();
   await page.keyboard.press('ArrowRight');
   await expect(seg.getByRole('radio', { name: '7 days' })).toHaveAttribute('aria-checked', 'true');
-  await page.keyboard.press('Home');
+  // (Material's toggles wrap with the arrows; they have no Home key)
+  await page.keyboard.press('ArrowRight');
   await expect(seg.getByRole('radio', { name: '1 h' })).toHaveAttribute('aria-checked', 'true');
   const outline = await seg.getByRole('radio', { name: '1 h' }).evaluate((e) => getComputedStyle(e).outlineStyle);
   expect(outline).toBe('solid');
@@ -120,7 +121,7 @@ test.describe('UI basics review fixes (regressions)', () => {
         return [
           h('[data-surface="page"] [data-group="fields"] input.pd-input'),
           h('[data-surface="page"] [data-group="fields"] select.pd-select'),
-          h('[data-surface="page"] [data-group="themed-select"] pd-select .pd-trigger'),
+          h('[data-surface="page"] [data-group="themed-select"] pd-select .mat-mdc-text-field-wrapper'),
           h('[data-surface="page"] [data-group="themed-select"] input.pd-input'),
         ];
       });
@@ -130,7 +131,7 @@ test.describe('UI basics review fixes (regressions)', () => {
 
   test('inputs, selects, the themed select and the switch show a solid 2 px focus outline (P1-5)', async ({ page }) => {
     await open(page, 'light', 'debrief');
-    for (const sel of ['#g-name', '#g-native', '#g-themed', '[data-surface="page"] input.pd-switch']) {
+    for (const sel of ['#g-name', '#g-native', 'mat-select#g-themed', '[data-surface="page"] input.pd-switch']) {
       const el = page.locator(sel).first();
       await el.focus();
       const o = await el.evaluate((e) => {
@@ -186,16 +187,19 @@ test.describe('UI basics review fixes (regressions)', () => {
     await open(page, 'light', 'debrief');
     const trigger = page.locator('#g-themed');
     await trigger.click();
-    const list = page.locator('.pd-list');
+    const list = page.locator('#g-themed-panel');
     await expect(list).toBeVisible();
-    const [t, l] = [(await trigger.boundingBox())!, (await list.boundingBox())!];
+    // the list lines up with the field's outline, of which the trigger text is inset
+    const [t, l] = [(await page.locator('pd-select:has(#g-themed) .mat-mdc-text-field-wrapper').boundingBox())!, (await list.boundingBox())!];
     expect(Math.abs(l.x - t.x)).toBeLessThanOrEqual(1);
     expect(Math.abs(l.width - t.width)).toBeLessThanOrEqual(1);
   });
 
   test('hover changes the border of an input, a native select and the themed select, and a secondary button on a white card (review 2, N-P2-2, N-P3-3)', async ({ page }) => {
     await open(page, 'light', 'debrief');
-    const border = (sel: string) => page.locator(sel).first().evaluate((e) => getComputedStyle(e).borderTopColor);
+    // the themed select's border is its outline's leading edge
+    const drawn = (sel: string) => (sel === '#g-themed' ? 'pd-select:has(#g-themed) .mdc-notched-outline__leading' : sel);
+    const border = (sel: string) => page.locator(drawn(sel)).first().evaluate((e) => getComputedStyle(e).borderTopColor);
     for (const sel of ['#g-name', '#g-native', '#g-themed']) {
       const rest = await border(sel);
       await page.locator(sel).first().hover();

@@ -31,6 +31,15 @@ class Bare {
   readonly options = OPTIONS;
 }
 
+@Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdSelect],
+  template: `<pd-select label="Theme" [options]="options" value="dark" />`,
+})
+class Labelled {
+  readonly options = OPTIONS;
+}
+
 async function settle(f: { whenStable(): Promise<unknown> }): Promise<void> {
   await f.whenStable();
   TestBed.tick();
@@ -136,6 +145,17 @@ describe('pd-select', () => {
     f.componentInstance.value.set('gone');
     await settle(f);
     expect(trigger(f).textContent?.trim()).toBe('Choose');
+  });
+
+  it('shows its own label in the outline and is named by it', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const f = TestBed.createComponent(Labelled);
+    document.body.appendChild(f.nativeElement);
+    await settle(f);
+    await settle(f);
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('label')!.textContent).toContain('Theme');
+    expect(el.querySelector('mat-select')!.getAttribute('aria-labelledby')).toContain(el.querySelector('label')!.id);
   });
 
   it('shows the error state when invalid', async () => {

@@ -109,13 +109,13 @@ const COLUMNS: PdColumn<Plugin>[] = [
       <p>Signal Forms with <code>pd-field</code>: the error appears after the field was left, or on submit.</p>
       <form class="gal-form gal-box" (submit)="submit($event)" novalidate>
         <pd-field label="Name" hint="Shown in the list" [state]="f.name()" [submitted]="submitted()">
-          <input class="pd-input" type="text" pdFieldControl [formField]="f.name" autocomplete="off" />
+          <input type="text" pdFieldControl [formField]="f.name" autocomplete="off" />
         </pd-field>
         <pd-field label="Port" hint="1 to 65535" size="short" [state]="f.port()" [submitted]="submitted()">
-          <input class="pd-input" type="number" pdFieldControl [formField]="f.port" />
+          <input type="number" pdFieldControl [formField]="f.port" />
         </pd-field>
         <pd-field label="Workspace" hint="Set by your administrator">
-          <input class="pd-input" type="text" pdFieldControl value="Debrief" disabled />
+          <input type="text" pdFieldControl value="Debrief" disabled />
         </pd-field>
         <div class="gal-row"><button class="pd-btn pd-btn--primary" type="submit">Save</button></div>
       </form>

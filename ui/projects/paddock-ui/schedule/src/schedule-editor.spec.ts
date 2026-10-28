@@ -1,5 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { MatTimepickerInput } from '@angular/material/timepicker';
+import { By } from '@angular/platform-browser';
 import { describe, expect, it } from 'vitest';
 import { PdPauseEditor } from './pause-editor';
 import { PdScheduleEditor } from './schedule-editor';
@@ -95,6 +97,19 @@ describe('pd-schedule-editor', () => {
     t.all('pd-day-picker button')[2]!.click();
     await settle(t.f);
     expect(t.value()).toMatchObject({ days: ['mon', 'wed'] });
+    // the days come back in week order whatever order they were picked in
+    t.all('pd-day-picker button')[0]!.click();
+    await settle(t.f);
+    t.all('pd-day-picker button')[0]!.click();
+    await settle(t.f);
+    expect(t.value()).toMatchObject({ days: ['mon', 'wed'] });
+    t.all('pd-day-picker button')[6]!.click();
+    t.all('pd-day-picker button')[1]!.click();
+    await settle(t.f);
+    expect(t.value()).toMatchObject({ days: ['mon', 'tue', 'wed', 'sun'] });
+    t.all('pd-day-picker button')[6]!.click();
+    t.all('pd-day-picker button')[1]!.click();
+    await settle(t.f);
     // The only time of day cannot be removed; a second one can be added, edited and removed.
     expect(t.q<HTMLButtonElement>('.pd-times button').disabled).toBe(true);
     t.q('.pd-add').click();
@@ -118,6 +133,19 @@ describe('pd-schedule-editor', () => {
     expect(t.value()).toMatchObject({ zone: 'Asia/Tokyo' });
     await t.change(t.q<HTMLInputElement>('[data-testid=schedule-zone] input'), '');
     expect(t.value()).toMatchObject({ zone: null });
+  });
+
+  it('hands each picker one Date per change, not a new one per check (a Date made per check never lets change detection settle)', async () => {
+    const t = schedule({ mode: 'times', days: ['mon'], times: ['09:00', '17:30'], zone: null });
+    await settle(t.f);
+    const pickers = () => t.f.debugElement.queryAll(By.directive(MatTimepickerInput)).map((d) => d.injector.get(MatTimepickerInput).value());
+    const first = pickers();
+    for (let i = 0; i < 3; i++) {
+      t.f.componentRef.setInput('disabled', i % 2 === 0);
+      await settle(t.f);
+    }
+    expect(first.map((d) => d && `${d.getHours()}:${d.getMinutes()}`)).toEqual(['9:0', '17:30']);
+    pickers().forEach((d, i) => expect(d).toBe(first[i]));
   });
 
   it('stops adding times at the engine limit', async () => {
