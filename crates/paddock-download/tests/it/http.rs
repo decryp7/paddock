@@ -825,11 +825,9 @@ fn a_stalled_transfer_ends_as_stalled_and_keeps_the_partial_file() {
 
 #[test]
 fn an_unreachable_host_is_a_network_error_after_the_attempts() {
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    // A held port that resets every connection, not a port read off a dropped listener (ADR 0023).
+    let held = paddock_testkit::net::HeldPort::reset();
+    let port = held.port();
     let dir = tempfile::tempdir().unwrap();
     let req = Request::new(
         &format!("http://127.0.0.1:{port}/f"),
@@ -1058,11 +1056,8 @@ fn transport_failures_are_classified() {
     );
     let plain = Server::start(|r, _| partial(r, b"x"));
     // A proxy that is not there.
-    let closed = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    let held = paddock_testkit::net::HeldPort::reset();
+    let closed = held.port();
     let d = Downloader::http(HttpConfig {
         proxy: ProxyMode::explicit(&format!("http://127.0.0.1:{closed}")).unwrap(),
         ..HttpConfig::default()
