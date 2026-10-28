@@ -1245,3 +1245,68 @@ fn a_first_fit_keeps_the_viewport_delta_and_the_zoom_converts_the_measure_to_log
     );
     assert_eq!(state(&app).viewport_delta_or("d-main-99", || 1.0), None);
 }
+
+#[test]
+fn a_destroyed_window_and_a_closed_host_are_forgotten_in_the_applied_state() {
+    for os in ["windows", "linux"] {
+        let (app, timer) = manual_app();
+        let h = app.handle().clone();
+        let mark = native_mark();
+        // The parent is disabled, then destroyed with its modal still open (the host's end closes its dialogs).
+        open_on(&h, "main", request("unsaved-changes"), os).unwrap();
+        timer.deadline_passes();
+        assert_eq!(parent_ops(mark), ["disable:main"], "{os}");
+        assert_eq!(state(&app).parent_change("main"), None, "{os}: applied");
+        on_window_event(&os_window(&app, "main"), &WindowEvent::Destroyed);
+        // A window that later has the label starts enabled, so a new modal must disable it again.
+        let a = open_on(&h, "main", request("unsaved-changes"), os).unwrap();
+        timer.deadline_passes();
+        assert!(!state(&app).is_pending(&a.label), "{os}");
+        assert_eq!(parent_ops(mark), ["disable:main", "disable:main"], "{os}");
+        // Closing the host's dialogs forgets the label too.
+        assert_eq!(close_all_of(&h, "main"), 1, "{os}");
+        assert_eq!(
+            state(&app).parent_change("main"),
+            None,
+            "{os}: nothing wanted, nothing applied"
+        );
+        state(&app).applied("main", true);
+        close_all_of(&h, "main");
+        assert_eq!(state(&app).parent_change("main"), None, "{os}");
+    }
+}
+
+#[test]
+fn the_applied_state_is_recorded_only_when_the_caller_says_the_window_took_it() {
+    let (app, _t) = manual_app();
+    let h = app.handle().clone();
+    open_on(&h, "main", request("unsaved-changes"), "linux").unwrap();
+    let dialogs = state(&app);
+    // Showing is not done here, so nothing is wanted; make a shown modal by marking it.
+    let label = dialogs.of_host("main").remove(0);
+    dialogs.mark_shown(&label).unwrap();
+    // Asking does not record: a failed set_enabled (mock windows cannot fail, so this is the seam) leaves it to retry.
+    assert_eq!(dialogs.parent_change("main"), Some(true));
+    assert_eq!(dialogs.parent_change("main"), Some(true));
+    dialogs.applied("main", true);
+    assert_eq!(dialogs.parent_change("main"), None);
+    dialogs.remove(&label);
+    assert_eq!(dialogs.parent_change("main"), Some(false));
+    dialogs.applied("main", false);
+    assert_eq!(dialogs.parent_change("main"), None);
+}
+
+#[test]
+fn the_zoom_is_kept_on_the_entry_and_a_monitor_change_does_not_change_it() {
+    let (app, _t) = manual_app();
+    let h = app.handle().clone();
+    let info = open(&h, "main", request("ai-setup")).unwrap();
+    let dialogs = state(&app);
+    assert_eq!(dialogs.zoom_for(&info.label, Some(2.0), 1.0), Some(2.0));
+    assert_eq!(dialogs.get(&info.label).unwrap().zoom.unwrap().zoom, 2.0);
+    // The scale factor changed (monitor move) with a stale ratio: kept.
+    assert_eq!(dialogs.zoom_for(&info.label, Some(2.0), 2.0), Some(2.0));
+    // The page zoomed at the unchanged scale: read again.
+    assert_eq!(dialogs.zoom_for(&info.label, Some(3.0), 2.0), Some(1.5));
+    assert_eq!(dialogs.zoom_for("d-main-99", Some(3.0), 2.0), None);
+}
