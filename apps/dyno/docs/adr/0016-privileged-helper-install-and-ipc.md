@@ -1,6 +1,6 @@
 # 16. The privileged helper: a registered system daemon, installed on a click, spoken to over the one IPC
 
-- Status: accepted (2026-10-23)
+- Status: accepted (2026-10-23); the closed action list is reduced to read-only actions plus Install and Uninstall by ADR 0021 (2026-10-28); Dyno 1.0 ships without the helper (ADR 0021 point 4); the install flow, IPC and audit log are revised for 1.1 by ADR 0022
 - Related: ADR 0001, 0002, 0006 (this record fills in its points 3 to 5), 0010, `crates/dyno-helper`,
   `dyno_core::helper` and `dyno_core::helper_wire`, `dyno_platform::{elevate, tuning_admin}`,
   `dyno_agent::helper_link`, docs/roadmap.md (WP-01)

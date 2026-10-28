@@ -107,6 +107,9 @@ const OWNERS = [
   [/^(renovate\/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)/, ['tools']], // checked by scripts/affected.test.mjs
 ];
 
+/** An app's `src-tauri/Cargo.toml` and `capabilities/`, which conformance C48 reads (the app itself is marked as their owner). */
+export const APP_CAPABILITY_INPUT = /^apps\/[^/]+\/(app\/)?src-tauri\/(Cargo\.toml|capabilities\/)/;
+
 /** Generated TypeScript and JSON of the shared crates, written by their tests (a `generated` folder under ui, `.ts` or `.json`). */
 export const GENERATED = /^ui\/.*\/generated\/[^/]+\.(ts|json)$/;
 
@@ -363,6 +366,9 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
         kind(`app:${a}`, 'rust');
       }
     }
+    // An app's Cargo dependencies and capabilities are read by conformance C48 (a shell app grants its dialog windows the
+    // shell's dialog set), which runs in the conformance job.
+    if (APP_CAPABILITY_INPUT.test(f)) mark('conformance', `C48 reads ${f}`);
     // The shared actions' scripts in conformance/ run in every app's gates.
     if (f.startsWith('conformance/') && !/^conformance\/(test|fixtures)\//.test(f)) {
       for (const a of apps.keys()) {

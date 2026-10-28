@@ -627,3 +627,16 @@ guard: `paddockConfig({ buildGuard: 'none' | 'ui' | 'ui-dist', uiRoot })`; an ap
 `ui/dist` (today Spotter), else nothing. `PW_SKIP_BUILD_GUARD=1` skips it. The ui config checks the css only with `PW_REUSE_SERVER=1` (its webServers run `build:css` themselves). Dot-files (`.DS_Store`) are ignored; README and doc edits under `projects/paddock-ui` mark the dist stale on purpose (every non-test file counts). A direct `ng build paddock-ui` leaves `ui/dist` unstamped, so the guard fails: build with `npm run build -w ui`. Tests: `build-guard.test.ts`, `env.test.ts`
 (including every app config on a fresh checkout). Proposed binding rule (the user decides): every Playwright config
 uses these three, and `scripts/new-app.mjs` templates do.
+## 2026-10-29: a harness that stands in for a plugin must stand in for its routing and its ACL
+
+The ADR 0026 real-window probe ended "no report within 90s: the dialog page never became ready" on macOS, and it looked like
+a product fault (a hidden window that never readies). It was the harness: the page sends the shell's commands as
+`plugin:paddock-shell|dialog_take_input`, but the probe registered them as bare app commands and had no ACL, so Tauri
+refused every call ("paddock-shell.window_pong not allowed. Plugin not found") before the probe's handler saw it. The page
+booted fine (the DOM was there, and the ready of ADR 0026 §4.2 took about 10 ms once the calls arrived). "Refused" was told
+from "never made" only by silence in the probe's own log, and confirmed by calling a command from the webview by hand; the
+probe could not tell them apart. **Rule (guidance):** a probe or test that replaces the app's plugin registers a plugin of
+the same name and an ACL resolved from the app's real capability file, so a wrong capability fails it; it prints every call
+it receives, with its time, and the calls seen when it gives up. A refusal itself shows only in the webview console or as a
+`RuntimeAuthority` check, so a harness that needs to name it asks the authority, not the log. C48 checks the capability file
+of every app on the shared shell.

@@ -7,11 +7,13 @@ planned (not built). The text companion is [architecture.md](architecture.md).
 ## Overview
 
 Dyno is a per-user **agent** that measures the machine and keeps its history, an **app** (Tauri shell plus Angular UI)
-that shows it, a pure Rust **core** that holds every decision, OS **adapters** behind the core's ports, and (planned) a
-privileged **helper** installed on the first admin action. The user changes nothing by accident: rules ship disabled,
-and every action is logged with an undo (ADR 0006).
+that shows it, a pure Rust **core** that holds every decision, and OS **adapters** behind the core's ports. Dyno 1.0 has no privileged helper: everything runs with the user's own rights. Dyno only watches: it changes nothing on the machine
+([ADR 0021](adr/0021-monitoring-only.md)).
 
 ![Dyno at a glance](../diagrams/dyno-overview.svg)
+
+The README's hero, social card and feature panels are drawn illustrations for now: the screenshots still show features
+ADR 0021 removed. They are retaken after Dyno moves onto the shared shell ([releasing.md](releasing.md#before-tagging)).
 
 ## C4 model
 
@@ -20,15 +22,15 @@ and every action is logged with an undo (ADR 0006).
 ![System context](../diagrams/svg/c4-1-context.svg)
 
 The PC owner uses Dyno; Dyno reads the operating system through ports and checks Dyno's own release host for opt-in
-updates. Debrief (open a time window), Pitwall (explain on click) and backup tools (health checks) are planned
-integrations and never get data unless the user clicks.
+updates. Debrief (open a time window) and Pitwall (explain on click) are planned integrations and never get data unless the user
+clicks; Dyno also checks that backup tools ran (built, read-only).
 
 ### Level 2 — containers
 
 ![Containers](../diagrams/svg/c4-2-containers.svg)
 
 The app (Angular UI in a Tauri shell) and the agent run as the user; every arrow between Dyno processes is the one
-`dyno-ipc` crate. The agent is the single writer of the data folder. Plugins run out of process; the helper is a separate system service installed on a click (ADR 0016).
+`dyno-ipc` crate. The agent is the single writer of the data folder. Plugins run out of process. There is no helper in 1.0.
 
 ### Level 3 — core components
 
@@ -58,26 +60,25 @@ The CLI, the service registration, the shared state, the plugin host and the ben
 ![Deployment on Linux](../diagrams/svg/uml-deployment-linux.svg)
 
 Per OS: the app bundle, the OS's way of starting the agent at login (launchd through `SMAppService`, a systemd user
-unit, a per-user `Run` entry on Windows), the agent process, the data folder, and the helper, a system service that exists only after the user installed it.
+unit, a per-user `Run` entry on Windows), the agent process and the data folder. Nothing runs as a system service.
 
 ## Use cases
 
 ![Use cases: see and understand](../diagrams/svg/uml-use-cases-observe.svg)
 
-![Use cases: change and tune](../diagrams/svg/uml-use-cases-act.svg)
+![Use cases: run and set up](../diagrams/svg/uml-use-cases-setup.svg)
 
-Everything that changes the machine needs an enabled rule or an explicit click. Dashed use cases are planned.
+What the owner runs or sets up. Benchmarks start only on a click; Explain this in Pitwall is planned for after 1.0 (dashed). Dyno
+only watches (ADR 0021): none of these changes the machine. The disk map is in scope for 1.0.
 
 ## Domain model
 
 ![Domain model: measurements](../diagrams/svg/uml-class-domain.svg)
 
-![Domain model: rules and actions](../diagrams/svg/uml-class-rules.svg)
+![Domain model: findings](../diagrams/svg/uml-class-insight.svg)
 
-![Domain model: diagnosis and changes](../diagrams/svg/uml-class-insight.svg)
-
-The core's main types. `Reading<T>` makes a missing sensor explicit; `ProcessRef` (pid plus start time) is the only way to
-name a process in an action; `ActivityEntry` carries an `UndoRecord`.
+The core's main types. `Reading<T>` makes a missing sensor explicit; `ProcessRef` (pid plus start time) names a process
+so a reused pid is never mistaken for it. The findings are what Dyno tells the owner.
 
 ## Flows
 
@@ -88,24 +89,11 @@ name a process in an action; `ActivityEntry` carries an `UndoRecord`.
 The app subscribes once; the sampler measures at adaptive intervals; the agent pushes each `LiveUpdate` to every
 subscriber at its detail level, dropping frames for a slow subscriber.
 
-### Act on a process, then undo
-
-![Act and undo](../diagrams/svg/uml-seq-act-undo.svg)
-
-Validate, check the protected list, apply to a `ProcessRef`, record the inverse; `Undo` applies it.
-
-### First admin action installs the helper
-
-![Helper install](../diagrams/svg/uml-seq-helper-install.svg)
-
-Review, the helper's explanation, the OS's own prompt (the install runs `dyno-helper install` elevated), then the change: a second validation inside the helper, the setting read back, the helper's audit line and the activity entry with its inverse (ADR 0016).
-
 ### Agent restart after an update
 
 ![Agent restart](../diagrams/svg/uml-seq-agent-restart.svg)
 
-A newer app asks the older agent to exit; the service manager starts the new one; `release_all` first undoes what rules
-applied. On Windows no manager restarts the agent; the app does.
+A newer app asks the older agent to exit; the service manager starts the new one. On Windows no manager restarts the agent; the app does.
 
 ### History rollup
 
@@ -128,9 +116,3 @@ Closing the window destroys it; the tray and the agent stay; opening builds a fr
 
 Not installed, or installed with two flags: running and pointing at this executable. `ensure` repairs a stale
 registration and never installs one unasked.
-
-### Rule engine per (rule, app)
-
-![Rule engine](../diagrams/svg/uml-state-rule.svg)
-
-Watching, Acting at step n, Releasing, Snoozed; steps add up and are undone in reverse order.
