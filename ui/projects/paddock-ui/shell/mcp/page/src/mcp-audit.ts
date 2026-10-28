@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { MatButton } from '@angular/material/button';
 import { PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { AuditRow, Outcome } from '@decryp7/paddock-ui/shell/mcp';
 
@@ -31,11 +32,11 @@ function size(bytes: number): string {
 @Component({
   selector: 'pd-mcp-audit',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdTable],
+  imports: [MatButton, PdTable],
   template: `
     <div class="pd-au__head">
       <h3 id="pd-au-title">{{ t.title }}</h3>
-      <button type="button" class="pd-au__btn" data-testid="mcp-audit-clear" [disabled]="rows().length === 0 || state() !== 'ready'" (click)="clear.emit()">{{ t.clear }}</button>
+      <button matButton="outlined" type="button" data-testid="mcp-audit-clear" [disabled]="rows().length === 0 || state() !== 'ready'" (click)="clear.emit()">{{ t.clear }}</button>
     </div>
     <pd-table
       [rows]="lines()"
@@ -55,9 +56,6 @@ function size(bytes: number): string {
     :host { display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; container-type: inline-size; }
     h3 { margin: 0; font-size: var(--pd-text-subtitle); font-weight: var(--pd-weight-semibold); }
     .pd-au__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--pd-space-2); }
-    .pd-au__btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .pd-au__btn:disabled { opacity: 0.6; cursor: default; }
-    .pd-au__btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
   `,
 })
 export class PdMcpAudit {

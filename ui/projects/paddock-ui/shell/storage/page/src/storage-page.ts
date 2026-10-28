@@ -1,4 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { MatButton } from '@angular/material/button';
+import { MatProgressBar } from '@angular/material/progress-bar';
+import { MatTooltip } from '@angular/material/tooltip';
 import { PdPathText } from '@decryp7/paddock-ui';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import { formatBytes } from '@decryp7/paddock-ui/format';
@@ -18,7 +21,7 @@ import { STORAGE_STYLES } from './styles';
 @Component({
   selector: 'pd-storage-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdPathText, PdTable, PdCell, PdMiddleText, PdGlyph],
+  imports: [MatButton, MatProgressBar, MatTooltip, PdPathText, PdTable, PdCell, PdMiddleText, PdGlyph],
   template: `
     <section class="pd-storage__block" aria-labelledby="pd-storage-title" data-testid="storage-page">
       <h2 id="pd-storage-title">{{ t.title }}</h2>
@@ -29,14 +32,14 @@ import { STORAGE_STYLES } from './styles';
       <div class="pd-storage__notice" role="status" data-testid="storage-working">
         <span class="pd-storage__title">{{ store.progress()?.label ?? (job === 'clear' ? t.clearing : t.measuring) }}</span>
         @if (store.progress(); as p) {
-          <progress [attr.aria-label]="p.label" [attr.value]="p.total === null ? null : p.done" [attr.max]="p.total"></progress>
+          <mat-progress-bar [attr.aria-label]="p.label" [mode]="p.total === null ? 'indeterminate' : 'determinate'" [value]="percent(p)" />
           <span class="pd-storage__muted" data-testid="storage-count">{{ p.total === null ? p.done : p.done + ' / ' + p.total }}</span>
         } @else {
-          <progress [attr.aria-label]="t.working"></progress>
+          <mat-progress-bar mode="indeterminate" [attr.aria-label]="t.working" />
         }
         <span class="pd-storage__muted" data-testid="storage-still-working">{{ t.stillWorking }}</span>
         <span class="pd-storage__row">
-          <button type="button" class="pd-storage__btn" data-testid="storage-cancel" [disabled]="store.cancelling()" (click)="store.cancel()">{{ store.cancelling() ? t.cancelling : t.cancel }}</button>
+          <button matButton="outlined" type="button" data-testid="storage-cancel" [disabled]="store.cancelling()" (click)="store.cancel()">{{ store.cancelling() ? t.cancelling : t.cancel }}</button>
         </span>
       </div>
     }
@@ -50,9 +53,9 @@ import { STORAGE_STYLES } from './styles';
         }
         <span class="pd-storage__row">
           @if (f.retryable) {
-            <button type="button" class="pd-storage__btn" data-testid="storage-retry" (click)="store.scan()">{{ t.retry }}</button>
+            <button matButton="outlined" type="button" data-testid="storage-retry" (click)="store.scan()">{{ t.retry }}</button>
           }
-          <button type="button" class="pd-storage__btn" (click)="store.dismissFailure()">{{ t.dismiss }}</button>
+          <button matButton="outlined" type="button" (click)="store.dismissFailure()">{{ t.dismiss }}</button>
         </span>
       </div>
     }
@@ -75,7 +78,7 @@ import { STORAGE_STYLES } from './styles';
             </details>
           }
         }
-        <span class="pd-storage__row"><button type="button" class="pd-storage__btn" (click)="store.dismissResult()">{{ t.dismiss }}</button></span>
+        <span class="pd-storage__row"><button matButton="outlined" type="button" (click)="store.dismissResult()">{{ t.dismiss }}</button></span>
       </div>
     }
 
@@ -83,8 +86,8 @@ import { STORAGE_STYLES } from './styles';
       <div class="pd-storage__summary">
         <p data-testid="storage-total">{{ totalText(usage.totalBytes, usage.capped) }}</p>
         <span class="pd-storage__row">
-          <button type="button" class="pd-storage__btn" data-testid="storage-clear-cache" [disabled]="!!store.working() || store.cache().ids.length === 0" (click)="clearCache()">{{ cacheLabel() }}</button>
-          <button type="button" class="pd-storage__btn" data-testid="storage-measure" [disabled]="!!store.working()" (click)="store.scan()">{{ t.measure }}</button>
+          <button matButton="outlined" type="button" data-testid="storage-clear-cache" [disabled]="!!store.working() || store.cache().ids.length === 0" (click)="clearCache()">{{ cacheLabel() }}</button>
+          <button matButton="outlined" type="button" data-testid="storage-measure" [disabled]="!!store.working()" (click)="store.scan()">{{ t.measure }}</button>
         </span>
       </div>
       <pd-table
@@ -102,14 +105,14 @@ import { STORAGE_STYLES } from './styles';
         (action)="onCategoryAction($event)"
       >
         <ng-template pdCell="label" let-c>
-          <span class="pd-storage__name" [attr.title]="c.note || null">
+          <span class="pd-storage__name" [matTooltip]="c.note || ''">
             <span class="pd-storage__title">{{ c.label }}</span>
             @if (c.note) {
               <span class="pd-storage__note">{{ c.note }}</span>
             }
           </span>
         </ng-template>
-        <ng-template pdCell="size" let-c><span [attr.title]="exact(c)" data-testid="storage-size">{{ sizeText(c) }}</span></ng-template>
+        <ng-template pdCell="size" let-c><span [matTooltip]="exact(c)" data-testid="storage-size">{{ sizeText(c) }}</span></ng-template>
       </pd-table>
       @if (openTree(); as id) {
         @if (store.trees()[id]; as tree) {
@@ -151,7 +154,7 @@ import { STORAGE_STYLES } from './styles';
       <div class="pd-storage__notice pd-storage__notice--danger" role="alert" data-testid="storage-error">
         <span class="pd-storage__title">{{ t.noUsage }}</span>
         <span>{{ problem }}</span>
-        <span class="pd-storage__row"><button type="button" class="pd-storage__btn" data-testid="storage-load-retry" (click)="store.load()">{{ t.retry }}</button></span>
+        <span class="pd-storage__row"><button matButton="outlined" type="button" data-testid="storage-load-retry" (click)="store.load()">{{ t.retry }}</button></span>
       </div>
     } @else if (!store.working()) {
       <p class="pd-storage__muted" role="status" data-testid="storage-loading">{{ t.loading }}</p>
@@ -277,6 +280,11 @@ export class PdStoragePage {
 
   protected label(id: string): string {
     return this.store.categories().find((c) => c.id === id)?.label ?? id;
+  }
+
+  /** The bar's fill in percent; only called when the total is known (otherwise the bar is indeterminate). */
+  protected percent(p: { done: number; total: number | null }): number {
+    return p.total ? Math.min(100, Math.max(0, (p.done / p.total) * 100)) : 0;
   }
 
   protected sizeText(c: StorageCategory): string {

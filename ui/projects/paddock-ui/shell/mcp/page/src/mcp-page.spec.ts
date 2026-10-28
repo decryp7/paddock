@@ -46,21 +46,24 @@ describe('the AI access page', () => {
       (typeof id === 'string' ? q(id) : id)!.click();
       await flush();
     };
-    const toggle = async (id: string): Promise<void> => click(id);
-    return { fixture, el, q, click, toggle, flush, memory, dialogs };
+    /** The real checkbox inside a Material toggle or checkbox host (what the user clicks and a screen reader reads). */
+    const box = (id: string): HTMLElement => q(id)!.querySelector<HTMLElement>('input, button[role="switch"]')!;
+    const isOn = (id: string): boolean => box(id).getAttribute('aria-checked') === 'true' || (box(id) as HTMLInputElement).checked === true;
+    const toggle = async (id: string): Promise<void> => click(box(id));
+    return { fixture, el, q, box, click, toggle, isOn, flush, memory, dialogs };
   }
 
   it('shows it off, the read-only tools, the action apart and off, no clients yet, and an empty log', async () => {
     const p = await open();
     expect(text(p.q('mcp-page')!)).toContain('AI access (MCP)');
     expect(text(p.el)).toContain('AI access is off');
-    expect((p.q('mcp-enabled') as HTMLInputElement).checked).toBe(false);
-    expect((p.q('mcp-tool-search_events') as HTMLInputElement).checked).toBe(true);
+    expect(p.isOn('mcp-enabled')).toBe(false);
+    expect(p.isOn('mcp-tool-search_events')).toBe(true);
     expect(text(p.q('mcp-tools')!)).toContain('Search events');
     expect(text(p.q('mcp-tools')!)).not.toContain('Export a report');
     expect(text(p.q('mcp-actions')!)).toContain('Allow Export a report');
     expect(text(p.q('mcp-actions-warning')!)).toContain('change something');
-    expect((p.q('mcp-action-export_report') as HTMLInputElement).checked).toBe(false);
+    expect(p.isOn('mcp-action-export_report')).toBe(false);
     expect(p.q('mcp-no-clients')).not.toBeNull();
     expect(p.q('mcp-keys')).toBeNull();
     expect(text(p.el)).toContain('No client has called a tool yet.');
@@ -85,7 +88,7 @@ describe('the AI access page', () => {
     const p = await open({ saveError: { code: 'storeUnavailable', message: 'The settings file is read-only.', retryable: true } });
     await p.toggle('mcp-enabled');
     expect(text(p.q('mcp-save-error')!)).toContain('The settings file is read-only.');
-    expect((p.q('mcp-enabled') as HTMLInputElement).checked).toBe(false);
+    expect(p.isOn('mcp-enabled')).toBe(false);
     await p.click('mcp-save-error-dismiss');
     expect(p.q('mcp-save-error')).toBeNull();
   });

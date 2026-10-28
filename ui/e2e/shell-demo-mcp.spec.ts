@@ -17,21 +17,23 @@ async function openPage(page: import('@playwright/test').Page, app: { settings: 
 test.describe('AI access (MCP) (plan X22)', () => {
   test('turn it on, allow an action, add a client (the key is shown once), revoke it, read and clear the log', async ({ app, page, pageErrors }) => {
     await openPage(page, app, '');
-    await expect(page.getByTestId('mcp-enabled')).not.toBeChecked();
+    await expect(page.getByTestId('mcp-enabled').getByRole('switch')).not.toBeChecked();
     await expect(page.getByText('AI access is off')).toBeVisible();
     // Tools are read-only; the action is a separate, off-by-default permission with a warning.
     await expect(page.getByTestId('mcp-tools')).not.toContainText('Export a report');
     await expect(page.getByTestId('mcp-actions-warning')).toContainText('change something');
-    await expect(page.getByTestId('mcp-action-export_report')).not.toBeChecked();
+    await expect(page.getByTestId('mcp-action-export_report').getByRole('checkbox')).not.toBeChecked();
     await expect(page.getByTestId('mcp-no-clients')).toBeVisible();
     expect(await axeViolations(page)).toEqual([]);
 
-    await page.getByTestId('mcp-enabled').check();
+    // A Material toggle updates after the click (change detection), so click, then expect (check() asserts at once).
+    await page.getByTestId('mcp-enabled').getByRole('switch').click();
+    await expect(page.getByTestId('mcp-enabled').getByRole('switch')).toBeChecked();
     await expect(page.getByText('AI access is on')).toBeVisible();
-    await page.getByTestId('mcp-tool-errors_around').uncheck();
-    await expect(page.getByTestId('mcp-tool-errors_around')).not.toBeChecked();
-    await page.getByTestId('mcp-action-export_report').check();
-    await expect(page.getByTestId('mcp-action-export_report')).toBeChecked();
+    await page.getByTestId('mcp-tool-errors_around').getByRole('checkbox').uncheck();
+    await expect(page.getByTestId('mcp-tool-errors_around').getByRole('checkbox')).not.toBeChecked();
+    await page.getByTestId('mcp-action-export_report').getByRole('checkbox').check();
+    await expect(page.getByTestId('mcp-action-export_report').getByRole('checkbox')).toBeChecked();
 
     // The key is created and shown in the key dialog's window, once.
     await page.getByTestId('mcp-add-client').click();

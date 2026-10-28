@@ -60,7 +60,7 @@ describe('the Set-up page', () => {
     expect(items.map((i) => i.getAttribute('data-testid'))).toEqual(['setup-item-service', 'setup-item-login', 'setup-item-notifications', 'setup-item-pitwall']);
     expect(text(q('setup-status-service')!)).toContain('To do');
     expect(text(q('setup-act-service')!)).toBe('Install');
-    expect(q('setup-act-service')!.className).toContain('pd-setup__btn--primary');
+    expect(q('setup-act-service')!.className).toContain('mat-mdc-unelevated-button');
     expect(text(q('setup-act-login')!)).toBe('Turn on');
     // Pitwall is optional: the shared needs-AI sentence explains, Skip is there.
     expect(text(q('setup-message-pitwall')!)).toContain('not installed');
@@ -95,7 +95,7 @@ describe('the Set-up page', () => {
     expect(text(q('setup-status-notifications')!)).toContain('Needs repair');
     expect(text(q('setup-message-notifications')!)).toContain('system said no');
     expect(q('setup-act-notifications')).toBeNull();
-    expect(q('setup-repair-notifications')!.className).toContain('pd-setup__btn--primary');
+    expect(q('setup-repair-notifications')!.className).toContain('mat-mdc-unelevated-button');
     await click('setup-repair-notifications');
     await e.all();
     await sync();

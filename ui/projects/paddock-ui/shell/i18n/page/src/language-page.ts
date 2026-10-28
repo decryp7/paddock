@@ -1,4 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { MatButton } from '@angular/material/button';
+import { MatRadioButton, MatRadioGroup } from '@angular/material/radio';
 import { LANGUAGE_CONFIG, languageOptions, LanguageStore, type LanguageChoice } from '@decryp7/paddock-ui/shell/i18n';
 
 /**
@@ -12,24 +14,22 @@ import { LANGUAGE_CONFIG, languageOptions, LanguageStore, type LanguageChoice } 
   selector: 'pd-language-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Its own store: built from the `LANGUAGE_CONFIG` this page sees (the Settings window's providers), not the root's one.
+  imports: [MatButton, MatRadioButton, MatRadioGroup],
   providers: [LanguageStore],
   template: `
     <section aria-labelledby="pd-language-title" data-testid="language-page">
       <h2 id="pd-language-title">{{ t.title }}</h2>
       <p class="pd-muted">{{ t.lede }}</p>
     </section>
-    <div class="pd-options" role="radiogroup" aria-labelledby="pd-language-title">
+    <mat-radio-group class="pd-options" aria-labelledby="pd-language-title" name="pd-language" [value]="store.choice()" (change)="store.choose($event.value)">
       @for (o of options(); track o.value) {
-        <label class="pd-option" [class.pd-on]="o.value === store.choice()">
-          <input type="radio" name="pd-language" [value]="o.value" [checked]="o.value === store.choice()" [attr.data-testid]="'language-' + o.value" (change)="store.choose(o.value)" />
-          <span>{{ o.label }}</span>
-        </label>
+        <mat-radio-button class="pd-option" [class.pd-on]="o.value === store.choice()" [value]="o.value" [attr.data-testid]="'language-' + o.value">{{ o.label }}</mat-radio-button>
       }
-    </div>
+    </mat-radio-group>
     @if (store.reloadPending()) {
       <div class="pd-restart" role="status" data-testid="language-restart">
         <span>{{ t.restartNeeded }}</span>
-        <button type="button" class="pd-btn" data-testid="language-restart-now" (click)="store.reload()">{{ t.restartNow }}</button>
+        <button matButton="filled" type="button" data-testid="language-restart-now" (click)="store.reload()">{{ t.restartNow }}</button>
       </div>
     }
   `,
@@ -39,14 +39,11 @@ import { LANGUAGE_CONFIG, languageOptions, LanguageStore, type LanguageChoice } 
     p { margin: 0; overflow-wrap: anywhere; }
     .pd-muted { color: var(--pd-text-muted); }
     .pd-options { display: flex; flex-direction: column; gap: var(--pd-space-1); }
-    .pd-option { display: flex; align-items: center; gap: var(--pd-space-2); min-height: var(--pd-hit-min); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); cursor: pointer; }
+    .pd-option { min-height: var(--pd-hit-min); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); }
     .pd-option:hover { background: var(--pd-hover); }
     .pd-option.pd-on { background: var(--pd-accent-tint); font-weight: var(--pd-weight-semibold); }
-    .pd-option:focus-within { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
     .pd-restart { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); }
     .pd-restart span { flex: 1 1 14rem; min-width: 0; }
-    .pd-btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-accent-fill); background: var(--pd-accent-fill); color: var(--pd-on-accent); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .pd-btn:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
   `,
 })
 export class PdLanguagePage {

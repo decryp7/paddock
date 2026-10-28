@@ -11,7 +11,7 @@ test.describe('set-up checklist (plan X19)', () => {
     await app.dialogs.loaded();
     await expect(page.getByTestId('setup-list').getByRole('heading')).toHaveText(['Background service', 'Start at login', 'Notifications', 'Connect to Pitwall']);
     await expect(page.getByTestId('setup-status-service')).toContainText('To do');
-    await expect(page.getByRole('button', { name: 'Install' })).toHaveClass(/pd-setup__btn--primary/);
+    await expect(page.getByRole('button', { name: 'Install' })).toHaveClass(/mat-mdc-unelevated-button/);
     expect(await axeViolations(page)).toEqual([]);
     await expectNoHorizontalScroll(page);
 
@@ -39,7 +39,7 @@ test.describe('set-up checklist (plan X19)', () => {
     await expect(page.getByTestId('setup-status-notifications')).toContainText('Needs repair');
     await expect(page.getByTestId('setup-message-notifications')).toContainText('Close the other copy of the app');
     await expect(page.getByTestId('setup-act-notifications')).toHaveCount(0);
-    await expect(page.getByTestId('setup-repair-notifications')).toHaveClass(/pd-setup__btn--primary/);
+    await expect(page.getByTestId('setup-repair-notifications')).toHaveClass(/mat-mdc-unelevated-button/);
     await expect(page.getByTestId('setup-repair-notifications')).toBeEnabled();
   });
 

@@ -1,4 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { MatButton } from '@angular/material/button';
+import { MatProgressBar } from '@angular/material/progress-bar';
 import { PdPathText } from '@decryp7/paddock-ui';
 import { PdGlyph, PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
 import { PacksStore, type KindView } from '@decryp7/paddock-ui/shell/packs';
@@ -13,7 +15,7 @@ import { PACKS_STYLES } from './styles';
 @Component({
   selector: 'pd-packs-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdStatusGlyph, PdGlyph, PdPathText],
+  imports: [MatButton, MatProgressBar, PdStatusGlyph, PdGlyph, PdPathText],
   template: `
     <section class="pd-packs__head" aria-labelledby="pd-packs-title" data-testid="packs-page">
       <div>
@@ -21,7 +23,7 @@ import { PACKS_STYLES } from './styles';
         <p class="pd-packs__muted">{{ t.lede }}</p>
       </div>
       @if (store.view()) {
-        <button type="button" class="pd-packs__btn" [class.pd-packs__btn--primary]="store.problemCount() > 0" data-testid="packs-reload" [disabled]="store.reloading()" (click)="store.reload()">
+        <button [matButton]="store.problemCount() > 0 ? 'filled' : 'outlined'" type="button" data-testid="packs-reload" [disabled]="store.reloading()" (click)="store.reload()">
           <pd-glyph name="refresh" [size]="16" />{{ t.reload }}
         </button>
       }
@@ -30,7 +32,7 @@ import { PACKS_STYLES } from './styles';
     @if (store.reloading()) {
       <div class="pd-packs__notice" role="status" data-testid="packs-reloading">
         <span class="pd-packs__title">{{ t.reloading }}</span>
-        <progress [attr.aria-label]="t.reloading"></progress>
+        <mat-progress-bar mode="indeterminate" [attr.aria-label]="t.reloading" />
         <span class="pd-packs__muted" data-testid="packs-still-working">{{ t.stillWorking }}</span>
       </div>
     }
@@ -90,7 +92,7 @@ import { PACKS_STYLES } from './styles';
       <div class="pd-packs__notice" role="alert" data-testid="packs-error">
         <span class="pd-packs__title">{{ t.noStatus }}</span>
         <span>{{ problem }}</span>
-        <span><button type="button" class="pd-packs__btn" data-testid="packs-load-retry" (click)="store.load()">{{ t.retry }}</button></span>
+        <span><button matButton="outlined" type="button" data-testid="packs-load-retry" (click)="store.load()">{{ t.retry }}</button></span>
       </div>
     } @else {
       <p class="pd-packs__muted" role="status" data-testid="packs-loading">{{ t.loading }}</p>

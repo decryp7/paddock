@@ -1,4 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { MatButton } from '@angular/material/button';
+import { MatProgressBar } from '@angular/material/progress-bar';
 import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
 import type { Saved } from '../generated/diagnostics';
 import { DiagnosticsStore } from './diagnostics.store';
@@ -13,6 +15,7 @@ import { DIAGNOSTICS_STYLES } from './styles';
 @Component({
   selector: 'pd-report-problem-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [MatButton, MatProgressBar],
   template: `
     <p class="pd-diag__lede">{{ t.lede }}</p>
 
@@ -70,7 +73,7 @@ import { DIAGNOSTICS_STYLES } from './styles';
         <div class="pd-diag__notice pd-diag__notice--danger" role="alert" data-testid="diag-error">
           <span class="pd-diag__title">{{ t.noPreview }}</span>
           <span class="pd-diag__detail">{{ problem }}</span>
-          <span class="pd-diag__row"><button type="button" class="pd-diag__btn" (click)="store.load()">{{ t.retry }}</button></span>
+          <span class="pd-diag__row"><button matButton="outlined" type="button" (click)="store.load()">{{ t.retry }}</button></span>
         </div>
       } @else if (store.isLoading()) {
         <p class="pd-diag__muted" role="status" data-testid="diag-loading">{{ t.collecting }}</p>
@@ -81,8 +84,8 @@ import { DIAGNOSTICS_STYLES } from './styles';
       @case ('saving') {
         <div class="pd-diag__notice" role="status" data-testid="diag-saving">
           <span class="pd-diag__title">{{ t.saving }}</span>
-          <progress [attr.aria-label]="t.saving"></progress>
-          <span class="pd-diag__row"><button type="button" class="pd-diag__btn" (click)="store.cancel()">{{ t.cancelSave }}</button></span>
+          <mat-progress-bar mode="indeterminate" [attr.aria-label]="t.saving" />
+          <span class="pd-diag__row"><button matButton="outlined" type="button" (click)="store.cancel()">{{ t.cancelSave }}</button></span>
         </div>
       }
       @case ('saved') {
@@ -109,9 +112,9 @@ import { DIAGNOSTICS_STYLES } from './styles';
 
     <div class="pd-diag__actions">
       @if (savedResult(); as saved) {
-        <button type="button" class="pd-diag__btn pd-diag__btn--primary" data-default data-testid="diag-done" (click)="ref.close(saved)">{{ t.done }}</button>
+        <button matButton="filled" type="button" data-default data-testid="diag-done" (click)="ref.close(saved)">{{ t.done }}</button>
       } @else {
-        <button type="button" class="pd-diag__btn pd-diag__btn--primary" data-default data-testid="diag-save" [disabled]="!store.isLoaded() || store.saving()" (click)="save()">{{ t.save }}</button>
+        <button matButton="filled" type="button" data-default data-testid="diag-save" [disabled]="!store.isLoaded() || store.saving()" (click)="save()">{{ t.save }}</button>
       }
     </div>
   `,

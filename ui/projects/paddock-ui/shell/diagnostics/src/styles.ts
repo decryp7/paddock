@@ -18,14 +18,11 @@ export const DIAGNOSTICS_STYLES = `
   @container (max-width: 520px) { td.what, th.what { display: none; } }
   .pd-diag__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); }
   .pd-diag__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--pd-space-2); }
-  .pd-diag__btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
-  .pd-diag__btn--primary { background: var(--pd-accent-fill); border-color: var(--pd-accent-fill); color: var(--pd-on-accent); }
-  .pd-diag__btn:disabled { opacity: 0.6; cursor: default; }
   .pd-diag__notice { display: flex; flex-direction: column; gap: var(--pd-space-1); padding: var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); }
   .pd-diag__notice--danger { background: var(--pd-danger-tint); }
   .pd-diag__notice .pd-diag__title { font-weight: var(--pd-weight-medium); }
   .pd-diag__notice .pd-diag__detail { color: var(--pd-text-muted); overflow-wrap: anywhere; }
   .pd-diag__path { font-family: var(--pd-font-mono); font-size: var(--pd-text-caption); white-space: nowrap; overflow: hidden; }
   ul { margin: 0; padding-left: var(--pd-space-6); }
-  progress { width: 100%; }
+  mat-progress-bar { width: 100%; }
 `;

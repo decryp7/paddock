@@ -1,6 +1,10 @@
 import { afterNextRender, ChangeDetectionStrategy, Component, computed, ElementRef, inject, Injector, signal, viewChild } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { form, FormField } from '@angular/forms/signals';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatCheckbox } from '@angular/material/checkbox';
+import { MatSlideToggle } from '@angular/material/slide-toggle';
+import { MatTooltip } from '@angular/material/tooltip';
 import { PdPathText, SuEmptyState, SuErrorState, SuSkeleton, SuStatusPill } from '@decryp7/paddock-ui';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
@@ -36,7 +40,7 @@ import { CHANNELS_STYLES } from './styles';
 @Component({
   selector: 'pd-channels-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormField, NgTemplateOutlet, PdGlyph, PdPathText, PdSelect, SuEmptyState, SuErrorState, SuSkeleton, SuStatusPill],
+  imports: [FormField, MatButton, MatCheckbox, MatIconButton, MatSlideToggle, MatTooltip, NgTemplateOutlet, PdGlyph, PdPathText, PdSelect, SuEmptyState, SuErrorState, SuSkeleton, SuStatusPill],
   template: `
     <section class="pd-ch__head" aria-labelledby="pd-ch-title" data-testid="channels-page">
       <div>
@@ -44,7 +48,7 @@ import { CHANNELS_STYLES } from './styles';
         <p class="pd-ch__muted">{{ t.lede }}</p>
       </div>
       @if (store.isLoaded() && store.channels().length > 0) {
-        <button type="button" class="pd-ch__btn pd-ch__btn--primary" data-testid="channel-add" [attr.aria-disabled]="store.atLimit() || null" [attr.aria-describedby]="store.atLimit() ? 'pd-ch-limit' : null" (click)="add()">{{ t.add }}</button>
+        <button matButton="filled" type="button" data-testid="channel-add" [disabled]="store.atLimit()" disabledInteractive [attr.aria-describedby]="store.atLimit() ? 'pd-ch-limit' : null" (click)="add()">{{ t.add }}</button>
       }
     </section>
     @if (store.isLoaded() && store.atLimit()) {
@@ -54,7 +58,7 @@ import { CHANNELS_STYLES } from './styles';
     @if (store.isLoaded()) {
       @if (store.channels().length === 0 && !draft()) {
         <pd-empty-state icon="bell" [heading]="t.emptyTitle" [description]="t.emptyText" data-testid="channels-empty">
-          <button slot="action" type="button" class="pd-ch__btn pd-ch__btn--primary" data-testid="channel-add-empty" (click)="add()">{{ t.add }}</button>
+          <button slot="action" matButton="filled" type="button" data-testid="channel-add-empty" (click)="add()">{{ t.add }}</button>
         </pd-empty-state>
       } @else if (store.channels().length > 0) {
         <table class="pd-ch__table" data-testid="channels-table">
@@ -73,7 +77,7 @@ import { CHANNELS_STYLES } from './styles';
               <tr [class.pd-ch__editing]="editingId() === c.id" [attr.data-testid]="'channel-row-' + c.id">
                 <th scope="row" class="pd-ch__namecell">
                   <span class="pd-ch__name">
-                    <strong [title]="c.name">{{ c.name }}</strong>
+                    <strong [matTooltip]="c.name">{{ c.name }}</strong>
                     <pd-path-text class="pd-ch__muted" [value]="endpoint(c)" [plain]="true" />
                     @if (store.tests()[c.id]; as test) {
                       <ng-container [ngTemplateOutlet]="result" [ngTemplateOutletContext]="{ $implicit: test, id: c.id }" />
@@ -82,7 +86,7 @@ import { CHANNELS_STYLES } from './styles';
                 </th>
                 <td class="pd-ch__type">{{ typeLabel(c.transport.type) }}</td>
                 <td class="pd-ch__events">
-                  <span [title]="c.events.join(', ')">{{ eventsSummary(c) }}</span>
+                  <span [matTooltip]="c.events.join(', ')">{{ eventsSummary(c) }}</span>
                   <span class="pd-ch__muted"> · {{ severityLabel(c.minSeverity) }}</span>
                 </td>
                 <td>
@@ -95,9 +99,9 @@ import { CHANNELS_STYLES } from './styles';
                 </td>
                 <td>
                   <span class="pd-ch__actions" [class.pd-ch__actions--open]="editingId() === c.id">
-                    <button type="button" class="pd-ch__icon" data-testid="channel-edit" [attr.aria-label]="editAria(c.name)" [title]="editAria(c.name)" (click)="edit(c)"><pd-glyph name="edit" [size]="16" /></button>
-                    <button type="button" class="pd-ch__icon" data-testid="channel-test" [attr.aria-label]="testAria(c.name)" [title]="testAria(c.name)" [disabled]="store.tests()[c.id]?.state === 'running'" (click)="store.test(c)"><pd-glyph name="play" [size]="16" /></button>
-                    <button type="button" class="pd-ch__icon" data-testid="channel-remove" [attr.aria-label]="removeAria(c.name)" [title]="removeAria(c.name)" (click)="remove(c)"><pd-glyph name="trash" [size]="16" /></button>
+                    <button matIconButton type="button" data-testid="channel-edit" [attr.aria-label]="editAria(c.name)" [matTooltip]="editAria(c.name)" (click)="edit(c)"><pd-glyph name="edit" [size]="16" /></button>
+                    <button matIconButton type="button" data-testid="channel-test" [attr.aria-label]="testAria(c.name)" [matTooltip]="testAria(c.name)" [disabled]="store.tests()[c.id]?.state === 'running'" (click)="store.test(c)"><pd-glyph name="play" [size]="16" /></button>
+                    <button matIconButton type="button" data-testid="channel-remove" [attr.aria-label]="removeAria(c.name)" [matTooltip]="removeAria(c.name)" (click)="remove(c)"><pd-glyph name="trash" [size]="16" /></button>
                   </span>
                 </td>
               </tr>
@@ -209,23 +213,17 @@ import { CHANNELS_STYLES } from './styles';
             <label for="pd-ch-severity">{{ t.fSeverity }}</label>
             <pd-select inputId="pd-ch-severity" [options]="severityOptions" [value]="d.minSeverity" (valueChange)="patch({ minSeverity: $any($event) })" data-testid="channel-severity" />
           </div>
-          <label class="pd-ch__check">
-            <input type="checkbox" role="switch" [formField]="f.enabled" data-testid="channel-enabled" />
-            <span>{{ t.fEnabled }}</span>
-          </label>
+          <mat-slide-toggle class="pd-ch__check" [formField]="f.enabled" data-testid="channel-enabled">{{ t.fEnabled }}</mat-slide-toggle>
 
           @if (d.type !== 'email') {
-            <label class="pd-ch__check pd-ch__field--wide">
-              <input type="checkbox" [formField]="f.auth" data-testid="channel-auth" />
-              <span>{{ t.fAuth }}</span>
-            </label>
+            <mat-checkbox class="pd-ch__check pd-ch__field--wide" [formField]="f.auth" data-testid="channel-auth">{{ t.fAuth }}</mat-checkbox>
           }
           @if (draftNeedsSecret()) {
             <div class="pd-ch__secret" data-testid="channel-secret" role="group" [attr.aria-label]="secretWord(d.type)">
               <span data-testid="channel-secret-state">{{ secretStored() ? t.secretStored : t.secretMissing }}</span>
-              <button type="button" class="pd-ch__btn" data-testid="channel-secret-set" (click)="openSecret()">{{ secretStored() ? t.changeSecret(d.type) : t.setSecret(d.type) }}</button>
+              <button matButton="outlined" type="button" data-testid="channel-secret-set" (click)="openSecret()">{{ secretStored() ? t.changeSecret(d.type) : t.setSecret(d.type) }}</button>
               @if (secretStored()) {
-                <button type="button" class="pd-ch__btn" data-testid="channel-secret-clear" (click)="clearSecret()">{{ t.removeSecret }}</button>
+                <button matButton="outlined" type="button" data-testid="channel-secret-clear" (click)="clearSecret()">{{ t.removeSecret }}</button>
               }
             </div>
           }
@@ -239,9 +237,9 @@ import { CHANNELS_STYLES } from './styles';
         }
 
         <div class="pd-ch__foot">
-          <button type="submit" class="pd-ch__btn pd-ch__btn--primary" data-testid="channel-save" [disabled]="!canSave()">{{ t.save }}</button>
-          <button type="button" class="pd-ch__btn" data-testid="channel-cancel" (click)="cancel()">{{ t.cancel }}</button>
-          <button type="button" class="pd-ch__btn" data-testid="channel-send-test" [disabled]="!canTest()" (click)="sendTest()">{{ t.sendTest }}</button>
+          <button matButton="filled" type="submit" data-testid="channel-save" [disabled]="!canSave()">{{ t.save }}</button>
+          <button matButton="outlined" type="button" data-testid="channel-cancel" (click)="cancel()">{{ t.cancel }}</button>
+          <button matButton="outlined" type="button" data-testid="channel-send-test" [disabled]="!canTest()" (click)="sendTest()">{{ t.sendTest }}</button>
           @if (draftTest(); as test) {
             <ng-container [ngTemplateOutlet]="result" [ngTemplateOutletContext]="{ $implicit: test, id: draftChannel().id }" />
           }
