@@ -1,5 +1,6 @@
-import { provideZonelessChangeDetection } from '@angular/core';
+import { ApplicationRef, ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { Dialog } from '@angular/cdk/dialog';
 import { MatTimepickerInput } from '@angular/material/timepicker';
 import { By } from '@angular/platform-browser';
 import { describe, expect, it } from 'vitest';
@@ -14,6 +15,15 @@ const PREVIEW: SchedulePreview = {
   warnings: ['Clamped to once a minute.'],
   zone: 'Europe/Berlin',
 };
+
+@Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdScheduleEditor],
+  template: `<pd-schedule-editor [value]="{ mode: 'times', days: ['mon'], times: times(), zone: null }" />`,
+})
+class InDialog {
+  readonly times = signal(['09:00']);
+}
 
 async function settle(f: { whenStable(): Promise<unknown> }): Promise<void> {
   await f.whenStable();
@@ -212,6 +222,23 @@ describe('pd-schedule-editor', () => {
     expect(t.value()).toMatchObject({ times: ['21:00'] });
     expect(t.all('[data-testid=field-error]')).toHaveLength(0);
     expect(seen).toEqual(['Escape']);
+  });
+
+  it('shows the real key code (27) to everything above a shut time field, so a CDK dialog still closes on Escape', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const dialog = TestBed.inject(Dialog);
+    const ref = dialog.open(InDialog, { disableClose: false });
+    ref.componentInstance!.times.set(['21:00']);
+    await settle({ whenStable: () => TestBed.inject(ApplicationRef).whenStable() });
+    const input = document.querySelector<HTMLInputElement>('.cdk-dialog-container input[role=combobox]')!;
+    const codes: number[] = [];
+    document.addEventListener('keydown', (e) => codes.push(e.keyCode), { once: true });
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
+    expect(codes).toEqual([27]);
+    expect(input.value).toBe('21:00');
+    expect(document.querySelector('.cdk-dialog-container')).toBeNull();
+    ref.close();
   });
 
   it('labels the interval unit select', async () => {
