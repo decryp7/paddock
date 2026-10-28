@@ -365,6 +365,11 @@ fn fixture_snapshots() -> Vec<JobSnapshot> {
     deadline.finish(JobState::Cancelled {
         reason: CancelReason::Deadline,
     });
+    // A job whose success is not announced (a source test that runs with every edit of a form).
+    let quiet = reporter(9, "test", "Testing the source", None);
+    quiet.set_quiet_on_success();
+    quiet.start();
+    quiet.finish(JobState::Done);
     let all = vec![
         queued.snapshot(),
         finding.snapshot(),
@@ -374,6 +379,7 @@ fn fixture_snapshots() -> Vec<JobSnapshot> {
         failed.snapshot(),
         user.snapshot(),
         deadline.snapshot(),
+        quiet.snapshot(),
     ];
     drop(guard);
     all
@@ -386,7 +392,7 @@ fn generated_typescript_is_current() {
     let fixtures = format!(
         "// Generated from paddock-jobs' wire model by its tests (Rust round trip). Do not edit: {REGENERATE}.\n\n\
          /** One `paddock://jobs` snapshot of every shape, as Rust serialises them: queued, discovering, determinate bytes,\n \
-         * not cancellable, done, failed, cancelled by the user and by a deadline. */\n\
+         * not cancellable, done, failed, cancelled by the user and by a deadline, and a done one that is quiet on success. */\n\
          export const JOB_SNAPSHOT_FIXTURES: readonly unknown[] = {fixtures};\n"
     );
     let mode = WriteMode::from_env();

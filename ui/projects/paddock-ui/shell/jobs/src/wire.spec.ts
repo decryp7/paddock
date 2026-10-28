@@ -9,8 +9,8 @@ describe('the jobs wire model', () => {
   it('decodes every snapshot shape Rust wrote (round trip)', () => {
     const jobs = parseJobSnapshots(JOB_SNAPSHOT_FIXTURES);
     expect(jobs).toHaveLength(JOB_SNAPSHOT_FIXTURES.length);
-    expect(jobs.map((j) => j.state)).toEqual(['queued', 'running', 'running', 'running', 'done', 'failed', 'cancelled', 'cancelled']);
-    const [queued, finding, download, writing, , failed, user, deadline] = jobs;
+    expect(jobs.map((j) => j.state)).toEqual(['queued', 'running', 'running', 'running', 'done', 'failed', 'cancelled', 'cancelled', 'done']);
+    const [queued, finding, download, writing, , failed, user, deadline, quiet] = jobs;
     expect(queued?.subject).toBe('3 folders');
     expect(finding).toMatchObject({ state: 'running', phase: { id: 'find', label: 'Finding files', unit: 'items', total: null, done: 12345 } });
     expect(download).toMatchObject({ state: 'running', phase: { unit: 'bytes', total: 118 * 1024 * 1024 } });
@@ -19,8 +19,11 @@ describe('the jobs wire model', () => {
     expect(failed).toMatchObject({ state: 'failed', message: 'The folder is not readable' });
     expect(user).toMatchObject({ reason: 'user' });
     expect(deadline).toMatchObject({ reason: 'deadline' });
+    // The flag Rust wrote for a quiet job survives the parser; the other jobs do not carry it.
+    expect(quiet).toMatchObject({ state: 'done', quietOnSuccess: true });
+    expect(jobs.filter((j) => j.quietOnSuccess).map((j) => j.id)).toEqual([9]);
     expect(jobs.filter(isActiveJob).map((j) => j.id)).toEqual([1, 2, 3, 4]);
-    expect(jobs.filter(isFinishedJob).map((j) => j.id)).toEqual([5, 6, 7, 8]);
+    expect(jobs.filter(isFinishedJob).map((j) => j.id)).toEqual([5, 6, 7, 8, 9]);
   });
 
   const good = { id: 1, kind: 'scan', title: 'Scan', seq: 1, elapsedMs: 0, cancellable: true, state: 'queued' };

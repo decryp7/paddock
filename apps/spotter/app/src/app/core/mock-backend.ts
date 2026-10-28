@@ -273,7 +273,7 @@ export class MockBackend implements SpotterBackend {
   private async call<T>(name: string, work: () => T | PromiseLike<T>): Promise<T> {
     this.calls.push(name);
     if (this.latency > 0) await new Promise((r) => setTimeout(r, this.latency));
-    if (this.scenario === 'broken') throw problem('unavailable', 'The engine is not answering (mock "broken" scenario).');
+    if (this.scenario === 'broken') throw problem('unavailable', 'The engine is not answering.');
     return work();
   }
 

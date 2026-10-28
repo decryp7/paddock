@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Jobs: quietOnSuccess (shared API)
+- `paddock-jobs`: `JobSnapshot::quiet_on_success` (wire field `quietOnSuccess`, off by default and left out of the wire form while off),
+  set with `JobContext::quiet_on_success()` / `Reporter::set_quiet_on_success()` and carried by every later snapshot, the terminal one
+  included. `@decryp7/paddock-ui/shell/jobs`: `SuJobSnapshot.quietOnSuccess`, read by `parseJobSnapshot`, and the jobs store does not
+  announce the success of such a job (a failure still is). For work that runs again with every edit of a form or on a schedule; the
+  generated `JOB_SNAPSHOT_FIXTURES` carry a quiet job, so both sides test the same wire form. Spotter uses it for the source test and
+  the check of one watch.
+
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,
   Chromium e2e in two shards, WebKit e2e) and releases through the shared `app-release.yml` from a thin `dyno-release.yml` (nightly

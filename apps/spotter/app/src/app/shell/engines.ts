@@ -45,7 +45,7 @@ export class BrowserEngines {
 
   /** The scenario "Break the connection" of the browser build (`?health=sources`): every watch unreachable. */
   breakSources(): void {
-    this.health.fail('sp.sources', cause('Spotter cannot reach any of the places it watches.', 'Check the network connection, then check again.', 'dns error'));
+    this.health.fail('sp.sources', cause('Spotter cannot reach any of the places it watches.', 'Check the network connection, then check again.', 'dns error'), 'retry');
   }
 }
 
