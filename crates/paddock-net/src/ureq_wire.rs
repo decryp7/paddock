@@ -254,6 +254,15 @@ mod tests {
                 io(std::io::ErrorKind::ConnectionRefused),
                 NetError::Connect(h.into()),
             ),
+            // What a test's held reset port gives (ADR 0023); Windows may report an abort instead.
+            (
+                io(std::io::ErrorKind::ConnectionReset),
+                NetError::Connect(h.into()),
+            ),
+            (
+                io(std::io::ErrorKind::ConnectionAborted),
+                NetError::Connect(h.into()),
+            ),
             (
                 ureq::Error::Io(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
