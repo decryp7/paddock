@@ -535,3 +535,10 @@ Consolidating CI, Dyno 1.0.0 and Spotter 1.0.0 had to run together, which "one a
 releases are small, finished apps in their own folders with their own tags. The rule's reason is attention and machine
 load, and a release prep of a finished app costs little of either. **Rule:** one *large* app at a time; small,
 independent releases (separate app folders, serialized tags) may run alongside it (rule 1, amended 2026-10-28).
+
+## Rule 1 is one release at a time, not one app (2026-10-28)
+Even "one large app at a time" held back work that cost the release nothing, while the real limits that day were two
+single-job CI runners, the machine's load and conflicts in shared code (Dyno and Spotter both wait on the shared dialog
+API). **Rule:** one release at a time; release-critical work first; other apps progress in parallel only while load and
+CI capacity allow and only if they don't change shared code the release depends on (rule 1 and ER-1, amended
+2026-10-28).
