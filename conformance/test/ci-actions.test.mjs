@@ -663,71 +663,10 @@ test('the host-tools pin is a release version with SHA-256 sums', () => {
   for (const sum of read(join(ACTIONS, 'host-tools', 'action.yml')).matchAll(/SUM=(\S+);/g)) assert.match(sum[1], /^[0-9a-f]{64}$/);
 });
 
-// ---- The imported apps' own workflows (dyno, pitwall; each the app's old build.yml; Pitcrew is on the kit) ----
-// They follow Paddock's CI: the paddock-ci image, the shared actions, workspace-wide steps, nextest's ci profile, sharded e2e,
-// installers and the real-app smoke only on full runs, and the family's signing keys stripped before the bundler.
+// ---- The apps on the shared kit (ci.yml's app leg through paddock.ci.json, <app>-release.yml through app-release.yml) ----
 import { parseJobs } from '../src/util/workflows.mjs';
-
-const APP_WORKFLOWS = [];
-// Apps on the shared kit (ci.yml's app leg through paddock.ci.json, <app>-release.yml through app-release.yml), not yet every app.
 const KIT_APPS = ['pitcrew', 'spotter', 'pitwall', 'dyno'];
 const ciContract = (app) => JSON.parse(read(join(PADDOCK, 'apps', app, 'paddock.ci.json')));
-const appWorkflow = (app) => read(join(WORKFLOWS, `${app}.yml`));
-const appJob = (app, id) => parseJobs(appWorkflow(app)).find((j) => j.id === id);
-
-test('the app workflows run on the paddock-ci image and the shared actions, with nothing fetched per run', () => {
-  for (const app of APP_WORKFLOWS) {
-    const wf = appWorkflow(app);
-    for (const m of wf.matchAll(/(?:image: |container: .*')(\S+?:\S+?)'?$/gm)) {
-      assert.equal(m[1], 'dev.decryptology.net/decryp7/paddock-ci:v2', `${app}.yml: ${m[1]}`);
-    }
-    assert.doesNotMatch(wf, /garage:|catthehacker|dtolnay\/rust-toolchain|taiki-e\/install-action|actions\/setup-node|actions\/cache|playwright install|apt-get/, `${app}.yml fetches per run what the image and actions keep`);
-    for (const id of ['rust', 'bundle']) {
-      const job = appJob(app, id)?.text ?? '';
-      assert.match(job, /uses: \.\/\.gitea\/actions\/setup-rust/, `${app} ${id}: setup-rust (sccache)`);
-      assert.match(job, /uses: \.\/\.gitea\/actions\/sccache-stats\n\s+if: always\(\)/, `${app} ${id}: sccache-stats`);
-      assert.doesNotMatch(job, /setup-rust\n\s+if: runner\.os/, `${app} ${id}: every OS leg`);
-    }
-    for (const id of ['frontend', 'e2e', 'e2e-webkit', 'bundle']) {
-      const job = appJob(app, id);
-      if (!job) continue;
-      assert.match(job.text, new RegExp(`uses: \\./\\.gitea/actions/node-caches\\n\\s+with:\\n\\s+angular-dir: apps/${app}/app`), `${app} ${id}: npm and Angular caches`);
-    }
-    assert.match(read(join(PADDOCK, 'apps', app, 'app', 'angular.json')), /"cache": \{ "enabled": true, "environment": "all" \}/, `${app}: Angular keeps its cache in CI`);
-  }
-});
-
-test('the app rust and bundle jobs build from a stable path into a build folder set as cargo configuration, with the pinned nextest', () => {
-  for (const app of APP_WORKFLOWS) {
-    const wf = appWorkflow(app);
-    assert.doesNotMatch(wf.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'), /CARGO_(BUILD_)?TARGET_DIR|PADDOCK_CARGO_TARGET/, `${app}: the build folder is cargo configuration, never a CARGO_* variable (sccache's key)`);
-    const conf = read(join(PADDOCK, 'apps', app, '.cargo', 'config.toml'));
-    assert.match(conf, /^include = \[\{ path = "ci\.toml", optional = true \}\]$/m, `${app}: .cargo/config.toml includes the job's build folder`);
-    assert.match(read(join(PADDOCK, 'apps', app, '.gitignore')), /^\.cargo\/ci\.toml$/m, `${app}: the job's ci.toml is never committed`);
-    for (const id of ['rust', 'bundle']) {
-      const job = appJob(app, id)?.text ?? '';
-      assert.notEqual(job, '', `${app}: a ${id} job`);
-      const gitBash = job.indexOf('Git bash on PATH');
-      const sw = job.indexOf('uses: ./.gitea/actions/stable-workspace');
-      const bf = job.indexOf('uses: ./.gitea/actions/build-folder');
-      assert.ok(gitBash > 0 && gitBash < sw && sw < bf && bf < job.indexOf('uses: ./.gitea/actions/setup-rust'), `${app} ${id}: Git bash, then the stable path, then the build folder, then Rust`);
-      assert.match(job.slice(sw, sw + 120), /\n\s+if: runner\.os != 'Linux'/, `${app} ${id}: stable-workspace on the hosts only`);
-      assert.match(job.slice(bf, bf + 220), new RegExp(`workspace: \\$\\{\\{ env\\.PADDOCK_WORKSPACE \\|\\| github\\.workspace \\}\\}/apps/${app}\\n\\s+name: ${app}-\\$\\{\\{ github\\.job \\}\\}`), `${app} ${id}: one kept folder per app and job, in the stable checkout`);
-      for (const s of parseSteps(job).filter((st) => /\b(cargo (clippy|nextest run|test|build|run|llvm-cov)|tauri build|tauri-bundle\.sh|macos-verify-bundle\.sh|check-bundle\.sh)\b/.test(st.run ?? ''))) {
-        if (/runner\.os == 'Linux'/.test(s.text)) continue;
-        assert.match(s.text, /working-directory: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}/, `${app} ${id} "${s.name}": builds from the stable path`);
-      }
-    }
-    const job = appJob(app, 'rust').text;
-    assert.match(job, /os: \[ubuntu-latest, windows-latest, macos-latest\]|- os: ubuntu-latest[\s\S]*- os: windows-latest[\s\S]*- os: macos-latest/, `${app}: one leg per OS`);
-    assert.match(job, /uses: \.\/\.gitea\/actions\/host-tools/, `${app}: the pinned cargo-nextest`);
-    for (const s of parseSteps(job).filter((st) => /\bcargo test\b/.test(st.run ?? ''))) assert.match(s.run, /--doc/, `${app} "${s.name}": tests run under nextest (cargo test only for doc tests)`);
-    assert.match(job, /cargo nextest run [^\n]*--profile ci/, `${app}: nextest with the ci profile`);
-    assert.match(job, /cargo test [^\n]*--doc/, `${app}: doc tests (nextest skips them)`);
-    assert.match(job, /cargo fmt --all --check/, `${app}: format`);
-    assert.match(job, /cargo clippy [^\n]*-- -D warnings/, `${app}: clippy`);
-  }
-});
 
 /** Runs conformance/ci/build-folder.sh for `os` on a scratch Cargo workspace; returns what it wrote. */
 function runBuildFolder(os, { include = true, name = 'spotter-rust' } = {}) {
@@ -764,7 +703,7 @@ test('build-folder keeps a host job\'s build folder outside the checkout as carg
 });
 
 test('every app workspace has a nextest ci profile that stops a slow test, and every longer budget is a waiver with a reason', () => {
-  for (const app of [...APP_WORKFLOWS, ...KIT_APPS]) {
+  for (const app of KIT_APPS) {
     const file = join(PADDOCK, 'apps', app, '.config', 'nextest.toml');
     const text = read(file);
     const ci = text.slice(text.indexOf('[profile.ci]\n') + '[profile.ci]\n'.length);
@@ -779,65 +718,34 @@ test('every app workspace has a nextest ci profile that stops a slow test, and e
   }
 });
 
-/** Runs the `full=false ... esac` part of an app's plan step: whether the installers, the real-app smoke and WebKit run. */
-function appFull(app, env) {
-  const run = parseSteps(appWorkflow(app)).find((s) => s.name === 'Decide')?.run ?? '';
-  const body = run.slice(run.indexOf('full=false'), run.indexOf('esac\n', run.lastIndexOf('case "$EVENT"')) + 5);
-  const r = spawnSync('bash', ['--noprofile', '--norc', '-euc', `${body}\necho "$full"`], { env: { PATH: '/usr/bin:/bin', HOME: tmpdir(), BUNDLES: 'false', ...env }, encoding: 'utf8' });
-  assert.equal(r.status, 0, r.stderr);
-  return r.stdout.trim();
-}
-
-test('installers, the real-app smoke and WebKit run only on main pushes, the app tags, the nightly run and a manual run that asks', () => {
-  for (const app of APP_WORKFLOWS) {
-    const wf = appWorkflow(app);
-    assert.match(wf, /workflow_dispatch:\n\s+inputs:\n\s+bundles:\n[\s\S]*?type: boolean\n\s+default: false/, `${app}: the bundles input`);
-    assert.equal(appFull(app, { EVENT: 'push', REF: 'refs/heads/main' }), 'true');
-    assert.equal(appFull(app, { EVENT: 'push', REF: `refs/tags/${app}-v1.2.3` }), 'true');
-    assert.equal(appFull(app, { EVENT: 'schedule', REF: 'refs/heads/main' }), 'true');
-    assert.equal(appFull(app, { EVENT: 'workflow_dispatch', REF: 'refs/heads/x', BUNDLES: 'true' }), 'true');
-    assert.equal(appFull(app, { EVENT: 'workflow_dispatch', REF: 'refs/heads/main', BUNDLES: 'false' }), 'false');
-    assert.equal(appFull(app, { EVENT: 'push', REF: 'refs/heads/feature' }), 'false');
-    assert.equal(appFull(app, { EVENT: 'push', REF: 'refs/tags/other-v1.0.0' }), 'false', 'another app\'s tag');
-    assert.equal(appFull(app, { EVENT: 'pull_request', REF: 'refs/pull/1/merge' }), 'false');
-    assert.match(appJob(app, 'bundle').text, /^ {4}if: needs\.plan\.outputs\.run == 'true' && needs\.plan\.outputs\.full == 'true'$/m, `${app}: bundles on full runs`);
-    const webkit = appJob(app, 'e2e-webkit');
-    if (webkit) assert.match(webkit.text, /^ {4}if: needs\.plan\.outputs\.run == 'true' && needs\.plan\.outputs\.full == 'true'$/m, `${app}: WebKit on full runs (rule 3)`);
-    for (const s of parseSteps(wf).filter((st) => /Agent measures once/.test(st.name ?? ''))) assert.match(s.text, /needs\.plan\.outputs\.full == 'true'/, `${app}: the real-app smoke on full runs`);
-  }
-});
-
-test('the larger app e2e suites run in Chromium in two shards, each on a port no other e2e job uses', () => {
+test('every e2e job of every kit app, ci.yml and debrief.yml runs on a port no other job uses', () => {
   const ports = [];
-  for (const app of APP_WORKFLOWS) {
-    const wf = appWorkflow(app);
-    for (const m of wf.matchAll(/PW_(?:E2E_)?PORT: (?:\$\{\{ matrix\.shard == 1 && '(\d+)' \|\| '(\d+)' \}\}|"(\d+)")/g)) ports.push(...m.slice(1).filter(Boolean).map((p) => `${app}:${p}`));
-    const e2e = appJob(app, 'e2e');
-    assert.match(e2e.text, /shard: \[1, 2\]/, `${app}: two shards`);
-    assert.match(e2e.text, /npx playwright test --project=chromium [^\n]*--fully-parallel --shard=\$\{\{ matrix\.shard \}\}\/2/, `${app}: Chromium, split by test`);
-    assert.match(appJob(app, 'e2e-webkit').text, /--project=webkit/, `${app}: WebKit on full runs`);
-  }
-  const numbers = ports.map((p) => p.split(':')[1]);
-  assert.equal(new Set(numbers).size, numbers.length, `one port per e2e job: ${ports.join(', ')}`);
-  for (const ci of [read(join(WORKFLOWS, 'ci.yml')), read(join(WORKFLOWS, 'debrief.yml'))]) {
-    for (const n of numbers) assert.doesNotMatch(ci, new RegExp(`['"]${n}['"]`), `port ${n} is also used by ci.yml or debrief.yml`);
-  }
-});
-
-test('the app bundles get the family keys stripped of whitespace (rule 25, C06), and no transition key or old-repo bridge is left', () => {
-  for (const app of APP_WORKFLOWS) {
-    const wf = appWorkflow(app);
-    const job = appJob(app, 'bundle').text;
-    const strip = job.indexOf('uses: ./.gitea/actions/strip-signing-keys');
-    assert.ok(strip > 0 && strip < job.indexOf('name: Build installers'), `${app}: keys stripped before the bundler`);
-    assert.match(job.slice(strip, strip + 300), /signing-private-key: \$\{\{ secrets\.PADDOCK_TAURI_SIGNING_PRIVATE_KEY \}\}\n\s+updater-pubkey: \$\{\{ secrets\.PADDOCK_TAURI_UPDATER_PUBKEY \}\}/);
-    for (const s of parseSteps(wf)) {
-      for (const k of ['TAURI_SIGNING_PRIVATE_KEY', 'TAURI_UPDATER_PUBKEY']) assert.ok(!(k in s.env), `${app} "${s.name}": ${k} comes stripped from strip-signing-keys, never raw from a secret`);
+  for (const app of KIT_APPS) {
+    const c = ciContract(app);
+    const shards = c.e2eShards ?? 1;
+    for (const line of c.e2e ?? []) {
+      const range = /PORT=\$\(\((\d+) \+ E2E_INDEX\)\)/.exec(line);
+      if (range) for (let i = 1; i <= shards; i += 1) ports.push([`${app} e2e shard ${i}`, Number(range[1]) + i]);
+      else if (/PORT=\d+/.test(line)) ports.push([`${app} e2e`, Number(/PORT=(\d+)/.exec(line)[1])]);
+      else if (/playwright test/.test(line)) assert.fail(`${app}: "${line}" names no port: another job could hold the default`);
     }
-    assert.doesNotMatch(wf, /TRANSITION_SIGNING_KEY|OLD_REPO|--newest/, `${app}: one key for the family, no bridge release in the old repo`);
-    const conf = JSON.parse(read(join(PADDOCK, 'apps', app, 'app', 'src-tauri', 'tauri.conf.json')));
-    assert.deepEqual(conf.plugins.updater.endpoints, [`https://dev.decryptology.net/decryp7/paddock/releases/download/${app}-latest/latest.json`], `${app}: the updater reads only Paddock's ${app}-latest`);
-    assert.match(wf, /\*\*Existing installs:\*\* download this version once by hand/, `${app}: the First launch section says to reinstall once`);
+    for (const line of c.e2eWebkit ?? []) {
+      const m = /PORT=(\d+)/.exec(line);
+      if (m) ports.push([`${app} webkit`, Number(m[1])]);
+      else if (/playwright test/.test(line)) assert.fail(`${app}: "${line}" names no port`);
+    }
+  }
+  for (const file of ['ci.yml', 'debrief.yml']) {
+    for (const m of read(join(WORKFLOWS, file)).matchAll(/^\s*\w*PORT: (.+)$/gm)) {
+      for (const n of m[1].matchAll(/['"](\d{4})['"]/g)) ports.push([`${file} ${m[0].trim()}`, Number(n[1])]);
+      for (const n of m[1].matchAll(/"(\d{3})\$\{\{ matrix\.shard \}\}"/g)) for (const sh of [1, 2]) ports.push([`${file} ${m[0].trim()} shard ${sh}`, Number(`${n[1]}${sh}`)]);
+    }
+  }
+  assert.ok(ports.length >= 10, `found the ports (${ports.length})`);
+  const seen = new Map();
+  for (const [who, port] of ports) {
+    assert.ok(!seen.has(port), `port ${port} is used by both "${seen.get(port)}" and "${who}"`);
+    seen.set(port, who);
   }
 });
 
