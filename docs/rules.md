@@ -119,6 +119,16 @@ changes here, every app's copy is updated in the same change.
     zoom as explicit choices; the viewer fits before its first paint rather than after measuring. A shared viewer in
     `paddock-ui` (rule 39) owns the default; `notes/image/note-image-view.ts` in Debrief starts at scale 1 and must adopt it.
 
+**Large jobs (user, 2026-10-28; Debrief research note 2026-10-28)**
+46. **No LLM for large jobs.** Work over many items (imports, catalogues, name tables, indexing, classification, tagging
+    or summaries per item) uses deterministic rules, shipped TOML knowledge packs (rule 21) and static embeddings; an LLM
+    is used only for bounded requests the user starts (a chat turn, a chosen range, an explicit "Suggest with AI" over a
+    small selection), never automatically and never once per item. An exception (for example describing all frames of a
+    video) needs an explicit confirmation that states the item count and the expected time. *Why:* a local model per item
+    turns a cheap background task into hours of GPU and gigabytes of memory on the user's machine (Debrief 1.1 loaded an
+    8 GB model to name 2,000 log names after every import), its answers change with the model and cannot be explained, and
+    rules, packs and the logs' own metadata were measured as good or better for the same job.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:
