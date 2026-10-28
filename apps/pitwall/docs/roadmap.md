@@ -97,6 +97,13 @@ Debrief uses Pitwall when it is running and keeps its built-in AI as the default
 - Below-normal process priority for engines is applied on Windows only; decide the macOS and Linux equivalent.
 - Pin updates for llama.cpp as reviewed changes that pass the end-to-end test.
 
+## 1.1 follow-ups: jobs in the UI (ADR 0024)
+
+- Mirror the job wire types in `api.types.ts` when the UI moves onto the jobs: `JobEvent.progress` gains `unit`
+  (`items` | `bytes`; format a size for bytes) and `canStopWaiting`; `JobEvent.cancelled` gains `stoppedWaiting`; add the
+  `job_stop_waiting` command. Show "Stop waiting" next to Cancel while `canStopWaiting` is true, and say on a cancelled
+  job with `stoppedWaiting` that the server may still be working (Repair service is the way out).
+
 ## Next (hand-off, 2026-10-22)
 
 1. **Linux CI** (`rust tests + core coverage (linux)`): the two end-to-end tests that start a real child process

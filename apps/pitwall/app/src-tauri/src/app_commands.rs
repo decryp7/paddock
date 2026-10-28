@@ -221,17 +221,22 @@ fn server_job(
         let mut failed = false;
         let reply = loop {
             tokio::select! {
+                // A Cancel press is handled before a Stop waiting press that came with it.
+                biased;
                 r = &mut work => break r,
                 // Every press of Cancel asks the server again; a failed earlier ask does not switch Cancel off.
                 Ok(()) = presses.cancel.changed() => {
                     grace = None;
                     failed = false;
+                    // A Stop waiting press made before this attempt belongs to the failed state it left.
+                    presses.stop.borrow_and_update();
                     ctx.phase(Phase::discovering("cancel", "Cancelling"));
                     match forward(client.as_ref(), "cancel_op", serde_json::json!({ "opId": op_id })).await {
                         Ok(_) => grace = Some(Box::pin(tokio::time::sleep(CANCEL_GRACE))),
                         // Refused or unreachable (an unreachable server also fails the work call, which ends the job).
                         Err(_) => {
                             failed = true;
+                            presses.stop.borrow_and_update();
                             ctx.phase(Phase::discovering(jobs::CANCEL_FAILED_PHASE, CANCEL_FAILED));
                         }
                     }
@@ -244,11 +249,14 @@ fn server_job(
                 }, if grace.is_some() => {
                     grace = None;
                     failed = true;
+                    // A press made while the cancel was in flight is stale: only one made in this state counts.
+                    presses.stop.borrow_and_update();
                     ctx.phase(Phase::discovering(jobs::CANCEL_FAILED_PHASE, CANCEL_FAILED));
                 }
                 Ok(()) = presses.stop.changed(), if failed => {
                     // The app's job ends as cancelled; dropping the call closes its connection. The server may still work.
                     ctx.phase(Phase::discovering("stopped-waiting", STOPPED_WAITING));
+                    jobs2.note_stopped_waiting(ctx.id().0);
                     return Ok(Outcome::Cancelled);
                 }
             }
@@ -578,7 +586,13 @@ mod tests {
         );
         assert_eq!(jobs.running(), 0);
         let ev = events.all();
-        assert_eq!(ev.last(), Some(&JobEvent::Cancelled { job_id: id }));
+        assert_eq!(
+            ev.last(),
+            Some(&JobEvent::Cancelled {
+                job_id: id,
+                stopped_waiting: false
+            })
+        );
         assert_eq!(ev.iter().filter(|e| matches!(e, JobEvent::Cancelled { .. })).count(), 1);
         assert!(
             ev.iter().any(|e| progress_phase(e) == Some("Cancelling")),
@@ -685,7 +699,14 @@ mod tests {
         // Stop waiting ends the app's job as cancelled and says the server may still be working.
         assert!(jobs.stop_waiting(id));
         events.until_terminal().await;
-        assert_eq!(events.last(), Some(JobEvent::Cancelled { job_id: id }));
+        assert_eq!(
+            events.last(),
+            Some(JobEvent::Cancelled {
+                job_id: id,
+                stopped_waiting: true
+            }),
+            "the final event says the user stopped waiting"
+        );
         assert!(events
             .all()
             .iter()
@@ -717,8 +738,80 @@ mod tests {
         *server.cancel_reply.lock().unwrap() = Ok(Value::Null);
         assert!(jobs.cancel(id));
         events.until_terminal().await;
-        assert_eq!(events.last(), Some(JobEvent::Cancelled { job_id: id }));
+        assert_eq!(
+            events.last(),
+            Some(JobEvent::Cancelled {
+                job_id: id,
+                stopped_waiting: false
+            })
+        );
         assert_eq!(cancel_ops(&server), 2);
+    }
+
+    /// The press comes right after `start` returned the id, before the spawned body ever ran: it must not be lost.
+    #[tokio::test(start_paused = true)]
+    async fn a_cancel_pressed_before_the_job_body_first_runs_is_not_lost() {
+        let server = Arc::new(CancelAware::new());
+        let client: SharedClient = server.clone();
+        let (sink, events) = collector();
+        let jobs = jobs();
+        let id = server_job(
+            &jobs,
+            client,
+            sink,
+            spec("load-model", "t", "p"),
+            NONCE,
+            "load_model",
+            serde_json::json!({ "id": "m" }),
+        );
+        // No await since `server_job` returned: the body has not been polled.
+        assert!(jobs.cancel(id));
+        events.until_terminal().await;
+        assert_eq!(
+            events.last(),
+            Some(JobEvent::Cancelled {
+                job_id: id,
+                stopped_waiting: false
+            })
+        );
+        assert_eq!(cancel_ops(&server), 1);
+    }
+
+    /// Stop waiting pressed while a Cancel press is being handled belongs to the state that press left; it must not end
+    /// the job the next time the cancel fails.
+    #[tokio::test(start_paused = true)]
+    async fn a_stop_waiting_press_made_during_a_cancel_attempt_does_not_fire_in_the_next_failed_state() {
+        let server = Arc::new(CancelAware::new());
+        server.honours_cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+        let client: SharedClient = server.clone();
+        let (sink, events) = collector();
+        let jobs = jobs();
+        let id = server_job(
+            &jobs,
+            client,
+            sink,
+            spec("load-model", "t", "p"),
+            NONCE,
+            "load_model",
+            serde_json::json!({ "id": "m" }),
+        );
+        server.received(1).await;
+        assert!(jobs.cancel(id));
+        events.until("the cancel failed", failed_to_cancel).await;
+        // Cancel again and Stop waiting in the same instant (the job still shows the failed phase): the body handles
+        // the Cancel first.
+        assert!(jobs.cancel(id));
+        assert!(jobs.stop_waiting(id));
+        events
+            .until("the second attempt failed too", |e| {
+                failed_to_cancel(e) && phases(e).iter().filter(|p| **p == "Cancelling").count() == 2
+            })
+            .await;
+        assert_eq!(jobs.running(), 1, "the stale press did not end the job");
+        // A press made in this state does.
+        assert!(jobs.stop_waiting(id));
+        events.until_terminal().await;
+        assert!(matches!(events.last(), Some(JobEvent::Cancelled { stopped_waiting: true, .. })));
     }
 
     #[tokio::test(start_paused = true)]
