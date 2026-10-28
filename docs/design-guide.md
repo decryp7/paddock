@@ -312,6 +312,9 @@ units and thousands separators; relative time under 24 h with absolute on hover;
 start with the benefit, not the lack. Pitwall may be slightly technical, Dyno slightly warmer, Debrief terse, Pitcrew
 operational, Spotter concise.
 
+"Label: value" pairs (a status chip's "Log store: stopped", a fact list's "Version: 1.2") use a lower-case value unless it is a
+proper noun or a name; the label starts the sentence, the value continues it.
+
 ## 11. Native-feel rules (Debrief ADR 0028 for the whole Paddock family)
 
 App shell is `user-select: none`, default cursor on non-links, no browser context menu/keys/zoom/drag, selectable
