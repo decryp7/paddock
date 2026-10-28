@@ -132,9 +132,23 @@ pub trait ProcessSource {
 /// The operating system as a [`ProcessSource`]. Make one per tree walk ([`tree_memory`] does): on a platform that cannot
 /// list the children of one pid it scans the machine's process list at most once, lazily, and shares that scan between
 /// the nodes of the walk.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct OsSource {
     scan: LazyScan,
+    /// Lists the children of one pid where the platform can (`None`: it cannot).
+    list: fn(u32) -> Option<Vec<u32>>,
+    /// Scans the machine for the fallback; a seam for tests.
+    scan_with: fn() -> Table,
+}
+
+impl Default for OsSource {
+    fn default() -> OsSource {
+        OsSource {
+            scan: LazyScan::default(),
+            list: children_of,
+            scan_with: scan_table,
+        }
+    }
 }
 
 /// The process list scanned on first use, for the platforms without a children-of-one-pid call.
@@ -167,7 +181,7 @@ impl ProcessSource for OsSource {
     }
 
     fn children(&self, pid: u32) -> Vec<u32> {
-        children_or_scan(children_of(pid), || self.scan.children(pid, scan_table))
+        children_or_scan((self.list)(pid), || self.scan.children(pid, self.scan_with))
     }
 
     fn table(&self) -> Table {
@@ -543,6 +557,46 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
         }
         assert_eq!(scans.get(), 1);
         assert_eq!(lazy.children(1, scan), vec![2]);
+    }
+
+    thread_local! {
+        static KID: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+        static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// The real source on a platform without a per-pid call: a whole tree walk scans the machine once, through its own
+    /// scan and not through `table()`.
+    #[test]
+    fn the_os_source_scans_once_per_walk_when_it_cannot_list_children() {
+        use crate::testchild::{Mode, child};
+        let me = std::process::id();
+        let c = crate::Supervised::spawn(child(Mode::Sleep)).unwrap();
+        let kid = c.id().unwrap();
+        KID.with(|k| k.set(kid));
+        let src = OsSource {
+            scan: LazyScan::default(),
+            list: |_| None,
+            scan_with: || {
+                SCANS.with(|s| s.set(s.get() + 1));
+                let row = |pid, parent| ProcEntry {
+                    pid,
+                    parent,
+                    rss: 1,
+                    is_thread: false,
+                };
+                table_from([
+                    row(std::process::id(), None),
+                    row(KID.with(std::cell::Cell::get), Some(std::process::id())),
+                ])
+            },
+        };
+        SCANS.with(|s| s.set(0));
+        assert!(tree_memory_from(&src, me) >= process_memory(kid).unwrap());
+        assert_eq!(
+            SCANS.with(std::cell::Cell::get),
+            1,
+            "one scan for the root and the child together"
+        );
     }
 
     #[test]
