@@ -16,7 +16,6 @@ runs:
         DROP_BUNDLES: ${{ inputs.drop-bundles }}
       run: |
         dir="${PADDOCK_BUILD_FOLDER:-}"
-        [ -n "$dir" ] || { echo "no build folder was set in this job; nothing to prune"; exit 0; }
-        if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
-        if [ "$DROP_BUNDLES" = true ]; then rm -rf "$dir/dist/bundle" || true; fi
-        bash "${{ github.action_path }}/../../../tools/prune-build-folders.sh" "$dir" "$MAX_GB" || true
+        if [ -n "$dir" ] && command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
+        args=(); if [ "$DROP_BUNDLES" = true ]; then args+=(--drop-bundles); fi
+        bash "${{ github.action_path }}/../../../tools/prune-ci-build-folder.sh" "$dir" "$MAX_GB" ${args[@]+"${args[@]}"}
