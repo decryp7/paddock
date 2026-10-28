@@ -27,7 +27,7 @@ html {
 @include mat.strong-focus-indicators(
   (
     border-style: solid,
-    border-width: 2px,
+    border-width: string.unquote('var(--pd-focus-width)'),
     border-color: string.unquote('var(--pd-focus-ring)'),
     display: block,
   )

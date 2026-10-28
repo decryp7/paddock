@@ -287,7 +287,9 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   ghost, and the class `pd-button-danger` on any of them = danger. `tonal` and `elevated` are bridged only so they never fall back
   to Material's blue; the family does not use them (an app review rejects them).
 - **Keyboard focus** is Material's strong indicator in `--pd-focus-ring`: a 2 px solid ring 2 px outside the control, 3:1 on every
-  surface. `e2e/material.spec.ts` tabs through every kind of control and asserts it.
+  surface (`--pd-focus-width`, 2 px). `e2e/material.spec.ts` tabs through every kind of control and asserts it. **Exception, form
+  fields:** the floated label sits on the border, so a ring around the box would cross it; the field's own outline is the ring
+  instead, in `--pd-focus-ring` at 3 px (the resting 1 px border is part of it, so 2 px of new pixels change, SC 2.4.13).
 - **Measured:** `npm run test:tokens` checks the contrast of every bridged component in both schemes and all accents; the gallery
   page "Material controls" and its e2e check the rendered sizes (28 px rows, 4 px panel padding, 12 px floated label).
 

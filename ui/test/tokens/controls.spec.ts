@@ -60,7 +60,7 @@ describe('control styles and the Material bridge (plan X37)', () => {
     }
     // Every value is a token reference, a sized token expression or a keyword: nothing hard-coded.
     for (const m of material.matchAll(/(--mat-[\w-]+)\s*:\s*([^;]+);/g)) {
-      expect(m[2], m[1]).toMatch(/^(var\(--pd-[\w-]+\)|calc\(var\(--pd-[\w-]+\) \/ [\d.]+\)|calc\(2px \/ 0\.75\)|none|transparent|currentcolor|block|2px|0px|0)$/);
+      expect(m[2], m[1]).toMatch(/^(var\(--pd-[\w-]+\)|calc\(var\(--pd-[\w-]+\) \/ [\d.]+\)|calc\(var\(--pd-focus-width\) \+ 1px\)|none|transparent|currentcolor|block|0px|0)$/);
     }
   });
 
@@ -98,9 +98,9 @@ describe('control styles and the Material bridge (plan X37)', () => {
   });
 
   it('inputs, selects and the switch show the solid focus ring, not only a translucent halo (review P1-5)', () => {
-    expect(controls).toMatch(/\.pd-input:focus-visible,[^{]*\{[^}]*outline: 2px solid var\(--pd-focus-ring\)/);
+    expect(controls).toMatch(/\.pd-input:focus-visible,[^{]*\{[^}]*outline: var\(--pd-focus-width\) solid var\(--pd-focus-ring\)/);
     expect(controls).not.toMatch(/box-shadow:\s*0 0 0 2px var\(--pd-accent-ring\)/);
-    expect(controls).toMatch(/\.pd-switch:focus-visible\s*\{[^}]*outline: 2px solid/);
+    expect(controls).toMatch(/\.pd-switch:focus-visible\s*\{[^}]*outline: var\(--pd-focus-width\) solid/);
   });
 
   it('the selected segment is an accent tint with a ring and a heavier label, not a surface that inverts in dark (review P1-6)', () => {

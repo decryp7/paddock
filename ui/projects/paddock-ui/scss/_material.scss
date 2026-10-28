@@ -112,9 +112,10 @@
   // Material draws the floated outlined label at scale(0.75) of this size, so ask for the size / 0.75: it renders at the 12 px label size.
   --mat-form-field-outlined-label-text-populated-size: calc(var(--pd-text-label) / 0.75);
   --mat-form-field-outlined-label-text-size: calc(var(--pd-text-label) / 0.75);
-  // The field's own outline is the keyboard ring: 2 px in the family ring colour (the floated label sits on the border, so no ring around it).
+  // The field's own outline is the keyboard ring (the floated label sits on the border, so no ring around it): the family ring colour
+  // at 3 px, because the resting border is already 1 px and SC 2.4.13 wants 2 px of new pixels.
   --mat-form-field-outlined-focus-outline-color: var(--pd-focus-ring);
-  --mat-form-field-outlined-focus-outline-width: 2px;
+  --mat-form-field-outlined-focus-outline-width: calc(var(--pd-focus-width) + 1px);
   --mat-icon-button-state-layer-size: var(--pd-control-height);
   --mat-icon-button-icon-size: var(--pd-space-4);
   --mat-focus-indicator-border-color: var(--pd-focus-ring);
@@ -572,7 +573,7 @@
   zoom: 0.75;
   --mat-slide-toggle-label-text-size: calc(var(--pd-text-body) / 0.75);
   // The scale shrinks the ring too: widen it so it still draws 2 px on screen.
-  --mat-focus-indicator-border-width: calc(2px / 0.75);
+  --mat-focus-indicator-border-width: calc(var(--pd-focus-width) / 0.75);
 }
 
 // Icons in Material parts are the family's 16 px; a mat-icon in a button or a chip follows its parent.
@@ -635,13 +636,13 @@ html .mat-mdc-menu-item {
 }
 
 // Material upper-cases the calendar heading ("OCT 2026") in script; the family writes sentence case. Lower-case it and
-// capitalise the first letter again (::first-letter needs a block box).
-html .mat-calendar-period-button .mdc-button__label > span:first-child {
+// capitalise the first letter again (::first-letter needs a block box). English only: other scripts and locales keep Material's text.
+html:lang(en) .mat-calendar-period-button .mdc-button__label > span:first-child {
   display: inline-block;
   text-transform: lowercase;
 }
 
-html .mat-calendar-period-button .mdc-button__label > span:first-child::first-letter {
+html:lang(en) .mat-calendar-period-button .mdc-button__label > span:first-child::first-letter {
   text-transform: uppercase;
 }
 
@@ -691,6 +692,6 @@ html .mat-mdc-snack-bar-action {
 // draws a 2 px --pd-focus-ring border 2 px outside the control (each component offsets its own `.mat-focus-indicator` child); the slide toggle's track is ringed as well (its zoom thins
 // the indicator).
 html .mat-mdc-slide-toggle:has(.mdc-switch:focus-visible) .mdc-switch__track {
-  outline: calc(2px / 0.75) solid var(--pd-focus-ring);
+  outline: calc(var(--pd-focus-width) / 0.75) solid var(--pd-focus-ring);
   outline-offset: 2px;
 }

@@ -38,6 +38,9 @@
   --pd-weight-semibold: 600;
   --pd-numeric: tabular-nums;
 
+  // The keyboard ring's thickness (SC 2.4.13), used by every focus outline.
+  --pd-focus-width: 2px;
+
   // 4 px grid.
   --pd-space-0: 2px;
   --pd-space-1: 4px;
