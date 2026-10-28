@@ -218,25 +218,6 @@ pub(super) fn set_window_opacity<R: Runtime>(
     }
 }
 
-/// Whether this build lets a window be made translucent on this OS. Windows is off unless the app turns it on
-/// (`PanelsBuilder::windows_translucency`): a layered window over WebView2 is not yet verified on a real desktop
-/// (`apps/workbench-demo/docs/testing-manual.md`), so the guides outline instead.
-#[cfg(windows)]
-pub(super) fn translucency_allowed(enabled: bool) -> Result<(), OpacityError> {
-    if enabled {
-        Ok(())
-    } else {
-        Err(OpacityError::Unsupported(
-            "translucent pop-outs are off on Windows until verified on a real desktop".into(),
-        ))
-    }
-}
-
-#[cfg(not(windows))]
-pub(super) fn translucency_allowed(_enabled: bool) -> Result<(), OpacityError> {
-    Ok(())
-}
-
 /// The primary mouse button as the drag follower reads it, on the main thread with the dragged pop-out `w`. macOS and
 /// Windows read it system-wide; X11 asks GDK for the pointer's button state through the window. Wayland tells a client
 /// nothing about the pointer outside its own surfaces: there the cursor position fails too and the feature never starts.

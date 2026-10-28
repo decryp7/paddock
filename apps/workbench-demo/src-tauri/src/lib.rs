@@ -136,6 +136,11 @@ pub fn workbench<R: Runtime>(
 ) -> Result<paddock_workbench::Builder<R>, BoxError> {
     let dirs = dirs(place.test_dir())?;
     let mut panels = Panels::builder().route("index.html#/popout");
+    // Dev only: lets a pop-out dragged over its window turn translucent on Windows, to run the manual check that decides
+    // the default (apps/workbench-demo/docs/testing-manual.md). Without it Windows draws outlined guides instead.
+    if std::env::var_os("PADDOCK_WINDOWS_TRANSLUCENCY").is_some_and(|v| v == "1") {
+        panels = panels.windows_translucency(true);
+    }
     if !matches!(place, Place::Test { .. }) {
         panels = panels.bounds_file(dirs.data().join("popout-places.json"));
     }

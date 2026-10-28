@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 #[derive(Default)]
 pub(crate) struct State {
     following: Mutex<HashMap<String, Instant>>,
+    ended: std::sync::Condvar,
 }
 
 impl State {
@@ -56,6 +57,21 @@ impl State {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(label);
+        self.ended.notify_all();
+    }
+
+    /// Blocks until `label` is no longer followed, at most `timeout`; true when it is not.
+    #[cfg(test)]
+    fn wait_ended(&self, label: &str, timeout: Duration) -> bool {
+        let guard = self
+            .following
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let (guard, _) = self
+            .ended
+            .wait_timeout_while(guard, timeout, |m| m.contains_key(label))
+            .unwrap_or_else(PoisonError::into_inner);
+        !guard.contains_key(label)
     }
 }
 
@@ -63,20 +79,15 @@ impl State {
 struct TauriOpacity<R: Runtime> {
     app: AppHandle<R>,
     label: String,
-    /// `PanelsBuilder::windows_translucency`.
-    windows_translucency: bool,
 }
 
 impl<R: Runtime> WindowOpacity for TauriOpacity<R> {
     fn set_opacity(&mut self, opacity: f64) -> Result<(), OpacityError> {
-        if opacity < 1.0 {
-            native::translucency_allowed(self.windows_translucency)?;
-        }
         let label = self.label.clone();
         let app = self.app.clone();
         on_main(&self.app, move || match super::window(&app, &label) {
             // The mock runtime has no native window (its handles point nowhere): nothing is called (rule 7).
-            Some(_) if cfg!(any(test, feature = "mock-runtime")) => Ok(()),
+            Some(_) if cfg!(test) => Ok(()),
             Some(w) => native::set_window_opacity(&w, opacity),
             None => Err(OpacityError::Failed("the window is gone".into())),
         })
@@ -197,11 +208,12 @@ fn start<R: Runtime>(
     };
     let env = Environment {
         reduce_transparency: native::reduce_transparency(),
+        // Windows: a layered window over WebView2 is unverified, so it is the app's choice (`windows_translucency`).
+        translucency_off: cfg!(windows) && !panels.redock_windows,
     };
     let window = TauriOpacity {
         app: app.clone(),
         label: label.to_string(),
-        windows_translucency: panels.redock_windows,
     };
     let opacity = panels.redock_opacity;
     let (end_app, end_label) = (app.clone(), label.to_string());
@@ -405,6 +417,7 @@ mod follow_tests {
             vec![s(true, true), s(false, true), s(false, true)],
             Environment {
                 reduce_transparency: true,
+                ..Environment::default()
             },
         );
         assert_eq!(log, ["announce Outline", "announce Opaque", "done"]);
@@ -477,19 +490,21 @@ mod tests {
 mod mock_tests {
     use super::*;
     use crate::redock::{Appearance, Probe, WindowOpacity};
-    use crate::tauri::tests::{app, app_with, recorder, window};
+    use crate::tauri::tests::{app, app_with, window};
     use crate::wire::PANELS_EVENT;
     use ::tauri::Manager;
     use ::tauri::test::MockRuntime;
     use serde_json::json;
-    use std::time::Instant;
-
-    fn wait_for(what: &str, mut condition: impl FnMut() -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while !condition() {
-            assert!(Instant::now() < deadline, "timed out waiting for {what}");
-            std::thread::yield_now();
-        }
+    /// Collects the host's panel events on a channel, so a test blocks on the next one instead of polling.
+    fn events(
+        w: &::tauri::WebviewWindow<MockRuntime>,
+    ) -> std::sync::mpsc::Receiver<serde_json::Value> {
+        use ::tauri::Listener;
+        let (tx, rx) = std::sync::mpsc::channel();
+        w.listen(PANELS_EVENT, move |e| {
+            let _ = tx.send(serde_json::from_str(e.payload()).unwrap_or(serde_json::Value::Null));
+        });
+        rx
     }
 
     fn live(app: &::tauri::App<MockRuntime>) -> Live<MockRuntime> {
@@ -507,7 +522,6 @@ mod mock_tests {
         let mut gone = TauriOpacity {
             app: app.handle().clone(),
             label: "p-main-9".into(),
-            windows_translucency: true,
         };
         assert!(matches!(
             gone.set_opacity(0.5),
@@ -517,7 +531,6 @@ mod mock_tests {
         let mut present = TauriOpacity {
             app: app.handle().clone(),
             label: "p-main-1".into(),
-            windows_translucency: true,
         };
         assert_eq!(present.set_opacity(0.5), Ok(()));
         assert_eq!(present.set_opacity(1.0), Ok(()));
@@ -536,23 +549,6 @@ mod mock_tests {
             &OpacityError::Unsupported("no compositor".into()),
         );
         log_problem(&mut logged, &OpacityError::Failed("busy".into()));
-    }
-
-    #[test]
-    fn windows_stay_opaque_until_the_app_enables_translucency() {
-        let app = app();
-        let _ = window(&app, "p-main-1");
-        let mut off = TauriOpacity {
-            app: app.handle().clone(),
-            label: "p-main-1".into(),
-            windows_translucency: false,
-        };
-        let r = off.set_opacity(0.5);
-        if cfg!(windows) {
-            assert!(matches!(r, Err(OpacityError::Unsupported(_))));
-        }
-        // Restoring is never gated.
-        let _ = off.set_opacity(1.0);
     }
 
     #[test]
@@ -576,17 +572,17 @@ mod mock_tests {
     #[test]
     fn announcing_tells_the_host_the_look() {
         let app = app();
-        let seen = recorder(&window(&app, "main"), PANELS_EVENT);
+        let seen = events(&window(&app, "main"));
         let mut l = live(&app);
         l.announce(Appearance::Outline);
         l.announce(Appearance::Opaque);
-        wait_for("both events", || seen.lock().unwrap().len() == 2);
-        let seen = seen.lock().unwrap().clone();
+        let next = || seen.recv_timeout(Duration::from_secs(10)).unwrap();
+        let (first, second) = (next(), next());
         assert_eq!(
-            seen[0],
+            first,
             json!({ "kind": "redock", "panel": "pn.code", "label": "p-main-1", "look": "outline" })
         );
-        assert_eq!(seen[1]["look"], "opaque");
+        assert_eq!(second["look"], "opaque");
     }
 
     #[test]
@@ -625,7 +621,7 @@ mod mock_tests {
         let app = app();
         let h = app.handle();
         let _ = window(&app, "p-main-1");
-        let seen = recorder(&window(&app, "main"), PANELS_EVENT);
+        let seen = events(&window(&app, "main"));
         start(h, "main", "p-main-1", "pn.code", (true, true, Some(true)));
         assert!(
             app.state::<Panels>()
@@ -638,16 +634,15 @@ mod mock_tests {
         on_moved(h, "main", "p-main-1", "pn.code");
         // The window goes: the follower ends, announces nothing it had not announced, and forgets the window.
         window(&app, "p-main-1").destroy().unwrap();
-        wait_for("the follower to end", || {
+        assert!(
             app.state::<Panels>()
                 .redock
-                .since_move("p-main-1")
-                .is_none()
-        });
+                .wait_ended("p-main-1", Duration::from_secs(10)),
+            "the follower ended"
+        );
+        // Whatever it announced on the way is an opaque end (the window never turned translucent here).
         assert!(
-            seen.lock()
-                .unwrap()
-                .iter()
+            seen.try_iter()
                 .all(|e| e["kind"] != "redock" || e["look"] == "opaque")
         );
     }

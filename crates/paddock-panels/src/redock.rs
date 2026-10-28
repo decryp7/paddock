@@ -96,13 +96,20 @@ pub enum DragState {
 pub struct Environment {
     /// "Reduce transparency" (macOS), transparency effects off (Windows).
     pub reduce_transparency: bool,
+    /// The app has turned translucency off for this platform (`PanelsBuilder::windows_translucency` on Windows, until the
+    /// real-desktop check passes): the same outline as for reduced transparency, with no error.
+    pub translucency_off: bool,
 }
 
 /// The look the dragged window should have: translucent only while the drag is active and over the host, and an outline
 /// instead when the system reduces transparency. Every other state, in particular every end, is opaque.
 pub fn desired(state: DragState, env: Environment, opacity: Opacity) -> Appearance {
     match state {
-        DragState::Active { over_host: true } if env.reduce_transparency => Appearance::Outline,
+        DragState::Active { over_host: true }
+            if env.reduce_transparency || env.translucency_off =>
+        {
+            Appearance::Outline
+        }
         DragState::Active { over_host: true } => Appearance::Translucent(opacity),
         DragState::Active { over_host: false } | DragState::Ended(_) => Appearance::Opaque,
     }
@@ -409,9 +416,29 @@ mod tests {
     }
 
     #[test]
+    fn translucency_turned_off_by_the_app_gives_the_outline_without_an_error() {
+        let env = Environment {
+            translucency_off: true,
+            ..Environment::default()
+        };
+        assert_eq!(desired(OVER, env, Opacity::default()), Appearance::Outline);
+        assert_eq!(desired(AWAY, env, Opacity::default()), Appearance::Opaque);
+        let fake = Fake::default();
+        let (mut c, problems) = ctl(&fake, env);
+        assert_eq!(c.update(OVER), Some(Appearance::Outline));
+        assert_eq!(c.end(EndCause::Released), Some(Appearance::Opaque));
+        assert!(fake.calls().is_empty());
+        assert!(
+            problems.lock().unwrap().is_empty(),
+            "off is a choice, not a failure"
+        );
+    }
+
+    #[test]
     fn reduced_transparency_gives_an_outline_not_a_dimmed_window() {
         let env = Environment {
             reduce_transparency: true,
+            ..Environment::default()
         };
         assert_eq!(desired(OVER, env, Opacity::default()), Appearance::Outline);
         assert_eq!(desired(AWAY, env, Opacity::default()), Appearance::Opaque);
@@ -677,6 +704,7 @@ mod tests {
             ],
             Environment {
                 reduce_transparency: true,
+                ..Environment::default()
             },
         );
         assert_eq!(looks, [Look::Outline, Look::Opaque]);

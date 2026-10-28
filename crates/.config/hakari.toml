@@ -20,5 +20,7 @@ third-party = [
     { name = "tauri-runtime-wry" },
     { name = "wry" },
     { name = "gtk" },
+    { name = "gtk-sys" },
+    { name = "gdk-sys" },
     { name = "ts-rs" },
 ]

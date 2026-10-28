@@ -82,14 +82,11 @@ time = { version = "0.3", features = ["formatting", "macros", "parsing", "serde"
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 bitflags = { version = "2", default-features = false, features = ["std"] }
-cairo-sys-rs = { version = "0.18", default-features = false, features = ["use_glib"] }
 digest = { version = "0.11", features = ["alloc", "mac", "oid"] }
 futures-core = { version = "0.3" }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4", default-features = false, features = ["std", "sys_rng"] }
-gio-sys = { version = "0.18", default-features = false, features = ["v2_70"] }
 glib-sys = { version = "0.18", default-features = false, features = ["v2_70"] }
 gobject-sys = { version = "0.18", default-features = false, features = ["v2_70"] }
-gtk-sys = { version = "0.18", default-features = false, features = ["v3_24"] }
 libc = { version = "0.2" }
 linux-raw-sys = { version = "0.12", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "ioctl", "net", "netlink", "no_std", "prctl", "xdp"] }
 mio = { version = "1", features = ["net", "os-ext"] }

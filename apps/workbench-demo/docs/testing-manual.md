@@ -31,7 +31,7 @@ Per OS:
 - **Windows (gate: translucency is OFF by default).** A layered window (`WS_EX_LAYERED`, `SetLayeredWindowAttributes`) over a
   WebView2 child is not verified on a real desktop, so `PanelsBuilder::windows_translucency` defaults to false and the guides
   outline instead: expect an opaque pop-out and outlined guides. To flip the default to on, run 1 to 7 with
-  `.windows_translucency(true)` on a real Windows 10 and 11 session (a physical or VM desktop, not a headless runner), at 100 %
+  `PADDOCK_WINDOWS_TRANSLUCENCY=1` set in the environment of the demo (dev only; it calls `.windows_translucency(true)`) on a real Windows 10 and 11 session (a physical or VM desktop, not a headless runner), at 100 %
   and 150 % scale and on a second display, and confirm: the web content is visible (not black or frozen) while translucent;
   after the drop or leaving, the window is fully opaque with no stale frame, shadow or black rectangle; maximise or snap keeps
   it translucent. Only then change the default and record the date and Windows build here. Also turn off Settings >
