@@ -62,7 +62,7 @@ impl Terminator for OsTerminator {
 /// without a window ignore it, and the stop timeout then ends them with `/F`.
 #[cfg(windows)]
 fn taskkill(pid: u32, force: bool) -> Result<(), String> {
-    let mut cmd = quiet_command(std::path::Path::new("taskkill.exe"));
+    let mut cmd = quiet_command(&crate::process::taskkill_exe());
     cmd.args(["/PID", &pid.to_string()]);
     if force {
         cmd.arg("/F");

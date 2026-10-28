@@ -554,6 +554,9 @@ timeout before a slow process could exit; (4) real-time job lengths (`sleep 3`) 
 process-table read, scaled with the load. **Rule:** a test double's job lasts until the test releases it, never a real
 time; a test waits for what the system under test has *seen* (its usage, its list), not for the input it was given;
 while the system compares the fake clock with real OS timestamps, the clock follows the real one (`until_real`) and
-holds still while a real process reacts to a signal; a tool's timeout ends its whole process tree, or `cmd /c`'s and a
-login shell's children outlive it (nextest's "leaky"). Reproduce with a delay knob in the fake (`spawn_delay_ms`), not
-by hoping for load.
+holds still while a real process reacts to a signal (step it only where the product needs time to pass, such as a
+job's end after `IDLE_CONFIRM`); a tool's timeout ends its whole tree: on Unix its own session (`setsid`, so an
+interactive login shell gets no `SIGTTIN` either) and `killpg`, on Windows a kill-on-close job object, which also holds
+helpers that left the tree (`taskkill /T` misses those); otherwise `cmd /c`'s and a login shell's children outlive it
+(nextest's "leaky"). A test of a timeout gives up on a condition (the tree is complete), never on a time budget.
+Reproduce with a delay knob in the fake (`spawn_delay_ms`), not by hoping for load.
