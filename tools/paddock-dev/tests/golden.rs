@@ -95,10 +95,15 @@ fn golden_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
 }
 
+/// A lockfile stored in the fixture as `package-lock.fixture.json`, so the repository's own "one lockfile" check ignores it.
+fn placed_name(name: &str) -> &str {
+    if name == "package-lock.fixture.json" { "package-lock.json" } else { name }
+}
+
 fn copy_tree(from: &Path, to: &Path) {
     for entry in std::fs::read_dir(from).unwrap() {
         let entry = entry.unwrap();
-        let target = to.join(entry.file_name());
+        let target = to.join(placed_name(&entry.file_name().to_string_lossy()));
         if entry.file_type().unwrap().is_dir() {
             std::fs::create_dir_all(&target).unwrap();
             copy_tree(&entry.path(), &target);
@@ -154,7 +159,7 @@ fn fixture_repo() -> (tempfile::TempDir, PathBuf) {
     let mut overlay = Vec::new();
     files_below(&golden_dir().join("base-overlay"), &golden_dir().join("base-overlay"), &mut overlay);
     for rel in overlay.into_iter().filter(|r| !golden_dir().join("fixture").join(r).exists()) {
-        std::fs::remove_file(root.join(rel)).unwrap();
+        std::fs::remove_file(root.join(rel)).unwrap(); // overlay-only files carry no renamed names
     }
     git(&root, &["add", "-A"]);
     git(&root, &["commit", "-q", "-m", "head"]);
