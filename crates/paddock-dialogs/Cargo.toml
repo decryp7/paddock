@@ -9,7 +9,7 @@ publish = ["decryp7"]
 
 [features]
 # The Tauri adapter (`paddock_dialogs::tauri`); the core above it never depends on Tauri.
-tauri = ["dep:tauri", "dep:log"]
+tauri = ["dep:tauri", "dep:log", "dep:objc2-app-kit"]
 # For other crates' tests on Tauri's mock runtime: dialogs are not parented to a native window. Never in an app.
 mock-runtime = ["tauri"]
 
@@ -20,6 +20,12 @@ serde_json = "1"
 tauri = { workspace = true, optional = true }
 log = { version = "0.4", features = ["kv"], optional = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+# macOS: a dialog window is attached to its parent when it is shown, not when it is created (`addChildWindow:ordered:`;
+# AppKit orders a child in with its parent at once, ADR 0026 §4.6 and the 1.1-0 spike). Already in every app's tree
+# through Tauri.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSResponder", "NSWindow", "NSGraphics"], optional = true }
 
 [dev-dependencies]
 # The Tauri adapter is tested on Tauri's mock runtime; `tauri-runtime` builds monitors for the placement on it.

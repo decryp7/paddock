@@ -32,8 +32,8 @@
 //!   shows and focuses it. A page that has not reported within [`Dialogs::show_deadline`] is shown at the placed size
 //!   anyway (a blank page must not leave the user with a dialog they cannot see), and a later [`dialog_ready`] fits it
 //!   once. The parent is disabled at the moment of showing, never at creation, so a dialog that never
-//!   shows never locks anything (on macOS the window is attached to its parent at creation, since Tauri cannot attach later,
-//!   and hidden again at once). Opening a pending dialog again creates no window and does not show
+//!   shows never locks anything. On macOS an owned dialog is also attached to its parent only then
+//!   (`-[NSWindow addChildWindow:ordered:]`): AppKit orders a child window in with its parent as soon as it exists. Opening a pending dialog again creates no window and does not show
 //!   it early. [`dialog_fit`] refits a shown dialog; a scale-factor change refits it from its last measure. Which
 //!   mechanism keeps the window unseen is [`show_mechanism`](crate::window::show_mechanism), chosen per OS in one place.
 //! * No dialog window has title-bar buttons; a close request from the OS reaches the dialog as its own Close/Cancel
@@ -383,7 +383,9 @@ fn build_window<R: Runtime>(
         .visible(c.visible)
         .background_color(Color(r, g, b, 255))
         .focused(false);
-    let builder = if c.owned {
+    // On macOS a child window is ordered in with its parent as soon as it exists, hidden or not: the parent is attached
+    // when the dialog is shown instead (`attach_at_show`).
+    let builder = if c.owned && !attaches_at_show(spec.os) {
         owned_by(builder, parent)?
     } else {
         builder
@@ -396,10 +398,6 @@ fn build_window<R: Runtime>(
     let window = builder.build().map_err(failed)?;
     if let Some(f) = hooks.as_ref().and_then(|h| h.built.as_ref()) {
         f(&window);
-    }
-    if !c.visible && c.owned && ordered_in_with_parent(spec.os) {
-        native("hide", spec.label);
-        let _ = window.hide();
     }
     // Where logical coordinates are not one global space (Windows, Linux with mixed DPI), the builder converted them
     // with some monitor's scale: set the exact physical place (on the parent's monitor, unless the window waits
@@ -415,11 +413,41 @@ fn build_window<R: Runtime>(
     Ok(())
 }
 
-/// Whether an owned window is on screen as soon as it is built even though it was built hidden (macOS: AppKit orders a
-/// child window in with its parent, spike 1.1-0). Tauri 2.12 has no way to attach a parent after creation, so the
-/// window is hidden again at once, before its page can draw; the parent stays attached.
-fn ordered_in_with_parent(os: &str) -> bool {
+/// Whether an owned dialog window is attached to its parent when it is shown rather than when it is built: macOS, where
+/// AppKit orders a child window in with its parent at once, even one built hidden (the 1.1-0 spike).
+pub(crate) fn attaches_at_show(os: &str) -> bool {
     os == "macos"
+}
+
+/// Attaches `child` to `parent` as a child window above it (`-[NSWindow addChildWindow:ordered:]`), on the main thread.
+#[cfg(all(target_os = "macos", not(any(test, feature = "mock-runtime"))))]
+fn attach_child<R: Runtime>(
+    app: &AppHandle<R>,
+    parent: &WebviewWindow<R>,
+    child: &WebviewWindow<R>,
+) {
+    use objc2_app_kit::{NSWindow, NSWindowOrderingMode};
+    let (parent, child) = (parent.clone(), child.clone());
+    let _ = app.run_on_main_thread(move || {
+        let (Ok(p), Ok(c)) = (parent.ns_window(), child.ns_window()) else {
+            return;
+        };
+        // SAFETY: both pointers are live NSWindows owned by Tauri (it hands them out on the main thread, where this runs),
+        // and `addChildWindow:ordered:` only retains the child.
+        unsafe {
+            let (p, c) = (&*(p as *const NSWindow), &*(c as *const NSWindow));
+            p.addChildWindow_ordered(c, NSWindowOrderingMode::Above);
+        }
+    });
+}
+
+/// Elsewhere (and on the mock runtime, which has no native windows) the parent was attached when the window was built.
+#[cfg(not(all(target_os = "macos", not(any(test, feature = "mock-runtime")))))]
+fn attach_child<R: Runtime>(
+    _app: &AppHandle<R>,
+    _parent: &WebviewWindow<R>,
+    _child: &WebviewWindow<R>,
+) {
 }
 
 /// An owned window of `owner`: above it, minimised and hidden with it (Windows: owner; macOS: child; Linux: transient).
@@ -791,6 +819,13 @@ fn show<R: Runtime>(
         return;
     };
     let parent = app.get_webview_window(&entry.parent);
+    if let Some(p) = &parent
+        && attaches_at_show(os)
+        && crate::Parenting::of(entry.modality, os) == crate::Parenting::Owned
+    {
+        native("attach", label);
+        attach_child(app, p, &w);
+    }
     if let Some(p) = &parent
         && entry.modality == Modality::Modal
         && disables_parent_natively(os)

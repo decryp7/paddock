@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shared dialog API, part 5: macOS attach at show and the configured deadline
+- macOS: an owned dialog window is built without a parent and attached with `addChildWindow:ordered:` when it is shown
+  (`objc2-app-kit`, a macOS-only dependency of `paddock-dialogs`, already in every app's tree through Tauri), instead of
+  built with its parent and hidden again.
+- The shell plugin passes `paddock_startup::Config::dialog_show_deadline` to `Dialogs::with_show_deadline`.
+
 ### Shared dialog API, part 4: test kit and checks (ADR 0026 §6; package 1.2b, first part)
 - ESLint `paddock/dialog-frame-footer` (in the preset for the templates of `*dialog*` components): no `footer`, foot or
   actions row, and no Close, Cancel or OK button in a dialog content.
