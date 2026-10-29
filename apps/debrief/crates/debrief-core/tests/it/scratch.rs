@@ -20,6 +20,16 @@ pub fn scratch_dir(prefix: &str) -> PathBuf {
     path
 }
 
+thread_local! {
+    static FAIL_NEXT_REMOVAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Makes the next [`remove_or_defer`] on this thread fail without touching the folder: the seam a test uses to stage a
+/// failed removal. File modes cannot stage one portably (root ignores a read-only folder, as in the Linux CI container).
+pub fn fail_next_removal() {
+    FAIL_NEXT_REMOVAL.with(|f| f.set(true));
+}
+
 /// Folders whose removal failed when their owner dropped them: removed again when the test process exits.
 static DEFERRED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
@@ -31,7 +41,13 @@ extern "C" fn remove_deferred_at_exit() {
 /// anything that holds the folder for a moment) is said on stderr and done again when the test process exits, so the
 /// folder never outlives the process silently (CI 7108 left `debrief-prop-*` folders behind; docs/testing/temp-leaks.md).
 pub fn remove_or_defer(path: &std::path::Path) {
-    match std::fs::remove_dir_all(path) {
+    let staged = FAIL_NEXT_REMOVAL.with(|f| f.replace(false));
+    let removed = if staged {
+        Err(std::io::Error::other("a removal failure staged by fail_next_removal"))
+    } else {
+        std::fs::remove_dir_all(path)
+    };
+    match removed {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => {

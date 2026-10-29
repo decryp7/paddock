@@ -794,22 +794,20 @@ impl Drop for TempDir {
 }
 
 /// The lone process of [`a_property_folder_whose_removal_fails_is_gone_when_its_process_ends`]: a property folder whose
-/// removal fails when it is dropped (made read-only, as a transient error would), made writable again, then the process
-/// ends normally. Does nothing in a normal run.
+/// removal fails when it is dropped (staged through [`crate::scratch::fail_next_removal`], as a transient error would),
+/// then the process ends normally. Does nothing in a normal run.
 #[test]
 #[cfg(unix)]
 fn a_property_folder_whose_removal_fails_is_gone_when_its_process_ends_in_a_lone_process() {
-    use std::os::unix::fs::PermissionsExt;
     if std::env::var_os("DEBRIEF_PROP_LEAK_PROBE").is_none() {
         return;
     }
     let dir = TempDir::new();
     let path = dir.0.clone();
     std::fs::write(path.join("a.clef"), b"x").unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o555)).unwrap();
+    crate::scratch::fail_next_removal();
     drop(dir);
     assert!(path.join("a.clef").exists(), "the removal failed, as staged");
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     println!("FOLDER {}", path.display());
 }
 
