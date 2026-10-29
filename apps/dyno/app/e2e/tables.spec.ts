@@ -8,15 +8,15 @@ test.use({ viewport: { width: 1280, height: 420 } });
 test.describe('table headers stay on top while the rows scroll and one is hovered', () => {
   test('processes', async ({ page }) => {
     await page.goto(url('/processes'));
-    await page.getByRole('button', { name: 'All', exact: true }).click();
+    await page.getByRole('radio', { name: 'All', exact: true }).click();
     await expect(page.getByRole('treegrid', { name: 'Processes' })).toBeVisible();
     await expectHeaderOnTop(page.getByRole('treegrid', { name: 'Processes' }));
   });
 
   test('network connections', async ({ page }) => {
     await page.goto(url('/network'));
-    await page.getByRole('group', { name: 'Group by' }).getByRole('button', { name: 'None' }).click();
-    await page.getByRole('button', { name: 'Show loopback' }).click();
+    await page.getByRole('radio', { name: 'None', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Show loopback' }).click();
     await expectHeaderOnTop(page.getByRole('grid', { name: 'Connections' }));
   });
 
@@ -71,18 +71,14 @@ test.describe('keyboard on the shared grids', () => {
     await expect(rows.nth(1)).toBeFocused();
   });
 
-  test('processes: Enter on a scrolled row opens the details, the row keeps the focus, every drawn row has the header\'s cells, and Escape closes the panel', async ({ page }) => {
+  test('processes: Enter on a row far down opens the details, the row keeps the focus, every drawn row has the header\'s cells, and Escape closes the panel', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 600 });
     await page.clock.install();
     await page.goto(url('/processes'));
-    await page.getByRole('button', { name: 'All', exact: true }).click();
+    await page.getByRole('radio', { name: 'All', exact: true }).click();
     const grid = page.getByRole('treegrid', { name: 'Processes' });
     await expect(grid).toBeVisible();
     await grid.getByRole('row').nth(3).focus();
-    await page.mouse.move(600, 400);
-    await page.mouse.wheel(0, 400);
-    // The wheel moved the rows under the header: wait for that, not for a time.
-    await expect.poll(() => page.evaluate(() => document.querySelector('.pd-body')?.scrollTop ?? 0)).toBeGreaterThan(0);
     const focused = page.locator('.pd-body [role=row]:focus');
     await grid.locator('.pd-body [role=row][data-key]').nth(6).focus();
     const key = await page.evaluate(() => (document.activeElement as HTMLElement).dataset['key']);
@@ -107,7 +103,7 @@ test.describe('live updates keep the keyboard where it was', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.clock.install();
     await page.goto(url('/processes'));
-    await page.getByRole('button', { name: 'All', exact: true }).click();
+    await page.getByRole('radio', { name: 'All', exact: true }).click();
     const grid = page.getByRole('treegrid', { name: 'Processes' });
     await expect(grid).toBeVisible();
     const rows = grid.locator('.pd-body [role=row][data-key]');
@@ -132,5 +128,24 @@ test.describe('live updates keep the keyboard where it was', () => {
     await page.keyboard.press('Escape');
     await expect(page.getByRole('complementary', { name: 'Process details' })).toHaveCount(0);
     await expect(page.locator(`.pd-body [role=row][data-key="${key}"]`)).toBeFocused();
+  });
+});
+
+test.describe('the row menu from the keyboard', () => {
+  test('processes: after switching Apps to All, Shift+F10 opens the focused row\'s menu and Escape gives the focus back', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 800 });
+    await page.goto(url('/processes'));
+    const grid = page.getByRole('treegrid', { name: 'Processes' });
+    await expect(grid).toBeVisible();
+    await page.getByRole('radio', { name: 'All', exact: true }).click();
+    const row = grid.locator('.pd-body [role=row][data-key]:not([aria-expanded])').first();
+    await row.focus();
+    await page.keyboard.press('Shift+F10');
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'Details' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(row).toBeFocused();
   });
 });

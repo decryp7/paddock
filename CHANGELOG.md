@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `pd-table`: one tooltip for a row's actions (`PdActionTip`), and the focus follows a reordered row
+- `PdActionTip` (`pdActionTip`, from `@decryp7/paddock-ui/table`; moved from Dyno's `dyActionTip`) puts one tooltip left of a cluster of icon buttons, named after the button the pointer or the keyboard is on. pd-table's row actions use it, so a tooltip never covers the next row's actions.
+- A focused row keeps the focus when the app puts the rows in another order (live values): the table asks for the row again by its key once the browser dropped the focus, whether or not the element is still there. A click outside the grid forgets the row.
+
+### `@decryp7/paddock-e2e`: `expectNoSilentClipping`
+- `textClippedWithoutEllipsis(page)`, `expectNoSilentClipping(page)` and the pure `isSilentlyClipped(probe)`: fail when an element cuts its own text (hidden overflow, narrower than the text) without `text-overflow: ellipsis`.
+
 ### Dyno: pages no longer clip at 900 and 1024 px
 - Benchmarks, Health, Extras (tabs and Maintenance) and Network wrap or shrink to the page instead of being cut by `.pd-page`'s `overflow-x: hidden`; the primary "Run benchmarks" button is always whole. `e2e/layout.spec.ts` now fails on any page content wider than the page, and on text cut without an ellipsis, at 900, 1024 and 1280 px, for every page and every Settings page.
 

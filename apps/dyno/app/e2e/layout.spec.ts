@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { dialogContracts, dialogWindowUrl } from '@decryp7/paddock-e2e';
+import { dialogContracts, dialogWindowUrl, textClippedWithoutEllipsis } from '@decryp7/paddock-e2e';
 
 /**
  * No table row of any Dyno page clips its own content at the window sizes the app supports (900 px is the window minimum in
@@ -22,28 +22,6 @@ async function clipped(page: Page): Promise<string[]> {
     }
     return out;
   }, ROWS);
-}
-
-/**
- * Text that is cut without an ellipsis (ER-21: this kind of bug kept coming back): any element that holds text of its own, hides
- * its overflow and is narrower than its text must say so with `text-overflow: ellipsis`. Nothing is "clipped quietly".
- */
-async function clippedWithoutEllipsis(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
-    const out: string[] = [];
-    for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
-      if (el.clientWidth === 0 || el.scrollWidth <= el.clientWidth + 1) continue;
-      if (!Array.from(el.childNodes).some((n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim() !== '')) continue;
-      const css = getComputedStyle(el);
-      if (css.overflowX === 'visible' || css.overflowX === 'auto' || css.overflowX === 'scroll') continue;
-      // The screen-reader-only text is clipped on purpose.
-      if (css.position === 'absolute' && el.clientWidth <= 1) continue;
-      if (css.textOverflow === 'ellipsis') continue;
-      const name = `${el.tagName.toLowerCase()}.${String(el.className).trim().split(/\s+/).join('.')}`;
-      out.push(`${name} "${(el.textContent ?? '').trim().slice(0, 40)}": text needs ${el.scrollWidth}px, has ${el.clientWidth}px, no ellipsis`);
-    }
-    return out;
-  });
 }
 
 /** A state of the app to measure: a page, or a page with its detail panel open, a second view or a tab. */
@@ -98,7 +76,7 @@ test.describe('rows never clip their content, and text that is cut says so with 
           await state.setup(page);
           await page.mouse.move(0, 0);
         }
-        const found = [...new Set([...(await clipped(page)), ...(await clippedWithoutEllipsis(page))])];
+        const found = [...new Set([...(await clipped(page)), ...(await textClippedWithoutEllipsis(page))])];
         if (found.length) problems[state.name] = found;
       }
       expect(problems).toEqual({});

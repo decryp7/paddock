@@ -1,10 +1,11 @@
-import { Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { MatTooltip } from '@angular/material/tooltip';
 import { By } from '@angular/platform-browser';
 import { PdActionTip } from './action-tip';
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdActionTip],
   template: `<span pdActionTip><button class="a" aria-label="Edit rule">e</button><button class="b" aria-label="Delete rule">d</button><i class="gap">-</i></span>`,
 })

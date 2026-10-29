@@ -34,3 +34,53 @@ export async function expectWithinWidth(page: Page, selector: string, width: num
 export async function resize(page: Page, width: number, height = 700): Promise<void> {
   await page.setViewportSize({ width, height });
 }
+
+/** What the check reads of one element (see {@link isSilentlyClipped}). */
+export interface ClipProbe {
+  readonly clientWidth: number;
+  readonly scrollWidth: number;
+  readonly hasOwnText: boolean;
+  readonly overflowX: string;
+  readonly textOverflow: string;
+  readonly positionAbsolute: boolean;
+}
+
+/**
+ * Whether an element cuts its own text without saying so (ER-21: text clipped without an ellipsis kept coming back): it holds
+ * text, hides its overflow, is narrower than its text and has no `text-overflow: ellipsis`. Screen-reader-only text (absolute, one
+ * pixel wide) and scrollable boxes are not clipped.
+ */
+export function isSilentlyClipped(p: ClipProbe): boolean {
+  if (p.clientWidth === 0 || p.scrollWidth <= p.clientWidth + 1 || !p.hasOwnText) return false;
+  if (p.overflowX === 'visible' || p.overflowX === 'auto' || p.overflowX === 'scroll') return false;
+  if (p.positionAbsolute && p.clientWidth <= 1) return false;
+  return p.textOverflow !== 'ellipsis';
+}
+
+/** Every element of the page that cuts its own text without an ellipsis, described for the failure message. */
+export function textClippedWithoutEllipsis(page: Page): Promise<string[]> {
+  return page.evaluate((decide) => {
+    const silently = new Function(`return ${decide}`)() as (p: ClipProbe) => boolean;
+    const out: string[] = [];
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+      const css = getComputedStyle(el);
+      const probe: ClipProbe = {
+        clientWidth: el.clientWidth,
+        scrollWidth: el.scrollWidth,
+        hasOwnText: Array.from(el.childNodes).some((n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim() !== ''),
+        overflowX: css.overflowX,
+        textOverflow: css.textOverflow,
+        positionAbsolute: css.position === 'absolute',
+      };
+      if (!silently(probe)) continue;
+      const name = `${el.tagName.toLowerCase()}.${String(el.className).trim().split(/\s+/).join('.')}`;
+      out.push(`${name} "${(el.textContent ?? '').trim().slice(0, 40)}": text needs ${el.scrollWidth}px, has ${el.clientWidth}px, no ellipsis`);
+    }
+    return out;
+  }, isSilentlyClipped.toString());
+}
+
+/** Fails when any element of the page cuts its own text without an ellipsis. */
+export async function expectNoSilentClipping(page: Page, label = ''): Promise<void> {
+  expect(await textClippedWithoutEllipsis(page), `text cut without an ellipsis${label ? ` (${label})` : ''}`).toEqual([]);
+}

@@ -456,7 +456,7 @@ test.describe('issues', () => {
 
   test('a row\'s context menu opens with Shift+F10, reaches every action, and Escape gives the focus back to the row', async ({ page }) => {
     await page.goto(url('/issues'));
-    const table = page.getByRole('table', { name: 'Issues', exact: true });
+    const table = page.getByRole('treegrid', { name: 'Issues', exact: true });
     const row = table.getByRole('row', { name: /Safari/ }).first();
     await row.focus();
     await page.keyboard.press('Shift+F10');
@@ -477,7 +477,7 @@ test.describe('issues', () => {
   test('a right-click right after hovering a row leaves no tooltip behind, and the first Escape closes the menu', async ({ page }) => {
     await page.clock.install();
     await page.goto(url('/issues'));
-    const table = page.getByRole('table', { name: 'Issues', exact: true });
+    const table = page.getByRole('treegrid', { name: 'Issues', exact: true });
     const row = table.getByRole('row', { name: /Safari/ }).first();
     await row.hover(); // the row's centre is the program-name cell
     await row.click({ button: 'right' }); // the same point, before any tooltip has shown
