@@ -69,11 +69,16 @@ fn main() {
     let budget = |name, limit, stat| Budget { name, limit, stat };
     let runs = 200;
     let nms_s = measure(&clock, 20, runs, || drop(black_box(nms(black_box(&dets), iou)))).expect("runs > 0");
-    let grid_s = measure(&clock, 20, runs, || drop(black_box(tile_grid(3840, 2160, spec)))).expect("runs > 0");
+    let grid_s = measure(&clock, 20, runs, || {
+        drop(black_box(tile_grid(black_box(3840), black_box(2160), spec)))
+    })
+    .expect("runs > 0");
     let map_s = measure(&clock, 20, runs, || {
-        for d in &dets {
-            black_box(map.rect(d.rect));
+        let mut acc = 0.0;
+        for d in black_box(&dets) {
+            acc += map.rect(d.rect).x();
         }
+        black_box(acc);
     })
     .expect("runs > 0");
 
