@@ -24,6 +24,7 @@ function result(over: Partial<FinderResult> = {}): FinderResult {
       { bytesEach: 50 * MB, wastedBytes: 50 * MB, files: [f('d2a', '/p/m.onnx', 50, 1), f('d2b', '/p/x/m.onnx', 50, 2)] },
     ],
     scanned: 1200,
+    unreadable: 0,
     limit: null,
     wastedBytes: 250 * MB,
     ...over,
@@ -68,5 +69,7 @@ describe('files model', () => {
     expect(scanSentence(result())).toBe('Looked at 1,200 files.');
     const limit = { limit: 'files' as const, message: 'Stopped after 500000 files and folders. Choose a smaller folder to see everything in it.' };
     expect(scanSentence(result({ scanned: 1, limit }))).toBe(`Looked at 1 file before a limit. ${limit.message}`);
+    expect(scanSentence(result({ unreadable: 1 }))).toBe('Looked at 1,200 files. 1 folder could not be read and was left out.');
+    expect(scanSentence(result({ unreadable: 3 }))).toBe('Looked at 1,200 files. 3 folders could not be read and were left out.');
   });
 });

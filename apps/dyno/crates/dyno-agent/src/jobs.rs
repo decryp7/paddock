@@ -229,7 +229,11 @@ fn execute(shared: &Arc<Shared>, ctx: &JobContext, spec: JobSpec) -> Result<JobO
     match spec {
         JobSpec::FindFiles { query } => {
             let id = shared.extras.next_scan_id(now());
-            crate::extras::finder::run(ctx, &query, &id, crate::extras::finder::Limits::default()).map(|r| JobOutput::Finder(Box::new(r)))
+            // How many threads may read the folder at once depends on what it lives on: more on an SSD, one on a disk that spins.
+            let (location, rotational, cores) = shared.disk.storage_of(std::path::Path::new(&query.folder));
+            let workers = Workers::new(dyno_core::extras::files::finder_threads(&location, rotational, cores));
+            crate::extras::finder::run(ctx, &query, &id, crate::extras::finder::Limits::default(), workers)
+                .map(|r| JobOutput::Finder(Box::new(r)))
         }
         JobSpec::RescanIssues { query } => {
             shared.issues.scan(shared, Some(ctx))?;

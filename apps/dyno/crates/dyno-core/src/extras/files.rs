@@ -18,6 +18,17 @@ pub const MAX_DEPTH: u32 = 48;
 /// Most bytes the scan reads while comparing the content of files that could be duplicates.
 pub const MAX_HASH_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 
+/// How many threads may read the chosen folder at once (ER-20, rule 51): 4 to 8 on an SSD (more cores, more threads, as the work
+/// is waiting for the disk), one on a spinning disk, two per server on the network. A drive whose kind is unknown is treated as
+/// an SSD.
+pub fn finder_threads(location: &crate::disk::volume::VolumeLocation, rotational: Option<bool>, cores: usize) -> usize {
+    match location {
+        crate::disk::volume::VolumeLocation::Network { .. } => 2,
+        _ if rotational == Some(true) => 1,
+        _ => cores.saturating_sub(1).clamp(4, 8),
+    }
+}
+
 /// Which limit stopped a scan early. The scan still answers with what it found so far.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -142,6 +153,8 @@ pub struct FinderResult {
     pub duplicates: Vec<DuplicateGroup>,
     /// Files looked at.
     pub scanned: u32,
+    /// Folders the walk could not read (no permission, a share that went away, a folder removed meanwhile); they are left out.
+    pub unreadable: u32,
     /// The limit that stopped the scan early, when one did; more exists.
     pub limit: Option<LimitHit>,
     /// Total wasted by the listed duplicate groups.

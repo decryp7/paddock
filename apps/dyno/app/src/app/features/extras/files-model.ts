@@ -68,5 +68,6 @@ export function middleEllipsis(text: string, max: number): string {
 /** The sentence under a finished search: how many files were looked at, then the engine's own words when a limit stopped it early. */
 export function scanSentence(r: FinderResult): string {
   const n = `Looked at ${plural(r.scanned, 'file')}`;
-  return r.limit ? `${n} before a limit. ${r.limit.message}` : `${n}.`;
+  const unread = r.unreadable > 0 ? ` ${plural(r.unreadable, 'folder')} could not be read and ${r.unreadable === 1 ? 'was' : 'were'} left out.` : '';
+  return (r.limit ? `${n} before a limit. ${r.limit.message}` : `${n}.`) + unread;
 }

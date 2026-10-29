@@ -1878,6 +1878,8 @@ export interface FinderResult {
   large: FoundFile[];
   duplicates: DuplicateGroup[];
   scanned: number;
+  /** Folders the walk could not read (no permission, a share that went away); they are left out. */
+  unreadable: number;
   /** The limit that stopped the scan early, with the sentence to show; `null` when it read everything. */
   limit: FinderLimitHit | null;
   wastedBytes: number;

@@ -715,3 +715,14 @@ One day of CI went on runs for superseded branch heads, the same head dispatched
 into another branch, and global triggers in the affected planner that made every run build everything (fixed in
 b618b5c97). **Rule:** cancel older queued runs before dispatching, dispatch once after the last review fix, give merged
 branches and docs-only changes no CI, and keep branch runs on the affected plan (rule 50).
+
+## Long work in an agent needs the shell's job mechanism, not a poll of our own (2026-10-29, Dyno)
+Dyno's first jobs (6c73efd75) polled the agent for their status with a runner of their own: the shell's Jobs view stayed empty,
+the pages had two mechanisms, every UI request still had a 15 s timer, and a log read could be cancelled only between logs.
+**Rule:** work that runs in another process pushes its `paddock_jobs::wire::WireSnapshot`s, the shell relays them as
+`paddock://jobs`, and the pages follow with `JobsStore` and `JobFollow`; the UI has no timer at all (the shared
+`uiTimeoutProblems` check runs over the app's sources as a test). A tool that streams its output is read line by line with
+`OnCancel` killing the child, so Cancel does not wait for the next line, and the reading happens on a thread of its own: a
+killed shell's own children keep its pipe open. Anything that waits for another read waits on a `Condvar` that Cancel also wakes.
+**Also:** a store that every dialog window shares must not ask for the shell's jobs store at construction (it sends a request the
+dialog's contract may not declare); resolve it when a job starts.

@@ -380,6 +380,19 @@ impl DiskCentre {
         }
     }
 
+    /// What kind of storage holds `path` and whether it spins, by the volume list as last asked for (internal and unknown when no
+    /// volume holds it), with the number of logical cores: what decides how many threads may read it at once.
+    pub fn storage_of(&self, path: &Path) -> (VolumeLocation, Option<bool>, usize) {
+        let home = self
+            .listed(false)
+            .into_iter()
+            .filter(|l| path.starts_with(&l.root) || path.starts_with(&l.volume.mount))
+            .max_by_key(|l| l.volume.mount.len());
+        home.map_or((VolumeLocation::Internal, None, self.cores), |l| {
+            (l.volume.location, l.volume.rotational, self.cores)
+        })
+    }
+
     /// The host a path lives on, by the volume list as last asked for (this computer when no volume holds it).
     fn folder_host(&self, path: &str) -> String {
         self.listed(false)
