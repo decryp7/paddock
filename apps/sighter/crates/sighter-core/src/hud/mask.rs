@@ -88,37 +88,42 @@ pub fn marker(name: &SecretName) -> String {
     format!("•••• secret {}", name.as_str())
 }
 
-/// Text the HUD may show: a literal (already masked) or a secret reference. The HUD, the trace and the sidecar carry
-/// nothing else, so a raw secret has no path to the screen.
+/// Text the HUD may show: a literal that went through [`mask`] or a secret reference. The HUD, the trace and the sidecar
+/// carry nothing else, and the only public way to make a literal is [`mask`] (with no secrets it is a plain cut), so a raw
+/// secret has no path to the screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HudText {
-    /// Plain text; at most [`MAX_HUD_TEXT`] characters.
+pub struct HudText(Repr);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Repr {
+    /// At most [`MAX_HUD_TEXT`] characters, cut when built.
     Plain(String),
     /// A secret, shown as its marker.
     Secret(SecretName),
 }
 
 impl HudText {
-    /// Plain text, cut to [`MAX_HUD_TEXT`] characters. Text that may contain secrets must go through [`mask`].
-    pub fn plain(s: &str) -> Self {
-        Self::Plain(cut(s))
+    /// Plain text, cut to [`MAX_HUD_TEXT`] characters. Crate-private: it does **not** mask. Callers outside the crate go
+    /// through [`mask`].
+    pub(crate) fn plain(s: &str) -> Self {
+        Self(Repr::Plain(cut(s)))
     }
     /// A secret reference.
     pub fn secret(name: SecretName) -> Self {
-        Self::Secret(name)
+        Self(Repr::Secret(name))
     }
     /// What to draw.
     pub fn render(&self) -> String {
-        match self {
-            Self::Plain(s) => s.clone(),
-            Self::Secret(n) => marker(n),
+        match &self.0 {
+            Repr::Plain(s) => s.clone(),
+            Repr::Secret(n) => marker(n),
         }
     }
 }
 
 impl From<&Secret> for HudText {
     fn from(s: &Secret) -> Self {
-        Self::Secret(s.name.clone())
+        Self::secret(s.name.clone())
     }
 }
 
@@ -131,9 +136,9 @@ enum Wire {
 
 impl Serialize for HudText {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::Plain(t) => Wire::Plain(t.clone()),
-            Self::Secret(n) => Wire::Secret(n.clone()),
+        match &self.0 {
+            Repr::Plain(t) => Wire::Plain(t.clone()),
+            Repr::Secret(n) => Wire::Secret(n.clone()),
         }
         .serialize(s)
     }
@@ -142,7 +147,7 @@ impl<'de> Deserialize<'de> for HudText {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         Ok(match Wire::deserialize(d)? {
             Wire::Plain(t) => HudText::plain(&t),
-            Wire::Secret(n) => HudText::Secret(n),
+            Wire::Secret(n) => HudText::secret(n),
         })
     }
 }
@@ -156,32 +161,43 @@ fn cut(s: &str) -> String {
     out
 }
 
-/// Replaces every occurrence of every secret's value in `text` with its marker, in one left-to-right pass that prefers
-/// the longest value at each position, so overlapping secrets leave no readable part of the longer one and replaced
-/// text is never rescanned. Matching is exact (case-sensitive): a secret the screen shows in another form (encoded,
-/// re-cased) is the job of the redaction regions, not of this function.
+/// Replaces every occurrence of every secret's value in `text` with a marker. All match ranges of all secrets are found in
+/// the **original** text (overlapping and nested matches included), overlapping ranges are merged, and each merged range
+/// becomes one marker naming every secret it covers (`•••• secret A, B`, sorted by name), so no readable part of any secret
+/// survives, however the secrets overlap. Replaced text is never rescanned. Matching is exact (case-sensitive): a secret
+/// the screen shows in another form (encoded, re-cased) is the job of the redaction regions, not of this function.
 pub fn mask(text: &str, secrets: &[Secret]) -> HudText {
-    // The scan covers the whole input; only the result is cut, so a secret straddling the cut cannot survive.
-    let mut out = String::with_capacity(text.len());
-    let mut i = 0;
-    while i < text.len() {
+    // (start, end, secret index) for every occurrence, found on character boundaries of the original text.
+    let mut ranges: Vec<(usize, usize, usize)> = Vec::new();
+    for (i, _) in text.char_indices() {
         let rest = &text[i..];
-        match secrets
-            .iter()
-            .filter(|s| rest.starts_with(s.value.as_str()))
-            .max_by_key(|s| s.value.len())
-        {
-            Some(s) => {
-                out.push_str(&marker(&s.name));
-                i += s.value.len();
-            }
-            None => {
-                let c = rest.chars().next().unwrap_or(' ');
-                out.push(c);
-                i += c.len_utf8();
+        for (k, s) in secrets.iter().enumerate() {
+            if rest.starts_with(s.value.as_str()) {
+                ranges.push((i, i + s.value.len(), k));
             }
         }
     }
+    // `ranges` is sorted by start already; merge the overlapping ones.
+    let mut out = String::with_capacity(text.len());
+    let mut pos = 0;
+    let mut k = 0;
+    while k < ranges.len() {
+        let (start, mut end, first) = ranges[k];
+        let mut names = vec![first];
+        k += 1;
+        while k < ranges.len() && ranges[k].0 < end {
+            end = end.max(ranges[k].1);
+            names.push(ranges[k].2);
+            k += 1;
+        }
+        out.push_str(&text[pos..start]);
+        let mut list: Vec<&str> = names.iter().map(|&n| secrets[n].name.as_str()).collect();
+        list.sort_unstable();
+        list.dedup();
+        out.push_str(&format!("•••• secret {}", list.join(", ")));
+        pos = end;
+    }
+    out.push_str(&text[pos..]);
     HudText::plain(&out)
 }
 
@@ -214,9 +230,19 @@ mod tests {
     }
 
     #[test]
-    fn the_longest_overlapping_secret_wins() {
-        let secrets = [secret("SHORT", "abc"), secret("LONG", "abcdef")];
-        assert_eq!(mask("xabcdefx", &secrets).render(), "x•••• secret LONGx");
+    fn overlapping_secrets_leave_nothing_readable() {
+        // Regression: the greedy scan masked "xab" and then leaked "cdef" of the longer secret.
+        let secrets = [secret("A", "xab"), secret("B", "abcdef")];
+        assert_eq!(mask("xabcdef", &secrets).render(), "•••• secret A, B");
+        // Nested: one secret inside another.
+        let nested = [secret("SHORT", "abc"), secret("LONG", "xabcdefx")];
+        assert_eq!(mask("1xabcdefx2", &nested).render(), "1•••• secret LONG, SHORT2");
+        // Touching but not overlapping secrets keep their own markers.
+        let touching = [secret("A", "ab"), secret("B", "cd")];
+        assert_eq!(mask("abcd", &touching).render(), "•••• secret A•••• secret B");
+        // A secret that overlaps itself ("aaa" in "aaaaa") is one range.
+        assert_eq!(mask("aaaaa!", &[secret("S", "aaa")]).render(), "•••• secret S!");
+        assert_eq!(mask("no secret here", &[]).render(), "no secret here");
     }
 
     #[test]
@@ -265,6 +291,34 @@ mod tests {
                 let shown = format!("{sec:?}");
                 let rendered = HudText::from(sec).render();
                 prop_assert!(values.iter().all(|v| !shown.contains(v.as_str()) && !rendered.contains(v.as_str())));
+            }
+        }
+
+        /// Overlapping and nested secrets built from substrings of the text: every character a secret covers disappears,
+        /// every other character stays, whatever the overlaps (markers contain letters and spaces, the text only digits).
+        #[test]
+        fn overlapping_secrets_cover_exactly_their_ranges(
+            text in "[0-3]{1,24}",
+            picks in prop::collection::vec((0usize..24, 1usize..8), 1..5),
+        ) {
+            let secrets: Vec<Secret> = picks.iter().enumerate().map(|(i, (start, len))| {
+                let start = start % text.len();
+                let end = (start + len).min(text.len());
+                secret(&format!("S{}", (b'A' + i as u8) as char), &text[start..end])
+            }).collect();
+            let out = mask(&text, &secrets).render();
+            let mut covered = vec![false; text.len()];
+            for s in &secrets {
+                let v = s.value.as_str();
+                for i in 0..=text.len() - v.len() {
+                    if text[i..].starts_with(v) { covered[i..i + v.len()].iter_mut().for_each(|c| *c = true); }
+                }
+            }
+            let kept: String = text.chars().zip(&covered).filter(|(_, c)| !**c).map(|(ch, _)| ch).collect();
+            let digits: String = out.chars().filter(char::is_ascii_digit).collect();
+            prop_assert_eq!(digits, kept);
+            for s in &secrets {
+                prop_assert!(!out.contains(s.value.as_str()));
             }
         }
 

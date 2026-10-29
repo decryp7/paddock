@@ -436,6 +436,19 @@ mod tests {
     }
 
     #[test]
+    fn identity_origin_equality_and_debug() {
+        let id = Map::<Logical, RemotePx>::identity();
+        let p = Pt::<Logical>::new(3.0, -4.0).unwrap();
+        assert_eq!(id.pt(p).x(), 3.0);
+        assert_eq!(Pt::<Logical>::from_origin(), Pt::new(0.0, 0.0).unwrap());
+        assert_eq!(Scale::unit(), Scale::uniform(1.0).unwrap());
+        assert_eq!(id, id.inverse().inverse());
+        assert_ne!(id, Map::new(Scale::uniform(2.0).unwrap(), 0.0, 0.0).unwrap());
+        assert!(format!("{id:?}").starts_with("Map { sx: 1.0"));
+        assert_eq!(id.clone(), id);
+    }
+
+    #[test]
     fn map_composes_and_inverts() {
         let m: Map<Logical, RemotePx> = Map::new(Scale::uniform(1.5).unwrap(), 0.0, 0.0).unwrap();
         let n: Map<RemotePx, CapturePx> = Map::new(Scale::new(0.75, 0.5).unwrap(), 10.0, 20.0).unwrap();

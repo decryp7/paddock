@@ -271,9 +271,13 @@ impl Layout {
     pub fn display(&self, id: u32) -> Result<&Display, ChainError> {
         self.displays.iter().find(|d| d.id == id).ok_or(ChainError::UnknownDisplay(id))
     }
-    /// The display holding a host point, if any (edges belong to the first display in layout order that has them).
+    /// The display holding a host point, if any. Displays are half-open, `[left, right) x [top, bottom)`: the first
+    /// pixel of the next display, not the last of this one, owns the shared edge.
     pub fn display_at(&self, p: Pt<HostInput>) -> Option<&Display> {
-        self.displays.iter().find(|d| d.extent(self.input).contains_pt(p))
+        self.displays.iter().find(|d| {
+            let e = d.extent(self.input);
+            p.x() >= e.x() && p.x() < e.right() && p.y() >= e.y() && p.y() < e.bottom()
+        })
     }
     /// The chain of a whole-display capture: `c = 0`, `s = 1`, `r = h`, `o` = the display's origin.
     pub fn chain_for_display(&self, id: u32) -> Result<Chain, ChainError> {
@@ -407,7 +411,7 @@ mod tests {
         let m = mac_layout();
         let c3 = m.chain_for_display(3).unwrap();
         let bottom_right = c3.logical_to_input().pt(pt(2560.0 / 1.5, 1440.0 / 1.5));
-        assert!(near(bottom_right.x(), 2560.0 / 1.5) && near(bottom_right.y(), 0.0 - 0.0 + (-960.0 + 960.0)));
+        assert!(near(bottom_right.x(), 2560.0 / 1.5) && near(bottom_right.y(), 0.0));
         assert_eq!(m.chain_for_display(9), Err(ChainError::UnknownDisplay(9)));
     }
 
@@ -426,6 +430,13 @@ mod tests {
         assert_eq!(w.display_of_box(&r(1910.0, 1190.0, 5.0, 20.0)), Err(ChainError::PartlyOffScreen(1)));
         assert_eq!(w.display_at(pt(2.0, 2.0)).map(Display::id), Some(1));
         assert!(w.display_at(pt(-5.0, -5.0)).is_none());
+        // Half-open: x = 1920 is display 2's first pixel column, x = 1919 display 1's last; y = 0 belongs to displays 1 and
+        // 2 (not to display 3 above, whose bottom edge is y = 0).
+        assert_eq!(w.display_at(pt(1919.0, 5.0)).map(Display::id), Some(1));
+        assert_eq!(w.display_at(pt(1920.0, 5.0)).map(Display::id), Some(2));
+        assert_eq!(w.display_at(pt(5.0, 0.0)).map(Display::id), Some(1));
+        assert_eq!(w.display_at(pt(5.0, -1.0)).map(Display::id), Some(3));
+        assert!(w.display_at(pt(1920.0 + 3840.0, 5.0)).is_none());
     }
 
     #[test]
@@ -460,6 +471,21 @@ mod tests {
             (InputSpace::MacPoints, 1, (100, 100))
         );
         assert_eq!(l.display(1).unwrap().scale(), sc(1.0));
+    }
+
+    #[test]
+    fn a_shrunk_viewer_cannot_click_more_exactly_than_its_own_pixels() {
+        // s = 0.25: one host pixel is four remote pixels, so rounding to a host pixel moves the click by up to two.
+        let c = viewer(0.25, 1.0, 1.0, InputSpace::WindowsPixels);
+        let to_input = c.remote_to_capture().then(&c.capture_to_input());
+        let worst = (0..400)
+            .map(|i| {
+                let remote = pt::<RemotePx>(f64::from(i), 0.0);
+                let (px, _) = nearest_pixel(to_input.pt(remote));
+                (to_input.inverse().pt(pt::<HostInput>(px as f64, 0.0)).x() - remote.x()).abs()
+            })
+            .fold(0.0, f64::max);
+        assert!(worst > 1.0 && worst <= 0.5 / 0.25 + 1e-9, "{worst}");
     }
 
     #[test]
@@ -529,11 +555,13 @@ mod tests {
             prop_assert!(near(input.w(), w * k));
         }
 
-        /// A click on a whole remote pixel, rounded to a whole host pixel (Windows), comes back within one pixel of the
-        /// finer grid: one remote pixel, or one host pixel when the host grid is the finer one.
+        /// A click on a whole remote pixel, rounded to a whole host pixel (Windows), comes back within one remote pixel.
+        /// That holds for a viewer scale `s >= 0.5`: half a host pixel is `0.5 / s` remote pixels, at most one. Below
+        /// `s = 0.5` a host pixel spans more than two remote pixels and no click can be that exact (the error is `0.5 / s`,
+        /// checked in `a_shrunk_viewer_cannot_click_more_exactly_than_its_own_pixels`).
         #[test]
         fn rounded_input_lands_within_one_pixel_of_the_finer_grid(
-            s in arb_scale_s(), r in arb_scale_r(), h in arb_scale_h(),
+            s in prop_oneof![Just(0.5), Just(1.0), 0.5f64..2.0], r in arb_scale_r(), h in arb_scale_h(),
             ox in -2000i32..2000, oy in -2000i32..2000, rx in 0u32..4000, ry in 0u32..4000,
         ) {
             let c = Chain::new(ChainParams {
@@ -545,7 +573,7 @@ mod tests {
             let to_input = c.remote_to_capture().then(&c.capture_to_input());
             let (px, py) = nearest_pixel(to_input.pt(remote));
             let back = to_input.inverse().pt(pt(px as f64, py as f64));
-            let tolerance = 1.0f64.max(0.5 / s) + 1e-6; // half a host pixel is 0.5 / s remote pixels
+            let tolerance = 1.0 + 1e-6;
             prop_assert!((back.x() - remote.x()).abs() <= tolerance && (back.y() - remote.y()).abs() <= tolerance);
             // Host -> remote -> host: a whole host pixel returns exactly (floating point), hence within one pixel.
             let host = pt::<HostInput>(px as f64, py as f64);

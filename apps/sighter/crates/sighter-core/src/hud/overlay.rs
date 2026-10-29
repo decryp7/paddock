@@ -72,9 +72,10 @@ impl BandThresholds {
         }
         Ok(Self { high, medium })
     }
-    /// The band of a score.
+    /// The band of a score, taken on the **displayed** value (the score rounded to hundredths, as [`label`] shows it), so
+    /// a label can never read `0.80 medium` for a score of 0.7999 or `0.50 low` for 0.4999.
     pub fn band(&self, score: Score) -> Band {
-        match score.get() {
+        match f64::from(hundredths(score)) / 100.0 {
             s if s >= self.high => Band::High,
             s if s >= self.medium => Band::Medium,
             _ => Band::Low,
@@ -123,12 +124,18 @@ impl ClassNames {
     }
 }
 
+/// The score rounded to whole hundredths (0 to 100): the one value a label shows, in either style.
+fn hundredths(score: Score) -> u32 {
+    (score.get() * 100.0).round() as u32
+}
+
 /// The label text: `Button 0.92 high`, or `Button 92% high`, with `, target` for the chosen box. The band is always
-/// spelled out.
+/// spelled out. Both styles show the score rounded to hundredths, formatted from integers (no float formatting ties).
 pub fn label(name: &str, score: Score, band: Band, style: ScoreStyle, chosen: bool) -> String {
+    let h = hundredths(score);
     let value = match style {
-        ScoreStyle::Decimal => format!("{:.2}", score.get()),
-        ScoreStyle::Percent => format!("{:.0}%", score.get() * 100.0),
+        ScoreStyle::Decimal => format!("{}.{:02}", h / 100, h % 100),
+        ScoreStyle::Percent => format!("{h}%"),
     };
     let target = if chosen { ", target" } else { "" };
     format!("{name} {value} {}{target}", band.text())
@@ -282,6 +289,25 @@ mod tests {
         );
     }
 
+    /// Regression: a band on the raw score next to a rounded label read "0.80 medium" for 0.7999.
+    #[test]
+    fn the_band_follows_the_displayed_value() {
+        let t = BandThresholds::default();
+        for (raw, band, shown) in [
+            (0.7999, Band::High, "0.80"),
+            (0.7949, Band::Medium, "0.79"),
+            (0.4999, Band::Medium, "0.50"),
+            (0.4949, Band::Low, "0.49"),
+        ] {
+            let sc = s(raw);
+            assert_eq!(t.band(sc), band, "{raw}");
+            assert!(label("X", sc, t.band(sc), ScoreStyle::Decimal, false).contains(shown), "{raw}");
+        }
+        assert_eq!(label("X", s(0.125), Band::Medium, ScoreStyle::Decimal, false), "X 0.13 medium");
+        assert_eq!(label("X", s(1.0), Band::High, ScoreStyle::Decimal, false), "X 1.00 high");
+        assert_eq!(label("X", s(0.7999), Band::High, ScoreStyle::Percent, false), "X 80% high");
+    }
+
     #[test]
     fn labels_carry_name_score_band_and_target() {
         assert_eq!(label("Button", s(0.92), Band::High, ScoreStyle::Decimal, false), "Button 0.92 high");
@@ -377,8 +403,11 @@ mod tests {
                 prop_assert!(!it.masked || it.text.is_none());
                 prop_assert_eq!(it.label.contains("target"), it.chosen);
             }
-            // The label never carries OCR text, masked or not: it is class, score, band and target only.
-            prop_assert!(items.iter().all(|it| it.label.split(' ').count() >= 3));
+            // The label is exactly class, score, band and target: it never carries OCR text, masked or not.
+            for (it, i) in items.iter().zip(&inputs) {
+                let expected = label(&names.name(i.detection.class), i.detection.score, it.band, ctx.style, i.chosen);
+                prop_assert_eq!(&it.label, &expected);
+            }
         }
 
         /// Bands are monotone in the score.

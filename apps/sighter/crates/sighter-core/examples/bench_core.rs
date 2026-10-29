@@ -1,22 +1,27 @@
 //! Benchmarks the pure core on synthetic data (no model needed) and prints a rule 48 results block.
 //!
-//! `SIGHTER_BENCH_LOAD=<1-minute load> SIGHTER_BENCH_COMMIT=<sha> SIGHTER_BENCH_MACHINE=<text> \
+//! Environment (all but the load are optional text for the block): `SIGHTER_BENCH_LOAD` (required: the current 1-minute
+//! load, at most 25), `SIGHTER_BENCH_COMMIT`, `SIGHTER_BENCH_MACHINE`, `SIGHTER_BENCH_DATE`, `SIGHTER_BENCH_BRANCH`.
+//!
+//! `SIGHTER_BENCH_LOAD=<load> SIGHTER_BENCH_COMMIT=<sha> SIGHTER_BENCH_MACHINE=<text> SIGHTER_BENCH_DATE=<date> \
 //!  nice -n 10 cargo run --release -p sighter-core --example bench_core`
 //!
-//! The run refuses to start above the load limit, because a number taken on a busy machine is only an indication.
+//! The run refuses to start above the load limit, because a number taken on a busy machine is only an indication. None of
+//! the rows has a budget of its own yet (the budgets are model latencies), so each is an indication.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use sighter_core::bench::{Budget, Clock, Row, RunInfo, Stat, SystemClock, budgets, load_allows_run, measure, render_results_block};
+#[path = "common/mod.rs"]
+mod common;
+
+use common::{env, footprint, stats};
+use paddock_bench::{Clock, SystemClock};
+use sighter_core::bench::{ResultRow, RunInfo, budgets, format_duration, load_allows_run, render_results_block, time_runs};
 use sighter_core::chain::{Chain, InputSpace};
 use sighter_core::detect::{ClassId, Detection, Fraction, Score, nms};
 use sighter_core::geometry::{Logical, Pt, Rect, Scale};
 use sighter_core::tiling::{GridSpec, tile_grid};
 use std::hint::black_box;
-
-fn env(name: &str, default: &str) -> String {
-    std::env::var(name).unwrap_or_else(|_| default.to_owned())
-}
 
 /// A deterministic synthetic detection set (a linear congruential generator, no randomness crate).
 fn synthetic(n: usize) -> Vec<Detection> {
@@ -54,11 +59,13 @@ fn main() {
         std::process::exit(2);
     }
     let clock = SystemClock::new();
+    let now = || clock.now();
     let dets = synthetic(500);
     let iou = Fraction::new(0.5).expect("constant threshold");
+    let origin = Pt::new(0.0, 0.0).expect("origin");
     let chain = Chain::local(
         Scale::uniform(2.0).expect("constant scale"),
-        Pt::new(0.0, 0.0).expect("origin"),
+        origin,
         Pt::new(0.0, 0.0).expect("origin"),
         InputSpace::MacPoints,
     )
@@ -66,15 +73,13 @@ fn main() {
     let map = chain.logical_to_input();
     let spec = GridSpec::default_640();
 
-    // Generous guard budgets: this skeleton records numbers, it does not gate the core (the gates are model latencies).
-    let budget = |name, limit, stat| Budget { name, limit, stat };
     let runs = 200;
-    let nms_s = measure(&clock, 20, runs, || drop(black_box(nms(black_box(&dets), iou)))).expect("runs > 0");
-    let grid_s = measure(&clock, 20, runs, || {
+    let nms_s = time_runs(&now, 20, runs, || drop(black_box(nms(black_box(&dets), iou)))).expect("runs > 0");
+    let grid_s = time_runs(&now, 20, runs, || {
         drop(black_box(tile_grid(black_box(3840), black_box(2160), spec)))
     })
     .expect("runs > 0");
-    let map_s = measure(&clock, 20, runs, || {
+    let map_s = time_runs(&now, 20, runs, || {
         let mut acc = 0.0;
         for d in black_box(&dets) {
             acc += map.rect(d.rect).x();
@@ -84,21 +89,10 @@ fn main() {
     .expect("runs > 0");
 
     let rows = [
-        Row::latency(
-            "NMS, 500 boxes",
-            &nms_s,
-            &budget("locate target CPU", budgets::LOCATE_TARGET_CPU_P95, Stat::P95),
-        ),
-        Row::latency(
-            "Tile grid, 3840 x 2160",
-            &grid_s,
-            &budget("HUD frame", budgets::HUD_FRAME_OVERHEAD, Stat::P95),
-        ),
-        Row::latency(
-            "Chain map, 500 boxes",
-            &map_s,
-            &budget("HUD frame", budgets::HUD_FRAME_OVERHEAD, Stat::P95),
-        ),
+        ResultRow::indication("NMS, 500 boxes, median", stats(&nms_s).median),
+        ResultRow::indication("NMS, 500 boxes, p95", stats(&nms_s).p95),
+        ResultRow::indication("Tile grid, 3840 x 2160, median", stats(&grid_s).median),
+        ResultRow::indication("Chain map, 500 boxes, median", stats(&map_s).median),
     ];
     let info = RunInfo {
         date: env("SIGHTER_BENCH_DATE", "YYYY-MM-DD"),
@@ -109,12 +103,12 @@ fn main() {
         load: format!("1-minute load {load} at start"),
         build: "release; no model, no allocator override".into(),
         corpus: "synthetic: 500 boxes from a fixed-seed generator in the example; a 3840 x 2160 grid".into(),
-        command: "cargo run --release -p sighter-core --example bench_core".into(),
-        runs: format!("single series, 20 warm-up and {runs} timed runs; median and p95 (sorted[floor(p x (n - 1))])"),
-        memory_measure: "not measured".into(),
+        command: "SIGHTER_BENCH_LOAD=<load> nice -n 10 cargo run --release -p sighter-core --example bench_core".into(),
+        runs: format!("single series, 20 warm-up and {runs} timed runs; median and nearest-rank p95 (paddock-bench `summarize`)"),
+        memory_measure: footprint(),
         notes: format!(
-            "wall time {}; indicative only unless the load is below about 12",
-            sighter_core::bench::format_duration(clock.now())
+            "wall time {}; no budget applies to these rows; indicative unless the load is below about 12",
+            format_duration(clock.now())
         ),
     };
     print!("{}", render_results_block(&info, &rows));

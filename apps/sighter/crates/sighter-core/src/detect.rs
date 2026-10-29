@@ -17,6 +17,8 @@ pub const HINT_CONTAINMENT: f64 = 0.5;
 pub const HINT_MARGIN: f64 = 8.0;
 /// Largest accepted hint margin.
 pub const MAX_HINT_MARGIN: f64 = 256.0;
+/// Longest part of an untrusted wire tag echoed in an error.
+pub const MAX_TAG_ECHO: usize = 64;
 /// Longest adapter name kept in a hint.
 pub const MAX_ADAPTER_NAME: usize = 64;
 
@@ -40,6 +42,9 @@ pub enum DetectError {
     /// A detection names a tile the grid does not have.
     #[error("a detection names tile {0}, which the tile grid does not have")]
     UnknownTile(usize),
+    /// A hint arrived without a DPI awareness, or with an unknown one.
+    #[error("a hint needs the adapter's DPI awareness: per-monitor-v2, per-monitor, system or unaware (got {0:?})")]
+    UnknownDpiAwareness(Option<String>),
     /// A hint arrived without a coordinate space tag, or with an unknown one.
     #[error("a hint needs a space tag: host-input, remote-pixels, capture-pixels or logical (got {0:?})")]
     UnknownHintSpace(Option<String>),
@@ -257,7 +262,7 @@ impl HintSpace {
             Some("capture-pixels") => Self::CapturePixels,
             Some("logical") => Self::Logical,
             Some("virtualised") => Self::Virtualised,
-            other => return Err(DetectError::UnknownHintSpace(other.map(str::to_owned))),
+            other => return Err(DetectError::UnknownHintSpace(other.map(|t| t.chars().take(MAX_TAG_ECHO).collect()))),
         })
     }
     /// The wire tag.
@@ -269,6 +274,36 @@ impl HintSpace {
             Self::Logical => "logical",
             Self::Virtualised => "virtualised",
         }
+    }
+}
+
+/// How DPI aware the adapter's reading thread is, as the client states it with each hint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DpiAwareness {
+    /// `per-monitor-v2`.
+    PerMonitorV2,
+    /// `per-monitor`.
+    PerMonitor,
+    /// `system`: coordinates are virtualised per monitor.
+    System,
+    /// `unaware`: coordinates are virtualised.
+    Unaware,
+}
+
+impl DpiAwareness {
+    /// Parses a wire tag; a missing or unknown tag is refused at the edge (the echo is cut to [`MAX_TAG_ECHO`]).
+    pub fn from_tag(tag: Option<&str>) -> Result<Self, DetectError> {
+        Ok(match tag {
+            Some("per-monitor-v2") => Self::PerMonitorV2,
+            Some("per-monitor") => Self::PerMonitor,
+            Some("system") => Self::System,
+            Some("unaware") => Self::Unaware,
+            other => {
+                return Err(DetectError::UnknownDpiAwareness(
+                    other.map(|t| t.chars().take(MAX_TAG_ECHO).collect()),
+                ));
+            }
+        })
     }
 }
 
@@ -296,9 +331,26 @@ impl HintRect {
             h,
         })
     }
-    /// Builds a hint from its wire form: the space tag is required.
-    pub fn from_wire(adapter: &str, tag: Option<&str>, x: f64, y: f64, w: f64, h: f64) -> Result<Self, DetectError> {
-        Self::new(adapter, HintSpace::from_tag(tag)?, x, y, w, h)
+    /// Builds a hint from its wire form: the space tag and the adapter's DPI awareness are both required. An adapter
+    /// that is `system` or `unaware` reads virtualised coordinates, so a `host-input` or `remote-pixels` hint from it
+    /// becomes [`HintSpace::Virtualised`] whatever the tag says (`capture-pixels` and `logical` are Sighter's own boxes and
+    /// do not depend on the reader).
+    pub fn from_wire(
+        adapter: &str,
+        tag: Option<&str>,
+        awareness: Option<&str>,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    ) -> Result<Self, DetectError> {
+        let space = HintSpace::from_tag(tag)?;
+        let awareness = DpiAwareness::from_tag(awareness)?;
+        let space = match (space, awareness) {
+            (HintSpace::HostInput | HintSpace::RemotePixels, DpiAwareness::System | DpiAwareness::Unaware) => HintSpace::Virtualised,
+            (s, _) => s,
+        };
+        Self::new(adapter, space, x, y, w, h)
     }
     /// The adapter that sent the hint.
     pub fn adapter(&self) -> &str {
@@ -331,27 +383,32 @@ impl HintRect {
     }
 }
 
-/// Hints mapped, grown and clipped for one query.
+/// Hints mapped, grown and clipped for one query. A refused hint does not fail the batch: the usable ones still apply.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreparedHints {
-    /// The usable hints in logical points, in input order (a dropped hint leaves no entry).
+    /// The usable hints in logical points, in input order (a dropped or refused hint leaves no entry).
     pub rects: Vec<Rect<Logical>>,
     /// Indices of the input hints that fell outside the scope and were dropped (recorded in the trace).
     pub dropped: Vec<usize>,
+    /// Hints that could not be used at all, with the reason: a virtualised hint (its message names the adapter and what to
+    /// fix), or one whose mapped rectangle leaves the supported coordinate range. The caller reports each and goes on.
+    pub refused: Vec<(usize, DetectError)>,
 }
 
 impl PreparedHints {
-    /// When the query had hints and **every** one fell outside the scope, how many there were. The query then runs
-    /// unhinted (degrade, don't fail) and the caller records a trace event saying so
-    /// ([`crate::hud::trace::HintEvent::AllOutsideScope`]); `None` otherwise.
-    pub fn all_dropped(&self) -> Option<usize> {
-        (self.rects.is_empty() && !self.dropped.is_empty()).then_some(self.dropped.len())
+    /// When the query had hints and **every** one fell outside the scope (none usable, none refused), how many there
+    /// were. The query then runs unhinted (degrade, don't fail) and the caller records
+    /// [`crate::hud::trace::HintEvent::AllOutsideScope`]; `None` otherwise.
+    pub fn all_dropped(&self) -> Option<u32> {
+        (self.rects.is_empty() && self.refused.is_empty() && !self.dropped.is_empty())
+            .then(|| u32::try_from(self.dropped.len()).unwrap_or(u32::MAX))
     }
 }
 
 /// Maps each hint through the chain, grows it by `margin` logical points on every side (a hint can be stale), and clips it
-/// to the query's `scope`; a hint with nothing left inside the scope is dropped and recorded. A refused hint (virtualised)
-/// is an error naming the adapter: the caller reports it and goes on without that hint.
+/// to the query's `scope`; a hint with nothing left inside the scope is dropped and recorded, and a hint that cannot be
+/// used (virtualised, or mapped out of range) is recorded in [`PreparedHints::refused`] while the others still apply.
+/// Only a bad `margin` fails the call.
 pub fn prepare_hints(hints: &[HintRect], chain: &Chain, scope: &Rect<Logical>, margin: f64) -> Result<PreparedHints, DetectError> {
     if margin.is_nan() || !(0.0..=MAX_HINT_MARGIN).contains(&margin) {
         return Err(DetectError::BadMargin(margin));
@@ -359,13 +416,23 @@ pub fn prepare_hints(hints: &[HintRect], chain: &Chain, scope: &Rect<Logical>, m
     let mut out = PreparedHints {
         rects: Vec::new(),
         dropped: Vec::new(),
+        refused: Vec::new(),
     };
     for (i, h) in hints.iter().enumerate() {
-        let r = h.to_logical(chain)?;
-        let grown = Rect::new(r.x() - margin, r.y() - margin, r.w() + 2.0 * margin, r.h() + 2.0 * margin)?;
-        match grown.clip(scope) {
-            Some(c) => out.rects.push(c),
-            None => out.dropped.push(i),
+        let grown = h.to_logical(chain).and_then(|r| {
+            Ok(Rect::new(
+                r.x() - margin,
+                r.y() - margin,
+                r.w() + 2.0 * margin,
+                r.h() + 2.0 * margin,
+            )?)
+        });
+        match grown {
+            Ok(g) => match g.clip(scope) {
+                Some(c) => out.rects.push(c),
+                None => out.dropped.push(i),
+            },
+            Err(e) => out.refused.push((i, e)),
         }
     }
     Ok(out)
@@ -425,9 +492,12 @@ pub fn apply_hints(dets: &[Detection], hints: &[Rect<Logical>], min_inside: Frac
         }
     }
     // Stable sort: equal hint index keeps the canonical (score) order.
-    out.sort_by_key(|c| match c.provenance {
-        Provenance::HintSourced(i) => i,
-        Provenance::Detected => usize::MAX,
+    out.sort_by_key(|c| {
+        if let Provenance::HintSourced(i) = c.provenance {
+            i
+        } else {
+            usize::MAX
+        }
     });
     Ok(out)
 }
@@ -623,11 +693,48 @@ mod tests {
             HintSpace::from_tag(Some("pixels")),
             Err(DetectError::UnknownHintSpace(Some("pixels".into())))
         );
-        assert!(HintRect::from_wire("a", None, 0.0, 0.0, 1.0, 1.0).is_err());
+        assert!(HintRect::from_wire("a", None, Some("per-monitor-v2"), 0.0, 0.0, 1.0, 1.0).is_err());
         assert_eq!(
-            HintRect::from_wire("a", Some("logical"), 0.0, 0.0, 1.0, 1.0).unwrap().space(),
+            HintRect::from_wire("a", Some("logical"), Some("unaware"), 0.0, 0.0, 1.0, 1.0)
+                .unwrap()
+                .space(),
             HintSpace::Logical
         );
+    }
+
+    #[test]
+    fn untrusted_tags_are_cut_in_errors() {
+        let long = "x".repeat(10_000);
+        assert_eq!(
+            HintSpace::from_tag(Some(&long)),
+            Err(DetectError::UnknownHintSpace(Some("x".repeat(MAX_TAG_ECHO))))
+        );
+        assert_eq!(
+            DpiAwareness::from_tag(Some(&long)),
+            Err(DetectError::UnknownDpiAwareness(Some("x".repeat(MAX_TAG_ECHO))))
+        );
+        assert_eq!(DpiAwareness::from_tag(None), Err(DetectError::UnknownDpiAwareness(None)));
+    }
+
+    #[test]
+    fn system_and_unaware_adapters_make_host_and_remote_hints_virtualised() {
+        let wire = |tag, aw| {
+            HintRect::from_wire("FlaUI", Some(tag), Some(aw), 1.0, 1.0, 5.0, 5.0)
+                .unwrap()
+                .space()
+        };
+        for aw in ["system", "unaware"] {
+            assert_eq!(wire("host-input", aw), HintSpace::Virtualised);
+            assert_eq!(wire("remote-pixels", aw), HintSpace::Virtualised);
+            // Sighter's own earlier boxes do not depend on the reader.
+            assert_eq!(wire("logical", aw), HintSpace::Logical);
+            assert_eq!(wire("capture-pixels", aw), HintSpace::CapturePixels);
+        }
+        for aw in ["per-monitor-v2", "per-monitor"] {
+            assert_eq!(wire("host-input", aw), HintSpace::HostInput);
+            assert_eq!(wire("remote-pixels", aw), HintSpace::RemotePixels);
+        }
+        assert_eq!(wire("virtualised", "per-monitor-v2"), HintSpace::Virtualised);
     }
 
     #[test]
@@ -708,6 +815,52 @@ mod tests {
     }
 
     #[test]
+    fn a_hint_on_each_display_of_the_mixed_layout_maps_to_its_element_in_both_host_spaces() {
+        use crate::chain::{Display, Layout};
+        let pt = |x, y| Pt::new(x, y).unwrap();
+        let sc = |v| Scale::uniform(v).unwrap();
+        // The ADR's layout: 100 % 1920 x 1200 left, 200 % 3840 x 2160 right, 150 % 2560 x 1440 above with a negative origin.
+        let windows = Layout::new(
+            InputSpace::WindowsPixels,
+            vec![
+                Display::new(1, pt(0.0, 0.0), 1920, 1200, sc(1.0)).unwrap(),
+                Display::new(2, pt(1920.0, 0.0), 3840, 2160, sc(2.0)).unwrap(),
+                Display::new(3, pt(0.0, -1440.0), 2560, 1440, sc(1.5)).unwrap(),
+            ],
+        )
+        .unwrap();
+        let mac = Layout::new(
+            InputSpace::MacPoints,
+            vec![
+                Display::new(1, pt(0.0, 0.0), 1920, 1200, sc(1.0)).unwrap(),
+                Display::new(2, pt(1920.0, 0.0), 3840, 2160, sc(2.0)).unwrap(),
+                Display::new(3, pt(0.0, -960.0), 2560, 1440, sc(1.5)).unwrap(),
+            ],
+        )
+        .unwrap();
+        let element = rect(300.0, 200.0, 80.0, 24.0); // logical points on its display
+        for layout in [&windows, &mac] {
+            for id in [1, 2, 3] {
+                let chain = layout.chain_for_display(id).unwrap();
+                let host = chain.logical_to_input().rect(element);
+                let hint = HintRect::from_wire(
+                    "adapter",
+                    Some("host-input"),
+                    Some("per-monitor-v2"),
+                    host.x(),
+                    host.y(),
+                    host.w(),
+                    host.h(),
+                )
+                .unwrap();
+                let l = hint.to_logical(&chain).unwrap();
+                let got = [l.x() - 300.0, l.y() - 200.0, l.w() - 80.0, l.h() - 24.0];
+                assert!(got.iter().all(|e| e.abs() <= 1.0));
+            }
+        }
+    }
+
+    #[test]
     fn prepared_hints_are_grown_clipped_to_the_scope_and_recorded_when_dropped() {
         let chain = Chain::local(
             Scale::uniform(1.0).unwrap(),
@@ -745,11 +898,22 @@ mod tests {
             1
         );
         assert_eq!(prepare_hints(&[], &chain, &scope, 0.0).unwrap().all_dropped(), None);
-        let virt = [HintRect::new("FlaUI", HintSpace::Virtualised, 0.0, 0.0, 1.0, 1.0).unwrap()];
-        assert!(matches!(
-            prepare_hints(&virt, &chain, &scope, 0.0),
-            Err(DetectError::UnmappableHint { .. })
-        ));
+        // A refused hint does not fail the batch: the others still apply, and the refusal names its index and reason.
+        let mixed = [
+            HintRect::new("FlaUI", HintSpace::Virtualised, 0.0, 0.0, 1.0, 1.0).unwrap(),
+            HintRect::new("a", HintSpace::Logical, 50.0, 50.0, 20.0, 20.0).unwrap(),
+            // Valid on its own, but growing it by the margin leaves the supported range.
+            HintRect::new("a", HintSpace::Logical, 0.0, 0.0, 9_999_999.0, 5.0).unwrap(),
+        ];
+        let m = prepare_hints(&mixed, &chain, &scope, 8.0).unwrap();
+        assert_eq!(m.rects, vec![rect(42.0, 42.0, 36.0, 36.0)]);
+        assert_eq!(m.refused.len(), 2);
+        assert!(matches!(m.refused[0], (0, DetectError::UnmappableHint { .. })));
+        assert!(matches!(m.refused[1], (2, DetectError::Geometry(_))));
+        assert_eq!(m.all_dropped(), None);
+        // Only refused and dropped hints: not "all outside the scope".
+        let only = prepare_hints(&mixed[..1], &chain, &scope, 0.0).unwrap();
+        assert!(only.rects.is_empty() && only.all_dropped().is_none());
         // Two-way containment of the grown hint (42..78 x 42..78): a detection qualifies when at least HINT_CONTAINMENT of it
         // lies inside the hint, or at least HINT_CONTAINMENT of the hint lies inside it.
         let grown = [p.rects[0]];

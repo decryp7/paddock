@@ -30,12 +30,14 @@ pub enum TilingError {
         max: u32,
     },
     /// A pixel buffer does not hold `width * height * 3` bytes.
-    #[error("a {width} x {height} RGB frame needs {} bytes, got {len}", .width * .height * 3)]
+    #[error("a {width} x {height} RGB frame needs {expected} bytes, got {len}")]
     BadBuffer {
         /// Frame width.
         width: u32,
         /// Frame height.
         height: u32,
+        /// The length the size calls for (computed in 64 bits).
+        expected: u64,
         /// Buffer length given.
         len: usize,
     },
@@ -226,19 +228,14 @@ impl TileGrid {
     pub fn frame(&self) -> (u32, u32) {
         (self.width, self.height)
     }
-    /// The seam strips: the overlap of every pair of horizontally or vertically adjacent tiles. [`crate::detect::merge_seams`]
-    /// takes them.
+    /// The seam strips: the overlap of **every pair of tiles that overlap**, adjacent or not. Next to the frame edge the
+    /// last tile is pulled back, so it can overlap the tile two places before it (at a width of 1217 the tiles at 0 and
+    /// 577 share a strip although a tile lies between them). Corner (diagonal) neighbours overlap too and are included.
     pub fn seam_strips(&self) -> Vec<Rect<Logical>> {
         let mut out = Vec::new();
-        for t in &self.tiles {
-            for n in [
-                self.tiles.get(t.id + 1).filter(|n| n.row == t.row),
-                self.tiles.get(t.id + self.cols),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                if let Some(s) = t.rect().intersection(&n.rect()) {
+        for (i, a) in self.tiles.iter().enumerate() {
+            for b in &self.tiles[i + 1..] {
+                if let Some(s) = a.rect().intersection(&b.rect()) {
                     out.push(s);
                 }
             }
@@ -301,15 +298,20 @@ impl PadColour {
 /// Inference and dataset assembly both call this, so training sees exactly the pulled-back edge tiles and the padded
 /// small frames the detector sees at run time.
 pub fn cut_tile_rgb(frame: &[u8], width: u32, height: u32, tile: &Tile, pad: PadColour) -> Result<Vec<u8>, TilingError> {
-    if frame.len() as u64 != u64::from(width) * u64::from(height) * 3
-        || width == 0
-        || height == 0
-        || width > MAX_FRAME_SIDE
-        || height > MAX_FRAME_SIDE
-    {
+    let ok = |v: u32| (1..=MAX_FRAME_SIDE).contains(&v);
+    if !ok(width) || !ok(height) {
+        return Err(TilingError::FrameSize {
+            width,
+            height,
+            max: MAX_FRAME_SIDE,
+        });
+    }
+    let expected = u64::from(width) * u64::from(height) * 3;
+    if frame.len() as u64 != expected {
         return Err(TilingError::BadBuffer {
             width,
             height,
+            expected,
             len: frame.len(),
         });
     }
@@ -399,14 +401,36 @@ mod tests {
     fn seam_strips_are_the_overlaps() {
         let g = tile_grid(1920, 1200, GridSpec::default_640()).unwrap();
         let strips = g.seam_strips();
-        // 3 vertical seams x 2 rows + 4 horizontal seams x 1.
-        assert_eq!(strips.len(), 3 * 2 + 4);
         assert!(
             strips
                 .iter()
                 .any(|s| s.x() == 576.0 && s.w() == 64.0 && s.y() == 0.0 && s.h() == 640.0)
         );
+        // One strip per overlapping pair of tiles, counted by brute force (adjacent and diagonal pairs).
+        let pairs = g
+            .tiles()
+            .iter()
+            .enumerate()
+            .flat_map(|(i, a)| g.tiles()[i + 1..].iter().map(move |b| (a, b)))
+            .filter(|(a, b)| a.rect().intersection(&b.rect()).is_some())
+            .count();
+        assert_eq!(strips.len(), pairs);
         assert!(tile_grid(300, 300, GridSpec::default_640()).unwrap().seam_strips().is_empty());
+    }
+
+    #[test]
+    fn pulled_back_tiles_overlap_without_being_adjacent() {
+        // 1217 wide: origins 0, 576 and 577 (pulled back). Tile 0 (0..640) and tile 2 (577..1217) overlap by 63 although
+        // tile 1 lies between them; tiles 1 and 2 overlap almost completely.
+        let g = tile_grid(1217, 640, GridSpec::default_640()).unwrap();
+        let xs: Vec<u32> = g.tiles().iter().map(|t| t.origin().0).collect();
+        assert_eq!(xs, vec![0, 576, 577]);
+        let strips = g.seam_strips();
+        assert_eq!(strips.len(), 3);
+        assert!(
+            strips.iter().any(|s| s.x() == 577.0 && s.w() == 63.0),
+            "the 0-2 strip is missing: {strips:?}"
+        );
     }
 
     #[test]
@@ -468,12 +492,21 @@ mod tests {
         assert_eq!(&t[10 * 640 * 3..10 * 640 * 3 + 3], &[255, 0, 0]);
         assert!(matches!(
             cut_tile_rgb(&frame, 3, 2, &g.tiles()[0], pad),
-            Err(TilingError::BadBuffer { .. })
+            Err(TilingError::BadBuffer { expected: 18, .. })
         ));
-        assert!(matches!(
-            cut_tile_rgb(&[], 0, 0, &g.tiles()[0], pad),
-            Err(TilingError::BadBuffer { .. })
-        ));
+        // A side over the limit is a FrameSize error, and no error's Display can overflow or panic.
+        let e = cut_tile_rgb(&[], 70_000, 70_000, &g.tiles()[0], pad).unwrap_err();
+        assert!(matches!(e, TilingError::FrameSize { width: 70_000, .. }));
+        assert!(!e.to_string().is_empty());
+        let e = cut_tile_rgb(&[], 0, 0, &g.tiles()[0], pad).unwrap_err();
+        assert!(matches!(e, TilingError::FrameSize { .. }));
+        let big = TilingError::BadBuffer {
+            width: 70_000,
+            height: 70_000,
+            expected: 14_700_000_000,
+            len: 0,
+        };
+        assert_eq!(big.to_string(), "a 70000 x 70000 RGB frame needs 14700000000 bytes, got 0");
     }
 
     #[test]

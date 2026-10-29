@@ -98,6 +98,17 @@ fn ordered(prev: Option<&TraceEvent>, e: &TraceEvent) -> bool {
     prev.is_none_or(|p| e.seq > p.seq && e.at >= p.at)
 }
 
+/// Refuses a line over [`MAX_LINE_BYTES`], or one that would take a file of `written` bytes over [`MAX_FILE_BYTES`].
+fn within_limits(line: usize, text_len: usize, written: usize) -> Result<(), SidecarError> {
+    if text_len > MAX_LINE_BYTES {
+        return Err(SidecarError::LineTooLong { line });
+    }
+    if written + text_len + 1 > MAX_FILE_BYTES {
+        return Err(SidecarError::FileTooLarge);
+    }
+    Ok(())
+}
+
 impl Track {
     /// A track from events; they must be in order (increasing `seq`, non-decreasing time).
     pub fn new(events: Vec<TraceEvent>) -> Result<Self, SidecarError> {
@@ -119,19 +130,26 @@ impl Track {
     pub fn events(&self) -> &[TraceEvent] {
         &self.events
     }
-    /// Writes the track as JSON Lines.
-    pub fn to_jsonl(&self) -> String {
+    /// Writes the track as JSON Lines. Refuses what [`Track::parse`] would refuse: a line over [`MAX_LINE_BYTES`] or a file
+    /// over [`MAX_FILE_BYTES`] is an error, so a track that was written can always be read back.
+    pub fn to_jsonl(&self) -> Result<String, SidecarError> {
         let mut out = String::new();
         let header = Header {
             format: FORMAT.to_owned(),
             version: VERSION,
         };
-        // Serialising these plain types cannot fail; an empty line would be rejected on read rather than panic.
-        let _ = writeln!(out, "{}", serde_json::to_string(&header).unwrap_or_default());
-        for e in &self.events {
-            let _ = writeln!(out, "{}", serde_json::to_string(e).unwrap_or_default());
+        let mut push = |line: usize, json: serde_json::Result<String>| -> Result<(), SidecarError> {
+            // Serialising these plain types cannot fail; an empty line would be skipped and counted by the reader.
+            let text = json.unwrap_or_default();
+            within_limits(line, text.len(), out.len())?;
+            let _ = writeln!(out, "{text}");
+            Ok(())
+        };
+        push(1, serde_json::to_string(&header))?;
+        for (i, e) in self.events.iter().enumerate() {
+            push(i + 2, serde_json::to_string(e))?;
         }
-        out
+        Ok(out)
     }
     /// Parses a track. A malformed line, an event this build does not know, or an event out of order is **skipped and
     /// counted** ([`Track::skipped`]), never a panic; unknown fields are ignored. A file or line over a limit, a bad
@@ -182,8 +200,8 @@ impl Track {
 
 #[cfg(test)]
 mod tests {
-    use super::super::mask::{HudText, SecretName};
-    use super::super::trace::{DetectionEvent, Layer, LayerOutcome, LocateEvent, LocateStatus, StepEvent, TraceKind};
+    use super::super::mask::{HudText, SecretName, mask};
+    use super::super::trace::{DetectionEvent, HintEvent, Layer, LayerOutcome, LocateEvent, LocateStatus, StepEvent, TraceKind};
     use super::*;
     use crate::detect::{ClassId, Score};
     use crate::geometry::{Pt, Rect};
@@ -252,7 +270,7 @@ mod tests {
     #[test]
     fn round_trips_every_event_kind() {
         let t = Track::new(sample()).unwrap();
-        let text = t.to_jsonl();
+        let text = t.to_jsonl().unwrap();
         assert!(text.starts_with("{\"format\":\"sighter-hud\",\"version\":1}\n"));
         assert_eq!(text.lines().count(), 1 + 8);
         assert_eq!(Track::parse(&text).unwrap(), t);
@@ -293,6 +311,45 @@ mod tests {
             Err(SidecarError::TooManyLines)
         );
         assert_eq!((MAX_LINE_BYTES, MAX_LINES, MAX_FILE_BYTES), (65_536, 1_000_000, 268_435_456));
+    }
+
+    #[test]
+    fn writing_enforces_the_limits_the_reader_enforces() {
+        // HudText is cut to 512 characters when built, so a line cannot be made long by text alone; many 4-byte characters
+        // in a secret-free label still fit. The limit is reachable only through a huge track, so test the file limit with
+        // the smallest possible event repeated, and the line limit through the error type.
+        let one = TraceEvent {
+            seq: 0,
+            at: Micros(0),
+            event: TraceKind::Step(StepEvent::Started { step: 0 }),
+        };
+        let max_text = HudText::plain(&"\u{10FFFF}".repeat(10_000)); // cut to 512 characters
+        assert_eq!(max_text.render().chars().count(), super::super::mask::MAX_HUD_TEXT);
+        let typed = TraceEvent {
+            seq: 1,
+            at: Micros(1),
+            event: TraceKind::Step(StepEvent::Typed { step: 1, text: max_text }),
+        };
+        let t = Track::new(vec![one, typed]).unwrap();
+        let text = t.to_jsonl().unwrap();
+        assert!(text.lines().all(|l| l.len() <= MAX_LINE_BYTES));
+        assert_eq!(Track::parse(&text).unwrap(), t);
+        assert!(SidecarError::LineTooLong { line: 2 }.to_string().contains("65536"));
+        // The limits themselves, without building a 64 KiB line or a 256 MiB file.
+        assert_eq!(within_limits(7, MAX_LINE_BYTES, 0), Ok(()));
+        assert_eq!(within_limits(7, MAX_LINE_BYTES + 1, 0), Err(SidecarError::LineTooLong { line: 7 }));
+        assert_eq!(within_limits(7, 10, MAX_FILE_BYTES - 11), Ok(()));
+        assert_eq!(within_limits(7, 10, MAX_FILE_BYTES - 10), Err(SidecarError::FileTooLarge));
+        // And the event limit: one event too many is refused before anything else is looked at.
+        let many = vec![
+            TraceEvent {
+                seq: 0,
+                at: Micros(0),
+                event: TraceKind::Step(StepEvent::Started { step: 0 })
+            };
+            MAX_EVENTS + 1
+        ];
+        assert_eq!(Track::new(many), Err(SidecarError::TooManyEvents));
     }
 
     #[test]
@@ -366,22 +423,41 @@ mod tests {
     }
 
     fn arb_kind() -> impl Strategy<Value = TraceKind> {
+        let layer = prop_oneof![
+            Just(Layer::Cache),
+            Just(Layer::Template),
+            Just(Layer::OcrAnchor),
+            Just(Layer::Detector),
+            Just(Layer::Vlm)
+        ];
+        let outcome = prop_oneof![Just(LayerOutcome::Hit), Just(LayerOutcome::Miss), Just(LayerOutcome::Skipped)];
+        let status = prop_oneof![
+            Just(LocateStatus::Found),
+            Just(LocateStatus::Ambiguous),
+            Just(LocateStatus::NotFound),
+            Just(LocateStatus::NeedsLabelling)
+        ];
         prop_oneof![
             any::<u32>().prop_map(|step| TraceKind::Step(StepEvent::Started { step })),
-            (any::<u32>(), "[ -~]{0,40}").prop_map(|(step, t)| TraceKind::Step(StepEvent::Typed {
+            (any::<u32>(), any::<bool>()).prop_map(|(step, ok)| TraceKind::Step(StepEvent::Finished { step, ok })),
+            (any::<u32>(), 0.0f64..5000.0, 0.0f64..5000.0).prop_map(|(step, x, y)| TraceKind::Step(StepEvent::Clicked {
                 step,
-                text: HudText::plain(&t)
+                at: Pt::new(x, y).unwrap()
             })),
+            (any::<u32>(), "[ -~]{0,40}").prop_map(|(step, t)| TraceKind::Step(StepEvent::Typed { step, text: mask(&t, &[]) })),
             (any::<u32>(), "[A-Za-z0-9_.-]{1,20}").prop_map(|(step, n)| TraceKind::Step(StepEvent::Typed {
                 step,
                 text: HudText::secret(SecretName::new(&n).unwrap())
             })),
-            (any::<u64>(), 0u64..100_000).prop_map(|(id, took_us)| TraceKind::Locate(LocateEvent::Layer {
+            any::<u64>().prop_map(|id| TraceKind::Locate(LocateEvent::Started { id })),
+            (any::<u64>(), layer, outcome, 0u64..100_000).prop_map(|(id, layer, outcome, took_us)| TraceKind::Locate(LocateEvent::Layer {
                 id,
-                layer: Layer::Template,
-                outcome: LayerOutcome::Miss,
+                layer,
+                outcome,
                 took_us
             })),
+            (any::<u64>(), status).prop_map(|(id, status)| TraceKind::Locate(LocateEvent::Finished { id, status })),
+            (any::<u64>(), any::<u32>()).prop_map(|(locate, count)| TraceKind::Hint(HintEvent::AllOutsideScope { locate, count })),
             (
                 any::<u64>(),
                 0.0f64..5000.0,
@@ -409,7 +485,7 @@ mod tests {
             let mut at = 0u64;
             let events: Vec<TraceEvent> = kinds.into_iter().enumerate().map(|(i, k)| { at += gaps[i]; ev(i as u64, at, k) }).collect();
             let t = Track::new(events).unwrap();
-            prop_assert_eq!(Track::parse(&t.to_jsonl()).unwrap(), t);
+            prop_assert_eq!(Track::parse(&t.to_jsonl().unwrap()).unwrap(), t);
         }
 
         /// The parser never panics, whatever it is fed.

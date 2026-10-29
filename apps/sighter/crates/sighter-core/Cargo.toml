@@ -15,6 +15,9 @@ thiserror = "2"
 
 [dev-dependencies]
 proptest = "1"
+# The benchmark examples use the family clock and statistics, and read the process's real memory (rule 26).
+paddock-bench = { path = "../../../../crates/paddock-bench" }
+paddock-proc = { path = "../../../../crates/paddock-proc" }
 
 [lints]
 workspace = true

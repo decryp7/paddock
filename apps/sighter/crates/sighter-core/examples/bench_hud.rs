@@ -3,13 +3,20 @@
 //! Two budgets from the design review: HUD work at most 2 ms per frame, and switching the trace on or off may not change
 //! step timing by more than 5 %. The second is measured as interleaved A/B runs (trace off, trace on).
 //!
-//! `SIGHTER_BENCH_LOAD=<1-minute load> SIGHTER_BENCH_COMMIT=<sha> SIGHTER_BENCH_MACHINE=<text> SIGHTER_BENCH_DATE=<date> \
+//! Environment: `SIGHTER_BENCH_LOAD` (required: the current 1-minute load, at most 25), and the optional text of the block:
+//! `SIGHTER_BENCH_COMMIT`, `SIGHTER_BENCH_MACHINE`, `SIGHTER_BENCH_DATE`, `SIGHTER_BENCH_BRANCH`.
+//!
+//! `SIGHTER_BENCH_LOAD=<load> SIGHTER_BENCH_COMMIT=<sha> SIGHTER_BENCH_MACHINE=<text> SIGHTER_BENCH_DATE=<date> \
 //!  nice -n 10 cargo run --release -p sighter-core --example bench_hud`
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "common/mod.rs"]
+mod common;
+
+use common::{env, footprint, stats};
+use paddock_bench::{Clock, SystemClock};
 use sighter_core::bench::{
-    Budget, Row, RunInfo, Stat, SystemClock, budgets, change_percent, format_duration, load_allows_run, measure, measure_ab,
-    render_results_block,
+    ResultRow, RunInfo, budgets, change_percent, format_duration, load_allows_run, render_results_block, time_ab, time_runs,
 };
 use sighter_core::chain::{Chain, InputSpace};
 use sighter_core::detect::{ClassId, Detection, Fraction, Score, nms};
@@ -19,10 +26,6 @@ use sighter_core::hud::sidecar::Track;
 use sighter_core::hud::trace::{DetectionEvent, LocateEvent, LocateStatus, Micros, TraceBus, TraceKind};
 use sighter_core::tiling::{GridSpec, tile_grid};
 use std::hint::black_box;
-
-fn env(name: &str, default: &str) -> String {
-    std::env::var(name).unwrap_or_else(|_| default.to_owned())
-}
 
 /// A deterministic synthetic detection set (a linear congruential generator).
 fn synthetic(n: usize) -> Vec<Detection> {
@@ -75,13 +78,15 @@ fn main() {
         std::process::exit(2);
     }
     let clock = SystemClock::new();
+    let now = || clock.now();
     let frame_dets = synthetic(50);
     let step_dets = synthetic(300);
     let frame_events = events(&frame_dets);
     let step_events = events(&synthetic(12));
+    let origin = Pt::new(0.0, 0.0).expect("origin");
     let chain = Chain::local(
         Scale::uniform(2.0).expect("scale"),
-        Pt::new(0.0, 0.0).expect("origin"),
+        origin,
         Pt::new(0.0, 0.0).expect("origin"),
         InputSpace::MacPoints,
     )
@@ -107,9 +112,9 @@ fn main() {
         .collect();
     let iou = Fraction::new(0.5).expect("threshold");
 
-    // 1. HUD work for one frame of 50 detections: fan the events out to two viewers, build the overlay items, and append
-    //    the frame's events to the sidecar track text.
-    let frame = measure(&clock, 50, 400, || {
+    // 1. HUD work for one frame of 50 detections: fan the events out to two viewers, build the overlay items, and write the
+    //    frame's events as sidecar text.
+    let frame = time_runs(&now, 50, 400, || {
         let mut bus = TraceBus::new(1024, true).expect("bus");
         let a = bus.subscribe(1024).expect("sub");
         let b = bus.subscribe(1024).expect("sub");
@@ -119,7 +124,7 @@ fn main() {
         let drained = bus.drain(a).expect("drain");
         black_box(bus.drain(b).expect("drain"));
         black_box(build_items(&inputs, &to_capture, &ctx).expect("items"));
-        black_box(Track::new(drained.events).expect("track").to_jsonl());
+        black_box(Track::new(drained.events).expect("track").to_jsonl().expect("jsonl"));
     })
     .expect("runs");
 
@@ -132,8 +137,8 @@ fn main() {
         black_box(nms(black_box(&step_dets), iou)).ok();
         black_box(tile_grid(1920, 1200, spec)).ok();
     };
-    let (a, b) = measure_ab(
-        &clock,
+    let (a, b) = time_ab(
+        &now,
         6,
         20,
         100,
@@ -152,25 +157,21 @@ fn main() {
         },
     )
     .expect("runs");
-    let delta = change_percent(a.p50(), b.p50());
+    let (sa, sb) = (stats(&a), stats(&b));
+    let delta = change_percent(sa.median, sb.median);
 
-    let frame_budget = Budget {
-        name: "HUD per frame",
-        limit: budgets::HUD_FRAME_OVERHEAD,
-        stat: Stat::P95,
-    };
     let step_ok = delta <= budgets::HUD_STEP_TIMING_CHANGE_PERCENT;
     let rows = [
-        Row::latency("HUD work per frame, 50 detections, 2 viewers", &frame, &frame_budget),
-        Row {
-            measure: "Step p50, trace off".into(),
-            value: format_duration(a.p50()),
-            budget: "none (reference)".into(),
-            verdict: "reference".into(),
-        },
-        Row {
-            measure: "Step p50, trace on".into(),
-            value: format!("{} ({delta:+.1} %)", format_duration(b.p50())),
+        ResultRow::against(
+            "HUD work per frame, 50 detections, 2 viewers, p95",
+            stats(&frame).p95,
+            "HUD per frame",
+            budgets::HUD_FRAME_OVERHEAD,
+        ),
+        ResultRow::indication("Step median, trace off", sa.median),
+        ResultRow {
+            measure: "Step median, trace on".into(),
+            value: format!("{} ({delta:+.1} %)", format_duration(sb.median)),
             budget: format!("change <= {} %", budgets::HUD_STEP_TIMING_CHANGE_PERCENT),
             verdict: if step_ok { "within" } else { "over" }.into(),
         },
@@ -184,10 +185,10 @@ fn main() {
         load: format!("1-minute load {load} at start"),
         build: "release; no model, no UI rendering".into(),
         corpus: "synthetic: fixed-seed boxes (50 per frame, 300 per step) and 12 trace events per step".into(),
-        command: "cargo run --release -p sighter-core --example bench_hud".into(),
-        runs: "frame: 50 warm-up and 400 timed runs, p95; step: 6 interleaved A/B pairs of 100 timed runs after 20 warm-up, p50".into(),
-        memory_measure: "not measured".into(),
-        notes: "Pure-core cost only: drawing, the video sidecar write and the UI are not measured. Indicative unless the load is below about 12.".into(),
+        command: "SIGHTER_BENCH_LOAD=<load> nice -n 10 cargo run --release -p sighter-core --example bench_hud".into(),
+        runs: "frame: 50 warm-up and 400 timed runs, nearest-rank p95; step: 6 interleaved A/B pairs of 100 timed runs after 20 warm-up, median (paddock-bench `summarize`)".into(),
+        memory_measure: footprint(),
+        notes: format!("Pure-core cost only: drawing, the video sidecar write and the UI are not measured. Indicative unless the load is below about 12. Wall time {}.", format_duration(clock.now())),
     };
     print!("{}", render_results_block(&info, &rows));
 }

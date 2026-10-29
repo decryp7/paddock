@@ -1,12 +1,17 @@
-//! The benchmark harness skeleton (rule 48: every quoted benchmark is recorded in `docs/performance.md`).
+//! The benchmark side of the pure core (rule 48: every quoted benchmark is recorded in `docs/performance.md`).
 //!
-//! It needs no model: it times any closure with an injected clock, computes percentiles the way `performance.md`
-//! reports them, judges them against budgets and renders the results block of the family template
-//! (`docs/benchmarks.md`). **Runtime code never reads the budgets** (ADR 0031): they are benchmark constants only.
+//! What is Sighter's own lives here: the budgets as named constants, interleaved A/B timing over an injected `now`
+//! function, and the renderer of the family results block (`docs/benchmarks.md`). The clock, the sample statistics and
+//! the results files are the shared `paddock-bench` crate's: the examples (`examples/bench_*.rs`) use it as a dev
+//! dependency and pass `|| clock.now()` here, so this module needs no clock type of its own.
+//!
+//! TODO(shared follow-up, after the Dyno and Spotter tags freeze lifts): the results-block renderer (`RunInfo`,
+//! `ResultRow`, `render_results_block`) and the interleaved A/B timer are generic; move them to `paddock-bench`.
+//!
+//! **Runtime code never reads the budgets** (ADR 0031): they are benchmark constants only.
 
-use std::cell::Cell;
 use std::fmt::Write as _;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// The budgets of ADR 0001 and the design review, as named constants (benchmark use only; mirrored in
 /// `docs/performance.md`). Changing a number is a one-line change.
@@ -53,98 +58,11 @@ pub enum BenchError {
     },
 }
 
-/// Most timed runs one measurement takes.
+/// Most timed runs one measurement takes (all pairs of an A/B measurement together).
 pub const MAX_RUNS: usize = 1_000_000;
 
-/// A monotonic time source; tests inject a fake one.
-pub trait Clock {
-    /// Time since an arbitrary fixed start.
-    fn now(&self) -> Duration;
-}
-
-/// The real clock.
-#[derive(Debug, Clone, Copy)]
-pub struct SystemClock(Instant);
-
-impl SystemClock {
-    /// Starts a clock now.
-    pub fn new() -> Self {
-        Self(Instant::now())
-    }
-}
-impl Default for SystemClock {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-impl Clock for SystemClock {
-    fn now(&self) -> Duration {
-        self.0.elapsed()
-    }
-}
-
-/// A clock that moves only when told to (for deterministic tests).
-#[derive(Debug, Default)]
-pub struct ManualClock(Cell<Duration>);
-
-impl ManualClock {
-    /// Moves the clock forward.
-    pub fn advance(&self, d: Duration) {
-        self.0.set(self.0.get() + d);
-    }
-}
-impl Clock for ManualClock {
-    fn now(&self) -> Duration {
-        self.0.get()
-    }
-}
-
-/// Timed samples of one measurement.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Samples(Vec<Duration>);
-
-impl Samples {
-    /// Wraps samples; at least one is required.
-    pub fn new(mut v: Vec<Duration>) -> Result<Self, BenchError> {
-        if v.is_empty() {
-            return Err(BenchError::NoRuns);
-        }
-        v.sort();
-        Ok(Self(v))
-    }
-    /// Number of samples.
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-    /// Never empty (kept for the usual pairing with `len`).
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-    /// The percentile `p` in `[0, 1]` as `performance.md` reports it: `sorted[floor(p * (n - 1))]`.
-    pub fn percentile(&self, p: f64) -> Duration {
-        let p = if p.is_nan() { 1.0 } else { p.clamp(0.0, 1.0) };
-        self.0[(p * (self.0.len() - 1) as f64).floor() as usize]
-    }
-    /// The median.
-    pub fn p50(&self) -> Duration {
-        self.percentile(0.5)
-    }
-    /// The 95th percentile.
-    pub fn p95(&self) -> Duration {
-        self.percentile(0.95)
-    }
-    /// The slowest run.
-    pub fn max(&self) -> Duration {
-        self.0[self.0.len() - 1]
-    }
-    /// The mean.
-    pub fn mean(&self) -> Duration {
-        self.0.iter().sum::<Duration>() / self.0.len() as u32
-    }
-}
-
-/// Runs `f` `warmup` times unmeasured, then `runs` times timed with `clock`.
-pub fn measure<C: Clock>(clock: &C, warmup: usize, runs: usize, mut f: impl FnMut()) -> Result<Samples, BenchError> {
+/// Runs `f` `warmup` times unmeasured, then `runs` times timed with `now` (a monotonic time since some start).
+pub fn time_runs(now: &dyn Fn() -> Duration, warmup: usize, runs: usize, mut f: impl FnMut()) -> Result<Vec<Duration>, BenchError> {
     if runs == 0 {
         return Err(BenchError::NoRuns);
     }
@@ -156,86 +74,41 @@ pub fn measure<C: Clock>(clock: &C, warmup: usize, runs: usize, mut f: impl FnMu
     }
     let mut out = Vec::with_capacity(runs);
     for _ in 0..runs {
-        let t0 = clock.now();
+        let t0 = now();
         f();
-        out.push(clock.now().saturating_sub(t0));
+        out.push(now().saturating_sub(t0));
     }
-    Samples::new(out)
+    Ok(out)
 }
 
 /// Interleaved A/B timing: `pairs` times, run `a` then `b` (each `runs` timed runs after `warmup`), so drift cancels
-/// between the two series (the family guide's rule). Returns the samples of A and of B.
-pub fn measure_ab<C: Clock>(
-    clock: &C,
+/// between the two series (the family guide's rule). Returns the pooled samples of A and of B. `pairs * runs` is bounded
+/// by [`MAX_RUNS`].
+pub fn time_ab(
+    now: &dyn Fn() -> Duration,
     pairs: usize,
     warmup: usize,
     runs: usize,
     mut a: impl FnMut(),
     mut b: impl FnMut(),
-) -> Result<(Samples, Samples), BenchError> {
-    if pairs == 0 {
+) -> Result<(Vec<Duration>, Vec<Duration>), BenchError> {
+    if pairs == 0 || runs == 0 {
         return Err(BenchError::NoRuns);
     }
-    let (mut sa, mut sb) = (Vec::new(), Vec::new());
+    let total = pairs.saturating_mul(runs);
+    if total > MAX_RUNS {
+        return Err(BenchError::TooManyRuns { got: total, max: MAX_RUNS });
+    }
+    let (mut sa, mut sb) = (Vec::with_capacity(total), Vec::with_capacity(total));
     for _ in 0..pairs {
-        sa.extend_from_slice(&measure(clock, warmup, runs, &mut a)?.0);
-        sb.extend_from_slice(&measure(clock, warmup, runs, &mut b)?.0);
+        sa.extend(time_runs(now, warmup, runs, &mut a)?);
+        sb.extend(time_runs(now, warmup, runs, &mut b)?);
     }
-    Ok((Samples::new(sa)?, Samples::new(sb)?))
+    Ok((sa, sb))
 }
 
-/// Which statistic a budget limits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Stat {
-    /// Median.
-    P50,
-    /// 95th percentile.
-    P95,
-    /// Worst run.
-    Max,
-}
-
-/// A named latency budget.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Budget {
-    /// Shown in the results table.
-    pub name: &'static str,
-    /// The limit.
-    pub limit: Duration,
-    /// The statistic compared with the limit.
-    pub stat: Stat,
-}
-
-/// Whether a result meets its budget.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Verdict {
-    /// At or under the limit.
-    Within,
-    /// Over the limit.
-    Over,
-}
-
-impl Budget {
-    /// The measured value this budget looks at.
-    pub fn value(&self, s: &Samples) -> Duration {
-        match self.stat {
-            Stat::P50 => s.p50(),
-            Stat::P95 => s.p95(),
-            Stat::Max => s.max(),
-        }
-    }
-    /// Judges samples against the budget.
-    pub fn judge(&self, s: &Samples) -> Verdict {
-        if self.value(s) <= self.limit {
-            Verdict::Within
-        } else {
-            Verdict::Over
-        }
-    }
-}
-
-/// Relative change of `with` against `without` in percent (positive means slower). Zero when `without` is zero and
-/// `with` is too; infinite when only `without` is zero.
+/// Relative change of `with` against `without` in percent (positive means slower). Zero when both are zero; infinite when
+/// only `without` is zero.
 pub fn change_percent(without: Duration, with: Duration) -> f64 {
     let (a, b) = (without.as_secs_f64(), with.as_secs_f64());
     if a == 0.0 {
@@ -273,7 +146,7 @@ pub struct RunInfo {
     pub command: String,
     /// Run count and what is reported.
     pub runs: String,
-    /// Footprint, PSS, private working set, or RSS.
+    /// Footprint, PSS, private working set, or RSS, with the figure.
     pub memory_measure: String,
     /// Noise, anomalies, what is not measured.
     pub notes: String,
@@ -281,7 +154,7 @@ pub struct RunInfo {
 
 /// One row of the numbers table.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Row {
+pub struct ResultRow {
     /// What was measured.
     pub measure: String,
     /// The measured value, formatted.
@@ -292,27 +165,24 @@ pub struct Row {
     pub verdict: String,
 }
 
-impl Row {
-    /// A row for a latency statistic against a budget.
-    pub fn latency(measure: &str, s: &Samples, b: &Budget) -> Self {
-        let verdict = match b.judge(s) {
-            Verdict::Within => "within",
-            Verdict::Over => "over",
-        };
+impl ResultRow {
+    /// A measurement with no budget: an indication, not a verdict.
+    pub fn indication(measure: &str, value: Duration) -> Self {
         Self {
             measure: measure.to_owned(),
-            value: format_duration(b.value(s)),
-            budget: format!("{} {} <= {}", b.name, stat_name(b.stat), format_duration(b.limit)),
-            verdict: verdict.to_owned(),
+            value: format_duration(value),
+            budget: "none".into(),
+            verdict: "indication".into(),
         }
     }
-}
-
-fn stat_name(s: Stat) -> &'static str {
-    match s {
-        Stat::P50 => "p50",
-        Stat::P95 => "p95",
-        Stat::Max => "max",
+    /// A latency against the budget that belongs to it.
+    pub fn against(measure: &str, value: Duration, budget_name: &str, limit: Duration) -> Self {
+        Self {
+            measure: measure.to_owned(),
+            value: format_duration(value),
+            budget: format!("{budget_name} <= {}", format_duration(limit)),
+            verdict: if value <= limit { "within" } else { "over" }.to_owned(),
+        }
     }
 }
 
@@ -336,7 +206,7 @@ fn cell(s: &str) -> String {
 }
 
 /// Renders the results block of the family template, ready to paste at the top of `docs/performance.md`.
-pub fn render_results_block(info: &RunInfo, rows: &[Row]) -> String {
+pub fn render_results_block(info: &RunInfo, rows: &[ResultRow]) -> String {
     let mut o = String::new();
     let line = |o: &mut String, k: &str, v: &str| {
         let _ = writeln!(o, "- **{k}:** {}", v.replace(['\n', '\r'], " "));
@@ -369,107 +239,91 @@ pub fn render_results_block(info: &RunInfo, rows: &[Row]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
+    use std::cell::Cell;
 
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
     }
 
     #[test]
-    fn measure_uses_the_injected_clock_and_skips_warmup() {
-        let clock = ManualClock::default();
+    fn time_runs_uses_the_injected_clock_and_skips_warmup() {
+        let t = Cell::new(Duration::ZERO);
+        let now = || t.get();
         let mut calls = 0u64;
-        let s = measure(&clock, 2, 5, || {
+        let s = time_runs(&now, 2, 5, || {
             calls += 1;
-            clock.advance(ms(calls));
+            t.set(t.get() + ms(calls));
         })
         .unwrap();
         assert_eq!(calls, 7);
-        assert_eq!(s.len(), 5);
-        assert!(!s.is_empty());
-        assert_eq!((s.p50(), s.max()), (ms(5), ms(7)));
-        assert_eq!(s.mean(), ms(5));
-        let sys = SystemClock::default();
-        assert!(measure(&sys, 0, 2, || {}).is_ok());
-        assert!(sys.now() >= Duration::ZERO);
-    }
-
-    #[test]
-    fn interleaved_ab_alternates_and_pools() {
-        let clock = ManualClock::default();
-        let order = std::cell::RefCell::new(String::new());
-        let (a, b) = measure_ab(
-            &clock,
-            2,
-            0,
-            1,
-            || {
-                order.borrow_mut().push('a');
-                clock.advance(ms(1));
-            },
-            || {
-                order.borrow_mut().push('b');
-                clock.advance(ms(2));
-            },
-        )
-        .unwrap();
-        assert_eq!(order.borrow().as_str(), "abab");
-        assert_eq!((a.len(), b.len(), a.max(), b.max()), (2, 2, ms(1), ms(2)));
-        assert_eq!(measure_ab(&clock, 0, 0, 1, || {}, || {}), Err(BenchError::NoRuns));
-    }
-
-    #[test]
-    fn percentile_follows_the_performance_md_rule() {
-        // 30 samples: p95 is the 28th (index 27), as in the 2026-10-29 record.
-        let s = Samples::new((1..=30).map(ms).collect()).unwrap();
-        assert_eq!(s.p95(), ms(28));
-        assert_eq!(s.p50(), ms(15));
-        assert_eq!(s.percentile(f64::NAN), ms(30));
-        assert_eq!(s.percentile(-1.0), ms(1));
+        assert_eq!(s, vec![ms(3), ms(4), ms(5), ms(6), ms(7)]);
     }
 
     #[test]
     fn bad_run_counts_are_typed_errors() {
-        let c = ManualClock::default();
-        assert_eq!(measure(&c, 0, 0, || {}), Err(BenchError::NoRuns));
+        let now = || Duration::ZERO;
+        assert_eq!(time_runs(&now, 0, 0, || {}), Err(BenchError::NoRuns));
         assert_eq!(
-            measure(&c, 0, MAX_RUNS + 1, || {}),
+            time_runs(&now, 0, MAX_RUNS + 1, || {}),
             Err(BenchError::TooManyRuns {
                 got: MAX_RUNS + 1,
                 max: MAX_RUNS
             })
         );
-        assert_eq!(Samples::new(vec![]), Err(BenchError::NoRuns));
+        assert_eq!(time_ab(&now, 0, 0, 1, || {}, || {}), Err(BenchError::NoRuns));
+        assert_eq!(time_ab(&now, 1, 0, 0, || {}, || {}), Err(BenchError::NoRuns));
+        // pairs x runs is what is bounded, so no pooled series can exceed the limit or be empty.
+        assert_eq!(
+            time_ab(&now, 2, 0, MAX_RUNS, || {}, || {}),
+            Err(BenchError::TooManyRuns {
+                got: 2 * MAX_RUNS,
+                max: MAX_RUNS
+            })
+        );
+        assert_eq!(
+            time_ab(&now, usize::MAX, 0, 2, || {}, || {}),
+            Err(BenchError::TooManyRuns {
+                got: usize::MAX,
+                max: MAX_RUNS
+            })
+        );
     }
 
     #[test]
-    fn budgets_are_judged_and_named_after_the_adr() {
-        let s = Samples::new(vec![ms(100), ms(200), ms(900)]).unwrap();
-        let gate = Budget {
-            name: "locate gate",
-            limit: budgets::LOCATE_GATE_GPU_P95,
-            stat: Stat::Max,
-        };
-        assert_eq!(gate.judge(&s), Verdict::Over);
-        let target = Budget {
-            name: "target",
-            limit: budgets::LOCATE_TARGET_GPU_P50,
-            stat: Stat::P50,
-        };
-        assert_eq!(target.judge(&s), Verdict::Over);
-        let p95 = Budget {
-            name: "cpu",
-            limit: budgets::LOCATE_GATE_CPU_P95,
-            stat: Stat::P95,
-        };
-        assert_eq!(p95.judge(&s), Verdict::Within);
+    fn interleaved_ab_alternates_and_pools() {
+        let t = Cell::new(Duration::ZERO);
+        let now = || t.get();
+        let order = std::cell::RefCell::new(String::new());
+        let (a, b) = time_ab(
+            &now,
+            2,
+            0,
+            1,
+            || {
+                order.borrow_mut().push('a');
+                t.set(t.get() + ms(1));
+            },
+            || {
+                order.borrow_mut().push('b');
+                t.set(t.get() + ms(2));
+            },
+        )
+        .unwrap();
+        assert_eq!(order.borrow().as_str(), "abab");
+        assert_eq!((a, b), (vec![ms(1), ms(1)], vec![ms(2), ms(2)]));
+    }
+
+    #[test]
+    fn budgets_are_named_after_the_adr() {
         assert_eq!(budgets::LOCATE_GATE_CPU_P95, Duration::from_secs(2));
         assert_eq!(budgets::HUD_FRAME_OVERHEAD, ms(2));
-        assert!(
-            budgets::LOCATE_TARGET_GPU_P95 < budgets::LOCATE_GATE_GPU_P95
-                && budgets::LOCATE_GATE_CPU_P95_4K > budgets::LOCATE_GATE_GPU_P95_4K
-        );
-        assert!(budgets::MODEL_COLD_LOAD > ms(0) && budgets::LOCATE_TARGET_CPU_P95 < budgets::LOCATE_GATE_CPU_P95);
+        assert_eq!(budgets::HUD_STEP_TIMING_CHANGE_PERCENT, 5.0);
+        assert!(budgets::LOCATE_TARGET_GPU_P95 < budgets::LOCATE_GATE_GPU_P95);
+        assert!(budgets::LOCATE_GATE_CPU_P95_4K > budgets::LOCATE_GATE_GPU_P95_4K);
+        assert!(budgets::MODEL_COLD_LOAD > budgets::LOCATE_TARGET_GPU_P50);
+        assert!(budgets::LOCATE_TARGET_CPU_P95 < budgets::LOCATE_GATE_CPU_P95);
+        assert!(budgets::LOCATE_TARGET_GPU_P50 < budgets::LOCATE_TARGET_GPU_P95);
+        assert!(budgets::LOCATE_GATE_GPU_P95_4K > budgets::LOCATE_GATE_GPU_P95);
     }
 
     #[test]
@@ -478,7 +332,21 @@ mod tests {
         assert_eq!(change_percent(ms(0), ms(0)), 0.0);
         assert!(change_percent(ms(0), ms(1)).is_infinite());
         assert!(load_allows_run(24.9) && !load_allows_run(25.1) && !load_allows_run(f64::NAN));
-        assert_eq!(budgets::HUD_STEP_TIMING_CHANGE_PERCENT, 5.0);
+    }
+
+    #[test]
+    fn rows_judge_only_against_their_own_budget() {
+        let within = ResultRow::against("HUD", ms(1), "HUD per frame p95", budgets::HUD_FRAME_OVERHEAD);
+        assert_eq!(
+            (within.verdict.as_str(), within.budget.as_str()),
+            ("within", "HUD per frame p95 <= 2.00 ms")
+        );
+        assert_eq!(ResultRow::against("HUD", ms(3), "x", budgets::HUD_FRAME_OVERHEAD).verdict, "over");
+        let ind = ResultRow::indication("NMS", Duration::from_micros(65));
+        assert_eq!(
+            (ind.budget.as_str(), ind.verdict.as_str(), ind.value.as_str()),
+            ("none", "indication", "65.00 us")
+        );
     }
 
     #[test]
@@ -497,14 +365,7 @@ mod tests {
             memory_measure: "not measured".into(),
             notes: "a | b\nsecond line".into(),
         };
-        let s = Samples::new(vec![ms(1), ms(2)]).unwrap();
-        let b = Budget {
-            name: "HUD per frame",
-            limit: budgets::HUD_FRAME_OVERHEAD,
-            stat: Stat::P95,
-        };
-        let row = Row::latency("map 1k boxes | p95", &s, &b);
-        assert_eq!(row.verdict, "within");
+        let row = ResultRow::indication("map 1k boxes | p95", ms(1));
         let text = render_results_block(&info, &[row]);
         for needle in [
             "### 2026-10-30, core geometry (sighter/core-wave-0)",
@@ -520,14 +381,5 @@ mod tests {
         assert_eq!(format_duration(Duration::from_nanos(900)), "900 ns");
         assert_eq!(format_duration(Duration::from_micros(15)), "15.00 us");
         assert_eq!(format_duration(Duration::from_secs(3)), "3.00 s");
-    }
-
-    proptest! {
-        #[test]
-        fn percentiles_are_ordered_and_bounded(v in prop::collection::vec(0u64..10_000, 1..200)) {
-            let s = Samples::new(v.iter().map(|&n| Duration::from_micros(n)).collect()).unwrap();
-            prop_assert!(s.percentile(0.0) <= s.p50() && s.p50() <= s.p95() && s.p95() <= s.max());
-            prop_assert!(s.mean() <= s.max());
-        }
     }
 }

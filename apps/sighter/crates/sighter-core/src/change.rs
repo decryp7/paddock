@@ -2,9 +2,11 @@
 //! fallback where the OS reports no dirty rects.
 //!
 //! The ADR fixes the method: hash a slightly quantised, downsampled copy of each tile so codec noise does not count as a
-//! change; a tile counts as changed when the hash differs, confirmed by a mean-absolute-difference threshold; a changed
+//! change; a tile counts as changed when the hash differs, confirmed by the **largest absolute difference of any single
+//! cell** of the downsampled tile (a mean over the whole tile would average a small local change, such as a 16 point
+//! checkbox in a 640 tile, away to nothing); a changed
 //! tile is re-run only after it has been stable for N frames. The ADR does **not** fix the numbers (downsample size,
-//! quantisation levels, threshold, N) or the pixel format, so [`ChangeParams`] has no default: the caller passes
+//! quantisation levels, cell threshold, N) or the pixel format, so [`ChangeParams`] has no default: the caller passes
 //! measured values, and this module takes 8-bit luma. Pure: no time, no I/O.
 
 /// Largest tile side accepted (a 960 tile with room to spare).
@@ -54,7 +56,7 @@ pub enum ChangeError {
 pub struct ChangeParams {
     cells: usize,
     levels: u16,
-    mad_threshold: f64,
+    cell_threshold: f64,
     stable_frames: u32,
 }
 
@@ -68,17 +70,17 @@ fn range(what: &'static str, value: f64, min: f64, max: f64) -> Result<(), Chang
 
 impl ChangeParams {
     /// `cells`: the tile is averaged down to `cells x cells` (2 to 64). `levels`: brightness levels after quantisation
-    /// (2 to 256). `mad_threshold`: mean absolute difference, in 0..=255 luma units, at or above which a differing hash
-    /// counts as a change. `stable_frames`: frames a changed tile must stay the same before it is re-run (at least 1).
-    pub fn new(cells: usize, levels: u16, mad_threshold: f64, stable_frames: u32) -> Result<Self, ChangeError> {
+    /// (2 to 256). `cell_threshold`: the largest difference of any one cell, in 0..=255 luma units, at or above which a
+    /// differing hash counts as a change (choose `cells` so one cell is about the size of the smallest element to notice). `stable_frames`: frames a changed tile must stay the same before it is re-run (at least 1).
+    pub fn new(cells: usize, levels: u16, cell_threshold: f64, stable_frames: u32) -> Result<Self, ChangeError> {
         range("cells", cells as f64, 2.0, MAX_CELLS as f64)?;
         range("levels", f64::from(levels), 2.0, 256.0)?;
-        range("mad_threshold", mad_threshold, 0.0, 255.0)?;
+        range("cell_threshold", cell_threshold, 0.0, 255.0)?;
         range("stable_frames", f64::from(stable_frames), 1.0, f64::from(u32::MAX))?;
         Ok(Self {
             cells,
             levels,
-            mad_threshold,
+            cell_threshold,
             stable_frames,
         })
     }
@@ -158,15 +160,19 @@ pub fn signature(img: &Luma<'_>, p: &ChangeParams) -> Result<Signature, ChangeEr
     Ok(Signature { hash, cells })
 }
 
-/// Mean absolute difference of the downsampled brightness, in luma units.
-pub fn mean_abs_diff(a: &Signature, b: &Signature) -> f64 {
-    let total: u32 = a.cells.iter().zip(&b.cells).map(|(x, y)| u32::from(x.abs_diff(*y))).sum();
-    f64::from(total) / a.cells.len().max(1) as f64
+/// The largest absolute difference of any single cell of the two downsampled tiles, in luma units.
+pub fn max_cell_diff(a: &Signature, b: &Signature) -> f64 {
+    a.cells
+        .iter()
+        .zip(&b.cells)
+        .map(|(x, y)| x.abs_diff(*y))
+        .max()
+        .map_or(0.0, f64::from)
 }
 
-/// True when the hashes differ **and** the mean absolute difference reaches the threshold.
+/// True when the hashes differ **and** some cell differs by at least the threshold.
 pub fn changed(a: &Signature, b: &Signature, p: &ChangeParams) -> bool {
-    a.hash != b.hash && mean_abs_diff(a, b) >= p.mad_threshold
+    a.hash != b.hash && max_cell_diff(a, b) >= p.cell_threshold
 }
 
 /// What to do with a tile after seeing its newest frame.
@@ -294,11 +300,40 @@ mod tests {
             }
         }
         let (a, b) = (sig(&base, &p), sig(&edited, &p));
-        assert!(changed(&a, &b, &p) && mean_abs_diff(&a, &b) > 20.0);
+        assert!(changed(&a, &b, &p) && max_cell_diff(&a, &b) > 20.0);
+    }
+
+    /// A tile of `side` x `side` pixels, flat grey, with a `size` x `size` square set to `value` at (x, y).
+    fn tile_with_square(side: usize, base: u8, x: usize, y: usize, size: usize, value: u8) -> Vec<u8> {
+        let mut v = vec![base; side * side];
+        for row in y..y + size {
+            for col in x..x + size {
+                v[row * side + col] = value;
+            }
+        }
+        v
+    }
+
+    /// Regression: a 16 point checkbox going from light to dark was averaged away by a whole-tile mean (0.137 of 255 in a
+    /// 640 tile) and the tile stayed "unchanged", so a new dialog's checkbox was never detected.
+    #[test]
+    fn a_16_point_change_in_a_640_or_960_tile_is_a_change() {
+        for side in [640usize, 960] {
+            let p = ChangeParams::new(32, 16, 8.0, 1).unwrap();
+            let before = tile_with_square(side, 240, 100, 100, 16, 240);
+            let after = tile_with_square(side, 240, 100, 100, 16, 20);
+            let sig = |d: &[u8]| signature(&Luma::new(side, side, d).unwrap(), &p).unwrap();
+            let (a, b) = (sig(&before), sig(&after));
+            assert!(max_cell_diff(&a, &b) >= 8.0, "{side}: {}", max_cell_diff(&a, &b));
+            assert!(changed(&a, &b, &p), "{side}");
+            let mut t = TileTracker::new();
+            t.observe(a, &p);
+            assert_eq!(t.observe(b, &p), Verdict::Rerun, "{side}");
+        }
     }
 
     #[test]
-    fn a_quantisation_boundary_flip_needs_the_mad_confirmation() {
+    fn a_quantisation_boundary_flip_needs_the_cell_confirmation() {
         let p = params(1);
         // 111 and 112 sit on a quantisation edge (step 16): the hashes differ, the brightness hardly does.
         let (a, b) = (sig(&flat(111), &p), sig(&flat(112), &p));

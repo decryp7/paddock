@@ -169,6 +169,7 @@ impl HintEvent {
     /// The sentence the HUD and the "Explain this locate" view show.
     pub fn explain(&self) -> String {
         match self {
+            Self::AllOutsideScope { count: 1, .. } => "the hint was outside the scope; the query ran without hints".to_owned(),
             Self::AllOutsideScope { count, .. } => format!("all {count} hints were outside the scope; the query ran without hints"),
         }
     }
@@ -382,9 +383,12 @@ mod tests {
     }
     fn steps(e: &[TraceEvent]) -> Vec<u32> {
         e.iter()
-            .map(|e| match e.event {
-                TraceKind::Step(StepEvent::Started { step }) => step,
-                _ => u32::MAX,
+            .filter_map(|e| {
+                if let TraceKind::Step(StepEvent::Started { step }) = e.event {
+                    Some(step)
+                } else {
+                    None
+                }
             })
             .collect()
     }
@@ -446,6 +450,10 @@ mod tests {
     fn the_all_hints_dropped_event_explains_itself_and_round_trips() {
         let e = HintEvent::AllOutsideScope { locate: 4, count: 3 };
         assert_eq!(e.explain(), "all 3 hints were outside the scope; the query ran without hints");
+        assert_eq!(
+            HintEvent::AllOutsideScope { locate: 4, count: 1 }.explain(),
+            "the hint was outside the scope; the query ran without hints"
+        );
         let kind = TraceKind::Hint(e);
         let json = serde_json::to_string(&kind).unwrap();
         assert_eq!(serde_json::from_str::<TraceKind>(&json).unwrap(), kind);
