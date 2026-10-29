@@ -148,7 +148,7 @@ and Dyno (28). The per-app results are in [audits/](audits/); the shared check t
 | P07 | Drawings and screenshots shipped unreviewed or stale | No gate | rule 22 | **S** `C24`: `docs/images/REVIEWED.md` holds the hash of every reviewed image; a changed hash fails. proposed |
 | P08 | Release from a workstation | Convenience | rule 9 | **S** `C07` (only the tag workflow holds the secrets); **R** otherwise. partial |
 | P09 | Tunables hard-coded; knowledge lists in code | Not Settings/TOML packs | rule 21 | **R** + `C09`-style grep for magic thresholds is impractical: reviewed in the audit; Settings schema test per app. |
-| P10 | Stale model/engine catalogues | Catalogue not dated | lessons | **A** Pitwall/Debrief update scripts (`update-llama-runtimes.py`); nightly check that catalogue entries resolve. proposed |
+| P10 | Stale model/engine catalogues | Catalogue not dated | lessons | **A** Pitwall/Debrief update scripts (`./dev fetch llama`); nightly check that catalogue entries resolve. proposed |
 
 ## Summary
 

@@ -1,4 +1,4 @@
-use crate::{input_hash, plan, slots};
+use crate::{fetch, input_hash, plan, slots};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -27,6 +27,11 @@ enum Command {
     Ci {
         #[command(subcommand)]
         command: CiCommand,
+    },
+    /// Pinned downloads: the test browser, libduckdb, catalogue pins and runtime manifests.
+    Fetch {
+        #[command(subcommand)]
+        command: fetch::Command,
     },
     /// The project graph.
     Graph {
@@ -128,6 +133,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             SlotCommand::Status(a) => slots::status(&a),
             SlotCommand::Hold(a) => slots::hold(&a),
         },
+        Command::Fetch { command } => fetch::command(command),
         Command::Graph {
             command: GraphCommand::Affected(a),
         } => plan::command(&plan::Request {

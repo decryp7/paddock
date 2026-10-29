@@ -96,7 +96,7 @@ A waiver past its date, or without a reason or date, is an error itself (W001, W
 
 ## CI scripts (`ci/`) and the shared actions
 
-`pin-runtime.mjs` pins a `paddock-runtime` catalogue (Chromium's `chromium.toml`, FFmpeg's, llama.cpp's): it downloads each
+`pin-runtime.mjs` (superseded by `./dev fetch pin`, R3 of ADR 0022; it stays because `install-test-browser.mjs` imports it and CI still runs that) pins a `paddock-runtime` catalogue (Chromium's `chromium.toml`, FFmpeg's, llama.cpp's): it downloads each
 platform's archive once, measures size and SHA-256 while reading and rewrites `version`, `url`, `size` and `sha256` in place
 (`--version <v>` moves the URLs; `--chrome-for-testing [channel]` takes Chrome for Testing's version and URLs). It replaces
 Spotter's `pin-chromium.mjs`. `install-test-browser.mjs --catalogue <toml>` installs the build such a catalogue pins (it replaces

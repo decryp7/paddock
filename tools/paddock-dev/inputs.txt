@@ -3,9 +3,15 @@
 # globs. tests/inputs.rs compares the list with `cargo metadata` (normal and build path dependencies only).
 tools/paddock-dev
 crates/Cargo.toml
+crates/paddock-archive
+crates/paddock-chromium
 crates/paddock-cli
+crates/paddock-download
+crates/paddock-env
+crates/paddock-jobs
 crates/paddock-proc
 crates/paddock-repo-graph
+crates/paddock-runtime
 crates/paddock-slots
 crates/paddock-workspace-hack
 .cargo/config.toml

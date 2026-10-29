@@ -28,6 +28,16 @@ paddock-cli = { path = "../../crates/paddock-cli" }
 paddock-proc = { path = "../../crates/paddock-proc" }
 paddock-repo-graph = { path = "../../crates/paddock-repo-graph", features = ["git-history", "cargo-metadata"] }
 paddock-slots = { path = "../../crates/paddock-slots" }
+# `dev fetch` (R3): pinned downloads on the shared crates.
+paddock-archive = { path = "../../crates/paddock-archive" }
+paddock-chromium = { path = "../../crates/paddock-chromium" }
+paddock-download = { path = "../../crates/paddock-download" }
+paddock-jobs = { path = "../../crates/paddock-jobs" }
+paddock-runtime = { path = "../../crates/paddock-runtime" }
+# Catalogue pins are rewritten in place, so comments and order survive.
+toml_edit = "0.22"
+# Ctrl+C cancels the running fetch job.
+ctrlc = "3"
 
 [target.'cfg(unix)'.dependencies]
 # fds.rs: the holder closes the descriptors it inherited.
@@ -39,6 +49,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 
 [dev-dependencies]
 tempfile = "3"
+sha2 = "0.10"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 paddock-testkit = { path = "../../crates/paddock-testkit" }
 
 [lints.rust]

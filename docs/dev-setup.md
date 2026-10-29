@@ -25,7 +25,7 @@ scripts/setup-dev.sh --install  # macOS: installs the missing tools, then report
 | `cargo-hakari`, `cargo-machete` | one feature set per dependency, unused dependencies | `cargo install --locked cargo-hakari cargo-machete` (or the prebuilt release binaries) | same | same |
 | Docker (or OrbStack) | run the Linux CI image locally before pushing | Docker Desktop or OrbStack | docker | Docker Desktop |
 | Playwright browsers | e2e: Chromium in branches, Chromium + WebKit on the combined branch and in CI | `npx playwright install chromium webkit` in `app/` | `npx playwright install --with-deps chromium webkit` | `npx playwright install chromium` |
-| Chrome for Testing (pinned) | tests that drive a real browser; never the installed Google Chrome (rule 7) | each app's `install-test-browser` script sets `CHROMIUM_TEST_PATH` | same | same |
+| Chrome for Testing (pinned) | tests that drive a real browser; never the installed Google Chrome (rule 7) | `./dev fetch chrome` (or each app's `install-test-browser` script) sets `CHROMIUM_TEST_PATH` | same | same |
 
 ## Environment
 

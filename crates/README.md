@@ -1473,7 +1473,7 @@ browser.close();                                                    // Browser.c
   when `PADDOCK_FAKE_BROWSER` is set. `tests/real_browser.rs` drives a real Chrome for Testing headless when
   `CHROMIUM_TEST_PATH` is set and checks that nothing is left behind; with `PADDOCK_REQUIRE_TEST_BROWSER` set a missing browser
   fails it (Paddock's Linux CI job, whose `paddock-ci` image carries the build `chromium.toml` pins).
-- Pins: `node conformance/ci/pin-runtime.mjs crates/paddock-chromium/src/chromium.toml --chrome-for-testing Stable` rewrites
+- Pins: `./dev fetch pin crates/paddock-chromium/src/chromium.toml --chrome-for-testing Stable` rewrites
   version, URLs, sizes and checksums (any `paddock-runtime` catalogue: `--version <v>` or as it is); the CI image's
   `CHROME_VERSION` must follow (`scripts/ci-image.test.mjs` checks it).
 
