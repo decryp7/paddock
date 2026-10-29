@@ -844,3 +844,17 @@ All 9 overview images approved (docs/images/REVIEW.md, REVIEWED.md); C24 is bloc
 diagram-kit recommendation (one meaning per line style: solid = works today, dashed = later/optional, dotted 2 3 with
 ≥3:1 contrast = OS-process boundary, external = neutral dashed node, planned = solid outline + pill) go into
 diagrams/STYLE.md and the next redraw.
+
+## Page-footer safe area follow-up (shell-gaps, 2026-10-28)
+
+`--pd-page-footer-safe` is a fixed 56 px today (the toast host cannot know a page's footer). Next: the frame owns a declared
+footer region that publishes its measured height into `--pd-page-footer-safe` (default 0 without a footer), so toasts sit
+exactly above any footer.
+
+## Follow-up: declare health cause codes once
+
+The chip's words (`CAUSE_WORDS` in `shell/notify/src/service-status-text.ts`) are keyed by the stable `Cause::code` strings that
+Rust emits, which today live as string literals in many crates and apps, so a spec scans the Rust sources to keep the two in step.
+Declare the codes once in Rust (a `paddock-health` enum with an `ALL` list that apps extend), generate the TypeScript union from it
+(ts-rs, like the other wire types) and make `CAUSE_WORDS` a `Record<CauseCode, ...>`, so a missing word is a compile error and the
+source scan can go. Same for the Notice `code`.

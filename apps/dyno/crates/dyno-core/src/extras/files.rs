@@ -1,6 +1,5 @@
 //! The large and duplicate file finder: the pure part. The agent walks the chosen folder (bounded), hashes the files that
-//! could be duplicates and hands the results here. Finding deletes nothing: files are removed only through the cleanup
-//! policy's admission, re-check and Trash/quarantine (ADR 0005), on the user's click.
+//! could be duplicates and hands the results here. Finding deletes nothing, and neither does anything else in Dyno.
 
 use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -178,24 +177,6 @@ pub fn duplicate_groups(files: &[Walked], hashed: &[(usize, [u8; 32])], id_prefi
     groups
 }
 
-/// Every file a user could select in `result` (large and duplicate copies), by id.
-pub fn find_file<'a>(result: &'a FinderResult, id: &str) -> Option<&'a FoundFile> {
-    result
-        .large
-        .iter()
-        .chain(result.duplicates.iter().flat_map(|g| g.files.iter()))
-        .find(|f| f.id == id)
-}
-
-/// Whether the selection would remove every copy of some duplicate group (the user keeps nothing): refused, one copy
-/// always stays.
-pub fn removes_every_copy(result: &FinderResult, ids: &[String]) -> bool {
-    result
-        .duplicates
-        .iter()
-        .any(|g| !g.files.is_empty() && g.files.iter().all(|f| ids.iter().any(|i| i == &f.id)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,19 +259,5 @@ mod tests {
         assert!(g.is_empty());
         // An index outside the list is ignored.
         assert!(duplicate_groups(&files, &[(99, same), (98, same)], "s").is_empty());
-    }
-
-    #[test]
-    fn a_selection_may_not_remove_every_copy() {
-        let files = vec![w("/a", 2 * MB, 1), w("/b", 2 * MB, 2)];
-        let d = [3u8; 32];
-        let result = FinderResult {
-            duplicates: duplicate_groups(&files, &[(0, d), (1, d)], "s"),
-            ..Default::default()
-        };
-        assert!(removes_every_copy(&result, &["s-d0-0".into(), "s-d0-1".into()]));
-        assert!(!removes_every_copy(&result, &["s-d0-1".into()]));
-        assert!(find_file(&result, "s-d0-0").is_some());
-        assert!(find_file(&result, "nope").is_none());
     }
 }

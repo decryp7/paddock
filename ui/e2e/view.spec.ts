@@ -240,7 +240,7 @@ test('P2-10: the form shows the name the host gave the chosen folder and secret'
   const box = await open(page);
   const form = box.locator('[data-node-id="form"]');
   await form.getByRole('button', { name: 'Output folder: Choose a folder…' }).click();
-  await expect(form.locator('[data-testid=path-text]')).toHaveAttribute('title', /bundle$/);
+  await expect(form.locator('[data-testid=path-text]')).toHaveAttribute('data-full', /bundle$/);
   await form.getByRole('button', { name: 'Publish token: Choose a secret…' }).click();
   await expect(form.getByTestId('view-chosen').nth(1)).toContainText('release-publish-token');
 });

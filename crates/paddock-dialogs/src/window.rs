@@ -5,9 +5,9 @@
 //! Ported from Debrief's `dialog_windows.rs` (Debrief ADRs 0050 and 0054) without Debrief's labels, events or error type.
 
 use crate::contract::{
-    Contract, DIALOG_MIN, FALLBACK_SIZE, Kind, MAX_SIDE, Modality, valid_dialog_id,
+    CAP_FRACTION, Contract, Kind, MAX_SIDE, Modality, Size, UNMEASURED_HEIGHT, valid_dialog_id,
 };
-use crate::placement::{self, Monitor, Rect, Remembered, ScreenPosition, TITLE_BAR};
+use crate::placement::{self, Monitor, Rect, Remembered, ScreenPosition};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
@@ -16,6 +16,10 @@ use std::fmt;
 pub const RESULT_EVENT: &str = "paddock://dialog-result";
 /// To the window that opened the dialog: it is gone (with or without a result). Payload: [`DialogClosed`].
 pub const CLOSED_EVENT: &str = "paddock://dialog-closed";
+/// To the window that opened the dialog: its window is on screen now (shown on ready, or at the show deadline). The
+/// opener's in-app scrim over a macOS parent (which the OS does not disable) starts here, not at open. Payload:
+/// [`DialogShown`].
+pub const SHOWN_EVENT: &str = "paddock://dialog-shown";
 /// To the dialog: the user asked to close it (Cmd/Ctrl+W, a window-manager close); the dialog decides and calls
 /// `dialog_close`. No payload.
 pub const CLOSE_REQUESTED_EVENT: &str = "paddock://dialog-close-requested";
@@ -32,8 +36,8 @@ pub const MAX_TITLE: usize = 200;
 /// The route of the app's UI that renders a dialog (the default of [`crate::Dialogs::new`]).
 pub const DEFAULT_ROUTE: &str = "index.html#/dialog";
 
-/// What the UI asks for when opening a dialog. The kind, modality, required choice and floor are not asked for: they
-/// come from the dialog's declared contract, which Rust owns.
+/// What the UI asks for when opening a dialog. The kind, modality, required choice and sizes are not asked for: they
+/// come from the dialog's declared contract, which Rust owns (ADR 0026 §3).
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -48,24 +52,25 @@ pub struct DialogRequest {
     #[serde(default)]
     #[cfg_attr(test, ts(optional, type = "unknown"))]
     pub input: Option<Value>,
-    #[serde(default)]
-    #[cfg_attr(test, ts(optional))]
-    pub width: Option<f64>,
-    /// None: the window is fitted to its content (a fitted form or decision).
-    #[serde(default)]
-    #[cfg_attr(test, ts(optional))]
-    pub height: Option<f64>,
-    #[serde(default)]
-    #[cfg_attr(test, ts(optional))]
-    pub min_width: Option<f64>,
-    #[serde(default)]
-    #[cfg_attr(test, ts(optional))]
-    pub min_height: Option<f64>,
     /// What the UI remembered of this dialog: its size and its offset from the parent window (never an absolute
     /// screen position). The shell decides where it goes ([`placement::place`]).
     #[serde(default)]
     #[cfg_attr(test, ts(optional))]
     pub remembered: Option<Remembered>,
+    /// The opener's resolved theme (its `data-theme`): the window's background before the page paints is that theme's
+    /// `--pd-surface-2`. Without it the parent window's OS theme is used.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub theme: Option<Theme>,
+}
+
+/// A colour scheme of the app (`data-theme`).
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DialogTheme"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    Light,
+    Dark,
 }
 
 /// A dialog window as the opener sees it.
@@ -75,8 +80,11 @@ pub struct DialogRequest {
 pub struct DialogInfo {
     pub label: String,
     pub dialog_id: String,
-    /// The window existed already and was focused.
+    /// The window existed already (and was focused, if it was on screen).
     pub existing: bool,
+    /// The window is not on screen yet: it is shown when its page is ready (or at the show deadline), and
+    /// `paddock://dialog-shown` follows. False for an existing window that was shown already.
+    pub pending: bool,
 }
 
 /// What a dialog's own webview needs to render (`dialog_take_input`).
@@ -103,6 +111,15 @@ pub struct DialogResult {
     pub dialog_id: String,
     #[cfg_attr(test, ts(type = "unknown"))]
     pub result: Option<Value>,
+}
+
+/// The payload of [`SHOWN_EVENT`].
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DialogShown {
+    pub label: String,
+    pub dialog_id: String,
 }
 
 /// The payload of [`CLOSED_EVENT`].
@@ -262,33 +279,24 @@ pub fn json_len(v: &Value) -> usize {
     n.0
 }
 
-/// A size within what a window can sensibly be; the default for a value that is not a number.
-fn clamp_size(v: Option<f64>, min: f64, default: f64) -> f64 {
-    match v {
-        Some(v) if v.is_finite() => v.clamp(min, MAX_SIDE),
-        _ => default.clamp(min, MAX_SIDE),
-    }
-}
-
-/// The validated window geometry of a request, logical px: (width, height, min width, min height). The request's
-/// sizes, else the kind's default, else [`FALLBACK_SIZE`]; never below the dialog's floor ([`Contract::floor`]: a viewer
-/// is never smaller than 680x560) nor above [`MAX_SIDE`].
-pub fn geometry(r: &DialogRequest, contract: &Contract) -> (f64, f64, f64, f64) {
+/// The window geometry of a dialog, logical px: (width, height, min width, min height). The contract's width and
+/// preferred height (a measured decision or form starts at [`UNMEASURED_HEIGHT`] until its first fit), never below the
+/// dialog's floor ([`Contract::floor`]: a viewer is never smaller than 680x560) nor above [`MAX_SIDE`].
+pub fn geometry(contract: &Contract) -> (f64, f64, f64, f64) {
     let floor = contract.floor();
-    let default = contract.kind.policy().default_size.unwrap_or(FALLBACK_SIZE);
-    let min_w = clamp_size(r.min_width, DIALOG_MIN.width, DIALOG_MIN.width).max(floor.width);
-    let min_h = clamp_size(r.min_height, DIALOG_MIN.height, DIALOG_MIN.height).max(floor.height);
+    let height = contract.height.unwrap_or(UNMEASURED_HEIGHT);
     (
-        clamp_size(r.width, min_w, default.width),
-        clamp_size(r.height, min_h, default.height),
-        min_w,
-        min_h,
+        contract.width.clamp(floor.width, MAX_SIDE),
+        height.clamp(floor.height, MAX_SIDE),
+        floor.width,
+        floor.height,
     )
 }
 
-/// Whether the window of a request is fitted to its content: the kind fits content and the request names no height.
-pub fn is_fitted(r: &DialogRequest, kind: Kind) -> bool {
-    kind.policy().fits_content && r.height.is_none()
+/// Whether the window of a dialog of `kind` is fitted to its content (ADR 0026 §1: decisions, forms and viewers are;
+/// a tool is user-sized).
+pub fn is_fitted(kind: Kind) -> bool {
+    kind.policy().fits_content
 }
 
 /// The builder configuration of a dialog window, separate from the build so a test can check it without a window.
@@ -301,6 +309,8 @@ pub struct WindowConfig {
     /// Logical px (see [`ScreenPosition`]).
     pub position: (f64, f64),
     pub min_inner: (f64, f64),
+    /// The background before the page paints ([`window_surface`]).
+    pub background: (u8, u8, u8),
     pub resizable: bool,
     /// Owned by the parent natively ([`Parenting::Owned`]).
     pub owned: bool,
@@ -310,6 +320,23 @@ pub struct WindowConfig {
     pub minimizable: bool,
     /// The native zoom / maximise button: none.
     pub maximizable: bool,
+    /// Run in the page before the app ([`platform_script`]).
+    pub init_script: String,
+}
+
+/// The script run in a dialog page before the app: `<html data-platform>` is the OS the window was built for (`macos`,
+/// `windows` or `linux`; any other OS counts as Linux), so the shell's platform-dependent layout (the footer's button
+/// order) does not depend on the user agent. Set at once, or when the document element appears.
+pub fn platform_script(os: &str) -> String {
+    let os = match os {
+        "macos" => "macos",
+        "windows" => "windows",
+        _ => "linux",
+    };
+    format!(
+        "(function(){{var set=function(){{var d=document.documentElement;if(!d)return false;d.dataset.platform='{os}';return true;}};\
+if(!set()){{var o=new MutationObserver(function(){{if(set())o.disconnect();}});o.observe(document,{{childList:true}});}}}})();"
+    )
 }
 
 /// The title-bar buttons of a dialog window: (closable, minimizable, maximizable). None, for every kind: a dialog closes
@@ -329,6 +356,8 @@ pub struct WindowSpec<'a> {
     pub modality: Modality,
     /// The OS (`std::env::consts::OS`).
     pub os: &'a str,
+    /// The colour scheme, for the background ([`window_surface`]).
+    pub theme: Theme,
 }
 
 /// The builder configuration of a dialog at `place` with logical minimum `min`.
@@ -348,30 +377,193 @@ pub fn window_config(
         title: spec.title.to_string(),
         inner: (w, h),
         position: at.logical,
+        background: window_surface(spec.theme),
+        init_script: platform_script(spec.os),
         min_inner: (min.0.min(w), min.1.min(h)),
         resizable: true,
         owned: Parenting::of(spec.modality, spec.os) == Parenting::Owned,
     }
 }
 
-/// The window height (logical px) that fits `content` px of dialog content: at least [`DIALOG_MIN`], at most `max`
-/// (the work area's height less the title bar); `None` for a value that is not a number.
-pub fn fitted_height(content: f64, max: f64) -> Option<f64> {
-    if !content.is_finite() || !max.is_finite() {
-        return None;
-    }
-    Some(
-        content
-            .ceil()
-            .clamp(DIALOG_MIN.height, max.clamp(DIALOG_MIN.height, MAX_SIDE)),
-    )
+/// A dialog's measure (ADR 0026 §4.2), the dialog's own inner logical size as its frame measured it, synchronously,
+/// after its content and `document.fonts.ready`: `content` is what it needs at its declared width (header, body at its
+/// natural height, footer), `min_content` the least it can be (the footer's buttons on one line, the body's declared
+/// minimum). The window system makes `min_content` the OS minimum.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DialogMeasureWire"))]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Measure {
+    pub content: Size,
+    pub min_content: Size,
+    /// The page's `window.innerHeight` (CSS px), when the page sends it. A webview can be shorter than the window's
+    /// inner height (the 1.1-0 spike measured 32 px on a Mac whose outer and inner sizes were equal): the fit adds the
+    /// difference ([`viewport_delta`]) to the content and minimum content heights so the footer is not cut off.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub viewport_height: Option<f64>,
+    /// The page's `window.devicePixelRatio` when it measured. A webview zoomed away from the window's scale factor
+    /// (browser zoom, an OS text scale) reports CSS px that are not logical px: the fit converts with [`zoom_of`].
+    /// Absent: CSS px are taken as logical.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub device_pixel_ratio: Option<f64>,
 }
 
-/// The height a dialog window is set to when its content measures `content` px: fitted, but never below the dialog's
-/// floor (a viewer opens at 560 and is not fitted down to its first short state) and, for a kind that only grows, never
-/// below the height it has (a result being read does not shrink under the reader, even when the user made it taller).
-pub fn fit_target(kind: Kind, content: f64, max: f64, floor: f64, current: f64) -> Option<f64> {
-    let fitted = fitted_height(content, max)?.max(floor);
+/// The least and the most a reported `devicePixelRatio` can be (anything else is a wrong report).
+pub const DEVICE_PIXEL_RATIO_RANGE: std::ops::RangeInclusive<f64> = 0.25..=8.0;
+
+/// The webview zoom: CSS px per logical px, `devicePixelRatio / scale_factor`. 1 when the page sent no ratio or either
+/// number is not a positive finite one.
+pub fn zoom_of(device_pixel_ratio: Option<f64>, scale_factor: f64) -> f64 {
+    match device_pixel_ratio {
+        Some(r) if r.is_finite() && r > 0.0 && scale_factor.is_finite() && scale_factor > 0.0 => {
+            r / scale_factor
+        }
+        _ => 1.0,
+    }
+}
+
+/// The webview zoom a dialog window has, with the page ratio and window scale it was read at ([`zoom_after`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ZoomState {
+    /// The page's `devicePixelRatio` last seen (`None` until the page sent one).
+    pub device_pixel_ratio: Option<f64>,
+    /// The window's scale factor at the last fit.
+    pub scale_factor: f64,
+    /// CSS px per logical px ([`zoom_of`]).
+    pub zoom: f64,
+}
+
+/// The zoom after a fit at window scale `scale_factor` with a page that reports `device_pixel_ratio`. The first fit
+/// (`dialog_ready`) reads it as [`zoom_of`]. Later it changes only when the page's ratio changed at an unchanged scale
+/// factor (the user zoomed the page); when the scale factor changed (the window moved to another monitor) the stored
+/// zoom is kept, because the ratio the page sent may still be the old monitor's and `dpr_old / scale_new` would be a
+/// wrong zoom. A fit without a ratio (a refit from the logical measure) keeps the zoom too.
+pub fn zoom_after(
+    prev: Option<ZoomState>,
+    device_pixel_ratio: Option<f64>,
+    scale_factor: f64,
+) -> ZoomState {
+    let fresh = || ZoomState {
+        device_pixel_ratio,
+        scale_factor,
+        zoom: zoom_of(device_pixel_ratio, scale_factor),
+    };
+    let Some(prev) = prev else {
+        return fresh();
+    };
+    let same_scale = prev.scale_factor == scale_factor;
+    let same_ratio = device_pixel_ratio.is_none() || device_pixel_ratio == prev.device_pixel_ratio;
+    if same_scale && !same_ratio {
+        return fresh();
+    }
+    ZoomState {
+        device_pixel_ratio: device_pixel_ratio.or(prev.device_pixel_ratio),
+        scale_factor,
+        zoom: prev.zoom,
+    }
+}
+
+/// The most a viewport delta can be, logical px (a bigger gap is a wrong report, not a webview inset).
+pub const MAX_VIEWPORT_DELTA: f64 = 400.0;
+
+/// The part of a window's inner height the page's viewport does not see: `inner_height` less the page's reported
+/// `viewport_height`, clamped to `0..=`[`MAX_VIEWPORT_DELTA`] (a page that is taller than the window has no delta). 0
+/// when the page did not report one.
+pub fn viewport_delta(inner_height: f64, viewport_height: Option<f64>) -> f64 {
+    match viewport_height {
+        Some(v) if v.is_finite() && inner_height.is_finite() => {
+            (inner_height - v).clamp(0.0, MAX_VIEWPORT_DELTA)
+        }
+        _ => 0.0,
+    }
+}
+
+impl Measure {
+    /// The measure in logical px: content, minimum content and viewport height, which the page reports in CSS px,
+    /// multiplied by `zoom` ([`zoom_of`]). The ratio is spent, so converting again does nothing.
+    pub fn logical(self, zoom: f64) -> Measure {
+        let by = |s: Size| Size {
+            width: s.width * zoom,
+            height: s.height * zoom,
+        };
+        Measure {
+            content: by(self.content),
+            min_content: by(self.min_content),
+            viewport_height: self.viewport_height.map(|v| v * zoom),
+            device_pixel_ratio: None,
+        }
+    }
+
+    /// The measure if all four numbers are finite and positive and at most [`MAX_SIDE`] (a webview cannot make Rust
+    /// size a window to nonsense); an `Invalid` error otherwise.
+    pub fn checked(self) -> Result<Measure, DialogError> {
+        let sane = |s: Size| {
+            [s.width, s.height]
+                .iter()
+                .all(|v| v.is_finite() && *v > 0.0 && *v <= MAX_SIDE)
+        };
+        let viewport_ok = self
+            .viewport_height
+            .is_none_or(|v| v.is_finite() && (1.0..=MAX_SIDE).contains(&v));
+        let ratio_ok = self
+            .device_pixel_ratio
+            .is_none_or(|r| r.is_finite() && DEVICE_PIXEL_RATIO_RANGE.contains(&r));
+        if sane(self.content) && sane(self.min_content) && viewport_ok && ratio_ok {
+            Ok(self)
+        } else {
+            Err(DialogError::new(
+                DialogErrorCode::Invalid,
+                "the measure is not a size",
+            ))
+        }
+    }
+}
+
+/// How a dialog window is kept from being seen at the wrong size (ADR 0026 §4.4). The 1.1-0 spike
+/// (`docs/research/2026-10-28-dialog-hidden-windows.md`) found that nothing that waits for a frame runs in a hidden
+/// window, so the UI measures synchronously and Rust decides when the window appears.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShowMechanism {
+    /// Method d: the window is created hidden and shown on `dialog_ready` (or at the show deadline).
+    ReadyThenShow,
+}
+
+/// The ONE place the show mechanism is chosen per OS (`std::env::consts::OS`). The 1.1-0 spike measured method d on
+/// macOS, Linux and Windows, so it is the same everywhere.
+pub fn show_mechanism(os: &str) -> ShowMechanism {
+    let _ = os;
+    ShowMechanism::ReadyThenShow
+}
+
+/// The background of a dialog window before its page paints, RGB: the dialog shell's own surface, `--pd-surface-2` of
+/// `_tokens.scss` for `theme` (a test compares these values with the file), so the window never flashes another colour.
+pub const fn window_surface(theme: Theme) -> (u8, u8, u8) {
+    match theme {
+        Theme::Dark => (0x1b, 0x1e, 0x23),
+        Theme::Light => (0xf0, 0xf2, 0xf5),
+    }
+}
+
+/// The height a dialog window is set to when its content measures `content` px: the preferred height (the content, at
+/// least `floor`, the viewer's preferred height) limited to `cap`, then never below `min` (the minimum content), and,
+/// for a kind that only grows, never below the height it has (a result being read does not shrink under the reader,
+/// even when the user made it taller). `None` for a value that is not a number.
+pub fn fit_target(
+    kind: Kind,
+    content: f64,
+    cap: f64,
+    min: f64,
+    floor: f64,
+    current: f64,
+) -> Option<f64> {
+    if ![content, cap, min, floor, current]
+        .iter()
+        .all(|v| v.is_finite())
+    {
+        return None;
+    }
+    let fitted = content.ceil().max(floor).min(cap).max(min);
     Some(if kind.policy().grows_only {
         fitted.max(current)
     } else {
@@ -379,41 +571,93 @@ pub fn fit_target(kind: Kind, content: f64, max: f64, floor: f64, current: f64) 
     })
 }
 
-/// What a re-fit does to a dialog window.
+/// What a fit does to a dialog window.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Fit {
-    /// The new inner height, logical px.
-    pub height: f64,
+    /// The new inner size, logical px.
+    pub size: Size,
+    /// The new OS minimum (the minimum content), logical px.
+    pub min: Size,
+    /// The size differs from the current one (by half a pixel or more).
+    pub resize: bool,
     /// Where the window moves so that it stays on its monitor, if it must.
     pub move_to: Option<ScreenPosition>,
 }
 
-/// The re-fit of a dialog of `kind` (floor height `floor`) whose content measures `content` px, now `current` px tall
-/// inside the outer rectangle `outer` (physical px) on `monitor`: `Ok(None)` when it already has that height (within
-/// half a pixel), an error for a content height that is not a number. The height is bounded by the work area of the
-/// dialog's own monitor, and a window that would hang off its bottom moves up on the same monitor.
+/// What a fit knows of the window it sizes.
+#[derive(Debug, Clone, Copy)]
+pub struct Around<'a> {
+    /// The window's inner size now, logical px.
+    pub current: Size,
+    /// Its own decorations: outer minus inner, logical px.
+    pub decor: Size,
+    /// Its outer rectangle, physical px.
+    pub outer: Option<Rect>,
+    /// The monitor it is on.
+    pub monitor: Option<Monitor>,
+    /// The OS (`std::env::consts::OS`).
+    pub os: &'a str,
+    /// What the window's inner height has beyond the page's viewport, logical px ([`viewport_delta`]), taken once at
+    /// `dialog_ready` and reused by every later fit.
+    pub viewport_delta: f64,
+}
+
+/// The fit of a dialog of `kind` (preferred-height floor `floor`, [`Kind::policy`]'s viewer height; 0 for the others)
+/// whose frame measured `measure`, now `current` (inner, logical px) with decorations `decor` (the window's own outer
+/// minus inner, logical px) inside the outer rectangle `outer` (physical px) on `monitor`.
+///
+/// * The cap is [`CAP_FRACTION`] of the monitor's work area minus the window's own decorations; it limits the preferred
+///   size only and never pushes the window below the minimum content. The minimum itself stays on the work area.
+/// * A decision, form or viewer takes the content height; a decision and a form shrink and grow, a viewer only grows.
+///   A tool is user-sized: it keeps its size (but never below the minimum).
+/// * The width is the window's (the frame is laid out at its declared or remembered width) but never below the minimum
+///   content width.
+/// * A window that would hang off the bottom of its monitor moves up on it.
 pub fn plan_fit(
     kind: Kind,
-    content: f64,
+    measure: Measure,
     floor: f64,
-    current: f64,
-    outer: Option<Rect>,
-    monitor: Option<Monitor>,
-    os: &str,
-) -> Result<Option<Fit>, DialogError> {
+    around: &Around<'_>,
+) -> Result<Fit, DialogError> {
+    let Around {
+        current,
+        decor,
+        outer,
+        monitor,
+        os,
+        viewport_delta: delta,
+    } = *around;
+    let measure = measure.checked()?;
     let monitor = monitor.filter(|m| m.work.is_usable());
-    let max = monitor.map_or(MAX_SIDE, |m| m.work.height / m.scale() - TITLE_BAR);
-    let height = fit_target(kind, content, max, floor, current).ok_or_else(|| {
-        DialogError::new(
-            DialogErrorCode::Invalid,
-            "the content height is not a number",
+    let work = monitor.map(|m| (m.work.width / m.scale(), m.work.height / m.scale()));
+    let (avail_w, avail_h) = work.map_or((MAX_SIDE, MAX_SIDE), |(w, h)| {
+        ((w - decor.width).max(1.0), (h - decor.height).max(1.0))
+    });
+    let min = Size {
+        width: measure.min_content.width.min(avail_w),
+        height: (measure.min_content.height + delta).min(avail_h),
+    };
+    let width = current.width.max(min.width);
+    let height = if kind.policy().fits_content {
+        let cap = work.map_or(MAX_SIDE, |(_, h)| h * CAP_FRACTION - decor.height);
+        fit_target(
+            kind,
+            measure.content.height + delta,
+            cap,
+            min.height,
+            floor,
+            current.height,
         )
-    })?;
-    if (height - current).abs() < 0.5 {
-        return Ok(None);
-    }
+        // Finite by `checked` above.
+        .unwrap_or(current.height)
+    } else {
+        current.height.max(min.height)
+    };
+    let size = Size { width, height };
+    let resize =
+        (size.width - current.width).abs() >= 0.5 || (size.height - current.height).abs() >= 0.5;
     let move_to = outer
-        .and_then(|o| placement::keep_on_monitor(o, height, monitor))
+        .and_then(|o| placement::keep_on_monitor(o, size.height + decor.height, monitor))
         .map(|(x, y)| {
             let scale = monitor.map_or(1.0, |m| m.scale());
             let p = placement::Placement {
@@ -426,24 +670,31 @@ pub fn plan_fit(
             };
             placement::screen_position(&p, os)
         });
-    Ok(Some(Fit { height, move_to }))
+    Ok(Fit {
+        size,
+        min,
+        resize,
+        move_to,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contract::{Contracts, VIEWER_MIN};
+    use crate::contract::{Contracts, DIALOG_MIN, VIEWER_MIN};
     use serde_json::json;
 
+    crate::dialogs! {
+        static TABLE;
+        "a" => Form(Modeless),
+        "about" => Viewer,
+        "settings" => Tool,
+        "huge" => Tool { width: Some(Px(4096)), height: Some(4096) },
+        "ask" => Decision,
+    }
+
     fn contracts() -> Contracts {
-        Contracts::parse(
-            r#"{ "version": 1, "dialogs": {
-                "a": { "kind": "form", "modality": "modeless" },
-                "about": { "kind": "viewer", "modality": "modeless", "minSize": { "width": 680, "height": 560 } },
-                "settings": { "kind": "tool", "modality": "modeless" },
-                "ask": { "kind": "decision", "modality": "modal" } } }"#,
-        )
-        .unwrap()
+        Contracts::from_tables(&[&TABLE]).unwrap()
     }
 
     fn contract(id: &str) -> Contract {
@@ -456,55 +707,359 @@ mod tests {
             instance: None,
             title: "Set up".into(),
             input: Some(json!({ "modelId": "m1" })),
-            width: Some(760.0),
-            height: None,
-            min_width: None,
-            min_height: None,
             remembered: None,
+            theme: None,
+        }
+    }
+
+    fn measure(cw: f64, ch: f64, mw: f64, mh: f64) -> Measure {
+        Measure {
+            content: Size {
+                width: cw,
+                height: ch,
+            },
+            min_content: Size {
+                width: mw,
+                height: mh,
+            },
+            viewport_height: None,
+            device_pixel_ratio: None,
+        }
+    }
+
+    fn size(width: f64, height: f64) -> Size {
+        Size { width, height }
+    }
+
+    fn around(current: Size, decor: Size, monitor: Option<Monitor>, os: &str) -> Around<'_> {
+        Around {
+            current,
+            decor,
+            outer: None,
+            monitor,
+            os,
+            viewport_delta: 0.0,
+        }
+    }
+
+    /// The `--pd-surface-2` of the `@mixin dark` or `@mixin light` block of `_tokens.scss`, as RGB.
+    fn token_surface(mixin: &str) -> (u8, u8, u8) {
+        let scss = include_str!("../../../ui/projects/paddock-ui/scss/_tokens.scss");
+        let block = scss
+            .split(&format!("@mixin {mixin} {{"))
+            .nth(1)
+            .expect("the mixin exists");
+        let line = block
+            .lines()
+            .find(|l| l.trim_start().starts_with("--pd-surface-2:"))
+            .expect("the block sets --pd-surface-2");
+        let hex = line.split('#').nth(1).unwrap().trim_end_matches(';').trim();
+        let n = u32::from_str_radix(hex, 16).unwrap();
+        ((n >> 16) as u8, (n >> 8) as u8, n as u8)
+    }
+
+    #[test]
+    fn the_window_surfaces_are_the_tokens_surface_2_of_each_theme() {
+        assert_eq!(window_surface(Theme::Dark), token_surface("dark"));
+        assert_eq!(window_surface(Theme::Light), token_surface("light"));
+    }
+
+    #[test]
+    fn a_dialog_page_is_told_its_platform_before_the_app_runs() {
+        for (os, platform) in [
+            ("macos", "macos"),
+            ("windows", "windows"),
+            ("linux", "linux"),
+            ("freebsd", "linux"),
+        ] {
+            let script = platform_script(os);
+            assert!(
+                script.contains(&format!("d.dataset.platform='{platform}'")),
+                "{os}: {script}"
+            );
         }
     }
 
     #[test]
-    fn a_dialog_window_is_fitted_to_its_content_within_bounds() {
+    fn the_viewport_delta_is_the_inner_height_less_the_pages_and_clamped() {
+        assert_eq!(viewport_delta(332.0, Some(300.0)), 32.0);
+        assert_eq!(viewport_delta(300.0, Some(332.0)), 0.0);
+        assert_eq!(viewport_delta(900.0, Some(100.0)), MAX_VIEWPORT_DELTA);
+        assert_eq!(viewport_delta(332.0, None), 0.0);
+        assert_eq!(viewport_delta(332.0, Some(f64::NAN)), 0.0);
+    }
+
+    #[test]
+    fn a_viewport_short_of_the_window_adds_its_delta_to_content_and_minimum() {
+        let cur = size(400.0, 332.0);
+        let m = measure(400.0, 300.0, 300.0, 150.0);
+        let none = plan_fit(
+            Kind::Form,
+            m,
+            0.0,
+            &around(cur, size(0.0, 0.0), None, "macos"),
+        )
+        .unwrap();
+        let mut a = around(cur, size(0.0, 0.0), None, "macos");
+        a.viewport_delta = 32.0;
+        let fit = plan_fit(Kind::Form, m, 0.0, &a).unwrap();
+        assert_eq!(fit.size.height, none.size.height + 32.0);
+        assert_eq!(fit.min.height, none.min.height + 32.0);
+        // The delta is the caller's, taken once: a measure's own viewport height does not recompute it.
+        let mut resized = m;
+        resized.viewport_height = Some(100.0);
+        assert_eq!(plan_fit(Kind::Form, resized, 0.0, &a).unwrap(), fit);
+    }
+
+    #[test]
+    fn the_zoom_follows_the_page_ratio_at_a_fixed_scale_and_survives_a_monitor_change() {
+        // First fit: dpr 2 on a 2x window is zoom 1.
+        let a = zoom_after(None, Some(2.0), 2.0);
         assert_eq!(
-            fitted_height(180.2, 900.0),
-            Some(DIALOG_MIN.height.max(181.0))
+            (a.zoom, a.device_pixel_ratio, a.scale_factor),
+            (1.0, Some(2.0), 2.0)
         );
-        assert_eq!(fitted_height(250.2, 900.0), Some(251.0));
-        assert_eq!(fitted_height(50.0, 900.0), Some(DIALOG_MIN.height));
-        assert_eq!(fitted_height(5000.0, 700.0), Some(700.0));
-        assert_eq!(fitted_height(5000.0, 1e9), Some(MAX_SIDE));
-        assert_eq!(fitted_height(f64::NAN, 700.0), None);
-        assert_eq!(fitted_height(300.0, f64::INFINITY), None);
+        // The user zooms the page (dpr 3 at the same scale): zoom 1.5.
+        let b = zoom_after(Some(a), Some(3.0), 2.0);
+        assert_eq!(b.zoom, 1.5);
+        // The window moves to a 1x monitor but the page still reports the old ratio: the zoom is kept, not 3 / 1.
+        let c = zoom_after(Some(b), Some(3.0), 1.0);
+        assert_eq!((c.zoom, c.scale_factor), (1.5, 1.0));
+        // A report with the new monitor's ratio (1.5) at the new scale keeps it too (unchanged zoom, ratio recorded).
+        let d = zoom_after(Some(c), Some(1.5), 1.0);
+        assert_eq!(d.zoom, 1.5);
+        // Both ratio and scale changed at once: kept.
+        assert_eq!(zoom_after(Some(a), Some(3.0), 1.0).zoom, 1.0);
+        // Later at that scale a real page zoom is read again.
+        let e = zoom_after(Some(zoom_after(Some(a), Some(3.0), 1.0)), Some(2.0), 1.0);
+        assert_eq!(e.zoom, 2.0);
+        // A refit without a ratio keeps the zoom and the last ratio; a first fit without one is zoom 1.
+        let f = zoom_after(Some(b), None, 2.0);
+        assert_eq!((f.zoom, f.device_pixel_ratio), (1.5, Some(3.0)));
+        assert_eq!(zoom_after(None, None, 2.0).zoom, 1.0);
+        // A bad ratio on a first fit is zoom 1.
+        assert_eq!(zoom_after(None, Some(f64::NAN), 2.0).zoom, 1.0);
+    }
+
+    #[test]
+    fn the_zoom_is_the_ratio_over_the_scale_and_defaults_to_one() {
+        assert_eq!(zoom_of(Some(3.0), 2.0), 1.5);
+        assert_eq!(zoom_of(Some(2.0), 2.0), 1.0);
+        for (r, s) in [
+            (None, 2.0),
+            (Some(2.0), 0.0),
+            (Some(2.0), f64::NAN),
+            (Some(0.0), 2.0),
+            (Some(f64::NAN), 2.0),
+        ] {
+            assert_eq!(zoom_of(r, s), 1.0, "{r:?} {s}");
+        }
+    }
+
+    #[test]
+    fn a_zoomed_measure_converts_css_px_to_logical_px_once() {
+        let mut m = measure(400.0, 300.0, 300.0, 150.0);
+        m.viewport_height = Some(280.0);
+        m.device_pixel_ratio = Some(3.0);
+        let l = m.logical(zoom_of(m.device_pixel_ratio, 2.0));
+        assert_eq!(
+            (l.content, l.min_content, l.viewport_height),
+            (size(600.0, 450.0), size(450.0, 225.0), Some(420.0))
+        );
+        assert_eq!(l.device_pixel_ratio, None, "spent");
+        assert_eq!(l.logical(1.5), l.logical(1.5));
+        let plain = measure(400.0, 300.0, 300.0, 150.0);
+        assert_eq!(plain.logical(1.0), plain);
+    }
+
+    #[test]
+    fn a_measure_must_be_a_real_size() {
+        let mut v = measure(400.0, 300.0, 300.0, 150.0);
+        for bad in [Some(0.0), Some(f64::NAN), Some(MAX_SIDE + 1.0)] {
+            v.viewport_height = bad;
+            assert_eq!(v.checked().unwrap_err().code, DialogErrorCode::Invalid);
+        }
+        v.viewport_height = None;
+        for bad in [0.0, 0.24, 8.01, f64::NAN, f64::INFINITY] {
+            v.device_pixel_ratio = Some(bad);
+            assert_eq!(v.checked().unwrap_err().code, DialogErrorCode::Invalid);
+        }
+        for ok in [0.25, 2.0, 8.0] {
+            v.device_pixel_ratio = Some(ok);
+            assert!(v.checked().is_ok(), "{ok}");
+        }
+        v.device_pixel_ratio = None;
+        v.viewport_height = Some(300.0);
+        assert!(v.checked().is_ok());
+        assert!(measure(400.0, 300.0, 300.0, 150.0).checked().is_ok());
+        for bad in [
+            measure(f64::NAN, 300.0, 300.0, 150.0),
+            measure(400.0, 0.0, 300.0, 150.0),
+            measure(400.0, 300.0, -1.0, 150.0),
+            measure(400.0, 300.0, 300.0, f64::INFINITY),
+            measure(400.0, MAX_SIDE + 1.0, 300.0, 150.0),
+        ] {
+            assert_eq!(bad.checked().unwrap_err().code, DialogErrorCode::Invalid);
+        }
+        let m: Measure = serde_json::from_value(
+            json!({ "content": { "width": 400, "height": 300 }, "minContent": { "width": 300, "height": 150 } }),
+        )
+        .unwrap();
+        assert_eq!(m, measure(400.0, 300.0, 300.0, 150.0));
+        assert!(
+            serde_json::from_value::<Measure>(json!({ "content": { "width": 1, "height": 1 }, "minContent": { "width": 1, "height": 1 }, "x": 1 })).is_err()
+        );
+    }
+
+    #[test]
+    fn the_show_mechanism_is_chosen_per_os_in_one_place() {
+        for os in ["macos", "windows", "linux"] {
+            assert_eq!(show_mechanism(os), ShowMechanism::ReadyThenShow, "{os}");
+        }
+        assert_eq!(window_surface(Theme::Dark), (0x1b, 0x1e, 0x23));
+        assert_eq!(window_surface(Theme::Light), (0xf0, 0xf2, 0xf5));
     }
 
     #[test]
     fn a_viewer_is_never_fitted_below_its_floor_or_shrunk_and_a_decision_fits_exactly() {
         use Kind::{Decision, Form, Viewer};
+        // fit_target(kind, content, cap, min, floor, current)
         // A viewer opened at 560 with a short first state stays 560; it grows with the content; it never shrinks.
-        assert_eq!(fit_target(Viewer, 300.0, 900.0, 560.0, 560.0), Some(560.0));
-        assert_eq!(fit_target(Viewer, 700.0, 900.0, 560.0, 560.0), Some(700.0));
         assert_eq!(
-            fit_target(Viewer, 600.0, 900.0, 560.0, 800.0),
+            fit_target(Viewer, 300.0, 900.0, 100.0, 560.0, 560.0),
+            Some(560.0)
+        );
+        assert_eq!(
+            fit_target(Viewer, 700.0, 900.0, 100.0, 560.0, 560.0),
+            Some(700.0)
+        );
+        assert_eq!(
+            fit_target(Viewer, 600.0, 900.0, 100.0, 560.0, 800.0),
             Some(800.0),
             "the user made it taller"
         );
         assert_eq!(
-            fit_target(Viewer, 5000.0, 700.0, 560.0, 560.0),
+            fit_target(Viewer, 5000.0, 700.0, 100.0, 560.0, 560.0),
             Some(700.0),
-            "up to the screen"
+            "up to the cap"
         );
-        // A decision is exactly its content; so is a fitted form, which may shrink after a step.
+        // A decision is exactly its content; so is a form, which may shrink after a step.
         assert_eq!(
-            fit_target(Decision, 251.0, 900.0, 200.0, 520.0),
+            fit_target(Decision, 250.2, 900.0, 100.0, 0.0, 520.0),
             Some(251.0)
         );
-        assert_eq!(fit_target(Form, 300.0, 900.0, 200.0, 520.0), Some(300.0));
-        assert_eq!(fit_target(Decision, f64::NAN, 900.0, 200.0, 520.0), None);
+        assert_eq!(
+            fit_target(Form, 300.0, 900.0, 100.0, 0.0, 520.0),
+            Some(300.0)
+        );
+        // The cap never pushes below the minimum content.
+        assert_eq!(
+            fit_target(Form, 900.0, 300.0, 400.0, 0.0, 520.0),
+            Some(400.0)
+        );
+        assert_eq!(
+            fit_target(Decision, 20.0, 900.0, 150.0, 0.0, 520.0),
+            Some(150.0)
+        );
+        for bad in [f64::NAN, f64::INFINITY] {
+            assert_eq!(fit_target(Decision, bad, 900.0, 100.0, 0.0, 520.0), None);
+            assert_eq!(fit_target(Decision, 300.0, bad, 100.0, 0.0, 520.0), None);
+        }
     }
 
     #[test]
-    fn a_refit_is_bounded_by_the_dialogs_own_monitor_and_moves_up_on_it() {
+    fn the_cap_is_three_quarters_of_the_work_area_less_the_windows_own_decorations() {
+        // A 1920x1080 display at 1x: cap = 0.75 * 1080 - 28 = 782.
+        let m = Monitor {
+            work: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 1920.0,
+                height: 1080.0,
+            },
+            scale: 1.0,
+        };
+        let decor = size(0.0, 28.0);
+        let cur = size(560.0, 520.0);
+        let fit = plan_fit(
+            Kind::Form,
+            measure(560.0, 4000.0, 400.0, 150.0),
+            0.0,
+            &around(cur, decor, Some(m), "linux"),
+        )
+        .unwrap();
+        assert_eq!(fit.size, size(560.0, 0.75 * 1080.0 - 28.0));
+        assert!(fit.resize);
+        assert_eq!(fit.min, size(400.0, 150.0));
+        // Never below the minimum content, even when that is taller than the cap.
+        let fit = plan_fit(
+            Kind::Form,
+            measure(560.0, 4000.0, 400.0, 900.0),
+            0.0,
+            &around(cur, decor, Some(m), "linux"),
+        )
+        .unwrap();
+        assert_eq!(fit.size.height, 900.0);
+        // The minimum itself stays on the work area less the decorations.
+        let fit = plan_fit(
+            Kind::Form,
+            measure(560.0, 300.0, 4000.0, 3000.0),
+            0.0,
+            &around(cur, decor, Some(m), "linux"),
+        )
+        .unwrap();
+        assert_eq!(
+            (fit.min, fit.size.height),
+            (size(1920.0, 1080.0 - 28.0), 1080.0 - 28.0)
+        );
+        // A decision shrinks to its content and a form follows it; a viewer only grows; a tool keeps the user's size.
+        let content = measure(560.0, 250.0, 300.0, 150.0);
+        let at = |kind, floor| {
+            plan_fit(kind, content, floor, &around(cur, decor, Some(m), "linux")).unwrap()
+        };
+        assert_eq!(at(Kind::Decision, 0.0).size, size(560.0, 250.0));
+        assert_eq!(at(Kind::Viewer, 560.0).size, size(560.0, 560.0));
+        assert!(
+            at(Kind::Viewer, 560.0).resize,
+            "grown from 520 to its preferred 560"
+        );
+        let tool = at(Kind::Tool, 0.0);
+        assert_eq!((tool.size, tool.resize), (cur, false));
+        // The width is the window's, but never below the minimum content width.
+        let wide_min = measure(560.0, 250.0, 700.0, 150.0);
+        assert_eq!(
+            plan_fit(
+                Kind::Decision,
+                wide_min,
+                0.0,
+                &around(size(400.0, 300.0), decor, Some(m), "linux")
+            )
+            .unwrap()
+            .size
+            .width,
+            700.0
+        );
+        // No monitor known: only the largest side bounds it.
+        let free = plan_fit(
+            Kind::Viewer,
+            measure(720.0, 900.0, 300.0, 150.0),
+            560.0,
+            &around(size(720.0, 560.0), decor, None, "linux"),
+        )
+        .unwrap();
+        assert_eq!((free.size.height, free.move_to), (900.0, None));
+        let e = plan_fit(
+            Kind::Form,
+            measure(f64::NAN, 1.0, 1.0, 1.0),
+            0.0,
+            &around(cur, decor, None, "linux"),
+        )
+        .unwrap_err();
+        assert_eq!(e.code, DialogErrorCode::Invalid);
+    }
+
+    #[test]
+    fn a_refit_moves_the_window_up_on_its_own_monitor() {
         // A Retina display left of the primary (negative x), 2x.
         let m = Monitor {
             work: Rect {
@@ -521,62 +1076,35 @@ mod tests {
             width: 1200.0,
             height: 500.0,
         };
+        let decor = size(0.0, 32.0);
+        let a = |os| Around {
+            current: size(600.0, 220.0),
+            decor,
+            outer: Some(outer),
+            monitor: Some(m),
+            os,
+            viewport_delta: 0.0,
+        };
         let fit = plan_fit(
             Kind::Form,
-            400.0,
-            200.0,
-            220.0,
-            Some(outer),
-            Some(m),
-            "macos",
+            measure(600.0, 400.0, 300.0, 150.0),
+            0.0,
+            &a("macos"),
         )
-        .unwrap()
         .unwrap();
-        assert_eq!(fit.height, 400.0);
+        assert_eq!(fit.size.height, 400.0);
         let to = fit.move_to.unwrap();
         // 400 + 32 logical = 864 physical; it ends at the work area's bottom, in points on macOS.
         assert_eq!(to.logical, (-1000.0, (1964.0 - 864.0) / 2.0));
         assert_eq!(to.physical, None);
         let fit = plan_fit(
             Kind::Form,
-            400.0,
-            200.0,
-            220.0,
-            Some(outer),
-            Some(m),
-            "windows",
+            measure(600.0, 400.0, 300.0, 150.0),
+            0.0,
+            &a("windows"),
         )
-        .unwrap()
         .unwrap();
         assert_eq!(fit.move_to.unwrap().physical, Some((-2000, 1100)));
-        // Content taller than the display: bounded by its work area (in its own logical px).
-        let tall = plan_fit(Kind::Form, 5000.0, 200.0, 220.0, None, Some(m), "linux")
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            (tall.height, tall.move_to),
-            (1964.0 / 2.0 - TITLE_BAR, None)
-        );
-        // Already that tall: nothing to do; a value that is not a number is an error.
-        assert_eq!(
-            plan_fit(Kind::Form, 220.2, 200.0, 221.0, None, None, "linux"),
-            Ok(None)
-        );
-        let e = plan_fit(Kind::Form, f64::NAN, 200.0, 221.0, None, None, "linux").unwrap_err();
-        assert_eq!(e.code, DialogErrorCode::Invalid);
-        // No monitor known: bounded by the largest side, never moved.
-        let free = plan_fit(
-            Kind::Viewer,
-            900.0,
-            560.0,
-            560.0,
-            Some(outer),
-            None,
-            "linux",
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!((free.height, free.move_to), (900.0, None));
     }
 
     #[test]
@@ -611,39 +1139,36 @@ mod tests {
         r.instance = Some("abc1".into());
         assert!(validate(&r).is_ok());
 
-        let mut r = request("a");
-        r.width = Some(f64::NAN);
-        r.height = Some(1e9);
-        r.min_width = Some(10.0);
+        // The contract decides the size: a measured form starts at its width and the unmeasured height, a viewer at its
+        // preferred size (never below its floor), a tool at its own.
         assert_eq!(
-            geometry(&r, &contract("a")),
+            geometry(&contract("a")),
             (
-                FALLBACK_SIZE.width,
-                MAX_SIDE,
+                560.0,
+                UNMEASURED_HEIGHT,
                 DIALOG_MIN.width,
                 DIALOG_MIN.height
             )
         );
-        // The kind's floor wins over a smaller request: a viewer is never below 680x560.
-        let mut small = request("about");
-        small.width = Some(400.0);
-        small.height = Some(300.0);
-        small.min_width = Some(320.0);
-        small.min_height = Some(200.0);
+        assert_eq!(geometry(&contract("ask")).0, 400.0);
         assert_eq!(
-            geometry(&small, &contract("about")),
-            (680.0, 560.0, 680.0, 560.0)
+            geometry(&contract("about")),
+            (720.0, 560.0, VIEWER_MIN.width, VIEWER_MIN.height)
         );
-        // The kind's default size when the request names none.
-        let mut bare = request("settings");
-        bare.width = None;
         assert_eq!(
-            geometry(&bare, &contract("settings")),
+            geometry(&contract("settings")),
             (960.0, 680.0, 320.0, 200.0)
         );
-        let mut bare = request("about");
-        bare.width = None;
-        assert_eq!(geometry(&bare, &contract("about")).0, VIEWER_MIN.width);
+        assert_eq!(geometry(&contract("huge")).1, MAX_SIDE);
+        // The webview cannot size the window either.
+        for field in ["width", "height", "minWidth", "minHeight"] {
+            let mut v = json!({ "dialogId": "a", "title": "t" });
+            v[field] = json!(400);
+            assert!(
+                serde_json::from_value::<DialogRequest>(v).is_err(),
+                "{field}"
+            );
+        }
 
         // A remembered place is an offset from the parent; absolute bounds are refused.
         assert!(
@@ -667,17 +1192,9 @@ mod tests {
     }
 
     #[test]
-    fn only_kinds_that_fit_content_and_requests_without_a_height_are_fitted() {
-        let r = request("a");
-        assert!(
-            is_fitted(&r, Kind::Form)
-                && is_fitted(&r, Kind::Decision)
-                && is_fitted(&r, Kind::Viewer)
-        );
-        assert!(!is_fitted(&r, Kind::Tool));
-        let mut fixed = request("a");
-        fixed.height = Some(400.0);
-        assert!(!is_fitted(&fixed, Kind::Form));
+    fn decisions_forms_and_viewers_are_fitted_and_a_tool_is_user_sized() {
+        assert!(is_fitted(Kind::Form) && is_fitted(Kind::Decision) && is_fitted(Kind::Viewer));
+        assert!(!is_fitted(Kind::Tool));
     }
 
     #[test]
@@ -704,6 +1221,7 @@ mod tests {
                 title: "Set up",
                 modality,
                 os,
+                theme: Theme::Dark,
             };
             let at = placement::screen_position(&place, os);
             let c = window_config(&spec, &at, &place, (680.0, 300.0));
@@ -721,6 +1239,18 @@ mod tests {
             // The minimum never exceeds the window (a dialog shrunk to a small work area).
             assert_eq!(c.min_inner, (500.0, 300.0));
             assert_eq!(c.title, "Set up");
+            // Created unseen, on the dialog shell's own surface.
+            assert_eq!(c.background, window_surface(Theme::Dark));
+            let light = window_config(
+                &WindowSpec {
+                    theme: Theme::Light,
+                    ..spec
+                },
+                &at,
+                &place,
+                (680.0, 300.0),
+            );
+            assert_eq!(light.background, window_surface(Theme::Light));
         }
     }
 
@@ -768,6 +1298,7 @@ mod tests {
             label: "d-main-1".into(),
             dialog_id: "a".into(),
             existing: false,
+            pending: true,
         };
         assert_eq!(serde_json::to_value(&info).unwrap()["dialogId"], "a");
     }

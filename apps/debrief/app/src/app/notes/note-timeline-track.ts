@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, input } from '@angular/core';
 import { formatDateTime } from '../core/format';
 import { WorkspaceStore } from '../core/workspace.store';
+import { StripChip, TimelineChips } from '../timeline/timeline-chips';
 import { NoteActions } from './note-actions';
 import { severityColor, TimeNote, timeNotes } from './notes-model';
 import { NotesStore } from './notes.store';
@@ -11,25 +12,17 @@ export interface NoteMarkVm {
   left: number;
   /** Width of a range (percent); 0 for a moment. */
   width: number;
-  row: number;
 }
 
-/** Places notes of the visible range (percent of the plot) and stacks labels that would overlap. Pure. */
-export function layoutNoteMarks(notes: readonly TimeNote[], view: { from: number; to: number }, widthPx = 1000): NoteMarkVm[] {
+/** Places notes of the visible range (percent of the plot). Pure. */
+export function layoutNoteMarks(notes: readonly TimeNote[], view: { from: number; to: number }): NoteMarkVm[] {
   const span = Math.max(1, view.to - view.from);
-  const rowEnds: number[] = [];
   return [...notes]
     .sort((a, b) => a.from - b.from || a.id.localeCompare(b.id))
     .map((note) => {
       const from = Math.max(note.from, view.from);
       const to = Math.min(note.to, view.to);
-      const left = ((from - view.from) / span) * 100;
-      const width = note.to > note.from ? ((to - from) / span) * 100 : 0;
-      const x = (left / 100) * widthPx;
-      let row = rowEnds.findIndex((end) => end <= x);
-      if (row < 0) row = rowEnds.push(0) - 1;
-      rowEnds[row] = x + Math.min(180, 20 + note.label.length * 6) + 4;
-      return { note, left, width, row };
+      return { note, left: ((from - view.from) / span) * 100, width: note.to > note.from ? ((to - from) / span) * 100 : 0 };
     });
 }
 
@@ -47,27 +40,12 @@ export function layoutNoteMarks(notes: readonly TimeNote[], view: { from: number
       } @else {
         <div class="line" [style.left.%]="m.left" [style.--c]="color(m)" aria-hidden="true"></div>
       }
-      <button
-        type="button"
-        class="flag"
-        data-testid="note-mark"
-        [style.left.%]="m.left"
-        [style.top.px]="2 + m.row * 16"
-        [style.--c]="color(m)"
-        [title]="title(m)"
-        [attr.aria-label]="title(m)"
-        (pointerdown)="$event.stopPropagation()"
-        (click)="open(m)"
-      >✎ {{ m.note.label }}</button>
     }
   `,
   styles: `
     :host { position: absolute; inset: 0; pointer-events: none; }
     .line { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--c); opacity: .8; }
     .span { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--c) 10%, transparent); border-left: 1px dashed var(--c); border-right: 1px dashed var(--c); }
-    .flag { pointer-events: auto; position: absolute; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: var(--fs-2xs); line-height: 14px; padding: 0 5px; border-radius: 3px; border: 1px solid var(--c); background: var(--bg-3); color: var(--text); cursor: pointer; z-index: 2; }
-    .flag:hover { background: var(--bg-hover); }
-    .flag:focus-visible { outline: 2px solid var(--focus-ring); }
   `,
 })
 export class NoteTimelineTrack {
@@ -78,11 +56,33 @@ export class NoteTimelineTrack {
   private readonly store = inject(NotesStore);
   private readonly actions = inject(NoteActions);
   private readonly workspace = inject(WorkspaceStore);
+  private readonly chips = inject(TimelineChips, { optional: true });
 
   protected readonly items = computed(() => {
     const v = this.view();
-    return v ? layoutNoteMarks(timeNotes(this.store.items(), v.from, v.to), v, this.width()) : [];
+    return v ? layoutNoteMarks(timeNotes(this.store.items(), v.from, v.to), v) : [];
   });
+
+  constructor() {
+    const chips = this.chips;
+    if (!chips) return;
+    chips.register('note', computed(() => this.items().map((m) => this.chip(m))));
+    inject(DestroyRef).onDestroy(() => chips.clear('note'));
+  }
+
+  private chip(m: NoteMarkVm): StripChip {
+    return {
+      id: `note-${m.note.id}`,
+      x: (m.left / 100) * this.width(),
+      w: Math.min(180, 20 + m.note.label.length * 6),
+      text: `✎ ${m.note.label}`,
+      title: this.title(m),
+      label: this.title(m),
+      testid: 'note-mark',
+      accent: this.color(m),
+      open: () => this.open(m),
+    };
+  }
 
   protected color(m: NoteMarkVm): string {
     return severityColor(m.note.severity);

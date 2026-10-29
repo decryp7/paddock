@@ -1,5 +1,6 @@
 import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { ToastArea } from '@decryp7/paddock-ui/shell';
 import { MAX_VISIBLE, NOTIFY_CLOCK, TOAST_MS } from './notify-config';
 import { NOTIFICATION_SOURCES, persists, visibleNotifications, type HostNotification, type NotificationSource } from './notification-host.model';
 import { PdNotificationHost } from './notification-host';
@@ -47,6 +48,18 @@ describe('pd-notification-host', () => {
     const { f, el } = setup([], false);
     await f.whenStable();
     expect(all(el, '[data-testid=notification]')).toHaveLength(0);
+  });
+
+  it('lifts itself above the undo snack bar while one is open (the one toast area)', async () => {
+    const { f, el } = setup([n('job:1')]);
+    await f.whenStable();
+    expect(el.style.getPropertyValue('--pd-toast-lift')).toBe('0px');
+    TestBed.inject(ToastArea).setLift(48);
+    await f.whenStable();
+    expect(el.style.getPropertyValue('--pd-toast-lift')).toBe('calc(48px + var(--pd-space-2))');
+    TestBed.inject(ToastArea).setLift(0);
+    await f.whenStable();
+    expect(el.style.getPropertyValue('--pd-toast-lift')).toBe('0px');
   });
 
   it('shows the title, the body, a count for a repeated cause, and updates in place', async () => {
@@ -199,6 +212,10 @@ describe('pd-notification-host in a small window (review 2, P3-14)', () => {
     .replace(/\[_ng(?:content|host)-%COMP%\]/g, '')
     .replace(/\s+/g, ' ');
   const compact = /@media \(max-width: 480px\) \{(.*?)\} \}/.exec(css)?.[1] ?? '';
+
+  it('keeps the page-footer safe area above the status bar, from tokens, so a toast never covers a footer action', () => {
+    expect(css).toMatch(/\bbottom: calc\(var\(--(?:%NS%)?pd-statusbar-height[^)]*\) \+ var\(--(?:%NS%)?pd-page-footer-safe[^)]*\) \+ var\(--(?:%NS%)?pd-space-2\)\)/);
+  });
 
   it('a toast is never wider than 360 px', () => {
     expect(/\.pd-toast \{[^}]*\bwidth: 360px;/.test(css)).toBe(true);

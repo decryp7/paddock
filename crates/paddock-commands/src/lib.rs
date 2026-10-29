@@ -65,8 +65,8 @@ pub use error::{CommandError, ErrorCode};
 pub use guard::{DialogGrant, Refusal, RefusalCode, check};
 pub use labels::{Label, WindowClass, class_of};
 pub use table::{
-    CommandInfo, DEFAULT_LIMIT, KIB, Kind, MAX_LIMIT, MIB, MIN_LIMIT, Spec, Table, TableError,
-    Windows, limit,
+    CommandInfo, DEFAULT_LIMIT, DialogCallable, DialogCallableKind, KIB, Kind, MAX_LIMIT, MIB,
+    MIN_LIMIT, Spec, Table, TableError, Windows, limit, plugin, prefix,
 };
 
 #[cfg(feature = "tauri")]
@@ -100,17 +100,21 @@ pub mod tauri;
 /// keeps its own handler; `tauri::Routes` sends a call to the handler of the part that lists it.
 ///
 /// ```
-/// paddock_commands::command_table! {
-///     pub static HEALTH;
-///     Query [WINDOW] => health::health_snapshot,
+/// mod health {
+///     paddock_commands::command_table! {
+///         pub static HEALTH;
+///         Query [WINDOW] => health::health_snapshot,
+///     }
 /// }
-/// paddock_commands::command_table! {
-///     pub static JOBS;
-///     Mutation [WINDOW] => jobs::job_cancel,
+/// mod jobs {
+///     paddock_commands::command_table! {
+///         pub static JOBS;
+///         Mutation [WINDOW] => jobs::job_cancel,
+///     }
 /// }
 /// paddock_commands::command_table! {
 ///     /// Every command of the shell.
-///     pub static SHELL = [HEALTH, JOBS];
+///     pub static SHELL = [health::HEALTH, jobs::JOBS];
 /// }
 /// assert_eq!(SHELL.specs().len(), 2);
 /// assert_eq!(SHELL.kind_of("job_cancel"), paddock_commands::Kind::Mutation);
@@ -119,9 +123,42 @@ pub mod tauri;
 /// Two parts naming the same command do not compile:
 ///
 /// ```compile_fail,E0080
-/// paddock_commands::command_table! { pub static A; Query [WINDOW] => a::status, }
-/// paddock_commands::command_table! { pub static B; Query [MAIN] => b::status, }
-/// paddock_commands::command_table! { pub static BOTH = [A, B]; }
+/// mod a { paddock_commands::command_table! { pub static A; Query [WINDOW] => a::status, } }
+/// mod b { paddock_commands::command_table! { pub static B; Query [MAIN] => b::status, } }
+/// paddock_commands::command_table! { pub static BOTH = [a::A, b::B]; }
+/// ```
+///
+/// **Dialog markers** (ADR 0026 §3). A leaf table also emits a module `dialog_callable` beside it (so one leaf table per
+/// module) with a [`DialogCallable`] constant for every command open to dialogs (`DIALOG` or `WINDOW`) and `ALL`, their
+/// names. A dialog contract (`paddock_dialogs::dialogs!`) names the marker, so naming a command that is not in the table
+/// or not open to dialogs does not compile:
+///
+/// ```
+/// paddock_commands::command_table! {
+///     pub static COMMANDS;
+///     Query [MAIN | DIALOG] => app::app_status,
+///     Mutation [MAIN] => app::app_quit,
+/// }
+/// assert_eq!(dialog_callable::app_status, paddock_commands::DialogCallable::__command("app_status"));
+/// assert_eq!(dialog_callable::ALL, ["app_status"]);
+/// const SETTINGS: paddock_commands::DialogCallable = paddock_commands::prefix(dialog_callable::ALL, "app_");
+/// assert_eq!(SETTINGS.wire(), "app_*");
+/// ```
+///
+/// ```compile_fail,E0425
+/// paddock_commands::command_table! {
+///     pub static COMMANDS;
+///     Mutation [MAIN] => app::app_quit,
+/// }
+/// let closed_to_dialogs = dialog_callable::app_quit;
+/// ```
+///
+/// ```compile_fail,E0080
+/// paddock_commands::command_table! {
+///     pub static COMMANDS;
+///     Query [WINDOW] => app::app_status,
+/// }
+/// const NONE: paddock_commands::DialogCallable = paddock_commands::prefix(dialog_callable::ALL, "settings_");
 /// ```
 #[macro_export]
 macro_rules! command_table {
@@ -157,15 +194,43 @@ macro_rules! command_table {
         $( $(#[$doc:meta])* $kind:ident [$($win:ident)|+] $(limit $limit:expr)? => $($seg:ident)::+ ),* $(,)?
     ) => {
         $(#[$table_meta])*
-        $vis static $table: $crate::Table = $crate::Table::new(&[
-            $( $crate::Spec::new(
-                stringify!($($seg)::+),
-                $crate::Kind::$kind,
-                $crate::Windows::NONE $(.with($crate::Windows::$win))+,
-                $crate::limit(&[$($limit)?]),
-            ), )*
-        ]);
+        $vis static $table: $crate::Table = $crate::Table::new(dialog_callable::SPECS);
+
+        /// The markers of the commands of this table open to dialogs (ADR 0026 §3): a dialog contract names
+        /// `dialog_callable::<command>`, so a command that is misspelt, removed or closed to dialogs does not compile.
+        #[allow(non_upper_case_globals, unused_imports, dead_code)]
+        $vis mod dialog_callable {
+            use super::*;
+            #[doc(hidden)]
+            pub const SPECS: &[$crate::Spec] = &[
+                $( $crate::Spec::new(
+                    stringify!($($seg)::+),
+                    $crate::Kind::$kind,
+                    $crate::Windows::NONE $(.with($crate::Windows::$win))+,
+                    $crate::limit(&[$($limit)?]),
+                ), )*
+            ];
+            const COUNT: usize = $crate::table::dialog_count(SPECS);
+            /// Every command of the table open to dialogs, in table order (what a `prefix*` entry is checked against).
+            pub const ALL: &[&str] = &$crate::table::dialog_names::<COUNT>(SPECS);
+            $( $crate::__dialog_marker! { [$($win)+] $($seg)::+ } )*
+        }
     };
+}
+
+/// One `dialog_callable` marker for a command whose window classes open it to dialogs (`DIALOG` or `WINDOW`), none
+/// otherwise. Used by [`command_table!`].
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __dialog_marker {
+    ([$($win:ident)*] $first:ident :: $($rest:ident)::+) => { $crate::__dialog_marker! { [$($win)*] $($rest)::+ } };
+    ([] $name:ident) => {};
+    ([DIALOG $($win:ident)*] $name:ident) => {
+        #[doc = concat!("The command `", stringify!($name), "`, open to dialogs.")]
+        pub const $name: $crate::DialogCallable = $crate::DialogCallable::__command(stringify!($name));
+    };
+    ([WINDOW $($win:ident)*] $name:ident) => { $crate::__dialog_marker! { [DIALOG] $name } };
+    ([$other:ident $($win:ident)*] $name:ident) => { $crate::__dialog_marker! { [$($win)*] $name } };
 }
 
 #[cfg(test)]

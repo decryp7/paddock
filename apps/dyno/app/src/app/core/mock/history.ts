@@ -63,38 +63,18 @@ function point(at: number, now: number): HistoryPoint {
   };
 }
 
-/** Rule actions, cleanups, tuning, alerts and boots inside `[from, to]`, derived from the same build windows. */
-function events(from: number, to: number, now: number, step: number): TimelineEvent[] {
+/** Network changes, alerts and boots inside `[from, to]`. */
+function events(from: number, to: number, now: number): TimelineEvent[] {
   const out: TimelineEvent[] = [];
-  const slotLen = 20 * MIN;
-  // At wide ranges one marker per build window would bury the chart: keep the interesting ones.
-  const every = step >= 2 * HOUR ? 6 : step >= 30 * MIN ? 3 : 1;
-  let n = 0;
-  for (let s = Math.floor(from / slotLen); s * slotLen <= to; s++) {
-    const at = s * slotLen;
-    if (at < from || !building(at + MIN, now) || building(at - slotLen + MIN, now)) continue;
-    if (n++ % every !== 0) continue;
-    out.push({ at: at + 5 * MIN, kind: 'throttle', label: 'Lowered priority of rustc.exe (Tame long CPU hogs)' });
-    if (hash01(s, 12) > 0.5) out.push({ at: at + 10 * MIN, kind: 'cap', label: 'Capped rustc.exe at 50% CPU' });
-    out.push({ at: at + 19 * MIN, kind: 'release', label: 'Released rustc.exe (below threshold)' });
-  }
-  // The build running now.
-  if (now - 4 * MIN >= from && now - 4 * MIN <= to) out.push({ at: now - 4 * MIN, kind: 'throttle', label: 'Lowered priority of rustc.exe (Tame long CPU hogs)' });
   const fixed: TimelineEvent[] = [
     { at: now - 35 * MIN, kind: 'network', label: 'Joined Wi-Fi “Studio”' },
     { at: now - 58 * MIN, kind: 'network', label: 'VPN up (utun4)' },
-    { at: now - 72 * MIN, kind: 'cleanup', label: 'Cleanup freed 4.6 GB' },
     { at: now - 3 * HOUR, kind: 'network', label: 'IP address on en0 changed: 192.168.1.23 → 192.168.1.41' },
-    { at: now - 5 * HOUR, kind: 'tuning', label: 'Lighter visual effects' },
     { at: now - 27 * HOUR, kind: 'alert', label: 'Memory pressure high' },
-    { at: now - 2 * DAY, kind: 'cleanup', label: 'Scheduled cleanup freed 6.1 GB' },
     { at: now - 52 * HOUR, kind: 'alert', label: 'Drive C: below 25% free' },
     { at: now - 4 * DAY, kind: 'alert', label: 'CPU reached 98 °C' },
-    { at: now - 9 * DAY, kind: 'cleanup', label: 'Scheduled cleanup freed 8.3 GB' },
     { at: now - 12 * DAY, kind: 'boot', label: 'Windows started (boot 17.2 s)' },
-    { at: now - 16 * DAY, kind: 'cleanup', label: 'Scheduled cleanup freed 5.4 GB' },
     { at: now - 19 * DAY, kind: 'boot', label: 'Windows started (boot 15.8 s)' },
-    { at: now - 21 * DAY, kind: 'tuning', label: 'Best performance while plugged in' },
     { at: now - 26 * DAY, kind: 'boot', label: 'Windows started (boot 21.4 s)' },
   ];
   out.push(...fixed.filter((e) => e.at >= from && e.at <= to));
@@ -176,7 +156,7 @@ export function mockHistory(range: HistoryRange, end: number | null, now: number
     to,
     resolutionMs: step,
     points,
-    events: events(from, to, now, step),
+    events: events(from, to, now),
     topConsumers: [
       { app: 'Rust build (cargo)', cpuAvg: round(range === 'hour' ? 31 : 14.2, 1), memoryAvg: Math.round((range === 'hour' ? 2.4 : 1.1) * GB) },
       { app: 'Google Chrome', cpuAvg: round(6.1 * (range === 'hour' ? 1 : 0.8), 1), memoryAvg: Math.round(4.1 * GB) },

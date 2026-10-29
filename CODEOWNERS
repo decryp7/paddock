@@ -26,6 +26,8 @@ tsconfig/.* @decryp7
 lint/.* @decryp7
 icons/.* @decryp7
 templates/.* @decryp7
+dev @decryp7
+dev\.cmd @decryp7
 \.claude/.* @decryp7
 
 # CI, tools and the image.
@@ -33,6 +35,7 @@ templates/.* @decryp7
 ci-image/.* @decryp7
 scripts/.* @decryp7
 tools/.* @decryp7
+spikes/.* @decryp7
 renovate/.* @decryp7
 
 # Family docs and diagrams.

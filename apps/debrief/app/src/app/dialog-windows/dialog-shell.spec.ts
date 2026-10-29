@@ -55,6 +55,32 @@ async function setup(over: { lookup?: (id: string) => DialogDef | undefined; fai
 const key = (target: Element, k: string, init: KeyboardEventInit = {}) => target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init }));
 
 describe('DialogShell', () => {
+  it('is not stable while the content is still loading, and is once it has loaded', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow = defineDialog({ ...base, kind: 'decision', load: async () => (await gate, Content) });
+    const io = new FakeDialogIo();
+    io.start = { dialogId: 'shell-test', title: 'Shell test', modality: 'modal', input: {} };
+    TestBed.configureTestingModule({
+      providers: [
+        ...provideTinyBackend(),
+        { provide: DIALOG_IO, useValue: io },
+        { provide: DIALOG_ROUTE, useValue: { id: 'shell-test', host: 'main', label: 'd-main-1' } },
+        { provide: DIALOG_LOOKUP, useValue: () => slow },
+      ],
+    });
+    const fixture = TestBed.createComponent(DialogShell);
+    let stable = false;
+    const waited = fixture.whenStable().then(() => (stable = true));
+    // Far more macrotask turns than any budget: the pending load must still hold whenStable.
+    for (let turn = 0; turn < 100; turn++) await new Promise<void>((r) => setTimeout(r, 0));
+    expect(stable).toBe(false);
+    release();
+    await waited;
+    expect(stable).toBe(true);
+    expect(fixture.nativeElement.querySelector('[data-testid=dialog-loading]')).toBeNull();
+  });
+
   it('sizes the window to the content unless the dialog names a height', async () => {
     const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ height: 120, top: 0, bottom: 136 } as DOMRect);
     try {

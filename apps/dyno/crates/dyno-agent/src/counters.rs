@@ -349,8 +349,8 @@ mod tests {
 
         let ev = dyno_core::protocol::TimelineEvent {
             at: Timestamp(2_000),
-            kind: dyno_core::protocol::TimelineEventKind::Cleanup,
-            label: "Cleanup ran".into(),
+            kind: dyno_core::protocol::TimelineEventKind::Alert,
+            label: "Alert raised".into(),
         };
         let h = c
             .history(&p, 5, Timestamp(3_500), |from, to| {

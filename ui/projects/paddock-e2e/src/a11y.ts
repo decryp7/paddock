@@ -11,9 +11,11 @@ export interface EveryDialogOptions extends AxeOptions {
   readonly themes?: readonly Theme[];
 }
 
-/** The targets of every dialog in `contractsPath` (an app's `dialog-contracts.json`), minus `skip`. */
-export function dialogTargets(contractsPath: string, options: Pick<EveryDialogOptions, 'inputs' | 'skip'> = {}): AxeTarget[] {
-  const ids = Object.keys(dialogContracts(contractsPath))
+/** The targets of every dialog in `contractsPaths` (generated `dialog-contracts.ts` files), minus `skip`. */
+export function dialogTargets(contractsPaths: string | readonly string[], options: Pick<EveryDialogOptions, 'inputs' | 'skip'> = {}): AxeTarget[] {
+  const paths = typeof contractsPaths === 'string' ? [contractsPaths] : [...contractsPaths];
+  const contractsPath = paths.join(', ');
+  const ids = Object.keys(dialogContracts(...paths))
     .filter((id) => !(id in (options.skip ?? {})))
     .sort();
   if (!ids.length) throw new Error(`${contractsPath} lists no dialog to check: an empty pass would prove nothing`);
@@ -27,8 +29,8 @@ export function dialogTargets(contractsPath: string, options: Pick<EveryDialogOp
 /**
  * axe over the window of every dialog the app declares, in both themes (plan X49: every shell window passes axe). The
  * result lists the dialogs that failed with their violations; `expect(result).toEqual({})`. A new dialog is covered the
- * moment it is in the contract file, so no window can be added without the check.
+ * moment it is in a contract table, so no window can be added without the check.
  */
-export function axeEveryDialog(page: Page, contractsPath: string, options: EveryDialogOptions = {}): Promise<Record<string, string[]>> {
-  return axeTargets(page, dialogTargets(contractsPath, options), options);
+export function axeEveryDialog(page: Page, contractsPaths: string | readonly string[], options: EveryDialogOptions = {}): Promise<Record<string, string[]>> {
+  return axeTargets(page, dialogTargets(contractsPaths, options), options);
 }

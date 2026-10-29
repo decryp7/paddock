@@ -94,7 +94,7 @@ describe('the Background service page', () => {
 
   it('has one primary button and labelled controls', async () => {
     const p = await open(new MemoryServiceBackend({ condition: 'notRunning' }));
-    expect(p.el.querySelectorAll('.pd-service__btn--primary')).toHaveLength(1);
+    expect(p.el.querySelectorAll('.mat-mdc-unelevated-button')).toHaveLength(1);
     expect(p.el.querySelector('.pd-service__actions')?.getAttribute('aria-label')).toBe('Service actions');
     expect(p.el.querySelector('section')?.getAttribute('aria-labelledby')).toBe('pd-service-title');
     expect(p.el.querySelector('#pd-service-title')?.textContent).toContain('Background service');
@@ -121,7 +121,7 @@ describe('the Background service page', () => {
     await h.next();
     await p.fixture.whenStable();
     expect(text(p.q('service-step')!)).toBe('Registering the service');
-    expect(p.el.querySelector('progress')?.getAttribute('aria-label')).toBe('Working…');
+    expect(p.el.querySelector('mat-progress-bar')?.getAttribute('aria-label')).toBe('Working…');
     // The engine says it is repairing: nothing else applies until it ends.
     expect(p.buttons()).toEqual([]);
     await h.all();
@@ -181,7 +181,7 @@ describe('the Background service page', () => {
     await h.all();
     await p.fixture.whenStable();
     expect(p.buttons()).toEqual(['Open Login Items…']);
-    expect(p.el.querySelector('.pd-service__btn--primary')?.textContent).toContain('Open Login Items');
+    expect(p.el.querySelector('.mat-mdc-unelevated-button')?.textContent).toContain('Open Login Items');
     expect(p.q('service-retry')).toBeNull();
     expect(text(p.q('service-failure')!)).toContain('switched off');
     await p.click('service-open-login-items');

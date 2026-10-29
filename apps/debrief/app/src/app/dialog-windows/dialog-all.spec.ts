@@ -36,7 +36,8 @@ describe('every dialog window', () => {
         const fixture = TestBed.createComponent(DialogShell);
         await settle(fixture, 1);
         const loading = () => (fixture.nativeElement as HTMLElement).querySelector('[data-testid=dialog-loading]');
-        for (let i = 0; i < 400 && loading(); i++) await settle(fixture, 1);
+        // Wait on the condition, not a budget of turns: the shell's content load is a pending task.
+        await fixture.whenStable();
         if (loading()) throw new Error(`${def.id} never left Loading: ${errors.join(' | ')}`);
         await settle(fixture, 4);
         const root = fixture.nativeElement as HTMLElement;
@@ -49,7 +50,8 @@ describe('every dialog window', () => {
         expect(errors.filter((e) => !/readFileHead/.test(e))).toEqual([]);
         const store = TestBed.inject(WorkspaceStore);
         const wants = !!(def.backends?.includes('workspace') || def.backends?.includes('summary'));
-        for (let i = 0; i < 100 && wants && !store.summary(); i++) await settle(fixture, 1);
+        // On the condition itself, no turn budget: a summary that never arrives ends at the runner's test timeout, naming this dialog.
+        while (wants && !store.summary()) await settle(fixture, 1);
         // A dialog loads the workspace only when it names the `summary` or `workspace` backend.
         expect(store.summary() !== null).toBe(wants);
         // No dialog window has title-bar buttons: each one has a visible way to close from its content or, failing that, the

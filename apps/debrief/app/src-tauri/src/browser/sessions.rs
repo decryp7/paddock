@@ -135,7 +135,7 @@ impl Session {
     }
 
     /// Whether this browser uses the kept research profile.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub fn kept_profile(&self) -> bool {
         self._kept.is_some()
     }
@@ -472,7 +472,7 @@ impl Renderers {
     }
 
     /// Where the window's browser is in its life.
-    #[cfg_attr(not(test), allow(dead_code))] // the service-health registry (ADR 0055) reads it
+    #[cfg_attr(not(all(test, unix)), allow(dead_code))] // the service-health registry (ADR 0055) reads it; tests use it on Unix
     pub fn lifecycle(&self, owner: &str) -> Lifecycle {
         crate::sync::lock(&self.inner.slots)
             .get(owner)
@@ -785,7 +785,7 @@ impl Renderers {
     }
 
     /// Waits (bounded) until the window's browser is in a phase `pred` accepts; the phase it ended in.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub fn wait_for(&self, owner: &str, timeout: Duration, pred: impl Fn(Phase) -> bool) -> Phase {
         let end = Instant::now() + timeout;
         let mut slots = crate::sync::lock(&self.inner.slots);

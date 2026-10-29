@@ -27,9 +27,6 @@ import { hue, initial, learningText, whyText } from './issues-model';
         <div class="bar" role="group" aria-label="New programs">
           <span class="learn">{{ learning() }}</span>
           <span class="grow"></span>
-          @if (o.ignored > 0 || store.includeIgnored()) {
-            <button type="button" class="tog" [attr.aria-pressed]="store.includeIgnored()" (click)="store.setIncludeIgnored(!store.includeIgnored())"><dy-icon name="check" /> Show hidden ({{ o.ignored }})</button>
-          }
           <button type="button" class="btn ghost icon" aria-label="More actions" [cdkMenuTriggerFor]="more"><dy-icon name="more" /></button>
         </div>
 
@@ -45,10 +42,10 @@ import { hue, initial, learningText, whyText } from './issues-model';
           <div class="layout" [class.with-detail]="!!selected()">
             <div class="tablewrap">
               <table class="table progs" aria-label="New and unusual programs">
-                <thead><tr><th>Program</th><th>Why</th><th class="when">First seen</th><th class="state">State</th><th class="acts"><span class="visually-hidden">Actions</span></th></tr></thead>
+                <thead><tr><th>Program</th><th>Why</th><th class="when">First seen</th><th class="state">State</th></tr></thead>
                 <tbody>
                   @for (i of o.items; track i.key) {
-                    <tr class="row" tabindex="0" [class.sel]="selectedKey() === i.key" [class.hidden-item]="i.status === 'ignored' || i.status === 'protected'" [cdkContextMenuTriggerFor]="menu" [cdkContextMenuTriggerData]="{ item: i }" (click)="select(i)" (keydown.enter)="select(i)" (keydown.shift.f10)="select(i)" (contextmenu)="select(i)">
+                    <tr class="row" tabindex="0" [class.sel]="selectedKey() === i.key" [cdkContextMenuTriggerFor]="menu" [cdkContextMenuTriggerData]="{ item: i }" (click)="select(i)" (keydown.enter)="select(i)" (keydown.shift.f10)="select(i)" (contextmenu)="select(i)">
                       <td>
                         <span class="prog">
                           <span class="av" aria-hidden="true" [style.background]="tile(i.name)">{{ ini(i.name) }}</span>
@@ -57,15 +54,7 @@ import { hue, initial, learningText, whyText } from './issues-model';
                       </td>
                       <td><span class="why"><span class="dot" [attr.data-tone]="i.level === 'unusual' ? 'warn' : null" aria-hidden="true"></span><span class="ell" [title]="why(i)">{{ why(i) }}</span></span></td>
                       <td class="when muted">{{ since(i) }}</td>
-                      <td class="state muted">{{ i.status === 'ignored' ? 'Hidden' : i.status === 'protected' ? 'Protected' : i.running ? 'Running' : 'Not running' }}</td>
-                      <td class="acts">
-                        @if (i.status === 'new') {
-                          <button type="button" class="ib" [disabled]="store.busy() !== null" [attr.aria-label]="'Protect ' + i.name" title="Protect: rules never touch it" (click)="act(i, 'protect', $event)"><dy-icon name="shield-check" /></button>
-                          <button type="button" class="ib" [disabled]="store.busy() !== null" [attr.aria-label]="'Hide ' + i.name" title="Hide from this list" (click)="act(i, 'ignore', $event)"><dy-icon name="close" /></button>
-                        } @else {
-                          <button type="button" class="ib" [disabled]="store.busy() !== null" [attr.aria-label]="'Show ' + i.name + ' again'" title="Show on the list again" (click)="act(i, 'restore', $event)"><dy-icon name="undo" /></button>
-                        }
-                      </td>
+                      <td class="state muted">{{ i.running ? 'Running' : 'Not running' }}</td>
                     </tr>
                   }
                 </tbody>
@@ -89,15 +78,9 @@ import { hue, initial, learningText, whyText } from './issues-model';
                   <dt>Last seen</dt><dd>{{ s.lastSeen > 0 ? (s.running ? 'Running now' : ago(s.lastSeen)) : 'Has not run since' }}</dd>
                 </dl>
                 <div class="dacts">
-                  @if (s.status === 'new') {
-                    <button type="button" class="btn sm" [disabled]="store.busy() !== null" (click)="act(s, 'protect')"><dy-icon name="shield-check" /> Protect</button>
-                    <button type="button" class="btn sm" [disabled]="store.busy() !== null" (click)="act(s, 'ignore')"><dy-icon name="close" /> Hide</button>
-                  } @else {
-                    <button type="button" class="btn sm" [disabled]="store.busy() !== null" (click)="act(s, 'restore')"><dy-icon name="undo" /> Show again</button>
-                  }
                   @if (s.exe) { <button type="button" class="btn sm" (click)="copy(s.exe)"><dy-icon name="copy" /> Copy path</button> }
                 </div>
-                <p class="hint">Protect adds it to the list that rules never touch. Hide only removes it from this list. Dyno never ends or removes a program because of what is shown here.</p>
+                <p class="hint">Dyno never ends or removes a program because of what is shown here.</p>
               </aside>
             }
           </div>
@@ -107,12 +90,6 @@ import { hue, initial, learningText, whyText } from './issues-model';
 
     <ng-template #menu let-item="item">
       <div class="menu" cdkMenu aria-label="Program actions">
-        @if (item.status === 'new') {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="act(item, 'protect')"><dy-icon name="shield-check" /> Protect</button>
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="act(item, 'ignore')"><dy-icon name="close" /> Hide from this list</button>
-        } @else {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="act(item, 'restore')"><dy-icon name="undo" /> Show again</button>
-        }
         @if (item.exe) { <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copy(item.exe)"><dy-icon name="copy" /> Copy path</button> }
         <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchWeb(item)"><dy-icon name="search" /> Search the web…</button>
         @if (item.exe) { <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchHash(item)"><dy-icon name="shield" /> Search file hash on VirusTotal…</button> }
@@ -140,7 +117,6 @@ import { hue, initial, learningText, whyText } from './issues-model';
     .progs { table-layout: fixed; }
     .progs th.when, .progs td.when { width: 110px; }
     .progs th.state, .progs td.state { width: 100px; }
-    .progs th.acts, .progs td.acts { width: 72px; padding: 0 4px; text-align: right; }
     .progs td { overflow: hidden; text-overflow: ellipsis; }
     .progs th:first-child, .progs td:first-child { width: 28%; }
     .prog { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
@@ -152,9 +128,6 @@ import { hue, initial, learningText, whyText } from './issues-model';
     tr.row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
     tr.row.sel td { background: var(--accent-soft); }
     tr.row.sel td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
-    tr.row.hidden-item td { opacity: 0.65; }
-    td.acts { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
-    tr.row:hover td.acts, tr.row:focus-within td.acts, tr.row.sel td.acts { opacity: 1; }
     .ib { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
     .ib:hover:not(:disabled) { background: var(--surface-active); color: var(--text-1); }
     .ib:disabled { opacity: 0.35; cursor: default; }
@@ -221,12 +194,6 @@ export class UnusualView {
     this.selectedKey.set(i.key);
   }
 
-  protected async act(i: UnusualItem, action: 'ignore' | 'protect' | 'restore', e?: Event): Promise<void> {
-    e?.stopPropagation();
-    await this.store.act(i, action);
-    if (action !== 'restore' && !this.store.includeIgnored()) this.selectedKey.set(null);
-  }
-
   /** Up and Down move between rows. */
   protected key(e: KeyboardEvent): void {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
@@ -243,7 +210,7 @@ export class UnusualView {
     const known = this.store.overview()?.known ?? 0;
     const ok = await this.dialogs.confirm({
       title: 'Forget the programs Dyno knows?',
-      message: `Dyno forgets the ${known} programs it learned and the ones you hid or protected, then learns again for ${this.store.overview()?.learningDays ?? 7} days before it lists anything new. Programs you protected stay on the protected list.`,
+      message: `Dyno forgets the ${known} programs it learned, then learns again for ${this.store.overview()?.learningDays ?? 7} days before it lists anything new.`,
       confirmLabel: 'Forget',
       danger: true,
     });

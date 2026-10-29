@@ -10,6 +10,7 @@
 }
 
 .subnav {
+  /* conformance: not-a-header */
   position: sticky;
   top: var(--sp-6);
   display: flex;

@@ -3,7 +3,7 @@
 //! Tauri's own ACL, the drag ghost's page, and the sample job, Pitwall and assistant working without Pitwall.
 
 use paddock_panels::ghost::{GHOST_LABEL, page};
-use paddock_workbench_demo::{COMMANDS, Place, invoke_handler, link, shell, workbench};
+use paddock_workbench_demo::{COMMANDS, Place, dialogs, invoke_handler, link, shell, workbench};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -290,4 +290,19 @@ fn the_sample_reindex_starts_a_job_on_the_shells_registry() {
 fn every_command_of_the_demo_is_async_and_in_its_table() {
     assert_eq!(COMMANDS.specs().len(), 5);
     paddock_commands::testing::assert_async(&COMMANDS, &[&app_dir().join("src")]);
+}
+
+/// The demo's dialog base set as TypeScript, which its dialog windows hand to `dialogWindowConfig` (ADR 0026 §3).
+#[test]
+fn the_uis_dialog_contracts_are_generated_from_the_apps_table() {
+    const REGENERATE: &str =
+        "cd apps/workbench-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app";
+    let text = paddock_dialogs::ts::contracts_module("the app", &dialogs::DIALOGS, REGENERATE);
+    let path = ui_dir().join("src/app/generated/dialog-contracts.ts");
+    paddock_commands::testing::sync_generated(
+        &path,
+        &text,
+        paddock_commands::testing::WriteMode::from_env(),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
 }

@@ -5,7 +5,9 @@
 // (a generous limit that only stops a hung test) is allowed with `// conformance: hang-guard` on the assertion's line
 // or the line above and a limit of at least 10 s. Also flagged: a `thread::sleep` in a Rust test that also starts or joins
 // threads, uses channels, atomics or locks (a sleep waiting for another thread's effect: wait on the event, a channel or the
-// FakeClock instead; the waiver comment alone allows a deliberate sleep), and, in TypeScript specs, `Date.now()` /
+// FakeClock instead; the waiver comment alone allows a deliberate sleep), a non-negated `assert!` over `.close()` / `.close_gracefully(..)`
+// (it asserts that a product grace period was long enough for this machine; waive `close_gracefully` with the hang-guard comment
+// and a grace of at least 10 s, or either with `// conformance: grace-free — <why>` when the thing ended already), and, in TypeScript specs, `Date.now()` /
 // `performance.now()` differences asserted with `expect` (unless the spec uses fake timers: `useFakeTimers`, `setSystemTime`,
 // `page.clock`). Warning level: existing code is listed, never blocks a build.
 import { warn } from '../finding.mjs';
@@ -96,6 +98,45 @@ export function wallClockAsserts(source) {
   return out;
 }
 
+/** Calls that wait out a product's grace period and answer whether it was enough: `.close()` with no argument (a browser's own) and `.close_gracefully(..)`. `.close(id)` (a store, a renderer) is something else. */
+const GRACE_CALL = /\.close\s*\(\s*\)|\.close_gracefully\s*\(/;
+/** The waiver of an assert over a call that cannot wait: `// conformance: grace-free — <why>` (the thing has ended already, so no grace is waited out). */
+const GRACE_FREE = /conformance:\s*grace-free\s*[—–-]+\s*(\S.{2,})/;
+
+/**
+ * Asserts over a call that waits out a grace period, in `#[test]` fns of a Rust file: [{ line, text, call, waiver, limitMs }].
+ * `waiver` is 'grace-free' (with a reason), 'hang-guard' (only for `close_gracefully`, whose limit `limitMs` is the literal
+ * `Duration` written, null when none) or null. Negated asserts (`assert!(!b.close_gracefully(Duration::ZERO))`: forced end,
+ * nothing waited for) are not reported.
+ */
+export function graceAsserts(source) {
+  const masked = mask(source);
+  const raw = source.split('\n');
+  const out = [];
+  for (const t of masked.matchAll(/#\[(?:[\w]+::)*test(?:\([^)]*\))?\]/g)) {
+    const fn = /\bfn\s+\w+[^{;]*\{/.exec(masked.slice(t.index));
+    if (!fn) continue;
+    const open = t.index + fn.index + fn[0].length - 1;
+    const end = closing(masked, open);
+    if (end < 0) continue;
+    const body = masked.slice(open, end);
+    for (const a of body.matchAll(/\b(?:debug_)?assert(?:_eq|_ne)?!\s*\(/g)) {
+      const start = open + a.index + a[0].length - 1;
+      const stop = closing(masked, start);
+      if (stop < 0) continue;
+      const args = masked.slice(start, stop);
+      const call = GRACE_CALL.exec(args);
+      if (!call || /^\(\s*!/.test(args)) continue;
+      const line = masked.slice(0, start).split('\n').length;
+      const near = [raw[line - 1] ?? '', raw[line - 2] ?? ''];
+      const gracious = call[0].includes('close_gracefully');
+      const waiver = near.some((l) => GRACE_FREE.test(l)) ? 'grace-free' : gracious && near.some((l) => HANG_GUARD.test(l)) ? 'hang-guard' : null;
+      out.push({ line, text: (raw[line - 1] ?? '').trim().slice(0, 100), call: call[0], waiver, limitMs: gracious ? literalLimitMs(args) : null });
+    }
+  }
+  return out;
+}
+
 /** Signals in a test body that a sleep is waiting for another thread. */
 const THREADED = /\bthread::(?:spawn|scope)\b|\.spawn\s*\(|\.join\s*\(\)|\bmpsc\b|\bchannel\s*\(|\.recv(?:_timeout)?\s*\(|\bAtomic\w+|\bArc::|\bMutex\b|\bCondvar\b/;
 
@@ -171,6 +212,14 @@ export default {
         for (const a of wallClockAsserts(text)) {
           if (a.guard === null) out.push(warn('C30', 40, f, a.line, `asserts on the wall clock: ${a.text}`, fix));
           else if (a.guard < MIN_GUARD_MS) out.push(warn('C30', 40, f, a.line, `a hang guard of ${a.guard} ms is too tight to be one: ${a.text}`, 'Raise the limit to at least 10 s, or replace it with a FakeClock.'));
+        }
+        for (const a of graceAsserts(text)) {
+          if (a.waiver === 'grace-free') continue;
+          if (a.waiver === 'hang-guard') {
+            if (a.limitMs !== null && a.limitMs < MIN_GUARD_MS) out.push(warn('C30', 40, f, a.line, `a hang guard of ${a.limitMs} ms is too tight to be one: ${a.text}`, 'Raise the grace to at least 10 s (the exit is waited for on the condition, so a long guard costs nothing), or assert the mechanism instead.'));
+            continue;
+          }
+          out.push(warn('C30', 40, f, a.line, `asserts that a call outlasted by load finished within its grace: ${a.text}`, 'Wait for the exit on the condition with a generous hang guard (`close_gracefully(Duration::from_secs(120))` with `// conformance: hang-guard`), assert the mechanism, not the budget, or, when the thing has ended already, say so with `// conformance: grace-free — <why>` (lesson "Chromium tests compared a loaded machine with a product timeout").'));
         }
         for (const s of threadSleeps(text)) {
           if (s.waived === 'no-reason') out.push(warn('C30', 40, f, s.line, `the sleep's waiver gives no reason: ${s.text}`, 'Write `// conformance: hang-guard — <why this sleep is needed>`.'));

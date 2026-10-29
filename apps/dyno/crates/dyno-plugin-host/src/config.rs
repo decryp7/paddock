@@ -8,14 +8,10 @@ use std::time::Duration;
 pub struct Timeouts {
     /// From starting the process to its connecting (5 s).
     pub start: Duration,
-    /// `Describe`, `CleanupCategories` and `Actions` (2 s).
+    /// `Describe` (2 s).
     pub describe: Duration,
     /// `Sensors` (2 s).
     pub sensors: Duration,
-    /// `Scan` (60 s).
-    pub scan: Duration,
-    /// `RunAction` (10 s).
-    pub action: Duration,
     /// How long a stopped plugin may take to exit before it is killed (1 s).
     pub stop_grace: Duration,
 }
@@ -26,8 +22,6 @@ impl Default for Timeouts {
             start: Duration::from_secs(5),
             describe: Duration::from_secs(2),
             sensors: Duration::from_secs(2),
-            scan: Duration::from_secs(60),
-            action: Duration::from_secs(10),
             stop_grace: Duration::from_secs(1),
         }
     }

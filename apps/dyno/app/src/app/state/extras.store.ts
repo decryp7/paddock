@@ -3,9 +3,7 @@ import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
 import type {
   BootReport,
   ChangeTimeline,
-  CleanupOutcome,
   CommandError,
-  DeleteMode,
   FinderMode,
   FinderResult,
   GpuReport,
@@ -19,9 +17,9 @@ import type {
 } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
-import { DEFAULT_MIN_MIB, defaultSelection, mibToBytes } from '../features/extras/files-model';
+import { DEFAULT_MIN_MIB, mibToBytes } from '../features/extras/files-model';
 import type { ExtrasTab } from '../features/extras/extras-model';
-import { formatBytes, plural } from '../shared/format';
+import { formatBytes } from '../shared/format';
 import { Notifier } from '../shared/notifier';
 import { fileName } from './diagnostics.store';
 import { SettingsStore } from './settings.store';
@@ -56,10 +54,6 @@ interface ExtrasState {
   mode: FinderMode;
   minMib: number;
   finder: Resource<FinderResult>;
-  /** File ids chosen for removal. */
-  selected: string[];
-  removing: boolean;
-  removeError: CommandError | null;
 }
 
 type ResourceKey = 'changes' | 'sleep' | 'boot' | 'apps' | 'gpu' | 'software' | 'maintenance';
@@ -77,7 +71,7 @@ const TAB_RESOURCE: Partial<Record<ExtrasTab, ResourceKey>> = {
 
 /**
  * The Extras page: one read-only resource per tab, loaded when the tab is first opened, plus the file finder (search,
- * selection, removal through the cleanup policy) and the maintenance windows (saved through the settings store).
+ * listing only) and the maintenance windows (saved through the settings store).
  */
 export const ExtrasStore = signalStore(
   { providedIn: 'root' },
@@ -99,20 +93,17 @@ export const ExtrasStore = signalStore(
     mode: 'both',
     minMib: DEFAULT_MIN_MIB,
     finder: idle<FinderResult>(),
-    selected: [],
-    removing: false,
-    removeError: null,
   }),
   withMethods((store, backend = inject(BACKEND), notifier = inject(Notifier), settings = inject(SettingsStore)) => {
     /** Reads one resource; a slower answer for a request that was replaced does not overwrite the newer one. */
     const tokens: Partial<Record<ResourceKey | 'finder', number>> = {};
-    async function read<T>(key: ResourceKey | 'finder', fetch: () => Promise<T>, after?: (data: T) => Partial<ExtrasState>): Promise<void> {
+    async function read<T>(key: ResourceKey | 'finder', fetch: () => Promise<T>): Promise<void> {
       const mine = (tokens[key] = (tokens[key] ?? 0) + 1);
       const current = store[key]() as Resource<T>;
       patchState(store, { [key]: { ...current, loading: true, error: null } } as Partial<ExtrasState>);
       try {
         const data = await fetch();
-        if (mine === tokens[key]) patchState(store, { [key]: { data, error: null, loading: false }, ...(after?.(data) ?? {}) } as Partial<ExtrasState>);
+        if (mine === tokens[key]) patchState(store, { [key]: { data, error: null, loading: false } } as Partial<ExtrasState>);
       } catch (e) {
         if (mine === tokens[key]) patchState(store, { [key]: { ...current, error: toCommandError(e), loading: false } } as Partial<ExtrasState>);
       }
@@ -121,10 +112,7 @@ export const ExtrasStore = signalStore(
     const search = (): Promise<void> => {
       const folder = store.folder();
       if (!folder) return Promise.resolve();
-      return read('finder', () => backend.findFiles({ folder, mode: store.mode(), minBytes: mibToBytes(store.minMib()) }), (r) => ({
-        selected: [...defaultSelection(r)],
-        removeError: null,
-      }));
+      return read('finder', () => backend.findFiles({ folder, mode: store.mode(), minBytes: mibToBytes(store.minMib()) }));
     };
 
     return {
@@ -194,38 +182,6 @@ export const ExtrasStore = signalStore(
         patchState(store, { minMib });
         await search();
       },
-      toggleFile(id: string): void {
-        const now = store.selected();
-        patchState(store, { selected: now.includes(id) ? now.filter((x) => x !== id) : [...now, id] });
-      },
-      /** Back to the suggestion: every copy but the oldest, nothing else. */
-      resetSelection(): void {
-        const r = store.finder().data;
-        patchState(store, { selected: r ? [...defaultSelection(r)] : [] });
-      },
-      clearSelection(): void {
-        patchState(store, { selected: [] });
-      },
-      /** Removes the selected files through the cleanup policy; called only after the person confirmed. */
-      async remove(mode: DeleteMode): Promise<CleanupOutcome | null> {
-        const result = store.finder().data;
-        if (!result || store.removing() || store.selected().length === 0) return null;
-        patchState(store, { removing: true, removeError: null });
-        try {
-          const outcome = await backend.removeFoundFiles(result.scanId, store.selected(), mode);
-          patchState(store, { removing: false });
-          notifier.show(
-            outcome.deleted ? `Moved ${plural(outcome.deleted, 'file')} (${formatBytes(outcome.freedBytes)})` : 'Nothing was moved',
-            outcome.failed.length ? 'warn' : 'ok',
-          );
-          await search();
-          return outcome;
-        } catch (e) {
-          patchState(store, { removing: false, removeError: toCommandError(e) });
-          return null;
-        }
-      },
-
       // -------------------------------------------------------------------------------------- inventory
       /** Shows the OS save dialog through the shell and writes the report; a cancelled dialog changes nothing. */
       async exportReport(format: InventoryFormat): Promise<void> {

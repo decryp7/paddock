@@ -58,7 +58,7 @@ describe('dy-alarms-page, Active', () => {
   it('shows shelved alarms with one muted suffix instead of a pill', async () => {
     const { f, el } = render();
     await settle(f);
-    const shelved = rows(el).find((r) => text(r).includes('Tame long CPU hogs'))!;
+    const shelved = rows(el).find((r) => text(r).includes('rustc has used'))!;
     expect(shelved.querySelector('.sfx')?.textContent).toMatch(/^Shelved until \d\d:\d\d$/);
     expect(el.querySelectorAll('.badge, .pill')).toHaveLength(0);
   });
@@ -115,12 +115,12 @@ describe('dy-alarms-page, Active', () => {
   it('offers Unshelve only for a shelved alarm and applies it', async () => {
     const { f, el } = render();
     await settle(f);
-    const row = rows(el).find((r) => text(r).includes('Tame long'))!;
+    const row = rows(el).find((r) => text(r).includes('rustc has used'))!;
     button(row, /^More actions/)!.click();
     await settle(f);
     menuItem('Unshelve')!.click();
     await settle(f);
-    expect(text(rows(el).find((r) => text(r).includes('Tame long'))!)).not.toContain('Shelved');
+    expect(text(rows(el).find((r) => text(r).includes('rustc has used'))!)).not.toContain('Shelved');
   });
 
   it('opens the detail panel with full values, notes and history, and closes it with Esc', async () => {
@@ -301,13 +301,13 @@ describe('dy-alarms-page, Rules', () => {
     expect(el.querySelector('dy-alarm-stats [role="alert"]')).toBeTruthy();
   });
 
-  it('says so when no rule fired and nothing needs tuning', async () => {
+  it('says so when no rule fired and nothing needs adjusting', async () => {
     const { f, el, mock } = render();
     await settle(f);
     vi.spyOn(mock, 'alarmStats').mockResolvedValue({ open: 0, unacknowledged: 0, chattering: [], noisiest: [], meanTimeToAcknowledgeMs: null, medianTimeToAcknowledgeMs: null, suggestions: [] });
     await tab(f, el, 'Rules');
     expect(text(el)).toContain('No rule has fired yet.');
-    expect(text(el)).toContain('Nothing to tune.');
+    expect(text(el)).toContain('Nothing to adjust.');
     expect(text(el)).toContain('—');
   });
 

@@ -1,4 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { MatButton } from '@angular/material/button';
+import { MatProgressBar } from '@angular/material/progress-bar';
 import { SuStatusPill } from '@decryp7/paddock-ui';
 import { PdSettingsSection } from '@decryp7/paddock-ui/shell/settings/window';
 import { conditionView, LOGIN_SECTION, ServiceStore } from '@decryp7/paddock-ui/shell/service';
@@ -13,7 +15,7 @@ import { SERVICE_STYLES } from './styles';
 @Component({
   selector: 'pd-service-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuStatusPill, PdSettingsSection],
+  imports: [MatButton, MatProgressBar, SuStatusPill, PdSettingsSection],
   template: `
     <section class="pd-service__block" aria-labelledby="pd-service-title" data-testid="service-page">
       <h2 id="pd-service-title">{{ t.title }}</h2>
@@ -34,7 +36,7 @@ import { SERVICE_STYLES } from './styles';
           @if (store.step(); as step) {
             <span data-testid="service-step">{{ step }}</span>
           }
-          <progress [attr.aria-label]="t.working"></progress>
+          <mat-progress-bar mode="indeterminate" [attr.aria-label]="t.working" />
           <span class="pd-service__muted" data-testid="service-still-working">{{ t.stillWorking }}</span>
         </div>
       } @else if (store.notice(); as n) {
@@ -54,7 +56,7 @@ import { SERVICE_STYLES } from './styles';
           <span class="pd-service__title">{{ failureTitle(f.action) }}</span>
           <span>{{ f.error.message }}</span>
           @if (store.retryable()) {
-            <span class="pd-service__row"><button type="button" class="pd-service__btn" data-testid="service-retry" (click)="store.retry()">{{ t.retry }}</button></span>
+            <span class="pd-service__row"><button matButton="outlined" type="button" data-testid="service-retry" (click)="store.retry()">{{ t.retry }}</button></span>
           }
         </div>
       }
@@ -62,13 +64,13 @@ import { SERVICE_STYLES } from './styles';
       @if (store.canInstall() || store.canRepair() || store.canOpenLoginItems()) {
         <div class="pd-service__actions" role="group" [attr.aria-label]="t.actions">
           @if (store.canInstall()) {
-            <button type="button" class="pd-service__btn" [class.pd-service__btn--primary]="primary() === 'install'" data-testid="service-install" [disabled]="store.working()" (click)="store.install()">{{ t.install }}</button>
+            <button [matButton]="primary() === 'install' ? 'filled' : 'outlined'" type="button" data-testid="service-install" [disabled]="store.working()" (click)="store.install()">{{ t.install }}</button>
           }
           @if (store.canRepair()) {
-            <button type="button" class="pd-service__btn" [class.pd-service__btn--primary]="primary() === 'repair'" data-testid="service-repair" [disabled]="store.working()" (click)="store.repair()">{{ t.repair }}</button>
+            <button [matButton]="primary() === 'repair' ? 'filled' : 'outlined'" type="button" data-testid="service-repair" [disabled]="store.working()" (click)="store.repair()">{{ t.repair }}</button>
           }
           @if (store.canOpenLoginItems()) {
-            <button type="button" class="pd-service__btn" [class.pd-service__btn--primary]="primary() === 'openLoginItems'" data-testid="service-open-login-items" (click)="store.openLoginItems()">{{ t.openLoginItems }}</button>
+            <button [matButton]="primary() === 'openLoginItems' ? 'filled' : 'outlined'" type="button" data-testid="service-open-login-items" (click)="store.openLoginItems()">{{ t.openLoginItems }}</button>
           }
         </div>
       }
@@ -76,7 +78,7 @@ import { SERVICE_STYLES } from './styles';
       <div class="pd-service__notice pd-service__notice--danger" role="alert" data-testid="service-error">
         <span class="pd-service__title">{{ t.noStatus }}</span>
         <span>{{ problem }}</span>
-        <span class="pd-service__row"><button type="button" class="pd-service__btn" data-testid="service-load-retry" (click)="store.load()">{{ t.retry }}</button></span>
+        <span class="pd-service__row"><button matButton="outlined" type="button" data-testid="service-load-retry" (click)="store.load()">{{ t.retry }}</button></span>
       </div>
     } @else {
       <p class="pd-service__muted" role="status" data-testid="service-loading">{{ t.loading }}</p>

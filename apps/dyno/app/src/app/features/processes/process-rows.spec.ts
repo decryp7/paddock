@@ -1,11 +1,26 @@
-import type { AppGroup, ProcessSample } from '../../core/api.types';
+import type { AppGroup, Measured, ProcessSample } from '../../core/api.types';
 import { type Row, type RowInput, type Sort, buildRows, compareRows, matches } from './process-rows';
 
-const sample = (pid: number, name: string, extra: Partial<ProcessSample> = {}): ProcessSample => ({
-  pid, parent: null, name, exe: `/bin/${name}`, user: 'alex', cpu: 1, memory: 100, diskReadBps: 0, diskWriteBps: 0,
-  started: 1000 + pid, state: 'running', protectedReason: null, ...extra,
+type SampleOver = Partial<Omit<ProcessSample, 'user' | 'cpu' | 'memory' | 'diskReadBps' | 'diskWriteBps' | 'started'>> & {
+  user?: string | null;
+  cpu?: number | Measured<number>;
+  memory?: number;
+  diskReadBps?: number;
+  diskWriteBps?: number;
+};
+const num = (v: number | Measured<number>): Measured<number> => (typeof v === 'number' ? { value: v } : v);
+const sample = (pid: number, name: string, extra: SampleOver = {}): ProcessSample => {
+  const { user = 'alex', cpu = 1, memory = 100, diskReadBps = 0, diskWriteBps = 0, ...rest } = extra;
+  return {
+    pid, parent: null, name, exe: `/bin/${name}`, state: 'running',
+    user: user === null ? { unavailable: { reason: 'notPermitted' } } : { value: user },
+    cpu: num(cpu), memory: num(memory), diskReadBps: num(diskReadBps), diskWriteBps: num(diskWriteBps),
+    started: { value: 1000 + pid }, owner: 'own', ...rest,
+  };
+};
+const group = (id: string, name: string, pids: number[], cpu = 0, memory = 0): AppGroup => ({
+  id, name, exe: null, pids, cpu: { value: cpu }, memory: { value: memory }, diskBps: { value: 0 }, partial: false,
 });
-const group = (id: string, name: string, pids: number[], cpu = 0, memory = 0): AppGroup => ({ id, name, exe: null, pids, cpu, memory, diskBps: 0 });
 const input = (over: Partial<RowInput>): RowInput => ({
   mode: 'groups', processes: [], groups: [], sort: { key: 'cpu', dir: 'desc' }, query: '', expanded: new Set(), ...over,
 });
@@ -34,8 +49,8 @@ describe('matches', () => {
 
 describe('compareRows', () => {
   const row = (name: string, extra: Partial<Row> = {}): Row => ({
-    key: name, kind: 'process', depth: 0, name, count: 1, cpu: 0, memory: 0, disk: 0, user: null, pid: null, ref: null,
-    groupId: null, expandable: false, expanded: false, protectedReason: null, suspended: false, ...extra,
+    key: name, kind: 'process', depth: 0, name, count: 1, cpu: 0, memory: 0, disk: 0, unavailable: { cpu: null, memory: null, disk: null }, partial: false, user: null, pid: null, ref: null,
+    groupId: null, expandable: false, expanded: false, suspended: false, ...extra,
   });
   it('sorts numerically in both directions', () => {
     const lo = row('a', { cpu: 1 });
@@ -46,6 +61,15 @@ describe('compareRows', () => {
   it('sorts names and users case-insensitively, a missing user as empty', () => {
     expect(compareRows(row('apple'), row('Banana'), { key: 'name', dir: 'asc' })).toBeLessThan(0);
     expect(compareRows(row('a', { user: 'Zed' }), row('b', { user: null }), { key: 'user', dir: 'asc' })).toBeGreaterThan(0);
+  });
+  it('puts rows whose value is unavailable last in either direction', () => {
+    const na = row('na', { cpu: null });
+    const some = row('some', { cpu: 3 });
+    for (const dir of ['asc', 'desc'] as const) {
+      expect(compareRows(na, some, { key: 'cpu', dir })).toBeGreaterThan(0);
+      expect(compareRows(some, na, { key: 'cpu', dir })).toBeLessThan(0);
+    }
+    expect(compareRows(row('b', { cpu: null }), row('a', { cpu: null }), { key: 'cpu', dir: 'asc' })).toBeGreaterThan(0);
   });
   it('breaks ties by name, then pid', () => {
     const sort: Sort = { key: 'cpu', dir: 'desc' };
@@ -59,12 +83,12 @@ describe('compareRows', () => {
 });
 
 describe('buildRows: flat', () => {
-  const processes = [sample(1, 'b', { cpu: 5 }), sample(2, 'a', { cpu: 9 }), sample(3, 'c', { cpu: 1, state: 'suspended', protectedReason: 'sys' })];
+  const processes = [sample(1, 'b', { cpu: 5 }), sample(2, 'a', { cpu: 9 }), sample(3, 'c', { cpu: 1, state: 'suspended' })];
   it('lists processes sorted', () => {
     const rows = buildRows(input({ mode: 'flat', processes }));
     expect(names(rows)).toEqual(['a', 'b', 'c']);
     expect(rows.every((r) => r.depth === 0 && !r.expandable && r.kind === 'process')).toBe(true);
-    expect(rows[2]).toMatchObject({ suspended: true, protectedReason: 'sys', ref: { pid: 3, started: 1003 }, key: 'p3' });
+    expect(rows[2]).toMatchObject({ suspended: true, ref: { pid: 3, started: 1003 }, key: 'p3' });
   });
   it('sums disk and filters by the query', () => {
     const rows = buildRows(input({ mode: 'flat', processes: [sample(1, 'x', { diskReadBps: 3, diskWriteBps: 4 })], query: 'x' }));
@@ -73,12 +97,47 @@ describe('buildRows: flat', () => {
   });
 });
 
+describe('buildRows: values that were not read', () => {
+  it('shows null with the reason, never 0, and a partial group says so', () => {
+    const hidden = sample(1, 'sys', { cpu: { unavailable: { reason: 'needsAdmin' } } });
+    const rows = buildRows(input({ mode: 'flat', processes: [hidden, sample(2, 'mine', { cpu: 4 })] }));
+    expect(rows.map((r) => r.name)).toEqual(['mine', 'sys']);
+    expect(rows[1]).toMatchObject({ cpu: null });
+    expect(rows[1]!.unavailable.cpu).toContain('administrator');
+    expect(rows[1]!.unavailable.memory).toBeNull();
+    const g = { ...group('g', 'G', [1, 2], 4), partial: true };
+    expect(buildRows(input({ processes: [hidden, sample(2, 'mine', { cpu: 4 })], groups: [g] }))[0]).toMatchObject({ partial: true, cpu: 4 });
+  });
+});
+
+describe('buildRows: other users', () => {
+  const other = { count: 3, cpu: { value: 4.5 }, memory: { value: 900 }, partial: true } as const;
+  it('adds one row that is not expandable, last in every mode, with its note values', () => {
+    const processes = [sample(1, 'a', { cpu: 50 })];
+    for (const mode of ['groups', 'tree', 'flat'] as const) {
+      const rows = buildRows(input({ mode, processes, groups: [group('a', 'A', [1], 50)], otherUsers: other }));
+      const last = rows[rows.length - 1]!;
+      expect(last).toMatchObject({ kind: 'other', name: 'Other users', count: 3, cpu: 4.5, memory: 900, disk: null, partial: true, expandable: false, expanded: false, ref: null });
+      expect(last.unavailable.disk).toContain('Unavailable');
+    }
+  });
+  it('shows an unreadable total as null with the reason and follows the search', () => {
+    const none = { ...other, cpu: { unavailable: { reason: 'needsAdmin' } }, partial: true } as const;
+    const rows = buildRows(input({ mode: 'flat', processes: [], otherUsers: none }));
+    expect(rows[0]).toMatchObject({ kind: 'other', cpu: null });
+    expect(rows[0]!.unavailable.cpu).toContain('administrator');
+    expect(buildRows(input({ mode: 'flat', processes: [], otherUsers: other, query: 'other' })).length).toBe(1);
+    expect(buildRows(input({ mode: 'flat', processes: [], otherUsers: other, query: 'zzz' }))).toEqual([]);
+    expect(buildRows(input({ mode: 'flat', processes: [], otherUsers: null }))).toEqual([]);
+  });
+});
+
 describe('buildRows: groups', () => {
   const processes = [
     sample(1, 'chrome', { cpu: 2, user: 'alex' }),
     sample(2, 'chrome', { cpu: 6 }),
     sample(3, 'code', { cpu: 1, user: 'bob' }),
-    sample(4, 'svc', { protectedReason: 'sys', state: 'suspended' }),
+    sample(4, 'svc', { state: 'suspended' }),
   ];
   const groups = [group('code', 'Code', [3], 1, 100), group('chrome', 'Chrome', [1, 2], 8, 200), group('svc', 'Services', [4], 0.5), group('gone', 'Gone', [99])];
 
@@ -110,8 +169,8 @@ describe('buildRows: groups', () => {
   });
   it('protected / suspended only when every member is', () => {
     const rows = buildRows(input({ processes, groups }));
-    expect(rows.find((r) => r.name === 'Services')).toMatchObject({ protectedReason: 'sys', suspended: true });
-    expect(rows.find((r) => r.name === 'Chrome')).toMatchObject({ protectedReason: null, suspended: false });
+    expect(rows.find((r) => r.name === 'Services')).toMatchObject({ suspended: true });
+    expect(rows.find((r) => r.name === 'Chrome')).toMatchObject({ suspended: false });
   });
   it('sorts groups by name ascending', () => {
     expect(names(buildRows(input({ processes, groups, sort: { key: 'name', dir: 'asc' } })))).toEqual(['Chrome', 'Code', 'Services']);

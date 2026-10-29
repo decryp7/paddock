@@ -1,4 +1,4 @@
-//! The health score: 100 minus the points each problem costs, with the reasons and a fix for each where one exists.
+//! The health score: 100 minus the points each problem costs, with the reasons.
 
 use crate::anomaly::Anomaly;
 use crate::facts::{DiskHealthStatus, SystemFacts};
@@ -6,7 +6,6 @@ use crate::forecast::Forecast;
 use crate::metrics::{derive_pressure, percent, MemoryPressure, SystemSample};
 use crate::startup::{ImpactRating, StartupEntry};
 use crate::time::Timestamp;
-use crate::tuning::Plan;
 use crate::units::{bytes, duration};
 use serde::{Deserialize, Serialize};
 
@@ -34,42 +33,6 @@ pub enum Severity {
     Critical,
 }
 
-/// What a fix does.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum FixKind {
-    /// Apply a tuning suggestion (by id).
-    Tuning(String),
-    /// Open cleanup.
-    OpenCleanup,
-    /// Open the startup manager.
-    OpenStartup,
-    /// Restart the computer (the UI asks first).
-    Restart,
-    /// Open the task manager.
-    OpenTaskManager,
-    /// Open the disk and battery life page.
-    OpenLifespan,
-}
-
-/// A one-click fix.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Fix {
-    /// Button label.
-    pub label: String,
-    /// What it does and why.
-    pub explanation: String,
-    /// What will change, line by line.
-    pub preview: Vec<String>,
-    /// Needs the helper's admin prompt.
-    pub needs_admin: bool,
-    /// Can be undone from Activity.
-    pub undoable: bool,
-    /// What it is.
-    pub kind: FixKind,
-}
-
 /// One reason the score is not 100.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,8 +47,6 @@ pub struct HealthReason {
     pub impact: u32,
     /// Severity.
     pub severity: Severity,
-    /// A fix, if there is one.
-    pub fix: Option<Fix>,
 }
 
 /// The report.
@@ -120,8 +81,6 @@ pub struct HealthInput<'a> {
     pub anomalies: &'a [Anomaly],
     /// App crashes in the last 7 days.
     pub crashes_7d: u32,
-    /// Tuning plans that fit now (fixes link to them).
-    pub tuning: &'a [Plan],
     /// Disk and battery life forecasts (only ones that need attention cost points).
     pub lifespans: &'a [crate::lifespan::LifeForecast],
 }
@@ -135,40 +94,16 @@ pub fn grade(score: u32) -> Grade {
     }
 }
 
-fn simple_fix(label: &str, explanation: &str, kind: FixKind) -> Option<Fix> {
-    Some(Fix {
-        label: label.into(),
-        explanation: explanation.into(),
-        preview: vec![],
-        needs_admin: false,
-        undoable: false,
-        kind,
-    })
-}
-
-fn tuning_fix(plans: &[Plan], id: &str) -> Option<Fix> {
-    let p = plans.iter().find(|p| p.suggestion.id == id && !p.suggestion.applied)?;
-    Some(Fix {
-        label: p.suggestion.title.clone(),
-        explanation: p.suggestion.explanation.clone(),
-        preview: p.apply.preview(),
-        needs_admin: p.suggestion.needs_admin,
-        undoable: true,
-        kind: FixKind::Tuning(id.into()),
-    })
-}
-
 /// Scores the machine.
 pub fn assess(i: &HealthInput<'_>) -> HealthReport {
     let mut r: Vec<HealthReason> = Vec::new();
-    let mut add = |id: &str, title: String, detail: String, impact: u32, severity: Severity, fix: Option<Fix>| {
+    let mut add = |id: &str, title: String, detail: String, impact: u32, severity: Severity| {
         r.push(HealthReason {
             id: id.into(),
             title,
             detail,
             impact,
             severity,
-            fix,
         });
     };
 
@@ -185,7 +120,6 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
                 "Back up your files now and plan to replace the disk; its own health check reports trouble.".into(),
                 impact,
                 severity,
-                None,
             );
         }
     }
@@ -204,11 +138,6 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
                 "Windows and apps need free space for updates, the page file and temporary files.".into(),
                 impact,
                 severity,
-                simple_fix(
-                    "Free up space",
-                    "Opens Cleanup with a preview of what can go.",
-                    FixKind::OpenCleanup,
-                ),
             );
         }
         if let Some((_, Forecast::FullInDays(days))) = i.forecasts.iter().find(|(id, _)| id.eq_ignore_ascii_case(&d.id)) {
@@ -219,7 +148,6 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
                     "At the rate free space shrank over the last days.".into(),
                     if *days < 7.0 { 15 } else { 8 },
                     Severity::Warning,
-                    simple_fix("See what's taking space", "Opens Cleanup and the disk map.", FixKind::OpenCleanup),
                 );
             }
         }
@@ -241,7 +169,6 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
                 },
                 impact,
                 severity,
-                None,
             );
         }
     }
@@ -267,11 +194,6 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             format!("{} Confidence: {}.", f.explanation, f.confidence.word()),
             if severity == Severity::Warning { 12 } else { 5 },
             severity,
-            simple_fix(
-                "See disk and battery life",
-                "Opens the lifespan page with the forecast, its range and how sure Dyno is.",
-                FixKind::OpenLifespan,
-            ),
         );
     }
 
@@ -293,11 +215,6 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             ),
             if pressure == MemoryPressure::Critical { 15 } else { 8 },
             Severity::Warning,
-            simple_fix(
-                "See what uses memory",
-                "Opens the task manager sorted by memory.",
-                FixKind::OpenTaskManager,
-            ),
         );
     }
 
@@ -308,7 +225,6 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             "Hot components slow themselves down and wear faster. Check the vents and fans.".into(),
             10,
             Severity::Warning,
-            None,
         );
     }
 
@@ -320,11 +236,6 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             "Updates are only half installed until you restart.".into(),
             8,
             Severity::Warning,
-            simple_fix(
-                "Restart now",
-                "Restarts the computer after you confirm. Save your work first.",
-                FixKind::Restart,
-            ),
         );
     }
     if let Some(n) = i.facts.pending_updates.value().filter(|n| **n > 0) {
@@ -334,7 +245,6 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             "Security and driver fixes are waiting to be installed.".into(),
             5,
             Severity::Info,
-            None,
         );
     }
     let uptime_days = i.sample.uptime_secs / 86_400;
@@ -345,11 +255,6 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             "A restart clears memory leaks and finishes pending maintenance.".into(),
             5,
             Severity::Info,
-            simple_fix(
-                "Restart now",
-                "Restarts the computer after you confirm. Save your work first.",
-                FixKind::Restart,
-            ),
         );
     }
 
@@ -368,11 +273,6 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             ),
             5,
             Severity::Info,
-            simple_fix(
-                "Review startup apps",
-                "Opens the startup manager to disable or delay them.",
-                FixKind::OpenStartup,
-            ),
         );
     }
 
@@ -383,7 +283,6 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             "Frequent crashes point at a broken update, a driver or failing hardware.".into(),
             10,
             Severity::Warning,
-            None,
         );
     }
     for (n, a) in i.anomalies.iter().enumerate() {
@@ -393,28 +292,6 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             a.explanation.clone(),
             if n < 3 { 5 } else { 0 },
             Severity::Info,
-            None,
-        );
-    }
-
-    if let Some(fix) = tuning_fix(i.tuning, "powerPlan").or_else(|| tuning_fix(i.tuning, "lowPowerMode")) {
-        add(
-            "powerSaver",
-            "A power-saving mode slows the CPU while plugged in".into(),
-            fix.explanation.clone(),
-            3,
-            Severity::Info,
-            Some(fix),
-        );
-    }
-    if let Some(fix) = tuning_fix(i.tuning, "indexDevFolders") {
-        add(
-            "indexing",
-            "Search indexing slows your builds".into(),
-            fix.explanation.clone(),
-            2,
-            Severity::Info,
-            Some(fix),
         );
     }
 
@@ -433,13 +310,10 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
 mod tests {
     use super::*;
     use crate::anomaly::AnomalyKind;
-    use crate::cleanup::Os;
-    use crate::facts::{DevFolder, DiskHealth, PowerPlan};
-    use crate::helper::POWER_SAVER_SCHEME;
+    use crate::facts::DiskHealth;
     use crate::metrics::fixtures::sample;
     use crate::metrics::{BatterySample, PowerSource, Reading, Temperature};
     use crate::startup::fixtures::entry;
-    use crate::tuning::plans;
 
     fn run(
         sample: &SystemSample,
@@ -449,7 +323,6 @@ mod tests {
         crashes: u32,
         forecasts: &[(String, Forecast)],
     ) -> HealthReport {
-        let tuning = plans(facts, Os::Windows, Some(PowerSource::Ac), &[]);
         assess(&HealthInput {
             now: Timestamp(1),
             sample,
@@ -459,7 +332,6 @@ mod tests {
             startup,
             anomalies,
             crashes_7d: crashes,
-            tuning: &tuning,
             lifespans: &[],
         })
     }
@@ -473,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn everything_wrong_scores_poor_with_fixes() {
+    fn everything_wrong_scores_poor() {
         let mut s = sample(0);
         s.disks[0].free = 10 << 30; // 2%
         s.battery = Reading::Available(BatterySample {
@@ -514,16 +386,6 @@ mod tests {
         ]);
         f.restart_pending = Reading::Available(true);
         f.pending_updates = Reading::Available(1);
-        f.power_plan = Reading::Available(PowerPlan {
-            id: POWER_SAVER_SCHEME.into(),
-            name: "Power saver".into(),
-            power_saver: true,
-        });
-        f.dev_folders = vec![DevFolder {
-            path: "C:\\src\\x".into(),
-            indexed: Some(true),
-            av_excluded: Some(true),
-        }];
         let heavy = vec![
             entry("A", "C:\\a.exe", ImpactRating::High),
             entry("B", "C:\\b.exe", ImpactRating::High),
@@ -554,15 +416,10 @@ mod tests {
             "updates",
             "startup",
             "crashes",
-            "powerSaver",
-            "indexing",
         ] {
             assert!(ids.contains(&want), "{want} in {ids:?}");
         }
         assert!(!ids.contains(&"uptime"), "restart pending already says it");
-        let power = r.reasons.iter().find(|r| r.id == "powerSaver").unwrap().fix.as_ref().unwrap();
-        assert!(power.undoable && !power.preview.is_empty());
-        assert_eq!(power.kind, FixKind::Tuning("powerPlan".into()));
     }
 
     #[test]
@@ -612,7 +469,6 @@ mod tests {
     fn disk_and_battery_life_cost_points_only_with_evidence() {
         use crate::hardware::Confidence;
         use crate::lifespan::{unavailable, LifeOutcome, LifeSubject};
-        let tuning = plans(&SystemFacts::unknown("w"), Os::Windows, Some(PowerSource::Ac), &[]);
         let facts = SystemFacts::unknown("w");
         let s = sample(0);
         let mut ssd = unavailable(LifeSubject::Ssd, "Samsung 990", "x");
@@ -635,7 +491,6 @@ mod tests {
                 startup: &[],
                 anomalies: &[],
                 crashes_7d: 0,
-                tuning: &tuning,
                 lifespans: l,
             })
         };
@@ -645,11 +500,6 @@ mod tests {
         let r = run(&[ssd.clone()]);
         assert_eq!(r.score, 95);
         assert_eq!(r.reasons[0].id, "ssdLife:Samsung 990");
-        assert_eq!(
-            r.reasons[0].fix.as_ref().map(|f| f.kind.clone()),
-            Some(FixKind::OpenLifespan),
-            "the reason links to /lifespan"
-        );
         assert!(r.reasons[0].detail.contains("Confidence: medium"));
         ssd.outcome = LifeOutcome::AlreadyPastLimit;
         let r = run(&[ssd]);
@@ -662,6 +512,5 @@ mod tests {
         bat.confidence = Confidence::High;
         let r = run(&[bat]);
         assert_eq!(r.reasons[0].id, "batteryLife:Battery");
-        assert_eq!(r.reasons[0].fix.as_ref().map(|f| f.kind.clone()), Some(FixKind::OpenLifespan));
     }
 }

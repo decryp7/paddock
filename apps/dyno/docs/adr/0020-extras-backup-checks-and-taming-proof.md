@@ -1,6 +1,6 @@
 # 20. Extras, backup health checks, the login-shell PATH and the proof of taming
 
-- Status: accepted (2026-10-23)
+- Status: accepted (2026-10-23); taming proof and file removal superseded by ADR 0021 (2026-10-28); extras and backup health stand
 - Related: ADR 0004, 0005, 0006, 0010, 0013, 0017; roadmap WP-13, WP-14, WP-36 and gap G11
 
 ## Context

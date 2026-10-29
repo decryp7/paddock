@@ -16,6 +16,17 @@ use tungstenite::Message;
 const MAX_MESSAGE: usize = 32 << 20;
 const MAX_EVENTS: usize = 1024;
 
+/// How [`Connection::wait_event_or_lost`] ended.
+#[derive(Debug, Clone)]
+pub enum Waited {
+    /// The event.
+    Found(Event),
+    /// Events after the mark left the bounded log before the awaited one was seen: it may have been among them.
+    Lost,
+    /// The time ran out, or the connection ended.
+    TimedOut,
+}
+
 /// A protocol event.
 #[derive(Debug, Clone)]
 pub struct Event {
@@ -123,6 +134,33 @@ impl Connection {
         lock(&self.inner.events).seq
     }
 
+    /// The events after `since` still in the bounded log, oldest first, with their sequence numbers.
+    pub fn events_since(&self, since: u64) -> Vec<(u64, Event)> {
+        lock(&self.inner.events).log.iter().filter(|(s, _)| *s > since).cloned().collect()
+    }
+
+    /// [`Connection::wait_event`] that also ends, with [`Waited::Lost`], once events after `since` have left the bounded
+    /// log, so the one awaited may be among them: a caller that cannot tell then decides what that means.
+    pub fn wait_event_or_lost(&self, since: u64, timeout: Duration, pred: impl Fn(&Event) -> bool) -> Waited {
+        let end = Instant::now() + timeout;
+        let mut g = lock(&self.inner.events);
+        loop {
+            if let Some((_, e)) = g.log.iter().find(|(s, e)| *s > since && pred(e)) {
+                return Waited::Found(e.clone());
+            }
+            if g.log.front().is_some_and(|(s, _)| *s > since + 1) {
+                return Waited::Lost;
+            }
+            if self.is_closed() {
+                return Waited::TimedOut;
+            }
+            let Some(left) = end.checked_duration_since(Instant::now()) else {
+                return Waited::TimedOut;
+            };
+            g = self.inner.cv.wait_timeout(g, left).unwrap_or_else(|e| e.into_inner()).0;
+        }
+    }
+
     /// Waits for an event after `since` that `pred` accepts.
     pub fn wait_event(&self, since: u64, timeout: Duration, pred: impl Fn(&Event) -> bool) -> Option<Event> {
         let end = Instant::now() + timeout;
@@ -169,6 +207,12 @@ fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
     let _ = ws.close(None);
 }
 
+/// Whether an event goes into the bounded log. Network events are only wanted for documents (a failed load's trace,
+/// `page::trace`): a page's own requests would flood the log, so the rest is dropped here.
+fn kept(method: &str, params: Option<&Value>) -> bool {
+    !method.starts_with("Network.") || params.and_then(|p| p.get("type")).and_then(Value::as_str) == Some("Document")
+}
+
 fn dispatch(inner: &Inner, text: &str) {
     let Ok(v) = serde_json::from_str::<Value>(text) else { return };
     if let Some(id) = v.get("id").and_then(Value::as_u64) {
@@ -180,6 +224,9 @@ fn dispatch(inner: &Inner, text: &str) {
             let _ = tx.send(r);
         }
     } else if let Some(m) = v.get("method").and_then(Value::as_str) {
+        if !kept(m, v.get("params")) {
+            return;
+        }
         let mut g = lock(&inner.events);
         g.seq += 1;
         let seq = g.seq;
@@ -196,5 +243,19 @@ fn dispatch(inner: &Inner, text: &str) {
         }
         drop(g);
         inner.cv.notify_all();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_documents_network_events_are_kept() {
+        assert!(kept("Page.frameNavigated", None));
+        assert!(kept("Network.loadingFailed", Some(&json!({"type": "Document"}))));
+        assert!(!kept("Network.loadingFailed", Some(&json!({"type": "Script"}))));
+        assert!(!kept("Network.dataReceived", Some(&json!({}))));
+        assert!(!kept("Network.requestWillBeSentExtraInfo", None));
     }
 }

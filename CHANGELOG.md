@@ -4,6 +4,334 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Rust developer and CI tool, phase R0 (ADR 0022)
+- New shared crates `paddock-slots` (numbered job slots over OS file locks, with a holder that always ends: job folder gone,
+  release, or `--max-hold-secs`), `paddock-repo-files` (the walk, its caps and a bounded-thread file hash) and
+  `paddock-repo-graph` (the project graph from Cargo and npm, the `History` port and its git adapter).
+- New `tools/paddock-dev` (its own workspace and lockfile) with `graph affected`, `ci slot acquire|release|status|hold` and
+  `self hash`, and the `./dev` / `dev.cmd` wrappers that build the tool or take it from `~/.paddock-dev/bin` (five newest kept).
+  The binary's name is a hash of the inputs in `inputs.txt`, the compiler, the build-affecting `CARGO_*` and `RUSTFLAGS`
+  variables and the text of every cargo config it reads (all `.cargo` folders up to the root, `$CARGO_HOME`, the tool's
+  `include` files). `./dev` says how to add `tools/` to a sparse checkout.
+- `ci.yml` gets a `paddock-dev` leg on Linux, Windows and macOS (fmt, clippy, nextest `ci` profile, cargo deny, lockfile check).
+
+### `pd-table` on Angular Material's table (ADR 0027, decision 5)
+- `pd-table` is built on `mat-table`: a header-only table above the CDK virtual scroll viewport and the body table inside it,
+  one `role="grid"`, so the header never moves with the rows (also on fast scrolls, jumps and End). `matSort` and
+  `mat-sort-header` sort (`aria-sort`; Material's arrow, hidden at rest), `mat-menu` gives the column and row menus (the
+  "..." button, right-click and Shift+F10), `matTooltip` the full text of a cut cell and the buttons' names, `matIconButton`
+  the row actions (24 px, the family's hover fill in a 6 px shape). Group rows, middle truncation, `hideBelow`, the row
+  heights and the grid keyboard stay the family's own. The public API is unchanged.
+- One tab stop for the grid (the active row): the sort headers and the row's buttons are not tab stops. Up from the first row
+  reaches the sort headers and the arrows move along them; Right reaches the row's enabled buttons, Left and Escape go
+  back, Up and Down on a button go to the row above or below; Shift+F10 or the Menu key opens the row's menu. A grouped
+  table is a tree grid: group rows say whether they are expanded, Right expands a collapsed group and on an expanded one
+  moves to its first row, Left collapses an expanded group, Left on a row moves to its group row, and the rows say their
+  place (`aria-posinset`/`aria-setsize`: groups among groups, rows among their group's count).
+  The keyboard focus follows End and Home in a virtual table once the row is drawn, and a pending focus is dropped when the
+  lines change or the focus leaves the grid. A row stays marked while its menu is open. A focused button shows Material's
+  focus indicator alone; a cut cell's tooltip (and its description) exists only while the pointer is on it; the loading
+  placeholders are hidden from assistive technology.
+- Every body is drawn in the viewport: above 100 lines only the rows in view; below, or with `virtual="false"`, every row,
+  a frame after a change.
+- A sortable header's accessible name is its label (the button inside the column header); "Sort by …" is its description.
+- `@decryp7/paddock-e2e`: `headerTrack` samples a grid's header frame by frame through a fast scroll, a jump and End.
+- Popup menus built with `mat-menu` keep the family's item size and keyboard ring (`_controls.scss`).
+
+### Sticky table headers stay above their rows (ADR 0027)
+- New tokens `--pd-z-table-corner` (4), `--pd-z-table-header` (3), `--pd-z-table-sticky-column` (2) and
+  `--pd-z-table-row-action` (1): the layers inside a table, header on top, a sticky column's header cell above both. `pd-table`'s grid is its own stacking context and its header uses `--pd-z-table-header`;
+  `pd-view-table`'s header and `pd-view-matrix`'s sticky row headings and the shell's diagnostics tables use the ladder.
+- The apps' tables whose sticky header had no z-index (Debrief: alerts, tail status, query results, SQL console, store pane,
+  markers, keyboard settings, runs, dashboard tiles, parser editor, format wizard; Dyno: Charted counters) set one, so
+  muted or translucent rows and hover actions no longer paint over the header; Pitwall's model library keeps its sticky
+  action column (2) below the header (3).
+- Conformance C43: a header or footer row that sticks (top, bottom, `inset-block-*`, the `inset` shorthands) needs a
+  z-index of at least 3, a sticky column's header cell at least 4, and a sticky column must sit below the app's lowest
+  header (`/* conformance: not-a-header */` for sticky panels); run on Paddock's CI with the other repo-wide checks. The
+  headers at 1 (Dyno, Spotter, Pitcrew, the workbench explorer) and the sticky action bars (Dyno cleanup, Debrief's setup
+  wizards and schedules, Spotter's editor) are at the header level.
+- `@decryp7/paddock-e2e`: `headerCovers`, `expectHeaderOnTop` and `isOpaqueColor` (scroll in steps and a jump of more than
+  two viewports, `elementFromPoint` across the header row in the first frame and again once a row reaches the header with
+  the row under it hovered, opaque background); the gallery runs it over `pd-table` in both themes, Chromium and WebKit.
+
+### Frame navigation on Material and the CDK (WP-4 of the Material migration, rule 47)
+- The pages sidebar is a `mat-nav-list`; the CDK `FocusKeyManager` moves focus with Up, Down, Home and End (wrapping). Tab still reaches every link.
+- Count badges (sidebar and activity bar) are `matBadge` (aria-hidden: the count stays in the link's name). In the sidebar the count is at the row's end (on the icon in the rail); a count without a badge label stays in the link's name. The two page groups are `role="list"` of list items, not extra navigation landmarks. Tones set `--mat-badge-background-color`.
+- Tooltips are `matTooltip`, not `title`: the rail's page names, the activity bar and its More menu, the status bar's More button, the part Retry button, the path text's Copy button. `pd-path-text` shows the full value only when the text on screen is shorter than it; the title bar no longer repeats the app name as a native title.
+- The Copy menu (`PdCopyMenuHost`) is a CDK context menu (`cdkContextMenuTrigger` and `cdkMenu`), opened at the pointer by `PdCopyMenu` as before. The `.pd-badge`/`.pd-act-badge` classes and `[data-testid="page-badge"]` are gone: the e2e page object `badges` finds `.mat-badge-content`.
+
+
+### Shell toasts keep a page-footer safe area
+- New token `--pd-page-footer-safe` (56 px). `pd-notification-host` now sits above the status bar plus this safe area, so a toast no
+  longer covers a page footer's primary action (a wizard's Next); the status-bar fallback is 24 px like the token.
+
+
+
+### Updates and the undo toast on Material (WP-W2, WP-W3, rule 47)
+- Updates (the About dialog itself did not change): its checkboxes are `mat-checkbox` and the download progress is `mat-progress-bar` (a
+  phase without a total is indeterminate; with reduced motion it is a full, still bar, not a frozen partial one). The dialog needs
+  `providePaddockMaterial()` and `css/material.css`, in the main window and in the dialog windows. The shell demo's `?hold` keeps a
+  download running and `window.sdUpdatesDownload.progress()` plays the engine's job events (e2e and screenshots).
+- Material checkboxes line up with the form column: one shared rule in `_material.scss` pulls the box back over the touch-target padding (not in table cells, which keep Material's centring).
+- Breaking (shell/undo): `pd-undo-toast` draws nothing itself now and opens a `MatSnackBar` ("Done: ...", Undo action, close button;
+  polite live region, no focus, the store's clock keeps the timeout, reduced motion follows Material and the global rule). Place it once
+  in the shell and drop any wrapper that positioned it. MatSnackBar shows one at a time: another snack bar replaces the undo toast and the
+  store then drops its toast (the edit stays undoable).
+- One toast area: new `ToastArea` (`@decryp7/paddock-ui/shell`). The undo snack bar is bottom right, 360 px, on the notification host's
+  baseline (status bar + `--pd-page-footer-safe`) and styled like a notification (surface-3, hairline, shadow; every Material snack bar looks like
+  this now, with the action in the accent colour). It reports its height and `pd-notification-host` lifts itself above it, so the two never
+  overlap at any width (under 600 px the snack bar stays at the right, with the host's 8 px gutter up to 480 px). The apps' shells need `providePaddockMaterial()` and `css/material.css` (the shell demo has both).
+
+### One shared Material theme (WP-0 of the Material migration, rule 47)
+- `css/material.css` (`scss/entry-material.scss`) is now the whole Material look: one Material 3 `mat.theme` (density -3) whose system
+  and component tokens all resolve to `--pd-*`, so theme, accent, contrast and density follow our tokens and an app carries no
+  Material theme of its own. New bridge tokens: table, sort header, paginator, tree, button toggle, badge, list, expansion, timepicker,
+  slider, chips, tabs, progress bar and every `matButton` variant (filled = primary, outlined = secondary with the surface-2 fill, text,
+  tonal, elevated; danger is the class `pd-button-danger` on any of them; no ripple).
+- New secondary entry `@decryp7/paddock-ui/material`: `providePaddockMaterial()` makes every `mat-form-field` `appearance="outline"` with
+  `floatLabel="always"` and turns ripples off. `@angular/material` is an optional peer dependency (`^22.2.4`) of `@decryp7/paddock-ui`.
+- `npm run test:tokens` measures the contrast of every bridged Material component in light and dark for all accents (text 4.5:1,
+  icons, borders and indicators 3:1). It found the snack bar action (accent on the inverse surface, 1.9:1 to 2.4:1): it now takes the
+  surface ink. `npm run build:css` resolves `@angular/material` from the repo's `node_modules`.
+- Review fixes: keyboard focus is Material's strong indicator in `--pd-focus-ring` (2 px, 2 px outside; no more hidden rings), the shape
+  rules win over Material's own CSS (28 px menu items and options, 4 px panel padding, popover radius), form fields get a 12 px floated
+  label, a centred input and room for the suffix icons; type scale without tracking and with the family's line heights, family font
+  stack; muted hints; segmented-look button toggle; `@angular/material` and `@angular/cdk` are 22.2.4 in every workspace.
+- Round 2: the floated label now renders at 12 px (Material scales it by 0.75, so the size is asked for / 0.75; the e2e measures the rendered
+  width), the field's own 2 px outline in `--pd-focus-ring` is the keyboard ring (no ring over the floated label), calendar month names
+  are sentence case (`monthLabel` in `providePaddockMaterial`, the heading's upper-casing undone in CSS), icon buttons and the paginator select
+  follow the density, and `@angular/material` / `@angular/cdk` are hoisted to one root copy again in `package-lock.json`.
+- Gallery: a "Material controls" section shows every bridged component (`e2e/material.spec.ts`: axe, token checks, real overlays).
+- State layers: bridge-only CSS (no `mat.theme`) left `--mat-sys-*-state-layer-opacity` undefined, so the opacity computed to 1 and every
+  hovered or focused Material icon button drew a solid disc. The bridge now sets the hover, focus and pressed opacities from the new
+  public tokens `--pd-hover-alpha` / `--pd-pressed-alpha` (0.05 / 0.09; `--pd-hover` and `--pd-pressed` are built from them; Material's
+  own defaults are 0.08 / 0.12 / 0.12) and the icon button's ink to `--pd-text`. The material e2e checks every icon button's rendered state
+  layer (alpha and pixels) in light and dark, and a token test compiles the bridge alone. `e2e/material.spec.ts` type-checks again.
+
+### Form controls on Material (WP-1 of the Material migration, rule 47)
+- `pd-select` is a `mat-select` in an outline `mat-form-field` (keys, typeahead and ARIA are Material's; closed, the arrow keys now
+  choose the next option and Enter or Space opens the list; the chosen option has its check mark). New optional input `label` (the label
+  in the outline's notch). A `<label for>` that names it through `inputId` is read from the document: its id becomes `aria-labelledby`,
+  and a label with no id becomes the select's `aria-label` text (no id is written onto a label the select does not own).
+- `pd-field` keeps its inputs and `pdFieldControl`, and is an outline `mat-form-field` with the label always floated in the notch
+  (design rule 11, D1), `mat-hint` and `mat-error`. Whatever look the marked control brings (`pd-input`, a dialog's own input style) is
+  neutralised by the `pdFieldControl` marker. A native `<select pdFieldControl>` gets Material's arrow and a textarea its Material class.
+  A field with no control to outline (a picker made of a button) keeps the classic layout: the label above, the content in a labelled
+  group, the hint or error below. New inputs: `error` (an error the host knows without a form state) and `suffix` (a template drawn at the
+  end of the outline, for a picker's toggle). `PdField.describedBy` is now a signal fed by Material.
+- `pd-segmented-control` is a single `mat-button-toggle-group`: Home and End no longer jump (Material has no such key) and the
+  `nextEnabled` helper is removed from the public API.
+- `pd-day-picker` is a multiple `mat-button-toggle-group`; the schedule editor's mode and interval presets are button toggles too.
+- The schedule and pause editors use `mat-timepicker` instead of `type="time"`, with a toggle button, and show and read times in
+  **24 hours** (`17:45`, like the engine's `HH:MM` and the preview), a visible change from the platform's time field. The engine still gets
+  `"HH:MM"`, converted at the edge on a fixed reference day (`time-value.ts`, tested across midnight, DST and half-hour zones). Text the
+  picker cannot read keeps the last good time and shows "Enter a time such as 09:00." once the field is left; any change of the schedule
+  from outside the field clears it. Buttons are `matButton`/`matIconButton`, tooltips `matTooltip`.
+- Escape closes an open `pd-select` or time list and stops there, so a dialog around it stays open.
+
+### Shell pages' controls are Angular Material (WP-2 of the Material migration, rule 47)
+- Settings window and fields, AI access (MCP), Notification channels, Set-up, Storage, Knowledge packs, Background service, Report a
+  problem and Language: the hand-made switches are `mat-slide-toggle`, checkboxes `mat-checkbox`, the language radio group
+  `mat-radio-group`, native `<progress>` `mat-progress-bar`, the "Needs restart" and "Advanced" badges static `mat-chip`s, native
+  buttons `matButton` (filled = primary, outlined = secondary, text for quiet actions) and `matIconButton`, and `title` tooltips
+  `matTooltip`. Public APIs and `data-testid`s are unchanged, but a toggle's test id is now on the Material host: tests reach the control
+  with `getByRole('switch' | 'checkbox')` inside it. A button at a limit uses `disabledInteractive` (focusable, `aria-disabled`).
+- `.pd-switch` stays in `_controls.scss` until its last users (the view form and the gallery) have moved.
+
+
+### Shell: About, health chip, notices and jobs popover fixes
+- About, Updates and What's new are styled again: `ABOUT_STYLES` selected the pre-`pd-` class names (b88a387a1). A new spec
+  (`shell/testing/src/template-classes.spec.ts`) checks that every class a shell template uses has a selector in its styles, so the
+  rename drift cannot come back unnoticed (it also covers host classes and `src/lib`, and a class binding cannot satisfy itself).
+- The service health chip is sentence-cased for labels such as "your sources" (the value after the colon stays lower case, a rule
+  now in the design guide §10) and says what is wrong from the cause code Rust emits (`CAUSE_WORDS`: "not installed", "needs
+  approval", "needs pairing" ...). `cause-codes.spec.ts` reads the Rust sources and fails for a cause code without words, a
+  non-literal `.code(` that is not listed, or a word for a code nothing emits. No network cause code exists on the Rust side yet.
+- Notification centre titles wrap (two lines, full text in the tooltip) instead of cutting at one line, and the hover buttons no longer reserve room.
+- Jobs: `pd-job` has a `flat` input (a row without border or background) and `pd-jobs-list` a `flat` input, which the status popover
+  uses (no card in a card); a phase named like the job's title is not said twice ("Downloading" in the card and the status item).
+
+### Shell toasts keep a page-footer safe area
+- New token `--pd-page-footer-safe` (56 px). `pd-notification-host` now sits above the status bar plus this safe area, so a toast no
+  longer covers a page footer's primary action (a wizard's Next); the status-bar fallback is 24 px like the token.
+
+### Shared dialog API, round 2 of the reviews (frame)
+
+- A refused answer's alert is measured with its margins, so the refitted window keeps the body's bottom padding and does
+  not scroll (e2e: body `scrollHeight <= clientHeight` in the rejected state).
+- `layoutActions` returns the decision's `tone`: `danger` (and Cancel focused) only when a destructive answer is the sole
+  affirmative; a primary beside a destructive (the save prompt) is `info` and focuses the primary.
+- Busy: the pressed button keeps its full colour with its spinner and may say `busyLabel` ("Creating…"); the inert body
+  dims. Rejected: the alert has an error icon and no border; Try again shows its focus ring after the script moved focus.
+- Contents: pd.mcp.key reads the key count when it opens (its contract adds `mcp_get`) and shows the key limit as a
+  validation message with Create key disabled; Create key says "Creating…" and the channel secret's Save "Saving…".
+  pd.storage.confirm's button repeats its heading ("Delete logs?" / "Delete logs"). sd.inspector says "Running".
+  Report a problem breaks long file names without hyphens. Set-up says "Get Pitwall" when Pitwall is not installed. The
+  channel secret's Show button is as tall as its input. `SuEmptyState`'s description uses `text-wrap: pretty` (no widows).
+- Round 3 polish: Report a problem keeps a file name on one line with an ellipsis (the full name is its tooltip); the
+  Settings window's footer says "Changes are saved as you make them." until a change has its own notice, and its
+  content ends where Close does; a busy dialog dims only its controls, not its heading and text; the demo save prompt's
+  refusal is one a retry can fix.
+- The dialog harness takes `interact` (what the user does once a dialog booted, by id): the shell demo's boot follows
+  About's releases link, so `files_open_url` is sent and the unexercised count stays at 32.
+
+### Shared dialog API: About opens its releases page in the system browser
+
+- `pd.about` may call `files_open_url` (`paddock-updater` depends on `paddock-files` for the marker): the releases link asks
+  the engine to open the page, since a webview window opens no links itself, and says why when it was refused.
+  `AboutBackend.openUrl` (Tauri: `files_open_url`; memory: `openedUrls`, and `opener` for a browser build).
+
+### Shared dialog API, review fixes (Rust)
+
+- `Measure` has an optional `viewportHeight` (the page's `window.innerHeight`, wire type `DialogMeasureWire`). Rust adds
+  the window's inner height less it (clamped to 0..=400 logical px) to the content and minimum content heights, so a
+  webview shorter than its window no longer cuts off the footer.
+- A modal's parent is disabled and re-enabled under the registry lock, on the main thread, and only shown modals hold
+  it: a deadline that fires after a close, or a pending modal, can no longer leave the parent disabled.
+- **Fixed.** The deadline/close race that could leave a parent disabled with no dialog: the registry records only the
+  desired state (a parent is disabled iff a shown modal of it is open) and one queued main-thread task reads the latest
+  of it and applies it (`Dialogs::parent_change`); no window API is called under the registry lock, and a close whose
+  task runs before the show's still ends with the parent enabled. `Dialogs::mark_shown_with` and `remove_with` are gone
+  (`mark_shown` returns the entry).
+- The viewport delta is taken once, at the first fit (`dialog_ready`), kept on the registry entry (`viewport_delta`) and
+  reused by later fits, so a later `dialog_fit` does not recompute it from a resized window.
+- `Measure` has an optional `devicePixelRatio` (finite, 0.25..=8; `DialogMeasureWire`, `DialogMeasure`): the page reports
+  CSS px, and the fit converts content, minimum content and viewport height to logical px by the webview zoom,
+  `devicePixelRatio / scale_factor` (1 when either is missing, `zoom_of`, `Measure::logical`).
+- `DialogInfo` has `pending` (the window is not on screen yet): an existing window that is still pending no longer
+  unblocks its opener before its `paddock://dialog-shown` event (`WindowDialogBackend`); a closed window's early-shown
+  mark is forgotten.
+- Conformance C45 (C40 to C44 are taken by ADR 0024 and other branches): `__command(` and `__prefix(` are called nowhere outside `crates/paddock-commands` (test code and
+  doctests excepted).
+- The real-window probe boots the built shell-demo's real dialog frame (`PADDOCK_PROBE_DIST`) with a visible host and a
+  modal dialog, asserts the dialog window is hidden until its `dialog_ready` arrives, and reports from a synchronous read
+  and a timer (no animation frames). Its job `dialog-window-probe` (`nightly.yml`) is off by default and gates nothing:
+  it runs on a manual run or with the variable `PADDOCK_REAL_WINDOW_PROBE=true`, because it opens real windows (ER-14)
+  and the Mac host's displays sleep at night. Built with `--features tauri`, not `--all-features`.
+- A destroyed window, and a host whose dialogs close, are forgotten in the applied parent state (`Dialogs::forget_applied`);
+  the applied state is recorded only after `set_enabled` returned Ok (`Dialogs::applied`), so a failed call is retried.
+- The webview zoom is kept on the dialog entry from `dialog_ready` and changes only when the page's `devicePixelRatio`
+  changes at an unchanged scale factor (`zoom_after`); a monitor move keeps it, so a fit is not off by
+  `dpr_old / scale_new`.
+
+- **Breaking.** `paddock_commands::DialogCallable` is a struct with a private field (its old variants are now
+  `DialogCallableKind`, read with `kind()`): a contract can only name a `dialog_callable::<name>` marker, `prefix` or
+  `plugin`; `DialogCallable::Command("x")` no longer compiles (compile_fail doctest).
+
+- `DialogRequest` has an optional `theme` (`'light' | 'dark'`, the opener's `data-theme`, else its system scheme; sent by
+  the window backend): a dialog window's background before its page paints is that theme's `--pd-surface-2`, a test
+  compares Rust's two values with `_tokens.scss`. Without it Rust falls back to the parent's OS theme.
+- Every dialog page gets `<html data-platform="macos|windows|linux">` from an initialization script, so the footer's
+  button order follows the shell's platform, not the user agent.
+- New event `paddock://dialog-shown` (`DIALOG_EVENTS.shown`, payload `DialogShown { label, dialogId }`) when the window is
+  shown. `DialogSession` has an optional `shown` promise: a windowed modal blocks its parent (the scrim over a macOS
+  parent) once its window is on screen, not when it is opened; one closed before that never blocks. `FakeDialogIo.shown()`
+  plays the event.
+
+- `scripts/affected.mjs` maps a change to a generated file under `ui/**/generated/` (`.ts`, `.json`) to the crates that
+  name it (all crates when none does), so a stale generated file fails branch CI, not the merge.
+
+- `paddock-dialogs/tests/show_probe.rs`: the ADR 0026 section 6 real-window probe as a test target (`harness = false`,
+  runs only with `PADDOCK_REAL_WINDOWS=1`; `tauri` gets the `wry` feature in this crate's dev-dependencies).
+
+### Shared dialog API, part 7: dialog content polish after the visual review
+
+- `pd.about` shows its facts in a two-column label and value grid, says the system in words ("macOS (Apple silicon)", "Web browser") and links the releases page; the shared About, Updates and What's New styles use the `pd-` class names the templates use (buttons are 8 px apart again).
+- `pd.updates`, `pd.setup` and `pd.wb.dock.layout-manage` are modeless forms (medium, fitted to their content) instead of fixed-size tools; their generated contracts and the shell demo's manifest changed. Updates keeps the automatic-check box, the channel and the install-on-quit box on separate rows and says "Not checked yet" once. Set-up has one filled button (the first step to do, or Repair) and names the missing Pitwall once. Manage layouts has a designed empty state with a Save current layout action (also in the footer once layouts exist), which closes with `{ save: true }` and runs the dock's Save layout flow (`LayoutManageResult.save`).
+- `sd.inspector` is a modeless form, shows "Queued" once and the uptime as "12 min 34 s". Report a problem keeps its Size column on one line and breaks long names and `***`; the channel secret's Show button is as tall as its input. Labels are muted 12/500 and intro text muted across these dialogs, with curly quotes.
+
+### Shared dialog API, part 6: the command recorder and the nightly check (ADR 0026 §3, §6; package 1.2b)
+- Every command a dialog window sends through `shellInvoke` is recorded for its dialog (`dialogCommandLedger`;
+  `dialogWindowConfig({ baseCommands })` names what it may send); an undeclared one is reported at once. The boot harness
+  records too; `PADDOCK_DIALOG_COMMANDS_SEEN` writes `dialog-commands-seen.json`.
+- `scripts/dialog-commands.mjs` (`npm run check:dialog-commands`, nightly only): every declared command was sent, or is
+  listed in the app's `dialog-commands-unexercised.json` with a reason, whose count may only fall
+  (`dialog-commands-unexercised.count`); every dialog was opened (`openEveryDialog`'s list).
+- `@decryp7/paddock-e2e`: `openEveryDialog`, `measureDialogWindow`. ESLint `dialog-content-footer` checks every component
+  that is a dialog content, whatever its file name.
+- workbench-demo's dialog windows may send the start-up handshake (the recorder found the base set lacked it).
+
+### Shared dialog API, part 5: macOS attach at show and the configured deadline
+- macOS: an owned dialog window is built without a parent and attached with `addChildWindow:ordered:` when it is shown
+  (`objc2-app-kit`, a macOS-only dependency of `paddock-dialogs`, already in every app's tree through Tauri), instead of
+  built with its parent and hidden again.
+- The shell plugin passes `paddock_startup::Config::dialog_show_deadline` to `Dialogs::with_show_deadline`.
+
+### Shared dialog API, part 4: test kit and checks (ADR 0026 §6; package 1.2b, first part)
+- ESLint `paddock/dialog-frame-footer` (in the preset for the templates of `*dialog*` components): no `footer`, foot or
+  actions row, and no Close, Cancel or OK button in a dialog content.
+- The boot harness reports a content that draws its own footer (`ownFooter`), a missing ready handshake and a ready
+  measure whose minimum exceeds its content.
+- `@decryp7/paddock-e2e`: `dialogFitProblems` (ADR 0016 check 1: scales 1, 1.25 and 1.5 on 1920x1080 and 1366x768; footer
+  buttons inside the window, on top, at most 24 px above its bottom); the shell demo runs it over every dialog.
+
+### Shared dialog API, part 2: DialogFrame, declared actions and pd.confirm (ADR 0026 §2, §4.8, §5; packages 1.2a and 1.2c)
+- **Breaking.** Every dialog renders in `DialogFrame` (`@decryp7/paddock-ui/shell/dialogs`): an optional header, a body that
+  alone scrolls and a footer the frame draws from the content's declared actions (`DialogContent.dialogActions`, a signal of
+  `AnswerAction | RunAction | DismissAction`; `dialogStatus`, `dialogMinBodyHeight`, `dialogHeader`). `layoutActions` (pure,
+  tested as a table) orders them natively per OS (macOS and Linux: Cancel left of the primary; Windows: primary, then
+  Cancel), allows one primary, one destructive and one dismiss (none for a required choice; the frame adds Cancel/Close),
+  never makes a destructive action the Enter target, and picks the first focus (a form's first field, marked
+  `data-autofocus`; a destructive decision's Cancel). Busy (spinner, `aria-busy`, inert body; abortable work is aborted on a
+  dismissal, other work finishes first, "Finishing…") and rejected states (`DialogActionError`'s message, Try again) are the
+  frame's. An invalid declaration renders one Close and is logged.
+- **Breaking.** Outcomes: `DialogRef` (what a content injects) has `answer(value)` and `dismiss()`; the opener's
+  `DialogHandle.closed` and `ShellCore.openDialog` resolve a `DialogOutcome` (`answered` with a value, or `dismissed`),
+  never an ambiguous `undefined` (`answerOf`, `answered`, `DISMISSED`). On the wire an answer is `{ answered: true, value }`.
+- A dialog window measures itself synchronously once the content and `document.fonts.ready` are there (no frame wait,
+  the 1.1-0 spike) and sends `DialogIo.ready`, then `fit` at most once per frame when its natural size, the fonts, theme or
+  density change; decisions and forms shrink as well as grow. In the page a dialog stays hidden until ready or the show
+  deadline (Loading with Close), and a modal traps the focus (CDK). Focus returns to the opener. The `keys.ts`
+  heuristics (`hasCloseAction`, `findDefaultAction`) are gone.
+- The 13 shared dialogs and the shell demo's 5 and the workbench demo's 2 declare their actions and lose their footers.
+  Destructive actions say what they destroy (Remove channel, Revoke key, Clear cache / Delete data); Updates' job controls
+  read Stop checking / Stop download.
+- New `@decryp7/paddock-ui/shell/confirm` (`pd.confirm`, `defineConfirmDialog`, `confirm()`; contract
+  `paddock_shell::DIALOGS`): the one shared confirmation (heading, message, details, a primary or destructive affirmative).
+- `shell/testing`: `renderFramed` and `createFramed` render a content in the real frame for its spec.
+
+### Shared dialog API, part 1: contracts in Rust (ADR 0026 §1, §3; package 1.1a)
+- **Breaking.** Dialog contracts are Rust tables: `paddock_dialogs::dialogs!` (a `Shape` for kind and modality, the width
+  steps `Narrow` 400 / `Medium` 560 / `Wide` 720, a tool's `Px(n)`, a viewer's or tool's preferred `height`, `instanced`,
+  `required_choice`, `commands`). `command_table!` emits a `dialog_callable` module beside each leaf table (one leaf table per
+  module) with a marker per command open to dialogs and `ALL`; `paddock_commands::prefix` and `plugin` build the other entries.
+  A misspelt or closed command, a prefix matching nothing, a modal viewer or a required choice that is not modal does not compile.
+- **Breaking.** `Contracts::parse`, `ContractFile`, `Dialogs::from_json` and `paddock_shell::Builder::dialog_contracts` are gone:
+  `Contracts::from_tables`, `Dialogs::from_tables` and `Builder::dialogs(&[&app::DIALOGS])`; the shell registers its own tables
+  (`paddock_shell::SHELL_DIALOGS`: channels, MCP, storage, diagnostics, updater, set-up) and the workbench has
+  `paddock_workbench::DIALOGS`. `paddock_shell::dialog_commands` re-exports every shell crate's markers for an app's table.
+- **Breaking.** `defineDialog(contract, ui)`: the contract is the generated `DIALOG_CONTRACTS['<id>']` of the owner
+  (`generated/dialog-contracts.ts`), the second argument the title, result, providers and loader. `DialogSpec`, `minWidth`/`minHeight`,
+  `dialogMinSize`, `KIND_POLICY`, `FALLBACK_WIDTH`, `dialogContract`, `dialogContractFile`, `serializeDialogContracts` and the
+  JSON contract files are gone; `DialogRequest` carries no sizes (Rust takes them from the contract). The kind table is generated
+  (`DIALOG_KIND_TABLE`, `DIALOG_WIDTH_STEPS`; `fitsContent` and the new `growsOnly` read it), so TypeScript and Rust agree on
+  which kinds are fitted. `fakeDialogContract` (`shell/testing`) makes contracts for specs.
+- `pd.report-problem` is a modeless form, 720 wide; the shared decisions and forms take the width steps (400 or 560).
+- The manifest's dialogs carry `width` and `height` instead of `minSize`.
+- `@decryp7/paddock-e2e`: `dialogContracts(...paths)` and `axeEveryDialog(page, paths)` read generated `dialog-contracts.ts` files
+  (`parseDialogContractsModule`); conformance C33 reads an app's generated file (or the legacy JSON until Debrief moves).
+- The package bin `paddock-check-dialog-commands` and `npm run check:dialogs` are deleted (ADR 0026 §3: the compiler checks
+  that a command exists and is open to dialogs; the invoke-layer recorder of package 1.2b replaces the rest).
+
+### Shared dialog API, part 3: the window lifecycle (package 1.1b)
+- **Breaking.** `dialog_fit_height` is gone: a dialog window reports `dialog_ready { measure }` once and `dialog_fit { measure }`
+  after that, with `measure = { content, minContent }` (the dialog's own inner logical size; the wire type `DialogMeasureWire`
+  in `shell/generated/dialogs.ts`). `tauriDialogIo.ready` and `.fit` send them. `BASE_COMMANDS` lists `dialog_ready` and
+  `dialog_fit`; apps list the two commands in their table instead of `dialog_fit_height`.
+- A dialog window is created hidden (pending), at the placed size, on the dialog shell's surface colour, and shown and
+  focused when its page is ready, so the user never sees the 520 px guess or the jump. If the page has not reported within
+  `Dialogs::show_deadline` (1 s, `with_show_deadline`; `paddock-startup` `Config::dialog_show_deadline`) it is shown at the
+  placed size and a late ready fits it once. The deadline runs through an injectable `Scheduler`.
+- The show mechanism per OS is chosen in one function, `paddock_dialogs::show_mechanism(os)`: method d (hidden, show on ready)
+  on every OS (the 1.1-0 spike measured macOS, Linux and Windows); the off-screen method is gone.
+- The minimum content becomes the OS minimum. The size cap is 75 % of the work area less the dialog window's own
+  outer-minus-inner decorations, applies to the preferred size only and never pushes below the minimum content. Physical
+  sizes are rounded up once. A decision keeps its offset only, a form its width and offset, a viewer and a tool their size.
+- A modal's parent is disabled when the dialog is shown, not when it is created; opening a dialog that is still pending
+  creates no window and does not show it early. A scale-factor change refits the window from its last measure.
+
+
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,
   Chromium e2e in two shards, WebKit e2e) and releases through the shared `app-release.yml` from a thin `dyno-release.yml` (nightly
@@ -11,6 +339,12 @@ Conventional Commits; one semver tag for the whole repo.
   `check-index.mjs` and `ci-prune.sh` are deleted. Dyno's host clean-up ends only the test programs of its own build folder.
 - New `app-release.yml` input `bundle-check`: an app's own script run on Linux and macOS after the installers are built, with the bundle
   folder as its argument (Dyno's run-path check; on macOS the bundled `dyno-agent` measures once, which replaces the old Rust-leg step).
+
+### Dialog boot harness waits on the dialog's load, not on a turn budget
+- `bootDialog`/`assertDialogBoots` (`@decryp7/paddock-ui/shell/testing`) wait for `whenStable` (the shell's start is a
+  pending task), with no turn budget: a slow first `import()` on a busy runner no longer reads as "never leaves
+  Loading" (CI run 6563). `DialogHarnessOptions.maxTurns` is removed; a loader that never answers is now reported by the
+  runner's test timeout.
 
 ### Spotter on the shared CI kit (WP-C3)
 - Spotter is a leg of `ci.yml` (`apps/spotter/paddock.ci.json`) and releases through the shared `app-release.yml` from a thin
@@ -290,6 +624,11 @@ The family release. Highlights: the survey work packages X21 to X54 (shared crat
   #494FDB as in the CSS.
 
 ### Added
+- `paddock-chromium`: a page's first load waits (within its timeout, on events) until the tab's own first navigation, reported
+  by `Page.enable`, has committed or stopped, so it cannot cancel the load (`net::ERR_ABORTED`); an abort the driver cannot name
+  carries the tab's navigation, lifecycle and document network events; only documents' network events are logged.
+  `discover::TEST_ISOLATION_FLAGS` keeps a test browser off the network (no proxy lookup, no host but loopback resolves). The
+  fake browser has `UserAction::SlowStartPage`/`FinishStartPage`.
 - `paddock-chromium` on Windows: every end of the browser (the time limit's included) goes through its `Supervised`, so the
   kill-on-close job closes with it; the Chrome for Testing self-test checks the version manifest and a headless page dump (Chrome
   prints no `--version` there). The real-browser test runs on macOS and Windows CI too (install action, `catalogue:`).

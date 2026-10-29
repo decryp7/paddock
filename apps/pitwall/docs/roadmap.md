@@ -90,6 +90,8 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 Debrief uses Pitwall when it is running and keeps its built-in AI as the default and the offline fallback
 ([ADR 0009](adr/0009-app-integration-contract.md); the Debrief side is not built). Then Pitcrew, Spotter and Dyno.
 
+Pacenotes: toolsets `orient`, `code`, `review`, `diagrams`, `requirements` and `tests` over Pacenotes' read-only MCP tools, after "MCP and tool hosting" above and once Pacenotes' MCP server exists (about 2 agent-days; Pacenotes plan `apps/pacenotes/docs/plans/2026-10-29-first-release-plan.md`, package MC1).
+
 ## Engineering follow-ups
 
 - Windows and Linux real-model runs; CUDA and Vulkan runs; record the results in the testing manual.

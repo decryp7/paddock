@@ -59,6 +59,7 @@ function preset(options) {
         'paddock/signal-read-before-await': 'error',
         'paddock/store-rules': ['error', options.storeFlagsAllowedIn ? { allowFlagsIn: options.storeFlagsAllowedIn } : {}],
         'paddock/no-raw-style-values': 'error',
+        'paddock/dialog-content-footer': 'error',
         ...forms,
         ...(options.rules ?? {}),
       },
@@ -84,6 +85,14 @@ function preset(options) {
         'paddock/template-no-inner-html': 'error',
         ...(options.templateRules ?? {}),
       },
+    },
+    {
+      // ADR 0026 §2: a dialog content declares its actions; the frame draws the footer (inline templates of `*dialog*.ts`).
+      files: ['**/*dialog*.ts/*.html', '**/*dialog*.html'],
+      // The frame itself draws the footer; specs plant footers on purpose.
+      ignores: ['**/dialog-frame.ts/*.html', '**/*.spec.ts/*.html'],
+      plugins: { paddock: plugin },
+      rules: { 'paddock/dialog-frame-footer': 'error' },
     },
   ];
 }

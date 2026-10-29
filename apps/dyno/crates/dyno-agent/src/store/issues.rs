@@ -198,7 +198,7 @@ mod tests {
         assert_eq!(entries, vec![e.clone()]);
         assert_eq!(startup, vec!["login:a".to_string()]);
         let mut changed = e.clone();
-        changed.status = Status::Ignored;
+        changed.status = Status::Known;
         s.apply_baseline(&[Change::Entry(changed.clone())]).unwrap();
         assert_eq!(s.load_baseline().unwrap().1, vec![changed]);
         s.apply_baseline(&[Change::Remove(vec!["/a".into()])]).unwrap();
