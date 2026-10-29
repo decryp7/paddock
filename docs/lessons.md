@@ -751,3 +751,24 @@ composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor D
 crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
 (`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
 not by guessing at the VM.
+
+## 2026-10-30: live-browser tests opened Chrome on the user's desktop (Debrief, Spotter)
+
+The Mac CI runner runs in the user's GUI session and sets `CHROMIUM_TEST_PATH`, so every macOS rust-test job of Debrief
+opened Chrome for Testing windows on the user's desktop: chromium-driver's `real_browser` tests and the renderer's
+scripted-page and challenge-page tests (Debrief's driver has no headless mode, by design: a challenge page needs a person,
+`the_browser_opens_on_screen_with_no_offscreen_or_headless_arguments`). The challenge test also timed out on that runner
+(runs 7141 and 7146), an on-screen Chrome competing with the user's apps for the focus. Spotter's
+`off_screen_headful_mode_and_redirects` had the same flaw on the Mac and Windows legs: a window at -32000,-32000 is still a
+window with a Dock or taskbar entry that takes the focus. paddock-chromium and Spotter's other live tests were already
+headless. **Rule (rule 7):** a test opens a browser window only on Linux under a virtual display: the CI job runs it
+under `xvfb-run` and sets `PADDOCK_LIVE_BROWSER=1` (debrief.yml `rust tests`; app-gates sets it with its `display` wrap).
+The gate lives in the test-browser finder (`chromium_driver::discover::find_for_tests` / `test_browser`,
+`spotter_render::discover::windowed_tests_here`); elsewhere the test prints where it runs instead, and a job set up wrongly
+(the variable without a display, or the browser required on Linux without the variable) fails instead of skipping. C51
+flags a headful launch in `tests/` without the gate and any read of `CHROMIUM_TEST_PATH` around the finder.
+
+Considered and rejected: a test-only headless or off-screen launch option for Debrief's live tests, to keep them on the
+Mac. Headless tests a mode the product never runs (the challenge test is about the window coming to the front), the option
+would be a product code path that must never be used, and an off-screen headful window still shows in the Dock and takes
+the focus (Spotter's case). The Mac keeps the fake-browser tests of the whole life cycle; the live ones run once, on Linux.

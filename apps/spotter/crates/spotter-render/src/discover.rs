@@ -133,6 +133,9 @@ pub const TEST_BROWSER_ENV: &str = "SPOTTER_TEST_BROWSER";
 /// Environment variable overriding the folder that holds the test browser (default: see [`test_browser_dir`]).
 pub const TEST_BROWSER_DIR_ENV: &str = "SPOTTER_TEST_BROWSER_DIR";
 
+/// Set to `1` by CI where the test browser must be there: a missing one fails the test instead of skipping it.
+pub const REQUIRE_TEST_BROWSER_ENV: &str = "SPOTTER_REQUIRE_TEST_BROWSER";
+
 /// Where the pinned Chrome for Testing build for tests is installed (`node scripts/install-test-browser.mjs`).
 pub fn test_browser_dir(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
     if let Some(d) = env(TEST_BROWSER_DIR_ENV).filter(|d| !d.is_empty()) {
@@ -195,6 +198,61 @@ pub fn test_browser_flags_with(env: &dyn Fn(&str) -> Option<String>) -> Vec<Stri
 /// [`test_browser_flags_with`] for the process environment.
 pub fn test_browser_flags() -> Vec<String> {
     test_browser_flags_with(&|k| std::env::var(k).ok())
+}
+
+/// Set to `1` by a test job whose display is a virtual one (`xvfb-run` in the Linux CI container): only then may a test
+/// open a headful browser window ([`crate::launch::Mode::OffScreen`] or `OnScreen`). The Mac and Windows runners run in a
+/// user's session, where an off-screen window still takes a Dock or taskbar entry and the focus (Paddock rule 7: no
+/// windows on the desktop). Headless tests run everywhere. Honoured on Linux only.
+pub const LIVE_BROWSER_VAR: &str = "PADDOCK_LIVE_BROWSER";
+
+/// Whether a test may open a browser window here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WindowedTests {
+    /// Linux, a display, and the job said it is a virtual one.
+    Allowed,
+    /// Not here, and where such tests run instead (the test prints it, so a skip is never silent).
+    NotHere(String),
+}
+
+/// [`WindowedTests`] for `os` and the environment `env`. `Err` is a job set up wrongly, which fails the test: the
+/// variable without a display (no `xvfb-run`), or `require_var` set on Linux without the variable (the windowed tests
+/// would skip). A set variable is a non-blank value other than `0`.
+pub fn windowed_tests_with(os: Os, env: &dyn Fn(&str) -> Option<String>, require_var: &str) -> Result<WindowedTests, String> {
+    let set = |k: &str| env(k).is_some_and(|v| !v.trim().is_empty() && v.trim() != "0");
+    if os != Os::Linux {
+        return Ok(WindowedTests::NotHere(format!(
+            "this test opens a browser window, so it runs only on Linux under a virtual display (Xvfb, the Linux CI leg with \
+             {LIVE_BROWSER_VAR}=1), never on a {os:?} desktop (Paddock rule 7)"
+        )));
+    }
+    match (set(LIVE_BROWSER_VAR), set("DISPLAY") || set("WAYLAND_DISPLAY")) {
+        (true, true) => Ok(WindowedTests::Allowed),
+        (true, false) => Err(format!(
+            "{LIVE_BROWSER_VAR} is set but there is no display: run the tests under xvfb-run (a virtual display)"
+        )),
+        (false, _) if set(require_var) => Err(format!(
+            "{require_var} is set on Linux but {LIVE_BROWSER_VAR} is not: run the tests under xvfb-run with \
+             {LIVE_BROWSER_VAR}=1, or the windowed browser tests skip"
+        )),
+        (false, _) => Ok(WindowedTests::NotHere(format!(
+            "this test opens a browser window: run it under xvfb-run with {LIVE_BROWSER_VAR}=1 (Linux only), never on a \
+             desktop (Paddock rule 7)"
+        ))),
+    }
+}
+
+/// For a test that opens a headful browser window: `true` where it may (see [`windowed_tests_with`]); otherwise prints
+/// why and returns `false` (the test then returns). Panics on a job set up wrongly.
+pub fn windowed_tests_here() -> bool {
+    match windowed_tests_with(Os::CURRENT, &|k| std::env::var(k).ok(), REQUIRE_TEST_BROWSER_ENV) {
+        Ok(WindowedTests::Allowed) => true,
+        Ok(WindowedTests::NotHere(why)) => {
+            eprintln!("not run here: {why}");
+            false
+        }
+        Err(why) => panic!("{why}"),
+    }
 }
 
 /// The executable of a downloaded Chromium, if one was installed completely.
@@ -273,6 +331,57 @@ mod tests {
             PathBuf::from("/opt/cft/chrome")
         );
         assert!(find_for_tests_with(Os::Linux, &explicit, &|_| false).is_none());
+    }
+
+    /// Regression (Debrief CI 7141, 7146; the same class here): the Mac and Windows runners run in the user's session, so a
+    /// headful test browser (off screen or not) put a window, a Dock or taskbar entry and a focus change on the user's
+    /// desktop. A headful test runs only on Linux, where the job says its display is a virtual one (rule 7).
+    #[test]
+    fn a_windowed_test_runs_only_on_a_virtual_display() {
+        let env =
+            |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        const XVFB: &[(&str, &str)] = &[(LIVE_BROWSER_VAR, "1"), ("DISPLAY", ":99"), (REQUIRE_TEST_BROWSER_ENV, "1")];
+        for os in [Os::Mac, Os::Windows] {
+            let Ok(WindowedTests::NotHere(why)) = windowed_tests_with(os, &env(XVFB), REQUIRE_TEST_BROWSER_ENV) else {
+                panic!("{os:?} allowed a window")
+            };
+            assert!(why.contains("Linux") && why.contains(LIVE_BROWSER_VAR), "{why}");
+        }
+        assert_eq!(
+            windowed_tests_with(Os::Linux, &env(XVFB), REQUIRE_TEST_BROWSER_ENV),
+            Ok(WindowedTests::Allowed)
+        );
+        assert_eq!(
+            windowed_tests_with(
+                Os::Linux,
+                &env(&[(LIVE_BROWSER_VAR, "1"), ("WAYLAND_DISPLAY", "w")]),
+                REQUIRE_TEST_BROWSER_ENV
+            ),
+            Ok(WindowedTests::Allowed)
+        );
+        // A developer's Linux desktop: not there either.
+        assert!(matches!(
+            windowed_tests_with(Os::Linux, &env(&[("DISPLAY", ":0")]), REQUIRE_TEST_BROWSER_ENV),
+            Ok(WindowedTests::NotHere(_))
+        ));
+        assert!(matches!(
+            windowed_tests_with(
+                Os::Linux,
+                &env(&[(LIVE_BROWSER_VAR, "0"), ("DISPLAY", ":99")]),
+                REQUIRE_TEST_BROWSER_ENV
+            ),
+            Ok(WindowedTests::NotHere(_))
+        ));
+        // A job set up wrongly fails: the variable without a display, or the browser required without the variable.
+        let e = windowed_tests_with(
+            Os::Linux,
+            &env(&[(LIVE_BROWSER_VAR, "1"), ("DISPLAY", " ")]),
+            REQUIRE_TEST_BROWSER_ENV,
+        )
+        .unwrap_err();
+        assert!(e.contains("xvfb-run"), "{e}");
+        let e = windowed_tests_with(Os::Linux, &env(&[(REQUIRE_TEST_BROWSER_ENV, "1")]), REQUIRE_TEST_BROWSER_ENV).unwrap_err();
+        assert!(e.contains(LIVE_BROWSER_VAR), "{e}");
     }
 
     #[test]

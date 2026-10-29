@@ -191,8 +191,12 @@ jobs:
       # nextest runs every test in its own process, in parallel across crates, and reports every failure;
       # .config/nextest.toml serialises the tests that time real child processes. The ci profile never retries (a flaky
       # test is fixed, not retried), stops a test after its time budget and writes a JUnit report.
-      # xvfb-run: a virtual display (no screen, no desktop) for the real-browser tests' windows.
+      # xvfb-run: a virtual display (no screen, no desktop) for the real-browser tests' windows. The live-browser tests
+      # (chromium-driver's real_browser, the renderer's scripted and challenge pages) run only here: PADDOCK_LIVE_BROWSER=1
+      # says the display is a virtual one; without it, and on any other OS, they print why and return (Paddock rule 7).
       - name: Tests (workspace)
+        env:
+          PADDOCK_LIVE_BROWSER: "1"
         run: xvfb-run -a cargo nextest run --workspace --profile ci
 
       - name: Test report (JUnit)
@@ -260,24 +264,19 @@ jobs:
           name: debrief-${{ github.job }}
 
       # The Mac runner is shared with other jobs: four rustc at a time, as Paddock's crate job.
-      - name: Build jobs and the test browser's folder
+      - name: Build jobs
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: |
-          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
-          # Outside the checkout, which stable-workspace moves; the installer stamps the pinned version in it.
-          echo "DEBRIEF_TEST_BROWSER_DIR=$HOME/.paddock-ci/test-browser-debrief" >> "$GITHUB_ENV"
+        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
       - name: libduckdb
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: bash scripts/ci/libduckdb-env.sh
 
-      # The pinned Chrome for Testing (runtime.rs), never the host's installed Chrome (Paddock rule 7); kept on the host and
-      # downloaded once per pin. Sets CHROMIUM_TEST_PATH and DEBRIEF_REQUIRE_TEST_BROWSER=1.
-      - uses: ./.gitea/actions/install-test-browser
-        with:
-          rust-source: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app/src-tauri/src/browser/runtime.rs
-          env-prefix: DEBRIEF
-          dir: ${{ env.DEBRIEF_TEST_BROWSER_DIR }}
+      # No test browser here: this runner runs in the user's session, and Debrief's driver has no headless mode, so every
+      # live-browser test would open a Chrome window on the user's desktop (Paddock rule 7; it also made the challenge test
+      # flaky, runs 7141 and 7146). They run in `rust tests` (Linux, under Xvfb); here they print why and return.
+      - name: Live-browser tests run on Linux only
+        run: echo "::notice::The live-browser tests (chromium-driver real_browser, the renderer's live pages) run in the Linux job 'rust tests' under Xvfb, never on this desktop runner (Paddock rule 7)."
 
       - name: Temp folders before the tests
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief

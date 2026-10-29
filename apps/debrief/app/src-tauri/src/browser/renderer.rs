@@ -936,7 +936,8 @@ mod tests {
         }
     }
 
-    // ---- a real browser, when the machine has one (skipped otherwise) ----
+    // ---- the pinned test browser: its window opens, so only on Linux under a virtual display (Xvfb, the CI job that
+    // sets PADDOCK_LIVE_BROWSER=1); elsewhere the tests print why and return (chromium_driver::discover::test_browser) ----
 
     fn serve() -> u16 {
         use std::io::{Read, Write};
@@ -966,7 +967,7 @@ mod tests {
     type Live = (Arc<Renderers>, ChromiumPage, Arc<Mutex<Vec<Cue>>>);
 
     fn live_page() -> Option<Live> {
-        chromium_driver::find_for_tests()?;
+        chromium_driver::discover::test_browser()?;
         let renderers = Arc::new(Renderers::default());
         let seen = Arc::new(Mutex::new(Vec::new()));
         let s2 = seen.clone();

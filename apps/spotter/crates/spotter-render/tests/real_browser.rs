@@ -4,7 +4,7 @@
 
 mod support;
 
-use spotter_render::discover::{find_for_tests, test_browser_flags, Browser};
+use spotter_render::discover::{find_for_tests, test_browser_flags, windowed_tests_here, Browser};
 use spotter_render::launch::{Chromium, EndedBy, LaunchOptions, Mode};
 use spotter_render::process::processes_mentioning;
 use spotter_render::{ChromiumRenderer, PageRenderer, RenderError};
@@ -105,6 +105,10 @@ async fn renders_a_scripted_page_and_leaves_nothing_behind() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn off_screen_headful_mode_and_redirects() {
+    // Headful: a window (off screen, but with a Dock or taskbar entry and the focus), so only under a virtual display.
+    if !windowed_tests_here() {
+        return;
+    }
     let _turn = serial();
     let Some(b) = browser() else { return };
     let port = site().await;
