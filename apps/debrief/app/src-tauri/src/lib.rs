@@ -866,19 +866,59 @@ pub(crate) mod test_support {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../samples")
     }
 
+    /// A test's folder `debrief-app-test-<tag>-<pid>` in the OS temp folder: removed when dropped, and also when the test
+    /// process is stopped before the test ends (see [`own`]).
     pub struct TempDir(pub PathBuf);
     impl TempDir {
         pub fn new(tag: &str) -> TempDir {
             let p = std::env::temp_dir().join(format!("debrief-app-test-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&p);
             std::fs::create_dir_all(&p).unwrap();
+            own(&p);
             TempDir(p)
         }
     }
     impl Drop for TempDir {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
+            disown(&self.0);
         }
+    }
+
+    /// Every folder the test helpers made in this process and not removed yet: [`remove_process_scratch`] removes what is
+    /// left, at exit and when the process is told to stop.
+    static OWNED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+    /// The exit code of a test process stopped by SIGTERM or SIGINT (128 + SIGTERM, as the shell reports it).
+    pub const STOPPED_EXIT: i32 = 143;
+
+    /// Records `path` as this process's to remove, and arms the clean-up once per process: an `atexit` handler, and a
+    /// handler for SIGTERM and SIGINT (`ctrlc`, on its own thread, so the clean-up is ordinary code, not a signal handler).
+    /// nextest stops a test that ran past its time budget with SIGTERM, then SIGKILL after a grace period
+    /// (<https://nexte.st/docs/features/slow-tests/>); without the handler the process died with its folders still there
+    /// and CI's temp-leak check failed on top of the timeout (CI 7096). Only SIGKILL (nothing can run) or a crash of the
+    /// process itself still leaves them.
+    fn own(path: &std::path::Path) {
+        static ARMED: std::sync::Once = std::sync::Once::new();
+        ARMED.call_once(|| {
+            extern "C" {
+                fn atexit(cb: extern "C" fn()) -> std::os::raw::c_int;
+            }
+            // SAFETY: registers a plain `extern "C"` function with the C runtime; it runs once, at exit.
+            let registered = unsafe { atexit(remove_process_scratch_at_exit) };
+            assert_eq!(registered, 0, "atexit failed");
+            // Exiting runs the `atexit` handler, which removes the folders; it runs no destructors, so the endpoint folders
+            // of plugins still starting go first (docs/testing/temp-leaks.md). A test binary that set its own handler keeps it.
+            let _ = ctrlc::set_handler(|| {
+                debrief_ipc::endpoint::remove_live();
+                std::process::exit(STOPPED_EXIT)
+            });
+        });
+        crate::sync::lock(&OWNED).push(path.to_path_buf());
+    }
+
+    fn disown(path: &std::path::Path) {
+        crate::sync::lock(&OWNED).retain(|p| p != path);
     }
 
     thread_local! {
@@ -894,6 +934,7 @@ pub(crate) mod test_support {
             .tempdir()
             .expect("create a scratch folder");
         let path = dir.path().to_path_buf();
+        own(&path);
         SCRATCH.with(|k| k.borrow_mut().push(dir));
         path
     }
@@ -903,17 +944,26 @@ pub(crate) mod test_support {
     /// store's index and compaction threads), or that code without a test thread asks for (the bundle folder).
     static PROCESS_SCRATCH: std::sync::Mutex<Vec<tempfile::TempDir>> = std::sync::Mutex::new(Vec::new());
 
+    /// The exit handler: every folder of the test helpers still there (the process is going, so none is in use).
     extern "C" fn remove_process_scratch_at_exit() {
         remove_process_scratch();
+        let left = std::mem::take(&mut *crate::sync::lock(&OWNED));
+        remove_all(left);
     }
 
-    /// Removes every folder [`process_scratch_dir`] made (what the exit handler does). A store thread may still be
-    /// writing a file into one while it goes (the removal then finds the folder not empty): asked again a few times.
+    /// Removes every folder [`process_scratch_dir`] made. A store thread may still be writing a file into one while it
+    /// goes (the removal then finds the folder not empty): asked again a few times.
     pub fn remove_process_scratch() {
         let dirs = std::mem::take(&mut *crate::sync::lock(&PROCESS_SCRATCH));
-        for dir in dirs {
-            let path = dir.path().to_path_buf();
-            drop(dir);
+        let paths: Vec<PathBuf> = dirs.into_iter().map(tempfile::TempDir::keep).collect();
+        for path in &paths {
+            disown(path);
+        }
+        remove_all(paths);
+    }
+
+    fn remove_all(paths: Vec<PathBuf>) {
+        for path in paths {
             for _ in 0..20 {
                 if !path.exists() || std::fs::remove_dir_all(&path).is_ok() {
                     break;
@@ -924,20 +974,12 @@ pub(crate) mod test_support {
 
     /// A fresh empty folder named `debrief-<prefix>-...` in the OS temp folder, removed when the test process exits.
     pub fn process_scratch_dir(prefix: &str) -> PathBuf {
-        static AT_EXIT: std::sync::Once = std::sync::Once::new();
-        AT_EXIT.call_once(|| {
-            extern "C" {
-                fn atexit(cb: extern "C" fn()) -> std::os::raw::c_int;
-            }
-            // SAFETY: registers a plain `extern "C"` function with the C runtime; it runs once, at exit.
-            let registered = unsafe { atexit(remove_process_scratch_at_exit) };
-            assert_eq!(registered, 0, "atexit failed");
-        });
         let dir = tempfile::Builder::new()
             .prefix(&format!("debrief-{prefix}-"))
             .tempdir()
             .expect("create a scratch folder");
         let path = dir.path().to_path_buf();
+        own(&path);
         crate::sync::lock(&PROCESS_SCRATCH).push(dir);
         path
     }
@@ -949,6 +991,100 @@ pub(crate) mod test_support {
         std::fs::write(dir.join("f"), b"x").unwrap();
         remove_process_scratch();
         assert!(!dir.exists());
+    }
+
+    /// The lone process of [`a_test_process_stopped_by_sigterm_leaves_no_folders`]: makes one folder of each helper, says
+    /// where, and waits to be stopped. Does nothing in a normal run.
+    #[test]
+    #[cfg(unix)]
+    fn a_test_process_stopped_by_sigterm_leaves_no_folders_in_a_lone_process() {
+        if std::env::var_os("DEBRIEF_TEMP_KILL_PROBE").is_none() {
+            return;
+        }
+        let kept = TempDir::new("kill-probe");
+        for path in [kept.0.clone(), scratch_dir("kill-probe"), process_scratch_dir("kill-probe")] {
+            std::fs::write(path.join("f"), b"x").unwrap();
+            println!("OWNED {}", path.display());
+        }
+        println!("READY");
+        // Stopped here by the parent: blocks until the process goes (the sender is never used).
+        let (_never, wait) = std::sync::mpsc::channel::<()>();
+        let _ = wait.recv();
+        drop(kept);
+    }
+
+    /// Regression (CI 7096): nextest stops a test past its time budget with SIGTERM; the folders of the stopped tests
+    /// (`debrief-app-test-ai-*`, `debrief-test-stores-*`) stayed behind and failed the temp-leak check as well. Waits on
+    /// the child's own "ready" line, not on time.
+    #[test]
+    #[cfg(unix)]
+    fn a_test_process_stopped_by_sigterm_leaves_no_folders() {
+        use std::io::BufRead;
+        let name = "test_support::a_test_process_stopped_by_sigterm_leaves_no_folders_in_a_lone_process";
+        /// Kills the probe if the test fails before it stopped it (it waits forever otherwise).
+        struct Probe(std::process::Child);
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let mut probe = Probe(
+            debrief_core::process::quiet_command(std::env::current_exe().unwrap())
+                .args(["--exact", name, "--test-threads=1", "--nocapture"])
+                .env("DEBRIEF_TEMP_KILL_PROBE", "1")
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let child = &mut probe.0;
+        let mut owned = Vec::new();
+        for line in std::io::BufReader::new(child.stdout.take().unwrap()).lines() {
+            let line = line.unwrap();
+            // libtest's "test <name> ... " has no line end of its own: the first line may start with it.
+            if let Some((_, path)) = line.split_once("OWNED ") {
+                owned.push(PathBuf::from(path));
+            }
+            if line.ends_with("READY") {
+                break;
+            }
+        }
+        assert_eq!(owned.len(), 3, "the probe made its folders");
+        assert!(owned.iter().all(|p| p.is_dir()));
+        let sent = debrief_core::process::quiet_command("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status()
+            .unwrap();
+        assert!(sent.success());
+        let status = child.wait().unwrap();
+        assert_eq!(status.code(), Some(STOPPED_EXIT), "{status:?}");
+        let left: Vec<_> = owned.iter().filter(|p| p.exists()).collect();
+        assert!(left.is_empty(), "left behind: {left:?}");
+    }
+
+    /// Regression (CI 7096): five `ai::tests` ran past nextest's 90 s on a loaded Mac runner while taking 2-4 s alone. Their
+    /// imports waited on the plugins under wall-clock limits (a 15 s connect window, a 4.5 s sniff deadline, the watchdog):
+    /// a plugin that started or answered late was stopped, restarted late again and quarantined, and the import waited
+    /// through every round. With plugins that take 16 s to start, one such test took 215 s. A test app's plugins now
+    /// end their waits on a condition (connected, answered, or the process died), never on the clock.
+    #[test]
+    fn a_test_apps_plugins_wait_for_a_condition_not_the_clock() {
+        use tauri::Manager;
+        let app = test_app(None);
+        let plugins = app.state::<AppState>().plugins.clone();
+        assert!(!plugins.processes().is_empty(), "the test app has its plugins");
+        for p in plugins.processes() {
+            assert_eq!(p.connect_window(), debrief_ipc::process::UNTIL_CONNECTED, "{}", p.id());
+        }
+        assert_eq!(
+            main_window(&app).host.registry.health().budgets(),
+            debrief_core::guard::Budgets::unlimited()
+        );
+        assert_eq!(
+            crate::engine::local::registry_of(Some(plugins)).health().budgets(),
+            debrief_core::guard::Budgets::unlimited(),
+            "the store's importers too"
+        );
     }
 
     #[test]
@@ -1185,6 +1321,15 @@ pub(crate) mod test_support {
         }
     }
 
+    /// The time budgets of plugin calls in a test app: none. A budget is a wall-clock bound: on a loaded runner a slow
+    /// but healthy plugin missed it, was stopped and restarted (late again) and finally quarantined, and the test waited
+    /// through all of it (CI 7096: five `ai::tests` past 90 s). A test app's plugin calls end when the plugin answers or
+    /// its process dies; the test runner's hang detector ends a real hang. The budgets themselves are tested where they
+    /// are the subject (`debrief-core`'s guard, `debrief-plugin-host`'s remote tests).
+    pub(crate) fn patient_budgets() -> debrief_core::guard::Budgets {
+        debrief_core::guard::Budgets::unlimited()
+    }
+
     fn manage(app: tauri::App<MockRuntime>, profile_dir: Option<PathBuf>) -> tauri::App<MockRuntime> {
         manage_in(app, profile_dir, false)
     }
@@ -1194,7 +1339,9 @@ pub(crate) mod test_support {
             debrief_plugin_host::Builtins::none()
         } else {
             ensure_plugins_binary();
-            debrief_plugin_host::Builtins::load(&debrief_plugin_host::builtins::default_binary())
+            debrief_plugin_host::Builtins::load_with(&debrief_plugin_host::builtins::default_binary(), |spec| {
+                spec.connect_window = debrief_ipc::process::UNTIL_CONNECTED;
+            })
         });
         // The store in process, scratch stores under the system temp folder (one folder per test app, removed when
         // the test process exits: the store's background threads may still write after the test).
@@ -1202,7 +1349,12 @@ pub(crate) mod test_support {
         PluginsStopWithTheTest::register(&plugins);
         let stores = engine::local::with_plugins(plugins.clone(), safe_mode);
         let shared = AppState::with(profile_dir, safe_mode, plugins, stores, root);
-        let windows = windows::Windows::new(shared.factory());
+        let factory = shared.factory();
+        let windows = windows::Windows::new(Box::new(move |label| {
+            let state = factory(label)?;
+            state.host.registry.set_budgets(patient_budgets());
+            Ok(state)
+        }));
         windows.get_or_create(windows::MAIN).unwrap();
         app.manage(shared);
         app.manage(windows);

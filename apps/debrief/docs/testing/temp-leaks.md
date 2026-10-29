@@ -16,6 +16,11 @@ Tests must not leave `debrief-*` or `imt-*` folders in the OS temp directory. CI
   endpoint folder `debrief-plugin-<12 hex>` behind, so `debrief_ipc::endpoint::remove_live()` removes every live
   endpoint folder right before that exit (`lifeline()` does). Anything else that ends a process without unwinding
   must call it too.
+- **Test processes stopped by a timeout**: nextest stops a test past its time budget with SIGTERM (SIGKILL after a grace
+  period). `debrief-app`'s test helpers (`test_support::TempDir`, `scratch_dir`, `process_scratch_dir`) record their
+  folders, and the first one arms a SIGTERM/SIGINT handler (`ctrlc`) that removes the live endpoint folders and exits; the
+  `atexit` handler then removes the recorded folders. So a timed-out test fails as a timeout only, not also as a leak
+  (CI 7096 left `debrief-app-test-ai-*` and `debrief-test-stores-*`). Only SIGKILL or a crash still leaves them.
 - **Rust tests**: make scratch folders with `tempfile::TempDir` (or `tempfile::Builder::new().prefix("debrief-...-")`) and
   keep the guard alive for the test, so the folder is removed on panic too. Unit tests in `debrief-core` use
   `crate::test_dirs::scratch_dir(prefix)`, which keeps the guard in a thread-local for the test's thread.
