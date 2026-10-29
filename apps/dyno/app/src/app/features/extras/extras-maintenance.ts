@@ -87,6 +87,8 @@ import { TimeField } from '../../shared/time-field';
       .lede { margin: 0; color: var(--text-2); }
       .status { margin: 0; display: flex; align-items: center; font-weight: var(--fw-medium); }
       .row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
+      /* Material's switch draws its state layer (the hover and focus circle of the handle) 3 px past the switch at its right end when on; the row leaves it room. */
+      .row mat-slide-toggle { margin-inline-end: 3px; }
       .lbl { display: grid; gap: 2px; }
       .lbl small { color: var(--text-3); font-size: var(--fs-sm); }
       .windows { list-style: none; margin: 0; padding: 0; display: grid; }

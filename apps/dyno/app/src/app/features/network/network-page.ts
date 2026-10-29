@@ -325,7 +325,7 @@ export class NetworkPage implements OnInit, OnDestroy {
     const prog = this.group() !== 'process' ? 'minmax(130px, 1.2fr) ' : '';
     return this.tab() === 'connections'
       ? `${prog}minmax(160px, 2fr) ${this.store.resolveNames() ? 'minmax(140px, 2fr) ' : ''}minmax(90px, 1fr) 80px 110px ${this.showLocal() ? 'minmax(150px, 1.2fr) ' : ''}80px 84px`
-      : `${prog}minmax(240px, 2fr) minmax(220px, 2fr) 80px 90px 84px`;
+      : `${prog}minmax(170px, 2fr) minmax(150px, 2fr) 80px 90px 84px`;
   });
   protected readonly selectedItem = computed(() => {
     const k = this.selectedKey();

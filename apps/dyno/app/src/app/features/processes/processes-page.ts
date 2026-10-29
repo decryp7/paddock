@@ -174,6 +174,8 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
     .banner span { flex: 1; } .banner small { display: block; color: var(--text-2); }
     .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
     .body.open { grid-template-columns: minmax(0, 1fr) 380px; }
+    /* Under 1100 px the panel goes below the table (the table needs about 610 px), as on the alarms page. */
+    @media (max-width: 1100px) { .body.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(240px, 45%); } }
     .table { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
     .row { display: grid; grid-template-columns: minmax(140px, 1fr) 84px 96px 96px 130px 64px 36px; align-items: center; height: 32px; padding-right: var(--sp-2); border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-base); outline: none; }
     .row > span { padding: 0 var(--sp-2); min-width: 0; }

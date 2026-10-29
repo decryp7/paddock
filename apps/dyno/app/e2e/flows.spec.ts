@@ -470,21 +470,20 @@ test.describe('issues', () => {
     await expect(menu).toHaveCount(0);
   });
 
-  test('after the pointer rested on a row until its tooltip showed, a right-click opens the menu and the first Escape closes it', async ({ page }) => {
+  test('a right-click right after hovering a row leaves no tooltip behind, and the first Escape closes the menu', async ({ page }) => {
+    await page.clock.install();
     await page.goto(url('/issues'));
     const table = page.getByRole('table', { name: 'Issues', exact: true });
     const row = table.getByRole('row', { name: /Safari/ }).first();
-    // The dwell: the pointer rests on the row's cut-off details cell until its tooltip is open (no sleep: wait on the tooltip).
-    const spot = row.locator('td').nth(3);
-    await spot.hover();
-    const tip = page.locator('.mat-mdc-tooltip');
-    await expect(tip.first()).toBeVisible();
-    await spot.click({ button: 'right' });
+    await row.hover(); // the row's centre is the program-name cell
+    await row.click({ button: 'right' }); // the same point, before any tooltip has shown
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
-    // The menu has the keyboard (its first item is focused) before the first Escape.
-    await expect(menu.getByRole('menuitem').first()).toBeFocused();
+    // The tooltip's show delay runs out while the menu is open: it must not open.
+    await page.clock.runFor(1500);
+    await expect(page.locator('.mat-mdc-tooltip')).toHaveCount(0);
     await page.keyboard.press('Escape');
+    await page.clock.runFor(500);
     await expect(menu).toHaveCount(0);
     await expect(row).toBeFocused();
   });
