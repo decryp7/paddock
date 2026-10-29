@@ -381,8 +381,8 @@ pub struct Candidate {
 }
 
 /// Narrows and ranks detections by hints (already prepared by [`prepare_hints`]; `min_inside` is `HINT_CONTAINMENT`). Without hints every detection passes as
-/// [`Provenance::Detected`]. With hints, a detection stays when at least `min_inside` of its area (or, for an empty box,
-/// its centre) lies inside a hint; it is recorded against the first such hint and ranked by hint index, then score.
+/// [`Provenance::Detected`]. With hints, a detection stays when at least `min_inside` of its area lies inside a hint, or at
+/// least `min_inside` of the hint lies inside it (a hint smaller than its element), or, for an empty box, its centre lies inside; it is recorded against the first such hint and ranked by hint index, then score.
 /// A hint with no detection inside it yields nothing: hints never create candidates.
 pub fn apply_hints(dets: &[Detection], hints: &[Rect<Logical>], min_inside: Fraction) -> Result<Vec<Candidate>, DetectError> {
     bounded(dets.len())?;
@@ -399,8 +399,13 @@ pub fn apply_hints(dets: &[Detection], hints: &[Rect<Logical>], min_inside: Frac
     }
     let mut out = Vec::new();
     for d in sorted {
+        // Two-way: enough of the detection lies inside the hint, or enough of the hint lies inside the detection (a hint
+        // smaller than its element).
         let inside = |h: &Rect<Logical>| match d.rect.area() {
-            a if a > 0.0 => h.intersection(&d.rect).map_or(0.0, |i| i.area()) / a >= min_inside.get(),
+            a if a > 0.0 => {
+                let shared = h.intersection(&d.rect).map_or(0.0, |i| i.area());
+                shared / a >= min_inside.get() || (h.area() > 0.0 && shared / h.area() >= min_inside.get())
+            }
             _ => h.contains_pt(d.rect.center()),
         };
         if let Some(i) = hints.iter().position(inside) {
@@ -720,13 +725,22 @@ mod tests {
             prepare_hints(&virt, &chain, &scope, 0.0),
             Err(DetectError::UnmappableHint { .. })
         ));
-        // 50 % containment of the grown hint: a detection half inside counts, one 40 % inside does not.
+        // Two-way containment of the grown hint (42..78 x 42..78): a detection qualifies when at least HINT_CONTAINMENT of it
+        // lies inside the hint, or at least HINT_CONTAINMENT of the hint lies inside it.
         let grown = [p.rects[0]];
-        let half = det(42.0, 42.0, 72.0, 36.0, 1, 0.9); // 36 of 72 wide inside
-        let less = det(42.0, 42.0, 90.0, 36.0, 1, 0.9); // 36 of 90 inside
-        let kept = apply_hints(&[half, less], &grown, Fraction::new(HINT_CONTAINMENT).unwrap()).unwrap();
-        assert_eq!(kept.len(), 1);
-        assert_eq!(kept[0].detection, half);
+        let t = Fraction::new(HINT_CONTAINMENT).unwrap();
+        // Direction 1: the detection is mostly inside the hint (36 of 72 wide = 0.5).
+        let half = det(42.0, 42.0, 72.0, 36.0, 1, 0.9);
+        // Direction 2: the hint is smaller than its element; the detection holds the whole hint (hint share 1.0) but only
+        // 36 x 36 of 400 x 400 of it lies inside the hint.
+        let big = det(0.0, 0.0, 400.0, 400.0, 1, 0.8);
+        // Neither: it overlaps 12 of 90 wide of itself (0.13) and 12 of 36 of the hint (0.33).
+        let neither = det(66.0, 42.0, 90.0, 36.0, 1, 0.7);
+        assert_eq!(apply_hints(&[half], &grown, t).unwrap().len(), 1);
+        assert_eq!(apply_hints(&[big], &grown, t).unwrap().len(), 1);
+        assert!(apply_hints(&[neither], &grown, t).unwrap().is_empty());
+        let kept = apply_hints(&[half, big, neither], &grown, t).unwrap();
+        assert_eq!(kept.iter().map(|c| c.detection).collect::<Vec<_>>(), vec![big.clone(), half]);
     }
 
     fn arb_det() -> impl Strategy<Value = Detection> {
