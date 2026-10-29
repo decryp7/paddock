@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `providePagesPalette`: the command palette on the pages frame
+- New `providePagesPalette(options?)` and `GO_TO_PAGE_PROVIDER` in `@decryp7/paddock-ui/workbench/palette`: the shared palette (`PaletteStore`, `<pd-command-palette />`, Mod+Shift+P for the commands, Mod+P for "Go to…") for a window on the pages frame, which has no workbench ports. It routes `openPalette` to the store and contributes a plain-text provider that lists the pages the window offers now (`ShellPages.visible`, sidebar order, ranked by the typed text) and shows the one accepted. Put `<pd-command-palette />` beside `<pd-shell-frame />`.
+- Dyno uses it: Mod+P goes to any page of the sidebar; Mod+Shift+P lists the shell's commands and Dyno's own (Capture the last ten minutes, Refresh history, Rescan issues, Check backup now, Run the slowness check again).
+
 ### `@decryp7/paddock-e2e`: a truncation must say its full text
 - `isSilentlyClipped` now fails an ellipsis unless the element says its full text (`isAcceptedEllipsis`: a non-empty `data-full-text`, title, aria-label or Material tooltip message) and is not in a button, link, tab or `.num`. New exports: `isAcceptedEllipsis`, `unacceptedTextClips`, `textCutOffWithoutTooltip`, `ELLIPSIS_NEVER_WITHIN`, `ELLIPSIS_NEVER_SELF`; the checks read facts in the page and decide in Node, with no `new Function`.
 - `pd-table`'s truncating text cell sets `data-full-text`.
