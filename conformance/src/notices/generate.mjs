@@ -3,7 +3,7 @@
 // deterministic (sorted, no paths, no dates), so the output can be compared in CI (`--check`).
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { PERMISSIVE } from './licences.mjs';
 
 const LICENCE_FILE = /^(licen[cs]e|licen[cs]ing|copying|notice|unlicense)([-_.].*)?$/i;
@@ -32,17 +32,59 @@ export function lockProduction(lock) {
     .map(([path, p]) => ({ path, name: path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length), version: p.version, license: p.license ?? null }));
 }
 
-/** The production npm packages of an app folder with their licence texts: { packages, warnings }. Needs `npm ci --omit=dev` first for the texts. */
+/**
+ * The production closure of one workspace of a root npm workspace lock (Paddock's monorepo, ADR 0014 §1): its dependencies,
+ * optional and peer dependencies and theirs, resolved in node's lookup order (nested first, then up to the root's
+ * node_modules). The root lock's dev flags describe all workspaces together, so they cannot be used here.
+ */
+export function workspaceProduction(lock, ws) {
+  const pk = lock.packages ?? {};
+  const entry = pk[ws];
+  if (!entry) throw new Error(`the lock has no workspace ${ws}`);
+  const resolveFrom = (at, name) => {
+    for (let base = at; ; base = base.includes('/node_modules/') ? base.slice(0, base.lastIndexOf('/node_modules/')) : '') {
+      const cand = base ? `${base}/node_modules/${name}` : `node_modules/${name}`;
+      if (pk[cand]) return pk[cand].link ? null : cand;
+      if (!base) return null;
+    }
+  };
+  const deps = (e) => [
+    ...Object.keys(e.dependencies ?? {}),
+    ...Object.keys(e.optionalDependencies ?? {}),
+    ...Object.keys(e.peerDependencies ?? {}).filter((n) => !e.peerDependenciesMeta?.[n]?.optional),
+  ];
+  const seen = new Set();
+  const todo = deps(entry).map((n) => resolveFrom(ws, n));
+  while (todo.length) {
+    const at = todo.pop();
+    if (!at || seen.has(at)) continue;
+    seen.add(at);
+    for (const n of deps(pk[at])) todo.push(resolveFrom(at, n));
+  }
+  return [...seen].sort().map((path) => ({ path, name: path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length), version: pk[path].version, license: pk[path].license ?? null }));
+}
+
+/** The folder with the package-lock.json that covers `dir`: `dir` itself, or the npm workspace root above it; null if none. */
+function lockRoot(dir) {
+  for (let d = dir; ; d = dirname(d)) {
+    if (existsSync(join(d, 'package-lock.json'))) return d;
+    if (dirname(d) === d) return null;
+  }
+}
+
+/** The production npm packages of an app folder (itself an npm root, or a workspace of the lock above it) with their licence texts: { packages, warnings }. Needs `npm ci --omit=dev` (or a full `npm ci`) first for the texts. */
 export function npmPackages(appDir) {
-  const lockFile = join(appDir, 'package-lock.json');
-  if (!existsSync(lockFile)) throw new Error(`${lockFile} not found: run the notices from the app's folder or pass --npm <dir>`);
-  const lock = JSON.parse(readFileSync(lockFile, 'utf8'));
+  const root = lockRoot(appDir);
+  if (!root) throw new Error(`${join(appDir, 'package-lock.json')} not found: run the notices from the app's folder or pass --npm <dir>`);
+  const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
+  const ws = relative(root, appDir).split(sep).join('/');
+  const list = ws ? workspaceProduction(lock, ws) : lockProduction(lock);
   const warnings = [];
   const seen = new Set();
-  const packages = lockProduction(lock)
+  const packages = list
     .filter((p) => !seen.has(`${p.name}@${p.version}`) && seen.add(`${p.name}@${p.version}`))
     .map((p) => {
-      const dir = join(appDir, p.path);
+      const dir = join(root, p.path);
       let pkgJson = {};
       try {
         pkgJson = existsSync(join(dir, 'package.json')) ? JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) : {};
@@ -139,7 +181,7 @@ export function render(rust, npm, appName = 'This application') {
   return { markdown: `${out.join('\n').replace(/\n+$/, '')}\n`, counts: { rust: rust.length, npm: npm.length, texts: texts.length, tally } };
 }
 
-/** Packages none of whose licence options is permissive: ["rust x@1: GPL-3.0-only"]. */
+/** Packages none of whose licence options is permissive (the deprecated "MPL-2.0+" spelling counts as MPL-2.0): ["rust x@1: GPL-3.0-only"]. */
 export function nonPermissive(pkgs) {
-  return pkgs.filter((p) => p.spdx.length && !p.spdx.some((id) => PERMISSIVE.has(id))).map((p) => `${p.kind} ${p.name}@${p.version}: ${p.license}`);
+  return pkgs.filter((p) => p.spdx.length && !p.spdx.some((id) => PERMISSIVE.has(id.replace(/\+$/, '')))).map((p) => `${p.kind} ${p.name}@${p.version}: ${p.license}`);
 }
