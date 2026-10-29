@@ -206,6 +206,8 @@ fn stored_import_targets_pass_through_redaction() {
             fingerprint: Fingerprint::of_content(b"x"),
             size: 1,
             facts: Some(facts),
+            modified_ns: None,
+            read_at_ns: 0,
         }],
         next_file_sequence: 1,
         ..Batch::default()

@@ -88,10 +88,11 @@ impl ParseWorkers {
     }
 
     fn take(&self) -> Result<Child, SourceError> {
-        if let Some(child) = lock(&self.idle).pop() {
-            if !child.exited() && !child.peer().is_closed() {
-                return Ok(child);
-            }
+        if let Some(child) = lock(&self.idle).pop()
+            && !child.exited()
+            && !child.peer().is_closed()
+        {
+            return Ok(child);
         }
         let mut spec = ChildSpec::new(&self.settings.program, "pacenotes-parse-worker");
         spec.lower_priority = true;
