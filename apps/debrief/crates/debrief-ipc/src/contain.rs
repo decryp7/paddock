@@ -263,6 +263,7 @@ impl Contained {
 
     pub fn kill(&self) -> io::Result<()> {
         // SAFETY: a valid process handle; terminating an exited process fails harmlessly.
+        // conformance: pid-kill — a process handle we own (the process object cannot be handed on while it is open)
         match unsafe { TerminateProcess(self.process.0, 1) } {
             Ok(()) => Ok(()),
             Err(_) if self.try_wait()?.is_some() => Ok(()),

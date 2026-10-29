@@ -179,6 +179,7 @@ mod tree {
                 Some(job) => {
                     // SAFETY: a job handle this value owns and has not closed.
                     unsafe {
+                        // conformance: pid-kill — a job handle we own: no pid is looked up
                         let _ = windows::Win32::System::JobObjects::TerminateJobObject(job, 1);
                     }
                     // Anything that escaped the job (see `of`) and is still in the tool's tree.
