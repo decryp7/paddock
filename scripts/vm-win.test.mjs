@@ -107,6 +107,28 @@ describe('guard rails', () => {
   });
 });
 
+describe('vmrun password', () => {
+  test('an unencrypted VM gets no -vp and never reads the keychain', () => {
+    const dir = join(scratch, 'plain');
+    const fusion = join(scratch, 'PlainFusion.app');
+    const bin = join(scratch, 'plain-bin');
+    const log = join(scratch, 'plain-vmrun.log');
+    mkdirSync(join(dir, 'vm/paddock-win11-test.vmwarevm'), { recursive: true });
+    writeFileSync(join(dir, 'vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx'), '.encoding = "UTF-8"\nguestOS = "arm-windows11-64"\n');
+    mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
+    writeFileSync(join(fusion, 'Contents/Library/vmrun'), `#!/bin/sh\necho "$*" >> '${log}'\necho "Total snapshots: 0"\n`);
+    chmodSync(join(fusion, 'Contents/Library/vmrun'), 0o755);
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, 'security'), `#!/bin/sh\necho security >> '${log}'\nexit 1\n`);
+    chmodSync(join(bin, 'security'), 0o755);
+    const r = run('vm-win.sh', ['snapshot', 'probe'], { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: fusion, PATH: `${bin}:${process.env.PATH}` });
+    assert.equal(r.status, 0, r.stderr);
+    const calls = readFileSync(log, 'utf8');
+    assert.match(calls, /^-T fusion snapshot \S+paddock-win11-test\.vmx probe$/m);
+    assert.doesNotMatch(calls, /-vp|security/);
+  });
+});
+
 describe('ip', () => {
   const dir = join(scratch, 'vm');
   const fusion = join(scratch, 'Fusion.app');

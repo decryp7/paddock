@@ -12,8 +12,8 @@
 #   scripts/vm-win.sh baseline                one-time: detach the install discs, take the clean-baseline snapshot
 #
 # Only ever acts on the VM under PADDOCK_WIN_VM_DIR (default /Volumes/d7sst7/vms/paddock-win11-test); any other VM on
-# this Mac is never started, stopped or changed. If the VM has a virtual TPM, its encryption password is read from the
-# login keychain (service paddock-win11-test-vm, account vmrun) and passed to vmrun as -vp.
+# this Mac is never started, stopped or changed. Only if the VM is encrypted (option A, virtual TPM) is its password read
+# from the login keychain (service paddock-win11-test-vm, account vmrun) and passed to vmrun as -vp.
 set -euo pipefail
 
 dir=${PADDOCK_WIN_VM_DIR:-/Volumes/d7sst7/vms/paddock-win11-test}
@@ -37,11 +37,20 @@ guard() {
   [ -x "$lib/vmrun" ] || die "vmrun not found in $lib (set FUSION_APP)"
 }
 
+# An encrypted VM (option A: TPM files encrypted) has encryption.* keys in its .vmx and needs the password from the login
+# keychain; an unencrypted VM (option B, the default set-up) never reads the keychain.
+encrypted() { grep -q '^encryption\.' "$vmx"; }
+
 vmrun() {
-  local pw
-  pw=$(security find-generic-password -s paddock-win11-test-vm -a vmrun -w 2>/dev/null || true)
   local cmd=$1; shift
-  if [ -n "$pw" ]; then "$lib/vmrun" -T fusion -vp "$pw" "$cmd" "$vmx" "$@"; else "$lib/vmrun" -T fusion "$cmd" "$vmx" "$@"; fi
+  if encrypted; then
+    local pw
+    pw=$(security find-generic-password -s paddock-win11-test-vm -a vmrun -w 2>/dev/null) ||
+      die "the VM is encrypted but the keychain has no item paddock-win11-test-vm/vmrun (docs/testing/windows-test-vm.md, TPM)"
+    "$lib/vmrun" -T fusion -vp "$pw" "$cmd" "$vmx" "$@"
+  else
+    "$lib/vmrun" -T fusion "$cmd" "$vmx" "$@"
+  fi
 }
 
 running() { "$lib/vmrun" -T fusion list | grep -Fxq "$vmx"; }

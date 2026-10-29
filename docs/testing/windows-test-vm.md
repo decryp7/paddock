@@ -55,17 +55,22 @@ part of the `.vmx`; the virtual disk stays unencrypted) [Fusion 13 docs, communi
 `managedVM.autoAddVTPM = "software"` setting is experimental, Broadcom recommends against it, and users report it still
 encrypts the VM with an unknown password, so it is not used here.
 
-| | A. Virtual TPM, TPM files encrypted (recommended) | B. No TPM (`prepare.sh --no-tpm`) |
+| | A. Virtual TPM, TPM files encrypted (alternative) | B. No TPM (`prepare.sh --no-tpm`, **in use**) |
 | --- | --- | --- |
 | Encryption | only the TPM files; the disk is not encrypted | none |
-| Headless start | yes: `vmrun -vp <password>`; `vm-win.sh` reads the password from the login keychain | yes, no password |
+| Headless start | yes: `vmrun -vp <password>`; `vm-win.sh` reads the password from the login keychain | yes, no password; `vm-win.sh` never reads the keychain |
 | Matches users' PCs | yes (TPM 2.0, Secure Boot) | no: Setup skips the TPM and Secure Boot checks (LabConfig) |
 | Windows Update | supported configuration | Microsoft warns such devices may not be entitled to updates |
 | Set-up effort | one Fusion window: encrypt TPM files, add the TPM (2 minutes) | none |
 | Risk | the password passes through `vmrun`'s command line (visible to `ps` for the life of that call); losing it means rebuilding the VM; `vmcli` may not edit an encrypted `.vmx` (then detach the discs in Fusion's settings) | a less realistic guest; future Windows feature updates may refuse to install |
 
-Recommendation: **A**. The disk stays unencrypted (no I/O cost), the guest is a supported Windows 11, and headless runs
-work through the keychain. Choose B only if the keychain step is unwanted.
+**Decision (user, 2026-10-29): B.** The first try with A failed: the VM was encrypted with a password that did not match
+the keychain item, nobody knew it, and an encrypted VM without its password cannot be opened, so it had to be deleted
+and rebuilt. B has no password to lose and is fully headless. A stays documented below as the alternative if a test ever
+needs a real TPM (it is the more realistic and Microsoft-supported guest).
+
+`vm-win.sh` decides by the `.vmx` itself: only a VM with `encryption.*` keys (A) gets `-vp` and a keychain lookup; an
+unencrypted VM (B) never touches the keychain, so a leftover keychain item does no harm.
 
 ## One-time setup (the user)
 
@@ -77,11 +82,11 @@ work through the keychain. Choose B only if the keychain step is unwanted.
    - or Fusion's *File > New > Get Windows from Microsoft*, which downloads Microsoft's ESD and converts it to an ISO.
      Cancel the wizard after the ISO is saved and move the ISO to the path above. (Older Fusion releases built broken
      24H2 images with it; 26.0.1 is current, but prefer Microsoft's page.)
-2. **Prepare** (already done once on 2026-10-29; re-run after changing the scripts or to switch to option B):
-   `scripts/vm-win/prepare.sh` (or `--no-tpm`). It never downloads Windows. The answer file's language must be one the
+2. **Prepare** (done on 2026-10-29 with `--no-tpm`; re-run after changing the scripts):
+   `scripts/vm-win/prepare.sh --no-tpm` (option B; without `--no-tpm` for option A). It never downloads Windows. The answer file's language must be one the
    ISO contains, or Setup stops at the language step: the default is `--lang en-GB` (keyboard `0809:00000809`); for
    another ISO pass `--lang <tag>` and, except for en-US, `--input-locale <language id>:<layout id>`.
-3. **Option A only, add the TPM** (the VM must be off):
+3. **Option A only (skip for B), add the TPM** (the VM must be off):
    1. Create the password and keep it in the login keychain:
       `security add-generic-password -s paddock-win11-test-vm -a vmrun -w "$(openssl rand -base64 24)"`,
       then copy it to the clipboard without showing it and without a trailing newline:
