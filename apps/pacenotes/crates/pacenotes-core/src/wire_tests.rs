@@ -107,6 +107,7 @@ fn every_core_type_round_trips_through_json_and_postcard() {
             kind: ChangeKind::Renamed { from: path("b.rs") },
         }],
         truncated: false,
+        skipped_names: 2,
     });
     both(LspRequest {
         feature: LspFeature::Definition,

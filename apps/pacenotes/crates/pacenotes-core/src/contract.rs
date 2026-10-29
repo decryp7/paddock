@@ -98,7 +98,11 @@ impl History for MemoryHistory {
         }
         let truncated = changes.len() > limit;
         changes.truncate(limit);
-        Ok(ChangeSet { changes, truncated })
+        Ok(ChangeSet {
+            changes,
+            truncated,
+            skipped_names: 0,
+        })
     }
 }
 
