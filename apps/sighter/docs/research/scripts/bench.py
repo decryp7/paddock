@@ -43,6 +43,7 @@ for i in range(runs):
         print(json.dumps({"aborted": "load", "load": load1(), "done": i})); sys.exit(0)
     t = time.perf_counter(); sess.run(None, {inp.name: x}); ts.append((time.perf_counter() - t) * 1000)
 ts.sort()
+# p95 as reported on 2026-10-29: sorted[int(0.95 * (n - 1))], the 28th of 30 values (nearest rank would be the 29th).
 print(json.dumps({"model": os.path.basename(os.path.dirname(model)), "ep": ep, "threads": threads, "input": shape,
     "outputs": [(o.name, o.shape) for o in sess.get_outputs()], "providers": sess.get_providers(),
     "create_ms": round(create_ms), "p50": round(statistics.median(ts), 1), "p95": round(ts[int(0.95 * (len(ts) - 1))], 1),

@@ -91,13 +91,15 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
      or NVIDIA discrete GPUs, through our `DirectML.dll` or, if the gate below removes it, the system's. The CPU EP is
      the fallback, the reference and the determinism baseline. `error_on_failure` is set for the GPU EP so a failed
      registration is seen, never a silent CPU run.
-   - **Start-up check**: when the sidecar starts (and after a driver or model change) it runs a quick GPU self-test: the
-     EP loads, and the bundled self-test model's boxes match the stored CPU answer within tolerance. If either fails
-     (for example an old driver, the DirectML gate failing, or, a minor case, Sighter itself started inside a VM or
-     a Remote Desktop session without a GPU), Sighter
-     **falls back automatically to the CPU with the Nano preset** and tells the user why in plain words ("The graphics
-     card could not run the detector (driver too old), so Sighter uses the processor with the Fast model. Locating is
-     slower."). Settings has an "Inference device" choice: Automatic (default), GPU, CPU.
+   - **Start-up check**: a quick GPU self-test, run when the sidecar first loads a model and again after a model,
+     driver or OS change: the EP loads, and **the user's own model**, run on its **stored reference frame**, gives boxes
+     that match the **CPU answer saved in `model.json` when the model was created**, within tolerance. (The tiny bundled
+     model is only the sidecar's rule-23 `--self-test`.) If either check fails (for example an old driver, the DirectML
+     gate failing, or, a minor case, Sighter itself started inside a VM or a Remote Desktop session without a GPU),
+     Sighter **falls back automatically to the CPU with the same model** (no per-app Nano model exists unless the user
+     trains one) and tells the user why in plain words ("The graphics card could not run the detector (driver too old),
+     so Sighter uses the processor. Locating is slower."), with an optional action "Train a Fast model for this
+     computer" (a Nano model of the same app). Settings has an "Inference device" choice: Automatic (default), GPU, CPU.
    - **Device on every result**: each locate response, pre-labelling job and evaluation records the device used (EP,
      GPU name, fallback reason if any) with the ONNX Runtime version and model hash, for diagnostics.
    - **Telemetry off, by construction** (user, 2026-10-29; Sighter AGENTS.md: no telemetry). ONNX Runtime 1.31.0 made
@@ -118,8 +120,15 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
      `Microsoft.AI.DirectML`, 18.5 MB, SHA-256-pinned) next to the sidecar (user, 2026-10-29). Its licence is
      Microsoft's proprietary DirectML terms (distribution allowed only inside an application, never stand-alone; may
      collect data; research note section 11). **The user approved it on 2026-10-29 as a named licence exception for that
-     one file**, on one condition: **spike gate** — the egress test must show that `DirectML.dll` makes no outbound
-     connection (see "Licence exceptions"). If it does, Sighter does not ship it and uses only the system's
+     one file**, on one condition, the DirectML gate (spike, plan item P6): (1) the egress test shows no outbound
+     connection while the DirectML EP runs, and
+     (2) **`DirectML.dll` registers no TraceLogging/ETW provider, or the provider is shown to be inert**: search the DLL
+     for TraceLogging provider metadata and provider GUIDs, and run an ETW session (`logman` or `tracelog`) that lists
+     the providers registered and the events written while the EP runs. What the egress test can and cannot show:
+     it sees connections that `sighter-infer` itself opens; it **cannot** see data a DLL hands to ETW/TraceLogging,
+     because that leaves the machine, if at all, through Windows' own diagnostics pipeline (for ONNX Runtime's own
+     TraceLogging events its privacy notice says "based on user consent"), not through our process. Hence check (2).
+     If the gate fails, Sighter does not ship it and uses only the system's
      `DirectML.dll` (System32, Windows 10 1903 and later) or the CPU EP; that needs the DirectML import to be delay-loaded
      (or a CPU-only build variant), so that a missing or too old system copy degrades to the CPU instead of failing the
      start. Our own DirectML build of ONNX Runtime imports it like pyke's does (verify
@@ -165,8 +174,14 @@ Retina scaling where the logical size (points, or DIPs on Windows) differs from 
 
 ### How frames map to detector input
 
-Tiles are square, 640 or 960 px, with a **64 px overlap** (one overlap covers any element up to 64 px wide that straddles
-a seam; a larger element is seen whole in at least one tile when it is under the tile size minus the overlap). Tiles per
+Tiles are square, 640 or 960 px, with a **64 px overlap**. With an overlap of `o`, only an element **at most `o` px
+wide (and high) is guaranteed to lie whole inside some tile**; a wider element that straddles a seam is cut into parts
+in neighbouring tiles and relies on the **seam merge** (a pure function in `sighter-core` that joins boxes of the same
+class that touch or overlap across the seam). Should the overlap match the largest class width? No: wide classes
+(text boxes, tabs, toolbars, often 200–600 px) would need huge overlaps and many more tiles, and a wide element is
+still visible in both parts; the overlap is set to cover the **small classes** whose parts would be too small to
+detect (icons, checkboxes, radio buttons, small buttons: about 16–64 logical px), and the model card records the
+overlap and the largest small-class size measured in the training set. Recall at tile seams is a spike item. Tiles per
 frame = ⌈(W − 64) / (T − 64)⌉ × ⌈(H − 64) / (T − 64)⌉.
 
 | Frame (pixels fed to the detector) | 640 tiles | 960 tiles | Downscale to 640 instead: factor |
@@ -198,24 +213,30 @@ Projection = tile count × the measured per-tile time (RF-DETR Small at 640, bat
 indicative). **These are projections, not measurements.** Batching tiles on a GPU and using cores − 1 CPU threads
 (the run used 4) would both lower them; neither was measured.
 
-| Frame (pixels fed to the detector) | 640 tiles | CPU EP, p50 (179 ms/tile) | CPU EP, p95 sum (276 ms/tile) | CoreML CPU+GPU, p50 (30 ms/tile) | vs CPU budget p95 ≤ 600 ms |
-|---|---|---|---|---|---|
-| 1920 × 1200, or 4K at 200 % | 8 | ~1.4 s | ~2.2 s | ~0.24 s | over on CPU; within on GPU |
-| 2560 × 1440, or 5K at 200 % | 15 | ~2.7 s | ~4.1 s | ~0.45 s | over on CPU; within on GPU |
-| 3840 × 2160 at 100 % | 28 | ~5.0 s | ~7.7 s | ~0.83 s | over on both |
-| 5120 × 2880 at 100 % | 45 | ~8.1 s | ~12.4 s | ~1.3 s | over on both |
+| Frame (pixels fed to the detector) | 640 tiles | CPU EP, p50 (179 ms/tile) | CPU EP, p95 sum (276 ms/tile) | CoreML CPU+GPU, p50 (30 ms/tile) | vs CPU budget p95 ≤ 600 ms | vs GPU budget p50 ≤ 80 ms, p95 ≤ 250 ms |
+|---|---|---|---|---|---|---|
+| 1920 × 1200, or 4K at 200 % | 8 | ~1.4 s | ~2.2 s | ~0.24 s | **over** | **over** (p50 ~240 ms vs 80; p95 sum ~258 ms vs 250) |
+| 2560 × 1440, or 5K at 200 % | 15 | ~2.7 s | ~4.1 s | ~0.45 s | **over** | **over** |
+| 3840 × 2160 at 100 % | 28 | ~5.0 s | ~7.7 s | ~0.83 s | **over** | **over** |
+| 5120 × 2880 at 100 % | 45 | ~8.1 s | ~12.4 s | ~1.3 s | **over** | **over** |
+
+A whole frame misses **both** budgets at every supported size, even on the GPU. The GPU budget can be met only with
+changed tiles, priority order with early stop, or batching (below); **none of these is measured yet**, so meeting the
+GPU budget is a **spike gate** (research note spike item 8): the default pipeline must reach locate p50 ≤ 80 ms and
+p95 ≤ 250 ms on the GPU at 1920 × 1200 and 4K, or the budget or the design changes before release.
 
 Nano at 640 is ~142 ms per tile on the CPU (about 20 % less), so it does not change the picture for whole frames.
 
 What the design does when a whole frame misses the budget, in this order:
 
 1. **Scope**: a locate is scoped to the target window by default (tests target an app), so the usual cost is the
-   window's tiles, not the screen's: a 1200 × 800 logical window is 2 × 2 = 4 tiles (~0.7 s CPU, ~0.12 s GPU, projected).
+   window's tiles, not the screen's: a 1200 × 800 logical window is 2 × 2 = 4 tiles (~0.7 s CPU, ~0.12 s GPU, projected;
+   still over the GPU p50 budget on its own).
 2. **Changed tiles only**: tiles whose pixels did not change since the last frame reuse their cached detections.
 3. **Priority order**: the focused element's and the pointer's tiles run first; a unique hit above the class threshold
    in the requested scope ends the locate early.
 4. **Batching** tiles in one run on a GPU EP (fixed input, no NMS: DETR batches well); on the CPU, cores − 1 threads.
-5. **Nano preset** on CPU-only runners, and **"Still working"** rather than a timeout for a full-screen pre-labelling job
+5. **A Fast (Nano) model**, if the user trained one for that app, on CPU-only runners, and **"Still working"** rather than a timeout for a full-screen pre-labelling job
    (rule 12); an unattended locate that cannot finish inside its budget reports the scope it covered and fails as "not
    found in time", never a guess (AGENTS.md: never click blindly).
 
@@ -227,7 +248,7 @@ logical 100 % scale (1920 × 1200: 8 tiles, ~1.4 s CPU p50, ~0.24 s CoreML, proj
 
 | Approach | Cost vs whole frame | What it can miss | Platform API |
 |---|---|---|---|
-| 1. Tile the whole frame | **1.0×** of compute (plus ~10–20 % for the overlap); faster wall-clock only by running tiles in parallel on spare cores or batching them on a GPU (not measured) | Nothing, at the tile scale | none |
+| 1. Tile the whole frame | **1.0×** of compute (the tiles cover more pixels than the frame, from the overlap and the edge tiles: +42 % at 1920 × 1200, +67 % at 2560 × 1440, +38 % at 3840 × 2160, +25 % at 5120 × 2880 with 640 tiles); faster wall-clock only by running tiles in parallel on spare cores or batching them on a GPU (not measured) | Nothing, at the tile scale | none |
 | 2. Only segments that changed since the last frame | **≈ changed tiles / all tiles**: 0 for a static screen; 1–3 of 8 (0.13–0.38×, ~0.2–0.5 s CPU) for a typical click that opens a menu or changes a few controls (projection) | Nothing if the change detection is right; misses a change the OS does not report (some GPU-drawn or remote-session surfaces) unless a per-tile pixel hash is the fallback; cache must be cleared on model change, theme or DPI change | macOS: `SCStreamFrameInfo.dirtyRects` (ScreenCaptureKit, macOS 12.3+): "a union of the rectangles redrawn and moved". Windows: Desktop Duplication `IDXGIOutputDuplication::GetFrameDirtyRects` and `GetFrameMoveRects` (Windows 8+; process move rects before dirty rects); otherwise a per-tile hash of the new frame (cheap, not measured) |
 | 3. Active window, or the region around the pointer or focus, first | Window 1200 × 800: 4 tiles, **0.5×**; pointer region: 1 tile, **0.13×** (~0.18 s CPU, ~30 ms GPU) | Elements outside the window: menus and pop-ups that open outside it, toasts, other windows of a multi-window app | Window bounds and focus from the capture or window APIs (`SCWindow` frames; `GetWindowRect`/DWM extended frame bounds on Windows; verify in the spike); pointer position |
 | 4. Cheap first pass (OCR) picks segments, detector runs on those only | OCR pass + detector on k tiles; OCR is not cheap on a whole frame (proposal: 150–500 ms CPU for 1080p, unverified) | Icon-only and custom-drawn controls with no text, which is exactly where the detector is needed | OCR (`sighter-ocr`) |
@@ -346,12 +367,13 @@ host → remote → host within ±1 host pixel.
 
 ## Licence exceptions
 
-Sighter's code and every bundled component are permissive (Sighter `deny.toml`), with exactly two named exceptions:
+Sighter's code and every bundled or downloaded component are permissive (Sighter `deny.toml`), with exactly two named
+exceptions, one shipped (conditional) and one downloaded on request:
 
 | File | Licence | Scope | Reason | Approved |
 |---|---|---|---|---|
-| `DirectML.dll` 1.15.4 (NuGet `Microsoft.AI.DirectML`, SHA-256-pinned) | Microsoft Software License Terms, Microsoft DirectX Machine Learning (DirectML): proprietary; distribution allowed only inside an application, for Windows and Xbox, not stand-alone; may collect data | Windows only, shipped next to `sighter-infer.exe`; never another file of that package, never another app. **Condition: the spike's egress test shows no outbound connection from it**; otherwise it is not shipped and Sighter uses the system `DirectML.dll` or the CPU | DirectML is how the ONNX Runtime build reaches any DirectX 12 GPU (NVIDIA, AMD, Intel) on Windows; the build imports it | user, 2026-10-29 (conditional) |
-| NVIDIA CUDA runtime libraries (CUDA runtime, cuBLAS, cuDNN and the other NVIDIA libraries the pinned PyTorch CUDA wheels depend on) | NVIDIA CUDA EULA and NVIDIA's cuDNN licence: proprietary | **Training only**: the opt-in CUDA variant of the managed Python training runtime, **downloaded on request** (never in the installer, never used by inference), with NVIDIA's terms shown before the download | PyTorch has no other accelerator for NVIDIA GPUs; without it NVIDIA laptops train on the CPU or a remote host | user, 2026-10-29 |
+| `DirectML.dll` 1.15.4 (NuGet `Microsoft.AI.DirectML`, SHA-256-pinned) | Microsoft Software License Terms, Microsoft DirectX Machine Learning (DirectML): proprietary; distribution allowed only inside an application, for Windows and Xbox, not stand-alone; may collect data | Windows only, shipped next to `sighter-infer.exe`; never another file of that package, never another app. **Condition: the DirectML gate passes** (no outbound connection, and no ETW/TraceLogging provider or an inert one; decision 4, plan item P6); otherwise it is not shipped and Sighter uses the system `DirectML.dll` with a delay-loaded import (or a CPU-only build) or the CPU | DirectML is how the ONNX Runtime build reaches any DirectX 12 GPU (NVIDIA, AMD, Intel) on Windows; the build imports it | user, 2026-10-29 (conditional) |
+| NVIDIA CUDA runtime libraries (CUDA runtime, cuBLAS, cuDNN and the other NVIDIA libraries the pinned PyTorch CUDA wheels depend on) | NVIDIA CUDA EULA (v13.4) and the NVIDIA SDK licence with its cuDNN supplement (v. 2022-02-22): proprietary; runtime `.so`/`.dll` files distributable only "as incorporated in object code format into a software application" with "material additional functionality", "only accessed by your application" | **Training only**: the opt-in CUDA variant of the managed Python training runtime, **downloaded on request from the upstream hosts** (`download.pytorch.org` for the PyTorch CUDA wheels; `pypi.org` and `files.pythonhosted.org` for the `nvidia-*` wheels they depend on, Linux), **never mirrored on our Gitea** (a stand-alone copy of NVIDIA's files would fall outside EULA 1.1.1's grant); never in the installer, never used by inference; NVIDIA's terms shown before the download; those hosts are on the `Egress` allow-list for this download job only | PyTorch has no other accelerator for NVIDIA GPUs; without it NVIDIA laptops train on the CPU or a remote host | user, 2026-10-29 |
 
 cargo-deny checks crates, not shipped DLLs or downloaded runtimes, so the exceptions are written in
 `apps/sighter/deny.toml` as a commented "non-crate binaries" list with these reasons, and the third-party notices list
@@ -385,9 +407,12 @@ against that list comes with the notices tooling.
   and flags per target 2–3, CI jobs, artefact publishing and caching 1–2, `ort` custom-lib wiring and the checks 1–2,
   Windows arm64 1); CI time per cold build not measured (a full ONNX Runtime build is long, so it must never run in
   an app's normal pipeline).
-- **P6. Spike gate for `DirectML.dll`**: run the egress test on Windows with our `DirectML.dll` on the DirectML EP; no
-  outbound connection keeps the exception; any connection removes the file from the bundle and switches Windows to the
-  system copy or the CPU (decision 4). Record the result in performance.md or the spike notes.
+- **P6. Spike gate for `DirectML.dll`**: on Windows with our `DirectML.dll` on the DirectML EP, (1) the egress test
+  (no outbound connection from `sighter-infer`) and (2) the ETW check (search the DLL for TraceLogging provider metadata
+  and GUIDs; an ETW session with `logman` or `tracelog` listing providers and events while the EP runs). It passes only
+  if there is no connection and no provider is registered, or the provider is shown to be inert. A failure removes the
+  file from the bundle and switches Windows to the system copy (delay-loaded import or CPU-only build) or the CPU
+  (decision 4). Record the result in the spike notes.
 
 ## Consequences
 
@@ -397,7 +422,7 @@ against that list comes with the notices tooling.
   pipeline (plan item P5) instead of pyke's CDN download. Intel Macs are not supported (already decided). Linux, if
   ever needed, is one more target of that pipeline (pyke offers only CPU and CUDA builds for Linux arm64).
 - `cargo deny` must allow `ort`/`ort-sys` (MIT OR Apache-2.0) and ONNX Runtime's notices; the model catalogue gets its
-  own licence allow-list (Apache-2.0, MIT) checked by a test over every entry. `DirectML.dll` is the one named exception
+  own licence allow-list (Apache-2.0, MIT) checked by a test over every entry. `DirectML.dll` and the CUDA training runtime are the two named exceptions
   ("Licence exceptions"), listed in the third-party notices.
 - macOS packaging has nothing new beyond Pacenotes' findings (macOS ≥ 13.4 link floor, `libclang_rt.osx.a`). Windows
   packaging adds `DirectML.dll` next to `sighter-infer.exe`.
@@ -439,22 +464,24 @@ against that list comes with the notices tooling.
 4. Labelling: **whole recordings are pre-labelled by the user's own detector**; Pitwall's VLM only for small,
    user-chosen selections or after a confirmation that states the frame count (rule 46; decision 5).
 5. RT-DETRv4: **do a licence review**; the model stays pending until it is done (decision 2, plan item P4).
-6. Windows: **ship Microsoft's DirectML redistributable** when the system's is missing or too old (decision 4). Since
-   the DirectML build imports it, in practice Sighter always ships it next to the sidecar.
+6. Windows: **ship Microsoft's DirectML redistributable** next to the sidecar (decision 4), **conditional on the
+   DirectML gate** (item 10); if the gate fails, the system `DirectML.dll` or the CPU.
 7. DirectML: **approved as a named licence exception for `DirectML.dll` only** ("Licence exceptions").
 8. Telemetry: **ONNX Runtime is self-built with `--no_telemetry`** per platform and linked through `ort`'s custom-library
    mode, not pyke's prebuilt libraries; the runtime opt-out and the egress test stay as a second line of defence
    (decision 4, plan item P5).
 9. Objects365 lineage: **accept RF-DETR's N/S/M/L checkpoints on Roboflow's Apache-2.0 label**, because Sighter is for
    personal, non-commercial use; the lineage is recorded in every model card (decision 1).
-10. DirectML: the redistributable exception **holds only if the spike's egress test shows `DirectML.dll` makes no
-    outbound connection**; otherwise the system `DirectML.dll` or the CPU only (decision 4, "Licence exceptions").
+10. DirectML: the redistributable exception **holds only if the DirectML gate passes** (no outbound connection, and no
+    ETW/TraceLogging provider or an inert one); otherwise the system `DirectML.dll` or the CPU only (decision 4,
+    "Licence exceptions", plan item P6).
 11. CUDA: **an opt-in CUDA training runtime is approved as a recorded licence exception**, for training only and
     downloaded on request ("Licence exceptions").
 12. Proposal 9.1: **the amendment is approved** and applied to the proposal (decision 5).
 13. Device: **GPU by default** (CoreML; DirectML on Intel integrated or NVIDIA discrete GPUs, including the system
-    DirectML), with a start-up self-test and an automatic fall-back to the CPU with the Nano preset, explained to the
-    user and selectable in Settings; the device is recorded on every result and job (decision 4).
+    DirectML), with a start-up self-test of the user's model against its stored CPU answer and an automatic fall-back to
+    the CPU **with the same model** (an optional "Train a Fast model for this computer" action), explained to the user
+    and selectable in Settings; the device is recorded on every result and job (decision 4).
 14. Remote targets: **Sighter runs on the host that has the GPU** and looks at a viewer window (Remote Desktop, VM
     console, VNC client); only pixels are available, per-tile hashes replace OS dirty rects, boxes and input map
     through the viewer's content rectangle and scale, and 1:1 viewer scaling is recommended ("Remote desktops and VM

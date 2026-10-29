@@ -48,7 +48,7 @@ measured on our data.
 - **Command:** `RF_HOME=<scratch>/weights nice -n 19 python -I export.py <scratch>/models`, then per row
   `nice -n 19 python -I bench.py <model.onnx> <cpu|coreml:ALL|coreml:CPUAndGPU> 4 5 30` (one process per row; scripts in
   [research/scripts/](research/scripts/))
-- **Runs:** single series per row: 5 warm-up and 30 timed `Session.run` calls; reported p50, p95 (nearest rank) and
+- **Runs:** single series per row: 5 warm-up and 30 timed `Session.run` calls; reported p50, p95 (`sorted[int(0.95 × (n − 1))]`, the 28th of 30 values; nearest rank would be the 29th) and
   session creation time
 - **Numbers:**
 
