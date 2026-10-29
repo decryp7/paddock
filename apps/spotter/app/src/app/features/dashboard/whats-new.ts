@@ -76,10 +76,12 @@ import { WatchesStore } from '../../state/watches.store';
     :host,
     .days {
       display: grid;
+      grid-template-columns: minmax(0, 1fr);
       gap: var(--pd-space-4);
     }
     .day {
       display: grid;
+      grid-template-columns: minmax(0, 1fr);
       gap: var(--pd-space-1);
     }
     h3 {

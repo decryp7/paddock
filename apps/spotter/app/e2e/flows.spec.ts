@@ -64,12 +64,14 @@ test.describe('Spotter against the mock backend', () => {
 
   test('a settings change applies at once and is still there after visiting another settings page', async ({ page, app }) => {
     await app.settings.open({ page: 'sp.general' });
-    await page.getByLabel('Show notifications').uncheck();
-    await expect(page.getByLabel('Show notifications')).not.toBeChecked();
+    const notify = page.getByRole('switch', { name: 'Show notifications' });
+    await expect(notify).toBeChecked();
+    await notify.click();
+    await expect(notify).not.toBeChecked();
     // The shell's Appearance page is beside Spotter's own.
     await app.settings.nav.getByRole('button', { name: /Appearance/ }).click();
     await app.settings.nav.getByRole('button', { name: /Spotter/ }).click();
-    await expect(page.getByLabel('Show notifications')).not.toBeChecked();
+    await expect(page.getByRole('switch', { name: 'Show notifications' })).not.toBeChecked();
   });
 
   test('the tray popup lists unseen releases', async ({ page }) => {
