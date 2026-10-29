@@ -3,7 +3,8 @@
 //! - `recorded_*`: cases in `tests/golden/cases.json` run on the fixture repository in `tests/golden/fixture` (built in a scratch
 //!   folder with two commits, tagged `fixture-base` and `fixture-head`); the answers of the script were recorded once into `tests/golden/expected/`
 //!   by `tests/golden/generate.mjs`. These need no node, so they outlive the script (ADR 0022 R4 deletes it).
-//! - `live_*`: the script itself as the oracle on this working tree, while the script exists. Skipped, with the reason printed,
+//! - `live_*`: the script itself as the oracle on this working tree, while the script exists. The `.gitea/` and `conformance/ci`
+//!   samples need a clean tree: the script narrows those only for files that differ from HEAD (it answers everything for a clean one). Skipped, with the reason printed,
 //!   when node or the script is missing.
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::plan::{Request, plan_for};
@@ -74,6 +75,12 @@ const SAMPLES: &[&[&str]] = &[
     &["package-lock.json"],
     &["tools/paddock-dev/src/lib.rs", "tools/test/x.test.mjs"],
     &["totally-unknown-root-file"],
+    &["scripts/affected.mjs", "scripts/affected.test.mjs"],
+    &[".cargo/config.toml"],
+    &["lint/clippy.toml"],
+    &["rust-toolchain.toml", "tsconfig/base.json"],
+    &["conformance/ci/build-folder.sh"],
+    &["conformance/src/util/is-main.mjs"],
     &[".gitignore", "crates/paddock-cli/CHANGELOG.md"],
 ];
 

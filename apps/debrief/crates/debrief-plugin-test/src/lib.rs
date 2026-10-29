@@ -451,7 +451,7 @@ fn start(exe: &Path, manifest: &Manifest, granted: &[Permission], launch: &Launc
     };
     let mut s = SpawnSpec::new(exe, format!("plugin \"{}\"", manifest.id));
     s.current_dir = Some(home.join("bin"));
-    s.endpoint_prefix = "debrief-plugin-test".into();
+    s.endpoint_prefix = debrief_ipc::endpoint::prefix::PLUGIN_TEST.into();
     s.connect_window = Duration::from_secs(15);
     s.sandbox = sandbox;
     let mut c = ChildSpec::new(s);
