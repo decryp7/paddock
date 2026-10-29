@@ -294,6 +294,16 @@ impl Engine {
         specs.iter().map(|s| self.summary_of(s)).collect()
     }
 
+    /// How many watches that are not paused read JavaScript pages (they need a browser). One look at the list: no watch's
+    /// history or check log is built for it.
+    pub fn watches_needing_renderer(&self) -> usize {
+        lock(&self.inner.doc)
+            .watches
+            .iter()
+            .filter(|w| !w.paused && w.source.values.get("rendered").is_some_and(|v| v == "true"))
+            .count()
+    }
+
     /// One watch with its history and check log.
     pub fn get_watch(&self, id: &str) -> Result<WatchDetail> {
         let spec = self.find_spec(id)?;

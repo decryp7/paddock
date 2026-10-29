@@ -90,9 +90,8 @@ pub fn after_install(result: Result<(), String>, cancelled: bool, kind_now: Rend
                 .hint("Try the install again; if it keeps failing, open the log from Settings.")
                 .code("sp.renderer.not-found")),
         },
-        Err(_) if cancelled => {
-            Err(still_missing().unwrap_or_else(|| Cause::new("The install was cancelled.").code("sp.renderer.cancelled")))
-        }
+        // Cancelled: nothing failed. A browser that exists by now means the need is met; else the original cause stays.
+        Err(_) if cancelled => still_missing().map_or(Ok(()), Err),
         Err(e) => Err(Cause::new("The browser could not be installed.")
             .hint("Check the connection and try again.")
             .detail(e)
@@ -189,7 +188,7 @@ impl<R: Runtime> Hub<R> {
                 let state = install.state()?;
                 let app = install.app.get().cloned().ok_or_else(|| Cause::new("Spotter is still starting."))?;
                 let registry = crate::jobs::registry(&app).ok_or_else(|| Cause::new("The shell's jobs are not set up."))?;
-                let op = crate::jobs::begin(&registry, crate::jobs::Kind::InstallRenderer, "Installing the browser", None);
+                let op = crate::jobs::begin(&registry, crate::jobs::Kind::InstallRenderer, "Installing Chromium", None);
                 let result = tauri::async_runtime::block_on(spotter_render::install::install(
                     &state.data_dir,
                     &state.downloader,
@@ -225,21 +224,12 @@ impl<R: Runtime> Hub<R> {
 
     /// Looks at the page browser when the number of watches that need it changed (the `--version` lookup is slow,
     /// so it runs off the async threads and never on every push).
-    pub fn report_renderer(&self, watches: &[WatchSummary]) {
+    pub fn report_renderer(&self) {
         let Some(app) = self.app.get().cloned() else { return };
         let Some(state) = app.try_state::<Shared>().map(|s| s.inner().clone()) else {
             return;
         };
-        let needed = watches
-            .iter()
-            .filter(|w| !w.paused)
-            .filter(|w| {
-                state
-                    .engine
-                    .get_watch(&w.id)
-                    .is_ok_and(|d| d.spec.source.values.get("rendered").is_some_and(|v| v == "true"))
-            })
-            .count();
+        let needed = state.engine.watches_needing_renderer();
         {
             let mut last = self.last_needed.lock().unwrap_or_else(PoisonError::into_inner);
             if *last == Some(needed) {
@@ -335,6 +325,8 @@ mod tests {
         // Cancelled: the original cause comes back, not "could not be installed".
         let c = after_install(Err("Cancelled.".into()), true, RendererKind::None, 2).unwrap_err();
         assert_eq!(c.code.as_deref(), Some("sp.renderer.missing"));
+        // Cancelled, but a browser exists now (one was installed meanwhile): nothing is missing, the service is not left down.
+        assert!(after_install(Err("Cancelled.".into()), true, RendererKind::ChromiumInstalled, 2).is_ok());
         // A failure that is not a cancel says so.
         let c = after_install(Err("offline".into()), false, RendererKind::None, 1).unwrap_err();
         assert_eq!(c.code.as_deref(), Some("sp.renderer.install"));

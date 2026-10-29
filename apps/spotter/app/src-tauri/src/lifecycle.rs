@@ -172,7 +172,7 @@ async fn forward_changes<R: Runtime>(app: AppHandle<R>, engine: Engine, hub: Hub
     while let Ok(_) | Err(RecvError::Lagged(_)) = rx.recv().await {
         let watches = push_state(&app, &engine);
         hub.report_sources(&watches);
-        hub.report_renderer(&watches);
+        hub.report_renderer();
     }
 }
 

@@ -164,19 +164,22 @@ pub async fn set_paused(state: State<'_, Shared>, id: String, paused: bool) -> O
     Ok(state.engine.set_paused(&id, paused)?)
 }
 
-/// `check_now`: one watch now (the answer comes when it is done, however long that takes: the UI does not time it
-/// out), or every watch in the background (progress "n of m" arrives as job events and the watches report through
-/// the pushed state).
+/// `check_now`: one watch, or every watch. Either returns at once (rule 10): the check is a shell job (phase and Cancel in
+/// the Jobs list, "n of m" for every watch) and the watches report what it found through the pushed state.
 #[tauri::command]
 pub async fn check_now<R: Runtime>(app: AppHandle<R>, state: State<'_, Shared>, id: Option<String>) -> Out<()> {
     match id {
         Some(id) => {
             text_ok("watch id", &id)?;
+            // Unknown watches are refused here, before a job exists; everything after that is the job's (rule 10).
+            state.engine.get_watch(&id)?;
             let name = watch_name(&state, &id);
             let op = begin_job(&app, Kind::Check, &format!("Checking {name}"), None)?;
-            let result = state.engine.check_now_job(Some(&id), &op.job).await;
-            op.end(result.is_ok(), &result.as_ref().err().map(ToString::to_string).unwrap_or_default());
-            result?;
+            let engine = state.engine.clone();
+            tauri::async_runtime::spawn(async move {
+                let result = engine.check_now_job(Some(&id), &op.job).await;
+                op.end(result.is_ok(), &result.as_ref().err().map(ToString::to_string).unwrap_or_default());
+            });
         }
         None => {
             let registry = jobs::registry(&app).ok_or_else(|| CommandError::internal("The shell's jobs are not set up."))?;
@@ -498,7 +501,7 @@ pub async fn renderer_status(state: State<'_, Shared>) -> Out<RendererStatusDto>
 /// `install_renderer`: downloads the pinned, checksum-verified Chromium. Only ever runs because the user asked.
 #[tauri::command]
 pub async fn install_renderer<R: Runtime>(app: AppHandle<R>, state: State<'_, Shared>) -> Out<RendererStatusDto> {
-    let op = begin_job(&app, Kind::InstallRenderer, "Installing the browser", None)?;
+    let op = begin_job(&app, Kind::InstallRenderer, "Installing Chromium", None)?;
     let installed = spotter_render::install::install(&state.data_dir, &state.downloader, op.ctx(), &op.job).await;
     op.end(
         installed.is_ok(),
