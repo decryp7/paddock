@@ -443,11 +443,171 @@ export interface ActivityEntry {
 
 // ----------------------------------------------------------------------------------------------------- disk map
 
-export interface SizeNode {
+/** `Settings.disk`: every key optional. */
+export interface DiskSettings {
+  /** The most nodes one scan keeps (10,000 to 5,000,000). */
+  scanFolders?: number;
+  /** Files of at least this many MiB get a node of their own (1 to 1,024). */
+  notableFileMib?: number;
+}
+
+/** The protocol of a network volume. */
+export type NetworkProtocol = 'smb' | 'nfs' | 'afp' | 'webDav' | 'sshfs' | 'other';
+
+/** Where a volume lives (externally tagged: a unit variant is a string). */
+export type VolumeLocation = 'internal' | { external: { bus: string | null } } | { network: { protocol: NetworkProtocol; host: string } };
+
+/** A volume the disk map can scan. */
+export interface Volume {
+  /** Stable id: the mount point. */
+  id: string;
   name: string;
-  path: string;
+  mount: string;
+  /** File system ("apfs", "ntfs", "smbfs"). */
+  fs: string;
+  location: VolumeLocation;
+  /** Bytes; `null` when the volume cannot say. */
+  capacity: number | null;
+  free: number | null;
+  /** A spinning disk; `null` when unknown. */
+  rotational: boolean | null;
+  readOnly: boolean;
+  /** False when a network volume did not answer ("Not answering"). */
+  reachable: boolean;
+  /** Whether used space is a fixed scale for a scan; false for a network share (scanned like a folder). */
+  wholeVolume: boolean;
+}
+
+/** What a scan covers. */
+export type DiskTarget = { volume: { id: string } } | { folder: { path: string } };
+
+export type ScanPhase = 'readingVolumeFacts' | 'readingFolders';
+
+export type ScanFailure = { volumeUnreachable: { detail: string } } | { cannotStart: { reason: string } } | { internal: { detail: string } };
+
+export type ScanState = 'running' | 'done' | 'cancelled' | { failed: { failure: ScanFailure } };
+
+/** Live numbers of a scan; every one only grows. */
+export interface ScanProgress {
   bytes: number;
-  children: SizeNode[];
+  items: number;
+  folders: number;
+  /** The bytes expected (a whole volume's used space), or `null`: the total is unknown and the count just grows. */
+  totalBytes: number | null;
+  /** Folders the OS refused to open (counted, not fatal). */
+  unreadable: number;
+}
+
+/** One scan's status: the reply to starting it and the pushed event while it runs (keep the highest `seq`). */
+export interface DiskScanStatus {
+  scan: number;
+  seq: number;
+  name: string;
+  target: DiskTarget;
+  volume: Volume | null;
+  state: ScanState;
+  phase: ScanPhase;
+  progress: ScanProgress;
+  /** A limit left folders out. */
+  truncated: boolean;
+  /** The first folders that could not be read. */
+  unreadableFirst: string[];
+  /** Folders were refused and this Mac has not given Dyno Full Disk Access, the likely reason (macOS only). */
+  needsFullDiskAccess: boolean;
+  /** Files and folders counted per second while running; `null` until it can be known (never a made-up number). */
+  itemsPerSecond: number | null;
+  /** Seconds left in the first pass over a whole volume; `null` when it cannot be known. */
+  etaSeconds: number | null;
+  /** Used space the scan did not count (used minus counted), for a whole-volume scan that is done; `null` otherwise. */
+  hiddenBytes: number | null;
+  /** When the latest pass ended; `null` while the first pass runs. */
+  scannedAt: Timestamp | null;
+}
+
+export type NodeKind = 'folder' | 'file' | 'mountPoint' | 'unreadable';
+
+/** A node of a scan. */
+export interface DiskNode {
+  id: number;
+  name: string;
+  kind: NodeKind;
+  /** Bytes on the volume, children included. */
+  bytes: number;
+  /** Bytes of content, children included (what the files add up to when read). */
+  logicalBytes: number;
+  /** Files and folders inside, recursively. */
+  items: number;
+  newestChange: Timestamp;
+  /** Everything inside has been read. */
+  complete: boolean;
+  hasChildren: boolean;
+}
+
+/** A sum of folded things. */
+export interface Folded {
+  count: number;
+  /** Bytes on the volume. */
+  bytes: number;
+  /** Bytes of content. */
+  logicalBytes: number;
+  items: number;
+}
+
+/** One page of one level: the children of a folder, biggest first. children + other + loose = the folder's bytes. */
+export interface DiskChildren {
+  node: DiskNode;
+  children: DiskNode[];
+  /** Children below the minimum share, folded into one bucket (all pages). */
+  other: Folded;
+  /** Small files directly inside the folder that have no node of their own. */
+  loose: Folded;
+  /** How many children are shown across all pages. */
+  shown: number;
+  offset: number;
+  /** The offset of the next page, `null` on the last. */
+  nextOffset: number | null;
+}
+
+/** A folder or file with what is shown inside it, nested. */
+export interface RingNode {
+  node: DiskNode;
+  /** Shown children, biggest first. */
+  children: RingNode[];
+  /** Children not shown: below the minimum share, or past the node cap. */
+  other: Folded;
+  /** Small files directly inside that have no node of their own. */
+  loose: Folded;
+}
+
+/** Several levels of a scan under a folder, in one answer. */
+export interface DiskRings {
+  root: RingNode;
+  /** Nodes in the answer, the centre included. */
+  count: number;
+  /** The node cap left out children that were big enough to show. */
+  capped: boolean;
+}
+
+/** What to read: `rings` 1 to 6, `minShare` 0 to 1 of the centre, `maxNodes` 1 to 2000. */
+export interface DiskRingsQuery {
+  scan: number;
+  /** The centre; `null` for the scan's root. */
+  node: number | null;
+  rings: number;
+  minShare: number;
+  maxNodes: number;
+}
+
+/** Which page of which level. */
+export interface DiskChildrenQuery {
+  scan: number;
+  /** The folder; `null` for the scan's root. */
+  node: number | null;
+  offset: number;
+  /** 1 to 256. */
+  limit: number;
+  /** Children below this share (0 to 1) of the folder are folded into `other`; 0 shows all. */
+  minFraction: number;
 }
 
 // ------------------------------------------------------------------------------------------- health
@@ -605,6 +765,8 @@ export interface Settings {
   hardwareAlarms?: HardwareAlarms;
   /** New and unusual programs: the baseline and its learning period (the engine fills the default when absent). */
   unusual?: UnusualSettings;
+  /** The disk map's limits (the engine fills the defaults when absent). */
+  disk?: DiskSettings;
   /** Maintenance windows: when Dyno's own heavier background work may run. */
   maintenance: MaintenanceSettings;
   /** Backup health checks. */

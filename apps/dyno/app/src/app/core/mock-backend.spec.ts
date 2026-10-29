@@ -321,13 +321,6 @@ describe('diagnosis, history, activity', () => {
   });
 });
 
-describe('disk map', () => {
-  it('diskUsage returns a tree', async () => {
-    const root = await make().diskUsage(null);
-    expect(root.bytes).toBeGreaterThan(0);
-  });
-});
-
 describe('health, tuning, startup', () => {
   it('health grades the score', async () => {
     const h = await make().health();

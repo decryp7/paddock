@@ -359,10 +359,11 @@ jobs:
           # Full history so pull requests can check every commit message.
           fetch-depth: 0
 
-      # cargo-deny comes with the image; cargo-about does not.
+      # cargo-deny comes with the image; cargo-about does not. Pinned: the committed notices are its output, and a new
+      # release can find more licence texts.
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-about
+          tool: cargo-about@0.9.2
 
       # cargo about reads every crate's licence from its sources and cargo deny clones the advisory database: without a
       # cache both download everything on every run. The image's CARGO_HOME is /usr/local/cargo. Saved on every run (a

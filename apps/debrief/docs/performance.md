@@ -212,6 +212,7 @@ some fields; "n/s" means the source does not state them.
 - 20 copies (563,220 events): zstd Parquet segments write 261–409k events/s with 1 writer and 0.97–1.7M with 8, against 36.5k for the native table. This chose the layout.
 - 10M (`bench.rs`): import 81 s (123k events/s), peak RSS 415 MB; store 787 MB; write-side reads under 0.5 s.
 - Source: ADR 0014, sections R2a, R2b and R2c; bench `layout_bakeoff.rs`.
+- See also: [research/2026-10-29-duckdb-write-paths.md](research/2026-10-29-duckdb-write-paths.md), the write paths compared again on DuckDB 2.0 and the Mac mini.
 
 ### 2026-10-20/22, mixed-source importers
 

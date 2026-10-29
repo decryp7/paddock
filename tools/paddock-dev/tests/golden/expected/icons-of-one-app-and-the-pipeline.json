@@ -1,0 +1,45 @@
+{
+ "all": false,
+ "crates": false,
+ "ui": false,
+ "eslint": false,
+ "conformance": false,
+ "tools": false,
+ "icons": true,
+ "ciImage": false,
+ "paddockDev": false,
+ "docs": false,
+ "apps": [
+  "x",
+  "y",
+  "z"
+ ],
+ "kinds": {
+  "x": [
+   "rust"
+  ],
+  "y": [
+   "rust"
+  ],
+  "z": [
+   "rust"
+  ]
+ },
+ "packages": {},
+ "why": {
+  "app:x": [
+   "icons icons/x/a.svg",
+   "icons icons/tools/make.mjs"
+  ],
+  "app:y": [
+   "icons icons/tools/make.mjs"
+  ],
+  "app:z": [
+   "icons icons/tools/make.mjs"
+  ],
+  "icons": [
+   "icons/x/a.svg",
+   "icons/tools/make.mjs"
+  ]
+ }
+}

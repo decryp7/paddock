@@ -1,0 +1,26 @@
+{
+ "all": false,
+ "crates": false,
+ "ui": false,
+ "eslint": false,
+ "conformance": false,
+ "tools": false,
+ "icons": false,
+ "ciImage": false,
+ "paddockDev": false,
+ "docs": false,
+ "apps": [
+  "y"
+ ],
+ "kinds": {
+  "y": [
+   "ui"
+  ]
+ },
+ "packages": {},
+ "why": {
+  "app:y": [
+   "apps/y/app/tsconfig.json"
+  ]
+ }
+}

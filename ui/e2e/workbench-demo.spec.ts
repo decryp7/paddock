@@ -367,7 +367,7 @@ test('the rename row in Manage layouts: the buttons stand on the field\'s line, 
   await wb.frame.open();
   await page.getByRole('menuitem', { name: 'Window', exact: true }).click();
   await page.getByRole('menuitem', { name: /Save layout/i }).click();
-  await page.getByTestId('layout-save-ok').click();
+  await page.getByTestId('dialog-action-save').click();
   await page.getByRole('menuitem', { name: 'Window', exact: true }).click();
   await page.getByRole('menuitem', { name: /Manage layouts/i }).click();
   await page.getByTestId('layout-manage-rename-start').first().click();

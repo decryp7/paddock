@@ -6,12 +6,9 @@ import type {
   HealthReason,
   PluginInfo,
   Settings,
-  SizeNode,
   StartupEntry,
 } from '../api.types';
-import { prng } from './noise';
 
-const GB = 1024 ** 3;
 const MB = 1024 ** 2;
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -209,53 +206,3 @@ export function demoSettings(): Settings {
   };
 }
 
-/** A plausible size tree for the disk-usage treemap. */
-export function diskTree(path: string | null): SizeNode {
-  const node = (name: string, p: string, gb: number, children: SizeNode[] = []): SizeNode => {
-    const childSum = children.reduce((a, c) => a + c.bytes, 0);
-    return { name, path: p, bytes: Math.max(Math.round(gb * GB), childSum), children };
-  };
-  const rand = prng(42);
-  const leaves = (base: string, names: string[], total: number): SizeNode[] => {
-    const w = names.map(() => 0.3 + rand());
-    const s = w.reduce((a, b) => a + b, 0);
-    return names.map((n, i) => node(n, `${base}\\${n}`, (total * w[i]!) / s));
-  };
-  const dev = node('dev', 'C:\\dev', 182, [
-    node('old-raytracer', 'C:\\dev\\old-raytracer', 9.4, leaves('C:\\dev\\old-raytracer', ['target', 'src', '.git'], 9.4)),
-    node('dyno', 'C:\\dev\\dyno', 21, leaves('C:\\dev\\dyno', ['target', 'app', '.git', 'crates'], 21)),
-    node('imt', 'C:\\dev\\imt', 34, leaves('C:\\dev\\imt', ['target', 'app', 'samples', '.git'], 34)),
-    node('aoc-2025', 'C:\\dev\\aoc-2025', 5.1, leaves('C:\\dev\\aoc-2025', ['target', 'src'], 5.1)),
-    node('electron-test', 'C:\\dev\\electron-test', 3.2, leaves('C:\\dev\\electron-test', ['node_modules', 'dist'], 3.2)),
-    node('tauri-playground', 'C:\\dev\\tauri-playground', 4.6, leaves('C:\\dev\\tauri-playground', ['target', 'node_modules', 'src'], 4.6)),
-    node('other projects', 'C:\\dev\\…', 104.7),
-  ]);
-  const users = node('Users', 'C:\\Users', 356, [
-    node('alex', 'C:\\Users\\alex', 352, [
-      node('AppData', 'C:\\Users\\alex\\AppData', 118, leaves('C:\\Users\\alex\\AppData', ['Local\\Docker', 'Local\\Google', 'Local\\Temp', 'Roaming\\Spotify', 'Local\\npm-cache', 'Local\\Packages'], 118)),
-      node('.rustup', 'C:\\Users\\alex\\.rustup', 9.2),
-      node('.cargo', 'C:\\Users\\alex\\.cargo', 6.8),
-      node('.nuget', 'C:\\Users\\alex\\.nuget', 3.1),
-      node('Downloads', 'C:\\Users\\alex\\Downloads', 41, leaves('C:\\Users\\alex\\Downloads', ['ISOs', 'Installers', 'Archives', 'Papers'], 41)),
-      node('Documents', 'C:\\Users\\alex\\Documents', 38),
-      node('Pictures', 'C:\\Users\\alex\\Pictures', 64),
-      node('Videos', 'C:\\Users\\alex\\Videos', 58),
-      node('OneDrive', 'C:\\Users\\alex\\OneDrive', 13.9),
-    ]),
-    node('Public', 'C:\\Users\\Public', 4),
-  ]);
-  const root = node('C:', 'C:\\', 734, [
-    node('Windows', 'C:\\Windows', 38, leaves('C:\\Windows', ['WinSxS', 'System32', 'SoftwareDistribution', 'Installer', 'SysWOW64'], 38)),
-    node('Program Files', 'C:\\Program Files', 46, leaves('C:\\Program Files', ['Docker', 'NVIDIA Corporation', 'Microsoft Office', 'PowerShell', 'Google'], 46)),
-    node('Program Files (x86)', 'C:\\Program Files (x86)', 22, leaves('C:\\Program Files (x86)', ['Steam', 'Microsoft Visual Studio', 'Windows Kits'], 22)),
-    node('ProgramData', 'C:\\ProgramData', 18),
-    users,
-    dev,
-    node('pagefile.sys', 'C:\\pagefile.sys', 24),
-    node('hiberfil.sys', 'C:\\hiberfil.sys', 12.8),
-    node('$Recycle.Bin', 'C:\\$Recycle.Bin', 3.4),
-  ]);
-  if (!path) return root;
-  const find = (n: SizeNode): SizeNode | null => (n.path === path ? n : n.children.map(find).find((x) => x) ?? null);
-  return find(root) ?? root;
-}

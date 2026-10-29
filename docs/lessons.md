@@ -524,6 +524,27 @@ A dead renderer is reloaded, not aborted; a closed or reset connection is `ERR_E
 browser-side call as an ordering barrier; otherwise the code), so the next failure names its cause instead of being
 retried or guessed at.
 
+**Follow-up (same day):** Windows run 6563 failed the same test with the plain code again, so the cause is neither a
+download nor a replacement the driver saw. It still does not reproduce on the Mac. Two findings while instrumenting it:
+(1) an unexplained abort now carries what the browser reported about the tab from its creation on (lifecycle steps, the
+document request's `Network.requestWillBeSent`/`responseReceived`/`loadingFailed` with `canceled` and `blockedReason`,
+requested and started navigations, crashes, detaches), and the real-browser tests write Chrome's net log
+(`--log-net-log`) and print its page-load, cancellation and error events in a failed assertion. `Network.enable` sent
+while a `Page.navigate` is unanswered gets no answer within 10 s, so it is enabled once when the tab is attached, and
+the connection keeps only documents' network events. (2) The net log showed the "hermetic" test browser talking to the
+internet: Chrome for Testing 156 with `--disable-background-networking` still connected to www.google.com,
+accounts.google.com, update.googleapis.com and clients2.google.com. **Do:** give a test browser
+`--no-proxy-server` and `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1` (the rule also
+maps IP literals, so loopback must be excluded), and assert from the net log that it connected to loopback only, so
+"no real hosts" is checked rather than assumed.
+
+**Likeliest cause, now guarded:** Chrome's `Page.enable` reports a navigation of the tab that is still running as
+`Page.frameStartedNavigating` before its reply (Chromium's PageHandler::Enable, read 2026-10-28). A new tab's own first
+navigation (`about:blank` from `Target.createTarget`) can still be running on a loaded Windows runner when the first
+`Page.navigate` is sent. **Do:** note the navigation `Page.enable` reported, and let the first load wait (within the
+caller's timeout, on events, no sleep) until that navigation committed or stopped loading. Both drivers
+(paddock-chromium and Spotter's copy) now do this; the fake browser's `SlowStartPage` reproduces the abort.
+
 ## A local model over every item turns a background task into a machine hog (2026-10-28, Debrief)
 Debrief's background "Learning human names" ran the local model over up to 2,000 names after every import. It held about
 8 GB on the Mac and made a Windows PC sluggish for the whole run, for a result that rules, a names pack and the logs' own
@@ -586,10 +607,6 @@ helpers that left the tree (`taskkill /T` misses those); otherwise `cmd /c`'s an
 (nextest's "leaky"). A test of a timeout gives up on a condition (the tree is complete), never on a time budget.
 Reproduce with a delay knob in the fake (`spawn_delay_ms`), not by hoping for load.
 
-## 2026-10-28: Chromium tests that compared a loaded machine with a wall-clock budget
-
-Three `paddock-chromium` tests failed on CI runs of several branches and never on a quiet machine: (1) `a_real_browser_reads_a_page_and_closes_cleanly` and `a_cancelled_load_says_whether_it_was_a_download_or_replaced` asserted `Browser.close()`, whose 5 s grace (`CLOSE_GRACE`, the product's bound before it kills the tree) is a fine product choice but a time budget as a test assertion: a loaded runner let Chrome take longer (macOS 6662, Windows 6726, 13 s test); (2) `a_page_is_read_snapshot_by_snapshot` pushed a 16 MiB page (`MAX_HTML` + 1) through the fake browser in a debug build to see the size cap refuse it, which outlasted the 10 s call timeout on a macOS runner and gave `Timeout` instead of "larger". **Rule:** a test asserts the mechanism (the browser exits by itself and is not killed; the cap refuses a page one byte over it), never that it happened within a product timeout; give the code under test the cap as a parameter so a few bytes prove it; wait on the condition (`close_gracefully` returns the moment Chrome exits) with a hang guard that only stops a browser that never exits. A failing wait names what the thing it waited for reported (the load's own result), so the next failure carries its cause.
-
 ## Unrecorded benchmark conditions made 182k and 1.3M events/s look like a contradiction (2026-10-29)
 Two quoted ingest numbers, about 182k and 1.3M events/s, were argued over as if one was wrong. Neither came with machine,
 load, build profile, corpus or command, so nobody could tell whether they differed by a release build, a quiet machine, a
@@ -607,6 +624,26 @@ apps and the shared shell had it (ADR 0027 lists them); none showed with the moc
 actions) and an opaque background; C43 checks every instance and `expectHeaderOnTop` checks a grid at run time (ADR 0027,
 rule 40).
 
+
+## Stale servers and stale builds (e2e and screenshots, 2026-10-28)
+
+Three times in one night tests and screenshots ran against old code: (1) `reuseExistingServer: true` on fixed ports
+(4300 to 4302 and the apps' own) silently reused another worktree's or an old dev server, so the tests "passed on the old
+code"; (2) `ui/dist` and the generated, untracked `ui/projects/paddock-ui/css/*.css` were older than their sources, so
+screenshots showed old text and a reviewer reported a bug that existed only in stale CSS. **Rule:** one mechanism in `@decryp7/paddock-e2e`
+(ER-21, rule 42), not another warning. A running server is reused only with `PW_REUSE_SERVER=1` (default never, and
+never on CI; `reuseServer()`, `paddockConfig`); `e2ePort` derives the local default port from the worktree (`20000 +
+(hash(git top level) mod 160) * 100 +` the config's last two digits: disjoint blocks) and still refuses a default on CI
+(`e2ePortOrCiDefault` keeps the apps' fixed CI ports); and the config checks, at load and so before any server starts,
+that what it consumes of ui is built from the current sources. The build writes a content stamp (`css/.source-hash` by
+`npm run build:css`, `ui/dist/.source-hash` by `npm run build -w ui`); the check recomputes the hash of `scss/**` (and
+every file of the package for the dist, except tests, bin/ and the generated css) and fails with "rebuild ui: npm run build -w ui" on a mismatch, a missing stamp or
+a missing css entry. A content hash, not mtimes: unchanged rebuilds, checkouts and touches never false-fail. Which
+guard: `paddockConfig({ buildGuard: 'none' | 'ui' | 'ui-dist', uiRoot })`; an app's own config calls
+`appBuildGuard(__dirname, uiRoot)`, which picks `ui-dist` only when the app's tsconfig maps `@decryp7/paddock-ui` to
+`ui/dist` (today Spotter), else nothing. `PW_SKIP_BUILD_GUARD=1` skips it. The ui config checks the css only with `PW_REUSE_SERVER=1` (its webServers run `build:css` themselves). Dot-files (`.DS_Store`) are ignored; README and doc edits under `projects/paddock-ui` mark the dist stale on purpose (every non-test file counts). A direct `ng build paddock-ui` leaves `ui/dist` unstamped, so the guard fails: build with `npm run build -w ui`. Tests: `build-guard.test.ts`, `env.test.ts`
+(including every app config on a fresh checkout). Proposed binding rule (the user decides): every Playwright config
+uses these three, and `scripts/new-app.mjs` templates do.
 ## 2026-10-29: a harness that stands in for a plugin must stand in for its routing and its ACL
 
 The ADR 0026 real-window probe ended "no report within 90s: the dialog page never became ready" on macOS, and it looked like
@@ -630,3 +667,9 @@ the cell pushed the buttons past the clipped edge of the grid at 1280 px, out of
 holds all its buttons (a column as wide as the actions), and the row-actions e2e (every action must show its tooltip, whose
 text is its name, and the tooltip must overlap no other action) is the check; a tooltip on an icon-only button is never left
 to a per-button `matTooltip` inside a cluster.
+
+## Chromium tests compared a loaded machine with a product timeout (2026-10-28, paddock-chromium)
+
+Three `paddock-chromium` tests failed on CI runs of several branches and never on a quiet machine: (1) `a_real_browser_reads_a_page_and_closes_cleanly` and `a_cancelled_load_says_whether_it_was_a_download_or_replaced` asserted `Browser.close()`, whose 5 s grace (`CLOSE_GRACE`, the product's bound before it kills the tree) is a fine product choice but a time budget as a test assertion: a loaded runner let Chrome take longer (macOS 6662, Windows 6726, 13 s test); (2) `a_page_is_read_snapshot_by_snapshot` pushed a 16 MiB page (`MAX_HTML` + 1) through the fake browser in a debug build to see the size cap refuse it, which outlasted the 10 s call timeout on a macOS runner and gave `Timeout` instead of "larger". **Rule:** a test asserts the mechanism (the browser exits by itself and is not killed; the cap refuses a page one byte over it), never that it happened within a product timeout; give the code under test the cap as a parameter so a few bytes prove it; wait on the condition (`close_gracefully` returns the moment Chrome exits) with a hang guard that only stops a browser that never exits. A failing wait names what the thing it waited for reported (the load's own result), so the next failure carries its cause.
+
+This is the same lesson as "A turn budget in a test wait is a timeout in disguise" for assertions on a product's own grace period: wait on the condition, and let a generous hang guard (never an expectation) stop only a thing that never ends. A third cause was found in the same test by review: its server took one connection at a time with a blocking read, so an idle socket Chrome opened (a preconnect or backup connect) could hide the real request; each connection now has its thread and a failed wait prints what the server saw. C30 now flags a non-negated `assert!` over a bare `.close()` or `.close_gracefully(..)` (the calls that wait out a grace). Waive `close_gracefully` with `// conformance: hang-guard` and a grace of at least 10 s, or either call with `// conformance: grace-free — <why>` when the thing had ended already; a forced end (`assert!(!b.close_gracefully(Duration::ZERO))`) is not flagged.
