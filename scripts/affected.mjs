@@ -287,6 +287,9 @@ const OWNERS = [
 /** An app's `src-tauri/Cargo.toml` and `capabilities/`, which conformance C48 reads (the app itself is marked as their owner). */
 export const APP_CAPABILITY_INPUT = /^apps\/[^/]+\/(app\/)?src-tauri\/(Cargo\.toml|capabilities\/)/;
 
+/** The notices script and the shared cargo-about configuration (and the tool, conformance/src/notices/): inputs of every app with a `notices` block. */
+export const NOTICES_INPUTS = /^(scripts\/notices\.sh|templates\/repo\/about\.toml|conformance\/src\/notices\/.*)$/;
+
 /** Generated TypeScript and JSON of the shared crates, written by their tests (a `generated` folder under ui, `.ts` or `.json`). */
 export const GENERATED = /^ui\/.*\/generated\/[^/]+\.(ts|json)$/;
 
@@ -633,7 +636,16 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     // An app's Cargo dependencies and capabilities are read by conformance C48 (a shell app grants its dialog windows the
     // shell's dialog set), which runs in the conformance job.
     if (APP_CAPABILITY_INPUT.test(f)) mark('conformance', `C48 reads ${f}`);
-    // The rest of conformance/ (bin, src) runs in every app's gates through the shared actions.
+    // The notices tool and its cargo-about configuration decide the committed THIRD_PARTY_NOTICES.md of every app with a
+    // `notices` block (conformance/src/notices/** is covered by the rule below): they are inputs of those apps.
+    if (NOTICES_INPUTS.test(f)) {
+      for (const [a, cfg] of apps) {
+        if (!cfg.notices) continue;
+        mark(`app:${a}`, `notices tool ${f}`);
+        kind(`app:${a}`, 'all');
+      }
+    }
+    // The shared actions' scripts in conformance/ run in every app's gates.
     if (f.startsWith('conformance/') && !/^conformance\/(test|fixtures)\//.test(f)) {
       for (const a of apps.keys()) {
         mark(`app:${a}`, `conformance ${f}`);
@@ -718,6 +730,7 @@ export function matrix(plan, { cargo, apps }, { narrow = false, webkit = false }
         angular_dir: linux && app.angularDir ? posix.join(app.dir, app.angularDir) : '',
         last_packages: (app.lastPackages ?? []).join(' '),
         windows_clippy: app.windowsClippy ? 'true' : 'false',
+        notices: linux && app.notices && (rust || ui) ? 'true' : 'false',
         processes: (app.processes ?? []).join(' '),
         process_patterns: (app.processPatterns ?? []).join('\n'),
         test_browser_prefix: app.testBrowser?.envPrefix ?? '',
@@ -746,6 +759,7 @@ export function matrix(plan, { cargo, apps }, { narrow = false, webkit = false }
         rust: false,
         ui: false,
         display: 'false',
+        notices: 'false', // the main leg checks them once
         e2e_checks: app.e2e.join('\n'),
         e2e_shard: `${i}/${shards}`,
         e2e_leg: `e2e-${i}`,
@@ -753,7 +767,7 @@ export function matrix(plan, { cargo, apps }, { narrow = false, webkit = false }
     }
     // `e2eWebkit` (commands): the WebKit end-to-end tests, a leg of their own when the run asks for WebKit (see wantsWebkit).
     if (ui && webkit && app.e2eWebkit?.length) {
-      legs.push({ ...base, prepare: '', checks: '', ui_checks: '', rust: false, ui: false, display: 'false', e2e_checks: app.e2eWebkit.join('\n'), e2e_shard: '', e2e_leg: 'e2e-webkit' });
+      legs.push({ ...base, prepare: '', checks: '', ui_checks: '', rust: false, ui: false, display: 'false', notices: 'false', e2e_checks: app.e2eWebkit.join('\n'), e2e_shard: '', e2e_leg: 'e2e-webkit' });
     }
     return legs;
   });
