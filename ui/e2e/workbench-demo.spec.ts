@@ -262,12 +262,14 @@ test.describe('review 1 (X50)', () => {
     await wb.palette.run('Show problems');
     const table = page.locator('wd-problems-view pd-table');
     await expect(table.getByRole('columnheader', { name: /Problem/ })).toBeVisible();
+    // The table learns its width from a ResizeObserver: the first frame has the roomy columns, the next the folded ones, with
+    // the header cells drawn anew. Measure once the fold is in place (WebKit got a detached, 0-wide header before it).
+    await expect(table.locator('.where').first()).toBeVisible();
     const [tw, pw] = await Promise.all([
       table.evaluate((t) => t.getBoundingClientRect().width),
       table.getByRole('columnheader', { name: /Problem/ }).evaluate((h) => h.getBoundingClientRect().width),
     ]);
     expect(pw / tw).toBeGreaterThanOrEqual(0.6);
-    await expect(table.locator('.where').first()).toBeVisible();
     // Review 2 P1-A: folded rows grow; no cell overflows, the second line clears the row's bottom border by 4 px.
     const overflow = await table.locator('[role=row].pd-row').evaluateAll((rows) =>
       rows.flatMap((r) => {
