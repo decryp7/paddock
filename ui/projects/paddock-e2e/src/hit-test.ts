@@ -62,6 +62,8 @@ export interface CoveredElement {
   readonly coveredBy: string;
   /** When it was seen: `rest`, or the scroller and its position. */
   readonly at: string;
+  /** The viewport point where the cover was found (`x,y`). */
+  readonly point: string;
 }
 
 /** The selector list of the built-in candidates (exported for the unit tests and the docs). */
@@ -80,6 +82,9 @@ export const INTERACTIVE_SELECTOR = [
   '[role="checkbox"]',
   '[role="switch"]',
   '[role="slider"]',
+  '[role="radio"]',
+  '[role="link"]',
+  '[role="treeitem"]',
   '[tabindex]',
 ].join(', ');
 
@@ -88,7 +93,7 @@ export function formatCovered(found: readonly CoveredElement[]): string {
   if (found.length === 0) return 'nothing covers an interactive element';
   return [
     `${found.length} interactive element${found.length === 1 ? ' is' : 's are'} covered:`,
-    ...found.map((f) => `  - ${f.name ? `"${f.name}" ` : ''}${f.selector} is covered by ${f.coveredBy} (${f.at})`),
+    ...found.map((f) => `  - ${f.name ? `"${f.name}" ` : ''}${f.selector} is covered by ${f.coveredBy} at ${f.point} (${f.at})`),
   ].join('\n');
 }
 
@@ -102,8 +107,20 @@ export async function coveredInteractive(root: Locator, opts: HitTestOptions = {
   const pageScroll = await page.evaluate(() => [window.scrollX, window.scrollY] as const);
   try {
     await root.first().scrollIntoViewIfNeeded();
-    // The pointer rests away from the page, so no hover state (a tooltip, a row action) is open while probing.
-    await page.mouse.move(0, 0);
+    // The pointer rests where it is over no candidate, so no hover state (a tooltip, a row action) is open while probing.
+    const rest = await root.first().evaluate((rootEl, sel) => {
+      for (const fy of [0.97, 0.5, 0.03, 0.75, 0.25]) {
+        for (const fx of [0.97, 0.03, 0.5, 0.75, 0.25]) {
+          const x = Math.round(innerWidth * fx);
+          const y = Math.round(innerHeight * fy);
+          const hit = document.elementFromPoint(x, y);
+          // Over no candidate and nothing that opens a tooltip or hover card.
+          if (hit && !hit.closest(sel) && !hit.closest('[tabindex], [title], [aria-describedby], [mattooltip], .mat-mdc-tooltip-trigger')) return [x, y] as const;
+        }
+      }
+      return [0, 0] as const;
+    }, INTERACTIVE_SELECTOR);
+    await page.mouse.move(rest[0], rest[1]);
     // One page function does all of it (the page's CSP forbids passing code in as text).
     return await root.first().evaluate(
       async (rootEl, { selector, extra, allow, overlays, owners, scroll, scrollers }) => {
@@ -119,7 +136,7 @@ export async function coveredInteractive(root: Locator, opts: HitTestOptions = {
         };
         const jump = (e: Element, top: number, left: number) => e.scrollTo({ top, left, behavior: 'instant' });
         const seen = new Set<string>();
-        const found: { name: string; selector: string; coveredBy: string; at: string }[] = [];
+        const found: { name: string; selector: string; coveredBy: string; at: string; point: string }[] = [];
         const saved: { el: Element; top: number; left: number }[] = [];
         try {
           const describe = (e: Element) => {
@@ -134,11 +151,13 @@ export async function coveredInteractive(root: Locator, opts: HitTestOptions = {
             const text = [e.getAttribute('aria-label'), e.getAttribute('title'), (e as HTMLInputElement).value, e.getAttribute('placeholder'), e.textContent].find((t) => t && t.trim()) ?? '';
             return String(text).replace(/\s+/g, ' ').trim().slice(0, 40);
           };
-          // Built-in controls and role elements are always candidates (a roving tabindex of -1 is still a control); a bare
-          // `[tabindex]` element is one only as a tab stop (tabindex >= 0).
+          // Built-in controls and the interactive roles are always candidates (a roving tabindex of -1 is still a control);
+          // any other `[tabindex]` element (a landmark, a tabpanel) is one only as a tab stop (tabindex >= 0).
+          const INTERACTIVE_ROLE = /^(option|tab|menuitem|menuitemcheckbox|menuitemradio|treeitem|gridcell|radio|checkbox|switch|button|link|slider)$/;
           const isCandidate = (e: Element) => {
             const t = e.getAttribute('tabindex');
-            if (e.matches('button, a[href], input, select, textarea, [role]') || t === null) return true;
+            if (e.matches('button, a[href], input, select, textarea') || t === null) return true;
+            if (INTERACTIVE_ROLE.test(e.getAttribute('role') ?? '')) return true;
             const n = Number.parseInt(t, 10);
             return Number.isFinite(n) && n >= 0;
           };
@@ -157,10 +176,12 @@ export async function coveredInteractive(root: Locator, opts: HitTestOptions = {
               if (skipTo && cur !== skipTo) continue;
               skipTo = null;
               const cs = getComputedStyle(cur);
-              if (cur !== e && (cs.overflowX !== 'visible' || cs.overflowY !== 'visible')) {
+              if (cur !== e) {
                 const c = cur.getBoundingClientRect();
                 if (cs.overflowX !== 'visible') [l, rt] = [Math.max(l, c.left + cur.clientLeft), Math.min(rt, c.left + cur.clientLeft + cur.clientWidth)];
                 if (cs.overflowY !== 'visible') [t, b] = [Math.max(t, c.top + cur.clientTop), Math.min(b, c.top + cur.clientTop + cur.clientHeight)];
+                // `contain: paint` (also in `strict` and `content`) and `clip-path` clip like overflow: to the box (clip-path: its box).
+                if (/paint|strict|content/.test(cs.contain) || cs.clipPath !== 'none') [l, t, rt, b] = [Math.max(l, c.left), Math.max(t, c.top), Math.min(rt, c.right), Math.min(b, c.bottom)];
               }
               if (cs.position === 'fixed') break;
               if (cs.position === 'absolute') skipTo = (cur as HTMLElement).offsetParent ?? document.documentElement;
@@ -197,11 +218,12 @@ export async function coveredInteractive(root: Locator, opts: HitTestOptions = {
             return inert;
           };
           const clear = (c: string) => c === 'transparent' || c === '' || /,\s*0\)$/.test(c) || /\/\s*0(%|\.0+)?\s*\)$/.test(c);
-          const REPLACED = /^(img|svg|canvas|video|picture|object|embed|iframe|input|textarea|select|button|audio|meter|progress)$/;
+          const REPLACED = /^(img|canvas|video|picture|object|embed|iframe|input|textarea|select|button|audio|meter|progress)$/;
           /** Whether the element paints anything of its own (background, border, shadow, outline, filters, text, replaced content, a drawn pseudo-element). */
           const paints = (el: Element) => {
             const cs = getComputedStyle(el);
-            if (REPLACED.test(el.tagName.toLowerCase())) return true;
+            // An SVG shape the stack returned is painted fill or stroke (the pointer rule of `auto` is visiblePainted); the svg root itself paints nothing.
+            if (REPLACED.test(el.tagName.toLowerCase()) || el instanceof SVGGeometryElement || el instanceof SVGTextContentElement || el instanceof SVGImageElement) return true;
             if (!clear(cs.backgroundColor) || cs.backgroundImage !== 'none') return true;
             if (['Top', 'Right', 'Bottom', 'Left'].some((side) => Number.parseFloat(cs.getPropertyValue(`border-${side.toLowerCase()}-width`)) > 0 && !['none', 'hidden'].includes(cs.getPropertyValue(`border-${side.toLowerCase()}-style`)))) return true;
             if (cs.boxShadow !== 'none' || cs.filter !== 'none' || (cs.backdropFilter && cs.backdropFilter !== 'none')) return true;
@@ -230,10 +252,10 @@ export async function coveredInteractive(root: Locator, opts: HitTestOptions = {
             }
             return true;
           };
-          /** A sticky element of a scroller the target scrolls in, which has scrolled, and that does not contain the target: a header over scrolled rows. */
+          /** A sticky element of a scroller the target scrolls in, which has scrolled: a header over scrolled rows (a target inside a sticky element does not scroll in it). */
           const stickyOverScrolled = (layer: Element, e: Element) => {
             for (let s: Element | null = layer; s && s !== document.documentElement; s = s.parentElement) {
-              if (getComputedStyle(s).position !== 'sticky' || s.contains(e)) continue;
+              if (getComputedStyle(s).position !== 'sticky') continue; // (a sticky ancestor of the target is caught by scrollsIn)
               const p = scrollerOf(s);
               if (p !== doc && !p.contains(e)) continue;
               if (!(p.scrollTop > 0 || p.scrollLeft > 0)) continue;
@@ -257,9 +279,14 @@ export async function coveredInteractive(root: Locator, opts: HitTestOptions = {
           /** What sits on top of the target at a point: the first layer above it that is not a designed or empty one, or null. */
           const coverAt = (x: number, y: number, e: Element): Element | null => {
             const labels = (e as HTMLInputElement).labels ? [...(e as HTMLInputElement).labels!] : [];
-            for (const layer of document.elementsFromPoint(x, y)) {
-              // The target, its content, a rounded corner that lands on an ancestor, or its own label element: the point reaches it.
-              if (layer === e || e.contains(layer) || layer.contains(e) || labels.includes(layer as HTMLLabelElement)) return null;
+            const stack = document.elementsFromPoint(x, y);
+            // An ancestor reaches the target (a rounded corner) only when the target is not further down this stack: when it is,
+            // the ancestor (or its ::before/::after scrim) paints over it.
+            const targetDown = stack.some((l) => l === e || e.contains(l));
+            for (const layer of stack) {
+              // The target, its content or its own label element: the point reaches it.
+              if (layer === e || e.contains(layer) || labels.includes(layer as HTMLLabelElement)) return null;
+              if (layer.contains(e) && !targetDown) return null;
               if (skippable(layer, e)) continue;
               return layer;
             }
@@ -278,15 +305,20 @@ export async function coveredInteractive(root: Locator, opts: HitTestOptions = {
               const r = e.getBoundingClientRect();
               if (r.width <= 1 || r.height <= 1) continue; // visually hidden (a 1 px native input) or empty
               const v = visible(e);
-              if (v.w < 2 || v.h < 2) continue; // fully clipped by a scroller or the window
+              // Fully clipped by a scroller or the window, or only a sliver shows (under 6 px a point lands on the neighbour's pixel).
+              if (v.w < 6 || v.h < 6) continue;
               // The centre or any other sample point under a cover that is not allowed fails the element.
               let cover: Element | null = null;
+              let point = '';
               for (const [x, y] of samplePoints(e, v)) {
                 cover = coverAt(x, y, e);
-                if (cover) break;
+                if (cover) {
+                  point = `${Math.round(x)},${Math.round(y)}`;
+                  break;
+                }
               }
               if (!cover) continue;
-              const f = { name: nameOf(e), selector: describe(e), coveredBy: describe(cover), at };
+              const f = { name: nameOf(e), selector: describe(e), coveredBy: describe(cover), at, point };
               const key = `${index}|${f.selector}|${f.coveredBy}`;
               if (seen.has(key)) continue;
               seen.add(key);

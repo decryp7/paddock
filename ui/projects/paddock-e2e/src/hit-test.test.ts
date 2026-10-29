@@ -8,13 +8,13 @@ test('an empty list reads as the passing state', () => {
 
 test('each finding gets a line naming the element, its cover and where it was seen', () => {
   const text = formatCovered([
-    { name: 'Save', selector: 'button.btn', coveredBy: 'div.tip', at: 'rest' },
-    { name: '', selector: 'a', coveredBy: 'span', at: 'div.scroll scrolled to 40/0' },
+    { name: 'Save', selector: 'button.btn', coveredBy: 'div.tip', at: 'rest', point: '12,34' },
+    { name: '', selector: 'a', coveredBy: 'span', at: 'div.scroll scrolled to 40/0', point: '5,6' },
   ]);
   assert.match(text, /^2 interactive elements are covered:/);
-  assert.match(text, /- "Save" button\.btn is covered by div\.tip \(rest\)/);
-  assert.match(text, /- a is covered by span \(div\.scroll scrolled to 40\/0\)/);
-  assert.match(formatCovered([{ name: 'x', selector: 'b', coveredBy: 'c', at: 'rest' }]), /^1 interactive element is covered:/);
+  assert.match(text, /- "Save" button\.btn is covered by div\.tip at 12,34 \(rest\)/);
+  assert.match(text, /- a is covered by span at 5,6 \(div\.scroll scrolled to 40\/0\)/);
+  assert.match(formatCovered([{ name: 'x', selector: 'b', coveredBy: 'c', at: 'rest', point: '1,2' }]), /^1 interactive element is covered:/);
 });
 
 test('the candidate list names every interactive role of the brief', () => {

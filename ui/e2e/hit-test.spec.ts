@@ -180,9 +180,108 @@ test('a label: the label element over its input passes (a custom checkbox), a po
   expect(await coveredInteractive(page.locator('label'))).toMatchObject([{ selector: 'input#n', coveredBy: 'span.pop' }]);
 });
 
-test('a rounded corner that lands on the ancestor still reaches the button', async ({ page }) => {
-  await page.setContent(`<style>body{margin:0}</style><div id="p" style="position:absolute;left:0;top:0;width:200px;height:80px;background:#ddd"><button style="position:absolute;left:20px;top:20px;width:100px;height:40px;border-radius:20px">Pill</button></div>`);
+test('a non-rectangular button (an ellipse) whose corner points land on the ancestor still reaches it', async ({ page }) => {
+  // 50 % is not a pixel radius, so no corner inset applies: only "an ancestor reaches the target" can pass this.
+  await page.setContent(`<style>body{margin:0}</style><div id="p" style="position:absolute;left:0;top:0;width:200px;height:80px;background:#ddd"><button style="position:absolute;left:20px;top:20px;width:100px;height:40px;border-radius:50%">Oval</button></div>`);
   await expectNothingCovers(page.locator('#p'));
+});
+
+test('a pill button over a decoration at its corner: the inset keeps the points on the shape', async ({ page }) => {
+  // The decoration sits behind the button's rounded corner (a sibling, not an ancestor): without the inset the corner
+  // point would see it and report a cover.
+  await page.setContent(`<style>body{margin:0}</style><div id="p" style="position:absolute;left:0;top:0;width:200px;height:80px">
+    <div class="deco" style="position:absolute;left:20px;top:20px;width:100px;height:40px;background:#ccc"></div>
+    <button style="position:absolute;left:20px;top:20px;width:100px;height:40px;border-radius:20px;border:0;background:#09f">Pill</button></div>`);
+  await expectNothingCovers(page.locator('#p'));
+});
+
+test('(N1) an ancestor ::after scrim over its own child button is caught', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0} .panel{position:relative;width:300px;height:100px} .panel.busy::after{content:'';position:absolute;inset:0;background:rgba(0,0,0,.6);z-index:5}</style><div class="panel busy">${BTN}</div>`);
+  expect(await coveredInteractive(page.locator('body'))).toMatchObject([{ name: 'Save', coveredBy: 'div.panel.busy' }]);
+});
+
+test('(N2) a child button under its parent background (z-index -1) is caught', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0}</style><div style="position:relative;width:300px;height:100px;background:#888"><button style="position:absolute;left:10px;top:10px;width:80px;height:30px;z-index:-1">Under</button></div>`);
+  expect(names(await coveredInteractive(page.locator('body')))).toContain('Under');
+});
+
+test('(N3) a Material focus layer of button B that overflows onto button A is a cover; B owns it only over B', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0}</style>${BTN}<button id="b" style="position:absolute;left:95px;top:10px;width:40px;height:30px">B<span class="mat-focus-indicator" style="position:absolute;left:-40px;top:0;width:80px;height:30px;background:rgba(0,0,255,.4);pointer-events:none"></span></button>`);
+  expect(names(await coveredInteractive(page.locator('body')))).toEqual(['Save']);
+});
+
+test('(N4) a label over its custom checkbox passes', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0}</style><div id="w" style="position:relative"><input id="c" type="checkbox" style="position:absolute;left:0;top:0;width:20px;height:20px;margin:0"><label for="c" style="position:absolute;left:0;top:0;width:20px;height:20px;background:#ccc;display:block"></label></div>`);
+  expect(await coveredInteractive(page.locator('#w'))).toEqual([]);
+});
+
+test('(N5) a cover that is fading out when the probe starts is gone before the probe', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0}</style>${BTN}<div id="fade" style="position:absolute;left:0;top:0;width:120px;height:60px;background:#333"></div>`);
+  await page.evaluate(() => {
+    const d = document.getElementById('fade')!;
+    d.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, fill: 'forwards' }).finished.then(() => d.remove());
+  });
+  expect(await coveredInteractive(page.locator('body'))).toEqual([]);
+});
+
+test('(N6) the pointer is moved off a hover trigger, so its tooltip is not probed', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0} #t{position:absolute;left:10px;top:60px} #t:hover + .tip{display:block} .tip{display:none;position:absolute;left:0;top:0;width:200px;height:55px;background:#333}</style>${BTN}<button id="t">Hover me</button><div class="tip"></div>`);
+  await page.hover('#t');
+  expect(await coveredInteractive(page.locator('body'))).toEqual([]);
+});
+
+test('nested scrollers: leaving the outer one at its end would hide the inner one, so each is restored before the next', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0}</style><div id="outer" style="height:120px;width:340px;overflow:auto"><div style="height:700px">
+    <div id="inner" style="position:relative;height:100px;width:300px;overflow:auto"><div style="height:600px;position:relative">
+      <button style="position:absolute;left:10px;top:400px;width:80px;height:30px">Inner</button><div class="late" style="position:absolute;left:0;top:390px;width:120px;height:60px;background:#333"></div></div></div></div></div>`);
+  expect(await coveredInteractive(page.locator('#outer'), { scroll: false })).toEqual([]);
+  expect(names(await coveredInteractive(page.locator('#outer')))).toEqual(['Inner']);
+});
+
+test('a probe that fails after scrolling still puts the scroller back', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0}</style><div id="g" style="height:100px;width:300px;overflow:auto"><div style="height:600px">${Array.from({ length: 20 }, (_, i) => `<button style="display:block;height:30px">B${i}</button>`).join("")}</div></div>`);
+  // The first scroll breaks the next hit test, so the probe throws between scroll positions.
+  await page.evaluate(() => document.getElementById('g')!.addEventListener('scroll', () => { document.elementsFromPoint = () => { throw new Error('boom'); }; }, { once: true }));
+  await expect(coveredInteractive(page.locator('#g'))).rejects.toThrow(/boom/);
+  expect(await page.locator('#g').evaluate((e) => e.scrollTop)).toBe(0);
+  expect(await page.locator('style[data-pd-hit-test]').count()).toBe(0);
+});
+
+test('a sticky header that holds the button does not excuse a panel inside it that covers the button', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0}</style><div id="g" style="height:150px;width:300px;overflow:auto"><div style="position:sticky;top:0;height:50px;background:#eee;z-index:2">
+    <button style="position:absolute;left:10px;top:10px;width:80px;height:30px">Head</button><div class="panel" style="position:absolute;left:0;top:0;width:120px;height:50px;background:#333"></div></div><div style="height:600px"></div></div>`);
+  expect(names(await coveredInteractive(page.locator('#g'), { scroll: false }))).toContain('Head');
+  expect(names(await coveredInteractive(page.locator('#g')))).toContain('Head');
+});
+
+test('a button of which only a sliver shows in its scroller is skipped', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0}</style><div id="g" style="height:100px;width:300px;overflow:auto"><div style="height:400px"><button style="margin-top:-27px;height:30px;display:block">Edge</button><div class="next" style="position:absolute;top:2px;left:0;width:100px;height:30px;background:#333"></div></div></div>`);
+  await page.locator('#g').evaluate((e) => e.scrollTo({ top: 0 }));
+  expect(await coveredInteractive(page.locator('#g'), { scroll: false })).toEqual([]);
+});
+
+test('an inert svg root covers nothing, an inert svg shape that paints does', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0}</style>${BTN}<svg style="position:absolute;left:0;top:0;width:120px;height:60px;pointer-events:none" viewBox="0 0 120 60"><title>x</title></svg>`);
+  await expectNothingCovers(page.locator('body'));
+  await page.setContent(`<style>body{margin:0}</style>${BTN}<svg class="density" style="position:absolute;left:0;top:0;width:120px;height:60px;pointer-events:none" viewBox="0 0 120 60"><path d="M0 0H120V60H0Z" fill="rgba(0,0,0,.2)"/></svg>`);
+  expect(await coveredInteractive(page.locator('body'))).toMatchObject([{ name: 'Save', coveredBy: 'path' }]);
+  await expectNothingCovers(page.locator('body'), { allow: [['svg.density', '#a']] });
+});
+
+test('a negative tabindex counts for interactive roles only', async ({ page }) => {
+  const cover = '<div style="position:absolute;left:0;top:0;width:120px;height:60px;background:#333"></div>';
+  await page.setContent(`<style>body{margin:0}</style><div role="option" tabindex="-1" style="position:absolute;left:10px;top:10px;width:80px;height:30px">Opt</div>${cover}`);
+  expect(names(await coveredInteractive(page.locator('body')))).toEqual(['Opt']);
+  await page.setContent(`<style>body{margin:0}</style><div role="tabpanel" tabindex="-1" style="position:absolute;left:10px;top:10px;width:80px;height:30px">Panel</div><main tabindex="-1" style="position:absolute;left:10px;top:10px;width:80px;height:30px">Main</main>${cover}`);
+  expect(await coveredInteractive(page.locator('body'))).toEqual([]);
+});
+
+test('an ancestor that clips with contain: paint or clip-path hides the part of the button it cuts away', async ({ page }) => {
+  for (const clip of ['contain:paint', 'clip-path:inset(0 0 0 0)']) {
+    await page.setContent(`<style>body{margin:0}</style><div id="c" style="position:absolute;left:0;top:0;width:60px;height:60px;${clip}"><button style="position:absolute;left:5px;top:10px;width:200px;height:30px">Wide</button></div>
+      <div class="behind" style="position:absolute;left:100px;top:0;width:100px;height:60px;background:#333"></div>`);
+    expect(await coveredInteractive(page.locator('#c')), clip).toEqual([]);
+  }
 });
 
 test('five identical covered buttons are five findings', async ({ page }) => {
