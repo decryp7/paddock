@@ -33,7 +33,7 @@ async function prepare(page: Page, theme: 'dark' | 'light', mock = 'macos'): Pro
   void mock;
 }
 
-const SCREENS: { name: string; path: string; mock?: string; query?: string; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } }[] = [
+const SCREENS: { name: string; path: string; mock?: string; query?: string; latency?: number; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } }[] = [
   {
     name: 'dashboard',
     path: '/#/',
@@ -96,14 +96,14 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/network',
     ready: async (page) => {
       await page.getByRole('radio', { name: 'Listening' }).click();
-      await expect(page.getByRole('grid', { name: 'Listening ports' })).toBeVisible();
+      await expect(page.getByRole('treegrid', { name: 'Listening ports' })).toBeVisible();
     },
   },
   {
     name: 'network-connections',
     path: '/#/network',
     ready: async (page) => {
-      await expect(page.getByRole('grid', { name: 'Connections' })).toBeVisible();
+      await expect(page.getByRole('treegrid', { name: 'Connections' })).toBeVisible();
       await page.getByRole('row', { name: /142.250.74.46/ }).click();
       await expect(page.getByRole('complementary', { name: 'Details' })).toBeVisible();
     },
@@ -377,6 +377,52 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
   },
   { name: 'reports', path: '/#/reports', size: { width: 1440, height: 1100 }, ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Reports', exact: true })).toBeVisible()) },
   {
+    name: 'disk-map',
+    path: '/#/disk-map',
+    ready: async (page) => {
+      await page.getByRole('button', { name: 'Scan Macintosh HD' }).click();
+      await expect(page.getByRole('button', { name: 'Rescan Macintosh HD' })).toBeVisible();
+      await expect(page.getByRole('tree', { name: 'Disk usage of Macintosh HD' })).toBeVisible();
+      await page.mouse.move(2, 2);
+      await page.clock.runFor(1_000);
+    },
+  },
+  {
+    name: 'disk-map-table',
+    path: '/#/disk-map',
+    ready: async (page) => {
+      await page.getByRole('button', { name: 'Scan Macintosh HD' }).click();
+      await expect(page.getByRole('button', { name: 'Rescan Macintosh HD' })).toBeVisible();
+      await page.getByRole('radio', { name: 'Table' }).click();
+      await expect(page.getByRole('table', { name: /Contents of Macintosh HD/ })).toBeVisible();
+      await page.mouse.move(2, 2);
+      await page.clock.runFor(1_000);
+    },
+  },
+  {
+    name: 'command-palette',
+    path: '/#/',
+    ready: async (page) => {
+      await page.keyboard.press('ControlOrMeta+p');
+      await expect(page.getByRole('combobox', { name: /Type a command/ })).toBeFocused();
+      await page.clock.runFor(500);
+      await expect(page.getByRole('option').first()).toBeVisible();
+    },
+  },
+  {
+    name: 'jobs',
+    path: '/#/issues',
+    latency: 4_000,
+    ready: async (page) => {
+      await page.getByRole('button', { name: 'Read the system logs now' }).click();
+      await page.clock.runFor(1_500);
+      await page.getByRole('button', { name: /^Jobs/ }).click();
+      await expect(page.getByRole('region', { name: 'Jobs' }).getByRole('listitem').first()).toBeVisible();
+      await page.mouse.move(2, 2);
+      await page.clock.runFor(200);
+    },
+  },
+  {
     name: 'tray',
     path: '/#/tray',
     size: { width: 440, height: 660 },
@@ -391,7 +437,7 @@ for (const theme of ['dark', 'light'] as const) {
     test(`${screen.name} (${theme})`, async ({ page }) => {
       if (screen.size) await page.setViewportSize(screen.size);
       await prepare(page, theme);
-      await page.goto(`${screen.path.replace('/#/', `/?latency=0&chrome=macos${screen.mock ? `&mock=${screen.mock}` : ''}${screen.query ?? ''}#/`)}`);
+      await page.goto(`${screen.path.replace('/#/', `/?latency=${screen.latency ?? 0}&chrome=macos${screen.mock ? `&mock=${screen.mock}` : ''}${screen.query ?? ''}#/`)}`);
       await expect(page.locator('pd-shell-frame, dy-tray').first()).toBeVisible();
       await page.clock.runFor(45_000);
       await screen.ready(page);
