@@ -662,3 +662,45 @@ fn a_backup_check_cancelled_before_it_waits_for_the_running_one_returns_cancelle
     scheduled.join().unwrap();
     assert!(!s.extras.backup_report().checking, "checking came down");
 }
+
+#[test]
+fn a_rescan_that_loses_the_race_to_the_scheduled_read_waits_for_it_instead_of_answering_at_once() {
+    let gate = Arc::new(Gate::default());
+    let h = Harness::start(slow_issues(&gate));
+    let shared = h.shared();
+    let scheduled: Arc<Mutex<Option<std::thread::JoinHandle<()>>>> = Arc::default();
+    let (s, g, sched) = (shared.clone(), gate.clone(), scheduled.clone());
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let ctx = cancelled_job_open();
+        // The scheduled read starts after the first look found none running and before this rescan claimed it.
+        let out = s.issues.scan_with(&s, Some(&ctx), &|| {
+            let s2 = s.clone();
+            *sched.lock().unwrap() = Some(std::thread::spawn(move || {
+                let _ = s2.issues.scan(&s2, None);
+            }));
+            g.wait_for_callers(1);
+        });
+        let _ = tx.send(out.map_err(|e| e.to_string()));
+    });
+    assert!(
+        rx.recv_timeout(Duration::from_millis(400)).is_err(),
+        "the rescan answered while the scheduled read was still running"
+    );
+    gate.open();
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        Ok(false),
+        "and answers once that read has ended"
+    );
+    scheduled.lock().unwrap().take().unwrap().join().unwrap();
+}
+
+/// A job that is not cancelled.
+fn cancelled_job_open() -> paddock_jobs::JobContext {
+    struct Quiet;
+    impl paddock_jobs::EventSink for Quiet {
+        fn emit(&self, _: &paddock_jobs::JobSnapshot) {}
+    }
+    paddock_jobs::JobRegistry::new(Arc::new(Quiet)).register("rescan-issues", "Reading system logs", None)
+}

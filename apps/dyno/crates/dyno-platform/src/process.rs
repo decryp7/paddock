@@ -93,6 +93,50 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<Output, P
     })
 }
 
+/// The pid of a running tool that Cancel and the timeout may signal, until the tool has been reaped. Both take the lock; so does
+/// the reaping, which releases the pid under it: a signal either reaches the live tool or finds nothing.
+struct TreeGuard {
+    pid: std::sync::Mutex<Option<u32>>,
+    end: fn(u32),
+}
+
+impl TreeGuard {
+    fn new(pid: Option<u32>, end: fn(u32)) -> Result<TreeGuard, PlatformError> {
+        match pid {
+            Some(p) if p != 0 => Ok(TreeGuard {
+                pid: std::sync::Mutex::new(Some(p)),
+                end,
+            }),
+            _ => Err(PlatformError::Failed(
+                "Dyno could not tell which process it started, so it did not run the tool.".into(),
+            )),
+        }
+    }
+
+    /// Ends the tool's tree if it has not been reaped.
+    fn kill(&self) {
+        if let Some(p) = *self.pid.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
+            (self.end)(p);
+        }
+    }
+
+    /// The tool has been reaped: no signal may reach the pid any more (tests; the runner releases it in `reap_when_ended`).
+    #[cfg(test)]
+    fn reaped(&self) {
+        *self.pid.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
+    /// Reaps the tool if it has ended, under the lock, and releases the pid with it; false while it still runs.
+    fn reap_when_ended(&self, tool: &mut paddock_proc::Supervised) -> bool {
+        let mut pid = self.pid.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if tool.is_running() {
+            return false;
+        }
+        *pid = None;
+        true
+    }
+}
+
 /// Runs `cmd` with stdout read line by line as it arrives: `on_line` sees every line (the caller counts what it parses, so
 /// progress grows while the tool works). The child is killed after `timeout` and at once when `control` is cancelled; the call
 /// then returns [`PlatformError::Failed`] ("stopped") and the caller, who knows it cancelled, drops the result. A non-zero exit
@@ -113,21 +157,28 @@ pub fn run_streaming(
         std::io::ErrorKind::PermissionDenied => PlatformError::AccessDenied(format!("Not allowed to run {program}.")),
         _ => PlatformError::Failed(format!("Could not run {program}: {e}")),
     })?;
-    let pid = tool.id().unwrap_or(0);
+    // Never a guess: pid 0 would signal our own process group. A child with no id is ended and reported.
+    let guard = match TreeGuard::new(tool.id(), paddock_proc::kill_tree) {
+        Ok(g) => std::sync::Arc::new(g),
+        Err(e) => {
+            tool.kill();
+            return Err(e);
+        }
+    };
     let stdout = tool.take_stdout();
     let err = drain(tool.take_stderr());
     let timed_out = std::sync::Arc::new(AtomicBool::new(false));
     // Cancel ends the tree at once: the read below sees the end of the stream and returns, it does not wait for a line.
-    let kill = move || paddock_proc::kill_tree(pid);
-    let _on_cancel = control.on_cancel(Box::new(kill));
+    let g = guard.clone();
+    let _on_cancel = control.on_cancel(Box::new(move || g.kill()));
     // The timeout is a watcher that ends when the read does.
     let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
     let watcher = {
-        let timed_out = timed_out.clone();
+        let (timed_out, guard) = (timed_out.clone(), guard.clone());
         std::thread::spawn(move || {
             if done_rx.recv_timeout(timeout) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
                 timed_out.store(true, Ordering::SeqCst);
-                paddock_proc::kill_tree(pid);
+                guard.kill();
             }
         })
     };
@@ -165,6 +216,14 @@ pub fn run_streaming(
                 }
             }
         }
+    }
+    // Reap the tool under the guard's lock: a Cancel or a timeout that comes later finds the pid released and signals nothing (the
+    // id may belong to another process by then).
+    loop {
+        if guard.reap_when_ended(&mut tool) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
     }
     let status = tool.wait();
     let _ = done_tx.send(());
@@ -338,22 +397,18 @@ pub(crate) mod tests {
     #[cfg(unix)]
     #[test]
     fn cancel_ends_the_whole_tree_of_a_streamed_tool_not_just_its_first_process() {
-        let dir = tempfile::tempdir().unwrap();
-        let pidfile = dir.path().join("grandchild.pid");
-        let script = format!("sleep 30 & echo $! > '{}'; echo first; wait", pidfile.display());
-        let hand = std::sync::Arc::new(Hand::default());
-        let h = hand.clone();
-        let file = pidfile.clone();
-        let canceller = std::thread::spawn(move || {
-            while !file.exists() {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            h.cancel();
-        });
-        let err = run_streaming(shell(&script), Duration::from_secs(60), hand.as_ref(), |_| {}).unwrap_err();
-        canceller.join().unwrap();
+        // The tool says the pid of its helper as its first line; Cancel comes when that line has been handed over.
+        let hand = Hand::default();
+        let mut helper: Option<u32> = None;
+        let started = Instant::now();
+        let err = run_streaming(shell("sleep 30 & echo $!; wait"), Duration::from_secs(60), &hand, |line| {
+            helper = line.trim().parse().ok();
+            hand.cancel();
+        })
+        .unwrap_err();
         assert!(matches!(&err, PlatformError::Failed(m) if m.contains("stopped")), "{err:?}");
-        let pid: u32 = std::fs::read_to_string(&pidfile).unwrap().trim().parse().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let pid = helper.expect("the first line was the helper's pid");
         for _ in 0..200 {
             if !paddock_proc::is_alive(pid) {
                 return;
@@ -361,5 +416,40 @@ pub(crate) mod tests {
             std::thread::sleep(Duration::from_millis(25));
         }
         panic!("the tool's helper process {pid} is still running after Cancel");
+    }
+
+    static KILLED: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+    fn record(pid: u32) {
+        KILLED.lock().unwrap().push(pid);
+    }
+
+    #[test]
+    fn a_missing_or_zero_pid_is_an_error_never_a_signal_to_our_own_process_group() {
+        assert!(matches!(TreeGuard::new(None, record), Err(PlatformError::Failed(_))));
+        assert!(
+            matches!(TreeGuard::new(Some(0), record), Err(PlatformError::Failed(_))),
+            "pid 0 is every process of our own group"
+        );
+        assert!(TreeGuard::new(Some(4242), record).is_ok());
+    }
+
+    #[test]
+    fn a_cancel_after_the_tool_was_reaped_signals_nothing_because_the_pid_may_belong_to_someone_else_by_then() {
+        let before = KILLED.lock().unwrap().len();
+        let guard = TreeGuard::new(Some(777_001), record).unwrap();
+        guard.kill();
+        assert_eq!(
+            KILLED.lock().unwrap()[before..],
+            [777_001],
+            "while the tool lives, Cancel reaches it"
+        );
+        guard.reaped();
+        guard.kill();
+        guard.kill();
+        assert_eq!(
+            KILLED.lock().unwrap().len(),
+            before + 1,
+            "after it was reaped, nothing is signalled"
+        );
     }
 }

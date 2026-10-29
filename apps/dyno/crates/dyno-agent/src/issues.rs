@@ -68,34 +68,50 @@ impl IssueCentre {
     /// repeated and not answered with the old state: this returns `false` once that read has ended, `true` after its own read.
     /// Without a job and with a read running it returns `false` at once.
     pub fn scan(&self, shared: &Shared, job: Option<&JobContext>) -> Result<bool, JobError> {
-        // A read is already running: wait for it (a job) or leave it (the schedule).
-        if let Some(j) = job {
-            if lock(&self.state).scanning {
-                j.phase(Phase::discovering("waiting", "Waiting for the system log read that is running"));
-                // The waker goes in BEFORE the lock is taken: a token that is already cancelled runs it on the spot, and it
-                // takes this same lock. Cancel wakes the wait and so does the end of the running read; no polling.
-                let (state, ended) = (self.state.clone(), self.ended.clone());
-                let _wake = j.cancel_token().on_cancel(move || {
-                    let _held = lock(&state);
-                    ended.notify_all();
-                });
-                let mut st = lock(&self.state);
-                while st.scanning {
+        self.scan_with(shared, job, &|| {})
+    }
+
+    /// [`scan`](Self::scan) with `between` run after the first look at whether a read is running and before the read is claimed:
+    /// the moment a scheduled read can slip in (tests start one there).
+    #[doc(hidden)]
+    pub fn scan_with(&self, shared: &Shared, job: Option<&JobContext>, between: &dyn Fn()) -> Result<bool, JobError> {
+        let mut first = true;
+        let since = loop {
+            // A read is already running: wait for it (a job) or leave it (the schedule).
+            if let Some(j) = job {
+                if lock(&self.state).scanning {
+                    j.phase(Phase::discovering("waiting", "Waiting for the system log read that is running"));
+                    // The waker goes in BEFORE the lock is taken: a token that is already cancelled runs it on the spot, and it
+                    // takes this same lock. Cancel wakes the wait and so does the end of the running read; no polling.
+                    let (state, ended) = (self.state.clone(), self.ended.clone());
+                    let _wake = j.cancel_token().on_cancel(move || {
+                        let _held = lock(&state);
+                        ended.notify_all();
+                    });
+                    let mut st = lock(&self.state);
+                    while st.scanning {
+                        j.check()?;
+                        st = self.ended.wait(st).unwrap_or_else(std::sync::PoisonError::into_inner);
+                    }
                     j.check()?;
-                    st = self.ended.wait(st).unwrap_or_else(std::sync::PoisonError::into_inner);
+                    return Ok(false);
                 }
-                j.check()?;
-                return Ok(false);
             }
-        }
-        let since = {
+            if std::mem::take(&mut first) {
+                between();
+            }
             let mut st = lock(&self.state);
             if st.scanning {
+                if job.is_some() {
+                    // A scheduled read started since the look above: wait for it too, like the check above does.
+                    drop(st);
+                    continue;
+                }
                 return Ok(false);
             }
             st.scanning = true;
             let t = now();
-            st.last_scan.map_or(t.minus(FIRST_DAYS * DAY), |l| l.minus(OVERLAP_MS))
+            break st.last_scan.map_or(t.minus(FIRST_DAYS * DAY), |l| l.minus(OVERLAP_MS));
         };
         let until = now();
         // Whatever happens below (a cancel included), the flag must come down.
