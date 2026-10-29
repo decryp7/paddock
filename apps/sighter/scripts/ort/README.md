@@ -24,7 +24,9 @@ This branch depends on `fix/windows-static-crt` (ADR 0032), which is merged into
 | File | What it does |
 | --- | --- |
 | `pins.env` | The one place for every pin: ORT tag and commit, pipeline revision, macOS floor, DirectML package and DLL hashes, package URL |
-| `build-ort.sh <variant> <work> [--jobs N] [--dry-run]` | Clones the pinned tag (a cached tree is re-verified), builds with `--no_telemetry`, static, Release, no tests; checks CMake's telemetry switches; merges the static libraries into one; writes `link.txt` and `BUILD-INFO.txt`; runs the byte check; packs a `.tar.gz` and its catalogue lines. `ORT_USE_CCACHE=1` uses ccache (never for a published build) |
+| `build-ort.sh <variant> <work> [--jobs N] [--dry-run]` | Clones the pinned tag, or copies the tree kept in `ORT_SOURCE_CACHE` (set only on runs that do not publish) after `check-source.sh`, builds with `--no_telemetry`, static, Release, no tests; checks CMake's telemetry switches; merges the static libraries into one; writes `link.txt` and `BUILD-INFO.txt`; runs the byte check; packs a `.tar.gz` and its catalogue lines. `ORT_USE_CCACHE=1` uses ccache (never for a published build) |
+| `check-source.sh <dir> <commit> [submodule]...` | A source tree is trusted only if HEAD is the pin, `git fsck --full --strict` passes and `git status --porcelain --ignored --untracked-files=all` is empty, in the tree and each named submodule |
+| `cache-sync.sh <restore\|save> <work> <cache>` | Moves the downloads (third-party source archives, the DirectML package) between the work folder and `apps/sighter/.ort-cache`, the stable path the workflow caches |
 | `detect-jobs.sh` | Compile jobs for this runner: cores minus one (the cgroup CPU quota counts), at most one per 2 GB of available memory after 2 GB kept back (cgroup v1 and v2 limits count); `ORT_BUILD_JOBS` wins |
 | `check-cmake-telemetry.sh <build>/Release` | `onnxruntime_USE_TELEMETRY` and `onnxruntime_USE_WINDOWS_TELEMETRY` OFF in `CMakeCache.txt`; no compile command defines `USE_1DS_TELEMETRY` or `USE_WINDOWS_TELEMETRY` |
 | `fetch-directml.sh <x64\|arm64> <cache>` | Gets `Microsoft.AI.DirectML` 1.15.4 from nuget.org (never mirrored; user, 2026-10-30), checks NuGet's SHA-512 on every run (a cached package too) and the DLL's SHA-256, lays it out for `--dml_path` |
@@ -33,6 +35,15 @@ This branch depends on `fix/windows-static-crt` (ADR 0032), which is merged into
 | `tests/run.sh` | Tests of the scripts above on synthetic fixtures (`tests/fixtures`), publishing against a local stand-in for Gitea (`tests/mock-packages.mjs`) |
 | `catalogue/*.toml` | `paddock-runtime` catalogues: `onnxruntime` (what ships per platform) and `onnxruntime-cpu` (Windows CPU-only). **Placeholder pins until the first published run** |
 | `smoke/` | The minimal `ort` program: links an archive through `ORT_LIB_PATH` (and `link.txt`), registers one EP with `error_on_failure`, runs a one-node model |
+
+Caches: the workflow keeps `apps/sighter/.ort-cache` (git-ignored) between runs. Downloads go in on every run; they
+are checked again when used. The source tree and ccache (`CCACHE_MAXSIZE=2G`, one key per variant and pin) are kept
+only by runs that do not publish: any branch's run can write a cache, so a published build clones and compiles cold.
+
+**To confirm on the first Windows run:** `--no-network` fails on any import of WinHTTP, WinINet, URLMon, WebSocket,
+Winsock (`ws2_32.dll`) or `mswsock.dll`. Rust's standard library reaches Winsock only through `std::net`; whether a
+binary that never uses it still imports `ws2_32.dll` is not verified here. If the smoke binary fails on `ws2_32.dll`
+alone, inspect where the import comes from before relaxing the rule.
 
 ## Variants
 

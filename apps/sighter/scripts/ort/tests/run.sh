@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests of Sighter's ONNX Runtime pipeline scripts, on synthetic fixtures only (no build, no network, no real package
-# server): check-catalogue.sh, check-cmake-telemetry.sh, detect-jobs.sh and publish-ort.sh (against mock-packages.mjs on
-# 127.0.0.1). The byte and import checks have their own tests in conformance/test (telemetry-bytes, windows-crt-imports).
+# server): check-catalogue.sh, check-cmake-telemetry.sh, detect-jobs.sh, check-source.sh (on Git repositories made here),
+# cache-sync.sh and publish-ort.sh (against mock-packages.mjs on 127.0.0.1). The byte and import checks have their own tests in conformance/test (telemetry-bytes, windows-crt-imports).
 #
 #   apps/sighter/scripts/ort/tests/run.sh
 set -euo pipefail
@@ -62,6 +62,67 @@ expect 0 "ORT_BUILD_JOBS wins" env ORT_BUILD_JOBS=4 DETECT_CORES=64 DETECT_MEM_M
 output_has "ORT_BUILD_JOBS=4" "4"
 expect 2 "ORT_BUILD_JOBS=0 is refused" env ORT_BUILD_JOBS=0 "$ort/detect-jobs.sh"
 expect 0 "this runner gives a number" "$ort/detect-jobs.sh"
+
+# ---- check-source.sh: a pristine checkout at the pinned commit, with its submodule, and nothing else.
+g() { git -c user.name=t -c user.email=t@example.invalid -c init.defaultBranch=main -c protocol.file.allow=always "$@"; }
+repo="$scratch/src-repo"
+g init -q "$scratch/sub-origin" && echo sub >"$scratch/sub-origin/s.txt" && g -C "$scratch/sub-origin" add s.txt && g -C "$scratch/sub-origin" commit -q -m sub
+g init -q "$scratch/origin" && echo readme >"$scratch/origin/README" && printf 'build/\n' >"$scratch/origin/.gitignore"
+g -C "$scratch/origin" add README .gitignore && g -C "$scratch/origin" submodule add -q "$scratch/sub-origin" ext/sub && g -C "$scratch/origin" commit -q -m one
+pin=$(git -C "$scratch/origin" rev-parse HEAD)
+fresh() { rm -rf "$repo" && g clone -q "$scratch/origin" "$repo" && g -C "$repo" submodule update -q --init -- ext/sub; }
+fresh
+expect 0 "a fresh clone at the pin passes" "$ort/check-source.sh" "$repo" "$pin" ext/sub
+expect 1 "another commit fails" "$ort/check-source.sh" "$repo" 0000000000000000000000000000000000000000 ext/sub
+output_has "it names the commit" "pinned 0000000"
+echo x >"$repo/new.txt"
+expect 1 "an untracked file fails" "$ort/check-source.sh" "$repo" "$pin" ext/sub
+fresh; mkdir -p "$repo/build" && echo x >"$repo/build/out.o"
+expect 1 "an ignored file fails" "$ort/check-source.sh" "$repo" "$pin" ext/sub
+fresh; echo changed >>"$repo/README"
+expect 1 "a changed file fails" "$ort/check-source.sh" "$repo" "$pin" ext/sub
+fresh; echo changed >>"$repo/ext/sub/s.txt"
+expect 1 "a changed file in the submodule fails" "$ort/check-source.sh" "$repo" "$pin" ext/sub
+fresh; g -C "$repo/ext/sub" commit -q -am x --allow-empty
+expect 1 "a submodule at another commit fails" "$ort/check-source.sh" "$repo" "$pin" ext/sub
+fresh; rm -rf "$repo/ext/sub" && mkdir "$repo/ext/sub"
+expect 1 "a submodule not checked out fails" "$ort/check-source.sh" "$repo" "$pin" ext/sub
+fresh
+# Make every object loose (a clone may hold them in a pack), then overwrite README's blob with other bytes.
+for pk in "$repo"/.git/objects/pack/*.pack; do
+  [ -f "$pk" ] || continue
+  mv "$pk" "$scratch/p.pack" && rm -f "${pk%.pack}".*
+  git -C "$repo" unpack-objects -q <"$scratch/p.pack"
+done
+obj=$(git -C "$repo" rev-parse HEAD:README)
+objfile="$repo/.git/objects/${obj:0:2}/${obj:2}"
+chmod u+w "$objfile" && printf 'forged' >"$objfile"
+expect 1 "a forged object fails git fsck" "$ort/check-source.sh" "$repo" "$pin" ext/sub
+output_has "it is git fsck that fails" "git fsck --full --strict fails"
+expect 1 "a folder that is no checkout fails" "$ort/check-source.sh" "$scratch" "$pin"
+
+# ---- cache-sync.sh: downloads move between the work folder and the stable cache folder, by relative path.
+w="$scratch/work"; c="$scratch/cache"
+arch="build/linux-x64-cpu/Release/_deps/abseil_cpp-subbuild/abseil_cpp-populate-prefix/src/20250814.0.zip"
+mkdir -p "$w/$(dirname "$arch")" "$w/cache/directml/1.15.4" "$w/build/linux-x64-cpu/Release/lib"
+echo zip >"$w/$arch"; echo pkg >"$w/cache/directml/1.15.4/microsoft.ai.directml.1.15.4.nupkg"; echo obj >"$w/build/linux-x64-cpu/Release/lib/a.o"
+expect 0 "save" "$ort/cache-sync.sh" save "$w" "$c"
+output_has "save counts" "1 source archive(s), 1 DirectML package(s)"
+if [ -f "$c/deps/${arch#build/}" ] && [ -f "$c/directml/1.15.4/microsoft.ai.directml.1.15.4.nupkg" ] && [ ! -e "$c/deps/linux-x64-cpu/Release/lib/a.o" ]; then
+  pass=$((pass + 1))
+else
+  failures=$((failures + 1)); echo "FAIL: save kept the wrong files"; find "$c" -type f
+fi
+rm -rf "$w"
+expect 0 "restore into an empty work folder" "$ort/cache-sync.sh" restore "$w" "$c"
+if [ "$(cat "$w/$arch")" = zip ] && [ -f "$w/cache/directml/1.15.4/microsoft.ai.directml.1.15.4.nupkg" ]; then
+  pass=$((pass + 1))
+else
+  failures=$((failures + 1)); echo "FAIL: restore did not bring the files back"
+fi
+expect 0 "restore from a missing cache is a no-op" "$ort/cache-sync.sh" restore "$scratch/w2" "$scratch/none"
+output_has "nothing restored" "0 source archive(s), 0 DirectML package(s)"
+expect 2 "a usage error" "$ort/cache-sync.sh" sideways "$w" "$c"
 
 # ---- publish-ort.sh against a local stand-in for Gitea.
 command -v node >/dev/null || { echo "tests need node"; exit 2; }

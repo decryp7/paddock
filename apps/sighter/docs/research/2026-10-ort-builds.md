@@ -212,13 +212,16 @@ Projections (scaled by compile jobs, unmeasured):
 The Windows variants run one after the other, about 1.5–2.5 h in all. The times include fetching the sources (a few
 hundred MB) and building the third-party libraries.
 
-**Caches.** Jobs keep no folders between runs. What `actions/cache` keeps:
-- the ONNX Runtime source tree (keyed on `ORT_COMMIT`, and re-verified on restore);
-- the third-party source archives CMake downloads (checked by their SHA-1 from `cmake/deps.txt` when used);
-- the DirectML package (keyed on its NuGet SHA-512, re-verified on every run);
-- ccache on Linux and macOS, for runs that do not publish only.
+**Caches.** Jobs keep no folders between runs. `actions/cache` keeps `apps/sighter/.ort-cache`, a stable path in the
+checkout; the work folder's path changes per run, so caching it would never hit:
+- downloads, used by every run: the third-party source archives CMake fetches (checked by their SHA-1 from
+  `cmake/deps.txt` when used), and the DirectML package (re-verified on every run);
+- the ONNX Runtime source tree, one key per OS and `ORT_COMMIT`, only on runs that do not publish. It is used only if
+  `check-source.sh` finds it pristine: HEAD, `git fsck --full --strict`, and nothing changed, untracked or ignored;
+- ccache on Linux and macOS, 2 GB, one key per variant and pin, only on runs that do not publish.
 
-A published archive always comes from a cold compile. Warm rebuilds are unmeasured.
+Any branch's run can write a cache, so a published archive always comes from a fresh clone and a cold compile. Warm
+rebuilds are unmeasured.
 
 **Machine needs:**
 - CMake ≥ 3.28, Python ≥ 3.10 (ONNX Runtime's `build.py` and ONNX's code generation; on Windows `python3`, `python`

@@ -132,20 +132,30 @@ fi
 sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
 native() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s\n' "$1"; fi; }
 
-# ---- source: the pinned tag, checked against its commit; submodules at the tag's commits (fuzzing and emsdk skipped).
-# A source tree restored from a cache is checked the same way on every run: the pinned commit, nothing changed.
-src_ok() {
-  [ -d "$src/.git" ] && [ "$(git -C "$src" rev-parse HEAD 2>/dev/null)" = "$ORT_COMMIT" ] \
-    && git -C "$src" diff --quiet HEAD 2>/dev/null \
-    && [ "$(git -C "$src" submodule status -- cmake/external/onnx 2>/dev/null | cut -c1)" = " " ]
-}
-if ! src_ok; then
+# ---- source: the pinned tag at its commit, with the onnx submodule (fuzzing and emsdk skipped). A tree is used only
+# after check-source.sh finds it pristine (HEAD, git fsck --full --strict, nothing changed, untracked or ignored).
+# ORT_SOURCE_CACHE (set by the workflow only on runs that do not publish) is a folder that keeps a pristine copy between
+# runs; a published build always clones afresh.
+src_ok() { "$here/check-source.sh" "$1" "$ORT_COMMIT" cmake/external/onnx; }
+cache_src=${ORT_SOURCE_CACHE:+$ORT_SOURCE_CACHE/onnxruntime-$ORT_VERSION}
+if ! { [ -d "$src" ] && src_ok "$src" 2>/dev/null; }; then
   rm -rf "$src"
   mkdir -p "$(dirname "$src")"
-  git -c core.longpaths=true clone --quiet --depth 1 --branch "v$ORT_VERSION" https://github.com/microsoft/onnxruntime.git "$src"
-  git -C "$src" -c core.longpaths=true submodule update --quiet --init --depth 1 -- cmake/external/onnx
-  src_ok || { echo "build-ort: v$ORT_VERSION is $(git -C "$src" rev-parse HEAD), pinned $ORT_COMMIT (or its onnx submodule differs)" >&2; exit 1; }
+  if [ -n "$cache_src" ] && [ -d "$cache_src" ] && src_ok "$cache_src"; then
+    cp -R "$cache_src" "$src"
+  else
+    git -c core.longpaths=true clone --quiet --depth 1 --branch "v$ORT_VERSION" https://github.com/microsoft/onnxruntime.git "$src"
+    git -C "$src" -c core.longpaths=true submodule update --quiet --init --depth 1 -- cmake/external/onnx
+  fi
+  src_ok "$src" || { echo "build-ort: the ONNX Runtime source is not the pinned v$ORT_VERSION ($ORT_COMMIT)" >&2; exit 1; }
+  if [ -n "$cache_src" ] && ! { [ -d "$cache_src" ] && src_ok "$cache_src" 2>/dev/null; }; then
+    rm -rf "$cache_src"
+    mkdir -p "$(dirname "$cache_src")"
+    cp -R "$src" "$cache_src"
+  fi
 fi
+# build.py must not leave __pycache__ folders in the source tree.
+export PYTHONDONTWRITEBYTECODE=1
 
 # ---- DirectML for the DirectML variant: our pinned copy, so ORT's CMake does not restore it with an unpinned nuget.exe.
 dml_args=()
