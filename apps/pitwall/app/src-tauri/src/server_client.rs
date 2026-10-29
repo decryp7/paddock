@@ -144,7 +144,7 @@ impl LoopbackClient {
     }
 
     /// Tests only: a stand-in for the well-known port.
-    #[cfg(all(test, not(target_os = "macos")))]
+    #[cfg(all(test, target_os = "linux"))]
     fn with_default_port(mut self, port: u16) -> LoopbackClient {
         self.default_port = Some(port);
         self
@@ -520,9 +520,9 @@ mod tests {
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
     }
 
-    /// A loopback port that is bound and held but not listening: connecting is refused (Linux and Windows; macOS drops the
+    /// A loopback port that is bound and held but not listening: connecting is refused (Linux only: Windows reports the refusal after about 2 s of SYN retries, close to the 3 s connect timeout, and macOS drops the
     /// attempt instead, so the tests using it do not run there).
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     fn refused_port() -> (socket2::Socket, u16) {
         let s = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
         s.bind(&std::net::SocketAddr::from(([127, 0, 0, 1], 0)).into()).unwrap();
@@ -530,7 +530,7 @@ mod tests {
         (s, port)
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn a_refused_port_is_unavailable_with_the_repair_hint_and_the_next_port_is_tried() {
         let (_held, dead) = refused_port();
