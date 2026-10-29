@@ -703,9 +703,12 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
         return Err(e.context(format!("indexing {bad}")));
     }
     s.fts.commit(w, epoch)?;
-    for file in batch {
-        conn.execute("UPDATE segments SET indexed = TRUE WHERE file = ?", params![file])?;
-    }
+    // One statement (one commit, one write-ahead-log sync) for the step's segments, not one per segment.
+    let marks = vec!["?"; batch.len()].join(", ");
+    conn.execute(
+        &format!("UPDATE segments SET indexed = TRUE WHERE file IN ({marks})"),
+        duckdb::params_from_iter(batch.iter()),
+    )?;
     s.pending.store(total - batch.len() as u64, Ordering::SeqCst);
     Ok(true)
 }
