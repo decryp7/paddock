@@ -100,7 +100,7 @@ import { PermissionsEditor } from './permissions-editor';
                     <p>
                       <span class="status" [attr.data-tone]="a.connected ? 'ok' : 'muted'">{{ a.connected ? 'Connected' : 'Not connected' }}</span>
                       <span class="faint">{{ a.connected ? 'active ' : 'last seen ' }}{{ when(a.lastSeenAt, now()) }}</span>
-                      <span class="faint">· {{ limits(a.permissions.limits) }}</span>
+                      <span class="faint lim" [matTooltip]="limits(a.permissions.limits)" matTooltipShowDelay="600">· {{ limits(a.permissions.limits) }}</span>
                     </p>
                   </div>
                   <pw-row-menu [items]="appMenu(a)" [label]="'More actions for ' + a.name" />
@@ -136,7 +136,8 @@ import { PermissionsEditor } from './permissions-editor';
                 @if (a.keys.length === 0) {
                   <pw-empty-state icon="key" heading="No keys" [text]="a.name + ' cannot call Pitwall until it has a key or pairs again.'" />
                 } @else {
-                  <table class="table keys">
+                  <table class="table keys fit">
+                    <colgroup><col /><col class="c-day" /><col class="c-day" /><col class="c-act" /></colgroup>
                     <thead>
                       <tr>
                         <th scope="col">Key</th>
@@ -217,11 +218,37 @@ import { PermissionsEditor } from './permissions-editor';
       display: flex;
       gap: var(--pd-space-2);
     }
+    /* The list beside the app; one column (the list above) when the page is too narrow for both. */
+    .page {
+      container: apps-page / inline-size;
+    }
     .layout {
       display: grid;
-      grid-template-columns: 300px minmax(0, 1fr);
+      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
       gap: var(--pd-space-3);
       align-items: start;
+    }
+    @container apps-page (max-width: 760px) {
+      .layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .list-panel {
+        position: static;
+      }
+    }
+    .keys {
+      .c-day {
+        width: 112px;
+      }
+      .c-act {
+        width: 48px;
+      }
+    }
+    .lim {
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
     }
     .list-panel {
       /* conformance: not-a-header */

@@ -39,8 +39,11 @@ export interface SelectOption {
     </ng-template>
   `,
   styles: `
+    /* 160 px unless the layout gives it less: the label then ends in an ellipsis (the options list keeps its width). */
     :host {
       display: inline-block;
+      width: 160px;
+      min-width: 0;
       max-width: 100%;
     }
     .trigger {
@@ -49,7 +52,7 @@ export interface SelectOption {
       justify-content: space-between;
       gap: var(--pd-space-2);
       width: 100%;
-      min-width: 160px;
+      min-width: 0;
       height: 30px;
       padding: 0 var(--pd-space-2) 0 var(--pd-space-3);
       font: inherit;
@@ -57,7 +60,7 @@ export interface SelectOption {
       color: var(--pd-text);
       text-align: left;
       background: var(--pd-surface-1);
-      border: 1px solid var(--pd-border-strong);
+      border: 1px solid var(--pd-border-control);
       border-radius: var(--pd-radius-control);
       cursor: default;
       outline: none;

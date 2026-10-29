@@ -44,7 +44,8 @@ export function statusDetail(s: PresetStatus): string {
         </pw-empty-state>
       } @else {
         <div class="scroll">
-          <table class="table">
+          <table class="table fit">
+            <colgroup><col class="c-alias" /><col class="c-target" /><col /><col class="c-defs" /><col class="c-act" /></colgroup>
             <thead>
               <tr>
                 <th scope="col">Name apps send</th>
@@ -198,17 +199,13 @@ export function statusDetail(s: PresetStatus): string {
     }
     .target {
       display: block;
-      max-width: 260px;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     /* One line per preset: the verdict, then what serves it (or why nothing does), truncated with a tooltip. */
-    .serves {
-      max-width: 340px;
-    }
     .via {
       display: inline-block;
-      max-width: 220px;
+      max-width: calc(100% - 96px);
       margin-left: var(--pd-space-2);
       overflow: hidden;
       vertical-align: bottom;
@@ -216,15 +213,22 @@ export function statusDetail(s: PresetStatus): string {
       color: var(--pd-text-muted);
     }
     .defs {
-      max-width: 260px;
-      overflow: hidden;
       font-size: var(--pd-text-label);
       color: var(--pd-text-muted);
       text-overflow: ellipsis;
     }
-    .table td.act {
-      width: 1%;
+    .c-alias {
+      width: 24%;
     }
+    .c-target,
+    .c-defs {
+      width: 20%;
+    }
+    /* Edit and the "..." menu, with the cell's padding. */
+    .c-act {
+      width: 84px;
+    }
+
     tr.editing td {
       background: var(--pd-accent-tint);
     }
@@ -241,19 +245,23 @@ export function statusDetail(s: PresetStatus): string {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: var(--pd-space-3);
+      /* Four across when the panel has room, then two, then one: the fields keep a usable width. */
       &.four {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       }
     }
     @media (max-width: 760px) {
-      .grid,
-      .grid.four {
+      .grid {
         grid-template-columns: minmax(0, 1fr);
       }
     }
     .field {
       display: grid;
       gap: 4px;
+      min-width: 0;
+      .input {
+        width: 100%;
+      }
       label {
         font-size: var(--pd-text-label);
         font-weight: var(--pd-weight-medium);

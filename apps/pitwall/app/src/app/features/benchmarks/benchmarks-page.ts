@@ -75,8 +75,15 @@ import { BenchmarksStore } from './benchmarks.store';
         @if (store.results().length === 0) {
           <pw-empty-state icon="benchmarks" heading="No runs yet" />
         } @else {
-          <table class="table">
+          <table class="table fit">
             <caption class="sr-only">Benchmark results, newest first</caption>
+            <colgroup>
+              <col /><col /><col class="c-gen" /><col class="c-prompt" /><col class="c-n" />
+              @if (contextVaries()) {
+                <col class="c-n" />
+              }
+              <col class="c-when" />
+            </colgroup>
             <thead>
               <tr>
                 <th scope="col">Model</th>
@@ -93,7 +100,7 @@ import { BenchmarksStore } from './benchmarks.store';
             <tbody>
               @for (r of store.sorted(); track $index) {
                 <tr>
-                  <td class="strong">{{ store.names().get(r.modelId) ?? r.modelId }}</td>
+                  <td class="strong" [matTooltip]="store.names().get(r.modelId) ?? r.modelId" matTooltipShowDelay="600">{{ store.names().get(r.modelId) ?? r.modelId }}</td>
                   <td class="build" [matTooltip]="r.build">{{ r.build }}</td>
                   <td class="right num"><b>{{ rateText(r.genTps) }}</b></td>
                   <td class="right num">{{ intText(r.promptTps) }}</td>
@@ -111,6 +118,18 @@ import { BenchmarksStore } from './benchmarks.store';
     </div>
   `,
   styles: `
+    .c-gen {
+      width: 128px;
+    }
+    .c-prompt {
+      width: 104px;
+    }
+    .c-n {
+      width: 80px;
+    }
+    .c-when {
+      width: 112px;
+    }
     .page {
       display: flex;
       flex-direction: column;

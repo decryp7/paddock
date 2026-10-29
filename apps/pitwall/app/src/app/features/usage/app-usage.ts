@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import type { EChartsCoreOption } from 'echarts/core';
 import type { AppPermissions, LimitStatus, RequestRecord } from '../../core/api.types';
 import { ThemeService } from '../../core/theme';
@@ -21,7 +22,7 @@ const METRICS: { id: UsageMetric; label: string }[] = [
 /** One app's usage over time, where each of its limits stands, and its latest requests (metadata only). */
 @Component({
   selector: 'pw-app-usage',
-  imports: [Panel, EChart, EmptyState, CacheTiles],
+  imports: [Panel, EChart, EmptyState, CacheTiles, MatTooltipModule],
   providers: [UsageStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -86,7 +87,14 @@ const METRICS: { id: UsageMetric; label: string }[] = [
       @if (recent().length === 0) {
         <pw-empty-state icon="requests" heading="No requests yet" text="Requests from this app appear here with their model, status and size. Prompt text is never shown here." />
       } @else {
-        <table class="table recent">
+        <table class="table recent fit">
+          <colgroup>
+            <col class="c-time" /><col /><col />
+            @if (hasFailures()) {
+              <col class="c-status" />
+            }
+            <col class="c-num" /><col class="c-num" />
+          </colgroup>
           <thead>
             <tr>
               <th scope="col">Time</th>
@@ -103,8 +111,8 @@ const METRICS: { id: UsageMetric; label: string }[] = [
             @for (r of recent(); track r.id) {
               <tr>
                 <td class="muted num">{{ time(r.at) }}</td>
-                <td class="mono ep">{{ r.endpoint }}</td>
-                <td>{{ r.modelId ?? '—' }}</td>
+                <td class="mono ep" [matTooltip]="r.endpoint" matTooltipShowDelay="600">{{ r.endpoint }}</td>
+                <td [matTooltip]="r.modelId ?? ''" matTooltipShowDelay="600">{{ r.modelId ?? '—' }}</td>
                 @if (hasFailures()) {
                   <td>
                     @if (r.status >= 400) {
@@ -127,11 +135,24 @@ const METRICS: { id: UsageMetric; label: string }[] = [
       flex-direction: column;
       gap: var(--pd-space-3);
     }
+    .recent {
+      .c-time {
+        width: 72px;
+      }
+      .c-status {
+        width: 96px;
+      }
+      .c-num {
+        width: 68px;
+      }
+    }
     .cache {
       margin-bottom: var(--pd-space-3);
     }
     .controls {
       display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
       gap: var(--pd-space-2);
     }
     .seg {

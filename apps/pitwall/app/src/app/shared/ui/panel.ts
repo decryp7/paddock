@@ -129,6 +129,11 @@ import { Skeleton } from './skeleton';
       }
       .msg {
         flex: 1;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .btn {
+        flex: none;
       }
     }
   `,

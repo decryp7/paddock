@@ -240,12 +240,14 @@ summary {
 .input,
 .select {
   height: 30px;
+  min-width: 0;
   padding: 0 var(--pd-space-3);
   font: inherit;
   font-size: var(--pd-text-body);
   color: var(--pd-text);
   background: var(--pd-surface-1);
-  border: 1px solid var(--pd-border-strong);
+  /* The control border (3:1 against the surface, WCAG 1.4.11), not the hairline-strong divider. */
+  border: 1px solid var(--pd-border-control);
   border-radius: var(--pd-radius-control);
   outline: none;
   transition:
@@ -459,8 +461,14 @@ textarea.input {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* The title gives way (its subtitle ends in an ellipsis); the page's actions never leave the window. */
+  > :first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
   .actions {
     display: flex;
+    flex: none;
     align-items: center;
     gap: var(--pd-space-2);
   }
@@ -534,6 +542,24 @@ textarea.input {
 }
 
 /* Row actions: icon buttons that appear on hover and keyboard focus; the "..." button stays at 40 % (RowMenu). */
+/* The CDK places a virtual list's rows in an absolutely positioned wrapper as wide as its widest row: a list whose rows
+   are a fitting grid (cells end in an ellipsis) makes the wrapper the viewport's width instead of scrolling sideways. */
+cdk-virtual-scroll-viewport.fit > .cdk-virtual-scroll-content-wrapper {
+  width: 100%;
+}
+
+/* A table that fits its panel instead of scrolling sideways: the columns share the width (a <colgroup> sets the ones
+   that need a share), and a cell that is too narrow ends in an ellipsis; its full value is in a tooltip or the detail
+   panel (UI review 2 rule 9). */
+.table.fit {
+  table-layout: fixed;
+  th,
+  td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
 .table .row-actions {
   display: inline-flex;
   align-items: center;
@@ -588,6 +614,25 @@ textarea.input {
     position: static;
     align-self: stretch;
     max-height: none;
+  }
+}
+
+/* When the list beside the panel would be narrower than a usable table (under about 440 px), the panel lies over the
+   list's right side instead of squeezing it: the list keeps its columns, the selected row stays visible on the left. */
+.with-panel {
+  position: relative;
+  container: with-panel / inline-size;
+}
+@container with-panel (max-width: 812px) {
+  .with-panel pw-detail-panel,
+  .with-panel.fill pw-detail-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--pd-z-sidebar);
+    max-height: none;
+    box-shadow: var(--pd-shadow-3);
   }
 }
 
