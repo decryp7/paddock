@@ -49,7 +49,9 @@ impl<R: Runtime> Clone for Hub<R> {
 
 impl<R: Runtime> Default for Hub<R> {
     fn default() -> Self {
-        Hub { app: Arc::new(OnceLock::new()) }
+        Hub {
+            app: Arc::new(OnceLock::new()),
+        }
     }
 }
 

@@ -1044,9 +1044,8 @@ mod tests {
         assert!(parse_tray(r#"{"version":7}"#).1.unwrap().contains("newer"));
         assert!(parse_tray(&" ".repeat(MAX_BYTES + 1)).1.unwrap().contains("too large"));
         assert_eq!(parse_tray("{}"), (TrayItems::default(), None));
-        let (t, w) = parse_tray(
-            r#"{"items":[{"id":"a","metric":"cpuTotal","style":"lineGraph"},{"id":"","metric":"fan","style":"ring"}]}"#,
-        );
+        let (t, w) =
+            parse_tray(r#"{"items":[{"id":"a","metric":"cpuTotal","style":"lineGraph"},{"id":"","metric":"fan","style":"ring"}]}"#);
         assert_eq!((t.items.len(), w.is_some()), (1, true));
         let mut bad = TrayItems::default();
         bad.items[0].metric = Metric::PerfCounter(String::new());

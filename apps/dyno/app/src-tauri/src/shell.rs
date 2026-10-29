@@ -49,7 +49,13 @@ pub fn alarm_notice(alarm: &dyno_core::alarms::Alarm) -> paddock_health::notify:
         Severity::Warning => NoticeSeverity::Warning,
         Severity::Critical => NoticeSeverity::Error,
     };
-    let mut notice = NewNotice::new(format!("dy.alarm.{}", alarm.key), "dy.alarm", severity, alarm.title.clone(), NoticeScope::App);
+    let mut notice = NewNotice::new(
+        format!("dy.alarm.{}", alarm.key),
+        "dy.alarm",
+        severity,
+        alarm.title.clone(),
+        NoticeScope::App,
+    );
     notice.body = alarm.detail.clone();
     notice
 }
