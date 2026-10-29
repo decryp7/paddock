@@ -10,49 +10,49 @@ source = "Roboflow RF-DETR COCO checkpoints (https://github.com/roboflow/rf-detr
 license = "Apache-2.0"
 
 [[model]]
-key = "rf-detr-nano rf-detr-nano.pth 366287238 d8d6b9ee57d4d0ed2b1f305163624712a0532cb7bce0c747317984fc5457440d nano_coco/checkpoint_best_regular.pth fb6504cce7fbdc783f7a46991f07639f 384"
-file = ""
-url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-weights/1.11.2/"
-size = 
-sha256 = ""
+key = "rf-detr-nano"
+file = "rf-detr-nano.pth"
+url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-weights/1.11.2/rf-detr-nano.pth"
+size = 366287238
+sha256 = "d8d6b9ee57d4d0ed2b1f305163624712a0532cb7bce0c747317984fc5457440d"
 license = "Apache-2.0"
-upstream_url = "https://storage.googleapis.com/rfdetr/"
-upstream_md5 = ""
-resolution = 
+upstream_url = "https://storage.googleapis.com/rfdetr/nano_coco/checkpoint_best_regular.pth"
+upstream_md5 = "fb6504cce7fbdc783f7a46991f07639f"
+resolution = 384
 lineage = "DINOv2 (Apache-2.0) -> Objects365 pre-training (no licence stated) -> COCO (Roboflow checkpoint, Apache-2.0)"
 
 [[model]]
-key = "rf-detr-small rf-detr-small.pth 386045550 d81979a9213a2109345158ce9232668df4c1ae52e9b8db3f2ec0a8cbad959b33 small_coco/checkpoint_best_regular.pth fb37061c1af7bace359c91b723a8d5c1 512"
-file = ""
-url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-weights/1.11.2/"
-size = 
-sha256 = ""
+key = "rf-detr-small"
+file = "rf-detr-small.pth"
+url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-weights/1.11.2/rf-detr-small.pth"
+size = 386045550
+sha256 = "d81979a9213a2109345158ce9232668df4c1ae52e9b8db3f2ec0a8cbad959b33"
 license = "Apache-2.0"
-upstream_url = "https://storage.googleapis.com/rfdetr/"
-upstream_md5 = ""
-resolution = 
+upstream_url = "https://storage.googleapis.com/rfdetr/small_coco/checkpoint_best_regular.pth"
+upstream_md5 = "fb37061c1af7bace359c91b723a8d5c1"
+resolution = 512
 lineage = "DINOv2 (Apache-2.0) -> Objects365 pre-training (no licence stated) -> COCO (Roboflow checkpoint, Apache-2.0)"
 
 [[model]]
-key = "rf-detr-medium rf-detr-medium.pth 404992918 749ff6071828aaffac63e204c4f4135ed3d6cdae4d702e086c360edc3b5768c8 medium_coco/checkpoint_best_regular.pth 7223f764a87b863f02eb8d52bf0ce2ee 576"
-file = ""
-url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-weights/1.11.2/"
-size = 
-sha256 = ""
+key = "rf-detr-medium"
+file = "rf-detr-medium.pth"
+url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-weights/1.11.2/rf-detr-medium.pth"
+size = 404992918
+sha256 = "749ff6071828aaffac63e204c4f4135ed3d6cdae4d702e086c360edc3b5768c8"
 license = "Apache-2.0"
-upstream_url = "https://storage.googleapis.com/rfdetr/"
-upstream_md5 = ""
-resolution = 
+upstream_url = "https://storage.googleapis.com/rfdetr/medium_coco/checkpoint_best_regular.pth"
+upstream_md5 = "7223f764a87b863f02eb8d52bf0ce2ee"
+resolution = 576
 lineage = "DINOv2 (Apache-2.0) -> Objects365 pre-training (no licence stated) -> COCO (Roboflow checkpoint, Apache-2.0)"
 
 [[model]]
-key = "rf-detr-large rf-detr-large-2026.pth 135954129 0f4e20e19a99c0f8a62b5685f57f6c8b5c371c59081feda6752a0561a79ccf38 rf-detr-large-2026.pth 5cb72153541cbcb9aa6efa26222acc75 704"
-file = ""
-url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-weights/1.11.2/"
-size = 
-sha256 = ""
+key = "rf-detr-large"
+file = "rf-detr-large-2026.pth"
+url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-weights/1.11.2/rf-detr-large-2026.pth"
+size = 135954129
+sha256 = "0f4e20e19a99c0f8a62b5685f57f6c8b5c371c59081feda6752a0561a79ccf38"
 license = "Apache-2.0"
-upstream_url = "https://storage.googleapis.com/rfdetr/"
-upstream_md5 = ""
-resolution = 
+upstream_url = "https://storage.googleapis.com/rfdetr/rf-detr-large-2026.pth"
+upstream_md5 = "5cb72153541cbcb9aa6efa26222acc75"
+resolution = 704
 lineage = "DINOv2 (Apache-2.0) -> Objects365 pre-training (no licence stated) -> COCO (Roboflow checkpoint, Apache-2.0)"
