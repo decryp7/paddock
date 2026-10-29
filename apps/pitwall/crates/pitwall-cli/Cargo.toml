@@ -29,6 +29,8 @@ tokio = { workspace = true, features = ["rt", "macros", "time", "io-util", "io-s
 keyring = "4.2"
 
 [dev-dependencies]
+# A socket bound but not listening refuses connections on Linux and Windows (not macOS): "nothing listens" with the port held.
+socket2 = { version = "0.6", features = ["all"] }
 tempfile.workspace = true
 # A held loopback port for "nothing answers there" (C39: a test never frees a port it probes).
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }

@@ -144,15 +144,96 @@ fn status_for(has_key: bool, version: String) -> AppUpdateStatus {
 /// What an update check or install says when the server is in offline mode.
 pub const OFFLINE_MESSAGE: &str =
     "Pitwall is in offline mode, so it does not look for or download updates. Turn offline mode off in Settings > Network to update.";
+/// What it says when offline mode cannot be confirmed because the server does not answer and was never seen online.
+pub const UNCONFIRMED_MESSAGE: &str = "Pitwall cannot confirm offline mode is off because the background service is not answering. Start or repair the service, then check again.";
 
-/// Refuses with [`ErrorCode::Offline`] while the server's `network.offline` is on: offline mode stops every outbound
-/// request, the app's own update check and download included (ADR 0017). The server is the single source of truth for the
-/// setting (`update_check_status.offline`). A server that cannot be asked does not block: the setting is unknown, and
-/// the check fails by itself when there is no network.
-pub async fn refuse_when_offline(client: &dyn ServerClient) -> Result<(), CommandError> {
-    match forward(client, "update_check_status", Value::Null).await {
-        Ok(status) if status.get("offline") == Some(&Value::Bool(true)) => Err(CommandError::new(ErrorCode::Offline, OFFLINE_MESSAGE)),
-        _ => Ok(()),
+/// The last `network.offline` the server reported (to this app, by any status or overview read). Offline mode blocks every
+/// network path, so when the server cannot be asked this is the answer; a value never seen is "unknown".
+#[derive(Default)]
+pub struct OfflineKnown(std::sync::atomic::AtomicU8);
+
+impl OfflineKnown {
+    const ONLINE: u8 = 1;
+    const OFFLINE: u8 = 2;
+
+    /// Remembers what the server said.
+    pub fn set(&self, offline: bool) {
+        self.0.store(
+            if offline { Self::OFFLINE } else { Self::ONLINE },
+            std::sync::atomic::Ordering::SeqCst,
+        );
+    }
+
+    /// The last value seen, `None` when the server never answered.
+    pub fn get(&self) -> Option<bool> {
+        match self.0.load(std::sync::atomic::Ordering::SeqCst) {
+            Self::ONLINE => Some(false),
+            Self::OFFLINE => Some(true),
+            _ => None,
+        }
+    }
+
+    /// Learns from a server reply: `overview` (`server.offline`) and `update_check_status` (`offline`).
+    pub fn observe(&self, method: &str, reply: &Value) {
+        let flag = match method {
+            "update_check_status" => reply.get("offline"),
+            "overview" => reply.get("server").and_then(|s| s.get("offline")),
+            _ => None,
+        };
+        if let Some(b) = flag.and_then(Value::as_bool) {
+            self.set(b);
+        }
+    }
+}
+
+/// A client that tells [`OfflineKnown`] about every status or overview answer that passes through.
+pub struct Observing {
+    inner: std::sync::Arc<dyn ServerClient>,
+    known: std::sync::Arc<OfflineKnown>,
+}
+
+impl Observing {
+    /// Wraps `inner`.
+    pub fn new(inner: std::sync::Arc<dyn ServerClient>, known: std::sync::Arc<OfflineKnown>) -> Observing {
+        Observing { inner, known }
+    }
+}
+
+impl ServerClient for Observing {
+    fn call<'a>(
+        &'a self,
+        method: &'a str,
+        args: Value,
+        timeout: Option<std::time::Duration>,
+    ) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+        Box::pin(async move {
+            let reply = self.inner.call(method, args, timeout).await?;
+            self.known.observe(method, &reply);
+            Ok(reply)
+        })
+    }
+
+    fn open_stream<'a>(
+        &'a self,
+        path: &'a str,
+        body: Option<Value>,
+        open_timeout: std::time::Duration,
+    ) -> crate::server_client::BoxFuture<'a, Result<Box<dyn crate::server_client::FrameStream>, CommandError>> {
+        self.inner.open_stream(path, body, open_timeout)
+    }
+}
+
+/// Refuses while offline mode is on, or cannot be confirmed to be off. The server is the source of truth
+/// (`update_check_status.offline`); when it cannot be asked (or does not say), the last value seen is used: offline refuses,
+/// online allows (an app update may be what repairs a broken service), and never seen refuses with the next step.
+pub async fn refuse_when_offline(client: &dyn ServerClient, known: &OfflineKnown) -> Result<(), CommandError> {
+    if let Ok(status) = forward(client, "update_check_status", Value::Null).await {
+        known.observe("update_check_status", &status);
+    }
+    match known.get() {
+        Some(true) => Err(CommandError::new(ErrorCode::Offline, OFFLINE_MESSAGE)),
+        Some(false) => Ok(()),
+        None => Err(CommandError::new(ErrorCode::ServerUnavailable, UNCONFIRMED_MESSAGE)),
     }
 }
 
@@ -182,22 +263,32 @@ pub async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<Option<UpdateInfo>,
 }
 
 /// Downloads, verifies and installs the update found by [`check`], then restarts the app (the server keeps serving).
-/// `report` gets the byte progress of the download. The pending update stays, so a cancelled or failed install can be
+/// `report` gets the byte progress of the download; `before_install` runs after it and before anything is installed. The pending update stays, so a cancelled or failed install can be
 /// tried again.
-pub async fn install<R: Runtime>(app: &AppHandle<R>, report: impl Fn(InstallProgress) + Send + Sync) -> Result<(), CommandError> {
+pub async fn install<R: Runtime, F: std::future::Future<Output = Result<(), CommandError>>>(
+    app: &AppHandle<R>,
+    report: impl Fn(InstallProgress) + Send + Sync,
+    before_install: impl FnOnce() -> F,
+) -> Result<(), CommandError> {
     let Some(update) = app.state::<Pending>().0.get() else {
         return Err(CommandError::new(ErrorCode::BadRequest, "check for updates first"));
     };
     let mut bytes = ByteCounter::default();
-    update
-        .download_and_install(
+    let downloaded = update
+        .download(
             |len, total| {
                 let (done, total) = bytes.chunk(len, total);
                 report(InstallProgress::Downloading { done, total });
             },
-            || report(InstallProgress::Installing),
+            || {},
         )
         .await
+        .map_err(|e| CommandError::new(ErrorCode::Internal, format!("the update could not be downloaded: {e}")))?;
+    // Offline mode may have been turned on during the download: nothing is installed then.
+    before_install().await?;
+    report(InstallProgress::Installing);
+    update
+        .install(downloaded)
         .map_err(|e| CommandError::new(ErrorCode::Internal, format!("the update could not be installed: {e}")))?;
     app.restart();
 }
@@ -212,28 +303,70 @@ mod tests {
     use crate::server_client::fake::{FakeServer, Reply};
     use serde_json::json;
 
-    #[tokio::test]
-    async fn offline_mode_refuses_an_update_check_or_install_with_the_offline_code() {
-        let server = FakeServer::new();
-        server.reply("update_check_status", Reply::Ok(json!({ "offline": true })));
-        let e = refuse_when_offline(&server).await.unwrap_err();
-        assert_eq!(e.code, ErrorCode::Offline);
-        assert_eq!(e.message, OFFLINE_MESSAGE);
-        assert_eq!(server.calls().len(), 1, "the setting was read from the server, nothing else asked");
+    fn status(offline: Value) -> Reply {
+        Reply::Ok(json!({ "offline": offline }))
     }
 
     #[tokio::test]
-    async fn online_or_an_unreachable_server_does_not_block_an_update() {
+    async fn offline_mode_refuses_an_update_check_or_install_with_the_offline_code() {
         let server = FakeServer::new();
-        server.reply("update_check_status", Reply::Ok(json!({ "offline": false })));
-        assert!(refuse_when_offline(&server).await.is_ok());
-        server.reply("update_check_status", Reply::Err(crate::server_client::unavailable()));
-        assert!(
-            refuse_when_offline(&server).await.is_ok(),
-            "unknown setting: the check fails by itself without a network"
+        server.reply("update_check_status", status(json!(true)));
+        let known = OfflineKnown::default();
+        let e = refuse_when_offline(&server, &known).await.unwrap_err();
+        assert_eq!((e.code, e.message.as_str()), (ErrorCode::Offline, OFFLINE_MESSAGE));
+        assert_eq!(known.get(), Some(true), "what the server said is remembered");
+    }
+
+    #[tokio::test]
+    async fn online_allows_an_update() {
+        let server = FakeServer::new();
+        server.reply("update_check_status", status(json!(false)));
+        let known = OfflineKnown::default();
+        assert!(refuse_when_offline(&server, &known).await.is_ok());
+        assert_eq!(known.get(), Some(false));
+    }
+
+    #[tokio::test]
+    async fn a_server_that_cannot_confirm_offline_mode_is_refused_unless_it_was_last_seen_online() {
+        let down = FakeServer::new();
+        down.reply("update_check_status", Reply::Err(crate::server_client::unavailable()));
+        let known = OfflineKnown::default();
+        let e = refuse_when_offline(&down, &known).await.unwrap_err();
+        assert_eq!(
+            (e.code, e.message.as_str()),
+            (ErrorCode::ServerUnavailable, UNCONFIRMED_MESSAGE),
+            "never known: refused"
         );
-        server.reply("update_check_status", Reply::Ok(json!({})));
-        assert!(refuse_when_offline(&server).await.is_ok());
+        // An answer without the field tells nothing either.
+        let empty = FakeServer::new();
+        empty.reply("update_check_status", Reply::Ok(json!({})));
+        assert_eq!(
+            refuse_when_offline(&empty, &known).await.unwrap_err().code,
+            ErrorCode::ServerUnavailable
+        );
+        // Last seen online: an update may be the repair for a broken service.
+        known.set(false);
+        assert!(refuse_when_offline(&down, &known).await.is_ok());
+        assert!(refuse_when_offline(&empty, &known).await.is_ok());
+        // Last seen offline: refused as offline.
+        known.set(true);
+        assert_eq!(refuse_when_offline(&down, &known).await.unwrap_err().code, ErrorCode::Offline);
+    }
+
+    #[tokio::test]
+    async fn every_overview_or_status_read_updates_the_last_known_value() {
+        let inner = FakeServer::new();
+        inner.reply("overview", Reply::Ok(json!({ "server": { "offline": true } })));
+        inner.reply("update_check_status", status(json!(false)));
+        let known = std::sync::Arc::new(OfflineKnown::default());
+        let client = Observing::new(std::sync::Arc::new(inner), known.clone());
+        assert_eq!(known.get(), None);
+        forward(&client, "overview", Value::Null).await.unwrap();
+        assert_eq!(known.get(), Some(true));
+        forward(&client, "update_check_status", Value::Null).await.unwrap();
+        assert_eq!(known.get(), Some(false));
+        forward(&client, "presets", Value::Null).await.unwrap();
+        assert_eq!(known.get(), Some(false), "other methods say nothing");
     }
 
     #[test]

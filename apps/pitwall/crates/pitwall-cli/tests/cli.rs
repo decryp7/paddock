@@ -532,3 +532,23 @@ fn a_call_that_never_answers_times_out() {
     assert!(text(&out.stderr).contains("did not answer within 1 s"));
     t.join().unwrap();
 }
+
+/// A loopback port that is bound and held but not listening: connecting is refused (Linux and Windows; macOS drops the
+/// attempt instead, so the test below does not run there).
+#[cfg(not(target_os = "macos"))]
+fn refused_port() -> (socket2::Socket, u16) {
+    let s = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
+    s.bind(&std::net::SocketAddr::from(([127, 0, 0, 1], 0)).into()).unwrap();
+    let port = s.local_addr().unwrap().as_socket().unwrap().port();
+    (s, port)
+}
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn nothing_listening_is_exit_3_with_the_next_step() {
+    let (_held, port) = refused_port();
+    let h = home();
+    let out = pitwall(h.path(), &["status", "--port", &port.to_string()]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(text(&out.stderr).contains("Start the Pitwall app"), "{}", text(&out.stderr));
+}

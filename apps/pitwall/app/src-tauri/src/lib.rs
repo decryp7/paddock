@@ -104,7 +104,11 @@ pub fn run() {
         Box::new(credentials::OsKeyStore),
         data_dir.join("admin.key"),
     ));
-    let client: SharedClient = Arc::new(server_client::LoopbackClient::new(data_dir, keys));
+    let known_offline = Arc::new(updater::OfflineKnown::default());
+    let client: SharedClient = Arc::new(updater::Observing::new(
+        Arc::new(server_client::LoopbackClient::new(data_dir, keys)),
+        known_offline.clone(),
+    ));
     let model: SharedModel = Arc::new(Mutex::new(TrayModel::new()));
     let builder = tauri::Builder::default();
     // Must be the first plugin. Debug builds skip it so a development run does not collide with an installed Pitwall.
@@ -122,6 +126,7 @@ pub fn run() {
         .plugin(updater::plugin())
         .on_menu_event(app_menu::on_event)
         .manage(client.clone())
+        .manage(known_offline)
         .manage(model.clone())
         .manage(Arc::new(commands::Streams::default()))
         .manage(Arc::new(jobs::Jobs::default()))

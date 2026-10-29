@@ -400,3 +400,28 @@ mod tests {
         assert!(matches!(e, LoopbackError::Timeout(_)), "{e}");
     }
 }
+
+#[cfg(all(test, not(target_os = "macos")))]
+mod refused_tests {
+    use super::*;
+
+    /// A loopback port that is bound and held but not listening: connecting is refused (Linux and Windows; macOS drops the
+    /// attempt instead, so these tests do not run there). The socket keeps the port taken for as long as it is alive.
+    fn refused_port() -> (socket2::Socket, u16) {
+        let s = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
+        s.bind(&std::net::SocketAddr::from(([127, 0, 0, 1], 0)).into()).unwrap();
+        let port = s.local_addr().unwrap().as_socket().unwrap().port();
+        (s, port)
+    }
+
+    #[tokio::test]
+    async fn a_port_nothing_listens_on_is_a_connect_error() {
+        let (_held, port) = refused_port();
+        let e = Client::new(LoopbackPort::new(port).unwrap(), None)
+            .send("GET", "/", None, Duration::from_secs(1))
+            .await
+            .err()
+            .unwrap();
+        assert!(matches!(e, LoopbackError::Connect(p, _) if p == port), "{e}");
+    }
+}

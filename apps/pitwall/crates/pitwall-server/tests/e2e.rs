@@ -718,11 +718,12 @@ async fn an_idle_models_context_is_cleared_before_its_weights_are_released() {
     let erased = h.erases.load(Ordering::SeqCst);
     assert_eq!(h.st.serving.loaded().len(), 1, "still loaded");
     // The planner may name the model again; the release itself runs only once per idle period.
-    h.st.serving.tick();
-    for _ in 0..200 {
-        tokio::task::yield_now().await;
-    }
-    assert_eq!(h.erases.load(Ordering::SeqCst), erased, "only once per idle period");
+    let again = h.st.serving.tick();
+    assert!(
+        !again.iter().any(|a| matches!(a, pitwall_core::memory::Action::ReleaseContext(..))),
+        "only once per idle period: {again:?}"
+    );
+    assert_eq!(h.erases.load(Ordering::SeqCst), erased);
 
     // The next request makes it eligible again; past the idle time the weights go too.
     assert_eq!(ask().await.status, 200);

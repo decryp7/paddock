@@ -122,8 +122,8 @@ fn candidate_ports_with(discovery_text: Option<&str>, default: Option<u16>) -> V
 pub struct LoopbackClient {
     data_dir: PathBuf,
     keys: Arc<dyn AdminKeys>,
-    /// Whether the well-known port is tried after the one in the discovery file (always, except in tests).
-    try_default_port: bool,
+    /// The well-known port tried after the one in the discovery file (always, except in tests).
+    default_port: Option<u16>,
 }
 
 impl LoopbackClient {
@@ -132,14 +132,21 @@ impl LoopbackClient {
         LoopbackClient {
             data_dir,
             keys,
-            try_default_port: true,
+            default_port: Some(DEFAULT_PORT),
         }
     }
 
     /// Tests only: never fall back to the well-known port, which a Pitwall installed on the machine may be using.
     #[cfg(test)]
     fn discovery_port_only(mut self) -> LoopbackClient {
-        self.try_default_port = false;
+        self.default_port = None;
+        self
+    }
+
+    /// Tests only: a stand-in for the well-known port.
+    #[cfg(all(test, not(target_os = "macos")))]
+    fn with_default_port(mut self, port: u16) -> LoopbackClient {
+        self.default_port = Some(port);
         self
     }
 
@@ -149,7 +156,7 @@ impl LoopbackClient {
             .ok()
             .filter(|m| m.len() as usize <= pitwall_core::discovery::MAX_BYTES)
             .and_then(|_| std::fs::read_to_string(path).ok());
-        candidate_ports_with(text.as_deref(), self.try_default_port.then_some(DEFAULT_PORT))
+        candidate_ports_with(text.as_deref(), self.default_port)
     }
 
     async fn call_once(&self, method: &str, args: &Value, timeout: Option<Duration>, key: Option<String>) -> Result<Value, CommandError> {
@@ -511,6 +518,37 @@ mod tests {
         assert!(e.message.contains("restart the service"), "{}", e.message);
         let e = c.open_stream("/mgmt/v1/live", None, Duration::from_secs(5)).await.err().unwrap();
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
+    }
+
+    /// A loopback port that is bound and held but not listening: connecting is refused (Linux and Windows; macOS drops the
+    /// attempt instead, so the tests using it do not run there).
+    #[cfg(not(target_os = "macos"))]
+    fn refused_port() -> (socket2::Socket, u16) {
+        let s = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
+        s.bind(&std::net::SocketAddr::from(([127, 0, 0, 1], 0)).into()).unwrap();
+        let port = s.local_addr().unwrap().as_socket().unwrap().port();
+        (s, port)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[tokio::test]
+    async fn a_refused_port_is_unavailable_with_the_repair_hint_and_the_next_port_is_tried() {
+        let (_held, dead) = refused_port();
+        // Nothing listens on either port: unavailable, with the next step.
+        let (_d, c) = client_for(dead, "k");
+        let (_held2, dead2) = refused_port();
+        let c = c.with_default_port(dead2);
+        let e = c.call("overview", Value::Null, Some(Duration::from_secs(5))).await.unwrap_err();
+        assert_eq!(e.code, ErrorCode::ServerUnavailable);
+        assert!(e.message.contains("Repair service"), "{}", e.message);
+        let e = c.open_stream("/mgmt/v1/live", None, Duration::from_secs(5)).await.err().unwrap();
+        assert!(e.message.contains("Repair service"), "{}", e.message);
+        // A stale discovery file (refused) falls through to the second port, which answers.
+        let (port, _seen) = serve_once(200, "application/json", r#"{"ok":true}"#.into()).await;
+        let (_d, c) = client_for(dead, "k");
+        let c = c.with_default_port(port);
+        let v = c.call("overview", Value::Null, Some(Duration::from_secs(5))).await.unwrap();
+        assert_eq!(v, json!({"ok": true}));
     }
 
     #[tokio::test]

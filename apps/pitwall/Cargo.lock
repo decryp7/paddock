@@ -3410,6 +3410,7 @@ dependencies = [
  "pitwall-loopback",
  "serde",
  "serde_json",
+ "socket2",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
@@ -3434,6 +3435,7 @@ dependencies = [
  "pitwall-loopback",
  "serde",
  "serde_json",
+ "socket2",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -3463,6 +3465,7 @@ dependencies = [
  "hyper-util",
  "paddock-testkit",
  "serde_json",
+ "socket2",
  "thiserror 2.0.21",
  "tokio",
 ]
