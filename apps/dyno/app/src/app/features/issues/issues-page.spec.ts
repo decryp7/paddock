@@ -46,7 +46,7 @@ describe('dy-issues-page', () => {
     expect(el.querySelectorAll('table[aria-label="Apps with the most issues"] tbody tr').length).toBe(5);
     expect(el.querySelectorAll('table[aria-label="Issues"] tr.day').length).toBeGreaterThan(2);
     expect(el.textContent).toContain('2 of 2 logs read');
-    expect(el.querySelector('.tab-count, .count')?.textContent).toBe('5');
+    expect(el.querySelector('pd-segmented-control .pd-count')?.textContent?.trim()).toBe('5');
   });
 
   it('filters by a leaderboard row, clears it, collapses a day and opens evidence as plain text', async () => {
@@ -57,7 +57,7 @@ describe('dy-issues-page', () => {
     const rows = [...el.querySelectorAll('table[aria-label="Issues"] tr.row')];
     expect(rows.length).toBe(3);
     expect(rows.every((r) => r.textContent!.includes('Mail'))).toBe(true);
-    (el.querySelector('[aria-label="Clear the filter"]') as HTMLElement).click();
+    (el.querySelector('[aria-label^="Clear the filter"]') as HTMLElement).click();
     await settle(f);
     expect(el.querySelectorAll('table[aria-label="Issues"] tr.row').length).toBeGreaterThan(3);
     (el.querySelector('tr.day button') as HTMLElement).click();

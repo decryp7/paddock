@@ -51,7 +51,7 @@ describe('IssuesStore', () => {
     await Promise.all([issues.rescan(), issues.rescan()]);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(issues.rescanning()).toBe(false);
-    expect(notifier.toasts().at(-1)?.text).toContain('Read the system logs');
+    expect(notifier.recent().at(-1)?.text).toContain('Read the system logs');
     spy.mockRejectedValueOnce({ code: 'timeout', message: 'slow' });
     await issues.rescan();
     expect(issues.error()?.message).toBe('slow');
@@ -62,7 +62,7 @@ describe('IssuesStore', () => {
     const { issues, mock, notifier } = setup();
     await issues.exportForDebrief();
     expect(issues.saved()?.path).toMatch(/\.jsonl$/);
-    expect(notifier.toasts().at(-1)?.text).toContain('dyno-issues.jsonl');
+    expect(notifier.recent().at(-1)?.text).toContain('dyno-issues.jsonl');
     const spy = vi.spyOn(mock, 'saveIssues').mockResolvedValueOnce(null);
     const before = issues.saved();
     await issues.exportForDebrief();
@@ -90,7 +90,7 @@ describe('UnusualStore', () => {
     expect(unusual.overview()).toMatchObject({ known: 0 });
     vi.spyOn(mock, 'forgetBaseline').mockRejectedValueOnce({ code: 'internal', message: 'bad' });
     await unusual.forget();
-    expect(notifier.toasts().at(-1)?.text).toBe('bad');
+    expect(notifier.recent().at(-1)?.text).toBe('bad');
   });
 
 });

@@ -1,7 +1,7 @@
 import { EVENTS, REQUEST_TIMEOUT_MS, TauriBackend, type InvokeFn, type ListenFn } from './tauri-backend';
 
 const REF = { pid: 7, started: 1000 };
-const SETTINGS = { theme: 'dark' } as never;
+const SETTINGS = { launchAtLogin: true } as never;
 
 function fake() {
   const invoke = vi.fn().mockResolvedValue('ok');
@@ -98,18 +98,19 @@ describe('TauriBackend: request shapes', () => {
     expect(invoke).toHaveBeenLastCalledWith('pick_folder');
   });
 
-  it('popoverResize sends the measured height to popover_resize', async () => {
+  it('the tray popover is the shell’s window: fit, close, show the main window and quit are the shell’s commands', async () => {
     const { backend, invoke } = fake();
-    await backend.popoverResize(342);
-    expect(invoke.mock.calls).toEqual([['popover_resize', { height: 342 }]]);
-  });
-
-  it('appInfo and the tray use their own commands without arguments', async () => {
-    const { backend, invoke } = fake();
-    await backend.appInfo();
-    await backend.trayOpenMain();
-    await backend.trayQuit();
-    expect(invoke.mock.calls).toEqual([['app_info'], ['tray_open_main'], ['tray_quit']]);
+    await backend.fitTray(342);
+    await backend.hideTray();
+    await backend.quitApp();
+    await backend.showMainWindow();
+    expect(invoke.mock.calls).toEqual([
+      ['plugin:paddock-shell|tray_fit_height', { height: 342 }],
+      ['plugin:paddock-shell|tray_close'],
+      ['plugin:paddock-shell|app_quit'],
+      ['plugin:paddock-shell|window_focus', { label: 'main' }],
+      ['plugin:paddock-shell|tray_close'],
+    ]);
   });
 });
 

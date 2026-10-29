@@ -19,8 +19,8 @@ describe('the graph of this tree', () => {
   test('a shared crate marks crates and every app whose Cargo graph reaches it, Rust half only', () => {
     const r = run('crates/paddock-jobs/src/lib.rs');
     assert.ok(r.crates && !r.ui);
-    // Debrief's store worker depends on paddock-proc by path (the macOS memory footprint), so the shared crates reach Debrief too.
-    assert.deepEqual(r.apps, ['debrief', 'shell-demo', 'workbench-demo']);
+    // Debrief's store worker depends on paddock-proc by path (the macOS memory footprint), so the shared crates reach Debrief too; Dyno takes the shell crates by path.
+    assert.deepEqual(r.apps, ['debrief', 'dyno', 'shell-demo', 'workbench-demo']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust']);
     assert.deepEqual(r.kinds.debrief, ['rust']);
     assert.ok(r.packages.crates.includes('paddock-jobs'));
@@ -52,9 +52,10 @@ describe('the graph of this tree', () => {
   test('a ui change marks the Tauri shells that embed a ui build (frontendDist), both halves', () => {
     const r = run('ui/projects/paddock-ui/shell/src/public-api.ts');
     assert.ok(r.ui);
-    // Spotter maps @decryp7/paddock-ui to ui/dist in its tsconfig (a path edge, no npm edge).
-    assert.deepEqual(r.apps, ['shell-demo', 'spotter', 'workbench-demo']);
+    // Spotter and Dyno map @decryp7/paddock-ui to ui/dist in their tsconfig (a path edge, no npm edge).
+    assert.deepEqual(r.apps, ['dyno', 'shell-demo', 'spotter', 'workbench-demo']);
     assert.deepEqual(r.kinds.spotter, ['ui']);
+    assert.deepEqual(r.kinds.dyno, ['ui']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust', 'ui']);
   });
 

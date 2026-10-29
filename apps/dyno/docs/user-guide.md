@@ -26,7 +26,7 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
    fans. A tile that cannot be read says why (for example "no battery") instead of showing zero.
 2. Press **Check now** to get the diagnosis: the likeliest cause of slowness, with evidence and suggestions in words.
 3. Look at **Processes** to see which applications use the most.
-4. In **Settings**, choose the theme, what the tray icon shows and how long history is kept.
+4. In **Settings**, choose what the tray icon shows and how long history is kept.
 
 ## Everyday use
 

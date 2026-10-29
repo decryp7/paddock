@@ -141,7 +141,7 @@ describe('CountersStore', () => {
     for (let i = store.pinned().length; i < MAX_PINNED; i++) await store.togglePin(`\\O\\c${i}`);
     expect(store.pinned()).toHaveLength(MAX_PINNED);
     expect(await store.togglePin('\\O\\extra')).toBe(false);
-    expect(notifier.toasts().at(-1)!.text).toMatch(/up to 16/);
+    expect(notifier.recent().at(-1)!.text).toMatch(/up to 16/);
   });
 
   it('saves, applies, replaces and deletes sets, and offers undo', async () => {
@@ -160,7 +160,7 @@ describe('CountersStore', () => {
     expect(store.watching()).toEqual([CPU]);
     expect(await store.deleteSet('Load')).toBe(true);
     expect(store.sets().some((s) => s.name === 'Load')).toBe(false);
-    const toast = notifier.toasts().at(-1)!;
+    const toast = notifier.recent().at(-1)!;
     expect(toast.action!.label).toBe('Undo');
     toast.action!.run();
     await new Promise((r) => setTimeout(r));
@@ -174,7 +174,7 @@ describe('CountersStore', () => {
     for (let i = store.sets().length; i < MAX_SETS; i++) await store.saveSet(`set ${i}`);
     expect(store.sets()).toHaveLength(MAX_SETS);
     expect(await store.saveSet('one too many')).toBe(false);
-    expect(notifier.toasts().at(-1)!.text).toMatch(/up to 12/);
+    expect(notifier.recent().at(-1)!.text).toMatch(/up to 12/);
     expect(await store.saveSet('set 1')).toBe(true);
   });
 
@@ -189,7 +189,7 @@ describe('CountersStore', () => {
     const full = settings.settings()!;
     await settings.save({ ...full, dashboard: { ...full.dashboard!, widgets: Array.from({ length: MAX_WIDGETS }, (_, i) => ({ ...added, id: `w${i}` })) } }, null);
     expect(await store.addToDashboard(QUEUE)).toBe(false);
-    expect(notifier.toasts().at(-1)!.text).toMatch(/up to 32/);
+    expect(notifier.recent().at(-1)!.text).toMatch(/up to 32/);
   });
 
   it('does nothing to settings that are not loaded', async () => {

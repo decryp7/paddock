@@ -26,6 +26,7 @@ import { MatContextMenuTrigger, MatMenu, MatMenuContent, MatMenuItem, MatMenuTri
 import { MatSort, MatSortHeader, type Sort } from '@angular/material/sort';
 import { MatCell, MatCellDef, MatColumnDef, MatHeaderCell, MatHeaderCellDef, MatHeaderRow, MatHeaderRowDef, MatRow, MatRowDef, MatTable } from '@angular/material/table';
 import { MatTooltip } from '@angular/material/tooltip';
+import { PdContextMenuKeys } from '@decryp7/paddock-ui/material';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdMiddleText } from './middle-text';
 import {
@@ -37,7 +38,6 @@ import {
   fromControl,
   groupItems,
   inlineActions,
-  isMenuKey,
   menuActions,
   nextIndex,
   PD_HEADER_HEIGHT,
@@ -142,6 +142,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
     MatMenuTrigger,
     MatMenuContent,
     MatContextMenuTrigger,
+    PdContextMenuKeys,
     MatTooltip,
     MatIconButton,
     PdGlyph,
@@ -281,6 +282,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
             [attr.data-key]="line.kind === 'row' ? rowKey()(line.row) : null"
             [attr.aria-selected]="line.kind === 'row' ? isSelected(line) : null"
             [attr.tabindex]="line.kind === 'skeleton' ? null : indexOf(line) === active() ? 0 : -1"
+            pdContextMenuKeys
             [matContextMenuTriggerFor]="rowMenu"
             [matContextMenuTriggerData]="{ row: line.row }"
             [matContextMenuTriggerDisabled]="line.kind !== 'row' || !actionsOf(line.row).length"
@@ -746,13 +748,6 @@ export class PdTable<T> {
     const target = e.target.closest<HTMLElement>('[role="row"][data-index]');
     if (!target || e.target !== target) return;
     const index = Number(target.dataset['index']);
-    if (isMenuKey(e)) {
-      // The keyboard's right-click: not every platform turns it into a `contextmenu` event, so the row's menu is opened here.
-      e.preventDefault();
-      const box = target.getBoundingClientRect();
-      target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left + 24, clientY: box.top + box.height / 2 }));
-      return;
-    }
     if (e.key === 'Enter') {
       const item = this.items()[index];
       e.preventDefault();

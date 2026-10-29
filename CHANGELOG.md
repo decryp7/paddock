@@ -4,6 +4,22 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `providePaddockMaterial`: tooltips wait 500 ms
+- `providePaddockMaterial()` provides `MAT_TOOLTIP_DEFAULT_OPTIONS` with `showDelay: 500` (`PADDOCK_TOOLTIP_OPTIONS`), the design guide's delay for the tooltip every icon-only button carries. Every app that provides it gets the delay without setting it per tooltip.
+
+### `pd-table` uses `PdContextMenuKeys`
+- The grid's own Shift+F10 / Menu key handler is gone: pd-table's rows use the shared `isContextMenuKey` (the same keys, one definition).
+- Removed: `isMenuKey` from `@decryp7/paddock-ui/table`; use `isContextMenuKey` from `@decryp7/paddock-ui/material`.
+
+### `PdContextMenuKeys`: a row's context menu from the keyboard
+- New directive `pdContextMenuKeys` (and `isContextMenuKey`) in `@decryp7/paddock-ui/material` (with the other Material behaviour; not in the root entry): Shift+F10 or the Menu key on a focused host fires a `contextmenu` event there, for `matContextMenuTriggerFor` or any listener (macOS sends none for those keys). It works like pd-table's own row handler, which will use it in a follow-up.
+
+### `@decryp7/paddock-ui/schedule` exports its time-field building blocks
+- New exports: `PdKeepTimeOnEscape` (the `pdKeepTime` directive: Escape in a closed time field keeps the time), `TIME_PROVIDERS`, `timeToDate`, `dateToTime`, `timeOptions` and `TimeProblems`, so an app can put a `mat-timepicker` in its own form with the editors' behaviour (24-hour times, the half-hour list, a problem shown once the field was left). Dyno's `dy-time-field` is the first user.
+
+### The dialog frame's filled button uses the page primary's colours
+- `.pd-frame-btn--filled` takes `--pd-accent-fill` with `--pd-on-accent`, the same as `.pd-btn--primary` and Material's filled button, so a dialog's primary and a page's primary are one colour in both schemes (`--pd-accent-control` is for toggles and checkmarks).
+
 ### Rust developer and CI tool, phase R0 (ADR 0022)
 - New shared crates `paddock-slots` (numbered job slots over OS file locks, with a holder that always ends: job folder gone,
   release, or `--max-hold-secs`), `paddock-repo-files` (the walk, its caps and a bounded-thread file hash) and

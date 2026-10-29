@@ -3,6 +3,7 @@ import { MAT_DATE_FORMATS, MAT_RIPPLE_GLOBAL_OPTIONS } from '@angular/material/c
 import { MAT_SLIDE_TOGGLE_DEFAULT_OPTIONS } from '@angular/material/slide-toggle';
 import { MAT_FORM_FIELD_DEFAULT_OPTIONS } from '@angular/material/form-field';
 import { describe, expect, it } from 'vitest';
+import { MAT_TOOLTIP_DEFAULT_OPTIONS } from '@angular/material/tooltip';
 import { providePaddockMaterial } from '../../material/src/provide';
 
 describe('providePaddockMaterial', () => {
@@ -26,5 +27,10 @@ describe('providePaddockMaterial', () => {
   it('turns ripples off globally (the state layer is the feedback)', () => {
     TestBed.configureTestingModule({ providers: [providePaddockMaterial()] });
     expect(TestBed.inject(MAT_RIPPLE_GLOBAL_OPTIONS)?.disabled).toBe(true);
+  });
+
+  it('shows tooltips after 500 ms (the design guide\'s delay for icon-only buttons)', () => {
+    TestBed.configureTestingModule({ providers: [providePaddockMaterial()] });
+    expect(TestBed.inject(MAT_TOOLTIP_DEFAULT_OPTIONS).showDelay).toBe(500);
   });
 });

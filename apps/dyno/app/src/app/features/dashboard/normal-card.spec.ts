@@ -1,3 +1,5 @@
+import { By } from '@angular/platform-browser';
+import { MatTooltip } from '@angular/material/tooltip';
 import { TestBed } from '@angular/core/testing';
 import type { BaselineOverview } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
@@ -41,7 +43,7 @@ describe('dy-normal-card', () => {
     expect(rows).toHaveLength(3);
     expect(rows[0]!.querySelector('.what')?.textContent).toContain('CPU: Higher than usual for Tuesday mornings');
     expect(rows[0]!.querySelector('.vals')?.textContent).toBe('71% now · usually 14%');
-    expect(rows[0]!.getAttribute('title')).toContain('usually about 14%');
+    expect(f.debugElement.queryAll(By.directive(MatTooltip))[0]!.injector.get(MatTooltip).message).toContain('usually about 14%');
     expect(rows[0]!.querySelector('.visually-hidden')?.textContent).toContain('usually about 14%');
     expect(rows[0]!.querySelector('.dot')?.getAttribute('data-tone')).toBe('warn');
     expect(rows[1]!.querySelector('.dot')?.getAttribute('data-tone')).toBe('info');

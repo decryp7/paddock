@@ -658,6 +658,16 @@ it receives, with its time, and the calls seen when it gives up. A refusal itsel
 `RuntimeAuthority` check, so a harness that needs to name it asks the authority, not the log. C48 checks the capability file
 of every app on the shared shell.
 
+## 2026-10-29: a row's actions must fit their own box, or the tooltip anchored to it covers them (Dyno)
+
+A row-action cluster got one tooltip on its container, placed left of the container. In the active-alarms table the cluster's
+cell was 40 px wide for three 28 px buttons that overflowed to the left, so the tooltip opened over the buttons, took the
+pointer (a `mouseleave` after 30 ms) and the second and third actions never showed one. The reverse also happened: widening
+the cell pushed the buttons past the clipped edge of the grid at 1280 px, out of reach. **Rule (guidance):** a cluster's box
+holds all its buttons (a column as wide as the actions), and the row-actions e2e (every action must show its tooltip, whose
+text is its name, and the tooltip must overlap no other action) is the check; a tooltip on an icon-only button is never left
+to a per-button `matTooltip` inside a cluster.
+
 ## Chromium tests compared a loaded machine with a product timeout (2026-10-28, paddock-chromium)
 
 Three `paddock-chromium` tests failed on CI runs of several branches and never on a quiet machine: (1) `a_real_browser_reads_a_page_and_closes_cleanly` and `a_cancelled_load_says_whether_it_was_a_download_or_replaced` asserted `Browser.close()`, whose 5 s grace (`CLOSE_GRACE`, the product's bound before it kills the tree) is a fine product choice but a time budget as a test assertion: a loaded runner let Chrome take longer (macOS 6662, Windows 6726, 13 s test); (2) `a_page_is_read_snapshot_by_snapshot` pushed a 16 MiB page (`MAX_HTML` + 1) through the fake browser in a debug build to see the size cap refuse it, which outlasted the 10 s call timeout on a macOS runner and gave `Timeout` instead of "larger". **Rule:** a test asserts the mechanism (the browser exits by itself and is not killed; the cap refuses a page one byte over it), never that it happened within a product timeout; give the code under test the cap as a parameter so a few bytes prove it; wait on the condition (`close_gracefully` returns the moment Chrome exits) with a hang guard that only stops a browser that never exits. A failing wait names what the thing it waited for reported (the load's own result), so the next failure carries its cause.
@@ -699,3 +709,9 @@ actions that run them; the `plan` job wires every other job; a line-based YAML s
 does not understand (comments on keys, flow mappings, anchors); and mutants survived because tests asserted `every(...)` over
 possibly empty lists. **Guidance:** when narrowing a trigger, grep for every consumer of the old list, make a narrowing fail
 safe to everything on any input it cannot model, and assert exact lists in tests, never `every` on a list that may be empty.
+
+## Stale, duplicate and global-trigger CI runs wasted the runners (2026-10-29)
+One day of CI went on runs for superseded branch heads, the same head dispatched twice, runs for branches already merged
+into another branch, and global triggers in the affected planner that made every run build everything (fixed in
+b618b5c97). **Rule:** cancel older queued runs before dispatching, dispatch once after the last review fix, give merged
+branches and docs-only changes no CI, and keep branch runs on the affected plan (rule 50).

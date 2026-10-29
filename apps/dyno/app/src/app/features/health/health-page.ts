@@ -7,6 +7,7 @@ import { LOCATION_LABEL, startupStateText } from '../../shared/labels';
 import { ViewPrefs } from '../../core/view-prefs';
 import { HealthStore } from '../../state/health.store';
 import { HealthHero } from '../dashboard/health-hero';
+import { MatCheckbox } from '@angular/material/checkbox';
 
 const IMPACT_LABEL: Record<ImpactRating, string> = { notMeasured: 'Not measured', low: 'Low', medium: 'Medium', high: 'High' };
 const IMPACT_TONE: Record<ImpactRating, 'ok' | 'warn' | 'bad' | null> = { notMeasured: null, low: 'ok', medium: 'warn', high: 'bad' };
@@ -16,7 +17,7 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
 /** Health: the score and its reasons, and what starts at sign-in. Dyno only shows these; it changes nothing. */
 @Component({
   selector: 'dy-health-page',
-  imports: [AsyncState, HealthHero, Icon],
+  imports: [MatCheckbox, AsyncState, HealthHero, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -34,8 +35,8 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
           <h2><dy-icon name="power" /> Start-up items</h2>
           <span class="spacer"></span>
           <div class="filters" role="group" aria-label="Hide from the list">
-            <button type="button" class="tog" [attr.aria-pressed]="filter().hideOs" (click)="toggle('hideOs')"><dy-icon name="check" /> Hide system entries <span class="num">{{ store.startupCounts().os }}</span></button>
-            <button type="button" class="tog" [attr.aria-pressed]="filter().hideSigned" (click)="toggle('hideSigned')"><dy-icon name="check" /> Hide signed apps <span class="num">{{ store.startupCounts().signed }}</span></button>
+            <mat-checkbox [checked]="filter().hideOs" (change)="toggle('hideOs')">Hide system entries <span class="num">{{ store.startupCounts().os }}</span></mat-checkbox>
+            <mat-checkbox [checked]="filter().hideSigned" (change)="toggle('hideSigned')">Hide signed apps <span class="num">{{ store.startupCounts().signed }}</span></mat-checkbox>
           </div>
         </div>
         <dy-async [loaded]="store.startupLoaded()" [error]="store.startupError()" [empty]="store.startup().length === 0" [emptyTitle]="emptyTitle()" [emptyText]="emptyText()" what="startup items" [rows]="4" (retry)="reload()">
@@ -69,11 +70,6 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
     .dot[data-tone='bad'] { background: var(--bad); }
     .faint { color: var(--text-3); }
     .filters { display: flex; gap: var(--sp-2); }
-    .tog { display: inline-flex; align-items: center; gap: 4px; height: var(--control-h); padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-pill); background: var(--surface-2); color: var(--text-2); font: var(--fw-medium) var(--fs-sm) / 1 var(--font-sans); cursor: pointer; }
-    .tog dy-icon { --icon-size: 13px; display: none; }
-    .tog .num { color: var(--text-3); }
-    .tog[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
-    .tog[aria-pressed='true'] dy-icon { display: inline-block; }
     .shown { margin: 0 var(--sp-4) var(--sp-3); color: var(--text-3); font-size: var(--fs-sm); }
   `,
 })

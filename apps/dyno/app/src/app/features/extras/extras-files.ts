@@ -5,6 +5,9 @@ import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
 import { MIN_SIZES, MODES, type FileRow, baseName, dirName, fileRows, middleEllipsis, scanSentence } from './files-model';
 import { EXTRAS_STYLES } from './extras-styles';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /**
  * Large and duplicate files in a folder the person chooses. Searching only reads: Dyno lists the files and moves or
@@ -12,25 +15,17 @@ import { EXTRAS_STYLES } from './extras-styles';
  */
 @Component({
   selector: 'dy-extras-files',
-  imports: [AsyncState, Icon],
+  imports: [MatIconButton, MatTooltip, SuSegmentedControl, MatButton, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Search">
-      <button type="button" class="btn primary" [disabled]="store.finder().loading" (click)="store.chooseFolder()"><dy-icon name="folder" /> {{ store.folder() ? 'Choose another folder…' : 'Choose a folder…' }}</button>
+      <button type="button" matButton="filled" [disabled]="store.finder().loading" (click)="store.chooseFolder()"><dy-icon name="folder" /> {{ store.folder() ? 'Choose another folder…' : 'Choose a folder…' }}</button>
       @if (store.folder(); as f) {
-        <span class="folder path" [title]="f">{{ short(f) }}</span>
+        <span class="folder path" [matTooltip]="f">{{ short(f) }}</span>
       }
       <span class="grow"></span>
-      <div class="seg" role="group" aria-label="Look for">
-        @for (m of modes; track m.mode) {
-          <button type="button" [attr.aria-pressed]="store.mode() === m.mode" (click)="store.setMode(m.mode)">{{ m.label }}</button>
-        }
-      </div>
-      <div class="seg" role="group" aria-label="At least this big">
-        @for (s of sizes; track s.mib) {
-          <button type="button" [attr.aria-pressed]="store.minMib() === s.mib" (click)="store.setMinMib(s.mib)">{{ s.label }}</button>
-        }
-      </div>
+      <pd-segmented-control label="Look for" [options]="modeSegs" [value]="store.mode()" (valueChange)="pickMode($event)" />
+      <pd-segmented-control label="At least this big" [options]="sizeSegs" [value]="store.minMib() + ''" (valueChange)="store.setMinMib(+$event)" />
     </div>
 
     @if (!store.folder() && !store.finder().error) {
@@ -57,14 +52,14 @@ import { EXTRAS_STYLES } from './extras-styles';
                     @if (row.kind === 'group') {
                       <tr class="day">
                         <td colspan="3">
-                          <button type="button" class="chev" [attr.aria-expanded]="row.open" [attr.aria-label]="(row.open ? 'Collapse ' : 'Expand ') + row.title" (click)="toggleGroup(row.key)"><dy-icon [name]="row.open ? 'chevron-down' : 'chevron-right'" /></button>
+                          <button type="button" matIconButton [matTooltip]="(row.open ? 'Collapse ' : 'Expand ') + row.title" class="chev" [attr.aria-expanded]="row.open" [attr.aria-label]="(row.open ? 'Collapse ' : 'Expand ') + row.title" (click)="toggleGroup(row.key)"><dy-icon [name]="row.open ? 'chevron-down' : 'chevron-right'" /></button>
                           <strong>{{ row.title }}</strong><span class="faint cnt">{{ row.detail }}</span>
                         </td>
                       </tr>
                     } @else {
                       <tr>
                         <td>
-                          <span class="ell" [title]="row.file.path"><strong class="fname">{{ base(row.file.path) }}</strong> <span class="dir path">{{ short(dir(row.file.path), 56) }}</span></span>
+                          <span class="ell" [matTooltip]="row.file.path"><strong class="fname">{{ base(row.file.path) }}</strong> <span class="dir path">{{ short(dir(row.file.path), 56) }}</span></span>
                         </td>
                         <td class="r">{{ bytes(row.file.bytes) }}</td>
                         <td class="r muted">{{ modified(row.file.modified) }}</td>
@@ -88,8 +83,6 @@ import { EXTRAS_STYLES } from './extras-styles';
       .w-mod { width: 110px; }
       .fname { font-weight: var(--fw-medium); }
       .dir { color: var(--text-3); margin-left: var(--sp-2); }
-      .chev { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 0; background: none; color: var(--text-3); border-radius: var(--r-sm); cursor: pointer; vertical-align: middle; }
-      .chev:hover { background: var(--surface-active); color: var(--text-1); }
     `,
   ],
 })
@@ -97,6 +90,12 @@ export class ExtrasFiles {
   protected readonly store = inject(ExtrasStore);
   protected readonly modes = MODES;
   protected readonly sizes = MIN_SIZES;
+  protected readonly modeSegs: SuSegment[] = MODES.map((m) => ({ value: m.mode, label: m.label }));
+  protected readonly sizeSegs: SuSegment[] = MIN_SIZES.map((s) => ({ value: String(s.mib), label: s.label }));
+  protected pickMode(value: string): void {
+    const m = MODES.find((x) => x.mode === value);
+    if (m) void this.store.setMode(m.mode);
+  }
   private readonly collapsed = signal<ReadonlySet<string>>(new Set());
 
   protected readonly result = computed(() => this.store.finder().data);

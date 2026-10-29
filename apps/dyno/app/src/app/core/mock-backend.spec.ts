@@ -51,10 +51,6 @@ describe('applyMockPlatform', () => {
 });
 
 describe('OS differences', () => {
-  it('appInfo reports the OS', async () => {
-    for (const os of ['windows', 'macos', 'linux'] as const) expect((await make({ os }).appInfo()).os).toBe(os);
-    expect((await make().appInfo()).updatesAvailable).toBe(false);
-  });
   it('disks follow the OS', async () => {
     const mounts = async (os: 'windows' | 'macos' | 'linux') => make({ os }).liveUpdate('summary').system.disks.map((d) => d.mount);
     expect(await mounts('windows')).toEqual(['C:\\', 'D:\\']);
@@ -220,11 +216,23 @@ describe('errors and the fail option', () => {
       vi.useRealTimers();
     }
   });
+  it('adds, replaces and deletes one alert rule without touching the other settings', async () => {
+    const b = make();
+    const rule = { id: 'hot', name: 'Hot', metric: 'cpuTemp', op: 'above', limit: 90, forSecs: 30, severity: 'warning', enabled: true } as never;
+    const added = await b.upsertAlertRule(rule);
+    expect(added.customAlerts?.map((r) => r.id)).toContain('hot');
+    const renamed = await b.upsertAlertRule({ ...(rule as object), name: 'Hotter' } as never);
+    expect(renamed.customAlerts?.filter((r) => r.id === 'hot')).toHaveLength(1);
+    expect(renamed.customAlerts?.find((r) => r.id === 'hot')?.name).toBe('Hotter');
+    const gone = await b.deleteAlertRule('hot');
+    expect(gone.customAlerts?.some((r) => r.id === 'hot')).toBe(false);
+    expect(gone.sampling).toEqual(added.sampling);
+  });
   it('replies are copies: mutating them does not change the mock', async () => {
     const b = make();
     const s = await b.settings();
-    s.theme = s.theme === 'dark' ? 'light' : 'dark';
-    expect((await b.settings()).theme).not.toBe(s.theme);
+    s.launchAtLogin = !s.launchAtLogin;
+    expect((await b.settings()).launchAtLogin).not.toBe(s.launchAtLogin);
   });
 });
 
@@ -386,8 +394,10 @@ describe('reports, settings, plugins, tray', () => {
   it('lists plugins and handles the tray commands', async () => {
     const b = make();
     expect((await b.plugins()).length).toBeGreaterThan(0);
-    await expect(b.trayOpenMain()).resolves.toBeUndefined();
-    await expect(b.trayQuit()).resolves.toBeUndefined();
+    await expect(b.showMainWindow()).resolves.toBeUndefined();
+    await expect(b.hideTray()).resolves.toBeUndefined();
+    await expect(b.fitTray(300)).resolves.toBeUndefined();
+    await expect(b.quitApp()).resolves.toBeUndefined();
   });
 });
 

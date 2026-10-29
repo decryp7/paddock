@@ -5,18 +5,20 @@ import { Icon } from '../../shared/icon';
 import { LiveStore } from '../../state/live.store';
 import type { AppGroup } from '../../core/api.types';
 import { readValue, UNAVAILABLE } from '../../core/measured';
+import { MatButton } from '@angular/material/button';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /** The apps using the most CPU or memory right now, grouped by app ("Chrome · 38"); a click opens them in the task manager. */
 @Component({
   selector: 'dy-top-apps',
-  imports: [Icon],
+  imports: [MatTooltip, MatButton, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" [attr.aria-label]="'Top apps by ' + metric()">
       <div class="card-head">
         <h2><dy-icon [name]="metric() === 'cpu' ? 'cpu' : 'memory'" /> Top apps by {{ metric() === 'cpu' ? 'CPU' : 'memory' }}</h2>
         <span class="spacer"></span>
-        <button type="button" class="btn link" (click)="openAll()">View all</button>
+        <button type="button" matButton="text" class="dy-link" (click)="openAll()">View all</button>
       </div>
       @if (!live.connected()) {
         <div class="skeletons" aria-busy="true" aria-label="Loading apps">
@@ -31,7 +33,7 @@ import { readValue, UNAVAILABLE } from '../../core/measured';
               <button type="button" (click)="open(g)" [attr.aria-label]="'Show ' + g.name + ' in Processes'">
                 <span class="name truncate">{{ g.name }}</span>
                 @if (g.pids.length > 1) {
-                  <span class="mult num" [title]="count(g.pids.length) + ' processes'">×{{ count(g.pids.length) }}</span>
+                  <span class="mult num" [matTooltip]="count(g.pids.length) + ' processes'">×{{ count(g.pids.length) }}</span>
                 }
                 <span class="val num">{{ value(g) }}</span>
                 <span class="bar-track" aria-hidden="true"><span [style.width.%]="share(g)"></span></span>

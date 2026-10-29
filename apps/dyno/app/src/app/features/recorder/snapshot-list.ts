@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, ElementRef, input, output, viewChild } from '@angular/core';
 import type { CaptureReason, RecorderSnapshotInfo } from '../../core/api.types';
 import { formatBytes, formatClock, formatDate } from '../../shared/format';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /** What triggered a snapshot, as text: "Manual" or the alarm's title. */
 export function reasonText(r: CaptureReason): string {
@@ -10,6 +11,7 @@ export function reasonText(r: CaptureReason): string {
 /** Saved snapshots, newest first, as a keyboard-navigable list (arrows move and select, Home/End jump). */
 @Component({
   selector: 'dy-snapshot-list',
+  imports: [FullTextTip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="head" aria-hidden="true"><span>Saved</span><span>Reason</span><span class="r">Size</span></div>
@@ -17,7 +19,7 @@ export function reasonText(r: CaptureReason): string {
       @for (s of snapshots(); track s.id) {
         <button type="button" role="option" class="row" [attr.aria-selected]="s.id === selectedId()" [tabindex]="s.id === selectedId() ? 0 : -1" [attr.data-id]="s.id" (click)="picked.emit(s.id)">
           <span class="when">{{ when(s.at) }}</span>
-          <span class="why" [title]="why(s)">{{ why(s) }}</span>
+          <span class="why" [dyFullText]="why(s)">{{ why(s) }}</span>
           <span class="size">{{ size(s) }}</span>
         </button>
       }

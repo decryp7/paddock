@@ -5,19 +5,17 @@ import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
 import { CHANGE_KIND_LABEL, CHANGE_WINDOWS, changeRows, changeTone, watchingNote } from './extras-model';
 import { EXTRAS_STYLES } from './extras-styles';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /** What changed on this computer: installs, updates, new start-up items and setting changes, grouped by day. */
 @Component({
   selector: 'dy-extras-changes',
-  imports: [AsyncState, Icon],
+  imports: [FullTextTip, SuSegmentedControl, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Window">
-      <div class="seg" role="group" aria-label="Period">
-        @for (w of windows; track w.hours) {
-          <button type="button" [attr.aria-pressed]="store.hours() === w.hours" (click)="store.setHours(w.hours)">{{ w.label }}</button>
-        }
-      </div>
+      <pd-segmented-control label="Period" [options]="windowSegs" [value]="store.hours() + ''" (valueChange)="store.setHours(+$event)" />
       <span class="grow"></span>
       @if (watching()) { <span class="faint muted">{{ watching() }}</span> }
     </div>
@@ -41,8 +39,8 @@ import { EXTRAS_STYLES } from './extras-styles';
                     <tr>
                       <td class="time num muted">{{ clock(r.change.at) }}</td>
                       <td class="kind"><span class="dot" [attr.data-tone]="tone(r.change.kind)" aria-hidden="true"></span>{{ kindLabel(r.change.kind) }}</td>
-                      <td><span class="ell" [title]="r.change.title">{{ r.change.title }}</span></td>
-                      <td class="muted"><span class="ell" [title]="r.change.detail">{{ r.change.detail }}</span></td>
+                      <td><span class="ell" [dyFullText]="r.change.title">{{ r.change.title }}</span></td>
+                      <td class="muted"><span class="ell" [dyFullText]="r.change.detail">{{ r.change.detail }}</span></td>
                     </tr>
                   }
                 }
@@ -65,6 +63,7 @@ import { EXTRAS_STYLES } from './extras-styles';
 export class ExtrasChanges implements OnInit {
   protected readonly store = inject(ExtrasStore);
   protected readonly windows = CHANGE_WINDOWS;
+  protected readonly windowSegs: SuSegment[] = CHANGE_WINDOWS.map((w) => ({ value: String(w.hours), label: w.label }));
   protected readonly state = this.store.changes;
   protected readonly data = computed(() => this.store.changes().data);
   protected readonly rows = computed(() => {

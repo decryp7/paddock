@@ -279,6 +279,7 @@
     "pd.health.state.paused": "⟦þááûûšééð⟧",
     "pd.health.state.program-missing": "⟦þŕööĝŕááɱ ɱîîššîñĝ⟧",
     "pd.health.state.quarantined": "⟦šŵîîţçĥééð ööƒƒ⟧",
+    "pd.health.state.reconnecting": "⟦ŕééçööññééçţîñĝ⟧",
     "pd.health.state.refused": "⟦ŕééƒûûšééð ƀý ţĥé šýšţééɱ⟧",
     "pd.health.state.repairing": "⟦ŕééþááîîŕîñĝ⟧",
     "pd.health.state.stopped": "⟦šţööþþééð⟧",

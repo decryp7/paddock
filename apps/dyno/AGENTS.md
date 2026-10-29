@@ -182,9 +182,15 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
   comments only where intent isn't obvious), idioms. Rust uses `rustfmt.toml` (max_width 140).
 - UI: standalone components, signals, OnPush, CSS custom properties for theme tokens (dark and light), accessible
   markup (real buttons, labels, aria-labels on icon buttons), the `dy` selector prefix.
-- UI building blocks: use **Angular CDK** for behaviour and accessibility (menus, overlays, dialogs, listbox,
-  scrolling) instead of hand-rolling them, and **Angular Material first** (rule 47: a Material component wherever one fits), themed through
-  Dyno's CSS tokens. Icons use Material's `MatIconRegistry` with Dyno's own SVGs registered as literals in the `dy`
+- The UI runs on the Paddock app shell (ADR 0023): pages, status items, commands, settings pages and dialogs are
+  contributions in `app/src/app/shell/contributions.ts`; the frame, the palette, notifications, jobs, Settings, About and the
+  tray popover are the shell's. A dialog is an OS window: its contract is Rust's (`src-tauri/src/dialogs.rs`, generated to
+  `generated/dialog-contracts.ts`), its component declares `dialogActions` and draws no footer, and a confirmation is the
+  shared `pd.confirm`. Never open a CDK dialog or write a toast; use `DialogService` and `Notifier`. The legacy `--surface-*`,
+  `--text-*`, `--sp-*` tokens in `styles.scss` are a bridge over `--pd-*`: new code uses `--pd-*`.
+- UI building blocks: use **Angular CDK** for behaviour and accessibility (menus, overlays, listbox, scrolling) instead of
+  hand-rolling them, and **Angular Material first** (rule 47: a Material component wherever one fits), themed through
+  the shared `--pd-*` tokens. Icons use Material's `MatIconRegistry` with Dyno's own SVGs registered as literals in the `dy`
   namespace; no icon fonts and no icon URLs fetched at run time (the CSP forbids it).
 - Charts use Apache ECharts with the CVD-checked categorical palette. Status colours always come with words or
   numbers; validate colours for contrast (WCAG AA) and colour-vision deficiency.
@@ -193,6 +199,8 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
 
 - Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
   `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
+- Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
+  branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.
 - Research official sources before choosing libraries or relying on an OS behaviour (performance counters, job
   objects, Restart Manager, `taskpolicy`), and record what you found and when in the ADR or doc comment.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they are available instead of
