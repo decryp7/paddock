@@ -671,6 +671,21 @@ test('stable-workspace: the checkout never keeps an alternate into the kept clon
   assert.doesNotMatch(left, /\.paddock-ci/, 'no alternate into the kept clones is left behind');
 });
 
+test('stable-workspace: the kept clone holds no loose objects and at most 21 packs, however many small jobs it serves', () => {
+  const f = keptCloneFixture();
+  f.checkout();
+  assert.equal(f.run().status, 0);
+  for (let i = 0; i < 23; i += 1) {
+    f.checkout();
+    const r = f.run();
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    const v = Object.fromEntries(f.git(f.stable, 'count-objects', '-v').split('\n').map((l) => l.split(': ')));
+    // A fetch below fetch.unpackLimit (100 objects) is written as loose objects, which no pack count bounds.
+    assert.equal(Number(v.count), 0, `job ${i + 2}: ${v.count} loose objects`);
+    assert.ok(Number(v.packs) <= 21, `job ${i + 2}: ${v.packs} packs`);
+  }
+});
+
 test('stable-workspace: a lock left in the kept clone by a killed job does not break it for good: a fresh clone is made', () => {
   const f = keptCloneFixture();
   f.checkout();

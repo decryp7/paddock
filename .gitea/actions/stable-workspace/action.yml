@@ -75,9 +75,10 @@ runs:
             trap 'restore; trap - EXIT INT TERM; exit 1' INT TERM
             trap restore EXIT
             mkdir -p "$(dirname "$alt")" && printf '%s\n' "$objs" >> "$alt" || { restore; trap - EXIT INT TERM; return 1; }
-            # --update-shallow lets the clone take a commit whose parents it does not have.
+            # --update-shallow lets the clone take a commit whose parents it does not have. unpackLimit=1: every fetch is
+            # written as one pack (below the default 100 objects git writes loose objects, which no pack count bounds).
             local st=0
-            git -C "$stable" fetch -q --no-tags --update-shallow "$ws" HEAD || st=$?
+            git -C "$stable" -c fetch.unpackLimit=1 fetch -q --no-tags --update-shallow "$ws" HEAD || st=$?
             restore
             trap - EXIT INT TERM
             [ "$st" = 0 ] &&
