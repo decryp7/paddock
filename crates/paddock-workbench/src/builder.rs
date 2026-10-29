@@ -81,13 +81,16 @@ impl<R: Runtime> Builder<R> {
         let mut parts = Some(self);
         tauri::plugin::Builder::<R>::new(PLUGIN_NAME)
             .invoke_handler(handler)
+            // Tauri runs these hooks with its plugin store held: no window may be built in them (it would deadlock).
             .setup(move |app, _api| {
+                let _scope = paddock_commands::plugin_hook::plugin_hook_scope();
                 if let Some(parts) = parts.take() {
                     parts.install(app.app_handle());
                 }
                 Ok(())
             })
             .on_window_ready(|window| {
+                let _scope = paddock_commands::plugin_hook::plugin_hook_scope();
                 let w = window.clone();
                 window.on_window_event(move |event| on_window_event(&w, event));
             })

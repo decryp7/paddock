@@ -26,7 +26,7 @@ use paddock_diag::tauri::Setup;
 use paddock_env::{AppDirs, AppId, MapVars, Os};
 use paddock_health::notify::os::{FakeToaster, OsNotifier, SharedOsSettings, Toaster};
 use paddock_health::tauri::native::PluginToaster;
-use paddock_log::{LogConfig, LogHandle, Logging};
+use paddock_log::LogHandle;
 use paddock_shell::{AppIdentity, Builder};
 use paddock_updater::tauri::UpdatesBuilder;
 use paddock_window::tauri::{FixedPrefs, WindowConfig, Windows};
@@ -104,19 +104,10 @@ fn dirs(
 /// Starts the app's log in the user's log folder at the level and limits saved in the settings (the level changes later
 /// without a restart, from the Logging page). A log that cannot start is only noted: the app runs without one.
 fn install_log() {
-    let started = dirs(None).map_err(|e| e.to_string()).and_then(|dirs| {
-        let id = AppId::new(APP_ID, APP_NAME).map_err(|e| e.to_string())?;
-        let saved = paddock_diag::logging::stored(&dirs.config().join(paddock_settings::FILE_NAME));
-        let config = LogConfig::new(&id, "app", VERSION)
-            .with_dirs(&dirs)
-            .with_settings(saved);
-        Logging::new(config).install().map_err(|e| e.to_string())
-    });
-    match started {
-        Ok(handle) => {
-            let _ = LOG.set(handle);
-        }
-        Err(why) => eprintln!("{APP_NAME}: the log could not start ({why})"),
+    if let Some(handle) =
+        paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION))
+    {
+        let _ = LOG.set(handle);
     }
 }
 
@@ -347,6 +338,22 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         .wrap(handler!())
 }
 
+/// The demo on `builder` (after the plugins already on it): the shell plugin `shell`, the tray drawn by `tray_backend`
+/// and the main window for `launch` (the shell opens both after every plugin is set up) and the demo's guarded commands.
+/// The start `run` uses and the start test composes.
+pub fn app<R: Runtime>(
+    builder: tauri::Builder<R>,
+    shell: Builder<R>,
+    launch: paddock_window::launch::LaunchArgs,
+    tray_backend: impl paddock_window::tauri::TrayBackend<R>,
+) -> tauri::Builder<R> {
+    shell
+        .tray(move |app| tray::tray(app, tray_backend))
+        .launch(launch)
+        .add_to(builder)
+        .invoke_handler(invoke_handler())
+}
+
 /// The app: the shell plugin, the demo's guarded commands, the tray and the main window.
 pub fn run() {
     install_log();
@@ -361,18 +368,12 @@ pub fn run() {
         Ok(startup) => shell = shell.startup(startup),
         Err(e) => log::error!("The relaunch hook is not installed: {e}"),
     }
-    let shell = shell.setup(move |app| {
-        tray::create(app);
-        paddock_window::tauri::start(app, &launch)?;
-        Ok(())
-    });
     let builder = tauri::Builder::default()
         // The native save dialog of Report a Problem (the shell's `native-dialogs`).
         .plugin(tauri_plugin_dialog::init())
         // The OS notification plugin behind the shell's `PluginToaster`.
-        .plugin(tauri_plugin_notification::init())
-        .plugin(shell.build())
-        .invoke_handler(invoke_handler());
+        .plugin(tauri_plugin_notification::init());
+    let builder = app(builder, shell, launch, tray::native());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     let builder =

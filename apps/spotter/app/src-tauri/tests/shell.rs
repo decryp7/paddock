@@ -232,3 +232,47 @@ fn the_proxy_degradation_tells_the_user_what_to_fix() {
     let cause = spotter_app_lib::health::proxy_cause("socks");
     assert!(format!("{cause:?}").contains("http://host:port"));
 }
+
+/// Spotter's start as `run` composes it (rule 43), the engine's set-up included, on the mock runtime with a headless
+/// tray: the tray and the main window open, after every plugin is set up (a window built inside a plugin hook
+/// deadlocked Spotter's start).
+#[test]
+fn the_start_opens_the_tray_and_the_main_window() {
+    use paddock_shell::testing::{start, Started};
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().to_path_buf();
+    let started = start(move || composed(&data, paddock_window::launch::LaunchArgs::default()));
+    assert_eq!(
+        started,
+        Ok(Started {
+            main_window: true,
+            tray: true
+        })
+    );
+    assert!(dir.path().join("data").is_dir(), "the engine opened, in the test's folder");
+}
+
+/// Started at log-in (`--hidden`) with a tray: Spotter stays in the tray without a window.
+#[test]
+fn a_hidden_start_stays_in_the_tray() {
+    use paddock_shell::testing::{start, Started};
+    let launch = paddock_window::launch::LaunchArgs {
+        hidden: true,
+        ..Default::default()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().to_path_buf();
+    assert_eq!(
+        start(move || composed(&data, launch)),
+        Ok(Started {
+            main_window: false,
+            tray: true
+        })
+    );
+}
+
+/// Spotter as `run` composes it, the engine included (its data in `dir`, no OS toasts), without the OS plugins.
+fn composed(dir: &std::path::Path, launch: paddock_window::launch::LaunchArgs) -> tauri::Builder<tauri::test::MockRuntime> {
+    let shell = shell(Place::Test { dir: dir.to_path_buf() }, &Hub::default());
+    spotter_app_lib::app(tauri::test::mock_builder(), shell, launch, paddock_window::tauri::HeadlessTray)
+}
