@@ -372,6 +372,25 @@ describe('contracts', () => {
     assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /"\$RUNNER_OS" != Windows \] \|\| \[ "\$WINDOWS_CLIPPY" = true \]; then step cargo clippy/);
   });
 
+  test('notices: an app with a `notices` block checks its THIRD_PARTY_NOTICES.md on the Linux leg that runs Rust or UI, and only there', () => {
+    for (const [name, app] of graph.apps) {
+      if (!app.notices) continue;
+      assert.ok(app.notices.name && Array.isArray(app.notices.manifests), `${name}: notices needs a name and its Cargo manifests`);
+    }
+    const pitwall = graph.apps.get('pitwall');
+    const legsOf = () => matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph).filter((l) => l.app === 'pitwall');
+    assert.ok(legsOf().every((l) => l.notices === 'false'), 'no block, no check');
+    pitwall.notices = { name: 'Pitwall', manifests: [] };
+    try {
+      const legs = legsOf();
+      assert.ok(legs.length > 1, 'Pitwall has host legs too');
+      for (const l of legs) assert.equal(l.notices, l.os === LINUX ? 'true' : 'false', l.os);
+    } finally {
+      delete pitwall.notices;
+    }
+    assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /scripts\/notices\.sh" "\$APP" --check/, 'app-gates runs the shared check');
+  });
+
   test("an app's last packages reach every leg, so a host leg and the Linux leg agree on what is tested apart", () => {
     const legs = matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph);
     assert.deepEqual([...new Set(legs.map((l) => l.last_packages))], ['pitwall-app'], 'Pitwall tests its Tauri shell after the rest');

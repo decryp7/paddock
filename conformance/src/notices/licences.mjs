@@ -7,7 +7,7 @@ export const ALLOWED = [
   'BSL-1.0', 'Unicode-3.0', 'Unlicense', 'MPL-2.0', 'CDLA-Permissive-2.0',
 ];
 
-/** Accepted for npm packages only (fonts, build-time data); cargo-deny never sees them. */
-export const NPM_EXTRA = ['OFL-1.1', 'Python-2.0', 'BlueOak-1.0.0'];
+/** Accepted for npm packages only (fonts, build-time data such as caniuse-lite's CC-BY-4.0, whose attribution these notices carry); cargo-deny never sees them. */
+export const NPM_EXTRA = ['OFL-1.1', 'Python-2.0', 'BlueOak-1.0.0', 'CC-BY-4.0'];
 
 export const PERMISSIVE = new Set([...ALLOWED, ...NPM_EXTRA]);
