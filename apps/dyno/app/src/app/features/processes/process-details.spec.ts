@@ -16,7 +16,8 @@ async function make(os: 'windows' | 'macos' = 'windows', fail?: Set<string>) {
   const store = TestBed.inject(ProcessesStore);
   TestBed.inject(LiveStore);
   store.start();
-  await new Promise((r) => setTimeout(r, 5));
+  // The mock's first live update arrives on its own timer: wait for it, not for a time.
+  await vi.waitFor(() => expect(store.processes().length).toBeGreaterThan(0));
   const f = TestBed.createComponent(ProcessDetailsPanel);
   const el = f.nativeElement as HTMLElement;
   const settle = async () => {

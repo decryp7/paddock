@@ -166,7 +166,8 @@ test.describe('native feel', () => {
     await page.keyboard.down('Control');
     await page.mouse.wheel(0, -200);
     await page.keyboard.up('Control');
-    await page.waitForTimeout(200);
+    // Two frames: any zoom or navigation the keys and the wheel caused has been applied by then.
+    await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
     expect(await page.evaluate(() => (window as unknown as { __alive?: boolean }).__alive)).toBe(true);
     expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
 
@@ -199,7 +200,8 @@ test.describe('native feel', () => {
         async ([px, py]) => {
           const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: px, clientY: py });
           (document.elementFromPoint(px!, py!) ?? document.body).dispatchEvent(e);
-          await new Promise((r) => setTimeout(r, 150));
+          // Two frames: the menu, if the event opens one, is in the overlay by then.
+          await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
           return !!document.querySelector('.cdk-overlay-container [role=menuitem]');
         },
         [x, y],

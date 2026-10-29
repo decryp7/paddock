@@ -12,7 +12,12 @@ const target = (p: string): AxeTarget => ({
   url: `/?latency=0#/${p}`,
   ready: async (page) => {
     await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible({ timeout: 45_000 });
-    await page.waitForTimeout(800);
+    // Settled: nothing is loading and every finite animation (fades, chart entry) has finished, so axe sees final colours.
+    await page.waitForFunction(
+      () =>
+        !document.querySelector('[aria-busy="true"]') &&
+        document.getAnimations().every((a) => a.playState === 'finished' || a.effect?.getTiming().iterations === Infinity),
+    );
   },
 });
 // The network page's rows are the one grid still made of div rows with aria-rowindex (axe: aria-conditional-attr). Rebuilding it

@@ -25,7 +25,8 @@ function env() {
 async function settle(f: { whenStable(): Promise<unknown>; detectChanges(): void }) {
   f.detectChanges();
   await f.whenStable();
-  await new Promise((r) => setTimeout(r, 5));
+  // One event-loop turn: the mock's first live update was scheduled with the same zero delay earlier, so it has run.
+  await new Promise((r) => setTimeout(r));
   f.detectChanges();
 }
 const buttons = (el: HTMLElement) => [...el.querySelectorAll('button')];

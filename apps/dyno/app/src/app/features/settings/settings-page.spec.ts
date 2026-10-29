@@ -11,8 +11,9 @@ const NOW = 1_700_000_000_000;
 /** Renders, then lets the mock's promises and timers run and renders again (signals set after awaits). */
 async function settle(f: ComponentFixture<unknown>) {
   f.detectChanges();
+  // Event-loop turns, not time: the mock answers through microtasks and zero-delay timers scheduled earlier.
   for (let i = 0; i < 3; i++) {
-    await new Promise((r) => setTimeout(r, 2));
+    await new Promise((r) => setTimeout(r));
     f.detectChanges();
   }
 }
@@ -104,16 +105,18 @@ describe('SettingsPage', () => {
   });
 
   it('has a Backup health section: switch, hours and folders for the tools found by name', async () => {
-    const { el, saveButton, store } = await make();
+    const { f, el, saveButton, store } = await make();
     const section = el.querySelector('section[aria-label="Backup health"]')!;
     expect(section).not.toBeNull();
     expect(section.textContent).toContain('never runs or manages a backup');
     expect(section.querySelectorAll('textarea')).toHaveLength(3);
     expect(section.textContent).toContain('Where restic is installed');
     toggle(el, 'Tell me when a backup is out of date').click();
-    await new Promise((r) => setTimeout(r, 2));
-    expect(saveButton()).toBeDefined();
-    expect(store.settings()!.backup.alertWhenStale).toBe(true);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(store.settings()!.backup.alertWhenStale).toBe(true);
+      expect(saveButton()).toBeDefined();
+    });
   });
 
   it('keeps what is typed in a folder box, validates it like the engine and saves it', async () => {

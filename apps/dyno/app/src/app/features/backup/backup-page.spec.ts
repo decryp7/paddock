@@ -102,17 +102,24 @@ describe('dy-backup-page', () => {
 
   it('checks now: disabled while it runs, then shows the new time', async () => {
     const { f, el, mock } = render({ latencyMs: 5 });
-    await new Promise((r) => setTimeout(r, 20));
+    await vi.waitFor(() => {
+      f.detectChanges();
+      // Loaded: the summary is there and the button is usable.
+      expect(el.querySelector('[aria-label="Summary"] h2')).not.toBeNull();
+      expect(btn(el, 'Check now')?.disabled).toBe(false);
+    });
     await settle(f);
     const spy = vi.spyOn(mock, 'refreshBackup');
     const check = btn(el, 'Check now');
     check.click();
     f.detectChanges();
     expect(btn(el, 'Checking').disabled).toBe(true);
-    await new Promise((r) => setTimeout(r, 450));
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(btn(el, 'Check now')?.disabled).toBe(false);
+    });
     await settle(f);
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(btn(el, 'Check now').disabled).toBe(false);
     expect(el.querySelector('[aria-label="Summary"] p')?.textContent).toBe('Checked just now');
   });
 
