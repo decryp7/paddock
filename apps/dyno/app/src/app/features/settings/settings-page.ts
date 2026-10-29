@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { BackupSettings, BackupTool, BaselineSettings, HardwareAlarms, IpLookupSettings, Settings, TrayItem, UnusualSettings } from '../../core/api.types';
+import type { BackupSettings, BackupTool, BaselineSettings, DiskSettings, HardwareAlarms, IpLookupSettings, Settings, TrayItem, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -12,14 +12,15 @@ import { LOOKUP_PRESETS, presetIdFor, templateProblem } from './ip-lookup-preset
 import { TrayItemsEditor } from './tray-items-editor';
 import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
 import { MatButton } from '@angular/material/button';
-import { MatFormField, MatSuffix } from '@angular/material/form-field';
+import { MatError, MatFormField, MatSuffix } from '@angular/material/form-field';
+import { ErrorStateMatcher } from '@angular/material/core';
 import { MatInput } from '@angular/material/input';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 
 /** Dyno's page of the Settings window (Appearance, Updates and About are the shell's): start-up, sampling and retention, the tray, alert thresholds, the observe-only posture and plugins. */
 @Component({
   selector: 'dy-settings-page',
-  imports: [PdSelect, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, TrayItemsEditor],
+  imports: [PdSelect, MatError, MatFormField, MatInput, MatSuffix, MatButton, FormsModule, MatSlideToggle, AsyncState, Icon, TrayItemsEditor],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page narrow">
@@ -30,7 +31,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
         }
         @if (dirty()) {
           <button type="button" matButton="outlined" (click)="revert()">Discard changes</button>
-          <button type="button" matButton="filled" [disabled]="store.saving() || !!backupProblem()" (click)="save()">Save changes</button>
+          <button type="button" matButton="filled" [disabled]="store.saving() || !!backupProblem() || !!diskProblem()" (click)="save()">Save changes</button>
         }
       </header>
 
@@ -106,6 +107,19 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
                 @if (asnProblem(); as p) {
                   <small class="problem" role="alert">{{ p }}</small>
                 }
+              </div>
+            </section>
+
+            <section class="card" aria-label="Disk map" id="disk-map">
+              <h2>Disk map</h2>
+              <p class="sub">Limits of a disk map scan. A larger scan is more complete and uses more memory; a scan that reaches a limit says so.</p>
+              <div class="row">
+                <div class="lbl"><strong>Items kept per scan</strong><small>The most folders and large files one scan keeps (10,000 to 5,000,000).</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="10000" max="5000000" step="10000" aria-label="Items kept per scan" [errorStateMatcher]="scanFoldersMatcher" [ngModel]="disk().scanFolders" (ngModelChange)="setDisk({ scanFolders: +$event })" /><span matTextSuffix>items</span>@if (diskErrors().scanFolders; as e) { <mat-error>{{ e }}</mat-error> }</mat-form-field>
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>Large file size</strong><small>Files at least this big get a place of their own in the map (1 to 1,024 MiB); smaller ones count toward their folder.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" max="1024" aria-label="Large file size" [errorStateMatcher]="notableFileMatcher" [ngModel]="disk().notableFileMib" (ngModelChange)="setDisk({ notableFileMib: +$event })" /><span matTextSuffix>MiB</span>@if (diskErrors().notableFileMib; as e) { <mat-error>{{ e }}</mat-error> }</mat-form-field>
               </div>
             </section>
 
@@ -250,6 +264,21 @@ export class SettingsPage implements OnInit {
   protected readonly presetId = computed(() => presetIdFor(this.ipLookup().ipTemplate));
   protected readonly ipProblem = computed(() => templateProblem(this.ipLookup().ipTemplate, 'ip'));
   protected readonly asnProblem = computed(() => templateProblem(this.ipLookup().asnTemplate, 'asn'));
+  /** The engine always sends the disk limits (its defaults when none were saved). */
+  protected readonly disk = computed<DiskSettings>(() => this.draft()?.disk ?? {});
+  protected readonly diskErrors = computed(() => {
+    const d = this.disk();
+    const bad = (v: number | undefined, lo: number, hi: number, what: string) =>
+      v === undefined || (Number.isInteger(v) && v >= lo && v <= hi) ? null : `${what} must be a whole number from ${lo.toLocaleString()} to ${hi.toLocaleString()}.`;
+    return { scanFolders: bad(d.scanFolders, 10_000, 5_000_000, 'Items kept'), notableFileMib: bad(d.notableFileMib, 1, 1024, 'Large file size') };
+  });
+  protected readonly scanFoldersMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().scanFolders };
+  protected readonly notableFileMatcher: ErrorStateMatcher = { isErrorState: () => !!this.diskErrors().notableFileMib };
+  protected readonly diskProblem = computed(() => this.diskErrors().scanFolders ?? this.diskErrors().notableFileMib);
+  /** Keeps what was typed so the field can say what is wrong; Save stays off until it is in range (the engine would clamp it, silently saving another number). */
+  protected setDisk(p: DiskSettings): void {
+    this.draft.update((d) => (d ? { ...d, disk: { ...d.disk, ...p } } : d));
+  }
   protected readonly baselines = computed<BaselineSettings>(() => this.draft()?.baselines ?? { enabled: true, learningDays: 7, alarms: false });
   protected readonly hardwareAlarms = computed<HardwareAlarms>(() => this.draft()?.hardwareAlarms ?? { throttling: true, lifespan: true });
   protected readonly systemChoices = [500, 1000, 2000, 5000].map((o): PdSelectOption => ({ value: String(o), label: this.every(o) }));

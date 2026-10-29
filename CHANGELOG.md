@@ -6,6 +6,17 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### `paddock-jobs`: the `wire` module
 - New `paddock_jobs::wire` (`WireSnapshot`, `WireState`, `WirePhase`): the postcard-safe form of a `JobSnapshot` for apps whose jobs run in an agent process and are relayed to the UI as `paddock://jobs` events (Dyno is the first). It converts both ways without loss.
+### `pd-sunburst` in `@decryp7/paddock-ui/chart` (docs/plans/pd-sunburst.md)
+- New `PdSunburst` (`pd-sunburst`) and `PdSunburstCentre`, a drillable ring chart for hierarchies (first consumer: Dyno's disk map) and the pure
+  `sunburstLayout`: SVG with tree semantics (`treeitem`, `aria-level`, `aria-setsize`, `aria-posinset`, `aria-expanded`), colour by branch over
+  the ring-ordered chart tokens, hatched hidden space and a dashed "not counted yet" ghost, folding by angle and count with a segment cap,
+  a live mode that coalesces updates to four per second, the tree keyboard model, and loading, empty and error states. Exports are one
+  declared line each in `chart/public-api.ts`; a gallery section shows every state. Also exported: `branchSlots`, `slotColour` and `PdArc` (a list beside the chart uses the chart's own colours), and `pd-sunburst` has a `highlight` input. `@decryp7/paddock-e2e` gains `clickShape`, `hoverShape` and `pointInShape` (real pointer events on a point inside an SVG shape). The tween between centres is a 100 to 180 ms cross-fade
+  (`tweenLayouts` is not built yet); `pd-table` tree rows (spec section 7) are a separate change.
+
+### Dyno: the disk map screen on the shell
+- New nav entry `Disk map` (`/disk-map`): scan a volume or folder as a job with live phase-labelled progress and Cancel, ring chart (`pd-sunburst`) beside a list or a `mat-table`, drill-down, capacity strip with hidden space, Full Disk Access and "Unavailable" states with a reason, Settings limits (items kept per scan, large file size).
+- The engine says why each unreadable folder was refused (`DiskNode.unreadableReason`). On macOS "operation not permitted" (EPERM) is `needsFullDiskAccess` while Full Disk Access is missing and `protected` ("macOS protects this folder") when it is already granted; "permission denied" (EACCES) is `needsAdmin`, except a privacy-protected folder of the user's own home while Full Disk Access is missing (a path hint). Windows and Linux: either refusal is `needsAdmin`; any other error is `other`. The Full Disk Access button shows only when a refused folder has that reason. `PROTOCOL_VERSION` is 2 for the new field (jobs-1.0 bumps to 2 as well: one bump covers both while unreleased).
 
 ### `providePaddockMaterial`: tooltips wait 500 ms
 - `providePaddockMaterial()` provides `MAT_TOOLTIP_DEFAULT_OPTIONS` with `showDelay: 500` (`PADDOCK_TOOLTIP_OPTIONS`), the design guide's delay for the tooltip every icon-only button carries. Every app that provides it gets the delay without setting it per tooltip.
@@ -349,7 +360,6 @@ Conventional Commits; one semver tag for the whole repo.
   sizes are rounded up once. A decision keeps its offset only, a form its width and offset, a viewer and a tool their size.
 - A modal's parent is disabled when the dialog is shown, not when it is created; opening a dialog that is still pending
   creates no window and does not show it early. A scale-factor change refits the window from its last measure.
-
 
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,

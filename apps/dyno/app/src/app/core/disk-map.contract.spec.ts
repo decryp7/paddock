@@ -43,7 +43,7 @@ const status = (state: DiskScanStatus['state'], volume: Volume | null): DiskScan
 
 const phases: ScanPhase[] = ['readingVolumeFacts', 'readingFolders'];
 
-const child = (id: number, name: string, kind: DiskChildren['children'][number]['kind'], bytes: number, logicalBytes: number, items: number, complete: boolean, newestChange: number, hasChildren = false) => ({
+const child = (id: number, name: string, kind: DiskChildren['children'][number]['kind'], bytes: number, logicalBytes: number, items: number, complete: boolean, newestChange: number, hasChildren = false, unreadableReason: DiskChildren['children'][number]['unreadableReason'] = null) => ({
   id,
   name,
   kind,
@@ -53,15 +53,16 @@ const child = (id: number, name: string, kind: DiskChildren['children'][number][
   newestChange,
   complete,
   hasChildren,
+  unreadableReason,
 });
 
 const children: DiskChildren = {
-  node: { id: 0, name: 'Macintosh HD', kind: 'folder', bytes: 604, logicalBytes: 574, items: 6, newestChange: 1_700_000_000_000, complete: false, hasChildren: true },
+  node: { id: 0, name: 'Macintosh HD', kind: 'folder', bytes: 604, logicalBytes: 574, items: 6, newestChange: 1_700_000_000_000, complete: false, hasChildren: true, unreadableReason: null },
   children: [
     child(1, 'Users', 'folder', 500, 480, 1, true, 1_700_000_000_000, true),
     child(3, 'vm.img', 'file', 100, 90, 1, true, 1_650_000_000_000),
     child(4, 'Volumes', 'mountPoint', 0, 0, 0, true, 0),
-    child(5, 'private', 'unreadable', 0, 0, 0, false, 0),
+    child(5, 'private', 'unreadable', 0, 0, 0, false, 0, false, 'needsFullDiskAccess'),
   ],
   other: { count: 0, bytes: 0, logicalBytes: 0, items: 0 },
   loose: { count: 1, bytes: 4, logicalBytes: 4, items: 1 },
@@ -74,14 +75,14 @@ const none = { count: 0, bytes: 0, logicalBytes: 0, items: 0 };
 const ringNode = (node: DiskChildren['node'], kids: RingNode[] = [], loose = none): RingNode => ({ node, children: kids, other: none, loose });
 const rings: DiskRings = {
   root: ringNode(
-    { id: 0, name: 'Macintosh HD', kind: 'folder', bytes: 503, logicalBytes: 483, items: 4, newestChange: 1_700_000_000_000, complete: false, hasChildren: true },
+    { id: 0, name: 'Macintosh HD', kind: 'folder', bytes: 503, logicalBytes: 483, items: 4, newestChange: 1_700_000_000_000, complete: false, hasChildren: true, unreadableReason: null },
     [
       ringNode(
-        { id: 1, name: 'Users', kind: 'folder', bytes: 503, logicalBytes: 483, items: 2, newestChange: 1_700_000_000_000, complete: true, hasChildren: true },
-        [ringNode({ id: 2, name: 'disk-image.dmg', kind: 'file', bytes: 500, logicalBytes: 480, items: 1, newestChange: 1_700_000_000_000, complete: true, hasChildren: false })],
+        { id: 1, name: 'Users', kind: 'folder', bytes: 503, logicalBytes: 483, items: 2, newestChange: 1_700_000_000_000, complete: true, hasChildren: true, unreadableReason: null },
+        [ringNode({ id: 2, name: 'disk-image.dmg', kind: 'file', bytes: 500, logicalBytes: 480, items: 1, newestChange: 1_700_000_000_000, complete: true, hasChildren: false, unreadableReason: null })],
         { count: 1, bytes: 3, logicalBytes: 3, items: 1 },
       ),
-      ringNode({ id: 3, name: 'private', kind: 'unreadable', bytes: 0, logicalBytes: 0, items: 0, newestChange: 0, complete: false, hasChildren: false }),
+      ringNode({ id: 3, name: 'private', kind: 'unreadable', bytes: 0, logicalBytes: 0, items: 0, newestChange: 0, complete: false, hasChildren: false, unreadableReason: 'needsFullDiskAccess' }),
     ],
   ),
   count: 4,

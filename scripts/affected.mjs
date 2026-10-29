@@ -645,7 +645,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
         kind(`app:${a}`, 'all');
       }
     }
-    // The shared actions' scripts in conformance/ run in every app's gates.
+    // The rest of conformance/ (bin, src) runs in every app's gates through the shared actions.
     if (f.startsWith('conformance/') && !/^conformance\/(test|fixtures)\//.test(f)) {
       for (const a of apps.keys()) {
         mark(`app:${a}`, `conformance ${f}`);

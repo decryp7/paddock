@@ -189,6 +189,28 @@ describe('SettingsPage', () => {
     expect(sent.baselines).toEqual({ enabled: true, learningDays: 14, alarms: true });
     expect(sent.hardwareAlarms).toEqual({ throttling: false, lifespan: false });
   });
+  it('shows the disk map limits with the engine defaults, saves a change and says what is wrong with a value out of range', async () => {
+    const { f, mock, el, saveButton } = await make();
+    const section = el.querySelector('section[aria-label="Disk map"]')!;
+    const items = section.querySelector<HTMLInputElement>('input[aria-label="Items kept per scan"]')!;
+    const size = section.querySelector<HTMLInputElement>('input[aria-label="Large file size"]')!;
+    expect([items.value, size.value]).toEqual(['2000000', '10']);
+    const type = (i: HTMLInputElement, v: string) => {
+      i.value = v;
+      i.dispatchEvent(new Event('input'));
+      f.detectChanges();
+    };
+    for (const bad of ['9999', '5000001', '1.5', '']) type(items, bad);
+    for (const bad of ['0', '1025']) type(size, bad);
+    expect(section.querySelector('mat-error')?.textContent).toContain('whole number from 10,000 to 5,000,000');
+    expect(saveButton()!.disabled).toBe(true);
+    type(items, '500000');
+    type(size, '64');
+    const spy = vi.spyOn(mock, 'saveSettings');
+    saveButton()!.click();
+    await settle(f);
+    expect(spy.mock.calls[0]![0].disk).toEqual({ scanFolders: 500_000, notableFileMib: 64 });
+  });
   it('ignores a learning period outside 1 to 30 and dims its rows when learning is off', async () => {
     const { f, el, saveButton } = await make();
     const input = el.querySelector<HTMLInputElement>('input[aria-label="Days of learning"]')!;

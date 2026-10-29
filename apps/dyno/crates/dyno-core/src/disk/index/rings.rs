@@ -133,6 +133,7 @@ impl DiskIndex {
 mod tests {
     use super::*;
     use crate::disk::index::{ScanLimits, Sizes};
+    use crate::disk::reason::UnreadableReason;
     use crate::time::Timestamp;
 
     const MB: u64 = 1024 * 1024;
@@ -247,7 +248,7 @@ mod tests {
         let a = i.add_folder(r, "a").unwrap();
         i.add_file(a, "x", Sizes::same(3 * MB), Timestamp(1));
         let locked = i.add_folder(r, "locked").unwrap();
-        i.mark_unreadable(locked);
+        i.mark_unreadable(locked, UnreadableReason::NeedsAdmin);
         // Nothing finished: a is still being listed.
         let out = i.rings(r, 2, 0.0, 10).unwrap();
         assert!(!out.root.node.complete);
