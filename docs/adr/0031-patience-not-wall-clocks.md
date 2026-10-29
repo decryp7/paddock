@@ -1,7 +1,7 @@
 # 31. Patience, not wall clocks: stalls judged on progress, CPU time and run state, one injected policy, tests wait on conditions
 
-- Status: Proposed (2026-10-29), revision 2 after independent review round 1 (7 P1 and the P2s addressed). Needs a
-  second review before the user decides.
+- Status: Proposed (2026-10-29), revision 3 after independent review rounds 1 and 2 (all P1 and P2 addressed). Needs
+  the reviewer's approval of this revision before the user decides.
 - Date: 2026-10-29
 - Related: ER-1 (one release at a time), ER-12 (no sleeps or raised timeouts in tests), ER-18 and ER-19 (live phases,
   the UI never times out), ER-20 and rule 51 (bounded parallelism), ER-21 / rule 40 (recurring bugs mean a missing design
@@ -60,13 +60,15 @@ Elapsed time cannot separate these. Progress, CPU time and run state together ca
   because time passed.
 - **Cap:** a limit the user would recognise as a product rule, with its value in Settings or in a spec, or a bound on
   something that cannot report progress (external I/O, shutdown). Caps stay time limits (section 6), but they run on
-  host ticks so a pause does not spend them, and when one fires it explains itself (ADR 0019).
+  host ticks so a pause does not spend them (shutdown bounds excepted, section 6), and when one fires it explains
+  itself (ADR 0019).
 
 ### 2. The stall judgement for a child process
 
-**Host tick.** The monitor thread (ADR 0024's per-pid monitor, one per host) wakes every *beat* (default 1 s). A wake-up
-is a **tick** when it comes within two beats of the previous one. A longer gap means the host itself was paused or
-starved; that interval counts **no** tick. Ticks are the only unit of liveness; seconds are never compared.
+**Host tick.** The monitor thread (ADR 0024's per-pid monitor, one per host) wakes every *beat* (default 1 s). **Every
+wake-up is exactly one tick**, however late it comes: a host paused for an hour counts one tick when it resumes, not
+3,600, and a starved host that wakes every 3 beats still moves forward, one tick per wake-up. Ticks are the only unit of
+liveness; seconds are never compared.
 
 **Signals, read at each tick for each child with a call in flight or a start pending:**
 
@@ -77,7 +79,17 @@ starved; that interval counts **no** tick. Ticks are the only unit of liveness; 
 2. **CPU time** (the second signal): the child's user + system CPU time from `paddock-proc`'s per-pid probe.
 3. **Run state:** runnable, blocked, waiting for I/O, stopped, exited (section 4 says how each OS reports it).
 
-**Judgement, per tick, for a child without call progress since the last tick:**
+**The process's state is the combination of its threads' states:** any thread runnable means **Runnable**; no thread
+runnable and at least one in uninterruptible wait means **IoWait**; every thread blocked means **Blocked**; the process
+stopped means **Stopped** (section 4 says where each OS reports thread states).
+
+**Counters are per call.** A child may serve several calls at once (a sniff beside an import). Each call has its own
+blocked and spin counters, and a call gains a blocked tick or spin CPU only when **that call** made no progress since
+the last tick; another call's progress does not reset it. The process's run state and CPU growth are shared by its
+calls; the CPU growth of a tick is counted toward a call's spin limit only while that call is the one without progress
+(with several calls without progress, each counts it: the limit is an upper bound, never an exact share).
+
+**Judgement, per tick, for each call without progress since the last tick:**
 
 - **Stopped** (paused): no tick counts; the job's phase says so. Cancel still works (section 4).
 - **Runnable and its CPU time did not grow** (starved), or **waiting for I/O**: no tick counts. A runnable child that got
@@ -95,7 +107,8 @@ it is starved or stopped; the fixed 15 s window goes.
 
 ### 3. In-process calls (the watchdog)
 
-An in-process plugin call runs on one of the host's threads; it cannot be stopped, only marked hung so that further
+This covers Debrief's `plugin::watchdog` and `paddock-guard`'s call budget (`Guard`, `Failure::Hang`), both **L**
+instances. An in-process plugin call runs on one of the host's threads; it cannot be stopped, only marked hung so that further
 calls fail fast. Reading another thread's run state is not portable (Windows has none), and a deadlocked thread and a
 starved thread both show no CPU growth. Decision: **the watchdog counts host ticks, not elapsed time: it is pause-proof
 but stays load-sensitive.** This is acceptable because (a) the consequence is "fail fast", not a kill or restart that
@@ -112,12 +125,15 @@ Read in the platform documentation and headers, not yet verified on every OS ver
 returns.
 
 - **macOS:** `proc_pidinfo(PROC_PIDTBSDINFO)`: `pbi_status == SSTOP` (4) is stopped. The process status is coarse
-  (`SRUN` for most live processes), so runnable or blocked comes from the threads: `proc_pidinfo(PROC_PIDTHREADINFO)` per
-  thread, `pth_run_state` (`TH_STATE_RUNNING` against `TH_STATE_WAITING` and `TH_STATE_UNINTERRUPTIBLE`). CPU time:
+  (`SRUN` for most live processes), so runnable or blocked comes from the threads: `proc_pidinfo(PROC_PIDLISTTHREADS)`
+  for the thread ids, then `PROC_PIDTHREADINFO` per thread, `pth_run_state`: `TH_STATE_RUNNING` is runnable,
+  `TH_STATE_WAITING` blocked, **`TH_STATE_UNINTERRUPTIBLE` is IoWait** (`TH_STATE_STOPPED` and `TH_STATE_HALTED` count
+  as stopped). CPU time:
   `PROC_PIDTASKINFO` `pti_total_user + pti_total_system`, in Mach absolute time units, converted with
   `mach_timebase_info` (on Apple silicon the units are not nanoseconds).
-- **Linux:** `/proc/<pid>/stat`: state `T`/`t` stopped, `R` runnable, `S` blocked, `D` waiting for I/O, `Z` exited;
-  `utime + stime` (fields 14 and 15) over `sysconf(_SC_CLK_TCK)`.
+- **Linux:** the threads' states from `/proc/<pid>/task/*/stat` (field 3: `R` runnable, `S` blocked, `D` IoWait,
+  `T`/`t` stopped), combined as above; `/proc/<pid>/stat` for `Z` (exited) and for the process's `utime + stime`
+  (fields 14 and 15) over `sysconf(_SC_CLK_TCK)`.
 - **Windows:** no stopped state for ordinary processes. A process frozen by the system reports `IsFrozen` in
   `PROCESS_EXTENDED_BASIC_INFORMATION` (`NtQueryInformationProcess`, `ProcessBasicInformation` with the extended size).
   CPU time: `GetProcessTimes`. Runnable against blocked is not available per process: on Windows a child without CPU
@@ -161,33 +177,39 @@ pub struct StallJudge { /* pure state machine: no I/O, no clock */ }
 ```
 
 - **`HostTickClock`**, an implementation of the existing `Clock` whose `monotonic()` advances by one beat per host tick.
-  It makes the existing `Deadline` and `Backoff` pause-proof without touching their code: caps (section 6) and the
-  supervisors' backoff run on it. The simpler option, "only a host-tick clock everywhere", was considered and rejected as
+  It makes the existing `Deadline` and `Backoff` pause-proof without touching their code. **Only waits the host does
+  itself run on it:** the user-facing caps (section 6) and the supervisors' backoff. Shutdown bounds (S) stay on the
+  real monotonic clock (quitting must end in real time). External bounds (X) keep the OS's or the library's own
+  timeouts (a socket or HTTP timeout, a tool's run limit); the host-tick clock is not passed into them. The simpler option, "only a host-tick clock everywhere", was considered and rejected as
   the whole answer: it fixes pauses but not starvation, which is what CI 7096 was.
 - **`Deadline`** stays for caps (on the host-tick clock) and is not used for liveness. **`Backoff`** is reused unchanged.
-- **`Patience::product()`** holds today's values as thresholds (WP-A1 converts them; for a child start, for example,
-  N = 15 blocked ticks and C = 15 CPU-seconds), tunable in Settings under rule 51 (Auto default, validated in the engine).
+- **`Patience::product()`** holds the thresholds per key. N (blocked ticks) starts from today's values (a child start:
+  15 ticks). **C (the spin limit) is set per key from measurements:** WP-A3 measures, for every built-in call kind, the
+  largest CPU time between two progress reports on the synthetic corpora, and C is that with a margin of 4x (recorded
+  under rule 48). Both are tunable in Settings under rule 51 (Auto default, validated in the engine).
   **`Patience::until_condition()`** returns no thresholds for any key: tests.
 - **Layering and dependency edges.** `paddock-jobs::patience` is pure (policy, ports, judge) and adds no dependency.
   The OS probe goes in `paddock-proc` (`paddock_proc::runstate`, with its own types; `paddock-proc` gains no dependency).
   `paddock-ipc` already depends on both and adapts the probe to the port. `paddock-plugin-host` and `paddock-guard` take
-  `Arc<dyn Patience>` from `paddock-jobs`, on which they already depend. New edges: **none among the shared crates**; in
-  Debrief, `debrief-ipc -> paddock-jobs` (WP-B4; it already depends on `paddock-proc`).
+  `Arc<dyn Patience>` from `paddock-jobs`, on which they already depend. New edges: **`paddock-startup -> paddock-jobs`**
+  (WP-B3; `paddock-startup` depends on `paddock-commands`, `paddock-env` and `paddock-log` today, and `paddock-jobs`
+  depends on none of them back, so no cycle), and in Debrief `debrief-ipc -> paddock-jobs` (WP-B4; it already depends on
+  `paddock-proc`). No other edge among the shared crates.
 
-### 6. Bounds that stay time limits (caps), all on host ticks
+### 6. Bounds that stay time limits
 
-- **User-facing caps:** the elevated-call cap (`MAX_ELEVATED_CALL`, 1 h), a tool operation's declared budget
+- **User-facing caps (C), on host ticks:** the elevated-call cap (`MAX_ELEVATED_CALL`, 1 h), a tool operation's declared budget
   (`OpSpec::budget`, `DEFAULT_OP_BUDGET`), the store client's `LONG_TIMEOUT` and `WAIT_TIMEOUT`, `paddock-plugin-host`'s
   `NO_BUDGET` (1 h, the longest a call without a budget is waited for), import size, memory and count caps.
-- **External I/O** that cannot report progress: other hosts over the network (`paddock-net`, the updater's
+- **External I/O (X), on the OS's or library's own timeouts:** I/O that cannot report progress: other hosts over the network (`paddock-net`, the updater's
   `MANIFEST_TIMEOUT`, downloads, Spotter's `REQUEST_TIMEOUT` and mail timeouts), OS tools we run but do not control
   (`paddock-files` `OPENER_TIMEOUT`, `paddock-download` `TOOL_TIMEOUT`, `paddock-proc` `SHELL_TIMEOUT`, Dyno's platform
   tool timeouts), the privileged helper and services (`paddock-service` `HELPER_TIMEOUT`), the MCP loopback handshake
   (`paddock-mcp` `HANDSHAKE_TIMEOUT`: the other end is a client we do not ship), notification channels
   (`paddock-channels` `DEFAULT_TIMEOUT`). They fail with Retry and never count toward a quarantine.
-- **Shutdown and teardown:** `KILL_GRACE`, `EXIT_WAIT`, `CANCEL_GRACE`, `paddock-window` `TEARDOWN_STEP_LIMIT` and
+- **Shutdown and teardown (S), on the real monotonic clock:** `KILL_GRACE`, `EXIT_WAIT`, `CANCEL_GRACE`, `paddock-window` `TEARDOWN_STEP_LIMIT` and
   `EXIT_STALL_LIMIT`, Pitwall's `EXIT_STALL_LIMIT`. Quitting must end.
-- **UI handshakes that change only what is shown:** `paddock-dialogs` `SHOW_DEADLINE`, `paddock-startup`
+- **UI handshakes that change only what is shown (U), on host ticks:** `paddock-dialogs` `SHOW_DEADLINE`, `paddock-startup`
   `dialog_show_deadline` (ADR 0026: the window is shown anyway).
 - **True hangs:** still found, by section 2.
 
@@ -209,6 +231,12 @@ that decide restarts, failures or quarantine, and their neighbours; section 8's 
 | Debrief `debrief-plugin-host` `MANIFESTS_TIMEOUT`, `installed::PROBE_TIMEOUT` (30 s) | our binary describing itself | L | |
 | Debrief `debrief-plugin-host` `PUMP_WAIT` (120 s) | a pumped callback | L | the host owes the child: no blocked ticks for the child |
 | Debrief `debrief-core` `plugin::watchdog` with `guard::Budgets` | in-process call | L | section 3 |
+| Debrief `debrief-plugin-host` `PluginSpec::connect_window` (15 s, copied into `SpawnSpec`) | plugin process start | L | |
+| Debrief app `startup_watchdog::READY_TIMEOUT` (10 s) | a window's page-ready handshake | L | the webview is ours; judged on the host's ticks |
+| Debrief `debrief-plugin-api` `serve::REPORT_TIMEOUT` (10 s), child side | task reports to the host | L | judged on the host's ticks |
+| Debrief app `ai::runtimes::REPORT_TIMEOUT` (90 s) | the AI worker checking every installed build | L | `llama-server --list-devices` per build |
+| Debrief app `engine::import::BUSY_WAIT` (300 s) | an import waiting for the store's running import | L | the running import's progress is the progress |
+| Debrief `debrief-store-duck` `tail::TAIL_WAIT` (30 s) | live tail waiting for a running import | L | same |
 | Debrief `debrief-ai` `worker::frames::CONNECT_WINDOW` (15 s) | AI worker start | L | |
 | Debrief `debrief-store-client` `CALL_TIMEOUT` (120 s) | store call | L | `LONG_TIMEOUT`, `WAIT_TIMEOUT`: C |
 | Debrief, child side: `debrief-plugin-api` `host_file::READ_TIMEOUT` (60 s), `output::ACCEPT_WAIT` (30 s) | the child waiting on the host | L | judged on the host's own ticks and run state |
@@ -219,8 +247,9 @@ that decide restarts, failures or quarantine, and their neighbours; section 8's 
 | `paddock-ipc` `handshake::HANDSHAKE_TIMEOUT` (10 s) | handshake | L | |
 | `paddock-ipc` `peer::CANCEL_GRACE` (2 s) | cancel | S | |
 | `paddock-plugin-host` per-call budgets; `NO_BUDGET` (1 h) | plugin call | L; C | |
+| `paddock-guard` call budget (`Guard` `budget`, `Failure::Hang`) | an in-process guarded call | L | judged like section 3 |
 | `paddock-guard` quarantine window | quarantine | C | already on the injected `Clock`: give it the host-tick clock |
-| `paddock-startup` `ready_timeout` (10 s), `terminate_window` (60 s), `dialog_show_deadline` (1 s) | plugin set-up at start (ADR 0029) | L; S; U | |
+| `paddock-startup` `ready_timeout` (10 s), `terminate_window` (60 s), `dialog_show_deadline` (1 s) | the page-ready handshake of a starting window (ready), the end of a stalled start (terminate), a dialog shown anyway (show) | L; S; U | ADR 0026, 0029 |
 | `paddock-chromium` `START_LIMIT` (20 s), `START_PAGE_WAIT` (5 s), `SELF_TEST_LIMIT` (30 s); `CLOSE_GRACE` (5 s) | the research and test browser | L; S | Chromium is ours to start: judged on its run state |
 | `paddock-service` `HELPER_TIMEOUT` (30 s), `ELEVATED_TIMEOUT` (120 s), `STOP_VERB_TIMEOUT` (10 s) | privileged helper, OS service manager | X | the OS and the user's prompt |
 | `paddock-mcp` `loopback::HANDSHAKE_TIMEOUT` (10 s) | MCP client | X | |
@@ -248,8 +277,13 @@ It flags:
   WAIT, LIMIT, GRACE or BUDGET.
 
 A flagged site passes when its bound comes from `Patience`, or when the line or the item above it carries `// cap:`,
-`// external:`, `// shutdown:` or `// ui:` with a reason. Test code is exempt from the comment, not from ER-12. Today's
-sites are a waiver list that may only shrink, as C40-C42 do.
+`// external:`, `// shutdown:`, `// ui:` or **`// pace:`** with a reason. `pace` is for throttles and intervals that bound
+nothing (a poll interval, a progress throttle, a debounce): they decide how often, not how long. Test code is exempt
+from the comment, not from ER-12. Today's sites are a waiver list that may only shrink, as C40-C42 do, with targets:
+
+- end of phase A (WP-A4): no Debrief site left uncommented or unjudged (Debrief's 349 seed sites);
+- end of WP-B3: no shared-crate site left (the shared crates' share of the seed);
+- end of phase B (WP-B5): the list is empty; C51 then fails on any new uncommented site.
 
 **Seed of the waiver list** (`4109de2fd`; raw line counts of the patterns above, with in-file `#[cfg(test)]` modules cut
 off and `tests/`, `benches/`, `examples/` and `fuzz/` skipped; a line matching two patterns counts twice; the check's own
@@ -270,8 +304,16 @@ WP-B2, for the new frame type.
 
 ## Parallelism and cost (rule 51)
 
-- **Cost of the judgement:** one `Progress` frame where the call's code already does work (no timer), and one run-state
-  and CPU-time read per watched child per beat on the monitor thread ADR 0024 already runs. No new thread.
+- **Cost of the judgement:** one `Progress` frame where the call's code already does work (no timer), and per watched
+  child per beat, on the monitor thread ADR 0024 already runs (no new thread), only while the child has a call in flight
+  or a start pending:
+  - macOS: one `PROC_PIDTBSDINFO`, one `PROC_PIDTASKINFO`, one `PROC_PIDLISTTHREADS` and one `PROC_PIDTHREADINFO` per
+    thread: system calls only, no table of all processes (the cost ADR 0024 measured and removed);
+  - Linux: one read of `/proc/<pid>/stat` and one of `/proc/<pid>/task/<tid>/stat` per thread;
+  - Windows: one `GetProcessTimes` and one `NtQueryInformationProcess`.
+
+  A plugin process has a handful of threads, so a beat costs tens of system calls per watched child. WP-A2 measures it
+  and records it (rule 48), with a budget of 0.1 % of a core per watched child.
 - **Waiting instead of restarting is cheaper on a busy machine:** in the reproduction the restarts cost 69 s of 215 s and
   started extra processes.
 - **Plugin reuse (rule 51 b, "can it be cheaper?").** Most of the remaining 146 s were plugin processes started one after
@@ -311,20 +353,26 @@ WP-B2, for the new frame type.
 
 ## Work packages
 
-Phase A, Debrief (about 9 days):
+Phase A, Debrief (about 9.5 days):
 
 1. **WP-A1** `debrief_ipc::patience`: `CallKey`, `Stall`, `Patience` (`product()`, `until_condition()`), `TickSource`,
    `RunStateProbe`, `StallJudge`, `HostTickClock`. Tests with a hand-driven tick source and a **fake probe**: starved
    (runnable, no CPU growth) is not stuck; stopped is not stuck; waiting for I/O is not stuck; blocked for N ticks is
-   stuck; spinning for C CPU-seconds is stuck; a **heartbeat without call progress** is stuck; a paused host counts no
-   ticks; the host owing a callback counts no ticks; Cancel of a stopped child kills it and sends no `SIGCONT`. About
-   2.5 days.
+   stuck; spinning for C CPU-seconds is stuck; a **heartbeat without call progress** is stuck; a paused host counts one
+   tick on resuming; **a host waking every 3 beats still reaches N**; **a stuck call beside a progressing call is still
+   stuck**; thread states combine as section 2 says; the host owing a callback counts no ticks; Cancel of a stopped
+   child kills it and sends no `SIGCONT`. About 2.5 days.
 2. **WP-A2** `debrief_ipc::runstate` for macOS, Linux and Windows (section 4), each tested on its CI runner with a real
-   child that is stopped, blocked and spinning. About 2 days.
+   child that is stopped, blocked, spinning and in uninterruptible wait; the tests pin the mapping of each OS state,
+   **`TH_STATE_UNINTERRUPTIBLE` to IoWait on macOS** and `D` to IoWait on Linux, and measure the cost per beat (rule 48).
+   About 2 days.
 3. **WP-A3** Debrief's SDK and IPC: `Progress` and "starting" frames from the call's work, the `progress` capability bit;
    the host's launch, supervisor and plugin-host deadlines, `SNIFF_DEADLINE`, `DEFAULT_DEADLINE`, the restore call,
-   `MANIFESTS_TIMEOUT`, `PROBE_TIMEOUT`, the AI and store worker launchers on the judge; caps on `HostTickClock`; the
-   watchdog on ticks (section 3); the "paused" phase. About 3 days.
+   `MANIFESTS_TIMEOUT`, `PROBE_TIMEOUT`, `PluginSpec::connect_window`, the AI and store worker launchers, the app's
+   `startup_watchdog::READY_TIMEOUT`, the SDK's `REPORT_TIMEOUT`, the AI runtimes' `REPORT_TIMEOUT`, `BUSY_WAIT` and
+   `TAIL_WAIT` on the judge; caps on `HostTickClock`; the watchdog on ticks (section 3); the "paused" phase. Measure C per
+   key (section 5) and add a test that **every built-in long call reports `ctx.progress()` within its C** on the
+   synthetic corpora. About 3.5 days.
 4. **WP-A4** Debrief's tests on `until_condition()`; C51 with Debrief's waiver list. About 1 day.
 5. **WP-A5** Verify on the user's Mac (a local VM or the real app, never CI): App Tamer pausing Debrief during an import,
    a loaded machine; measure the plugin-reuse options and record them (rule 48). About 0.5 day.
@@ -339,7 +387,7 @@ Phase B, shared crates, after the tags (about 9 days):
 10. **WP-B5** Dyno, Pitcrew, Pitwall and Spotter: their L rows of section 7 on the judge, their C, X, S and U rows
     commented; C51 over the whole family. About 2.5 days.
 
-Total about 18 days.
+Total about 18.5 days.
 
 ## Open questions for the user
 
