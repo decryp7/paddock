@@ -10,4 +10,10 @@ export const ALLOWED = [
 /** Accepted for npm packages only (fonts, build-time data such as caniuse-lite's CC-BY-4.0, whose attribution these notices carry); cargo-deny never sees them. */
 export const NPM_EXTRA = ['OFL-1.1', 'Python-2.0', 'BlueOak-1.0.0', 'CC-BY-4.0'];
 
-export const PERMISSIVE = new Set([...ALLOWED, ...NPM_EXTRA]);
+/** The licences one ecosystem may ship: Rust crates only the deny.toml list, npm packages also NPM_EXTRA. */
+export function allowedFor(kind) {
+  return new Set(kind === 'npm' ? [...ALLOWED, ...NPM_EXTRA] : ALLOWED);
+}
+
+/** Npm's set, kept for callers that do not know the ecosystem. */
+export const PERMISSIVE = allowedFor('npm');
