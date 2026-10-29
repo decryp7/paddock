@@ -70,7 +70,7 @@ impl Generation {
 
 /// A state of the repository: a commit, or the working tree as the index saw it in one generation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum Rev {
     /// A commit.
     Commit(CommitHash),
@@ -125,6 +125,6 @@ mod tests {
         }
         assert!(!c.is_mutable() && w.is_mutable());
         assert_eq!(w.to_string(), "worktree@7");
-        assert!(serde_json::from_str::<Rev>(r#"{"kind":"commit","value":"zz"}"#).is_err());
+        assert!(serde_json::from_str::<Rev>(r#"{"commit":"zz"}"#).is_err());
     }
 }

@@ -44,7 +44,7 @@ pub enum HistoryError {
 
 /// How a file changed between two revisions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum ChangeKind {
     /// New file.
     Added,
