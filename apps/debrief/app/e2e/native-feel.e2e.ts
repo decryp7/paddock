@@ -75,13 +75,18 @@ test.describe('native feel', () => {
     expect(await message.evaluate((el) => getComputedStyle(el).userSelect || (getComputedStyle(el) as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect)).toBe('text');
     await message.dblclick({ position: { x: 12, y: 6 } });
     await expect.poll(() => page.evaluate(() => window.getSelection()?.toString().trim() ?? '')).not.toBe('');
+    const selected = await page.evaluate(() => window.getSelection()?.toString() ?? '');
     await watch(page, ['contextmenu']);
     await message.click({ button: 'right', position: { x: 12, y: 6 } });
     await expect.poll(() => prevented(page, 'contextmenu')).toEqual([true]);
     const menu = page.getByRole('menu');
     await expect(menu.getByRole('menuitem', { name: 'Copy', exact: true })).toBeVisible();
+    // In WebKit `contextmenu` comes on the button press: the menu is drawn before the release, which must not close it.
+    await expect(menu.getByRole('menuitem', { name: 'Copy', exact: true })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);
+    // The selection is still there, as a native menu keeps it (WebKit drops it when the menu takes the focus).
+    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe(selected);
   });
 
   test('middle-click does not start autoscroll on chrome, and files dropped outside drop targets do not navigate', async ({ page }) => {
