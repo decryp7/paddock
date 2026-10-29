@@ -61,9 +61,10 @@ shared folder. Test bundles are never uploaded, tagged or published (ER-15); del
 - `1.0.0-test` and `1.0.1-test`: the version bumped in a scratch worktree only, `createUpdaterArtifacts` on, `pubkey` = the
   test public key, `plugins.updater.endpoints` = the local feed URL (an `http://` URL on the host needs
   `plugins.updater.dangerousInsecureTransportProtocol: true` in the same override; fine for a test build, never for a release).
-- **Windows test bundles (NSIS), built on the Mac** (tested 2026-10-29 for the sidecars; see the result below). Needs
-  `rustup target add x86_64-pc-windows-msvc`, `cargo install cargo-xwin` (downloads the Windows SDK and CRT on first use,
-  about 1 GB, into `~/.cache/cargo-xwin`), `brew install makensis` and `llvm`/`lld` on `PATH`. The plain `cargo` in
+- **Windows test bundles (NSIS), built on the Mac** (tried on the Mac mini on 2026-10-29: it produced `Dyno_0.1.0_x64-setup.exe`, 9.7 MiB, unsigned; not yet
+  installed in the VM). Needs `rustup target add x86_64-pc-windows-msvc`, `cargo install cargo-xwin` (downloads the Windows SDK and
+  CRT on first use), `brew install makensis llvm`, and a `mt.exe` on `PATH` (the linker asks for the manifest tool; a symlink
+  to `llvm-mt` does it: `mkdir -p <shim> && ln -s /opt/homebrew/opt/llvm/bin/llvm-mt <shim>/mt.exe`, then `export PATH=<shim>:/opt/homebrew/opt/llvm/bin:$PATH`). The plain `cargo` in
   `sidecar.mjs` cannot link for Windows, so build the sidecars with xwin and copy them, then run Tauri without that step:
 
   ```sh
@@ -72,11 +73,12 @@ shared folder. Test bundles are never uploaded, tagged or published (ER-15); del
   cargo xwin build -p dyno-agent -p dyno-cli --profile dist --target x86_64-pc-windows-msvc
   for b in dyno-agent dyno; do cp $CARGO_TARGET_DIR/x86_64-pc-windows-msvc/dist/$b.exe app/src-tauri/binaries/$b-x86_64-pc-windows-msvc.exe; done
   cd app && npx tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis \
-    --config '{"build":{"beforeBuildCommand":"npm run build"},"plugins":{"updater":{"pubkey":"<test pubkey>","endpoints":["http://<host-only IP>:8089/latest.json"],"dangerousInsecureTransportProtocol":true}},"bundle":{"createUpdaterArtifacts":true}}'
+    --config '{"version":"1.0.0-test","build":{"beforeBuildCommand":"npm run build"},"plugins":{"updater":{"pubkey":"<test pubkey>","endpoints":["http://<host-only IP>:8089/latest.json"],"dangerousInsecureTransportProtocol":true}},"bundle":{"createUpdaterArtifacts":true}}'
   ```
 
   with `TAURI_SIGNING_PRIVATE_KEY` / `_PASSWORD` set to the throwaway key (never the family key). The installer lands in
-  `$CARGO_TARGET_DIR/x86_64-pc-windows-msvc/release/bundle/nsis/`. If the cross build fails on your Mac, build in the Windows
+  `$CARGO_TARGET_DIR/x86_64-pc-windows-msvc/release/bundle/nsis/Dyno_<version>_x64-setup.exe`; copy it (and the `.sig`) to the
+  feed folder. It is not Authenticode-signed (expected: SmartScreen applies as for the release). If the cross build fails on your Mac, build in the Windows
   test VM instead (Git for Windows, Node from `.nvmrc`, rustup with the msvc toolchain, Visual Studio Build Tools with the
   "Desktop development with C++" workload and a Windows SDK, NSIS from Tauri's own download), with the same commands in
   PowerShell and only the throwaway key copied in.
