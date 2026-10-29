@@ -722,3 +722,12 @@ Nobody asked whether more workers or a cheaper operation would help until the nu
 any slow operation, measure both: can more threads or workers run it (bounded by the kind of work), and can each item cost
 less? Make thread counts Settings with an "Auto" default, and give long or bulk designs a "Parallelism and cost" section
 (rule 51).
+
+## 2026-10-29: a host runner's temp folder is the user's temp folder (CI hermeticity, ER-14)
+
+On the Mac host runner, `os.tmpdir()` and Rust's `temp_dir()` are the runner user's `/var/folders/.../T`, the same folder
+the agents' local test runs on that Mac use. Debrief's leak check snapshotted and checked it, so a local run that died
+during a CI job made the job fail with leaks it did not cause, and the CI tests wrote there too. **Guidance:** every job
+on a host runner that runs tests or checks a folder gets a folder of its own first: the shared `job-tmpdir` action
+(`RUNNER_TEMP/t` as `TMPDIR`, `TMP`/`TEMP` on Windows; removed as the last step), and checks name that folder explicitly
+(`--dir "$PADDOCK_JOB_TMPDIR"`). A conformance test holds every job that runs `check-temp-leaks.mjs` to it.
