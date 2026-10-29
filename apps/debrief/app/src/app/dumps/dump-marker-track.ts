@@ -40,7 +40,7 @@ export function layoutMarkers(markers: readonly DumpMarker[], view: { from: numb
   `,
   styles: `
     :host { position: absolute; inset: 0; pointer-events: none; }
-    .line { position: absolute; top: var(--tl-strip-top, 50px); bottom: 0; width: 0; border-left: 2px dotted var(--s3); }
+    .line { position: absolute; top: calc(var(--tl-strip-top, 50px) + var(--tl-strip-h, 0px)); bottom: 0; width: 0; border-left: 2px dotted var(--s3); }
     .line.critical { border-left-color: var(--lvl-fatal); }
   `,
 })

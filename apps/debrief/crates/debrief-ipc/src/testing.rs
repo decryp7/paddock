@@ -15,7 +15,8 @@ pub struct Confined {
     path: PathBuf,
 }
 
-/// Makes a [`Confined`] folder.
+/// Makes a [`Confined`] folder. Test-only: it panics (`expect`) when `/tmp` cannot hold a folder or the folder vanishes,
+/// which fails the test that asked for it, the right outcome there; product code must not call it.
 pub fn confined_tmp() -> Confined {
     let dir = tempfile::Builder::new()
         .prefix("dbw")

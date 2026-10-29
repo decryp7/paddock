@@ -35,6 +35,7 @@ test.describe('Profiling with the logs', () => {
     await expect(hotspots(page).getByRole('combobox', { name: 'Active profile' }).locator('option:checked')).toHaveText('orders.speedscope.json');
 
     await page.getByRole('tab', { name: /Timeline/ }).click();
+    // TODO(feat/e2e-hit-test): switch to the shared expectNothingCovers when it lands.
     // Nothing (ADR 0027: the sticky header, its tick labels) may paint over a chip or a lane marker: the point under the
     // centre of every capture span, dump chip, note flag and lane marker or run below the header is that element.
     // Inert covers (pointer-events: none) are made live for the probe, so a label that only looks harmless still fails it.

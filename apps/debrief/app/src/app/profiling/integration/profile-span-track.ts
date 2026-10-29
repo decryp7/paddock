@@ -53,7 +53,7 @@ export function layoutSpans(spans: readonly ProfileSpan[], view: { from: number;
   `,
   styles: `
     :host { position: absolute; inset: 0; pointer-events: none; }
-    .band { position: absolute; top: var(--tl-strip-top, 50px); bottom: 0; min-width: 2px; background: color-mix(in srgb, var(--s4) 12%, transparent); border-left: 1px dashed var(--s4); border-right: 1px dashed var(--s4); }
+    .band { position: absolute; top: calc(var(--tl-strip-top, 50px) + var(--tl-strip-h, 0px)); bottom: 0; min-width: 2px; background: color-mix(in srgb, var(--s4) 12%, transparent); border-left: 1px dashed var(--s4); border-right: 1px dashed var(--s4); }
     .band.heap { background: none; border-right: 0; }
   `,
 })

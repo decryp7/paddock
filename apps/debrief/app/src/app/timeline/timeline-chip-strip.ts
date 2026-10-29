@@ -69,9 +69,9 @@ export function layoutStrip(chips: readonly StripChip[], widthPx: number, rows =
         [title]="moreLabel(n)"
         (pointerdown)="$event.stopPropagation()"
       >+{{ n }}</button>
-      <mat-menu #menu="matMenu">
+      <mat-menu #menu="matMenu" class="pd-popmenu">
         @for (c of laid().more; track c.id) {
-          <button type="button" mat-menu-item [attr.data-testid]="c.testid + '-item'" [attr.aria-label]="c.label" [title]="c.title" (click)="c.open()">{{ c.text }}</button>
+          <button type="button" mat-menu-item class="pd-popmenu__item" [attr.data-testid]="c.testid + '-item'" [attr.aria-label]="c.label" [title]="c.title" (click)="c.open()">{{ c.text }}</button>
         }
       </mat-menu>
     }

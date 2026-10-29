@@ -137,6 +137,7 @@ fn worker() -> StoreWorker {
     worker_in(MemoryMode::Normal)
 }
 
+#[cfg(unix)]
 thread_local! {
     /// The private temp folders of this test's workers, removed when the test's thread ends (also on a panic).
     static WORKER_TMP: std::cell::RefCell<Vec<debrief_ipc::testing::Confined>> = const { std::cell::RefCell::new(Vec::new()) };
@@ -146,12 +147,19 @@ thread_local! {
 /// folder this test owns. A test that kills the worker cannot rely on it removing the private folders it made for its
 /// plugins' sockets (`debrief-plugin-*`, made before the handshake); they go with the folder instead of staying in a
 /// shared one (see `debrief_ipc::testing`).
+#[cfg(unix)]
 fn confined(exe: &str) -> WorkerConfig {
     let mut cfg = WorkerConfig::new(exe);
     let dir = debrief_ipc::testing::confined_tmp();
     cfg.env.extend(dir.env());
     WORKER_TMP.with(|t| t.borrow_mut().push(dir));
     cfg
+}
+
+/// Elsewhere (Windows) the worker's endpoint is a named pipe, not a folder, so nothing is left to confine.
+#[cfg(not(unix))]
+fn confined(exe: &str) -> WorkerConfig {
+    WorkerConfig::new(exe)
 }
 
 fn worker_in(mode: MemoryMode) -> StoreWorker {
@@ -163,6 +171,7 @@ fn worker_in(mode: MemoryMode) -> StoreWorker {
 /// Regression (macOS CI temp-leak check): the confined folder was inside macOS' long temp folder, so the endpoints of the
 /// killed worker's plugins (socket path over 96 bytes) fell back to `/tmp`, where nothing cleaned them up. It must be a
 /// folder every endpoint prefix fits in, and it is removed when the test's thread ends.
+#[cfg(unix)]
 #[test]
 fn a_workers_temp_folder_fits_every_endpoint_and_is_removed_with_its_test() {
     use debrief_ipc::endpoint::{fits, prefix};
