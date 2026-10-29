@@ -93,7 +93,8 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
      registration is seen, never a silent CPU run.
    - **Start-up check**: when the sidecar starts (and after a driver or model change) it runs a quick GPU self-test: the
      EP loads, and the bundled self-test model's boxes match the stored CPU answer within tolerance. If either fails
-     (for example a VM or Remote Desktop session with no GPU, an old driver, or the DirectML gate failing), Sighter
+     (for example an old driver, the DirectML gate failing, or, a minor case, Sighter itself started inside a VM or
+     a Remote Desktop session without a GPU), Sighter
      **falls back automatically to the CPU with the Nano preset** and tells the user why in plain words ("The graphics
      card could not run the detector (driver too old), so Sighter uses the processor with the Fast model. Locating is
      slower."). Settings has an "Inference device" choice: Automatic (default), GPU, CPU.
@@ -128,8 +129,8 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
    a bounded, user-started request (rule 46). **Labelling** (user, 2026-10-29): whole recordings are pre-labelled by the
    user's own trained detector for that app. Pitwall's VLM is used only on a small selection the user chooses, or after a
    confirmation that states the frame count (and the expected time). Before the first model of an app exists,
-   pre-labelling comes from the deterministic sources (OCR, template, accessibility `LabelSource`s) and the review queue,
-   not from the VLM per frame. This amends proposal 9.1's "label suggestions" request kind; the user approved the
+   pre-labelling comes from OCR, templates and the review queue only (decision 9, "100 % computer vision"), not from
+   the VLM per frame. This amends proposal 9.1's "label suggestions" request kind; the user approved the
    amendment on 2026-10-29 and it is applied in the proposal.
 6. **Model distribution.** The runtime detector is always made locally and stored immutable and content-hashed in the
    project registry with its `model.json` (classes, input size, normalisation, thresholds, dataset hash, metrics, parent,
@@ -147,7 +148,13 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
 8. **Screens, tiles and coordinates** as in the next section: frames are normalised to logical (100 %) scale per
    display, tiled at 640 with overlap, unchanged tiles reuse cached detections, the active window goes first, and boxes
    come back in physical pixels with their display and are converted to points at the input edge.
-9. **Spike before the first release**, per the research note's checklist; its numbers go into
+9. **100 % computer vision** (user, 2026-10-29: "Sighter will be 100% computer vision"). Sighter uses only pixels, for
+   local windows and remote ones alike: no accessibility tree, no UI Automation or AX APIs, no AT-SPI, no DOM, no app
+   hooks or injected code. Pre-labelling before an app's first model comes from OCR, templates and the review queue
+   only. **Allowed:** window bounds, titles and the window list from the OS to pick and follow the capture target, and
+   the pointer position: that is capture plumbing, not UI understanding, and it never names, classifies or locates an
+   element. The cost and its mitigation are in Consequences.
+10. **Spike before the first release**, per the research note's checklist; its numbers go into
    [performance.md](../performance.md) as results blocks (rule 48) and can move the default preset or switch the CPU
    preset to the fallback without changing this ADR.
 
@@ -223,15 +230,18 @@ logical 100 % scale (1920 × 1200: 8 tiles, ~1.4 s CPU p50, ~0.24 s CoreML, proj
 | 1. Tile the whole frame | **1.0×** of compute (plus ~10–20 % for the overlap); faster wall-clock only by running tiles in parallel on spare cores or batching them on a GPU (not measured) | Nothing, at the tile scale | none |
 | 2. Only segments that changed since the last frame | **≈ changed tiles / all tiles**: 0 for a static screen; 1–3 of 8 (0.13–0.38×, ~0.2–0.5 s CPU) for a typical click that opens a menu or changes a few controls (projection) | Nothing if the change detection is right; misses a change the OS does not report (some GPU-drawn or remote-session surfaces) unless a per-tile pixel hash is the fallback; cache must be cleared on model change, theme or DPI change | macOS: `SCStreamFrameInfo.dirtyRects` (ScreenCaptureKit, macOS 12.3+): "a union of the rectangles redrawn and moved". Windows: Desktop Duplication `IDXGIOutputDuplication::GetFrameDirtyRects` and `GetFrameMoveRects` (Windows 8+; process move rects before dirty rects); otherwise a per-tile hash of the new frame (cheap, not measured) |
 | 3. Active window, or the region around the pointer or focus, first | Window 1200 × 800: 4 tiles, **0.5×**; pointer region: 1 tile, **0.13×** (~0.18 s CPU, ~30 ms GPU) | Elements outside the window: menus and pop-ups that open outside it, toasts, other windows of a multi-window app | Window bounds and focus from the capture or window APIs (`SCWindow` frames; `GetWindowRect`/DWM extended frame bounds on Windows; verify in the spike); pointer position |
-| 4. Cheap first pass (OCR or accessibility tree) picks segments, detector runs on those only | OCR pass + detector on k tiles; the a11y tree is tens of ms (not measured); OCR is not cheap on a whole frame (proposal: 150–500 ms CPU for 1080p, unverified) | Icon-only controls and custom-drawn UIs that have no text and no a11y node, which is exactly where the detector is needed; AGENTS.md also forbids depending on a11y at run time | OCR (`sighter-ocr`); a11y `LabelSource`s (optional, hint only) |
+| 4. Cheap first pass (OCR) picks segments, detector runs on those only | OCR pass + detector on k tiles; OCR is not cheap on a whole frame (proposal: 150–500 ms CPU for 1080p, unverified) | Icon-only and custom-drawn controls with no text, which is exactly where the detector is needed | OCR (`sighter-ocr`) |
 | 5. Segments in priority order, results streamed | **1.0×** total if it runs to the end; **first result after one tile** (~0.18 s CPU, ~30 ms GPU); less if it stops early | With early stop: a better or second match elsewhere, so a query that needs uniqueness must finish its scope | none (scheduling in `sighter-core`) |
 
 **Default pipeline:** normalise each display's frame to logical 100 % → limit to the query's scope (target window by
 default) → split into 640 tiles with 64 px overlap → reuse cached detections for tiles the OS reports unchanged (dirty
 rects, else a per-tile hash) → run the remaining tiles in priority order (focus and pointer first, then the rest of the
 scope), batched on a GPU EP → stop early only when a unique match above the threshold is found and the query allows it →
-merge boxes across seams (pure function in `sighter-core`). OCR and a11y stay resolver layers and label sources, not
-the gate for the detector.
+merge boxes across seams (pure function in `sighter-core`). OCR stays a resolver layer and a label source, not the gate
+for the detector. **For a viewer window** (remote desktop or VM console): the scope is the viewer's content
+rectangle mapped to remote pixels, changed tiles come from Sighter's own per-tile hash instead of OS dirty rects, the
+priority goes to the pointer region and the most recently changed tiles (the remote "focused window" is not known from
+the host) ("Remote desktops and VM consoles in a viewer window").
 
 ### Coordinates
 
@@ -248,6 +258,91 @@ the gate for the detector.
   left, 200 % 3840 × 2160 right, 150 % 2560 × 1440 above with a negative origin); a box on a tile seam; a box at each
   display edge; round trip tile → physical → logical → physical within ±1 px; property tests over random layouts and
   boxes. Plus one OS-level check per platform in the spike (a synthetic window at a known position on a 200 % display).
+
+## Remote desktops and VM consoles in a viewer window
+
+Sighter runs on the PC that has the GPU (the host). What it looks at is often a **viewer window** on that host: the
+Remote Desktop client (mstsc or the Windows App), a Hyper-V, VMware, VirtualBox or UTM console, or a VNC client (user,
+2026-10-29; proposal 7.6 `remote_session`). Sighter does not run inside the remote machine. This section applies the
+rest of the ADR to that case. (Sighter's own embedded RDP client of proposal 7.15 receives the remote frames directly
+with the exact remote resolution, so it needs only the parts on compression and input.)
+
+- **Capture and inference**: the viewer window is captured **by window** on the host (ScreenCaptureKit window capture
+  on macOS; window capture on Windows), and inference runs on the **host GPU** (decision 4). The CPU fall-back for "no
+  usable GPU" stays but is a minor case: it covers a host without a working GPU (old driver, the DirectML gate failing,
+  or Sighter itself started inside a VM or a Remote Desktop session, which is not the normal set-up).
+- **Only pixels**, as for every target (decision 9): the detector and OCR carry everything. (The remote UI's own
+  accessibility tree would not be reachable from the host anyway.)
+- **Compression**: RDP and VNC codecs are lossy (blur, banding, soft text edges, progressive refinement after a change).
+  Training uses the proposal's "remote codec" augmentation preset (JPEG/H.264-style artefacts) and, best, frames recorded
+  through the same viewer and codec settings; OCR runs on upscaled crops (proposal 7.6). Accuracy on compressed frames is
+  a spike item.
+
+### Changed tiles without OS dirty rects
+
+The OS dirty rects (`dirtyRects`, `GetFrameDirtyRects`) describe the host's screen: for a viewer window they say, at
+best, which parts of the viewer repainted, and a viewer that composites on the GPU may report its whole window. Remote
+protocols repaint in tiles and rectangles of their own, and lossy codecs refine pixels for a while after a change. So
+for viewer windows Sighter **ignores OS dirty rects** and uses its own **per-tile hash** on the viewer's content area:
+
+1. Crop the viewer chrome (title bar, toolbars, scroll bars) to the content rectangle (below).
+2. Lay the tile grid in **remote-desktop pixels**, so tiles do not shift when the viewer window moves.
+3. Hash a slightly quantised, downsampled copy of each tile (codec noise must not count as a change); a tile counts as
+   changed when the hash differs, confirmed by a mean-absolute-difference threshold.
+4. A changed tile is re-run only after it is stable for N frames (proposal 7.6's "stable frames"), so progressive
+   refinement does not trigger repeated runs.
+
+Hashing a frame is cheap compared with one detector tile (not measured; a spike number).
+
+### Resolution and scaling
+
+Three scales stack up: the **remote session's** resolution and scale factor (for example 1920 × 1200 at 100 %, or 4K at
+150 %), the **viewer's** own scaling (1:1, fit-to-window, smart sizing, a VM console's zoom), and the **host display's**
+scale factor (the viewer window's physical pixels on the host).
+
+- **Mapping a box** (pure functions in `sighter-core`): tile pixels → viewer-capture pixels (host physical) → minus the
+  content rectangle's origin → divided by the viewer scale `s = content width / remote width` (and the same for height)
+  → **remote-desktop pixels** → divided by the remote scale factor → remote logical points, which is what the model is
+  normalised to.
+- **How Sighter learns the remote resolution and the viewer scale**, in this order: (1) Sighter's own embedded client
+  knows both exactly; (2) the target setup records the remote resolution and scale (entered or confirmed by the user,
+  and stored with the target as proposal 7.15 already requires: "fixed session resolution and scaling per target");
+  (3) the content rectangle is found from the viewer window (chrome detection on the capture), which gives `s` from the
+  recorded remote size; (4) a check at start: a known remote element (or a calibration pattern the user shows once)
+  must land where expected, else Sighter says the viewer scale changed and asks the user to confirm. Reading the
+  viewer's own settings (for example an `.rdp` file's smart-sizing flag) is a possible shortcut, verify per viewer.
+- **Recommendation: 1:1 viewer scaling** (smart sizing and fit-to-window off, VM console at 100 %) and a remote
+  resolution no larger than the viewer area. Then `s = 1`, small elements keep their pixels, and the downscale rows of
+  the "smallest element" table do not apply. When the viewer scales down (a 4K remote session in a 1920-wide window is
+  `s = 0.5`), the smallest element in remote pixels doubles: a 16 px element becomes 8 px on the host and is likely lost.
+  Sighter warns in plain words when `s < 1` ("The remote desktop is shown smaller than its real size; small controls may
+  be missed. Turn off scaling in the viewer.").
+- A viewer that scrolls (1:1 but larger than its window) shows only part of the remote desktop: Sighter treats the rest
+  as not visible and never acts outside the visible content rectangle.
+
+### Input into the viewer
+
+If Sighter clicks or types, it acts on the viewer window, so the mapping runs backwards: remote-desktop pixels → × `s`
+→ plus the content origin → plus the viewer window's current position on the host → host input coordinates (points on
+macOS, Per-Monitor V2 physical pixels on Windows, as in "Coordinates"). The viewer is brought to the front before input,
+and Sighter re-checks the content rectangle just before acting. Where a viewer filters injected input, Sighter fails with
+a message and a next step (proposal 7.6).
+
+**Test item** (pure, synthetic): remote 1920 × 1200 at 100 % and 3840 × 2160 at 150 %, shown 1:1, fit-to-window at
+`s = 0.75` and `s = 0.5`, fullscreen, moved, on a 100 % and a 200 % host display, and spanning two host displays; a click
+on a known remote pixel must land within ±1 remote pixel after the round trip remote → host → remote, and a box must map
+host → remote → host within ±1 host pixel.
+
+### Viewer window changes
+
+| Change | What Sighter does |
+|---|---|
+| Moved | Window capture does not depend on position; input uses the window's position read just before acting; the tile cache stays (tiles are in remote pixels) |
+| Resized | Re-derive the content rectangle and `s`; if `s` changed, drop the tile cache and warn if `s < 1` |
+| Fullscreen (or back) | Chrome disappears or returns: re-derive the content rectangle and `s`; input coordinates follow the new geometry |
+| Spans several monitors | One window capture gives one image; the window has one DPI on Windows (the monitor it is mostly on) and the mapping uses the window's geometry, so monitor borders do not matter; mixed-DPI tests cover it |
+| Minimised or hidden | Some viewers stop rendering when minimised (proposal 7.15): Sighter pauses with "The remote desktop window is minimised; restore it to continue", never acts on a stale frame |
+| Covered by another window | Window capture still returns the viewer's pixels where the OS supports it (verify per OS); before input the viewer is brought to the front |
 
 ## Licence exceptions
 
@@ -321,7 +416,13 @@ against that list comes with the notices tooling.
   primary, DEIMv2 moves to excluded (non-commercial), RT-DETRv4 is pending, UI-DETR-1 and the "Florence-2 bootstraps
   boxes" idea are not v1, and 9.1's label suggestions follow decision 5 (applied on 2026-10-29).
 - A new app starts with no detector: until the user has reviewed enough frames to train the first model, labelling is
-  OCR, template, accessibility sources and manual review. This is the price of leaving UI-DETR-1 out of v1.
+  OCR, templates and manual review. This is the price of leaving UI-DETR-1 out of v1 and of using pixels only.
+- **Cost of 100 % computer vision** (decision 9): no ground-truth element names, roles or states from the OS, so labels,
+  names and classes come from the user's review. Mitigation: OCR text inside or next to a box is the default label and
+  name (the user confirms or corrects it in the review queue), and the VLM can suggest names for a small user-chosen
+  selection (rule 46). Follow-up: Sighter AGENTS.md ("Vision first": accessibility trees as an optional `LabelSource`)
+  and proposal sections 5, 8 (`LabelSource` list: `A11yUia`, `A11yAx`, `A11yAtspi`, `Dom`) still describe accessibility
+  sources and must be updated to match (plan item P2).
 - The mirror makes downloads independent of Roboflow's URLs (the Large checkpoint already moved once), and costs about
   1.5 GB on our Gitea. Updating a checkpoint is a new mirror entry with a new hash, never an overwrite.
 - Other execution providers (research note section 11): v1 inference stays CPU, CoreML and DirectML, which already use
@@ -354,6 +455,13 @@ against that list comes with the notices tooling.
 13. Device: **GPU by default** (CoreML; DirectML on Intel integrated or NVIDIA discrete GPUs, including the system
     DirectML), with a start-up self-test and an automatic fall-back to the CPU with the Nano preset, explained to the
     user and selectable in Settings; the device is recorded on every result and job (decision 4).
+14. Remote targets: **Sighter runs on the host that has the GPU** and looks at a viewer window (Remote Desktop, VM
+    console, VNC client); only pixels are available, per-tile hashes replace OS dirty rects, boxes and input map
+    through the viewer's content rectangle and scale, and 1:1 viewer scaling is recommended ("Remote desktops and VM
+    consoles in a viewer window").
+15. Pixels only: **Sighter is 100 % computer vision** for local and remote targets; OS window bounds are allowed only
+    to pick and follow the capture target; pre-labelling before the first model is OCR, templates and review
+    (decision 9).
 
 ## Open questions for the user
 

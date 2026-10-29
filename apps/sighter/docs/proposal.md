@@ -786,8 +786,8 @@ runner has no GPU/Pitwall, or icons have no text.
 1. **Label suggestions**: "list the interactive elements" on a frame -> boxes + classes (feeds the review queue), **only for
    a small selection of frames the user chooses, or after a confirmation that states the frame count and the expected
    time** (rule 46; amended 2026-10-29 by the user, [ADR 0001](adr/0001-object-detector.md) decision 5). Whole recordings
-   are pre-labelled by the app's own trained detector; before the first model exists, by OCR, template and accessibility
-   label sources and the review queue.
+   are pre-labelled by the app's own trained detector; before the first model exists, by OCR, templates and the review
+   queue only (Sighter is 100 % computer vision, ADR 0001 decision 9).
 2. **Element naming**: a numbered grid sheet of crops -> a name per crop ("Settings (gear)").
 3. **Grounding fallback**: "where is X" -> box, only when cheaper layers fail (never the default for unattended runs).
 4. **Step descriptions**: before/after frames + the click -> "Click the gear icon in the toolbar to open Settings" for reports and search.
