@@ -4,6 +4,20 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### The shell owns the start (ADR 0029; shared API, breaking)
+- `paddock-shell`: `Builder::tray(f)`, `Builder::launch(LaunchArgs)` and `Builder::add_to(tauri::Builder)` open the tray
+  and the main window from Tauri's own `setup`, after every plugin is set up (a window built inside a plugin hook
+  deadlocked the main thread: Spotter started with no window). A start that cannot open its window is logged and exits
+  with code 1. `Builder::setup` no longer opens windows. New `paddock_shell::testing::start` (feature `mock-runtime`):
+  the start test every app runs. The shell's plugin hooks are marked; a Dock click with no window and a file opened from
+  Finder open their window after the hook.
+- `paddock-commands`: `plugin_hook` (`plugin_hook_scope`, `in_plugin_hook`, `INSIDE_PLUGIN_HOOK`).
+- `paddock-window`: `after_plugin_hook` (window work after the hook, in order), `exit_with`, `HeadlessTray`; windows and
+  the tray popover refuse to be built inside a plugin hook with the new `WindowErrorCode` `insidePluginHook`.
+- `paddock-dialogs`, `paddock-panels`: dialogs, pop-outs and the drag ghost refuse to be built inside a plugin hook.
+- `paddock-workbench`: its plugin hooks are marked.
+- Spotter, the shell demo and the workbench demo use the new start; conformance C50 checks every app on the shell.
+
 ### The dialog frame's filled button uses the page primary's colours
 - `.pd-frame-btn--filled` takes `--pd-accent-fill` with `--pd-on-accent`, the same as `.pd-btn--primary` and Material's filled button, so a dialog's primary and a page's primary are one colour in both schemes (`--pd-accent-control` is for toggles and checkmarks).
 

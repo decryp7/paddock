@@ -20,6 +20,21 @@ pub trait TrayBackend<R: Runtime>: Send + Sync + 'static {
     fn update(&self, app: &AppHandle<R>, view: &TrayView) -> Result<(), String>;
 }
 
+/// A tray that draws nothing and always exists: for tests of an app's start (no icon reaches the desktop) and for
+/// platforms where the app keeps its tray state without an icon.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HeadlessTray;
+
+impl<R: Runtime> TrayBackend<R> for HeadlessTray {
+    fn create(&self, _: &AppHandle<R>, _: &TrayView) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn update(&self, _: &AppHandle<R>, _: &TrayView) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 type Model<R> = dyn Fn(&AppHandle<R>) -> TrayView + Send + Sync;
 type Action<R> = dyn Fn(&AppHandle<R>, &str) + Send + Sync;
 

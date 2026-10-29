@@ -306,3 +306,38 @@ fn the_uis_dialog_contracts_are_generated_from_the_apps_table() {
     )
     .unwrap_or_else(|e| panic!("{e}"));
 }
+
+/// The demo's start as `run` composes it (rule 43), on the mock runtime: the main window opens, after every plugin is set
+/// up (a window built inside a plugin hook deadlocks the start). The demo has no tray, so `--hidden` still opens it (there
+/// would be no way back to the app).
+#[test]
+fn the_start_opens_the_main_window_even_when_hidden_without_a_tray() {
+    use paddock_shell::testing::{Started, start};
+    for hidden in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let place = Place::Test {
+            dir: dir.path().to_path_buf(),
+        };
+        let launch = paddock_window::launch::LaunchArgs {
+            hidden,
+            ..Default::default()
+        };
+        let started = start(move || {
+            let link = link(&place).unwrap();
+            paddock_workbench_demo::app(
+                mock_builder(),
+                shell::<MockRuntime>(&place, link.clone()),
+                workbench::<MockRuntime>(&place, link).unwrap(),
+                launch,
+            )
+        });
+        assert_eq!(
+            started,
+            Ok(Started {
+                main_window: true,
+                tray: false
+            }),
+            "hidden: {hidden}"
+        );
+    }
+}

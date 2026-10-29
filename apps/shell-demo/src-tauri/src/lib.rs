@@ -347,6 +347,22 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         .wrap(handler!())
 }
 
+/// The demo on `builder` (after the plugins already on it): the shell plugin `shell`, the tray drawn by `tray_backend`
+/// and the main window for `launch` (the shell opens both after every plugin is set up) and the demo's guarded commands.
+/// The start `run` uses and the start test composes.
+pub fn app<R: Runtime>(
+    builder: tauri::Builder<R>,
+    shell: Builder<R>,
+    launch: paddock_window::launch::LaunchArgs,
+    tray_backend: impl paddock_window::tauri::TrayBackend<R>,
+) -> tauri::Builder<R> {
+    shell
+        .tray(move |app| tray::tray(app, tray_backend))
+        .launch(launch)
+        .add_to(builder)
+        .invoke_handler(invoke_handler())
+}
+
 /// The app: the shell plugin, the demo's guarded commands, the tray and the main window.
 pub fn run() {
     install_log();
@@ -361,18 +377,12 @@ pub fn run() {
         Ok(startup) => shell = shell.startup(startup),
         Err(e) => log::error!("The relaunch hook is not installed: {e}"),
     }
-    let shell = shell.setup(move |app| {
-        tray::create(app);
-        paddock_window::tauri::start(app, &launch)?;
-        Ok(())
-    });
     let builder = tauri::Builder::default()
         // The native save dialog of Report a Problem (the shell's `native-dialogs`).
         .plugin(tauri_plugin_dialog::init())
         // The OS notification plugin behind the shell's `PluginToaster`.
-        .plugin(tauri_plugin_notification::init())
-        .plugin(shell.build())
-        .invoke_handler(invoke_handler());
+        .plugin(tauri_plugin_notification::init());
+    let builder = app(builder, shell, launch, tray::native());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     let builder =

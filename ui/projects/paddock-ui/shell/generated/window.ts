@@ -4,7 +4,7 @@ export type WindowInfo = { label: string, title: string, focused: boolean, visib
 
 export type OpenAsk = { count: number, names: Array<string>, };
 
-export type WindowErrorCode = "notReady" | "closed" | "tooMany" | "notAllowed" | "failed";
+export type WindowErrorCode = "notReady" | "closed" | "tooMany" | "notAllowed" | "failed" | "insidePluginHook";
 
 export type WindowError = { code: WindowErrorCode, 
 /**
