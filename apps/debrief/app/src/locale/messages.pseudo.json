@@ -5318,6 +5318,7 @@
     "timeline.annTip.evidence": "⟦Çļîîçķ ţöö šĥööŵ ţĥé ééṽîîðééñçé⟧",
     "timeline.annTip.from": "⟦{$KIND} · ƒŕööɱ {$OWNER}⟧",
     "timeline.annotationTrack.aria": "⟦{$label} ({$severity}, {$owner}) — šĥööŵ ţĥéé ééṽîðééñçéé⟧",
+    "timeline.chipStrip.more": "⟦{$count} ɱööŕéé çááþţûŕééš, ðûûɱþš ááñð ñöţééš⟧",
     "timeline.command.category": "⟦Ṽîîééŵ⟧",
     "timeline.command.new": "⟦Ñééŵ ţîîɱééļîñéé⟧",
     "timeline.config.aria": "⟦Ţîîɱééļîîñé šééţţîîñĝš⟧",
