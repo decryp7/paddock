@@ -5,4 +5,5 @@
 //! Nothing here draws. Overlays, the live view and the local overlay window need the shared UI and wait.
 
 pub mod mask;
+pub mod sidecar;
 pub mod trace;
