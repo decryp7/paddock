@@ -20,7 +20,7 @@ release; pre-releases are not offered.
 `pitwall-v*`) over `apps/pitwall/**` and the shared crates Pitwall builds on (`crates/paddock-service`, `crates/paddock-jobs`, `crates/paddock-proc`;
 `ui/**` joins after the shell move), so they list Pitwall's own commits. The changelog is the Releases page of the repository
 (`https://dev.decryptology.net/decryp7/paddock/releases`, filter `pitwall-v`); there is no committed `CHANGELOG.md` for the
-app, and (the shared checklist below says `CHANGELOG.md`: for Pitwall that is the release notes) `git cliff --config apps/pitwall/cliff.toml --include-path 'apps/pitwall/**' -o /dev/stdout` prints the whole history.
+app, and `git cliff --config apps/pitwall/cliff.toml --include-path 'apps/pitwall/**' -o /dev/stdout` prints the whole history.
 
 **Pitwall 1.0.x copies reinstall once, by hand.** Releases up to 1.0.x were published from `decryp7/pitwall` and are signed
 with a different key, and their updater reads a different feed. Install 1.1.0 from the Releases page over the old copy
@@ -103,19 +103,20 @@ reinstall from the releases page and replace the secrets. Because the key is sha
 Installing and running on Windows and Linux, and CUDA and Vulkan engine builds, have not been verified on real
 machines yet; say so in the release notes of any early build. See [roadmap.md](roadmap.md).
 
-<!-- paddock:block releasing rev=ce073bd0 -->
+<!-- paddock:block releasing rev=8ad0c1a8 -->
 ## Releasing from a tag
 
-Releases are made by CI from a `v*` tag, never from a workstation (rule 9). A local build for you to try is fine; it is
-never published.
+Releases are made by CI from the tag `pitwall-vX.Y.Z`, never from a workstation (rule 9). A local build for you to try is
+fine; it is never published.
 
-1. Make sure `main` is green in CI, the version in `tauri.conf.json`, `Cargo.toml` and `package.json` agree, and
-   `CHANGELOG.md` has the version's section.
+1. Make sure `main` is green in CI and the version in `tauri.conf.json`, `Cargo.toml` and `package.json` agree. The release
+   notes are generated from the commits since the previous `pitwall-v*` tag (git-cliff); there is no committed changelog
+   file to update.
 2. Before tagging (rule 25): `cargo deny check advisories`, one CI build with bundles (the workflow's manual run), the
    icon check, signing secrets stripped of whitespace, and the release notes' "First launch" section (until the apps are
    signed).
-3. Tag the commit (`git tag vX.Y.Z`, never a `[skip ci]` commit) and push the tag. The tag workflow runs the gates again,
-   builds the installers on all platforms, verifies the macOS bundle (`codesign --verify --deep --strict` on the .app
+3. Tag the commit (`git tag pitwall-vX.Y.Z`, never a `[skip ci]` commit) and push the tag. The tag workflow runs the gates
+   again, builds the installers on all platforms, verifies the macOS bundle (`codesign --verify --deep --strict` on the .app
    and the DMG), publishes the release with its notes and `latest.json`.
 4. After the release: install the published build (not the CI artifact) and run the app's installed-app verify script.
 <!-- /paddock:block releasing -->
