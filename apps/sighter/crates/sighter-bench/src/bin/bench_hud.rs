@@ -7,14 +7,11 @@
 //! `SIGHTER_BENCH_COMMIT`, `SIGHTER_BENCH_MACHINE`, `SIGHTER_BENCH_DATE`, `SIGHTER_BENCH_BRANCH`.
 //!
 //! `SIGHTER_BENCH_LOAD=<load> SIGHTER_BENCH_COMMIT=<sha> SIGHTER_BENCH_MACHINE=<text> SIGHTER_BENCH_DATE=<date> \
-//!  nice -n 10 cargo run --release -p sighter-core --example bench_hud`
+//!  nice -n 10 cargo run --release -p sighter-bench --bin bench_hud`
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-#[path = "common/mod.rs"]
-mod common;
-
-use common::{env, footprint, stats};
 use paddock_bench::{Clock, SystemClock};
+use sighter_bench::{env, footprint, stats};
 use sighter_core::bench::{
     ResultRow, RunInfo, budgets, change_percent, format_duration, load_allows_run, render_results_block, time_ab, time_runs,
 };
@@ -167,14 +164,16 @@ fn main() {
             stats(&frame).p95,
             "HUD per frame",
             budgets::HUD_FRAME_OVERHEAD,
+            load,
         ),
         ResultRow::indication("Step median, trace off", sa.median),
-        ResultRow {
-            measure: "Step median, trace on".into(),
-            value: format!("{} ({delta:+.1} %)", format_duration(sb.median)),
-            budget: format!("change <= {} %", budgets::HUD_STEP_TIMING_CHANGE_PERCENT),
-            verdict: if step_ok { "within" } else { "over" }.into(),
-        },
+        ResultRow::with_verdict(
+            "Step median, trace on",
+            format!("{} ({delta:+.1} %)", format_duration(sb.median)),
+            format!("change <= {} %", budgets::HUD_STEP_TIMING_CHANGE_PERCENT),
+            step_ok,
+            load,
+        ),
     ];
     let info = RunInfo {
         date: env("SIGHTER_BENCH_DATE", "YYYY-MM-DD"),
@@ -185,7 +184,7 @@ fn main() {
         load: format!("1-minute load {load} at start"),
         build: "release; no model, no UI rendering".into(),
         corpus: "synthetic: fixed-seed boxes (50 per frame, 300 per step) and 12 trace events per step".into(),
-        command: "SIGHTER_BENCH_LOAD=<load> nice -n 10 cargo run --release -p sighter-core --example bench_hud".into(),
+        command: "SIGHTER_BENCH_LOAD=<load> nice -n 10 cargo run --release -p sighter-bench --bin bench_hud".into(),
         runs: "frame: 50 warm-up and 400 timed runs, nearest-rank p95; step: 6 interleaved A/B pairs of 100 timed runs after 20 warm-up, median (paddock-bench `summarize`)".into(),
         memory_measure: footprint(),
         notes: format!("Pure-core cost only: drawing, the video sidecar write and the UI are not measured. Indicative unless the load is below about 12. Wall time {}.", format_duration(clock.now())),

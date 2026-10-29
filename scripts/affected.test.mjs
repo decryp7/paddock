@@ -19,11 +19,12 @@ describe('the graph of this tree', () => {
   test('a shared crate marks crates and every app whose Cargo graph reaches it, Rust half only', () => {
     const r = run('crates/paddock-jobs/src/lib.rs');
     assert.ok(r.crates && !r.ui);
-    // Debrief's store worker depends on paddock-proc by path (the macOS memory footprint), so the shared crates reach Debrief too; Dyno takes the shell crates by path, and Sighter's benchmark examples take paddock-bench and paddock-proc as dev-dependencies.
+    // Debrief's store worker depends on paddock-proc by path (the macOS memory footprint), so the shared crates reach Debrief too; Dyno takes the shell crates by path, and Sighter's sighter-bench takes paddock-bench and paddock-proc (sighter-core stays free of shared crates).
     assert.deepEqual(r.apps, ['debrief', 'dyno', 'shell-demo', 'sighter', 'workbench-demo']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust']);
     assert.deepEqual(r.kinds.debrief, ['rust']);
     assert.ok(r.packages.crates.includes('paddock-jobs'));
+    assert.deepEqual(r.packages['apps/sighter'], ['sighter-bench'], 'a shared crate reaches only the benchmark programs, not sighter-core');
     assert.ok(r.packages['apps/shell-demo/src-tauri'].includes('paddock-shell-demo'));
   });
 

@@ -54,40 +54,49 @@ pub enum OverlayError {
 /// The defaults follow the resolver's `tau` of 0.8 for high; medium starts at 0.5.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BandThresholds {
-    high: f64,
-    medium: f64,
+    /// Whole hundredths (1 to 100), so a threshold can be written exactly in a label.
+    high: u32,
+    medium: u32,
 }
 
 impl Default for BandThresholds {
     fn default() -> Self {
-        Self { high: 0.8, medium: 0.5 }
+        Self { high: 80, medium: 50 }
     }
 }
 
+/// `x` as whole hundredths, if it is one (within float noise).
+fn as_hundredths(x: f64) -> Option<u32> {
+    let h = (x * 100.0).round();
+    ((x * 100.0 - h).abs() < 1e-9 && (0.0..=100.0).contains(&h)).then_some(h as u32)
+}
+
 impl BandThresholds {
-    /// Validates the two settings.
+    /// Validates the two settings: `0 < medium < high <= 1`, each a whole number of hundredths (0.5, 0.8, 0.85; not 0.855),
+    /// so the label (which shows hundredths) and the band can never disagree.
     pub fn new(medium: f64, high: f64) -> Result<Self, OverlayError> {
-        if medium.is_nan() || high.is_nan() || medium <= 0.0 || high > 1.0 || medium >= high {
-            return Err(OverlayError::Thresholds { medium, high });
+        match (as_hundredths(medium), as_hundredths(high)) {
+            (Some(m), Some(h)) if m >= 1 && m < h => Ok(Self { high: h, medium: m }),
+            _ => Err(OverlayError::Thresholds { medium, high }),
         }
-        Ok(Self { high, medium })
     }
-    /// The band of a score, taken on the **displayed** value (the score rounded to hundredths, as [`label`] shows it), so
-    /// a label can never read `0.80 medium` for a score of 0.7999 or `0.50 low` for 0.4999.
+    /// The band of a score, taken on the score rounded **down** to hundredths (what [`label`] shows). Because thresholds
+    /// are whole hundredths this equals comparing the raw score with the threshold (up to 1e-9 of float noise, so 0.8 is
+    /// high and 0.29 is 0.29), and a label can never read `0.80` for a score below 0.8 or `0.50` for one below 0.5.
     pub fn band(&self, score: Score) -> Band {
-        match f64::from(hundredths(score)) / 100.0 {
-            s if s >= self.high => Band::High,
-            s if s >= self.medium => Band::Medium,
+        match hundredths(score) {
+            h if h >= self.high => Band::High,
+            h if h >= self.medium => Band::Medium,
             _ => Band::Low,
         }
     }
     /// The high threshold.
     pub fn high(&self) -> f64 {
-        self.high
+        f64::from(self.high) / 100.0
     }
     /// The medium threshold.
     pub fn medium(&self) -> f64 {
-        self.medium
+        f64::from(self.medium) / 100.0
     }
 }
 
@@ -124,13 +133,14 @@ impl ClassNames {
     }
 }
 
-/// The score rounded to whole hundredths (0 to 100): the one value a label shows, in either style.
+/// The score rounded **down** to whole hundredths (0 to 100): the one value a label shows, in either style. Rounding down
+/// (with 1e-9 for float noise, so 0.29 is 29) means a displayed value never exceeds the score: 0.7999 shows `0.79`.
 fn hundredths(score: Score) -> u32 {
-    (score.get() * 100.0).round() as u32
+    (score.get() * 100.0 + 1e-9).floor() as u32
 }
 
 /// The label text: `Button 0.92 high`, or `Button 92% high`, with `, target` for the chosen box. The band is always
-/// spelled out. Both styles show the score rounded to hundredths, formatted from integers (no float formatting ties).
+/// spelled out. Both styles show the score rounded down to hundredths, formatted from integers (no float formatting ties).
 pub fn label(name: &str, score: Score, band: Band, style: ScoreStyle, chosen: bool) -> String {
     let h = hundredths(score);
     let value = match style {
@@ -289,23 +299,52 @@ mod tests {
         );
     }
 
-    /// Regression: a band on the raw score next to a rounded label read "0.80 medium" for 0.7999.
+    /// Regression: high is the resolver's acting threshold (0.8), so 0.7999 must never read "high" or "0.80", and a
+    /// label must never show a value above the score.
     #[test]
-    fn the_band_follows_the_displayed_value() {
+    fn the_band_follows_the_raw_score_and_the_label_rounds_down() {
         let t = BandThresholds::default();
         for (raw, band, shown) in [
-            (0.7999, Band::High, "0.80"),
-            (0.7949, Band::Medium, "0.79"),
-            (0.4999, Band::Medium, "0.50"),
-            (0.4949, Band::Low, "0.49"),
+            (0.7999, Band::Medium, "0.79"),
+            (0.795, Band::Medium, "0.79"),
+            (0.8, Band::High, "0.80"),
+            (0.29, Band::Low, "0.29"),
+            (0.4999, Band::Low, "0.49"),
+            (0.5, Band::Medium, "0.50"),
+            (1.0, Band::High, "1.00"),
+            (0.0, Band::Low, "0.00"),
         ] {
             let sc = s(raw);
             assert_eq!(t.band(sc), band, "{raw}");
-            assert!(label("X", sc, t.band(sc), ScoreStyle::Decimal, false).contains(shown), "{raw}");
+            let text = label("X", sc, t.band(sc), ScoreStyle::Decimal, false);
+            assert_eq!(text, format!("X {shown} {}", band.text()), "{raw}");
         }
-        assert_eq!(label("X", s(0.125), Band::Medium, ScoreStyle::Decimal, false), "X 0.13 medium");
-        assert_eq!(label("X", s(1.0), Band::High, ScoreStyle::Decimal, false), "X 1.00 high");
-        assert_eq!(label("X", s(0.7999), Band::High, ScoreStyle::Percent, false), "X 80% high");
+        assert_eq!(label("X", s(0.7999), Band::Medium, ScoreStyle::Percent, false), "X 79% medium");
+        assert_eq!(label("X", s(0.125), Band::Low, ScoreStyle::Decimal, false), "X 0.12 low");
+    }
+
+    #[test]
+    fn thresholds_must_be_whole_hundredths() {
+        assert!(BandThresholds::new(0.5, 0.85).is_ok());
+        for (m, h) in [(0.5, 0.855), (0.505, 0.8), (0.0, 0.8), (0.01, 1.0)] {
+            assert_eq!(BandThresholds::new(m, h).is_ok(), m == 0.01, "{m} {h}");
+        }
+        assert!(matches!(BandThresholds::new(0.5, 1.01), Err(OverlayError::Thresholds { .. })));
+        // With whole-hundredth thresholds, band and displayed value agree for every score on the 0.01 grid and just below.
+        let t = BandThresholds::new(0.35, 0.8).unwrap();
+        for i in 0..=1000u32 {
+            let sc = s(f64::from(i) / 1000.0);
+            let shown = hundredths(sc);
+            let by_raw = if sc.get() + 1e-9 >= 0.8 {
+                Band::High
+            } else if sc.get() + 1e-9 >= 0.35 {
+                Band::Medium
+            } else {
+                Band::Low
+            };
+            assert_eq!(t.band(sc), by_raw, "{i}");
+            assert!(shown <= i / 10);
+        }
     }
 
     #[test]
@@ -385,12 +424,12 @@ mod tests {
         #[test]
         fn every_item_has_a_band_label_and_safe_text(
             specs in prop::collection::vec((0.0f64..600.0, 0u32..5, 0.0f64..=1.0, any::<bool>(), "[a-z0-9 ]{0,12}"), 0..30),
-            medium in 0.05f64..0.5, high in 0.55f64..=1.0, percent in any::<bool>(),
+            medium_h in 5u32..50, high_h in 55u32..=100, percent in any::<bool>(),
         ) {
             let names = ClassNames::new(&["A", "B", "C"]);
             let redactions = [Rect::new(100.0, 0.0, 120.0, 100.0).unwrap()];
             let ctx = OverlayContext {
-                thresholds: BandThresholds::new(medium, high).unwrap(),
+                thresholds: BandThresholds::new(f64::from(medium_h) / 100.0, f64::from(high_h) / 100.0).unwrap(),
                 style: if percent { ScoreStyle::Percent } else { ScoreStyle::Decimal },
                 names: &names, password_class: Some(ClassId(1)), redactions: &redactions, secrets: &[],
             };
@@ -412,8 +451,8 @@ mod tests {
 
         /// Bands are monotone in the score.
         #[test]
-        fn bands_are_monotone(a in 0.0f64..=1.0, b in 0.0f64..=1.0, medium in 0.05f64..0.5, high in 0.55f64..=1.0) {
-            let t = BandThresholds::new(medium, high).unwrap();
+        fn bands_are_monotone(a in 0.0f64..=1.0, b in 0.0f64..=1.0, medium_h in 5u32..50, high_h in 55u32..=100) {
+            let t = BandThresholds::new(f64::from(medium_h) / 100.0, f64::from(high_h) / 100.0).unwrap();
             let rank = |x: Band| match x { Band::Low => 0, Band::Medium => 1, Band::High => 2 };
             let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
             prop_assert!(rank(t.band(Score::new(lo).unwrap())) <= rank(t.band(Score::new(hi).unwrap())));

@@ -1232,11 +1232,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
-name = "sighter-core"
+name = "sighter-bench"
 version = "0.0.0"
 dependencies = [
  "paddock-bench",
  "paddock-proc",
+ "sighter-core",
+]
+
+[[package]]
+name = "sighter-core"
+version = "0.0.0"
+dependencies = [
  "proptest",
  "serde",
  "serde_json",

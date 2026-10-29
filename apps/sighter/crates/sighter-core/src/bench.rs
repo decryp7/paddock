@@ -2,7 +2,7 @@
 //!
 //! What is Sighter's own lives here: the budgets as named constants, interleaved A/B timing over an injected `now`
 //! function, and the renderer of the family results block (`docs/benchmarks.md`). The clock, the sample statistics and
-//! the results files are the shared `paddock-bench` crate's: the examples (`examples/bench_*.rs`) use it as a dev
+//! the results files are the shared `paddock-bench` crate's: the programs of `sighter-bench` use it as a
 //! dependency and pass `|| clock.now()` here, so this module needs no clock type of its own.
 //!
 //! TODO(shared follow-up, after the Dyno and Spotter tags freeze lifts): the results-block renderer (`RunInfo`,
@@ -38,6 +38,9 @@ pub mod budgets {
     pub const HUD_FRAME_OVERHEAD: Duration = Duration::from_millis(2);
     /// Largest change of step timing, in percent, that switching the trace on may cause.
     pub const HUD_STEP_TIMING_CHANGE_PERCENT: f64 = 5.0;
+    /// 1-minute load up to which a number counts as measured on a quiet machine (the family guide: below about 12). Above
+    /// it, up to [`RUN_LOAD_LIMIT`], a run is only an indication.
+    pub const QUIET_LOAD: f64 = 12.0;
     /// Healthy 1-minute load for a benchmark run (the family guide says "below about 12"; ADR runs skipped above 25).
     pub const RUN_LOAD_LIMIT: f64 = 25.0;
 }
@@ -175,13 +178,26 @@ impl ResultRow {
             verdict: "indication".into(),
         }
     }
-    /// A latency against the budget that belongs to it.
-    pub fn against(measure: &str, value: Duration, budget_name: &str, limit: Duration) -> Self {
+    /// A latency against the budget that belongs to it. Measured above [`budgets::QUIET_LOAD`] the verdict says
+    /// "(indication)": a plain "within" is for a quiet machine only.
+    pub fn against(measure: &str, value: Duration, budget_name: &str, limit: Duration, load_1min: f64) -> Self {
+        Self::with_verdict(
+            measure,
+            format_duration(value),
+            format!("{budget_name} <= {}", format_duration(limit)),
+            value <= limit,
+            load_1min,
+        )
+    }
+    /// A row with a ready value and budget text and a pass flag; the load decides whether the verdict is an indication.
+    pub fn with_verdict(measure: &str, value: String, budget: String, within: bool, load_1min: f64) -> Self {
+        let word = if within { "within" } else { "over" };
+        let quiet = load_1min <= budgets::QUIET_LOAD;
         Self {
             measure: measure.to_owned(),
-            value: format_duration(value),
-            budget: format!("{budget_name} <= {}", format_duration(limit)),
-            verdict: if value <= limit { "within" } else { "over" }.to_owned(),
+            value,
+            budget,
+            verdict: if quiet { word.to_owned() } else { format!("{word} (indication)") },
         }
     }
 }
@@ -336,12 +352,17 @@ mod tests {
 
     #[test]
     fn rows_judge_only_against_their_own_budget() {
-        let within = ResultRow::against("HUD", ms(1), "HUD per frame p95", budgets::HUD_FRAME_OVERHEAD);
+        let within = ResultRow::against("HUD", ms(1), "HUD per frame p95", budgets::HUD_FRAME_OVERHEAD, 8.0);
         assert_eq!(
             (within.verdict.as_str(), within.budget.as_str()),
             ("within", "HUD per frame p95 <= 2.00 ms")
         );
-        assert_eq!(ResultRow::against("HUD", ms(3), "x", budgets::HUD_FRAME_OVERHEAD).verdict, "over");
+        let q = |value, load| ResultRow::against("HUD", value, "x", budgets::HUD_FRAME_OVERHEAD, load).verdict;
+        assert_eq!(q(ms(3), 8.0), "over");
+        // Between the quiet threshold and the run limit a verdict is only an indication; a plain "within" is for quiet.
+        assert_eq!(q(ms(1), 18.5), "within (indication)");
+        assert_eq!(q(ms(3), 18.5), "over (indication)");
+        assert_eq!(q(ms(1), budgets::QUIET_LOAD), "within");
         let ind = ResultRow::indication("NMS", Duration::from_micros(65));
         assert_eq!(
             (ind.budget.as_str(), ind.verdict.as_str(), ind.value.as_str()),

@@ -2,7 +2,7 @@
 
 Sighter's benchmarks, budgets and recorded results. How to run a benchmark reproducibly and the results template are in
 the family guide, [docs/benchmarks.md](../../../docs/benchmarks.md). Record every run there quoted (newest first) here.
-The pure core (`crates/sighter-core`) has two benchmark examples, `bench_core` and `bench_hud` (clock and statistics from `paddock-bench`, memory from `paddock-proc`); no model is benchmarked yet. Both refuse to run above a 1-minute load of 25 and take the environment variables named in their header (`SIGHTER_BENCH_LOAD` is required).
+The pure core (`crates/sighter-core`, timed by `crates/sighter-bench`) has two benchmark programs in `crates/sighter-bench`, `bench_core` and `bench_hud` (clock and statistics from `paddock-bench`, memory from `paddock-proc`); no model is benchmarked yet. Both refuse to run above a 1-minute load of 25 and take the environment variables named in their header (`SIGHTER_BENCH_LOAD` is required).
 
 ## Budgets (proposed; the constants are in `sighter_core::bench::budgets`, read by benchmarks only)
 
@@ -37,15 +37,15 @@ measured on our data.
 - **Load:** 1-minute load 18.54 at start (above the family guide's quiet threshold of about 12, with other agents' builds running: indication only)
 - **Build:** release; no model, no UI rendering
 - **Corpus:** synthetic: fixed-seed boxes (50 per frame, 300 per step) and 12 trace events per step
-- **Command:** `SIGHTER_BENCH_LOAD=<load> nice -n 10 cargo run --release -p sighter-core --example bench_hud`
+- **Command:** `SIGHTER_BENCH_LOAD=<load> nice -n 10 cargo run --release -p sighter-bench --bin bench_hud`
 - **Runs:** frame: 50 warm-up and 400 timed runs, nearest-rank p95; step: 6 interleaved A/B pairs of 100 timed runs after 20 warm-up, median (paddock-bench `summarize`)
 - **Numbers:**
 
   | Measure | Value | Budget | Verdict |
   |---|---|---|---|
-  | HUD work per frame, 50 detections, 2 viewers, p95 | 27.29 us | HUD per frame <= 2.00 ms | within |
+  | HUD work per frame, 50 detections, 2 viewers, p95 | 27.29 us | HUD per frame <= 2.00 ms | within (indication) |
   | Step median, trace off | 25.04 us | none | indication |
-  | Step median, trace on | 25.62 us (+2.3 %) | change <= 5 % | within |
+  | Step median, trace on | 25.62 us (+2.3 %) | change <= 5 % | within (indication) |
 
 - **Memory measure:** physical footprint at the end of the run 4.2 MB (paddock-proc::process_memory)
 - **Notes:** Pure-core cost only: drawing, the video sidecar write and the UI are not measured. Indicative unless the load is below about 12. Wall time 59.54 ms.
@@ -56,8 +56,8 @@ measured on our data.
 - **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
 - **Load:** 1-minute load 18.54 at start (above the family guide's quiet threshold of about 12, with other agents' builds running: indication only)
 - **Build:** release; no model, no allocator override
-- **Corpus:** synthetic: 500 boxes from a fixed-seed generator in the example; a 3840 x 2160 grid
-- **Command:** `SIGHTER_BENCH_LOAD=<load> nice -n 10 cargo run --release -p sighter-core --example bench_core`
+- **Corpus:** synthetic: 500 boxes from a fixed-seed generator in the program; a 3840 x 2160 grid
+- **Command:** `SIGHTER_BENCH_LOAD=<load> nice -n 10 cargo run --release -p sighter-bench --bin bench_core`
 - **Runs:** single series, 20 warm-up and 200 timed runs; median and nearest-rank p95 (paddock-bench `summarize`)
 - **Numbers:**
 

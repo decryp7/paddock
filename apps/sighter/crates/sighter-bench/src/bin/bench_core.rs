@@ -4,18 +4,15 @@
 //! load, at most 25), `SIGHTER_BENCH_COMMIT`, `SIGHTER_BENCH_MACHINE`, `SIGHTER_BENCH_DATE`, `SIGHTER_BENCH_BRANCH`.
 //!
 //! `SIGHTER_BENCH_LOAD=<load> SIGHTER_BENCH_COMMIT=<sha> SIGHTER_BENCH_MACHINE=<text> SIGHTER_BENCH_DATE=<date> \
-//!  nice -n 10 cargo run --release -p sighter-core --example bench_core`
+//!  nice -n 10 cargo run --release -p sighter-bench --bin bench_core`
 //!
 //! The run refuses to start above the load limit, because a number taken on a busy machine is only an indication. None of
 //! the rows has a budget of its own yet (the budgets are model latencies), so each is an indication.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-#[path = "common/mod.rs"]
-mod common;
-
-use common::{env, footprint, stats};
 use paddock_bench::{Clock, SystemClock};
+use sighter_bench::{env, footprint, stats};
 use sighter_core::bench::{ResultRow, RunInfo, budgets, format_duration, load_allows_run, render_results_block, time_runs};
 use sighter_core::chain::{Chain, InputSpace};
 use sighter_core::detect::{ClassId, Detection, Fraction, Score, nms};
@@ -102,8 +99,8 @@ fn main() {
         machine: env("SIGHTER_BENCH_MACHINE", "unknown"),
         load: format!("1-minute load {load} at start"),
         build: "release; no model, no allocator override".into(),
-        corpus: "synthetic: 500 boxes from a fixed-seed generator in the example; a 3840 x 2160 grid".into(),
-        command: "SIGHTER_BENCH_LOAD=<load> nice -n 10 cargo run --release -p sighter-core --example bench_core".into(),
+        corpus: "synthetic: 500 boxes from a fixed-seed generator in the program; a 3840 x 2160 grid".into(),
+        command: "SIGHTER_BENCH_LOAD=<load> nice -n 10 cargo run --release -p sighter-bench --bin bench_core".into(),
         runs: format!("single series, 20 warm-up and {runs} timed runs; median and nearest-rank p95 (paddock-bench `summarize`)"),
         memory_measure: footprint(),
         notes: format!(

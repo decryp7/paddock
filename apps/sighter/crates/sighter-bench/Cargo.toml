@@ -1,0 +1,17 @@
+[package]
+name = "sighter-bench"
+version = "0.0.0"
+description = "Sighter's benchmark programs (no model needed): the pure core's geometry, NMS and tiling, and the HUD's overhead. Kept apart from sighter-core so the core stays light; uses the family clock and statistics (paddock-bench) and real-memory reader (paddock-proc)."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+sighter-core = { path = "../sighter-core" }
+paddock-bench = { path = "../../../../crates/paddock-bench" }
+paddock-proc = { path = "../../../../crates/paddock-proc" }
+
+[lints]
+workspace = true
