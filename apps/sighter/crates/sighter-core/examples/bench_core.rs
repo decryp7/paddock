@@ -38,6 +38,7 @@ fn synthetic(n: usize) -> Vec<Detection> {
                 rect: r,
                 class: ClassId(next(8) as u32),
                 score: Score::new(next(1000) as f64 / 1000.0).ok()?,
+                tile: 0,
             })
         })
         .collect()

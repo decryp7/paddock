@@ -4,10 +4,19 @@
 
 use crate::chain::Chain;
 use crate::geometry::{CapturePx, HostInput, Logical, Rect, RemotePx};
+use crate::tiling::TileGrid;
 use std::cmp::Ordering;
 
 /// Most detections one call accepts; keeps the quadratic passes bounded.
 pub const MAX_DETECTIONS: usize = 10_000;
+/// Default overlap fraction of two cut parts for the seam merge (`SEAM_IOU`, a validated setting in (0, 1]).
+pub const SEAM_IOU: f64 = 0.5;
+/// Default share of a detection's area that must lie inside a grown hint (`HINT_CONTAINMENT`, a validated setting).
+pub const HINT_CONTAINMENT: f64 = 0.5;
+/// Default growth of a mapped hint on every side, in logical points (a tunable).
+pub const HINT_MARGIN: f64 = 8.0;
+/// Largest accepted hint margin.
+pub const MAX_HINT_MARGIN: f64 = 256.0;
 /// Longest adapter name kept in a hint.
 pub const MAX_ADAPTER_NAME: usize = 64;
 
@@ -28,12 +37,21 @@ pub enum DetectError {
         /// Limit.
         max: usize,
     },
+    /// A detection names a tile the grid does not have.
+    #[error("a detection names tile {0}, which the tile grid does not have")]
+    UnknownTile(usize),
+    /// A hint arrived without a coordinate space tag, or with an unknown one.
+    #[error("a hint needs a space tag: host-input, remote-pixels, capture-pixels or logical (got {0:?})")]
+    UnknownHintSpace(Option<String>),
+    /// A margin was negative, not a number or absurdly large.
+    #[error("a hint margin must be between 0 and {MAX_HINT_MARGIN} logical points, got {0}")]
+    BadMargin(f64),
     /// A hint's rectangle could not be built.
     #[error(transparent)]
     Geometry(#[from] crate::geometry::GeometryError),
     /// A hint came from a coordinate space that cannot be mapped (an adapter that is not DPI aware sees virtualised
     /// coordinates that no chain can undo).
-    #[error("hint from adapter '{adapter}' is in DPI-virtualised coordinates and cannot be mapped; make the adapter Per-Monitor V2 aware")]
+    #[error("The hint from {adapter} is in DPI-virtualised coordinates; make the adapter Per-Monitor V2 DPI aware")]
     UnmappableHint {
         /// The adapter that sent it.
         adapter: String,
@@ -104,6 +122,8 @@ pub struct Detection {
     pub class: ClassId,
     /// The detector's score.
     pub score: Score,
+    /// The id of the tile the detection came from ([`crate::tiling::Tile::id`]).
+    pub tile: usize,
 }
 
 /// Total order used everywhere: higher score first, then position, size and class, so results never depend on input
@@ -117,6 +137,7 @@ fn canonical(a: &Detection, b: &Detection) -> Ordering {
         .then(a.rect.w().total_cmp(&b.rect.w()))
         .then(a.rect.h().total_cmp(&b.rect.h()))
         .then(a.class.cmp(&b.class))
+        .then(a.tile.cmp(&b.tile))
 }
 
 fn bounded(n: usize) -> Result<(), DetectError> {
@@ -153,18 +174,20 @@ pub fn nms(dets: &[Detection], iou: Fraction) -> Result<Vec<Detection>, DetectEr
     Ok(kept)
 }
 
-/// Joins boxes of the same class that a tile border cut apart: two boxes merge when they touch or overlap (allowing
-/// `gap` logical points) and **both** touch the same seam strip (the overlap of two neighbouring tiles). Merging is
-/// transitive; a merged box is the union and keeps the best score. Boxes away from every seam are never merged, so two
-/// separate neighbouring buttons stay two. Run [`nms`] afterwards for duplicates the overlap produced.
-pub fn merge_seams(dets: &[Detection], seams: &[Rect<Logical>], gap: f64) -> Result<Vec<Detection>, DetectError> {
+/// Joins the parts of one element that a tile border cut apart (ADR 0001, "Decisions for the pure core", 2). Two
+/// detections of the same class merge only when they come from **different, neighbouring tiles** (tiles that share an
+/// overlap strip), **both** intersect that strip, and their parts inside the strip agree: the IoU of `A ∩ strip` and
+/// `B ∩ strip` is at least `seam_iou`. Detections of the same tile never merge. Merging is transitive (a box cut at a
+/// four-tile corner); a merged box is the union and keeps the best score and that detection's tile. Two separate
+/// neighbours in a strip are each seen whole by both tiles and pair with their own copies, not with each other. Run
+/// [`nms`] afterwards to remove the duplicates the overlap produced.
+pub fn merge_seams(dets: &[Detection], grid: &TileGrid, seam_iou: Fraction) -> Result<Vec<Detection>, DetectError> {
     bounded(dets.len())?;
+    if let Some(d) = dets.iter().find(|d| d.tile >= grid.tiles().len()) {
+        return Err(DetectError::UnknownTile(d.tile));
+    }
     let mut sorted = dets.to_vec();
     sorted.sort_by(canonical);
-    let on_seam: Vec<Vec<usize>> = sorted
-        .iter()
-        .map(|d| (0..seams.len()).filter(|&i| d.rect.touches(&seams[i], 0.0)).collect())
-        .collect();
     let mut parent: Vec<usize> = (0..sorted.len()).collect();
     fn find(p: &mut [usize], mut i: usize) -> usize {
         while p[i] != i {
@@ -175,10 +198,19 @@ pub fn merge_seams(dets: &[Detection], seams: &[Rect<Logical>], gap: f64) -> Res
     }
     for i in 0..sorted.len() {
         for j in i + 1..sorted.len() {
-            let shares_seam = on_seam[i].iter().any(|s| on_seam[j].contains(s));
-            if sorted[i].class == sorted[j].class && shares_seam && sorted[i].rect.touches(&sorted[j].rect, gap) {
-                let (a, b) = (find(&mut parent, i), find(&mut parent, j));
-                parent[b.max(a)] = a.min(b);
+            let (a, b) = (&sorted[i], &sorted[j]);
+            if a.class != b.class || a.tile == b.tile {
+                continue;
+            }
+            let Some(strip) = grid.tiles()[a.tile].rect().intersection(&grid.tiles()[b.tile].rect()) else {
+                continue;
+            };
+            let (Some(pa), Some(pb)) = (a.rect.intersection(&strip), b.rect.intersection(&strip)) else {
+                continue;
+            };
+            if pa.iou(&pb) >= seam_iou.get() {
+                let (ra, rb) = (find(&mut parent, i), find(&mut parent, j));
+                parent[ra.max(rb)] = ra.min(rb);
             }
         }
     }
@@ -189,31 +221,55 @@ pub fn merge_seams(dets: &[Detection], seams: &[Rect<Logical>], gap: f64) -> Res
             None => *d,
             Some(g) => Detection {
                 rect: g.rect.union(&d.rect),
-                class: g.class,
-                score: g.score,
+                ..g
             },
         });
     }
-    // Sorted best score first, so the first member of a group already carries the group's best score.
+    // Sorted best score first, so the first member of a group already carries the group's best score and tile.
     let mut out: Vec<Detection> = groups.into_iter().flatten().collect();
     out.sort_by(canonical);
     Ok(out)
 }
 
-/// The coordinate space a hint rectangle is given in. The adapter must say which; Sighter never guesses.
+/// The coordinate space a hint rectangle is given in. The adapter must say which; Sighter never guesses. Wire tags are
+/// `host-input`, `remote-pixels`, `capture-pixels`, `logical` and `virtualised`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HintSpace {
-    /// The host's input space: macOS global points, or physical virtual-screen pixels of a Per-Monitor V2 aware Windows
-    /// adapter (for example FlaUI's `BoundingRectangle` in an aware process).
+    /// `host-input`: the host's input space: macOS global points, or physical virtual-screen pixels of a Per-Monitor
+    /// aware Windows adapter (for example FlaUI's `BoundingRectangle`).
     HostInput,
-    /// Capture pixels of the frame Sighter sees.
-    Capture,
-    /// Remote pixels.
-    RemotePx,
-    /// Logical points (already on the tile grid).
+    /// `remote-pixels`: pixels of the remote desktop, from an adapter running inside it.
+    RemotePixels,
+    /// `capture-pixels`: only for boxes Sighter returned earlier (a client narrowing a follow-up query).
+    CapturePixels,
+    /// `logical`: only for boxes Sighter returned earlier, already on the tile grid.
     Logical,
-    /// Coordinates virtualised by a DPI-unaware process: they cannot be mapped and are refused.
-    DpiVirtualised,
+    /// `virtualised`: coordinates from a system-aware or unaware reader; they cannot be mapped and are refused.
+    Virtualised,
+}
+
+impl HintSpace {
+    /// Parses a wire tag; a missing or unknown tag is refused at the edge.
+    pub fn from_tag(tag: Option<&str>) -> Result<Self, DetectError> {
+        Ok(match tag {
+            Some("host-input") => Self::HostInput,
+            Some("remote-pixels") => Self::RemotePixels,
+            Some("capture-pixels") => Self::CapturePixels,
+            Some("logical") => Self::Logical,
+            Some("virtualised") => Self::Virtualised,
+            other => return Err(DetectError::UnknownHintSpace(other.map(str::to_owned))),
+        })
+    }
+    /// The wire tag.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::HostInput => "host-input",
+            Self::RemotePixels => "remote-pixels",
+            Self::CapturePixels => "capture-pixels",
+            Self::Logical => "logical",
+            Self::Virtualised => "virtualised",
+        }
+    }
 }
 
 /// A rectangle a user's own framework adapter passed as an optional hint.
@@ -240,6 +296,10 @@ impl HintRect {
             h,
         })
     }
+    /// Builds a hint from its wire form: the space tag is required.
+    pub fn from_wire(adapter: &str, tag: Option<&str>, x: f64, y: f64, w: f64, h: f64) -> Result<Self, DetectError> {
+        Self::new(adapter, HintSpace::from_tag(tag)?, x, y, w, h)
+    }
     /// The adapter that sent the hint.
     pub fn adapter(&self) -> &str {
         &self.adapter
@@ -251,7 +311,7 @@ impl HintRect {
     /// Maps the hint onto the logical grid through the one chain.
     pub fn to_logical(&self, chain: &Chain) -> Result<Rect<Logical>, DetectError> {
         Ok(match self.space {
-            HintSpace::DpiVirtualised => {
+            HintSpace::Virtualised => {
                 return Err(DetectError::UnmappableHint {
                     adapter: self.adapter.clone(),
                 });
@@ -260,15 +320,46 @@ impl HintRect {
             HintSpace::HostInput => chain
                 .input_to_logical()
                 .rect(Rect::<HostInput>::new(self.x, self.y, self.w, self.h)?),
-            HintSpace::Capture => chain
+            HintSpace::CapturePixels => chain
                 .capture_to_logical()
                 .rect(Rect::<CapturePx>::new(self.x, self.y, self.w, self.h)?),
-            HintSpace::RemotePx => chain
+            HintSpace::RemotePixels => chain
                 .logical_to_remote()
                 .inverse()
                 .rect(Rect::<RemotePx>::new(self.x, self.y, self.w, self.h)?),
         })
     }
+}
+
+/// Hints mapped, grown and clipped for one query.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedHints {
+    /// The usable hints in logical points, in input order (a dropped hint leaves no entry).
+    pub rects: Vec<Rect<Logical>>,
+    /// Indices of the input hints that fell outside the scope and were dropped (recorded in the trace).
+    pub dropped: Vec<usize>,
+}
+
+/// Maps each hint through the chain, grows it by `margin` logical points on every side (a hint can be stale), and clips it
+/// to the query's `scope`; a hint with nothing left inside the scope is dropped and recorded. A refused hint (virtualised)
+/// is an error naming the adapter: the caller reports it and goes on without that hint.
+pub fn prepare_hints(hints: &[HintRect], chain: &Chain, scope: &Rect<Logical>, margin: f64) -> Result<PreparedHints, DetectError> {
+    if margin.is_nan() || !(0.0..=MAX_HINT_MARGIN).contains(&margin) {
+        return Err(DetectError::BadMargin(margin));
+    }
+    let mut out = PreparedHints {
+        rects: Vec::new(),
+        dropped: Vec::new(),
+    };
+    for (i, h) in hints.iter().enumerate() {
+        let r = h.to_logical(chain)?;
+        let grown = Rect::new(r.x() - margin, r.y() - margin, r.w() + 2.0 * margin, r.h() + 2.0 * margin)?;
+        match grown.clip(scope) {
+            Some(c) => out.rects.push(c),
+            None => out.dropped.push(i),
+        }
+    }
+    Ok(out)
 }
 
 /// Where a candidate came from.
@@ -289,7 +380,7 @@ pub struct Candidate {
     pub provenance: Provenance,
 }
 
-/// Narrows and ranks detections by hints (already mapped to logical points). Without hints every detection passes as
+/// Narrows and ranks detections by hints (already prepared by [`prepare_hints`]; `min_inside` is `HINT_CONTAINMENT`). Without hints every detection passes as
 /// [`Provenance::Detected`]. With hints, a detection stays when at least `min_inside` of its area (or, for an empty box,
 /// its centre) lies inside a hint; it is recorded against the first such hint and ranked by hint index, then score.
 /// A hint with no detection inside it yields nothing: hints never create candidates.
@@ -330,8 +421,9 @@ pub fn apply_hints(dets: &[Detection], hints: &[Rect<Logical>], min_inside: Frac
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chain::InputSpace;
+    use crate::chain::{ChainParams, InputSpace};
     use crate::geometry::{Pt, Scale};
+    use crate::tiling::{GridSpec, tile_grid};
     use proptest::prelude::*;
 
     fn rect(x: f64, y: f64, w: f64, h: f64) -> Rect<Logical> {
@@ -342,7 +434,15 @@ mod tests {
             rect: rect(x, y, w, h),
             class: ClassId(class),
             score: Score::new(score).unwrap(),
+            tile: 0,
         }
+    }
+    fn on(tile: usize, d: Detection) -> Detection {
+        Detection { tile, ..d }
+    }
+    /// The 1920 x 1200 grid: tiles 0 (0,0), 1 (576,0), 2 (1152,0), 3 (1280,0), 4..7 the second row at y = 560.
+    fn grid() -> TileGrid {
+        tile_grid(1920, 1200, GridSpec::default_640()).unwrap()
     }
     fn frac(v: f64) -> Fraction {
         Fraction::new(v).unwrap()
@@ -379,32 +479,89 @@ mod tests {
     }
 
     #[test]
-    fn seam_merge_joins_a_wide_box_cut_by_a_seam_but_not_distinct_neighbours() {
-        let seam = rect(576.0, 0.0, 64.0, 640.0);
-        // A text box cut at the right tile edge (x = 640) and at the left edge of the next tile (x = 576).
-        let left = det(500.0, 100.0, 140.0, 20.0, 3, 0.7);
-        let right = det(576.0, 100.0, 200.0, 20.0, 3, 0.9);
-        let out = merge_seams(&[left, right], &[seam], 0.0).unwrap();
+    fn seam_merge_joins_one_wide_box_cut_by_a_seam() {
+        // Tiles 0 and 1 share the strip x 576..640, y 0..640. A text box 500..776 is cut: tile 0 sees up to x = 640, tile 1
+        // from x = 576. Their parts inside the strip are the same region.
+        let left = on(0, det(500.0, 100.0, 140.0, 20.0, 3, 0.7));
+        let right = on(1, det(576.0, 100.0, 200.0, 20.0, 3, 0.9));
+        let out = merge_seams(&[left, right], &grid(), Fraction::new(SEAM_IOU).unwrap()).unwrap();
         assert_eq!(out.len(), 1);
-        assert_eq!((out[0].rect.x(), out[0].rect.right(), out[0].score.get()), (500.0, 776.0, 0.9));
-        // Two buttons that touch but sit away from the seam stay two.
-        let (a, b) = (det(10.0, 10.0, 20.0, 20.0, 3, 0.9), det(30.0, 10.0, 20.0, 20.0, 3, 0.9));
-        assert_eq!(merge_seams(&[a, b], &[seam], 0.0).unwrap().len(), 2);
-        // A different class never merges.
-        let other = det(576.0, 100.0, 200.0, 20.0, 4, 0.9);
-        assert_eq!(merge_seams(&[left, other], &[seam], 0.0).unwrap().len(), 2);
-        // A gap within tolerance merges.
-        let far = det(780.0, 100.0, 10.0, 20.0, 3, 0.4);
-        let near_seam = rect(700.0, 0.0, 100.0, 640.0);
-        assert_eq!(merge_seams(&[right, far], &[near_seam], 5.0).unwrap().len(), 1);
-        assert_eq!(merge_seams(&[right, far], &[near_seam], 1.0).unwrap().len(), 2);
+        assert_eq!(
+            (out[0].rect.x(), out[0].rect.right(), out[0].score.get(), out[0].tile),
+            (500.0, 776.0, 0.9, 1)
+        );
+    }
+
+    #[test]
+    fn two_separate_buttons_four_points_apart_in_a_strip_stay_two() {
+        // Both tiles see both buttons whole: each button pairs with its own copy, never with the other button.
+        let (a, b) = ((590.0, 100.0), (614.0, 100.0)); // 20 wide, 4 apart
+        let dets = [
+            on(0, det(a.0, a.1, 20.0, 20.0, 3, 0.9)),
+            on(1, det(a.0, a.1, 20.0, 20.0, 3, 0.8)),
+            on(0, det(b.0, b.1, 20.0, 20.0, 3, 0.7)),
+            on(1, det(b.0, b.1, 20.0, 20.0, 3, 0.6)),
+        ];
+        let merged = merge_seams(&dets, &grid(), Fraction::new(SEAM_IOU).unwrap()).unwrap();
+        assert_eq!(merged.len(), 2);
+        assert_eq!(nms(&merged, Fraction::new(0.5).unwrap()).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_box_cut_at_a_four_tile_corner_becomes_one() {
+        // Tiles 0, 1, 4, 5 meet around x 576..640, y 560..640. One 100 x 100 element at (540, 540) is cut four ways.
+        let whole = rect(540.0, 540.0, 100.0, 100.0);
+        let parts = [
+            (0, rect(540.0, 540.0, 100.0, 100.0)),
+            (1, rect(576.0, 540.0, 64.0, 100.0)),
+            (4, rect(540.0, 560.0, 100.0, 80.0)),
+            (5, rect(576.0, 560.0, 64.0, 80.0)),
+        ];
+        let dets: Vec<Detection> = parts
+            .iter()
+            .enumerate()
+            .map(|(i, (t, r))| Detection {
+                rect: *r,
+                class: ClassId(1),
+                score: Score::new(0.5 + i as f64 / 10.0).unwrap(),
+                tile: *t,
+            })
+            .collect();
+        let out = merge_seams(&dets, &grid(), Fraction::new(SEAM_IOU).unwrap()).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].rect, whole);
+        assert_eq!(out[0].score.get(), 0.8);
+    }
+
+    #[test]
+    fn detections_of_one_tile_never_merge_and_other_classes_do_not_either() {
+        let a = on(0, det(590.0, 100.0, 20.0, 20.0, 3, 0.9));
+        let b = on(0, det(590.0, 100.0, 20.0, 20.0, 3, 0.8));
+        assert_eq!(merge_seams(&[a, b], &grid(), Fraction::new(0.1).unwrap()).unwrap().len(), 2);
+        let c = on(1, det(590.0, 100.0, 20.0, 20.0, 4, 0.8));
+        assert_eq!(merge_seams(&[a, c], &grid(), Fraction::new(0.1).unwrap()).unwrap().len(), 2);
+        // Tiles that share no strip (0 and 3) never merge even with identical boxes.
+        let far = on(3, det(590.0, 100.0, 20.0, 20.0, 3, 0.8));
+        assert_eq!(merge_seams(&[a, far], &grid(), Fraction::new(0.1).unwrap()).unwrap().len(), 2);
+        // A box outside the strip does not merge with its neighbour tile's copy.
+        let outside = on(1, det(700.0, 100.0, 20.0, 20.0, 3, 0.8));
+        assert_eq!(merge_seams(&[a, outside], &grid(), Fraction::new(0.1).unwrap()).unwrap().len(), 2);
+        // A tile the grid does not have is a typed error.
+        assert_eq!(
+            merge_seams(&[on(99, a)], &grid(), Fraction::new(0.5).unwrap()),
+            Err(DetectError::UnknownTile(99))
+        );
+        assert!(Fraction::new(0.0).is_err() && Fraction::new(1.0).is_ok());
     }
 
     #[test]
     fn limits_are_typed_errors() {
         let many = vec![det(0.0, 0.0, 1.0, 1.0, 0, 0.5); MAX_DETECTIONS + 1];
         assert!(matches!(nms(&many, frac(0.5)), Err(DetectError::TooMany { .. })));
-        assert!(matches!(merge_seams(&many, &[], 0.0), Err(DetectError::TooMany { .. })));
+        assert!(matches!(
+            merge_seams(&many, &grid(), Fraction::new(0.5).unwrap()),
+            Err(DetectError::TooMany { .. })
+        ));
         assert!(matches!(
             filter_scores(&many, Score::new(0.0).unwrap()),
             Err(DetectError::TooMany { .. })
@@ -443,6 +600,23 @@ mod tests {
     }
 
     #[test]
+    fn hint_spaces_have_wire_tags_and_untagged_hints_are_refused() {
+        for t in ["host-input", "remote-pixels", "capture-pixels", "logical", "virtualised"] {
+            assert_eq!(HintSpace::from_tag(Some(t)).unwrap().tag(), t);
+        }
+        assert_eq!(HintSpace::from_tag(None), Err(DetectError::UnknownHintSpace(None)));
+        assert_eq!(
+            HintSpace::from_tag(Some("pixels")),
+            Err(DetectError::UnknownHintSpace(Some("pixels".into())))
+        );
+        assert!(HintRect::from_wire("a", None, 0.0, 0.0, 1.0, 1.0).is_err());
+        assert_eq!(
+            HintRect::from_wire("a", Some("logical"), 0.0, 0.0, 1.0, 1.0).unwrap().space(),
+            HintSpace::Logical
+        );
+    }
+
+    #[test]
     fn hints_map_through_the_chain_by_their_declared_space() {
         // 200 % macOS host, local window at (100, 50) points: logical = (point - origin).
         let chain = Chain::local(
@@ -455,12 +629,12 @@ mod tests {
         let host = HintRect::new("test-adapter", HintSpace::HostInput, 120.0, 70.0, 40.0, 20.0).unwrap();
         let l = host.to_logical(&chain).unwrap();
         assert_eq!((l.x(), l.y(), l.w(), l.h()), (20.0, 20.0, 40.0, 20.0));
-        let cap = HintRect::new("a", HintSpace::Capture, 40.0, 40.0, 80.0, 40.0)
+        let cap = HintRect::new("a", HintSpace::CapturePixels, 40.0, 40.0, 80.0, 40.0)
             .unwrap()
             .to_logical(&chain)
             .unwrap();
         assert_eq!((cap.x(), cap.w()), (20.0, 40.0));
-        let rem = HintRect::new("a", HintSpace::RemotePx, 40.0, 40.0, 80.0, 40.0)
+        let rem = HintRect::new("a", HintSpace::RemotePixels, 40.0, 40.0, 80.0, 40.0)
             .unwrap()
             .to_logical(&chain)
             .unwrap();
@@ -470,11 +644,89 @@ mod tests {
             .to_logical(&chain)
             .unwrap();
         assert_eq!((lg.x(), lg.h()), (1.0, 4.0));
-        let virt = HintRect::new(&"x".repeat(200), HintSpace::DpiVirtualised, 1.0, 1.0, 1.0, 1.0).unwrap();
+        let virt = HintRect::new(&"x".repeat(200), HintSpace::Virtualised, 1.0, 1.0, 1.0, 1.0).unwrap();
         assert_eq!(virt.adapter().len(), MAX_ADAPTER_NAME);
-        assert_eq!(virt.space(), HintSpace::DpiVirtualised);
-        assert!(matches!(virt.to_logical(&chain), Err(DetectError::UnmappableHint { .. })));
+        assert_eq!(virt.space(), HintSpace::Virtualised);
+        let err = HintRect::new("FlaUI", HintSpace::Virtualised, 1.0, 1.0, 1.0, 1.0)
+            .unwrap()
+            .to_logical(&chain)
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "The hint from FlaUI is in DPI-virtualised coordinates; make the adapter Per-Monitor V2 DPI aware"
+        );
         assert!(HintRect::new("a", HintSpace::HostInput, f64::NAN, 0.0, 1.0, 1.0).is_err());
+    }
+
+    #[test]
+    fn a_remote_pixels_hint_with_r_1_5_and_s_0_5_names_the_right_logical_rectangle() {
+        // Viewer window: remote r = 1.5 shown at s = 0.5 on a 200 % host (content origin (0, 28), window at (100, 50)).
+        let chain = Chain::new(ChainParams {
+            viewer_scale: Scale::uniform(0.5).unwrap(),
+            remote_scale: Scale::uniform(1.5).unwrap(),
+            host_scale: Scale::uniform(2.0).unwrap(),
+            content_origin: Pt::new(0.0, 28.0).unwrap(),
+            window_origin: Pt::new(100.0, 50.0).unwrap(),
+            input: InputSpace::MacPoints,
+        })
+        .unwrap();
+        // The element is the logical rectangle (200, 100, 80, 24).
+        let element = rect(200.0, 100.0, 80.0, 24.0);
+        let remote = chain.logical_to_remote().rect(element);
+        let from_remote = HintRect::new("in-vm", HintSpace::RemotePixels, remote.x(), remote.y(), remote.w(), remote.h()).unwrap();
+        let from_host_rect = chain.logical_to_input().rect(element);
+        let from_host = HintRect::new(
+            "fla",
+            HintSpace::HostInput,
+            from_host_rect.x(),
+            from_host_rect.y(),
+            from_host_rect.w(),
+            from_host_rect.h(),
+        )
+        .unwrap();
+        for h in [from_remote, from_host] {
+            let l = h.to_logical(&chain).unwrap();
+            assert!(
+                (l.x() - 200.0).abs() <= 1.0 && (l.y() - 100.0).abs() <= 1.0 && (l.w() - 80.0).abs() <= 1.0 && (l.h() - 24.0).abs() <= 1.0,
+                "{l:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn prepared_hints_are_grown_clipped_to_the_scope_and_recorded_when_dropped() {
+        let chain = Chain::local(
+            Scale::uniform(1.0).unwrap(),
+            Pt::new(0.0, 0.0).unwrap(),
+            Pt::new(0.0, 0.0).unwrap(),
+            InputSpace::WindowsPixels,
+        )
+        .unwrap();
+        let scope = rect(0.0, 0.0, 200.0, 200.0);
+        let hints = [
+            HintRect::new("a", HintSpace::Logical, 50.0, 50.0, 20.0, 20.0).unwrap(),
+            HintRect::new("a", HintSpace::Logical, 195.0, 10.0, 20.0, 20.0).unwrap(),
+            HintRect::new("a", HintSpace::Logical, 500.0, 500.0, 20.0, 20.0).unwrap(),
+        ];
+        let p = prepare_hints(&hints, &chain, &scope, HINT_MARGIN).unwrap();
+        assert_eq!(p.dropped, vec![2]);
+        assert_eq!(p.rects[0], rect(42.0, 42.0, 36.0, 36.0)); // 8 points each side
+        assert_eq!((p.rects[1].x(), p.rects[1].right(), p.rects[1].y()), (187.0, 200.0, 2.0)); // clipped to the scope
+        for bad in [-1.0, f64::NAN, MAX_HINT_MARGIN + 1.0] {
+            assert!(matches!(prepare_hints(&hints, &chain, &scope, bad), Err(DetectError::BadMargin(_))));
+        }
+        let virt = [HintRect::new("FlaUI", HintSpace::Virtualised, 0.0, 0.0, 1.0, 1.0).unwrap()];
+        assert!(matches!(
+            prepare_hints(&virt, &chain, &scope, 0.0),
+            Err(DetectError::UnmappableHint { .. })
+        ));
+        // 50 % containment of the grown hint: a detection half inside counts, one 40 % inside does not.
+        let grown = [p.rects[0]];
+        let half = det(42.0, 42.0, 72.0, 36.0, 1, 0.9); // 36 of 72 wide inside
+        let less = det(42.0, 42.0, 90.0, 36.0, 1, 0.9); // 36 of 90 inside
+        let kept = apply_hints(&[half, less], &grown, Fraction::new(HINT_CONTAINMENT).unwrap()).unwrap();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].detection, half);
     }
 
     fn arb_det() -> impl Strategy<Value = Detection> {
@@ -515,8 +767,7 @@ mod tests {
 
         #[test]
         fn merge_covers_every_input_and_never_grows(dets in arb_dets(), gap in 0.0f64..5.0) {
-            let seams = [rect(576.0, 0.0, 64.0, 700.0), rect(0.0, 576.0, 700.0, 64.0)];
-            let out = merge_seams(&dets, &seams, gap).unwrap();
+            let out = merge_seams(&dets, &grid(), Fraction::new(0.05 + gap / 6.0).unwrap()).unwrap();
             prop_assert!(out.len() <= dets.len());
             for d in &dets {
                 // Containment up to floating-point rounding of `x + (right - x)`.
@@ -528,7 +779,7 @@ mod tests {
             }
             let mut rev = dets.clone();
             rev.reverse();
-            prop_assert_eq!(merge_seams(&rev, &seams, gap).unwrap(), out);
+            prop_assert_eq!(merge_seams(&rev, &grid(), Fraction::new(0.05 + gap / 6.0).unwrap()).unwrap(), out);
         }
 
         #[test]

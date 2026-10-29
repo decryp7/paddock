@@ -238,6 +238,7 @@ mod tests {
             rect: Rect::new(x, 10.0, 40.0, 20.0).unwrap(),
             class: ClassId(class),
             score: s(score),
+            tile: 0,
         }
     }
     fn to_capture() -> Map<Logical, CapturePx> {

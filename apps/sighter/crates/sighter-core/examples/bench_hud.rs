@@ -42,6 +42,7 @@ fn synthetic(n: usize) -> Vec<Detection> {
             .expect("in range"),
             class: ClassId(next(6) as u32),
             score: Score::new(next(1000) as f64 / 1000.0).expect("in range"),
+            tile: 0,
         })
         .collect()
 }
