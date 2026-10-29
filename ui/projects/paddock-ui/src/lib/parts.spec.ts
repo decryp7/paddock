@@ -274,6 +274,45 @@ describe('pd-copy-menu', () => {
     await vi.waitFor(() => expect(menu.state()).toBeNull());
   });
 
+  it('gives back the selection it opened on when it closes, as a native menu keeps it (WebKit drops it on focus)', async () => {
+    const f = TestBed.createComponent(PdCopyMenuHost);
+    const menu = TestBed.inject(PdCopyMenu);
+    f.detectChanges();
+    const p = document.createElement('p');
+    p.textContent = 'keep me selected';
+    const other = document.createElement('p');
+    other.textContent = 'something else';
+    document.body.append(p, other);
+    const select = (el: Element) => {
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(r);
+    };
+    try {
+      select(p);
+      menu.open(1, 2, 'keep me selected');
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      getSelection()!.removeAllRanges(); // what WebKit does when the menu takes the focus
+      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+      await vi.waitFor(() => expect(menu.state()).toBeNull());
+      await vi.waitFor(() => expect(getSelection()!.toString()).toBe('keep me selected'));
+
+      // A selection the user made while it was open is theirs: it stays.
+      menu.open(1, 2, 'keep me selected');
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      select(other);
+      menu.close();
+      await vi.waitFor(() => expect(panel()).toBeNull());
+      await f.whenStable();
+      expect(getSelection()!.toString()).toBe('something else');
+    } finally {
+      getSelection()!.removeAllRanges();
+      p.remove();
+      other.remove();
+    }
+  });
+
   it('closes when the service closes it, and a failing clipboard only closes the menu', async () => {
     stubClipboard(() => Promise.reject(new Error('denied')));
     const f = TestBed.createComponent(PdCopyMenuHost);

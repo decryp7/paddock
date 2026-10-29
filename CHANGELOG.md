@@ -9,6 +9,7 @@ Conventional Commits; one semver tag for the whole repo.
 - `@decryp7/paddock-eslint`: new `paddock/e2e-axe-through-kit` (on in the preset for `e2e/` files; an `axe.ts` helper is exempt) reports `@axe-core/playwright` imported by a browser spec.
 
 ### `pd-copy-menu`: stays open in WebKit
+- `<pd-copy-menu />` gives back the text selection it opened on when it closes (Escape, a click elsewhere, Copy), as a native menu keeps it: WebKit drops the selection when focus moves into the menu. A selection the user made while it was open stays.
 - `PdCopyMenu.open(x, y, text, event?)` takes the right click that asked for it (the native-feel guard passes it), and `<pd-copy-menu />` opens the CDK menu with that event. Where `contextmenu` comes on the button press (macOS and Linux, so WKWebView and WebKitGTK), the release's `auxclick` used to close the menu as soon as it was drawn; the CDK now skips it. `FeelHooks.copyMenu` gets the event as a fourth argument. The reference apps' WebKit specs wait for animations before axe (data), use a page-local clipboard instead of `grantPermissions` (WebKit has no `clipboard-write`) and measure the folded Problems table once the fold is in place.
 
 ### `paddock-jobs`: `WalkOptions::with_modified`

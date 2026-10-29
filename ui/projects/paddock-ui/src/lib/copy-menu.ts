@@ -1,4 +1,5 @@
 import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem } from '@angular/cdk/menu';
+import { DOCUMENT } from '@angular/common';
 import { afterNextRender, ChangeDetectionStrategy, Component, effect, inject, Injectable, Injector, signal, untracked, viewChild } from '@angular/core';
 import { copyText } from './clipboard';
 
@@ -45,7 +46,8 @@ export class PdCopyMenu {
 
 /**
  * Draws the Copy menu at the pointer as a CDK context menu: it focuses Copy, and Escape, a click elsewhere or losing focus
- * closes it (the CDK menu's own behaviour).
+ * closes it (the CDK menu's own behaviour). Closed, it gives back the text selection it opened on, as a native menu keeps it:
+ * WebKit drops the selection when focus moves into the menu. A selection the user made meanwhile stays.
  */
 @Component({
   selector: 'pd-copy-menu',
@@ -75,6 +77,9 @@ export class PdCopyMenuHost {
   /** The menu panel, once it is open (its template is declared here, so the query finds it in the overlay). */
   private readonly panel = viewChild(CdkMenu);
   private readonly injector = inject(Injector);
+  private readonly document = inject(DOCUMENT);
+  /** The selection when the menu opened (copies of its ranges), given back when it closes; null while closed. */
+  private saved: Range[] | null = null;
 
   constructor() {
     // The service's state is the one truth: the CDK menu is opened and closed to follow it (a DOM overlay is outside the signal graph).
@@ -84,8 +89,13 @@ export class PdCopyMenuHost {
       untracked(() => {
         if (!s) {
           trigger.close();
+          const saved = this.saved;
+          this.saved = null;
+          // After the render, so after the CDK has moved the focus back (which in WebKit can clear the selection again).
+          if (saved) afterNextRender(() => this.restoreSelection(saved), { injector: this.injector });
           return;
         }
+        this.saved ??= this.saveSelection();
         // Opened with the right click itself, the CDK skips that click's own auxclick (the CDK's `_openOnContextMenu`, its
         // public host listener); a programmatic open has none to skip.
         if (s.event) trigger._openOnContextMenu(s.event);
@@ -93,5 +103,21 @@ export class PdCopyMenuHost {
         afterNextRender(() => this.panel()?.focusFirstItem('program'), { injector: this.injector });
       });
     });
+  }
+
+  private saveSelection(): Range[] {
+    const sel = this.document.getSelection();
+    if (!sel) return [];
+    return Array.from({ length: sel.rangeCount }, (_, i) => sel.getRangeAt(i).cloneRange());
+  }
+
+  /** Puts the saved ranges back unless the user selected something else meanwhile (a selection that is not just a caret). */
+  private restoreSelection(saved: readonly Range[]): void {
+    const sel = this.document.getSelection();
+    if (!sel || saved.length === 0 || (sel.rangeCount > 0 && !sel.isCollapsed)) return;
+    const live = saved.filter((r) => r.startContainer.isConnected && r.endContainer.isConnected);
+    if (live.length === 0) return;
+    sel.removeAllRanges();
+    for (const r of live) sel.addRange(r);
   }
 }

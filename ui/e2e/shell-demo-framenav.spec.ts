@@ -106,23 +106,21 @@ test.describe('copy menu', () => {
     });
     await app.frame.open();
     const text = page.getByTestId('app-context');
-    const selectAll = () =>
-      text.evaluate((el) => {
-        el.classList.add('pd-selectable');
-        const r = document.createRange();
-        r.selectNodeContents(el);
-        getSelection()?.removeAllRanges();
-        getSelection()?.addRange(r);
-      });
-    await selectAll();
+    await text.evaluate((el) => {
+      el.classList.add('pd-selectable');
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      getSelection()?.removeAllRanges();
+      getSelection()?.addRange(r);
+    });
     await text.click({ button: 'right', position: { x: 20, y: 8 } });
     const item = page.getByRole('menuitem', { name: 'Copy' });
     await expect(item).toBeVisible();
     await expect(item).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(item).toHaveCount(0);
-    // WebKit drops the selection when focus moves into the menu (Chromium keeps it); select again, as a user would.
-    await selectAll();
+    // The selection is still there (WebKit drops it when the menu takes the focus; the menu gives it back on close).
+    await expect.poll(() => page.evaluate(() => getSelection()?.toString() ?? '')).toContain('App context');
     await text.click({ button: 'right', position: { x: 20, y: 8 } });
     await page.getByRole('menuitem', { name: 'Copy' }).click();
     await expect(page.getByRole('menuitem', { name: 'Copy' })).toHaveCount(0);
