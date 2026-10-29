@@ -106,7 +106,8 @@ jobs:
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 
   # The nightly and a manual run without gates: the installers (app-release publishes only on a tag). It needs only the plan,
-  # so the skipped gates cannot skip it. The same inputs as `release` (ci-actions.test.mjs compares them).
+  # so the skipped gates cannot skip it. The same inputs as `release` (ci-actions.test.mjs compares them), without
+  # RELEASE_TOKEN: a job that never publishes does not hold the token that writes releases.
   installers:
     name: installers
     needs: [plan]
@@ -141,4 +142,3 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}

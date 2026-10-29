@@ -1345,9 +1345,13 @@ test("every kit app's nightly and manual runs build the installers when the plan
       assert.deepEqual(installers(ev, { fail: ['gates'] }), [], `${app}: red gates on ${what} build nothing`);
     }
     for (const ev of [nightly, manual, tag]) assert.deepEqual(installers(ev, { outputs: { run: 'false' } }), [], `${app}: nothing when the plan does not mark ${app}`);
-    // The two callers build the same installers: one text from `uses:` to the end of the job.
+    // The two callers build the same installers: one text from `uses:` to the end of the job, except that only the job
+    // that can publish (a tag) gets the token that writes releases.
     const call = (id) => jobs.find((j) => j.id === id).text.replace(/^[\s\S]*?(    uses: )/, '$1').replace(/(\n\s*(#.*)?)+$/, '');
-    assert.equal(new Set(callers.map(call)).size, 1, `${app}: every app-release caller passes the same inputs and secrets`);
+    const token = /\n {6}RELEASE_TOKEN: \$\{\{ secrets\.RELEASE_TOKEN \}\}/;
+    assert.match(call('release'), token, `${app}: the release job can publish`);
+    assert.doesNotMatch(call('installers'), /RELEASE_TOKEN/, `${app}: the nightly and manual installers never hold the release token`);
+    assert.equal(new Set(callers.map((c) => call(c).replace(token, ''))).size, 1, `${app}: otherwise every app-release caller passes the same inputs and secrets`);
     // Main lands in batches; a push to main gets ci.yml only, not a release workflow (2026-10-29).
     const push = /^ {2}push:\n((?: {4}.*\n)+)/m.exec(wf)?.[1] ?? '';
     assert.doesNotMatch(push, /branches:/, `${app}: no push-to-main trigger`);
