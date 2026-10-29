@@ -40,7 +40,7 @@ Record: date, OS and version, Dyno version, load average at the time, result per
 | 21 | `dyno-agent service status` after Launch at login | "installed, running" |
 | 22 | Install a newer build over the old one | The agent restarts into the new build; the app reconnects; no manual step (macOS: re-registration happens by itself) |
 | 23 | `kill` the agent | It comes back within seconds (macOS, Linux); on Windows the app starts it |
-| 24 | Install and update in a throwaway VM | The plan [below](#install-and-update-in-a-throwaway-vm), rows 24a to 24h |
+| 24 | Install and update in a throwaway VM | The plan [below](#install-and-update-in-a-throwaway-vm), rows 24a to 24i |
 
 ### Install and update in a throwaway VM
 
@@ -61,10 +61,29 @@ shared folder. Test bundles are never uploaded, tagged or published (ER-15); del
 - `1.0.0-test` and `1.0.1-test`: the version bumped in a scratch worktree only, `createUpdaterArtifacts` on, `pubkey` = the
   test public key, `plugins.updater.endpoints` = the local feed URL (an `http://` URL on the host needs
   `plugins.updater.dangerousInsecureTransportProtocol: true` in the same override; fine for a test build, never for a release).
+- **Windows test bundles (NSIS), built on the Mac** (tested 2026-10-29 for the sidecars; see the result below). Needs
+  `rustup target add x86_64-pc-windows-msvc`, `cargo install cargo-xwin` (downloads the Windows SDK and CRT on first use,
+  about 1 GB, into `~/.cache/cargo-xwin`), `brew install makensis` and `llvm`/`lld` on `PATH`. The plain `cargo` in
+  `sidecar.mjs` cannot link for Windows, so build the sidecars with xwin and copy them, then run Tauri without that step:
+
+  ```sh
+  cd apps/dyno
+  export CARGO_TARGET_DIR=<scratch build dir> CARGO_BUILD_JOBS=2
+  cargo xwin build -p dyno-agent -p dyno-cli --profile dist --target x86_64-pc-windows-msvc
+  for b in dyno-agent dyno; do cp $CARGO_TARGET_DIR/x86_64-pc-windows-msvc/dist/$b.exe app/src-tauri/binaries/$b-x86_64-pc-windows-msvc.exe; done
+  cd app && npx tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis \
+    --config '{"build":{"beforeBuildCommand":"npm run build"},"plugins":{"updater":{"pubkey":"<test pubkey>","endpoints":["http://<host-only IP>:8089/latest.json"],"dangerousInsecureTransportProtocol":true}},"bundle":{"createUpdaterArtifacts":true}}'
+  ```
+
+  with `TAURI_SIGNING_PRIVATE_KEY` / `_PASSWORD` set to the throwaway key (never the family key). The installer lands in
+  `$CARGO_TARGET_DIR/x86_64-pc-windows-msvc/release/bundle/nsis/`. If the cross build fails on your Mac, build in the Windows
+  test VM instead (Git for Windows, Node from `.nvmrc`, rustup with the msvc toolchain, Visual Studio Build Tools with the
+  "Desktop development with C++" workload and a Windows SDK, NSIS from Tauri's own download), with the same commands in
+  PowerShell and only the throwaway key copied in.
 - `latest.json` for the feed is written by `conformance/release/latest-json.mjs` from the 1.0.1-test installers and their
-  `.sig` files; serve the folder from the host (`python3 -m http.server`, bound to the VM network only). Share bundles
+  `.sig` files; serve the folder from the host with `python3 -m http.server 8089 --bind <host-only IP> --directory <feed folder>` (the address of the VM network's host side, for example Tart's `192.168.64.1`, never `0.0.0.0`; stop it when the run ends). Share bundles
   into the VM through a read-only folder, not a copy of the repository.
-- The **CI-built signed 1.0.0** (the installers of the release run, or of a manual `dyno-release` run with gates) carries
+- The **CI-built signed 1.0.0** (the installers of the manual `dyno-release` run with `gates: true` on the commit to be tagged) carries
   the real public key and the public feed baked in, so it cannot read a local feed or accept a test signature. It is used
   for the install rows only (24a, 24b, 24h); the update rows (24c to 24g) start from `1.0.0-test`, which is built with the
   same flags, sidecars and bundle checks.
@@ -73,12 +92,13 @@ shared folder. Test bundles are never uploaded, tagged or published (ER-15); del
 | --- | --- | --- |
 | 24a | Windows VM, standard user: run the CI-built `Dyno_1.0.0_x64-setup.exe` | Installs per user with no administrator prompt; Dyno starts; SmartScreen shows the documented "More info > Run anyway" path |
 | 24b | macOS VM, standard user: open the CI-built `.dmg`, drag Dyno to Applications, right-click > Open once | Starts after the Open Anyway step; the agent is registered (`dyno-agent service status`: installed, running); no administrator prompt |
-| 24c | Install `1.0.0-test` on each VM, turn on update checks, let the dashboard fill for a minute, note the agent's process id | History is recording; the version in About reads `1.0.0` |
-| 24d | Windows: with the feed running, Settings > Updates > Check for updates, then Install | The NSIS installer runs **passively** (progress only, no wizard pages, no prompt); Dyno restarts on `1.0.1`; the earlier history is still there |
-| 24e | macOS: the same on the Tart VM | The `.app.tar.gz` is downloaded, verified and swapped into place; the app relaunches on `1.0.1`; `codesign --verify --deep` still passes on the new bundle; no second copy is left behind |
+| 24c | Revert each VM to its clean snapshot (24a and 24b left Dyno installed). Install `1.0.0-test`, turn on update checks, let the dashboard fill for a minute, note the agent's process id | History is recording; About reads `1.0.0-test` |
+| 24d | Windows: with the feed running, Settings > Updates > Check for updates, then Install | The NSIS installer runs **passively** (progress only, no wizard pages, no prompt); Dyno restarts on `1.0.1-test` (About); the earlier history is still there |
+| 24e | macOS: the same on the Tart VM | The `.app.tar.gz` is downloaded, verified and swapped into place; the app relaunches on `1.0.1-test`; `codesign --verify --deep` still passes on the new bundle; no second copy is left behind |
 | 24f | After 24d and 24e: `dyno status`, the process list of the agent | The agent runs from the new build (new process id; `dyno-agent --version` shows the new version), the app reconnected by itself, nothing was started by hand; kill the agent: it comes back within seconds (macOS) or the app starts it (Windows) |
 | 24g | Reset the VM to the `1.0.0-test` snapshot. Corrupt one byte of the `.sig` in the feed folder (or point `latest.json` at a `.sig` of another version), then check and install | The update is refused with a signature message; the installed version, the agent and the history are untouched. Put the good `.sig` back: the update installs. Repeat once with a `latest.json` that names the `1.0.1-test` bundle but a `.sig` made with a different test key |
-| 24h | Revert both VMs. Check the host: no test key in the repository or the worktree, no test bundle in a release folder, the feed server stopped | Nothing to publish or clean up; record date, VM image, macOS and Windows versions, and the result per row |
+| 24h | Uninstall on each VM (Windows: Apps > Dyno > Uninstall; macOS: quit Dyno, then `dyno-agent service uninstall` if offered, drag the app to the Bin) | The agent process is gone; Windows: no `Dyno` entry under `HKCU\...\Run`, no folder under `%LOCALAPPDATA%\Dyno` program files; macOS: no `~/Library/LaunchAgents/net.decryptology.dyno.agent.plist` or Login Items entry; history kept or removed as the uninstaller says |
+| 24i | Revert both VMs. Check the host: no test key in the repository or the worktree, no test bundle in a release folder, the feed server stopped | Nothing to publish or clean up; record date, VM image, macOS and Windows versions, and the result per row |
 
 ## Privileges
 
