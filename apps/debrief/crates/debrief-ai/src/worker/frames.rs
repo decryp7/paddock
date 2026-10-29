@@ -311,7 +311,7 @@ impl FramesTransport {
         spec.args = args.to_vec();
         spec.env = env.to_vec();
         spec.keep_env = super::WORKER_ENV;
-        spec.endpoint_prefix = "debrief-ai".into();
+        spec.endpoint_prefix = debrief_ipc::endpoint::prefix::AI.into();
         spec.connect_window = CONNECT_WINDOW;
         spec.log = Some(worker_log());
         let mut c = ChildSpec::new(spec);

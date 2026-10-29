@@ -237,6 +237,15 @@ for: (1) BM25 + Model2Vec versus BM25 + Model2Vec + Qwen re-rank of the top 50 v
 latency; (2) indexing time, peak memory and index size per 1M lines; (3) the re-rank latency on CPU-only machines. Record the
 results here; revisit the default only if (1) shows the re-ranked default failing the bar.
 
+## Amendment 2026-10-29: the model is downloaded on first use
+
+**Decision (user, 2026-10-29).** potion-code-16M-v2 is not bundled in the installer. It is downloaded the first time
+someone uses semantic search, which stays opt-in per repository. The download goes through `paddock-download` with its
+SHA-256 checked while writing, runs as a job with progress and Cancel, and a file with the wrong hash is discarded:
+semantic search stays off with a Retry, text and structural search keep working. This settles "decide at packaging time"
+in the Decision above. Implemented by package B2 of
+[the first release plan](../plans/2026-10-29-first-release-plan.md).
+
 ## Sources (checked 2026-10-25)
 
 - `model2vec-rs` 0.3.0 (crates.io, 2026-09-19; github.com/MinishLab/model2vec-rs, `LICENSE` MIT); models on Hugging Face:

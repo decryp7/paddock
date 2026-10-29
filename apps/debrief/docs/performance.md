@@ -237,6 +237,36 @@ some fields; "n/s" means the source does not state them.
 - ADR 0051: time to first event on 100,000 files went from about 3.5 s to under 10 ms (`stream_bench.rs`; machine and build n/s).
 - ADR 0050: rendering a dialog window went from about 345 to about 320 ms (production build in Chromium, median of 5, 2026-10-23).
 
+## Results history: build and link times (newest first)
+
+### 2026-10-29, incremental rebuild and link time (docs/link-time)
+
+- **Commit:** cae1649f9 (origin/main) plus local, uncommitted experiment edits (crate type, a dev `dylib` crate); research
+  note [2026-10-29-link-time.md](../../../docs/research/2026-10-29-link-time.md)
+- **Machine:** Mac mini M4 Pro (Mac16,11), 14 cores, 64 GB, macOS 27.2, Xcode 27.1 (`ld-27037.1`); rustc 1.99.1 (LLVM 23.1.1)
+- **Load:** 1-minute load 3.6-6.6 during the measured builds; other agents mostly idle; no other job of mine running
+- **Build:** debug (`dev`: deps opt-level 2, `debug = "line-tables-only"`, `split-debuginfo = "unpacked"`), default features
+- **Corpus:** none (the compiler is measured); synthetic one-line change in the app crate
+- **Command:** Probe build: `perl` replaces `pub fn __link_probe() -> u32 { N }` at the end of `app/src-tauri/src/lib.rs`, then `CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=<private> CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=cc-timed.sh LINKMODE=ld|lld cargo build -p debrief-app [--features dynamic_linking] [--config 'profile.dev.package.debrief-app.debug=false|"full"']`; crate type switched by editing `[lib] crate-type`. [`cc-timed.sh`](../../../scripts/perf/link-time/cc-timed.sh) runs `cc` (with `--ld-path=<toolchain>/gcc-ld/ld64.lld` and `SDKROOT=MacOSX26.5.sdk` for lld) and logs each link's duration. Phase split: the same with `--timings`. The probe loop and round driver were throw-away shell scripts in `/Volumes/d7sst7/dev-targets/target/link-time-tools/` (machine-local); the linker wrapper is committed.
+- **Runs:** 3 rounds, interleaved (every configuration once per round, each after an uncounted warm-up build); median (range) of wall time; link = median duration of the linker call
+- **Numbers:**
+
+  | Measure | Base (today: staticlib + cdylib + rlib, Apple ld) | Change | Budget | Verdict |
+  |---|---|---|---|---|
+  | Incremental rebuild, crate type rlib only | 5.88 s (5.83-6.19) | 4.40 s (4.13-4.66), -25% | none | adopt |
+  | Incremental rebuild, dev `dylib` (option a), rlib only | 5.88 s | 3.99 s (3.79-3.99), -32% | none | not worth the hazards |
+  | Incremental rebuild, lld (today's crate types) | 5.88 s | 6.68 s (6.41-6.69), +14% | none | reject |
+  | Incremental rebuild, lld, rlib only / dylib | 4.40 / 3.99 s (ld) | 4.78 / 4.20 s | none | reject |
+  | Incremental rebuild, app crate `debug = false` / `"full"` | 5.88 s | 5.60 s (-5%) / 6.55 s (+11%) | none | keep line-tables-only |
+  | Binary link (`ld`) | 0.61 s (0.59-0.63) | rlib 0.64 s, dylib 0.30 s, lld 1.04 s | none | — |
+  | cdylib link (`ld`) | 0.24 s (0.23-0.25) | gone with rlib only; lld 0.52 s | none | — |
+  | App library unit (`--timings`, 2 runs) | 4.64-4.73 s | 3.05-3.35 s (rlib only) | none | — |
+  | App binary unit (`--timings`, 2 runs) | 0.82-0.85 s | 0.85-0.87 s (rlib only) | none | — |
+  | `libdebrief_app_lib.a` written per build | 1.0 GB | none (rlib only) | none | — |
+
+- **Memory measure:** not measured (build time only)
+- **Notes:** Cold build of the app with its dependencies: 7 min 45 s (465 s, `heavy.sh`, load 5-15). The lld runs used the MacOSX26.5 SDK because LLD 23 cannot read the macOS 27 SDK's `libSystem.tbd`. In the dylib configuration `debrief-alloc` stays out of the dylib (mimalloc's C symbols are not exported from a Rust dylib); the global allocator then does not cover the dylib's code (see the research note). Raw CSV and link logs: `/Volumes/d7sst7/dev-targets/target/link-time-tools/` (machine-local).
+
 ## Bundle size and start-up records (newest last)
 
 ## 2026-10-23, baseline before the Angular phase-1 migration (main at 67a51214)
