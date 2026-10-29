@@ -15,19 +15,43 @@ pub enum SpanError {
     Reversed,
 }
 
-/// A point in a file: 1-based line, 1-based column counted in UTF-8 bytes.
+/// A point in a file: 1-based line, 1-based column counted in UTF-8 bytes. Reading one from the wire goes through
+/// [`Position::new`], so a 0 coordinate is refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "RawPosition")]
 pub struct Position {
-    /// 1-based line.
-    pub line: u32,
-    /// 1-based column in UTF-8 bytes.
-    pub column: u32,
+    line: u32,
+    column: u32,
+}
+
+/// The wire form of a [`Position`].
+#[derive(Deserialize)]
+struct RawPosition {
+    line: u32,
+    column: u32,
+}
+
+impl TryFrom<RawPosition> for Position {
+    type Error = SpanError;
+    fn try_from(raw: RawPosition) -> Result<Position, SpanError> {
+        Position::new(raw.line, raw.column).ok_or(SpanError::ZeroBased)
+    }
 }
 
 impl Position {
     /// A position; `None` when a coordinate is 0.
     pub fn new(line: u32, column: u32) -> Option<Position> {
         (line >= 1 && column >= 1).then_some(Position { line, column })
+    }
+
+    /// The 1-based line.
+    pub fn line(&self) -> u32 {
+        self.line
+    }
+
+    /// The 1-based column in UTF-8 bytes.
+    pub fn column(&self) -> u32 {
+        self.column
     }
 }
 
@@ -56,9 +80,6 @@ impl TryFrom<RawSpan> for Span {
 impl Span {
     /// A span from two positions.
     pub fn new(start: Position, end: Position) -> Result<Span, SpanError> {
-        if start.line == 0 || start.column == 0 || end.line == 0 || end.column == 0 {
-            return Err(SpanError::ZeroBased);
-        }
         if end < start {
             return Err(SpanError::Reversed);
         }
@@ -67,11 +88,8 @@ impl Span {
 
     /// A span covering whole lines `first..=last` (columns 1 to the end of `last`, shown as column 1 of the next line).
     pub fn lines(first: u32, last: u32) -> Result<Span, SpanError> {
-        let start = Position { line: first, column: 1 };
-        let end = Position {
-            line: last.saturating_add(1),
-            column: 1,
-        };
+        let start = Position::new(first, 1).ok_or(SpanError::ZeroBased)?;
+        let end = Position::new(last.saturating_add(1), 1).ok_or(SpanError::ZeroBased)?;
         Span::new(start, end)
     }
 
@@ -112,14 +130,15 @@ mod tests {
     fn positions_are_one_based() {
         assert!(Position::new(0, 1).is_none());
         assert!(Position::new(1, 0).is_none());
-        assert_eq!(p(3, 4), Position { line: 3, column: 4 });
+        assert_eq!((p(3, 4).line(), p(3, 4).column()), (3, 4));
+        assert!(serde_json::from_str::<Position>(r#"{"line":0,"column":1}"#).is_err());
     }
 
     #[test]
     fn a_reversed_span_is_refused_and_an_empty_one_is_fine() {
         assert_eq!(Span::new(p(2, 1), p(1, 9)), Err(SpanError::Reversed));
         assert!(Span::new(p(2, 5), p(2, 5)).is_ok());
-        assert_eq!(Span::new(Position { line: 0, column: 1 }, p(1, 1)), Err(SpanError::ZeroBased));
+        assert_eq!(Span::lines(0, 1), Err(SpanError::ZeroBased));
     }
 
     #[test]

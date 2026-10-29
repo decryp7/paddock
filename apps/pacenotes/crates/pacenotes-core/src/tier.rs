@@ -94,16 +94,21 @@ impl fmt::Display for Severity {
     }
 }
 
+/// A severity name that is not one of the five.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown severity {0:?} (use info, low, medium, high or blocker)")]
+pub struct SeverityError(pub String);
+
 impl FromStr for Severity {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, String> {
+    type Err = SeverityError;
+    fn from_str(s: &str) -> Result<Self, SeverityError> {
         match s {
             "info" => Ok(Severity::Info),
             "low" => Ok(Severity::Low),
             "medium" => Ok(Severity::Medium),
             "high" => Ok(Severity::High),
             "blocker" => Ok(Severity::Blocker),
-            other => Err(format!("unknown severity {other:?} (use info, low, medium, high or blocker)")),
+            other => Err(SeverityError(other.chars().take(40).collect())),
         }
     }
 }
@@ -134,7 +139,7 @@ mod tests {
             assert_eq!(s.name().parse::<Severity>().unwrap(), s);
             assert_eq!(serde_json::to_string(&s).unwrap(), format!("\"{}\"", s.name()));
         }
-        assert!("critical".parse::<Severity>().unwrap_err().contains("use info"));
+        assert!("critical".parse::<Severity>().unwrap_err().to_string().contains("use info"));
         assert!(Severity::High < Severity::Blocker);
     }
 

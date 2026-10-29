@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::budget::BudgetKind;
+use crate::budget::BudgetExceeded;
 
 /// Why a host call failed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
@@ -10,16 +10,17 @@ pub enum HostError {
     /// The caller cancelled.
     #[error("cancelled")]
     Cancelled,
-    /// The call hit a limit of its budget.
-    #[error("the call exceeded its {0:?} budget")]
-    BudgetExceeded(BudgetKind),
+    /// The call hit a limit of its budget; the error says which and where to change it.
+    #[error("{0}")]
+    BudgetExceeded(BudgetExceeded),
     /// The thing asked for does not exist.
     #[error("not found")]
     NotFound,
     /// A capability is not available (no index yet, no Pitwall); the text is the next step for the user.
     #[error("unavailable: {0}")]
     Unavailable(String),
-    /// The request is outside what the function may ask (a path outside the workspace, a call it did not declare).
+    /// The request is outside what the function may ask (a path outside the workspace, a call it did not declare, a model
+    /// call from background work).
     #[error("refused: {0}")]
     Refused(String),
     /// The host failed in a way the function cannot fix.
@@ -41,8 +42,8 @@ pub enum FunctionError {
     #[error("cancelled")]
     Cancelled,
     /// The call hit a limit of its budget.
-    #[error("the call exceeded its {0:?} budget")]
-    BudgetExceeded(BudgetKind),
+    #[error("{0}")]
+    BudgetExceeded(BudgetExceeded),
     /// A host call the function needed failed.
     #[error("a host call failed: {0}")]
     Host(HostError),
@@ -56,7 +57,7 @@ impl From<HostError> for FunctionError {
     fn from(e: HostError) -> Self {
         match e {
             HostError::Cancelled => FunctionError::Cancelled,
-            HostError::BudgetExceeded(k) => FunctionError::BudgetExceeded(k),
+            HostError::BudgetExceeded(b) => FunctionError::BudgetExceeded(b),
             other => FunctionError::Host(other),
         }
     }
@@ -65,14 +66,16 @@ impl From<HostError> for FunctionError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::budget::BudgetKind;
 
     #[test]
     fn cancel_and_budget_pass_through_and_the_rest_is_wrapped() {
+        let b = BudgetExceeded {
+            kind: BudgetKind::Items,
+            limit: 3,
+        };
         assert_eq!(FunctionError::from(HostError::Cancelled), FunctionError::Cancelled);
-        assert_eq!(
-            FunctionError::from(HostError::BudgetExceeded(BudgetKind::Items)),
-            FunctionError::BudgetExceeded(BudgetKind::Items)
-        );
+        assert_eq!(FunctionError::from(HostError::BudgetExceeded(b)), FunctionError::BudgetExceeded(b));
         assert_eq!(FunctionError::from(HostError::NotFound), FunctionError::Host(HostError::NotFound));
     }
 
@@ -84,5 +87,10 @@ mod tests {
                 .to_string()
                 .contains("set up Pitwall")
         );
+        let b = HostError::BudgetExceeded(BudgetExceeded {
+            kind: BudgetKind::Bytes,
+            limit: 9,
+        });
+        assert!(b.to_string().contains("9 bytes"));
     }
 }

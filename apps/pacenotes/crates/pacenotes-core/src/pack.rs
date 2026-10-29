@@ -138,7 +138,7 @@ struct RawScip {
 
 /// How to find an installed server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "how", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum Detect {
     /// A program of this name on `PATH`.
     Path {
@@ -152,46 +152,138 @@ pub enum Detect {
     },
 }
 
-/// A pinned download, offered on the user's click only.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Download {
-    /// An `https` URL.
-    pub url: String,
-    /// The expected SHA-256 as 64 lowercase hex digits.
-    pub sha256: String,
+fn word(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'+' | b'-'))
 }
 
-/// A validated tier-3 language-server pack.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+impl Detect {
+    fn check(&self) -> Result<(), PackError> {
+        let ok = match self {
+            Detect::Path { program } => word(program),
+            Detect::RustupComponent { component } => word(component),
+        };
+        if ok {
+            Ok(())
+        } else {
+            Err(invalid(
+                "server.detect",
+                format!("{self:?} is not a valid detection rule"),
+                "Use `path:<program>` or `rustup:component=<name>`.",
+            ))
+        }
+    }
+}
+
+/// A pinned download, offered on the user's click only. Reading one from the wire goes through [`Download::new`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "DownloadWire")]
+pub struct Download {
+    url: String,
+    sha256: String,
+}
+
+/// The wire form of a [`Download`].
+#[derive(Serialize, Deserialize)]
+pub(crate) struct DownloadWire {
+    url: String,
+    sha256: String,
+}
+
+impl TryFrom<DownloadWire> for Download {
+    type Error = PackError;
+    fn try_from(w: DownloadWire) -> Result<Download, PackError> {
+        Download::new(&w.url, Some(&w.sha256))
+    }
+}
+
+impl Download {
+    /// A pinned download: an `https` URL and the file's SHA-256 (64 hex digits). Unpinned downloads are refused.
+    pub fn new(url: &str, sha256: Option<&str>) -> Result<Download, PackError> {
+        const FIX: &str =
+            "A download is pinned: give an `https` URL and the file's SHA-256 (64 hex digits). Unpinned downloads are refused.";
+        let Some(hash) = sha256 else {
+            return Err(invalid("server.download.sha256", "the download is not pinned by a hash", FIX));
+        };
+        if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(invalid("server.download.sha256", "it is not 64 hexadecimal digits", FIX));
+        }
+        if !url.starts_with("https://")
+            || url.len() > 2048
+            || url.chars().any(|c| c.is_whitespace() || c.is_control())
+            || url.len() == "https://".len()
+        {
+            return Err(invalid("server.download.url", "it is not an `https` URL", FIX));
+        }
+        Ok(Download {
+            url: url.to_owned(),
+            sha256: hash.to_ascii_lowercase(),
+        })
+    }
+
+    /// The `https` URL.
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// The expected SHA-256, 64 lowercase hex digits.
+    pub fn sha256(&self) -> &str {
+        &self.sha256
+    }
+}
+
+/// The wire form of a [`ServerPack`]: every field as data. Reading a `ServerPack` from any serde format reads this and then
+/// runs the same validation as the TOML parser, so a pack cannot be built around the checks.
+#[derive(Serialize, Deserialize)]
+pub(crate) struct PackWire {
+    pub(crate) id: String,
+    pub(crate) name: Option<String>,
+    pub(crate) languages: Vec<Language>,
+    pub(crate) globs: Vec<String>,
+    pub(crate) command: String,
+    pub(crate) args: Vec<String>,
+    pub(crate) env: std::collections::BTreeMap<String, String>,
+    pub(crate) detect: Vec<Detect>,
+    pub(crate) install_offer: Option<String>,
+    pub(crate) download: Option<Download>,
+    pub(crate) init_options: String,
+    pub(crate) discover: Vec<String>,
+    pub(crate) features: Vec<LspFeature>,
+    pub(crate) scip_command: Option<String>,
+}
+
+impl TryFrom<PackWire> for ServerPack {
+    type Error = PackError;
+    fn try_from(w: PackWire) -> Result<ServerPack, PackError> {
+        ServerPack::from_wire(w)
+    }
+}
+
+/// A validated tier-3 language-server pack. Fields are private: a pack exists only if it passed [`ServerPack::parse`] or the
+/// same validation on the wire.
+///
+/// `init_options` is carried as JSON text (an object, at most 16 KiB) so the type crosses postcard. The core does not
+/// judge its content: the pack loader in `pacenotes-lsp` owns the check of known execution switches (rust-analyzer's
+/// `cargo.buildScripts` and `procMacro`, and the like) against the repository's trust state (ADR 0002).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "PackWire")]
 pub struct ServerPack {
-    /// The pack id (a slug).
-    pub id: String,
-    /// A display name, when given.
-    pub name: Option<String>,
-    /// The languages it serves.
-    pub languages: Vec<Language>,
-    /// The files it applies to.
-    pub globs: Vec<String>,
-    /// The server program: a bare name or an absolute path.
-    pub command: String,
-    /// Its arguments.
-    pub args: Vec<String>,
-    /// Environment variables for the server.
-    pub env: std::collections::BTreeMap<String, String>,
-    /// How to find an installed server.
-    pub detect: Vec<Detect>,
-    /// A command shown to the user to install the server (never run without a click).
-    pub install_offer: Option<String>,
-    /// A pinned download.
-    pub download: Option<Download>,
-    /// LSP initialisation options, passed through (least-execution defaults live here).
-    pub init_options: toml::Table,
-    /// Build-config files that mark a workspace root.
-    pub discover: Vec<String>,
-    /// The LSP features used.
-    pub features: Vec<LspFeature>,
-    /// An optional SCIP indexer command for batch indexing.
-    pub scip_command: Option<String>,
+    id: String,
+    name: Option<String>,
+    languages: Vec<Language>,
+    globs: Vec<String>,
+    command: String,
+    args: Vec<String>,
+    env: std::collections::BTreeMap<String, String>,
+    detect: Vec<Detect>,
+    install_offer: Option<String>,
+    download: Option<Download>,
+    init_options: String,
+    discover: Vec<String>,
+    features: Vec<LspFeature>,
+    scip_command: Option<String>,
 }
 
 fn is_slug(s: &str) -> bool {
@@ -202,6 +294,14 @@ fn is_slug(s: &str) -> bool {
 }
 
 const SHELL_META: &[char] = &[';', '|', '&', '$', '`', '<', '>', '\n', '\r', '\0'];
+/// The largest `init_options` JSON text.
+pub const MAX_INIT_OPTIONS_BYTES: usize = 16 * 1024;
+
+/// Environment variables a pack may never set: they make the server load code of the pack's choosing.
+fn forbidden_env(name: &str) -> bool {
+    let n = name.to_ascii_uppercase();
+    n == "LD_PRELOAD" || n == "LD_LIBRARY_PATH" || n.starts_with("DYLD_") || n == "NODE_OPTIONS"
+}
 
 fn check_command(field: &'static str, command: &str) -> Result<(), PackError> {
     const FIX: &str = "Use the program's name (found on PATH) or its absolute path; arguments go in `args`.";
@@ -253,12 +353,6 @@ fn check_globs(field: &'static str, globs: &[String], required: bool) -> Result<
 
 fn parse_detect(entry: &str) -> Result<Detect, PackError> {
     const FIX: &str = "Use `path:<program>` or `rustup:component=<name>`.";
-    let word = |s: &str| {
-        !s.is_empty()
-            && s.len() <= 64
-            && s.bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'+' | b'-'))
-    };
     if let Some(p) = entry.strip_prefix("path:").filter(|p| word(p)) {
         return Ok(Detect::Path { program: p.to_owned() });
     }
@@ -275,27 +369,6 @@ impl ServerPack {
             return Err(PackError::TooLarge(text.len()));
         }
         let raw: RawPack = toml::from_str(text).map_err(|e| PackError::Syntax(e.message().to_owned()))?;
-        if !is_slug(&raw.pack.id) {
-            return Err(invalid(
-                "pack.id",
-                format!("{:?} is not an id", raw.pack.id),
-                "Use lowercase letters, digits and `-`, starting with a letter.",
-            ));
-        }
-        if raw.pack.name.as_deref().is_some_and(|n| n.is_empty() || n.len() > 120) {
-            return Err(invalid(
-                "pack.name",
-                "it is empty or longer than 120 characters",
-                "Give a short display name or leave it out.",
-            ));
-        }
-        if raw.pack.languages.is_empty() || raw.pack.languages.len() > MAX_LIST {
-            return Err(invalid(
-                "pack.languages",
-                "list between 1 and 64 languages",
-                "Name the languages the server serves, for example [\"rust\"].",
-            ));
-        }
         let languages = raw
             .pack
             .languages
@@ -304,65 +377,21 @@ impl ServerPack {
                 Language::parse(l).map_err(|e| invalid("pack.languages", e.to_string(), "Use language ids such as \"rust\" or \"cpp\"."))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        check_globs("pack.globs", &raw.pack.globs, true)?;
-        check_command("server.command", &raw.server.command)?;
-        if raw.server.args.len() > MAX_LIST || raw.server.args.iter().any(|a| a.len() > 1024 || a.contains('\0')) {
-            return Err(invalid(
-                "server.args",
-                "too many or too long arguments",
-                "Keep at most 64 arguments of at most 1024 characters.",
-            ));
-        }
-        if raw.server.env.len() > MAX_LIST
-            || raw
-                .server
-                .env
-                .iter()
-                .any(|(k, v)| k.is_empty() || k.contains(['=', '\0']) || v.contains('\0') || v.len() > 1024)
-        {
-            return Err(invalid(
-                "server.env",
-                "an invalid name or value, or too many",
-                "Use plain NAME = \"value\" pairs.",
-            ));
-        }
-        if raw.server.detect.len() > MAX_LIST / 2 {
-            return Err(invalid(
-                "server.detect",
-                "more than 32 entries",
-                "Keep the detection rules you need.",
-            ));
-        }
         let detect = raw.server.detect.iter().map(|d| parse_detect(d)).collect::<Result<Vec<_>, _>>()?;
-        if let Some(i) = &raw.server.install
-            && (i.offer.is_empty() || i.offer.len() > 512 || i.offer.contains(['\n', '\r', '\0']))
-        {
-            return Err(invalid(
-                "server.install.offer",
-                "it is empty, too long or has a line break",
-                "Give the one-line command the user may run.",
-            ));
-        }
-        let download = raw.server.download.as_ref().map(check_download).transpose()?;
-        check_globs("workspace.discover", &raw.workspace.discover, false)?;
-        if raw.features.use_.is_empty() {
-            return Err(invalid(
-                "features.use",
-                "the list is empty",
-                "List the LSP features the pack uses, for example [\"definition\", \"references\"].",
-            ));
-        }
-        if let Some(s) = &raw.scip {
-            check_command("scip.command", s.command.split_whitespace().next().unwrap_or(""))?;
-            if s.command.len() > 1024 || s.command.contains(SHELL_META) {
-                return Err(invalid(
-                    "scip.command",
-                    "it is too long or contains a shell metacharacter",
-                    "Give the indexer command and its arguments only.",
-                ));
-            }
-        }
-        Ok(ServerPack {
+        let download = raw
+            .server
+            .download
+            .as_ref()
+            .map(|d| Download::new(&d.url, d.sha256.as_deref()))
+            .transpose()?;
+        let init_options = serde_json::to_string(&raw.server.init_options).map_err(|_| {
+            invalid(
+                "server.init_options",
+                "it cannot be written as JSON",
+                "Use plain tables, strings, numbers and booleans.",
+            )
+        })?;
+        ServerPack::from_wire(PackWire {
             id: raw.pack.id,
             name: raw.pack.name,
             languages,
@@ -373,11 +402,133 @@ impl ServerPack {
             detect,
             install_offer: raw.server.install.map(|i| i.offer),
             download,
-            init_options: raw.server.init_options,
+            init_options,
             discover: raw.workspace.discover,
             features: raw.features.use_,
             scip_command: raw.scip.map(|s| s.command),
         })
+    }
+
+    /// The one validation, used by the TOML parser and by every serde format.
+    pub(crate) fn from_wire(w: PackWire) -> Result<ServerPack, PackError> {
+        if !is_slug(&w.id) {
+            return Err(invalid(
+                "pack.id",
+                format!("{:?} is not an id", w.id),
+                "Use lowercase letters, digits and `-`, starting with a letter.",
+            ));
+        }
+        if w.name.as_deref().is_some_and(|n| n.is_empty() || n.len() > 120) {
+            return Err(invalid(
+                "pack.name",
+                "it is empty or longer than 120 characters",
+                "Give a short display name or leave it out.",
+            ));
+        }
+        if w.languages.is_empty() || w.languages.len() > MAX_LIST {
+            return Err(invalid(
+                "pack.languages",
+                "list between 1 and 64 languages",
+                "Name the languages the server serves, for example [\"rust\"].",
+            ));
+        }
+        check_globs("pack.globs", &w.globs, true)?;
+        check_command("server.command", &w.command)?;
+        if w.args.len() > MAX_LIST || w.args.iter().any(|a| a.len() > 1024 || a.contains('\0')) {
+            return Err(invalid(
+                "server.args",
+                "too many or too long arguments",
+                "Keep at most 64 arguments of at most 1024 characters.",
+            ));
+        }
+        if w.env.len() > MAX_LIST
+            || w.env
+                .iter()
+                .any(|(k, v)| k.is_empty() || k.contains(['=', '\0']) || v.contains('\0') || v.len() > 1024)
+        {
+            return Err(invalid(
+                "server.env",
+                "an invalid name or value, or too many",
+                "Use plain NAME = \"value\" pairs.",
+            ));
+        }
+        if let Some(name) = w.env.keys().find(|k| forbidden_env(k)) {
+            return Err(invalid(
+                "server.env",
+                format!("{name} makes the server load code of the pack's choosing"),
+                "Remove it; LD_PRELOAD, LD_LIBRARY_PATH, DYLD_* and NODE_OPTIONS are never set by a pack.",
+            ));
+        }
+        if w.detect.len() > MAX_LIST / 2 {
+            return Err(invalid(
+                "server.detect",
+                "more than 32 entries",
+                "Keep the detection rules you need.",
+            ));
+        }
+        w.detect.iter().try_for_each(Detect::check)?;
+        if let Some(offer) = &w.install_offer
+            && (offer.is_empty() || offer.len() > 512 || offer.contains(['\n', '\r', '\0']))
+        {
+            return Err(invalid(
+                "server.install.offer",
+                "it is empty, too long or has a line break",
+                "Give the one-line command the user may run.",
+            ));
+        }
+        if w.init_options.len() > MAX_INIT_OPTIONS_BYTES {
+            return Err(invalid(
+                "server.init_options",
+                "it is larger than 16 KiB",
+                "Keep only the options the server needs.",
+            ));
+        }
+        if !matches!(
+            serde_json::from_str::<serde_json::Value>(&w.init_options),
+            Ok(serde_json::Value::Object(_))
+        ) {
+            return Err(invalid("server.init_options", "it is not a JSON object", "Use a table of options."));
+        }
+        check_globs("workspace.discover", &w.discover, false)?;
+        if w.features.is_empty() {
+            return Err(invalid(
+                "features.use",
+                "the list is empty",
+                "List the LSP features the pack uses, for example [\"definition\", \"references\"].",
+            ));
+        }
+        if let Some(s) = &w.scip_command {
+            check_command("scip.command", s.split_whitespace().next().unwrap_or(""))?;
+            if s.len() > 1024 || s.contains(SHELL_META) {
+                return Err(invalid(
+                    "scip.command",
+                    "it is too long or contains a shell metacharacter",
+                    "Give the indexer command and its arguments only.",
+                ));
+            }
+        }
+        Ok(ServerPack {
+            id: w.id,
+            name: w.name,
+            languages: w.languages,
+            globs: w.globs,
+            command: w.command,
+            args: w.args,
+            env: w.env,
+            detect: w.detect,
+            install_offer: w.install_offer,
+            download: w.download,
+            init_options: w.init_options,
+            discover: w.discover,
+            features: w.features,
+            scip_command: w.scip_command,
+        })
+    }
+
+    /// True when `w` passes the validation (for the wire tests).
+    #[cfg(test)]
+    pub(crate) fn from_wire_for_test(w: PackWire) -> bool {
+        ServerPack::from_wire(w).is_ok()
     }
 
     /// Refuses a set of packs in which two share an id.
@@ -388,27 +539,76 @@ impl ServerPack {
             None => Ok(()),
         }
     }
-}
 
-fn check_download(d: &RawDownload) -> Result<Download, PackError> {
-    const FIX: &str = "A download is pinned: give an `https` URL and the file's SHA-256 (64 hex digits). Unpinned downloads are refused.";
-    let Some(hash) = d.sha256.as_deref() else {
-        return Err(invalid("server.download.sha256", "the download is not pinned by a hash", FIX));
-    };
-    if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(invalid("server.download.sha256", "it is not 64 hexadecimal digits", FIX));
+    /// The pack id (a slug).
+    pub fn id(&self) -> &str {
+        &self.id
     }
-    if !d.url.starts_with("https://")
-        || d.url.len() > 2048
-        || d.url.chars().any(|c| c.is_whitespace() || c.is_control())
-        || d.url.len() == "https://".len()
-    {
-        return Err(invalid("server.download.url", "it is not an `https` URL", FIX));
+
+    /// A display name, when given.
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
     }
-    Ok(Download {
-        url: d.url.clone(),
-        sha256: hash.to_ascii_lowercase(),
-    })
+
+    /// The languages it serves.
+    pub fn languages(&self) -> &[Language] {
+        &self.languages
+    }
+
+    /// The files it applies to.
+    pub fn globs(&self) -> &[String] {
+        &self.globs
+    }
+
+    /// The server program: a bare name or an absolute path.
+    pub fn command(&self) -> &str {
+        &self.command
+    }
+
+    /// Its arguments.
+    pub fn args(&self) -> &[String] {
+        &self.args
+    }
+
+    /// Environment variables for the server (never a code-loading one).
+    pub fn env(&self) -> &std::collections::BTreeMap<String, String> {
+        &self.env
+    }
+
+    /// How to find an installed server.
+    pub fn detect(&self) -> &[Detect] {
+        &self.detect
+    }
+
+    /// A command shown to the user to install the server (never run without a click).
+    pub fn install_offer(&self) -> Option<&str> {
+        self.install_offer.as_deref()
+    }
+
+    /// A pinned download.
+    pub fn download(&self) -> Option<&Download> {
+        self.download.as_ref()
+    }
+
+    /// LSP initialisation options as a JSON object text; the pack loader judges its content (see the type's docs).
+    pub fn init_options_json(&self) -> &str {
+        &self.init_options
+    }
+
+    /// Build-config files that mark a workspace root.
+    pub fn discover(&self) -> &[String] {
+        &self.discover
+    }
+
+    /// The LSP features used.
+    pub fn features(&self) -> &[LspFeature] {
+        &self.features
+    }
+
+    /// An optional SCIP indexer command for batch indexing.
+    pub fn scip_command(&self) -> Option<&str> {
+        self.scip_command.as_deref()
+    }
 }
 
 #[cfg(test)]
@@ -448,16 +648,16 @@ command = "rust-analyzer scip ."
     #[test]
     fn the_proposals_example_pack_is_accepted() {
         let p = ServerPack::parse(GOOD).unwrap();
-        assert_eq!((p.id.as_str(), p.command.as_str()), ("rust", "rust-analyzer"));
-        assert_eq!(p.features.len(), 4);
+        assert_eq!((p.id(), p.command()), ("rust", "rust-analyzer"));
+        assert_eq!(p.features().len(), 4);
         assert_eq!(
-            p.detect[1],
+            p.detect()[1],
             Detect::RustupComponent {
                 component: "rust-analyzer".into()
             }
         );
-        assert!(p.init_options.contains_key("cargo"));
-        assert_eq!(p.scip_command.as_deref(), Some("rust-analyzer scip ."));
+        assert!(p.init_options_json().contains("buildScripts"));
+        assert_eq!(p.scip_command(), Some("rust-analyzer scip ."));
     }
 
     /// The regression test of the plan (A1): a pack with an unpinned download is refused with a message.
@@ -505,7 +705,7 @@ command = "rust-analyzer scip ."
             )
         })
         .unwrap();
-        assert_eq!(ok.download.unwrap().sha256, "ab".repeat(32));
+        assert_eq!(ok.download().unwrap().sha256(), "ab".repeat(32));
     }
 
     #[test]
@@ -616,6 +816,96 @@ command = "rust-analyzer scip ."
     fn a_pack_can_leave_out_the_optional_parts() {
         let min = "[pack]\nid = \"go\"\nlanguages = [\"go\"]\nglobs = [\"**/*.go\"]\n[server]\ncommand = \"gopls\"\n[features]\nuse = [\"definition\"]\n";
         let p = ServerPack::parse(min).unwrap();
-        assert!(p.name.is_none() && p.download.is_none() && p.scip_command.is_none() && p.detect.is_empty() && p.discover.is_empty());
+        assert!(
+            p.name().is_none() && p.download().is_none() && p.scip_command().is_none() && p.detect().is_empty() && p.discover().is_empty()
+        );
+    }
+
+    #[test]
+    fn code_loading_environment_variables_are_refused() {
+        for name in [
+            "LD_PRELOAD",
+            "ld_library_path",
+            "DYLD_INSERT_LIBRARIES",
+            "DYLD_FRAMEWORK_PATH",
+            "NODE_OPTIONS",
+        ] {
+            let r = with(|g| {
+                g.replace(
+                    "command = \"rust-analyzer\"",
+                    &format!("command = \"rust-analyzer\"\nenv = {{ {name} = \"x\" }}"),
+                )
+            });
+            assert!(message(r).contains("load code"), "{name}");
+        }
+        assert!(
+            with(|g| g.replace(
+                "command = \"rust-analyzer\"",
+                "command = \"rust-analyzer\"\nenv = { RUST_LOG = \"info\" }"
+            ))
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn init_options_are_bounded_json_objects() {
+        let big = "x".repeat(MAX_INIT_OPTIONS_BYTES);
+        assert!(
+            message(with(
+                |g| g.replace("init_options = {", &format!("init_options = {{ big = \"{big}\", "))
+            ))
+            .contains("16 KiB")
+        );
+    }
+
+    #[test]
+    fn a_pack_round_trips_and_the_wire_is_validated_like_the_file() {
+        let p = ServerPack::parse(GOOD).unwrap();
+        let json = serde_json::to_string(&p).unwrap();
+        assert_eq!(serde_json::from_str::<ServerPack>(&json).unwrap(), p);
+        assert_eq!(postcard::from_bytes::<ServerPack>(&postcard::to_stdvec(&p).unwrap()).unwrap(), p);
+        let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        v["command"] = "bin/x".into();
+        assert!(serde_json::from_value::<ServerPack>(v).is_err());
+        let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        v["env"] = serde_json::json!({ "LD_PRELOAD": "/x.so" });
+        assert!(serde_json::from_value::<ServerPack>(v).is_err());
+        assert!(serde_json::from_str::<Download>(r#"{"url":"http://x","sha256":"abc"}"#).is_err());
+    }
+
+    #[test]
+    fn every_getter_returns_what_was_parsed_and_detect_rules_are_rechecked() {
+        let p = ServerPack::parse(GOOD).unwrap();
+        assert_eq!(p.name(), None);
+        assert_eq!(p.languages().len(), 1);
+        assert_eq!(p.globs(), ["**/*.rs"]);
+        assert!(p.args().is_empty() && p.env().is_empty());
+        assert_eq!(p.install_offer(), Some("rustup component add rust-analyzer"));
+        assert_eq!(p.discover(), ["Cargo.toml"]);
+        let dl = with(|g| {
+            g.replace(
+                "[workspace]",
+                &format!(
+                    "[server.download]\nurl = \"https://example.invalid/ra.gz\"\nsha256 = \"{}\"\n\n[workspace]",
+                    "ab".repeat(32)
+                ),
+            )
+        })
+        .unwrap();
+        assert_eq!(dl.download().unwrap().url(), "https://example.invalid/ra.gz");
+        let mut wire = serde_json::to_value(&p).unwrap();
+        wire["detect"] = serde_json::json!([{ "path": { "program": "a b" } }]);
+        assert!(
+            serde_json::from_value::<ServerPack>(wire).is_err(),
+            "a detect rule read from the wire is checked again"
+        );
+        let many = format!("[{}]", vec!["\"path:a\""; 33].join(","));
+        assert!(
+            message(with(|g| g.replace(
+                "detect = [\"path:rust-analyzer\", \"rustup:component=rust-analyzer\"]",
+                &format!("detect = {many}")
+            )))
+            .contains("server.detect")
+        );
     }
 }

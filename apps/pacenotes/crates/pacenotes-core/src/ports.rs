@@ -98,6 +98,9 @@ pub enum StoreError {
     /// The index is being rebuilt or is damaged; the caller shows tier 1 meanwhile.
     #[error("the index is not available: {0}")]
     Unavailable(String),
+    /// Cancelled by the caller.
+    #[error("cancelled")]
+    Cancelled,
     /// The backend failed.
     #[error("store backend: {0}")]
     Backend(String),
@@ -120,17 +123,27 @@ pub struct SymbolRecord {
     pub confidence: Confidence,
 }
 
+/// A bounded page of symbols.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct SymbolPage {
+    /// Ordered by span start, at most the caller's limit.
+    pub symbols: Vec<SymbolRecord>,
+    /// True when the file declares more symbols than `symbols` holds.
+    pub truncated: bool,
+}
+
 /// The read side of the index. The one writer is a separate actor in `pacenotes-index`. Within one generation reads are
-/// consistent: two calls that see the same [`Generation`] see the same data.
+/// consistent: two calls that see the same [`Generation`] see the same data. Every call may touch disk, so each takes a
+/// [`CancelToken`] and ends with [`StoreError::Cancelled`] when it is cancelled.
 pub trait Store: Send + Sync {
     /// The current index generation.
-    fn generation(&self) -> Result<Generation, StoreError>;
+    fn generation(&self, cancel: &CancelToken) -> Result<Generation, StoreError>;
 
     /// The id of the file now at `path`, or `None` when the index has no such file.
-    fn file_id(&self, path: &RepoPath) -> Result<Option<FileId>, StoreError>;
+    fn file_id(&self, path: &RepoPath, cancel: &CancelToken) -> Result<Option<FileId>, StoreError>;
 
-    /// The symbols declared in `file`, ordered by span start; empty for an unknown file.
-    fn symbols_in_file(&self, file: FileId) -> Result<Vec<SymbolRecord>, StoreError>;
+    /// At most `limit` of the symbols declared in `file`, ordered by span start; empty for an unknown file.
+    fn symbols_in_file(&self, file: FileId, limit: usize, cancel: &CancelToken) -> Result<SymbolPage, StoreError>;
 }
 
 // ---- Embedder and VectorIndex --------------------------------------------------------------------------------------
@@ -184,6 +197,9 @@ pub enum EmbedError {
     /// The model is not installed or not reachable; the text says what to do.
     #[error("the embedding model is unavailable: {0}")]
     Unavailable(String),
+    /// More than [`MAX_EMBED_TEXTS`] texts, or a text longer than [`MAX_EMBED_TEXT_BYTES`].
+    #[error("too much to embed at once (at most {MAX_EMBED_TEXTS} texts of {MAX_EMBED_TEXT_BYTES} bytes)")]
+    TooLarge,
     /// Cancelled by the caller.
     #[error("cancelled")]
     Cancelled,
@@ -191,6 +207,11 @@ pub enum EmbedError {
     #[error("embedder backend: {0}")]
     Backend(String),
 }
+
+/// The most texts one [`Embedder::embed`] call takes.
+pub const MAX_EMBED_TEXTS: usize = 256;
+/// The longest text, in bytes, one [`Embedder::embed`] call takes; chunkers cut below it.
+pub const MAX_EMBED_TEXT_BYTES: usize = 64 * 1024;
 
 /// Turns text into vectors (Model2Vec in process, Pitwall, or nothing).
 pub trait Embedder: Send + Sync {
@@ -200,7 +221,8 @@ pub trait Embedder: Send + Sync {
     /// The length of every vector.
     fn dimension(&self) -> usize;
 
-    /// One vector per text, in the order of `texts`, each `dimension()` long.
+    /// One vector per text, in the order of `texts`, each `dimension()` long. At most [`MAX_EMBED_TEXTS`] texts of at most
+    /// [`MAX_EMBED_TEXT_BYTES`] each, else [`EmbedError::TooLarge`] before any work.
     fn embed(&self, texts: &[&str], cancel: &CancelToken) -> Result<Vec<Vec<f32>>, EmbedError>;
 }
 
@@ -293,11 +315,25 @@ pub struct LspRequest {
     pub position: Option<Position>,
 }
 
+/// The most locations one reply holds.
+pub const MAX_LSP_LOCATIONS: usize = 10_000;
+
 /// A language server's answer: places in the repository, all [`Confidence::Exact`] by definition.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct LspReply {
-    /// The places the server named.
+    /// The places the server named, at most [`MAX_LSP_LOCATIONS`].
     pub locations: Vec<Location>,
+    /// True when the server named more places than `locations` holds.
+    pub truncated: bool,
+}
+
+impl LspReply {
+    /// A reply of `locations`, cut at [`MAX_LSP_LOCATIONS`] with `truncated` set.
+    pub fn bounded(mut locations: Vec<Location>) -> LspReply {
+        let truncated = locations.len() > MAX_LSP_LOCATIONS;
+        locations.truncate(MAX_LSP_LOCATIONS);
+        LspReply { locations, truncated }
+    }
 }
 
 /// A running language server behind a supervisor (start on demand, timeouts, restart, quarantine).
@@ -308,9 +344,41 @@ pub trait LanguageServer: Send + Sync {
 
 // ---- Llm -----------------------------------------------------------------------------------------------------------
 
-/// The most tokens a call may use.
+/// The most tokens one call may be given.
+pub const MAX_TOKENS: u32 = 32_768;
+
+/// Why a token budget is not valid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a token budget is between 1 and {MAX_TOKENS}")]
+pub struct TokenBudgetError;
+
+/// The most tokens a call may use: 1 to [`MAX_TOKENS`]. Reading one from the wire goes through [`TokenBudget::new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TokenBudget(pub u32);
+#[serde(try_from = "u32")]
+pub struct TokenBudget(u32);
+
+impl TokenBudget {
+    /// A budget of `tokens`.
+    pub fn new(tokens: u32) -> Result<TokenBudget, TokenBudgetError> {
+        if (1..=MAX_TOKENS).contains(&tokens) {
+            Ok(TokenBudget(tokens))
+        } else {
+            Err(TokenBudgetError)
+        }
+    }
+
+    /// The number of tokens.
+    pub fn get(self) -> u32 {
+        self.0
+    }
+}
+
+impl TryFrom<u32> for TokenBudget {
+    type Error = TokenBudgetError;
+    fn try_from(value: u32) -> Result<Self, TokenBudgetError> {
+        TokenBudget::new(value)
+    }
+}
 
 /// Why an [`Llm`] call failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -333,11 +401,13 @@ pub struct Completion {
     pub text: String,
     /// Tokens used, never more than the budget.
     pub tokens_used: u32,
+    /// The model that answered, recorded with whatever is derived from the text.
+    pub model: ModelId,
 }
 
 /// A local model (Pitwall), used only for bounded, user-started requests (family rule 46).
 pub trait Llm: Send + Sync {
-    /// Completes `prompt` within `budget`.
+    /// Completes `prompt` within `budget`; the reply names the model.
     fn complete(&self, prompt: &str, budget: TokenBudget, cancel: &CancelToken) -> Result<Completion, LlmError>;
 }
 
@@ -356,5 +426,25 @@ mod tests {
         assert_eq!(serde_json::to_string(&id).unwrap(), "\"a/b\"");
         assert!(serde_json::from_str::<ModelId>("\"no no\"").is_err());
         assert!(ModelId::parse("no no").unwrap_err().to_string().contains("not a model id"));
+    }
+
+    #[test]
+    fn token_budgets_are_bounded_and_validated_on_the_wire() {
+        assert!(TokenBudget::new(0).is_err() && TokenBudget::new(MAX_TOKENS + 1).is_err());
+        assert_eq!(TokenBudget::new(5).unwrap().get(), 5);
+        assert!(serde_json::from_str::<TokenBudget>("0").is_err());
+        assert_eq!(serde_json::from_str::<TokenBudget>("7").unwrap().get(), 7);
+        assert!(TokenBudget::try_from(MAX_TOKENS + 1).is_err());
+    }
+
+    #[test]
+    fn lsp_replies_are_cut_at_the_bound() {
+        let loc = Location {
+            path: RepoPath::parse("a.rs").unwrap(),
+            span: Span::lines(1, 1).unwrap(),
+        };
+        let reply = LspReply::bounded(vec![loc.clone(); MAX_LSP_LOCATIONS + 1]);
+        assert_eq!((reply.locations.len(), reply.truncated), (MAX_LSP_LOCATIONS, true));
+        assert!(!LspReply::bounded(vec![loc]).truncated);
     }
 }

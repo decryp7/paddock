@@ -10,6 +10,9 @@ pub enum LanguageError {
     /// The id does not match `[a-z][a-z0-9+#-]{0,31}` after lowering.
     #[error("{0:?} is not a language id (lowercase letters, digits, `+`, `#` or `-`, starting with a letter, at most 32 characters)")]
     BadId(String),
+    /// The id is one of the languages Pacenotes knows; use [`Language::parse`], which gives the known one.
+    #[error("{0:?} is a language Pacenotes already knows; it cannot be added as another")]
+    KnownAlias(String),
 }
 
 /// The languages compiled in (proposal 7.1): the eight tier-3 languages, Kotlin, and the config and data formats.
@@ -126,9 +129,12 @@ impl KnownLanguage {
 pub struct LanguageId(String);
 
 impl LanguageId {
-    /// Parses and lowers `text`.
+    /// Parses and lowers `text`. A name or alias of a [`KnownLanguage`] is refused, so one language has one value.
     pub fn parse(text: &str) -> Result<LanguageId, LanguageError> {
         let id = text.to_ascii_lowercase();
+        if KnownLanguage::from_alias(&id).is_some() {
+            return Err(LanguageError::KnownAlias(text.to_owned()));
+        }
         let mut chars = id.chars();
         let ok = id.len() <= 32
             && chars.next().is_some_and(|c| c.is_ascii_lowercase())
@@ -224,6 +230,8 @@ mod tests {
         assert!(Language::parse("1st").is_err());
         assert!(Language::parse("has space").is_err());
         assert!(Language::parse(&"a".repeat(33)).is_err());
+        assert_eq!(LanguageId::parse("cpp"), Err(LanguageError::KnownAlias("cpp".into())));
+        assert!(LanguageId::parse("c#").is_err());
     }
 
     #[test]

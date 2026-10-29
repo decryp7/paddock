@@ -78,51 +78,60 @@ impl From<RuleId> for String {
     }
 }
 
-/// What a rule checks.
+/// What a rule checks. Externally tagged, so it crosses postcard: `check = { pattern = "..." }` in TOML.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(rename_all = "snake_case")]
 pub enum Check {
-    /// A structural, ast-grep-style pattern. Deterministic; needs no model.
-    Pattern {
-        /// The pattern text (compiled by `pacenotes-rules`).
-        pattern: String,
-    },
+    /// A structural, ast-grep-style pattern (compiled by `pacenotes-rules`). Deterministic; needs no model.
+    Pattern(String),
     /// A judgement rule in prose, checked by the local model through Pitwall.
-    Markdown {
-        /// The rule text.
-        text: String,
-    },
+    Markdown(String),
 }
 
-/// A review rule.
+/// The wire form of a [`RuleSpec`]. Reading a `RuleSpec` from any serde format reads this and runs the same validation as
+/// [`RuleSpec::from_toml`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct RuleWire {
+    pub(crate) id: RuleId,
+    pub(crate) title: String,
+    pub(crate) severity: Severity,
+    #[serde(default)]
+    pub(crate) include: Vec<String>,
+    #[serde(default)]
+    pub(crate) exclude: Vec<String>,
+    #[serde(default)]
+    pub(crate) languages: Vec<Language>,
+    pub(crate) check: Check,
+    pub(crate) fix: Option<String>,
+    #[serde(default)]
+    pub(crate) good: Vec<String>,
+    #[serde(default)]
+    pub(crate) bad: Vec<String>,
+}
+
+impl TryFrom<RuleWire> for RuleSpec {
+    type Error = RuleError;
+    fn try_from(w: RuleWire) -> Result<RuleSpec, RuleError> {
+        RuleSpec::from_wire(w)
+    }
+}
+
+/// A review rule. Fields are private: a rule exists only if it passed [`RuleSpec::from_toml`] or the same validation on the
+/// wire.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "RuleWire")]
 pub struct RuleSpec {
-    /// The rule id.
-    pub id: RuleId,
-    /// A short title.
-    pub title: String,
-    /// How serious a violation is.
-    pub severity: Severity,
-    /// Files the rule applies to (empty: all).
-    #[serde(default)]
-    pub include: Vec<String>,
-    /// Files it does not apply to.
-    #[serde(default)]
-    pub exclude: Vec<String>,
-    /// Languages it applies to (empty: all).
-    #[serde(default)]
-    pub languages: Vec<Language>,
-    /// The check.
-    pub check: Check,
-    /// A hint on how to fix a violation.
-    pub fix: Option<String>,
-    /// Snippets the rule must not flag; with `bad` they are the rule's tests.
-    #[serde(default)]
-    pub good: Vec<String>,
-    /// Snippets the rule must flag.
-    #[serde(default)]
-    pub bad: Vec<String>,
+    id: RuleId,
+    title: String,
+    severity: Severity,
+    include: Vec<String>,
+    exclude: Vec<String>,
+    languages: Vec<Language>,
+    check: Check,
+    fix: Option<String>,
+    good: Vec<String>,
+    bad: Vec<String>,
 }
 
 impl RuleSpec {
@@ -135,27 +144,26 @@ impl RuleSpec {
                 4 * MAX_TEXT_BYTES
             )));
         }
-        let rule: RuleSpec = toml::from_str(text).map_err(|e| RuleError::Syntax(e.message().to_owned()))?;
-        rule.validate()?;
-        Ok(rule)
+        let wire: RuleWire = toml::from_str(text).map_err(|e| RuleError::Syntax(e.message().to_owned()))?;
+        RuleSpec::from_wire(wire)
     }
 
-    /// Checks shape and bounds.
-    pub fn validate(&self) -> Result<(), RuleError> {
+    /// The one validation: shape and bounds.
+    pub(crate) fn from_wire(w: RuleWire) -> Result<RuleSpec, RuleError> {
         let err = |field: &'static str, problem: String, fix: &'static str| RuleError::Invalid {
-            rule: self.id.as_str().to_owned(),
+            rule: w.id.as_str().to_owned(),
             field,
             problem,
             fix,
         };
-        if self.title.trim().is_empty() || self.title.len() > 200 {
+        if w.title.trim().is_empty() || w.title.len() > 200 {
             return Err(err(
                 "title",
                 "it is empty or longer than 200 characters".into(),
                 "Give the rule a short title.",
             ));
         }
-        for (field, globs) in [("include", &self.include), ("exclude", &self.exclude)] {
+        for (field, globs) in [("include", &w.include), ("exclude", &w.exclude)] {
             if globs.len() > MAX_GLOBS {
                 return Err(err(field, format!("more than {MAX_GLOBS} globs"), "Merge globs."));
             }
@@ -170,17 +178,17 @@ impl RuleSpec {
                 ));
             }
         }
-        if self.languages.len() > MAX_GLOBS {
+        if w.languages.len() > MAX_GLOBS {
             return Err(err(
                 "languages",
                 "too many languages".into(),
                 "List the languages the rule applies to, or none for all.",
             ));
         }
-        if self.fix.as_deref().is_some_and(|f| f.len() > MAX_TEXT_BYTES) {
+        if w.fix.as_deref().is_some_and(|f| f.len() > MAX_TEXT_BYTES) {
             return Err(err("fix", "it is too long".into(), "Keep the fix hint short."));
         }
-        for (field, list) in [("good", &self.good), ("bad", &self.bad)] {
+        for (field, list) in [("good", &w.good), ("bad", &w.bad)] {
             if list.len() > MAX_EXAMPLES || list.iter().any(|e| e.len() > MAX_TEXT_BYTES || e.contains('\0')) {
                 return Err(err(
                     field,
@@ -189,8 +197,8 @@ impl RuleSpec {
                 ));
             }
         }
-        match &self.check {
-            Check::Pattern { pattern } => {
+        match &w.check {
+            Check::Pattern(pattern) => {
                 if pattern.trim().is_empty() || pattern.len() > MAX_TEXT_BYTES {
                     return Err(err(
                         "check.pattern",
@@ -198,7 +206,7 @@ impl RuleSpec {
                         "Give the pattern, at most 16 KiB.",
                     ));
                 }
-                if self.good.is_empty() || self.bad.is_empty() {
+                if w.good.is_empty() || w.bad.is_empty() {
                     return Err(err(
                         "good/bad",
                         "a structural rule needs at least one good and one bad example".into(),
@@ -206,7 +214,7 @@ impl RuleSpec {
                     ));
                 }
             }
-            Check::Markdown { text } => {
+            Check::Markdown(text) => {
                 if text.trim().is_empty() || text.len() > MAX_TEXT_BYTES {
                     return Err(err(
                         "check.text",
@@ -216,7 +224,68 @@ impl RuleSpec {
                 }
             }
         }
-        Ok(())
+        Ok(RuleSpec {
+            id: w.id,
+            title: w.title,
+            severity: w.severity,
+            include: w.include,
+            exclude: w.exclude,
+            languages: w.languages,
+            check: w.check,
+            fix: w.fix,
+            good: w.good,
+            bad: w.bad,
+        })
+    }
+
+    /// The rule id.
+    pub fn id(&self) -> &RuleId {
+        &self.id
+    }
+
+    /// A short title.
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// How serious a violation is.
+    pub fn severity(&self) -> Severity {
+        self.severity
+    }
+
+    /// Files the rule applies to (empty: all).
+    pub fn include(&self) -> &[String] {
+        &self.include
+    }
+
+    /// Files it does not apply to.
+    pub fn exclude(&self) -> &[String] {
+        &self.exclude
+    }
+
+    /// Languages it applies to (empty: all).
+    pub fn languages(&self) -> &[Language] {
+        &self.languages
+    }
+
+    /// The check.
+    pub fn check(&self) -> &Check {
+        &self.check
+    }
+
+    /// A hint on how to fix a violation.
+    pub fn fix(&self) -> Option<&str> {
+        self.fix.as_deref()
+    }
+
+    /// Snippets the rule must not flag; with `bad` they are the rule's tests.
+    pub fn good(&self) -> &[String] {
+        &self.good
+    }
+
+    /// Snippets the rule must flag.
+    pub fn bad(&self) -> &[String] {
+        &self.bad
     }
 }
 
@@ -236,7 +305,6 @@ good = ["let f = File::open(p)?;"]
 bad = ["let f = File::open(p).unwrap();"]
 
 [check]
-kind = "pattern"
 pattern = "$X.unwrap()"
 "#;
 
@@ -247,8 +315,8 @@ pattern = "$X.unwrap()"
     #[test]
     fn a_good_structural_rule_parses() {
         let r = RuleSpec::from_toml(GOOD).unwrap();
-        assert_eq!((r.id.as_str(), r.severity), ("no-unwrap-on-io", Severity::High));
-        assert!(matches!(r.check, Check::Pattern { .. }));
+        assert_eq!((r.id().as_str(), r.severity()), ("no-unwrap-on-io", Severity::High));
+        assert!(matches!(r.check(), Check::Pattern(_)));
     }
 
     #[test]
@@ -259,7 +327,7 @@ pattern = "$X.unwrap()"
 
     #[test]
     fn a_markdown_rule_needs_text_not_examples() {
-        let md = "id = \"validate-body\"\ntitle = \"Validate the body\"\nseverity = \"medium\"\n[check]\nkind = \"markdown\"\ntext = \"Handlers validate the request body before using it.\"\n";
+        let md = "id = \"validate-body\"\ntitle = \"Validate the body\"\nseverity = \"medium\"\n[check]\nmarkdown = \"Handlers validate the request body before using it.\"\n";
         assert!(RuleSpec::from_toml(md).is_ok());
         assert!(msg(&md.replace("Handlers validate the request body before using it.", "  ")).contains("check.text"));
     }
@@ -308,5 +376,17 @@ pattern = "$X.unwrap()"
     fn rule_ids_convert_to_and_from_strings() {
         let id = RuleId::try_from("a-b".to_owned()).unwrap();
         assert_eq!(String::from(id), "a-b");
+    }
+
+    #[test]
+    fn every_getter_returns_what_was_parsed() {
+        let r = RuleSpec::from_toml(GOOD).unwrap();
+        assert_eq!(r.title(), "No unwrap on I/O");
+        assert_eq!(r.include(), ["src/**/*.rs"]);
+        assert_eq!(r.exclude(), ["tests/**"]);
+        assert_eq!(r.languages().len(), 1);
+        assert_eq!(r.fix(), Some("Return the error with `?`."));
+        assert_eq!((r.good().len(), r.bad().len()), (1, 1));
+        assert_eq!(r.check(), &Check::Pattern("$X.unwrap()".into()));
     }
 }

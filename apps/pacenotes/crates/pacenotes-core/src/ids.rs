@@ -1,8 +1,13 @@
 //! Ids that survive renames: [`Fingerprint`], [`FileId`], [`SymbolId`] and [`ChunkId`] (ADR 0002).
 //!
 //! A [`SymbolId`] derives from the file's [`FileId`] and the symbol's identity (language, kind, qualified name,
-//! disambiguator), never from the file's path. The index keeps one `FileId` per file for the file's whole life and
-//! re-binds it to the new path when a rename is matched by [`Fingerprint`], so a renamed file keeps every symbol id.
+//! disambiguator), never from the file's path. The store issues one `FileId` per file from a counter
+//! ([`FileIdAllocator`]) and re-binds it to the new path when a rename is matched by [`Fingerprint`], so a renamed file
+//! keeps every symbol id. The *qualified name* is the chain of containers inside the file (`Outer::Inner::method`),
+//! never a module path derived from where the file lives (ADR 0002); a module path is a separate, mutable column.
+//!
+//! TODO(shared-later, ADR 0002 "Shared later"): [`Fingerprint`] is one of several content hashes in the family; a single
+//! canonical one is chosen when shared code unfreezes.
 
 use std::fmt;
 use std::str::FromStr;
@@ -11,7 +16,6 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
 use crate::language::Language;
-use crate::path::RepoPath;
 
 /// Why a string is not an id.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -183,12 +187,50 @@ id_type!(
 );
 
 impl FileId {
-    /// Mints the id of a file first seen at `path` with `fingerprint`. Call it once per new file and store the result;
-    /// a renamed file keeps the stored id.
-    pub fn mint(path: &RepoPath, fingerprint: &Fingerprint) -> FileId {
-        let mut f = Fields::new("pacenotes/file/v1");
-        f.text(path.as_str()).bytes(&fingerprint.0);
+    /// The id for the `sequence`-th file the store has ever seen. The store issues sequence numbers from a persistent
+    /// counter ([`FileIdAllocator`]), so two files never share an id, even when one is moved away and another file
+    /// later appears at its old path with the same content. The id is opaque; it is never recomputed from a path.
+    pub fn from_sequence(sequence: u64) -> FileId {
+        let mut f = Fields::new("pacenotes/file/v2");
+        f.bytes(&sequence.to_le_bytes());
         FileId(f.finish16())
+    }
+}
+
+/// Issues [`FileId`]s from a counter. The store persists [`FileIdAllocator::next_sequence`] with its data and restores it
+/// with [`FileIdAllocator::resume`]; ids are never reused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileIdAllocator {
+    next: u64,
+}
+
+impl FileIdAllocator {
+    /// A new allocator whose first id is sequence 0.
+    pub fn new() -> FileIdAllocator {
+        FileIdAllocator { next: 0 }
+    }
+
+    /// An allocator that continues from a stored `next_sequence`.
+    pub fn resume(next_sequence: u64) -> FileIdAllocator {
+        FileIdAllocator { next: next_sequence }
+    }
+
+    /// The id for a file seen for the first time.
+    pub fn issue(&mut self) -> FileId {
+        let id = FileId::from_sequence(self.next);
+        self.next = self.next.saturating_add(1);
+        id
+    }
+
+    /// The counter to store.
+    pub fn next_sequence(&self) -> u64 {
+        self.next
+    }
+}
+
+impl Default for FileIdAllocator {
+    fn default() -> Self {
+        FileIdAllocator::new()
     }
 }
 
@@ -284,32 +326,51 @@ mod tests {
     use super::*;
     use crate::language::KnownLanguage;
 
-    fn path(p: &str) -> RepoPath {
-        RepoPath::parse(p).unwrap()
-    }
-
     fn rust() -> Language {
         Language::Known(KnownLanguage::Rust)
     }
 
-    /// The regression test of the plan (A1): ids stay stable after a rename matched by fingerprint.
+    /// What this proves: derivation is deterministic and has no path input, so a store that keeps the stored `FileId` on
+    /// a rename keeps every symbol id. That the store does keep it (a rename matched by fingerprint) is A3a's test.
     #[test]
-    fn symbol_ids_survive_a_rename_matched_by_fingerprint() {
-        let content = b"pub fn parse() {}\n";
-        let fp_before = Fingerprint::of_content(content);
-        let file = FileId::mint(&path("src/old_name.rs"), &fp_before);
-        let before = SymbolId::derive(file, &rust(), SymbolKind::Function, "crate::parse", 0);
+    fn symbol_ids_are_deterministic_and_take_no_path() {
+        let file = FileIdAllocator::new().issue();
+        let a = SymbolId::derive(file, &rust(), SymbolKind::Function, "Outer::parse", 0);
+        let b = SymbolId::derive(file, &rust(), SymbolKind::Function, "Outer::parse", 0);
+        assert_eq!(a, b);
+        assert_eq!(
+            Fingerprint::of_content(b"pub fn parse() {}\n"),
+            Fingerprint::of_content(b"pub fn parse() {}\r\n")
+        );
+    }
 
-        // The file moves; its content is identical, so its fingerprint matches and the index keeps the stored FileId.
-        let fp_after = Fingerprint::of_content(b"pub fn parse() {}\r\n");
-        assert_eq!(fp_before, fp_after, "line endings do not change the fingerprint");
-        let after = SymbolId::derive(file, &rust(), SymbolKind::Function, "crate::parse", 0);
-        assert_eq!(before, after);
+    /// `git mv a b`, then a new file appears at `a` with the same content: the old scheme (path + fingerprint) gave both
+    /// the same id. Issued ids cannot collide.
+    #[test]
+    fn moving_a_file_away_and_restoring_the_path_gives_two_different_ids() {
+        let mut ids = FileIdAllocator::new();
+        let at_a = ids.issue();
+        // a moves to b: the store keeps `at_a` for the file now at b. A new file at a gets a new id.
+        let restored_a = ids.issue();
+        assert_ne!(at_a, restored_a);
+        let sym = |f| SymbolId::derive(f, &rust(), SymbolKind::Function, "parse", 0);
+        assert_ne!(sym(at_a), sym(restored_a));
+    }
+
+    #[test]
+    fn the_allocator_resumes_without_reusing_an_id() {
+        let mut first = FileIdAllocator::new();
+        let ids: Vec<_> = (0..3).map(|_| first.issue()).collect();
+        let mut again = FileIdAllocator::resume(first.next_sequence());
+        let next = again.issue();
+        assert!(!ids.contains(&next));
+        assert_eq!(FileIdAllocator::default().next_sequence(), 0);
+        assert_eq!(FileId::from_sequence(1), ids[1]);
     }
 
     #[test]
     fn a_changed_identity_is_a_new_id() {
-        let file = FileId::mint(&path("a.rs"), &Fingerprint::of_content(b"x"));
+        let file = FileId::from_sequence(1);
         let base = SymbolId::derive(file, &rust(), SymbolKind::Function, "a::f", 0);
         assert_ne!(
             base,
@@ -322,13 +383,13 @@ mod tests {
             base,
             SymbolId::derive(file, &Language::Known(KnownLanguage::C), SymbolKind::Function, "a::f", 0)
         );
-        let other_file = FileId::mint(&path("b.rs"), &Fingerprint::of_content(b"y"));
+        let other_file = FileId::from_sequence(3);
         assert_ne!(base, SymbolId::derive(other_file, &rust(), SymbolKind::Function, "a::f", 0));
     }
 
     #[test]
     fn fields_cannot_be_shifted_into_each_other() {
-        let file = FileId::mint(&path("a.rs"), &Fingerprint::of_content(b""));
+        let file = FileId::from_sequence(2);
         let a = SymbolId::derive(file, &Language::parse("zig").unwrap(), SymbolKind::Other, "x", 0);
         let b = SymbolId::derive(file, &Language::parse("zi").unwrap(), SymbolKind::Other, "gx", 0);
         assert_ne!(a, b);
@@ -347,7 +408,7 @@ mod tests {
 
     #[test]
     fn ids_display_parse_and_serialise_the_same_way() {
-        let file = FileId::mint(&path("a.rs"), &Fingerprint::of_content(b"x"));
+        let file = FileId::from_sequence(1);
         let sym = SymbolId::derive(file, &rust(), SymbolKind::Class, "A", 0);
         let chunk = ChunkId::derive(file, Some(sym), 3);
         assert!(file.to_string().starts_with("file:") && sym.to_string().starts_with("sym:") && chunk.to_string().starts_with("chk:"));

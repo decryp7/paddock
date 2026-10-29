@@ -1082,6 +1082,7 @@ version = "0.1.0"
 dependencies = [
  "paddock-jobs",
  "paddock-testkit",
+ "postcard",
  "proptest",
  "serde",
  "serde_json",

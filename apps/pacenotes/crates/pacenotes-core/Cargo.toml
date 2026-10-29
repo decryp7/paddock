@@ -15,12 +15,13 @@ testing = []
 [dependencies]
 paddock-jobs = { workspace = true }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
 toml = "1"
 
 [dev-dependencies]
-serde_json = "1"
+postcard = { version = "1", default-features = false, features = ["use-std"] }
 proptest = "1"
 paddock-testkit = { workspace = true }
 

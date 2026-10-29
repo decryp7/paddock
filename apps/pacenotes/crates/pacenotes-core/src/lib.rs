@@ -9,6 +9,7 @@ pub mod finding;
 pub mod ids;
 pub mod language;
 pub mod location;
+pub mod lsp;
 pub mod pack;
 pub mod path;
 pub mod ports;
@@ -20,11 +21,14 @@ pub mod tier;
 pub mod contract;
 
 pub use finding::{FindingState, TransitionError};
-pub use ids::{ChunkId, FileId, Fingerprint, IdError, SymbolId, SymbolKind};
+pub use ids::{ChunkId, FileId, FileIdAllocator, Fingerprint, IdError, SymbolId, SymbolKind};
 pub use language::{KnownLanguage, Language, LanguageError, LanguageId};
 pub use location::{Location, Position, Span, SpanError};
 pub use pack::{LspFeature, PackError, ServerPack};
 pub use path::{PathError, RepoPath};
 pub use rev::{CommitHash, Generation, Rev, RevError};
 pub use rule::{Check, RuleError, RuleId, RuleSpec};
-pub use tier::{Confidence, Severity, Tier};
+pub use tier::{Confidence, Severity, SeverityError, Tier};
+
+#[cfg(test)]
+mod wire_tests;

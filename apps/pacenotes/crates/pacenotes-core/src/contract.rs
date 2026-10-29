@@ -14,7 +14,8 @@ use crate::ids::{ChunkId, FileId};
 use crate::path::RepoPath;
 use crate::ports::{
     ChangeKind, ChangeSet, Completion, EmbedError, Embedder, FileChange, History, HistoryError, LanguageServer, Llm, LlmError, LspError,
-    LspReply, LspRequest, ModelId, Store, StoreError, SymbolRecord, TokenBudget, VectorError, VectorHit, VectorIndex,
+    LspReply, LspRequest, MAX_EMBED_TEXT_BYTES, MAX_EMBED_TEXTS, ModelId, Store, StoreError, SymbolPage, SymbolRecord, TokenBudget,
+    VectorError, VectorHit, VectorIndex,
 };
 use crate::rev::{Generation, Rev};
 
@@ -186,46 +187,70 @@ impl MemoryStore {
 }
 
 impl Store for MemoryStore {
-    fn generation(&self) -> Result<Generation, StoreError> {
+    fn generation(&self, cancel: &CancelToken) -> Result<Generation, StoreError> {
+        if cancel.is_cancelled() {
+            return Err(StoreError::Cancelled);
+        }
         Ok(self.state.lock().unwrap().0)
     }
 
-    fn file_id(&self, path: &RepoPath) -> Result<Option<FileId>, StoreError> {
+    fn file_id(&self, path: &RepoPath, cancel: &CancelToken) -> Result<Option<FileId>, StoreError> {
+        if cancel.is_cancelled() {
+            return Err(StoreError::Cancelled);
+        }
         Ok(self.state.lock().unwrap().1.get(path).copied())
     }
 
-    fn symbols_in_file(&self, file: FileId) -> Result<Vec<SymbolRecord>, StoreError> {
-        Ok(self.state.lock().unwrap().2.get(&file).cloned().unwrap_or_default())
+    fn symbols_in_file(&self, file: FileId, limit: usize, cancel: &CancelToken) -> Result<SymbolPage, StoreError> {
+        if cancel.is_cancelled() {
+            return Err(StoreError::Cancelled);
+        }
+        let mut symbols = self.state.lock().unwrap().2.get(&file).cloned().unwrap_or_default();
+        let truncated = symbols.len() > limit;
+        symbols.truncate(limit);
+        Ok(SymbolPage { symbols, truncated })
     }
 }
 
 /// The contract of [`Store`]: `known` is a file the store holds (with at least two symbols), `unknown` is not.
 pub fn store_contract(store: &dyn Store, known: &RepoPath, unknown: &RepoPath) {
-    let g1 = store.generation().unwrap();
-    let file = store.file_id(known).unwrap().expect("the known file has an id");
+    let live = CancelToken::new();
+    let g1 = store.generation(&live).unwrap();
+    let file = store.file_id(known, &live).unwrap().expect("the known file has an id");
     assert_eq!(
-        store.file_id(unknown).unwrap(),
+        store.file_id(unknown, &live).unwrap(),
         None,
         "an unknown path has no id, and is not an error"
     );
-    let symbols = store.symbols_in_file(file).unwrap();
-    assert!(symbols.len() >= 2);
+    let page = store.symbols_in_file(file, 1000, &live).unwrap();
+    assert!(!page.truncated && page.symbols.len() >= 2);
     assert!(
-        symbols.windows(2).all(|w| w[0].span.start() <= w[1].span.start()),
+        page.symbols.windows(2).all(|w| w[0].span.start() <= w[1].span.start()),
         "ordered by span start"
     );
-    assert!(symbols.iter().all(|s| s.file == file));
+    assert!(page.symbols.iter().all(|s| s.file == file));
+    let cut = store.symbols_in_file(file, 1, &live).unwrap();
+    assert_eq!(
+        (cut.symbols.len(), cut.truncated),
+        (1, true),
+        "the limit bounds the page and says it cut"
+    );
+    assert_eq!(cut.symbols[0], page.symbols[0]);
     let unknown_file = FileId::from_bytes([0xee; 16]);
     assert!(
-        store.symbols_in_file(unknown_file).unwrap().is_empty(),
+        store.symbols_in_file(unknown_file, 10, &live).unwrap().symbols.is_empty(),
         "an unknown file has no symbols"
     );
-    assert_eq!(store.generation().unwrap(), g1, "reads do not move the generation");
+    assert_eq!(store.generation(&live).unwrap(), g1, "reads do not move the generation");
     assert_eq!(
-        store.symbols_in_file(file).unwrap(),
-        symbols,
+        store.symbols_in_file(file, 1000, &live).unwrap(),
+        page,
         "within a generation the same question has the same answer"
     );
+    let dead = cancelled();
+    assert_eq!(store.generation(&dead), Err(StoreError::Cancelled));
+    assert_eq!(store.file_id(known, &dead), Err(StoreError::Cancelled));
+    assert_eq!(store.symbols_in_file(file, 10, &dead), Err(StoreError::Cancelled));
 }
 
 // ---- Embedder ------------------------------------------------------------------------------------------------------
@@ -258,6 +283,9 @@ impl Embedder for HashEmbedder {
     fn embed(&self, texts: &[&str], cancel: &CancelToken) -> Result<Vec<Vec<f32>>, EmbedError> {
         if cancel.is_cancelled() {
             return Err(EmbedError::Cancelled);
+        }
+        if texts.len() > MAX_EMBED_TEXTS || texts.iter().any(|t| t.len() > MAX_EMBED_TEXT_BYTES) {
+            return Err(EmbedError::TooLarge);
         }
         Ok(texts
             .iter()
@@ -293,6 +321,12 @@ pub fn embedder_contract(e: &dyn Embedder) {
     assert_eq!(again[0], out[0], "the same text embeds the same way, and order does not matter");
     assert_eq!(e.embed(&[], &live).unwrap().len(), 0);
     assert_eq!(e.embed(&texts, &cancelled()), Err(EmbedError::Cancelled));
+    // the bounds are refused before any work
+    let many = vec!["x"; MAX_EMBED_TEXTS + 1];
+    assert_eq!(e.embed(&many, &live), Err(EmbedError::TooLarge));
+    let long = "x".repeat(MAX_EMBED_TEXT_BYTES + 1);
+    assert_eq!(e.embed(&[long.as_str()], &live), Err(EmbedError::TooLarge));
+    assert!(e.embed(&vec!["x"; MAX_EMBED_TEXTS], &live).is_ok(), "the bound itself is allowed");
 }
 
 // ---- VectorIndex ---------------------------------------------------------------------------------------------------
@@ -483,10 +517,11 @@ impl Llm for EchoLlm {
         if let Some(step) = &self.unavailable {
             return Err(LlmError::Unavailable(step.clone()));
         }
-        let words: Vec<&str> = prompt.split_whitespace().take(budget.0 as usize).collect();
+        let words: Vec<&str> = prompt.split_whitespace().take(budget.get() as usize).collect();
         Ok(Completion {
             text: words.join(" "),
             tokens_used: words.len() as u32,
+            model: ModelId::parse("test/echo").unwrap(),
         })
     }
 }
@@ -495,14 +530,16 @@ impl Llm for EchoLlm {
 pub fn llm_contract(llm: &dyn Llm) {
     let live = CancelToken::new();
     let prompt = "one two three four five six";
-    let c = llm.complete(prompt, TokenBudget(3), &live).unwrap();
+    let three = TokenBudget::new(3).unwrap();
+    let c = llm.complete(prompt, three, &live).unwrap();
     assert!(c.tokens_used <= 3, "the budget is a hard cap");
-    assert_eq!(llm.complete(prompt, TokenBudget(3), &cancelled()), Err(LlmError::Cancelled));
+    assert!(!c.model.as_str().is_empty(), "the reply names the model");
+    assert_eq!(llm.complete(prompt, three, &cancelled()), Err(LlmError::Cancelled));
 }
 
 /// The contract of [`Llm`] when no model is reachable: `Unavailable` with a next step, not a hang or a panic.
 pub fn llm_unavailable_contract(llm: &dyn Llm) {
-    match llm.complete("x", TokenBudget(10), &CancelToken::new()) {
+    match llm.complete("x", TokenBudget::new(10).unwrap(), &CancelToken::new()) {
         Err(LlmError::Unavailable(step)) => assert!(!step.is_empty(), "the error names the next step"),
         other => panic!("expected Unavailable, got {other:?}"),
     }
@@ -511,7 +548,7 @@ pub fn llm_unavailable_contract(llm: &dyn Llm) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::{FileId, Fingerprint, SymbolId, SymbolKind};
+    use crate::ids::{SymbolId, SymbolKind};
     use crate::language::{KnownLanguage, Language};
     use crate::location::Span;
     use crate::rev::CommitHash;
@@ -557,7 +594,7 @@ mod tests {
     fn memory_store_passes_the_store_contract() {
         let store = MemoryStore::default();
         let path = p("src/a.rs");
-        let file = FileId::mint(&path, &Fingerprint::of_content(b"x"));
+        let file = FileId::from_sequence(1);
         let lang = Language::Known(KnownLanguage::Rust);
         let sym = |name: &str, line: u32| SymbolRecord {
             id: SymbolId::derive(file, &lang, SymbolKind::Function, name, 0),
@@ -569,7 +606,7 @@ mod tests {
         };
         store.put(path.clone(), file, vec![sym("b", 9), sym("a", 1)]);
         store_contract(&store, &path, &p("src/other.rs"));
-        assert_eq!(store.generation().unwrap(), Generation(1));
+        assert_eq!(store.generation(&CancelToken::new()).unwrap(), Generation(1));
     }
 
     #[test]

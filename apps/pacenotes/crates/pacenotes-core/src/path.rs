@@ -1,4 +1,7 @@
 //! [`RepoPath`]: a workspace-relative path, parsed once at the edge.
+//!
+//! TODO(shared-later, ADR 0002 "Shared later"): other Paddock crates parse workspace-relative paths too; this type moves
+//! into a shared crate once shared code unfreezes (after the Dyno and Spotter tags).
 
 use std::fmt;
 use std::str::FromStr;

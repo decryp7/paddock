@@ -13,22 +13,28 @@
 //! - a **codec** ([`codec`]) that turns any message into bounded postcard bytes and back.
 //!
 //! Every message is plain data: no references, closures, trait objects or handles. Wire types use externally tagged enums
-//! only (postcard cannot read internally or adjacently tagged ones; a test per message type round-trips it).
+//! only (postcard cannot read internally or adjacently tagged ones; a test per message type round-trips it). A validated
+//! type (`Budget`, `Contributions`, `HostRequest`) is validated again when read from the wire.
+//!
+//! TODO(shared-later, ADR 0002 "Shared later"): the codec duplicates what `paddock_ipc::wire` does; once shared code
+//! unfreezes (after the Dyno and Spotter tags) this module moves onto it.
 //!
 //! The two in-process traits, [`Function`] and [`Host`], are the port's Rust face; an out-of-process plugin implements
 //! `Function` in a wrapper that decodes frames and calls the same methods.
 
 pub mod budget;
 pub mod codec;
+#[cfg(any(test, feature = "testing"))]
+pub mod contract;
 pub mod contribution;
 pub mod error;
 pub mod message;
 
-pub use budget::{Budget, BudgetError, BudgetKind};
+pub use budget::{Budget, BudgetError, BudgetExceeded, BudgetKind};
 pub use codec::{CodecError, MAX_MESSAGE_BYTES, decode, encode};
-pub use contribution::{Contributions, SettingSpec, SettingValue, ToolSpec, ViewKind, ViewSpec};
+pub use contribution::{ContributionError, Contributions, SettingSpec, SettingValue, ToolSpec, ViewKind, ViewSpec};
 pub use error::{FunctionError, HostError};
-pub use message::{FunctionReply, FunctionRequest, HostCall, HostReply, HostRequest, ToolOutput};
+pub use message::{FunctionReply, FunctionRequest, HostCall, HostReply, HostRequest, Origin, RequestError, ToolOutput};
 
 use paddock_jobs::CancelToken;
 
