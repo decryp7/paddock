@@ -10998,35 +10998,35 @@
         <source>Widen the window to show the Explorer</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock-layout.ts</context>
-          <context context-type="linenumber">458</context>
+          <context context-type="linenumber">464</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.explorer.cannotFit.body" datatype="html">
         <source>There is no room for it beside the events grid at its minimum width.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock-layout.ts</context>
-          <context context-type="linenumber">459</context>
+          <context context-type="linenumber">465</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.layout.fit.title" datatype="html">
         <source>Some panes were tabbed to fit this window</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock-layout.ts</context>
-          <context context-type="linenumber">470</context>
+          <context context-type="linenumber">476</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.layout.fit.body" datatype="html">
         <source>Your saved layout is kept; it returns when the window is large enough.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock-layout.ts</context>
-          <context context-type="linenumber">471</context>
+          <context context-type="linenumber">477</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.layout.fit.undo" datatype="html">
         <source>Undo</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock-layout.ts</context>
-          <context context-type="linenumber">472</context>
+          <context context-type="linenumber">478</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.autoHide.toLeft" datatype="html">

@@ -81,12 +81,18 @@ export class DockLayout {
     return [...out, ...extra];
   }
 
-  /** A view's declared layout; the Events view's minimum width grows with the grid's extra columns (they are part of what it needs). */
+  /**
+   * A view's declared layout, as the plan and the group constraints see it: the Events view's minimum width grows with the grid's
+   * extra columns and the time cell's font (it needs them), and every view gets the theme's chrome around its dock cell on top (the
+   * Console theme's cards take 8 px from each group, so a group could otherwise end up under what its view declared).
+   */
   private declared(view: Parameters<typeof viewLayout>[0]): ViewLayout {
     const layout = viewLayout(view);
-    if (view?.id !== 'events') return layout;
-    const min = eventsViewMinWidth(this.prefs.extraColumns().length, this.metrics.charPx(), this.metrics.chromePx());
-    return { ...layout, min: { ...layout.min, width: min }, pref: { ...layout.pref, width: Math.max(layout.pref.width, min) } };
+    const chrome = this.metrics.chromePx();
+    const needs = view?.id === 'events' ? eventsViewMinWidth(this.prefs.extraColumns().length, this.metrics.charPx()) : layout.min.width;
+    const min = needs + chrome;
+    if (min === layout.min.width) return layout;
+    return { ...layout, min: { ...layout.min, width: min }, pref: { ...layout.pref, width: Math.max(layout.pref.width + chrome, min) } };
   }
 
   /** The row of the main column a panel sits in: an extra instance of a view (a second timeline) is stacked below the first, in a row of its own. */

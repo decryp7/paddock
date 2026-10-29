@@ -39,3 +39,23 @@ for (const theme of THEMES) {
       .toBe(true);
   });
 }
+
+// No dock group is ever narrower than the minimum its view declares, whatever the theme puts around the groups (the Console theme's cards
+// take 8 px from each): Timeline 560, Registry 420 (src/app/builtin).
+for (const theme of THEMES) {
+  for (const width of [1440, 1920]) {
+    test(`${theme} theme at ${width} px: no dock group is narrower than its declared minimum`, async ({ page, browserName }) => {
+      test.skip(browserName !== 'chromium', 'the launch option that shows classic scroll bars is Chromium-only');
+      await page.addInitScript((t) => localStorage.setItem('debrief.prefs.v1', JSON.stringify({ theme: t })), theme);
+      await page.setViewportSize({ width, height: 900 });
+      await openApp(page);
+      const widthOf = (name: string) =>
+        page
+          .locator('.dv-groupview')
+          .filter({ has: page.getByRole('tab', { name, exact: true }) })
+          .evaluate((g) => g.getBoundingClientRect().width);
+      await expect.poll(() => widthOf('Registry')).toBeGreaterThanOrEqual(420);
+      await expect.poll(() => widthOf('Timeline')).toBeGreaterThanOrEqual(560);
+    });
+  }
+}

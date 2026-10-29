@@ -1,4 +1,5 @@
 import { contrastProblems, paletteProblemsOf } from './theme-checks';
+import { contrastRatio } from '../tools/monitor/cvd';
 import { missingTokens, resolveTokens } from './theme-tokens';
 import { BUILT_IN_THEMES } from './themes';
 import { CONTRAST } from './themes/contrast.theme';
@@ -68,4 +69,17 @@ describe('high contrast theme', () => {
     expect(contrastProblems({ ...dark, border: dark['bg-1']! }, 'AAA').some((p) => p.startsWith('--border '))).toBe(true);
     expect(contrastProblems({ ...dark, 'focus-ring': dark['bg-1']! }, 'AAA').some((p) => p.startsWith('--focus-ring'))).toBe(true);
   });
+});
+
+describe('the in-app menu', () => {
+  // A disabled menu item is drawn in --muted on the menu's --tooltip-bg: the design guide asks for 4.5:1 for disabled text (7:1 in High contrast).
+  for (const theme of BUILT_IN_THEMES) {
+    for (const scheme of SCHEMES) {
+      it(`${theme.id} ${scheme}: disabled item text (--muted on --tooltip-bg) meets its contrast minimum`, () => {
+        const tokens = resolveTokens(theme, scheme, DENSITIES[0]);
+        const ratio = contrastRatio(tokens['muted']!, tokens['tooltip-bg']!)!;
+        expect(ratio).toBeGreaterThanOrEqual(theme.id === CONTRAST.id ? 7 : 4.5);
+      });
+    }
+  }
 });
