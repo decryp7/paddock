@@ -44,6 +44,8 @@ Conventional Commits; one semver tag for the whole repo.
 - Network's Listening table keeps the exposure badge whole at 900 px; truncated names in the dashboard feed, widgets and the Network service column show their full text in a tooltip. The layout e2e now also measures every state (detail panels, tabs, second views), every Settings page (with the advanced fields) and every dialog, and accepts an ellipsis only on the clipping element when it has a tooltip or a label and is not a control, a tab or a number.
 - Benchmarks, Health, Extras (tabs and Maintenance) and Network wrap or shrink to the page instead of being cut by `.pd-page`'s `overflow-x: hidden`; the primary "Run benchmarks" button is always whole. `e2e/layout.spec.ts` now fails on any page content wider than the page, and on text cut without an ellipsis, at 900, 1024 and 1280 px, for every page and every Settings page.
 
+### `paddock-chromium`: an unexplained abort names the network service
+- `Page::navigate`'s error for an unexplained `net::ERR_ABORTED` (not a download, not replaced) says whether the browser's network service restarted, stayed unchanged or could not be asked. New `Page::network_service_pid` (`Result<Option<u32>>`; `SystemInfo` is an experimental DevTools domain). ADR 0030 (proposed).
 
 ### `providePaddockMaterial`: tooltips wait 500 ms
 - `providePaddockMaterial()` provides `MAT_TOOLTIP_DEFAULT_OPTIONS` with `showDelay: 500` (`PADDOCK_TOOLTIP_OPTIONS`), the design guide's delay for the tooltip every icon-only button carries. Every app that provides it gets the delay without setting it per tooltip.
