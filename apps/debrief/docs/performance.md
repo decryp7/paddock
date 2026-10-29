@@ -83,6 +83,42 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-10-29, CI macOS Rust tests: shell tests bounded and patient (branch `fix/debrief-ai-tests-load`)
+
+- **Commit:** A/B: base `5c646222a` (CI 7096, job 21092; and CI 7102, job 21203) → change `a9ea3cbd2` (CI 7107, job 21334).
+  The change: test apps' plugins wait on conditions (no connect window, no call budgets), the shell tests (`debrief-app`
+  lib) run in the nextest group `app-plugin-processes` (at most 6 at a time), test stores in low memory mode.
+- **Machine:** the Mac runner on the Mac mini (M4 Pro, 14 cores, 64 GB, macOS 27.2), shared with other agents and with
+  the Linux CI container of the same run.
+- **Load:** sampled every 5 s with `sysctl vm.loadavg` and `ps` (`scratchpad/bin/watch-load.sh`). Base: a Mac run of the
+  same nextest profile watched 18:58–19:03 peaked at 116 with 14 test processes and 84 plugin processes; CI 7096's own
+  load was about 119 (reported by the coordinator, not sampled). Change: while tests ran, load 72 on average and 90 at
+  peak, at most 18 test processes and 49 plugin processes; the compile phase before them peaked at 198 (both Rust jobs
+  of the run compiling at once).
+- **Build:** debug, `cargo nextest run --workspace --profile ci` (nextest 0.9.149), libduckdb 1.5.6, sccache.
+- **Corpus:** the repository's synthetic `/samples` (the tests' own fixtures).
+- **Command:** `debrief.yml` job "rust tests (macOS)", step `cargo nextest run --workspace --profile ci`.
+- **Runs:** one CI run each (7096 and 7102 base, 7107 change); not interleaved.
+- **Numbers:**
+
+  | Measure | Base 7096 | Base 7102 | Change 7107 | Budget | Verdict |
+  |---|---|---|---|---|---|
+  | nextest step (build + tests) | 9.3 min | 15.6 min | 8.6 min | none | faster |
+  | test phase (nextest's own clock) | 5.8 min | 14.2 min | 5.1 min (304.6 s) | none | faster |
+  | tests past 90 s (TIMEOUT) | 5 | 18 | 0 | 0 | pass |
+  | other failures | 1 (captures) | 0 | 0 | 0 | pass |
+  | temp folders left | 10 | n/s | 0 | 0 | pass |
+  | peak load while tests ran | about 119 (116 sampled in another run) | n/s | 90 | none | lower |
+  | plugin processes at once | 84 (sampled in another run) | n/s | 49 | none | lower |
+
+- **Memory measure:** not measured.
+- **Notes:** single runs on a shared machine; 7102 ran under heavier outside load than 7096 (timeouts across many
+  crates). The reproduction behind the change (plugins started 16 s late through a wrapper as `DEBRIEF_PLUGINS`, no CPU
+  load): `ai::tests::use_cases_route_through_ipc_to_the_model_and_the_engine` took 215 s before and 146 s after (nine
+  cold starts of 16 s, no restarts), one run each. Locally (default profile, the same Mac, load about 40–60) the 877
+  `debrief-app` tests took 35.5 s with the group. Raw logs were kept in the agent's scratchpad, not in the repository.
+  No macOS-only `test-threads` cap was added: with the group the test phase stayed below the base and without timeouts.
+
 ### 2026-10-28, DuckDB server mode (Quack), research in progress
 
 - Date, commit: 2026-10-28; branch `docs/research-duckdb-server-mode`, **uncommitted** in its worktree (`research/2026-10-28-duckdb-server-mode.md` and `harness/`).
