@@ -6,6 +6,7 @@
 
 pub mod bench;
 pub mod chain;
+pub mod change;
 pub mod detect;
 pub mod geometry;
 pub mod hud;
