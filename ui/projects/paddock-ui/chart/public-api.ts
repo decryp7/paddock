@@ -20,11 +20,3 @@ export {
   type PdChartSpec,
   type PdSeriesColor,
 } from './src/options';
-export { PdSunburst, PdSunburstCentre } from './src/sunburst';
-export {
-  sunburstLayout,
-  type PdSunburstColourBy,
-  type PdSunburstKind,
-  type PdSunburstNode,
-  type PdSunburstPoint,
-} from './src/sunburst-layout';
