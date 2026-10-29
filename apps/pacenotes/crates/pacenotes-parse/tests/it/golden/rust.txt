@@ -1,0 +1,27 @@
+symbol Constant LIMIT 4-4
+symbol Struct Rect 6-9
+symbol Field Rect::w 7-7
+symbol Field Rect::h 8-8
+symbol Enum Mode 11-14
+symbol Constant Mode::Fast 12-12
+symbol Constant Mode::Slow 13-13
+symbol Trait Shape 16-18
+symbol Method Shape::area 17-17
+symbol Method Rect::area 21-23
+symbol Method Wrapper::new 27-31
+symbol Module inner 34-36
+symbol Function inner::deep 35-35
+symbol Macro twice 38-40
+symbol Function top 42-44
+import std::collections::HashMap
+import crate::util::helper
+call Rect::area -> helper
+call Wrapper::new -> new
+call Wrapper::new -> println
+chunk Rect 0 6-9
+chunk Mode 0 11-14
+chunk Shape::area 0 17-17
+chunk Rect::area 0 21-23
+chunk Wrapper::new 0 27-31
+chunk inner::deep 0 35-35
+chunk top 0 42-44

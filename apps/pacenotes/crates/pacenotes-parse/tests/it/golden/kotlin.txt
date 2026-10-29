@@ -1,0 +1,20 @@
+symbol Class Account 6-15
+symbol Property Account.balance 7-7
+symbol Constructor Account.constructor 9-9
+symbol Method Account.deposit 11-14
+symbol Class Registry 17-19
+symbol Method Registry.find 18-18
+symbol Interface Greeter 21-23
+symbol Method Greeter.greet 22-22
+symbol Enum Mode 25-25
+symbol Function topLevel 27-27
+import kotlin.math.max
+import java.util.List
+call Account.deposit -> max
+call Registry.find -> Account
+chunk Account.constructor 0 9-9
+chunk Account.deposit 0 11-14
+chunk Registry.find 0 18-18
+chunk Greeter.greet 0 22-22
+chunk Mode 0 25-25
+chunk topLevel 0 27-27

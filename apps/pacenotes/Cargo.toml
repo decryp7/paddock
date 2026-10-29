@@ -17,6 +17,7 @@ paddock-testkit = { path = "../../crates/paddock-testkit" }
 paddock-jobs = { path = "../../crates/paddock-jobs" }
 pacenotes-core = { path = "crates/pacenotes-core" }
 pacenotes-git = { path = "crates/pacenotes-git" }
+pacenotes-parse = { path = "crates/pacenotes-parse" }
 pacenotes-trap = { path = "tests/trap" }
 pacenotes-function-api = { path = "crates/pacenotes-function-api" }
 
