@@ -6,7 +6,7 @@ use dyno_ipc::wire::codes;
 use dyno_ipc::{Client, Connection, Host, IpcError, Peer, PeerOptions, RemoteError};
 use std::io::{Read, Write};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const LONG: Duration = Duration::from_secs(10);
 
