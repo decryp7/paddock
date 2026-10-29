@@ -22,7 +22,7 @@ export default defineConfig({
   reporter: [['list']],
   use: {
     baseURL: `http://localhost:${PORT}`,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
     viewport: { width: 1440, height: 900 },
   },
   projects: [

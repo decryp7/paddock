@@ -17,7 +17,7 @@ The version in the tag must match `app/src-tauri/tauri.conf.json`, `app/package.
 release; pre-releases are not offered.
 
 **Release notes and changelog.** The notes of a release are the git-cliff changelog (`apps/pitwall/cliff.toml`, tags
-`pitwall-v*`) over `apps/pitwall/**` and the shared crates Pitwall builds on (`crates/paddock-service`, `crates/paddock-jobs`;
+`pitwall-v*`) over `apps/pitwall/**` and the shared crates Pitwall builds on (`crates/paddock-service`, `crates/paddock-jobs`, `crates/paddock-proc`;
 `ui/**` joins after the shell move), so they list Pitwall's own commits. The changelog is the Releases page of the repository
 (`https://dev.decryptology.net/decryp7/paddock/releases`, filter `pitwall-v`); there is no committed `CHANGELOG.md` for the
 app, and (the shared checklist below says `CHANGELOG.md`: for Pitwall that is the release notes) `git cliff --config apps/pitwall/cliff.toml --include-path 'apps/pitwall/**' -o /dev/stdout` prints the whole history.

@@ -158,7 +158,7 @@ Pitwall 1.0.x updates do not look at the new feed, so this is the path every exi
 | # | Platform | Steps | Expected |
 |---|----------|-------|----------|
 | U7 | All | Install the 1.1.0-rc test build (signed with the test key, feed on the host). Settings > Updates > Check for updates. | "1.1.1 is available" with the release notes; the check made one GET of `latest.json` and nothing else (watch the host's server log). |
-| U8 | All | Choose Install, then **Cancel** while the download runs; repeat and cancel at the very start. | The download stops, the state returns to "1.1.1 is available", nothing is half-installed, the app and the server still run 1.1.0-rc; Install works again afterwards. |
+| U8 | All | Choose Install, then **Cancel** while the download runs; repeat and cancel at the very start; then watch the "Installing" phase. | The download stops, the state returns to "1.1.1 is available", nothing is half-installed, the app and the server still run 1.1.0-rc; Install works again afterwards. During "Installing" Cancel is unavailable (disabled, with the reason), because an install cannot be undone half-way. |
 | U9 | All | Install, with a streaming request running through the server. | The download and the install finish; the app restarts. The server does not restart until it is idle: the stream completes first, then the server restarts once onto the new binary (no restart while requests, queued jobs or downloads are active). |
 | U10 | All | Afterwards `GET /x/v1/health`, then Settings > Updates. | `version` is 1.1.1; "You have the latest version"; models, keys and settings unchanged. |
 | U11 | All | Serve a `latest.json` whose `.sig` was made with a different key (or edit one byte of the installer). | The install is refused with a signature message; the old version keeps running. |
@@ -175,7 +175,8 @@ Pitwall 1.0.x updates do not look at the new feed, so this is the path every exi
 
 | # | Steps | Expected |
 |---|-------|----------|
-| U15 | Turn on offline mode (Settings > General), turn on automatic update checks, restart the app, and click Check for updates. Watch the host feed's log and the VM's network (`tcpdump` on the VM or the feed's access log). | No request reaches the feed or any other host; the check reports that offline mode is on. Turning offline mode off allows the check again. |
+| U15 | Turn on offline mode (Settings > Network), turn on automatic update checks, restart the app, and click Check for updates. Watch the host feed's log and the VM's network (`tcpdump` on the VM or the feed's access log). | No request reaches the feed or any other host; the check reports that offline mode is on. Turning offline mode off allows the check again. |
+| U15b | Offline mode on, then stop the Pitwall server (quit the service), and click Check for updates. Watch the feed log. | No request reaches the feed. With the server down the app cannot ask it whether offline is on, so it refuses unless it knows from a last-known value that offline is off; it says why. |
 
 ### E. Uninstall leaves nothing behind
 

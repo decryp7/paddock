@@ -84,11 +84,12 @@ jobs:
       latest-tag: pitwall-latest
       notes-extra: "**Existing installs:** download this version once by hand. Pitwall now updates from the Paddock releases, which a copy installed before this version does not look at."
       cliff-config: apps/pitwall/cliff.toml
-      # The notes list Pitwall's own commits plus the two shared crates it builds on; add ui/** after the shell move.
+      # The notes list Pitwall's own commits plus the shared crates it builds on; add ui/** after the shell move.
       cliff-paths: |
         apps/pitwall/**
         crates/paddock-service/**
         crates/paddock-jobs/**
+        crates/paddock-proc/**
       # --version: pitwall-server has no --self-test; its --version starts the binary from the built app and exits 0 (the old
       # macos-verify-bundle.sh ran the same).
       sidecars: pitwall-server:--version
