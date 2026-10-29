@@ -7,14 +7,6 @@ Conventional Commits; one semver tag for the whole repo.
 ### Dyno: the disk map screen on the shell
 - New nav entry `Disk map` (`/disk-map`): scan a volume or folder as a job with live phase-labelled progress and Cancel, ring chart (`pd-sunburst`) beside a list or a `mat-table`, drill-down, capacity strip with hidden space, Full Disk Access and "Unavailable" states with a reason, Settings limits (items kept per scan, large file size).
 
-### `pd-sunburst` in `@decryp7/paddock-ui/chart` (docs/plans/pd-sunburst.md)
-- New `PdSunburst` (`pd-sunburst`) and `PdSunburstCentre`, a drillable ring chart for hierarchies (first consumer: Dyno's disk map) and the pure
-  `sunburstLayout`: SVG with tree semantics (`treeitem`, `aria-level`, `aria-setsize`, `aria-posinset`, `aria-expanded`), colour by branch over
-  the ring-ordered chart tokens, hatched hidden space and a dashed "not counted yet" ghost, folding by angle and count with a segment cap,
-  a live mode that coalesces updates to four per second, the tree keyboard model, and loading, empty and error states. Exports are one
-  declared line each in `chart/public-api.ts`; a gallery section shows every state. The tween between centres is a 100 to 180 ms cross-fade
-  (`tweenLayouts` is not built yet); `pd-table` tree rows (spec section 7) are a separate change.
-
 ### `providePaddockMaterial`: tooltips wait 500 ms
 - `providePaddockMaterial()` provides `MAT_TOOLTIP_DEFAULT_OPTIONS` with `showDelay: 500` (`PADDOCK_TOOLTIP_OPTIONS`), the design guide's delay for the tooltip every icon-only button carries. Every app that provides it gets the delay without setting it per tooltip.
 
