@@ -33,6 +33,23 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### `@decryp7/paddock-ui/schedule` exports its time-field building blocks
 - New exports: `PdKeepTimeOnEscape` (the `pdKeepTime` directive: Escape in a closed time field keeps the time), `TIME_PROVIDERS`, `timeToDate`, `dateToTime`, `timeOptions` and `TimeProblems`, so an app can put a `mat-timepicker` in its own form with the editors' behaviour (24-hour times, the half-hour list, a problem shown once the field was left). Dyno's `dy-time-field` is the first user.
+### The shell owns the start (ADR 0029; shared API, breaking)
+- `paddock-shell`: `Builder::tray(f)`, `Builder::launch(LaunchArgs)` and `Builder::add_to(tauri::Builder)` open the tray
+  and the main window from Tauri's own `setup`, after every plugin is set up (a window built inside a plugin hook
+  deadlocked the main thread: Spotter started with no window). A start that cannot open its window is logged and exits
+  with code 1. `Builder::setup` no longer opens windows. New `paddock_shell::testing::start` (feature `mock-runtime`):
+  the start test every app runs. The shell's plugin hooks are marked; a Dock click with no window and a file opened from
+  Finder open their window after the hook.
+- `paddock-shell`: `logging::install` (and `install_in`): the app's `paddock-log` in its folders with the level from
+  Settings; every app on the shell calls it first in `run`. A shell built with `build()` that has a tray or a launch
+  fails the start ("tray/launch need Builder::add_to"); `testing::start` names a start that panicked.
+- `paddock-commands`: `plugin_hook` (`plugin_hook_scope`, `in_plugin_hook`, `INSIDE_PLUGIN_HOOK`).
+- `paddock-window`: `after_plugin_hook` (window work after the hook, in order), `exit_with`, `HeadlessTray`; windows and
+  the tray popover refuse to be built inside a plugin hook with the new `WindowErrorCode` `insidePluginHook`.
+- `paddock-dialogs`, `paddock-panels`: dialogs, pop-outs and the drag ghost refuse to be built inside a plugin hook, with
+  the new `DialogErrorCode` / `PanelErrorCode` `insidePluginHook`.
+- `paddock-workbench`: its plugin hooks are marked.
+- Spotter, the shell demo and the workbench demo use the new start; conformance C50 checks every app on the shell.
 
 ### The dialog frame's filled button uses the page primary's colours
 - `.pd-frame-btn--filled` takes `--pd-accent-fill` with `--pd-on-accent`, the same as `.pd-btn--primary` and Material's filled button, so a dialog's primary and a page's primary are one colour in both schemes (`--pd-accent-control` is for toggles and checkmarks).

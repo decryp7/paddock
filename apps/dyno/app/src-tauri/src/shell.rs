@@ -14,7 +14,7 @@ use dyno_core::settings::Settings;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, Wry};
+use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
 
 /// The push channels of `tauri-backend.ts`.
 pub mod events {
@@ -70,9 +70,49 @@ pub fn initial_items(items: &dyno_core::widgets::TrayItems) -> Vec<crate::tray_m
     }
 }
 
+/// What the shell draws in the tray: the native icons in the app ([`NativePixels`]), nothing in a test ([`NoPixels`]).
+pub trait TrayPixels<R: Runtime>: Send + Sync {
+    /// The tray items changed.
+    fn sync_items(&self, app: &AppHandle<R>, specs: &[crate::tray_model::ItemSpec]) -> Result<(), String>;
+    /// Draws one item's frame.
+    fn paint(&self, app: &AppHandle<R>, item: &str, frame: &crate::tray_model::Frame);
+    /// Shows that the agent is not connected.
+    fn show_disconnected(&self, app: &AppHandle<R>);
+}
+
+/// The tray icons of the menu bar or notification area.
+pub struct NativePixels;
+
+impl TrayPixels<Wry> for NativePixels {
+    fn sync_items(&self, app: &AppHandle<Wry>, specs: &[crate::tray_model::ItemSpec]) -> Result<(), String> {
+        crate::tray::sync_items(app, specs).map_err(|e| e.to_string())
+    }
+    fn paint(&self, app: &AppHandle<Wry>, item: &str, frame: &crate::tray_model::Frame) {
+        crate::tray::paint(app, item, frame);
+    }
+    fn show_disconnected(&self, app: &AppHandle<Wry>) {
+        crate::tray::show_disconnected(app);
+    }
+}
+
+/// Draws nothing (a test: no icon reaches the desktop).
+pub struct NoPixels;
+
+impl<R: Runtime> TrayPixels<R> for NoPixels {
+    fn sync_items(&self, _: &AppHandle<R>, _: &[crate::tray_model::ItemSpec]) -> Result<(), String> {
+        Ok(())
+    }
+    fn paint(&self, _: &AppHandle<R>, _: &str, _: &crate::tray_model::Frame) {}
+    fn show_disconnected(&self, _: &AppHandle<R>) {}
+}
+
+/// The installed app's shell glue (the commands' state).
+pub type Shell = ShellOf<Wry>;
+
 /// The shell's state shared by the link, the commands and the tray.
-pub struct Shell {
-    app: AppHandle<Wry>,
+pub struct ShellOf<R: Runtime> {
+    app: AppHandle<R>,
+    pixels: Arc<dyn TrayPixels<R>>,
     tray: Mutex<TrayItems>,
     throttle: Mutex<Throttle>,
     /// Updates received since the shell started.
@@ -84,15 +124,16 @@ pub struct Shell {
     /// `notifications` as last read from the settings (desktop notifications for new alarms).
     notifications: std::sync::atomic::AtomicBool,
     /// The service health of the agent link (the status bar chip).
-    hub: Hub<Wry>,
+    hub: Hub<R>,
 }
 
-impl Shell {
-    /// The shell for `app`; `hub` reports the agent link to the shell's service health.
-    pub fn new(app: AppHandle<Wry>, hub: Hub<Wry>) -> Arc<Shell> {
+impl<R: Runtime> ShellOf<R> {
+    /// The shell for `app`; `hub` reports the agent link to the shell's service health; `pixels` draws the tray.
+    pub fn new(app: AppHandle<R>, hub: Hub<R>, pixels: Arc<dyn TrayPixels<R>>) -> Arc<ShellOf<R>> {
         let size = if cfg!(target_os = "macos") { 44 } else { 32 };
-        Arc::new(Shell {
+        Arc::new(ShellOf {
             app,
+            pixels,
             tray: Mutex::new(TrayItems::new(initial_items(&Settings::default().tray_items), size)),
             throttle: Mutex::new(Throttle::new(TRAY_INTERVAL)),
             updates: AtomicU64::new(0),
@@ -107,7 +148,7 @@ impl Shell {
     pub fn set_items(&self, specs: Vec<crate::tray_model::ItemSpec>) {
         let changed = self.tray.lock().unwrap_or_else(|e| e.into_inner()).set_specs(specs.clone());
         if changed {
-            if let Err(e) = crate::tray::sync_items(&self.app, &specs) {
+            if let Err(e) = self.pixels.sync_items(&self.app, &specs) {
                 logging::info(&format!("could not update the tray items: {e}"));
             }
         }
@@ -164,7 +205,7 @@ impl Shell {
     }
 }
 
-impl Sink for Shell {
+impl<R: Runtime> Sink for ShellOf<R> {
     fn live(&self, update: LiveUpdate) {
         let n = self.updates.fetch_add(1, Ordering::SeqCst) + 1;
         if n == 1 || n.is_multiple_of(LOG_EVERY) {
@@ -183,7 +224,7 @@ impl Sink for Shell {
                 .unwrap_or_else(|e| e.into_inner())
                 .frames(&update, crate::tray::dark_taskbar());
             for (id, frame) in frames {
-                crate::tray::paint(&self.app, &id, &frame);
+                self.pixels.paint(&self.app, &id, &frame);
             }
         }
         // With no window open nothing listens: skip serialising a (large) update for nobody.
@@ -238,7 +279,7 @@ impl Sink for Shell {
         *self.status.lock().unwrap_or_else(|e| e.into_inner()) = Some(status.clone());
         self.hub.report(&status);
         if !matches!(status.state, crate::dto::AgentState::Running) {
-            crate::tray::show_disconnected(&self.app);
+            self.pixels.show_disconnected(&self.app);
         }
         self.emit(events::AGENT, status);
     }

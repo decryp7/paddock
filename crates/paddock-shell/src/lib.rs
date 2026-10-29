@@ -33,11 +33,14 @@
 
 mod builder;
 mod commands;
+pub mod logging;
 pub mod manifest;
 pub mod notifications;
 pub mod permissions;
 mod prefs;
 pub mod setup;
+#[cfg(feature = "mock-runtime")]
+pub mod testing;
 
 pub use builder::{AppIdentity, Builder, FirstRun, ServicePart};
 pub use commands::{VersionReply, shell_version};

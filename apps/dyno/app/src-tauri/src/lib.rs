@@ -72,14 +72,25 @@ pub enum Place {
 }
 
 /// The shell plugin with Dyno's parts.
-pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>) -> Builder<R> {
+pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn shell::TrayPixels<R>>) -> Builder<R> {
     let attach = hub.clone();
+    let agent_hub = hub.clone();
+    let installed = matches!(place, Place::Installed);
+    let dirs = match &place {
+        Place::Installed => dyno_agent::paths::Dirs::current(),
+        Place::Test { dir } => dyno_agent::paths::Dirs::at(dir.join("data")),
+    };
     let mut builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))
         .app_commands(&COMMANDS)
         .dialogs(&[&dialogs::DIALOGS])
         .health(hub.services())
         .setup(move |app| {
             attach.attach(app);
+            Ok(())
+        })
+        // The agent link: state only, no window (the shell opens the tray and the window after every plugin, ADR 0029).
+        .setup(move |app| {
+            agent_setup(app, &agent_hub, dirs, pixels, installed)?;
             Ok(())
         });
     let test_dir = match &place {
@@ -164,48 +175,83 @@ pub fn invoke_handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + '
         .wrap(handler!())
 }
 
+/// Dyno on `builder` (after the plugins already on it): the shell plugin `shell`, the tray drawn by `tray_backend`, the
+/// main window for `launch` (none for `--hidden` with a tray). The start `run` uses (it adds Dyno's guarded commands)
+/// and the start test composes.
+pub fn app<R: Runtime>(
+    builder: tauri::Builder<R>,
+    shell: Builder<R>,
+    launch: paddock_window::launch::LaunchArgs,
+    tray_backend: impl paddock_window::tauri::TrayBackend<R>,
+) -> tauri::Builder<R> {
+    // The shell opens both after every plugin is set up (ADR 0029: a window built inside a plugin hook deadlocks).
+    shell.tray(move |_| tray::tray(tray_backend)).launch(launch).add_to(builder)
+}
+
+/// No agent program in a test: the link reports it as not running (nothing is started, rule 7).
+struct NoAgent;
+
+impl link::Launcher for NoAgent {
+    fn launch(&self) -> Result<(), String> {
+        Err("no agent in a test".into())
+    }
+    fn finish(&self, _: std::time::Duration) {}
+}
+
+/// Dyno's own log, the shell glue and the agent link in `dirs`; the installed app also starts the agent process, keeps
+/// late windows told about it and repairs its service registration.
+fn agent_setup<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    hub: &health::Hub<R>,
+    dirs: dyno_agent::paths::Dirs,
+    pixels: Arc<dyn shell::TrayPixels<R>>,
+    installed: bool,
+) -> std::io::Result<()> {
+    logging::init(&dirs.logs());
+    logging::info(&format!("Dyno {VERSION} starting (data folder: {})", dirs.root().display()));
+    let events = shell::ShellOf::new(app.clone(), hub.clone(), pixels);
+    let launcher: Box<dyn link::Launcher> = if installed {
+        Box::new(ProcessLauncher::new(login::agent_program))
+    } else {
+        Box::new(NoAgent)
+    };
+    let link = AgentLink::new(dirs, VERSION, events.clone(), launcher);
+    app.manage(events.clone());
+    app.manage(link.clone());
+    app.manage(commands::PickedFolders::default());
+    link.spawn()?;
+    if !installed {
+        return Ok(());
+    }
+    let beat = events.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        beat.replay_status();
+    });
+    // After an update launchd may refuse the registered agent (a rebuilt app has a new code identity on macOS) or
+    // keep the old job: replace the registration once per version and whenever launchd says it is stale
+    // (`service_repair`), in the background, so measuring resumes without the user's help.
+    let repair = link.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        match login::platform_service().repair(&|| repair.connected()) {
+            Ok(true) => logging::info("registered the agent service again (a new version, or launchd refused the old registration)"),
+            Ok(false) => {}
+            Err(e) => logging::info(&format!("the agent service could not be registered again: {e}")),
+        }
+    });
+    Ok(())
+}
+
 /// Starts the app.
 pub fn run() {
+    // First: the shared crates' log lines (the start's error among them) reach Dyno's daily log file (paddock-log); Dyno's
+    // own lines stay in its agent-side log.
+    let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
     let cwd = std::env::current_dir().ok();
     let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
     let hub = health::Hub::<tauri::Wry>::default();
-    let setup_hub = hub.clone();
-    let shell = shell::<tauri::Wry>(Place::Installed, &hub).setup(move |app| {
-        let dirs = dyno_agent::paths::Dirs::current();
-        logging::init(&dirs.logs());
-        logging::info(&format!("Dyno {VERSION} starting (data folder: {})", dirs.root().display()));
-        let events = shell::Shell::new(app.clone(), setup_hub.clone());
-        let launcher = ProcessLauncher::new(login::agent_program);
-        let link = AgentLink::new(dirs, VERSION, events.clone(), Box::new(launcher));
-        app.manage(events.clone());
-        app.manage(link.clone());
-        app.manage(commands::PickedFolders::default());
-        let items = shell::initial_items(&dyno_core::settings::Settings::default().tray_items);
-        if !tray::create(app, items) {
-            logging::info("no tray icon; closing the window will quit the app");
-        }
-        link.spawn()?;
-        let beat = events.clone();
-        std::thread::spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_secs(3));
-            beat.replay_status();
-        });
-        // Started at log-in (`--hidden`): stay in the tray without a window (only when there is a tray to come back from).
-        paddock_window::tauri::start(app, &launch)?;
-        // After an update launchd may refuse the registered agent (a rebuilt app has a new code identity on macOS) or
-        // keep the old job: replace the registration once per version and whenever launchd says it is stale
-        // (`service_repair`), in the background, so measuring resumes without the user's help.
-        let repair = link.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(5));
-            match login::platform_service().repair(&|| repair.connected()) {
-                Ok(true) => logging::info("registered the agent service again (a new version, or launchd refused the old registration)"),
-                Ok(false) => {}
-                Err(e) => logging::info(&format!("the agent service could not be registered again: {e}")),
-            }
-        });
-        Ok(())
-    });
+    let shell = shell::<tauri::Wry>(Place::Installed, &hub, Arc::new(shell::NativePixels));
     let builder = tauri::Builder::default()
         // First: a second launch shows the running app's window instead of starting another app.
         .plugin(tauri_plugin_single_instance::init(paddock_window::tauri::second_instance))
@@ -216,9 +262,9 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![paddock_window::launch::HIDDEN_FLAG]),
-        ))
-        .plugin(shell.build())
-        .invoke_handler(invoke_handler());
+        ));
+    let items = shell::initial_items(&dyno_core::settings::Settings::default().tray_items);
+    let builder = app(builder, shell, launch, tray::DynoTray::new(items)).invoke_handler(invoke_handler());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     let builder = builder.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated);

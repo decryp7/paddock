@@ -733,3 +733,21 @@ the pages had two mechanisms, every UI request still had a 15 s timer, and a log
 killed shell's own children keep its pipe open. Anything that waits for another read waits on a `Condvar` that Cancel also wakes.
 **Also:** a store that every dialog window shares must not ask for the shell's jobs store at construction (it sends a request the
 dialog's contract may not declare); resolve it when a job starts.
+
+## 2026-10-29: a window built inside a plugin hook deadlocks the main thread (Spotter, Dyno, Pitcrew, the demos)
+
+Spotter 1.0's release build never opened a window: the process kept running, `sample` showed the main thread waiting
+on a mutex and nothing reached the log. Symbolised (a debug build in a throwaway Tart VM), the main thread was in
+`tauri::Builder::build` → `AppManager::initialize_plugins` → the shell plugin's `setup` → the app's set-up closure →
+`paddock_window::tauri::start` → `create_main` → `WebviewManager::prepare_pending_webview` →
+`Mutex<PluginStore>::lock`. Tauri 2 holds its plugin store while it runs every plugin's `setup`, `on_event`,
+`on_page_load`, `on_window_ready` and `on_webview_ready`, and building a webview locks that store again on the same
+thread. Not VM-specific: the same deadlock reproduces on Tauri's mock runtime. Five apps had the same mistake (Spotter,
+Dyno, Pitcrew's shell branch and both demos) and the shell's run-event hook a sixth (Dock click, Finder "Open with").
+**Rule (ADR 0029):** the shell opens the start (`Builder::tray`, `Builder::launch`, `Builder::add_to`); apps never call
+`paddock_window::tauri::start`; window work a hook triggers runs after it (`after_plugin_hook`); every shared plugin
+marks its hooks with `plugin_hook_scope`, and Paddock's window builders refuse to build inside one. Each app tests its
+composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor Dyno installed a backend for the `log`
+crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
+(`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
+not by guessing at the VM.
