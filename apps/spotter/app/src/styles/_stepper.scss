@@ -1,0 +1,19 @@
+/* The watch stepper (Material's mat-stepper) on the family's spacing: tighter headers and no inset on the content, so the five
+   headers and the step fit beside the sidebar at 900 px. Colours come from the --mat-stepper-* tokens set on .stepper by the page. */
+.stepper {
+  --mat-stepper-header-height: 56px;
+
+  .mat-step-header {
+    padding: calc((var(--mat-stepper-header-height) - 24px) / 2) var(--pd-space-2);
+  }
+  .mat-stepper-horizontal-line {
+    min-width: var(--pd-space-4);
+  }
+  .mat-horizontal-content-container {
+    padding: var(--pd-space-4) 0 0;
+  }
+  .mat-step-icon mat-icon {
+    width: 16px;
+    height: 16px;
+  }
+}

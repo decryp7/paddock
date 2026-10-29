@@ -153,6 +153,7 @@ export const EditorStore = signalStore(
       },
       setStep(step: EditorStep): void {
         patchState(store, { step });
+        if (step === 'review' && !store.draft().name.trim()) update((d) => ({ ...d, name: suggestName(store.kind(), d.source.values) }));
         if ((step === 'notify' || step === 'review') && store.schedulePreview().value === null && !store.schedulePreview().loading) void runSchedulePreview();
         schedule();
         if (step === 'configure' || step === 'versions') {
@@ -161,9 +162,7 @@ export const EditorStore = signalStore(
       },
       next(): void {
         const i = store.stepIndex();
-        const to = STEPS[Math.min(i + 1, STEPS.length - 1)]?.id ?? 'review';
-        this.setStep(to);
-        if (to === 'review' && !store.draft().name.trim()) update((d) => ({ ...d, name: suggestName(store.kind(), d.source.values) }));
+        this.setStep(STEPS[Math.min(i + 1, STEPS.length - 1)]?.id ?? 'review');
       },
       back(): void {
         this.setStep(STEPS[Math.max(store.stepIndex() - 1, 0)]?.id ?? 'source');
