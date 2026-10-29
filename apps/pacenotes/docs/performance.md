@@ -43,3 +43,18 @@ on a 64 GB machine.
 - **Quality, doc recall@5:** BM25 0.250; potion-code 0.330; BM25 + potion-code 0.320; BGE 0.447; Qwen 0.773.
 - **Verdict:** BM25 + potion-code reaches 0.750 concept hit@5 and +28% doc recall, so it meets the bar.
 - **Notes:** about 8 s per 1M lines with Model2Vec, against about 50 min with BGE. Source: [ADR 0001](adr/0001-embeddings.md).
+
+## 2026-10-30, `pacenotes-git` open: the symbolic-link walk of the git folder
+
+Rule 48/51; helper: `PN_WALK_REPO=<repo> cargo test -p pacenotes-git --test it -- --ignored --nocapture measure_open`.
+Machine: the development Mac mini under normal load; one run each, second run shown where it differs. Repository: the Paddock
+monorepo's main checkout (about 92,000 packed objects in 3 packs, 5,203 loose objects, many linked worktrees).
+
+| Variant | `open()` time |
+|---|---|
+| walk everything under `.git` (first version) | 698 ms |
+| walk only `objects/`, `refs/` and `info/`, refuse a link at any other top-level name, skip hooks/logs/worktrees/modules | 25 to 28 ms |
+
+The folders skipped are never opened by gix. Debrief's checkout (2 packs, 3 loose objects), full walk: 143 ms. The cost is
+dominated by loose-object files and linked worktrees; a repository with hundreds of thousands of loose objects would still
+pay one `lstat` each, bounded by the 1,000,000-entry cap.
