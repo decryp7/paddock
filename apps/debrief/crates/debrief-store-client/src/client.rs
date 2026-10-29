@@ -94,6 +94,9 @@ pub struct WorkerConfig {
     pub tuning: protocol::StoreTuning,
     /// Hears what the host's memory watcher sees of the worker (the warning at 80% of the cap, the stop, the peak).
     pub memory_listener: Option<debrief_ipc::memory_watch::MemoryListener>,
+    /// Extra environment for the worker (and the plugin processes it starts). Tests that kill a worker on purpose point
+    /// `TMPDIR` at a folder they own, since a killed host cannot remove the private folders it made.
+    pub env: Vec<(String, String)>,
 }
 
 impl WorkerConfig {
@@ -111,6 +114,7 @@ impl WorkerConfig {
             memory_mode: protocol::MemoryMode::Normal,
             tuning: protocol::StoreTuning::default(),
             memory_listener: None,
+            env: Vec::new(),
         }
     }
 }
@@ -269,13 +273,14 @@ impl StoreWorker {
     /// Prepares the worker; it starts on the first call.
     pub fn new(cfg: WorkerConfig) -> StoreResult<StoreWorker> {
         let mut spawn = SpawnSpec::new(cfg.exe.clone(), "the store worker");
-        spawn.endpoint_prefix = "debrief-store".into();
+        spawn.endpoint_prefix = debrief_ipc::endpoint::prefix::STORE.into();
         // Imports and queries run at normal priority: they are what the user waits for.
         spawn.below_normal_priority = false;
         spawn.memory_listener = cfg.memory_listener.clone();
         if let Some(kv) = library_path_env(cfg.lib_dir.as_deref()) {
             spawn.env.push(kv);
         }
+        spawn.env.extend(cfg.env.iter().cloned());
         if cfg!(windows) {
             spawn.env.extend(
                 CONTAINER_ENV

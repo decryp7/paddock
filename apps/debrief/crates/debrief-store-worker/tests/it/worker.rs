@@ -137,10 +137,48 @@ fn worker() -> StoreWorker {
     worker_in(MemoryMode::Normal)
 }
 
+thread_local! {
+    /// The private temp folders of this test's workers, removed when the test's thread ends (also on a panic).
+    static WORKER_TMP: std::cell::RefCell<Vec<debrief_ipc::testing::Confined>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A worker config whose processes (and the plugin processes they start) make every temp file and endpoint folder in a
+/// folder this test owns. A test that kills the worker cannot rely on it removing the private folders it made for its
+/// plugins' sockets (`debrief-plugin-*`, made before the handshake); they go with the folder instead of staying in a
+/// shared one (see `debrief_ipc::testing`).
+fn confined(exe: &str) -> WorkerConfig {
+    let mut cfg = WorkerConfig::new(exe);
+    let dir = debrief_ipc::testing::confined_tmp();
+    cfg.env.extend(dir.env());
+    WORKER_TMP.with(|t| t.borrow_mut().push(dir));
+    cfg
+}
+
 fn worker_in(mode: MemoryMode) -> StoreWorker {
-    let mut cfg = WorkerConfig::new(env!("CARGO_BIN_EXE_debrief-store-worker"));
+    let mut cfg = confined(env!("CARGO_BIN_EXE_debrief-store-worker"));
     cfg.memory_mode = mode;
     StoreWorker::new(cfg).unwrap()
+}
+
+/// Regression (macOS CI temp-leak check): the confined folder was inside macOS' long temp folder, so the endpoints of the
+/// killed worker's plugins (socket path over 96 bytes) fell back to `/tmp`, where nothing cleaned them up. It must be a
+/// folder every endpoint prefix fits in, and it is removed when the test's thread ends.
+#[test]
+fn a_workers_temp_folder_fits_every_endpoint_and_is_removed_with_its_test() {
+    use debrief_ipc::endpoint::{fits, prefix};
+    let (path, env) = std::thread::spawn(|| {
+        let cfg = confined("/x/worker");
+        let path = PathBuf::from(&cfg.env.iter().find(|(k, _)| k == "TMPDIR").unwrap().1);
+        assert!(path.is_dir());
+        for p in [prefix::DEFAULT, prefix::PLUGIN, prefix::PLUGIN_TEST, prefix::AI] {
+            assert!(fits(&path, p), "{p} does not fit in {path:?}");
+        }
+        (path, cfg.env)
+    })
+    .join()
+    .unwrap();
+    assert!(env.iter().any(|(k, v)| k == "XDG_RUNTIME_DIR" && Path::new(v) == path));
+    assert!(!path.exists(), "the folder is removed when the test's thread ends");
 }
 
 #[test]
@@ -476,7 +514,7 @@ fn a_store_open_in_another_worker_is_locked_with_a_typed_error() {
 /// start (here after a crash) without a new client.
 #[test]
 fn the_worker_starts_with_its_tuning_and_the_next_start_takes_a_changed_one() {
-    let mut cfg = WorkerConfig::new(env!("CARGO_BIN_EXE_debrief-store-worker"));
+    let mut cfg = confined(env!("CARGO_BIN_EXE_debrief-store-worker"));
     let first = StoreTuning {
         parse_threads: Some(2),
         duck_threads: Some(3),

@@ -10,7 +10,8 @@
 //!   lockdown (JSON), so tests know what this system enforces; `read <path>` → `ok <bytes>` or the error;
 //!   `connect <ip:port>` → opens a TCP connection, `ok` or the error.
 //!
-//! Flags: `--exit-now` (dies before connecting), `--no-connect` (reads the bootstrap, never connects),
+//! Flags: `--leak-endpoint=<prefix>` (makes a private endpoint, prints its address and exits without dropping it),
+//! `--exit-now` (dies before connecting), `--no-connect` (reads the bootstrap, never connects),
 //! `--bad-token` (connects with a wrong token), `--relay` (starts a copy of itself that connects instead: a
 //! process the host did not start), `--garbage` (sends bytes that are not a frame after the handshake),
 //! `--oversize` (announces a 1 GiB frame after the handshake), `--say=<text>` (a line on stderr first),
@@ -107,6 +108,12 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     for say in args.iter().filter_map(|a| a.strip_prefix("--say=")) {
         eprintln!("{say}");
+    }
+    if let Some(prefix) = args.iter().find_map(|a| a.strip_prefix("--leak-endpoint=")) {
+        // A host that makes its private endpoint and then ends without running destructors (a crash, `exit`).
+        let l = debrief_ipc::link::Listener::create(prefix, debrief_ipc::link::Access::Owner).expect("endpoint");
+        println!("{}", l.address());
+        std::process::exit(0);
     }
     if args.iter().any(|a| a == "--exit-now") {
         std::process::exit(3);

@@ -744,7 +744,7 @@ fn child_spec(manifest: &Manifest, spec: &PluginSpec, granted: &[Permission], el
     let mut s = SpawnSpec::new(spec.exe.clone(), label);
     s.args = spec.args.clone();
     s.current_dir = Some(std::env::temp_dir());
-    s.endpoint_prefix = "debrief-plugin".into();
+    s.endpoint_prefix = debrief_ipc::endpoint::prefix::PLUGIN.into();
     s.connect_window = spec.connect_window;
     s.log = if elevated { None } else { spec.log.clone() };
     s.sandbox = match &spec.home {
