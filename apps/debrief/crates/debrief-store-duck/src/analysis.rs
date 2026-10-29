@@ -420,6 +420,51 @@ impl<'c> EventStream<'c> {
     }
 }
 
+/// An [`EventStream`] whose statement starts at the first row asked for (or at `finish`). A failing start ends the
+/// stream and is returned by [`Deferred::finish`], like an engine error while streaming.
+pub(crate) struct Deferred<'c> {
+    start: Option<Box<dyn FnOnce() -> StoreResult<EventStream<'c>> + 'c>>,
+    stream: Option<EventStream<'c>>,
+    error: Option<StoreError>,
+}
+
+impl<'c> Deferred<'c> {
+    pub(crate) fn new(start: impl FnOnce() -> StoreResult<EventStream<'c>> + 'c) -> Deferred<'c> {
+        Deferred {
+            start: Some(Box::new(start)),
+            stream: None,
+            error: None,
+        }
+    }
+
+    fn begin(&mut self) {
+        if let Some(start) = self.start.take() {
+            match start() {
+                Ok(s) => self.stream = Some(s),
+                Err(e) => self.error = Some(e),
+            }
+        }
+    }
+
+    pub(crate) fn finish(mut self) -> StoreResult<Coverage> {
+        self.begin();
+        match (self.error.take(), self.stream.take()) {
+            (Some(e), _) => Err(e),
+            (None, Some(s)) => s.finish(),
+            (None, None) => unreachable!("a started stream or its error"),
+        }
+    }
+}
+
+impl Iterator for Deferred<'_> {
+    type Item = OwnedRow;
+
+    fn next(&mut self) -> Option<OwnedRow> {
+        self.begin();
+        self.stream.as_mut()?.next()
+    }
+}
+
 impl Iterator for EventStream<'_> {
     type Item = OwnedRow;
 
@@ -851,8 +896,11 @@ impl Inner {
             fields: None,
         };
         let sql = |f: &SqlFilter, q: &CompiledQuery| format!("SELECT {} FROM {FROM} WHERE {}", self.select_list(f, q, &cols), f.all_sql());
-        let mut a = EventStream::new(&conn_a, &sql(&fa, &qa), self.schema.clone(), &ctx, &qa, fa.exact, MAX_ANALYSED)?;
-        let mut b = EventStream::new(&conn_b, &sql(&fb, &qb), self.schema.clone(), &ctx, &qb, fb.exact, MAX_ANALYSED)?;
+        // The sides are read one after the other, so the second statement starts when the first is drained: started
+        // together they both hold their scan buffers in DuckDB's memory limit for the whole comparison.
+        let (sql_a, sql_b) = (sql(&fa, &qa), sql(&fb, &qb));
+        let mut a = Deferred::new(|| EventStream::new(&conn_a, &sql_a, self.schema.clone(), &ctx, &qa, fa.exact, MAX_ANALYSED));
+        let mut b = Deferred::new(|| EventStream::new(&conn_b, &sql_b, self.schema.clone(), &ctx, &qb, fb.exact, MAX_ANALYSED));
         let result = analysis::compare_windows(&mut a, &mut b, &CompareConfig::default());
         let coverage = a.finish()?.and(b.finish()?);
         Ok(Analyzed { result, coverage })
