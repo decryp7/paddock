@@ -1314,3 +1314,30 @@ test("every kit app's nightly and manual runs build the installers when the plan
     assert.match(push, new RegExp(`tags: \\["${app}-v\\*"\\]`), `${app}: its tag still triggers`);
   }
 });
+
+// Whether a skipped release job came from a skipped need or from an empty plan output (run 6864: the plan logged
+// "pitwall: affected (rust, ui)", yet installers were skipped): the output must reach the job, end to end.
+test("the release workflows' plan output reaches their jobs: the job maps the plan action's `run`, which the decide step writes", () => {
+  const action = read(join(ACTIONS, 'plan', 'action.yml'));
+  assert.match(action, /^outputs:\n  run:\n(?:    .*\n)*?    value: \$\{\{ steps\.decide\.outputs\.run \}\}$/m, 'the action exposes the decide step\'s run');
+  for (const app of KIT_APPS) {
+    const plan = parseJobs(read(join(WORKFLOWS, `${app}-release.yml`))).find((j) => j.id === 'plan').text;
+    assert.match(plan, /^    outputs:\n      run: \$\{\{ steps\.plan\.outputs\.run \}\}$/m, `${app}: the job output is the step's`);
+    assert.match(plan, /- id: plan\n\s+uses: \.\/\.gitea\/actions\/plan\n\s+with:\n\s+app: (\S+)/, `${app}: the step with id plan is the plan action`);
+    assert.equal(/- id: plan\n\s+uses: \.\/\.gitea\/actions\/plan\n\s+with:\n\s+app: (\S+)/.exec(plan)[1], app);
+  }
+  // The decide step itself, as the nightly runs it for Pitwall: run=true reaches $GITHUB_OUTPUT (and nothing else is
+  // written there by the scripts it calls with their own output file).
+  const step = action.slice(action.indexOf('- id: decide'));
+  const body = step.slice(step.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n').replaceAll('${{ github.action_path }}', join(ACTIONS, 'plan'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-plan-decide-')));
+  const out = join(root, 'output');
+  writeFileSync(out, '');
+  const r = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', body], {
+    cwd: PADDOCK,
+    encoding: 'utf8',
+    env: { ...process.env, EVENT: 'schedule', REF: 'refs/heads/main', SHA: 'x', MAIN_REF: 'refs/heads/main', GREEN: '', APP: 'pitwall', TAG_PATTERN: 'pitwall-v*', PLAN_TOKEN: '', GITHUB_EVENT_NAME: 'schedule', GITHUB_REF: 'refs/heads/main', GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: '' },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(out, 'utf8'), 'run=true\n', 'exactly the output the job maps');
+});
