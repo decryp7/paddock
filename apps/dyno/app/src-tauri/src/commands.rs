@@ -19,8 +19,6 @@ pub fn parse_request(value: Value) -> Result<Request, CommandError> {
     match request {
         // Only the app's own shutdown path may stop the agent.
         Request::Shutdown => Err(CommandError::bad("The window may not stop the agent.")),
-        // A watched folder is added only through `add_watched_folder`, which asks the person in the OS folder dialog.
-        Request::AddWatchedFolder { .. } => Err(CommandError::bad("A folder to watch is chosen in the folder dialog.")),
         // The report goes only where the OS save dialog said (`save_inventory_report`), never to a path the webview names.
         Request::SaveInventoryReport { .. } => Err(CommandError::bad("Use the Export button: it asks where to save the report.")),
         r => Ok(r),
@@ -131,6 +129,23 @@ pub async fn save_inventory_report(
     .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
 }
 
+/// The file finder and a folder scan of the disk map look only in a folder the person picked in the OS dialog
+/// (`pick_folder`); a volume scan names a volume the agent itself listed.
+fn check_picked(picked: &PickedFolders, request: &Request) -> Result<(), CommandError> {
+    let folder = match request {
+        Request::FindFiles { query } => &query.folder,
+        Request::StartDiskScan {
+            target: dyno_core::disk::scan::DiskTarget::Folder { path },
+        } => path,
+        _ => return Ok(()),
+    };
+    if picked.allows(folder) {
+        Ok(())
+    } else {
+        Err(CommandError::bad("Choose the folder with the Choose folder button first."))
+    }
+}
+
 /// The one command of the engine contract: `invoke('dyno', { request })`.
 #[tauri::command]
 pub async fn dyno(
@@ -146,12 +161,7 @@ pub async fn dyno(
         request,
         Request::LookupIp { .. } | Request::WebSearch { .. } | Request::VirusTotalUrl { .. }
     );
-    // The file finder looks only in a folder the person picked in the OS dialog (`pick_folder`).
-    if let Request::FindFiles { query } = &request {
-        if !picked.allows(&query.folder) {
-            return Err(CommandError::bad("Choose the folder with the Choose folder button first."));
-        }
-    }
+    check_picked(&picked, &request)?;
     let (link, shell, label) = (link.inner().clone(), shell.inner().clone(), webview.label().to_string());
     let value = tauri::async_runtime::spawn_blocking(move || handle(&link, &shell, &label, request))
         .await
@@ -292,40 +302,6 @@ pub async fn save_issues(app: AppHandle, link: State<'_, Arc<AgentLink>>, days: 
     .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
 }
 
-/// "Add folder" on the Watched folders page: the OS folder dialog (so the folder is one the person chose, never one the
-/// webview named), then the agent adds it switched off. `null` when they cancel.
-#[tauri::command]
-pub async fn add_watched_folder(
-    app: AppHandle,
-    link: State<'_, Arc<AgentLink>>,
-    template: Option<String>,
-    keep_for_secs: u32,
-    recursive: bool,
-) -> Result<Value, CommandError> {
-    let link = link.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        use tauri_plugin_dialog::DialogExt;
-        let Some(chosen) = app.dialog().file().set_title("Choose the folder to watch").blocking_pick_folder() else {
-            return Ok(Value::Null);
-        };
-        let path = chosen
-            .into_path()
-            .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
-        let path = path.to_string_lossy().into_owned();
-        let reply = link.call(Request::AddWatchedFolder {
-            path,
-            template,
-            keep_for_secs,
-            recursive,
-        })?;
-        reply
-            .into_json()
-            .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
-    })
-    .await
-    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
-}
-
 /// The tray dropdown's "Open Dyno".
 #[tauri::command]
 pub async fn tray_open_main(app: AppHandle) -> Result<(), CommandError> {
@@ -407,6 +383,22 @@ mod tests {
     }
 
     #[test]
+    fn a_disk_scan_of_a_folder_needs_a_picked_folder_but_a_volume_does_not() {
+        use serde_json::json;
+        let picked = PickedFolders::default();
+        let dir = std::env::temp_dir().to_string_lossy().into_owned();
+        let folder = parse_request(json!({"startDiskScan": {"target": {"folder": {"path": dir}}}})).unwrap();
+        assert!(check_picked(&picked, &folder).is_err(), "nobody picked it");
+        picked.remember(&dir);
+        assert!(check_picked(&picked, &folder).is_ok());
+        let volume = parse_request(json!({"startDiskScan": {"target": {"volume": {"id": "/"}}}})).unwrap();
+        assert!(check_picked(&PickedFolders::default(), &volume).is_ok());
+        assert!(check_picked(&PickedFolders::default(), &Request::WhySlow).is_ok());
+        let finder = parse_request(json!({"findFiles": {"query": {"folder": dir, "minBytes": 1}}})).unwrap();
+        assert!(check_picked(&PickedFolders::default(), &finder).is_err());
+    }
+
+    #[test]
     fn the_extras_requests_have_the_shape_the_ui_sends() {
         use serde_json::json;
         for name in [
@@ -425,11 +417,6 @@ mod tests {
             parse_request(json!({"changes": {"query": {"hours": 24}}})).unwrap(),
             Request::Changes { query } if query.hours == 24
         ));
-        assert!(matches!(
-            parse_request(json!({"removeFoundFiles": {"scanId": "s", "ids": ["a"], "mode": "quarantine"}})).unwrap(),
-            Request::RemoveFoundFiles { .. }
-        ));
-        assert!(parse_request(json!({"removeFoundFiles": {"scanId": "s", "ids": ["a"], "mode": "shred"}})).is_err());
     }
 
     #[test]
@@ -442,48 +429,15 @@ mod tests {
             parse_request(json!({"rescanIssues": {"query": {"days": 7}}})).unwrap(),
             Request::RescanIssues { .. }
         ));
-        assert_eq!(
-            parse_request(json!({"unusual": {"includeIgnored": true}})).unwrap(),
-            Request::Unusual { include_ignored: true }
-        );
-        assert!(matches!(
-            parse_request(json!({"unusualAct": {"key": "/a/b", "action": "protect"}})).unwrap(),
-            Request::UnusualAct {
-                action: dyno_core::unusual::baseline::UnusualAction::Protect,
-                ..
-            }
-        ));
+        assert_eq!(parse_request(json!("unusual")).unwrap(), Request::Unusual);
         assert_eq!(parse_request(json!("forgetBaseline")).unwrap(), Request::ForgetBaseline);
-        // A forged action is refused at the edge.
-        assert!(parse_request(json!({"unusualAct": {"key": "k", "action": "delete"}})).is_err());
-    }
-
-    #[test]
-    fn a_watched_folder_cannot_be_added_by_the_webview_but_the_other_watch_requests_parse() {
-        let add = json!({"addWatchedFolder": {"path": "/x", "template": null, "keepForSecs": 600, "recursive": false}});
-        assert!(parse_request(add).unwrap_err().message.contains("folder dialog"));
-        assert!(matches!(parse_request(json!("watchedFolders")).unwrap(), Request::WatchedFolders));
-        assert!(matches!(
-            parse_request(json!({"setWatchedFolder": {"id": "w-1", "keepForSecs": 600, "enabled": true, "recursive": null}})).unwrap(),
-            Request::SetWatchedFolder { enabled: Some(true), .. }
-        ));
-        assert!(matches!(
-            parse_request(json!({"previewWatchedFolder": {"id": "w-1"}})).unwrap(),
-            Request::PreviewWatchedFolder { .. }
-        ));
-        assert!(matches!(
-            parse_request(json!({"webSearch": {"query": "q"}})).unwrap(),
-            Request::WebSearch { .. }
-        ));
+        // The ignore and protect actions are gone.
+        assert!(parse_request(json!({"unusualAct": {"key": "k", "action": "protect"}})).is_err());
         assert!(matches!(
             parse_request(json!({"fileHash": {"source": {"path": "/a"}}})).unwrap(),
             Request::FileHash { .. }
         ));
         assert!(parse_request(json!({"fileHash": {"source": {"pid": 1}}})).is_err());
-        assert!(matches!(
-            parse_request(json!({"startupOverview": {"filter": {"hideOs": true, "hideSigned": false}}})).unwrap(),
-            Request::StartupOverview { .. }
-        ));
     }
 
     #[test]

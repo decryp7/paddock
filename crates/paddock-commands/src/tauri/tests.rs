@@ -264,10 +264,15 @@ mod other {
     }
 }
 
-crate::command_table! {
-    static OTHER, macro other_handler;
-    Query [MAIN] => other::status,
+// One leaf table per module (each emits its own `dialog_callable` markers).
+#[macro_use]
+mod other_table {
+    crate::command_table! {
+        pub(super) static OTHER, macro other_handler;
+        Query [MAIN] => crate::tauri::tests::other::status,
+    }
 }
+use other_table::OTHER;
 
 crate::command_table! {
     static BOTH = [TABLE, OTHER];

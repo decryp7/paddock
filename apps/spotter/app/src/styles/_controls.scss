@@ -187,7 +187,7 @@ textarea.input {
 .table.sticky thead th {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: var(--pd-z-table-header);
   background: var(--pd-surface-1);
   box-shadow: inset 0 -1px 0 var(--pd-hairline);
   border-bottom: 0;

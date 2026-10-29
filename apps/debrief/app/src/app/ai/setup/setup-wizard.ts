@@ -284,6 +284,7 @@ import { canStart, choices, INITIAL, next, selected, WizardEvent, WizardState } 
       gap: 8px;
       position: sticky;
       bottom: -16px;
+      z-index: 3;
       margin-bottom: -16px;
       padding: 10px 0 16px;
       background: var(--bg-2);

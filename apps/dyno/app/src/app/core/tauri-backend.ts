@@ -16,10 +16,6 @@ import type {
   ShelveFor,
   Anomaly,
   AppInfo,
-  CleanupCategory,
-  CleanupOutcome,
-  CleanupScan,
-  DeleteMode,
   Diagnosis,
   HealthReport,
   History,
@@ -28,18 +24,19 @@ import type {
   LiveUpdate,
   Locker,
   PluginInfo,
-  ProcessAction,
   ProcessDetails,
   ProcessRef,
-  ProfileId,
-  QuarantineEntry,
-  RuleSet,
   Settings,
-  SizeNode,
+  DiskChildren,
+  DiskChildrenQuery,
+  DiskRings,
+  DiskRingsQuery,
+  DiskScanStatus,
+  DiskTarget,
+  Volume,
   SnapshotDiff,
   SnapshotInfo,
   StartupEntry,
-  StartupState,
   SystemInventory,
   ThrottleOverview,
   LifespanOverview,
@@ -55,8 +52,6 @@ import type {
   BenchOverview,
   StartBenchmark,
   Timestamp,
-  HelperStatus,
-  TuningSuggestion,
   WeeklyReport,
   ReportFormat,
   SavedReport,
@@ -76,17 +71,12 @@ import type {
   IssuesOverview,
   IssuesQuery,
   SavedIssues,
-  UnusualAction,
   UnusualOverview,
-  AddWatchedFolder,
   FileHashInfo,
   HashSource,
   SearchSeed,
   StartupFilter,
   StartupOverview,
-  WatchChange,
-  WatchOverview,
-  WatchPreview,
 } from './api.types';
 import type { DynoBackend, Unsubscribe } from './backend';
 import { toCommandError } from './command-error';
@@ -103,9 +93,8 @@ export type DynoRequest = string | Record<string, Record<string, unknown>>;
 export const REQUEST_TIMEOUT_MS = 15_000;
 /** A command that waits for the person at an OS dialog may take as long as they do (within reason). */
 export const DIALOG_TIMEOUT_MS = 10 * 60_000;
-/** Hashing a large program or listing a big watched folder may take longer than an ordinary request. */
+/** Hashing a large program may take longer than an ordinary request. */
 export const HASH_TIMEOUT_MS = 60_000;
-export const PREVIEW_TIMEOUT_MS = 60_000;
 /** Reading the system logs can take a minute or two on a busy PC (the shell waits 150 s for the agent). */
 export const LOG_READ_TIMEOUT_MS = 160_000;
 
@@ -116,6 +105,8 @@ export const EVENTS = {
   activity: 'dyno://activity',
   agent: 'dyno://agent',
   alarm: 'dyno://alarm',
+  diskScan: 'dyno://disk-scan',
+  diskVolumes: 'dyno://disk-volumes',
 } as const;
 
 /** One Tauri event shared by every UI listener: a single `listen`, fanned out, stopped with the last listener. */
@@ -157,6 +148,8 @@ export class TauriBackend implements DynoBackend {
   private readonly activityChannel: EventChannel<ActivityEntry>;
   private readonly agentChannel: EventChannel<AgentStatus>;
   private readonly alarmChannel: EventChannel<AlarmChange>;
+  private readonly diskScanChannel: EventChannel<DiskScanStatus>;
+  private readonly diskVolumesChannel: EventChannel<Volume[]>;
   /** How many live listeners want the full process list; the agent sends it only while one does. */
   private processListeners = 0;
   private liveListeners = 0;
@@ -173,6 +166,8 @@ export class TauriBackend implements DynoBackend {
     this.activityChannel = new EventChannel(listenFn, EVENTS.activity);
     this.agentChannel = new EventChannel(listenFn, EVENTS.agent);
     this.alarmChannel = new EventChannel(listenFn, EVENTS.alarm);
+    this.diskScanChannel = new EventChannel(listenFn, EVENTS.diskScan);
+    this.diskVolumesChannel = new EventChannel(listenFn, EVENTS.diskVolumes);
   }
 
   // ------------------------------------------------------------------------------------------------ live data
@@ -209,6 +204,14 @@ export class TauriBackend implements DynoBackend {
     return this.alarmChannel.add(listener);
   }
 
+  onDiskScan(listener: (s: DiskScanStatus) => void): Unsubscribe {
+    return this.diskScanChannel.add(listener);
+  }
+
+  onDiskVolumes(listener: (v: Volume[]) => void): Unsubscribe {
+    return this.diskVolumesChannel.add(listener);
+  }
+
   /** Tells the agent the detail level the UI needs now (only when it changed; nothing once nobody listens). */
   private syncDetail(): void {
     if (this.liveListeners === 0) {
@@ -233,14 +236,6 @@ export class TauriBackend implements DynoBackend {
 
   processDetails(target: ProcessRef): Promise<ProcessDetails> {
     return this.request({ processDetails: { target } });
-  }
-
-  act(target: ProcessRef, action: ProcessAction): Promise<ActivityEntry> {
-    return this.request({ act: { target, action } });
-  }
-
-  actOnGroup(groupId: string, action: ProcessAction): Promise<ActivityEntry> {
-    return this.request({ actOnGroup: { groupId, action } });
   }
 
   lockers(path: string): Promise<Locker[]> {
@@ -281,94 +276,54 @@ export class TauriBackend implements DynoBackend {
     return this.request({ activity: { limit } });
   }
 
-  undo(activityId: string): Promise<ActivityEntry> {
-    return this.request({ undo: { activityId } });
+  diskVolumes(): Promise<Volume[]> {
+    return this.request('diskVolumes');
   }
 
-  releaseAction(target: ProcessRef): Promise<ActivityEntry> {
-    return this.request({ releaseAction: { target } });
+  startDiskScan(target: DiskTarget): Promise<DiskScanStatus> {
+    return this.request({ startDiskScan: { target } });
   }
 
-  // ---------------------------------------------------------------------------------------------------- rules
-
-  rules(): Promise<RuleSet> {
-    return this.request('rules');
+  cancelDiskScan(scan: number): Promise<void> {
+    return this.request({ cancelDiskScan: { scan } });
   }
 
-  saveRules(rules: RuleSet): Promise<RuleSet> {
-    return this.request({ saveRules: { rules } });
+  diskScans(): Promise<DiskScanStatus[]> {
+    return this.request('diskScans');
   }
 
-  setProfile(profile: ProfileId): Promise<RuleSet> {
-    return this.request({ setProfile: { profile } });
+  diskChildren(q: DiskChildrenQuery): Promise<DiskChildren> {
+    return this.request({ diskChildren: { scan: q.scan, node: q.node, offset: q.offset, limit: q.limit, minFraction: q.minFraction } });
   }
 
-  pauseRules(paused: boolean): Promise<RuleSet> {
-    return this.request({ pauseRules: { paused } });
+  diskRings(q: DiskRingsQuery): Promise<DiskRings> {
+    return this.request({ diskRings: { scan: q.scan, node: q.node, rings: q.rings, minShare: q.minShare, maxNodes: q.maxNodes } });
   }
 
-  // -------------------------------------------------------------------------------------------------- cleanup
-
-  cleanupCategories(): Promise<CleanupCategory[]> {
-    return this.request('cleanupCategories');
+  diskPath(scan: number, node: number): Promise<string> {
+    return this.request({ diskPath: { scan, node } });
   }
 
-  scanCleanup(categories: string[]): Promise<CleanupScan> {
-    return this.request({ scanCleanup: { categories } });
+  retryDiskScan(scan: number): Promise<DiskScanStatus> {
+    return this.request({ retryDiskScan: { scan } });
   }
 
-  runCleanup(scanId: string, itemIds: string[], mode: DeleteMode): Promise<CleanupOutcome> {
-    return this.request({ runCleanup: { scanId, itemIds, mode } });
+  openFullDiskAccessSettings(): Promise<void> {
+    return this.request('openFullDiskAccessSettings');
   }
 
-  quarantine(): Promise<QuarantineEntry[]> {
-    return this.request('quarantine');
+  diskReveal(scan: number, node: number): Promise<void> {
+    return this.request({ diskReveal: { scan, node } });
   }
 
-  restoreQuarantine(id: string): Promise<void> {
-    return this.request({ restoreQuarantine: { id } });
-  }
-
-  diskUsage(path: string | null): Promise<SizeNode> {
-    return this.request({ diskUsage: { path } });
-  }
-
-  // ---------------------------------------------------------------------------------------- health and tuning
+  // ---------------------------------------------------------------------------------------- health
 
   health(): Promise<HealthReport> {
     return this.request('health');
   }
 
-  tuning(): Promise<TuningSuggestion[]> {
-    return this.request('tuning');
-  }
-
-  applyTuning(id: string): Promise<ActivityEntry> {
-    return this.request({ applyTuning: { id } });
-  }
-
-  revertTuning(id: string, force = false): Promise<ActivityEntry> {
-    return this.request({ revertTuning: { id, force } });
-  }
-
-  helperStatus(): Promise<HelperStatus> {
-    return this.request('helperStatus');
-  }
-
-  installHelper(): Promise<HelperStatus> {
-    return this.request('installHelper');
-  }
-
-  uninstallHelper(): Promise<HelperStatus> {
-    return this.request('uninstallHelper');
-  }
-
   startupEntries(): Promise<StartupEntry[]> {
     return this.request('startupEntries');
-  }
-
-  setStartupState(id: string, state: StartupState): Promise<ActivityEntry> {
-    return this.request({ setStartupState: { id, state } });
   }
 
   // ---------------------------------------------------------------------------------- reports, settings, plugins
@@ -501,39 +456,6 @@ export class TauriBackend implements DynoBackend {
     return this.request({ startupOverview: { filter } });
   }
 
-  // ------------------------------------------------------------------------------------------- watched folders
-
-  watchedFolders(): Promise<WatchOverview> {
-    return this.request('watchedFolders');
-  }
-
-  /** The shell shows the OS folder dialog (the webview never names the folder) and asks the agent to add the choice. */
-  addWatchedFolder(request: AddWatchedFolder): Promise<WatchOverview | null> {
-    return this.command<WatchOverview | null>(
-      'add_watched_folder',
-      { template: request.template, keepForSecs: request.keepForSecs, recursive: request.recursive },
-      DIALOG_TIMEOUT_MS,
-    );
-  }
-
-  setWatchedFolder(id: string, change: WatchChange): Promise<WatchOverview> {
-    return this.request({
-      setWatchedFolder: { id, keepForSecs: change.keepForSecs ?? null, enabled: change.enabled ?? null, recursive: change.recursive ?? null },
-    });
-  }
-
-  removeWatchedFolder(id: string): Promise<WatchOverview> {
-    return this.request({ removeWatchedFolder: { id } });
-  }
-
-  previewWatchedFolder(id: string): Promise<WatchPreview> {
-    return this.request({ previewWatchedFolder: { id } }, PREVIEW_TIMEOUT_MS);
-  }
-
-  sweepWatchedFolder(id: string): Promise<WatchOverview> {
-    return this.request({ sweepWatchedFolder: { id } }, PREVIEW_TIMEOUT_MS);
-  }
-
   // ------------------------------------------------------------------------------------------------ benchmarks
 
   benchmarks(): Promise<BenchOverview> {
@@ -577,12 +499,8 @@ export class TauriBackend implements DynoBackend {
     return this.command<SavedIssues | null>('save_issues', { days }, DIALOG_TIMEOUT_MS);
   }
 
-  unusual(includeIgnored: boolean): Promise<UnusualOverview> {
-    return this.request({ unusual: { includeIgnored } });
-  }
-
-  unusualAct(key: string, action: UnusualAction): Promise<UnusualOverview> {
-    return this.request({ unusualAct: { key, action } });
+  unusual(): Promise<UnusualOverview> {
+    return this.request('unusual');
   }
 
   forgetBaseline(): Promise<UnusualOverview> {
@@ -658,10 +576,6 @@ export class TauriBackend implements DynoBackend {
   findFiles(query: FinderQuery): Promise<FinderResult> {
     // Walking and hashing a big folder takes a while.
     return this.request({ findFiles: { query } }, LOG_READ_TIMEOUT_MS);
-  }
-
-  removeFoundFiles(scanId: string, ids: string[], mode: DeleteMode): Promise<CleanupOutcome> {
-    return this.request({ removeFoundFiles: { scanId, ids, mode } }, LOG_READ_TIMEOUT_MS);
   }
 
   maintenance(): Promise<MaintenanceStatus> {

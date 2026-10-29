@@ -4,7 +4,7 @@
 //! [`dyno_ipc::RemoteError`] whose code is one of [`codes`] (or `panic` from the IPC).
 
 use crate::manifest::Manifest;
-use crate::model::{ActionInfo, Candidate, CategoryInfo, RuleEvent, ScanLimits, SensorReading};
+use crate::model::SensorReading;
 use serde::{Deserialize, Serialize};
 
 /// One message: the host sends requests, the plugin answers with replies.
@@ -23,24 +23,6 @@ pub enum PluginRequest {
     Describe,
     /// Current sensor readings.
     Sensors,
-    /// The cleanup categories.
-    CleanupCategories,
-    /// The candidates of one category.
-    Scan {
-        /// The category id.
-        category: String,
-        /// Bounds of the scan.
-        limits: ScanLimits,
-    },
-    /// The actions offered.
-    Actions,
-    /// Run an action.
-    RunAction {
-        /// The action id.
-        action: String,
-        /// Why.
-        event: RuleEvent,
-    },
 }
 
 /// What the plugin answers, one variant per request.
@@ -50,14 +32,6 @@ pub enum PluginReply {
     Manifest(Manifest),
     /// To `Sensors`.
     Sensors(Vec<SensorReading>),
-    /// To `CleanupCategories`.
-    Categories(Vec<CategoryInfo>),
-    /// To `Scan`.
-    Candidates(Vec<Candidate>),
-    /// To `Actions`.
-    Actions(Vec<ActionInfo>),
-    /// To `RunAction`: what happened.
-    ActionDone(String),
 }
 
 /// The failure codes of the plugin protocol.
@@ -66,8 +40,4 @@ pub mod codes {
     pub const UNSUPPORTED: &str = dyno_ipc::wire::codes::UNSUPPORTED;
     /// The message was not a request.
     pub const BAD_REQUEST: &str = "badRequest";
-    /// A category or action the plugin does not know.
-    pub const NOT_FOUND: &str = "notFound";
-    /// The plugin's own [`PluginError`](crate::PluginError).
-    pub const FAILED: &str = "failed";
 }

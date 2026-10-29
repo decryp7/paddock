@@ -269,7 +269,10 @@ describe('pd-part-outlet', () => {
     const { fixture, outlet } = await mount({ load: () => (fail ? Promise.reject('offline') : Promise.resolve(PartA)) }, 'inline');
     const retry = outlet().querySelector<HTMLButtonElement>('button[data-testid="part-error"]');
     expect(retry?.getAttribute('aria-label')).toBe('Models did not load. Try again');
-    expect(retry?.title).toBe('Models did not load: offline');
+    expect(retry?.hasAttribute('title')).toBe(false);
+    retry?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('Models did not load: offline'));
+    retry?.dispatchEvent(new MouseEvent('mouseleave'));
     fail = false;
     retry?.click();
     await settle();
@@ -392,6 +395,10 @@ describe('pd-status-bar', () => {
     expect(more.getAttribute('aria-label')).toBe('More status (3)');
     expect(more.textContent?.trim()).toBe('3');
     expect(more.getAttribute('aria-expanded')).toBe('false');
+    expect(more.hasAttribute('title')).toBe(false);
+    more.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('More status (3)'));
+    more.dispatchEvent(new MouseEvent('mouseleave'));
     more.click();
     await fixture.whenStable();
     expect(hidden()).toEqual([]);

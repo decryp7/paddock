@@ -19,7 +19,7 @@ export {
   type SuJobUnit,
   type SuJobView,
 } from './lib/job-view';
-export { SuSegmentedControl, nextEnabled, type SuSegment } from './lib/segmented-control';
+export { SuSegmentedControl, type SuSegment } from './lib/segmented-control';
 export { SuTrayPopover, type SuTrayPlatform } from './lib/tray-popover';
 export {
   parseCssColor,

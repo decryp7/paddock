@@ -7,10 +7,12 @@
 
 use crate::contract::{Contracts, Grant, Kind, Modality};
 use crate::placement::Bounds;
-use crate::window::{DEFAULT_ROUTE, DialogError, DialogErrorCode, MAX_OPEN_PER_HOST};
+use crate::window::{
+    DEFAULT_ROUTE, DialogError, DialogErrorCode, MAX_OPEN_PER_HOST, Measure, ZoomState, zoom_after,
+};
 use paddock_commands::labels::{DIALOG_PREFIX, Label};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -18,6 +20,34 @@ use std::time::{Duration, Instant};
 /// A dialog that did not answer a close request this long is closed on the next request (a hung webview must not trap
 /// the user).
 pub const CLOSE_GRACE: Duration = Duration::from_millis(1500);
+
+/// How long after its window is created a dialog may take to report `dialog_ready` before it is shown anyway at its
+/// placed size (ADR 0026 §4.4). `paddock-startup`'s `Config::dialog_show_deadline` has the same default; the app passes
+/// its configured value to [`Dialogs::with_show_deadline`].
+pub const SHOW_DEADLINE: Duration = Duration::from_secs(1);
+
+/// Runs a job once after a delay. The Tauri adapter schedules the show deadline through it, so tests inject a manual
+/// one and never sleep (ER-12).
+pub trait Scheduler: std::fmt::Debug + Send + Sync {
+    /// Runs `job` after `delay`, on any thread.
+    fn after(&self, delay: Duration, job: Box<dyn FnOnce() + Send + 'static>);
+}
+
+/// The scheduler of the running app: one short-lived thread per job.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ThreadScheduler;
+
+impl Scheduler for ThreadScheduler {
+    fn after(&self, delay: Duration, job: Box<dyn FnOnce() + Send + 'static>) {
+        // A failed spawn only loses the safety net: the dialog is still shown by its own `dialog_ready`.
+        let _ = std::thread::Builder::new()
+            .name("paddock-dialog-deadline".into())
+            .spawn(move || {
+                std::thread::sleep(delay);
+                job();
+            });
+    }
+}
 
 /// One open dialog window.
 #[derive(Debug, Clone, PartialEq)]
@@ -40,6 +70,16 @@ pub struct OpenDialog {
     pub asked: Option<Instant>,
     /// The window watchdog found its page not answering: nobody can make a required choice, so the OS close may.
     pub unresponsive: bool,
+    /// The window is on screen. A window starts pending (hidden) and is shown once, on `dialog_ready`
+    /// or at the show deadline; its parent is disabled and a second open focuses it only from then on.
+    pub shown: bool,
+    /// The last measure its page reported, for a refit when the scale factor changes.
+    pub measure: Option<Measure>,
+    /// What the window's inner height has beyond the page's viewport, logical px, taken once at the first fit
+    /// (`dialog_ready`) and reused by every later one.
+    pub viewport_delta: Option<f64>,
+    /// The webview zoom, taken at `dialog_ready` and changed only as [`zoom_after`] says.
+    pub zoom: Option<ZoomState>,
 }
 
 impl OpenDialog {
@@ -63,6 +103,10 @@ impl OpenDialog {
             bounds: None,
             asked: None,
             unresponsive: false,
+            shown: false,
+            measure: None,
+            viewport_delta: None,
+            zoom: None,
         }
     }
 }
@@ -87,6 +131,10 @@ pub struct Dialogs {
     contracts: Arc<Contracts>,
     route: String,
     exiting: AtomicBool,
+    show_deadline: Duration,
+    scheduler: Arc<dyn Scheduler>,
+    /// Parents whose window is currently disabled by this layer.
+    applied: Mutex<BTreeSet<String>>,
 }
 
 impl Dialogs {
@@ -104,13 +152,40 @@ impl Dialogs {
             contracts,
             route: route.into(),
             exiting: AtomicBool::new(false),
+            show_deadline: SHOW_DEADLINE,
+            scheduler: Arc::new(ThreadScheduler),
+            applied: Mutex::default(),
         }
     }
 
-    /// Dialogs from the app's contract file; a file that does not parse is a build defect, so it is logged by the
-    /// caller and the app runs with no dialogs rather than with unchecked ones.
-    pub fn from_json(json: &str) -> Result<Self, crate::contract::ContractError> {
-        Contracts::parse(json).map(|c| Self::new(Arc::new(c)))
+    /// How long a dialog may take to report ready before it is shown anyway (default [`SHOW_DEADLINE`]).
+    pub fn with_show_deadline(mut self, deadline: Duration) -> Self {
+        self.show_deadline = deadline;
+        self
+    }
+
+    /// Schedules the show deadline through `scheduler` (default [`ThreadScheduler`]); for tests.
+    pub fn with_scheduler(mut self, scheduler: Arc<dyn Scheduler>) -> Self {
+        self.scheduler = scheduler;
+        self
+    }
+
+    /// The show deadline.
+    pub fn show_deadline(&self) -> Duration {
+        self.show_deadline
+    }
+
+    /// The scheduler of the show deadline.
+    pub fn scheduler(&self) -> &Arc<dyn Scheduler> {
+        &self.scheduler
+    }
+
+    /// Dialogs governed by the owners' static tables (the shell's, a feature's, the app's): two tables declaring one id
+    /// is a build defect, reported to the caller.
+    pub fn from_tables(
+        tables: &[&crate::DialogTable],
+    ) -> Result<Self, crate::contract::ContractError> {
+        Contracts::from_tables(tables).map(|c| Self::new(Arc::new(c)))
     }
 
     /// The contracts.
@@ -238,6 +313,92 @@ impl Dialogs {
         }
     }
 
+    /// Marks the dialog window `label` as shown. The entry the first time (the caller shows the window), `None` when it
+    /// was shown already or is not an open dialog.
+    pub fn mark_shown(&self, label: &str) -> Option<OpenDialog> {
+        let mut map = self.lock();
+        let e = map.get_mut(label)?;
+        if std::mem::replace(&mut e.shown, true) {
+            return None;
+        }
+        Some(e.clone())
+    }
+
+    /// Whether `parent` should be disabled right now: it has at least one SHOWN modal dialog open (a pending modal has
+    /// not locked it). Only the desired state, from the registry; window APIs are never called under its lock.
+    pub fn parent_wants_disabled(&self, parent: &str) -> bool {
+        Self::held_by(&self.lock(), parent)
+    }
+
+    fn held_by(map: &BTreeMap<String, OpenDialog>, parent: &str) -> bool {
+        map.values()
+            .any(|o| o.parent == parent && o.modality == Modality::Modal && o.shown)
+    }
+
+    /// Reads the latest desired state of `parent` (see [`Dialogs::parent_wants_disabled`]) and compares it with the state
+    /// last applied to the window: `Some(disabled)` when the window must change, `None` when it already is as wanted.
+    /// The queued main-thread task that applies it calls this, so whichever of a show and a close runs last decides, and
+    /// the answer is never stale. It records nothing: the task calls [`Dialogs::applied`] once the window accepted the
+    /// change, so a failed `set_enabled` is retried by the next task.
+    pub fn parent_change(&self, parent: &str) -> Option<bool> {
+        let wanted = self.parent_wants_disabled(parent);
+        let applied = self.applied.lock().unwrap_or_else(PoisonError::into_inner);
+        (applied.contains(parent) != wanted).then_some(wanted)
+    }
+
+    /// Records that `parent`'s window now is `disabled` (called after `set_enabled` returned Ok).
+    pub fn applied(&self, parent: &str, disabled: bool) {
+        let mut applied = self.applied.lock().unwrap_or_else(PoisonError::into_inner);
+        if disabled {
+            applied.insert(parent.to_string());
+        } else {
+            applied.remove(parent);
+        }
+    }
+
+    /// Forgets the applied state of window `label` (it was destroyed: a later window with the label starts enabled).
+    pub fn forget_applied(&self, label: &str) {
+        self.applied
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(label);
+    }
+
+    /// The zoom of `label` for a fit at `scale_factor` with the page's `device_pixel_ratio` (see [`zoom_after`]),
+    /// recorded. `None` for a window that is not an open dialog.
+    pub fn zoom_for(
+        &self,
+        label: &str,
+        device_pixel_ratio: Option<f64>,
+        scale_factor: f64,
+    ) -> Option<f64> {
+        let mut map = self.lock();
+        let e = map.get_mut(label)?;
+        let z = zoom_after(e.zoom, device_pixel_ratio, scale_factor);
+        e.zoom = Some(z);
+        Some(z.zoom)
+    }
+
+    /// Whether `label` is an open dialog whose window has not been shown yet.
+    pub fn is_pending(&self, label: &str) -> bool {
+        self.lock().get(label).is_some_and(|e| !e.shown)
+    }
+
+    /// The viewport delta of `label`: the one recorded by its first fit, or, if there is none yet, `first()` (computed
+    /// by the caller from the window as it is now), which is recorded. `None` for a window that is not an open dialog.
+    pub fn viewport_delta_or(&self, label: &str, first: impl FnOnce() -> f64) -> Option<f64> {
+        let mut map = self.lock();
+        let e = map.get_mut(label)?;
+        Some(*e.viewport_delta.get_or_insert_with(first))
+    }
+
+    /// Records the last measure the page of `label` reported.
+    pub fn set_measure(&self, label: &str, measure: Measure) {
+        if let Some(e) = self.lock().get_mut(label) {
+            e.measure = Some(measure);
+        }
+    }
+
     /// The app is exiting: closing dialogs then neither refocus their parents nor report to them.
     pub fn set_exiting(&self, exiting: bool) {
         self.exiting.store(exiting, Ordering::SeqCst);
@@ -254,16 +415,15 @@ mod tests {
     use super::*;
     use paddock_commands::DialogGrant;
 
+    crate::dialogs! {
+        static TABLE;
+        "settings" => Tool { commands: &[paddock_commands::DialogCallable::__command("settings_set")] },
+        "close-prompt" => Decision { required_choice: true },
+        "ask" => Decision,
+    }
+
     fn contracts() -> Arc<Contracts> {
-        Arc::new(
-            Contracts::parse(
-                r#"{ "version": 1, "dialogs": {
-                    "settings": { "kind": "tool", "modality": "modeless", "commands": ["settings_set"] },
-                    "close-prompt": { "kind": "decision", "modality": "modal", "requiredChoice": true },
-                    "ask": { "kind": "decision", "modality": "modal" } } }"#,
-            )
-            .unwrap(),
-        )
+        Arc::new(Contracts::from_tables(&[&TABLE]).unwrap())
     }
 
     fn entry(d: &Dialogs, host: &str, parent: &str, id: &str) -> OpenDialog {
@@ -417,9 +577,12 @@ mod tests {
     }
 
     #[test]
-    fn a_contract_file_builds_the_dialogs_or_says_why_not() {
-        let d = Dialogs::from_json(r#"{ "version": 1, "dialogs": {} }"#).unwrap();
-        assert_eq!(d.contracts().ids().count(), 0);
-        assert!(Dialogs::from_json("{").is_err());
+    fn static_tables_build_the_dialogs_or_say_why_not() {
+        let d = Dialogs::from_tables(&[&TABLE]).unwrap();
+        assert_eq!(d.contracts().ids().count(), 3);
+        assert!(
+            Dialogs::from_tables(&[&TABLE, &TABLE]).is_err(),
+            "one id declared twice"
+        );
     }
 }

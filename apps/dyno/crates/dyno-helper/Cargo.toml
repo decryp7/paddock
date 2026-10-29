@@ -1,6 +1,6 @@
 [package]
 name = "dyno-helper"
-description = "Dyno's minimal privileged helper: a closed set of reversible system changes, installed on the user's click (ADR 0016)"
+description = "Dyno's minimal privileged helper: read-only answers that need administrator rights (programs' network traffic), installed on the user's click (ADR 0016)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

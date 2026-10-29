@@ -67,6 +67,14 @@ paddock_commands::command_table! {
     Mutation [MAIN | DIALOG] => tauri::mcp_audit_clear,
 }
 
+paddock_dialogs::dialogs! {
+    /// The AI access dialogs (ADR 0026 §3): the key dialog issues a key; the revoke confirmation calls nothing (the page
+    /// revokes after the answer).
+    pub static DIALOGS;
+    "pd.mcp.key" => Form(Modal) { width: Some(Narrow), commands: &[dialog_callable::mcp_get, dialog_callable::mcp_issue_key] },
+    "pd.mcp.revoke" => Decision { instanced: true },
+}
+
 #[cfg(feature = "tauri")]
 pub mod tauri;
 

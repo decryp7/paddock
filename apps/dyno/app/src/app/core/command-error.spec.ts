@@ -22,7 +22,7 @@ describe('toCommandError', () => {
 
 describe('errorHint', () => {
   it('has a hint for actionable codes', () => {
-    for (const c of ['agentUnavailable', 'accessDenied', 'protected', 'timeout', 'busy', 'notFound'] as ErrorCode[]) {
+    for (const c of ['agentUnavailable', 'accessDenied', 'timeout', 'busy', 'notFound'] as ErrorCode[]) {
       expect(errorHint(c)).toEqual(expect.any(String));
     }
   });

@@ -29,7 +29,7 @@ import { clockToMinutes, defaultAlarmConfig, minutesToClock, withQuiet } from '.
       </section>
 
       <section aria-labelledby="notif-h" class="block">
-        <div class="sec-head"><h2 class="h2" id="notif-h">Notifications</h2><p class="lead">Muted rules and quiet hours always apply.</p></div>
+        <div class="sec-head"><h2 class="h2" id="notif-h">Notifications</h2><p class="lead">Muted rules and quiet hours are always respected.</p></div>
         <div class="rows">
           <div class="srow">
             <div class="txt"><span class="name">Desktop notifications</span><span class="help">Show a notification when a new alarm is raised.</span></div>

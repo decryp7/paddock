@@ -138,6 +138,16 @@ changes here, every app's copy is updated in the same change.
     `--pd-*` tokens (one shared theme), CSP-safe. *Why:* Material is widely used and tested; hand-rolled components cost
     bugs it already solves.
 
+## Benchmarks (user, 2026-10-29)
+48. **Every quoted benchmark run is recorded.** Any benchmark or performance number quoted anywhere is first recorded in
+    the owning app's `docs/performance.md` (shared code: `docs/benchmarks.md`) as a results block in the template of
+    [benchmarks.md](benchmarks.md), newest first. "Anywhere" means an ADR, research note, plan, CHANGELOG, commit message,
+    pull request or lesson. The block gives date, commit, machine, load, build, synthetic corpus and generator, the exact
+    command with env vars, the number and kind of runs, the numbers with the budget and verdict, and the memory measure
+    (physical footprint, rule 26). The quoting document links to the block. A number without a block is not evidence for a
+    decision or a budget. *Why:* results were scattered across ADRs, branches and expiring job logs, often without
+    machine, load or build, so they could not be compared or reproduced, and stale numbers kept being quoted.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:

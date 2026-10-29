@@ -20,6 +20,9 @@ import C35 from './C35-untimed-calls.mjs';
 import C36 from './C36-parser-hardening.mjs';
 import C37 from './C37-test-binaries.mjs';
 import C39 from './C39-freed-port.mjs';
+import C43 from './C43-sticky-headers.mjs';
+import C45 from './C45-dialog-markers.mjs';
+import C48 from './C48-dialog-capability.mjs';
 
 /** Every check, in id order. A check is { id, title, rule, run(ctx) -> findings[] | Promise<findings[]> }. */
-export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C39];
+export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C39, C43, C45, C48];

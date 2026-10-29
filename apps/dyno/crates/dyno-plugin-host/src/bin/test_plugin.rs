@@ -1,7 +1,7 @@
 //! A plugin for dyno-plugin-host's own tests; never shipped. Its behaviour comes from its id (`DYNO_PLUGIN_ID`, set
 //! by the host), up to the first `_`:
 //!
-//! - `ok`: one sensor, one cleanup category (`tmp`, proposing a relative path too, which the host drops), one action
+//! - `ok`: one sensor
 //! - `panic`, `hang`, `memory`: the sensors call panics, never returns, or allocates 1 GiB
 //! - `exit`: exits before connecting
 //! - `garbage`: describes itself, then answers the sensors call with bytes that are no frame
@@ -26,18 +26,9 @@ impl Plugin for Test {
         } else {
             self.id.clone()
         };
-        Manifest::new(id, "Test", "0.0.1")
-            .contributing(Contribution::Sensors)
-            .contributing(Contribution::Cleanup)
-            .contributing(Contribution::Actions)
+        Manifest::new(id, "Test", "0.0.1").contributing(Contribution::Sensors)
     }
     fn as_sensors(&self) -> Option<&dyn SensorProvider> {
-        Some(self)
-    }
-    fn as_cleanup(&self) -> Option<&dyn CleanupProvider> {
-        Some(self)
-    }
-    fn as_actions(&self) -> Option<&dyn ActionProvider> {
         Some(self)
     }
 }
@@ -58,43 +49,6 @@ impl SensorProvider for Test {
             }
             _ => vec![SensorReading::new("pid", "Process id", f64::from(std::process::id()), "")],
         }
-    }
-}
-
-impl CleanupProvider for Test {
-    fn categories(&self) -> Vec<CategoryInfo> {
-        vec![CategoryInfo {
-            id: "tmp".into(),
-            name: "Temp".into(),
-            description: "Test files".into(),
-            risk: Risk::Safe,
-        }]
-    }
-    fn scan(&self, _: &str, limits: ScanLimits) -> Result<Vec<Candidate>, PluginError> {
-        if limits.max_depth == 0 {
-            return Err(PluginError::new("the folder is missing"));
-        }
-        let dir = std::env::current_dir().unwrap();
-        let cand = |path: String| Candidate {
-            path,
-            bytes: 10,
-            modified_ms: 0,
-            reason: "test".into(),
-        };
-        Ok(vec![cand(dir.join("a.tmp").display().to_string()), cand("relative.tmp".into())])
-    }
-}
-
-impl ActionProvider for Test {
-    fn actions(&self) -> Vec<ActionInfo> {
-        vec![ActionInfo {
-            id: "echo".into(),
-            name: "Echo".into(),
-            description: "Echoes the app".into(),
-        }]
-    }
-    fn run(&self, _: &str, event: RuleEvent) -> Result<String, PluginError> {
-        Ok(format!("{} at {}%", event.app, event.cpu))
     }
 }
 
