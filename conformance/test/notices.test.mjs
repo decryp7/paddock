@@ -222,10 +222,38 @@ test('nonPermissive evaluates the SPDX expression: AND needs every term allowed,
   assert.ok(bad('npm', 'UNKNOWN'));
 });
 
-test('nonPermissive scopes the exceptions by ecosystem: CC-BY-4.0 and OFL-1.1 are for npm packages only', () => {
-  const bad = (kind, license) => nonPermissive([{ kind, name: 'x', version: '1', license, spdx: spdxIds(license) }]).length === 1;
-  assert.ok(bad('rust', 'CC-BY-4.0'));
-  assert.ok(!bad('npm', 'CC-BY-4.0'));
-  assert.ok(bad('rust', 'MIT AND OFL-1.1'));
-  assert.ok(!bad('npm', 'MIT AND OFL-1.1'));
+test('nonPermissive scopes the exceptions by ecosystem: CC-BY-4.0 and OFL-1.1 are for named npm packages only', () => {
+  const bad = (kind, name, license) => nonPermissive([{ kind, name, version: '1', license, spdx: spdxIds(license) }]).length === 1;
+  assert.ok(bad('rust', 'caniuse-lite', 'CC-BY-4.0'));
+  assert.ok(!bad('npm', 'caniuse-lite', 'CC-BY-4.0'));
+  assert.ok(bad('rust', '@fontsource/inter', 'MIT AND OFL-1.1'));
+  assert.ok(!bad('npm', '@fontsource/inter', 'MIT AND OFL-1.1'));
+});
+
+const pkg = (kind, name, license) => ({ kind, name, version: '1', license, spdx: spdxIds(license ?? '') });
+
+test('nonPermissive is fail-closed: a package is accepted only when its expression evaluates true', () => {
+  for (const license of ['', '  ', null, undefined, 'UNKNOWN', 'NOASSERTION', 'UNLICENSED', 'SEE LICENSE IN LICENSE.md', 'LicenseRef-custom', 'BSD', 'Apache', 'MIT/X11', 'MIT AND LicenseRef-x']) {
+    for (const kind of ['rust', 'npm']) assert.equal(nonPermissive([pkg(kind, 'x', license)]).length, 1, `${kind} ${JSON.stringify(license)} is refused`);
+  }
+  assert.deepEqual(nonPermissive([pkg('rust', 'x', 'MIT OR Apache-2.0')]), []);
+});
+
+test('exceptions are scoped to packages: CC-BY-4.0 to caniuse-lite, OFL-1.1 to the font packages that use it', () => {
+  assert.deepEqual(nonPermissive([pkg('npm', 'caniuse-lite', 'CC-BY-4.0'), pkg('npm', '@fontsource/inter', 'OFL-1.1')]), []);
+  assert.equal(nonPermissive([pkg('npm', 'other-data', 'CC-BY-4.0')]).length, 1);
+  assert.equal(nonPermissive([pkg('npm', 'other-font', 'OFL-1.1')]).length, 1);
+  assert.equal(nonPermissive([pkg('rust', 'caniuse-lite', 'CC-BY-4.0')]).length, 1, 'not for a Rust crate of that name');
+  assert.equal(nonPermissive([pkg('npm', 'caniuse-lite', 'MIT AND GPL-3.0-only')]).length, 1, 'an exception covers only its own licence');
+});
+
+test('declared npm licences: the legacy `licenses: [{type}]` form and object forms are parsed, not skipped', () => {
+  const root = makeApp({
+    'package-lock.json': JSON.stringify({ packages: { '': {}, 'node_modules/old': { version: '1.0.0' }, 'node_modules/obj': { version: '1.0.0' }, 'node_modules/none': { version: '1.0.0' } } }),
+    'node_modules/old/package.json': JSON.stringify({ licenses: [{ type: 'MIT' }, { type: 'Apache-2.0' }] }),
+    'node_modules/obj/package.json': JSON.stringify({ license: { type: 'ISC' } }),
+    'node_modules/none/package.json': '{}',
+  });
+  const by = Object.fromEntries(npmPackages(root).packages.map((p) => [p.name, p.license]));
+  assert.deepEqual(by, { old: 'MIT OR Apache-2.0', obj: 'ISC', none: 'UNKNOWN' });
 });

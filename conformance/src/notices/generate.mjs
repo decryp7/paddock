@@ -4,7 +4,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
-import { allowedFor } from './licences.mjs';
+import { allowedFor, EXCEPTIONS } from './licences.mjs';
 
 const LICENCE_FILE = /^(licen[cs]e|licen[cs]ing|copying|notice|unlicense)([-_.].*)?$/i;
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -25,11 +25,25 @@ export function spdxIds(expr) {
   return expr.replace(/[()]/g, ' ').split(/\s+(?:OR|AND)\s+/i).map((s) => s.trim()).filter(Boolean);
 }
 
+/**
+ * The licence expression a package.json or lock entry declares: a string, `{ type }`, or the legacy `licenses: [{ type }]`
+ * list (several entries are alternatives, so OR). Null when nothing usable is declared.
+ */
+export function declaredLicense(v) {
+  if (typeof v === 'string') return v.trim() || null;
+  if (Array.isArray(v)) {
+    const all = v.map(declaredLicense).filter(Boolean);
+    return all.length ? all.join(' OR ') : null;
+  }
+  if (v && typeof v === 'object') return declaredLicense(v.type);
+  return null;
+}
+
 /** Entries of a package-lock that ship in production (not dev-only). */
 export function lockProduction(lock) {
   return Object.entries(lock.packages ?? {})
     .filter(([path, p]) => path.includes('node_modules/') && !p.dev && !p.devOptional)
-    .map(([path, p]) => ({ path, name: path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length), version: p.version, license: p.license ?? null }));
+    .map(([path, p]) => ({ path, name: path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length), version: p.version, license: declaredLicense(p.license ?? p.licenses) }));
 }
 
 /**
@@ -91,7 +105,7 @@ export function npmPackages(appDir) {
       } catch {
         warnings.push(`npm ${p.name}@${p.version}: package.json is not valid JSON`);
       }
-      const license = p.license ?? (typeof pkgJson.license === 'string' ? pkgJson.license : pkgJson.license?.type) ?? 'UNKNOWN';
+      const license = p.license ?? declaredLicense(pkgJson.license ?? pkgJson.licenses) ?? 'UNKNOWN';
       const files = existsSync(dir) ? readdirSync(dir).filter((f) => LICENCE_FILE.test(f) && !/\.(js|ts|json|css)$/.test(f)).sort() : [];
       const texts = files
         .map((f) => ({ id: /apache/i.test(f) ? 'Apache-2.0' : /mit/i.test(f) ? 'MIT' : /^notice/i.test(f) ? 'NOTICE' : null, text: normalise(readFileSync(join(dir, f), 'utf8')) }))
@@ -226,7 +240,18 @@ export function expressionAllowed(expr, allowed) {
   }
 }
 
-/** Packages whose licence expression is not acceptable for their ecosystem ("rust x@1: GPL-3.0-only"). A package with no declared licence is not judged here (it gets a "no licence" warning). */
+/**
+ * Packages whose licence is not acceptable for their ecosystem ("rust x@1: GPL-3.0-only"). Fail-closed: a package is
+ * accepted only when its parsed expression evaluates true (so a missing or empty licence, NOASSERTION, UNLICENSED,
+ * `SEE LICENSE IN ...`, `LicenseRef-*` and imprecise names such as "BSD" are refused) or when a package-scoped exception names
+ * the package and its whole declared expression.
+ */
 export function nonPermissive(pkgs) {
-  return pkgs.filter((p) => p.license && p.license.trim() && !expressionAllowed(p.license, allowedFor(p.kind))).map((p) => `${p.kind} ${p.name}@${p.version}: ${p.license}`);
+  return pkgs
+    .filter((p) => {
+      const expr = typeof p.license === 'string' ? p.license.trim() : '';
+      if (EXCEPTIONS.some((e) => e.kind === p.kind && e.packages.includes(p.name) && e.license === expr)) return false;
+      return !(expr && expressionAllowed(expr, allowedFor(p.kind, p.name)));
+    })
+    .map((p) => `${p.kind} ${p.name}@${p.version}: ${p.license || '(no licence declared)'}`);
 }
