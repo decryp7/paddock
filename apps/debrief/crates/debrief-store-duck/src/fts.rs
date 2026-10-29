@@ -46,6 +46,15 @@ fn writer_shape(budget: WriterBudget) -> (usize, usize) {
     (threads, (budget.heap / threads).max(MIN_HEAP_PER_THREAD))
 }
 
+/// EXPERIMENT (WIP): the `DEBRIEF_EXP_FTS_MERGE` knob, `Some(true)` for a final merge.
+fn exp_merge() -> Option<bool> {
+    match std::env::var("DEBRIEF_EXP_FTS_MERGE").as_deref() {
+        Ok("none") => Some(false),
+        Ok("final") => Some(true),
+        _ => None,
+    }
+}
+
 /// Folder of the index in a store folder.
 pub const INDEX_DIR: &str = "index";
 
@@ -202,7 +211,12 @@ fn schema() -> (Schema, Fields) {
     let words = TextOptions::default().set_indexing_options(
         TextFieldIndexing::default()
             .set_tokenizer(TOKENIZER)
-            .set_index_option(IndexRecordOption::Basic),
+            // EXPERIMENT (WIP): `DEBRIEF_EXP_FTS_FREQS=1` keeps the counts, for the A/B of the index size.
+            .set_index_option(if std::env::var_os("DEBRIEF_EXP_FTS_FREQS").is_some() {
+                IndexRecordOption::WithFreqs
+            } else {
+                IndexRecordOption::Basic
+            }),
     );
     let text = b.add_text_field("text", words);
     (b.build(), Fields { id, source, seg, text })
@@ -279,7 +293,13 @@ impl Fts {
             .num_worker_threads(threads)
             .memory_budget_per_thread(heap_per_thread)
             .build();
-        Ok(self.index.writer_with_options(options)?)
+        let w: IndexWriter = self.index.writer_with_options(options)?;
+        // EXPERIMENT (import tuning, WIP): `DEBRIEF_EXP_FTS_MERGE=none|final` turns Tantivy's background merges off
+        // while indexing; `final` merges everything once when indexing is done.
+        if exp_merge().is_some() {
+            w.set_merge_policy(Box::new(tantivy::indexer::NoMergePolicy));
+        }
+        Ok(w)
     }
 
     fn commit(&self, w: &mut IndexWriter, epoch: u64) -> Result<()> {
@@ -746,12 +766,27 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, gate: &Gate, epoch: u64) {
             // The slot stays locked until the writer is gone: a clear or a source removal in that window would find the
             // slot empty, try to open a second writer and fail on the index's lock (leaving the old documents searchable).
             let mut slot = crate::lock(&s.writer);
-            if let Some(w) = slot.take() {
+            if let Some(mut w) = slot.take() {
+                if exp_merge() == Some(true) {
+                    let merged = s
+                        .fts
+                        .index
+                        .searchable_segment_ids()
+                        .map_err(anyhow::Error::from)
+                        .and_then(|ids| if ids.len() > 1 { w.merge(&ids).wait().map(drop).map_err(Into::into) } else { Ok(()) });
+                    match merged {
+                        Ok(()) => log::debug!("full-text index: final merge done"),
+                        Err(e) => log::warn!("full-text index: final merge failed: {e:#}"),
+                    }
+                    let _ = s.fts.reader.reload();
+                }
                 // Let the background merges finish (they hold memory and allocate until they do), then give the
                 // index build's heap and its threads' pages back to the OS: the process may idle now.
                 if let Err(e) = w.wait_merging_threads() {
                     log::warn!("full-text index merges failed: {e}");
                 }
+                let _ = s.fts.reader.reload();
+                log::debug!("full-text index: merges done, {} segments", s.fts.segments());
                 debrief_alloc::release();
             }
         }
