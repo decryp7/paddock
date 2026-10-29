@@ -38,15 +38,16 @@ measured on our data.
 - **Load:** 1-minute load 17.9–24.4 during the timed runs (other agents' CI builds and tests running); a guard skipped
   any run starting above 25 (Small 512 px on CoreML CPU+GPU was skipped)
 - **Build:** Python 3.12 scratch venv; `rfdetr` 1.11.2 (export), `torch` 2.15.0, `onnx` 1.23.2, `onnxruntime` 1.31.1
-  (PyPI wheel, not the static `ort` build); models fp32, ONNX opset 17, batch 1; CPU EP with `intra_op_num_threads=4`,
+  (the official PyPI wheel; `ort` rc.15's archives are 1.31.0; not the static `ort` build; **telemetry not disabled**:
+  official builds have it on by default, see the research note section 12); models fp32, ONNX opset 17, batch 1; CPU EP with `intra_op_num_threads=4`,
   `inter_op_num_threads=1`; CoreML EP with `ModelFormat=MLProgram`, `RequireStaticInputShapes=1`, `MLComputeUnits` ALL or
   CPUAndGPU, no model cache
 - **Corpus:** synthetic: one random float32 tensor `[1,3,H,W]` from `numpy.random.default_rng(42)`; models are the COCO
   checkpoints `rf-detr-nano.pth` and `rf-detr-small.pth` (MD5 checked by `rfdetr`), exported at native size (384, 512)
   and at 640
 - **Command:** `RF_HOME=<scratch>/weights nice -n 19 python -I export.py <scratch>/models`, then per row
-  `nice -n 19 python -I bench.py <model.onnx> <cpu|coreml:ALL|coreml:CPUAndGPU> 4 5 30` (one process per row; scripts
-  kept in the research branch's scratchpad only)
+  `nice -n 19 python -I bench.py <model.onnx> <cpu|coreml:ALL|coreml:CPUAndGPU> 4 5 30` (one process per row; scripts in
+  [research/scripts/](research/scripts/))
 - **Runs:** single series per row: 5 warm-up and 30 timed `Session.run` calls; reported p50, p95 (nearest rank) and
   session creation time
 - **Numbers:**
@@ -74,5 +75,5 @@ measured on our data.
 - **Notes:** indicative only (shared machine under load, Python wheel instead of static `ort`, random input, 30 runs);
   not a budget check of Sighter, which has no code. Session creation on CoreML is compilation without
   `ModelCacheDirectory`; a cached second load was not measured. Windows (DirectML) and Medium/Large were not measured.
-  Raw JSON lines were kept in the scratchpad only. Quoted by
+  CoreML outputs were not compared with the CPU EP's (fp16 risk). Raw JSON lines were kept in the scratchpad only. Quoted by
   [research note 2026-10-29-rf-detr](research/2026-10-29-rf-detr.md) section 5 and [ADR 0001](adr/0001-object-detector.md).

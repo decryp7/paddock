@@ -1,13 +1,14 @@
 # 1. Sighter's object detector: RF-DETR (Apache sizes) on ONNX Runtime in Sighter's own sidecar
 
-Status: proposed (2026-10-29). Four of its six questions were decided by the user on 2026-10-29 (marked "user,
-2026-10-29" below); RT-DETRv4 and the Windows DirectML question are still open.
+Status: proposed (2026-10-29). The user decided eight points on 2026-10-29 (marked "user, 2026-10-29" below). Three
+questions remain open: Objects365 lineage, the proposal 9.1 amendment and the CUDA training licence exception.
+RT-DETRv4 stays pending until its licence review is done.
 
-Related: [proposal](../proposal.md) sections 6, 8, 9.1, 11 and 12; [design review](../review/2026-10-design-review.md);
+Related: [proposal](../proposal.md) sections 6, 8, 9.1, 11, 12 and 15; [design review](../review/2026-10-design-review.md);
 research notes [2026-10-29-rf-detr](../research/2026-10-29-rf-detr.md) (this ADR's evidence) and the family note
 [2026-10-sighter-detector](../../../../docs/research/2026-10-sighter-detector.md); Sighter AGENTS.md ("Licences of
-models", "Pitwall is always optional"); family rules 10 to 15, 23, 26, 42, 46 and 48; ADR 0024 (background work);
-Pacenotes ADR 0001 (static ONNX Runtime and rule 23).
+models", "Pitwall is always optional", "Local only: no telemetry"); family rules 10 to 15, 23, 26, 42, 46 and 48;
+ADR 0024 (background work); Pacenotes ADR 0001 (static ONNX Runtime and rule 23).
 
 ## Context
 
@@ -15,13 +16,16 @@ Sighter locates UI elements by sight through a layered resolver (proposal sectio
 **trained detector**, optional Pitwall VLM grounding, then "needs labelling". The trained detector is a per-app,
 closed-set model trained on the user's own labelled frames (1k to 5k per app) and queried per frame. It has to:
 
-- carry permissive licences for code **and** weights (no AGPL, GPL or non-commercial: Sighter AGENTS.md);
+- carry permissive licences for code **and** weights (no AGPL, GPL or non-commercial: Sighter AGENTS.md), including
+  the data its base weights were pre-trained on, as far as that is stated;
 - run from Rust on macOS (Apple Silicon only since 2026-10-27) and Windows, with a GPU where there is one and a usable CPU
   path where there is not (CI runners);
 - meet the proposed budgets: locate p50 ≤ 80 ms and p95 ≤ 250 ms on a GPU, p95 ≤ 600 ms on a CPU; detector < 50 ms on a
   GPU at 640 px; model cold load ≤ 1.5 s; server ≤ 1.5 GB with three models;
+- support displays of 1920 × 1200 and larger, up to 4K and 5K, with HiDPI and Retina scaling (user, 2026-10-29);
 - keep rule 23 (one Team ID in the bundle, sidecars self-test from the built app);
-- work without Pitwall, deterministically on the CPU, and say which execution provider answered.
+- work without Pitwall and without any network, send no telemetry, run deterministically on the CPU, and say which
+  execution provider answered.
 
 The proposal named RT-DETR, D-FINE/DEIM, DEIMv2 and RF-DETR as candidates; the backlog of 2026-10-27 asked "RF-DETR or
 UI-DETR-1?". The research note answers with today's official sources and one indicative measurement.
@@ -32,9 +36,9 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
 
 | Option | Licence (code / weights) | COCO AP50:95, publishers' T4 latency | For | Against |
 |---|---|---|---|---|
-| **A. RF-DETR N/S/M/L** | Apache-2.0 / Apache-2.0 | 48.4–56.5, 2.3–6.8 ms | Best published fine-tuning transfer (RF100-VL 57.7–62.2); one architecture, size is a resolution knob; plain ONNX, no NMS; training package does COCO datasets, EMA, eval and export; measured in ONNX Runtime here | ViT backbone, heavier on CPU than a CNN; five sizes of the family are PML 1.0 and must be fenced off; fast-moving upstream |
-| B. D-FINE (with the DEIM recipe) | Apache-2.0 / Apache-2.0 | 42.8–55.8, 2.1–12.9 ms | CNN backbone, likely cheaper on CPU; same ONNX adapter | Weaker transfer evidence on non-COCO domains; training code is research-grade scripts |
-| C. RT-DETRv4 | Apache-2.0 / Apache-2.0 per repo | 49.8–57.0, 3.7–12.9 ms | Strong numbers, CNN at inference | Trained by distillation from DINOv3 (custom, non-OSI licence): unclear whether trained weights inherit its terms |
+| **A. RF-DETR N/S/M/L** | Apache-2.0 / Apache-2.0 (Objects365 pre-training, see open question 1) | 48.4–56.5, 2.3–6.8 ms | Best published fine-tuning transfer (RF100-VL 57.7–62.2); one architecture, size is a resolution knob; plain ONNX, no NMS; training package does COCO datasets, EMA, eval and export; measured in ONNX Runtime here | ViT backbone, heavier on CPU than a CNN; five sizes of the family are PML 1.0 and must be fenced off; fast-moving upstream |
+| B. D-FINE, COCO-only checkpoints (with the DEIM recipe) | Apache-2.0 / Apache-2.0 | 42.8–54.0 (N–L), 2.1–8.1 ms | CNN backbone, likely cheaper on CPU; same ONNX adapter; no Objects365 lineage | Weaker transfer evidence on non-COCO domains; training code is research-grade scripts; the stronger `obj365`/`obj2coco` checkpoints carry the Objects365 caveat |
+| C. RT-DETRv4 | Apache-2.0 code / **no stated licence** for the checkpoints | 49.8–57.0, 3.7–12.9 ms | Strong numbers, CNN at inference | Trained by distillation from DINOv3 (custom, non-OSI licence); checkpoints on Google Drive with no licence: pending review |
 | D. DEIMv2 | non-commercial | 50.9–57.8 | | **Excluded** by licence |
 | E. Ultralytics YOLO, YOLOv9/v10, YOLO-NAS, OmniParser `icon_detect` | AGPL / GPL / restricted | | | **Excluded** by licence |
 | F. Open-vocabulary detector or VLM at run time | various | | No training | Seconds per query, non-deterministic, no stable taxonomy; belongs in Pitwall for bounded requests |
@@ -43,8 +47,9 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
 
 | Option | Licence | For | Against |
 |---|---|---|---|
-| **`ort` 2.0 (ONNX Runtime 1.31), static** | MIT OR Apache-2.0 / MIT | Prebuilt static libraries with CoreML (macOS arm64) and DirectML (Windows x64/arm64), hash-pinned; no vendor dylib (rule 23); shared with PaddleOCR | ~80 MB static runtime; CDN download at build time; DirectML in sustained engineering; `DirectML.dll` redistribution unverified |
-| `tract` | MIT OR Apache-2.0 | Pure Rust, no C++ | CPU only; full RF-DETR graph not yet loaded |
+| `ort` 2.0 with pyke's prebuilt ONNX Runtime 1.31.0, static | MIT OR Apache-2.0 / MIT | Prebuilt static libraries with CoreML (macOS arm64) and DirectML (Windows x64/arm64), hash-pinned; no build in CI | Telemetry code inside (TraceLogging on Windows; 1DS is ONNX Runtime 1.31's default), switched off only at run time; CDN download at build time |
+| **`ort` 2.0 with ONNX Runtime 1.31 self-built with `--no_telemetry`, static** (chosen) | MIT OR Apache-2.0 / MIT | No telemetry code at all; same static linking (rule 23); version and flags pinned by us; no third-party CDN | A long C++ build per target in CI, cached (plan item P5); we own the build's upkeep |
+| `tract` | MIT OR Apache-2.0 | Pure Rust, no C++, no telemetry | CPU only; full RF-DETR graph not yet loaded |
 | `candle` / `burn` | MIT OR Apache-2.0 | Pure Rust with Metal/CUDA | No RF-DETR decoder; a port is real work |
 
 **Where it runs**
@@ -56,41 +61,185 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
 
 ## Decision
 
-1. **Architecture: RF-DETR, Apache-2.0 sizes only** (user, 2026-10-29). Presets: **Balanced = Small (default)**, **Fast = Nano** (CPU-only
-   runners), **Accurate = Medium or Large**. Input sides are multiples of 32 (patch 16 × 2 windows); tiles stay 640 and
-   960 at 1:1 scale (design review). Atto, Femto, Pico, XL and 2XL are refused: the model catalogue lists only the four
-   Apache checkpoints, and model import refuses an ONNX whose metadata or card names a PML size.
-2. **Fallback: D-FINE-S/M** (user, 2026-10-29) with the DEIM recipe, through the same "ONNX DETR, fixed input, no NMS" adapter, used when
-   the spike shows RF-DETR missing the CPU budget on the CI runner class or failing on an EP. RT-DETRv4 is reconsidered
-   only after the open question on DINOv3-distilled weights is answered.
-3. **Training: the `rfdetr` package** (Apache-2.0), version-pinned, inside the managed Python training runtime the user
-   accepted on 2026-10-24. Start weights: the Apache COCO checkpoints only. **UI-DETR-1 is not in v1** (user,
+1. **Architecture: RF-DETR, Apache-2.0 sizes only** (user, 2026-10-29). Presets: **Balanced = Small (default)**,
+   **Fast = Nano** (CPU-only runners), **Accurate = Medium or Large**. Input sides are multiples of 32 (patch 16 × 2
+   windows); frames map to tiles as in "Screen resolutions and HiDPI" below. Atto, Femto, Pico, XL and 2XL are refused:
+   the model catalogue lists only the four Apache checkpoints, and model import refuses an ONNX whose metadata or card
+   names a PML size. Subject to open question 1 (Objects365 lineage).
+2. **Fallback: D-FINE-S/M, COCO-only checkpoints** (user, 2026-10-29; COCO-only per the review), with the DEIM recipe,
+   through the same "ONNX DETR, fixed input, no NMS" adapter, used when the spike shows RF-DETR missing the CPU budget on
+   the CI runner class or failing on an EP. The `*_obj365` and `*_obj2coco` checkpoints are not used: D-FINE's README
+   says they "may be subject to the Objects365 dataset terms". **RT-DETRv4 is pending** (user, 2026-10-29) until the
+   licence review in the research note section 9 is done; until then it is not in the catalogue.
+3. **Training: the `rfdetr` package** (Apache-2.0), version-pinned, inside the managed Python training runtime (user
+   decision of 2026-10-24, recorded in proposal section 6 and the family note; this ADR closes proposal section 15
+   question 1). The runtime is itself a `paddock-runtime` entry (pinned, hashed, self-tested, quarantined on failure).
+   The training worker runs with no network: `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, and the sandbox denies
+   outbound connections (`rfdetr`'s DINOv2 backbone calls `from_pretrained`, which must find what it needs locally or
+   fail with a clear message). Start weights: the Apache COCO checkpoints only. **UI-DETR-1 is not in v1** (user,
    2026-10-29): neither as a labeller nor as start weights, because the licences of its training datasets are not
    stated.
 4. **Inference: `ort` with statically linked ONNX Runtime**, in Sighter's `sighter-infer` sidecar (started through
    `paddock-ipc`, supervised by `paddock-proc` with a memory cap measured as footprint per rule 26, `--self-test` per
-   rule 23), shared with OCR. EPs: CPU everywhere (the reference and determinism baseline), CoreML with `MLProgram` on
-   macOS, DirectML on Windows; `error_on_failure` for the chosen EP, and every response records EP, ONNX Runtime version
-   and model hash. The CoreML compiled-model cache is keyed by model hash and cleaned with the model registry.
+   rule 23), shared with OCR.
+   - **EPs**: CPU everywhere (the reference and determinism baseline), CoreML with `MLProgram` on macOS, DirectML on
+     Windows; `error_on_failure` for the chosen EP; every response records EP, ONNX Runtime version and model hash.
+   - **Telemetry off, by construction** (user, 2026-10-29; Sighter AGENTS.md: no telemetry). ONNX Runtime 1.31.0 made
+     1DS telemetry the default for its native builds, and pyke's Windows library carries the TraceLogging provider
+     (research note section 12). So Sighter does **not** use pyke's prebuilt libraries: it **builds ONNX Runtime from
+     source per platform with `--no_telemetry`** (macOS arm64 with CoreML; Windows x64 and arm64 with DirectML), static,
+     at a pinned release tag, and links it through `ort`'s custom-library mode (`ORT_LIB_PATH` pointing at the built
+     static libraries, `download-binaries` off, `load-dynamic` and `copy-dylibs` off). Build pipeline: plan item P5.
+   - **Second line of defence**: the sidecar still sets `ORT_DISABLE_TELEMETRY=1` before ONNX Runtime initialises and
+     calls `DisableTelemetryEvents` after creating the environment, and a CI **egress test** runs
+     `sighter-infer --self-test` with outbound connections recorded and fails on any connection attempt. A symbol check
+     on the built library (no 1DS SDK, no curl, no TraceLogging provider) runs in the build job.
+   - **CoreML cache**: the compiled-model cache is keyed by model hash and cleaned with the model registry. When it is
+     missing (new model, cleared cache, new OS), locate **answers on the CPU EP** and starts the "prepare for this Mac"
+     job; it never stalls a locate for the 23–49 s compile (indicative, at load 18–24).
+   - **Windows DirectML**: a DirectML build of ONNX Runtime imports `DirectML.dll` (pyke's does, with `D3D12`, `DXGI`
+     and `DXCORE`), so `sighter-infer` ships Microsoft's DirectML redistributable (`DirectML.dll` 1.15.4 from the NuGet package
+     `Microsoft.AI.DirectML`, 18.5 MB, SHA-256-pinned) next to the sidecar (user, 2026-10-29). Its licence is
+     Microsoft's proprietary DirectML terms (distribution allowed only inside an application, never stand-alone; may
+     collect data; research note section 11). **The user approved it on 2026-10-29 as a named licence exception for that
+     one file** (see "Licence exceptions"). Our own DirectML build of ONNX Runtime imports it like pyke's does (verify
+     whether the import is delay-loaded): if it is not, a missing or broken `DirectML.dll` would stop even a CPU-only
+     start, so the spike checks this and the self-test runs CPU first.
 5. **Not in Pitwall.** Pitwall stays optional and is the VLM layer for labelling help, naming and grounding fallback, each
    a bounded, user-started request (rule 46). **Labelling** (user, 2026-10-29): whole recordings are pre-labelled by the
    user's own trained detector for that app. Pitwall's VLM is used only on a small selection the user chooses, or after a
    confirmation that states the frame count (and the expected time). Before the first model of an app exists,
    pre-labelling comes from the deterministic sources (OCR, template, accessibility `LabelSource`s) and the review queue,
-   not from the VLM per frame. Proposal 9.1's "label suggestions" request kind follows this rule.
+   not from the VLM per frame. This amends proposal 9.1's "label suggestions" request kind (open question 4).
 6. **Model distribution.** The runtime detector is always made locally and stored immutable and content-hashed in the
    project registry with its `model.json` (classes, input size, normalisation, thresholds, dataset hash, metrics, parent,
-   base checkpoint file name, its licence and the `rfdetr` version). The only downloaded models are the four Apache
-   COCO checkpoints, **mirrored on our Gitea (dev.decryptology.net)** with the Apache-2.0 licence and notice, and pinned
-   to **our own SHA-256s** (user, 2026-10-29); upstream's MD5s are checked once, when the mirror is made. They come only
-   from a catalogue built into Sighter, one TOML entry each with the mirror URL, size, SHA-256, licence and the upstream
-   URL it was taken from, parsed once (the `paddock-runtime` catalogue pattern), downloaded through `paddock-download`
-   (hash while writing, rule 15), as a job. Nothing but a tiny self-test model ships in the installer.
+   base checkpoint file name, its licence and pre-training lineage, and the `rfdetr` version). The only downloaded models
+   are the four Apache COCO checkpoints, **mirrored on our Gitea (dev.decryptology.net)** with the Apache-2.0 licence and
+   notice, and pinned to **our own SHA-256s** (user, 2026-10-29); upstream's MD5s are checked once, when the mirror is
+   made. Share first (rule 42): this is the family's third single-file model download (after Pacenotes' Model2Vec
+   `potion-code` and, most likely, Pitwall's model downloads), so the catalogue is a **shared single-file asset kind in `paddock-runtime`** (or
+   a shared model catalogue next to it): one TOML entry per file with URL, size, SHA-256, licence and upstream URL, parsed
+   once, anything wrong refusing the whole catalogue. Downloads go through **`paddock-net` `Egress`** (the family's one
+   outbound door, host allow-list = our Gitea) and `paddock-download` (hash while writing, rule 15), as a job. Nothing
+   but a tiny self-test model ships in the installer.
 7. **Jobs.** Download, pre-labelling, evaluation, CoreML preparation and training are `paddock-jobs` jobs with
    phase-labelled progress, Cancel and background priority (ER-17 to ER-20, ADR 0024). Locate is a bounded request.
-8. **Spike before the first release**, per the research note's checklist; its numbers go into
+8. **Screens, tiles and coordinates** as in the next section: frames are normalised to logical (100 %) scale per
+   display, tiled at 640 with overlap, unchanged tiles reuse cached detections, the active window goes first, and boxes
+   come back in physical pixels with their display and are converted to points at the input edge.
+9. **Spike before the first release**, per the research note's checklist; its numbers go into
    [performance.md](../performance.md) as results blocks (rule 48) and can move the default preset or switch the CPU
    preset to the fallback without changing this ADR.
+
+## Screen resolutions and HiDPI
+
+Sighter supports 1920 × 1200 (WUXGA) and larger: 2560 × 1440, 3840 × 2160 (4K) and 5120 × 2880 (5K), with HiDPI and
+Retina scaling where the logical size (points, or DIPs on Windows) differs from the physical pixels (user, 2026-10-29).
+
+### How frames map to detector input
+
+Tiles are square, 640 or 960 px, with a **64 px overlap** (one overlap covers any element up to 64 px wide that straddles
+a seam; a larger element is seen whole in at least one tile when it is under the tile size minus the overlap). Tiles per
+frame = ⌈(W − 64) / (T − 64)⌉ × ⌈(H − 64) / (T − 64)⌉.
+
+| Frame (pixels fed to the detector) | 640 tiles | 960 tiles | Downscale to 640 instead: factor |
+|---|---|---|---|
+| 1920 × 1200 | 4 × 2 = 8 | 3 × 2 = 6 | 3.0 |
+| 1920 × 1220 | 4 × 3 = 12 (8 with an overlap ≤ 40 px) | 3 × 2 = 6 | 3.0 |
+| 2560 × 1440 | 5 × 3 = 15 | 3 × 2 = 6 | 4.0 |
+| 3840 × 2160 | 7 × 4 = 28 | 5 × 3 = 15 | 6.0 |
+| 5120 × 2880 | 9 × 5 = 45 | 6 × 4 = 24 | 8.0 |
+| 4K at 200 % (logical 1920 × 1080) | 4 × 2 = 8 | 3 × 2 = 6 | 3.0 |
+| 5K Retina at 200 % (logical 2560 × 1440) | 5 × 3 = 15 | 3 × 2 = 6 | 4.0 |
+
+### Smallest detectable element, per approach
+
+Design assumption, to be measured in the spike: RF-DETR N–L cut the input into 16 × 16 px patches, so an element needs
+about **16 px at the model's input** to be found reliably (COCO calls objects under 32 × 32 px "small").
+
+| Approach | Smallest element, in physical pixels | Cost | Verdict |
+|---|---|---|---|
+| Downscale the whole frame to one 640 input | 16 × factor: 48 (1920), 64 (2560), 96 (4K), 128 (5K) | 1 run | **No**: a 16 pt checkbox at 200 % is 32 physical px and disappears at 4K/5K |
+| Tile at physical 1:1 | 16 at every size | 8 to 45 tiles (table) | Most detail, most cost; elements look 2× larger at 200 % than in 100 % training data (covered by the 50–300 % scale augmentation, proposal section 6) |
+| **Normalise to logical 100 % per display, then tile** (default, design review P1) | 16 logical px (16 pt), which is 32 physical px at 200 % | the logical size's tile count: 8 for 4K at 200 %, 15 for 5K at 200 % | **Default**: model sees the scale it was trained at; a 4K or 5K Retina display costs what its logical size costs |
+| Logical tiles plus a **1:1 fine pass** on chosen regions | 16 physical px in those regions | + tiles of the region only | For classes the model card marks as small (icons, checkboxes, grid cells) when recall below 16 pt is too low |
+
+### Latency per resolution (projections)
+
+Projection = tile count × the measured per-tile time (RF-DETR Small at 640, batch 1, run one after another;
+[performance.md](../performance.md#2026-10-29-rf-detr-onnx-latency-indicative-docssighter-rfdetr), at load 18–24,
+indicative). **These are projections, not measurements.** Batching tiles on a GPU and using cores − 1 CPU threads
+(the run used 4) would both lower them; neither was measured.
+
+| Frame (pixels fed to the detector) | 640 tiles | CPU EP, p50 (179 ms/tile) | CPU EP, p95 sum (276 ms/tile) | CoreML CPU+GPU, p50 (30 ms/tile) | vs CPU budget p95 ≤ 600 ms |
+|---|---|---|---|---|---|
+| 1920 × 1200, or 4K at 200 % | 8 | ~1.4 s | ~2.2 s | ~0.24 s | over on CPU; within on GPU |
+| 2560 × 1440, or 5K at 200 % | 15 | ~2.7 s | ~4.1 s | ~0.45 s | over on CPU; within on GPU |
+| 3840 × 2160 at 100 % | 28 | ~5.0 s | ~7.7 s | ~0.83 s | over on both |
+| 5120 × 2880 at 100 % | 45 | ~8.1 s | ~12.4 s | ~1.3 s | over on both |
+
+Nano at 640 is ~142 ms per tile on the CPU (about 20 % less), so it does not change the picture for whole frames.
+
+What the design does when a whole frame misses the budget, in this order:
+
+1. **Scope**: a locate is scoped to the target window by default (tests target an app), so the usual cost is the
+   window's tiles, not the screen's: a 1200 × 800 logical window is 2 × 2 = 4 tiles (~0.7 s CPU, ~0.12 s GPU, projected).
+2. **Changed tiles only**: tiles whose pixels did not change since the last frame reuse their cached detections.
+3. **Priority order**: the focused element's and the pointer's tiles run first; a unique hit above the class threshold
+   in the requested scope ends the locate early.
+4. **Batching** tiles in one run on a GPU EP (fixed input, no NMS: DETR batches well); on the CPU, cores − 1 threads.
+5. **Nano preset** on CPU-only runners, and **"Still working"** rather than a timeout for a full-screen pre-labelling job
+   (rule 12); an unattended locate that cannot finish inside its budget reports the scope it covered and fails as "not
+   found in time", never a guess (AGENTS.md: never click blindly).
+
+### Would segmenting the screen make it faster?
+
+The user's question: "if we segment the screen into parts and analyse them, would it be faster?" Only if fewer pixels
+reach the detector. Splitting the same pixels into parts does not save work. Costs are relative to the whole frame at
+logical 100 % scale (1920 × 1200: 8 tiles, ~1.4 s CPU p50, ~0.24 s CoreML, projected from the measured per-tile times).
+
+| Approach | Cost vs whole frame | What it can miss | Platform API |
+|---|---|---|---|
+| 1. Tile the whole frame | **1.0×** of compute (plus ~10–20 % for the overlap); faster wall-clock only by running tiles in parallel on spare cores or batching them on a GPU (not measured) | Nothing, at the tile scale | none |
+| 2. Only segments that changed since the last frame | **≈ changed tiles / all tiles**: 0 for a static screen; 1–3 of 8 (0.13–0.38×, ~0.2–0.5 s CPU) for a typical click that opens a menu or changes a few controls (projection) | Nothing if the change detection is right; misses a change the OS does not report (some GPU-drawn or remote-session surfaces) unless a per-tile pixel hash is the fallback; cache must be cleared on model change, theme or DPI change | macOS: `SCStreamFrameInfo.dirtyRects` (ScreenCaptureKit, macOS 12.3+): "a union of the rectangles redrawn and moved". Windows: Desktop Duplication `IDXGIOutputDuplication::GetFrameDirtyRects` and `GetFrameMoveRects` (Windows 8+; process move rects before dirty rects); otherwise a per-tile hash of the new frame (cheap, not measured) |
+| 3. Active window, or the region around the pointer or focus, first | Window 1200 × 800: 4 tiles, **0.5×**; pointer region: 1 tile, **0.13×** (~0.18 s CPU, ~30 ms GPU) | Elements outside the window: menus and pop-ups that open outside it, toasts, other windows of a multi-window app | Window bounds and focus from the capture or window APIs (`SCWindow` frames; `GetWindowRect`/DWM extended frame bounds on Windows; verify in the spike); pointer position |
+| 4. Cheap first pass (OCR or accessibility tree) picks segments, detector runs on those only | OCR pass + detector on k tiles; the a11y tree is tens of ms (not measured); OCR is not cheap on a whole frame (proposal: 150–500 ms CPU for 1080p, unverified) | Icon-only controls and custom-drawn UIs that have no text and no a11y node, which is exactly where the detector is needed; AGENTS.md also forbids depending on a11y at run time | OCR (`sighter-ocr`); a11y `LabelSource`s (optional, hint only) |
+| 5. Segments in priority order, results streamed | **1.0×** total if it runs to the end; **first result after one tile** (~0.18 s CPU, ~30 ms GPU); less if it stops early | With early stop: a better or second match elsewhere, so a query that needs uniqueness must finish its scope | none (scheduling in `sighter-core`) |
+
+**Default pipeline:** normalise each display's frame to logical 100 % → limit to the query's scope (target window by
+default) → split into 640 tiles with 64 px overlap → reuse cached detections for tiles the OS reports unchanged (dirty
+rects, else a per-tile hash) → run the remaining tiles in priority order (focus and pointer first, then the rest of the
+scope), batched on a GPU EP → stop early only when a unique match above the threshold is found and the query allows it →
+merge boxes across seams (pure function in `sighter-core`). OCR and a11y stay resolver layers and label sources, not
+the gate for the detector.
+
+### Coordinates
+
+- The detector returns boxes in **tile pixels**; `sighter-core` maps them, with pure functions, to **frame physical
+  pixels** (tile offset, then undo the logical-scale normalisation) and tags each box with its **display id**.
+- At the input edge each `InputDriver` converts to what its OS wants: on macOS, points in the global display space (the
+  display's origin plus pixels ÷ its scale factor, which ScreenCaptureKit reports per frame as
+  `SCStreamFrameInfo.scaleFactor`); on Windows, the sidecar and the input helper run **Per-Monitor V2 DPI aware**, so
+  they see each display's raw pixels and every display can have its own scale (Microsoft: unaware or system-aware
+  processes get virtualised, scaled coordinates; `GetDpiForMonitor`/`GetDpiForWindow` give the per-monitor DPI).
+- Multi-monitor setups with mixed DPI: each display is captured, normalised and mapped on its own; a box never spans two
+  displays; a window that spans two is split by display.
+- **Test item** (`sighter-core`, pure, synthetic layouts): two and three displays with mixed scale (100 % 1920 × 1200
+  left, 200 % 3840 × 2160 right, 150 % 2560 × 1440 above with a negative origin); a box on a tile seam; a box at each
+  display edge; round trip tile → physical → logical → physical within ±1 px; property tests over random layouts and
+  boxes. Plus one OS-level check per platform in the spike (a synthetic window at a known position on a 200 % display).
+
+## Licence exceptions
+
+Sighter's code and every bundled component are permissive (Sighter `deny.toml`), with exactly one named exception:
+
+| File | Licence | Scope | Reason | Approved |
+|---|---|---|---|---|
+| `DirectML.dll` 1.15.4 (NuGet `Microsoft.AI.DirectML`, SHA-256-pinned) | Microsoft Software License Terms, Microsoft DirectX Machine Learning (DirectML): proprietary; distribution allowed only inside an application, for Windows and Xbox, not stand-alone; may collect data | Windows only, next to `sighter-infer.exe`; never another file of that package, never another app | DirectML is how the ONNX Runtime build reaches any DirectX 12 GPU (NVIDIA, AMD, Intel) on Windows; the build imports it, so the sidecar cannot start without it | user, 2026-10-29 |
+
+cargo-deny checks crates, not shipped DLLs, so the exception is written in `apps/sighter/deny.toml` as a commented
+"non-crate binaries" list with this reason, and the third-party notices list it. A check over the bundle's files
+against that list comes with the notices tooling.
 
 ## Plan items
 
@@ -100,48 +249,85 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
   source, version and upstream URLs to a release or package on dev.decryptology.net; then write the catalogue entries.
   About 1.5 GB (Nano and Small measured at 366 and 386 MB; Medium and Large estimated). **Needs the user's OK when it
   happens**: it is a large, outward-facing upload, so the agent doing it asks first and does not do it on its own.
-- **P2. Update the proposal** when this ADR is accepted (see Consequences).
+- **P2. Update the proposal** when this ADR is accepted (see Consequences), and close proposal section 15 question 1.
+- **P3. Shared single-file asset kind** in `paddock-runtime` (or a shared model catalogue), with Pacenotes' Model2Vec
+  and Pitwall's model downloads as the other users (rule 42, rule of three); downloads through `paddock-net` `Egress`.
+- **P4. RT-DETRv4 licence review** (research note section 9): ask the authors for the checkpoints' licence and whether
+  they contain teacher weights; inspect a checkpoint's keys; get a reading on DINOv3-distilled weights. Pending until
+  done.
+- **P5. ONNX Runtime build pipeline** (decision 4). A CI job per target (macOS arm64 + CoreML; Windows x64 + DirectML;
+  Windows arm64 + DirectML, cross-compiled or on an arm64 runner) that builds a pinned ONNX Runtime release tag (1.31.x,
+  submodules at the tag's commits) with `--no_telemetry`, static libraries, Release, tests skipped; checks the result
+  (symbol check for telemetry, a minimal `ort` program that loads the self-test model on each EP); and publishes the
+  libraries as a versioned, SHA-256-pinned artefact on our Gitea, keyed by (ORT version, flags, toolchain). App builds
+  consume that artefact through `ORT_LIB_PATH`; they never build ONNX Runtime themselves. Cache: the artefact itself
+  (rebuilt only when the key changes) plus the CI cache server for the C++ object files. Renovate watches the ORT tag;
+  a bump is one PR that rebuilds the artefact, re-runs the symbol check and the egress test. `DirectML.dll` is fetched
+  from NuGet once, pinned by SHA-256, and stored with the artefact. **Estimate:** about 5–8 agent-days (build scripts
+  and flags per target 2–3, CI jobs, artefact publishing and caching 1–2, `ort` custom-lib wiring and the checks 1–2,
+  Windows arm64 1); CI time per cold build not measured (a full ONNX Runtime build is long, so it must never run in
+  an app's normal pipeline).
 
 ## Consequences
 
 - One adapter covers RF-DETR, D-FINE and RT-DETR alike; swapping the detector is a different ONNX file and a catalogue
   entry, not new code (open/closed).
-- Sighter carries ONNX Runtime (~80 MB static in one sidecar binary) and the `cdn.pyke.io` build-time download, cached in
-  CI and pinned by Renovate. Intel Macs are not supported (already decided).
+- Sighter carries ONNX Runtime (~80 MB static in one sidecar binary, size of pyke's equivalent build) built by our own
+  pipeline (plan item P5) instead of pyke's CDN download. Intel Macs are not supported (already decided). Linux, if
+  ever needed, is one more target of that pipeline (pyke offers only CPU and CUDA builds for Linux arm64).
 - `cargo deny` must allow `ort`/`ort-sys` (MIT OR Apache-2.0) and ONNX Runtime's notices; the model catalogue gets its
-  own licence allow-list (Apache-2.0, MIT) checked by a test over every entry.
-- Windows packaging has one open item (the `DirectML.dll` question); macOS packaging has none beyond Pacenotes'
-  findings (macOS ≥ 13.4 link floor, `libclang_rt.osx.a`).
-- CoreML compiles each model on first use: 23 to 49 s per session here, without a cache (indicative,
+  own licence allow-list (Apache-2.0, MIT) checked by a test over every entry. `DirectML.dll` is the one named exception
+  ("Licence exceptions"), listed in the third-party notices.
+- macOS packaging has nothing new beyond Pacenotes' findings (macOS ≥ 13.4 link floor, `libclang_rt.osx.a`). Windows
+  packaging adds `DirectML.dll` next to `sighter-infer.exe`.
+- CoreML compiles each model on first use: 23 to 49 s per session here, without a cache (at load 18–24, indicative,
   [performance.md](../performance.md#2026-10-29-rf-detr-onnx-latency-indicative-docssighter-rfdetr)), against a 1.5 s
-  cold-load budget. The compiled-model cache is required, and "preparing the model for this Mac" runs as a job phase
-  right after training or import, never inside a locate request. Once compiled, a 640 px tile of Small took about 30 to
-  35 ms; on 4 CPU threads about 0.2 s, so CPU locating works on window crops or regions, not on whole tiled frames.
-- Determinism is promised bit-identical only on the CPU EP with fixed threads; GPU EPs promise "same top candidate within
-  tolerance".
+  cold-load budget. "Preparing the model for this Mac" runs as a job right after training or import; until it is done,
+  locate answers on the CPU EP. Once compiled, a 640 px tile of Small took about 30 to 35 ms (at load 18–24,
+  indicative); on 4 CPU threads about 0.2 s, so CPU locating works on window scopes and changed tiles, not on whole
+  tiled frames (see the projections).
+- Determinism is promised bit-identical only on the CPU EP with fixed threads (to be shown in the spike); GPU EPs promise
+  "same top candidate within tolerance".
 - The training runtime pins an upstream that releases often; every bump re-runs the export and self-test checks.
-- Fine-tuned models inherit Apache-2.0 from the base checkpoint; the user's own data stays the user's. The model card
-  records both.
-- Proposal section 6 (presets) and section 8 (licence table) are updated when this ADR is accepted: RF-DETR becomes
-  primary, DEIMv2 moves to excluded (non-commercial), RT-DETRv4 is added as pending, UI-DETR-1 and the "Florence-2
-  bootstraps boxes" idea are not v1, and 9.1's label suggestions follow decision 5.
+- Apache-2.0 does not force its licence onto a model fine-tuned from the checkpoint, but it keeps notice duties: the
+  model card carries the base checkpoint's licence, notice and lineage; the user's own data and model stay the user's.
+- Proposal section 6 (presets), section 8 (licence table) and 9.1 are updated when this ADR is accepted: RF-DETR becomes
+  primary, DEIMv2 moves to excluded (non-commercial), RT-DETRv4 is pending, UI-DETR-1 and the "Florence-2 bootstraps
+  boxes" idea are not v1, and 9.1's label suggestions follow decision 5.
 - A new app starts with no detector: until the user has reviewed enough frames to train the first model, labelling is
   OCR, template, accessibility sources and manual review. This is the price of leaving UI-DETR-1 out of v1.
 - The mirror makes downloads independent of Roboflow's URLs (the Large checkpoint already moved once), and costs about
   1.5 GB on our Gitea. Updating a checkpoint is a new mirror entry with a new hash, never an overwrite.
+- Other execution providers (research note section 11): v1 inference stays CPU, CoreML and DirectML, which already use
+  NVIDIA and Intel GPUs on Windows. OpenVINO is a candidate opt-in after the spike; CUDA/TensorRT inference is not
+  planned. CUDA training is an opt-in download that needs a licence exception (open question 5).
 
 ## Decided questions (user, 2026-10-29)
 
 1. Default detector: **RF-DETR Small**; Nano is the CPU preset, Medium or Large the "Accurate" preset; **D-FINE** is
-   the fallback, behind the same ONNX adapter (decisions 1 and 2).
+   the fallback, behind the same ONNX adapter (decisions 1 and 2; COCO-only checkpoints).
 2. Start weights: **mirror the Apache COCO checkpoints on our Gitea**, pinned to our own SHA-256s (decision 6, plan
    item P1; the upload needs the user's OK when it happens).
 3. UI-DETR-1: **not in v1**, because its datasets' licences are not stated (decision 3).
 4. Labelling: **whole recordings are pre-labelled by the user's own detector**; Pitwall's VLM only for small,
    user-chosen selections or after a confirmation that states the frame count (rule 46; decision 5).
+5. RT-DETRv4: **do a licence review**; the model stays pending until it is done (decision 2, plan item P4).
+6. Windows: **ship Microsoft's DirectML redistributable** when the system's is missing or too old (decision 4). Since
+   the DirectML build imports it, in practice Sighter always ships it next to the sidecar.
+7. DirectML: **approved as a named licence exception for `DirectML.dll` only** ("Licence exceptions").
+8. Telemetry: **ONNX Runtime is self-built with `--no_telemetry`** per platform and linked through `ort`'s custom-library
+   mode, not pyke's prebuilt libraries; the runtime opt-out and the egress test stay as a second line of defence
+   (decision 4, plan item P5).
 
 ## Open questions for the user
 
-1. **RT-DETRv4**: worth a licence review of DINOv3-distilled weights, or exclude it like DEIMv2?
-2. **Windows**: if the system `DirectML.dll` is too old, may Sighter ship Microsoft's DirectML redistributable next to
-   the sidecar, or should Windows GPU wait for Windows ML?
+1. **Objects365 lineage.** RF-DETR's paper says its detection heads were pre-trained on Objects365 (pseudo-labelled
+   with SAM2) before COCO; Roboflow labels the N/S/M/L checkpoints Apache-2.0; the Objects365 website states no licence;
+   D-FINE's authors warn that Objects365-pretrained checkpoints "should not be assumed to be commercially cleared".
+   Accept RF-DETR's checkpoints on Roboflow's Apache-2.0 label (Sighter is for personal, non-commercial use today), or
+   treat Objects365 lineage like D-FINE's and fall back to COCO-only D-FINE checkpoints by default?
+2. **Proposal 9.1 amendment**: approve changing 9.1's "label suggestions" from "per distinct frame" to decision 5's rule
+   (selection or confirmation with the frame count).
+3. **CUDA training**: allow an opt-in CUDA training runtime whose PyTorch wheels pull NVIDIA's proprietary CUDA and
+   cuDNN libraries, as a recorded licence exception (research note section 11)? Without it, NVIDIA laptops train on the
+   CPU or a remote host.
