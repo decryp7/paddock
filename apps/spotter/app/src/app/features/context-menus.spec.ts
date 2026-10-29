@@ -7,7 +7,7 @@ import { WatchesPage } from './watches/watches-page';
 import type { WhatsNewItem } from '../core/api.types';
 import { ClockService } from '../core/clock.service';
 import { Clipboard } from '../shared/clipboard';
-import { Confirm } from '../shared/ui/confirm-dialog';
+import { Confirm } from '../shared/ui/confirm';
 import { WatchesStore } from '../state/watches.store';
 import { appProviders, byText, flush, makeMock, NOW, routeStub, settle, text } from '../../testing/test-helpers';
 
@@ -157,7 +157,7 @@ describe('right-click menus', () => {
       const name = text(rows()[0]!.querySelector('.name'));
       await rightClick(f, rows()[0]!);
       await pickFromMenu(f, 'Delete watch');
-      expect(ask).toHaveBeenCalledWith(expect.objectContaining({ title: `Delete "${name}"?`, danger: true }));
+      expect(ask).toHaveBeenCalledWith(expect.objectContaining({ heading: `Delete "${name}"?`, confirm: { label: 'Delete watch', destructive: true } }));
       expect(rows()).toHaveLength(before);
       expect(backend.calls).not.toContain('deleteWatch');
       await rightClick(f, rows()[0]!);

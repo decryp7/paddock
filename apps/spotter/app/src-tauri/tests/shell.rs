@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_commands::testing::{sync_generated, WriteMode};
+use spotter_app_lib::dialogs::DIALOGS;
 use spotter_app_lib::health::Hub;
 use spotter_app_lib::{shell, Place, COMMANDS, MANIFEST};
 
@@ -61,6 +62,14 @@ fn the_uis_job_kinds_are_generated_from_the_kinds() {
 fn the_uis_command_names_are_generated_from_the_table() {
     let text = paddock_commands::ts::names_module(&COMMANDS, "APP_COMMANDS", "AppCommand", REGENERATE).unwrap();
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/app/generated/app-commands.ts");
+    sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// The UI's dialog contracts are generated from the dialogs table, so Rust and TypeScript cannot disagree (ADR 0026 §3).
+#[test]
+fn the_uis_dialog_contracts_are_generated_from_the_table() {
+    let text = paddock_dialogs::ts::contracts_module("the app", &DIALOGS, REGENERATE);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/app/generated/dialog-contracts.ts");
     sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
 }
 

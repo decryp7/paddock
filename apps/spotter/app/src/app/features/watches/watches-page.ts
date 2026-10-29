@@ -8,7 +8,7 @@ import { Clipboard } from '../../shared/clipboard';
 import { kindIcon, STATUS_FILTERS } from '../../shared/labels';
 import { AgoPipe, AgoShortPipe, UntilShortPipe } from '../../shared/ui/ago.pipe';
 import { Avatar } from '../../shared/ui/avatar';
-import { Confirm } from '../../shared/ui/confirm-dialog';
+import { Confirm, deleteWatchPrompt } from '../../shared/ui/confirm';
 import { Panel } from '../../shared/ui/panel';
 import { MenuButton, MenuPanel, type MenuEntry } from '../../shared/ui/row-menu';
 import { RowItem, RowList } from '../../shared/ui/row-nav';
@@ -77,12 +77,7 @@ export class WatchesPage {
 
   /** Deleting always asks, naming the watch. */
   protected async remove(w: WatchSummary): Promise<void> {
-    const ok = await this.confirm.ask({
-      title: `Delete "${w.name}"?`,
-      message: 'Spotter stops watching it and forgets its history. Downloaded files stay where they are.',
-      confirmLabel: 'Delete watch',
-      danger: true,
-    });
+    const ok = await this.confirm.ask(deleteWatchPrompt(w.name));
     if (ok) await this.store.remove(w.id);
   }
 

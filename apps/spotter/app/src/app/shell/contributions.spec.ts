@@ -1,7 +1,6 @@
 import { Injector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { AppearanceStore, BrowserAppearanceBackend, buildManifest, CommandService, ContributionRegistry, manifestDrift, provideAppearance, serializeManifest } from '@decryp7/paddock-ui/shell';
-import { dialogContractFile, serializeDialogContracts } from '@decryp7/paddock-ui/shell/dialogs';
 import { provideMenus, provideSubmenus } from '@decryp7/paddock-ui/shell/menu';
 import { SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { assertContributionsValid, dialogTableProblems, provideShellTesting, shellPorts } from '@decryp7/paddock-ui/shell/testing';
@@ -10,6 +9,7 @@ import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS, DIALOGS } from './contributions';
 import { spotterContext } from './context';
 import { DIALOG_BASE_COMMANDS } from './dialog-base';
 import { APP_COMMANDS } from '../generated/app-commands';
+import { DIALOG_BASE } from '../generated/dialog-contracts';
 import { BACKEND } from '../core/backend';
 import { ClockService } from '../core/clock.service';
 import { MockBackend } from '../core/mock-backend';
@@ -25,9 +25,8 @@ interface NodeFs {
 const nodeFs = (): Promise<NodeFs> => import(/* @vite-ignore */ ['node', 'fs'].join(':')) as Promise<NodeFs>;
 const env = (name: string): string | undefined => (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env[name];
 
-/** Rust reads both files (`paddock_shell::Builder::problems`, `app/src-tauri/tests/shell.rs`). */
+/** Rust reads this file (`paddock_shell::Builder::problems`, `app/src-tauri/tests/shell.rs`). */
 const MANIFEST = 'paddock-manifest.json';
-const CONTRACTS = 'dialog-contracts.json';
 
 function configure(contributions = [CONTRIBUTIONS]): void {
   const backend = new MockBackend({ now: () => new Date(2026, 9, 22, 12).getTime() });
@@ -93,12 +92,8 @@ describe('Spotter dialogs', () => {
     expect(problems).toEqual([]);
   });
 
-  // Regenerate with PADDOCK_WRITE_MANIFEST=1 npx ng test --watch=false --include=**/shell/contributions.spec.ts
-  it('keep dialog-contracts.json equal to the registry', async () => {
-    const text = serializeDialogContracts(dialogContractFile(DIALOGS, { base: DIALOG_BASE_COMMANDS }));
-    const fs = await nodeFs();
-    if (env('PADDOCK_WRITE_MANIFEST') === '1') fs.writeFileSync(CONTRACTS, text);
-    expect(fs.readFileSync(CONTRACTS, 'utf8')).toBe(text);
+  it('take the base commands from the Rust table', () => {
+    expect([...DIALOG_BASE]).toEqual([...DIALOG_BASE_COMMANDS].sort());
   });
 });
 
