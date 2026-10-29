@@ -100,3 +100,91 @@ then the UI's once the workspace loaded), was 3–4 times.
 The 1.4 s the user's 1.0.2 log showed between the window and the AI line was not reproduced with an empty data
 folder (30 ms here); it depends on that Mac's state (stored settings with plugin sections, an AI model loading). The
 `Steps` field of the next start's line names the step.
+
+## Query and import performance, DuckDB 1.5.6 against 2.0 (2026-10-28 and 29)
+
+Every block says what it measured: machine (Apple M4 Pro, 14 cores, macOS), the load average when it ran (load over 10 is marked and
+was not used for conclusions), the corpus (invented, same shape as the samples; never user logs), the command, and the build (release).
+Reproduce with `/Volumes/d7sst7/dev-targets/duck2-bench` (`ab.sh`, `imem.sh`, `reads.sh`, `fmt/suite.py`); the decisions are in
+ADR 0014's DuckDB 2.0 amendment.
+
+### Real import pipeline, 1.5.6 against 2.0 (`ab.sh`)
+
+Release CLI plus store worker, 16,847,461 events (2.42 GB: CLEF, log4net text, compressed), three interleaved pairs, load 33 to 65
+(over 10: the speeds are lower bounds). Events per second 1.5.6 / 2.0: 707k / 685k, 687k / 738k, 855k / 991k. Worker CPU 91 to 94 s
+against 79 to 81 s. Peak physical footprint 932 to 979 MB against 905 to 945 MB (both above the 768 MB budget; not new). End-of-import
+footprint 319 to 344 MB against 452 to 536 MB (explained next).
+
+### Memory after an import, and a bigger limit during it (`imem.sh`)
+
+In-process import of 3,000,000 CLEF events (release, corpus cached, load 3 to 7), then 30 s idle, three runs per variant.
+
+| Variant | Import | Peak footprint | DuckDB's own use right after | 30 s later | RSS 30 s later |
+|---|---|---|---|---|---|
+| A: shipped 192 MB limit | 4.2 to 5.3 s (570k to 717k events/s) | 756 to 816 MB | 10 to 12 MB | 172 to 176 MB | 1,092 to 1,133 MB |
+| B: 512 MB during the import, 192 MB after | 4.2 to 4.3 s | 783 to 815 MB | 14 to 15 MB | 171 to 175 MB | 1,115 to 1,150 MB |
+| C: 512 MB throughout | 4.1 to 4.3 s | 785 to 829 MB | 14 to 15 MB | 205 to 211 MB | 1,126 to 1,183 MB |
+| D: 64 MB set after the import | 4.2 to 4.4 s | not sampled | 11 MB | 56 to 59 MB | 1,078 to 1,132 MB |
+| E: 32 MB set after the import | 4.2 to 4.3 s | not sampled | 11 to 12 MB | 25 to 30 MB | 1,057 to 1,096 MB |
+
+Explanation of the extra memory after an import: it is DuckDB's buffer pool. The import itself uses 10 to 15 MB of DuckDB memory (events go
+to Parquet through arrow-rs, not through DuckDB); the background full-text index and catalogue builds then read the segments through DuckDB
+and fill its pool up to `memory_limit` within 30 s (172 MB at the 192 MB limit, 205 to 211 MB at 512 MB). It is a cache bounded by the
+limit, not a leak. A higher limit during the import gains nothing (A against B and C: same time, same peak). Setting a lower limit after
+the import caps it (D, E): 115 to 145 MB less DuckDB memory; RSS moves little in this process because it also holds the allocator's
+pages (RSS is not the right gauge; rule 26). Recommendation: do not raise the limit for imports; lower it to about 64 MB while the store
+is idle after an import and restore 192 MB on the first query, if the idle budget needs the memory.
+
+### Write stage against the number of writers (`layout_bakeoff`, 60 copies of the samples, 1.68M events, load 2.6 to 3.6)
+
+| Writers | Events/s | Against one writer | Peak over baseline |
+|---|---|---|---|
+| 1 | 1.15M | 1.0x | 0 to 6 MB |
+| 2 | 2.28M to 2.29M | 2.0x | 0 to 4 MB |
+| 4 | 4.39M to 4.45M | 3.8x | 2 to 3 MB |
+| 8 | 7.8M to 8.2M | 7.0x | 12 to 51 MB |
+| 12 | 10.5M to 10.7M | 9.2x | 52 to 61 MB |
+| Arrow appender into one native table | 737k to 745k | 0.64x | +175 to +470 MB |
+
+Verdict: the write stage scales linearly with writers up to the core count (14 cores; the pipeline's real ceiling is parsing, 0.7 to
+1.0M events/s in the pair table above, so writers beyond about the parse rate buy nothing). A single appender is one writer and tops out
+at 0.74M events/s, below one Parquet writer. Appender with two writers was not measured (a native table has one appender per connection;
+the test has no such variant).
+
+### Query formats on the same 3M events (`fmt/suite.py`, load 3 to 5, 2 rounds of 7 repetitions, 192 MB limit, 4 threads)
+
+p50 / p95 over the 14 repetitions of each query. File sizes: Parquet segments 165 MB; native table 1,681 MB (storage v2.0.0, 2.8 s to
+create from the view) and 1,675 MB (v1.5.0, 4.0 s); Vortex 388 MB (13.4 s; `extra`, a MAP, is not supported and was written as JSON text).
+
+| Query | Parquet + view | native v2.0.0 | native v1.5.0 | Vortex |
+|---|---|---|---|---|
+| count | 5 / 8 ms | 0 / 0 | 0 / 0 | 0 / 1 |
+| level facet | 8 / 8 | 2 / 2 | 2 / 2 | 2 / 2 |
+| minute x level | 18 / 19 | 7 / 9 | 7 / 7 | 7 / 8 |
+| first page | 23 / 24 | 4 / 4 | 3 / 4 | 5 / 5 |
+| extra facet | 119 / 120 | 59 / 64 | 57 / 62 | 87 / 98 |
+| ILIKE | 40 / 41 | 45 / 46 | 43 / 44 | 23 / 23 |
+| regex | 44 / 45 | 33 / 33 | 33 / 34 | 34 / 34 |
+| by id | 2 / 3 | 0 / 1 | 0 / 1 | 1 / 1 |
+| deep page | 77 / 80 | 57 / 58 | 56 / 57 | 57 / 58 |
+| peak RSS | 125 to 132 MB | 294 to 326 MB | 302 to 304 MB | 898 to 930 MB |
+
+The corpus is 20 shifted copies of the samples, which zstd compresses far better than DuckDB's native encodings would compress real logs,
+so the 10x size gap is exaggerated; the direction is not. All runs are warm for the operating system's cache; "cold" here is only the
+first run of a fresh process and is not separated. Native storage v2.0.0 (DICT_FSST) and v1.5.0 are the same in speed and size on this
+data. Verdict on formats: a native table answers the scans 1.5 to 5x faster and uses 10x the disk and 2.3x the memory; at 3M events
+every query is far under 0.5 s in all formats, so the Parquet default does not need to change on speed.
+
+### Appender against the Parquet fan-out (answer to "is the fan-out needed?", from the write-stage and format blocks)
+
+1. **Fan-out** (today): parse threads write segments in parallel; the write stage is never the limit (1.15M events/s per writer, 7 to 10M
+   with 8 to 12); 165 MB per 3M events; catalogue of segments, compaction, deletion list and `union_by_name` are the code it costs.
+2. **One Appender** into a native table: 0.74M events/s, so with 8 parse threads producing about 1M events/s it would be the bottleneck and
+   needs a queue in front of it; peak +175 to +470 MB; 975 MB to 1.7 GB on disk for 1.7M to 3M events. It would delete the segment catalogue,
+   compaction and `union_by_name`, but not the need for a deletion path or for the Tantivy index.
+3. **Hybrid** (fan-out, then `INSERT INTO native SELECT * FROM view`): 2.8 s (v2.0.0) or 4.0 s (v1.5.0) for 3M events, about 1M events/s,
+   doubling the disk and holding 1.2 GB of RSS while it runs.
+
+Not measured, honestly: the real pipeline with the sink swapped (the importer's sink interface would need an Appender implementation; the
+write-stage numbers above bound it), end-to-end time until search is ready for each, the compacted-Parquet, DuckLake, Quack, VARIANT and
+scaling-with-size cells, and the cold-cache runs (they need a cache purge this account cannot run). They are listed in the ADR as open.

@@ -71,7 +71,13 @@ fn interactive_operations_at_scale() {
     // Import, then wait for the full-text index (`DEBRIEF_BENCH_IMPORT_ONLY=1`: import only, for A/B runs).
     if !reuse {
         let started = Instant::now();
-        let store = DuckStore::create(&store_dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
+        // `DEBRIEF_BENCH_IMPORT_MB`: DuckDB's memory limit for the length of the import (default: the shipped one).
+        let mut options = debrief_store_duck::StoreOptions::default();
+        if let Some(mb) = std::env::var("DEBRIEF_BENCH_IMPORT_MB").ok().and_then(|v| v.parse::<u64>().ok()) {
+            options.memory_limit = format!("{mb}MB");
+        }
+        let shipped_limit = debrief_store_duck::StoreOptions::default().memory_limit;
+        let store = DuckStore::create_with(&store_dir.0, Profile::default_profile(), PluginRegistry::new(), options).unwrap();
         let r = store.open(std::slice::from_ref(&corpus)).unwrap().wait().unwrap();
         let import_ms = started.elapsed().as_secs_f64() * 1000.0;
         let import_peak = sampler.take_peak_mb();
@@ -83,6 +89,29 @@ fn interactive_operations_at_scale() {
         );
         if std::env::var_os("DEBRIEF_BENCH_IMPORT_ONLY").is_some() {
             eprintln!("{import}");
+            // `DEBRIEF_BENCH_IDLE_SECS`: what the process holds after the import, every 5 s (DuckDB's own use from
+            // `duckdb_memory()` and the resident size). `DEBRIEF_BENCH_LOWER=1` first sets the shipped limit again.
+            if let Some(secs) = std::env::var("DEBRIEF_BENCH_IDLE_SECS").ok().and_then(|v| v.parse::<u64>().ok()) {
+                use debrief_core::ports::Inspect;
+                if let Some(lower) = std::env::var("DEBRIEF_BENCH_LOWER").ok() {
+                    // "1": the shipped limit again; a number: that many MB (then the shipped limit again after 10 s).
+                    let limit = lower.parse::<u64>().ok().filter(|mb| *mb > 1).map_or(shipped_limit.clone(), |mb| format!("{mb}MB"));
+                    store
+                        .configure(debrief_store_duck::StoreOptions {
+                            memory_limit: limit,
+                            ..debrief_store_duck::StoreOptions::default()
+                        })
+                        .unwrap();
+                    debrief_alloc::release();
+                }
+                for t in (0..=secs).step_by(5) {
+                    let used = store.store_memory().map(|m| m.duck_used_bytes >> 20).unwrap_or(0);
+                    eprintln!("idle +{t:>3} s: RSS {} MB, DuckDB uses {used} MB", current() >> 20);
+                    if t < secs {
+                        std::thread::sleep(Duration::from_secs(5));
+                    }
+                }
+            }
             if kept.is_some() {
                 drop(store);
                 std::mem::forget(store_dir);
