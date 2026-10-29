@@ -59,7 +59,7 @@ describe('dy-throttling-page', () => {
     expect(heads).toEqual(['Started', 'Duration', 'Cause', 'Speed lost, average (%)', 'Peak temperature (°C)']);
     expect(cells(0)[2]).toBe('Heat');
     expect(cells(2)[2]).toBe('Power limit');
-    expect(cells(3)[2]).toBe('Battery saver');
+    expect(cells(3)[2]).toBe('Power saving mode');
     expect(cells(2)[4]).toBe('—');
     expect(cells(0)[1]).toBe('14 min');
     const first = rows()[0]!.textContent;

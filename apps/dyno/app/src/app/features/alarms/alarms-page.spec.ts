@@ -66,7 +66,7 @@ describe('dy-alarms-page, Active', () => {
     const { f, el } = render();
     await settle(f);
     const shelved = arows(el).find((r) => text(r).includes('rustc has used'))!;
-    expect(shelved.querySelector('.sfx')).toBeNull();
+    expect(shelved.querySelector('.sfx')?.textContent).toBe('Shelved');
     expect(el.querySelectorAll('.badge, .pill')).toHaveLength(0);
   });
 
@@ -97,13 +97,13 @@ describe('dy-alarms-page, Active', () => {
     await settle(f);
     button(arows(el)[1]!, 'Shelve for 1 hour')!.click();
     await settle(f);
-    expect(text(arows(el)[1]!)).not.toContain('Shelved until');
+    expect(text(arows(el)[1]!)).toContain('Shelved');
     button(arows(el)[1]!, 'More actions')!.click();
     await settle(f);
     expect(['Shelve for 1 hour', 'Shelve until tomorrow', 'Shelve until restart'].every((l) => menuItem(l))).toBe(true);
     menuItem('Shelve until restart')!.click();
     await settle(f);
-    expect(text(arows(el)[1]!)).not.toContain('Shelved until restart');
+    expect(text(arows(el)[1]!)).toContain('Shelved');
     expect(mock.isShelved((await mock.alarms({ states: [], minSeverity: null, rule: null, includeShelved: true, limit: 10 })).find((a) => a.id === 7)!)).toBe(true);
   });
 
@@ -187,7 +187,7 @@ describe('dy-alarms-page, Active', () => {
     expect(text(el.querySelector('aside')!)).toContain('Shelved until');
     button(el.querySelector('aside')!, /Unshelve/)!.click();
     await settle(f);
-    expect(text(el.querySelector('aside')!)).not.toContain('Shelved until');
+    expect(text(el.querySelector('aside')!)).toContain('Shelved');
   });
 
   it('moves between rows with the arrow keys, opens the menu with Shift+F10 and the panel with Enter, and Escape closes it and returns to the row', async () => {

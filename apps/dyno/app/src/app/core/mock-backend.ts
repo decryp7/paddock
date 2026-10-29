@@ -586,7 +586,7 @@ export class MockBackend implements DynoBackend {
               { label: 'CPU total', value: `${Math.round(this.system(t, samples).cpu.total)}%` },
               { label: 'For', value: '6 min' },
             ],
-            hints: [{ text: 'Open the task manager', link: 'taskManager' }],
+            hints: [{ text: 'Open Processes', link: 'taskManager' }],
             involved: [
               { id: this.profile.names.rustc, name: this.profile.names.rustc, share: `${Math.round(rustcCpu)}% CPU` },
               { id: this.profile.names.cargo, name: this.profile.names.cargo, share: '2% CPU' },

@@ -1,5 +1,3 @@
-import { PlatformService } from '../../core/platform';
-import { osTerms } from '../../shared/os-terms';
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { PdCell, PdTable, type PdColumn, type PdSort } from '@decryp7/paddock-ui/table';
@@ -134,7 +132,6 @@ import { CAUSE_LABEL, CAUSE_TONE, confidenceText, episodeSeconds, verdictTone } 
 export class ThrottlingPage implements OnInit, OnDestroy {
   protected readonly store = inject(ThrottleStore);
   protected readonly overview = this.store.overview;
-  private readonly lowPower = osTerms(inject(PlatformService).platform).lowPower;
   protected readonly causeLabel = CAUSE_LABEL;
   protected readonly causeTone = CAUSE_TONE;
   /** The episodes arrive newest first; the table sorts them (Started, newest first, until the person chooses another order). */
@@ -167,7 +164,7 @@ export class ThrottlingPage implements OnInit, OnDestroy {
   }
 
   protected causeToneOf = (e: ThrottleEpisode) => CAUSE_TONE[e.cause];
-  protected causeLabelOf = (e: ThrottleEpisode) => (e.cause === 'batterySaver' ? this.lowPower : CAUSE_LABEL[e.cause]);
+  protected causeLabelOf = (e: ThrottleEpisode) => CAUSE_LABEL[e.cause];
   protected stamp = (at: number): string => formatStamp(at, this.overview()?.at ?? at);
   protected duration = (e: ThrottleEpisode): string => formatDuration(episodeSeconds(e, this.overview()?.at ?? e.start));
 }

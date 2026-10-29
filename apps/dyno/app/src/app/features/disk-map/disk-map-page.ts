@@ -323,7 +323,7 @@ import {
             <section class="card table-card" aria-label="Folder contents">
               <div class="table-tools">
                 <dy-search-field label="Filter by name" placeholder="Filter by name" [value]="filter()" (valueChange)="filter.set($event)" />
-                <span class="muted small">{{ tableRows().length + (loose() ? 1 : 0) }} of {{ formatCount(folderCount(level)) }} rows</span>
+                <span class="muted small">{{ tableRows().length + (loose() ? 1 : 0) }} of {{ formatCount(level.shown + (loose() ? 1 : 0)) }} rows</span>
               </div>
               @if (onlyIds(); as only) {
                 <p class="only muted small" role="status">Showing {{ plural(only.size, 'smaller item') }} from the chart. <button type="button" matButton="text" (click)="onlyIds.set(null)">Show all</button></p>

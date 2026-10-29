@@ -1,7 +1,7 @@
 import type { SystemSample } from '../../core/api.types';
 import { MockBackend } from '../../core/mock-backend';
 import { builtinPresets, layoutFromPreset } from '../../core/mock/widget-presets';
-import { accepts, applyPreset, defaultMetric, isPercent, metricLabel, moveWidget, newTrayItem, newWidget, readCounter, readMetric, removeWidget, resizeWidget, seriesFor, styleFromId, thresholdTone, trayStyleId } from './widget-model';
+import { accepts, applyPreset, defaultMetric, isPercent, metricLabel, moveWidget, newTrayItem, newWidget, readCounter, readMetric, removeWidget, resizeWidget, seriesFor, styleFromId, thresholdTone, trayStyleId, sentenceCase } from './widget-model';
 
 const sample = (): SystemSample => new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000 }).liveUpdate('summary').system;
 
@@ -117,5 +117,15 @@ describe('widget model', () => {
     expect(styleFromId('number', '%', 'CPU')).toEqual({ number: { unit: '%', label: 'CPU' } });
     const items = [newTrayItem('cpuTotal', 'lineGraph', [])];
     expect(newTrayItem('cpuTotal', 'ring', items).id).not.toBe(items[0]!.id);
+  });
+});
+
+describe('sentenceCase', () => {
+  it('lower-cases a label inside a sentence but keeps an acronym', () => {
+    expect(sentenceCase('Memory')).toBe('memory');
+    expect(sentenceCase('CPU')).toBe('CPU');
+    expect(sentenceCase('GPU load')).toBe('GPU load');
+    expect(sentenceCase('Network down')).toBe('network down');
+    expect(sentenceCase('')).toBe('');
   });
 });

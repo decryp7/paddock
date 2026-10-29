@@ -260,7 +260,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     .row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
     .row.off { opacity: 0.55; }
     /* The whole name of every lookup site, not cut with an ellipsis. */
-    .site { min-width: 22rem; }
+    .site { min-width: min(22rem, 100%); }
     .ipt { display: flex; gap: var(--sp-2); flex: 1 1 380px; max-width: 560px; }
     .row.top { align-items: flex-start; }
     .ipt:has(textarea) { flex-direction: column; gap: var(--sp-1); }

@@ -20,7 +20,7 @@ import { DiagnosisCard } from '../dashboard/diagnosis-card';
 import { EventsFeed } from '../dashboard/events-feed';
 import { ConsumersPanel, DiskTrendPanel, HistoryPanel } from '../dashboard/history-panels';
 import { CountersStore } from '../../state/counters.store';
-import { PANEL_KINDS, KIND_LABEL, metricLabel, readCounter, readMetric, seriesFor, thresholdTone } from './widget-model';
+import { PANEL_KINDS, KIND_LABEL, metricLabel, readCounter, sentenceCase, readMetric, seriesFor, thresholdTone } from './widget-model';
 import { MatTooltip } from '@angular/material/tooltip';
 
 const ICON: Record<WidgetKind, IconName> = {
@@ -45,11 +45,6 @@ const ICON: Record<WidgetKind, IconName> = {
  * issues or the health score. Neutral by default; the hero uses the accent, and a threshold colour only appears when a
  * threshold is crossed (always with the number printed). Values glide to their new reading.
  */
-/** A metric label inside a sentence: lower case, except an acronym (`CPU`) which stays as it is. */
-function sentenceCase(label: string): string {
-  return /^[A-Z]{2,}\b/.test(label) ? label : label.toLowerCase();
-}
-
 @Component({
   selector: 'dy-widget',
   imports: [FullTextTip, MatTooltip, Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],

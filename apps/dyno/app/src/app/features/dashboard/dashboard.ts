@@ -1,5 +1,3 @@
-import { PlatformService } from '../../core/platform';
-import { osTerms } from '../../shared/os-terms';
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { NormalCard } from './normal-card';
@@ -25,7 +23,7 @@ import { MatButton } from '@angular/material/button';
           <h1>Dashboard</h1>
           <p class="num">{{ subtitle() }}</p>
         </div>
-        <a matButton="outlined" routerLink="/processes"><dy-icon name="processes" /> Open {{ terms.taskManager }}</a>
+        <a matButton="outlined" routerLink="/processes"><dy-icon name="processes" /> Open Processes</a>
       </header>
 
       <dy-normal-card />
@@ -40,7 +38,6 @@ import { MatButton } from '@angular/material/button';
   `,
 })
 export class Dashboard {
-  protected readonly terms = osTerms(inject(PlatformService).platform);
   protected readonly live = inject(LiveStore);
   protected readonly subtitle = computed(() => {
     const s = this.live.system();

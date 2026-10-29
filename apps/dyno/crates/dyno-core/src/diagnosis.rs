@@ -331,7 +331,7 @@ fn cpu_causes(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &mu
             vec![],
         ),
     };
-    hints.push(Hint::open("Open the task manager", HintLink::TaskManager));
+    hints.push(Hint::open("Open Processes", HintLink::TaskManager));
     out.push(Cause {
         kind,
         title,
@@ -370,7 +370,7 @@ fn memory_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
     if let Some(top) = input.groups.iter().max_by_key(|g| g.memory_read()) {
         evidence.push(Evidence::new(format!("Biggest: {}", top.name), bytes(top.memory_read())));
     }
-    hints.push(Hint::open("Open the task manager", HintLink::TaskManager));
+    hints.push(Hint::open("Open Processes", HintLink::TaskManager));
     out.push(Cause {
         kind: CauseKind::MemoryPressure,
         title: if level == MemoryPressure::Critical {
@@ -421,7 +421,7 @@ fn disk_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
             .into(),
         confidence,
         evidence,
-        hints: vec![Hint::open("Open the task manager", HintLink::TaskManager)],
+        hints: vec![Hint::open("Open Processes", HintLink::TaskManager)],
         involved: involved(input.groups, |g| g.disk_read() as f32, |v| format!("{}/s", bytes(v as u64))),
     });
 }

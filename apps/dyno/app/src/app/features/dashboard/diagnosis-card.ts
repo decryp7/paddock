@@ -1,5 +1,3 @@
-import { PlatformService } from '../../core/platform';
-import { osTerms } from '../../shared/os-terms';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { errorHint } from '../../core/command-error';
@@ -54,7 +52,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
               <div class="actions">
                 @for (h of c.hints; track h.text) {
                   @if (hintPath(h); as path) {
-                    <a matButton="outlined" [routerLink]="path">{{ hintText(h) }}</a>
+                    <a matButton="outlined" [routerLink]="path">{{ h.text }}</a>
                   } @else {
                     <span class="hint">{{ h.text }}</span>
                   }
@@ -118,9 +116,6 @@ import { FullTextTip } from '../../shared/full-text-tip';
   `,
 })
 export class DiagnosisCard {
-  private readonly terms = osTerms(inject(PlatformService).platform);
-  /** A hint's label; the task-manager hint names this OS's own viewer. */
-  protected readonly hintText = (h: { text: string; link?: unknown }): string => (h.link === 'taskManager' ? `Open ${this.terms.taskManager}` : h.text);
   protected readonly store = inject(DiagnosisStore);
   private readonly live = inject(LiveStore);
   /** The numbers the diagnosis weighs, as they are right now (formatting only; the engine does the reasoning). */

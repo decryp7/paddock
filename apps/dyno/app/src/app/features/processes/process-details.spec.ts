@@ -10,7 +10,8 @@ import { ProcessDetailsPanel } from './process-details';
 
 const NOW = 1_700_000_000_000;
 
-async function make(os: 'windows' | 'macos' = 'windows', fail?: Set<string>) {
+async function make(os: 'windows' | 'macos' | 'linux' = 'windows', fail?: Set<string>) {
+  document.documentElement.dataset['platform'] = os;
   const mock = new MockBackend({ latencyMs: 0, now: () => NOW, os, fail });
   TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([]), { provide: BACKEND, useValue: mock }] });
   const store = TestBed.inject(ProcessesStore);
@@ -32,6 +33,8 @@ async function make(os: 'windows' | 'macos' = 'windows', fail?: Set<string>) {
 }
 
 describe('ProcessDetailsPanel', () => {
+  afterEach(() => delete document.documentElement.dataset['platform']);
+
   it('shows a skeleton while nothing is selected or loaded', async () => {
     const { f, el, settle } = await make();
     f.detectChanges();
@@ -51,6 +54,23 @@ describe('ProcessDetailsPanel', () => {
     expect(el.querySelector('dl')?.textContent).toContain('Command line');
     expect(el.querySelector('dl')?.textContent).toContain('Efficiency mode');
     expect(el.querySelector('dl')?.textContent).not.toContain('Not available on this computer');
+  });
+
+  it.each([
+    ['windows', 'Handles'],
+    ['macos', 'File descriptors'],
+    ['linux', 'File descriptors'],
+  ] as const)('on %s shows every row the engine could send, with the OS\'s word for open files: %s', async (os, openFiles) => {
+    const { f, el, store, settle } = await make(os);
+    const p = store.processes().find((x) => x.name.startsWith('rustc'))!;
+    await store.select({ pid: p.pid, started: readValue(p.started) });
+    f.detectChanges();
+    await settle();
+    const rows = [...el.querySelectorAll('dl dt')].map((d) => d.textContent?.trim());
+    expect(rows).toEqual(expect.arrayContaining(['Priority', 'Cores', 'Efficiency mode', 'Threads', openFiles]));
+    expect(rows).not.toContain(openFiles === 'Handles' ? 'File descriptors' : 'Handles');
+    // No row is invented or hidden by the platform: a missing value says so in words.
+    expect(el.querySelector('dl')?.textContent).not.toContain('Nice value');
   });
 
   it('walks the tabs: parents, files, network, libraries', async () => {

@@ -101,9 +101,13 @@ export class AlarmsActive {
     { key: 'lastSeen', header: 'Last seen', value: (a) => a.lastSeen, text: (a) => this.time(a.lastSeen), width: '84px' },
     { key: 'count', header: 'Count', value: (a) => a.repeatCount, text: (a) => `×${String(a.repeatCount)}`, width: '64px', align: 'end' },
   ];
+  /** The suffix as the row shows it: when a shelved alarm comes back is in the detail and the tooltip, the row only says "Shelved". */
+  protected readonly tableSuffix = (a: Alarm): string =>
+    this.suffix(a)
+      .split(' · ')
+      .map((part) => (part.startsWith('Shelved') ? 'Shelved' : part))
+      .join(' · ');
   /** The title in full, with when a shelved alarm comes back (the table has no room for that line). */
-  /** The suffix without when a shelved alarm comes back: that line is in the detail and the tooltip, the row has no room for it. */
-  protected readonly tableSuffix = (a: Alarm): string => [a.muted ? 'Muted' : '', a.chattering ? 'Chattering' : ''].filter((x) => x !== '').join(' · ');
   protected readonly fullTitle = (a: Alarm): string => (this.suffix(a) ? `${a.title} · ${this.suffix(a)}` : a.title);
   protected readonly sev = (a: Alarm) => severityWord(a.severity);
   protected readonly state = (a: Alarm) => stateWord(a.state);

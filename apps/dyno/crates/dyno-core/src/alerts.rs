@@ -192,7 +192,7 @@ impl Alerts {
                     "{} has used over {HIGH_CPU:.0}% CPU for {} minutes",
                     g.name, st.long_high_cpu_minutes
                 ),
-                "Check the task manager to see what it is doing.".into(),
+                "Check the Processes page to see what it is doing.".into(),
             );
         }
         self.since.retain(|k, _| live.contains(k));

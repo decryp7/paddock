@@ -158,6 +158,16 @@ describe('dy-disk-map-page', () => {
     expect(text(el, '.crumb.current')).toBe('Macintosh HD');
   });
 
+  it('counts the rows it shows: the list heading and the table toolbar agree with their rows, folded small items included', async () => {
+    const { f, el } = await scanned();
+    const listed = el.querySelectorAll('.rows .item').length;
+    expect(text(el, '#in-folder')).toBe(`In this folder (${listed})`);
+    btn(el, 'Table')!.click();
+    await settle(f);
+    const shown = el.querySelectorAll('tbody tr.mat-mdc-row').length + el.querySelectorAll('tfoot tr:not(.foot-off)').length;
+    expect(text(el, '.table-tools .small')).toBe(`${shown} of ${shown} rows`);
+  });
+
   it('switches to the table, which carries every column, sorts and filters it, and keeps the centre', async () => {
     const { f, el } = await scanned();
     [...el.querySelectorAll<HTMLButtonElement>('.rows .name.link')].find((b) => b.textContent?.includes('Users'))!.click();

@@ -32,8 +32,8 @@ let nextId = 0;
       <span class="pd-text">{{ compact() ? compactText() : text() }}@if (!compact() && progress()) {<span class="pd-progress"> · {{ progress() }}</span>}</span>
     </button>
     @if (open()) {
-      <div class="pd-popover" role="region" [attr.aria-label]="t.popover" [id]="panelId">
-        <h2 class="pd-popover-title">{{ t.popover }}</h2>
+      <div class="pd-popover" role="region" [attr.aria-labelledby]="titleId" [id]="panelId">
+        <h2 class="pd-popover-title" [id]="titleId">{{ t.popover }}</h2>
         <pd-jobs-list [flat]="true" />
       </div>
     }
@@ -71,6 +71,7 @@ export class PdJobsStatus {
   readonly placement = input<'above' | 'below'>('above');
   protected readonly open = signal(false);
   protected readonly panelId = `pd-jobs-popover-${++nextId}`;
+  protected readonly titleId = `${this.panelId}-title`;
 
   /** The status bar is narrow: the item shows the running count only. */
   protected readonly compact = inject(STATUS_COMPACT, { optional: true }) ?? signal(false);

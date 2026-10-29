@@ -2,6 +2,7 @@ import type { Alarm, AlarmChange, CustomAlertRule } from '../../core/api.types';
 import { demoAlarms } from '../../core/mock/alarms';
 import {
   alarmSuffix,
+  ruleLabel,
   changeLabel,
   clockToMinutes,
   defaultAlarmConfig,
@@ -129,5 +130,23 @@ describe('alarm helpers', () => {
     expect(prependChange(log, c, 2)).toHaveLength(1);
     const more = prependChange(prependChange(log, change('raised', by(7), NOW - 10), 2), change('raised', by(6), NOW - 20), 2);
     expect(more.map((x) => x.at)).toEqual([NOW, NOW - 10]);
+  });
+});
+
+describe('ruleLabel', () => {
+  it('drops the source prefix and splits camelCase and kebab-case into words', () => {
+    expect(ruleLabel('alert:lowDisk')).toBe('Low disk');
+    expect(ruleLabel('network:newExposedListener')).toBe('New exposed listener');
+    expect(ruleLabel('threshold:gpu-limit')).toBe('GPU limit');
+    expect(ruleLabel('threshold:my_custom rule')).toBe('My custom rule');
+  });
+  it('keeps acronyms upper case, even inside camelCase', () => {
+    expect(ruleLabel('alert:longHighCpu')).toBe('Long high CPU');
+    expect(ruleLabel('alert:ssd-wear')).toBe('SSD wear');
+  });
+  it('works without a prefix and falls back to the key when nothing is left', () => {
+    expect(ruleLabel('crashLoop')).toBe('Crash loop');
+    expect(ruleLabel('alert:')).toBe('alert:');
+    expect(ruleLabel('')).toBe('');
   });
 });

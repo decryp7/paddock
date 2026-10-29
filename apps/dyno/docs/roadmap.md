@@ -467,29 +467,40 @@ Not part of 1.0.0; anything new that only watches goes here. Anything that would
 | Settings (the Settings window) | `settings-*.png`, `settings-menu-bar-*.png` | captured |
 | Tray popover on a desktop backdrop | `tray-*.png` | captured |
 | Why slow | `why-slow-*.png` | captured |
-| Health and the startup filter | `health-*.png`, `health-startup-filter-*.png` | captured |
+| Health | `health-*.png` | captured |
+| Health startup filter | `health-startup-filter-*.png` | not captured |
 | Reports | `reports-*.png` | captured |
 | Issues with statistics | `issues-*.png` | captured |
 | Unusual processes | `unusual-*.png` | captured |
 | Web and hash search (browser hand-offs) | `web-search-*.png`, `hash-search-*.png` | captured |
-| Benchmarks | `benchmarks-*.png`, `benchmarks-running-*.png`, `benchmarks-compare-*.png` | captured |
-| Network | `network-*.png`, `network-connections-*.png` | captured |
-| Performance counters | `counters-*.png`, `counters-search-*.png` | captured |
+| Benchmarks | `benchmarks-*.png` | captured |
+| Benchmarks, running and compare | `benchmarks-running-*.png`, `benchmarks-compare-*.png` | not captured |
+| Network | `network-connections-*.png` | captured |
+| Network, listening ports | `network-*.png` | not captured |
+| Performance counters | `counters-*.png` | captured |
+| Performance counters, search | `counters-search-*.png` | not captured |
 | Backup health | `backup-*.png` | captured |
-| Per-core CPU tile (total and per-core toggle, P/E grouping) | `cpu-per-core-tile-*.png` | captured (WP-19) |
+| Per-core CPU tile (total and per-core toggle, P/E grouping) | `cpu-per-core-tile-*.png` | not captured (WP-19) |
 | CPU detail with per-core heatmap | `cpu-detail-*.png` | captured (WP-19) |
 | Widget gallery and dashboard edit mode | `widgets-edit-*.png` | captured (WP-21) |
-| Presets | `widgets-developer-*.png`, `widgets-battery-*.png`, `widgets-gaming-*.png`, `widgets-overview-*.png` | captured (WP-21) |
+| Presets | `widgets-developer-*.png`, `widgets-battery-*.png`, `widgets-gaming-*.png`, `widgets-overview-*.png` | not captured (WP-21) |
 | Customised menu bar (several tray items) | `settings-menu-bar-*.png` | captured (WP-21) |
-| Memory slot drawings, including Apple Silicon unified memory | `inventory-*.png`, `inventory-apple-*.png`, `inventory-ddr5-*.png`, `inventory-generic-*.png`, `inventory-laptop-*.png`, `inventory-soldered-*.png` | captured (WP-20) |
+| Memory slot drawings, Apple Silicon unified memory | `inventory-*.png` | captured (WP-20) |
+| Memory slot drawings, DDR5, generic, laptop and soldered | `inventory-ddr5-*.png`, `inventory-generic-*.png`, `inventory-laptop-*.png`, `inventory-soldered-*.png` | not captured (WP-20) |
 | Alarms: Active | `alarms-*.png` | captured (WP-26) |
 | Alarms: History | `alarms-history-*.png` | captured (WP-26) |
 | Alarms: Rules, with the built-in alert statistics | `alarms-rules-*.png` | captured (WP-26) |
 | Diagnostics bundle preview | `diagnostics-*.png` | captured (WP-29) |
-| Throttling and forecasts | `throttling-*.png`, `throttling-hot-*.png`, `forecasts-*.png`, `baselines-*.png` | captured (WP-23, WP-24, WP-25) |
-| Extras: What changed, Sleep, Boot, Apps, GPU, Files, Inventory, Maintenance | `extras-<tab>-*.png` | captured (WP-13) |
+| Throttling and forecasts | `throttling-*.png`, `forecasts-*.png` | captured (WP-23, WP-25) |
+| Throttling while hot, "Is this normal?" | `throttling-hot-*.png`, `baselines-*.png` | not captured (WP-24) |
+| Extras: What changed, Boot, Apps, Files | `extras-changes-*.png`, `extras-boot-*.png`, `extras-apps-*.png`, `extras-files-*.png` | captured (WP-13) |
+| Extras: Sleep, GPU, Inventory, Maintenance | `extras-sleep-*.png`, `extras-gpu-*.png`, `extras-inventory-*.png`, `extras-maintenance-*.png` | not captured (WP-13) |
 | Flight recorder | `recorder-*.png` | captured |
 | Disk map (chart and table) | `disk-map-*.png`, `disk-map-table-*.png` | captured |
 | Command palette | `command-palette-*.png` | captured |
 | Jobs (a running job with its phase and Cancel) | `jobs-*.png` | captured |
 | Cleanup, CPU taming rules, tuning, watched folders | none | not in 1.0 (dropped, [ADR 0021](adr/0021-monitoring-only.md)) |
+
+Follow-ups recorded here: the mock's live values still drift a little between a light and a dark shot (they derive from the real clock,
+not only the faked one), and the engine should send each alarm rule's display name so the UI stops deriving it from the rule key
+(`ruleLabel` in `alarms-model.ts`) and a custom rule shows the name its owner gave it.

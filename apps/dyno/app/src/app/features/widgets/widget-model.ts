@@ -281,3 +281,8 @@ export function newTrayItem(metric: WidgetMetric, style: TrayStyleId, existing: 
 }
 
 export const bytesText = formatBytes;
+
+/** A metric label inside a sentence: lower case, except an acronym (`CPU`) which stays as it is. */
+export function sentenceCase(label: string): string {
+  return /^[A-Z]{2,}\b/.test(label) ? label : label.toLowerCase();
+}

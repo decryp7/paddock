@@ -142,7 +142,7 @@ describe('DiagnosisCard', () => {
     await TestBed.inject(DiagnosisStore).run();
     await settle(f);
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('a[href="/processes"]')?.textContent).toContain('Open the task manager');
+    expect(el.querySelector('a[href="/processes"]')?.textContent).toContain('Open tasks');
     expect(el.querySelector('a[href="/health"]')?.textContent).toContain('Open startup');
     expect(el.querySelector('.hint')?.textContent).toContain('Let it finish');
     expect(el.querySelector('button')?.textContent).not.toContain('Let it finish');
