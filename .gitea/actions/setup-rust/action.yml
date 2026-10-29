@@ -14,7 +14,7 @@ inputs:
     description: "Install the Linux libraries Tauri needs (webkit2gtk, gtk, rsvg, appindicator); ignored on other systems."
     default: "false"
   sccache-backend:
-    description: "local (default: sccache's disk cache, SCCACHE_DIR=$HOME/.paddock-ci/sccache on a host runner, /sccache in a container when that mount exists), auto (Redis when an endpoint is set, else local) or redis (the endpoint is required)."
+    description: "local (default: sccache's disk cache, the job slot's kept folder sccache-s<n> on a host runner, /sccache in a container when that mount exists), auto (Redis when an endpoint is set, else local) or redis (the endpoint is required)."
     default: local
   sccache-redis-endpoint:
     description: "Shared sccache backend, e.g. redis://172.16.1.188:6379 (no path: sccache ignores it). Used on every OS; empty means sccache's local disk."
@@ -81,23 +81,25 @@ runs:
         DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
         BIN=sccache; [ "$RUNNER_OS" = "Windows" ] && BIN=sccache.exe
         if [ ! -x "$DEST/$BIN" ]; then
-          TMP=$(mktemp -d)
+          dl=$(mktemp -d)
           NAME="sccache-v$VERSION-$T"
           # A failed download must not fail the job: the build runs without the cache.
-          if ! curl -fsSL --retry 3 -o "$TMP/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"; then
+          if ! curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"; then
             echo "::warning::could not download sccache $VERSION; building without the compile cache."; exit 0
           fi
-          if command -v sha256sum >/dev/null 2>&1; then GOT=$(sha256sum "$TMP/$NAME.$EXT" | cut -d' ' -f1); else GOT=$(shasum -a 256 "$TMP/$NAME.$EXT" | cut -d' ' -f1); fi
+          if command -v sha256sum >/dev/null 2>&1; then GOT=$(sha256sum "$dl/$NAME.$EXT" | cut -d' ' -f1); else GOT=$(shasum -a 256 "$dl/$NAME.$EXT" | cut -d' ' -f1); fi
           [ "$GOT" = "$SUM" ] || { echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"; exit 1; }
           if [ "$EXT" = zip ]; then
-            if command -v unzip >/dev/null 2>&1; then unzip -q "$TMP/$NAME.$EXT" -d "$TMP"; else powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$TMP/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$TMP")'"; fi
+            if command -v unzip >/dev/null 2>&1; then unzip -q "$dl/$NAME.$EXT" -d "$dl"; else powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"; fi
           else
-            tar -xzf "$TMP/$NAME.$EXT" -C "$TMP"
+            tar -xzf "$dl/$NAME.$EXT" -C "$dl"
           fi
           mkdir -p "$DEST"
-          cp "$TMP/$NAME/$BIN" "$DEST/$BIN"
-          chmod +x "$DEST/$BIN"
-          rm -rf "$TMP"
+          # Renamed into place whole: a runner with a shared tool cache may run two jobs that install it at once.
+          cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
+          chmod +x "$DEST/$BIN.part.$$"
+          mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
+          rm -rf "$dl"
         fi
         echo "$DEST" >> "$GITHUB_PATH"
     - name: sccache
@@ -120,27 +122,41 @@ runs:
           echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"; exit 1
         fi
         # CI's own server: a host runner may run a developer's sccache on the default port 4226 with its own backend, which
-        # would silently ignore the settings below. sccache-stats stops this port's server, never the default one.
-        export SCCACHE_SERVER_PORT=4227 SCCACHE_IGNORE_SERVER_IO_ERROR=1
+        # would silently ignore the settings below. sccache-stats stops this port's server, never the default one. On a host
+        # each job slot has its own port (job-isolation's ports.txt: 4227 for s1, 4228 for s2, ...), so a concurrent job's start (which
+        # stops the server first) or its sccache-stats (which stops it last) never takes this job's server away.
+        iso="${{ github.action_path }}/../../../conformance/ci/job-isolation.sh"
+        PORT=4227
+        if [ "$RUNNER_OS" != Linux ]; then PORT="$(bash "$iso" port sccache)"; fi
+        export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
         SETTINGS=()
         if [ "$BACKEND" = redis ] || { [ "$BACKEND" = auto ] && [ -n "$REDIS_ENDPOINT" ]; }; then
           export SCCACHE_REDIS_ENDPOINT="$REDIS_ENDPOINT" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
           SETTINGS+=("SCCACHE_REDIS_ENDPOINT=$REDIS_ENDPOINT" "SCCACHE_REDIS_DB=${REDIS_DB:-5}")
           echo "sccache: shared backend $REDIS_ENDPOINT db ${REDIS_DB:-5}"
         else
-          # Local disk. A host runner keeps it under the runner's home, so it outlives the job; a container uses the /sccache
+          # Local disk. A host runner keeps it in the job slot's kept folder, so it outlives the job; a container uses the /sccache
           # mount the runner provides, or a folder that dies with the container (with a notice: every job then starts cold).
+          SIZE=20G
           if [ "$RUNNER_OS" = Linux ]; then
             MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"  # overridable so the step's test does not depend on the runner's real mount
             if [ -d "$MOUNT" ] && [ -w "$MOUNT" ]; then DIR="$MOUNT"
             else DIR="${RUNNER_TEMP:-/tmp}/sccache"; echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."; fi
           else
-            DIR="$HOME/.paddock-ci/sccache"
+            # The job slot's own cache: sccache's local storage "only supports a single sccache server at a time" (docs/Local.md),
+            # so each slot's server has its own folder, and the host's budget PADDOCK_CI_SCCACHE_GB (default 40) is divided
+            # between the slots (PADDOCK_CI_SLOTS), at least 2 GB each.
+            DIR="$(bash "$iso" path sccache)"
+            SLOTS="$(bash "$iso" slots)"
+            TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
+            case "$TOTAL" in '' | *[!0-9]*) TOTAL=40 ;; esac
+            PER=$((TOTAL / SLOTS)); if [ "$PER" -lt 2 ]; then PER=2; fi
+            SIZE="${PER}G"
           fi
           mkdir -p "$DIR"
           if [ "$RUNNER_OS" = Windows ]; then DIR="$(cygpath -w "$DIR")"; fi
-          export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE=20G
-          SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=20G")
+          export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
+          SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE")
           echo "sccache: local disk $DIR"
         fi
         sccache --version
@@ -162,7 +178,7 @@ runs:
           # Cached builds are not incremental.
           echo "CARGO_INCREMENTAL=0"
           echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
-          echo "SCCACHE_SERVER_PORT=4227"
+          echo "SCCACHE_SERVER_PORT=$PORT"
           for kv in "${SETTINGS[@]}"; do echo "$kv"; done
         } >> "$GITHUB_ENV"
     - name: Linux dependencies for Tauri

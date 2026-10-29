@@ -80,6 +80,24 @@ pub fn acquire_retry<L: SlotLocks>(
     Ok(None)
 }
 
+/// Runs `work` only while slot `id` is idle: it tries the slot's lock once, without waiting, and holds it until `work`
+/// returns, so no job can take the slot while `work` changes what belongs to it (the CI kit deletes an idle slot's kept
+/// folders this way). `Ok(None)`: somebody holds the slot and `work` did not run. Because the lock is held throughout,
+/// "the slot is idle" cannot turn false between the check and the work: there is no check-then-act gap. An acquirer that
+/// meets the slot locked takes another one ([`acquire_first`] skips it).
+pub fn with_idle<L: SlotLocks, T>(
+    locks: &L,
+    id: SlotId,
+    work: impl FnOnce() -> T,
+) -> Result<Option<T>, SlotError> {
+    let Some(guard) = locks.try_lock(id)? else {
+        return Ok(None);
+    };
+    let out = work();
+    drop(guard);
+    Ok(Some(out))
+}
+
 /// Whether a slot is free or held.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SlotState {
@@ -173,6 +191,26 @@ mod tests {
     }
 
     fn noop() {}
+
+    #[test]
+    fn idle_work_runs_only_on_a_free_slot_and_keeps_it_locked_throughout() {
+        let f = Fake(RefCell::new(BTreeSet::from([2])), None);
+        let s1 = SlotId(1);
+        // While the work runs the slot is held: an acquirer skips it and gets the next free one.
+        let during = with_idle(&f, s1, || acquire_first(&f, 3).unwrap().map(|g| g.0))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            during,
+            Some(SlotId(3)),
+            "s1 (being worked on) and s2 (held) are skipped"
+        );
+        // A held slot: the work does not run.
+        let mut ran = false;
+        assert!(with_idle(&f, SlotId(2), || ran = true).unwrap().is_none());
+        assert!(!ran);
+        assert!(with_idle(&Fake(RefCell::new(BTreeSet::new()), Some(1)), s1, || ()).is_err());
+    }
 
     #[test]
     fn errors_propagate_and_states_list_busy_slots() {

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { calls, run, scratch, shim, systemFolder, TOOLS, write } from './helpers.mjs';
+import { calls, fakeDev, run, scratch, shim, systemFolder, TOOLS, write } from './helpers.mjs';
 
 /**
  * A fake tart that keeps its VMs in <home>/vms (one file per VM) and records every call. Knobs: FAKE_SMOKE_RC (exit of the
@@ -29,6 +29,7 @@ case "$1" in
     exit "\${FAKE_SMOKE_RC:-0}" ;;
 esac`);
   shim(bin, 'df', `echo "Filesystem 1024-blocks Used Available Capacity"; echo "/dev/x 1 1 ${freeKb} 1% /"`);
+  fakeDev(bin);
   shim(bin, 'uptime', `echo " 1:11  up 1 day, 1 user, load averages: ${load} 1.0 1.0"`);
   const stage = scratch('paddock-src-');
   write(stage, { 'N/Demo.app/Contents/Info.plist': 'n', 'N1/Demo.app/Contents/Info.plist': 'n1', 'smoke.sh': '#!/bin/bash\n' });
@@ -37,7 +38,7 @@ esac`);
 const base = (r, extra = {}) => ({
   bin: r.bin,
   cwd: r.home,
-  env: { TART: join(r.bin, 'tart'), TART_HOME: r.home, PADDOCK_VM_POLL: '0', PADDOCK_VM_BOOT_TIMEOUT: '5', PADDOCK_VM_RUN_TIMEOUT: '20', ...extra },
+  env: { TART: join(r.bin, 'tart'), TART_HOME: r.home, PADDOCK_DEV: join(r.bin, 'dev'), PADDOCK_VM_POLL: '0', PADDOCK_VM_BOOT_TIMEOUT: '5', PADDOCK_VM_RUN_TIMEOUT: '20', ...extra },
 });
 const go = (r, args, extra) => run('macos-vm-smoke.sh', args, base(r, extra));
 const args = (r) => ['--old', join(r.stage, 'N/Demo.app'), '--new', join(r.stage, 'N1/Demo.app'), '--smoke', join(r.stage, 'smoke.sh')];
@@ -55,7 +56,9 @@ test('a passing run: pinned image, headless clone with a read-only share, the sm
   assert.ok(log.some((l) => l.startsWith('tart stop')));
   assert.ok(log.some((l) => l.startsWith('tart delete')));
   assert.deepEqual(left(r), []);
-  assert.ok(!existsSync(join(r.home, '.paddock-vm-smoke.lock')), 'the lock is released');
+  assert.ok(log.some((l) => /^dev ci slot acquire --max 1 --owner \S+ --root .*\/\.paddock-vm$/.test(l)), 'a host-wide VM slot under TART_HOME');
+  assert.ok(log.some((l) => /^dev ci slot release --slot s1 --token t1 --root /.test(l)), 'given back');
+  assert.ok(!existsSync(join(r.home, '.paddock-vm', 'slots', 's1.owner')), 'the VM slot is released');
 });
 
 test('a failing smoke fails the run with its exit code and the VM is still deleted', () => {
@@ -88,18 +91,37 @@ test('a high load is waited for, then refused after the wait', () => {
   assert.ok(!calls(r.bin).some((l) => /^tart (pull|clone|run)/.test(l)));
 });
 
-test('only one VM at a time: a live lock refuses, a stale lock of a dead run is replaced', () => {
+test('VMs are serialised host-wide by a VM slot: a held one is waited for and refused after the wait; a dead run\'s is free; at most two', () => {
   const r = rig();
-  const lock = join(r.home, '.paddock-vm-smoke.lock');
-  mkdirSync(lock);
-  writeFileSync(join(lock, 'pid'), String(process.pid)); // alive
-  const busy = go(r, args(r));
+  const slots = join(r.home, '.paddock-vm', 'slots');
+  const other = scratch('paddock-vm-other-'); // a live run elsewhere on this Mac holds the slot
+  mkdirSync(join(slots, 's1.lock'), { recursive: true });
+  writeFileSync(join(slots, 's1.owner'), `token=x\nowner=${other}\n`);
+  const busy = go(r, args(r), { PADDOCK_VM_SLOT_WAIT: '1' });
   assert.equal(busy.status, 3, busy.out);
-  assert.ok(existsSync(lock), 'another run\'s lock is not removed');
+  assert.match(busy.out, /holds this Mac's VM slots; waiting/);
+  assert.match(busy.out, /stayed held for 1s/);
+  assert.ok(existsSync(join(slots, 's1.lock')), 'another run\'s slot is not touched');
   assert.ok(!calls(r.bin).some((l) => l.startsWith('tart clone')));
-  writeFileSync(join(lock, 'pid'), '999999'); // dead
+  const two = go(r, args(r), { PADDOCK_VM_MAX: '2' });
+  assert.equal(two.status, 0, two.out);
+  assert.match(two.out, /VM slot s2/, 'a second macOS VM may run beside it');
+  assert.equal(go(r, args(r), { PADDOCK_VM_MAX: '3' }).status, 2, 'never three macOS VMs');
+  rmSync(other, { recursive: true }); // that run ended without releasing (killed): its holder is gone with its folder
   const ok = go(r, args(r));
   assert.equal(ok.status, 0, ok.out);
+});
+
+test('a CI job names its VMs with its own prefix, so its leftover check never sees another job\'s VM', () => {
+  const r = rig();
+  const res = go(r, args(r), { PADDOCK_VM_PREFIX: 'paddock-smoke-77-1-' });
+  assert.equal(res.status, 0, res.out);
+  assert.ok(calls(r.bin).some((l) => /^tart clone \S+ paddock-smoke-77-1-macos-/.test(l)));
+  assert.equal(go(r, args(r), { PADDOCK_VM_PREFIX: '../x' }).status, 2);
+  const wf = readFileSync(join(TOOLS, '..', '.gitea', 'workflows', 'service-smoke.yml'), 'utf8');
+  assert.match(wf, /PADDOCK_VM_PREFIX: paddock-smoke-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-/);
+  assert.match(wf, /grep "\^\$PADDOCK_VM_PREFIX"/, 'the leftover check looks only at this job\'s VMs');
+  assert.doesNotMatch(wf, /grep '\^paddock-smoke-'/);
 });
 
 test('usage errors: missing builds, unknown option, unknown guest, different app names, missing tart', () => {
@@ -147,5 +169,5 @@ test('Ctrl-C / TERM in the middle of the smoke still stops and deletes the VM an
   const code = await closed;
   assert.equal(code, 130);
   assert.deepEqual(left(r), []);
-  assert.ok(!existsSync(join(r.home, '.paddock-vm-smoke.lock')));
+  assert.ok(!existsSync(join(r.home, '.paddock-vm', 'slots', 's1.owner')), 'the VM slot is given back');
 });

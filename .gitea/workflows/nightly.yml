@@ -104,6 +104,9 @@ jobs:
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
 
+      # A slot of the host (job isolation; after Git bash on Windows): setup-rust's sccache folder and port are this job's.
+      - uses: ./.gitea/actions/job-isolation
+
       - uses: ./.gitea/actions/setup-rust
         with:
           tauri-linux-deps: "true"
@@ -134,6 +137,15 @@ jobs:
           PADDOCK_REAL_WINDOWS: "1"
           PADDOCK_PROBE_DIST: ${{ github.workspace }}/ui/dist/shell-demo/browser
         run: cargo test -p paddock-dialogs --features tauri --test show_probe -- --nocapture
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+      # The slot goes back last.
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
 
   mark:
     name: mark the green nightly
