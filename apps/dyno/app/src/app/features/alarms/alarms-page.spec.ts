@@ -32,7 +32,8 @@ const tab = async (f: Parameters<typeof settle>[0], el: HTMLElement, name: strin
   button(el, name)!.click();
   await settle(f);
 };
-const rows = (el: ParentNode) => [...el.querySelectorAll<HTMLElement>('.row')];
+/** The custom rules: the rows of the shared table. */
+const rows = (el: ParentNode) => [...el.querySelectorAll<HTMLElement>('dy-custom-rules [role="row"][data-key]')];
 /** The alarm history: the rows of the shared table. */
 const hrows = (el: ParentNode) => [...el.querySelectorAll<HTMLElement>('dy-alarms-history [role="row"][data-key]')];
 /** The open alarms: the rows of the shared table, in order. */
@@ -373,7 +374,7 @@ describe('dy-alarms-page, Rules', () => {
     expect(opened.mock.calls[0]![1]).toMatchObject({ inputs: { rule: null, takenIds: ['gpu-limit'] }, title: 'Add alert rule' });
     const load = vi.spyOn(mock, 'settings');
     opened.mockReturnValue({ closed: Promise.resolve({ kind: 'answered', value: true }), dismiss() {} } as never);
-    button(el, 'Edit GPU limit')!.click();
+    button(rows(el).find((r) => text(r).includes('GPU limit'))!, 'Edit…')!.click();
     await settle(f);
     expect(opened.mock.calls[1]![1]).toMatchObject({ inputs: { rule: expect.objectContaining({ id: 'gpu-limit' }) }, title: 'Edit alert rule' });
     expect(load).toHaveBeenCalled();
@@ -384,7 +385,7 @@ describe('dy-alarms-page, Rules', () => {
     await settle(f);
     await tab(f, el, 'Rules');
     const opened = vi.spyOn(TestBed.inject(DialogService), 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'dismissed' }), dismiss() {} } as never);
-    button(el, /^More actions for GPU limit/)!.click();
+    button(rows(el).find((r) => text(r).includes('GPU limit'))!, 'More actions')!.click();
     await settle(f);
     menuItem('Delete…')!.click();
     await settle(f);
@@ -392,7 +393,7 @@ describe('dy-alarms-page, Rules', () => {
     expect(opened.mock.calls[0]![1]).toMatchObject({ inputs: { heading: 'Delete “GPU limit”?', confirm: { label: 'Delete rule', destructive: true } } });
     expect(TestBed.inject(SettingsStore).settings()!.customAlerts).toHaveLength(1);
     opened.mockReturnValue({ closed: Promise.resolve({ kind: 'answered', value: true }), dismiss() {} } as never);
-    button(el, /^More actions for GPU limit/)!.click();
+    button(rows(el).find((r) => text(r).includes('GPU limit'))!, 'More actions')!.click();
     await settle(f);
     menuItem('Delete…')!.click();
     await settle(f);
@@ -417,7 +418,7 @@ describe('dy-alarms-page, Rules', () => {
     await tab(f, el, 'Rules');
     vi.spyOn(TestBed.inject(DialogService), 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'answered', value: true }), dismiss() {} } as never);
     vi.spyOn(mock, 'deleteAlertRule').mockRejectedValueOnce({ code: 'internal', message: 'Disk full.' });
-    button(el, /^More actions for GPU limit/)!.click();
+    button(rows(el).find((r) => text(r).includes('GPU limit'))!, 'More actions')!.click();
     await settle(f);
     menuItem('Delete…')!.click();
     await settle(f);

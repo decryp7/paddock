@@ -36,6 +36,11 @@ const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown>
     f.detectChanges();
   }
 };
+/** A key press the way a browser makes it (the CDK listbox reads `keyCode`). */
+const press = (target: Element, key: string): void => {
+  const keyCode = { ArrowDown: 40, ArrowUp: 38, Home: 36, End: 35 }[key] ?? 0;
+  target.dispatchEvent(new KeyboardEvent('keydown', { key, keyCode, bubbles: true }));
+};
 const rows = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('[role="option"]')];
 
 describe('reasonText', () => {
@@ -66,17 +71,17 @@ describe('dy-recorder-page', () => {
     await settle(f);
     expect(store.selectedId()).toBe(2);
     const list = el.querySelector('[role="listbox"]')!;
-    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    press(list, 'ArrowDown');
     await settle(f);
     expect(store.selectedId()).toBe(1);
-    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
-    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    press(list, 'End');
+    press(list, 'ArrowUp');
     await settle(f);
     expect(store.selectedId()).toBe(2);
-    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    press(list, 'Home');
     await settle(f);
     expect(store.selectedId()).toBe(3);
-    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }));
+    press(list, 'x');
     expect(store.selectedId()).toBe(3);
   });
 
