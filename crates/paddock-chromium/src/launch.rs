@@ -18,7 +18,9 @@ use std::time::{Duration, Instant};
 pub const START_PAGE: &str = "about:blank";
 /// How long the browser may take to start and write its DevTools port.
 pub const START_LIMIT: Duration = Duration::from_secs(20);
-/// How long a browser gets to quit by itself after `Browser.close` before its tree is ended.
+/// How long a browser gets to quit by itself after `Browser.close` before its tree is ended. A loaded Mac took up to
+/// 11.7 s (p95 6.3 s) to exit after answering (docs/benchmarks.md, "paddock-chromium: Browser.close exit time"); past
+/// the grace the tree is ended, which is safe once the browser has answered.
 pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
 /// How long [`Chromium::start_page`] waits for the page the browser opens with.
 pub const START_PAGE_WAIT: Duration = Duration::from_secs(5);
@@ -386,6 +388,8 @@ pub struct Chromium {
     exe: Browser,
     /// `LaunchOptions::clock`: the time limit, the start-page wait and the pages' waits run on it.
     clock: Arc<dyn Clock>,
+    /// Whether the last `Browser.close` was answered (`None` before a close sent one); see [`Chromium::close_answered`].
+    close_answered: Option<bool>,
 }
 
 impl Chromium {
@@ -458,6 +462,7 @@ impl Chromium {
                 timed_out,
                 exe: exe.clone(),
                 clock: opts.clock.clone(),
+                close_answered: None,
             }),
             Err(e) => {
                 stop.cancel();
@@ -577,12 +582,14 @@ impl Chromium {
         self.stop.cancel();
         let mut exited = !self.proc().is_running();
         if !exited && !self.conn.is_closed() {
-            if let Err(e) = self.conn.call(
+            let answer = self.conn.call(
                 None,
                 "Browser.close",
                 json!({}),
                 grace.min(Duration::from_secs(2)),
-            ) {
+            );
+            self.close_answered = Some(answer.is_ok());
+            if let Err(e) = answer {
                 // Not an error to the caller (a closing browser may drop the connection before it answers), but the
                 // reason a close was slow or forced.
                 log::debug!("Browser.close was not answered: {e}");
@@ -599,6 +606,13 @@ impl Chromium {
         }
         cleanup(&self.dir, self.throwaway);
         exited
+    }
+
+    /// Whether the browser answered the last `Browser.close` that [`close_gracefully`](Self::close_gracefully) sent
+    /// (`None` when none was sent: the browser or its connection had ended already). For a slow or forced close it tells
+    /// "the browser never took the request" from "it took it and was slow to exit".
+    pub fn close_answered(&self) -> Option<bool> {
+        self.close_answered
     }
 
     /// [`close_gracefully`](Self::close_gracefully) with [`CLOSE_GRACE`].

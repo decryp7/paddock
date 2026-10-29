@@ -148,6 +148,9 @@ One line each. The dated records are in the app files.
   - `paddock-jobs` walk: about 1.3× faster than a sequential walk on a warm cache.
   - `paddock-download`: 4 connections against 1, 11.0 s → 2.7 s for 64 MiB.
   - `paddock-proc` per-pid watcher (branch): 4.9% → 0.1% of a core.
+  - `paddock-chromium` (2026-10-29, loaded Mac): a test browser exits 0.15 s (median) after `Browser.close` when alone,
+    up to 11.7 s (p95 6.3 s) with about 20 at once, past the 5 s `CLOSE_GRACE` in 18 of 178 closes. See
+    [the record](#2026-10-29-paddock-chromium-browserclose-exit-time-under-load-fixflaky-browser-close).
 - **CI** (2026-10-24, before the monorepo): Paddock `ci.yml` median 3m05s. App builds 15–37 min median; Debrief's is
   24 min. See [ci-timings](research/2026-10-ci-timings.md). The monorepo has no re-run yet.
 - **Dyno:** the agent costs about 2.0–3.2% of one core and 24 MB (load 55–85, an upper bound, date not stated).
@@ -156,6 +159,41 @@ One line each. The dated records are in the app files.
 - **Pitcrew** (branch `docs/pitcrew-autoscale`, simulation): auto-scaling 1–4 runners cuts the mean wait from 171 to
   9.7 min with no contention.
 - **Pitwall, Spotter, Sighter, demos:** no recorded results beyond bundle budgets.
+
+## Shared-crate results
+
+Results of shared crates (rule 48: shared code records here), newest first.
+
+### 2026-10-29, paddock-chromium: Browser.close exit time under load (fix/flaky-browser-close)
+
+- **Commit:** 18360f145 (origin/main) with temporary probe output in `Chromium::close_gracefully` (not committed): the
+  time from the `Browser.close` answer to the process's exit.
+- **Machine:** Mac mini (Mac16,11), 14 cores, macOS 27.2; the pinned Chrome for Testing 156.0.8078.47 (macOS arm64).
+- **Load:** single runs: 1-minute load 12–25. Parallel runs: 4 loops of the suite at once (about 20 test browsers),
+  1-minute load 145–210 at the end of the runs, with other agents' jobs on the machine.
+- **Build:** debug test build (`cargo test -p paddock-chromium --all-features --no-run`), `CARGO_BUILD_JOBS=2`.
+- **Corpus:** none; the real-browser tests' own local pages (synthetic).
+- **Command:** `CHROMIUM_TEST_PATH=<pinned Chrome for Testing> PADDOCK_REQUIRE_TEST_BROWSER=1 nice -n 10 <it binary>
+  real_browser --nocapture`, 40 runs one at a time; then 4 such loops of 15 runs at once, twice (before and after the
+  test fix).
+- **Runs:** 120 closes alone; 178 and 180 closes in the two parallel sets. Reported: median, p95, max.
+- **Numbers:**
+
+  | Measure | Alone | 4 suites at once (1) | 4 suites at once (2) | Budget | Verdict |
+  |---|---|---|---|---|---|
+  | Exit after `Browser.close` answered, median | 0.15 s | 1.39 s | 0.94 s | `CLOSE_GRACE` 5 s | pass |
+  | p95 | | 6.27 s | 3.31 s | 5 s | over in set 1 |
+  | max | 1.55 s | 11.68 s | 6.25 s | 5 s | over |
+  | Closes over 5 s | 0 of 120 | 18 of 178 | 4 of 180 | | |
+  | `Browser.close` answered | 120 of 120 | all | all | | |
+
+- **Memory measure:** not measured.
+- **Notes:** the browser always answered `Browser.close` and closed its DevTools connection; under load it was slow to
+  exit, not deaf. Tests that asserted the exit within `CLOSE_GRACE` failed on load alone (2 of 60 runs); they now wait
+  on the exit under a 40 s hang guard. **For the product:** past the grace the tree is ended, which is safe once the
+  browser has answered, but under heavy load about one close in ten ends by force. Whether `CLOSE_GRACE` should be
+  raised (for example to 15 s) is a decision for the user; it is unchanged. Raw output: the agent's scratch folder,
+  not kept in the repository.
 
 ## Other family measurements
 

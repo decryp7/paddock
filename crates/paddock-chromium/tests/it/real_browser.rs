@@ -267,20 +267,23 @@ fn a_cancelled_load_says_whether_it_was_a_download_or_replaced() {
 /// asserts the mechanism, that the browser exits by itself and is not killed, and waits for that exit on the condition; the
 /// bound only keeps a browser that never exits from hanging the test (rule 40). Returns whether it exited and the wait.
 fn close_by_itself(b: &mut Chromium) -> (bool, Duration) {
-    const HANG_GUARD: Duration = Duration::from_secs(120);
+    // Over three times the slowest exit measured on a loaded Mac (11.7 s, docs/benchmarks.md) and under CI's 60 s test
+    // kill (nextest slow-timeout 30 s × 2), so a browser that never exits fails here, with the message below.
+    const HANG_GUARD: Duration = Duration::from_secs(40);
     let dir = b.profile_dir().to_string_lossy().into_owned();
     let started = std::time::Instant::now();
     let exited = b.close_gracefully(HANG_GUARD);
     let waited = started.elapsed();
     // Always printed (nextest shows it for a failed test): how long a runner needs is the evidence for the next change;
-    // for a browser that did not exit, which of its processes were still there when it was ended.
+    // whether the browser answered Browser.close, and for one that did not exit, which of its processes were still there.
     let left = if exited {
         Vec::new()
     } else {
         paddock_proc::processes_mentioning(&dir)
     };
     eprintln!(
-        "Browser.close: exited by itself = {exited}, waited {waited:?}, left before the forced end: {left:?}"
+        "Browser.close: answered = {:?}, exited by itself = {exited}, waited {waited:?}, left before the forced end: {left:?}",
+        b.close_answered()
     );
     (exited, waited)
 }

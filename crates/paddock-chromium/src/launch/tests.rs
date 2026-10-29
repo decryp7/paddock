@@ -14,8 +14,10 @@ fn fake_browser_process() {
 
 /// How long a test waits for a closed browser to exit: a hang guard only (the exit is waited for on the condition). A
 /// loaded runner can take longer than the product's `CLOSE_GRACE` (5 s) to exit after it answered `Browser.close`
-/// (measured 5.0 to 11.7 s with 20 test browsers on the Mac), so a test asserting the grace failed on load alone.
-const CLOSE_GUARD: Duration = Duration::from_secs(120);
+/// (up to 11.7 s with 20 test browsers on the Mac, docs/benchmarks.md), so a test asserting the grace failed on load
+/// alone. 40 s: over three times that, and under CI's 60 s test kill (nextest `slow-timeout` 30 s × 2), so a real hang
+/// fails with its own message instead of being killed first.
+const CLOSE_GUARD: Duration = Duration::from_secs(40);
 
 /// Waits (without sleeping) until `f` holds; a hang guard only.
 fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
@@ -155,10 +157,13 @@ fn a_browser_that_ignores_close_is_ended_after_the_grace() {
     let f = Fixture::new(Mode::IgnoreClose, 1);
     let mut b = f.launch();
     let dir = b.profile_dir().to_path_buf();
+    assert_eq!(b.close_answered(), None, "no close sent yet");
     assert!(
         !b.close_gracefully(Duration::from_millis(200)),
         "it had to be ended"
     );
+    // It took the request and did not exit: answered, so the slow part was the exit, not the request.
+    assert_eq!(b.close_answered(), Some(true));
     assert!(!b.is_running());
     assert!(!dir.exists());
 }
