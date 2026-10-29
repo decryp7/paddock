@@ -1,0 +1,24 @@
+# The kept folders of a host runner's CI home (ci-home.sh): the one list job-isolation.sh reads (.gitea/actions/README.md,
+# "Job isolation"). Everything else a job writes lives in the runner's per-job folder ($RUNNER_TEMP) and dies with the job.
+#
+#   <kind>  <layout under the CI home>  <scope>
+#
+# scope `slot`: one folder per job slot ({slot} = s1, s2, ...), because two jobs must never write it at once and its absolute
+#   path must stay the same from run to run to stay warm (cargo fingerprints, sccache's working-folder key, Angular's cache).
+#   sccache's disk cache is one per slot: "The local storage only supports a single sccache server at a time. Multiple
+#   concurrent servers will race and cause spurious build failures" (sccache docs/Local.md, read 2026-10-28). npm's cache is
+#   one per slot too: it is cheap to keep warm, and a slot's own copy cannot be cleaned or verified under another job.
+#   {name} is the caller's name (app and job); it may hold letters, digits, '.', '_' and '-'.
+# scope `shared`: one folder for every job of the host, only for stores that are safe for concurrent writers (tool installs
+#   that land by an atomic rename).
+#
+# A new cache is one line here; the actions ask `job-isolation.sh path <kind> [<name>]` for its folder.
+target     target-{name}-{slot}       slot
+src        src/{name}-{slot}          slot
+angular    angular/{name}-{slot}      slot
+browser    test-browser-{name}-{slot} slot
+libduckdb  libduckdb/{name}-{slot}    slot
+node-modules node-modules/{name}-{slot} slot
+sccache    sccache-{slot}             slot
+npm        npm-{slot}                 slot
+tools      tools                      shared

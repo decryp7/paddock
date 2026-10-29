@@ -1,17 +1,14 @@
 name: host-cleanup
-description: "Leaves nothing behind on a host runner: stray test processes, temp folders and optionally build outputs. Run it with if: always() at the end of the job. Never fails the job."
+description: "Leaves nothing of this job behind on a host runner: its stray test processes, its temp folders and optionally its build outputs, never another job's (job isolation). Run it with if: always() at the end of the job, before the job-isolation release. Never fails the job."
 inputs:
   app-id:
-    description: The app id; temp folders named <id>-* are removed.
+    description: The app id; temp folders named <id>-* in the job's own temp folder are removed.
     required: true
-  processes:
-    description: Exact process names to kill, space separated (pitwall-server llama-server).
-    default: ""
   process-patterns:
-    description: "Patterns for `pkill -f`, one per line. Scope each to the app's own temp path (e.g. the $TMPDIR/pitcrew- prefix): a loose pattern kills other jobs' processes, and never `gitea-runner`, which is the real runner."
+    description: "Patterns for `pkill -f`, one per line, each anchored on a folder of this job: {tmp} (its temp folder), {build} (its build folder) or {slot} (its slot, in a kept folder's name), e.g. {build}[/\\\\]debug[/\\\\]pitwall-server. A pattern without one is skipped: it could kill other jobs' processes."
     default: ""
   temp-prefix:
-    description: "Start of the temp folders to remove ($TMPDIR/<prefix>*). Empty: <app-id>-. A kit app passes <app-id>-it-: only folders its tests create, never the installed product's own scratch folders."
+    description: "Start of the temp folders to remove (<job temp>/<prefix>*). Empty: <app-id>-. A kit app passes <app-id>-it-: only folders its tests create, never the installed product's own scratch folders."
     default: ""
   build-outputs:
     description: "'true' also removes dist, the target folder's dist and debug, and the app's dist and coverage."
@@ -22,13 +19,11 @@ runs:
     - shell: bash
       env:
         APP_ID: ${{ inputs.app-id }}
-        PROCESSES: ${{ inputs.processes }}
         PATTERNS: ${{ inputs.process-patterns }}
         TEMP_PREFIX: ${{ inputs.temp-prefix }}
         BUILD_OUTPUTS: ${{ inputs.build-outputs }}
       run: |
         args=(--id "$APP_ID")
-        for p in $PROCESSES; do args+=(--process "$p"); done
         while IFS= read -r pat; do
           if [ -n "$pat" ]; then args+=(--process-pattern "$pat"); fi
         done <<< "$PATTERNS"

@@ -71,3 +71,31 @@ export function run(script, args, { bin, env = {}, cwd } = {}) {
   });
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 }
+
+/**
+ * A stand-in for `./dev ci slot acquire|release` (paddock-dev) at `<bin>/dev`: a slot is a folder made with mkdir, and a held
+ * slot whose owner folder is gone is free again (the real holder ends when its owner folder goes; the real OS lock is tested
+ * in tools/paddock-dev). Calls are logged like a shim's.
+ */
+export function fakeDev(bin) {
+  write(bin, {
+    dev: `#!/bin/bash
+echo "dev $*" >> "${bin}/calls.log"
+cmd=$3; shift 3; max=1 owner= root= slot= token=
+while [ $# -gt 0 ]; do case $1 in --max) max=$2; shift ;; --owner) owner=$2; shift ;; --root) root=$2; shift ;; --slot) slot=$2; shift ;; --token) token=$2; shift ;; esac; shift; done
+d="$root/slots"; mkdir -p "$d"
+case $cmd in
+  acquire)
+    for n in $(seq 1 "$max"); do
+      o=$(sed -n 's/^owner=//p' "$d/s$n.owner" 2>/dev/null)
+      if [ -d "$d/s$n.lock" ] && [ -d "$o" ]; then continue; fi
+      rm -rf "$d/s$n.lock"; mkdir "$d/s$n.lock"; printf 'token=t%s\\nowner=%s\\n' "$n" "$owner" > "$d/s$n.owner"; echo "s$n t$n"; exit 0
+    done
+    echo "error: All $max slots are busy." >&2; exit 4 ;;
+  release)
+    [ "$(sed -n 's/^token=//p' "$d/$slot.owner" 2>/dev/null)" = "$token" ] && rm -rf "$d/$slot.lock" "$d/$slot.owner"; exit 0 ;;
+esac
+`,
+  });
+  return join(bin, 'dev');
+}

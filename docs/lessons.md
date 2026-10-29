@@ -589,6 +589,33 @@ default provider, reqwest's `rustls`) sets `AWS_LC_SYS_NO_JITTER_ENTROPY = { val
 variant, which the build script reads first. Windows 0xc0000409 is any self-triggered abort (`abort()`, `__fastfail`,
 `/GS`), not proof of a buffer overrun: look for a C `abort()` first.
 
+## Per-host CI state keyed by app and job breaks with two jobs on one host (2026-10-28, CI kit)
+
+Planning several jobs at once on one host (more runners per host) showed that every kept folder of the kit was named
+after the app and job only: a second run of the same job would have replaced the first one's checkout
+(`stable-workspace`), killed its test processes and deleted its temp folders (`host-cleanup`), pruned its build folder,
+and stopped its sccache server (one fixed port). The runner already gives every job a folder of its own
+(`<workdir_parent>/<16 hex>/`, `RUNNER_TEMP` in it, removed after the job). **Rule (ADR 0025):** what need not outlive the
+job goes in the runner's job folder; what must stay warm is a kept folder of the job's slot, declared once in
+`conformance/ci/kept-folders.txt` and reached only through `conformance/ci/job-isolation.sh`; process patterns are
+anchored on `{tmp}`, `{build}` or `{slot}`, never on a shared name.
+
+## A lock that can be reclaimed races; take an OS lock and act while holding it (2026-10-28, CI kit)
+
+The first job-slot lock was a `mkdir` with an owner file and a reclaim when the owner looked dead; the review found two
+jobs could both hold a slot (rename away, check, move back), and the disk sweep checked "slot idle" and then deleted, so a
+job could take the slot in between. **Rule:** a lock between processes is an OS file lock held by a process that lives as
+long as the owner (`paddock-slots`, `./dev ci slot`: the kernel frees it when the holder dies, so nothing is reclaimed),
+and work that needs "nobody holds X" runs while holding X's lock (`./dev ci slot idle-run`), never after a check.
+
+## A CI script tested only on the Mac's bash 3.2 can break in bash 5 (2026-10-28, CI kit)
+
+`job-isolation.sh` passed every test on the Mac and failed in CI's containers (bash 5.2): `patsub_replacement` made a
+backslash in `${v//p/r}`'s replacement an escape (every scoped process pattern became an invalid regular expression), and
+command substitutions dropped `-e` (a missing CI home became an empty one). **Rule:** a CI shell script never puts a
+computed value into `${v//p/r}`'s replacement (concatenate instead), sets `shopt -s inherit_errexit`, checks a value a
+substitution must produce, and its tests are also run under the container's bash before pushing (`docker run node:22`).
+
 ## A fake clock next to real processes must not run away from the real one (2026-10-28, Pitcrew)
 Pitcrew's supervision tests drive the supervisor with a fake clock but real runner processes, and failed or timed out
 only on a loaded CI runner (run 6628): (1) a test took the runner's "task started" line for the job's process, then
@@ -751,3 +778,30 @@ composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor D
 crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
 (`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
 not by guessing at the VM.
+
+## A work-stealing test picked its victim by position (2026-10-29, paddock-download)
+`a_slow_range_is_split_so_neither_the_tail_nor_the_hash_waits_on_it` made the range at offset 0 slow and expected it to be
+split. On a loaded Windows runner (CI 7110) its worker was descheduled before sending the request, and the other workers
+split the unstarted range below the split threshold, so nothing was left to split. **Guidance:** a test about work stealing
+must not pick the victim by its position; gate the fake so the victim is in flight before a stealer can run (ADR 0031,
+rule 49).
+
+## 2026-10-29: a host runner's temp folder is the user's temp folder (CI hermeticity, ER-14)
+
+On the Mac host runner, `os.tmpdir()` and Rust's `temp_dir()` are the runner user's `/var/folders/.../T`, the same folder
+the agents' local test runs on that Mac use. Debrief's leak check snapshotted and checked it, so a local run that died
+during a CI job made the job fail with leaks it did not cause, and the CI tests wrote there too. **Guidance:** every job
+on a host runner that runs tests or checks a folder gets a folder of its own first: the shared `job-tmpdir` action
+(`RUNNER_TEMP/t` as `TMPDIR`, `TMP`/`TEMP` on Windows; removed as the last step), and checks name that folder explicitly
+(`--dir "$PADDOCK_JOB_TEMP"`). A conformance test holds every job that runs `check-temp-leaks.mjs` to it.
+
+Review of the fix (2026-10-29): a job's own temp folder is not enough. **Sockets fall back to `/tmp`** when the temp path is
+too long (the runner's per-job folder is), so the leak check and the tests still met other runs there. A short socket
+folder per job (`PADDOCK_SOCKET_BASE`, `/tmp/pd-XXXXXXXX` from mktemp) comes before `/tmp`; scanning all of `/tmp` (`--shared`) is only
+right in a Linux container, where `/tmp` is the job's. **One owner:** job-isolation's acquire already pointed `TMPDIR` at
+the runner's folder; two mechanisms would disagree, so `conformance/ci/job-tmpdir.sh` is the only code that sets
+`TMPDIR`, `TMP` or `TEMP` (a test fails on any other writer), and every host job gets it through acquire. **macOS'
+bash 3.2** (what `shell: bash` runs on the Mac host) cannot parse an apostrophe inside `${var:?word}`, `${var:-word}`,
+`${var:+word}` or `${var:=word}` within double quotes, nor a `case` with unparenthesised patterns (`a)`) inside `$(...)`:
+write `(a)`. A `$(...)` inside a case branch is fine (an earlier version of this lesson said otherwise). `bash -n` does not
+always catch the second, so a conformance check greps every CI script for both and also runs `/bin/bash -n` where it exists.
