@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# Prepares the local Windows 11 Arm test VM in VMware Fusion (docs/testing/windows-test-vm.md). Local only, never CI.
+#
+#   scripts/vm-win/prepare.sh [--no-tpm]
+#
+# Creates, under PADDOCK_WIN_VM_DIR (default /Volumes/d7sst7/vms/paddock-win11-test, never under $HOME):
+#   keys/            SSH key pairs for paddock-test and paddock-admin, the setup passwords (all mode 600)
+#   payload/         the installers pinned in payload.lock, hash-checked
+#   iso/paddock-setup.iso   the setup disc: autounattend.xml, firstlogon.ps1, payload, public keys, Arm drivers
+#   vm/paddock-win11-test.vmwarevm   the VM: 4 vCPU, 8 GB, 80 GB growable NVMe disk, NAT, fixed MAC
+# It never downloads Windows (the user fetches the ISO, see the doc) and never touches any other VM. Safe to re-run:
+# existing keys, passwords, payload and VM are kept; the setup disc is rebuilt.
+#
+# --no-tpm  builds the VM without a virtual TPM: Setup skips the TPM and Secure Boot checks (LabConfig), nothing is
+#           encrypted and vmrun needs no password. Without it the user adds a TPM in Fusion, which encrypts the TPM
+#           files (not the disk) with a password kept in the login keychain (see the doc, "TPM").
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+dir=${PADDOCK_WIN_VM_DIR:-/Volumes/d7sst7/vms/paddock-win11-test}
+fusion=${FUSION_APP:-/Applications/VMware Fusion.app}
+lib="$fusion/Contents/Library"
+name=paddock-win11-test
+max_load=${PADDOCK_VM_MAX_LOAD:-25}
+no_tpm=false
+
+die() { echo "prepare: $*" >&2; exit 1; }
+for a in "$@"; do
+  case $a in
+    --no-tpm) no_tpm=true ;;
+    -h | --help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown option $a (see --help)" ;;
+  esac
+done
+
+case "$dir/" in "$HOME"/*) die "PADDOCK_WIN_VM_DIR must not be under \$HOME (ER-14): $dir" ;; esac
+[ -d "$lib" ] || die "VMware Fusion not found at $fusion (set FUSION_APP)"
+load=$(sysctl -n vm.loadavg | awk '{print $2}')
+awk -v l="$load" -v m="$max_load" 'BEGIN{exit !(l<m)}' || die "1-minute load $load is not under $max_load; try again later"
+
+mkdir -p "$dir"/{keys,payload,iso,vm}
+chmod 700 "$dir/keys"
+
+echo "== SSH keys (key-only logins; the private keys stay on this Mac)"
+for user in paddock-test paddock-admin; do
+  [ -f "$dir/keys/$user" ] || ssh-keygen -q -t ed25519 -N '' -C "$user@paddock-win11-test" -f "$dir/keys/$user"
+  chmod 600 "$dir/keys/$user"
+done
+
+echo "== Setup passwords (local accounts; SSH never accepts them)"
+pw="$dir/keys/setup-passwords"
+if [ ! -f "$pw" ]; then
+  ( umask 077
+    gen() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24; }
+    printf 'paddock-admin=%s\npaddock-test=%s\n' "$(gen)" "$(gen)" >"$pw" )
+fi
+admin_pw=$(sed -n 's/^paddock-admin=//p' "$pw")
+test_pw=$(sed -n 's/^paddock-test=//p' "$pw")
+[ -n "$admin_pw" ] && [ -n "$test_pw" ] || die "$pw is malformed; delete it to generate new passwords"
+
+echo "== Payload (pinned in payload.lock)"
+grep -v '^#' "$here/payload.lock" | while read -r file url sha; do
+  [ -n "$file" ] || continue
+  dest="$dir/payload/$file"
+  if [ ! -f "$dest" ] || [ "$(shasum -a 256 "$dest" | cut -d' ' -f1)" != "$sha" ]; then
+    curl -fsSL --retry 3 -o "$dest.part" "$url"
+    got=$(shasum -a 256 "$dest.part" | cut -d' ' -f1)
+    [ "$got" = "$sha" ] || { rm -f "$dest.part"; die "$file: SHA-256 $got does not match payload.lock ($sha)"; }
+    mv "$dest.part" "$dest"
+  fi
+  echo "  ok $file"
+done
+
+echo "== Setup disc"
+stage="$dir/setup-disc"
+rm -rf "$stage"
+trap 'rm -rf "$stage"' EXIT # the staged copy holds the filled answer file
+mkdir -p "$stage/setup" "$stage/payload" "$stage/keys" "$stage/\$WinPEDriver\$"
+if $no_tpm; then
+  bypass='      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add"><Order>1</Order><Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path></RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add"><Order>2</Order><Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path></RunSynchronousCommand>
+      </RunSynchronous>'
+else
+  bypass='      <!-- TPM: Fusion virtual TPM (no LabConfig bypass) -->'
+fi
+( umask 077
+  BYPASS="$bypass" ADMIN_PW="$admin_pw" TEST_PW="$test_pw" awk '
+    /@@TPM_BYPASS@@/ { print ENVIRON["BYPASS"]; next }
+    { gsub(/@@ADMIN_PASSWORD@@/, ENVIRON["ADMIN_PW"]); gsub(/@@TEST_PASSWORD@@/, ENVIRON["TEST_PW"]); print }
+  ' "$here/autounattend.xml.in" >"$stage/autounattend.xml" )
+grep -Eq '@@[A-Z_]+@@' "$stage/autounattend.xml" && die "autounattend.xml still has a placeholder"
+cp "$here/firstlogon.ps1" "$stage/setup/"
+cp "$here/payload.lock" "$dir"/payload/*.exe "$dir"/payload/*.msi "$stage/payload/"
+cp "$dir/keys/paddock-test.pub" "$dir/keys/paddock-admin.pub" "$stage/keys/"
+unzip -q -o "$lib/isoimages/arm64/drivers-arm64.zip" -x '*.pdb' -d "$stage/\$WinPEDriver\$"
+date -u +%FT%TZ >"$stage/paddock-setup.marker"
+rm -f "$dir/iso/paddock-setup.iso"
+hdiutil makehybrid -quiet -iso -joliet -default-volume-name PADDOCKSETUP -o "$dir/iso/paddock-setup.iso" "$stage"
+rm -rf "$stage"
+chmod 600 "$dir/iso/paddock-setup.iso"
+echo "  ok iso/paddock-setup.iso"
+
+echo "== VM"
+vmdir="$dir/vm/$name.vmwarevm"
+vmx="$vmdir/$name.vmx"
+win_iso=${PADDOCK_WIN_ISO:-$dir/iso/windows11-arm64.iso}
+if [ -f "$vmx" ]; then
+  echo "  kept existing $vmx (delete the .vmwarevm folder to rebuild it)"
+else
+  mkdir -p "$vmdir"
+  "$lib/vmware-vdiskmanager" -c -s 80GB -a lsilogic -t 0 "$vmdir/$name.vmdk" >/dev/null
+  cat >"$vmx" <<EOF
+.encoding = "UTF-8"
+config.version = "8"
+virtualHW.version = "22"
+displayName = "$name"
+guestOS = "arm-windows11-64"
+firmware = "efi"
+uefi.secureBoot.enabled = "TRUE"
+numvcpus = "4"
+cpuid.coresPerSocket = "4"
+memsize = "8192"
+nvram = "$name.nvram"
+pciBridge0.present = "TRUE"
+pciBridge4.present = "TRUE"
+pciBridge4.virtualDev = "pcieRootPort"
+pciBridge4.functions = "8"
+pciBridge5.present = "TRUE"
+pciBridge5.virtualDev = "pcieRootPort"
+pciBridge5.functions = "8"
+pciBridge6.present = "TRUE"
+pciBridge6.virtualDev = "pcieRootPort"
+pciBridge6.functions = "8"
+pciBridge7.present = "TRUE"
+pciBridge7.virtualDev = "pcieRootPort"
+pciBridge7.functions = "8"
+vmci0.present = "TRUE"
+hpet0.present = "TRUE"
+svga.present = "TRUE"
+mks.enable3d = "TRUE"
+usb.present = "TRUE"
+usb_xhci.present = "TRUE"
+sound.present = "FALSE"
+floppy0.present = "FALSE"
+nvme0.present = "TRUE"
+nvme0:0.present = "TRUE"
+nvme0:0.fileName = "$name.vmdk"
+sata0.present = "TRUE"
+sata0:0.present = "TRUE"
+sata0:0.deviceType = "cdrom-image"
+sata0:0.fileName = "$win_iso"
+sata0:1.present = "TRUE"
+sata0:1.deviceType = "cdrom-image"
+sata0:1.fileName = "$dir/iso/paddock-setup.iso"
+ethernet0.present = "TRUE"
+ethernet0.connectionType = "nat"
+ethernet0.virtualDev = "vmxnet3"
+ethernet0.addressType = "static"
+ethernet0.address = "00:50:56:2A:D0:C7"
+isolation.tools.hgfs.disable = "TRUE"
+sharedFolder.maxNum = "0"
+isolation.tools.copy.disable = "TRUE"
+isolation.tools.paste.disable = "TRUE"
+isolation.tools.dnd.disable = "TRUE"
+EOF
+  echo "  ok $vmx"
+fi
+
+echo
+[ -f "$win_iso" ] && echo "Windows ISO: found $win_iso" || echo "Windows ISO: MISSING, put it at $win_iso (see the doc, step 1)"
+if $no_tpm; then
+  echo "Next: scripts/vm-win.sh install (opens the VM once in Fusion; press a key at \"Press any key to boot from CD\")"
+else
+  echo "Next: add the TPM in Fusion (doc, step 3), then scripts/vm-win.sh install"
+fi
