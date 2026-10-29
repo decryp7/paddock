@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, provideAppInitializer, inject } fro
 import { bootstrapApplication } from '@angular/platform-browser';
 import type { Routes } from '@angular/router';
 import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
+import { PdCommandPalette, providePagesPalette } from '@decryp7/paddock-ui/workbench/palette';
 import { PdShellFrame, provideShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { provideContributions, provideShellContext, provideShellVersionCheck } from '@decryp7/paddock-ui/shell';
 import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
@@ -31,8 +32,8 @@ export const DETAIL_ROUTES: Routes = [
 @Component({
   selector: 'dy-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdShellFrame],
-  template: `<pd-shell-frame />`,
+  imports: [PdShellFrame, PdCommandPalette],
+  template: `<pd-shell-frame /><pd-command-palette />`,
   styles: `:host { display: block; height: 100vh; }`,
 })
 export class DynoShell {}
@@ -61,6 +62,8 @@ export function bootMainWindow(): Promise<unknown> {
       provideContributions(SETTINGS_CONTRIBUTIONS),
       provideShellSettings({ backend: settingsBackend, appearance: { gate: windowReady } }),
       provideSubmenus(),
+      // Mod+Shift+P lists the commands, Mod+P goes to a page (the shared palette on the pages frame).
+      providePagesPalette({ commonCommands: ['pd.settings.open', 'dy.refresh-history', 'dy.rescan-issues', 'dy.capture'] }),
       // The app's part of the context is a lazy chunk, loaded when the window is idle.
       provideShellContext<DynoContext>(() => import('./context').then((m) => m.dynoContext)),
       // Everything starts in the background: the first paint never waits for the backend.

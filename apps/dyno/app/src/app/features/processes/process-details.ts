@@ -158,7 +158,9 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
     .titles { flex: 1; min-width: 0; display: grid; }
     .faint { color: var(--text-3); font-size: var(--fs-xs); }
     .lock { display: flex; gap: var(--sp-2); align-items: center; margin: 0 var(--sp-4) var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--surface-inset); color: var(--text-2); font-size: var(--fs-sm); }
-    .tabs { padding: 0 var(--sp-3); }
+    .tabs { padding: 0 var(--sp-2); }
+    /* The five tabs fit the 380 px panel with the wider fonts of Linux: closer padding here, not a bar that paginates and cuts a label. */
+    .tabs .mat-mdc-tab-link.mdc-tab { padding-inline: var(--sp-2); }
     .content { flex: 1; overflow: auto; padding: var(--sp-3) var(--sp-4) var(--sp-4); }
     dl { margin: 0; display: grid; gap: 2px var(--sp-3); grid-template-columns: 96px minmax(0, 1fr); font-size: var(--fs-sm); }
     dt { color: var(--text-3); padding: 3px 0; }

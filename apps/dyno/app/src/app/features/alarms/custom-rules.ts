@@ -1,22 +1,16 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
-import { ActionTip } from '../../shared/action-tip';
+import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import type { CustomAlertRule } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { confirm } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
+import { MatButton } from '@angular/material/button';
 import { MatSlideToggle } from '@angular/material/slide-toggle';
 import { AlarmsStore } from '../../state/alarms.store';
 import { SettingsStore } from '../../state/settings.store';
-import { TABLE_CSS } from './alarms-css';
 import { ruleSummary, severityWord } from './alarms-model';
-import { MatButton, MatIconButton } from '@angular/material/button';
-import { MatTooltip } from '@angular/material/tooltip';
-import { FullTextTip } from '../../shared/full-text-tip';
-import { MatMenuModule } from '@angular/material/menu';
-import { MatDivider } from '@angular/material/divider';
-import { RowMenu } from '../../shared/row-menu';
 
 /** The id of the rule form's window (its contract is in `src-tauri/src/dialogs.rs`). */
 const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
@@ -24,7 +18,7 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
 /** The user's own alert rules from the settings: add, edit, enable and delete. The engine validates every save. */
 @Component({
   selector: 'dy-custom-rules',
-  imports: [ActionTip, RowMenu, MatMenuModule, MatDivider, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon, MatSlideToggle],
+  imports: [MatButton, AsyncState, Icon, MatSlideToggle, PdTable, PdCell],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="custom-h">
@@ -33,50 +27,23 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
         <button type="button" matButton="filled" [disabled]="!settings.settings()" (click)="edit(null)"><dy-icon name="plus" /> Add rule</button>
       </div>
       <dy-async [loaded]="!!settings.settings()" [error]="settings.error()" [empty]="rules().length === 0" emptyTitle="No custom rules" emptyText="Add a rule to be told when the CPU, memory, disk or temperature crosses your own limit." emptyIcon="bell" what="alert rules" [rows]="3" (retry)="settings.load()">
-        <div class="grid" role="table" aria-label="Custom alert rules">
-          <div class="head" role="row">
-            <span role="columnheader">Name</span>
-            <span role="columnheader">Condition</span>
-            <span role="columnheader">Severity</span>
-            <span role="columnheader">Enabled</span>
-            <span role="columnheader"><span class="visually-hidden">Actions</span></span>
-          </div>
-          @for (r of rules(); track r.id) {
-            <div class="row" role="row" [class.off]="!r.enabled"  dyRowMenu [matContextMenuTriggerFor]="menu" [matContextMenuTriggerData]="{ rule: r }">
-              <span class="cell" role="cell"><span class="truncate" [dyFullText]="r.name">{{ r.name }}</span></span>
-              <span class="cell muted" role="cell"><span class="truncate" [dyFullText]="summary(r)">{{ summary(r) }}</span></span>
-              <span class="cell" role="cell"><span class="dot" [attr.data-tone]="r.severity === 'critical' ? 'bad' : r.severity === 'warning' ? 'warn' : 'info'" aria-hidden="true"></span><span [class.muted]="r.severity !== 'critical'">{{ word(r) }}</span></span>
-              <span class="cell" role="cell"><mat-slide-toggle [checked]="r.enabled" [disabled]="alarms.saving()" [aria-label]="'Enable ' + r.name" (change)="toggle(r, $event.checked)" /></span>
-              <span class="cell acts" role="cell" dyActionTip>
-                <button type="button" matIconButton [attr.aria-label]="'Edit ' + r.name" (click)="edit(r)"><dy-icon name="edit" /></button>
-                <button type="button" matIconButton class="more" [attr.aria-label]="'More actions for ' + r.name" [matMenuTriggerFor]="menu" [matMenuTriggerData]="{ rule: r }"><dy-icon name="more" /></button>
-              </span>
-            </div>
-          }
-        </div>
+        <pd-table [toolbar]="false" label="Custom alert rules" [rows]="rules()" [columns]="columns" [rowKey]="ruleKey" [filterable]="false" [rowActions]="actions" [maxHeight]="480" (action)="run($event)">
+          <ng-template pdCell="severity" let-r><span class="dot" [attr.data-tone]="tone(r)" aria-hidden="true"></span><span [class.muted]="r.severity !== 'critical'">{{ word(r) }}</span></ng-template>
+          <ng-template pdCell="enabled" let-r><mat-slide-toggle [checked]="r.enabled" [disabled]="alarms.saving()" [aria-label]="'Enable ' + r.name" (change)="toggle(r, $event.checked)" /></ng-template>
+        </pd-table>
       </dy-async>
     </section>
-
-    <mat-menu #menu="matMenu" aria-label="Actions">
-      <ng-template matMenuContent let-rule="rule">
-        <button mat-menu-item (click)="edit(rule)"><dy-icon name="edit" /> Edit…</button>
-        <button mat-menu-item (click)="toggle(rule, !rule.enabled)"><dy-icon name="power" /> {{ rule.enabled ? 'Turn off' : 'Turn on' }}</button>
-        <mat-divider />
-        <button mat-menu-item class="danger" (click)="remove(rule)"><dy-icon name="trash" /> Delete…</button>
-      </ng-template>
-    </mat-menu>
   `,
-  styles: [
-    TABLE_CSS,
-    `
+  styles: `
     :host { display: block; }
     .sec-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-3); }
     .titles { display: grid; gap: 2px; }
-    .head, .row { --cols: minmax(120px, 1fr) minmax(200px, 1.6fr) 100px 70px 64px; }
-    .row { min-height: 40px; }
-    .row.off .cell:not(:nth-child(4)):not(.acts) { opacity: 0.55; }
+    .muted { color: var(--text-2); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-inline-end: var(--sp-2); background: var(--text-3); }
+    .dot[data-tone='bad'] { background: var(--bad); }
+    .dot[data-tone='warn'] { background: var(--warn); }
+    .dot[data-tone='info'] { background: var(--info); }
   `,
-  ],
 })
 export class CustomRules {
   protected readonly settings = inject(SettingsStore);
@@ -86,6 +53,25 @@ export class CustomRules {
   protected readonly rules = computed(() => this.settings.settings()?.customAlerts ?? []);
   protected readonly summary = ruleSummary;
   protected readonly word = (r: CustomAlertRule) => severityWord(r.severity);
+  protected readonly tone = (r: CustomAlertRule): string => (r.severity === 'critical' ? 'bad' : r.severity === 'warning' ? 'warn' : 'info');
+  protected readonly ruleKey = (r: CustomAlertRule): string => r.id;
+  protected readonly columns: PdColumn<CustomAlertRule>[] = [
+    { key: 'name', header: 'Name', value: (r) => r.name, required: true, sortable: false, width: 'minmax(120px, 1fr)' },
+    { key: 'condition', header: 'Condition', value: (r) => ruleSummary(r), sortable: false, width: 'minmax(200px, 1.6fr)', hideBelow: 520 },
+    { key: 'severity', header: 'Severity', value: (r) => severityWord(r.severity), sortable: false, width: '100px' },
+    { key: 'enabled', header: 'Enabled', value: (r) => r.enabled, text: (r) => (r.enabled ? 'On' : 'Off'), sortable: false, width: '80px' },
+  ];
+  protected readonly actions = (r: CustomAlertRule): PdRowAction[] => [
+    { id: 'edit', label: 'Edit…', icon: 'edit', inline: true },
+    { id: 'toggle', label: r.enabled ? 'Turn off' : 'Turn on' },
+    { id: 'delete', label: 'Delete…', icon: 'trash', danger: true },
+  ];
+
+  protected run({ id, row }: PdRowActionEvent<CustomAlertRule>): void {
+    if (id === 'edit') void this.edit(row);
+    else if (id === 'toggle') void this.toggle(row, !row.enabled);
+    else void this.remove(row);
+  }
 
   /** Opens the rule's window (a real OS window, ADR 0026); once the rule is stored the settings are read again. */
   protected async edit(rule: CustomAlertRule | null): Promise<void> {

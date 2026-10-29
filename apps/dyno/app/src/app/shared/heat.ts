@@ -22,6 +22,8 @@ export function heat(value: number, full: number): string | null {
 export function bar(value: number, full: number, accent = false): string | null {
   if (!Number.isFinite(value) || value <= 0 || full <= 0) return null;
   const pct = Math.round(Math.min(1, value / full) * 100);
+  // Under 3 % the fill is a sliver at the cell's edge that reads as a column divider, not as a value.
+  if (pct < 3) return null;
   const colour = accent ? accentWash(26) : 'color-mix(in srgb, var(--text-3) 22%, transparent)';
   return `linear-gradient(to right, ${colour} ${pct}%, transparent ${pct}%)`;
 }

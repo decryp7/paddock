@@ -134,6 +134,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             let alarm_config = core.settings.alarms;
             core.alarms.set_config(alarm_config);
             shared.disk.set_limits(core.settings.disk.limits());
+            shared.disk.set_read_threads(core.settings.disk.read_threads);
             core.save_settings(&shared.dirs);
             let s = core.settings.clone();
             drop(core);
@@ -208,10 +209,10 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         }
         Request::Inventory => Ok(Reply::Inventory(Box::new(crate::inventory::get(shared)))),
         Request::Issues { query } => crate::issues::overview(shared, query).map(|o| Reply::Issues(Box::new(o))),
-        Request::RescanIssues { query } => {
-            shared.issues.scan(shared);
-            crate::issues::overview(shared, query).map(|o| Reply::Issues(Box::new(o)))
-        }
+        Request::StartJob { spec } => shared.jobs.start(shared, spec).map(|s| Reply::Job(Box::new(s))),
+        Request::Jobs => Ok(Reply::Jobs(shared.jobs.statuses())),
+        Request::CancelJob { id } => Ok(Reply::JobCancelled(shared.jobs.cancel(id))),
+        Request::JobResult { id } => shared.jobs.output(id).map(|o| Reply::JobOutput(Box::new(o))),
         Request::SaveIssues { path, days } => crate::issues::save(shared, &path, days).map(Reply::IssuesSaved),
         Request::Unusual => Ok(Reply::Unusual(Box::new(shared.unusual.overview(shared)))),
         Request::ForgetBaseline => shared.unusual.forget(shared).map(|o| Reply::Unusual(Box::new(o))),
@@ -308,22 +309,14 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         | Request::DiskReveal { .. }
         | Request::DiskRings { .. }
         | Request::OpenFullDiskAccessSettings) => crate::disk::handle(shared, r),
-        r @ (Request::SearchSeed { .. }
-        | Request::WebSearch { .. }
-        | Request::FileHash { .. }
-        | Request::VirusTotalUrl { .. }
-        | Request::StartupOverview { .. }) => crate::handlers_search::handle(shared, r),
+        r @ (Request::SearchSeed { .. } | Request::WebSearch { .. } | Request::VirusTotalUrl { .. } | Request::StartupOverview { .. }) => {
+            crate::handlers_search::handle(shared, r)
+        }
         r @ (Request::Changes { .. }
-        | Request::SleepBlockers
-        | Request::BootAnalysis
-        | Request::AppUsage
         | Request::GpuProcesses
-        | Request::SoftwareInventory
         | Request::SaveInventoryReport { .. }
-        | Request::FindFiles { .. }
         | Request::Maintenance
-        | Request::Backup
-        | Request::RefreshBackup) => crate::extras::handle(shared, r),
+        | Request::Backup) => crate::extras::handle(shared, r),
         Request::WeeklyReport { weeks_ago } => weekly_report(shared, weeks_ago).map(|r| Reply::Report(Box::new(r))),
         Request::SaveReport { path, format, weeks_ago } => save_report(shared, &path, format, weeks_ago).map(Reply::ReportSaved),
     }

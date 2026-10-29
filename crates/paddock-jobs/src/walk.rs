@@ -26,6 +26,8 @@ pub struct WalkEntry {
     pub kind: EntryKind,
     /// File size when [`WalkOptions::with_size`] is set and the entry is a file.
     pub size: Option<u64>,
+    /// Modification time when [`WalkOptions::with_modified`] is set and the entry is a file (from the same `stat` as the size).
+    pub modified: Option<std::time::SystemTime>,
 }
 
 /// The ignore-rules hook's answer for an entry.
@@ -70,6 +72,8 @@ pub struct WalkOptions {
     pub include_dirs: bool,
     /// Fill [`WalkEntry::size`] for reported files (one `stat` each).
     pub with_size: bool,
+    /// Fill [`WalkEntry::modified`] for reported files; shares the one `stat` with [`with_size`](Self::with_size).
+    pub with_modified: bool,
     /// At most this many issues are kept (the rest are only counted).
     pub issue_cap: usize,
     /// The ignore-rules hook; see [`WalkOptions::with_filter`].
@@ -87,6 +91,7 @@ impl Default for WalkOptions {
             max_depth: None,
             include_dirs: false,
             with_size: false,
+            with_modified: false,
             issue_cap: 1000,
             filter: None,
             cancel_check_items: CANCEL_CHECK_ITEMS,
@@ -299,6 +304,7 @@ impl Walk<'_> {
                 path,
                 kind,
                 size: None,
+                modified: None,
             };
             let decision = self.decide(&entry);
             if decision == Decision::SkipSubtree {
@@ -312,8 +318,16 @@ impl Walk<'_> {
             }
             let reportable = kind != EntryKind::Dir || self.opts.include_dirs;
             if decision == Decision::Include && reportable {
-                if self.opts.with_size && kind == EntryKind::File {
-                    entry.size = fs::metadata(&entry.path).ok().map(|m| m.len());
+                if (self.opts.with_size || self.opts.with_modified) && kind == EntryKind::File {
+                    // One stat for both.
+                    if let Ok(m) = fs::metadata(&entry.path) {
+                        entry.size = self.opts.with_size.then_some(m.len());
+                        entry.modified = if self.opts.with_modified {
+                            m.modified().ok()
+                        } else {
+                            None
+                        };
+                    }
                 }
                 local.push(entry);
                 reported += 1;

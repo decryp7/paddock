@@ -10,7 +10,8 @@
         "kind": "folder",
         "logicalBytes": 480,
         "name": "Users",
-        "newestChange": 1700000000000
+        "newestChange": 1700000000000,
+        "unreadableReason": null
       },
       {
         "bytes": 100,
@@ -21,7 +22,8 @@
         "kind": "file",
         "logicalBytes": 90,
         "name": "vm.img",
-        "newestChange": 1650000000000
+        "newestChange": 1650000000000,
+        "unreadableReason": null
       },
       {
         "bytes": 0,
@@ -32,7 +34,8 @@
         "kind": "mountPoint",
         "logicalBytes": 0,
         "name": "Volumes",
-        "newestChange": 0
+        "newestChange": 0,
+        "unreadableReason": null
       },
       {
         "bytes": 0,
@@ -43,7 +46,8 @@
         "kind": "unreadable",
         "logicalBytes": 0,
         "name": "private",
-        "newestChange": 0
+        "newestChange": 0,
+        "unreadableReason": "needsFullDiskAccess"
       }
     ],
     "loose": {
@@ -62,7 +66,8 @@
       "kind": "folder",
       "logicalBytes": 574,
       "name": "Macintosh HD",
-      "newestChange": 1700000000000
+      "newestChange": 1700000000000,
+      "unreadableReason": null
     },
     "offset": 0,
     "other": {
@@ -182,7 +187,8 @@
                 "kind": "file",
                 "logicalBytes": 480,
                 "name": "disk-image.dmg",
-                "newestChange": 1700000000000
+                "newestChange": 1700000000000,
+                "unreadableReason": null
               },
               "other": {
                 "bytes": 0,
@@ -207,7 +213,8 @@
             "kind": "folder",
             "logicalBytes": 483,
             "name": "Users",
-            "newestChange": 1700000000000
+            "newestChange": 1700000000000,
+            "unreadableReason": null
           },
           "other": {
             "bytes": 0,
@@ -233,7 +240,8 @@
             "kind": "unreadable",
             "logicalBytes": 0,
             "name": "private",
-            "newestChange": 0
+            "newestChange": 0,
+            "unreadableReason": "needsFullDiskAccess"
           },
           "other": {
             "bytes": 0,
@@ -258,7 +266,8 @@
         "kind": "folder",
         "logicalBytes": 483,
         "name": "Macintosh HD",
-        "newestChange": 1700000000000
+        "newestChange": 1700000000000,
+        "unreadableReason": null
       },
       "other": {
         "bytes": 0,
@@ -269,7 +278,11 @@
     }
   },
   "settings": {
+    "finderDepth": 48,
+    "finderFiles": 500000,
+    "finderHashGib": 64,
     "notableFileMib": 10,
+    "readThreads": "auto",
     "scanFolders": 2000000
   },
   "statuses": [

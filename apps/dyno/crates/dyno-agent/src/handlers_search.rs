@@ -14,6 +14,29 @@ fn bad(msg: impl Into<String>) -> AgentError {
 /// The most characters of text a search seed is built from (it is cut to 200 anyway).
 const MAX_SEED_INPUT: usize = 4096;
 
+/// The path a hash job reads: the one the person gave, or the program a running process was started from.
+pub fn hash_path(shared: &Arc<Shared>, source: HashSource) -> Result<String, AgentError> {
+    match source {
+        HashSource::Path(p) => Ok(p),
+        HashSource::Process(target) => {
+            let found = lock(&shared.core)
+                .latest
+                .processes
+                .iter()
+                .find(|p| p.reference() == target)
+                .map(|p| p.exe.clone());
+            match found {
+                None => Err(AgentError::new(ErrorCode::NotFound, "That process has exited.")),
+                Some(None) => Err(AgentError::new(
+                    ErrorCode::AccessDenied,
+                    "The system does not tell Dyno which file this process runs from.",
+                )),
+                Some(Some(exe)) => Ok(exe),
+            }
+        }
+    }
+}
+
 /// Answers a search, hash or startup-filter request.
 pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentError> {
     match request {
@@ -24,34 +47,6 @@ pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentErro
         }
         Request::WebSearch { query } => search_url(&query).map(Reply::Url).map_err(|e| bad(e.to_string())),
         Request::VirusTotalUrl { sha256 } => virustotal_url(&sha256).map(Reply::Url).map_err(|e| bad(e.to_string())),
-        Request::FileHash { source } => {
-            let path = match source {
-                HashSource::Path(p) => p,
-                HashSource::Process(target) => {
-                    let found = lock(&shared.core)
-                        .latest
-                        .processes
-                        .iter()
-                        .find(|p| p.reference() == target)
-                        .map(|p| p.exe.clone());
-                    match found {
-                        None => return Err(AgentError::new(ErrorCode::NotFound, "That process has exited.")),
-                        Some(None) => {
-                            return Err(AgentError::new(
-                                ErrorCode::AccessDenied,
-                                "The system does not tell Dyno which file this process runs from.",
-                            ))
-                        }
-                        Some(Some(exe)) => exe,
-                    }
-                }
-            };
-            shared
-                .hasher
-                .hash(&path)
-                .map(Reply::FileHash)
-                .map_err(|m| AgentError::new(ErrorCode::NotFound, m))
-        }
         Request::StartupOverview { filter } => {
             let list = lock(&shared.ports.startup).list()?;
             Ok(Reply::StartupOverview(Box::new(dyno_core::startup::overview(

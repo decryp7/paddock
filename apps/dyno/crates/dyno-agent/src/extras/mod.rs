@@ -8,7 +8,6 @@ pub mod finder;
 use crate::agent::{lock, now, Shared};
 use dyno_core::extras::boot::{self, BootReport, BootRow, SettleTracker};
 use dyno_core::extras::changes::{diff_software, diff_startup, timeline, Change, ChangesQuery};
-use dyno_core::extras::files::{FinderQuery, FinderResult};
 use dyno_core::extras::gpu::GpuReport;
 use dyno_core::extras::software::{render_report, validate_destination, InventoryFormat, SoftwareInventory, SoftwareItem};
 use dyno_core::extras::usage::{self, UsageReport};
@@ -60,7 +59,9 @@ pub struct ExtrasCentre {
     os: Mutex<&'static str>,
     own_folder: bool,
     software: Mutex<Option<(Instant, SoftwareInventory)>>,
-    pub(crate) backup: Mutex<backup_check::Slot>,
+    pub(crate) backup: Arc<Mutex<backup_check::Slot>>,
+    /// Signalled when a backup check ends and when a job waiting for one is cancelled.
+    pub(crate) backup_done: Arc<std::sync::Condvar>,
     counter: AtomicU64,
 }
 
@@ -74,7 +75,8 @@ impl ExtrasCentre {
             os: Mutex::new(std::env::consts::OS),
             own_folder,
             software: Mutex::new(None),
-            backup: Mutex::new(backup_check::Slot::default()),
+            backup: Arc::new(Mutex::new(backup_check::Slot::default())),
+            backup_done: Arc::new(std::sync::Condvar::new()),
             counter: AtomicU64::new(1),
         }
     }
@@ -90,46 +92,42 @@ impl ExtrasCentre {
         *lock(&self.backup_tools) = Some(tools);
     }
 
+    /// The backup report as it stands, without starting a check (tests).
+    pub fn backup_report(&self) -> dyno_core::backup::BackupReport {
+        backup_check::peek(self)
+    }
+
     /// Tests: pretend to be another OS (`macos`, `windows`, `linux`).
     pub fn use_os(&self, os: &'static str) {
         *lock(&self.os) = os;
     }
 
-    fn tools(&self) -> Arc<dyn ToolRunner> {
+    pub(crate) fn tools(&self) -> Arc<dyn ToolRunner> {
         lock(&self.tools).clone()
     }
 
-    fn os(&self) -> &'static str {
+    pub(crate) fn os(&self) -> &'static str {
         *lock(&self.os)
     }
 
-    fn next_id(&self, t: Timestamp) -> String {
+    /// An id for one finder result.
+    pub fn next_scan_id(&self, t: Timestamp) -> String {
         format!("f{}-{}", t.millis(), self.counter.fetch_add(1, Ordering::Relaxed))
     }
 }
 
 /// Answers an extras request.
 pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentError> {
-    let x = &shared.extras;
     match request {
         Request::Changes { query } => changes(shared, query).map(|t| Reply::Changes(Box::new(t))),
-        Request::SleepBlockers => Ok(Reply::Sleep(Box::new(dyno_platform::extras::sleep_report(
-            x.tools().as_ref(),
-            x.os(),
-        )))),
-        Request::BootAnalysis => boot_report(shared).map(|b| Reply::Boot(Box::new(b))),
-        Request::AppUsage => Ok(Reply::AppUsage(Box::new(app_usage(shared)))),
         Request::GpuProcesses => Ok(Reply::Gpu(Box::new(gpu(shared)))),
-        Request::SoftwareInventory => Ok(Reply::Software(Box::new(software(shared)))),
         Request::SaveInventoryReport { path, format } => save_inventory(shared, &path, format).map(Reply::InventorySaved),
-        Request::FindFiles { query } => find_files(shared, &query).map(|r| Reply::FileFinder(Box::new(r))),
         Request::Maintenance => {
             let core = lock(&shared.core);
             let off = core.settings.alarms.utc_offset_minutes;
             Ok(Reply::Maintenance(core.settings.maintenance.status(now(), off)))
         }
-        Request::Backup => Ok(Reply::Backup(Box::new(backup_check::report(shared, false)))),
-        Request::RefreshBackup => Ok(Reply::Backup(Box::new(backup_check::report(shared, true)))),
+        Request::Backup => Ok(Reply::Backup(Box::new(backup_check::report(shared)))),
         other => Err(bad(format!("{other:?} is not an extras request."))),
     }
 }
@@ -215,7 +213,8 @@ pub fn record_changes(shared: &Shared) {
     }
 }
 
-fn boot_report(shared: &Shared) -> Result<BootReport, AgentError> {
+/// Boot history and what slowed the last start (runs OS tools).
+pub fn boot_report(shared: &Shared) -> Result<BootReport, AgentError> {
     let x = &shared.extras;
     let facts = dyno_platform::extras::boot_facts(x.tools().as_ref(), x.os());
     let t = now();
@@ -242,7 +241,8 @@ fn boot_report(shared: &Shared) -> Result<BootReport, AgentError> {
     })
 }
 
-fn app_usage(shared: &Shared) -> UsageReport {
+/// Network and energy use per app (runs OS tools).
+pub fn app_usage(shared: &Shared) -> UsageReport {
     let x = &shared.extras;
     let apps: Vec<(String, Vec<u32>)> = lock(&shared.core)
         .latest
@@ -295,13 +295,6 @@ fn save_inventory(shared: &Shared, path: &str, format: InventoryFormat) -> Resul
         path: dest.to_string_lossy().into_owned(),
         bytes: text.len() as u64,
     })
-}
-
-fn find_files(shared: &Shared, query: &FinderQuery) -> Result<FinderResult, AgentError> {
-    let x = &shared.extras;
-    let t = now();
-    let id = x.next_id(t);
-    finder::run(query, &id).map_err(bad)
 }
 
 /// Records this boot (once) and finds when the desktop settled after login, so Boot analysis has a history. Runs once at

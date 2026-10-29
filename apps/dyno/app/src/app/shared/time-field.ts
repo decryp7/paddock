@@ -43,7 +43,7 @@ export class TimeField {
   /** The visible label ("From", "Start of quiet hours"). */
   readonly label = input.required<string>();
   /** A shorter visible label for the narrow field ('From'); the accessible name stays `label`. */
-  /** The field sits in a cluster of actions that shares one tooltip (`dyActionTip`): the toggle shows none of its own. */
+  /** The field sits in a cluster of actions that shares one tooltip (`pdActionTip`): the toggle shows none of its own. */
   readonly clustered = input(false, { transform: booleanAttribute });
   readonly shown = input('');
   /** The time as `HH:MM`. */

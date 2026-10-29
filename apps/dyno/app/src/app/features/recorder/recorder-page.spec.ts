@@ -32,8 +32,14 @@ function render(setup: (m: MockBackend) => void = () => undefined) {
 const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
   for (let i = 0; i < 6; i++) {
     await f.whenStable();
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
     f.detectChanges();
   }
+};
+/** A key press the way a browser makes it (the CDK listbox reads `keyCode`). */
+const press = (target: Element, key: string): void => {
+  const keyCode = { ArrowDown: 40, ArrowUp: 38, Home: 36, End: 35 }[key] ?? 0;
+  target.dispatchEvent(new KeyboardEvent('keydown', { key, keyCode, bubbles: true }));
 };
 const rows = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('[role="option"]')];
 
@@ -53,7 +59,7 @@ describe('dy-recorder-page', () => {
     expect(rows(el)[0]!.getAttribute('aria-selected')).toBe('true');
     expect(rows(el)[1]!.textContent).toContain('Manual');
     expect(el.querySelector('dy-chart')?.getAttribute('aria-label')).toContain('one-second samples');
-    expect(el.querySelectorAll('[aria-label="Who was busiest"] tbody tr').length).toBe(3);
+    expect(el.querySelectorAll('[aria-label="Who was busiest"] pd-table [role="row"][data-key]').length).toBe(3);
     expect(el.querySelectorAll('button[matButton="filled"]')).toHaveLength(1);
   });
 
@@ -65,17 +71,17 @@ describe('dy-recorder-page', () => {
     await settle(f);
     expect(store.selectedId()).toBe(2);
     const list = el.querySelector('[role="listbox"]')!;
-    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    press(list, 'ArrowDown');
     await settle(f);
     expect(store.selectedId()).toBe(1);
-    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
-    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    press(list, 'End');
+    press(list, 'ArrowUp');
     await settle(f);
     expect(store.selectedId()).toBe(2);
-    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    press(list, 'Home');
     await settle(f);
     expect(store.selectedId()).toBe(3);
-    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }));
+    press(list, 'x');
     expect(store.selectedId()).toBe(3);
   });
 

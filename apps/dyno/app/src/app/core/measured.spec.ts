@@ -1,6 +1,6 @@
 import fixture from '../../../../contract/measured-wire.json';
 import type { Measured, OtherUsers, ProcessSample, UnavailableReason } from './api.types';
-import { ALL_REASONS, measured, readReason, readValue, reasonText, unavailable, unavailableText, UNAVAILABLE } from './measured';
+import { ALL_REASONS, measured, readReason, readValue, reasonText, unavailable, unavailableText, unreadableShort, unreadableText, UNAVAILABLE } from './measured';
 
 describe('measured values', () => {
   it('reads a value and never turns an unread one into 0', () => {
@@ -33,5 +33,17 @@ describe('measured values', () => {
     expect(fixture.reasons).toEqual([...ALL_REASONS]);
     const other = fixture.otherUsers as OtherUsers;
     expect([other.count, other.partial, readReason(other.memory)]).toEqual([3, true, 'needsAdmin']);
+  });
+});
+
+describe('unreadable folders', () => {
+  it('say why, in words the user can act on, and fall back to a plain reason', () => {
+    expect(unreadableText('needsFullDiskAccess')).toBe('Unavailable: Needs Full Disk Access: allow Dyno in System Settings › Privacy & Security › Full Disk Access');
+    expect(unreadableText('protected')).toBe('Unavailable: macOS protects this folder');
+    expect(unreadableShort('needsFullDiskAccess')).toBe('Needs Full Disk Access');
+    expect(unreadableShort(null)).toBe('Could not be read');
+    expect(unreadableText('needsAdmin')).toBe('Unavailable: Needs administrator rights to read');
+    expect(unreadableText('other')).toBe('Unavailable: The system could not read this folder');
+    expect(unreadableText(null)).toBe(unreadableText('other'));
   });
 });

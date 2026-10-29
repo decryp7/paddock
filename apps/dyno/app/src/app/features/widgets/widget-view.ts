@@ -1,3 +1,4 @@
+import { FullTextTip } from '../../shared/full-text-tip';
 import type { Measured } from '../../core/api.types';
 import { showMeasured } from '../../core/measured';
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
@@ -46,7 +47,7 @@ const ICON: Record<WidgetKind, IconName> = {
  */
 @Component({
   selector: 'dy-widget',
-  imports: [MatTooltip, Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
+  imports: [FullTextTip, MatTooltip, Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[attr.role]': 'ownCard() ? null : "group"', '[attr.aria-label]': 'ownCard() ? null : title()', '[attr.data-kind]': 'widget().kind', '[class.own-card]': 'ownCard()' },
   template: `
@@ -117,7 +118,7 @@ const ICON: Record<WidgetKind, IconName> = {
           @for (a of anomalies(); track a.id) {
             <li>
               <span class="ic" aria-hidden="true"><dy-icon [name]="anomalyIcon(a.kind)" /></span>
-              <span class="tx"><strong class="truncate">{{ a.title }}</strong><small class="truncate">{{ label(a.kind) }} · {{ a.app }}</small></span>
+              <span class="tx"><strong class="truncate" [dyFullText]="a.title">{{ a.title }}</strong><small class="truncate" [dyFullText]="label(a.kind) + ' · ' + a.app">{{ label(a.kind) }} · {{ a.app }}</small></span>
             </li>
           }
         </ul>
