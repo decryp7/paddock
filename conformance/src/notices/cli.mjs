@@ -50,7 +50,7 @@ export function cargoAbout({ manifests, aboutToml, root, exec = execFileSync }) 
     return manifests.map((manifest, i) => {
       const out = join(tmp, `${i}.json`);
       try {
-        exec('cargo', ['about', 'generate', '-c', aboutToml, '--format', 'json', '--manifest-path', manifest, '-o', out], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], timeout: TIMEOUT_MS });
+        exec('cargo', ['about', 'generate', '--locked', '-c', aboutToml, '--format', 'json', '--manifest-path', manifest, '-o', out], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], timeout: TIMEOUT_MS });
       } catch (e) {
         if (e.code === 'ENOENT') throw new Error('cargo is not installed');
         const why = `${e.stderr ?? ''}`.trim() || e.message;
