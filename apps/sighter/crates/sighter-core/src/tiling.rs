@@ -17,7 +17,7 @@ pub const MAX_FRAME_SIDE: u32 = 16_384;
 pub enum TileLocal {}
 
 /// Why a grid could not be built.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum TilingError {
     /// A frame side was zero or above [`MAX_FRAME_SIDE`].
     #[error("frame {width} x {height} must have sides between 1 and {max} points")]
@@ -29,6 +29,19 @@ pub enum TilingError {
         /// Limit.
         max: u32,
     },
+    /// A pixel buffer does not hold `width * height * 3` bytes.
+    #[error("a {width} x {height} RGB frame needs {} bytes, got {len}", .width * .height * 3)]
+    BadBuffer {
+        /// Frame width.
+        width: u32,
+        /// Frame height.
+        height: u32,
+        /// Buffer length given.
+        len: usize,
+    },
+    /// A normalisation mean was not a number in 0 to 1.
+    #[error("a normalisation mean must be a number between 0 and 1, got {0}")]
+    BadMean(f32),
     /// The overlap leaves no stride.
     #[error("overlap {overlap} must be smaller than the tile size {tile}")]
     Overlap {
@@ -261,6 +274,60 @@ impl TileGrid {
     }
 }
 
+/// The colour that fills the part of a tile outside the frame: the model card's normalisation mean, so it reads as
+/// background to the detector. A parameter of dataset assembly and inference, never a constant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PadColour([u8; 3]);
+
+impl PadColour {
+    /// From the model card's per-channel mean (RGB, each in 0 to 1).
+    pub fn from_mean(mean: [f32; 3]) -> Result<Self, TilingError> {
+        let mut rgb = [0u8; 3];
+        for (o, m) in rgb.iter_mut().zip(mean) {
+            if m.is_nan() || !(0.0..=1.0).contains(&m) {
+                return Err(TilingError::BadMean(m));
+            }
+            *o = (m * 255.0).round() as u8;
+        }
+        Ok(Self(rgb))
+    }
+    /// The colour as 8-bit RGB.
+    pub fn rgb(self) -> [u8; 3] {
+        self.0
+    }
+}
+
+/// Cuts a tile out of an RGB frame (3 bytes per pixel, row-major), filling whatever lies outside the frame with `pad`.
+/// Inference and dataset assembly both call this, so training sees exactly the pulled-back edge tiles and the padded
+/// small frames the detector sees at run time.
+pub fn cut_tile_rgb(frame: &[u8], width: u32, height: u32, tile: &Tile, pad: PadColour) -> Result<Vec<u8>, TilingError> {
+    if frame.len() as u64 != u64::from(width) * u64::from(height) * 3
+        || width == 0
+        || height == 0
+        || width > MAX_FRAME_SIDE
+        || height > MAX_FRAME_SIDE
+    {
+        return Err(TilingError::BadBuffer {
+            width,
+            height,
+            len: frame.len(),
+        });
+    }
+    let side = tile.size() as usize;
+    let mut out = Vec::with_capacity(side * side * 3);
+    for _ in 0..side * side {
+        out.extend_from_slice(&pad.0);
+    }
+    let (ox, oy) = (tile.origin().0 as usize, tile.origin().1 as usize);
+    let (w, h) = (width as usize, height as usize);
+    let cols = side.min(w.saturating_sub(ox));
+    for row in 0..side.min(h.saturating_sub(oy)) {
+        let src = ((oy + row) * w + ox) * 3;
+        out[row * side * 3..row * side * 3 + cols * 3].copy_from_slice(&frame[src..src + cols * 3]);
+    }
+    Ok(out)
+}
+
 /// Keeps only the tiles that changed since the last frame. `changed[id]` says whether tile `id` changed; a tile outside
 /// the slice counts as changed, so a stale cache never hides a change.
 pub fn only_changed(order: &[usize], changed: &[bool]) -> Vec<usize> {
@@ -367,6 +434,46 @@ mod tests {
             g.plan(Some(&Rect::new(5000.0, 5000.0, 10.0, 10.0).unwrap()), &[], None),
             Vec::<usize>::new()
         );
+    }
+
+    #[test]
+    fn padding_colour_is_the_model_cards_mean() {
+        let pad = PadColour::from_mean([0.485, 0.456, 0.406]).unwrap();
+        assert_eq!(pad.rgb(), [124, 116, 104]);
+        for bad in [[1.1, 0.0, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, f32::NAN]] {
+            assert!(matches!(PadColour::from_mean(bad), Err(TilingError::BadMean(_))));
+        }
+    }
+
+    #[test]
+    fn a_small_frame_is_one_padded_tile_and_the_last_tile_is_pulled_back() {
+        let pad = PadColour::from_mean([1.0, 0.0, 0.0]).unwrap();
+        // A 2 x 2 frame of grey (7) pixels becomes one 640 x 640 tile: the frame in the corner, the rest red.
+        let frame = vec![7u8; 2 * 2 * 3];
+        let g = tile_grid(2, 2, GridSpec::default_640()).unwrap();
+        assert_eq!(g.tiles().len(), 1);
+        let t = cut_tile_rgb(&frame, 2, 2, &g.tiles()[0], pad).unwrap();
+        assert_eq!(t.len(), 640 * 640 * 3);
+        assert_eq!(&t[0..3], &[7, 7, 7]);
+        assert_eq!(&t[2 * 3..2 * 3 + 3], &[255, 0, 0]); // right of the frame
+        assert_eq!(&t[640 * 3..640 * 3 + 3], &[7, 7, 7]); // second frame row
+        assert_eq!(&t[2 * 640 * 3..2 * 640 * 3 + 3], &[255, 0, 0]); // below the frame
+        // A pulled-back edge tile holds only real pixels: 700 x 10 frame, second tile starts at x = 60, 10 rows then pad.
+        let wide: Vec<u8> = (0..700 * 10).flat_map(|i| [(i % 251) as u8, 0, 0]).collect();
+        let g = tile_grid(700, 10, GridSpec::default_640()).unwrap();
+        assert_eq!(g.tiles()[1].origin(), (60, 0));
+        let t = cut_tile_rgb(&wide, 700, 10, &g.tiles()[1], pad).unwrap();
+        assert_eq!(t[0], wide[60 * 3]);
+        assert_eq!(t[639 * 3], wide[699 * 3]); // last column is the frame's last column
+        assert_eq!(&t[10 * 640 * 3..10 * 640 * 3 + 3], &[255, 0, 0]);
+        assert!(matches!(
+            cut_tile_rgb(&frame, 3, 2, &g.tiles()[0], pad),
+            Err(TilingError::BadBuffer { .. })
+        ));
+        assert!(matches!(
+            cut_tile_rgb(&[], 0, 0, &g.tiles()[0], pad),
+            Err(TilingError::BadBuffer { .. })
+        ));
     }
 
     #[test]
