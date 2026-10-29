@@ -27,9 +27,9 @@ forbids it): build times are projections from pyke's published CI runs.
   Abseil). Compiling it is not verified until the first Windows run.
 - **Delay-loading DirectML is the consumer's job** in a static build: ONNX Runtime applies its `/DELAYLOAD` list only to
   `onnxruntime.dll`. `sighter-infer` passes it from the archive's `link.txt`; the CPU-only variant imports no DirectML.
-- **Projected cold build times** on our runners: Linux x64 CPU on d-gtr9 about 15–30 min; macOS arm64 CoreML on the Mac
-  mini (6 jobs) about 20–35 min; each Windows variant on the VM about 45–90 min, run one after the other. Warm rebuilds
-  on the host runners (build folder kept) are minutes. All unmeasured.
+- **Projected cold build times** (every run is cold: jobs use their own temporary folder): Linux x64 CPU 15–60 min
+  depending on the runner; macOS arm64 CoreML 15–35 min; on an 8-core, 16 GB Windows runner (6 compile jobs) DirectML
+  40–60 min and CPU 35–55 min, one after the other. Compile jobs are detected at run time. All unmeasured.
 
 ## 1. The ONNX Runtime version
 
@@ -157,18 +157,21 @@ carries the same provider (not checked). The user's decision is under "Decided (
 
 - `--use_coreml` (Apple only), `--osx_arch arm64` (the default on an arm64 host), `--apple_deploy_target <ver>`, which
   `build.py` passes as `CMAKE_OSX_DEPLOYMENT_TARGET` (verified in `build_args.py`/`build.py`).
-- `--apple_deploy_target 13.4`: the floor the family already met with pyke's archive (Pacenotes ADR 0001); CoreML's
+- `--apple_deploy_target 13.4` (user, 2026-10-30): the floor the family already met with pyke's archive (Pacenotes ADR 0001); CoreML's
   `MLProgram` format needs macOS 12 or later (secondary: ONNX Runtime CoreML EP page, not re-read
-  today). A higher floor is a one-line change in `pins.env`.
+  today).
 - The CoreML EP cannot be used in a basic minimal build (`cmake/onnxruntime_providers_coreml.cmake`); we build full.
 - `ort-sys` adds `CoreML` and `Foundation` and `c++` for our archive; the smoke binary built on pyke's archive linked only
   system libraries (`otool -L`: libc++, Foundation, CoreML, CoreFoundation, libobjc, libSystem; verified).
 
 ## 7. Build times and machine needs
 
-Our runners: `ubuntu-latest` (d-gtr9, or d7-nas, which is about 1.5× slower: docs/research/2026-10-ci-timings.md),
-`macos-latest` (the Mac mini: 14 cores, 64 GB, shared with agents), `windows-latest` (the VM; core count and memory not
-documented in the repo). **No ONNX Runtime build was timed here.** The only measured times are pyke's own CI runs of the
+The jobs name runner labels only (`ubuntu-latest`, `macos-latest`, `windows-latest`), never a host, and any runner of
+the right OS may take them (user, 2026-10-30). `build-ort.sh` detects the cores and memory at run time and uses cores
+minus one compile jobs, at most one per 2 GB after 4 GB for the OS and the linker. The runners we know today, for the
+estimates only: two Linux hosts (one about 1.5× slower than the other, docs/research/2026-10-ci-timings.md), a 14-core
+Apple-silicon Mac shared with agents, and an 8-core, 16 GB Windows VM (user, 2026-10-30), where the rule gives 6 jobs.
+**No ONNX Runtime build was timed here.** The only measured times are pyke's own CI runs of the
 same kind of build (GitHub-hosted runners; job times from the GitHub Actions API, run 36487195855, 2026-09-28):
 
 | pyke job (static) | Runner | Time |
@@ -178,11 +181,13 @@ same kind of build (GitHub-hosted runners; job times from the GitHub Actions API
 | `x86_64-pc-windows-msvc`, DirectML | windows-2022 (4 vCPU) | 66 min |
 | `aarch64-pc-windows-msvc`, DirectML (cross build) | windows-2022 (4 vCPU) | 40 min |
 
-Projections for ours (scaled by cores, unmeasured): Linux CPU on d-gtr9 with 12 jobs **15–30 min** (40–60 on d7-nas);
-macOS CoreML on the Mac mini with 6 jobs **20–35 min**; Windows DirectML **45–90 min** and Windows CPU **35–75 min** on
-the VM, depending on its cores. Those include fetching the sources (a few hundred MB) and the third-party builds. With
-the host runners' build folder kept (`~/.paddock-ci/sighter-ort`), a rerun with the same pins rebuilds nothing but the
-bundle. Machine needs: CMake ≥ 3.28, Python ≥ 3.10 (ONNX Runtime's `build.py` and ONNX's code generation; no Python of
+Projections (scaled by compile jobs, unmeasured): Linux CPU **15–30 min** on the faster Linux host and **40–60 min** on
+the slower one; macOS CoreML **15–35 min** on the shared Mac (the build runs niced, so other work slows it); on the
+8-core, 16 GB Windows VM with 6 jobs, Windows DirectML **40–60 min**, Windows CPU **35–55 min** and, if enabled, the arm64
+DirectML cross build **25–40 min**. The Windows variants run one after the other, about 1.5–2.5 h in all. Six jobs,
+not seven, because 16 GB allows one MSVC compile job per 2 GB after about 4 GB for Windows and the linker (rule 51). The
+times include fetching the sources (a few hundred MB) and building the third-party libraries. Every run is cold: a job
+keeps nothing between runs. The cache is the published archive itself, rebuilt only when its key (the pins) changes. Machine needs: CMake ≥ 3.28, Python ≥ 3.10 (ONNX Runtime's `build.py` and ONNX's code generation; no Python of
 ours), Git, a C++20 compiler (Visual Studio 2022 17.x with the C++ tools on Windows; Xcode command-line tools on macOS;
 GCC 13 in the Ubuntu 24.04 image); disk about 10–15 GB per variant for sources and objects (projection); RAM: the
 script allows one compile job per 2 GB.
@@ -201,13 +206,14 @@ Windows DirectML `onnxruntime.lib` 360 MB (research note 2026-10-29 §12); compr
    amendment, since decision 8 says self-built); (b) none for Windows: pyke's archives are `/MD` and Microsoft's carry
    telemetry, so a Windows build failure is fixed, not worked around.
 3. **CI**: `.gitea/workflows/sighter-ort.yml`, manual dispatch plus a monthly build-only run, never on push. Linux on
-   `ubuntu-latest` in the `paddock-ci` image (a label that pins d-gtr9 would avoid d7-nas, integrator's call); macOS on
-   the Mac mini with 6 jobs; the two Windows variants one after the other on the VM. Each job runs the telemetry check,
+   any `ubuntu-latest` runner in the `paddock-ci` image, macOS on any `macos-latest` (Apple silicon) runner, Windows on
+   any `windows-latest` runner, the Windows variants one after the other; labels only, own temporary folders, compile
+   jobs detected at run time (user, 2026-10-30). Each job runs the telemetry check,
    the smoke program (CPU, plus CoreML on macOS; DirectML on Windows as an informational step) and, on Windows, the
    import checks. Publishing only on a dispatch from `main` with `publish: true`, to the generic package
    `sighter-onnxruntime`, version `<ORT>-p<rev>`, never overwriting.
 4. **Windows arm64 + DirectML** (plan SW5) waits: no arm64 runner, and the brief scoped it out. pyke cross-builds it on an
-   x64 Windows runner in 40 min, so it is one more job on the VM when wanted (`--arm64` in ONNX Runtime's build).
+   x64 Windows runner in 40 min, so it is one more job on a Windows runner when wanted (commented in the workflow) (`--arm64` in ONNX Runtime's build).
 
 ## Decided (user, 2026-10-30)
 
@@ -220,13 +226,14 @@ Windows DirectML `onnxruntime.lib` 360 MB (research note 2026-10-29 §12); compr
   `paddock-runtime` catalogues have no DirectML entry.
 - **P6 method accepted.** Reading the DLL's bytes (import table, strings, provider traits) and recording its ETW events
   is treated as acceptable under the licence's no-reverse-engineering clause (3b); no disassembly.
+- **Runners.** The builds run on any runner of the right OS: labels only (`ubuntu-latest`, `macos-latest`,
+  `windows-latest`), never a host name; each job uses its own temporary folder and detects its compile jobs at run time.
+- **macOS minimum.** 13.4 (`MACOS_DEPLOYMENT_TARGET` in `pins.env`).
+- **Windows CI VM.** 8 cores and 16 GB, so the run-time rule gives 6 compile jobs there (used for the estimates).
 
 ## Still open
 
-- **Hardware.** Only S2's two Windows PCs (already U-H1). Tell us the Windows VM's cores and memory, or accept that the
-  first run measures them.
-- **Runner label.** Whether the Linux job may be pinned to d-gtr9 (a label change on the runner).
-- **macOS floor.** 13.4 unless Sighter's app needs a higher minimum.
+- **Hardware.** Only S2's two Windows PCs (U-H1), a release gate.
 
 ## Sources (all read 2026-10-30)
 

@@ -7,6 +7,9 @@ App builds never compile ONNX Runtime. `.gitea/workflows/sighter-ort.yml` builds
 publishes it to the Gitea generic package `sighter-onnxruntime`; `sighter-infer` links the archive through `ort`'s
 custom-library mode (`ORT_LIB_PATH`, no `download-binaries`, no `load-dynamic`, no `copy-dylibs`).
 
+Jobs use runner labels only, never a host name, work in their own `$RUNNER_TEMP/ort` and detect the number of compile
+jobs at run time (cores minus one, one job per 2 GB after 4 GB for the OS; user, 2026-10-30).
+
 | File | What it does |
 | --- | --- |
 | `pins.env` | The one place for every pin: ORT tag and commit, pipeline revision, macOS floor, DirectML package and DLL hashes, package URL |
@@ -23,11 +26,11 @@ custom-library mode (`ORT_LIB_PATH`, no `download-binaries`, no `load-dynamic`, 
 
 | Variant | Runner | Catalogue key | Notes |
 | --- | --- | --- | --- |
-| `macos-arm64-coreml` | `macos-latest` (Mac mini) | `onnxruntime`, `macos-aarch64` | macOS 13.4 floor |
-| `windows-x64-directml` | `windows-latest` (VM) | `onnxruntime`, `windows-x86_64` | `/MT` (ADR 0032); DirectML from `fetch-directml.sh`, delay-loaded by the consumer |
-| `windows-x64-cpu` | `windows-latest` (VM) | `onnxruntime-cpu`, `windows-x86_64` | `/MT`; no DirectML import: starts with no `DirectML.dll` present |
+| `macos-arm64-coreml` | `macos-latest` (Apple silicon) | `onnxruntime`, `macos-aarch64` | macOS 13.4 floor |
+| `windows-x64-directml` | `windows-latest` | `onnxruntime`, `windows-x86_64` | `/MT` (ADR 0032); DirectML from `fetch-directml.sh`, delay-loaded by the consumer |
+| `windows-x64-cpu` | `windows-latest` | `onnxruntime-cpu`, `windows-x86_64` | `/MT`; no DirectML import: starts with no `DirectML.dll` present |
 | `linux-x64-cpu` | `ubuntu-latest` (`paddock-ci` image) | `onnxruntime`, `linux-x86_64` | CI and tests only |
-| `windows-arm64-directml` | not built yet | | Plan SW5 lists it; a commented, optional cross-build job on the x64 VM is in the workflow (needs the variant in `build-ort.sh`) |
+| `windows-arm64-directml` | not built yet | | Plan SW5 lists it; a commented, optional cross-build job on an x64 Windows runner is in the workflow (needs the variant in `build-ort.sh`) |
 
 ## The Windows import check for what ships
 

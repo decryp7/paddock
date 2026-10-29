@@ -68,17 +68,23 @@ case "$variant" in
   *) echo "build-ort: unknown variant '$variant'" >&2; usage ;;
 esac
 
-# Parallel compile jobs (rule 51 / ER-20): CPU-bound, so cores minus one, and at most one job per 2 GB of RAM (the
-# largest translation units, MLAS and the contrib ops, need well over 1 GB each). ORT_BUILD_JOBS or --jobs override.
+# Parallel compile jobs (rule 51 / ER-20), detected on the runner at run time (no machine is assumed): CPU-bound, so cores
+# minus one, and at most one job per 2 GB of the memory left after 4 GB for the OS and the linker (the largest
+# translation units, MLAS and the contrib ops, need well over 1 GB each). In a container the cgroup memory limit counts.
+# Example: 8 cores and 16 GB give 6 jobs. ORT_BUILD_JOBS or --jobs override.
 if [ "$jobs" = auto ]; then
   case "$host" in
-    Darwin-*) cores=$(sysctl -n hw.ncpu); mem_gb=$(( $(sysctl -n hw.memsize) / 1073741824 )) ;;
-    Linux-*) cores=$(nproc); mem_gb=$(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1048576 )) ;;
+    Darwin-*) cores=$(sysctl -n hw.ncpu); mem_mb=$(( $(sysctl -n hw.memsize) / 1048576 )) ;;
+    Linux-*) cores=$(nproc); mem_mb=$(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1024 ))
+       limit=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo max)
+       case "$limit" in ''|max|*[!0-9]*) ;; *) [ $(( limit / 1048576 )) -lt "$mem_mb" ] && mem_mb=$(( limit / 1048576 )) ;; esac ;;
     *) cores=${NUMBER_OF_PROCESSORS:-4}
-       mem_gb=$(( $(powershell -NoProfile -Command '(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory' | tr -d '\r') / 1073741824 )) ;;
+       mem_mb=$(( $(powershell -NoProfile -Command '(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory' | tr -d '\r') / 1048576 )) ;;
   esac
   jobs=$(( cores > 1 ? cores - 1 : 1 ))
-  by_mem=$(( mem_gb / 2 > 0 ? mem_gb / 2 : 1 ))
+  # Installed memory reads a little under its nominal size (16 GB shows as about 15.8 GiB), so round to the nearest GiB.
+  mem_gb=$(( (mem_mb + 512) / 1024 ))
+  by_mem=$(( (mem_gb - 4) / 2 > 0 ? (mem_gb - 4) / 2 : 1 ))
   [ "$by_mem" -lt "$jobs" ] && jobs=$by_mem
 fi
 
