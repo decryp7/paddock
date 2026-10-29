@@ -22,6 +22,15 @@ const tray: AxeTarget = {
     await expect(page.getByRole('button', { name: /Open Dyno/ })).toBeVisible();
   },
 };
+const palette: AxeTarget = {
+  name: 'command palette',
+  url: '/?latency=0#/',
+  ready: async (page) => {
+    await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible({ timeout: 45_000 });
+    await page.keyboard.press('ControlOrMeta+Shift+P');
+    await expect(page.getByRole('combobox', { name: /Type a command/ })).toBeFocused();
+  },
+};
 
 test.describe('Dyno accessibility (axe, WCAG 2.2 AA)', () => {
   test.setTimeout(600_000);
@@ -30,6 +39,6 @@ test.describe('Dyno accessibility (axe, WCAG 2.2 AA)', () => {
   });
   test('every dialog window and the tray popover have no violations in either theme', async ({ page }) => {
     expect(await axeEveryDialog(page, CONTRACT_FILES, { inputs: INPUTS })).toEqual({});
-    expect(await axeTargets(page, [tray])).toEqual({});
+    expect(await axeTargets(page, [tray, palette])).toEqual({});
   });
 });

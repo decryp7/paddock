@@ -57,6 +57,41 @@ test.describe('screens', () => {
   });
 });
 
+test.describe('command palette', () => {
+  test('Mod+P goes to a page: type its name and press Enter', async ({ page }) => {
+    await page.goto(url('/'));
+    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
+    await page.keyboard.press('ControlOrMeta+p');
+    const input = page.getByRole('combobox', { name: /Type a command/ });
+    await expect(input).toBeFocused();
+    // Every page of the sidebar is listed.
+    await expect(page.getByRole('option')).toHaveCount(17);
+    await input.fill('flight');
+    await expect(page.getByRole('option')).toHaveCount(1);
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { level: 1, name: 'Flight recorder' })).toBeVisible();
+    await expect(input).toBeHidden();
+  });
+
+  test('Mod+Shift+P lists the commands and runs one; Escape closes it', async ({ page }) => {
+    await page.goto(url('/'));
+    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
+    await page.keyboard.press('ControlOrMeta+Shift+P');
+    const input = page.getByRole('combobox', { name: /Type a command/ });
+    await expect(input).toBeFocused();
+    await input.fill('> rescan');
+    await expect(page.getByRole('option')).toHaveCount(1);
+    await page.keyboard.press('Enter');
+    await expect(page.getByText(/Read the system logs/)).toBeVisible();
+    await expect(input).toBeHidden();
+
+    await page.keyboard.press('ControlOrMeta+Shift+P');
+    await expect(input).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(input).toBeHidden();
+  });
+});
+
 test.describe('dashboard', () => {
   test('shows live tiles, history and the diagnosis on request', async ({ page }) => {
     await page.goto(url());

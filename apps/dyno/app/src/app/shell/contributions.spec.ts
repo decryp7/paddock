@@ -13,6 +13,10 @@ import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS, DIALOGS } from './contributions';
 import { dynoContext } from './context';
 import { DIALOG_BASE_COMMANDS } from './dialog-base';
 import { NAV } from './nav';
+import { BackupStore } from '../state/backup.store';
+import { DiagnosisStore } from '../state/diagnosis.store';
+import { HistoryStore } from '../state/history.store';
+import { IssuesStore } from '../state/issues.store';
 
 /** Node's `fs`, loaded at run time (the spec programme has no Node types). */
 interface NodeFs {
@@ -56,6 +60,27 @@ describe('Dyno contributions', () => {
 
   it('give the capture command a working handler against the context', async () => {
     await expect(TestBed.inject(CommandService).run('dy.capture')).resolves.toBe(true);
+  });
+
+  it('give every palette command a working handler that reaches the page’s own store', async () => {
+    const commands = TestBed.inject(CommandService);
+    expect(await commands.run('dy.refresh-history')).toBe(true);
+    expect(TestBed.inject(HistoryStore).history()).not.toBeNull();
+    expect(await commands.run('dy.rescan-issues')).toBe(true);
+    expect(TestBed.inject(IssuesStore).overview()).not.toBeNull();
+    expect(await commands.run('dy.check-backup')).toBe(true);
+    expect(TestBed.inject(BackupStore).report()).not.toBeNull();
+    expect(await commands.run('dy.run-why-slow')).toBe(true);
+    expect(TestBed.inject(DiagnosisStore).diagnosis()).not.toBeNull();
+  });
+
+  it('title every palette command in sentence case, under a category', () => {
+    const own = TestBed.inject(ContributionRegistry).commands().filter((c) => c.id.startsWith('dy.'));
+    expect(own.map((c) => c.id)).toEqual(['dy.capture', 'dy.refresh-history', 'dy.rescan-issues', 'dy.check-backup', 'dy.run-why-slow']);
+    for (const c of own) {
+      expect(c.category).toBeDefined();
+      expect(c.title.text).toMatch(/^[A-Z][a-z]/);
+    }
   });
 
   it('keep the appearance the shell’s', () => {

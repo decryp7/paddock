@@ -100,6 +100,30 @@ export const CONTRIBUTIONS: ContributionBatch<DynoContext> = {
       category: msg('dy.category.recorder', 'Flight recorder'),
       run: (ctx) => ctx.capture(),
     }),
+    defineCommand<DynoContext>({
+      id: 'dy.refresh-history',
+      title: msg('dy.refresh-history', 'Refresh history'),
+      category: msg('dy.category.dashboard', 'Dashboard'),
+      run: (ctx) => ctx.refreshHistory(),
+    }),
+    defineCommand<DynoContext>({
+      id: 'dy.rescan-issues',
+      title: msg('dy.rescan-issues', 'Rescan issues'),
+      category: msg('dy.category.issues', 'Issues'),
+      run: (ctx) => ctx.rescanIssues(),
+    }),
+    defineCommand<DynoContext>({
+      id: 'dy.check-backup',
+      title: msg('dy.check-backup', 'Check backup now'),
+      category: msg('dy.category.backup', 'Backup health'),
+      run: (ctx) => ctx.checkBackup(),
+    }),
+    defineCommand<DynoContext>({
+      id: 'dy.run-why-slow',
+      title: msg('dy.run-why-slow', 'Run the slowness check again'),
+      category: msg('dy.category.why-slow', 'Why slow'),
+      run: (ctx) => ctx.runWhySlow(),
+    }),
   ],
   pages: PAGES,
   statusItems: [
