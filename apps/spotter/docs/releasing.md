@@ -93,3 +93,30 @@ Apple notarization and Windows code signing are deferred until after the release
 The branch gates are the affected ones; the tag runs everything (see above). Before a first release, also by hand on one
 machine per OS: install the previous build, publish a newer one to a test feed, and check that Updates finds it **and installs
 it** (the installer is only reached from the real window), then that Spotter starts again on the new version.
+
+## Pre-release update test (local VMs, results)
+
+Manual, local only (never CI, never published): the installed copy must find a newer signed build, download it, verify the
+signature, install it and relaunch (`PluginInstaller`, paddock-updater's `install` feature). Builds run on the host with a
+test updater key made for the run (never the family key); the feed is a small HTTPS server on a host-only address, reached
+through a throw-away test CA that only the VM trusts. The feed URL is the `UPDATE_FEED` constant in `lib.rs`; there is no
+build-time override yet, so the test builds change that one string (and the version) in a scratch worktree, uncommitted.
+
+### 2026-10-29, 29d65b6bd (`spotter/shell-1.0`), builds 1.0.0-test.1 and 1.0.0-test.2
+
+| OS | Result |
+| --- | --- |
+| macOS 26.6.2 (25G83) guest, Tart `macos-tahoe-base`, host macOS 27.2 | **FAIL, blocked at step 2**: the installed test.1 never opens a window |
+| Windows 11 Arm (Fusion, the user's VM) | **NOT RUN**: the VM is encrypted (`vmrun`: "A password is required"), so it cannot be started headless; no agent user or OpenSSH was verifiable |
+
+macOS steps: both builds (aarch64, `--profile dist`, `.app.tar.gz` plus `.sig` with the test key) built; a test.2 signed with
+a second key was built for the negative case; test.1 installed in a fresh VM clone (CA trusted, feed reachable by `curl`
+from the guest, version read from `Info.plist`: 1.0.0-test.1). Launch (`open` and the binary directly, with and without a
+fresh data folder, 3 of 3 runs): the process stays up with a status item but no window is ever created (System Events lists no
+windows), nothing reaches `app.log` or stderr, and `sample` shows the main thread and `paddock-job-1` both blocked in
+`pthread_mutex` waits after start-up (binary stripped, so no symbols). Steps 3 to 7 (Updates, download, verify, install,
+relaunch, Install Chromium progress and Cancel, wrong-key refusal) were therefore not run. Not yet known whether the hang is
+specific to the VM (no GPU, paravirtual Metal) or a lock-order bug; the same build must be started once on a real Mac or
+an unstripped build sampled. Evidence: `/Volumes/d7sst7/dev-targets/handoff/spotter-update-test-2026-10-29/`.
+
+The hang was the start-up deadlock of ADR 0029 (a window built inside a plugin hook), fixed before the 1.0.0 release; the next VM run (runbook: `spotter-1.0-vm-runbook.md`) is the first on the fix.
