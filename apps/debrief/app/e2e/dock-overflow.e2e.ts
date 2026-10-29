@@ -1,4 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
+import { expectNothingCovers } from '../../../../ui/projects/paddock-e2e/src/hit-test.ts';
 import { openApp, openView } from './app';
 import { runCommand } from './analysis-support';
 import { chooseMenu, showProfileEditor } from './menu-support';
@@ -20,19 +21,13 @@ async function overflowStrip(page: Page): Promise<void> {
   await expect(chip(page)).toBeVisible();
 }
 
-/** The element on top at the middle of a locator's box. */
-async function topmostIsInside(page: Page, selector: string): Promise<boolean> {
-  const b = (await page.locator(selector).first().boundingBox())!;
-  return page.evaluate(([x, y, sel]) => !!document.elementFromPoint(x as number, y as number)?.closest(sel as string), [b.x + b.width / 2, b.y + b.height / 2, selector]);
-}
-
 test.describe('tab overflow list', () => {
   test('the chip is a named button with a tooltip; clicking it lists the hidden tabs on top, and a row opens its tab', async ({ page }) => {
     await overflowStrip(page);
     await expect(chip(page)).toHaveAttribute('title', /^\d+ more tabs$/);
     await chip(page).click();
     await expect(list(page)).toBeVisible();
-    expect(await topmostIsInside(page, '.dv-tabs-overflow-container')).toBe(true);
+    await expectNothingCovers(list(page), { scroll: false, extra: '.dv-tab' });
     // Whichever tab the strip's width hides first (the width is the plan's, not this test's).
     const hidden = list(page).locator('.dv-tab').first();
     const name = ((await hidden.innerText()) ?? '').replace(/[▾×]/g, '').replace('📌', '').trim();

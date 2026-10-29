@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { expectNothingCovers } from '../../../../ui/projects/paddock-e2e/src/hit-test.ts';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
@@ -72,5 +73,7 @@ test.describe('welcome', () => {
       points.filter((p) => p.y > 0),
     );
     expect(covered.every(Boolean)).toBe(true);
+    // And nothing of the dock (a floating host, a sash) sits on top of the welcome screen's buttons.
+    await expectNothingCovers(page.locator('debrief-welcome'), { scroll: false });
   });
 });

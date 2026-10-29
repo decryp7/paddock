@@ -1,4 +1,4 @@
-import { axeViolations, dialogContracts, dialogFitProblems, measureDialogWindow, openEveryDialog, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
+import { axeViolations, dialogContracts, dialogFitProblems, measureDialogWindow, openEveryDialog, expect, expectNoHorizontalScroll, expectNothingCovers, test, THEMES } from '@decryp7/paddock-e2e';
 
 // The shell demo is the reference consumer of @decryp7/paddock-ui/shell (ADR 0012 §7); each work package adds its checks.
 // It uses only the test kit (@decryp7/paddock-e2e, plan S16); the static source checks are in shell/testing's specs.
@@ -560,8 +560,7 @@ test.describe('dialogs (plan S6)', () => {
         await page.setViewportSize({ width, height });
         for (const id of ['dismiss', 'rename']) {
           const box = (await app.dialogs.action(id).boundingBox())!;
-          const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('[data-testid]')?.getAttribute('data-testid') ?? null, [box.x + box.width / 2, box.y + box.height / 2]);
-          expect(hit, `${id} at ${height} px`).toBe(`dialog-action-${id}`);
+          await expectNothingCovers(app.dialogs.action(id), { scroll: false });
           expect(box.y + box.height).toBeLessThanOrEqual(height);
           expect(height - (box.y + box.height), `the gap below ${id}`).toBeLessThanOrEqual(24);
         }
