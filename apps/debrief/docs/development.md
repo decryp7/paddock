@@ -144,7 +144,7 @@ and `tauri dev` use the npm scripts.
 the About dialog are generated, not edited by hand:
 
 ```sh
-scripts/notices/generate.sh    # needs cargo, node and cargo-about (installed if missing)
+scripts/notices.sh debrief      # from the repo root; needs cargo, node and cargo-about (installed if missing); --check verifies
 ```
 
 It collects the Rust crate licences with `cargo-about` and the npm production dependencies from
