@@ -12,6 +12,13 @@ fn fake_browser_process() {
     crate::fake::serve_if_requested();
 }
 
+/// How long a test waits for a closed browser to exit: a hang guard only (the exit is waited for on the condition). A
+/// loaded runner can take longer than the product's `CLOSE_GRACE` (5 s) to exit after it answered `Browser.close`
+/// (up to 11.7 s with 20 test browsers on the Mac, docs/benchmarks.md), so a test asserting the grace failed on load
+/// alone. 40 s: over three times that, and under CI's 60 s test kill (nextest `slow-timeout` 30 s × 2), so a real hang
+/// fails with its own message instead of being killed first.
+const CLOSE_GUARD: Duration = Duration::from_secs(40);
+
 /// Waits (without sleeping) until `f` holds; a hang guard only.
 fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
     let end = Instant::now() + Duration::from_secs(20);
@@ -94,10 +101,8 @@ fn the_launch_command_line_is_the_one_built_and_the_profile_goes_with_the_browse
     assert!(dir.exists() && b.is_running());
     assert_eq!(b.exe(), &f.exe());
     assert_eq!(b.ended_by(), EndedBy::Nothing);
-    assert!(
-        b.close_gracefully(Duration::from_secs(10)),
-        "it exited by itself"
-    );
+    // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
+    assert!(b.close_gracefully(CLOSE_GUARD), "it exited by itself");
     assert!(!dir.exists(), "the throwaway profile is gone");
     assert!(!paddock_proc::is_alive(pid));
     assert!(f.fake.calls().contains(&"Browser.close".to_string()));
@@ -142,8 +147,30 @@ fn a_kept_profile_is_used_with_its_theme_and_survives_the_close() {
         kept.join("Default/Preferences").is_file(),
         "the frame colour is written"
     );
-    assert!(b.close());
+    // A kept profile gets the long grace: ending Chrome by force in its shutdown can lose cookies or a sign-in.
+    assert_eq!(b.close_grace(), CLOSE_GRACE_KEPT);
+    // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
+    assert!(b.close_gracefully(CLOSE_GUARD));
     assert!(kept.is_dir(), "a kept profile is not removed");
+}
+
+#[test]
+fn a_throwaway_profile_keeps_the_short_grace_and_a_kept_one_gets_the_long_one() {
+    assert_eq!(
+        close_grace_for(&Profile::Throwaway("/t".into())),
+        CLOSE_GRACE
+    );
+    assert_eq!(
+        close_grace_for(&Profile::Persistent("/k".into())),
+        CLOSE_GRACE_KEPT
+    );
+    // Above the slowest exit measured on a loaded Mac (11.7 s, docs/benchmarks.md).
+    assert!(CLOSE_GRACE_KEPT > Duration::from_millis(11_700));
+    let f = Fixture::new(Mode::Obey, 1);
+    let mut b = f.launch();
+    assert_eq!(b.close_grace(), CLOSE_GRACE);
+    // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
+    assert!(b.close_gracefully(CLOSE_GUARD));
 }
 
 #[test]
@@ -151,10 +178,13 @@ fn a_browser_that_ignores_close_is_ended_after_the_grace() {
     let f = Fixture::new(Mode::IgnoreClose, 1);
     let mut b = f.launch();
     let dir = b.profile_dir().to_path_buf();
+    assert_eq!(b.close_answered(), None, "no close sent yet");
     assert!(
         !b.close_gracefully(Duration::from_millis(200)),
         "it had to be ended"
     );
+    // It took the request and did not exit: answered, so the slow part was the exit, not the request.
+    assert_eq!(b.close_answered(), Some(true));
     assert!(!b.is_running());
     assert!(!dir.exists());
 }
@@ -519,7 +549,8 @@ fn a_launch_without_a_memory_cap_uses_a_plain_child() {
     let mut o = opts(&f.base());
     o.memory_cap = None;
     let mut b = Chromium::launch_with(&f.exe(), &o, Sandbox::On).unwrap();
-    assert!(b.close());
+    // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
+    assert!(b.close_gracefully(CLOSE_GUARD));
 }
 
 #[test]
@@ -686,7 +717,8 @@ fn a_theme_that_cannot_be_written_does_not_stop_the_launch() {
     let mut o = opts(&f.base());
     (o.profile, o.accent) = (Profile::Persistent(kept), Some(0x336699));
     let mut b = Chromium::launch_with(&f.exe(), &o, Sandbox::On).unwrap();
-    assert!(b.close());
+    // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
+    assert!(b.close_gracefully(CLOSE_GUARD));
 }
 
 fn script(dir: &Path, name: &str, body: &str) -> Browser {
