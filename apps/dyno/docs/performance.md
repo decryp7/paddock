@@ -33,6 +33,35 @@ Dyno has two things called "bench":
 
 ## Results (newest first)
 
+### 2026-10-29, incremental rebuild and link time (docs/link-time)
+
+- **Commit:** cae1649f9 (origin/main) plus local, uncommitted experiment edits (crate type, a dev `dylib` crate); research
+  note [2026-10-29-link-time.md](../../../docs/research/2026-10-29-link-time.md)
+- **Machine:** Mac mini M4 Pro (Mac16,11), 14 cores, 64 GB, macOS 27.2, Xcode 27.1 (`ld-27037.1`); rustc 1.99.1 (LLVM 23.1.1)
+- **Load:** 1-minute load 3.7-6.0 during the measured builds; other agents mostly idle; no other job of mine running
+- **Build:** debug (`dev`: deps opt-level 2, `debug = "line-tables-only"`, `split-debuginfo = "unpacked"`), default features
+- **Corpus:** none (the compiler is measured); synthetic one-line change in the app crate
+- **Command:** Probe build: `perl` replaces `pub fn __link_probe() -> u32 { N }` at the end of `app/src-tauri/src/lib.rs`, then `CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=<private> CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=cc-timed.sh LINKMODE=ld|lld cargo build -p dyno-app [--features dynamic_linking] [--config 'profile.dev.package.dyno-app.debug=false|"full"']`; crate type switched by editing `[lib] crate-type`. `cc-timed.sh` runs `cc` (with `--ld-path=<toolchain>/gcc-ld/ld64.lld` and `SDKROOT=MacOSX26.5.sdk` for lld) and logs each link's duration. Phase split: the same with `--timings`. Scripts: `/Volumes/d7sst7/dev-targets/target/link-time-tools/` (not committed).
+- **Runs:** 3 rounds, interleaved (every configuration once per round, each after an uncounted warm-up build); median (range) of wall time; link = median duration of the linker call
+- **Numbers:**
+
+  | Measure | Base (today: staticlib + cdylib + rlib, Apple ld) | Change | Budget | Verdict |
+  |---|---|---|---|---|
+  | Incremental rebuild, crate type rlib only | 1.91 s (1.74-1.94) | 1.19 s (1.15-1.20), -38% | none | adopt |
+  | Incremental rebuild, dev `dylib` (option a), rlib only | 1.91 s | 1.08 s (1.03-1.17), -43% | none | not worth it |
+  | Incremental rebuild, lld (today's crate types) | 1.91 s | 2.21 s (2.03-2.29), +16% | none | reject |
+  | Incremental rebuild, lld, rlib only / dylib | 1.19 / 1.08 s (ld) | 1.25 / 1.09 s | none | reject |
+  | Incremental rebuild, app crate `debug = false` / `"full"` | 1.91 s | 1.78 s (-7%) / 2.22 s (+16%) | none | keep line-tables-only |
+  | Binary link (`ld`) | 0.21 s (0.21-0.24) | rlib 0.22 s, dylib 0.13 s, lld 0.34 s | none | — |
+  | cdylib link (`ld`) | 0.14 s (0.14-0.16) | gone with rlib only; lld 0.26 s | none | — |
+  | App library unit (`--timings`, 2 runs) | 1.37-1.54 s | 0.60-0.76 s (rlib only) | none | — |
+  | App binary unit (`--timings`, 2 runs) | 0.34-0.35 s | 0.34 s (rlib only) | none | — |
+  | `libdyno_app_lib.a` written per build | 364 MB | none (rlib only) | none | — |
+  | `dist` binary (`--profile dist`, 1 build each, load 8-44) | 11,205,808 B, `__text` 7,776,740 B, SHA-256 af25a650... | rlib only: 11,205,824 B, `__text` 7,778,404 B, SHA-256 13b39130...; not byte-identical | none | user decision |
+
+- **Memory measure:** not measured (build time only)
+- **Notes:** Cold build: 5 min 15 s (load 9-45, other agents building). Dist identity check of the crate-type change: see the research note. Raw CSV and link logs: `/Volumes/d7sst7/dev-targets/target/link-time-tools/` (machine-local).
+
 ### Date not stated, the agent's own overhead
 
 - **Commit:** not stated
