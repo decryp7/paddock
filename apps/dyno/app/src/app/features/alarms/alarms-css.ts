@@ -20,14 +20,9 @@ export const TABLE_CSS = `
   .dot[data-tone='calm'] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-3); }
   .id { font: var(--fw-regular) var(--fs-sm) / 1.2 var(--font-mono); }
   .acts { justify-content: flex-end; gap: 2px; }
-  .acts .ib { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
+  .acts .mat-mdc-icon-button { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
   .acts .more { opacity: 0.4; }
-  .row:hover .acts .ib, .row:focus-within .acts .ib, .row.selected .acts .ib, .row:hover .acts .more, .row:focus-within .acts .more { opacity: 1; }
-  .ib { display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
-  .ib:hover:not(:disabled), .ib:focus-visible { background: var(--surface-active); color: var(--text-1); }
-  .ib:disabled { cursor: default; }
-  .row:hover .acts .ib:disabled, .row:focus-within .acts .ib:disabled { opacity: 0.35; }
-  .ib dy-icon { --icon-size: 15px; }
+  .row:hover .acts .mat-mdc-icon-button, .row:focus-within .acts .mat-mdc-icon-button, .row.selected .acts .mat-mdc-icon-button, .row:hover .acts .more, .row:focus-within .acts .more { opacity: 1; }
   .h2 { margin: 0; font: var(--fw-semibold) var(--fs-md) / 1.3 var(--font-sans); }
   .lead { margin: 0; color: var(--text-3); font-size: var(--fs-sm); }
 `;

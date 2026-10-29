@@ -4,6 +4,9 @@ import { formatBytes, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { DiagnosticsStore } from '../../state/diagnostics.store';
 import { middlePath, redactionRows, redactionTotal, sizeInKb } from './diagnostics-model';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 const NEVER = [
   'The contents of your documents or any file outside Dyno',
@@ -15,7 +18,7 @@ const NEVER = [
 /** The diagnostics bundle: a preview of what a bug-report zip contains and one button that asks where to save it. Nothing is sent anywhere. */
 @Component({
   selector: 'dy-diagnostics-page',
-  imports: [AsyncState, Icon],
+  imports: [FullTextTip, MatTooltip, MatButton, MatIconButton, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -24,7 +27,7 @@ const NEVER = [
           <h1>Diagnostics bundle</h1>
           <p>A zip for a bug report. Made only when you ask, saved where you choose, never sent anywhere.</p>
         </div>
-        <button type="button" class="btn primary" [disabled]="store.saving() || !store.preview()" (click)="store.save()">
+        <button type="button" matButton="filled" [disabled]="store.saving() || !store.preview()" (click)="store.save()">
           <dy-icon name="file" />{{ store.saving() ? 'Saving…' : 'Save bundle...' }}
         </button>
       </header>
@@ -33,7 +36,7 @@ const NEVER = [
         <div class="note bad" role="alert">
           <dy-icon name="alert" />
           <span class="msg">{{ e.message }}</span>
-          <button type="button" class="btn sm" (click)="store.save()"><dy-icon name="refresh" /> Retry</button>
+          <button type="button" matButton="outlined" (click)="store.save()"><dy-icon name="refresh" /> Retry</button>
         </div>
       }
       @if (store.saved(); as s) {
@@ -41,7 +44,7 @@ const NEVER = [
           <dy-icon name="check" />
           <span>Saved {{ plural(s.files, 'file') }} ({{ bytes(s.bytes) }}) to</span>
           <code class="path" tabindex="0">{{ s.path }}</code>
-          <button type="button" class="btn sm ghost icon" aria-label="Copy the saved path" title="Copy path" (click)="copy(s.path)"><dy-icon name="copy" /></button>
+          <button type="button" matIconButton aria-label="Copy the saved path" matTooltipPosition="left" [matTooltip]="'Copy the saved path'" (click)="copy(s.path)"><dy-icon name="copy" /></button>
         </div>
       }
 
@@ -57,7 +60,7 @@ const NEVER = [
             <section class="card files" aria-label="Files in the bundle">
               <div class="card-head">
                 <h2>Files</h2>
-                <button type="button" class="btn sm ghost icon refresh" aria-label="Refresh the preview" title="Refresh" (click)="store.loadPreview()"><dy-icon name="refresh" /></button>
+                <button type="button" matIconButton class="refresh" aria-label="Refresh the preview" matTooltipPosition="left" [matTooltip]="'Refresh the preview'" (click)="store.loadPreview()"><dy-icon name="refresh" /></button>
               </div>
               <table class="table">
                 <caption class="visually-hidden">Files in the diagnostics bundle</caption>
@@ -66,8 +69,8 @@ const NEVER = [
                 <tbody>
                   @for (f of p.files; track f.path) {
                     <tr>
-                      <td><span class="mono ell" [title]="f.path">{{ short(f.path) }}</span></td>
-                      <td><span class="ell" [title]="f.description">{{ f.description }}</span></td>
+                      <td><span class="mono ell" [matTooltip]="f.path">{{ short(f.path) }}</span></td>
+                      <td><span class="ell" [dyFullText]="f.description">{{ f.description }}</span></td>
                       <td class="r">{{ kb(f.bytes) }}</td>
                     </tr>
                   }
@@ -102,7 +105,7 @@ const NEVER = [
   styles: `
     :host { display: block; }
     .page { display: grid; gap: var(--sp-4); align-content: start; }
-    .page-head .btn { align-self: start; }
+    .page-head .mat-mdc-button-base { align-self: start; }
     .note { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); border-left: 3px solid var(--ok); background: var(--surface-2); font-size: var(--fs-sm); min-width: 0; }
     .note.bad { border-left-color: var(--bad); background: var(--bad-soft); }
     .note > dy-icon { --icon-size: 15px; color: var(--ok); flex: none; }

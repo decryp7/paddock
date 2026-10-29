@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
-import type { AgentStatus, LiveUpdate } from '../core/api.types';
+import type { AgentStatus, HistoryPoint, LiveUpdate } from '../core/api.types';
 import { BACKEND, type Unsubscribe } from '../core/backend';
 
 /** How many live samples the sparklines keep (one a second: the last minute). */
@@ -47,6 +47,20 @@ export function appendSeries(s: Series, u: LiveUpdate): Series {
   };
 }
 
+/** The sparkline series of the last {@link SPARK_CAPACITY} history points (oldest first), to fill a window that opens after the agent measured. */
+export function seriesFromHistory(points: readonly HistoryPoint[]): Series {
+  const last = points.slice(-SPARK_CAPACITY);
+  return {
+    cpu: last.map((p) => p.cpu),
+    memory: last.map((p) => p.memory),
+    diskRead: last.map((p) => p.diskReadBps),
+    diskWrite: last.map((p) => p.diskWriteBps),
+    netRx: last.map((p) => p.netRxBps),
+    netTx: last.map((p) => p.netTxBps),
+    gpu: last.map((p) => p.gpu ?? 0),
+  };
+}
+
 /**
  * The live summary every screen shares (dashboard tiles, the shell's overhead and agent indicator, the tray):
  * subscribed once for the app's lifetime, with a minute of history for the sparklines.
@@ -63,6 +77,13 @@ export const LiveStore = signalStore(
     /** Applies one pushed update. */
     receive(u: LiveUpdate): void {
       patchState(store, (s) => ({ update: u, series: appendSeries(s.series, u) }));
+    },
+    /** Fills the sparklines from history; live samples that arrived first stay (they are newer than the history). */
+    seed(points: readonly HistoryPoint[]): void {
+      patchState(store, (s) => {
+        if (s.series.cpu.length > 0) return s;
+        return { series: seriesFromHistory(points) };
+      });
     },
     setAgent(agent: AgentStatus): void {
       patchState(store, { agent });

@@ -1,299 +1,123 @@
-/* Dyno's design system. Every colour, space, size, radius, shadow and duration is a token; components only use
-   var(--…). Dark and light follow the system (prefers-color-scheme); [data-theme] on <html> overrides it.
-   [data-vibrancy] (set by the shell before Angular boots) makes the window background translucent so Windows Mica /
-   macOS vibrancy shows through. Text/background pairs are checked for WCAG AA in tokens.spec.ts (keep it in sync). */
+/* Dyno's global styles. The theme (light, dark, accent, contrast, density, motion), the Material theme and the base styles come
+   from @decryp7/paddock-ui (paddock.css, controls.css and material.css, loaded by angular.json). Dyno's own scale below is a
+   BRIDGE: every colour, radius, space and duration of the legacy names (--surface-2, --text-2, --sp-3 ...) points at the shared
+   --pd-* token, so the components keep their markup while one source decides how the app looks. New code uses --pd-* directly;
+   the bridge goes when the components have moved (Material controls and the shared tables are the next steps). */
+
+@use '@angular/cdk' as cdk;
+
+@include cdk.overlay();
+@include cdk.a11y-visually-hidden();
+
+/* The pages frame puts a page in two wrappers of automatic height. Dyno's screens that fill the window (the process table, the
+   timelines) size themselves with `height: 100%`, so the wrappers pass the page's height down; a page that is taller than the
+   window still scrolls in the frame's main region. */
+pd-page-host,
+pd-part-outlet.pd-page {
+  height: 100%;
+}
 
 :root {
-  color-scheme: light dark;
-
-  /* Type. The system UI font (Segoe UI Variable on Windows 11, SF Pro on macOS); nothing loaded from the network. */
-  --font-sans: system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', 'SF Pro Text', Roboto, sans-serif;
-  --font-display: system-ui, -apple-system, 'Segoe UI Variable Display', 'Segoe UI', 'SF Pro Display', sans-serif;
-  --font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
-  --fs-2xs: 10.5px;
-  --fs-xs: 11px;
-  --fs-sm: 12px;
-  --fs-base: 13px;
-  --fs-md: 14px;
-  --fs-lg: 16px;
-  --fs-xl: 19px;
-  --fs-2xl: 24px;
-  --fs-3xl: 30px;
-  --fs-display: 44px;
+  /* Type. Dyno's dense scale (the shared body is 13 px as well); the families are the shared ones. */
+  --font-sans: var(--pd-font-sans);
+  --font-display: var(--pd-font-sans);
+  --font-mono: var(--pd-font-mono);
+  --fs-2xs: calc(var(--pd-text-caption) - 0.5px);
+  --fs-xs: var(--pd-text-caption);
+  --fs-sm: var(--pd-text-label);
+  --fs-base: var(--pd-text-body);
+  --fs-md: var(--pd-text-body-lg);
+  --fs-lg: var(--pd-text-subtitle);
+  --fs-xl: var(--pd-text-title);
+  --fs-2xl: calc(var(--pd-text-title) + var(--pd-space-1) + var(--pd-space-0));
+  --fs-3xl: var(--pd-text-display);
+  --fs-display: var(--pd-text-hero);
   --lh-tight: 1.2;
   --lh-base: 1.45;
-  --fw-regular: 400;
-  --fw-medium: 500;
-  --fw-semibold: 600;
-  --fw-bold: 700;
+  --fw-regular: var(--pd-weight-regular);
+  --fw-medium: var(--pd-weight-medium);
+  --fw-semibold: var(--pd-weight-semibold);
+  --fw-bold: var(--pd-weight-semibold);
 
-  /* Space: a 4-point scale. */
-  --sp-0: 2px;
-  --sp-1: 4px;
-  --sp-2: 8px;
-  --sp-3: 12px;
-  --sp-4: 16px;
-  --sp-5: 20px;
-  --sp-6: 24px;
-  --sp-8: 32px;
-  --sp-10: 40px;
-  --sp-12: 48px;
-
-  /* Radii. */
-  --r-xs: 3px;
-  --r-sm: 5px;
-  --r-md: 7px;
-  --r-lg: 10px;
-  --r-xl: 14px;
-  --r-pill: 999px;
-
-  /* Motion. */
-  --dur-instant: 80ms;
-  --dur-fast: 140ms;
-  --dur-base: 200ms;
-  --dur-slow: 320ms;
-  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-in-out: cubic-bezier(0.45, 0, 0.25, 1);
+  /* Space, radii, motion. */
+  --sp-0: var(--pd-space-0);
+  --sp-1: var(--pd-space-1);
+  --sp-2: var(--pd-space-2);
+  --sp-3: var(--pd-space-3);
+  --sp-4: var(--pd-space-4);
+  --sp-5: calc(var(--pd-space-4) + var(--pd-space-1));
+  --sp-6: var(--pd-space-6);
+  --sp-8: var(--pd-space-8);
+  --sp-10: calc(var(--pd-space-8) + var(--pd-space-2));
+  --sp-12: var(--pd-space-12);
+  --r-xs: calc(var(--pd-radius-tag) - 1px);
+  --r-sm: var(--pd-radius-tag);
+  --r-md: var(--pd-radius-control);
+  --r-lg: var(--pd-radius-card);
+  --r-xl: var(--pd-radius-dialog);
+  --r-pill: var(--pd-radius-pill);
+  --dur-instant: var(--pd-duration-micro);
+  --dur-fast: var(--pd-duration-micro);
+  --dur-base: var(--pd-duration);
+  --dur-slow: var(--pd-duration-large);
+  --ease-out: var(--pd-ease-enter);
+  --ease-in-out: var(--pd-ease-move);
   --ease-spring: cubic-bezier(0.3, 1.4, 0.5, 1);
+  --row-h: var(--pd-row-height);
+  --control-h: var(--pd-control-height);
+  --control-h-sm: var(--pd-hit-min);
 
-  /* Layout. */
-  --sidebar-w: 224px;
-  --sidebar-w-collapsed: 60px;
-  --topbar-h: 52px;
-  --titlebar-inset: 0px;
-  --row-h: 32px;
-  --control-h: 30px;
-  --control-h-sm: 26px;
+  /* Colour roles. */
+  --bg: var(--pd-bg);
+  --content-bg: var(--pd-bg);
+  --surface-1: var(--pd-bg);
+  --surface-2: var(--pd-surface-1);
+  --surface-3: var(--pd-surface-2);
+  --surface-hover: var(--pd-hover);
+  --surface-active: var(--pd-pressed);
+  --surface-inset: var(--pd-surface-2);
+  --overlay-bg: var(--pd-surface-3);
+  --scrim: var(--pd-scrim);
+  --text-1: var(--pd-text);
+  --text-2: var(--pd-text-muted);
+  --text-3: var(--pd-text-subtle);
+  --text-on-accent: var(--pd-on-accent);
+  --border: var(--pd-hairline);
+  --border-subtle: var(--pd-hairline);
+  --border-strong: var(--pd-border-strong);
+  --accent: var(--pd-accent-fill);
+  --accent-control: var(--pd-accent-control);
+  --accent-hover: var(--pd-accent-fill-hover);
+  --accent-text: var(--pd-accent);
+  --accent-soft: var(--pd-accent-tint);
+  --accent-soft-2: var(--pd-accent-ring);
+  --focus: var(--pd-accent);
+  --ok: var(--pd-success);
+  --ok-soft: var(--pd-success-tint);
+  --warn: var(--pd-warning);
+  --warn-soft: var(--pd-warning-tint);
+  --bad: var(--pd-danger);
+  --bad-soft: var(--pd-danger-tint);
+  --info: var(--pd-info);
+  --info-soft: var(--pd-info-tint);
+  --shadow-1: var(--pd-shadow-1);
+  --shadow-2: var(--pd-shadow-2);
+  --shadow-3: var(--pd-shadow-3);
+  --skeleton: var(--pd-skeleton);
+  --skeleton-shine: var(--pd-skeleton-shine);
 
-  /* Light theme. */
-  --bg: #f4f4f6;
-  --content-bg: #f7f7f8;
-  --surface-1: #eeeef1;
-  --surface-2: #ffffff;
-  --surface-3: #f4f4f6;
-  --surface-hover: #f0f0f3;
-  --surface-active: #e8e8ec;
-  --surface-inset: #f6f6f8;
-  --overlay-bg: #ffffff;
-  --scrim: rgb(20 20 28 / 32%);
-  --text-1: #16171a;
-  --text-2: #50535b;
-  --text-3: #686b73;
-  --text-on-accent: #ffffff;
-  --border: #e2e2e7;
-  --border-subtle: #ececf0;
-  --border-strong: #cdced5;
-  --accent: #be3584;
-  --accent-hover: #a82a74;
-  --accent-text: #a0226a;
-  --accent-soft: #fbeaf3;
-  --accent-soft-2: #f5d2e5;
-  --focus: #be3584;
-  --ok: #157347;
-  --ok-soft: #e3f4ea;
-  --warn: #965400;
-  --warn-soft: #fbefd9;
-  --bad: #c22f28;
-  --bad-soft: #fde6e4;
-  --info: #1d63b0;
-  --info-soft: #e2eefb;
-  --heat: 190 53 132;
-  --shadow-1: 0 1px 0 rgb(16 17 26 / 4%), 0 1px 2px rgb(16 17 26 / 6%);
-  --shadow-2: 0 1px 2px rgb(16 17 26 / 6%), 0 4px 12px rgb(16 17 26 / 7%);
-  --shadow-3: 0 2px 6px rgb(16 17 26 / 8%), 0 16px 40px rgb(16 17 26 / 16%);
-  --skeleton: #ebebef;
-  --skeleton-shine: #f6f6f8;
-
-  /* Charts: Okabe–Ito based, adjusted per theme for ≥ 3:1 against the card (see shared/palette.ts). */
-  --chart-1: #0072b2;
-  --chart-2: #c77f00;
-  --chart-3: #007a5e;
-  --chart-4: #a8588c;
-  --chart-5: #c24e00;
-  --chart-6: #4c5bd4;
-  --chart-7: #8a7a00;
-  --chart-8: #6b7280;
-  --bar-fill: #6b7380;
-  --chart-grid: #ececf0;
-  --chart-axis: #686b73;
-}
-
-@mixin dark {
-  --bg: #0e0f11;
-  --content-bg: #111214;
-  --surface-1: #0e0f11;
-  --surface-2: #17181b;
-  --surface-3: #1d1e22;
-  --surface-hover: #1f2024;
-  --surface-active: #26272c;
-  --surface-inset: #131416;
-  --overlay-bg: #1b1c20;
-  --scrim: rgb(0 0 0 / 55%);
-  --text-1: #ededf0;
-  --text-2: #a9abb3;
-  --text-3: #8c8f98;
-  --text-on-accent: #1d0614;
-  --border: #26272c;
-  --border-subtle: #1f2024;
-  --border-strong: #35363d;
-  --accent: #de559f;
-  --accent-hover: #e872b2;
-  --accent-text: #ef86be;
-  --accent-soft: #2c1422;
-  --accent-soft-2: #461c37;
-  --focus: #ef86be;
-  --ok: #4cc58b;
-  --ok-soft: #12291e;
-  --warn: #eaa64a;
-  --warn-soft: #2e2211;
-  --bad: #f7716a;
-  --bad-soft: #351817;
-  --info: #62aef5;
-  --info-soft: #132538;
-  --heat: 222 85 159;
-  --shadow-1: 0 1px 0 rgb(0 0 0 / 30%);
-  --shadow-2: 0 1px 2px rgb(0 0 0 / 40%), 0 6px 16px rgb(0 0 0 / 28%);
-  --shadow-3: 0 4px 12px rgb(0 0 0 / 40%), 0 24px 56px rgb(0 0 0 / 50%);
-  --skeleton: #1d1e22;
-  --skeleton-shine: #25262b;
-  --chart-1: #56b4e9;
-  --chart-2: #f0a030;
-  --chart-3: #5ad07f;
-  --chart-4: #d98bc0;
-  --chart-5: #f07d3a;
-  --chart-6: #8fa3ff;
-  --chart-7: #e8dc5a;
-  --chart-8: #a0a7b2;
-  --bar-fill: #8a92a0;
-  --chart-grid: #222327;
-  --chart-axis: #8c8f98;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    @include dark;
-    color-scheme: dark;
-  }
-}
-
-:root[data-theme='dark'] {
-  @include dark;
-  color-scheme: dark;
-}
-
-:root[data-theme='light'] {
-  color-scheme: light;
-}
-
-/* Native translucency: the window material shows through the sidebar; content keeps a light veil for legibility. */
-:root[data-vibrancy='mica'],
-:root[data-vibrancy='vibrancy'] {
-  --bg: transparent;
-  --surface-1: transparent;
-  --content-bg: rgb(247 247 248 / 82%);
-}
-
-@mixin dark-vibrancy {
-  --content-bg: rgb(17 18 20 / 78%);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root[data-vibrancy='mica']:not([data-theme='light']),
-  :root[data-vibrancy='vibrancy']:not([data-theme='light']) {
-    @include dark-vibrancy;
-  }
-}
-
-:root[data-theme='dark'][data-vibrancy='mica'],
-:root[data-theme='dark'][data-vibrancy='vibrancy'] {
-  @include dark-vibrancy;
-}
-
-/* Popover (tray / menu-bar window): the page is transparent, the shell supplies the material. */
-:root {
-  --popover-bg: color-mix(in srgb, #ffffff 80%, transparent);
-  --popover-border: rgb(0 0 0 / 10%);
-  --popover-shadow: 0 8px 28px rgb(16 17 26 / 18%), 0 1px 0 rgb(255 255 255 / 40%) inset;
-}
-
-@mixin dark-popover {
-  --popover-bg: color-mix(in srgb, #1b1c20 78%, transparent);
-  --popover-border: rgb(255 255 255 / 10%);
-  --popover-shadow: 0 10px 32px rgb(0 0 0 / 45%), 0 1px 0 rgb(255 255 255 / 6%) inset;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    @include dark-popover;
-  }
-}
-
-:root[data-theme='dark'] {
-  @include dark-popover;
-}
-
-html[data-surface='popover'],
-html[data-surface='popover'] body {
-  background: transparent;
-}
-
-/* macOS: overlay title bar with inset traffic lights. */
-:root[data-platform='macos'] {
-  --titlebar-inset: 28px;
-}
-
-/* Angular Material reads its --mat-sys-* tokens: map them onto Dyno's. */
-:root {
-  --mat-sys-primary: var(--accent);
-  --mat-sys-on-primary: var(--text-on-accent);
-  --mat-sys-primary-container: var(--accent-soft);
-  --mat-sys-on-primary-container: var(--text-1);
-  --mat-sys-surface: var(--surface-2);
-  --mat-sys-surface-container: var(--surface-3);
-  --mat-sys-surface-container-high: var(--surface-active);
-  --mat-sys-surface-container-highest: var(--border-strong);
-  --mat-sys-surface-variant: var(--surface-3);
-  --mat-sys-on-surface: var(--text-1);
-  --mat-sys-on-surface-variant: var(--text-2);
-  --mat-sys-outline: var(--border-strong);
-  --mat-sys-outline-variant: var(--border);
-  --mat-sys-inverse-surface: var(--text-1);
-  --mat-sys-inverse-on-surface: var(--surface-2);
-  --mat-sys-error: var(--bad);
-  --mat-sys-body-small-font: var(--font-sans);
-  --mat-sys-body-small-size: var(--fs-sm);
-  --mat-sys-body-medium-font: var(--font-sans);
-  --mat-sys-body-medium-size: var(--fs-base);
-  --mat-sys-label-large-font: var(--font-sans);
-  --mat-sys-corner-extra-small: var(--r-sm);
-  --mat-tooltip-container-color: var(--text-1);
-  --mat-tooltip-supporting-text-color: var(--surface-2);
-  --mat-tooltip-supporting-text-size: var(--fs-sm);
-  --mat-tooltip-supporting-text-font: var(--font-sans);
-  --mat-tooltip-container-shape: var(--r-sm);
-  --mat-slide-toggle-track-outline-color: var(--border-strong);
-  --mat-slide-toggle-unselected-track-color: var(--surface-active);
-  --mat-slide-toggle-unselected-handle-color: var(--text-3);
-  --mat-slide-toggle-selected-track-color: var(--accent);
-  --mat-slide-toggle-selected-handle-color: var(--text-on-accent);
-  --mat-slide-toggle-selected-hover-track-color: var(--accent-hover);
-  --mat-slide-toggle-selected-focus-track-color: var(--accent-hover);
-  --mat-slide-toggle-selected-pressed-track-color: var(--accent-hover);
-  --mat-slide-toggle-selected-hover-handle-color: var(--text-on-accent);
-  --mat-slide-toggle-selected-focus-handle-color: var(--text-on-accent);
-  --mat-slide-toggle-selected-pressed-handle-color: var(--text-on-accent);
-  --mat-slide-toggle-selected-icon-color: var(--accent);
-  --mat-slide-toggle-track-height: 20px;
-  --mat-slide-toggle-track-width: 34px;
-  --mat-slide-toggle-handle-height: 14px;
-  --mat-slide-toggle-handle-width: 14px;
-  --mat-slide-toggle-selected-handle-size: 14px;
-  --mat-slide-toggle-unselected-handle-size: 14px;
-  --mat-slide-toggle-pressed-handle-size: 16px;
-  --mat-slide-toggle-state-layer-size: 28px;
-  --mat-slide-toggle-label-text-font: var(--font-sans);
-  --mat-slide-toggle-label-text-size: var(--fs-base);
-  --mat-slide-toggle-label-text-color: var(--text-1);
+  /* Charts: the shared palette (the ECharts options read the same colours as values, shared/tokens.ts). */
+  --chart-1: var(--pd-chart-1);
+  --chart-2: var(--pd-chart-2);
+  --chart-3: var(--pd-chart-3);
+  --chart-4: var(--pd-chart-4);
+  --chart-5: var(--pd-chart-5);
+  --chart-6: var(--pd-chart-6);
+  --chart-7: var(--pd-chart-7);
+  --chart-8: var(--pd-chart-8);
+  --bar-fill: var(--pd-chart-neutral-bar);
+  --chart-grid: var(--pd-chart-grid);
+  --chart-axis: var(--pd-text-subtle);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -478,173 +302,17 @@ code,
   cursor: text;
 }
 
-/* ----------------------------------------------------------------------------------------------------- buttons */
+/* ----------------------------------------------------------------------------------------------------- Material controls */
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-2);
-  height: var(--control-h);
-  padding: 0 var(--sp-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-md);
-  background: var(--surface-2);
-  color: var(--text-1);
-  font: var(--fw-medium) var(--fs-base) / 1 var(--font-sans);
-  white-space: nowrap;
-  cursor: pointer;
-  box-shadow: var(--shadow-1);
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out),
-    transform var(--dur-instant) var(--ease-out);
-  user-select: none;
-
-  dy-icon {
-    --icon-size: 16px;
-    margin: 0 -2px;
-  }
-
-  &:hover:not(:disabled) {
-    background: var(--surface-hover);
-  }
-
-  &:active:not(:disabled) {
-    transform: translateY(0.5px);
-    background: var(--surface-active);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    box-shadow: none;
-  }
-
-  &.primary {
-    background: var(--accent);
-    border-color: transparent;
-    color: var(--text-on-accent);
-
-    &:hover:not(:disabled) {
-      background: var(--accent-hover);
-    }
-  }
-
-  &.danger {
-    color: var(--bad);
-
-    &:hover:not(:disabled) {
-      background: var(--bad-soft);
-      border-color: var(--bad);
-    }
-  }
-
-  &.danger-solid {
-    background: var(--bad);
-    border-color: transparent;
-    color: #fff;
-  }
-
-  &.ghost {
-    background: transparent;
-    border-color: transparent;
-    box-shadow: none;
-
-    &:hover:not(:disabled) {
-      background: var(--surface-hover);
-    }
-  }
-
-  &.sm {
-    height: var(--control-h-sm);
-    padding: 0 var(--sp-2);
-    font-size: var(--fs-sm);
-    gap: var(--sp-1);
-  }
-
-  &.icon {
-    width: var(--control-h);
-    padding: 0;
-
-    &.sm {
-      width: var(--control-h-sm);
-    }
-  }
-
-  &.link {
-    height: auto;
-    padding: 0;
-    border: 0;
-    background: none;
-    box-shadow: none;
-    color: var(--text-2);
-
-    &:hover:not(:disabled) {
-      background: none;
-      color: var(--text-1);
-      text-decoration: underline;
-    }
-  }
+/* Buttons, fields, toggles, tabs and selects are Material (rule 47) themed by css/material.css; only what is Dyno's own is here. */
+.mat-mdc-button-base dy-icon {
+  --icon-size: 16px;
 }
 
-/* --------------------------------------------------------------------------------------------- form controls */
-
-.input,
-.select {
-  height: var(--control-h);
-  padding: 0 var(--sp-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-md);
-  background: var(--surface-2);
-  color: var(--text-1);
-  font: var(--fs-base) var(--font-sans);
+/* An inline text button inside a sentence or a list line. */
+.dy-link {
   min-width: 0;
-  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
-
-  &::placeholder {
-    color: var(--text-3);
-  }
-
-  &:focus-visible,
-  &:focus {
-    outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft-2);
-  }
-
-  &.sm {
-    height: var(--control-h-sm);
-    font-size: var(--fs-sm);
-  }
-}
-
-.select {
-  appearance: none;
-  padding-right: var(--sp-8);
-  background-image:
-    linear-gradient(45deg, transparent 50%, var(--text-2) 50%),
-    linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
-  background-position:
-    calc(100% - 15px) 52%,
-    calc(100% - 10px) 52%;
-  background-size: 5px 5px;
-  background-repeat: no-repeat;
-}
-
-textarea.input {
-  height: auto;
-  padding: var(--sp-2) var(--sp-3);
-  resize: vertical;
-}
-
-input[type='checkbox'],
-input[type='radio'] {
-  accent-color: var(--accent);
-  width: 15px;
-  height: 15px;
-  margin: 0;
+  padding-inline: var(--sp-1);
 }
 
 .field {
@@ -661,47 +329,6 @@ input[type='radio'] {
   .hint {
     font-size: var(--fs-sm);
     color: var(--text-3);
-  }
-}
-
-/* Segmented control (radio-like button group). */
-.seg {
-  display: inline-flex;
-  padding: 2px;
-  gap: 2px;
-  border-radius: var(--r-md);
-  background: var(--surface-inset);
-  border: 1px solid var(--border);
-
-  button {
-    height: calc(var(--control-h) - 6px);
-    padding: 0 var(--sp-3);
-    border: 0;
-    border-radius: var(--r-sm);
-    background: none;
-    color: var(--text-2);
-    font: var(--fw-medium) var(--fs-sm) / 1 var(--font-sans);
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: var(--sp-1);
-    transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
-
-    dy-icon {
-      --icon-size: 15px;
-    }
-
-    &:hover {
-      color: var(--text-1);
-    }
-
-    &[aria-pressed='true'],
-    &[aria-checked='true'],
-    &[aria-selected='true'] {
-      background: var(--surface-2);
-      color: var(--text-1);
-      box-shadow: var(--shadow-1), 0 0 0 1px var(--border);
-    }
   }
 }
 
@@ -1078,114 +705,34 @@ kbd,
   padding-top: 12vh;
 }
 
-.menu {
-  min-width: 200px;
-  padding: var(--sp-1);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--overlay-bg);
-  box-shadow: var(--shadow-3);
-  animation: dy-fade-in var(--dur-fast) var(--ease-out);
-  display: flex;
-  flex-direction: column;
-  outline: none;
+/* Menus are Material (rule 47): a Dyno icon in an item, and the one danger colour. */
+.mat-mdc-menu-item dy-icon {
+  --icon-size: 16px;
+  margin-inline-end: var(--sp-3);
+  color: var(--text-2);
 }
 
-.menu-item {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  height: 30px;
-  padding: 0 var(--sp-2);
-  border: 0;
-  border-radius: var(--r-sm);
-  background: none;
-  color: var(--text-1);
-  font: var(--fs-base) var(--font-sans);
-  text-align: left;
-  cursor: pointer;
-  white-space: nowrap;
-
-  dy-icon {
-    --icon-size: 15px;
-    color: var(--text-2);
-  }
-
-  .trail {
-    margin-left: auto;
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-    padding-left: var(--sp-4);
-  }
-
-  &:hover:not([aria-disabled='true']):not(:disabled),
-  &:focus-visible,
-  &.cdk-menu-item-active {
-    background: var(--surface-hover);
-    outline: none;
-  }
-
-  &[aria-disabled='true'],
-  &:disabled {
-    color: var(--text-3);
-    cursor: not-allowed;
-  }
-
-  &.danger,
-  &.danger dy-icon {
-    color: var(--bad);
-  }
-
-  &[aria-checked='true']::after {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--accent);
-    margin-left: auto;
-  }
-}
-
-.menu.wide {
-  width: 300px;
-}
-
-.menu-item.two-line {
-  height: auto;
-  padding: var(--sp-2);
-  align-items: flex-start;
-  white-space: normal;
-
-  .text {
-    display: grid;
-    gap: 1px;
-    flex: 1;
-  }
-
-  small {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    line-height: 1.35;
-  }
-
-  &[aria-checked='true']::after {
-    margin-top: 6px;
-  }
-}
-
-.menu-sep {
-  height: 1px;
-  margin: var(--sp-1) 0;
-  background: var(--border);
-}
-
-.menu-label {
-  padding: var(--sp-2) var(--sp-2) var(--sp-1);
-  font-size: var(--fs-xs);
-  color: var(--text-3);
-  font-weight: var(--fw-medium);
+.mat-mdc-menu-item.danger,
+.mat-mdc-menu-item.danger dy-icon {
+  color: var(--bad);
 }
 
 .mat-mdc-tooltip {
   --mat-tooltip-container-shape: 6px;
+}
+
+/* The memory slot's tooltip: one fact per line. */
+.dy-slot-tip .mdc-tooltip__surface {
+  max-width: 320px;
+  white-space: pre-line;
+  text-align: start;
+}
+
+
+/* One control height in a toolbar: buttons as tall as fields and segmented controls. */
+:root {
+  --mat-button-filled-container-height: var(--control-h);
+  --mat-button-outlined-container-height: var(--control-h);
+  --mat-button-text-container-height: var(--control-h);
+  --mat-button-tonal-container-height: var(--control-h);
 }

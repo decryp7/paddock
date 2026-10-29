@@ -277,7 +277,7 @@ export function styleFromId(id: TrayStyleId, unit = '', label = ''): TrayItem['s
 export function newTrayItem(metric: WidgetMetric, style: TrayStyleId, existing: readonly TrayItem[]): TrayItem {
   let n = existing.length + 1;
   while (existing.some((i) => i.id === `${typeof metric === 'string' ? metric : 'item'}-${n.toString()}`)) n++;
-  return { id: `${typeof metric === 'string' ? metric : 'item'}-${n.toString()}`, metric, style: styleFromId(style), opens: 'ownPopover' };
+  return { id: `${typeof metric === 'string' ? metric : 'item'}-${n.toString()}`, metric, style: styleFromId(style) };
 }
 
 export const bytesText = formatBytes;

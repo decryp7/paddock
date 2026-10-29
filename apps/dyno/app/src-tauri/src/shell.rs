@@ -2,6 +2,7 @@
 //! settings drive the tray style and the start-at-login registrations.
 
 use crate::dto::AgentStatus;
+use crate::health::Hub;
 use crate::link::{AgentLink, Sink};
 use crate::logging;
 use crate::login::{self, AppAutostart};
@@ -38,6 +39,27 @@ const TRAY_INTERVAL: Duration = Duration::from_millis(500);
 /// One line in the log per this many live updates (the log shows that data flows, without filling up).
 const LOG_EVERY: u64 = 60;
 
+/// The notice an alarm becomes in the shell's centre: its severity, title and detail, keyed by the alarm's condition so a
+/// repeat updates the message instead of adding another.
+pub fn alarm_notice(alarm: &dyno_core::alarms::Alarm) -> paddock_health::notify::centre::NewNotice {
+    use dyno_core::health::Severity;
+    use paddock_health::notify::centre::{NewNotice, NoticeScope, NoticeSeverity};
+    let severity = match alarm.severity {
+        Severity::Info => NoticeSeverity::Info,
+        Severity::Warning => NoticeSeverity::Warning,
+        Severity::Critical => NoticeSeverity::Error,
+    };
+    let mut notice = NewNotice::new(
+        format!("dy.alarm.{}", alarm.key),
+        "dy.alarm",
+        severity,
+        alarm.title.clone(),
+        NoticeScope::App,
+    );
+    notice.body = alarm.detail.clone();
+    notice
+}
+
 /// The tray items: the user's settings, or the comma-separated `DYNO_TRAY_ITEMS` (development and measurements).
 pub fn initial_items(items: &dyno_core::widgets::TrayItems) -> Vec<crate::tray_model::ItemSpec> {
     let from_env = std::env::var("DYNO_TRAY_ITEMS").map(|t| parse_items(&t)).unwrap_or_default();
@@ -61,11 +83,13 @@ pub struct Shell {
     status: Mutex<Option<AgentStatus>>,
     /// `notifications` as last read from the settings (desktop notifications for new alarms).
     notifications: std::sync::atomic::AtomicBool,
+    /// The service health of the agent link (the status bar chip).
+    hub: Hub<Wry>,
 }
 
 impl Shell {
-    /// The shell for `app`.
-    pub fn new(app: AppHandle<Wry>) -> Arc<Shell> {
+    /// The shell for `app`; `hub` reports the agent link to the shell's service health.
+    pub fn new(app: AppHandle<Wry>, hub: Hub<Wry>) -> Arc<Shell> {
         let size = if cfg!(target_os = "macos") { 44 } else { 32 };
         Arc::new(Shell {
             app,
@@ -75,6 +99,7 @@ impl Shell {
             launch_at_login: Mutex::new(None),
             status: Mutex::new(None),
             notifications: std::sync::atomic::AtomicBool::new(true),
+            hub,
         })
     }
 
@@ -176,11 +201,16 @@ impl Sink for Shell {
     }
 
     fn alarm(&self, change: dyno_core::alarms::AlarmChange) {
-        if change.notify && self.notifications.load(Ordering::Relaxed) {
-            use tauri_plugin_notification::NotificationExt;
-            let a = &change.alarm;
-            if let Err(e) = self.app.notification().builder().title(&a.title).body(&a.detail).show() {
-                logging::info(&format!("could not show a notification: {e}"));
+        if change.notify {
+            // The shell's notification centre: one message per alarm, updated in place while it repeats (an in-app toast
+            // when a window is open, the list in the centre otherwise).
+            let _ = paddock_health::tauri::post(&self.app, None, alarm_notice(&change.alarm), false);
+            if self.notifications.load(Ordering::Relaxed) {
+                use tauri_plugin_notification::NotificationExt;
+                let a = &change.alarm;
+                if let Err(e) = self.app.notification().builder().title(&a.title).body(&a.detail).show() {
+                    logging::info(&format!("could not show a notification: {e}"));
+                }
             }
         }
         self.emit(events::ALARM, change);
@@ -201,6 +231,7 @@ impl Sink for Shell {
             status.message.as_deref().map(|m| format!(" ({m})")).unwrap_or_default()
         ));
         *self.status.lock().unwrap_or_else(|e| e.into_inner()) = Some(status.clone());
+        self.hub.report(&status);
         if !matches!(status.state, crate::dto::AgentState::Running) {
             crate::tray::show_disconnected(&self.app);
         }

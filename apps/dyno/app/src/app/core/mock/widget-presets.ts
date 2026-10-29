@@ -49,8 +49,8 @@ export function defaultTrayItems(): TrayItems {
   return {
     version: 1,
     items: [
-      { id: 'cpu', metric: 'cpuTotal', style: 'verticalBars', opens: 'ownPopover' },
-      { id: 'memory', metric: 'memory', style: 'verticalBars', opens: 'ownPopover' },
+      { id: 'cpu', metric: 'cpuTotal', style: 'verticalBars' },
+      { id: 'memory', metric: 'memory', style: 'verticalBars' },
     ],
   };
 }

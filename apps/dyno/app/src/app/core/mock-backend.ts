@@ -15,7 +15,6 @@ import type {
   AgentStatus,
   Alert,
   Anomaly,
-  AppInfo,
   CommandError,
   Diagnosis,
   HealthReport,
@@ -28,6 +27,7 @@ import type {
   ProcessDetails,
   ProcessRef,
   ProcessSample,
+  CustomAlertRule,
   Settings,
   DiskChildren,
   DiskChildrenQuery,
@@ -223,6 +223,7 @@ export class MockBackend implements DynoBackend {
     this.profile =
       options.cpu === 'uniform' ? { ...base, hybrid: null } : options.cpu === 'hybrid' && !base.hybrid ? { ...base, hybrid: { efficiency: 8, performance: 8, efficiencyFirst: false } } : base;
     this.kinds = coreKindsOf(this.profile.hybrid);
+    this.startup = demoStartup(this.profile.os);
     this.counters = new MockCounters(this.profile.os);
     this.settingsValue = { ...this.settingsValue, counters: demoCounterSettings(this.profile.os) };
     this.latencyMs = options.latencyMs ?? 0;
@@ -290,10 +291,6 @@ export class MockBackend implements DynoBackend {
     const wantsProcesses = [...this.liveListeners.values()].includes('processes');
     const update = this.liveUpdate(wantsProcesses ? 'processes' : 'summary');
     for (const [listener, detail] of this.liveListeners) listener(detail === 'processes' || !wantsProcesses ? update : { ...update, processes: null, groups: null });
-  }
-
-  appInfo(): Promise<AppInfo> {
-    return this.reply('appInfo', () => ({ version: '0.1.0', os: this.profile.os, updatesAvailable: false, updatesReason: 'Updates are not configured for this build (no signing key).' }));
   }
 
   /** The live sample at the current second. */
@@ -934,9 +931,9 @@ export class MockBackend implements DynoBackend {
 
   private runs(): BenchRun[] {
     return (this.benchRuns ??= [
-      mockRun('r3', this.start - 2 * 60 * MIN, 'Power mode: High performance (after)', 1.12, { group: 'Power mode: High performance', phase: 'after' }),
-      mockRun('r2', this.start - 3 * 60 * MIN, 'Power mode: High performance (before)', 1, { group: 'Power mode: High performance', phase: 'before' }),
-      mockRun('r1', this.start - 2 * DAY, 'Baseline', 0.99, { load: { cpuPercent: 31, memoryPercent: 61, onBattery: false } }),
+      mockRun('r3', this.start - 2 * 60 * MIN, 'Power mode: High performance (after)', 1.12, { group: 'Power mode: High performance', phase: 'after' }, this.profile.cores),
+      mockRun('r2', this.start - 3 * 60 * MIN, 'Power mode: High performance (before)', 1, { group: 'Power mode: High performance', phase: 'before' }, this.profile.cores),
+      mockRun('r1', this.start - 2 * DAY, 'Baseline', 0.99, { load: { cpuPercent: 31, memoryPercent: 61, onBattery: false } }, this.profile.cores),
     ]);
   }
 
@@ -958,8 +955,8 @@ export class MockBackend implements DynoBackend {
           const run = mockRun(p.runId, this.start, r.label || 'Benchmark', r.phase === 'after' ? 1.12 : 1, {
             group: r.group ?? null,
             phase: r.phase ?? null,
-            results: kinds.map((k) => mockKindResult(k, r.phase === 'after' ? 1.12 : 1, false)),
-          });
+            results: kinds.map((k) => mockKindResult(k, r.phase === 'after' ? 1.12 : 1, false, this.profile.cores)),
+          }, this.profile.cores);
           this.runs().unshift(run);
           this.benchRunning = null;
           return;
@@ -1103,20 +1100,41 @@ export class MockBackend implements DynoBackend {
     });
   }
 
+  upsertAlertRule(rule: CustomAlertRule): Promise<Settings> {
+    return this.reply('upsertAlertRule', () => {
+      if (!rule.name.trim()) throw err('badRequest', 'Give the rule a name.');
+      const rules = this.settingsValue.customAlerts ?? [];
+      const exists = rules.some((r) => r.id === rule.id);
+      this.settingsValue = copy({ ...this.settingsValue, customAlerts: exists ? rules.map((r) => (r.id === rule.id ? rule : r)) : [...rules, rule] });
+      return this.settingsValue;
+    });
+  }
+
+  deleteAlertRule(id: string): Promise<Settings> {
+    return this.reply('deleteAlertRule', () => {
+      this.settingsValue = copy({ ...this.settingsValue, customAlerts: (this.settingsValue.customAlerts ?? []).filter((r) => r.id !== id) });
+      return this.settingsValue;
+    });
+  }
+
   plugins(): Promise<PluginInfo[]> {
     return this.reply('plugins', () => demoPlugins());
   }
 
-  trayOpenMain(): Promise<void> {
-    return this.reply('trayOpenMain', () => undefined);
+  showMainWindow(): Promise<void> {
+    return this.reply('showMainWindow', () => undefined);
   }
 
-  popoverResize(_height: number): Promise<void> {
+  fitTray(_height: number): Promise<void> {
     return Promise.resolve();
   }
 
-  trayQuit(): Promise<void> {
-    return this.reply('trayQuit', () => undefined);
+  hideTray(): Promise<void> {
+    return this.reply('hideTray', () => undefined);
+  }
+
+  quitApp(): Promise<void> {
+    return this.reply('quitApp', () => undefined);
   }
 
   // ----------------------------------------------------------------------------------------- extras, backup

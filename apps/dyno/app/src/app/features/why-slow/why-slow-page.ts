@@ -8,6 +8,9 @@ import { CAUSE_ICON } from '../../shared/labels';
 import { Notifier } from '../../shared/notifier';
 import { DiagnosisStore } from '../../state/diagnosis.store';
 import { causeLinks, diagnosisText, hintPath, historyLine, windowText } from './why-slow-model';
+import { MatButton } from '@angular/material/button';
+import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /**
  * "Why is my PC slow?" in full: the engine's likeliest causes with what was measured, the apps behind each, pages to look
@@ -15,7 +18,7 @@ import { causeLinks, diagnosisText, hintPath, historyLine, windowText } from './
  */
 @Component({
   selector: 'dy-why-slow-page',
-  imports: [Icon, RouterLink],
+  imports: [FullTextTip, MatTooltip, MatButton, Icon, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -24,8 +27,8 @@ import { causeLinks, diagnosisText, hintPath, historyLine, windowText } from './
           <h1>Why is my PC slow?</h1>
           <p>Dyno weighs CPU, memory, disk, heat and background work together. It only looks; Dyno changes nothing on your computer.</p>
         </div>
-        <button type="button" class="btn" [disabled]="!shown()" (click)="copy()"><dy-icon name="copy" /> Copy as text</button>
-        <button type="button" class="btn primary" [disabled]="store.running()" (click)="store.run()">
+        <button type="button" matButton="outlined" [disabled]="!shown()" (click)="copy()"><dy-icon name="copy" /> Copy as text</button>
+        <button type="button" matButton="filled" [disabled]="store.running()" (click)="store.run()">
           <dy-icon name="refresh" /> {{ store.running() ? 'Checking…' : 'Run again' }}
         </button>
       </header>
@@ -34,7 +37,7 @@ import { causeLinks, diagnosisText, hintPath, historyLine, windowText } from './
         <div class="note" role="alert">
           <dy-icon name="alert" />
           <div class="msg"><strong>{{ e.message }}</strong>@if (hint(); as h) {<span>{{ h }}</span>}</div>
-          <button type="button" class="btn sm" (click)="store.run()"><dy-icon name="refresh" /> Retry</button>
+          <button type="button" matButton="outlined" (click)="store.run()"><dy-icon name="refresh" /> Retry</button>
         </div>
       }
 
@@ -43,7 +46,7 @@ import { causeLinks, diagnosisText, hintPath, historyLine, windowText } from './
           <h2 class="headline">{{ d.headline }}</h2>
           <p class="when num">
             {{ window(d) }}, checked {{ day(d.at) }}.
-            @if (viewingOlder()) { This is an earlier result. <button type="button" class="btn link" (click)="selected.set(null)">Show the latest</button> }
+            @if (viewingOlder()) { This is an earlier result. <button type="button" matButton="text" class="dy-link" (click)="selected.set(null)">Show the latest</button> }
           </p>
         </section>
 
@@ -55,7 +58,7 @@ import { causeLinks, diagnosisText, hintPath, historyLine, windowText } from './
                 <h3>{{ c.title }}</h3>
                 <p>{{ c.explanation }}</p>
               </div>
-              <span class="conf num" [title]="'How sure Dyno is: ' + conf(c.confidence)">{{ conf(c.confidence) }} confident</span>
+              <span class="conf num" [matTooltip]="'How sure Dyno is: ' + conf(c.confidence)">{{ conf(c.confidence) }} confident</span>
             </div>
 
             <div class="cols">
@@ -74,7 +77,7 @@ import { causeLinks, diagnosisText, hintPath, historyLine, windowText } from './
                   <h4>Apps involved</h4>
                   <ul class="apps">
                     @for (a of c.involved; track a.id) {
-                      <li><span class="n truncate" [title]="a.name">{{ a.name }}</span><span class="num">{{ a.share }}</span></li>
+                      <li><span class="n truncate" [dyFullText]="a.name">{{ a.name }}</span><span class="num">{{ a.share }}</span></li>
                     }
                   </ul>
                 </div>
@@ -84,12 +87,12 @@ import { causeLinks, diagnosisText, hintPath, historyLine, windowText } from './
             <div class="foot">
               <span class="look">Look closer:</span>
               @for (l of links(c); track l.path) {
-                <a class="btn sm ghost" [routerLink]="l.path"><dy-icon [name]="l.icon" /> {{ l.label }}</a>
+                <a matButton="text" [routerLink]="l.path"><dy-icon [name]="l.icon" /> {{ l.label }}</a>
               }
               <span class="spacer"></span>
               @for (h of c.hints; track h.text) {
                 @if (hintPath(h); as path) {
-                  <a class="btn sm" [routerLink]="path">{{ h.text }}</a>
+                  <a matButton="outlined" [routerLink]="path">{{ h.text }}</a>
                 } @else {
                   <span class="wait">{{ h.text }}</span>
                 }

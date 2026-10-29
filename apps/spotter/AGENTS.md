@@ -98,3 +98,5 @@ registered as literals (no icon fonts, no runtime URLs). Never run `prettier --w
 
 - Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
   `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
+- Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
+  branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.

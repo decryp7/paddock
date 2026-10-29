@@ -1,8 +1,8 @@
 import { provideRouter } from '@angular/router';
-import { TestBed } from '@angular/core/testing';
+import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
-import { newWidget } from './widget-model';
+import { METRICS, TRAY_STYLES, newWidget } from './widget-model';
 import { DashboardLayoutStore } from '../../state/dashboard-layout.store';
 import { CountersStore } from '../../state/counters.store';
 import { LiveStore } from '../../state/live.store';
@@ -110,7 +110,7 @@ describe('dy-widget-board', () => {
     (el.querySelector('button[aria-label="Remove widget"]') as HTMLButtonElement).click();
     f.detectChanges();
     expect(el.querySelectorAll('dy-widget')).toHaveLength(15);
-    (el.querySelectorAll('.seg button')[2] as HTMLButtonElement).click();
+    (el.querySelectorAll('pd-segmented-control button')[2] as HTMLButtonElement).click();
     f.detectChanges();
     expect(TestBed.inject(DashboardLayoutStore).dirty()).toBe(true);
     [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Cancel')!.click();
@@ -140,7 +140,7 @@ describe('dy-widget-board presets', () => {
     click('Save as preset');
     f.detectChanges();
     const input = el.querySelector<HTMLInputElement>('input[aria-label="Preset name"]')!;
-    expect(el.querySelector('button.primary')).not.toBeNull();
+    expect(el.querySelector('button[matButton="filled"]')).not.toBeNull();
     input.value = 'Lean';
     input.dispatchEvent(new Event('input'));
     f.detectChanges();
@@ -153,11 +153,21 @@ describe('dy-widget-board presets', () => {
   });
 });
 
+const styleLabel = (id: string) => TRAY_STYLES.find((s) => s.id === id)!.label;
+
+/** Opens the `index`-th Material select matching `selector` and picks the option with this text. */
+function choose(f: ComponentFixture<unknown>, el: HTMLElement, selector: string, index: number, text: string): void {
+  (el.querySelectorAll(selector)[index]!.querySelector('.mat-mdc-select-trigger') as HTMLElement).click();
+  f.detectChanges();
+  ([...document.querySelectorAll<HTMLElement>('mat-option')].find((o) => o.textContent?.trim() === text)!).click();
+  f.detectChanges();
+}
+
 describe('dy-tray-items-editor', () => {
   it('adds, changes style and metric, reorders and removes items, up to four', () => {
     env();
     const f = TestBed.createComponent(TrayItemsEditor);
-    let items = [{ id: 'cpu', metric: 'cpuTotal' as const, style: 'verticalBars' as const, opens: 'ownPopover' as const }];
+    let items = [{ id: 'cpu', metric: 'cpuTotal' as const, style: 'verticalBars' as const }];
     f.componentRef.setInput('items', items);
     f.componentInstance.itemsChange.subscribe((v) => {
       items = v as typeof items;
@@ -170,15 +180,10 @@ describe('dy-tray-items-editor', () => {
     add();
     add();
     expect(items).toHaveLength(3);
-    const styleSel = el.querySelectorAll<HTMLSelectElement>('select[aria-label^="Style"]')[0]!;
-    styleSel.value = 'number';
-    styleSel.dispatchEvent(new Event('change'));
-    f.detectChanges();
+    choose(f, el, 'mat-select[aria-label^="Style"]', 0, styleLabel('number'));
     expect(items[0]!.style).toEqual({ number: { unit: '', label: '' } });
     expect(el.querySelectorAll('input[aria-label="Unit"]')).toHaveLength(1);
-    const metricSel = el.querySelectorAll<HTMLSelectElement>('select[aria-label^="Metric"]')[1]!;
-    metricSel.value = 'memory';
-    metricSel.dispatchEvent(new Event('change'));
+    choose(f, el, 'mat-select[aria-label^="Metric"]', 1, METRICS.find((m) => m.metric === 'memory')!.label);
     expect(items[1]!.metric).toBe('memory');
     (el.querySelectorAll('button[aria-label="Move down"]')[0] as HTMLButtonElement).click();
     expect(items[1]!.metric).toBe('cpuTotal');
@@ -189,10 +194,7 @@ describe('dy-tray-items-editor', () => {
     (el.querySelector('button[aria-label="Remove item"]') as HTMLButtonElement).click();
     expect(items).toHaveLength(3);
     for (const style of ['lineGraph', 'graphAndNumber', 'horizontalMeter', 'ring']) {
-      const sel = el.querySelectorAll<HTMLSelectElement>('select[aria-label^="Style"]')[0]!;
-      sel.value = style;
-      sel.dispatchEvent(new Event('change'));
-      f.detectChanges();
+      choose(f, el, 'mat-select[aria-label^="Style"]', 0, styleLabel(style));
       expect(el.querySelector('.preview')!.textContent).toBeDefined();
     }
   });

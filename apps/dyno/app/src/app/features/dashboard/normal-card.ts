@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject
 import { Icon } from '../../shared/icon';
 import { BaselinesStore } from '../../state/baselines.store';
 import { itemName, normalLine, unusualItems, unusualStrength } from './normal-model';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /**
  * "Is this normal?": what the engine finds unusual for this time of the week, with the current and the usual value. Calm by default:
@@ -9,7 +10,7 @@ import { itemName, normalLine, unusualItems, unusualStrength } from './normal-mo
  */
 @Component({
   selector: 'dy-normal-card',
-  imports: [Icon],
+  imports: [MatTooltip, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (overview(); as o) {
@@ -25,7 +26,7 @@ import { itemName, normalLine, unusualItems, unusualStrength } from './normal-mo
           @if (unusual().length) {
             <ul>
               @for (i of unusual(); track i.id) {
-                <li [title]="i.judgement.explanation">
+                <li [matTooltip]="i.judgement.explanation">
                   <span class="dot" [attr.data-tone]="tone(i)" aria-hidden="true"></span>
                   <span class="what"><strong>{{ name(i) }}:</strong> {{ i.judgement.phrase }}</span>
                   <span class="vals num">{{ i.current }} now · usually {{ i.judgement.usual }}</span>

@@ -11,6 +11,31 @@ import { isMain } from '../../../../conformance/src/util/is-main.mjs';
 
 export const PATTERN = /^(debrief|imt)-/;
 
+/**
+ * The name of a private endpoint folder (`<prefix>-<12 hex digits>`, crates/debrief-ipc/src/endpoint.rs): the only shape
+ * looked for in the shared folders (`/tmp`, `$XDG_RUNTIME_DIR`) a socket falls back to when the temp folder is too long,
+ * which hold other programs' files too. A confined test folder (`dbw` and six characters) counts as well.
+ */
+export const ENDPOINT_PATTERN = /^(debrief(-[a-z]+)+-[0-9a-f]{12}|dbw[A-Za-z0-9]{6})$/;
+
+/** The shared folders endpoints can fall back to, besides the temp folder. */
+export function sharedDirs(env = process.env, temp = tmpdir()) {
+  const dirs = ['/tmp', env['XDG_RUNTIME_DIR']].filter((d) => typeof d === 'string' && d !== '');
+  return [...new Set(dirs)].filter((d) => d !== temp);
+}
+
+/** `<dir>/<name>` for the endpoint-shaped entries of `dir`, sorted; an unreadable folder has none. */
+export function listEndpointLeaks(dir) {
+  try {
+    return readdirSync(dir)
+      .filter((n) => ENDPOINT_PATTERN.test(n))
+      .sort()
+      .map((n) => `${dir}/${n}`);
+  } catch {
+    return [];
+  }
+}
+
 /** Names in `dir` that look like Debrief test scratch folders, sorted; an unreadable folder has none. */
 export function listLeaks(dir = tmpdir()) {
   try {
@@ -69,7 +94,9 @@ export function main(argv, log = console) {
     return i >= 0 ? argv[i + 1] : undefined;
   };
   const dir = opt('--dir') ?? tmpdir();
-  const current = listLeaks(dir);
+  // Without `--dir`, the shared folders are scanned too, for endpoint-shaped names only (kept in the list as full paths).
+  const extra = argv.includes('--dir') ? [] : sharedDirs();
+  const current = [...listLeaks(dir), ...extra.flatMap((d) => listEndpointLeaks(d))];
   const snapshot = opt('--snapshot');
   if (snapshot) {
     writeFileSync(snapshot, JSON.stringify(current));

@@ -156,11 +156,6 @@ export function nextIndex(count: number, current: number, key: string, page = 10
   }
 }
 
-/** Shift+F10 or the Menu key: the keyboard's right-click (the browser also sends a `contextmenu` event for it). */
-export function isMenuKey(e: Pick<KeyboardEvent, 'key' | 'shiftKey'>): boolean {
-  return e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey);
-}
-
 /** Whether an event came from a control inside a row (a button, link or field), which must not open the row. */
 export function fromControl(e: Event): boolean {
   const t = e.target;

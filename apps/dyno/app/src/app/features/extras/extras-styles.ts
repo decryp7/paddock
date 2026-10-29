@@ -25,9 +25,6 @@ export const EXTRAS_STYLES = `
   .cnt { margin-left: var(--sp-2); }
   .tile { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-right: var(--sp-2); border-radius: var(--r-md); color: #fff; font-size: var(--fs-xs); font-weight: var(--fw-semibold); vertical-align: middle; }
   .dot { margin-right: var(--sp-2); vertical-align: 1px; }
-  .search { position: relative; display: block; flex: 1 1 200px; min-width: 160px; max-width: 320px; }
-  .search dy-icon { position: absolute; left: 8px; top: 7px; --icon-size: 15px; color: var(--text-3); }
-  .search input { padding-left: 30px; width: 100%; }
   .path { font: var(--fw-regular) 12px / 1.4 var(--font-mono); user-select: text; overflow-wrap: anywhere; }
   .spin { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }

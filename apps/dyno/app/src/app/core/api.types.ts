@@ -728,10 +728,8 @@ export interface SavedReport {
 
 export type TrayMetric = 'cpu' | 'memory' | 'disk' | 'network' | 'gpu';
 export type TrayStyle = 'bars' | 'graph';
-export type Theme = 'system' | 'dark' | 'light';
 export interface Settings {
   version: number;
-  theme: Theme;
   launchAtLogin: boolean;
   sampling: { intervalMs: number; processIntervalMs: number };
   retention: { rawHours: number; minuteDays: number; quarterHourDays: number; hourDays: number };
@@ -964,13 +962,10 @@ export type TrayItemStyle =
   | 'graphAndNumber'
   | { number: { unit: string; label: string } };
 
-export type TrayOpens = 'ownPopover' | 'mainPopover';
-
 export interface TrayItem {
   id: string;
   metric: WidgetMetric;
   style: TrayItemStyle;
-  opens: TrayOpens;
 }
 
 /** At most 4 items, reorderable (array order = left to right). */

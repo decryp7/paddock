@@ -1,19 +1,11 @@
-import { DIALOG_DATA, DialogRef } from '@angular/cdk/dialog';
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input } from '@angular/core';
+import { DialogActionError, type DialogAction, type DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import type { HashSource } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
-import { DialogFrame } from '../../shared/dialog';
 import { formatBytes } from '../../shared/format';
 import { Icon } from '../../shared/icon';
-import { Notifier } from '../../shared/notifier';
 import { LookupStore } from '../../state/lookup.store';
-
-/** What the hash dialog is opened with. */
-export interface HashSearchData {
-  source: HashSource;
-  /** The program's name, for the subtitle. */
-  name: string;
-}
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /**
  * "Search this file's hash on VirusTotal": Dyno reads the file on this computer, shows its SHA-256, and only then, on a click,
@@ -21,19 +13,18 @@ export interface HashSearchData {
  */
 @Component({
   selector: 'dy-hash-search-dialog',
-  imports: [DialogFrame, Icon],
+  imports: [FullTextTip, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <dy-dialog title="Search the file's hash on VirusTotal" [subtitle]="data.name" icon="shield">
+      <p class="subject"><strong>{{ name() }}</strong></p>
       <p class="msg">Dyno computed this hash here, on your computer. Nothing is uploaded: the button opens VirusTotal's page for the hash in your browser.</p>
       @if (store.hash(); as h) {
         <dl>
-          <dt>File</dt><dd class="mono sel" [title]="h.path">{{ h.path }}</dd>
+          <dt>File</dt><dd class="mono sel" [dyFullText]="h.path">{{ h.path }}</dd>
           <dt>Size</dt><dd>{{ size() }}</dd>
           <dt>SHA-256</dt>
           <dd class="hash">
             <code class="mono sel" aria-label="SHA-256 hash">{{ h.sha256 }}</code>
-            <button type="button" class="btn ghost icon sm" aria-label="Copy the hash" title="Copy" (click)="copy(h.sha256)"><dy-icon name="copy" /></button>
           </dd>
         </dl>
       } @else if (!store.error()) {
@@ -43,17 +34,10 @@ export interface HashSearchData {
       @if (store.error(); as e) {
         <div class="err" role="alert"><dy-icon name="alert" /><span>{{ e.message }} @if (hint(); as t) {<small>{{ t }}</small>}</span></div>
       }
-      <ng-container footer>
-        @if (store.error()) {
-          <button type="button" class="btn" (click)="load()">Try again</button>
-        }
-        <button type="button" class="btn" (click)="ref.close()">Cancel</button>
-        <button type="button" class="btn primary" [disabled]="!store.hash() || store.busy()" (click)="open()"><dy-icon name="external" /> Open VirusTotal</button>
-      </ng-container>
-    </dy-dialog>
   `,
   styles: `
-    :host { --dialog-w: 560px; }
+    :host { display: grid; gap: var(--sp-3); min-width: 0; }
+    .subject { color: var(--text-2); overflow-wrap: anywhere; }
     .msg { color: var(--text-2); }
     dl { margin: 0; display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: var(--sp-2) var(--sp-3); font-size: var(--fs-sm); align-items: start; }
     dt { color: var(--text-3); padding-top: 2px; }
@@ -68,15 +52,29 @@ export interface HashSearchData {
     .err small { display: block; color: var(--text-2); }
   `,
 })
-export class HashSearchDialog implements OnInit {
-  protected readonly data = inject<HashSearchData>(DIALOG_DATA);
-  protected readonly ref = inject<DialogRef<boolean>>(DialogRef);
+export class HashSearchDialog implements DialogContent<true>, OnInit {
+  /** Which program's file to read. */
+  readonly source = input<HashSource | null>(null);
+  /** The program's name, for the heading. */
+  readonly name = input('');
   protected readonly store = inject(LookupStore);
-  private readonly notifier = inject(Notifier);
   protected readonly size = computed(() => formatBytes(this.store.hash()?.bytes ?? 0));
   protected readonly hint = computed(() => {
     const e = this.store.error();
     return e ? errorHint(e.code) : null;
+  });
+
+  /**
+   * Copy the hash, Close, and Open VirusTotal. A hash that could not be read is the action's failure: pressing it reads the
+   * file again, and the frame says why with Try again.
+   */
+  readonly dialogActions = computed<readonly DialogAction<true>[]>(() => {
+    const h = this.store.hash();
+    return [
+      { kind: 'run', id: 'copy', label: 'Copy hash', role: 'secondary', lead: true, enabled: h !== null, run: () => this.copy(h?.sha256 ?? '') },
+      { kind: 'dismiss', id: 'close', label: 'Close' },
+      { kind: 'answer', id: 'open', label: 'Open VirusTotal', role: 'primary', enabled: (h !== null || this.store.error() !== null) && !this.store.busy(), answer: () => this.open() },
+    ];
   });
 
   ngOnInit(): void {
@@ -84,21 +82,24 @@ export class HashSearchDialog implements OnInit {
     void this.load();
   }
 
-  protected load(): Promise<void> {
-    return this.store.loadHash(this.data.source);
+  private load(): Promise<void> {
+    const source = this.source();
+    return source ? this.store.loadHash(source) : Promise.resolve();
   }
 
-  protected async open(): Promise<void> {
+  private async open(): Promise<true> {
+    if (!this.store.hash()) await this.load();
     const h = this.store.hash();
-    if (h && (await this.store.openVirusTotal(h.sha256))) this.ref.close(true);
+    if (!h) throw new DialogActionError(this.store.error()?.message ?? 'The file could not be read.');
+    if (!(await this.store.openVirusTotal(h.sha256))) throw new DialogActionError(this.store.error()?.message ?? 'The browser could not be opened.');
+    return true;
   }
 
-  protected async copy(text: string): Promise<void> {
+  private async copy(text: string): Promise<void> {
     try {
       await navigator.clipboard.writeText(text);
-      this.notifier.show('Copied');
     } catch {
-      this.notifier.show('Copying is not allowed here.', 'bad');
+      throw new DialogActionError('Copying is not allowed here. Select the hash and copy it.');
     }
   }
 }

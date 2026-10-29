@@ -195,6 +195,14 @@ describe('the fake update server', () => {
     return { b, kinds };
   }
 
+  it('names the server host and the releases page it was given, and a placeholder otherwise', async () => {
+    const given = new MemoryUpdatesBackend({ currentVersion: '1.0.0', server: 'release', release: RELEASE, host: 'dev.decryptology.net', releasesPage: 'https://dev.decryptology.net/releases' });
+    const status = await given.status();
+    expect([status.endpointHost, status.releasesPage]).toEqual(['dev.decryptology.net', 'https://dev.decryptology.net/releases']);
+    const plain = await new MemoryUpdatesBackend({ currentVersion: '1.0.0', server: 'release', release: RELEASE }).status();
+    expect([plain.endpointHost, plain.releasesPage]).toEqual(['updates.example', 'https://updates.example/releases']);
+  });
+
   it('plays check, download, install on quit, restart and cancel like the engine', async () => {
     const { b, kinds } = await steps('release');
     expect((await b.check()).phase.kind).toBe('checking');

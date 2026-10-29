@@ -87,7 +87,7 @@ pub fn collect(shared: &Shared) -> Result<DiagnosticsBundle, String> {
             json(&n),
         )?;
     }
-    add("activity.json", "What Dyno and you changed recently", json(&activity))?;
+    add("activity.json", "What Dyno recorded recently", json(&activity))?;
     add("alerts.json", "Recent alerts", json(&alerts))?;
     if let Some(r) = recorder {
         add(

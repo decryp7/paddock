@@ -140,6 +140,24 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             shared.wake_sampler();
             Ok(Reply::Settings(Box::new(s)))
         }
+        Request::UpsertAlertRule { rule } => {
+            let mut core = lock(&shared.core);
+            dyno_core::alarms::custom::upsert_rule(&mut core.settings.custom_alerts, rule).map_err(bad)?;
+            core.save_settings(&shared.dirs);
+            let s = core.settings.clone();
+            drop(core);
+            shared.wake_sampler();
+            Ok(Reply::Settings(Box::new(s)))
+        }
+        Request::DeleteAlertRule { id } => {
+            let mut core = lock(&shared.core);
+            dyno_core::alarms::custom::delete_rule(&mut core.settings.custom_alerts, &id).map_err(bad)?;
+            core.save_settings(&shared.dirs);
+            let s = core.settings.clone();
+            drop(core);
+            shared.wake_sampler();
+            Ok(Reply::Settings(Box::new(s)))
+        }
         Request::Plugins => Ok(Reply::Plugins(plugins(shared))),
         Request::Network { query } => shared.network.snapshot(shared, query).map(|s| Reply::Network(Box::new(s))),
         Request::ResolveHosts { addresses } => shared.network.resolve(&addresses).map(Reply::HostNames),

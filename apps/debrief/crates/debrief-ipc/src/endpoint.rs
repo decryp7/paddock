@@ -27,6 +27,47 @@ pub fn tokens_equal(a: &str, b: &str) -> bool {
     diff == 0
 }
 
+/// Longest socket path (bytes) an endpoint may have: Unix socket paths are limited to about 100 bytes.
+#[cfg(unix)]
+pub const MAX_SOCKET_PATH: usize = 96;
+/// Random bytes in an endpoint folder's name (twice that many hex digits).
+#[cfg(unix)]
+const NAME_BYTES: usize = 6;
+
+/// Whether an endpoint named `<prefix>-<random>` can be made in `base` (on Unix, when its socket path is short enough;
+/// `create_named` goes on to the next base otherwise). Always true elsewhere. `base` is taken as it is: callers pass the
+/// resolved path, as `create_named` does.
+pub fn fits(base: &std::path::Path, prefix: &str) -> bool {
+    #[cfg(unix)]
+    {
+        base.join(format!("{prefix}-{}", "0".repeat(2 * NAME_BYTES)))
+            .join("w.sock")
+            .as_os_str()
+            .len()
+            <= MAX_SOCKET_PATH
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (base, prefix);
+        true
+    }
+}
+
+/// The names (prefixes) of the endpoint folders each part of Debrief makes, so a leak can be told from its folder name and
+/// tests can check that every one fits (see [`fits`]).
+pub mod prefix {
+    /// The default of [`crate::process::SpawnSpec`] and of [`super::PrivateEndpoint::create`].
+    pub const DEFAULT: &str = "debrief-ipc";
+    /// A built-in plugin's process.
+    pub const PLUGIN: &str = "debrief-plugin";
+    /// A plugin under test (the plugin SDK's test host).
+    pub const PLUGIN_TEST: &str = "debrief-plugin-test";
+    /// The AI worker.
+    pub const AI: &str = "debrief-ai";
+    /// The store worker, made by the app process (its temp folder is the app's own).
+    pub const STORE: &str = "debrief-store";
+}
+
 /// A listening address owned by the supervisor; the private directory is removed on drop.
 pub struct PrivateEndpoint {
     pub address: String,
@@ -34,16 +75,16 @@ pub struct PrivateEndpoint {
 }
 
 impl PrivateEndpoint {
-    /// A private address named `debrief-ipc-<random>`.
+    /// A private address named `debrief-ipc-<random>` ([`prefix::DEFAULT`]).
     pub fn create() -> io::Result<PrivateEndpoint> {
-        Self::create_named("debrief-ipc")
+        Self::create_named(prefix::DEFAULT)
     }
 
     /// A private address whose directory (Unix) or pipe (Windows) is named `<prefix>-<random>`, so a user
     /// looking at open handles can tell which part of Debrief it belongs to.
     #[cfg(unix)]
     pub fn create_named(prefix: &str) -> io::Result<PrivateEndpoint> {
-        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        let harden: fn(&std::path::Path) -> io::Result<()> = harden_dir;
         let mut bases: Vec<PathBuf> = Vec::new();
         if let Some(d) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|d| d.is_dir()) {
             bases.push(d);
@@ -55,25 +96,36 @@ impl PrivateEndpoint {
             // Named by its resolved path (macOS' temp folder `/var/folders/…` is `/private/var/folders/…`): a contained
             // child's sandbox profile allows exactly this socket, and the sandbox matches resolved paths.
             let base = base.canonicalize().unwrap_or(base);
-            let dir = base.join(format!("{prefix}-{}", random_hex(6)?));
-            let sock = dir.join("w.sock");
-            // Unix socket paths are limited to about 100 bytes.
-            if sock.as_os_str().len() > 96 {
-                continue;
-            }
-            match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
-                Ok(()) => {
-                    // Defend against a permissive umask or an odd file system.
-                    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
-                    return Ok(PrivateEndpoint {
-                        address: sock.to_string_lossy().into_owned(),
-                        dir: Some(dir),
-                    });
-                }
+            match Self::create_in(&base, prefix, harden) {
+                Ok(Some(e)) => return Ok(e),
+                Ok(None) => {}
                 Err(e) => last = e,
             }
         }
         Err(last)
+    }
+
+    /// One try in `base`: `Ok(None)` when the socket path would be too long there. The folder is owned by the returned
+    /// endpoint from the moment it exists, so a failing later step (`harden`) removes it again instead of leaving it.
+    #[cfg(unix)]
+    fn create_in(
+        base: &std::path::Path,
+        prefix: &str,
+        harden: fn(&std::path::Path) -> io::Result<()>,
+    ) -> io::Result<Option<PrivateEndpoint>> {
+        use std::os::unix::fs::DirBuilderExt;
+        let dir = base.join(format!("{prefix}-{}", random_hex(NAME_BYTES)?));
+        let sock = dir.join("w.sock");
+        if sock.as_os_str().len() > MAX_SOCKET_PATH {
+            return Ok(None);
+        }
+        std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
+        let endpoint = PrivateEndpoint {
+            address: sock.to_string_lossy().into_owned(),
+            dir: Some(dir.clone()),
+        };
+        harden(&dir)?;
+        Ok(Some(endpoint))
     }
 
     #[cfg(windows)]
@@ -90,6 +142,13 @@ impl PrivateEndpoint {
     pub fn dir(&self) -> Option<&std::path::Path> {
         self.dir.as_deref()
     }
+}
+
+/// Defends against a permissive umask or an odd file system: the folder is owner-only whatever `mkdir` made of it.
+#[cfg(unix)]
+fn harden_dir(dir: &std::path::Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
 }
 
 impl Drop for PrivateEndpoint {
@@ -128,5 +187,17 @@ mod tests {
         assert_ne!(e.address, other.address);
         drop(e);
         assert!(!dir.exists());
+    }
+
+    /// Regression: a step after `mkdir` that fails (the permission hardening) left the new folder behind, unowned.
+    #[cfg(unix)]
+    #[test]
+    fn a_failing_step_after_making_the_folder_removes_it_again() {
+        let base = tempfile::tempdir().unwrap();
+        let failing: fn(&std::path::Path) -> io::Result<()> = |_| Err(io::Error::other("cannot harden"));
+        assert!(PrivateEndpoint::create_in(base.path(), "debrief-x", failing).is_err());
+        assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0, "no folder is left behind");
+        let e = PrivateEndpoint::create_in(base.path(), "debrief-x", harden_dir).unwrap().unwrap();
+        assert!(e.dir().unwrap().is_dir());
     }
 }

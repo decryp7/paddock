@@ -9,6 +9,7 @@ import { ExtrasInventory } from './extras-inventory';
 import { ExtrasMaintenance } from './extras-maintenance';
 import { EXTRAS_TABS, type ExtrasTab } from './extras-model';
 import { ExtrasSleep } from './extras-sleep';
+import { MatTabsModule } from '@angular/material/tabs';
 
 /**
  * Extras: small read-only views of the computer that have no page of their own: what changed, why it will not sleep, how it
@@ -17,24 +18,24 @@ import { ExtrasSleep } from './extras-sleep';
  */
 @Component({
   selector: 'dy-extras-page',
-  imports: [ExtrasChanges, ExtrasSleep, ExtrasBoot, ExtrasApps, ExtrasGpu, ExtrasFiles, ExtrasInventory, ExtrasMaintenance],
+  imports: [MatTabsModule, ExtrasChanges, ExtrasSleep, ExtrasBoot, ExtrasApps, ExtrasGpu, ExtrasFiles, ExtrasInventory, ExtrasMaintenance],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <header class="page-head">
         <div class="titles">
           <h1>Extras</h1>
-          <p>More ways to look at this computer. Dyno only reads; files move only when you pick them and confirm.</p>
+          <p>More ways to look at this computer. Dyno only reads; it changes nothing.</p>
         </div>
       </header>
 
-      <div class="seg tabs" role="tablist" aria-label="Extras">
+      <nav mat-tab-nav-bar [tabPanel]="panel" aria-label="Extras">
         @for (t of tabs; track t.id) {
-          <button type="button" role="tab" [id]="'extras-tab-' + t.id" [attr.aria-selected]="tab() === t.id" [attr.aria-controls]="'extras-panel'" [attr.tabindex]="tab() === t.id ? 0 : -1" (click)="open(t.id)" (keydown)="key($event)">{{ t.label }}</button>
+          <button type="button" mat-tab-link [active]="tab() === t.id" (click)="open(t.id)">{{ t.label }}</button>
         }
-      </div>
+      </nav>
 
-      <section id="extras-panel" role="tabpanel" [attr.aria-labelledby]="'extras-tab-' + tab()">
+      <mat-tab-nav-panel #panel>
         @switch (tab()) {
           @case ('changes') { <dy-extras-changes /> }
           @case ('sleep') { <dy-extras-sleep /> }
@@ -45,14 +46,13 @@ import { ExtrasSleep } from './extras-sleep';
           @case ('inventory') { <dy-extras-inventory /> }
           @case ('maintenance') { <dy-extras-maintenance /> }
         }
-      </section>
+      </mat-tab-nav-panel>
     </div>
   `,
   styles: `
     :host { display: block; }
     .page { display: grid; gap: var(--sp-3); align-content: start; max-width: 1440px; }
     .page-head { margin-bottom: 0; }
-    .tabs { justify-self: start; flex-wrap: wrap; }
   `,
 })
 export class ExtrasPage {
@@ -66,17 +66,6 @@ export class ExtrasPage {
     if (tab === this.tab()) return;
     this.tab.set(tab);
     void this.router.navigate([], { relativeTo: this.route, queryParams: { tab }, replaceUrl: true });
-  }
-
-  /** Left and Right move between tabs. */
-  protected key(e: KeyboardEvent): void {
-    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-    const i = this.tabs.findIndex((t) => t.id === this.tab());
-    const next = this.tabs[(i + (e.key === 'ArrowRight' ? 1 : this.tabs.length - 1)) % this.tabs.length]!;
-    e.preventDefault();
-    const list = (e.currentTarget as HTMLElement).parentElement!;
-    this.open(next.id);
-    queueMicrotask(() => list.querySelector<HTMLElement>(`#extras-tab-${next.id}`)?.focus());
   }
 }
 

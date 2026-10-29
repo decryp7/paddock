@@ -1,4 +1,5 @@
 import { CdkDrag, CdkDragDrop, CdkDragHandle, CdkDropList } from '@angular/cdk/drag-drop';
+import { MatTooltip } from '@angular/material/tooltip';
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { TrayItem, WidgetMetric } from '../../core/api.types';
@@ -7,6 +8,10 @@ import { Icon } from '../../shared/icon';
 import { Sparkline } from '../../shared/sparkline';
 import { LiveStore } from '../../state/live.store';
 import { MAX_TRAY_ITEMS, METRICS, TRAY_STYLES, type TrayStyleId, metricLabel, moveWidget, newTrayItem, readMetric, seriesFor, styleFromId, trayStyleId } from '../widgets/widget-model';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatFormField, MatLabel } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 
 /**
  * The menu-bar / tray items: up to four, each a metric drawn in a style, reordered by dragging, with a live preview of
@@ -14,7 +19,7 @@ import { MAX_TRAY_ITEMS, METRICS, TRAY_STYLES, type TrayStyleId, metricLabel, mo
  */
 @Component({
   selector: 'dy-tray-items-editor',
-  imports: [FormsModule, Icon, Sparkline, CdkDropList, CdkDrag, CdkDragHandle],
+  imports: [MatTooltip, PdSelect, MatLabel, MatFormField, MatInput, MatButton, MatIconButton, FormsModule, Icon, Sparkline, CdkDropList, CdkDrag, CdkDragHandle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="preview" role="img" [attr.aria-label]="previewLabel()">
@@ -51,29 +56,22 @@ import { MAX_TRAY_ITEMS, METRICS, TRAY_STYLES, type TrayStyleId, metricLabel, mo
     <ul cdkDropList (cdkDropListDropped)="drop($event)" aria-label="Menu bar items">
       @for (it of items(); track it.id; let i = $index) {
         <li cdkDrag>
-          <button type="button" class="btn ghost icon sm grab" cdkDragHandle aria-label="Drag to reorder"><dy-icon name="more" /></button>
-          <button type="button" class="btn ghost icon sm" aria-label="Move up" [disabled]="i === 0" (click)="move(i, i - 1)"><dy-icon name="arrow-up" /></button>
-          <button type="button" class="btn ghost icon sm" aria-label="Move down" [disabled]="i === items().length - 1" (click)="move(i, i + 1)"><dy-icon name="arrow-down" /></button>
-          <select class="select sm" [attr.aria-label]="'Metric of item ' + (i + 1)" (change)="setMetric(it, $event)">
-            @for (m of metrics; track m.label) {
-              <option [value]="m.metric" [selected]="m.label === metricName(it)">{{ m.label }}</option>
-            }
-          </select>
-          <select class="select sm" [attr.aria-label]="'Style of item ' + (i + 1)" (change)="setStyle(it, $event)">
-            @for (s of styles; track s.id) {
-              <option [value]="s.id" [selected]="s.id === styleId(it)">{{ s.label }}</option>
-            }
-          </select>
+          <button type="button" matIconButton matTooltip="Drag to reorder" class="grab" cdkDragHandle aria-label="Drag to reorder"><dy-icon name="more" /></button>
+          <button type="button" matIconButton matTooltip="Move up" aria-label="Move up" [disabled]="i === 0" (click)="move(i, i - 1)"><dy-icon name="arrow-up" /></button>
+          <button type="button" matIconButton matTooltip="Move down" aria-label="Move down" [disabled]="i === items().length - 1" (click)="move(i, i + 1)"><dy-icon name="arrow-down" /></button>
+          <pd-select [options]="metricOptions" [value]="metricName(it)" [ariaLabel]="'Metric of item ' + (i + 1)" (valueChange)="setMetric(it, $event)" />
+          <pd-select [options]="styleOptions" [value]="styleId(it)" [ariaLabel]="'Style of item ' + (i + 1)" (valueChange)="setStyle(it, $event)" />
+          <button type="button" matIconButton matTooltip="Remove item" class="pd-button-danger" aria-label="Remove item" (click)="remove(it)"><dy-icon name="trash" /></button>
           @if (styleId(it) === 'number') {
-            <input class="input sm short" aria-label="Short label" placeholder="Label" maxlength="16" [ngModel]="numberLabel(it)" (ngModelChange)="setNumber(it, 'label', $event)" />
-            <input class="input sm short" aria-label="Unit" placeholder="Unit" maxlength="8" [ngModel]="numberUnit(it)" (ngModelChange)="setNumber(it, 'unit', $event)" />
+            <span class="num-fields">
+                <mat-form-field class="short"><mat-label>Label</mat-label><input matInput aria-label="Short label" maxlength="16" [ngModel]="numberLabel(it)" (ngModelChange)="setNumber(it, 'label', $event)" /></mat-form-field>
+              <mat-form-field class="short"><mat-label>Unit</mat-label><input matInput aria-label="Unit" maxlength="8" [ngModel]="numberUnit(it)" (ngModelChange)="setNumber(it, 'unit', $event)" /></mat-form-field>
+            </span>
           }
-          <span class="spacer"></span>
-          <button type="button" class="btn ghost icon sm danger" aria-label="Remove item" (click)="remove(it)"><dy-icon name="trash" /></button>
         </li>
       }
     </ul>
-    <button type="button" class="btn sm" [disabled]="items().length >= max_()" (click)="add()"><dy-icon name="plus" /> Add item</button>
+    <button type="button" matButton="outlined" [disabled]="items().length >= max_()" (click)="add()"><dy-icon name="plus" /> Add item</button>
     @if (items().length >= max_()) {
       <small class="faint">The menu bar holds up to {{ max_() }} items.</small>
     }
@@ -91,8 +89,12 @@ import { MAX_TRAY_ITEMS, METRICS, TRAY_STYLES, type TrayStyleId, metricLabel, mo
     .n { font-weight: var(--fw-medium); }
     .faint { color: var(--text-3); font-size: var(--fs-sm); }
     ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); align-self: stretch; }
-    li { display: flex; align-items: center; gap: var(--sp-2); padding: 4px var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); }
-    .spacer { flex: 1; } .short { width: 84px; } .grab { cursor: grab; }
+    li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: 4px var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); }
+    /* Metric and style share the row with the move buttons and Remove; a number style's Label and Unit get a row of their own. */
+    pd-select { flex: 1 1 8rem; min-width: 8rem; }
+    li .pd-button-danger { margin-inline-start: auto; }
+    .num-fields { flex: 1 1 100%; display: flex; gap: var(--sp-2); padding-inline-start: 4.5rem; }
+    .short { width: 7rem; flex: none; } .grab { cursor: grab; }
     .cdk-drag-preview { box-shadow: var(--shadow-3); border-radius: var(--r-md); background: var(--overlay-bg); display: flex; align-items: center; gap: var(--sp-2); padding: 4px var(--sp-2); }
     .cdk-drag-placeholder { opacity: 0.35; }
   `,
@@ -101,8 +103,8 @@ export class TrayItemsEditor {
   readonly items = input.required<TrayItem[]>();
   readonly itemsChange = output<TrayItem[]>();
   private readonly live = inject(LiveStore);
-  protected readonly metrics = METRICS;
-  protected readonly styles = TRAY_STYLES;
+  protected readonly metricOptions: PdSelectOption[] = METRICS.map((m) => ({ value: m.label, label: m.label }));
+  protected readonly styleOptions: PdSelectOption[] = TRAY_STYLES.map((s) => ({ value: s.id, label: s.label }));
   protected readonly max_ = () => MAX_TRAY_ITEMS;
   protected readonly styleId = trayStyleId;
   protected readonly metricName = (it: TrayItem) => metricLabel(it.metric);
@@ -147,11 +149,12 @@ export class TrayItemsEditor {
   protected drop(e: CdkDragDrop<unknown>): void {
     this.move(e.previousIndex, e.currentIndex);
   }
-  protected setMetric(it: TrayItem, e: Event): void {
-    this.emit(this.items().map((i) => (i.id === it.id ? { ...i, metric: (e.target as HTMLSelectElement).value as WidgetMetric } : i)));
+  protected setMetric(it: TrayItem, label: string): void {
+    const metric = METRICS.find((m) => m.label === label)?.metric;
+    if (metric) this.emit(this.items().map((i) => (i.id === it.id ? { ...i, metric: metric as WidgetMetric } : i)));
   }
-  protected setStyle(it: TrayItem, e: Event): void {
-    const id = (e.target as HTMLSelectElement).value as TrayStyleId;
+  protected setStyle(it: TrayItem, value: string): void {
+    const id = value as TrayStyleId;
     this.emit(this.items().map((i) => (i.id === it.id ? { ...i, style: styleFromId(id, this.numberUnit(i), this.numberLabel(i)) } : i)));
   }
   protected setNumber(it: TrayItem, field: 'unit' | 'label', value: string): void {

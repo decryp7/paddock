@@ -9,19 +9,6 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// The largest settings file Dyno reads.
 pub const MAX_SETTINGS_BYTES: usize = 256 * 1024;
 
-/// Colour theme.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum Theme {
-    /// Follow the OS.
-    #[default]
-    System,
-    /// Dark.
-    Dark,
-    /// Light.
-    Light,
-}
-
 /// A metric the tray icon can show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,8 +102,6 @@ impl Default for WebApi {
 pub struct Settings {
     /// Schema version.
     pub version: u32,
-    /// Theme.
-    pub theme: Theme,
     /// Start Dyno at login.
     pub launch_at_login: bool,
     /// Sampling.
@@ -184,7 +169,6 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             version: SCHEMA_VERSION,
-            theme: Theme::System,
             launch_at_login: false,
             sampling: Sampling::default(),
             retention: Retention::default(),
@@ -287,9 +271,9 @@ mod tests {
 
     #[test]
     fn missing_keys_take_defaults() {
-        let (s, w) = parse(r#"{"theme":"dark","sampling":{"intervalMs":2000},"futureKey":1}"#);
+        let (s, w) = parse(r#"{"launchAtLogin":true,"sampling":{"intervalMs":2000},"futureKey":1}"#);
         assert!(w.is_none());
-        assert_eq!(s.theme, Theme::Dark);
+        assert!(s.launch_at_login);
         assert_eq!(s.sampling.interval_ms, 2_000);
         assert_eq!(s.sampling.process_interval_ms, 2_000);
         assert_eq!(s.retention, Retention::default());
@@ -336,7 +320,7 @@ mod tests {
     #[test]
     fn dashboard_and_tray_items_are_normalised_and_optional() {
         // Old files without the new keys still load with the defaults.
-        let (s, w) = parse(r#"{"theme":"dark"}"#);
+        let (s, w) = parse(r#"{"launchAtLogin":true}"#);
         assert!(w.is_none());
         assert_eq!(s.dashboard, crate::widgets::DashboardLayout::default());
         assert_eq!(s.tray_items, crate::widgets::TrayItems::default());
@@ -364,7 +348,7 @@ mod tests {
 
     #[test]
     fn unusual_settings_are_optional_and_clamped() {
-        let (s, w) = parse(r#"{"theme":"dark"}"#);
+        let (s, w) = parse(r#"{"launchAtLogin":true}"#);
         assert!(w.is_none());
         assert_eq!(s.unusual, crate::unusual::UnusualSettings::default());
         let (s, _) = parse(r#"{"unusual":{"learningDays":500}}"#);
@@ -376,7 +360,7 @@ mod tests {
 
     #[test]
     fn extras_settings_are_optional_validated_and_reset_when_damaged() {
-        let (s, w) = parse(r#"{"theme":"dark"}"#);
+        let (s, w) = parse(r#"{"launchAtLogin":true}"#);
         assert!(w.is_none());
         assert!(!s.maintenance.enabled && s.backup.alert_when_stale && s.backup.stale_after_hours == 48);
         let (s, _) = parse(r#"{"maintenance":{"enabled":true,"windows":[]},"backup":{"staleAfterHours":0}}"#);

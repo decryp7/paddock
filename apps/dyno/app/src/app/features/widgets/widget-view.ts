@@ -20,6 +20,7 @@ import { EventsFeed } from '../dashboard/events-feed';
 import { ConsumersPanel, DiskTrendPanel, HistoryPanel } from '../dashboard/history-panels';
 import { CountersStore } from '../../state/counters.store';
 import { PANEL_KINDS, KIND_LABEL, metricLabel, readCounter, readMetric, seriesFor, thresholdTone } from './widget-model';
+import { MatTooltip } from '@angular/material/tooltip';
 
 const ICON: Record<WidgetKind, IconName> = {
   graph: 'trend',
@@ -45,7 +46,7 @@ const ICON: Record<WidgetKind, IconName> = {
  */
 @Component({
   selector: 'dy-widget',
-  imports: [Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
+  imports: [MatTooltip, Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[attr.role]': 'ownCard() ? null : "group"', '[attr.aria-label]': 'ownCard() ? null : title()', '[attr.data-kind]': 'widget().kind', '[class.own-card]': 'ownCard()' },
   template: `
@@ -94,7 +95,7 @@ const ICON: Record<WidgetKind, IconName> = {
       @case ('heatmap') {
         <div class="cells" role="img" [attr.aria-label]="'Per-core load: ' + cores().map(pct).join(', ')">
           @for (v of cores(); track $index) {
-            <span class="cell" [style.background]="cellColor(v)" [title]="'Core ' + round($index + 1) + ': ' + pct(v)"></span>
+            <span class="cell" [style.background]="cellColor(v)" [matTooltip]="'Core ' + round($index + 1) + ': ' + pct(v)"></span>
           }
         </div>
         <p class="note num">{{ round(cores().length) }} cores · busiest {{ pct(busiest()) }}</p>

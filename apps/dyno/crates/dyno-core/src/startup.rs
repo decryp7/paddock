@@ -254,7 +254,7 @@ pub(crate) mod fixtures {
         StartupEntry {
             id: format!("userRunKey:{name}"),
             name: name.into(),
-            command: format!("\"{exe}\" --background"),
+            command: format!("\"{exe}\" --hidden"),
             exe: Some(exe.into()),
             location: StartupLocation::UserRunKey,
             state: StartupState::Enabled,
