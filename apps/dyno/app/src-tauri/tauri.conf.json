@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "identifier": "net.decryptology.dyno",
   "build": {
+    "windows": { "staticVCRuntime": false },
     "frontendDist": "../dist/dyno-app/browser",
     "devUrl": "http://localhost:4200",
     "beforeDevCommand": "node src-tauri/scripts/sidecar.mjs --dev && npm run start",

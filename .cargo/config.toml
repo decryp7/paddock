@@ -8,6 +8,13 @@
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld.exe"
 
+# Windows: link the C runtime statically into every binary we build (ADR 0032). The dynamic default imports VCRUNTIME140.dll,
+# which is not part of Windows: a sidecar built that way exits with 0xC0000135 on a PC without the VC++ redistributable
+# (CI runners have it, so CI never showed it). Tauri's own staticVCRuntime covers only an app's main binary; this covers every
+# binary of every workspace in the repo. conformance/release/windows-crt-imports.mjs checks the built installers' binaries.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
+
 # The Gitea cargo registry the shared crates are published to (`publish = ["decryp7"]`; no token needed to read). It is
 # defined here, once, because cargo reads configuration from the current folder upwards, not from the manifest: every
 # workspace that uses a shared crate by path (crates/, apps/<app>/...) needs it, as the crates' manifests name it
