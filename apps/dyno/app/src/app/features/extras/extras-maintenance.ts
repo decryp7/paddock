@@ -83,7 +83,7 @@ import { TimeField } from '../../shared/time-field';
   styles: [
     EXTRAS_STYLES,
     `
-      .form { display: grid; gap: var(--sp-3); max-width: 960px; padding: var(--sp-4) var(--sp-5); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); }
+      .form { display: grid; min-width: 0; gap: var(--sp-3); max-width: 960px; padding: var(--sp-4) var(--sp-5); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); }
       .lede { margin: 0; color: var(--text-2); }
       .status { margin: 0; display: flex; align-items: center; font-weight: var(--fw-medium); }
       .row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
@@ -92,7 +92,7 @@ import { TimeField } from '../../shared/time-field';
       .lbl { display: grid; gap: 2px; }
       .lbl small { color: var(--text-3); font-size: var(--fs-sm); }
       .windows { list-style: none; margin: 0; padding: 0; display: grid; }
-      .win { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
+      .win { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
       .win.off { opacity: 0.55; }
       .win-end { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
       .sum { flex: 1 1 120px; min-width: 0; font-size: var(--fs-sm); }

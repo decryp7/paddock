@@ -193,9 +193,9 @@ const KINDS: { kind: BenchKind; text: string }[] = [
   `,
   styles: `
     :host { display: block; }
-    dy-async { display: grid; gap: var(--sp-4); }
-    .page { display: grid; gap: var(--sp-4); align-content: start; }
-    .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) 0; }
+    dy-async { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
+    .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); align-content: start; }
+    .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) 0; }
     .kind { position: relative; display: flex; align-items: center; gap: var(--sp-3); padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); }
     .kind[data-on='true'] { border-color: var(--border-strong); background: var(--surface-2); }
     .kind dy-icon { --icon-size: 20px; color: var(--text-3); flex: none; }
@@ -219,7 +219,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     .note, .warning, .load { margin: 0; padding: var(--sp-2) var(--sp-4); color: var(--text-2); }
     .load { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
     .warning { display: flex; gap: var(--sp-2); align-items: center; color: var(--warn); }
-    .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: var(--sp-3); padding: var(--sp-2) var(--sp-4) 0; }
+    .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: var(--sp-3); padding: var(--sp-2) var(--sp-4) 0; }
     .result { display: flex; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-lg); background: var(--surface-inset); min-width: 0; align-items: flex-start; }
     .result .art { flex: none; width: 96px; display: grid; place-items: center; padding-top: var(--sp-1); }
     .result .art dy-device-art { width: 72px; }
@@ -236,6 +236,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     .took { display: block; margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-xs); }
     .why { margin: 0; display: flex; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); }
     .table { margin: 0 var(--sp-4) var(--sp-3); width: calc(100% - 2 * var(--sp-4)); }
+    .table td:nth-child(2), .table td:nth-child(5) { white-space: normal; overflow-wrap: anywhere; }
     .faint { color: var(--text-3); }
     small { color: var(--text-3); }
     .badge.outline { margin-left: var(--sp-2); }

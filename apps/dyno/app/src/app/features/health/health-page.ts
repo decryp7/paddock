@@ -61,15 +61,16 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
   `,
   styles: `
     :host { display: block; }
-    .page { display: grid; gap: var(--sp-4); align-content: start; }
+    .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); align-content: start; }
     .table { margin: 0 var(--sp-4) var(--sp-3); width: calc(100% - 2 * var(--sp-4)); }
     .nowrap { white-space: nowrap; }
+    .table td.nowrap:nth-child(2) { white-space: normal; }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: var(--sp-2); background: var(--border-strong); }
     .dot[data-tone='ok'] { background: var(--ok); }
     .dot[data-tone='warn'] { background: var(--warn); }
     .dot[data-tone='bad'] { background: var(--bad); }
     .faint { color: var(--text-3); }
-    .filters { display: flex; gap: var(--sp-2); }
+    .filters { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
     .shown { margin: 0 var(--sp-4) var(--sp-3); color: var(--text-3); font-size: var(--fs-sm); }
   `,
 })

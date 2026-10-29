@@ -51,7 +51,7 @@ import { MatTabsModule } from '@angular/material/tabs';
   `,
   styles: `
     :host { display: block; }
-    .page { display: grid; gap: var(--sp-3); align-content: start; max-width: 1440px; }
+    .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-content: start; max-width: 1440px; }
     .page-head { margin-bottom: 0; }
   `,
 })

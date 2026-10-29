@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Dyno: pages no longer clip at 900 and 1024 px
+- Benchmarks, Health, Extras (tabs and Maintenance) and Network wrap or shrink to the page instead of being cut by `.pd-page`'s `overflow-x: hidden`; the primary "Run benchmarks" button is always whole. `e2e/layout.spec.ts` now fails on any page content wider than the page, and on text cut without an ellipsis, at 900, 1024 and 1280 px, for every page and every Settings page.
+
 ### `providePaddockMaterial`: tooltips wait 500 ms
 - `providePaddockMaterial()` provides `MAT_TOOLTIP_DEFAULT_OPTIONS` with `showDelay: 500` (`PADDOCK_TOOLTIP_OPTIONS`), the design guide's delay for the tooltip every icon-only button carries. Every app that provides it gets the delay without setting it per tooltip.
 

@@ -143,7 +143,7 @@ function readCollapsed(): Set<string> {
                     @if (store.resolveNames()) {
                       <span class="cell muted" role="gridcell"><span class="truncate" [matTooltip]="hostName(c) ?? ''">{{ hostName(c) ?? (c.lookupOk ? '—' : 'Private address') }}</span></span>
                     }
-                    <span class="cell" role="gridcell">{{ service(c.remotePort) }}</span>
+                    <span class="cell" role="gridcell"><span class="truncate" [matTooltip]="service(c.remotePort)">{{ service(c.remotePort) }}</span></span>
                     <span class="cell muted" role="gridcell">{{ protoText(c.proto, c.ipv6) }}</span>
                     <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="state(c).tone" aria-hidden="true"></span>{{ state(c).text }}</span>
                     @if (showLocal()) { <span class="cell addr" role="gridcell">{{ ep(c.local, c.localPort) }}</span> }
@@ -153,7 +153,7 @@ function readCollapsed(): Set<string> {
                     @if (group() !== 'process') {
                       <span class="cell prog" role="gridcell"><span class="av" aria-hidden="true">{{ ini(name(l.owner)) }}</span><span class="truncate" [matTooltip]="reason(l.owner) ?? ''">{{ name(l.owner) }}</span></span>
                     }
-                    <span class="cell" role="gridcell" [class.indent]="group() === 'process'">{{ service(l.port) }}</span>
+                    <span class="cell" role="gridcell" [class.indent]="group() === 'process'"><span class="truncate" [matTooltip]="service(l.port)">{{ service(l.port) }}</span></span>
                     <span class="cell" role="gridcell"><span class="addr">{{ l.local }}</span> <span class="reach" [attr.data-tone]="reachTone(l)" [matTooltip]="badge(l).hint"><dy-icon [name]="l.exposure === 'allInterfaces' ? 'globe' : l.exposure === 'loopback' ? 'lock' : 'network'" /> {{ badge(l).label }}</span></span>
                     <span class="cell muted" role="gridcell">{{ protoText(l.proto, l.ipv6) }}</span>
                     <span class="cell muted" role="gridcell">{{ since(l.firstSeen) }}</span>
@@ -245,7 +245,7 @@ function readCollapsed(): Set<string> {
     .summary b { color: var(--text-1); font-weight: var(--fw-semibold); }
     .summary .this-pc { margin-left: auto; color: var(--text-3); }
     .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; }
-    .traffic { margin-left: auto; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
+    .traffic { margin-left: auto; min-width: 0; flex: 0 8 auto; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
     .reach { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; }
     .reach dy-icon { --icon-size: 13px; }
     .reach[data-tone='warn'] { color: var(--warn); }
@@ -267,7 +267,7 @@ function readCollapsed(): Set<string> {
     .truncate { overflow: hidden; text-overflow: ellipsis; }
     .addr { font: var(--fw-regular) var(--fs-xs) / 1 var(--font-mono); color: var(--text-3); }
     .gname { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
-    .meta { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
+    .meta { min-width: 0; flex: 0 4 auto; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
     .exp { color: var(--warn); }
     .av { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; background: var(--surface-active); color: var(--text-2); font: var(--fw-semibold) 11px / 1 var(--font-sans); }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border-strong); flex: none; }
@@ -322,10 +322,11 @@ export class NetworkPage implements OnInit, OnDestroy {
   });
   protected readonly viewportHeight = computed(() => Math.min(Math.max(this.rows().length, 1) * ROW_H, 560));
   protected readonly cols = computed(() => {
-    const prog = this.group() !== 'process' ? 'minmax(130px, 1.2fr) ' : '';
+    // Minimums small enough that the usual columns fit the 673 px page of a 900 px window; a cell shows an ellipsis (and a tooltip) when it is tighter still.
+    const prog = this.group() !== 'process' ? 'minmax(90px, 1.2fr) ' : '';
     return this.tab() === 'connections'
-      ? `${prog}minmax(160px, 2fr) ${this.store.resolveNames() ? 'minmax(140px, 2fr) ' : ''}minmax(90px, 1fr) 80px 110px ${this.showLocal() ? 'minmax(150px, 1.2fr) ' : ''}80px 84px`
-      : `${prog}minmax(170px, 2fr) minmax(150px, 2fr) 80px 90px 84px`;
+      ? `${prog}minmax(110px, 2fr) ${this.store.resolveNames() ? 'minmax(90px, 2fr) ' : ''}minmax(70px, 1fr) 68px 96px ${this.showLocal() ? 'minmax(100px, 1.2fr) ' : ''}72px 72px`
+      : `${prog}minmax(90px, 2fr) minmax(100px, 2fr) 68px 80px 84px`;
   });
   protected readonly selectedItem = computed(() => {
     const k = this.selectedKey();
