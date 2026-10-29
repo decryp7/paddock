@@ -684,5 +684,9 @@ fn the_watches_that_need_a_browser_are_counted_without_reading_each_watch() {
     f.engine.save_watch(spec("http://127.0.0.1:1/feed"), &none()).unwrap();
     assert_eq!(f.engine.watches_needing_renderer(), 2, "a plain feed does not need one");
     f.engine.set_paused(&a.id, true).unwrap();
-    assert_eq!(f.engine.watches_needing_renderer(), 1, "a paused watch is not checked, so it does not need one");
+    assert_eq!(
+        f.engine.watches_needing_renderer(),
+        1,
+        "a paused watch is not checked, so it does not need one"
+    );
 }

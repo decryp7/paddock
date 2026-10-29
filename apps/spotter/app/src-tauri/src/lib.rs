@@ -258,7 +258,10 @@ fn updater<R: Runtime>(test_dir: Option<std::path::PathBuf>, app: &tauri::AppHan
     let b = UpdatesBuilder::new(APP_NAME)
         .channel("stable", "Stable", UPDATE_FEED)
         .public_key(key)
-        .installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(app.clone(), key.unwrap_or_default())))
+        .installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(
+            app.clone(),
+            key.unwrap_or_default(),
+        )))
         .releases_page(RELEASES_PAGE)
         .homepage("https://dev.decryptology.net/decryp7/paddock")
         .changelog(include_str!("../../../CHANGELOG.md"))
