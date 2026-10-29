@@ -186,6 +186,8 @@ pub fn app<R: Runtime>(
 
 /// The app: the two plugins, the demo's guarded commands and the main window.
 pub fn run() {
+    // First: the shared crates' log lines (the start's error among them) reach the app's daily log file.
+    let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
     let place = Place::Installed;
     let started = link(&place).and_then(|link| {
         let workbench = workbench::<tauri::Wry>(&place, link.clone())?;

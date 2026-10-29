@@ -1,7 +1,13 @@
-//! Which threads are inside a Tauri plugin hook. Tauri 2 holds its plugin store (`Mutex<PluginStore>`) while it runs a
-//! plugin's `setup`, `on_event`, `on_page_load`, `on_window_ready` and `on_webview_ready`, and building a webview locks
-//! that store again (for the plugins' initialisation scripts) on the same thread: a window built inside one of these hooks
-//! blocks the thread for good. On the main thread at start that is an app with no window, no menu and no log line.
+//! Which threads are inside a Tauri plugin hook. Tauri 2 (2.12.5) holds its plugin store (`Mutex<PluginStore>`) while it
+//! runs a plugin's `setup`, `on_event`, `on_page_load`, `on_window_ready`, `on_webview_ready` and `on_navigation`
+//! (`manager/webview.rs`), and while it calls a plugin's invoke handler (`AppManager::run_plugin_invoke_handler`,
+//! `manager/mod.rs`). Building a webview locks that store again (for the plugins' initialisation scripts) on the same
+//! thread: a window built inside one of these hooks blocks the thread for good. On the main thread at start that is an
+//! app with no window, no menu and no log line.
+//!
+//! The invoke handlers are safe only because every Paddock command is `async` (`paddock_commands::testing` checks it per crate and app): the handler
+//! only schedules the command on the async runtime and returns, so the command body runs after the store is free. A
+//! synchronous command that built a window would deadlock the same way.
 //!
 //! A plugin marks its hooks with [`plugin_hook_scope`]; every Paddock window builder (`paddock-window`'s windows and
 //! tray popover, `paddock-dialogs`' dialogs, `paddock-panels`' pop-outs and ghosts) asks [`in_plugin_hook`] first and

@@ -3,6 +3,7 @@
 //! (`paddock_window::tauri::HeadlessTray`) stands in for the icon; the OS plugins (single instance, autostart, updater)
 //! stay out (rule 7).
 
+use std::sync::mpsc::RecvTimeoutError;
 use tauri::Manager;
 use tauri::test::{MockRuntime, mock_context, noop_assets};
 
@@ -20,7 +21,7 @@ pub struct Started {
 }
 
 /// Builds the app `compose` returns on its own thread, runs Tauri's set-up once and says what opened. `Err` names why
-/// the start failed; a start that never returns (a window built inside a plugin hook) fails the test with that.
+/// the start failed; a start that never returns (a window built inside a plugin hook) or panics fails the test with that.
 pub fn start(
     compose: impl FnOnce() -> tauri::Builder<MockRuntime> + Send + 'static,
 ) -> Result<Started, String> {
@@ -40,7 +41,13 @@ pub fn start(
             });
         let _ = tx.send(started);
     });
-    rx.recv_timeout(DEADLOCKED_AFTER).unwrap_or_else(|_| {
-        Err("the start deadlocked: a window was built while Tauri held its plugin store".into())
-    })
+    match rx.recv_timeout(DEADLOCKED_AFTER) {
+        Ok(started) => started,
+        Err(RecvTimeoutError::Disconnected) => {
+            Err("the start panicked (see the test's output)".into())
+        }
+        Err(RecvTimeoutError::Timeout) => {
+            Err("the start deadlocked: a window was built while Tauri held its plugin store".into())
+        }
+    }
 }

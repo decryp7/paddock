@@ -26,7 +26,7 @@ use paddock_diag::tauri::Setup;
 use paddock_env::{AppDirs, AppId, MapVars, Os};
 use paddock_health::notify::os::{FakeToaster, OsNotifier, SharedOsSettings, Toaster};
 use paddock_health::tauri::native::PluginToaster;
-use paddock_log::{LogConfig, LogHandle, Logging};
+use paddock_log::LogHandle;
 use paddock_shell::{AppIdentity, Builder};
 use paddock_updater::tauri::UpdatesBuilder;
 use paddock_window::tauri::{FixedPrefs, WindowConfig, Windows};
@@ -104,19 +104,10 @@ fn dirs(
 /// Starts the app's log in the user's log folder at the level and limits saved in the settings (the level changes later
 /// without a restart, from the Logging page). A log that cannot start is only noted: the app runs without one.
 fn install_log() {
-    let started = dirs(None).map_err(|e| e.to_string()).and_then(|dirs| {
-        let id = AppId::new(APP_ID, APP_NAME).map_err(|e| e.to_string())?;
-        let saved = paddock_diag::logging::stored(&dirs.config().join(paddock_settings::FILE_NAME));
-        let config = LogConfig::new(&id, "app", VERSION)
-            .with_dirs(&dirs)
-            .with_settings(saved);
-        Logging::new(config).install().map_err(|e| e.to_string())
-    });
-    match started {
-        Ok(handle) => {
-            let _ = LOG.set(handle);
-        }
-        Err(why) => eprintln!("{APP_NAME}: the log could not start ({why})"),
+    if let Some(handle) =
+        paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION))
+    {
+        let _ = LOG.set(handle);
     }
 }
 
