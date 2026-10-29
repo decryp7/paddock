@@ -140,9 +140,9 @@
               <div class="field">
                 <span class="label">Tell me about</span>
                 <div id="mode" class="seg-tabs wrap" role="group" aria-label="Tell me about">
-                  <button type="button" [attr.aria-pressed]="draft().notify.mode === 'every-new'" (click)="setMode('every-new')">Every new release</button>
-                  <button type="button" [attr.aria-pressed]="draft().notify.mode === 'newer-than-installed'" (click)="setMode('newer-than-installed')">Newer than installed</button>
-                  <button type="button" [attr.aria-pressed]="draft().notify.mode === 'off'" (click)="setMode('off')">Nothing</button>
+                  @for (m of notifyModes; track m.value) {
+                    <button type="button" [attr.aria-pressed]="draft().notify.mode === m.value" (click)="setMode(m.value)">{{ m.label }}</button>
+                  }
                 </div>
               </div>
               <label class="check"><input type="checkbox" [checked]="draft().notify.nag" (change)="store.update(d => ({ ...d, notify: { ...d.notify, nag: checked($event) } }))" /><span>Keep reminding me until I mark it seen</span></label>

@@ -797,31 +797,39 @@ html .mat-mdc-slide-toggle:has(.mdc-switch:focus-visible) .mdc-switch__track {
   outline-offset: 2px;
 }
 
-// ---- Stepper geometry: tighter headers and lines than Material's 24 px (five headers fit beside a sidebar at 900 px), an outlined
+// ---- Stepper geometry (horizontal steppers): tighter headers and lines than Material's 24 px (five headers fit beside a sidebar at
+// 900 px), a 56 px header (the 24 px circle plus --pd-space-4 above and below; Material's fixed 72 px height is dropped), an outlined
 // circle for steps not reached yet, inline-SVG icons at 16 px, and no inset on the content (the page owns its margins).
-html .mat-stepper-horizontal,
-html .mat-stepper-vertical {
+html .mat-stepper-horizontal {
   background: transparent;
-}
 
-html .mat-step-header {
-  padding: var(--pd-space-4) var(--pd-space-2);
-}
+  .mat-horizontal-stepper-header {
+    height: auto;
+  }
 
-html .mat-stepper-horizontal-line {
-  min-width: var(--pd-space-4);
-  margin: 0;
-}
+  .mat-step-header {
+    padding: var(--pd-space-4) var(--pd-space-2);
+  }
 
-html .mat-horizontal-content-container {
-  padding: var(--pd-space-4) 0 0;
-}
+  .mat-step-label {
+    min-width: 0;
+  }
 
-html .mat-step-icon:not(.mat-step-icon-selected):not(.mat-step-icon-state-done):not(.mat-step-icon-state-edit) {
-  box-shadow: inset 0 0 0 1px var(--pd-border-strong);
-}
+  .mat-stepper-horizontal-line {
+    min-width: var(--pd-space-4);
+    margin: 0;
+  }
 
-html .mat-step-icon mat-icon {
-  width: 16px;
-  height: 16px;
+  .mat-horizontal-content-container {
+    padding: var(--pd-space-4) 0 0;
+  }
+
+  .mat-step-icon:not(.mat-step-icon-selected):not(.mat-step-icon-state-done):not(.mat-step-icon-state-edit) {
+    box-shadow: inset 0 0 0 1px var(--pd-border-strong);
+  }
+
+  .mat-step-icon mat-icon {
+    width: 16px;
+    height: 16px;
+  }
 }

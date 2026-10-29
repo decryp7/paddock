@@ -182,6 +182,11 @@ test.describe('the watch stepper', () => {
       await next(page).click();
       await expect(page.getByRole('heading', { name: 'Review', level: 2 })).toBeVisible();
       await page.screenshot({ path: `${dir}/5-review-${scheme}.png` });
+      await page.goto('/#/watches/w-2/edit');
+      await expect(page.locator('.source-line')).toHaveText(/^GitHub: /);
+      await expect(page.getByRole('table', { name: 'Releases found' })).toBeVisible();
+      await settleTransitions(page);
+      await page.screenshot({ path: `${dir}/6-edit-${scheme}.png` });
     });
   }
 });
