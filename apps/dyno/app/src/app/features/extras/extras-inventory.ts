@@ -1,22 +1,21 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
-import type { InventoryFormat } from '../../core/api.types';
+import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
+import type { InventoryFormat, SoftwareItem } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
 import { fileName } from '../../state/diagnostics.store';
-import { filterSoftware, hue, initial } from './extras-model';
+import { type Numbered, filterSoftware, hue, initial, numberKey, numbered } from './extras-model';
 import { EXTRAS_STYLES } from './extras-styles';
 import { MatButton } from '@angular/material/button';
-import { MatTooltip } from '@angular/material/tooltip';
-import { FullTextTip } from '../../shared/full-text-tip';
 import { SearchField } from '../../shared/search-field';
 import { MatMenuModule } from '@angular/material/menu';
 
 /** The installed software, searchable, and a report of the hardware and software saved through the OS save dialog. */
 @Component({
   selector: 'dy-extras-inventory',
-  imports: [MatMenuModule, SearchField, FullTextTip, MatTooltip, MatButton, AsyncState, Icon],
+  imports: [AsyncState, Icon, PdTable, PdCell, MatMenuModule, SearchField, MatButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Software">
@@ -42,20 +41,9 @@ import { MatMenuModule } from '@angular/material/menu';
         } @else if (rows().length === 0) {
           <div class="none"><dy-icon name="search" /><strong>Nothing matches “{{ search() }}”</strong><span>Try a shorter name or the publisher.</span></div>
         } @else {
-          <div class="tablewrap">
-            <table class="table tbl" aria-label="Installed software">
-              <thead><tr><th>Name</th><th class="w-ver">Version</th><th>Publisher</th></tr></thead>
-              <tbody>
-                @for (i of rows(); track i.name) {
-                  <tr>
-                    <td><span class="tile" aria-hidden="true" [style.background]="tile(i.name)">{{ initial(i.name) }}</span><span class="nm" [dyFullText]="i.name">{{ i.name }}</span></td>
-                    <td class="num">{{ i.version ?? '—' }}</td>
-                    <td class="muted"><span class="ell" [dyFullText]="i.publisher ?? ''">{{ i.publisher ?? '—' }}</span></td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
+          <pd-table label="Installed software" [rows]="numberedRows()" [columns]="columns" [rowKey]="rowNo" [filterable]="false" [maxHeight]="620">
+            <ng-template pdCell="name" let-i><span class="app"><span class="tile" aria-hidden="true" [style.background]="tile(i.name)">{{ initial(i.name) }}</span><span class="nm">{{ i.name }}</span></span></ng-template>
+          </pd-table>
           @if (inv.truncated) { <p class="note" role="status"><dy-icon name="info" /><span>This system has more packages than Dyno lists; the first {{ inv.items.length }} are shown.</span></p> }
         }
       }
@@ -68,7 +56,14 @@ import { MatMenuModule } from '@angular/material/menu';
       </ng-template>
     </mat-menu>
   `,
-  styles: [EXTRAS_STYLES, `.w-ver { width: 200px; } .nm { vertical-align: middle; }`],
+  styles: [
+    EXTRAS_STYLES,
+    `
+      .app { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+      .app .tile { flex: none; margin: 0; }
+      .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    `,
+  ],
 })
 export class ExtrasInventory implements OnInit {
   protected readonly store = inject(ExtrasStore);
@@ -81,6 +76,13 @@ export class ExtrasInventory implements OnInit {
     return this.rows().length === d.items.length ? plural(d.items.length, 'program') : `${this.rows().length} of ${plural(d.items.length, 'program')}`;
   });
   protected readonly initial = initial;
+  protected readonly numberedRows = computed(() => numbered(this.rows()));
+  protected readonly rowNo = numberKey;
+  protected readonly columns: PdColumn<Numbered<SoftwareItem>>[] = [
+    { key: 'name', header: 'Name', value: (i) => i.name, required: true, width: 'minmax(0, 2fr)' },
+    { key: 'version', header: 'Version', value: (i) => i.version, text: (i) => i.version ?? '—', width: '200px', hideBelow: 520 },
+    { key: 'publisher', header: 'Publisher', value: (i) => i.publisher, text: (i) => i.publisher ?? '—', width: 'minmax(0, 1.5fr)', hideBelow: 640 },
+  ];
   protected readonly name = fileName;
   protected readonly tile = (name: string) => `hsl(${hue(name)} 42% 38%)`;
 

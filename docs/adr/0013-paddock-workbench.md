@@ -137,3 +137,22 @@ As ADR 0012 sections 5-8, plus:
 - **Pacenotes and Sighter depend on Debrief's code.** Couples three release trains to Debrief and violates rule 39.
 - **Build the workbench before Pacenotes needs it.** Rule 1 (one app at a time) and YAGNI: Pacenotes' first screens are
   the second consumer that proves the contribution model.
+
+## Amendment (2026-10-29): the palette on the pages frame
+
+`workbench/palette` (the store, `<pd-command-palette />`, the matcher and `providePalette`) is not only the workbench
+frame's: an app on the pages frame (ADR 0012) adopts it with `providePagesPalette()` and places `<pd-command-palette />`
+beside `<pd-shell-frame />`. The first user is Dyno 1.0 (Mod+P goes to a page, Mod+Shift+P runs a command).
+
+- **Dependency direction.** A pages-frame app, and `workbench/palette` itself, now depend on each other's neighbours:
+  the app imports `workbench/palette` (and, through it, the workbench's contribution kinds and `WorkbenchRegistry`), and
+  `workbench/palette` imports `shell/pages` for the "Go to" provider. The workbench frame, the dock and the Explorer are
+  not pulled in. This is accepted for 1.0 because the palette core has no dock dependency (it reaches the workbench only
+  through `WORKBENCH_PORTS`, whose default degrades with a warning).
+- **Later.** Moving the palette core to `shell/palette` (the store, the component, the matcher, the provider kinds) makes
+  the dependency point the right way (workbench and pages frames both on the shell). It is a mechanical move with no
+  behaviour change; do it when a second pages-frame app adopts the palette or before Paddock's v1, whichever comes first.
+- **Options.** `providePagesPalette({ goToPages })`: by default the pages are listed on plain text (Mod+P); `{ prefix }`
+  puts them behind a symbol so an app's own plain-text provider can keep the plain text; `false` leaves them out.
+- **Menus.** The palette's two commands are items of the View menu with their keys, so the native macOS menu bar
+  carries them (the native menu is built from the same model).

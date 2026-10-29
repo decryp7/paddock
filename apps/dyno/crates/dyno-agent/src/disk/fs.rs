@@ -40,12 +40,16 @@ pub fn is_unreachable_errno(code: i32) -> bool {
     }
 }
 
+/// `EPERM`, "operation not permitted" (the same number on macOS, Linux and the BSDs; Windows never reports it).
+const EPERM: i32 = 1;
+
 /// Maps an I/O error to the port's typed error.
 pub fn read_error(e: &io::Error) -> ReadError {
     if e.raw_os_error().is_some_and(is_unreachable_errno) {
         return ReadError::Unreachable(e.to_string());
     }
     match e.kind() {
+        io::ErrorKind::PermissionDenied if e.raw_os_error() == Some(EPERM) => ReadError::NotPermitted,
         io::ErrorKind::PermissionDenied => ReadError::PermissionDenied,
         io::ErrorKind::NotFound => ReadError::NotFound,
         _ => ReadError::Other(e.to_string()),
@@ -241,6 +245,11 @@ mod tests {
             read_error(&io::Error::from(io::ErrorKind::PermissionDenied)),
             ReadError::PermissionDenied
         );
+        #[cfg(unix)]
+        {
+            assert_eq!(read_error(&io::Error::from_raw_os_error(EPERM)), ReadError::NotPermitted, "EPERM");
+            assert_eq!(read_error(&io::Error::from_raw_os_error(13)), ReadError::PermissionDenied, "EACCES");
+        }
         assert!(matches!(read_error(&io::Error::other("odd")), ReadError::Other(m) if m == "odd"));
         #[cfg(unix)]
         {

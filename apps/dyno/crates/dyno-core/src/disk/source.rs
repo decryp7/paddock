@@ -45,6 +45,9 @@ pub enum ReadError {
     /// The OS refused (no rights, or macOS Full Disk Access is off).
     #[error("access denied")]
     PermissionDenied,
+    /// "Operation not permitted" (EPERM): on macOS the privacy protection (Full Disk Access and kin), not file modes.
+    #[error("operation not permitted")]
+    NotPermitted,
     /// Gone while the scan ran.
     #[error("not found")]
     NotFound,

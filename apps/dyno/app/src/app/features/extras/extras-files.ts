@@ -1,13 +1,23 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
+import type { FoundFile } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatBytes, formatDate, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
+import { JobProgressCard } from '../../shared/job-progress';
 import { ExtrasStore } from '../../state/extras.store';
-import { MIN_SIZES, MODES, type FileRow, baseName, dirName, fileRows, middleEllipsis, scanSentence } from './files-model';
+import { MIN_SIZES, MODES, baseName, dirName, fileRows, middleEllipsis, scanSentence } from './files-model';
 import { EXTRAS_STYLES } from './extras-styles';
-import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
+
+interface FileLine {
+  readonly key: string;
+  readonly file: FoundFile;
+  readonly group: string;
+  readonly detail: string;
+}
 
 /**
  * Large and duplicate files in a folder the person chooses. Searching only reads: Dyno lists the files and moves or
@@ -15,7 +25,7 @@ import { MatTooltip } from '@angular/material/tooltip';
  */
 @Component({
   selector: 'dy-extras-files',
-  imports: [MatIconButton, MatTooltip, SuSegmentedControl, MatButton, AsyncState, Icon],
+  imports: [AsyncState, Icon, PdTable, PdCell, MatTooltip, SuSegmentedControl, MatButton, JobProgressCard],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Search">
@@ -35,54 +45,42 @@ import { MatTooltip } from '@angular/material/tooltip';
         <span>Choose a folder and Dyno lists its biggest files and files with identical content. It only reads and never moves or removes a file.</span>
       </div>
     } @else {
+      @if (store.finderJob(); as job) {
+        <dy-job-progress [progress]="job" (cancel)="store.cancelSearch()" />
+      }
+      @if (store.finderCancelled()) {
+        <p class="note faint" role="status">
+          Search stopped. @if (result()) { The earlier result is shown. }
+          <button type="button" matButton="text" (click)="store.search()">Search again</button>
+        </p>
+      }
+      @if (result() || (!store.finderJob() && !store.finderCancelled())) {
       <dy-async [loaded]="!!result()" [error]="store.finder().error" what="the folder" [rows]="6" (retry)="store.search()">
         @if (result(); as r) {
-          @if (rows().length === 0) {
+          @if (fileList().length === 0) {
             <div class="none">
               <dy-icon name="check" />
               <strong>Nothing found in this folder</strong>
               <span>No file is at least {{ minLabel() }} and no files with identical content were found. {{ scanned() }}</span>
             </div>
           } @else {
-            <div class="tablewrap">
-              <table class="table tbl files" aria-label="Large and duplicate files">
-                <thead><tr><th>File</th><th class="r w-size">Size</th><th class="r w-mod">Modified</th></tr></thead>
-                <tbody>
-                  @for (row of rows(); track row.key) {
-                    @if (row.kind === 'group') {
-                      <tr class="day">
-                        <td colspan="3">
-                          <button type="button" matIconButton [matTooltip]="(row.open ? 'Collapse ' : 'Expand ') + row.title" class="chev" [attr.aria-expanded]="row.open" [attr.aria-label]="(row.open ? 'Collapse ' : 'Expand ') + row.title" (click)="toggleGroup(row.key)"><dy-icon [name]="row.open ? 'chevron-down' : 'chevron-right'" /></button>
-                          <strong>{{ row.title }}</strong><span class="faint cnt">{{ row.detail }}</span>
-                        </td>
-                      </tr>
-                    } @else {
-                      <tr>
-                        <td>
-                          <span class="ell" [matTooltip]="row.file.path"><strong class="fname">{{ base(row.file.path) }}</strong> <span class="dir path">{{ short(dir(row.file.path), 56) }}</span></span>
-                        </td>
-                        <td class="r">{{ bytes(row.file.bytes) }}</td>
-                        <td class="r muted">{{ modified(row.file.modified) }}</td>
-                      </tr>
-                    }
-                  }
-                </tbody>
-              </table>
-            </div>
+            <pd-table [toolbar]="false" label="Large and duplicate files" [rows]="fileList()" [columns]="columns" [rowKey]="fileKey" [filterable]="false" [maxHeight]="620" groupBy="group" [groupSummary]="groupSummary">
+              <ng-template pdCell="file" let-f><span class="fcell"><strong class="fname">{{ base(f.file.path) }}</strong><span class="dir path">{{ short(dir(f.file.path), 56) }}</span></span></ng-template>
+            </pd-table>
             <p class="faint muted">{{ scanned() }} @if (r.duplicates.length > 0) { Copies are listed oldest first. }</p>
           }
         }
       </dy-async>
+      }
     }
   `,
   styles: [
     EXTRAS_STYLES,
     `
       .folder { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
-      .w-size { width: 110px; }
-      .w-mod { width: 110px; }
-      .fname { font-weight: var(--fw-medium); }
-      .dir { color: var(--text-3); margin-left: var(--sp-2); }
+      .fcell { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+      .fname { font-weight: var(--fw-medium); flex: none; }
+      .dir { color: var(--text-3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     `,
   ],
 })
@@ -96,13 +94,27 @@ export class ExtrasFiles {
     const m = MODES.find((x) => x.mode === value);
     if (m) void this.store.setMode(m.mode);
   }
-  private readonly collapsed = signal<ReadonlySet<string>>(new Set());
 
   protected readonly result = computed(() => this.store.finder().data);
-  protected readonly rows = computed<FileRow[]>(() => {
+  /** The files, each with the group it belongs to ("Large files", or a set of copies); the model builds the groups, the table folds them. */
+  protected readonly fileList = computed<FileLine[]>(() => {
     const r = this.result();
-    return r ? fileRows(r, this.collapsed()) : [];
+    const out: FileLine[] = [];
+    let group: { title: string; detail: string } | null = null;
+    for (const row of r ? fileRows(r, new Set()) : []) {
+      if (row.kind === 'group') group = { title: row.title, detail: row.detail };
+      else if (group) out.push({ key: row.key, file: row.file, group: group.title, detail: group.detail });
+    }
+    return out;
   });
+  protected readonly fileKey = (f: FileLine): string => f.key;
+  protected readonly groupSummary = (rows: readonly FileLine[]): Record<string, string> => ({ size: rows[0]?.detail ?? '' });
+  protected readonly columns: PdColumn<FileLine>[] = [
+    { key: 'group', header: 'Group', value: (f) => f.group, hidden: true, sortable: false },
+    { key: 'file', header: 'File', value: (f) => f.file.path, required: true, sortable: false, width: 'minmax(0, 1fr)' },
+    { key: 'size', header: 'Size', value: (f) => f.file.bytes, text: (f) => formatBytes(f.file.bytes), align: 'end', sortable: false, width: '230px' },
+    { key: 'modified', header: 'Modified', value: (f) => f.file.modified, text: (f) => formatDate(f.file.modified, Date.now()), align: 'end', sortable: false, width: '110px', hideBelow: 560 },
+  ];
   protected readonly minLabel = computed(() => MIN_SIZES.find((s) => s.mib === this.store.minMib())?.label ?? formatBytes(this.store.minMib() * 1024 * 1024));
   protected readonly scanned = computed(() => {
     const r = this.result();
@@ -115,12 +127,4 @@ export class ExtrasFiles {
   protected readonly dir = dirName;
   protected readonly short = (p: string, max = 48): string => middleEllipsis(p, max);
   protected readonly modified = (at: number): string => formatDate(at, Date.now());
-
-  protected toggleGroup(key: string): void {
-    this.collapsed.update((c) => {
-      const next = new Set(c);
-      if (!next.delete(key)) next.add(key);
-      return next;
-    });
-  }
 }

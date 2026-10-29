@@ -55,24 +55,18 @@ import type {
   ReportFormat,
   SavedReport,
   BackupReport,
-  BootReport,
   ChangeTimeline,
   ChangesQuery,
-  FinderQuery,
-  FinderResult,
   GpuReport,
   InventoryFormat,
   MaintenanceStatus,
   SavedInventory,
-  SleepReport,
-  SoftwareInventory,
-  UsageReport,
   IssuesOverview,
   IssuesQuery,
+  JobOutput,
+  JobSpec,
   SavedIssues,
   UnusualOverview,
-  FileHashInfo,
-  HashSource,
   SearchSeed,
   StartupFilter,
   StartupOverview,
@@ -208,8 +202,6 @@ export interface DynoBackend {
   // Issues and unusual programs (observe-only).
   /** Crashes, hangs and other problems the OS recorded, with the stability score and how each log was read. */
   issues(query: IssuesQuery): Promise<IssuesOverview>;
-  /** Reads the OS logs now and answers the same as `issues`. */
-  rescanIssues(query: IssuesQuery): Promise<IssuesOverview>;
   /** Asks where to save (the OS save dialog) and writes the last `days` days as JSON lines for Debrief; `null` when they cancel. */
   saveIssues(days: number): Promise<SavedIssues | null>;
   /** Programs that are new or unusual on this computer. */
@@ -223,8 +215,6 @@ export interface DynoBackend {
   searchSeed(text: string): Promise<SearchSeed>;
   /** Opens a web search for exactly this text in the default browser. */
   webSearch(query: string): Promise<void>;
-  /** The SHA-256 of a program's file, computed here. */
-  fileHash(source: HashSource): Promise<FileHashInfo>;
   /** Opens the VirusTotal page of a hash in the default browser. */
   openVirusTotal(sha256: string): Promise<void>;
   /** The startup entries after hiding the OS's and signed ones, with the counts. */
@@ -233,28 +223,25 @@ export interface DynoBackend {
   // Extras (read-only views) and backup health.
   /** Installs, updates, new start-up items and setting changes in a window. */
   changes(query: ChangesQuery): Promise<ChangeTimeline>;
-  /** What keeps the computer awake now and what woke it. */
-  sleepBlockers(): Promise<SleepReport>;
-  /** Recent boots and what slowed the last one. */
-  bootAnalysis(): Promise<BootReport>;
-  /** Network traffic and energy impact per app. */
-  appUsage(): Promise<UsageReport>;
   /** GPU use per process. */
   gpuProcesses(): Promise<GpuReport>;
-  /** The installed software. */
-  softwareInventory(): Promise<SoftwareInventory>;
   /** Asks where to save (the OS save dialog) and writes the hardware and software report there; `null` when they cancel. */
   saveInventoryReport(format: InventoryFormat): Promise<SavedInventory | null>;
   /** Asks for a folder (the OS folder dialog; the webview never invents a path); `null` when they cancel. */
   pickFolder(): Promise<string | null>;
-  /** Looks for large and duplicate files in a folder the person chose. Deletes nothing. */
-  findFiles(query: FinderQuery): Promise<FinderResult>;
   /** Where the maintenance windows stand now. */
   maintenance(): Promise<MaintenanceStatus>;
   /** The last backup check (the engine runs one when there is none yet). */
   backup(): Promise<BackupReport>;
-  /** Checks the backup tools now and answers the report. */
-  refreshBackup(): Promise<BackupReport>;
+
+  // Long operations are jobs (ER-17 to ER-19): find large and duplicate files in a folder the person chose (deletes nothing),
+  // read the OS logs now, check the backup tools now, hash a program's file, and the sleep, boot, app-usage and software reads.
+  // The shell's jobs store follows them (`paddock://jobs`) and cancels them (`job_cancel`); `JobStarter` ties these together.
+  // Nothing here waits for the work, so none of it needs a long timeout.
+  /** Starts a job and resolves at once with its id. A second start of the same work answers the running job; another search or log read while one runs is refused with `busy`. */
+  startJob(spec: JobSpec): Promise<number>;
+  /** What a done job produced; `notFound` when the job is not done or too old to be kept. */
+  jobResult(id: number): Promise<JobOutput>;
 
   // The tray popover window (the shell places and fits it).
   /** Shows and focuses the main window (and hides the tray popover). */

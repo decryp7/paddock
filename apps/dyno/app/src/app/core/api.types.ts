@@ -449,6 +449,23 @@ export interface DiskSettings {
   scanFolders?: number;
   /** Files of at least this many MiB get a node of their own (1 to 1,024). */
   notableFileMib?: number;
+  /** Threads that read folders at once, for the disk map and the file finder: Auto (by the kind of volume) or 1 to 16. */
+  readThreads?: Threads;
+  /** The file finder stops after this many files and folders (1,000 to 5,000,000). */
+  finderFiles?: number;
+  /** The file finder does not enter folders deeper than this (1 to 256). */
+  finderDepth?: number;
+  /** The file finder stops comparing contents after reading this many GiB (1 to 4,096). */
+  finderHashGib?: number;
+}
+
+/** A thread count setting: the engine decides (`'auto'`) or exactly this many (the engine holds it to the setting's own range). */
+export type Threads = 'auto' | { fixed: number };
+
+/** `Settings.jobs`: every key optional. */
+export interface JobSettings {
+  /** How many jobs run at once: Auto (4) or 1 to 8. Read when Dyno starts. */
+  workers?: Threads;
 }
 
 /** The protocol of a network volume. */
@@ -526,6 +543,9 @@ export interface DiskScanStatus {
 
 export type NodeKind = 'folder' | 'file' | 'mountPoint' | 'unreadable';
 
+/** Why one folder could not be read: macOS privacy (Full Disk Access), missing rights, protected by macOS in another way, or another error. */
+export type UnreadableReason = 'needsFullDiskAccess' | 'needsAdmin' | 'protected' | 'other';
+
 /** A node of a scan. */
 export interface DiskNode {
   id: number;
@@ -541,6 +561,8 @@ export interface DiskNode {
   /** Everything inside has been read. */
   complete: boolean;
   hasChildren: boolean;
+  /** Why an unreadable folder could not be read (the engine decides, by the OS); null for every other node. */
+  unreadableReason: UnreadableReason | null;
 }
 
 /** A sum of folded things. */
@@ -767,6 +789,8 @@ export interface Settings {
   unusual?: UnusualSettings;
   /** The disk map's limits (the engine fills the defaults when absent). */
   disk?: DiskSettings;
+  /** Long operations as jobs: how many run at once (the engine fills the default when absent). */
+  jobs?: JobSettings;
   /** Maintenance windows: when Dyno's own heavier background work may run. */
   maintenance: MaintenanceSettings;
   /** Backup health checks. */
@@ -1878,10 +1902,49 @@ export interface FinderResult {
   large: FoundFile[];
   duplicates: DuplicateGroup[];
   scanned: number;
-  /** The scan stopped early (file or time limit); more exists. */
-  truncated: boolean;
+  /** Folders the walk could not read (no permission, a share that went away); they are left out. */
+  unreadable: number;
+  /** The limit that stopped the scan early, with the sentence to show; `null` when it read everything. */
+  limit: FinderLimitHit | null;
   wastedBytes: number;
 }
+
+export type FinderLimit = 'files' | 'depth' | 'hashBytes';
+
+/** A limit that stopped a scan early. The engine words the message; the page only shows it. */
+export interface FinderLimitHit {
+  limit: FinderLimit;
+  message: string;
+}
+
+// ------------------------------------------------------------------------------------------------------------- jobs
+
+/**
+ * Long operations (find files, read the system logs, check the backups, hash a file, the sleep, boot, app-usage and software
+ * reads) run as jobs in the agent: starting one answers at once with its id, the shell's jobs store follows it through the
+ * `paddock://jobs` events, Cancel is the shell's `job_cancel`, and `jobResult` hands over what a done job produced. Mirrors
+ * `dyno_core::jobs`; the status itself is the shell's `SuJobSnapshot`.
+ */
+export type JobSpec =
+  | { findFiles: { query: FinderQuery } }
+  | { rescanIssues: { query: IssuesQuery } }
+  | 'refreshBackup'
+  | { fileHash: { source: HashSource } }
+  | 'sleepBlockers'
+  | 'bootAnalysis'
+  | 'appUsage'
+  | 'softwareInventory';
+
+/** What a done job produced, tagged by the kind of job. */
+export type JobOutput =
+  | { finder: FinderResult }
+  | { issues: IssuesOverview }
+  | { backup: BackupReport }
+  | { fileHash: FileHashInfo }
+  | { sleep: SleepReport }
+  | { boot: BootReport }
+  | { appUsage: UsageReport }
+  | { software: SoftwareInventory };
 
 export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 

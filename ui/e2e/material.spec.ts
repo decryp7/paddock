@@ -432,3 +432,12 @@ for (const theme of THEMES) {
     }
   });
 }
+
+test('Material controls: tab nav bar links size to their label, so eight tabs fit one row', async ({ page }) => {
+  await open(page, 'dark');
+  const links = section(page).locator('.mat-mdc-tab-nav-bar .mat-mdc-tab-link');
+  await expect(links).toHaveCount(8);
+  const widths = await links.evaluateAll((els) => els.map((e) => ({ min: getComputedStyle(e).minWidth, width: e.getBoundingClientRect().width })));
+  for (const w of widths) expect(w.min).toBe('0px');
+  expect(Math.min(...widths.map((w) => w.width)), 'a short label is narrower than Material\'s own 160 px minimum').toBeLessThan(160);
+});

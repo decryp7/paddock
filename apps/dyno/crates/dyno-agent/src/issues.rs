@@ -11,8 +11,9 @@ use dyno_core::issues::{
 };
 use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_core::time::{Timestamp, DAY, HOUR};
+use paddock_jobs::{JobContext, JobError, Phase};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Condvar, Mutex};
 
 /// How often the sources are read in the background.
 pub const SCAN_EVERY: std::time::Duration = std::time::Duration::from_secs(15 * 60);
@@ -36,7 +37,9 @@ struct State {
 /// The sources, how they were last read, and the schedule.
 pub struct IssueCentre {
     sources: Mutex<Vec<Box<dyn IssueSource>>>,
-    state: Mutex<State>,
+    state: Arc<Mutex<State>>,
+    /// Signalled when a read ends (a read the person asked for waits for the scheduled one on it) and when a waiter is cancelled.
+    ended: Arc<Condvar>,
 }
 
 impl IssueCentre {
@@ -45,11 +48,12 @@ impl IssueCentre {
         let statuses = sources.iter().map(|s| SourceStatus::pending(s.id())).collect();
         IssueCentre {
             sources: Mutex::new(sources),
-            state: Mutex::new(State {
+            state: Arc::new(Mutex::new(State {
                 statuses,
                 last_scan: None,
                 scanning: false,
-            }),
+            })),
+            ended: Arc::new(Condvar::new()),
         }
     }
 
@@ -58,40 +62,118 @@ impl IssueCentre {
         lock(&self.state).last_scan.is_none()
     }
 
-    /// Reads every source now, stores what is new and raises alarms. Returns false when another read is already running.
-    pub fn scan(&self, shared: &Shared) -> bool {
-        let since = {
+    /// Reads every source now, stores what is new and raises alarms. With a `job`, reports each source as a phase with a growing
+    /// count and stops when it is cancelled: what was found is then dropped, the sources' last statuses and the time of the last
+    /// read stay as they were, and nothing is stored. A read that is already running (the scheduled one) is waited for, not
+    /// repeated and not answered with the old state: this returns `false` once that read has ended, `true` after its own read.
+    /// Without a job and with a read running it returns `false` at once.
+    pub fn scan(&self, shared: &Shared, job: Option<&JobContext>) -> Result<bool, JobError> {
+        self.scan_with(shared, job, &|| {})
+    }
+
+    /// [`scan`](Self::scan) with `between` run after the first look at whether a read is running and before the read is claimed:
+    /// the moment a scheduled read can slip in (tests start one there).
+    #[doc(hidden)]
+    pub fn scan_with(&self, shared: &Shared, job: Option<&JobContext>, between: &dyn Fn()) -> Result<bool, JobError> {
+        let mut first = true;
+        let since = loop {
+            // A read is already running: wait for it (a job) or leave it (the schedule).
+            if let Some(j) = job {
+                if lock(&self.state).scanning {
+                    j.phase(Phase::discovering("waiting", "Waiting for the system log read that is running"));
+                    // The waker goes in BEFORE the lock is taken: a token that is already cancelled runs it on the spot, and it
+                    // takes this same lock. Cancel wakes the wait and so does the end of the running read; no polling.
+                    let (state, ended) = (self.state.clone(), self.ended.clone());
+                    let _wake = j.cancel_token().on_cancel(move || {
+                        let _held = lock(&state);
+                        ended.notify_all();
+                    });
+                    let mut st = lock(&self.state);
+                    while st.scanning {
+                        j.check()?;
+                        st = self.ended.wait(st).unwrap_or_else(std::sync::PoisonError::into_inner);
+                    }
+                    j.check()?;
+                    return Ok(false);
+                }
+            }
+            if std::mem::take(&mut first) {
+                between();
+            }
             let mut st = lock(&self.state);
             if st.scanning {
-                return false;
+                if job.is_some() {
+                    // A scheduled read started since the look above: wait for it too, like the check above does.
+                    drop(st);
+                    continue;
+                }
+                return Ok(false);
             }
             st.scanning = true;
             let t = now();
-            st.last_scan.map_or(t.minus(FIRST_DAYS * DAY), |l| l.minus(OVERLAP_MS))
+            break st.last_scan.map_or(t.minus(FIRST_DAYS * DAY), |l| l.minus(OVERLAP_MS));
         };
         let until = now();
-        let mut statuses = Vec::new();
-        let mut found: Vec<Issue> = Vec::new();
-        for source in lock(&self.sources).iter() {
-            let id = source.id();
-            // One misbehaving reader must not take the others (or the agent) down.
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| source.read(since, until))).unwrap_or_else(|_| {
-                Err(dyno_core::ports::PlatformError::Failed(
-                    "This log reader stopped unexpectedly.".into(),
-                ))
-            });
-            statuses.push(SourceStatus::after(id, until, &result));
-            if let Ok(list) = result {
-                found.extend(list);
-            }
-        }
+        // Whatever happens below (a cancel included), the flag must come down.
+        let read = self.read_all(job, since, until);
+        let mut st = lock(&self.state);
+        st.scanning = false;
+        self.ended.notify_all();
+        let (statuses, found) = read?;
+        drop(st);
         let found = collapse_across_sources(found);
         record(shared, &found, until);
         let mut st = lock(&self.state);
         st.statuses = statuses;
         st.last_scan = Some(until);
-        st.scanning = false;
-        true
+        Ok(true)
+    }
+
+    /// Reads the sources one after the other into a result of its own: nothing is shared until the caller keeps it.
+    fn read_all(&self, job: Option<&JobContext>, since: Timestamp, until: Timestamp) -> Result<(Vec<SourceStatus>, Vec<Issue>), JobError> {
+        let sources = lock(&self.sources);
+        let mut statuses = Vec::new();
+        let mut found: Vec<Issue> = Vec::new();
+        for source in sources.iter() {
+            if let Some(j) = job {
+                j.check()?;
+            }
+            let id = source.id();
+            if let Some(j) = job {
+                j.phase(Phase::discovering(
+                    &format!("source-{id:?}"),
+                    &format!("Reading {}", id.label().to_lowercase()),
+                ));
+            }
+            // A source that streams its tool reports a growing count and stops at Cancel; one that does not is a single step
+            // that cannot be interrupted and says so. One misbehaving reader must not take the others (or the agent) down.
+            let controllable = source.controllable();
+            let _step = job
+                .filter(|_| !controllable)
+                .map(|j| j.uncancellable("A system log is being read; Cancel takes effect when it has been read."));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match job {
+                Some(j) if controllable => source.read_controlled(since, until, &crate::jobs::JobControl(j)),
+                _ => source.read(since, until),
+            }))
+            .unwrap_or_else(|_| {
+                Err(dyno_core::ports::PlatformError::Failed(
+                    "This log reader stopped unexpectedly.".into(),
+                ))
+            });
+            drop(_step);
+            if let Some(j) = job {
+                // A cancelled read drops what the tool had given so far.
+                j.check()?;
+                if !controllable {
+                    j.set(result.as_ref().map_or(0, |l| l.len() as u64));
+                }
+            }
+            statuses.push(SourceStatus::after(id, until, &result));
+            if let Ok(list) = result {
+                found.extend(list);
+            }
+        }
+        Ok((statuses, found))
     }
 
     fn snapshot(&self) -> (Vec<SourceStatus>, Option<Timestamp>) {
@@ -184,7 +266,8 @@ pub fn run(shared: &Shared) {
     while !shared.stopped() {
         // Reading the OS logs is heavier work: only inside the maintenance windows, when the user set any.
         if crate::extras::maintenance_open(shared) {
-            shared.issues.scan(shared);
+            // Nobody can cancel the scheduled read, so it cannot end early.
+            let _ = shared.issues.scan(shared, None);
             wait(SCAN_EVERY);
         } else {
             wait(std::time::Duration::from_secs(5 * 60));
