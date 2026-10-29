@@ -7,6 +7,8 @@
 //
 //   node conformance/release/windows-crt-imports.mjs --src-tauri <dir> --bin-dir <dir> [--config <file.json>]...
 //   node conformance/release/windows-crt-imports.mjs <file-or-folder>...
+//   node conformance/release/windows-crt-imports.mjs [--delay-load <dll>]... [--not-direct <dll>]... [--no-import <dll>]...
+//        [--no-network] <file>...
 //
 // The first form checks exactly what the installer ships, named by the app's Tauri configuration (tauri.conf.json, then
 // tauri.windows.conf.json, then each --config in order, merged like Tauri does): the main binary (mainBinaryName, else
@@ -17,6 +19,13 @@
 // links to folders are not followed). Exit 0 when every file is clean, 1 on a finding (an import of the runtime, a file
 // that is missing, unreadable or not a valid PE), 2 when nothing was found to check. Pure Node: runs on the Windows
 // runner, the Linux image and a Mac alike, no dumpbin or objdump needed.
+//
+// Extra rules for a binary that links a library with optional DLLs (Sighter's ONNX Runtime, its ADR 0001), checked on
+// every given file: --delay-load <dll> (the DLL must be delay-loaded, never an ordinary import, so its absence degrades
+// instead of stopping the start), --not-direct <dll> (if imported at all, then only delay-loaded: for a DLL the linker
+// may drop when nothing calls it), --no-import <dll> (the DLL in no import table at all) and --no-network (no import of
+// winhttp.dll, wininet.dll or ws2_32.dll: the binary opens no connection through them; a run-time egress test is still
+// the proof).
 //
 // Limits: a DLL loaded at run time with LoadLibrary is not in any import table, so this check cannot see what it needs;
 // such a DLL must be shipped and listed (bundle.resources) to be checked itself.
@@ -108,6 +117,35 @@ export function peImports(bytes) {
   } catch (e) {
     return { error: e.message };
   }
+}
+
+/** DLLs through which a Windows program opens network connections. */
+export const NETWORK_DLLS = ['winhttp.dll', 'wininet.dll', 'ws2_32.dll'];
+
+/**
+ * The findings of the extra import rules for one file's tables (see the header); empty when it follows them.
+ * @param {{ imports: string[], delayImports: string[] }} tables
+ * @param {{ delayLoad?: string[], notDirect?: string[], noImport?: string[], noNetwork?: boolean }} rules
+ */
+export function ruleFindings(tables, { delayLoad = [], notDirect = [], noImport = [], noNetwork = false } = {}) {
+  const imports = tables.imports.map((d) => d.toLowerCase());
+  const delayed = tables.delayImports.map((d) => d.toLowerCase());
+  const out = [];
+  for (const d of delayLoad.map((x) => x.toLowerCase())) {
+    if (imports.includes(d)) out.push(`imports ${d} directly (it must be delay-loaded)`);
+    else if (!delayed.includes(d)) out.push(`does not delay-load ${d}`);
+  }
+  for (const d of notDirect.map((x) => x.toLowerCase())) {
+    if (imports.includes(d)) out.push(`imports ${d} directly (it must be delay-loaded)`);
+  }
+  for (const d of noImport.map((x) => x.toLowerCase())) {
+    if (imports.includes(d) || delayed.includes(d)) out.push(`imports ${d} (it must not)`);
+  }
+  if (noNetwork) {
+    const net = [...imports, ...delayed].filter((d) => NETWORK_DLLS.includes(d));
+    if (net.length) out.push(`imports ${[...new Set(net)].join(', ')} (a network API)`);
+  }
+  return out;
 }
 
 const isBinary = (p) => ['.exe', '.dll'].includes(extname(p).toLowerCase());
@@ -239,8 +277,9 @@ export function shippedFiles({ srcTauri, binDir, configs = [] }) {
 /**
  * Checks `files`; returns one line per finding (empty when every file is clean).
  * @param {string[]} files
+ * @param {{ delayLoad?: string[], notDirect?: string[], noImport?: string[], noNetwork?: boolean }} [rules] extra import rules (ruleFindings)
  */
-export function check(files) {
+export function check(files, rules = {}) {
   const findings = [];
   for (const f of files) {
     let bytes;
@@ -257,13 +296,14 @@ export function check(files) {
     }
     const bad = [...r.imports, ...r.delayImports].filter(needsRedist);
     if (bad.length) findings.push(`${f}: imports ${[...new Set(bad)].join(', ')} (the VC++ redistributable; link with +crt-static, ADR 0032)`);
+    for (const r2 of ruleFindings(r, rules)) findings.push(`${f}: ${r2}`);
   }
   return findings;
 }
 
-/** Parses the command line: `{ srcTauri, binDir, configs }` or `{ paths }`; throws on a usage error. */
+/** Parses the command line: `{ srcTauri, binDir, configs, rules }` or `{ paths, rules }`; throws on a usage error. */
 export function parseArgs(argv) {
-  const opts = { srcTauri: null, binDir: null, configs: [], paths: [] };
+  const opts = { srcTauri: null, binDir: null, configs: [], paths: [], rules: { delayLoad: [], notDirect: [], noImport: [], noNetwork: false } };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--src-tauri' || a === '--bin-dir' || a === '--config') {
@@ -271,6 +311,12 @@ export function parseArgs(argv) {
       if (!v) throw new Error(`${a} needs a value`);
       if (a === '--config') opts.configs.push(v);
       else opts[a === '--src-tauri' ? 'srcTauri' : 'binDir'] = v;
+    } else if (a === '--delay-load' || a === '--not-direct' || a === '--no-import') {
+      const v = argv[++i];
+      if (!v || v.startsWith('--')) throw new Error(`${a} needs a DLL name`);
+      opts.rules[{ '--delay-load': 'delayLoad', '--not-direct': 'notDirect', '--no-import': 'noImport' }[a]].push(v);
+    } else if (a === '--no-network') {
+      opts.rules.noNetwork = true;
     } else if (a.startsWith('--')) {
       throw new Error(`unknown option ${a}`);
     } else {
@@ -288,16 +334,18 @@ if (isMain(import.meta.url)) {
   try {
     opts = parseArgs(process.argv.slice(2));
   } catch (e) {
-    console.error(`${e.message}\nusage: windows-crt-imports.mjs --src-tauri <dir> --bin-dir <dir> [--config <file.json>]...\n       windows-crt-imports.mjs <file-or-folder>...`);
+    console.error(`${e.message}\nusage: windows-crt-imports.mjs [rules] --src-tauri <dir> --bin-dir <dir> [--config <file.json>]...\n       windows-crt-imports.mjs [rules] <file-or-folder>...\nrules: --delay-load <dll>, --not-direct <dll>, --no-import <dll>, --no-network`);
     process.exit(2);
   }
   const { files, problems } = opts.srcTauri ? shippedFiles(opts) : collect(opts.paths);
-  const findings = [...problems, ...check(files)];
+  const findings = [...problems, ...check(files, opts.rules)];
   for (const f of findings) console.log(`::error::${f}`);
   if (findings.length) process.exit(1);
   if (!files.length) {
     console.error(`::error::no .exe or .dll found to check`);
     process.exit(2);
   }
-  console.log(`${files.length} Windows binaries checked: none needs the VC++ redistributable.`);
+  const { delayLoad, notDirect, noImport, noNetwork } = opts.rules;
+  const extra = [delayLoad.length ? `delay-loads ${delayLoad.join(', ')}` : '', notDirect.length ? `imports ${notDirect.join(', ')} only delay-loaded if at all` : '', noImport.length ? `imports no ${noImport.join(', ')}` : '', noNetwork ? 'imports no network API' : ''].filter(Boolean);
+  console.log(`${files.length} Windows binaries checked: none needs the VC++ redistributable${extra.length ? `; each ${extra.join(', ')}` : ''}.`);
 }

@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cargoBinaryNames, check, collect, mergePatch, needsRedist, peImports, shippedFiles } from '../release/windows-crt-imports.mjs';
+import { cargoBinaryNames, check, collect, mergePatch, needsRedist, parseArgs, peImports, ruleFindings, shippedFiles } from '../release/windows-crt-imports.mjs';
 import { makeApp, pe } from './helpers.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -213,4 +213,50 @@ test('every build of Windows installers runs the check', () => {
   for (const p of ['conformance/ci/tauri-bundle.sh', 'scripts/demo/bundle.sh', '.gitea/workflows/debrief.yml']) {
     assert.match(read(p), /windows-crt-imports\.mjs"? --src-tauri /, `${p} checks the shipped list, not a glob`);
   }
+});
+
+// Sighter's ONNX Runtime (its ADR 0001 decision 4): DirectML delay-loaded in the DirectML build, absent in the CPU-only one,
+// and no network API in either.
+test('the import rules: delay-load, no import and no network, case-insensitively', () => {
+  const dml = { delayLoad: ['DirectML.dll', 'd3d12.dll'], noNetwork: true };
+  assert.deepEqual(ruleFindings({ imports: SYSTEM, delayImports: ['DIRECTML.DLL', 'd3d12.dll'] }, dml), []);
+  assert.deepEqual(ruleFindings({ imports: [...SYSTEM, 'DirectML.dll'], delayImports: [] }, dml), [
+    'imports directml.dll directly (it must be delay-loaded)',
+    'does not delay-load d3d12.dll',
+  ]);
+  assert.deepEqual(ruleFindings({ imports: SYSTEM, delayImports: ['WS2_32.dll', 'directml.dll', 'd3d12.dll'] }, dml), [
+    'imports ws2_32.dll (a network API)',
+  ]);
+  const cpu = { noImport: ['DirectML.dll'], noNetwork: true };
+  assert.deepEqual(ruleFindings({ imports: SYSTEM, delayImports: [] }, cpu), []);
+  assert.deepEqual(ruleFindings({ imports: SYSTEM, delayImports: ['DirectML.dll'] }, cpu), ['imports directml.dll (it must not)']);
+  assert.deepEqual(ruleFindings({ imports: ['WinHTTP.dll', 'wininet.dll'], delayImports: [] }, cpu), ['imports winhttp.dll, wininet.dll (a network API)']);
+  assert.deepEqual(ruleFindings({ imports: ['WinHTTP.dll'], delayImports: [] }), [], 'no rules, no findings');
+  // --not-direct: absent or delay-loaded is fine, an ordinary import is not.
+  const nd = { notDirect: ['dxcore.dll'] };
+  assert.deepEqual(ruleFindings({ imports: SYSTEM, delayImports: [] }, nd), []);
+  assert.deepEqual(ruleFindings({ imports: SYSTEM, delayImports: ['DXCORE.dll'] }, nd), []);
+  assert.deepEqual(ruleFindings({ imports: [...SYSTEM, 'dxcore.dll'], delayImports: [] }, nd), ['imports dxcore.dll directly (it must be delay-loaded)']);
+});
+
+test('the import rules on synthetic PE files and through the CLI', () => {
+  const root = makeApp({
+    'gpu.exe': pe({ imports: SYSTEM, delay: ['DirectML.dll'] }),
+    'eager.exe': pe({ imports: [...SYSTEM, 'DirectML.dll'] }),
+    'cpu.exe': pe({ imports: SYSTEM }),
+    'net.exe': pe({ imports: [...SYSTEM, 'WINHTTP.dll'] }),
+  });
+  const f = (n) => join(root, n);
+  assert.deepEqual(check([f('gpu.exe')], { delayLoad: ['DirectML.dll'] }), []);
+  assert.deepEqual(check([f('eager.exe')], { delayLoad: ['DirectML.dll'] }), [`${f('eager.exe')}: imports directml.dll directly (it must be delay-loaded)`]);
+  assert.deepEqual(check([f('cpu.exe')], { noImport: ['DirectML.dll'], noNetwork: true }), []);
+  assert.deepEqual(check([f('gpu.exe')], { noImport: ['DirectML.dll'] }), [`${f('gpu.exe')}: imports directml.dll (it must not)`]);
+  assert.deepEqual(check([f('net.exe')], { noNetwork: true }), [`${f('net.exe')}: imports winhttp.dll (a network API)`]);
+  const run = (...args) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8' });
+  const ok = run('--delay-load', 'DirectML.dll', '--no-network', f('gpu.exe'));
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.match(ok.stdout, /each delay-loads DirectML\.dll, imports no network API/);
+  assert.equal(run('--no-import', 'DirectML.dll', f('gpu.exe')).status, 1);
+  assert.equal(run('--delay-load').status, 2);
+  assert.deepEqual(parseArgs(['--no-import', 'a.dll', '--not-direct', 'b.dll', '--no-network', 'x.exe']).rules, { delayLoad: [], notDirect: ['b.dll'], noImport: ['a.dll'], noNetwork: true });
 });
