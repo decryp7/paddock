@@ -189,7 +189,7 @@ Pitwall runs native engines on untrusted model files and answers requests from o
 - UI: standalone components, signals, OnPush, CSS custom properties for theme tokens (dark and light), accessible
   markup (real buttons, labels, aria-labels on icon buttons), the `pw` selector prefix.
 - UI building blocks: use **Angular CDK** for behaviour and accessibility (menus, overlays, dialogs, listbox,
-  scrolling) instead of hand-rolling them, and **Angular Material** selectively for complex inputs, themed through
+  scrolling) instead of hand-rolling them, and **Angular Material first** (rule 47: a Material component wherever one fits), themed through
   Pitwall's CSS tokens. Icons use Material's `MatIconRegistry` with Pitwall's own SVGs registered as literals in the
   `pw` namespace (`<mat-icon svgIcon="pw:models">`); no icon fonts and no icon URLs fetched at run time (the CSP
   forbids it). Charts use Apache ECharts with the CVD-checked palette.
@@ -197,6 +197,10 @@ Pitwall runs native engines on untrusted model files and answers requests from o
 
 ## Working practices
 
+- Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
+  `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
+- Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
+  branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.
 - Research official sources before choosing libraries or relying on an engine's or API's behaviour (llama-server
   options, SDK request shapes), and record what you found and when in the ADR or doc comment.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they are available instead of

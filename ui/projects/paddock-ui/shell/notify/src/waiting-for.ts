@@ -108,7 +108,7 @@ export class PdWaitingFor {
   protected readonly status = computed(() => serviceStatus(this.state()?.state ?? null));
   protected readonly icon = computed(() => SU_STATUS_ICON[this.status()]);
   protected readonly line = computed(() => offlineLine(this.subject(), this.label(), this.state()?.repair ?? null));
-  protected readonly stopped = computed(() => `${shortName(this.label())} ${stateWord(this.state()?.state ?? 'down')}`);
+  protected readonly stopped = computed(() => `${shortName(this.label())} ${stateWord(this.state()?.state ?? 'down', this.state()?.cause)}`);
   /** The chip's repair, by the same words; none when nothing repairs it here (the details say what to do). */
   protected readonly repairText = computed(() => {
     const s = this.state();

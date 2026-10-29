@@ -157,22 +157,30 @@ The costs we accept:
    1,000, at most 10,000, paged). Results reach the UI only as typed cells; nothing is bound with
    `[innerHTML]`.
 
-### Later: DuckDB 2.0 and its server mode
+### DuckDB 2.0 and its server mode: do not migrate
 
-DuckDB 2.0 (announced for late 2026) promotes its client/server mode ("Quack", `CONNECT`) to
-stable, alongside a reworked C API, a new storage format and async I/O. When 2.0 is released with a
-patch release, duckdb-rs (or another maintained Rust client) supports it, and the server mode is
-stable on all three platforms, **migrate to it**:
+*Amended 2026-10-29 (user decision).* This section planned to replace the store worker with DuckDB 2.0's own server
+(the Quack protocol, `CONNECT`) once it was stable. **Debrief does not migrate to it**, and Debrief stays local only:
+a shared or remote workspace is not a goal, so there is no revisit plan. The research and measurements are in
+[2026-10-28-duckdb-server-mode.md](../research/2026-10-28-duckdb-server-mode.md) (3M synthetic events, DuckDB 2.0.0,
+macOS arm64). In short:
 
-- Replace the custom worker's engine host with DuckDB's own server process, supervised by Debrief like
-  `llama-server` (ADR 0009): local only, a random port or socket, an access token, external access
-  and extensions disabled. `debrief-store-duck` talks to it through the Rust client; Debrief keeps its own
-  query builder, paging, caps and cancel semantics on top. Tantivy moves into a small Rust sidecar
-  or stays in the Debrief-side adapter.
-- Re-run the spike's benchmarks on 2.0 first (its claimed speedups and the new storage format may
-  change the disk and filtered-scan numbers) and keep the `debrief.store.v1` worker as the fallback until
-  the server mode has proven itself.
-- The `LogStore` port and the equivalence tests make this an adapter change, not an app change.
+- **Write path**: one Quack writer inserts about 115k events/s, the parse threads' Parquet segments about 4.4M/s; four
+  Quack writers run out of memory at the worker's 192 MB limit.
+- **Memory**: the server's footprint reaches about 2 GB while importing at a 192 MB `memory_limit`, and every caller
+  becomes a DuckDB of its own (about 700 MB after a 100k-row fetch, against under 20 MB for a `debrief-ipc` client).
+- **Cancel and progress**: a client's interrupt does not reach the server, the server keeps running a query after its
+  client has gone, and the client gets no progress (ER-18).
+- **Security**: a TCP port on 127.0.0.1 open to every local account (no Unix socket or named pipe), and any token holder
+  gets the full SQL surface (measured: raising the server's memory limit tenfold, reading and writing files), unless
+  locked as in ADR 0030; plugins would need network access through their sandbox (ADR 0017 §6).
+- **Rust and packaging**: no Rust client; duckdb-rs prepared statements fail after `CONNECT`. The `quack` and `httpfs`
+  extensions are not in the prebuilt libduckdb and would have to be shipped and loaded.
+- **Maturity**: a secondary-tier extension whose README still calls it experimental.
+- Interactive queries are no faster over Quack (within 1.5 ms of the worker on every typical query).
+
+The store worker, its Parquet segments and `debrief-ipc` stay. DuckDB 2.0's in-process features are adopted on their
+own merits (ADR 0014, DuckDB 2.0 amendment).
 
 ### Licences and dependencies
 

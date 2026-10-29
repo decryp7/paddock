@@ -66,6 +66,14 @@ paddock_commands::command_table! {
     Mutation [MAIN | DIALOG] => tauri::channels_test,
 }
 
+paddock_dialogs::dialogs! {
+    /// The channels' dialogs (ADR 0026 §3): the secret dialog stores one channel's secret; the remove confirmation calls
+    /// nothing (the page removes the channel after a Remove).
+    pub static DIALOGS;
+    "pd.channels.secret" => Form(Modal) { width: Some(Narrow), commands: &[dialog_callable::channels_set_secret] },
+    "pd.channels.remove" => Decision { instanced: true },
+}
+
 #[cfg(feature = "tauri")]
 pub mod tauri;
 

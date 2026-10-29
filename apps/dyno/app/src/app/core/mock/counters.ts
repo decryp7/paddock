@@ -189,8 +189,8 @@ export class MockCounters {
       return { path, unit, points };
     });
     const events: TimelineEvent[] = [
-      { at: now - span * 0.62, kind: 'cleanup', label: 'Cleanup freed 1.2 GB' },
-      { at: now - span * 0.3, kind: 'throttle', label: 'Lowered the priority of Search indexer' },
+      { at: now - span * 0.62, kind: 'network', label: 'Joined Wi-Fi “Studio”' },
+      { at: now - span * 0.3, kind: 'boot', label: 'macOS started (boot 14.1 s)' },
       { at: now - span * 0.12, kind: 'alert', label: 'Disk queue was high for 2 minutes' },
     ];
     return { from, to: now, series, events };

@@ -170,14 +170,26 @@ pub fn downloaded_dir(data_dir: &Path) -> PathBuf {
 /// job that runs as root in a container (Chrome refuses to start as root otherwise). The product never reads it.
 pub const TEST_NO_SANDBOX_ENV: &str = "SPOTTER_TEST_BROWSER_NO_SANDBOX";
 
-/// Extra flags the tests pass to the test browser: `--no-sandbox` and `--disable-dev-shm-usage` when
-/// [`TEST_NO_SANDBOX_ENV`] is `1`, otherwise none.
+/// The flags [`test_browser_flags_with`] always gives: the tests only talk to loopback servers by IP address, so the test
+/// browser is kept off the network. `--no-proxy-server`: the runner's proxy settings (on Windows the system's, with WPAD
+/// or PAC auto-detection) are never looked up; Chrome already sends no loopback request through a proxy (its implicit
+/// bypass rules, M71 for PAC and M72 for manual proxies, net/docs/proxy.md, read 2026-10-28), but it resolves the
+/// configuration first. The host rule: no host resolves but loopback (the rule applies to IP literals too), so the requests Chrome for Testing 156 makes on its own
+/// even with `--disable-background-networking` (measured 2026-10-28 with `--log-net-log`: www.google.com,
+/// accounts.google.com, update.googleapis.com, clients2.google.com) fail at once instead of reaching real hosts.
+pub const TEST_ISOLATION_FLAGS: [&str; 2] = [
+    "--no-proxy-server",
+    "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1",
+];
+
+/// Extra flags the tests pass to the test browser: [`TEST_ISOLATION_FLAGS`], plus `--no-sandbox` and
+/// `--disable-dev-shm-usage` when [`TEST_NO_SANDBOX_ENV`] is `1`.
 pub fn test_browser_flags_with(env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
+    let mut flags: Vec<String> = TEST_ISOLATION_FLAGS.iter().map(|f| f.to_string()).collect();
     if env(TEST_NO_SANDBOX_ENV).as_deref() == Some("1") {
-        vec!["--no-sandbox".into(), "--disable-dev-shm-usage".into()]
-    } else {
-        Vec::new()
+        flags.extend(["--no-sandbox".into(), "--disable-dev-shm-usage".into()]);
     }
+    flags
 }
 
 /// [`test_browser_flags_with`] for the process environment.
@@ -274,11 +286,14 @@ mod tests {
     #[test]
     fn the_no_sandbox_switch_is_only_honoured_when_exactly_one() {
         let with = |v: &'static str| move |k: &str| (k == TEST_NO_SANDBOX_ENV).then(|| v.to_string());
-        assert_eq!(test_browser_flags_with(&with("1")), ["--no-sandbox", "--disable-dev-shm-usage"]);
+        let isolated: Vec<String> = TEST_ISOLATION_FLAGS.iter().map(|f| f.to_string()).collect();
+        let mut sandboxless = isolated.clone();
+        sandboxless.extend(["--no-sandbox".into(), "--disable-dev-shm-usage".into()]);
+        assert_eq!(test_browser_flags_with(&with("1")), sandboxless);
         for v in ["", "0", "true", "yes"] {
-            assert!(test_browser_flags_with(&with(v)).is_empty(), "{v}");
+            assert_eq!(test_browser_flags_with(&with(v)), isolated, "{v}");
         }
-        assert!(test_browser_flags_with(&|_| None).is_empty());
+        assert_eq!(test_browser_flags_with(&|_| None), isolated);
     }
 
     #[test]

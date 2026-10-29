@@ -1,13 +1,14 @@
-import { afterNextRender, ChangeDetectionStrategy, Component, effect, ElementRef, inject, Injector, input, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { formatBytes } from '@decryp7/paddock-ui/format';
-import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import { inSentence } from '@decryp7/paddock-ui/shell/storage';
 
 /**
  * The clear confirmation (a modal decision, one window per question): it names what will be removed and how much, and says
- * whether it is the user's own data. Keep is the default (Enter, Escape, focus on opening); Clear is the danger action and is
- * never the default. It calls nothing: it resolves `true` for Clear and `false` for Keep, and the page asks the engine. A window
- * opened without anything to clear says so inline, with a Close button, instead of asking a question about nothing.
+ * whether it is the user's own data. Its actions are declared (ADR 0026 §2): Keep is the way out and has the focus and Enter;
+ * Clear (Delete for the user's own data), labelled with the heading's verb and object, is the destructive answer and is never the Enter target. It calls nothing: it
+ * answers `true` and is dismissed by Keep, and the page asks the engine. A window opened without anything to clear says so
+ * inline, with a Close.
  */
 @Component({
   selector: 'pd-storage-confirm-dialog',
@@ -21,36 +22,22 @@ import { inSentence } from '@decryp7/paddock-ui/shell/storage';
         } @else {
           <p class="pd-sc__text pd-sc__muted">{{ t.cacheNote }}</p>
         }
-        <div class="pd-sc__actions">
-          <button type="button" class="pd-sc__btn pd-sc__btn--danger" data-testid="storage-confirm-yes" (click)="ref.close(true)">{{ t.clear }}</button>
-          <button #keep type="button" class="pd-sc__btn" data-default data-dialog-close data-testid="storage-confirm-keep" (click)="ref.close(false)">{{ t.keep }}</button>
-        </div>
       </div>
     } @else {
       <div class="pd-sc">
         <p class="pd-sc__error" role="alert" data-testid="storage-confirm-invalid">{{ t.invalid }}</p>
-        <div class="pd-sc__actions">
-          <button type="button" class="pd-sc__btn" data-dialog-close data-testid="storage-confirm-close" (click)="ref.close()">{{ t.close }}</button>
-        </div>
       </div>
     }
   `,
   styles: `
-    :host { display: block; color: var(--pd-text); min-width: 0; }
+    :host { display: block; min-width: 0; }
     .pd-sc { display: flex; flex-direction: column; gap: var(--pd-space-3); }
     .pd-sc__text, .pd-sc__error { margin: 0; overflow-wrap: anywhere; }
     .pd-sc__muted { color: var(--pd-text-muted); }
     .pd-sc__error { padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); }
-    .pd-sc__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--pd-space-2); }
-    .pd-sc__btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .pd-sc__btn--danger { background: var(--pd-danger-fill); border-color: var(--pd-danger-fill); color: var(--pd-on-danger); }
-    .pd-sc__btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
   `,
 })
-export class PdStorageConfirmDialog {
-  protected readonly ref = inject<DialogRef<boolean>>(DIALOG_REF);
-  private readonly injector = inject(Injector);
-  private readonly keep = viewChild<ElementRef<HTMLButtonElement>>('keep');
+export class PdStorageConfirmDialog implements DialogContent<boolean> {
 
   /** What will be cleared, as the page names it ("Cache", "Logs", "Logs and Models"). */
   readonly what = input('');
@@ -60,7 +47,6 @@ export class PdStorageConfirmDialog {
   readonly data = input(false);
 
   protected readonly t = {
-    clear: $localize`:@@pd.storage.confirm-yes:Clear`,
     keep: $localize`:@@pd.storage.confirm-keep:Keep`,
     close: $localize`:@@pd.storage.confirm-close:Close`,
     dataWarning: $localize`:@@pd.storage.confirm-data:This is your own data. It cannot be rebuilt, and clearing it cannot be undone.`,
@@ -72,20 +58,33 @@ export class PdStorageConfirmDialog {
     return this.what().trim() !== '';
   }
 
-  /** The facts the title does not repeat: how much goes. */
+  /** Keep and the destructive answer, worded as the heading ("Clear cache", "Delete logs"); a window without anything to clear offers only Close. */
+  readonly dialogActions = computed<readonly DialogAction<boolean>[]>(() =>
+    this.valid()
+      ? [
+          { kind: 'dismiss', id: 'keep', label: this.t.keep },
+          { kind: 'answer', id: 'clear', label: this.yesLabel(), role: 'destructive', answer: () => true },
+        ]
+      : [{ kind: 'dismiss', id: 'close', label: this.t.close }],
+  );
+
+  /** The question, as the decision's heading: Delete for the user's own data, Clear for a cache (ADR 0026: icon, heading, message). */
+  readonly dialogHeading = computed(() => {
+    if (!this.valid()) return null;
+    const what = inSentence(this.what());
+    return this.data() ? $localize`:@@pd.storage.confirm-title-data:Delete ${what}:what:?` : $localize`:@@pd.storage.confirm-title:Clear ${what}:what:?`;
+  });
+
+  /** The destructive button: the heading's verb and object without the question mark. */
+  private yesLabel(): string {
+    const what = inSentence(this.what());
+    return this.data() ? $localize`:@@pd.storage.confirm-yes-data:Delete ${what}:what:` : $localize`:@@pd.storage.confirm-yes:Clear ${what}:what:`;
+  }
+
+  /** The facts the heading does not repeat: how much goes. */
   protected question(): string {
     const size = formatBytes(this.bytes());
     return $localize`:@@pd.storage.confirm-question:Up to ${size}:size: is removed.`;
   }
 
-  constructor() {
-    // The title names what is cleared; it is known only once the opener's inputs are set (a side effect on the window's title).
-    effect(() => {
-      if (this.valid()) this.ref.setTitle?.($localize`:@@pd.storage.confirm-title:Clear ${inSentence(this.what())}:what:?`);
-    });
-    // Keep has the focus: a stray Enter never clears anything.
-    effect(() => {
-      if (this.valid()) afterNextRender(() => this.keep()?.nativeElement.focus(), { injector: this.injector });
-    });
-  }
 }

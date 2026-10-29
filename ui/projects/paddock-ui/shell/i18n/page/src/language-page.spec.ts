@@ -29,7 +29,7 @@ async function open(shipped: string[], storage = new MemoryLanguage()) {
     fixture,
     radios: () => [...el.querySelectorAll<HTMLInputElement>('input[type=radio]')],
     choose: async (value: string) => {
-      const r = el.querySelector<HTMLInputElement>(`[data-testid="language-${value}"]`);
+      const r = el.querySelector<HTMLInputElement>(`[data-testid="language-${value}"] input`);
       r?.click();
       await fixture.whenStable();
     },
@@ -44,7 +44,7 @@ describe('the Language page', () => {
     expect(p.radios().map((r) => r.value)).toEqual(['system', 'en', 'de', 'fr']);
     expect(p.radios().filter((r) => r.checked).map((r) => r.value)).toEqual(['de']);
     expect(p.el.textContent).toContain('Deutsch');
-    expect(p.el.querySelector('[role=radiogroup]')?.getAttribute('aria-labelledby')).toBe('pd-language-title');
+    expect(p.el.querySelector('mat-radio-group')?.getAttribute('aria-labelledby')).toBe('pd-language-title');
     // The window runs in English, the saved choice is German: the restart is offered from the start.
     expect(p.el.querySelector('[data-testid="language-restart"]')).not.toBeNull();
   });

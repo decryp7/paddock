@@ -22,6 +22,14 @@ Kept short on purpose; each line links to where it is described.
 Dropped on purpose: remote sources (SSH, SMB, Seq, Elasticsearch, Loki, Application Insights; 2026-10-18), WASM plugins and a
 plugin catalogue (2026-10-18), the CLR Profiling API "deep mode" agent, and the AI's own web search (replaced by the browser).
 
+## Next: Debrief 1.3
+
+- **Code checks with Pacenotes** (Pacenotes plan
+  [2026-10-29-first-release-plan.md](../../pacenotes/docs/plans/2026-10-29-first-release-plan.md), package BR1): ask
+  Pacenotes over MCP whether a log line, exception or config key matches the code, show the verdict with its evidence
+  and confidence, deep links both ways, and "not installed" with a next step. After Debrief 1.2 and once Pacenotes'
+  bridge exists.
+
 ## Open: more sources
 
 - **Format gaps found with real-world samples** (October 2026):
@@ -50,7 +58,6 @@ plugin catalogue (2026-10-18), the CLR Profiling API "deep mode" agent, and the 
 
 ## Open: platform
 
-- **Store**: moving to DuckDB 2.0's server mode once it is released and supported.
 - **Signing and notarisation**: needs certificates and a self-hosted Mac runner (see [releasing.md](releasing.md)).
 
 ## Engineering follow-ups

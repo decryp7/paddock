@@ -181,8 +181,8 @@ The app reads untrusted, possibly huge files and renders their content:
   light), accessible markup (real buttons, labels, aria-labels on icon buttons).
 - UI building blocks: use **Angular CDK** (`@angular/cdk`: menu, overlay, dialog, a11y, listbox,
   scrolling, drag-drop) for behaviour and accessibility instead of hand-rolling them, and
-  **Angular Material** selectively for complex inputs (e.g. slide toggle, tooltip, datepicker,
-  autocomplete), themed through Debrief's CSS tokens so the look stays consistent. Icons use Angular
+  **Angular Material first** (rule 47: a Material component wherever one fits, e.g. table, menu, tooltip, tabs,
+  select, slide toggle, datepicker, autocomplete), themed through Debrief's CSS tokens so the look stays consistent. Icons use Angular
   Material's `MatIconRegistry` with Debrief's own themed SVG icon set registered as literals in the
   `debrief` namespace (`<mat-icon svgIcon="debrief:timeline">`, wrapped by `<debrief-icon>`); no icon fonts
   and no icon URLs fetched at runtime (the CSP forbids it).
@@ -191,6 +191,10 @@ The app reads untrusted, possibly huge files and renders their content:
 
 ## Working practices
 
+- Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
+  `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
+- Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
+  branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.
 - Research before choosing libraries or patterns when unsure, and prefer
   well-maintained, permissively licensed (MIT/Apache-2.0) dependencies.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they

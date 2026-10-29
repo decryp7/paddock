@@ -90,7 +90,6 @@ describe('ExtrasStore: file finder', () => {
     await store.chooseFolder();
     expect(store.folder()).toBe('/Users/sam/Projects');
     expect(store.finder().data?.large).toHaveLength(8);
-    expect(store.selected().sort()).toEqual(['d1b', 'd1c', 'd2b']);
   });
 
   it('shows a dialog failure as the finder error', async () => {
@@ -114,51 +113,6 @@ describe('ExtrasStore: file finder', () => {
     expect(store.finder().data?.duplicates.map((g) => g.bytesEach)).toEqual([expect.any(Number)]);
   });
 
-  it('toggles, clears and resets the selection', async () => {
-    const { store } = setup();
-    await store.chooseFolder();
-    store.toggleFile('l1');
-    expect(store.selected()).toContain('l1');
-    store.toggleFile('l1');
-    expect(store.selected()).not.toContain('l1');
-    store.clearSelection();
-    expect(store.selected()).toEqual([]);
-    store.resetSelection();
-    expect(store.selected()).toHaveLength(3);
-  });
-
-  it('resetting without a result leaves nothing selected', () => {
-    const { store } = setup();
-    store.resetSelection();
-    expect(store.selected()).toEqual([]);
-  });
-
-  it('removes the selection, tells the person and searches again', async () => {
-    const { store, notifier } = setup();
-    await store.chooseFolder();
-    store.toggleFile('l1');
-    const out = await store.remove('quarantine');
-    expect(out).toMatchObject({ deleted: 4, quarantineId: 'q-find-1' });
-    expect(notifier.toasts().at(-1)?.text).toMatch(/^Moved 4 files/);
-    expect(store.finder().data?.large.map((f) => f.id)).not.toContain('l1');
-    expect(store.removing()).toBe(false);
-  });
-
-  it('says so when nothing moved, and keeps the engine refusal next to the list', async () => {
-    const { store, notifier, mock } = setup();
-    expect(await store.remove('quarantine')).toBeNull();
-    await store.chooseFolder();
-    vi.spyOn(mock, 'removeFoundFiles').mockResolvedValueOnce({ freedBytes: 0, deleted: 0, failed: [{ path: '/x', reason: 'in use' }], quarantineId: null });
-    await store.remove('recycleBin');
-    expect(notifier.toasts().at(-1)).toMatchObject({ text: 'Nothing was moved', tone: 'warn' });
-    store.clearSelection();
-    expect(await store.remove('recycleBin')).toBeNull();
-    store.toggleFile('d2a');
-    store.toggleFile('d2b');
-    expect(await store.remove('recycleBin')).toBeNull();
-    expect(store.removeError()?.message).toContain('at least one copy');
-    expect(store.removing()).toBe(false);
-  });
 });
 
 describe('ExtrasStore: inventory report and maintenance', () => {

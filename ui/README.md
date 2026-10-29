@@ -47,9 +47,8 @@ providers: [provideShellVersionCheck(ipc.invoke) /* never holds the start-up */,
 ```
 
 The app's checks over its own registry, in its specs: `assertContributionsValid` (the lint), the boot-every-dialog
-harness and `dialogTableProblems` with `{ ...APP_COMMANDS, ...SHELL_COMMANDS }`, `dialog-contracts.json` and
-`paddock-manifest.json` written from the registry (`dialogContractFile`, `buildManifest`; written in write mode, compared
-otherwise) and checked in Rust by `paddock_shell::Builder::problems` (see `crates/README.md`).
+harness and `dialogTableProblems` with `{ ...APP_COMMANDS, ...SHELL_COMMANDS }`, and `paddock-manifest.json` written
+from the registry (`buildManifest`; written in write mode, compared otherwise) and checked in Rust by `paddock_shell::Builder::problems` (see `crates/README.md`).
 
 ## Use
 
@@ -439,17 +438,24 @@ export const RENAME_DIALOG = defineDialog({
   page), `<pd-dialog-host />` in the root template, `openDialog: openDialogPort()` in `SHELL_PORTS`. Open with
   `inject(DialogService).open(RENAME_DIALOG, { inputs: { current } }).closed` (resolves to `string | undefined`; the inputs
   are typed from the content component's `input()`s).
-- Content: inject `DIALOG_REF` and call `close(result)`; inputs set the component's `input()`s; `dialogCanClose()` may
-  keep it open; mark a Close/Cancel with `data-dialog-close` (else the shell adds one) and the default with `data-default`.
+- Definition: `defineDialog(DIALOG_CONTRACTS['sd.rename'], { title, result: type<string>(), load })`. The contract (kind,
+  modality, width, preferred height, instancing, required choice, commands) is Rust's `dialogs!` table, generated into the
+  owner's `generated/dialog-contracts.ts` (ADR 0026 §3); TypeScript adds only what it alone knows. Specs make made-up
+  contracts with `fakeDialogContract` (`shell/testing`).
+- Content: declares its footer as `dialogActions` (answer, run and dismiss actions with roles; the frame orders them per OS,
+  runs Enter, gives the first focus, shows busy and rejected states; ADR 0026 §2), and optionally `dialogStatus`,
+  `dialogMinBodyHeight`, `dialogHeader`. It draws no footer (`paddock/dialog-frame-footer`). Inputs set the component's
+  `input()`s; `dialogCanClose()` may keep it open; a form marks its first field `data-autofocus`; a body that holds the
+  choice answers through `DIALOG_REF.answer`. The opener's `closed` resolves a `DialogOutcome`. Shared confirmation:
+  `pd.confirm` (`@decryp7/paddock-ui/shell/confirm`). Specs: `renderFramed`, `createFramed` (`shell/testing`).
 - Dialog window: in `main.ts`, `parseDialogRoute(location.hash)`; for a dialog route `mountDialogWindowHost()` and
   `bootstrapApplication(DialogShell, dialogWindowConfig({ dialogs, providers: dialogBase(), io, route }))`.
-- Contracts: a spec writes `serializeDialogContracts(dialogContractFile(dialogs, { base }))` to `src-tauri/dialog-contracts.json`
-  and compares it on every run; Rust reads it with `paddock_dialogs::Dialogs::from_json`.
+- Contracts: Rust's (`paddock_dialogs::dialogs!`), registered with `paddock_shell::Builder::dialogs(&[&dialogs::DIALOGS])`; a
+  command a contract names is checked by the compiler.
 - Checks every app runs (`shell/testing`): `assertDialogBoots(def, { dialogs, providers: dialogBase(), inputs })` per dialog
   (missing provider, empty or failed body, undeclared command sent at start, Close/Escape per kind, fit per kind),
-  `dialogTableProblems(dialogs, APP_COMMANDS, base)`, and `npx paddock-check-dialog-commands --config paddock-dialog-commands.json`
-  (what a click could send, in both directions; see the header of `bin/paddock-check-dialog-commands.mjs`). The shell
-  demo runs all three (`npm run check:dialogs`).
+  and `dialogTableProblems(dialogs, APP_COMMANDS, base)`. The TypeScript call-graph check (`paddock-check-dialog-commands`)
+  is gone: a command that does not exist or is closed to dialogs does not compile in Rust (ADR 0026 §3).
 
 ### Theme and language (`@decryp7/paddock-ui/shell`, `/shell/i18n`, plan S15)
 

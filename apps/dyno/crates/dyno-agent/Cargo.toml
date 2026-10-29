@@ -1,6 +1,6 @@
 [package]
 name = "dyno-agent"
-description = "Dyno's background agent: sampling, history, rules, cleanup and the plugin host"
+description = "Dyno's background agent: sampling, history, alarms and the plugin host"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -20,9 +20,7 @@ dyno-plugin-host.workspace = true
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde.workspace = true
 serde_json.workspace = true
-toml.workspace = true
 thiserror.workspace = true
-trash = "5"
 # The diagnostics bundle (MIT; the same build as Debrief's: deflate via the Rust zlib-rs, no C code).
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
@@ -33,7 +31,6 @@ sha2 = "0.10"
 libc = "0.2"
 
 [dev-dependencies]
-dyno-helper.workspace = true
 plist = "1"
 tempfile.workspace = true
 

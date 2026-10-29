@@ -5,8 +5,9 @@ decision or a lesson; the reasons are in [lessons.md](lessons.md). Each app's `A
 changes here, every app's copy is updated in the same change.
 
 ## Way of working
-1. **One large app at a time.** Finish the current large app before starting another; parallel agents only within that
-   app. Small, independent releases (separate app folders, serialized tags) may run alongside it (amended 2026-10-28).
+1. **One release at a time.** Release-critical work comes first. Other apps may progress in parallel only while load and
+   CI capacity allow, and only if they don't change shared code (`crates/`, `ui/`) the release depends on; tags stay
+   serialized (amended twice on 2026-10-28; ER-1).
 2. **Every agent works in its own git worktree** with its own `CARGO_TARGET_DIR` and its own e2e port; the main checkout
    stays on `main` for the coordinator.
 3. **Tests in a branch: only the affected ones** (touched crates, touched specs, related Playwright files), with
@@ -130,6 +131,33 @@ changes here, every app's copy is updated in the same change.
     8 GB model to name 2,000 log names after every import), its answers change with the model and cannot be explained, and
     rules, packs and the logs' own metadata were measured as good or better for the same job.
 
+## Components (user, 2026-10-28)
+47. **Material first.** Use Angular Material components wherever one fits (tables, menus, tooltips, tabs, selects,
+    toggles, chips, steppers, trees, progress, snack bars…), and Angular CDK for behaviour Material doesn't cover;
+    hand-roll only what neither provides, with the reason in the component's doc comment. Material is themed through the
+    `--pd-*` tokens (one shared theme), CSP-safe. *Why:* Material is widely used and tested; hand-rolled components cost
+    bugs it already solves.
+
+## Benchmarks (user, 2026-10-29)
+48. **Every quoted benchmark run is recorded.** Any benchmark or performance number quoted anywhere is first recorded in
+    the owning app's `docs/performance.md` (shared code: `docs/benchmarks.md`) as a results block in the template of
+    [benchmarks.md](benchmarks.md), newest first. "Anywhere" means an ADR, research note, plan, CHANGELOG, commit message,
+    pull request or lesson. The block gives date, commit, machine, load, build, synthetic corpus and generator, the exact
+    command with env vars, the number and kind of runs, the numbers with the budget and verdict, and the memory measure
+    (physical footprint, rule 26). The quoting document links to the block. A number without a block is not evidence for a
+    decision or a budget. *Why:* results were scattered across ADRs, branches and expiring job logs, often without
+    machine, load or build, so they could not be compared or reproduced, and stale numbers kept being quoted.
+
+## CI economy (user, 2026-10-29)
+50. **CI runs only what a change needs, once.**
+    (a) At most one CI run per branch head. Before dispatching, cancel any queued run on the same branch with an older head.
+    (b) Do not dispatch while review fixes are pending. Dispatch once after the last fix, and do not re-dispatch just to
+    refresh against main; merge main right before landing.
+    (c) A branch already merged into another branch gets no CI of its own.
+    (d) Docs-only changes land after the local conformance checks, without waiting for CI.
+    (e) Branch runs use the affected plan (rule 3); the full gates run once on main or at release.
+    *Why:* CI runners are the scarcest resource, and every wasted run delays a release.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:
@@ -144,5 +172,5 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
   try is fine but is never published. Never tag a `[skip ci]` commit.
 - **Rules 39 and 42:** shared code is moved to `crates/` or `ui/` and adopted by the app **in the same change**; there is
   no publish-and-consume step. "Consume the published version" becomes "use the in-tree version".
-- Rule 1 is about attention and load, not repos (amended 2026-10-28: one large app at a time; small, independent releases
-  may run alongside it).
+- Rule 1 is about attention, load, CI capacity and shared-code conflicts, not repos (amended 2026-10-28: one release at a
+  time; other apps only within those limits).

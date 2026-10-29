@@ -4,7 +4,7 @@ import { formatDuration } from '../../shared/format';
 import { AlarmsStore } from '../../state/alarms.store';
 import { TABLE_CSS } from './alarms-css';
 
-/** How the built-in alerts behave: time to acknowledge, the noisiest rules (with Mute) and the engine's tuning suggestions. */
+/** How the built-in alerts behave: time to acknowledge, the noisiest rules (with Mute) and the engine's suggestions. */
 @Component({
   selector: 'dy-alarm-stats',
   imports: [AsyncState],
@@ -39,7 +39,7 @@ import { TABLE_CSS } from './alarms-css';
             <div>
               <h3>Suggestions</h3>
               @if (s.suggestions.length === 0) {
-                <p class="lead">Nothing to tune. Your alerts look healthy.</p>
+                <p class="lead">Nothing to adjust. Your alerts look healthy.</p>
               } @else {
                 <ul class="sugg">
                   @for (g of s.suggestions; track $index) {

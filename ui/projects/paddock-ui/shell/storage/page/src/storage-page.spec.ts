@@ -1,3 +1,5 @@
+import { answered, DISMISSED } from '@decryp7/paddock-ui/shell';
+import { vi } from 'vitest';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
@@ -8,6 +10,15 @@ async function settle(rounds = 12): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
 }
 
+/** Waits until every pd-table on the page has drawn what it shows: its rows, or its empty, error or loading state (Material's table in the CDK viewport draws its rows in the next frame). */
+async function tablesDrawn(el: HTMLElement): Promise<void> {
+  await vi.waitFor(() => {
+    for (const t of el.querySelectorAll('pd-table')) {
+      if (!t.querySelector('.pd-body [role="row"], .pd-empty')) throw new Error('pd-table has not drawn its rows yet');
+    }
+  });
+}
+
 const text = (el: Element): string => (el.textContent ?? '').replace(/\s+/g, ' ').trim();
 
 /** The dialog service as the page uses it: records what was opened and answers like the confirmation window. */
@@ -16,7 +27,7 @@ class FakeDialogs {
   answer: boolean | undefined = true;
   open(id: string, options: { inputs?: Record<string, unknown> } = {}) {
     this.opened.push({ id, inputs: options.inputs ?? {} });
-    return { closed: Promise.resolve(this.answer), close: () => undefined };
+    return { closed: Promise.resolve(this.answer === undefined ? DISMISSED : answered(this.answer)), dismiss: () => undefined };
   }
 }
 
@@ -49,6 +60,8 @@ describe('the Storage page', () => {
       await fixture.whenStable();
       await settle();
       await fixture.whenStable();
+      await tablesDrawn(el);
+      await fixture.whenStable();
     };
     await flush();
     const q = (id: string): HTMLElement | null => el.querySelector(`[data-testid="${id}"]`);
@@ -79,7 +92,7 @@ describe('the Storage page', () => {
       await flush();
       return items;
     };
-    return { h, dialogs, el, q, click, flush, row, inline, menu, menuItems };
+    return { fixture, h, dialogs, el, q, click, flush, row, inline, menu, menuItems };
   }
 
   it('lists what the app keeps in one shared table, one line per row, grouped by what it is, with lower bounds written in words', async () => {
@@ -214,6 +227,7 @@ describe('the Storage page', () => {
     await p.h.next();
     await p.flush();
     expect(text(p.q('storage-working')!)).toContain('Measuring Cache');
+    expect(p.q('storage-working')!.querySelector('mat-progress-bar')?.getAttribute('role')).toBe('progressbar');
     await p.h.all();
     await p.flush();
     const tree = p.q('storage-tree')!;
@@ -246,5 +260,14 @@ describe('the Storage page', () => {
     p.h.memory.send({ state: 'tree', tree: { id: 'models', capped: true, root: { name: 'Models', bytes: 5, folded: 0, children: [] } } });
     await p.flush();
     expect(p.q('storage-tree-capped')?.textContent).toContain('stopped early');
+  });
+
+  it('fills the progress bar from the counts, and leaves it empty (indeterminate) while the total is unknown', async () => {
+    const p = await open();
+    const percent = (p.fixture.componentInstance as unknown as { percent(x: { done: number; total: number | null }): number }).percent;
+    expect(percent({ done: 5, total: 20 })).toBe(25);
+    expect(percent({ done: 30, total: 20 })).toBe(100);
+    expect(percent({ done: 3, total: null })).toBe(0);
+    expect(percent({ done: 0, total: 0 })).toBe(0);
   });
 });

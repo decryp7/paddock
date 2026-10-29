@@ -27,9 +27,7 @@ import { isMain } from '../conformance/src/util/is-main.mjs';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * What is never copied: build output, installed packages, Tauri's generated schemas, the demo's own lock file, and the
- * dialog command check's config (paddock-check-dialog-commands walks the shell's TypeScript sources, which the npm
- * package does not ship: outside this repository it cannot follow a dialog into the shell yet).
+ * What is never copied: build output, installed packages, Tauri's generated schemas and the demo's own lock file.
  */
 const TEMPLATES = {
   'shell-demo': { id: 'shell-demo', title: 'Paddock Shell Demo', readme: 'apps/shell-demo/README.md', section: 'Start a new app from the demo' },
@@ -38,7 +36,7 @@ const TEMPLATES = {
 /** The window accents an app can name (`SU_ACCENTS` of `@decryp7/paddock-ui`). */
 const ACCENTS = ['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter', 'pacenotes', 'sighter', 'graphite'];
 
-const SKIP = new Set(['node_modules', 'target', 'gen', 'dist', 'Cargo.lock', '.angular', 'paddock-dialog-commands.json']);
+const SKIP = new Set(['node_modules', 'target', 'gen', 'dist', 'Cargo.lock', '.angular']);
 
 // ---------------------------------------------------------------------------------------------------------------- pure
 
@@ -154,7 +152,6 @@ export function rustRewrites({ id, name, identifier }, versions) {
       ['pub const APP_NAME: &str = "Paddock Shell Demo";', `pub const APP_NAME: &str = "${name}";`],
       ['"https://dev.decryptology.net/decryp7/paddock/releases"', `"https://dev.decryptology.net/decryp7/${id}/releases"`],
       ['.homepage("https://dev.decryptology.net/decryp7/paddock")', `.homepage("https://dev.decryptology.net/decryp7/${id}")`],
-      ['include_str!("../../../../ui/projects/shell-demo/dialog-contracts.json")', 'include_str!("../../dialog-contracts.json")'],
       ['include_str!("../../../../ui/projects/shell-demo/paddock-manifest.json")', 'include_str!("../../paddock-manifest.json")'],
       ['include_str!("../../CHANGELOG.md")', 'include_str!("../../../CHANGELOG.md")'],
       ['include_str!("../../../../LICENSE-MIT")', 'include_str!("../../../LICENSE-MIT")'],
@@ -197,6 +194,9 @@ export function uiRewrites({ id, name }) {
       ["'https://dev.decryptology.net/decryp7/paddock/releases'", `'https://dev.decryptology.net/decryp7/${id}/releases'`],
     ],
     'src/app/generated/app-commands.ts': [['cd apps/shell-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app', 'cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app']],
+    'src/app/generated/dialog-contracts.ts': [
+      ['cd apps/shell-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app', 'cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app'],
+    ],
     'src/index.html': [['<title>Paddock Shell Demo</title>', `<title>${name}</title>`], ['Starting shell demo&hellip;', `Starting ${name}&hellip;`]],
     'tsconfig.app.json': [
       ['"extends": "../../tsconfig.json"', '"extends": "./tsconfig.json"'],
@@ -227,11 +227,11 @@ export function workbenchRustRewrites({ id, name, identifier }, versions) {
       ['pub const APP_ID: &str = "workbench-demo";', `pub const APP_ID: &str = "${id}";`],
       ['pub const APP_NAME: &str = "Paddock Workbench Demo";', `pub const APP_NAME: &str = "${name}";`],
       ['`WORKBENCH_DEMO_HOME`', `\`${id.toUpperCase().replaceAll('-', '_')}_HOME\``],
-      ['include_str!("../../../../ui/projects/workbench-demo/dialog-contracts.json")', 'include_str!("../../dialog-contracts.json")'],
     ],
     'tests/app.rs': [
       ['use paddock_workbench_demo::', `use ${lib}::`],
       ['app_dir().join("../../../ui/projects/workbench-demo")', 'app_dir().join("..")'],
+      ['"cd apps/workbench-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app"', '"cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app"'],
       ['snapshot["app"], "Paddock Workbench Demo"', `snapshot["app"], ${JSON.stringify(name)}`],
     ],
     'tauri.conf.json': [
@@ -261,6 +261,7 @@ export function workbenchUiRewrites({ name, accent }) {
     ],
     'src/index.html': [['<title>Paddock Workbench Demo</title>', `<title>${name}</title>`], ['Starting workbench demo&hellip;', `Starting ${name}&hellip;`]],
     'src/main-window.ts': [["'Workbench demo'", JSON.stringify(name).replaceAll('"', "'")]],
+    'src/app/generated/dialog-contracts.ts': [['cd apps/workbench-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app', 'cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app']],
     'src/app/views/orientation-view.ts': [['<h1>Workbench demo</h1>', `<h1>${name}</h1>`]],
     'tsconfig.app.json': [
       ['"extends": "../../tsconfig.json"', '"extends": "./tsconfig.json"'],
@@ -325,7 +326,8 @@ export function e2eSmoke({ id, name, template = 'shell-demo' }) {
   const config = `import { paddockConfig } from '@decryp7/paddock-e2e';
 
 // ${name}'s end-to-end specs (plan X39): Chromium in a branch (\`npm run e2e\`), WebKit too on the combined result and in CI.
-export default paddockConfig({ app: '${id}', defaultPort: 4200, serve: (port) => \`npx ng serve --port \${port}\` });
+// buildGuard 'none': the app uses the published @decryp7/paddock-ui from node_modules, not ui/dist (an app mapped to ui/dist says 'ui-dist' and uiRoot).
+export default paddockConfig({ app: '${id}', defaultPort: 4200, buildGuard: 'none', serve: (port) => \`npx ng serve --port \${port}\` });
 `;
   const ready = workbench ? "page.locator('pd-dock [role=tab]').first()" : "page.locator('#pd-main')";
   const extra = workbench

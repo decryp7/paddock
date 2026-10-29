@@ -62,7 +62,7 @@ export function matrixIndex(m: Matrix): ReadonlyMap<string, MatrixCell> {
     .pd-view-matrix__table { border-collapse: collapse; font-size: var(--pd-text-body); }
     th, td { padding: var(--pd-space-1) var(--pd-space-3); border: 1px solid var(--pd-hairline); text-align: center; min-width: 64px; min-height: var(--pd-row-height); }
     thead th { min-width: 6rem; background: var(--pd-surface-2); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
-    tbody th { text-align: start; background: var(--pd-surface-2); color: var(--pd-text); font-weight: var(--pd-weight-medium); position: sticky; inset-inline-start: 0; min-width: min(8rem, 40vw); max-width: 240px; overflow-wrap: break-word; }
+    tbody th { text-align: start; background: var(--pd-surface-2); color: var(--pd-text); font-weight: var(--pd-weight-medium); position: sticky; inset-inline-start: 0; z-index: var(--pd-z-table-sticky-column); min-width: min(8rem, 40vw); max-width: 240px; overflow-wrap: break-word; }
     .pd-view-matrix__corner { background: var(--pd-surface-2); }
     td[class*='pd-view-tone-'] { background: var(--pd-view-tint); color: var(--pd-text); }
     td.pd-view-tone-neutral { background: transparent; }

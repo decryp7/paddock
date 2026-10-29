@@ -915,8 +915,12 @@ fn window_events_track_focus_and_destroyed_windows() {
 
 #[test]
 fn dialogs_get_the_same_feel_and_hooks() {
-    let contracts = paddock_dialogs::Contracts::parse(
-        r#"{ "version": 1, "dialogs": { "about": { "kind": "viewer", "modality": "modeless" } } }"#,
+    let contracts = paddock_dialogs::Contracts::from_entries(
+        &[paddock_dialogs::Entry::new(
+            "about",
+            paddock_dialogs::Shape::Viewer,
+        )],
+        &[],
     )
     .unwrap();
     let app = app_with(

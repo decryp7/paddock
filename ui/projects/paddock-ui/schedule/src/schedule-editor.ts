@@ -1,7 +1,16 @@
-import { ChangeDetectionStrategy, Component, computed, input, model } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, model } from '@angular/core';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
+import { DateAdapter, MAT_DATE_FORMATS } from '@angular/material/core';
+import { MatTimepicker, MatTimepickerInput, MatTimepickerToggle } from '@angular/material/timepicker';
+import { MatTooltip } from '@angular/material/tooltip';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { PdDayPicker } from './day-picker';
+import { PdKeepTimeOnEscape } from './keep-time';
+import { dateToTime, TIME_PROVIDERS, TimeProblems, timeOptions, timeToDate } from './time-value';
 import {
   addTime,
   EVERY_PRESETS,
@@ -43,27 +52,23 @@ export function presetLabel(secs: number): string {
 @Component({
   selector: 'pd-schedule-editor',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdStatusGlyph, PdDayPicker, PdGlyph, PdSelect],
+  imports: [PdStatusGlyph, PdDayPicker, PdGlyph, PdSelect, PdField, PdFieldControl, SuSegmentedControl, MatButton, MatIconButton, MatButtonToggleGroup, MatButtonToggle, MatTimepicker, MatTimepickerInput, PdKeepTimeOnEscape, MatTimepickerToggle, MatTooltip],
+  providers: [TIME_PROVIDERS],
   template: `
-    <div class="pd-modes" role="radiogroup" [attr.aria-label]="modeLabel">
-      @for (m of modes; track m.id) {
-        <button type="button" role="radio" class="pd-mode" [class.pd-on]="value().mode === m.id" [attr.aria-checked]="value().mode === m.id" [disabled]="disabled()" (click)="setMode(m.id)">{{ m.label }}</button>
-      }
-    </div>
+    <pd-segmented-control [label]="modeLabel" [options]="modeSegments()" [value]="value().mode" (valueChange)="setMode($event)" />
 
     @switch (value().mode) {
       @case ('every') {
         <div class="pd-row" data-testid="schedule-every">
-          <div class="pd-presets" role="group" [attr.aria-label]="presetsLabel">
+          <mat-button-toggle-group class="pd-presets" hideSingleSelectionIndicator [aria-label]="presetsLabel" [value]="everySecs()" [disabled]="disabled()" (change)="setEvery($event.value)">
             @for (p of presets; track p) {
-              <button type="button" class="pd-preset" [class.pd-on]="everySecs() === p" [attr.aria-pressed]="everySecs() === p" [disabled]="disabled()" (click)="setEvery(p)">{{ label(p) }}</button>
+              <mat-button-toggle [value]="p">{{ label(p) }}</mat-button-toggle>
             }
-          </div>
-          <label class="pd-inline">
-            <span>{{ everyLabel }}</span>
-            <input class="pd-input pd-input--sm pd-amount" type="number" min="1" step="1" [value]="split().amount" [disabled]="disabled()" (change)="setAmount($event)" />
-          </label>
-          <pd-select [options]="unitOptions" [value]="split().unit" [ariaLabel]="unitLabel" [disabled]="disabled()" (valueChange)="setUnit($event)" />
+          </mat-button-toggle-group>
+          <pd-field class="pd-amount" size="short" [label]="everyLabel">
+            <input pdFieldControl type="number" min="1" step="1" [value]="split().amount" [disabled]="disabled()" (change)="setAmount($event)" />
+          </pd-field>
+          <pd-select class="pd-unit" [label]="unitLabel" [options]="unitOptions" [value]="split().unit" [disabled]="disabled()" (valueChange)="setUnit($event)" />
         </div>
       }
       @case ('times') {
@@ -72,30 +77,31 @@ export function presetLabel(secs: number): string {
           <ul class="pd-times">
             @for (t of times(); track $index) {
               <li>
-                <input class="pd-input pd-input--sm" type="time" [value]="t" [attr.aria-label]="timeLabel($index + 1)" [disabled]="disabled()" (change)="setTimeAt($index, $event)" />
-                <button type="button" class="pd-btn pd-btn--sm pd-btn--icon pd-btn--ghost" [attr.aria-label]="removeLabel($index + 1)" [attr.title]="removeText" [disabled]="disabled() || times().length < 2" (click)="removeTimeAt($index)">
+                <pd-field size="short" [label]="timeLabel($index + 1)" [suffix]="toggle" [error]="timeProblems.shown($index) ? badTimeText : null">
+                  <input pdFieldControl pdKeepTime [matTimepicker]="picker" [value]="timeDates()[$index] ?? null" [disabled]="disabled()" autocomplete="off" (valueChange)="setTimeAt($index, $event)" (keydown.escape)="closePicker($event, picker)" (blur)="timeProblems.leave($index)" />
+                  <mat-timepicker #picker panelClass="pd-timepicker-panel" [options]="timeList" />
+                  <ng-template #toggle><mat-timepicker-toggle [for]="picker" [disabled]="disabled()" /></ng-template>
+                </pd-field>
+                <button type="button" matIconButton [attr.aria-label]="removeLabel($index + 1)" [matTooltip]="removeText" [disabled]="disabled() || times().length < 2" (click)="removeTimeAt($index)">
                   <pd-glyph name="close" [size]="14" />
                 </button>
               </li>
             }
           </ul>
-          <button type="button" class="pd-btn pd-btn--sm pd-add" [disabled]="disabled() || times().length >= maxTimes" (click)="addTimeOfDay()"><pd-glyph name="plus" [size]="14" />{{ addText }}</button>
+          <button type="button" matButton="outlined" class="pd-add" [disabled]="disabled() || times().length >= maxTimes" (click)="addTimeOfDay()"><pd-glyph name="plus" [size]="14" />{{ addText }}</button>
         </div>
       }
       @case ('cron') {
-        <label class="pd-field" data-testid="schedule-cron">
-          <span class="pd-field__label">{{ cronLabel }}</span>
-          <input class="pd-input pd-mono" type="text" spellcheck="false" autocomplete="off" [value]="cron()" [disabled]="disabled()" (change)="setCron($event)" />
-          <span class="pd-field__hint">{{ cronHint }}</span>
-        </label>
+        <pd-field data-testid="schedule-cron" [label]="cronLabel" [hint]="cronHint">
+          <input pdFieldControl class="pd-mono" type="text" spellcheck="false" autocomplete="off" [value]="cron()" [disabled]="disabled()" (change)="setCron($event)" />
+        </pd-field>
       }
     }
 
     @if (value().mode !== 'every') {
-      <label class="pd-field">
-        <span class="pd-field__label">{{ zoneLabel }}</span>
-        <input class="pd-input" type="text" spellcheck="false" autocomplete="off" [placeholder]="zonePlaceholder" [value]="zone() ?? ''" [disabled]="disabled()" (change)="setZone($event)" />
-      </label>
+      <pd-field data-testid="schedule-zone" [label]="zoneLabel">
+        <input pdFieldControl type="text" spellcheck="false" autocomplete="off" [placeholder]="zonePlaceholder" [value]="zone() ?? ''" [disabled]="disabled()" (change)="setZone($event)" />
+      </pd-field>
     }
 
     <section class="pd-preview" aria-live="polite" [attr.aria-label]="previewLabel" data-testid="schedule-preview">
@@ -117,22 +123,17 @@ export function presetLabel(secs: number): string {
     </section>
   `,
   styles: `
+    /* The list is wider than the short field it opens from, so a time such as 10:00 stays on one line. */
+    ::ng-deep .pd-timepicker-panel { min-width: 8.5rem; }
     :host { display: grid; gap: var(--pd-space-3); min-width: 0; }
-    .pd-modes { display: inline-flex; gap: 2px; justify-self: start; max-width: 100%; padding: 2px; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); }
-    .pd-mode, .pd-preset { min-height: var(--pd-control-height); padding: 0 var(--pd-space-3); border: 1px solid transparent; border-radius: calc(var(--pd-radius-control) - 2px); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); }
-    .pd-preset { padding: 0 var(--pd-space-2); border-color: var(--pd-border-control); background: var(--pd-surface-1); }
-    .pd-mode:hover:not(:disabled, .pd-on), .pd-preset:hover:not(:disabled, .pd-on) { background: var(--pd-hover); color: var(--pd-text); }
-    .pd-mode.pd-on, .pd-preset.pd-on { border-color: var(--pd-accent); background: var(--pd-accent-tint); color: var(--pd-text); font-weight: var(--pd-weight-semibold); }
-    .pd-mode:focus-visible, .pd-preset:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
-    .pd-mode:disabled, .pd-preset:disabled { opacity: 0.5; }
     .pd-row, .pd-stack { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); min-width: 0; }
     .pd-stack { display: grid; justify-items: start; }
-    .pd-presets { display: inline-flex; flex-wrap: wrap; gap: var(--pd-space-1); }
-    .pd-inline { display: inline-flex; align-items: center; gap: var(--pd-space-2); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
-    .pd-amount { width: 6ch; }
-    .pd-times { display: grid; gap: var(--pd-space-1); margin: 0; padding: 0; list-style: none; }
-    .pd-times li { display: flex; align-items: center; gap: var(--pd-space-1); }
-    .pd-add { gap: var(--pd-space-1); }
+    .pd-amount { width: 8rem; }
+    .pd-unit { width: 9rem; }
+    .pd-times { display: grid; gap: var(--pd-space-1); margin: var(--pd-space-2) 0 0; padding: 0; list-style: none; }
+    .pd-times li { display: flex; align-items: flex-start; gap: var(--pd-space-1); }
+    .pd-add { justify-self: start; }
+    .pd-add pd-glyph { margin-inline-end: var(--pd-space-1); vertical-align: middle; }
     .pd-preview { display: grid; gap: var(--pd-space-1); min-width: 0; padding: var(--pd-space-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); }
     .pd-preview p, .pd-runs { margin: 0; }
     .pd-description { font-weight: var(--pd-weight-semibold); }
@@ -158,6 +159,10 @@ export class PdScheduleEditor {
   protected readonly maxTimes = MAX_TIMES;
   protected readonly presets = EVERY_PRESETS;
   protected readonly label = presetLabel;
+  private readonly adapter = inject<DateAdapter<Date>>(DateAdapter);
+  private readonly formats = inject(MAT_DATE_FORMATS);
+  /** The times the picker offers (every 30 minutes). */
+  protected readonly timeList = timeOptions(this.adapter, this.formats);
   protected readonly modes: readonly { id: ScheduleMode; label: string }[] = [
     { id: 'every', label: $localize`:Schedule mode|@@pd.schedule.mode.every:Every…` },
     { id: 'times', label: $localize`:Schedule mode|@@pd.schedule.mode.times:At times` },
@@ -181,6 +186,7 @@ export class PdScheduleEditor {
   protected readonly previewLabel = $localize`:Region name|@@pd.schedule.previewLabel:Schedule preview`;
   protected readonly nextRunsLabel = $localize`:List name|@@pd.schedule.nextRuns:Next runs`;
 
+  protected readonly modeSegments = computed<SuSegment[]>(() => this.modes.map((m) => ({ value: m.id, label: m.label, disabled: this.disabled() })));
   protected readonly everySecs = computed(() => {
     const v = this.value();
     return v.mode === 'every' ? v.secs : 0;
@@ -194,6 +200,8 @@ export class PdScheduleEditor {
     const v = this.value();
     return v.mode === 'times' ? v.times : [];
   });
+  /** The times as `Date`s, one object per change of `times` (a binding that made a new `Date` on every check would never settle). */
+  protected readonly timeDates = computed(() => this.times().map((t) => timeToDate(t)));
   protected readonly cron = computed(() => {
     const v = this.value();
     return v.mode === 'cron' ? v.expr : '';
@@ -219,8 +227,9 @@ export class PdScheduleEditor {
     return formatRun(ms, zone, this.locale());
   }
 
-  protected setMode(mode: ScheduleMode): void {
-    this.value.set(scheduleForMode(mode, this.value()));
+  protected setMode(id: string): void {
+    const mode = this.modes.find((m) => m.id === id)?.id;
+    if (mode) this.value.set(scheduleForMode(mode, this.value()));
   }
 
   protected setEvery(secs: number): void {
@@ -248,10 +257,23 @@ export class PdScheduleEditor {
     if (v.mode === 'times') this.value.set({ ...v, times: addTime(v.times) });
   }
 
-  protected setTimeAt(index: number, e: Event): void {
+  /** The times the picker could not read (the last good time stays in the schedule). */
+  protected readonly timeProblems = new TimeProblems<number>(() => this.value());
+  protected readonly badTimeText = $localize`:Field error|@@pd.schedule.badTime:Enter a time such as 09:00.`;
+
+  /** The picker's `Date` (null while the text is empty or incomplete: the last good time stays and the field says so) as the engine's `HH:MM`. */
+  protected setTimeAt(index: number, date: Date | null): void {
     const v = this.value();
-    const text = (e.target as HTMLInputElement).value;
-    if (v.mode === 'times' && text) this.value.set({ ...v, times: setTime(v.times, index, text) });
+    const time = dateToTime(date);
+    this.timeProblems.report(index, time !== null);
+    if (v.mode === 'times' && time) this.value.set({ ...v, times: setTime(v.times, index, time) });
+  }
+
+  /** Escape closes an open time list and goes no further, so a dialog around the editor stays open. */
+  protected closePicker(e: Event, picker: MatTimepicker<Date>): void {
+    if (!picker.isOpen()) return;
+    e.stopPropagation();
+    picker.close();
   }
 
   protected removeTimeAt(index: number): void {

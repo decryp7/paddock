@@ -1,6 +1,7 @@
 import { makeEnvironmentProviders, provideAppInitializer, type EnvironmentProviders } from '@angular/core';
 import { SHELL_PLUGIN, SHELL_VERSION, type VersionReply } from '../generated/shell';
 import { SHELL_COMMANDS, type ShellCommand } from '../generated/shell-commands';
+import { dialogCommandLedger, recordDialogCommand } from './dialog-commands';
 
 /*
  * The shell's Rust side is one Tauri plugin (`paddock-shell`, ADR 0012 §3): its commands are sent as
@@ -22,10 +23,16 @@ export function shellCommand(command: ShellCommand): string {
   return `plugin:${SHELL_PLUGIN}|${command}`;
 }
 
-/** `invoke` with the shell's commands sent to the plugin; any other command goes as it is. */
+/**
+ * `invoke` with the shell's commands sent to the plugin; any other command goes as it is. In a dialog window every call
+ * is recorded for the dialog (ADR 0026 §3: `recordDialogCommand`), and one its contract does not declare is reported.
+ */
 export function shellInvoke(send: InvokeFn): InvokeFn {
-  // A pass-through: the dialog command lint reads the command names at the backends' call sites, not here.
-  return <T>(command: string, args?: Record<string, unknown>) => send<T>(isShellCommand(command) ? shellCommand(command) : command, args);
+  return <T>(command: string, args?: Record<string, unknown>) => {
+    const ledger = dialogCommandLedger();
+    if (ledger.active) recordDialogCommand(ledger.active, command, ledger.allowed);
+    return send<T>(isShellCommand(command) ? shellCommand(command) : command, args);
+  };
 }
 
 /** What is wrong with the plugin's `shell_version` reply for this package (null: the same version). */

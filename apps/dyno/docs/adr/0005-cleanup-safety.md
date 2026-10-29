@@ -1,6 +1,6 @@
 # 5. Cleanup safety: nothing is offered, selected or deleted unless the policy admits it, and deletes are recoverable
 
-- Status: accepted (2026-10-22)
+- Status: superseded by ADR 0021 (2026-10-28); Dyno no longer deletes or moves files. Kept for history
 - Related: ADR 0006 (observe-only), 0007 (packs), `dyno_core::cleanup` (`policy`, `catalog`), `dyno_agent::cleanup`
 
 ## Context

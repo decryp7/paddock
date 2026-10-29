@@ -131,11 +131,15 @@ development and UI tests only; features are not done until they work against the
 
 - Match the surrounding code; Rust uses `rustfmt.toml` (max_width 140). Doc comments on public items.
 - UI: standalone components, signals, OnPush, CSS custom properties for theme tokens (dark and light, plus high
-  contrast), accessible markup. Use Angular CDK for behaviour and Angular Material selectively; icons through
+  contrast), accessible markup. Use Angular CDK for behaviour and Angular Material first (rule 47); icons through
   `MatIconRegistry` with Pacenotes's own SVGs, no icon fonts or runtime icon URLs.
 - Status and review colours always come with words; validate palettes for contrast and colour-vision deficiency.
 
 ## Working practices
 
+- Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
+  `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
+- Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
+  branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.
 - Research official sources before choosing models or libraries; record what you found and when in the ADR.
 - Navigate code with Serena's symbol tools when available. Delegate mechanical work to cheaper models; keep

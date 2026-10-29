@@ -1,6 +1,6 @@
 # 19. Watched folders sweep into the quarantine only; web and hash searches are browser hand-offs
 
-- Status: accepted (2026-10-23; the number is allocated at merge time, renumber on a clash)
+- Status: the sweeps are superseded by ADR 0021 (2026-10-28); web and hash searches stand. Was accepted (2026-10-23; the number is allocated at merge time, renumber on a clash)
 - Related: ADR 0005 (cleanup safety), 0015 (IP lookup), `dyno_core::{watch, weblinks, netchange}`, `dyno_agent::{watch, handlers_watch, netwatch}`
 
 ## Context

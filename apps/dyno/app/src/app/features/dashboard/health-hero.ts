@@ -1,20 +1,13 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
-import { Router } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
 import type { HealthReason } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
-import { Dialogs } from '../../shared/dialog';
 import { formatSigned } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { GRADE_LABEL, GRADE_TONE, SEVERITY_LABEL, SEVERITY_TONE } from '../../shared/labels';
-import { Notifier } from '../../shared/notifier';
 import { Ring } from '../../shared/ring';
 import { HealthStore } from '../../state/health.store';
-import { TuningStore } from '../../state/tuning.store';
-import { HelperGate } from '../helper/helper-gate';
-import { FixDialog } from './fix-dialog';
 
-/** The health score with its top reasons and one-click fixes. Each fix explains and previews itself first. */
+/** The health score with its top reasons. */
 @Component({
   selector: 'dy-health-hero',
   imports: [Ring, Icon],
@@ -48,9 +41,6 @@ import { FixDialog } from './fix-dialog';
                   <span class="d">{{ x.detail }}</span>
                 </div>
                 <span class="imp num" [title]="'Costs ' + pts(x.impact)">{{ pts(x.impact, true) }}</span>
-                @if (x.fix; as f) {
-                  <button type="button" class="btn sm" (click)="openFix(x)">{{ f.label }}</button>
-                }
               </li>
             }
           </ul>
@@ -99,11 +89,6 @@ import { FixDialog } from './fix-dialog';
 })
 export class HealthHero implements OnInit {
   protected readonly store = inject(HealthStore);
-  private readonly tuning = inject(TuningStore);
-  private readonly gate = inject(HelperGate);
-  private readonly dialogs = inject(Dialogs);
-  private readonly router = inject(Router);
-  private readonly notifier = inject(Notifier);
   protected readonly pts = (n: number, minus = false) => (minus ? formatSigned(-n) : `${Math.round(n)} points`);
   protected readonly score = (v: number) => Math.round(v).toString();
   protected readonly grade = computed(() => {
@@ -130,18 +115,4 @@ export class HealthHero implements OnInit {
     void this.store.loadReport();
   }
 
-  protected async openFix(reason: HealthReason): Promise<void> {
-    const fix = reason.fix;
-    if (!fix) return;
-    const ref = this.dialogs.open<boolean, HealthReason>(FixDialog, reason);
-    if ((await firstValueFrom(ref.closed)) !== true) return;
-    const kind = fix.kind;
-    if (fix.needsAdmin && !(await this.gate.ensure())) return;
-    if (typeof kind === 'object') await this.tuning.apply(kind.tuning);
-    else if (kind === 'openCleanup') void this.router.navigateByUrl('/cleanup');
-    else if (kind === 'openStartup') void this.router.navigateByUrl('/health');
-    else if (kind === 'openTaskManager') void this.router.navigateByUrl('/processes');
-    else if (kind === 'openLifespan') void this.router.navigateByUrl('/lifespan');
-    else this.notifier.show('Restart when it suits you. Dyno never restarts your PC for you.');
-  }
 }

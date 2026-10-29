@@ -1,0 +1,14 @@
+{
+  "productName": "Dialog Hidden Spike",
+  "identifier": "net.decryptology.paddock-dialog-hidden-spike",
+  "build": { "frontendDist": "dist" },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["../../apps/shell-demo/src-tauri/icons/icon.png", "../../apps/shell-demo/src-tauri/icons/icon.ico"]
+  }
+}

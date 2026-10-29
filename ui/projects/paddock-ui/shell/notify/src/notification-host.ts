@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, signal } from '@angular/core';
+import { ToastArea } from '@decryp7/paddock-ui/shell';
 import { errorMessage } from '@decryp7/paddock-ui/shell/store';
 import { NOTIFY_CLOCK, TOAST_MS } from './notify-config';
 import { NOTIFICATION_SOURCES, persists, visibleNotifications, type HostAction, type HostNotification } from './notification-host.model';
@@ -68,8 +69,9 @@ interface Timer {
       }
     </div>
   `,
+  host: { '[style.--pd-toast-lift]': "area.lift() ? 'calc(' + area.lift() + 'px + var(--pd-space-2))' : '0px'" },
   styles: `
-    :host { position: fixed; right: var(--pd-space-4); bottom: calc(var(--pd-statusbar-height, 28px) + var(--pd-space-2)); z-index: var(--pd-z-toast); pointer-events: none; }
+    :host { position: fixed; right: var(--pd-space-4); bottom: calc(var(--pd-statusbar-height, 24px) + var(--pd-page-footer-safe, 56px) + var(--pd-space-2)); z-index: var(--pd-z-toast); pointer-events: none; margin-bottom: var(--pd-toast-lift, 0px); }
     .pd-stack { display: flex; flex-direction: column; gap: var(--pd-space-2); align-items: flex-end; }
     .pd-toast { pointer-events: auto; position: relative; width: 360px; max-width: calc(100vw - 2 * var(--pd-space-4)); box-sizing: border-box; padding: var(--pd-space-2) var(--pd-space-8) var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-info); border-radius: var(--pd-radius-popover); background: var(--pd-surface-3); color: var(--pd-text); box-shadow: var(--pd-shadow-2); display: flex; flex-direction: column; gap: var(--pd-space-1); font-size: var(--pd-text-body); }
     .pd-toast[data-severity='success'] { border-inline-start-color: var(--pd-success); }
@@ -119,6 +121,8 @@ export class PdNotificationHost {
     dismissToast: $localize`:@@pd.notifications.dismiss-toast:Dismiss notification`,
     details: $localize`:@@pd.notifications.details:Details`,
   };
+  /** The undo snack bar's height, when one is open: this host stacks above it. */
+  protected readonly area = inject(ToastArea);
   private readonly sources = inject(NOTIFICATION_SOURCES, { optional: true }) ?? [];
   private readonly clock = inject(NOTIFY_CLOCK);
   protected readonly items = computed(() => visibleNotifications(this.sources.flatMap((s) => s.items())));

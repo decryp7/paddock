@@ -3,7 +3,7 @@
 //! number of days (nothing is flagged), then lists programs it has not seen as new, with reasons when they are unusual.
 
 use super::{assess, program_key, Assessment, Facts, Level, Reason, Signing, UnusualSettings, UNUSUAL_SCORE};
-use crate::cleanup::Os;
+use crate::os::Os;
 use crate::time::{Timestamp, DAY, MINUTE};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -19,7 +19,7 @@ pub const LAST_SEEN_WRITE_MS: i64 = 10 * MINUTE;
 /// A program seen within this long is "running".
 pub const RUNNING_MS: i64 = 2 * MINUTE;
 
-/// What the user decided about a program.
+/// Where a program stands in the baseline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Status {
@@ -27,22 +27,6 @@ pub enum Status {
     New,
     /// Known: learned, aged out or acknowledged.
     Known,
-    /// The user chose to ignore it; it stays out of the list.
-    Ignored,
-    /// The user added it to the protected list (and it stays out of the list).
-    Protected,
-}
-
-/// What the user can do with an item. None of them changes the program itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum UnusualAction {
-    /// Hide it.
-    Ignore,
-    /// Add it to the protected list so rules never touch it, and hide it.
-    Protect,
-    /// Bring an ignored program back to the list.
-    Restore,
 }
 
 /// Why a program is listed, as of the last look.
@@ -177,8 +161,6 @@ pub struct UnusualOverview {
     pub learning_days: u32,
     /// Programs in the baseline.
     pub known: u32,
-    /// Programs the user ignored.
-    pub ignored: u32,
     /// The list, most unusual first (at most [`MAX_ITEMS`]).
     pub items: Vec<UnusualItem>,
 }
@@ -401,32 +383,17 @@ impl Baseline {
         }
     }
 
-    /// The user's decision about a program. `None` when it is not in the baseline.
-    pub fn act(&mut self, key: &str, action: UnusualAction) -> Option<Entry> {
-        let e = self.entries.get_mut(key)?;
-        match action {
-            UnusualAction::Ignore => e.status = Status::Ignored,
-            UnusualAction::Protect => e.status = Status::Protected,
-            UnusualAction::Restore => {
-                if matches!(e.status, Status::Ignored | Status::Protected) {
-                    e.status = Status::New;
-                }
-            }
-        }
-        Some(e.clone())
-    }
-
     /// Forgets everything; the next look starts a new learning period.
     pub fn forget(&mut self) {
         *self = Baseline::default();
     }
 
     /// The page's data at `now`.
-    pub fn overview(&self, now: Timestamp, s: &UnusualSettings, include_ignored: bool) -> UnusualOverview {
+    pub fn overview(&self, now: Timestamp, s: &UnusualSettings) -> UnusualOverview {
         let mut items: Vec<UnusualItem> = self
             .entries
             .values()
-            .filter(|e| e.status == Status::New || (include_ignored && matches!(e.status, Status::Ignored | Status::Protected)))
+            .filter(|e| e.status == Status::New)
             .map(|e| {
                 let (score, reasons) = e
                     .flag
@@ -464,11 +431,6 @@ impl Baseline {
             learning: self.learning(now, s),
             learning_days: s.learning_days,
             known: self.entries.values().filter(|e| e.status == Status::Known).count() as u32,
-            ignored: self
-                .entries
-                .values()
-                .filter(|e| matches!(e.status, Status::Ignored | Status::Protected))
-                .count() as u32,
             items,
         }
     }
@@ -506,7 +468,7 @@ mod tests {
         let mut b = Baseline::default();
         let o = look(&mut b, at(0), &[prog("a", "/Applications/A.app/a"), prog("evil", "/tmp/evil")], &[]);
         assert!(o.newly_unusual.is_empty());
-        let ov = b.overview(at(0), &S, false);
+        let ov = b.overview(at(0), &S);
         assert!(ov.items.is_empty());
         assert!(ov.learning.active);
         assert_eq!(ov.learning.until, Some(at(7)));
@@ -514,8 +476,8 @@ mod tests {
         assert!(o.changes.contains(&Change::Since(at(0))));
         // Still learning on day 6: a new program is learned, not listed.
         look(&mut b, at(6), &[prog("b", "/tmp/b")], &[]);
-        assert!(b.overview(at(6), &S, false).items.is_empty());
-        assert_eq!(b.overview(at(6), &S, false).known, 3);
+        assert!(b.overview(at(6), &S).items.is_empty());
+        assert_eq!(b.overview(at(6), &S).known, 3);
     }
 
     #[test]
@@ -529,7 +491,7 @@ mod tests {
             &[],
         );
         assert!(o.newly_unusual.is_empty(), "first seen alone is new, not unusual");
-        let ov = b.overview(at(8), &S, false);
+        let ov = b.overview(at(8), &S);
         assert!(!ov.learning.active);
         assert_eq!(ov.items.len(), 1);
         assert_eq!(ov.items[0].name, "new");
@@ -551,7 +513,7 @@ mod tests {
             again.changes.iter().all(|c| !matches!(c, Change::Entry(_))),
             "nothing changed, nothing to write"
         );
-        let item = &b.overview(at(8), &S, false).items[0];
+        let item = &b.overview(at(8), &S).items[0];
         assert_eq!(item.level, Level::Unusual);
         assert!(item.reasons.iter().any(|r| r.contains("temporary folder")));
     }
@@ -562,12 +524,12 @@ mod tests {
         look(&mut b, at(0), &[], &[]);
         let p = prog("tool", "/Users/ann/tool");
         look(&mut b, at(8), std::slice::from_ref(&p), &[]);
-        assert_eq!(b.overview(at(8), &S, false).items[0].score, 15);
+        assert_eq!(b.overview(at(8), &S).items[0].score, 15);
         let key = program_key("tool", Some("/Users/ann/tool"));
         let sigs = HashMap::from([(key, Signing::Unsigned)]);
         let o = b.observe(at(8).plus(10_000), &S, Os::Macos, &[p], &[], &sigs);
         assert_eq!(o.newly_unusual.len(), 1, "15 + 25 is 40, which is unusual");
-        let item = &b.overview(at(8), &S, false).items[0];
+        let item = &b.overview(at(8), &S).items[0];
         assert_eq!(item.score, 40);
         assert_eq!(item.level, Level::Unusual);
     }
@@ -591,7 +553,7 @@ mod tests {
             ],
         );
         assert_eq!(o.newly_unusual.len(), 1);
-        let ov = b.overview(at(9), &S, false);
+        let ov = b.overview(at(9), &S);
         assert_eq!(ov.items.len(), 1);
         assert_eq!(ov.items[0].name, "dropper");
         assert!(!ov.items[0].running);
@@ -622,31 +584,10 @@ mod tests {
             exe: Some("/Applications/A.app/a".into()),
         };
         let o = look(&mut b, at(8), &[prog("a", "/Applications/A.app/a")], &[st]);
-        let item = &b.overview(at(8), &S, false).items[0];
+        let item = &b.overview(at(8), &S).items[0];
         assert!(item.reasons.iter().any(|r| r.contains("login")));
         assert_eq!(item.score, 45);
         assert_eq!(o.newly_unusual.len(), 1);
-    }
-
-    #[test]
-    fn user_decisions_stick() {
-        let mut b = Baseline::default();
-        look(&mut b, at(0), &[], &[]);
-        let p = prog("helper", "/tmp/helper");
-        look(&mut b, at(8), std::slice::from_ref(&p), &[]);
-        let key = program_key("helper", Some("/tmp/helper"));
-        assert_eq!(b.act(&key, UnusualAction::Ignore).unwrap().status, Status::Ignored);
-        look(&mut b, at(9), std::slice::from_ref(&p), &[]);
-        assert!(b.overview(at(9), &S, false).items.is_empty());
-        let with = b.overview(at(9), &S, true);
-        assert_eq!(with.items.len(), 1);
-        assert_eq!(with.ignored, 1);
-        assert_eq!(b.act(&key, UnusualAction::Protect).unwrap().status, Status::Protected);
-        assert_eq!(b.act(&key, UnusualAction::Restore).unwrap().status, Status::New);
-        assert_eq!(b.overview(at(9), &S, false).items.len(), 1);
-        assert!(b.act("nothing", UnusualAction::Ignore).is_none());
-        // Restore on a program that is listed does nothing.
-        assert_eq!(b.act(&key, UnusualAction::Restore).unwrap().status, Status::New);
     }
 
     #[test]
@@ -655,9 +596,9 @@ mod tests {
         look(&mut b, at(0), &[], &[]);
         let p = prog("tool", "/Applications/T.app/t");
         look(&mut b, at(8), std::slice::from_ref(&p), &[]);
-        assert_eq!(b.overview(at(8), &S, false).items.len(), 1);
+        assert_eq!(b.overview(at(8), &S).items.len(), 1);
         look(&mut b, at(8 + NEW_FOR_DAYS + 1), &[p], &[]);
-        let ov = b.overview(at(30), &S, false);
+        let ov = b.overview(at(30), &S);
         assert!(ov.items.is_empty());
         assert_eq!(ov.known, 1);
     }
@@ -669,11 +610,11 @@ mod tests {
         let mut busy = prog("builder", "/Applications/B.app/b");
         busy.children = 80; // 20 alone: not enough
         look(&mut b, at(8), &[busy.clone()], &[]);
-        assert!(b.overview(at(8), &S, false).items.is_empty());
+        assert!(b.overview(at(8), &S).items.is_empty());
         busy.connections = 90; // 20 + 20: enough
         let o = look(&mut b, at(8).plus(1000), &[busy], &[]);
         assert_eq!(o.newly_unusual.len(), 1);
-        assert_eq!(b.overview(at(8), &S, false).items.len(), 1);
+        assert_eq!(b.overview(at(8), &S).items.len(), 1);
     }
 
     #[test]
@@ -686,14 +627,14 @@ mod tests {
         let o = b.observe(at(0), &off, Os::Macos, &[prog("a", "/a")], &[], &HashMap::new());
         assert_eq!(o, Outcome::default());
         assert!(b.is_empty());
-        assert!(!b.overview(at(0), &off, false).enabled);
+        assert!(!b.overview(at(0), &off).enabled);
         look(&mut b, at(0), &[prog("a", "/a")], &[]);
         assert_eq!(b.len(), 1);
         assert_eq!(b.since(), Some(at(0)));
         b.forget();
         assert!(b.is_empty());
         assert_eq!(b.since(), None);
-        assert!(b.overview(at(1), &S, false).learning.until.is_none());
+        assert!(b.overview(at(1), &S).learning.until.is_none());
     }
 
     #[test]
@@ -705,7 +646,7 @@ mod tests {
         };
         b.observe(at(0), &s, Os::Macos, &[prog("a", "/Applications/A.app/a")], &[], &HashMap::new());
         assert!(
-            b.overview(at(0), &s, false).items.is_empty(),
+            b.overview(at(0), &s).items.is_empty(),
             "the first look is silent even with no learning period"
         );
         b.observe(
@@ -716,7 +657,7 @@ mod tests {
             &[],
             &HashMap::new(),
         );
-        assert_eq!(b.overview(at(0), &s, false).items.len(), 1);
+        assert_eq!(b.overview(at(0), &s).items.len(), 1);
     }
 
     #[test]
@@ -729,11 +670,11 @@ mod tests {
             &[prog("plain", "/Applications/P.app/p"), prog("odd", "/tmp/odd")],
             &[],
         );
-        let ov = b.overview(at(8), &S, false);
+        let ov = b.overview(at(8), &S);
         assert_eq!(ov.items[0].name, "odd");
         let entries: Vec<Entry> = b.entries.values().cloned().collect();
         let restored = Baseline::restore(b.since(), entries, vec!["x".into()]);
-        assert_eq!(restored.overview(at(8), &S, false), ov);
+        assert_eq!(restored.overview(at(8), &S), ov);
         assert!(restored.is_new("nope"));
         assert!(!restored.is_new(&program_key("odd", Some("/tmp/odd"))));
         assert!(restored.entry(&program_key("odd", Some("/tmp/odd"))).is_some());

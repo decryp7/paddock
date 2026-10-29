@@ -51,3 +51,15 @@ paddock_commands::command_table! {
     /// Finishes the checklist: it does not open by itself again.
     Mutation [MAIN | DIALOG] => tauri::setup_finish,
 }
+
+paddock_dialogs::dialogs! {
+    /// The set-up checklist as its own window (ADR 0026 §3).
+    pub static DIALOGS;
+    "pd.setup" => Form(Modeless) { commands: &[
+        dialog_callable::setup_state,
+        dialog_callable::setup_act,
+        dialog_callable::setup_repair,
+        dialog_callable::setup_skip,
+        dialog_callable::setup_finish,
+    ] },
+}

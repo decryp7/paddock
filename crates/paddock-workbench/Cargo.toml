@@ -16,7 +16,6 @@ tauri = [
   "dep:tauri",
   "dep:paddock-panels",
   "dep:paddock-assistant",
-  "dep:paddock-dialogs",
   "paddock-commands/tauri",
   "paddock-panels/tauri",
   "paddock-assistant/tauri",
@@ -28,7 +27,8 @@ paddock-commands = { workspace = true }
 paddock-env = { workspace = true }
 paddock-panels = { workspace = true, optional = true }
 paddock-assistant = { workspace = true, optional = true }
-paddock-dialogs = { workspace = true, optional = true }
+# The dock's dialog contracts (`dialogs!`, ADR 0026 §3); the Tauri adapter with the `tauri` feature.
+paddock-dialogs = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = { version = "0.4", features = ["kv"] }

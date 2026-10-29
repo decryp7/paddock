@@ -75,6 +75,12 @@ paddock_commands::command_table! {
     Mutation [MAIN | DIALOG] => tauri::storage_reveal,
 }
 
+paddock_dialogs::dialogs! {
+    /// The storage dialogs (ADR 0026 §3): the clear confirmation calls nothing (the page clears after the answer).
+    pub static DIALOGS;
+    "pd.storage.confirm" => Decision { instanced: true },
+}
+
 #[cfg(feature = "tauri")]
 pub mod tauri;
 

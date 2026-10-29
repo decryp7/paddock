@@ -1,5 +1,9 @@
-import { ChangeDetectionStrategy, Component, computed, input, model, output } from '@angular/core';
+import { afterRenderEffect, ChangeDetectionStrategy, Component, computed, ElementRef, input, model, output, viewChild } from '@angular/core';
 import type { FormValueControl, ValidationError } from '@angular/forms/signals';
+import { MatButton } from '@angular/material/button';
+import { MatChip, MatChipSet } from '@angular/material/chips';
+import { MatSlideToggle } from '@angular/material/slide-toggle';
+import { MatTooltip } from '@angular/material/tooltip';
 import { PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdSelect } from '@decryp7/paddock-ui/select';
 import { type SettingField, type SettingValue, displayValue, editUnit, parseList, parseNumber, rangeHint, sameValue } from '@decryp7/paddock-ui/shell/settings';
@@ -15,25 +19,30 @@ let nextId = 0;
 @Component({
   selector: 'pd-setting-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdStatusGlyph, PdSelect],
+  imports: [MatButton, MatChip, MatChipSet, MatSlideToggle, MatTooltip, PdStatusGlyph, PdSelect],
   host: { class: 'pd-setting', '[class.pd-invalid]': '!!message()', '[class.pd-edited]': 'dirty()', '[attr.data-key]': 'setting().key' },
   template: `
     @let f = setting();
     @let k = f.kind;
     <div class="pd-head">
       @if (k.type === 'bool') {
-        <input class="pd-switch" type="checkbox" role="switch" [id]="id" [checked]="value() === true" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (change)="choose($any($event.target).checked)" (blur)="touch.emit()" />
+        <mat-slide-toggle #toggle class="pd-label" [id]="id" [checked]="value() === true" [disabled]="disabled()" [aria-describedby]="describedBy() ?? ''" (change)="choose($event.checked)" (focusout)="touch.emit()">{{ f.label }}</mat-slide-toggle>
+      } @else {
+        <label class="pd-label" [for]="id">{{ f.label }}</label>
       }
-      <label class="pd-label" [for]="id">{{ f.label }}</label>
-      @if (f.restartRequired) {
-        <span class="pd-badge" [title]="t.restartTitle">{{ t.restart }}</span>
-      }
-      @if (f.advanced) {
-        <span class="pd-badge">{{ t.advanced }}</span>
+      @if (f.restartRequired || f.advanced) {
+        <mat-chip-set class="pd-badges">
+          @if (f.restartRequired) {
+            <mat-chip class="pd-badge" [matTooltip]="t.restartTitle">{{ t.restart }}</mat-chip>
+          }
+          @if (f.advanced) {
+            <mat-chip class="pd-badge">{{ t.advanced }}</mat-chip>
+          }
+        </mat-chip-set>
       }
       <span class="pd-spacer"></span>
       @if (!disabled() && !isDefault()) {
-        <button class="pd-reset" type="button" [attr.aria-label]="resetLabel(f.label)" [title]="defaultTitle()" (click)="resetToDefault.emit()">{{ t.reset }}</button>
+        <button class="pd-reset" matButton="text" type="button" [attr.aria-label]="resetLabel(f.label)" [matTooltip]="defaultTitle()" (click)="resetToDefault.emit()">{{ t.reset }}</button>
       }
     </div>
     @if (k.type !== 'bool') {
@@ -74,10 +83,9 @@ let nextId = 0;
     :host { display: flex; flex-direction: column; gap: var(--pd-space-1); padding: var(--pd-space-3) 0; border-bottom: 1px solid var(--pd-hairline); min-width: 0; }
     .pd-head { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 28px; flex-wrap: wrap; }
     .pd-label { font-weight: var(--pd-weight-medium); color: var(--pd-text); min-width: 0; overflow-wrap: anywhere; }
-    .pd-badge { flex: none; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-pill); border: 1px solid var(--pd-hairline); color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
+    .pd-badges { flex: none; --mat-chip-container-height: 20px; --mat-chip-label-text-size: var(--pd-text-caption); }
     .pd-spacer { flex: 1; }
-    .pd-reset { min-height: 24px; padding: 0 var(--pd-space-2); border: 1px solid transparent; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-caption); cursor: pointer; }
-    .pd-reset:hover { border-color: var(--pd-border-control); color: var(--pd-text); }
+    .pd-reset { --mat-button-text-container-height: 24px; font-size: var(--pd-text-caption); }
     .pd-control { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; min-width: 0; }
     .pd-input { min-height: var(--pd-control-height); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; min-width: 0; max-width: 100%; box-sizing: border-box; }
     pd-select { width: 15rem; max-width: 100%; }
@@ -123,6 +131,17 @@ export class PdSettingField implements FormValueControl<SettingValue> {
   readonly resetToDefault = output<void>();
 
   protected readonly id = `pd-setting-${++nextId}`;
+  private readonly toggle = viewChild('toggle', { read: ElementRef });
+
+  constructor() {
+    // Material's toggle has no `aria-invalid` input: the state goes onto its real switch button, as it was on the native switch.
+    afterRenderEffect(() => {
+      const button = (this.toggle()?.nativeElement as HTMLElement | undefined)?.querySelector('button[role="switch"]');
+      const invalid = !!this.message();
+      if (invalid) button?.setAttribute('aria-invalid', 'true');
+      else button?.removeAttribute('aria-invalid');
+    });
+  }
   protected readonly unit = computed(() => editUnit(this.setting().kind));
   protected readonly unitLabel = computed(() => {
     const k = this.setting().kind;

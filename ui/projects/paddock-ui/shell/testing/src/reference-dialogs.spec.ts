@@ -1,17 +1,28 @@
-import { dialogContractFile, serializeDialogContracts } from '@decryp7/paddock-ui/shell/dialogs';
 import { DEMO_DIALOGS } from '../../../../shell-demo/src/app/demo.contributions';
 import { DIALOG_BASE_COMMANDS, dialogBaseProviders } from '../../../../shell-demo/src/app/dialog-base';
 import { APP_COMMANDS } from '../../../../shell-demo/src/app/generated/app-commands';
+import { DIALOG_BASE } from '../../../../shell-demo/src/app/generated/dialog-contracts';
 import { assertDialogBoots, dialogTableProblems } from './dialog-harness';
-import { SHELL_COMMANDS, type DialogDef } from '@decryp7/paddock-ui/shell';
+import { dialogCommandsSeenJson, SHELL_COMMANDS, type DialogDef } from '@decryp7/paddock-ui/shell';
 import { CHANNELS_COMMANDS } from '@decryp7/paddock-ui/shell/channels';
 import { MCP_COMMANDS } from '@decryp7/paddock-ui/shell/mcp';
 
-// The shell demo's dialogs (one per kind) through the boot-every-dialog harness, its contract file and its command table:
-// what every app runs over its own registry (ADR 0009 §4).
+// The shell demo's dialogs (one per kind) through the boot-every-dialog harness and its command table: what every app runs
+// over its own registry (ADR 0009 §4). The contracts are Rust's (ADR 0026 §3): the registry reads the generated ones.
 const DIALOGS = DEMO_DIALOGS as readonly DialogDef[];
-/** Rust's copy of the registry, as an app keeps it next to `tauri.conf.json`. */
-const FILE = 'projects/shell-demo/dialog-contracts.json';
+/** About's facts as the engine sends them, with a releases page to follow. */
+const ABOUT_INFO = {
+  appName: 'Paddock Shell Demo',
+  version: '0.1.0',
+  os: 'macos',
+  arch: 'aarch64',
+  commit: null,
+  built: null,
+  homepage: null,
+  releasesPage: 'https://updates.example/releases',
+  legal: [],
+  updatesAvailable: false,
+};
 
 /** Node's `fs`, loaded at run time (the spec programme has no Node types). */
 interface NodeFs {
@@ -35,13 +46,22 @@ describe('shell-demo dialogs', () => {
         // Called with the IPC recorder in place: the window takes its Tauri backends, as in the desktop build.
         providers: dialogBaseProviders,
         baseCommands: DIALOG_BASE_COMMANDS,
-        answers: { window_ready: { recovered: null, ui: null } },
-        inputs: { 'sd.rename': { current: 'Demo' }, 'pd.channels.secret': { channelId: 'slack', label: 'Slack', kind: 'token' }, 'pd.channels.remove': { channelId: 'slack', name: 'Slack' }, 'pd.mcp.revoke': { keyId: 1, client: 'Pitwall' } },
+        answers: { window_ready: { recovered: null, ui: null }, about_info: ABOUT_INFO },
+        // The user follows About's releases link: the window asks the engine to open it (files_open_url).
+        interact: {
+          'pd.about': (root) => {
+            const link = root.querySelector<HTMLAnchorElement>('[data-testid=about-releases]');
+            if (!link) throw new Error('About shows no releases link');
+            link.click();
+          },
+        },
+        inputs: { 'sd.rename': { current: 'Demo' }, 'pd.channels.secret': { channelId: 'slack', label: 'Slack', kind: 'token' }, 'pd.channels.remove': { channelId: 'slack', name: 'Slack' }, 'pd.mcp.revoke': { keyId: 1, client: 'Pitwall' }, 'pd.confirm': { heading: 'Forget?', message: 'It goes.', confirm: { label: 'Forget greetings', destructive: true } } },
       });
       expect(report.sent).toContain('window_ready');
       if (def.id === 'sd.inspector') expect(report.sent).toContain('demo_status');
       if (def.id === 'pd.settings') expect(report.sent).toContain('settings_overview');
       if (def.id === 'pd.setup') expect(report.sent).toContain('setup_state');
+      if (def.id === 'pd.about') expect(report.sent).toContain('files_open_url');
     });
   }
 
@@ -50,11 +70,17 @@ describe('shell-demo dialogs', () => {
     expect(dialogTableProblems(DIALOGS, { ...APP_COMMANDS, ...SHELL_COMMANDS, ...CHANNELS_COMMANDS, ...MCP_COMMANDS }, DIALOG_BASE_COMMANDS)).toEqual([]);
   });
 
-  // Regenerate with PADDOCK_WRITE_CONTRACTS=1 npx ng test paddock-ui --watch=false --include=**/reference-dialogs.spec.ts
-  it('keeps dialog-contracts.json equal to the registry', async () => {
+  // The commands every dialog sent while it booted, for the nightly "declared but never sent" check (ADR 0026 §3):
+  // PADDOCK_DIALOG_COMMANDS_SEEN=<file> npx ng test paddock-ui --watch=false --include=**/shell/testing/src/reference-dialogs.spec.ts
+  it('writes the commands it saw when asked to', async () => {
+    const file = env('PADDOCK_DIALOG_COMMANDS_SEEN');
+    if (!file) return;
     const fs = await nodeFs();
-    const want = serializeDialogContracts(dialogContractFile(DIALOGS, { base: DIALOG_BASE_COMMANDS }));
-    if (env('PADDOCK_WRITE_CONTRACTS') === '1') fs.writeFileSync(FILE, want);
-    expect(fs.readFileSync(FILE, 'utf8')).toBe(want);
+    fs.writeFileSync(file, dialogCommandsSeenJson());
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).version).toBe(1);
+  });
+
+  it('takes the base commands from the Rust table', () => {
+    expect([...DIALOG_BASE]).toEqual([...DIALOG_BASE_COMMANDS].sort());
   });
 });

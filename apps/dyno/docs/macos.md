@@ -56,12 +56,10 @@ routes on one machine.
 ## Permissions and what Dyno can see
 
 - Your own processes: everything (command line, working directory, open files through `lsof`, signer through `codesign`).
-- Other users' and system processes: name and resource use; changing them needs administrator rights, which Dyno never takes by
-  itself. The optional helper (Settings > Helper) makes the few changes that need it: it is installed with the macOS password dialog as a LaunchDaemon (`net.decryptology.dyno.helper`, program in `/Library/PrivilegedHelperTools`, data in `/Library/Application Support/Dyno/Helper`), serves your account and Dyno's agent only, and Remove deletes all of it. It does not use SMAppService yet: that needs a Developer ID signature.
-- Efficiency mode is the Darwin background policy (`setpriority` with `PRIO_DARWIN_BG`); CPU caps are a 100 ms SIGSTOP/SIGCONT
-  duty cycle; there is no CPU affinity on macOS.
-- The protected list covers `kernel_task`, `launchd`, `WindowServer`, `loginwindow`, `coreaudiod`, `logd`, `securityd`,
-  `syspolicyd`, XProtect and more, plus Dyno itself.
+- System processes (uid below 500) are listed one by one with name, path, owner and parent. macOS gives CPU, memory and disk only for
+  your own processes, so for system processes those columns say *Unavailable: macOS shows this only for your own processes*. Other
+  accounts' processes are one **Other users** row that shows how many there are; its CPU, memory and disk totals say *Unavailable* with the same reason.
+- Dyno 1.0 installs no helper and no LaunchDaemon. Dyno 1.0 runs only with your own rights; elevation is planned for 1.1 (ADR 0022).
 
 ## After updating Dyno
 
@@ -70,7 +68,7 @@ Replace the app. If the agent does not come back, `dyno-agent service ensure` (o
 
 ## Logs and files
 
-`~/Library/Application Support/Dyno` (`dyno.db`, `settings.json`, `rules.json`, `process-control.json`, `agent.json`,
+`~/Library/Application Support/Dyno` (`dyno.db`, `settings.json`, `agent.json`,
 `logs/app.log`), `~/Library/Logs/Dyno/agent.log`.
 
 ## Removing Dyno
