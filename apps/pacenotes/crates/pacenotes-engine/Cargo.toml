@@ -1,0 +1,23 @@
+[package]
+name = "pacenotes-engine"
+description = "Pacenotes' engine edge (ADR 0006): the index run as a job on paddock-jobs with live phase-labelled progress, the .gitignore rules from paddock-repo-files, and the folder watcher that re-runs it when the repository changes."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+pacenotes-core = { workspace = true }
+pacenotes-index = { workspace = true }
+paddock-jobs = { workspace = true }
+paddock-repo-files = { path = "../../../../crates/paddock-repo-files" }
+paddock-watch = { path = "../../../../crates/paddock-watch" }
+thiserror = "2"
+
+[dev-dependencies]
+paddock-testkit = { workspace = true }
+
+[lints]
+workspace = true
