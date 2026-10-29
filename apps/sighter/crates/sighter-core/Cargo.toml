@@ -1,0 +1,20 @@
+[package]
+name = "sighter-core"
+version = "0.0.0"
+description = "Sighter's pure core: the coordinate chain, the detection model, the tile planner and the benchmark harness. No I/O, no model runtime."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror = "2"
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true

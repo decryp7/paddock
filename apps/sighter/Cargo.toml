@@ -1,0 +1,20 @@
+# Sighter's Cargo workspace (ADR 0014 §2: one workspace and one Cargo.lock per app). Wave 0 is the pure core only: no
+# model runtime, no capture API, no UI (docs/adr/0001-object-detector.md is still in review).
+[workspace]
+resolver = "3"
+members = ["crates/sighter-core"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://dev.decryptology.net/decryp7/paddock"
+rust-version = "1.88"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
