@@ -715,3 +715,10 @@ One day of CI went on runs for superseded branch heads, the same head dispatched
 into another branch, and global triggers in the affected planner that made every run build everything (fixed in
 b618b5c97). **Rule:** cancel older queued runs before dispatching, dispatch once after the last review fix, give merged
 branches and docs-only changes no CI, and keep branch runs on the affected plan (rule 50).
+
+## Slow imports hid cheap wins in threads and per-item cost (2026-10-29)
+Debrief's import was bound by 2 Tantivy writer threads and a single-threaded catalogue, and regex was 38% of parse time.
+Nobody asked whether more workers or a cheaper operation would help until the numbers were read by accident. **Rule:** for
+any slow operation, measure both: can more threads or workers run it (bounded by the kind of work), and can each item cost
+less? Make thread counts Settings with an "Auto" default, and give long or bulk designs a "Parallelism and cost" section
+(rule 51).

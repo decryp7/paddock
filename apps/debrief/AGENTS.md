@@ -195,6 +195,9 @@ The app reads untrusted, possibly huge files and renders their content:
   `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
 - Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
   branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.
+- Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
+  cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
+  thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
 - Research before choosing libraries or patterns when unsure, and prefer
   well-maintained, permissively licensed (MIT/Apache-2.0) dependencies.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they
