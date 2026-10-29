@@ -175,7 +175,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
     .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
     .body.open { grid-template-columns: minmax(0, 1fr) 380px; }
     .table { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
-    .row { display: grid; grid-template-columns: minmax(200px, 1fr) 84px 96px 96px 130px 64px 36px; align-items: center; height: 32px; padding-right: var(--sp-2); border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-base); outline: none; }
+    .row { display: grid; grid-template-columns: minmax(140px, 1fr) 84px 96px 96px 130px 64px 36px; align-items: center; height: 32px; padding-right: var(--sp-2); border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-base); outline: none; }
     .row > span { padding: 0 var(--sp-2); min-width: 0; }
     .row > .r { text-align: right; }
     .head-row { height: 32px; flex: none; border-bottom: 1px solid var(--border); background: var(--surface-2); }

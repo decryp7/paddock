@@ -72,7 +72,10 @@ const MAX_HOLD_SECS = 3600;
        row's controls share top and bottom. The label is decoration (the control carries the accessible name). */
     .seg-field { position: relative; height: var(--pd-field-height, 28px); min-width: 0; --mat-button-toggle-height: calc(var(--pd-field-height, 28px) - 2px); }
     .seg-field pd-segmented-control { display: block; }
-    .seg-label { position: absolute; top: -9px; left: var(--sp-3); z-index: 1; padding: 0 var(--sp-1); background: var(--pd-surface-2); color: var(--text-2); font-size: var(--fs-xs); line-height: 10px; height: 10px; }
+    .seg-label { position: absolute; top: -8px; left: var(--sp-3); z-index: 1; padding: 0 var(--sp-1); background: var(--pd-surface-2); color: var(--text-2); font-size: var(--fs-xs); line-height: 1; }
+    /* The segments sit 3 px inside the control's border, so the selected one's ring starts below the legend's notch (the legend stays centred
+       on the border, like the outline fields' legends). */
+    .seg-field pd-segmented-control ::ng-deep .mat-button-toggle { margin-block: 3px; --mat-button-toggle-height: calc(var(--pd-field-height, 28px) - 8px); }
     .hold { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; }
     .hold pd-field { flex: 1; min-width: 0; }
     /* The hint is one line that may run on under the unit toggle (the row's width), not a column of wrapped words. */

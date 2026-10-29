@@ -9,6 +9,7 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### `pd-table` uses `PdContextMenuKeys`
 - The grid's own Shift+F10 / Menu key handler is gone: pd-table's rows use the shared `isContextMenuKey` (the same keys, one definition).
+- Removed: `isMenuKey` from `@decryp7/paddock-ui/table`; use `isContextMenuKey` from `@decryp7/paddock-ui/material`.
 
 ### `PdContextMenuKeys`: a row's context menu from the keyboard
 - New directive `pdContextMenuKeys` (and `isContextMenuKey`) in `@decryp7/paddock-ui/material` (with the other Material behaviour; not in the root entry): Shift+F10 or the Menu key on a focused host fires a `contextmenu` event there, for `matContextMenuTriggerFor` or any listener (macOS sends none for those keys). It works like pd-table's own row handler, which will use it in a follow-up.

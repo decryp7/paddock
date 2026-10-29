@@ -37,4 +37,15 @@ describe('FullTextTip', () => {
     el.dispatchEvent(new MouseEvent('mouseenter'));
     expect(tip.message).toBe('');
   });
+
+  it('stays shut while a menu is open', () => {
+    const panel = document.body.appendChild(document.createElement('div'));
+    panel.className = 'mat-mdc-menu-panel';
+    const { el, tip } = setup(200, 100);
+    el.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(tip.message).toBe('');
+    panel.remove();
+    el.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(tip.message).toBe('a-very-long-process-name.exe');
+  });
 });

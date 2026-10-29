@@ -39,7 +39,7 @@ import { RowMenu } from '../../shared/row-menu';
             <span role="columnheader" class="c-rule">Rule</span>
             <span role="columnheader">State</span>
             <span role="columnheader" class="c-first">First seen</span>
-            <span role="columnheader">Last seen</span>
+            <span role="columnheader" class="c-last">Last seen</span>
             <span role="columnheader" class="r">Count</span>
             <span role="columnheader"><span class="visually-hidden">Actions</span></span>
           </div>
@@ -65,7 +65,7 @@ import { RowMenu } from '../../shared/row-menu';
               <span class="cell c-rule muted" role="gridcell"><span class="truncate id" [dyFullText]="a.rule">{{ a.rule }}</span></span>
               <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="tone(a)" aria-hidden="true"></span><span [class.muted]="tone(a) === 'calm'">{{ state(a) }}</span></span>
               <span class="cell c-first muted num" role="gridcell">{{ time(a.firstSeen) }}</span>
-              <span class="cell muted num" role="gridcell">{{ time(a.lastSeen) }}</span>
+              <span class="cell c-last muted num" role="gridcell">{{ time(a.lastSeen) }}</span>
               <span class="cell r muted num" role="gridcell">×{{ a.repeatCount }}</span>
               <span class="cell acts" role="gridcell" dyActionTip>
                 <button type="button" matIconButton [attr.aria-label]="'Acknowledge ' + a.title" [disabled]="!ackable(a)" (click)="ack(a, $event)"><dy-icon name="check" /></button>
@@ -123,6 +123,11 @@ import { RowMenu } from '../../shared/row-menu';
     @container (max-width: 1160px) {
       .c-rule, .c-first { display: none; }
       .head, .row { --cols: 14px 84px minmax(160px, 1fr) 180px 96px 52px 88px; }
+    }
+    /* Narrow windows (the 900 px minimum leaves about 630 px): "Last seen" is in the detail panel; the actions keep their 88 px. */
+    @container (max-width: 760px) {
+      .c-last { display: none; }
+      .head, .row { --cols: 14px 76px minmax(120px, 1fr) 130px 52px 88px; }
     }
     @media (max-width: 1100px) { .layout.with-detail { grid-template-columns: minmax(0, 1fr); } }
   `,
