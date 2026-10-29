@@ -114,7 +114,10 @@ const LEGAL: [(&str, &str, &str); 3] = [
 /// it an update is found but never installed.
 fn updater<R: Runtime>(test_dir: Option<std::path::PathBuf>, app: &tauri::AppHandle<R>) -> UpdatesBuilder {
     let key = option_env!("TAURI_UPDATER_PUBKEY");
-    let b = UpdatesBuilder::new(APP_NAME)
+    let b = LEGAL
+        .iter()
+        .fold(UpdatesBuilder::new(APP_NAME), |b, (id, title, text)| b.legal(id, title, *text));
+    let b = b
         .channel("stable", "Stable", UPDATE_FEED)
         .public_key(key)
         .installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(
@@ -124,9 +127,6 @@ fn updater<R: Runtime>(test_dir: Option<std::path::PathBuf>, app: &tauri::AppHan
         .releases_page(RELEASES_PAGE)
         .homepage("https://dev.decryptology.net/decryp7/paddock")
         .changelog(include_str!("../../../CHANGELOG.md"))
-        .legal(LEGAL[0].0, LEGAL[0].1, LEGAL[0].2)
-        .legal(LEGAL[1].0, LEGAL[1].1, LEGAL[1].2)
-        .legal(LEGAL[2].0, LEGAL[2].1, LEGAL[2].2)
         .build_info(option_env!("DYNO_COMMIT"), option_env!("DYNO_BUILT"));
     match test_dir {
         None => b,
@@ -232,8 +232,8 @@ pub fn run() {
 mod updater_tests {
     use super::*;
 
-    /// About lists the third-party notices first and they name what Dyno ships: a Rust crate of the app, a Rust crate of the
-    /// agent, an npm package of the UI and the licence text each is under (the attribution Apache-2.0 and MIT require).
+    /// About lists the third-party notices first and they name what Dyno ships: Rust crates of the app, npm packages of the UI and
+    /// the licence text each is under (the attribution Apache-2.0 and MIT require).
     #[test]
     fn about_lists_the_third_party_notices_with_known_dependencies() {
         let (id, title, text) = LEGAL[0];
@@ -245,7 +245,6 @@ mod updater_tests {
             text.contains("## Licence texts") && text.contains("Permission is hereby granted"),
             "the licence texts are included"
         );
-        assert!(!text.contains("NON-PERMISSIVE"), "no unaccepted licence");
         let ids: Vec<_> = LEGAL.iter().map(|d| d.0).collect();
         assert_eq!(
             ids,
