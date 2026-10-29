@@ -1,4 +1,4 @@
-import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
+import { PdActionTip, PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { ThemeService } from '../../core/theme';
 import type { CounterHit, CounterInfo, CounterUnit, TimelineEventKind } from '../../core/api.types';

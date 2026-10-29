@@ -891,11 +891,8 @@ describe('pd-table', () => {
   it('throws in dev mode when a table is given a tree together with groups', async () => {
     const f = await setup();
     f.componentInstance.tree.set({ level: () => 1, expanded: () => null });
-    await settle(f);
-    const table = f.debugElement.query((d) => d.name === 'pd-table').componentInstance as { items(): unknown };
     f.componentInstance.groupBy.set('kind');
-    f.detectChanges();
-    expect(() => table.items()).toThrow('use one');
+    expect(() => f.detectChanges()).toThrow('use one');
   });
 
   it('keeps the focus on a row whose place changed when the app reorders the rows (live updates)', async () => {
