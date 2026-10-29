@@ -105,7 +105,9 @@ import { MenuNode, TopMenu } from './menu-model';
       display: flex; align-items: center; gap: 8px; flex: none; height: 26px; padding: 0 10px 0 6px; border: 0; border-radius: 5px;
       background: transparent; color: var(--text-2); cursor: pointer; text-align: start; font: inherit; white-space: nowrap;
     }
-    .item:hover, .item:focus, .item[aria-expanded='true'] { background: var(--bg-active); color: var(--text); outline: none; }
+    .item:hover:not([aria-disabled='true']), .item:focus:not([aria-disabled='true']), .item[aria-expanded='true'] { background: var(--bg-active); color: var(--text); outline: none; }
+    .item[aria-disabled='true'] { color: var(--muted); cursor: default; }
+    .item[aria-disabled='true'] .check, .item[aria-disabled='true'] .hint { color: var(--muted); }
     .item:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
     .check { width: 14px; flex: none; text-align: center; color: var(--accent-text); }
     .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

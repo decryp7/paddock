@@ -259,3 +259,26 @@ test('the sash shows keyboard focus with the focus ring, not the hover strip', a
   expect(style.opacity).toBe('1');
   expect(parseFloat(style.width)).toBeGreaterThanOrEqual(2);
 });
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`a disabled menu item looks disabled in the ${scheme} scheme: muted text, the default cursor and no hover fill`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.addInitScript((s) => localStorage.setItem('debrief.prefs.v1', JSON.stringify({ scheme: s })), scheme);
+    await openApp(page);
+    const menu = await openMenu(page, 'View');
+    const disabled = menuItem(menu, 'Reset Explorer width');
+    const enabled = menuItem(menu, 'Fields');
+    await expect(disabled).toHaveAttribute('aria-disabled', 'true');
+    const look = (el: ReturnType<typeof menuItem>) => el.evaluate((e) => ({ color: getComputedStyle(e).color, cursor: getComputedStyle(e).cursor, background: getComputedStyle(e).backgroundColor }));
+    const off = await look(disabled);
+    const on = await look(enabled);
+    expect(off.color).not.toBe(on.color);
+    expect(off.cursor).toBe('default');
+    expect(on.cursor).toBe('pointer');
+    // Hovering it draws no fill (an enabled item does).
+    await disabled.hover();
+    const hovered = await look(disabled);
+    expect(hovered.background).toBe(off.background);
+    expect(hovered.color).toBe(off.color);
+  });
+}

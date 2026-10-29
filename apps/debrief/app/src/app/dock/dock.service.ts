@@ -127,13 +127,16 @@ export class DockService {
     const metrics = inject(GridMetrics);
     let extraColumns = prefs.extraColumns().length;
     let charPx = metrics.charPx();
+    let chrome = metrics.chromePx();
     effect(() => {
       const count = prefs.extraColumns().length;
       const chars = metrics.charPx();
+      const around = metrics.chromePx();
       untracked(() => {
-        if (count === extraColumns && chars === charPx) return;
+        if (count === extraColumns && chars === charPx && around === chrome) return;
         extraColumns = count;
         charPx = chars;
+        chrome = around;
         const api = this.ctx.api;
         if (api && this.ctx.apiReady()) this.fitToWindow(api, null);
       });

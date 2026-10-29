@@ -307,6 +307,7 @@ export class EventsGrid {
   private readonly viewport = viewChild<ElementRef<HTMLElement>>('viewport');
   private readonly metrics = inject(GridMetrics);
   private readonly injector = inject(Injector);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly document = inject(DOCUMENT);
   private readonly timeProbe = viewChild<ElementRef<HTMLElement>>('timeProbe');
   private readonly timeHead = viewChild<ElementRef<HTMLElement>>('timeHead');
@@ -529,6 +530,7 @@ export class EventsGrid {
   private measureTime(): void {
     const probe = this.timeProbe()?.nativeElement;
     if (probe) this.metrics.measure(probe);
+    this.metrics.measureChrome(this.host.nativeElement);
   }
 
   private missingRows(): number[] {

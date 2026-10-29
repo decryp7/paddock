@@ -201,6 +201,25 @@ test.describe('narrow window', () => {
     await expect(sidebar(page)).toHaveCount(0);
   });
 
+  test('1440 px: holding Ctrl+B toggles the Explorer exactly once', async ({ page }) => {
+    await resize(page, 1440);
+    await expect(sidebar(page)).toBeVisible();
+    await page.evaluate(() => {
+      const w = window as unknown as { __toggles: number };
+      w.__toggles = 0;
+      new MutationObserver((records) => {
+        for (const r of records) for (const n of [...r.addedNodes, ...r.removedNodes]) if ((n as Element).nodeName === 'DEBRIEF-SIDEBAR') w.__toggles++;
+      }).observe(document.body, { childList: true, subtree: true });
+    });
+    // Four keydowns of the held key (the last three are auto-repeats), then release.
+    await page.keyboard.down('ControlOrMeta');
+    for (let i = 0; i < 4; i++) await page.keyboard.down('b');
+    await page.keyboard.up('b');
+    await page.keyboard.up('ControlOrMeta');
+    await expect(sidebar(page)).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __toggles: number }).__toggles)).toBe(1);
+  });
+
   test('side docks auto-hide when the plan has no room for them and are pinned back, with a margin, when the window widens', async ({ page }) => {
     // Pin the inspector so it is a docked tool window.
     const bar = page.getByRole('navigation', { name: 'Auto-hidden tool windows (right)' });

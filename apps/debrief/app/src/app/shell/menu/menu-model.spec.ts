@@ -394,3 +394,17 @@ describe('View › Source colours', () => {
     expect(() => sub(menu(buildMenus(state()), 'view').items, 'Source colours')).toThrow(/no submenu/);
   });
 });
+
+describe('disabled commands', () => {
+  it('a command that is not enabled becomes a disabled item; an enabled one carries no flag', () => {
+    const commands = new Map(state().commands);
+    commands.set('view.resetExplorerWidth', { id: 'view.resetExplorerWidth', title: 'Reset Explorer width', enabled: false });
+    const view = menu(buildMenus(state({ commands })), 'view');
+    const reset = menuItems(view.items).find((n) => n.id === 'view.resetExplorerWidth');
+    expect(reset).toMatchObject({ kind: 'item', label: 'Reset Explorer width', disabled: true });
+    commands.set('view.resetExplorerWidth', { id: 'view.resetExplorerWidth', title: 'Reset Explorer width', enabled: true });
+    const again = menuItems(menu(buildMenus(state({ commands })), 'view').items).find((n) => n.id === 'view.resetExplorerWidth');
+    expect(again).toBeDefined();
+    expect(again).not.toHaveProperty('disabled');
+  });
+});

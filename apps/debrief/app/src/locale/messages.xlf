@@ -11033,21 +11033,21 @@
         <source>Auto-hide to the left</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock.service.ts</context>
-          <context context-type="linenumber">603</context>
+          <context context-type="linenumber">606</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.autoHide.toRight" datatype="html">
         <source>Auto-hide to the right</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock.service.ts</context>
-          <context context-type="linenumber">604</context>
+          <context context-type="linenumber">607</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.autoHide.toBottom" datatype="html">
         <source>Auto-hide to the bottom</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock.service.ts</context>
-          <context context-type="linenumber">605</context>
+          <context context-type="linenumber">608</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.floatCue.window" datatype="html">
@@ -13314,35 +13314,35 @@
         <source>Newest first</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">330</context>
+          <context context-type="linenumber">331</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.sort.oldest" datatype="html">
         <source>Oldest first</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">330</context>
+          <context context-type="linenumber">331</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.empty.filtered" datatype="html">
         <source>No events match the current filters.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">332</context>
+          <context context-type="linenumber">333</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.empty.noFiles" datatype="html">
         <source>No events: nothing is open yet.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">332</context>
+          <context context-type="linenumber">333</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.removeColumn" datatype="html">
         <source>Remove column <x id="column" equiv-text="column"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">336</context>
+          <context context-type="linenumber">337</context>
         </context-group>
       </trans-unit>
       <trans-unit id="health.host.region" datatype="html">

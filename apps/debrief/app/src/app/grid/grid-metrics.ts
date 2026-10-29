@@ -12,6 +12,18 @@ export class GridMetrics {
   /** One character of the time cell, px. */
   readonly charPx = this.width.asReadonly();
 
+  private readonly chrome = signal(0);
+  /** What the theme adds around the grid inside the dock's cell (the Console theme's card padding and border), px. */
+  readonly chromePx = this.chrome.asReadonly();
+
+  /** Measures what lies between the dock's cell and the grid: the cell's width less the grid's. */
+  measureChrome(grid: HTMLElement): void {
+    const cell = grid.closest('.dv-view');
+    if (!cell) return;
+    const px = Math.round(cell.getBoundingClientRect().width - grid.getBoundingClientRect().width);
+    if (px >= 0 && px < 64) this.chrome.set(px);
+  }
+
   /** Measures a monospace sample in the font of `cell` and keeps the width of one character. */
   measure(cell: HTMLElement, canvas: HTMLCanvasElement = cell.ownerDocument.createElement('canvas')): void {
     const style = cell.ownerDocument.defaultView?.getComputedStyle(cell);

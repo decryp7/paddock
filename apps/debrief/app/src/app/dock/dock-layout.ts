@@ -85,7 +85,7 @@ export class DockLayout {
   private declared(view: Parameters<typeof viewLayout>[0]): ViewLayout {
     const layout = viewLayout(view);
     if (view?.id !== 'events') return layout;
-    const min = eventsViewMinWidth(this.prefs.extraColumns().length, this.metrics.charPx());
+    const min = eventsViewMinWidth(this.prefs.extraColumns().length, this.metrics.charPx(), this.metrics.chromePx());
     return { ...layout, min: { ...layout.min, width: min }, pref: { ...layout.pref, width: Math.max(layout.pref.width, min) } };
   }
 

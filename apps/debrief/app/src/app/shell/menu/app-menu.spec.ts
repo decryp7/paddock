@@ -98,6 +98,22 @@ describe('native menu bar', () => {
     },
   ];
 
+  it('sends a disabled item as enabled: false and an enabled one as true', () => {
+    const menus: TopMenu[] = [
+      {
+        id: 'view',
+        label: 'View',
+        items: [
+          { kind: 'item', id: 'view.resetExplorerWidth', label: 'Reset Explorer width', disabled: true },
+          { kind: 'item', id: 'view.resetLayout', label: 'Reset layout' },
+        ],
+      },
+    ];
+    const [first, second] = toNativeModel(menus).menus[0]!.items;
+    expect(first).toMatchObject({ kind: 'item', id: 'view.resetExplorerWidth', enabled: false });
+    expect(second).toMatchObject({ kind: 'item', id: 'view.resetLayout', enabled: true });
+  });
+
   it('turns the menus into the wire model (groups as captions; no shortcut where the standard Edit items have one)', () => {
     expect(toNativeModel(MENUS)).toEqual({
       menus: [

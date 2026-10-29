@@ -57,12 +57,13 @@ export function timeFullWidth(format: DateFormat, charPx: number = DEFAULT_CHAR_
 /**
  * The narrowest the Events view may be, px, with `extraColumns` extra grid columns: the message column at its minimum, the
  * other columns at theirs, the gaps, the row padding and the scroll bar. The layout plan accounts for it; at this width the
- * time column shows the compact time.
+ * time column shows the compact time. `chrome` is what the theme adds around the grid inside the dock's cell (the Console theme's
+ * card padding and border), px.
  */
-export function eventsViewMinWidth(extraColumns = 0, charPx: number = DEFAULT_CHAR_PX): number {
+export function eventsViewMinWidth(extraColumns = 0, charPx: number = DEFAULT_CHAR_PX, chrome = 0): number {
   const m = GRID.min;
   const columns = 4 + extraColumns + 1;
-  return GRID.message + m.mark + timeMinWidth(charPx) + m.severity + m.source + extraColumns * m.extra + (columns - 1) * GRID.gap + 2 * GRID.padX + GRID.scrollbar;
+  return GRID.message + m.mark + timeMinWidth(charPx) + m.severity + m.source + extraColumns * m.extra + (columns - 1) * GRID.gap + 2 * GRID.padX + GRID.scrollbar + chrome;
 }
 
 /** The Events view's minimum width with no extra columns at the default character width (the declaration in the built-in views). */
