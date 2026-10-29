@@ -27,6 +27,7 @@ import { MatContextMenuTrigger, MatMenu, MatMenuContent, MatMenuItem, MatMenuTri
 import { MatSort, MatSortHeader, type Sort } from '@angular/material/sort';
 import { MatCell, MatCellDef, MatColumnDef, MatHeaderCell, MatHeaderCellDef, MatHeaderRow, MatHeaderRowDef, MatRow, MatRowDef, MatTable } from '@angular/material/table';
 import { MatTooltip } from '@angular/material/tooltip';
+import { PdActionTip } from './action-tip';
 import { PdContextMenuKeys } from '@decryp7/paddock-ui/material';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdMiddleText } from './middle-text';
@@ -148,11 +149,12 @@ const VIRTUAL_BUFFER_ROWS = 8;
     MatContextMenuTrigger,
     PdContextMenuKeys,
     MatTooltip,
+    PdActionTip,
     MatIconButton,
     PdGlyph,
     PdMiddleText,
   ],
-  host: { '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"' },
+  host: { '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"', '(document:pointerdown)': 'onPointerDownAnywhere($event)' },
   template: `
     @if (toolbar()) {
     <div class="pd-toolbar">
@@ -251,18 +253,18 @@ const VIRTUAL_BUFFER_ROWS = 8;
           }
           @if (actionWidth()) {
             <ng-container [matColumnDef]="actionsColumn">
-              <mat-cell *matCellDef="let line" class="pd-cell pd-actions" [attr.role]="cellRole">
+              <mat-cell *matCellDef="let line" class="pd-cell pd-actions" [attr.role]="cellRole" pdActionTip>
                 @if (line.kind === 'row') {
                   @let actions = actionsOf(line.row);
                   @if (actions.length) {
                     @if (!narrow()) {
                       @for (a of inline(actions); track a.id) {
-                        <button type="button" matIconButton tabindex="-1" class="pd-icon-btn pd-inline" [attr.aria-label]="a.label" [matTooltip]="a.label" [disabled]="a.disabled" (click)="act(a, line.row, $event)">
+                        <button type="button" matIconButton tabindex="-1" class="pd-icon-btn pd-inline" [attr.aria-label]="a.label" [disabled]="a.disabled" (click)="act(a, line.row, $event)">
                           <pd-glyph [name]="a.icon ?? ''" [size]="14" />
                         </button>
                       }
                     }
-                    <button type="button" matIconButton tabindex="-1" class="pd-icon-btn pd-more" [attr.aria-label]="t.more" [matTooltip]="t.more" [matMenuTriggerFor]="rowMenu" [matMenuTriggerData]="{ row: line.row }">
+                    <button type="button" matIconButton tabindex="-1" class="pd-icon-btn pd-more" [attr.aria-label]="t.more" [matMenuTriggerFor]="rowMenu" [matMenuTriggerData]="{ row: line.row }">
                       <pd-glyph name="more" [size]="16" />
                     </button>
                   }
@@ -799,18 +801,25 @@ export class PdTable<T> {
     );
   }
 
-  /** The row that has the focus (its element and key): when the virtual table removes that element, the row is focused again once it is drawn. */
-  private focusedRow: { el: HTMLElement; key: string } | null = null;
+  /**
+   * The key of the row that has the focus. When the app puts the rows in another order (live values), the browser drops the focus
+   * of a row element that was moved, whether or not the element is still there; the row is then focused again by its key.
+   */
+  private focusedRow: string | null = null;
   protected onFocusIn(e: FocusEvent): void {
     const row = e.target instanceof Element ? e.target.closest<HTMLElement>('.pd-body [role="row"][data-key]') : null;
-    this.focusedRow = row ? { el: row, key: `r:${row.dataset['key'] as string}` } : null;
+    this.focusedRow = row ? `r:${row.dataset['key'] as string}` : null;
   }
-  /** The focused row's element was removed (the focus fell to the page): ask for the row again by its key. */
+  /** A click anywhere outside the grid moves the focus away on purpose (to the page, when it hits nothing focusable): forget the row. */
+  protected onPointerDownAnywhere(e: Event): void {
+    if (e.target instanceof Node && !this.host.contains(e.target)) this.focusedRow = null;
+  }
+  /** The focus fell to the page while a row of this grid had it (its element was removed or moved): ask for the row again by its key. */
   private restoreLostFocus(): void {
     const held = this.focusedRow;
-    if (!held || held.el.isConnected || document.activeElement !== document.body || this.pendingFocus !== null) return;
+    if (held === null || document.activeElement !== document.body || this.pendingFocus !== null) return;
     this.focusedRow = null;
-    if (this.keyIndex().has(held.key)) this.pendingFocus = held.key;
+    if (this.keyIndex().has(held)) this.pendingFocus = held;
   }
 
   /** The focus left the grid for another element: forget a row still waiting to be focused, so it never takes the focus back. */

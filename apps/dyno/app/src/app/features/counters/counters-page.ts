@@ -1,6 +1,5 @@
 import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
-import { ActionTip } from '../../shared/action-tip';
 import { ThemeService } from '../../core/theme';
 import type { CounterHit, CounterInfo, CounterUnit, TimelineEventKind } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -29,7 +28,7 @@ import { MatMenuModule } from '@angular/material/menu';
  */
 @Component({
   selector: 'dy-counters-page',
-  imports: [AsyncState, Icon, Chart, PdTable, PdCell, ActionTip, MatMenuModule, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatButton, MatIconButton],
+  imports: [AsyncState, Icon, Chart, PdTable, PdCell, PdActionTip, MatMenuModule, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatButton, MatIconButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -65,7 +64,7 @@ import { MatMenuModule } from '@angular/material/menu';
                   <li class="item" [class.on]="isWatched(h.path)">
                     <span class="name truncate" [matTooltip]="h.path">{{ hitName(h) }}</span>
                     <span class="meta truncate">{{ h.object }}</span>
-                    <span class="acts" dyActionTip>
+                    <span class="acts" pdActionTip>
                       <button type="button" matIconButton [attr.aria-label]="(isWatched(h.path) ? 'Stop charting ' : 'Chart ') + hitName(h)" (click)="toggle(h.path)"><dy-icon [name]="isWatched(h.path) ? 'check' : 'plus'" /></button>
                     </span>
                   </li>
@@ -90,7 +89,7 @@ import { MatMenuModule } from '@angular/material/menu';
                 <li class="item" [class.on]="isWatched(pathOf(c))">
                   <span class="name truncate" [dyFullText]="c.help ?? c.name">{{ c.name }}</span>
                   <span class="meta truncate">{{ unitWord(c.unit) }}</span>
-                  <span class="acts" dyActionTip>
+                  <span class="acts" pdActionTip>
                     <button type="button" matIconButton [attr.aria-label]="(isWatched(pathOf(c)) ? 'Stop charting ' : 'Chart ') + c.name" (click)="toggle(pathOf(c))"><dy-icon [name]="isWatched(pathOf(c)) ? 'check' : 'plus'" /></button>
                   </span>
                 </li>
@@ -188,7 +187,7 @@ import { MatMenuModule } from '@angular/material/menu';
                   <li class="item">
                     <span class="name truncate" [matTooltip]="p">{{ title(p) }}</span>
                     <span class="meta truncate">{{ object(p) }}</span>
-                    <span class="acts" dyActionTip>
+                    <span class="acts" pdActionTip>
                       <button type="button" matIconButton [attr.aria-label]="'Chart ' + title(p)" (click)="store.watch(p)"><dy-icon name="plus" /></button>
                       <button type="button" matIconButton [attr.aria-label]="'Unpin ' + title(p)" (click)="store.togglePin(p)"><dy-icon name="close" /></button>
                     </span>

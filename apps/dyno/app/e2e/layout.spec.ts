@@ -32,7 +32,7 @@ const STATES: State[] = [
   ...EXTRAS.map((t): State => ({ name: `extras ${t}`, path: `extras?tab=${t}` })),
   { name: 'alarms rules', path: 'alarms', setup: (page) => page.getByRole('tab', { name: 'Rules' }).click() },
   { name: 'alarms detail open', path: 'alarms', setup: async (page) => {
-      await page.locator('.grid .row').first().click();
+      await page.getByRole('grid', { name: 'Open alarms' }).getByRole('row').nth(1).click();
       await expect(page.locator('dy-alarm-detail')).toBeVisible();
     },
   },
@@ -43,7 +43,7 @@ const STATES: State[] = [
     },
   },
   { name: 'issues detail open', path: 'issues', setup: async (page) => {
-      await page.getByRole('table', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click();
+      await page.getByRole('treegrid', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click();
       await expect(page.getByRole('complementary', { name: 'Issue details' })).toBeVisible();
     },
   },
@@ -55,7 +55,7 @@ const STATES: State[] = [
       await page.getByRole('searchbox', { name: 'Search counters' }).fill('bytes');
       const results = page.getByRole('list', { name: 'Search results' });
       for (const n of [/^Chart Bytes Received \(en0\)/, /^Chart Bytes Sent \(en0\)/]) await results.getByRole('button', { name: n }).click();
-      await expect(page.getByRole('table', { name: 'Charted counters' })).toBeVisible();
+      await expect(page.getByRole('grid', { name: 'Charted counters' })).toBeVisible();
     },
   },
   { name: 'network listening', path: 'network', setup: (page) => page.getByRole('radio', { name: 'Listening' }).click() },

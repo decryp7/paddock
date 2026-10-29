@@ -888,30 +888,54 @@ describe('pd-table', () => {
     expect(table.items()).toHaveLength(3);
   });
 
-  it('asks for the focused row again when the virtual table removed its element', async () => {
+  it('keeps the focus on a row whose place changed when the app reorders the rows (live updates)', async () => {
     const f = await setup();
-    const table = f.debugElement.query((d) => d.name === 'pd-table').componentInstance as unknown as { pendingFocus: string | null; restoreLostFocus(): void };
-    const row = rowEls(f)[1]!;
-    row.focus();
-    // Still there: nothing to restore.
-    table.restoreLostFocus();
-    expect(table.pendingFocus).toBeNull();
-    row.remove();
-    document.body.focus();
-    table.restoreLostFocus();
-    expect(table.pendingFocus).toBe(`r:${row.dataset['key']}`);
-    // Once, and not while another row is waited for.
-    table.pendingFocus = null;
-    table.restoreLostFocus();
-    expect(table.pendingFocus).toBeNull();
-    // A focus that left for another element is forgotten.
+    f.componentInstance.order.set('source');
+    await settle(f);
+    const focusedKey = (): string | undefined => (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[role="row"][data-key]')?.dataset['key'];
+    rowEls(f)[1]!.focus();
+    const key = rowEls(f)[1]!.dataset['key'];
+    expect(focusedKey()).toBe(key);
+    // The app puts the rows in another order, as a refresh of live values does (the focused row moves to the end).
+    const [first, second, third] = f.componentInstance.rows();
+    f.componentInstance.rows.set([third!, first!, second!]);
+    await settle(f);
+    expect(focusedKey()).toBe(key);
+    expect(document.activeElement).not.toBe(document.body);
+    // And again, over several refreshes in a row.
+    f.componentInstance.rows.set([second!, third!, first!]);
+    await settle(f);
+    f.componentInstance.rows.set([first!, second!, third!]);
+    await settle(f);
+    expect(focusedKey()).toBe(key);
+  });
+
+  it('does not take the focus back once it left the grid for another element', async () => {
+    const f = await setup();
+    f.componentInstance.order.set('source');
+    await settle(f);
     const filter = el(f).querySelector<HTMLInputElement>('input[type=search]')!;
+    const row = rowEls(f)[0]!;
+    row.focus();
+    filter.focus();
+    const [first, second, third] = f.componentInstance.rows();
+    f.componentInstance.rows.set([third!, second!, first!]);
+    await settle(f);
+    expect(document.activeElement).toBe(filter);
+  });
+
+  it('forgets the focused row after a click elsewhere on the page, so a refresh never takes the focus back', async () => {
+    const f = await setup();
+    f.componentInstance.order.set('source');
+    await settle(f);
     rowEls(f)[0]!.focus();
-    rowEls(f)[0]!.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: filter }));
-    rowEls(f)[0]!.remove();
-    document.body.focus();
-    table.restoreLostFocus();
-    expect(table.pendingFocus).toBeNull();
+    // A click on a part of the page that cannot take focus drops the focus to the page.
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    (document.activeElement as HTMLElement).blur();
+    const [first, second, third] = f.componentInstance.rows();
+    f.componentInstance.rows.set([third!, second!, first!]);
+    await settle(f);
+    expect(document.activeElement).toBe(document.body);
   });
 
   it('cycles a header between ascending and descending only when the sort cannot be cleared', async () => {

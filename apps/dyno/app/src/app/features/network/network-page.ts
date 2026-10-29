@@ -269,8 +269,8 @@ export class NetworkPage implements OnInit, OnDestroy {
     }
     return [
       ...prog,
-      { key: 'service', header: 'Service', value: (r) => this.itemService(r), required: true, width: 'minmax(240px, 2fr)', sortable: false },
-      { key: 'address', header: 'Address', value: (r) => (r.kind === 'item' ? (r.item as ListenerRow).local : ''), width: 'minmax(220px, 2fr)', sortable: false },
+      { key: 'service', header: 'Service', value: (r) => this.itemService(r), required: true, width: 'minmax(140px, 2fr)', sortable: false },
+      { key: 'address', header: 'Address', value: (r) => (r.kind === 'item' ? (r.item as ListenerRow).local : ''), width: 'minmax(150px, 2fr)', sortable: false },
       { key: 'proto', header: 'Protocol', value: (r) => (r.kind === 'item' ? protoText((r.item as ListenerRow).proto, (r.item as ListenerRow).ipv6) : ''), width: '80px', sortable: false },
       { key: 'since', header: 'Since', value: (r) => this.itemSince(r), text: (r) => (r.kind === 'item' ? this.since(this.itemSince(r)) : ''), width: '90px', sortable: false },
     ];
