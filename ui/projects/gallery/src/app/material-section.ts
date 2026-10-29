@@ -22,6 +22,7 @@ import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatSort, MatSortModule } from '@angular/material/sort';
 import { MatTableDataSource, MatTableModule } from '@angular/material/table';
+import { MatStepperModule } from '@angular/material/stepper';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatTimepickerModule } from '@angular/material/timepicker';
 import { MatTooltipModule } from '@angular/material/tooltip';
@@ -79,6 +80,7 @@ const RUNS: Run[] = [
     MatSnackBarModule,
     MatSortModule,
     MatTableModule,
+    MatStepperModule,
     MatTabsModule,
     MatTimepickerModule,
     MatTooltipModule,
@@ -204,6 +206,17 @@ const RUNS: Run[] = [
           <tr mat-row *matRowDef="let row; columns: columns"></tr>
         </table>
         <mat-paginator [length]="42" [pageSize]="5" [pageSizeOptions]="[5, 10, 25]" aria-label="Page of runs" />
+      </div>
+
+      <h3>Stepper</h3>
+      <div class="gal-box" data-testid="material-stepper">
+        <mat-stepper aria-label="Setup steps" [selectedIndex]="1">
+          <ng-template matStepperIcon="done"><pd-glyph name="check" [size]="16" /></ng-template>
+          <ng-template matStepperIcon="edit"><pd-glyph name="check" [size]="16" /></ng-template>
+          <mat-step label="Source" [completed]="true"><p class="gal-tab-body">Choose a source</p></mat-step>
+          <mat-step label="Configure"><p class="gal-tab-body">Configure it</p></mat-step>
+          <mat-step label="Review"><p class="gal-tab-body">Review it</p></mat-step>
+        </mat-stepper>
       </div>
 
       <h3>Tabs, list, tree, expansion</h3>
