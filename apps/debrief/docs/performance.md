@@ -272,3 +272,29 @@ Three windows of the sampled cold run: the import (1 to 47 s), index and catalog
    - About 1 core for 3 to 6 minutes.
 5. **No overlap**: the import holds the store's write lock for its whole length (`lib.rs`, `import_keeping`), so the index and
    the catalogue start only when it ends.
+
+### Parse speed: capturing without a rest-of-line tail (microbenchmark)
+
+`LineParser::line` spends 38% of the parse threads' time in `Regex::captures_at` (above). Almost every text format ends in a greedy
+rest-of-line group, `(?P<message>.*)$`: the log4net-pattern regex and every output template. The `regex` crate resolves capture
+groups with a bounded backtracker over the whole match, so that tail costs as much as the rest of the line.
+
+For one line (no `\n`, no `\r`) the tail matches whatever its prefix matched. So the prefix alone decides every other group, in the
+same leftmost-first order, and the tail group is the rest of the line. `debrief_core::text_format` detects the tail on the parsed
+pattern and captures with the prefix; any other line, or pattern, uses the whole regex.
+
+- Date and build: 2026-10-29, release, on `debrief/duckdb-2` at 092f59495.
+- Machine: M4 Pro, single thread, at load 27 (a relative comparison inside one process; the absolute times are high).
+- Corpus: the first 1,000,000 lines of `large10/web/WEB01/orders-web01.log` (invented, `gen_large.py`).
+- Command: `rx-bench <file> 1000000` (`duck2-bench/rx`, on `wip/debrief-duckdb2-prototypes`).
+
+| Capture | ns per line | MB/s | Lines matched |
+|---|---|---|---|
+| whole pattern, `captures` (shipped) | 915 to 925 | 123 to 124 | 909,102 |
+| whole pattern, `is_match` only | 119 to 130 | 876 to 952 | 909,102 |
+| prefix captures, tail = rest of line | 470 | 242 | 909,102 |
+
+The split captures equal the whole pattern's on all 1M lines, the message lengths included. A one-pass DFA, which would be faster
+still, does not build for this pattern ("not one-pass: conflicting transition"). Expected effect on a real import: about half of the
+regex share, so roughly 15 to 20% less parse CPU on text logs. The end-to-end import has not been measured yet: the machine had no
+quiet window.
