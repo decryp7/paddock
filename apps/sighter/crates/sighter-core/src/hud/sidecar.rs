@@ -19,8 +19,12 @@ pub const FORMAT: &str = "sighter-hud";
 pub const VERSION: u32 = 1;
 /// Longest accepted line in bytes.
 pub const MAX_LINE_BYTES: usize = 64 * 1024;
-/// Most events in one track.
-pub const MAX_EVENTS: usize = 2_000_000;
+/// Most lines in one file, the header included.
+pub const MAX_LINES: usize = 1_000_000;
+/// Most events in one track (every line but the header).
+pub const MAX_EVENTS: usize = MAX_LINES - 1;
+/// Largest file in bytes (256 MiB).
+pub const MAX_FILE_BYTES: usize = 256 * 1024 * 1024;
 /// The sidecar's file-name suffix.
 pub const SUFFIX: &str = ".hud.jsonl";
 
@@ -33,8 +37,10 @@ pub enum SidecarError {
     /// The header is not valid or names another format.
     #[error("line 1 is not a '{FORMAT}' header")]
     BadHeader,
-    /// A version this build does not know.
-    #[error("track version {found} is not supported (this build reads version {VERSION}); update Sighter to read it")]
+    /// A higher major version than this build reads.
+    #[error(
+        "This HUD file was written by a newer Sighter (format version {found}; this build reads version {VERSION}); update Sighter to read it"
+    )]
     UnsupportedVersion {
         /// The version in the file.
         found: u32,
@@ -53,6 +59,12 @@ pub enum SidecarError {
         /// 1-based line number.
         line: usize,
     },
+    /// The file is larger than [`MAX_FILE_BYTES`].
+    #[error("the HUD file is larger than {MAX_FILE_BYTES} bytes")]
+    FileTooLarge,
+    /// More lines than [`MAX_LINES`].
+    #[error("the HUD file has more than {MAX_LINES} lines")]
+    TooManyLines,
     /// More events than [`MAX_EVENTS`].
     #[error("the track holds more than {MAX_EVENTS} events")]
     TooManyEvents,
@@ -74,6 +86,7 @@ struct Header {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Track {
     events: Vec<TraceEvent>,
+    skipped: usize,
 }
 
 /// The sidecar file name for a video file name: `run.mp4` becomes `run.mp4.hud.jsonl`.
@@ -96,7 +109,11 @@ impl Track {
                 return Err(SidecarError::OutOfOrder { line: i + 3 });
             }
         }
-        Ok(Self { events })
+        Ok(Self { events, skipped: 0 })
+    }
+    /// Lines the reader skipped because they were malformed, unknown or out of order.
+    pub fn skipped(&self) -> usize {
+        self.skipped
     }
     /// The events.
     pub fn events(&self) -> &[TraceEvent] {
@@ -116,41 +133,43 @@ impl Track {
         }
         out
     }
-    /// Parses a track.
+    /// Parses a track. A malformed line, an event this build does not know, or an event out of order is **skipped and
+    /// counted** ([`Track::skipped`]), never a panic; unknown fields are ignored. A file or line over a limit, a bad
+    /// header or a newer major version stops the read with an error that says what to do.
     pub fn parse(text: &str) -> Result<Self, SidecarError> {
+        if text.len() > MAX_FILE_BYTES {
+            return Err(SidecarError::FileTooLarge);
+        }
         let mut lines = text.lines().enumerate().map(|(i, l)| (i + 1, l));
         let (_, first) = lines.next().ok_or(SidecarError::MissingHeader)?;
         if first.len() > MAX_LINE_BYTES {
             return Err(SidecarError::LineTooLong { line: 1 });
         }
         let header: Header = serde_json::from_str(first).map_err(|_| SidecarError::BadHeader)?;
-        if header.format != FORMAT {
+        if header.format != FORMAT || header.version == 0 {
             return Err(SidecarError::BadHeader);
         }
-        if header.version != VERSION {
+        if header.version > VERSION {
             return Err(SidecarError::UnsupportedVersion { found: header.version });
         }
         let mut events: Vec<TraceEvent> = Vec::new();
+        let mut skipped = 0;
         for (line, l) in lines {
+            if line > MAX_LINES {
+                return Err(SidecarError::TooManyLines);
+            }
             if l.len() > MAX_LINE_BYTES {
                 return Err(SidecarError::LineTooLong { line });
             }
             if l.trim().is_empty() {
                 continue;
             }
-            if events.len() == MAX_EVENTS {
-                return Err(SidecarError::TooManyEvents);
+            match serde_json::from_str::<TraceEvent>(l) {
+                Ok(e) if ordered(events.last(), &e) => events.push(e),
+                _ => skipped += 1,
             }
-            let e: TraceEvent = serde_json::from_str(l).map_err(|e| SidecarError::BadEvent {
-                line,
-                reason: e.to_string(),
-            })?;
-            if !ordered(events.last(), &e) {
-                return Err(SidecarError::OutOfOrder { line });
-            }
-            events.push(e);
         }
-        Ok(Self { events })
+        Ok(Self { events, skipped })
     }
     /// The events whose time lies in `[from, to]`, for drawing the HUD over a video frame (a viewer asks for the span
     /// around the frame's time). Events are sorted, so this is a binary search.
@@ -241,69 +260,99 @@ mod tests {
         assert_eq!(sidecar_name("run.mp4"), "run.mp4.hud.jsonl");
     }
 
+    const HEAD: &str = "{\"format\":\"sighter-hud\",\"version\":1}\n";
+
     #[test]
-    fn bad_input_is_a_typed_error_never_a_panic() {
+    fn bad_headers_limits_and_newer_versions_stop_the_read() {
         assert_eq!(Track::parse(""), Err(SidecarError::MissingHeader));
         assert_eq!(Track::parse("nope"), Err(SidecarError::BadHeader));
         assert_eq!(Track::parse(r#"{"format":"other","version":1}"#), Err(SidecarError::BadHeader));
         assert_eq!(
+            Track::parse(r#"{"format":"sighter-hud","version":0}"#),
+            Err(SidecarError::BadHeader)
+        );
+        assert_eq!(
             Track::parse(r#"{"format":"sighter-hud","version":2}"#),
             Err(SidecarError::UnsupportedVersion { found: 2 })
         );
-        let head = "{\"format\":\"sighter-hud\",\"version\":1}\n";
-        assert!(matches!(
-            Track::parse(&format!("{head}{{\"seq\":0}}\n")),
-            Err(SidecarError::BadEvent { line: 2, .. })
-        ));
+        assert!(
+            SidecarError::UnsupportedVersion { found: 9 }
+                .to_string()
+                .starts_with("This HUD file was written by a newer Sighter")
+        );
         assert_eq!(
-            Track::parse(&format!("{head}{}\n", "x".repeat(MAX_LINE_BYTES + 1))),
+            Track::parse(&format!("{HEAD}{}\n", "x".repeat(MAX_LINE_BYTES + 1))),
             Err(SidecarError::LineTooLong { line: 2 })
         );
         assert_eq!(
             Track::parse(&"x".repeat(MAX_LINE_BYTES + 1)),
             Err(SidecarError::LineTooLong { line: 1 })
         );
-        // Invalid values inside an event are refused at the edge: a score of 2 and a secret name with a space.
-        let bad_score =
-            r#"{"seq":0,"at":0,"event":{"kind":"detection","data":{"locate":1,"rect":[0,0,1,1],"class":1,"score":2.0,"chosen":false}}}"#;
-        assert!(matches!(
-            Track::parse(&format!("{head}{bad_score}\n")),
-            Err(SidecarError::BadEvent { .. })
-        ));
-        let bad_name = r#"{"seq":0,"at":0,"event":{"kind":"step","data":{"stage":"typed","step":1,"text":{"secret":"a b"}}}}"#;
-        assert!(matches!(
-            Track::parse(&format!("{head}{bad_name}\n")),
-            Err(SidecarError::BadEvent { .. })
-        ));
-        let bad_rect =
-            r#"{"seq":0,"at":0,"event":{"kind":"detection","data":{"locate":1,"rect":[0,0,-1,1],"class":1,"score":0.5,"chosen":false}}}"#;
-        assert!(matches!(
-            Track::parse(&format!("{head}{bad_rect}\n")),
-            Err(SidecarError::BadEvent { .. })
-        ));
-        assert!(SidecarError::UnsupportedVersion { found: 9 }.to_string().contains("update Sighter"));
+        assert_eq!(
+            Track::parse(&format!("{HEAD}{}", "\n".repeat(MAX_LINES))),
+            Err(SidecarError::TooManyLines)
+        );
+        assert_eq!((MAX_LINE_BYTES, MAX_LINES, MAX_FILE_BYTES), (65_536, 1_000_000, 268_435_456));
     }
 
     #[test]
-    fn order_is_enforced_on_write_and_read() {
+    fn the_file_size_limit_is_checked_before_anything_is_parsed() {
+        // One byte over 256 MiB of spaces: refused up front. (Allocated once, only in this test.)
+        let big = " ".repeat(MAX_FILE_BYTES + 1);
+        assert_eq!(Track::parse(&big), Err(SidecarError::FileTooLarge));
+    }
+
+    #[test]
+    fn malformed_unknown_and_out_of_order_lines_are_skipped_and_counted() {
+        let ok = |s: u64, a: u64| {
+            format!(
+                "{}\n",
+                serde_json::to_string(&ev(s, a, TraceKind::Step(StepEvent::Started { step: 0 }))).unwrap()
+            )
+        };
+        // Invalid values inside an event (a score of 2, a secret name with a space, a negative width), a line that is not
+        // JSON, an event kind this build does not know, and an event that goes back in time.
+        let bad_score =
+            r#"{"seq":1,"at":0,"event":{"kind":"detection","data":{"locate":1,"rect":[0,0,1,1],"class":1,"score":2.0,"chosen":false}}}"#;
+        let bad_name = r#"{"seq":2,"at":0,"event":{"kind":"step","data":{"stage":"typed","step":1,"text":{"secret":"a b"}}}}"#;
+        let bad_rect =
+            r#"{"seq":3,"at":0,"event":{"kind":"detection","data":{"locate":1,"rect":[0,0,-1,1],"class":1,"score":0.5,"chosen":false}}}"#;
+        let future = r#"{"seq":4,"at":0,"event":{"kind":"hologram","data":{}}}"#;
+        let text = format!(
+            "{HEAD}{}{bad_score}\n{bad_name}\n{bad_rect}\n{future}\nnot json\n{}{}",
+            ok(5, 10),
+            ok(5, 20),
+            ok(6, 5)
+        );
+        let t = Track::parse(&text).unwrap();
+        assert_eq!((t.events().len(), t.skipped()), (1, 7)); // seq 5 once; its repeat, bad lines and the backwards event skipped
+        assert_eq!(Track::new(sample()).unwrap().skipped(), 0);
+    }
+
+    #[test]
+    fn unknown_fields_and_header_extras_are_ignored() {
+        let head = "{\"format\":\"sighter-hud\",\"version\":1,\"video\":\"run.mp4\",\"future\":[1,2]}\n";
+        let line = r#"{"seq":0,"at":3,"note":"extra","event":{"kind":"step","data":{"stage":"started","step":9,"extra":true}}}"#;
+        let t = Track::parse(&format!("{head}{line}\n")).unwrap();
+        assert_eq!((t.events().len(), t.skipped()), (1, 0));
+        assert_eq!(t.events()[0].at, Micros(3));
+    }
+
+    #[test]
+    fn order_is_enforced_on_write() {
         let mut v = sample();
         v.swap(1, 2);
-        assert_eq!(Track::new(v.clone()), Err(SidecarError::OutOfOrder { line: 4 }));
+        assert_eq!(Track::new(v), Err(SidecarError::OutOfOrder { line: 4 }));
         let mut ok = sample();
         ok[3].at = Micros(5); // time goes back
         assert!(Track::new(ok).is_err());
-        let head = "{\"format\":\"sighter-hud\",\"version\":1}\n";
         let line = |s: u64, a: u64| {
             format!(
                 "{}\n",
                 serde_json::to_string(&ev(s, a, TraceKind::Step(StepEvent::Started { step: 0 }))).unwrap()
             )
         };
-        assert_eq!(
-            Track::parse(&format!("{head}{}{}", line(1, 5), line(1, 6))),
-            Err(SidecarError::OutOfOrder { line: 3 })
-        );
-        assert!(Track::parse(&format!("{head}{}\n{}", line(1, 5), line(2, 5))).is_ok()); // blank lines skipped, equal times fine
+        assert!(Track::parse(&format!("{HEAD}{}\n{}", line(1, 5), line(2, 5))).is_ok()); // blank lines skipped, equal times fine
     }
 
     #[test]
