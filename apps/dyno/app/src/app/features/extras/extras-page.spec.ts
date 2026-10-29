@@ -341,7 +341,7 @@ describe('dy-extras-page', () => {
     await settle(f);
     await new Promise((r) => setTimeout(r, 20));
     await settle(f);
-    expect(el.querySelector('table[aria-label="Large and duplicate files"]')).not.toBeNull();
+    expect(el.querySelector('[role$="grid"][aria-label="Large and duplicate files"]')).not.toBeNull();
     expect(el.textContent).not.toContain('Search stopped.');
   });
 

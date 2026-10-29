@@ -6,7 +6,8 @@ import { provideMenus, provideSubmenus } from '@decryp7/paddock-ui/shell/menu';
 import { SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { assertContributionsValid, dialogTableProblems, provideShellTesting } from '@decryp7/paddock-ui/shell/testing';
 import { BACKEND } from '../core/backend';
-import { MockBackend } from '../core/mock-backend';
+import type { MockBackend } from '../core/mock-backend';
+import { jobsProviders, mockWithJobs } from '../../testing/job-test-support';
 import { APP_COMMANDS } from '../generated/app-commands';
 import { DIALOG_BASE } from '../generated/dialog-contracts';
 import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS, DIALOGS } from './contributions';
@@ -35,11 +36,12 @@ const env = (name: string): string | undefined => (globalThis as { process?: { e
 const MANIFEST = 'paddock-manifest.json';
 
 function configure(contributions = [CONTRIBUTIONS]): MockBackend {
-  const backend = new MockBackend({ latencyMs: 0, now: () => new Date(2026, 9, 22, 12).getTime() });
+  const { mock: backend, jobs } = mockWithJobs({ now: () => new Date(2026, 9, 22, 12).getTime() });
   TestBed.configureTestingModule({
     providers: [
       { provide: BACKEND, useValue: backend },
       provideRouter([]),
+      jobsProviders(jobs),
       ...provideShellTesting({
         contributions,
         context: () => Promise.resolve(dynoContext),

@@ -169,7 +169,7 @@ describe('dy-backup-page', () => {
     expect(el.querySelector('pd-job')).toBeNull();
     expect(el.querySelector('[role="alert"]')).toBeNull();
     expect(el.querySelector('[aria-label="Summary"] p')?.textContent).toBe('Checked 40 min ago');
-    expect(el.querySelectorAll('tr.row')).toHaveLength(3);
+    expect(el.querySelectorAll(ROW)).toHaveLength(3);
     expect(btn(el, 'Check now').disabled).toBe(false);
   });
 
