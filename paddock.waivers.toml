@@ -93,9 +93,10 @@ path = "apps/spotter/crates/spotter-sources/tests/http_sources.rs"
 reason = "Spotter: an unreachable-source test on a freed port; to use HeldPort::reset"
 expires = "2026-12-31"
 
-# C54 (rule 52): Dyno's lowered threads are still QoS BACKGROUND; whether anything waits on them is being checked separately.
+# C54 (rule 52): Dyno's lowered threads still use the starvable levels (macOS QoS BACKGROUND, Windows background mode);
+# whether anything waits on them (the disk-map scan calls background_current_thread) is being checked separately.
 [[waiver]]
 check = "C54"
 path = "apps/dyno/crates/dyno-platform/src/priority.rs"
-reason = "Dyno: background_current_thread() uses QOS_CLASS_BACKGROUND; to move to UTILITY or carry an inline background-qos waiver once it is known that nothing waits on those threads"
+reason = "Dyno: background_current_thread() uses QOS_CLASS_BACKGROUND and THREAD_MODE_BACKGROUND_BEGIN; to move to the gentle levels or carry inline background-qos waivers once it is known that nothing waits on those threads"
 expires = "2026-12-31"

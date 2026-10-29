@@ -1,10 +1,11 @@
 //! Background priority for download workers: a large download must not slow the work the user is doing.
 //!
-//! [`lower_current_thread`] asks the OS for the "background" class for the calling thread (QoS utility on macOS, nice
-//! 10 on Linux, background mode on Windows, which also lowers its disk priority). It is best effort: where the OS
-//! refuses or the platform has no such call, the thread keeps its priority and nothing is reported.
+//! [`lower_current_thread`] asks the OS for a lowered but never starved level for the calling thread (QoS utility on
+//! macOS, nice 10 on Linux, below-normal priority on Windows): the user waits for the download, so Windows' background
+//! mode, which also drops the thread's disk and memory priority to the lowest, is not used (Paddock rule 52). It is best
+//! effort: where the OS refuses or the platform has no such call, the thread keeps its priority and nothing is reported.
 
-/// Lowers the calling thread's CPU (and where the OS has it, disk) priority.
+/// Lowers the calling thread's CPU priority.
 pub fn lower_current_thread() {
     imp::lower();
 }
@@ -33,12 +34,12 @@ mod imp {
 
 #[cfg(windows)]
 mod imp {
-    use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN};
+    use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL};
 
     pub fn lower() {
         // SAFETY: the pseudo handle of the calling thread is always valid; a refusal is ignored.
         unsafe {
-            let _ = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
+            let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
         }
     }
 }
