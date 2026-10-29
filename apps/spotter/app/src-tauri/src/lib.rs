@@ -267,7 +267,10 @@ const LEGAL: [(&str, &str, &str); 3] = [
 /// it an update is found but never installed.
 fn updater<R: Runtime>(test_dir: Option<std::path::PathBuf>, app: &tauri::AppHandle<R>) -> UpdatesBuilder {
     let key = option_env!("TAURI_UPDATER_PUBKEY");
-    let b = UpdatesBuilder::new(APP_NAME)
+    let b = LEGAL
+        .iter()
+        .fold(UpdatesBuilder::new(APP_NAME), |b, (id, title, text)| b.legal(id, title, *text));
+    let b = b
         .channel("stable", "Stable", UPDATE_FEED)
         .public_key(key)
         .installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(
@@ -277,9 +280,6 @@ fn updater<R: Runtime>(test_dir: Option<std::path::PathBuf>, app: &tauri::AppHan
         .releases_page(RELEASES_PAGE)
         .homepage("https://dev.decryptology.net/decryp7/paddock")
         .changelog(include_str!("../../../CHANGELOG.md"))
-        .legal(LEGAL[0].0, LEGAL[0].1, LEGAL[0].2)
-        .legal(LEGAL[1].0, LEGAL[1].1, LEGAL[1].2)
-        .legal(LEGAL[2].0, LEGAL[2].1, LEGAL[2].2)
         .build_info(option_env!("SPOTTER_COMMIT"), option_env!("SPOTTER_BUILT"));
     match test_dir {
         None => b,
