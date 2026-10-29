@@ -5,6 +5,7 @@ import { WidgetBoard } from '../widgets/widget-board';
 import { formatDuration } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { LiveStore } from '../../state/live.store';
+import { MatButton } from '@angular/material/button';
 
 /**
  * The home screen, made of widgets: the default layout shows how the PC is doing right now, what is using it, how it
@@ -13,7 +14,7 @@ import { LiveStore } from '../../state/live.store';
  */
 @Component({
   selector: 'dy-dashboard',
-  imports: [RouterLink, Icon, WidgetBoard, NormalCard],
+  imports: [MatButton, RouterLink, Icon, WidgetBoard, NormalCard],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -22,7 +23,7 @@ import { LiveStore } from '../../state/live.store';
           <h1>Dashboard</h1>
           <p class="num">{{ subtitle() }}</p>
         </div>
-        <a class="btn" routerLink="/processes"><dy-icon name="processes" /> Open task manager</a>
+        <a matButton="outlined" routerLink="/processes"><dy-icon name="processes" /> Open task manager</a>
       </header>
 
       <dy-normal-card />

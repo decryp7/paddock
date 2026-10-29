@@ -1,35 +1,32 @@
+import type { Type } from '@angular/core';
 import type { IconName } from '../shared/icons';
 
 export interface NavItem {
   path: string;
   label: string;
   icon: IconName;
-  /** Words the command palette also matches. */
-  keywords: string;
+  /** Loads the screen's component on first visit. */
+  load: () => Promise<Type<unknown>>;
 }
 
-/** The main window's screens, in sidebar order. */
+/** The main window's screens, in sidebar order (Settings is the shell's window, opened from the menu, the gear and Mod+,). */
 export const NAV: NavItem[] = [
-  { path: '/', label: 'Dashboard', icon: 'dashboard', keywords: 'home overview health live' },
-  { path: '/processes', label: 'Processes', icon: 'processes', keywords: 'task manager apps processes cpu memory details' },
-  { path: '/why-slow', label: 'Why slow', icon: 'why', keywords: 'diagnosis slow cause evidence lag freeze cpu memory disk heat' },
-  { path: '/throttling', label: 'Throttling', icon: 'temperature', keywords: 'throttle slowed down heat thermal clock speed power limit battery saver cpu slower' },
-  { path: '/issues', label: 'Issues', icon: 'alert', keywords: 'crashes hangs problems errors stability score unexpected shutdown new programs unusual first seen baseline' },
-  { path: '/inventory', label: 'Inventory', icon: 'memory', keywords: 'memory ram modules slots upgrade hardware dimm' },
-  { path: '/network', label: 'Network', icon: 'network', keywords: 'ports listening connections sockets firewall exposed ip remote host' },
-  { path: '/counters', label: 'Counters', icon: 'trend', keywords: 'performance counters perfmon pdh raw metrics browse search chart pin disk queue page faults network interface proc' },
-  { path: '/benchmarks', label: 'Benchmarks', icon: 'gauge', keywords: 'benchmark speed score cpu memory disk before after compare' },
-  { path: '/alarms', label: 'Alarms', icon: 'bell', keywords: 'alerts notifications acknowledge shelve mute thresholds custom rules' },
-  { path: '/reports', label: 'Reports', icon: 'reports', keywords: 'weekly report summary week trend export markdown html' },
-  { path: '/recorder', label: 'Flight recorder', icon: 'camera', keywords: 'timeline capture snapshot last ten minutes' },
-  { path: '/health', label: 'Health', icon: 'health', keywords: 'score reasons startup apps sign-in' },
-  { path: '/backup', label: 'Backup health', icon: 'restore', keywords: 'backup time machine restic borg file history duplicati stale last backup' },
-  { path: '/extras', label: 'Extras', icon: 'layers', keywords: 'what changed installs updates sleep wake blockers boot startup time apps network energy gpu large files duplicates software inventory maintenance windows' },
-  { path: '/lifespan', label: 'Lifespan', icon: 'battery', keywords: 'ssd disk battery life wear forecast replace endurance capacity cycles' },
-  { path: '/diagnostics', label: 'Diagnostics', icon: 'file', keywords: 'bundle zip bug report redacted support' },
-  { path: '/settings', label: 'Settings', icon: 'settings', keywords: 'theme tray plugins about preferences' },
-];
-
-/** What is on the roadmap but has no screen: listed in one dialog, never as a route or a page of its own. */
-export const COMING: { label: string; icon: IconName; text: string }[] = [
+  { path: '/', label: 'Dashboard', icon: 'dashboard', load: () => import('../features/dashboard/dashboard').then((m) => m.Dashboard) },
+  { path: '/processes', label: 'Processes', icon: 'processes', load: () => import('../features/processes/processes-page').then((m) => m.ProcessesPage) },
+  { path: '/why-slow', label: 'Why slow', icon: 'why', load: () => import('../features/why-slow/why-slow-page').then((m) => m.WhySlowPage) },
+  { path: '/throttling', label: 'Throttling', icon: 'temperature', load: () => import('../features/throttling/throttling-page').then((m) => m.ThrottlingPage) },
+  { path: '/issues', label: 'Issues', icon: 'alert', load: () => import('../features/issues/issues-page').then((m) => m.IssuesPage) },
+  { path: '/inventory', label: 'Inventory', icon: 'memory', load: () => import('../features/inventory/inventory-page').then((m) => m.InventoryPage) },
+  { path: '/disk-map', label: 'Disk map', icon: 'disk', load: () => import('../features/disk-map/disk-map-page').then((m) => m.DiskMapPage) },
+  { path: '/network', label: 'Network', icon: 'network', load: () => import('../features/network/network-page').then((m) => m.NetworkPage) },
+  { path: '/counters', label: 'Counters', icon: 'trend', load: () => import('../features/counters/counters-page').then((m) => m.CountersPage) },
+  { path: '/benchmarks', label: 'Benchmarks', icon: 'gauge', load: () => import('../features/benchmarks/bench-page').then((m) => m.BenchPage) },
+  { path: '/alarms', label: 'Alarms', icon: 'bell', load: () => import('../features/alarms/alarms-page').then((m) => m.AlarmsPage) },
+  { path: '/reports', label: 'Reports', icon: 'reports', load: () => import('../features/reports/reports-page').then((m) => m.ReportsPage) },
+  { path: '/recorder', label: 'Flight recorder', icon: 'camera', load: () => import('../features/recorder/recorder-page').then((m) => m.RecorderPage) },
+  { path: '/health', label: 'Health', icon: 'health', load: () => import('../features/health/health-page').then((m) => m.HealthPage) },
+  { path: '/backup', label: 'Backup health', icon: 'restore', load: () => import('../features/backup/backup-page').then((m) => m.BackupPage) },
+  { path: '/extras', label: 'Extras', icon: 'layers', load: () => import('../features/extras/extras-page').then((m) => m.ExtrasPage) },
+  { path: '/lifespan', label: 'Lifespan', icon: 'battery', load: () => import('../features/lifespan/lifespan-page').then((m) => m.LifespanPage) },
+  { path: '/diagnostics', label: 'Diagnostics', icon: 'file', load: () => import('../features/diagnostics/diagnostics-page').then((m) => m.DiagnosticsPage) },
 ];

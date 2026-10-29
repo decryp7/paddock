@@ -6,11 +6,13 @@ import { Icon } from '../../shared/icon';
 import { GRADE_LABEL, GRADE_TONE, SEVERITY_LABEL, SEVERITY_TONE } from '../../shared/labels';
 import { Ring } from '../../shared/ring';
 import { HealthStore } from '../../state/health.store';
+import { MatButton } from '@angular/material/button';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /** The health score with its top reasons. */
 @Component({
   selector: 'dy-health-hero',
-  imports: [Ring, Icon],
+  imports: [MatTooltip, MatButton, Ring, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" aria-label="Health score">
@@ -40,7 +42,7 @@ import { HealthStore } from '../../state/health.store';
                   <span class="t"><span class="badge" [attr.data-tone]="sevTone(x)">{{ sevLabel(x) }}</span> {{ x.title }}</span>
                   <span class="d">{{ x.detail }}</span>
                 </div>
-                <span class="imp num" [title]="'Costs ' + pts(x.impact)">{{ pts(x.impact, true) }}</span>
+                <span class="imp num" [matTooltip]="'Costs ' + pts(x.impact)">{{ pts(x.impact, true) }}</span>
               </li>
             }
           </ul>
@@ -49,7 +51,7 @@ import { HealthStore } from '../../state/health.store';
         <div class="err" role="alert">
           <dy-icon name="alert" />
           <div class="text"><strong>{{ e.message }}</strong>@if (hint(); as h) {<span>{{ h }}</span>}</div>
-          <button type="button" class="btn sm" (click)="store.loadReport()"><dy-icon name="refresh" /> Retry</button>
+          <button type="button" matButton="outlined" (click)="store.loadReport()"><dy-icon name="refresh" /> Retry</button>
         </div>
       } @else {
         <div class="score" aria-busy="true" aria-label="Loading health">

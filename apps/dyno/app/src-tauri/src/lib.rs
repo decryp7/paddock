@@ -1,159 +1,408 @@
-//! The Dyno app: tray icon, window and tray dropdown over the Dyno agent (ADR 0002). It measures nothing itself:
-//! [`link::AgentLink`] finds (or starts) the agent, forwards the webview's requests and turns the agent's pushes into
-//! events, and [`tray`] draws the icon from them.
+//! The Dyno app: tray icons, window and tray popover over the Dyno agent (ADR 0002), on the Paddock app shell (ADR 0012).
+//! The shell plugin owns the frame around Dyno: windows, the tray popover window, the exit with its watchdog, dialogs,
+//! notifications, service health, jobs, settings, About and updates. This crate adds Dyno's own commands ([`COMMANDS`]),
+//! its service ([`health`]) and the link to the agent: [`link::AgentLink`] finds (or starts) the agent, forwards the
+//! webview's requests and turns the agent's pushes into events, and [`tray`] draws the icons from them. It measures
+//! nothing itself.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod commands;
+pub mod dialogs;
 pub mod dto;
+pub mod health;
 pub mod link;
 pub mod logging;
 pub mod login;
-pub mod native_feel;
-pub mod popover;
 pub mod service_repair;
 pub mod shell;
 pub mod tray;
 pub mod tray_model;
-pub mod updater;
-pub mod window;
 
 use link::{AgentLink, ProcessLauncher};
+use paddock_shell::{AppIdentity, Builder};
+use paddock_updater::tauri::UpdatesBuilder;
+use paddock_window::tauri::{FixedPrefs, WindowConfig, Windows};
+use paddock_window::{OnClose, OpenFilesIn};
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Manager, Runtime};
 
-/// Starts the app.
-pub fn run() {
-    let background = std::env::args().any(|a| a == "--background");
-    let result = tauri::Builder::default()
-        // Must be the first plugin: a second launch asks the running app to show its window and exits.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| window::show_main(app)))
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec!["--background"]),
-        ))
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(updater::plugin())
-        .invoke_handler(tauri::generate_handler![
-            commands::dyno,
-            commands::app_info,
-            commands::tray_open_main,
-            commands::tray_quit,
-            commands::popover_resize,
-            commands::popover_close,
-            commands::save_diagnostics,
-            commands::save_report,
-            commands::save_issues,
-            commands::pick_folder,
-            commands::save_inventory_report,
-        ])
-        .on_window_event(|win, event| match event {
-            tauri::WindowEvent::Destroyed => {
-                if let Some(link) = win.app_handle().try_state::<Arc<AgentLink>>() {
-                    link.drop_window(win.label());
-                }
-            }
-            tauri::WindowEvent::Focused(false) if popover::is_popover_label(win.label()) => {
-                tray::popover_blurred(win.app_handle(), win.label())
-            }
-            _ => {}
-        })
+/// The app's id (the shell's `AppIdentity`, its folders and its log target).
+pub const APP_ID: &str = "dyno";
+/// The product name (`tauri.conf.json` `productName`, the windows, the menus, About).
+pub const APP_NAME: &str = "Dyno";
+/// The app's version: the workspace's (`tauri.conf.json` repeats it for the bundles).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Where the releases are (About's "Release notes", Updates' "Open the releases page").
+pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/paddock/releases?q=dyno-v";
+/// The feed the updater reads.
+pub const UPDATE_FEED: &str = "https://dev.decryptology.net/decryp7/paddock/releases/download/dyno-latest/latest.json";
+/// The manifest of the UI's contributions, compared by the tests.
+pub const MANIFEST: &str = include_str!("../../paddock-manifest.json");
+
+paddock_commands::command_table! {
+    /// Dyno's own commands (the shell's are the plugin's, `plugin:paddock-shell|<command>`). Windows that are not `main`
+    /// (the settings window, the tray popover) call only what is listed for them.
+    pub static COMMANDS, macro handler;
+    /// Every engine request, forwarded to the agent (`invoke('dyno', { request })`): parsed into a typed request here,
+    /// refused when it is one the window may not ask. The agent re-validates.
+    Mutation [MAIN | TRAY | DIALOG] => commands::dyno,
+    /// "Save bundle...": the OS save dialog, then the agent writes the redacted diagnostics zip.
+    Mutation [MAIN] => commands::save_diagnostics,
+    /// "Export" on the Reports page: the OS save dialog, then the agent writes the week's report.
+    Mutation [MAIN] => commands::save_report,
+    /// "Export for Debrief" on the Issues page.
+    Mutation [MAIN] => commands::save_issues,
+    /// "Export report..." on the Inventory tab.
+    Mutation [MAIN] => commands::save_inventory_report,
+    /// "Choose folder..." for the file finder: the OS folder dialog.
+    Mutation [MAIN] => commands::pick_folder,
+}
+
+/// Where the app runs: installed (the user's folders, real ticks) or in a test (nothing outside `dir`, no native menu
+/// off the main thread, no update checks).
+#[derive(Debug, Clone)]
+pub enum Place {
+    /// The installed app.
+    Installed,
+    /// A test: the updater and settings keep to `dir`.
+    Test {
+        /// The only folder the test touches.
+        dir: std::path::PathBuf,
+    },
+}
+
+/// The shell plugin with Dyno's parts.
+pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn shell::TrayPixels<R>>) -> Builder<R> {
+    let attach = hub.clone();
+    let agent_hub = hub.clone();
+    let installed = matches!(place, Place::Installed);
+    let dirs = match &place {
+        Place::Installed => dyno_agent::paths::Dirs::current(),
+        Place::Test { dir } => dyno_agent::paths::Dirs::at(dir.join("data")),
+    };
+    let mut builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))
+        .app_commands(&COMMANDS)
+        .dialogs(&[&dialogs::DIALOGS])
+        .health(hub.services())
         .setup(move |app| {
-            let dirs = dyno_agent::paths::Dirs::current();
-            logging::init(&dirs.logs());
-            logging::info(&format!(
-                "Dyno {} starting (data folder: {})",
-                env!("CARGO_PKG_VERSION"),
-                dirs.root().display()
-            ));
-            let shell = shell::Shell::new(app.handle().clone());
-            let launcher = ProcessLauncher::new(login::agent_program);
-            let link = AgentLink::new(dirs, env!("CARGO_PKG_VERSION"), shell.clone(), Box::new(launcher));
-            app.manage(shell.clone());
-            app.manage(link.clone());
-            app.manage(commands::PickedFolders::default());
-            popover::init(app.handle());
-            let items = shell::initial_items(&dyno_core::settings::Settings::default().tray_items);
-            if let Err(e) = tray::sync_items(app.handle(), &items) {
-                // Linux without a status-notifier host or libayatana-appindicator: the window is then the only way in,
-                // so closing it must exit (see `window::keeps_running`).
-                if cfg!(target_os = "linux") {
-                    logging::info(&format!("no tray icon ({e}); closing the window will quit the app"));
-                    app.manage(window::NoTray);
-                } else {
-                    return Err(e.into());
-                }
-            }
-            link.spawn()?;
-            let beat = shell.clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(3));
-                beat.replay_status();
-            });
-            if !window::start_hidden(background, window::has_tray(app.handle())) {
-                window::show_main(app.handle());
-            }
-            // After an update launchd may refuse the registered agent (a rebuilt app has a new code identity on
-            // macOS) or keep the old job: replace the registration once per version and whenever launchd says it is
-            // stale (`service_repair`), in the background, so measuring resumes without the user's help.
-            let repair = link.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs(5));
-                match login::platform_service().repair(&|| repair.connected()) {
-                    Ok(true) => {
-                        logging::info("registered the agent service again (a new version, or launchd refused the old registration)")
-                    }
-                    Ok(false) => {}
-                    Err(e) => logging::info(&format!("the agent service could not be registered again: {e}")),
-                }
-            });
+            attach.attach(app);
             Ok(())
         })
-        .build(tauri::generate_context!());
-    let app = match result {
-        Ok(app) => app,
-        Err(e) => {
-            eprintln!("Dyno could not start: {e}");
-            std::process::exit(1);
-        }
+        // The agent link: state only, no window (the shell opens the tray and the window after every plugin, ADR 0029).
+        .setup(move |app| {
+            agent_setup(app, &agent_hub, dirs, pixels, installed)?;
+            Ok(())
+        });
+    let test_dir = match &place {
+        Place::Installed => None,
+        Place::Test { dir } => Some(dir.clone()),
     };
-    // Closing the window destroys it and Dyno stays in the tray (a hidden webview could come back blank on macOS and
-    // kept its memory); Open in the tray, or the app's Dock icon on macOS, builds it again. Quit exits, and then stops
-    // the agent this app started unless a service keeps it (see `link::stop_agent_on_quit`).
-    app.run(|app, event| match event {
-        tauri::RunEvent::ExitRequested { code, api, .. } if window::keeps_running(code, window::has_tray(app)) => api.prevent_exit(),
-        tauri::RunEvent::Exit => {
+    let updates_dir = test_dir.clone();
+    builder = builder.updater(move |app| updater(updates_dir, app));
+    builder = builder.windows(move |app| windows(app, test_dir.is_none()));
+    match place {
+        Place::Installed => builder,
+        Place::Test { .. } => builder.in_memory().native_menu(false),
+    }
+}
+
+/// The legal documents About lists, compiled into the binary: the third-party notices (generated by `scripts/notices.sh dyno`
+/// from the Rust crates and npm packages Dyno ships; CI fails when they are stale) and Dyno's own two licences.
+const LEGAL: [(&str, &str, &str); 3] = [
+    (
+        "notices",
+        "Third-party notices",
+        include_str!("../resources/THIRD_PARTY_NOTICES.md"),
+    ),
+    ("licence-mit", "MIT licence", include_str!("../../../LICENSE-MIT")),
+    ("licence-apache", "Apache licence 2.0", include_str!("../../../LICENSE-APACHE")),
+];
+
+/// Updates, About and What's New. Without the CI's updater key the build cannot update itself and says so ("Updates
+/// are not available in this build").
+///
+/// The installer is `tauri-plugin-updater` (registered in [`run`]) with the same key the updater verifies with: without
+/// it an update is found but never installed.
+fn updater<R: Runtime>(test_dir: Option<std::path::PathBuf>, app: &tauri::AppHandle<R>) -> UpdatesBuilder {
+    let key = option_env!("TAURI_UPDATER_PUBKEY");
+    let b = LEGAL
+        .iter()
+        .fold(UpdatesBuilder::new(APP_NAME), |b, (id, title, text)| b.legal(id, title, *text));
+    let b = b
+        .channel("stable", "Stable", UPDATE_FEED)
+        .public_key(key)
+        .installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(
+            app.clone(),
+            key.unwrap_or_default(),
+        )))
+        .releases_page(RELEASES_PAGE)
+        .homepage("https://dev.decryptology.net/decryp7/paddock")
+        .changelog(include_str!("../../../CHANGELOG.md"))
+        .build_info(option_env!("DYNO_COMMIT"), option_env!("DYNO_BUILT"));
+    match test_dir {
+        None => b,
+        Some(dir) => b.dirs(dir.join("config"), dir.join("cache")).background(false),
+    }
+}
+
+/// The window layer: the main window from `tauri.conf.json` (`"create": false`), closing the last window keeps Dyno in the
+/// tray (the shell quits when there is no tray), bounds remembered in the data folder when installed, and the exit's
+/// teardown: the agent this app started is stopped unless a service keeps it (`link::stop_agent_on_quit`), bounded by the
+/// exit watchdog. A closed window no longer wants any live detail from the agent.
+fn windows<R: Runtime>(app: &tauri::AppHandle<R>, installed: bool) -> Windows<R> {
+    let b = Windows::builder(WindowConfig::new(APP_NAME).size(1280.0, 800.0).min_size(900.0, 600.0))
+        .prefs(Arc::new(FixedPrefs::new(OnClose::Tray, OpenFilesIn::NewWindow)))
+        .on_destroyed(|app, label| {
+            if let Some(link) = app.try_state::<Arc<AgentLink>>() {
+                link.drop_window(label);
+            }
+        })
+        .teardown("agent", |app| {
             if let Some(link) = app.try_state::<Arc<AgentLink>>() {
                 link.quit();
             }
-        }
-        #[cfg(target_os = "macos")]
-        tauri::RunEvent::Reopen { .. } => window::show_main(app),
-        _ => {}
+        });
+    match app.path().app_data_dir() {
+        Ok(dir) if installed => b.bounds_file(dir.join("window-state.json")).build(),
+        _ => b.build(),
+    }
+}
+
+/// Dyno's commands behind the shell's guard: window classes, the per-dialog contracts and request limits.
+pub fn invoke_handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
+    paddock_commands::tauri::Guard::new(&COMMANDS)
+        .dialog_grants(paddock_dialogs::tauri::grant_of)
+        .wrap(handler!())
+}
+
+/// Dyno on `builder` (after the plugins already on it): the shell plugin `shell`, the tray drawn by `tray_backend`, the
+/// main window for `launch` (none for `--hidden` with a tray). The start `run` uses (it adds Dyno's guarded commands)
+/// and the start test composes.
+pub fn app<R: Runtime>(
+    builder: tauri::Builder<R>,
+    shell: Builder<R>,
+    launch: paddock_window::launch::LaunchArgs,
+    tray_backend: impl paddock_window::tauri::TrayBackend<R>,
+) -> tauri::Builder<R> {
+    // The shell opens both after every plugin is set up (ADR 0029: a window built inside a plugin hook deadlocks).
+    shell.tray(move |_| tray::tray(tray_backend)).launch(launch).add_to(builder)
+}
+
+/// No agent program in a test: the link reports it as not running (nothing is started, rule 7).
+struct NoAgent;
+
+impl link::Launcher for NoAgent {
+    fn launch(&self) -> Result<(), String> {
+        Err("no agent in a test".into())
+    }
+    fn finish(&self, _: std::time::Duration) {}
+}
+
+/// Dyno's own log, the shell glue and the agent link in `dirs`; the installed app also starts the agent process, keeps
+/// late windows told about it and repairs its service registration.
+fn agent_setup<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    hub: &health::Hub<R>,
+    dirs: dyno_agent::paths::Dirs,
+    pixels: Arc<dyn shell::TrayPixels<R>>,
+    installed: bool,
+) -> std::io::Result<()> {
+    logging::init(&dirs.logs());
+    logging::info(&format!("Dyno {VERSION} starting (data folder: {})", dirs.root().display()));
+    let events = shell::ShellOf::new(app.clone(), hub.clone(), pixels);
+    let launcher: Box<dyn link::Launcher> = if installed {
+        Box::new(ProcessLauncher::new(login::agent_program))
+    } else {
+        Box::new(NoAgent)
+    };
+    let link = AgentLink::new(dirs, VERSION, events.clone(), launcher);
+    app.manage(events.clone());
+    app.manage(link.clone());
+    app.manage(commands::PickedFolders::default());
+    link.spawn()?;
+    if !installed {
+        return Ok(());
+    }
+    let beat = events.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        beat.replay_status();
     });
+    // After an update launchd may refuse the registered agent (a rebuilt app has a new code identity on macOS) or
+    // keep the old job: replace the registration once per version and whenever launchd says it is stale
+    // (`service_repair`), in the background, so measuring resumes without the user's help.
+    let repair = link.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        match login::platform_service().repair(&|| repair.connected()) {
+            Ok(true) => logging::info("registered the agent service again (a new version, or launchd refused the old registration)"),
+            Ok(false) => {}
+            Err(e) => logging::info(&format!("the agent service could not be registered again: {e}")),
+        }
+    });
+    Ok(())
+}
+
+/// Starts the app.
+pub fn run() {
+    // First: the shared crates' log lines (the start's error among them) reach Dyno's daily log file (paddock-log); Dyno's
+    // own lines stay in its agent-side log.
+    let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
+    let cwd = std::env::current_dir().ok();
+    let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
+    let hub = health::Hub::<tauri::Wry>::default();
+    let shell = shell::<tauri::Wry>(Place::Installed, &hub, Arc::new(shell::NativePixels));
+    let builder = tauri::Builder::default()
+        // First: a second launch shows the running app's window instead of starting another app.
+        .plugin(tauri_plugin_single_instance::init(paddock_window::tauri::second_instance))
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![paddock_window::launch::HIDDEN_FLAG]),
+        ));
+    let items = shell::initial_items(&dyno_core::settings::Settings::default().tray_items);
+    let builder = app(builder, shell, launch, tray::DynoTray::new(items)).invoke_handler(invoke_handler());
+    // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    let builder = builder.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated);
+    if let Err(e) = builder.run(tauri::generate_context!()) {
+        eprintln!("Dyno could not start: {e}");
+        std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod updater_tests {
+    use super::*;
+
+    /// About lists the third-party notices first and they name what Dyno ships: Rust crates of the app, npm packages of the UI and
+    /// the licence text each is under (the attribution Apache-2.0 and MIT require).
+    #[test]
+    fn about_lists_the_third_party_notices_with_known_dependencies() {
+        let (id, title, text) = LEGAL[0];
+        assert_eq!((id, title), ("notices", "Third-party notices"));
+        for known in ["- tauri ", "- serde ", "- echarts ", "- rxjs "] {
+            assert!(text.contains(known), "the notices do not list `{}`", known.trim());
+        }
+        assert!(
+            text.contains("## Licence texts") && text.contains("Permission is hereby granted"),
+            "the licence texts are included"
+        );
+        let ids: Vec<_> = LEGAL.iter().map(|d| d.0).collect();
+        assert_eq!(
+            ids,
+            ["notices", "licence-mit", "licence-apache"],
+            "ids are unique and the notices stay listed"
+        );
+    }
+
+    #[test]
+    fn the_built_app_has_an_installer_so_a_found_update_can_be_installed() {
+        let app = tauri::test::mock_app();
+        assert!(updater(None, app.handle()).has_installer());
+    }
 }
 
 #[cfg(test)]
 mod capability_tests {
-    /// The window has an overlay title bar on macOS (and no native one where decorations are off): the page's drag
-    /// regions only move it when the webview may start a window drag. Without the permission dragging fails silently.
-    #[test]
-    fn the_main_window_can_be_dragged_by_its_drag_regions() {
-        let caps: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
-        let granted: Vec<&str> = caps["permissions"].as_array().unwrap().iter().filter_map(|p| p.as_str()).collect();
-        assert!(granted.contains(&"core:window:allow-start-dragging"), "{granted:?}");
-        assert!(granted.contains(&"core:window:allow-internal-toggle-maximize"), "{granted:?}");
-        assert!(caps["windows"].as_array().unwrap().iter().any(|w| w == "main"));
+    fn caps(src: &str) -> serde_json::Value {
+        serde_json::from_str(src).unwrap()
     }
 
-    /// Least privilege: only the core event/window permissions above; no plugin, fs, shell or opener permission.
+    fn granted(c: &serde_json::Value) -> Vec<&str> {
+        c["permissions"].as_array().unwrap().iter().filter_map(|p| p.as_str()).collect()
+    }
+
+    /// The window has an overlay title bar on macOS: the page's drag regions only move it when the webview may start
+    /// a window drag. Without the permission dragging fails silently.
     #[test]
-    fn the_capability_grants_no_plugin_commands() {
-        let caps: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
-        for p in caps["permissions"].as_array().unwrap().iter().filter_map(|p| p.as_str()) {
-            assert!(p.starts_with("core:event:") || p.starts_with("core:window:allow-"), "{p}");
-            assert!(!p.contains('*'), "{p}");
+    fn the_main_window_can_be_dragged_by_its_drag_regions() {
+        let c = caps(include_str!("../capabilities/shell.json"));
+        let granted = granted(&c);
+        assert!(granted.contains(&"core:window:allow-start-dragging"), "{granted:?}");
+        assert!(granted.contains(&"core:window:allow-internal-toggle-maximize"), "{granted:?}");
+        assert!(c["windows"].as_array().unwrap().iter().any(|w| w == "main"));
+    }
+
+    /// The webview reaches the OS only through Dyno's own commands and the shell's sets: no other plugin permission, no
+    /// wildcard, no remote content.
+    #[test]
+    fn the_capabilities_are_least_privilege() {
+        for src in [
+            include_str!("../capabilities/shell.json"),
+            include_str!("../capabilities/dialog.json"),
+            include_str!("../capabilities/tray.json"),
+        ] {
+            let c = caps(src);
+            for p in granted(&c) {
+                assert!(
+                    p.starts_with("core:window:allow-") || p == "core:event:default" || p.starts_with("paddock-shell:"),
+                    "unexpected permission {p}"
+                );
+                assert!(!p.contains('*'), "{p}");
+            }
+            assert!(c.get("remote").is_none(), "no remote content may use IPC");
         }
+    }
+
+    /// Each window class gets its own shell set; the popover has no dialog or main commands.
+    #[test]
+    fn each_window_class_has_its_shell_set() {
+        let want = [
+            (include_str!("../capabilities/shell.json"), "paddock-shell:main"),
+            (include_str!("../capabilities/dialog.json"), "paddock-shell:dialog"),
+            (include_str!("../capabilities/tray.json"), "paddock-shell:tray"),
+        ];
+        for (src, set) in want {
+            assert!(granted(&caps(src)).contains(&set), "{set}");
+        }
+    }
+
+    /// No `unsafe-eval`, no remote origin, nothing but the app's own scheme and IPC.
+    #[test]
+    fn the_csp_has_no_unsafe_eval_and_no_remote_origin() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let csp = conf["app"]["security"]["csp"].as_str().unwrap();
+        assert!(!csp.contains("unsafe-eval"), "{csp}");
+        assert!(!csp.contains("http://") || csp.contains("http://ipc.localhost"), "{csp}");
+        assert!(!csp.contains("https:"), "{csp}");
+        assert!(!csp.contains('*'), "{csp}");
+        assert!(csp.contains("object-src 'none'") && csp.contains("frame-ancestors 'none'"));
+    }
+
+    /// The main window is built by the shell (`create: false`), so its remembered bounds and start in the tray apply.
+    #[test]
+    fn the_shell_builds_the_main_window() {
+        for src in [
+            include_str!("../tauri.conf.json"),
+            include_str!("../tauri.macos.conf.json"),
+            include_str!("../tauri.windows.conf.json"),
+        ] {
+            let conf: serde_json::Value = serde_json::from_str(src).unwrap();
+            let main = conf["app"]["windows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|w| w["label"] == "main")
+                .unwrap();
+            assert_eq!(main["create"], false);
+        }
+    }
+
+    /// The bundle step checks the built index.html first (a CSP nonce would break Angular's styles).
+    #[test]
+    fn the_build_checks_the_index_before_bundling() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert!(conf["build"]["beforeBuildCommand"].as_str().unwrap().contains("check-index.mjs"));
+    }
+
+    /// The autostart registration and the login item the agent installs both start Dyno hidden in the tray, with the
+    /// flag the shell's launch parser knows.
+    #[test]
+    fn the_login_start_uses_the_shells_hidden_flag() {
+        assert_eq!(paddock_window::launch::HIDDEN_FLAG, "--hidden");
     }
 }

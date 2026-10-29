@@ -37,6 +37,7 @@ mod manager;
 mod native;
 #[cfg(feature = "tray")]
 mod native_tray;
+mod plugin_hook;
 mod popover;
 mod tray;
 
@@ -48,14 +49,17 @@ pub use instance::{open_from_outside, opened, queue_open, reopen, second_instanc
 pub use lifecycle::{arm_exit_watchdog, exit, exit_requested};
 pub use manager::{
     ExitClock, FixedPrefs, Prefs, WindowConfig, Windows, WindowsBuilder, changed, close_requested,
-    create_main, destroyed, list, on_window_event, open_new, quit, reveal, start, target,
+    create_main, destroyed, exit_with, list, on_window_event, open_new, quit, reveal, start,
+    target,
 };
 pub use native::on_run_event;
 #[cfg(feature = "tray")]
 pub use native_tray::NativeTray;
+pub use plugin_hook::{PluginHookScope, after_plugin_hook, in_plugin_hook, plugin_hook_scope};
 pub use popover::{PopoverSpec, Popovers, close_popover, fit_popover, toggle_popover};
 pub use tray::{
-    Tray, TrayBackend, create_tray, icon_clicked, menu_chosen, refresh_tray, tray_available,
+    HeadlessTray, Tray, TrayBackend, create_tray, icon_clicked, menu_chosen, refresh_tray,
+    tray_available,
 };
 
 #[cfg(test)]

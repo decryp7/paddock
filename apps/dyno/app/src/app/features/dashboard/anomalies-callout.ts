@@ -3,6 +3,7 @@ import { formatCount } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { ANOMALY_ICON, ANOMALY_LABEL } from '../../shared/labels';
 import { DiagnosisStore } from '../../state/diagnosis.store';
+import { MatButton } from '@angular/material/button';
 
 /**
  * Unusual patterns the engine found in the history (memory growth, periodic spikes, restart loops): a quiet card with a
@@ -10,7 +11,7 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
  */
 @Component({
   selector: 'dy-anomalies-callout',
-  imports: [Icon],
+  imports: [MatButton, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (store.anomalies().length; as n) {
@@ -21,7 +22,7 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
           <strong>{{ n === 1 ? 'Dyno noticed 1 unusual pattern' : 'Dyno noticed ' + count(n) + ' unusual patterns' }}</strong>
           <span class="kinds truncate">{{ kinds() }}</span>
           <span class="spacer"></span>
-          <button type="button" class="btn sm ghost" [attr.aria-expanded]="open()" (click)="open.set(!open())">
+          <button type="button" matButton="text" [attr.aria-expanded]="open()" (click)="open.set(!open())">
             {{ open() ? 'Hide' : 'Show' }} <dy-icon [name]="open() ? 'chevron-down' : 'chevron-right'" />
           </button>
         </div>

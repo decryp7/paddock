@@ -1,12 +1,13 @@
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
-import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
+import { FullTextTip } from '../../shared/full-text-tip';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal, viewChild } from '@angular/core';
+import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import type { Alarm, ShelveFor } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { Icon } from '../../shared/icon';
 import { AlarmsStore } from '../../state/alarms.store';
 import { alarmSuffix, isShelved, needsAcknowledge, severityWord, shortTime, stateTone, stateWord } from './alarms-model';
-import { TABLE_CSS } from './alarms-css';
 import { AlarmDetail } from './alarm-detail';
+
+const SEVERITY_ORDER: Record<Alarm['severity'], number> = { critical: 0, warning: 1, info: 2 };
 
 /**
  * The open alarms as one table (newest first) with a detail panel beside it. The section action acknowledges everything that is
@@ -14,133 +15,96 @@ import { AlarmDetail } from './alarm-detail';
  */
 @Component({
   selector: 'dy-alarms-active',
-  imports: [AsyncState, Icon, AlarmDetail, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
+  imports: [FullTextTip, AsyncState, AlarmDetail, PdTable, PdCell],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="store.loaded()" [error]="store.error()" [empty]="store.alarms().length === 0" emptyTitle="No open alarms" emptyText="When a rule fires, its alarm waits here until you acknowledge it." emptyIcon="bell" what="alarms" [rows]="4" (retry)="store.load()">
       <div class="section-head">
         <p class="lead num">{{ store.alarms().length }} open · {{ store.unacknowledged().length }} not acknowledged</p>
         @if (store.unacknowledged().length > 0) {
-          <button type="button" class="btn primary" [disabled]="busy()" (click)="ackAll()">Acknowledge all ({{ store.unacknowledged().length }})</button>
+          <button type="button" matButton="filled" [disabled]="busy()" (click)="ackAll()">Acknowledge all ({{ store.unacknowledged().length }})</button>
         }
       </div>
       <div class="layout" [class.with-detail]="!!store.selected()">
-        <div class="grid" role="grid" tabindex="-1" aria-label="Open alarms" [attr.aria-rowcount]="store.alarms().length + 1" (keydown)="key($event)">
-          <div class="head" role="row">
-            <span role="columnheader"><span class="visually-hidden">Unread</span></span>
-            <span role="columnheader">Severity</span>
-            <span role="columnheader">Alarm</span>
-            <span role="columnheader" class="c-rule">Rule</span>
-            <span role="columnheader">State</span>
-            <span role="columnheader" class="c-first">First seen</span>
-            <span role="columnheader">Last seen</span>
-            <span role="columnheader" class="r">Count</span>
-            <span role="columnheader"><span class="visually-hidden">Actions</span></span>
-          </div>
-          @for (a of store.alarms(); track a.id) {
-            <div
-              class="row"
-              role="row"
-              tabindex="0"
-              [attr.data-id]="a.id"
-              [class.selected]="store.selectedId() === a.id"
-              [attr.aria-selected]="store.selectedId() === a.id"
-              [cdkContextMenuTriggerFor]="menu"
-              [cdkContextMenuTriggerData]="{ alarm: a }"
-              (click)="pick(a)"
-              (keydown.enter)="pick(a)"
-              (keydown.space)="$event.preventDefault(); pick(a)"
-            >
-              <span class="cell" role="gridcell">@if (unread(a)) {<span class="unread" title="Not acknowledged" aria-label="Not acknowledged"></span>}</span>
-              <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="a.severity === 'critical' ? 'bad' : a.severity === 'warning' ? 'warn' : 'info'" [attr.aria-label]="sev(a)" role="img"></span>@if (a.severity === 'critical') {<span>Critical</span>}</span>
-              <span class="cell title-cell" role="gridcell">
-                <span class="two">
-                  <span class="line"><span class="t truncate" [title]="a.title">{{ a.title }}</span>@if (suffix(a); as s) {<span class="sfx">{{ s }}</span>}</span>
-                  <span class="d truncate" [title]="a.detail">{{ a.detail }}</span>
-                </span>
-              </span>
-              <span class="cell c-rule muted" role="gridcell"><span class="truncate id" [title]="a.rule">{{ a.rule }}</span></span>
-              <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="tone(a)" aria-hidden="true"></span><span [class.muted]="tone(a) === 'calm'">{{ state(a) }}</span></span>
-              <span class="cell c-first muted num" role="gridcell">{{ time(a.firstSeen) }}</span>
-              <span class="cell muted num" role="gridcell">{{ time(a.lastSeen) }}</span>
-              <span class="cell r muted num" role="gridcell">×{{ a.repeatCount }}</span>
-              <span class="cell acts" role="gridcell">
-                <button type="button" class="ib" [attr.aria-label]="'Acknowledge ' + a.title" title="Acknowledge" [disabled]="!ackable(a)" (click)="ack(a, $event)"><dy-icon name="check" /></button>
-                <button type="button" class="ib" [attr.aria-label]="'Shelve ' + a.title" title="Shelve" [cdkMenuTriggerFor]="shelveMenu" [cdkMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="clock" /></button>
-                <button type="button" class="ib more" [attr.aria-label]="'More actions for ' + a.title" [cdkMenuTriggerFor]="menu" [cdkMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
-              </span>
-            </div>
-          }
-        </div>
+        <pd-table
+          label="Open alarms"
+          [rows]="store.alarms()"
+          [columns]="columns"
+          [rowKey]="rowKey"
+          [filterable]="false"
+          [rowActions]="actions"
+          [maxHeight]="560"
+          [selectedKey]="selectedKey()"
+          (rowActivate)="pick($event)"
+          (action)="run($event)"
+          (keydown.escape)="escape($event)"
+        >
+          <ng-template pdCell="unread" let-a>@if (unread(a)) {<span class="unread" role="img" aria-label="Not acknowledged"></span>}</ng-template>
+          <ng-template pdCell="severity" let-a><span class="dot" [attr.data-tone]="a.severity === 'critical' ? 'bad' : a.severity === 'warning' ? 'warn' : 'info'" aria-hidden="true"></span><span [class.muted]="a.severity === 'info'">{{ sev(a) }}</span></ng-template>
+          <ng-template pdCell="title" let-a>
+            <span class="line"><span class="t" [dyFullText]="a.title">{{ a.title }}</span>@if (suffix(a); as s) {<span class="sfx">{{ s }}</span>}</span>
+          </ng-template>
+          <ng-template pdCell="rule" let-a><span class="id muted" [dyFullText]="a.rule">{{ a.rule }}</span></ng-template>
+          <ng-template pdCell="state" let-a><span class="dot" [attr.data-tone]="tone(a)" aria-hidden="true"></span><span class="ell" [class.muted]="tone(a) === 'calm'" [dyFullText]="state(a)">{{ state(a) }}</span></ng-template>
+        </pd-table>
         @if (store.selected(); as sel) {
           <dy-alarm-detail [alarm]="sel" [now]="now()" [focusNote]="focusNote()" (closed)="closeDetail()" />
         }
       </div>
     </dy-async>
-
-    <ng-template #menu let-alarm="alarm">
-      <div class="menu" cdkMenu [attr.aria-label]="'Actions for ' + alarm.title">
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!ackable(alarm)" (cdkMenuItemTriggered)="ack(alarm)"><dy-icon name="check" /> Acknowledge</button>
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuTriggerFor]="shelveMenu" [cdkMenuTriggerData]="{ alarm }"><dy-icon name="clock" /> Shelve… <dy-icon name="chevron-right" class="trail" /></button>
-        @if (shelved(alarm)) {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.unshelve(alarm.id)"><dy-icon name="undo" /> Unshelve</button>
-        }
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="addNote(alarm)"><dy-icon name="edit" /> Add note…</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.mute(alarm.rule, !alarm.muted)"><dy-icon name="bell" /> {{ alarm.muted ? 'Unmute this rule' : 'Mute this rule' }}</button>
-        <div class="menu-sep"></div>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="showHistory(alarm)"><dy-icon name="list" /> Show history</button>
-      </div>
-    </ng-template>
-    <ng-template #shelveMenu let-alarm="alarm">
-      <div class="menu" cdkMenu aria-label="Shelve for">
-        @for (o of shelveOptions; track o.id) {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="shelve(alarm, o.id)">{{ o.label }}</button>
-        }
-      </div>
-    </ng-template>
   `,
-  styles: [
-    TABLE_CSS,
-    `
+  styles: `
     :host { display: block; }
     dy-async { display: grid; gap: var(--sp-3); }
     .section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); min-height: var(--control-h); margin-bottom: var(--sp-3); }
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 320px; }
-    .head, .row { --cols: 14px 64px minmax(280px, 2.4fr) minmax(120px, 1fr) 190px 80px 80px 52px 40px; }
-    .row.selected { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
-    .unread { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-    .title-cell { padding: 6px 0; }
-    .two { display: grid; gap: 1px; min-width: 0; flex: 1; }
+    .unread { display: block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
     .line { display: flex; gap: var(--sp-2); align-items: baseline; min-width: 0; }
-    .t { font-size: var(--fs-base); font-weight: var(--fw-medium); }
+    .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--fw-medium); }
     .sfx { flex: none; color: var(--text-3); font-size: var(--fs-xs); }
-    .d { color: var(--text-3); font-size: var(--fs-xs); }
-    @container (max-width: 1000px) {
-      .c-rule, .c-first { display: none; }
-      .head, .row { --cols: 14px 84px minmax(160px, 1fr) 180px 96px 52px 88px; }
-    }
+    .muted { color: var(--text-2); }
+    .ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .id { font: var(--fw-regular) var(--fs-sm) / 1.2 var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-inline-end: var(--sp-2); background: var(--text-3); }
+    .dot[data-tone='bad'] { background: var(--bad); }
+    .dot[data-tone='warn'] { background: var(--warn); }
+    .dot[data-tone='info'] { background: var(--info); }
+    .dot[data-tone='ok'] { background: var(--ok); }
+    .dot[data-tone='calm'] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-3); }
     @media (max-width: 1100px) { .layout.with-detail { grid-template-columns: minmax(0, 1fr); } }
   `,
-  ],
 })
 export class AlarmsActive {
   protected readonly store = inject(AlarmsStore);
+  private readonly grid = viewChild(PdTable);
   protected readonly now = signal(Date.now());
   protected readonly busy = signal(false);
   protected readonly focusNote = signal(0);
-  protected readonly shelveOptions: { id: ShelveFor; label: string }[] = [
+  /** The shelve choices, in the row's menu ("Shelve for 1 hour"). */
+  private readonly shelveOptions: { id: ShelveFor; label: string }[] = [
     { id: 'oneHour', label: '1 hour' },
-    { id: 'untilTomorrow', label: 'Until tomorrow' },
-    { id: 'untilReboot', label: 'Until restart' },
+    { id: 'untilTomorrow', label: 'until tomorrow' },
+    { id: 'untilReboot', label: 'until restart' },
+  ];
+  protected readonly rowKey = (a: Alarm): string => String(a.id);
+  protected readonly selectedKey = computed(() => (this.store.selectedId() === null ? null : String(this.store.selectedId())));
+  protected readonly columns: PdColumn<Alarm>[] = [
+    { key: 'unread', header: 'Not acknowledged', value: (a) => (needsAcknowledge(a) ? 0 : 1), text: () => '', width: '14px', headerHidden: true },
+    { key: 'severity', header: 'Severity', value: (a) => SEVERITY_ORDER[a.severity], text: (a) => severityWord(a.severity), width: '92px' },
+    { key: 'title', header: 'Alarm', value: (a) => a.title, required: true, width: 'minmax(0, 2fr)' },
+    { key: 'detail', header: 'Detail', value: (a) => a.detail, width: 'minmax(0, 2fr)', hideBelow: 900 },
+    { key: 'rule', header: 'Rule', value: (a) => a.rule, width: 'minmax(0, 1fr)', hideBelow: 1000 },
+    { key: 'state', header: 'State', value: (a) => stateWord(a.state), width: '190px' },
+    { key: 'firstSeen', header: 'First seen', value: (a) => a.firstSeen, text: (a) => this.time(a.firstSeen), width: '84px', hideBelow: 1000 },
+    { key: 'lastSeen', header: 'Last seen', value: (a) => a.lastSeen, text: (a) => this.time(a.lastSeen), width: '84px' },
+    { key: 'count', header: 'Count', value: (a) => a.repeatCount, text: (a) => `×${String(a.repeatCount)}`, width: '64px', align: 'end' },
   ];
   protected readonly sev = (a: Alarm) => severityWord(a.severity);
   protected readonly state = (a: Alarm) => stateWord(a.state);
   protected readonly tone = (a: Alarm) => stateTone(a.state);
-  protected readonly ackable = needsAcknowledge;
   protected readonly unread = needsAcknowledge;
   protected readonly suffix = (a: Alarm) => alarmSuffix(a, this.now());
-  protected readonly shelved = (a: Alarm) => isShelved(a.shelved, this.now());
   protected readonly time = (at: number) => shortTime(at, this.now());
 
   constructor() {
@@ -155,7 +119,7 @@ export class AlarmsActive {
   protected closeDetail(): void {
     const id = this.store.selectedId();
     void this.store.select(null);
-    queueMicrotask(() => document.querySelector<HTMLElement>(`.row[data-id="${String(id)}"]`)?.focus());
+    if (id !== null) this.grid()?.focusRow(String(id));
   }
 
   protected async ackAll(): Promise<void> {
@@ -164,8 +128,7 @@ export class AlarmsActive {
     this.busy.set(false);
   }
 
-  protected ack(a: Alarm, e?: Event): void {
-    e?.stopPropagation();
+  protected ack(a: Alarm): void {
     void this.store.acknowledge([a.id]);
   }
 
@@ -182,14 +145,30 @@ export class AlarmsActive {
     void this.store.select(a.id);
   }
 
-  protected key(e: KeyboardEvent): void {
-    const rows = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('.row')];
-    const i = rows.indexOf(document.activeElement as HTMLElement);
-    if (e.key === 'ArrowDown') rows[Math.min(rows.length - 1, i + 1)]?.focus();
-    else if (e.key === 'ArrowUp') rows[Math.max(0, i - 1)]?.focus();
-    else if (e.key === 'Escape' && this.store.selectedId() !== null) this.closeDetail();
-    else if ((e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) && i >= 0) rows[i]!.querySelector<HTMLElement>('.more')?.click();
-    else return;
+  /** The row actions: acknowledge and a one-hour shelve on hover, the rest (every shelve choice included) in the menu. */
+  protected readonly actions = (a: Alarm): PdRowAction[] => [
+    { id: 'ack', label: 'Acknowledge', icon: 'check', inline: true, disabled: !needsAcknowledge(a) },
+    { id: 'shelve:oneHour', label: 'Shelve for 1 hour', icon: 'clock', inline: true },
+    ...this.shelveOptions.slice(1).map((o): PdRowAction => ({ id: `shelve:${o.id}`, label: `Shelve ${o.label}`, icon: 'clock' })),
+    ...(isShelved(a.shelved, this.now()) ? [{ id: 'unshelve', label: 'Unshelve', icon: 'clock' }] : []),
+    { id: 'note', label: 'Add note…', icon: 'edit' },
+    { id: 'mute', label: a.muted ? 'Unmute this rule' : 'Mute this rule', icon: 'bell' },
+    { id: 'history', label: 'Show history', icon: 'history' },
+  ];
+
+  protected run({ id, row }: PdRowActionEvent<Alarm>): void {
+    if (id === 'ack') this.ack(row);
+    else if (id.startsWith('shelve:')) this.shelve(row, id.slice(7) as ShelveFor);
+    else if (id === 'unshelve') void this.store.unshelve(row.id);
+    else if (id === 'note') this.addNote(row);
+    else if (id === 'mute') void this.store.mute(row.rule, !row.muted);
+    else this.showHistory(row);
+  }
+
+  /** Escape in the table closes the detail panel and puts the focus back on its row. */
+  protected escape(e: Event): void {
+    if (this.store.selectedId() === null) return;
     e.preventDefault();
+    this.closeDetail();
   }
 }

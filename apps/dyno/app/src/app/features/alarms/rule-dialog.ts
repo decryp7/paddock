@@ -1,20 +1,16 @@
-import { DIALOG_DATA, DialogRef } from '@angular/cdk/dialog';
-import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import type { CommandError, CustomAlertRule, CustomMetric, CustomOp, Severity } from '../../core/api.types';
-import { DialogFrame } from '../../shared/dialog';
+import { ChangeDetectionStrategy, Component, computed, inject, input, signal, type OnInit } from '@angular/core';
+import { MatTooltip } from '@angular/material/tooltip';
+import { DialogActionError, type DialogAction, type DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
+import type { CustomAlertRule, CustomMetric, CustomOp, Severity } from '../../core/api.types';
+import { BACKEND } from '../../core/backend';
+import { toCommandError } from '../../core/command-error';
 import { Icon } from '../../shared/icon';
-import { Switch } from '../../shared/switch';
+import { MatSlideToggle } from '@angular/material/slide-toggle';
 import { CUSTOM_METRICS, metricInfo, severityWord, uniqueRuleId } from './alarms-model';
-
-export interface RuleDialogData {
-  /** The rule to edit, or null for a new one. */
-  rule: CustomAlertRule | null;
-  /** Ids of the other rules (a new id must avoid them). */
-  takenIds: string[];
-  /** Saves the rule; answers the engine's error to show inline, or null once stored. */
-  save: (rule: CustomAlertRule) => Promise<CommandError | null>;
-}
+import { MatIconButton } from '@angular/material/button';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 
 const SEVERITIES: Severity[] = ['info', 'warning', 'critical'];
 const MAX_HOLD_SECS = 3600;
@@ -22,122 +18,122 @@ const MAX_HOLD_SECS = 3600;
 /** Add or edit a custom alert rule: a metric, above or below a limit, held for a while, with a severity. */
 @Component({
   selector: 'dy-rule-dialog',
-  imports: [DialogFrame, Icon, Switch, CdkMenu, CdkMenuItem, CdkMenuTrigger],
+  imports: [MatTooltip, MatIconButton, PdField, PdFieldControl, PdSelect, SuSegmentedControl, Icon, MatSlideToggle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <dy-dialog [title]="data.rule ? 'Edit alert rule' : 'Add alert rule'" subtitle="Raises an alarm when a reading stays past a limit." icon="bell">
-      <div class="field">
-        <label for="rule-name">Name</label>
-        <input id="rule-name" class="input" type="text" maxlength="60" placeholder="High CPU while idle" [value]="name()" (input)="name.set($any($event.target).value)" />
-      </div>
-      <div class="field">
-        <span class="label" id="rule-metric-l">Reading</span>
-        <button type="button" class="input pick" aria-labelledby="rule-metric-l" [cdkMenuTriggerFor]="metricMenu"><span>{{ info().label }}</span><span class="faint">{{ info().unit }}</span><dy-icon name="chevron-down" /></button>
+      <p class="lead">Raises an alarm when a reading stays past a limit.</p>
+      <pd-field label="Name">
+        <input pdFieldControl aria-label="Name" type="text" maxlength="60" placeholder="High CPU while idle" [value]="name()" (input)="name.set($any($event.target).value)" />
+      </pd-field>
+      <pd-select class="reading" label="Reading" ariaLabel="Reading" describedBy="rule-reading-hint" [options]="metricChoices" [value]="metric()" (valueChange)="setMetric($event)" />
+      <p class="hint" id="rule-reading-hint">{{ info().hint }}</p>
+      <div class="two">
+        <div class="seg-field">
+          <span class="seg-label" aria-hidden="true">Alarm when it is</span>
+          <pd-segmented-control label="Alarm when it is" [options]="opSegs" [value]="op()" (valueChange)="setOp($event)" />
+        </div>
+        <pd-field label="Limit" [suffix]="limitTools">
+          <input pdFieldControl aria-label="Limit" type="text" inputmode="decimal" [value]="limit()" (input)="limit.set($any($event.target).value)" />
+        </pd-field>
       </div>
       <div class="two">
-        <div class="field">
-          <span class="label" id="rule-op-l">Alarm when it is</span>
-          <div class="seg" role="radiogroup" aria-labelledby="rule-op-l">
-            @for (o of ops; track o) {
-              <button type="button" role="radio" [attr.aria-checked]="op() === o" (click)="op.set(o)">{{ o === 'above' ? 'Above' : 'Below' }}</button>
-            }
-          </div>
+        <div class="hold">
+          <pd-field label="For at least" hint="0 raises the alarm right away. At most 60 min.">
+            <input pdFieldControl aria-label="Duration" type="text" inputmode="numeric" [value]="hold()" (input)="hold.set($any($event.target).value)" />
+          </pd-field>
+          <pd-segmented-control class="unit-seg" label="Duration unit" [options]="unitSegs" [value]="unit()" (valueChange)="setUnit($event === 'min' ? 'min' : 'sec')" />
         </div>
-        <div class="field">
-          <span class="label" id="rule-limit-l">Limit</span>
-          <div class="stepper" role="group" aria-labelledby="rule-limit-l">
-            <button type="button" class="ib" aria-label="Decrease the limit" (click)="step(-1)"><dy-icon name="minus" /></button>
-            <span class="in"><input class="input" type="text" inputmode="decimal" aria-label="Limit" [value]="limit()" (input)="limit.set($any($event.target).value)" /><span class="unit">{{ info().unit }}</span></span>
-            <button type="button" class="ib" aria-label="Increase the limit" (click)="step(1)"><dy-icon name="plus" /></button>
-          </div>
+        <div class="seg-field">
+          <span class="seg-label" aria-hidden="true">Severity</span>
+          <pd-segmented-control label="Severity" [options]="severitySegs" [value]="severity()" (valueChange)="setSeverity($event)" />
         </div>
       </div>
-      <div class="two">
-        <div class="field">
-          <span class="label" id="rule-for-l">For at least</span>
-          <div class="hold" role="group" aria-labelledby="rule-for-l">
-            <input class="input" type="text" inputmode="numeric" aria-label="Duration" [value]="hold()" (input)="hold.set($any($event.target).value)" />
-            <div class="seg" role="radiogroup" aria-label="Duration unit">
-              <button type="button" role="radio" [attr.aria-checked]="unit() === 'sec'" (click)="setUnit('sec')">sec</button>
-              <button type="button" role="radio" [attr.aria-checked]="unit() === 'min'" (click)="setUnit('min')">min</button>
-            </div>
-          </div>
-          <span class="hint">0 raises the alarm right away. At most 60 min.</span>
-        </div>
-        <div class="field">
-          <span class="label" id="rule-sev-l">Severity</span>
-          <div class="seg" role="radiogroup" aria-labelledby="rule-sev-l">
-            @for (s of severities; track s) {
-              <button type="button" role="radio" [attr.aria-checked]="severity() === s" (click)="severity.set(s)">{{ word(s) }}</button>
-            }
-          </div>
-        </div>
-      </div>
-      <div class="on"><span>Enabled</span><dy-switch [checked]="enabled()" (changed)="enabled.set($event)" label="Enabled" /></div>
+      <mat-slide-toggle [checked]="enabled()" (change)="enabled.set($event.checked)">Enabled</mat-slide-toggle>
       @if (problem(); as p) {
         <p class="err" role="alert"><dy-icon name="alert" /> {{ p }}</p>
       }
-      <ng-container footer>
-        <button type="button" class="btn" (click)="ref.close()">Cancel</button>
-        <button type="button" class="btn primary" [disabled]="busy()" (click)="submit()">{{ data.rule ? 'Save' : 'Add rule' }}</button>
-      </ng-container>
-    </dy-dialog>
-
-    <ng-template #metricMenu>
-      <div class="menu wide" cdkMenu aria-label="Reading">
-        @for (m of metrics; track m.id) {
-          <button type="button" class="menu-item two-line" cdkMenuItem [attr.aria-checked]="metric() === m.id" (cdkMenuItemTriggered)="metric.set(m.id)">
-            <span class="text"><span>{{ m.label }} <span class="faint">({{ m.unit }})</span></span><small>{{ m.hint }}</small></span>
-          </button>
-        }
-      </div>
-    </ng-template>
+      <ng-template #limitTools>
+        <span class="tools">
+          <span class="unit">{{ info().unit }}</span>
+          <button type="button" matIconButton matTooltip="Decrease the limit" aria-label="Decrease the limit" (click)="step(-1)"><dy-icon name="minus" /></button>
+          <button type="button" matIconButton matTooltip="Increase the limit" aria-label="Increase the limit" (click)="step(1)"><dy-icon name="plus" /></button>
+        </span>
+      </ng-template>
   `,
   styles: `
-    :host { --dialog-w: 480px; display: contents; }
-    .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); align-items: start; }
-    .pick { display: flex; align-items: center; gap: var(--sp-2); width: 100%; text-align: left; cursor: pointer; }
-    .pick span:first-child { flex: 1; }
-    .pick dy-icon { --icon-size: 14px; color: var(--text-3); }
-    .faint { color: var(--text-3); }
-    .hint { color: var(--text-3); font-size: var(--fs-xs); }
-    .stepper { display: flex; align-items: center; gap: 2px; }
-    .ib { display: grid; place-items: center; width: 28px; height: var(--control-h); flex: none; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface-2); color: var(--text-2); cursor: pointer; }
-    .ib:hover { background: var(--surface-hover); color: var(--text-1); }
-    .ib dy-icon { --icon-size: 14px; }
-    .in { position: relative; flex: 1; min-width: 0; }
-    .in input { width: 100%; padding-right: 30px; text-align: right; font-variant-numeric: tabular-nums; }
-    .unit { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--text-3); font-size: var(--fs-sm); pointer-events: none; }
-    .hold { display: flex; gap: var(--sp-2); align-items: center; }
-    .hold input { width: 72px; text-align: right; font-variant-numeric: tabular-nums; }
-    .on { display: flex; justify-content: space-between; align-items: center; font-size: var(--fs-base); }
+    :host { display: grid; gap: var(--sp-3); min-width: 0; }
+    .lead { color: var(--text-2); margin: 0; }
+    .reading { display: flex; width: 100%; }
+    .reading :is(mat-form-field) { width: 100%; }
+    .hint { margin: calc(-1 * var(--sp-2)) 0 0; padding-inline: var(--sp-4); color: var(--text-3); font-size: var(--fs-xs); }
+    .hint + .two { margin-top: var(--sp-2); }
+    .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+    /* A segmented control labelled like an outline field: the label sits on its top border, and it is as tall as a field, so a
+       row's controls share top and bottom. The label is decoration (the control carries the accessible name). */
+    .seg-field { position: relative; height: var(--pd-field-height, 28px); min-width: 0; --mat-button-toggle-height: calc(var(--pd-field-height, 28px) - 2px); }
+    .seg-field pd-segmented-control { display: block; }
+    .seg-label { position: absolute; top: -8px; left: var(--sp-3); z-index: 1; padding: 0 var(--sp-1); background: var(--pd-surface-2); color: var(--text-2); font-size: var(--fs-xs); line-height: 1; }
+    /* The segments sit 3 px inside the control's border, so the selected one's ring starts below the legend's notch (the legend stays centred
+       on the border, like the outline fields' legends). */
+    .seg-field pd-segmented-control ::ng-deep .mat-button-toggle { margin-block: 3px; --mat-button-toggle-height: calc(var(--pd-field-height, 28px) - 8px); }
+    .hold { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; }
+    .hold pd-field { flex: 1; min-width: 0; }
+    /* The hint is one line that may run on under the unit toggle (the row's width), not a column of wrapped words. */
+    .hold pd-field ::ng-deep .mat-mdc-form-field-subscript-wrapper { overflow: visible; }
+    .hold pd-field ::ng-deep .mat-mdc-form-field-hint-wrapper { overflow: visible; }
+    .hold pd-field ::ng-deep .pd-field__hint { white-space: nowrap; }
+    .unit-seg { --mat-button-toggle-height: calc(var(--pd-field-height, 28px) - 2px); }
+    .tools { display: inline-flex; align-items: center; gap: var(--sp-1); }
+    .tools dy-icon { --icon-size: 14px; }
+    .unit { color: var(--text-3); font-size: var(--fs-sm); }
     .err { margin: 0; display: flex; gap: var(--sp-2); align-items: flex-start; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--bad-soft); font-size: var(--fs-sm); }
     .err dy-icon { --icon-size: 15px; color: var(--bad); margin-top: 1px; }
   `,
 })
-export class RuleDialog {
-  protected readonly data = inject<RuleDialogData>(DIALOG_DATA);
-  protected readonly ref = inject<DialogRef<boolean>>(DialogRef);
-  protected readonly metrics = CUSTOM_METRICS;
-  protected readonly ops: CustomOp[] = ['above', 'below'];
-  protected readonly severities = SEVERITIES;
-  protected readonly word = severityWord;
+export class RuleDialog implements DialogContent<true>, OnInit {
+  /** The rule to edit, or null for a new one. */
+  readonly rule = input<CustomAlertRule | null>(null);
+  /** Ids of the other rules (a new id must avoid them). */
+  readonly takenIds = input<readonly string[]>([]);
+  private readonly backend = inject(BACKEND);
+  protected readonly metricChoices: PdSelectOption[] = CUSTOM_METRICS.map((m) => ({ value: m.id, label: `${m.label} (${m.unit})` }));
+  protected readonly opSegs: SuSegment[] = [{ value: 'above', label: 'Above' }, { value: 'below', label: 'Below' }];
+  protected readonly unitSegs: SuSegment[] = [{ value: 'sec', label: 'sec' }, { value: 'min', label: 'min' }];
+  protected readonly severitySegs: SuSegment[] = SEVERITIES.map((s) => ({ value: s, label: severityWord(s) }));
 
-  private readonly start = this.data.rule;
-  protected readonly name = signal(this.start?.name ?? '');
-  protected readonly metric = signal<CustomMetric>(this.start?.metric ?? 'cpuTotal');
-  protected readonly op = signal<CustomOp>(this.start?.op ?? 'above');
-  protected readonly limit = signal(String(this.start?.limit ?? 90));
-  protected readonly unit = signal<'sec' | 'min'>(this.start && this.start.forSecs > 0 && this.start.forSecs % 60 === 0 ? 'min' : 'sec');
-  protected readonly hold = signal(String(this.start ? (this.unit() === 'min' ? this.start.forSecs / 60 : this.start.forSecs) : 120));
-  protected readonly severity = signal<Severity>(this.start?.severity ?? 'warning');
-  protected readonly enabled = signal(this.start?.enabled ?? true);
-  protected readonly busy = signal(false);
-  protected readonly engineError = signal<string | null>(null);
+  /** Cancel, and the rule's one affirmative: the engine validates the rule and stores it; a refusal is shown in the frame with Try again. */
+  readonly dialogActions = computed<readonly DialogAction<true>[]>(() => [
+    { kind: 'dismiss', id: 'cancel', label: 'Cancel' },
+    { kind: 'answer', id: 'save', label: this.rule() ? 'Save' : 'Add rule', role: 'primary', answer: () => this.save() },
+  ]);
+
+  protected readonly name = signal('');
+  protected readonly metric = signal<CustomMetric>('cpuTotal');
+  protected readonly op = signal<CustomOp>('above');
+  protected readonly limit = signal('90');
+  protected readonly unit = signal<'sec' | 'min'>('sec');
+  protected readonly hold = signal('120');
+  protected readonly severity = signal<Severity>('warning');
+  protected readonly enabled = signal(true);
   protected readonly info = computed(() => metricInfo(this.metric()));
   /** The first thing wrong with the form (a convenience: the engine validates again), or the engine's own message. */
-  protected readonly problem = computed(() => this.submitted() ? this.engineError() ?? this.check() : null);
+  protected readonly problem = computed(() => (this.submitted() ? this.check() : null));
   private readonly submitted = signal(false);
+
+  /** The inputs are set before this runs: the form starts from the rule being edited. */
+  ngOnInit(): void {
+    const r = this.rule();
+    if (!r) return;
+    this.name.set(r.name);
+    this.metric.set(r.metric);
+    this.op.set(r.op);
+    this.limit.set(String(r.limit));
+    const minutes = r.forSecs > 0 && r.forSecs % 60 === 0;
+    this.unit.set(minutes ? 'min' : 'sec');
+    this.hold.set(String(minutes ? r.forSecs / 60 : r.forSecs));
+    this.severity.set(r.severity);
+    this.enabled.set(r.enabled);
+  }
 
   private holdSecs(): number {
     const n = Number(this.hold().trim());
@@ -153,6 +149,18 @@ export class RuleDialog {
     return null;
   }
 
+  protected setMetric(id: string): void {
+    const m = CUSTOM_METRICS.find((x) => x.id === id);
+    if (m) this.metric.set(m.id);
+  }
+  protected setOp(value: string): void {
+    this.op.set(value === 'below' ? 'below' : 'above');
+  }
+  protected setSeverity(value: string): void {
+    const s = SEVERITIES.find((x) => x === value);
+    if (s) this.severity.set(s);
+  }
+
   protected setUnit(u: 'sec' | 'min'): void {
     if (u === this.unit()) return;
     const secs = this.holdSecs();
@@ -166,13 +174,14 @@ export class RuleDialog {
     this.limit.set(String(Math.min(this.info().unit === '°C' ? 150 : 100, Math.max(this.info().unit === '°C' ? -50 : 0, next))));
   }
 
-  protected async submit(): Promise<void> {
+  /** Validates (the engine does again) and stores the rule; a refusal reaches the frame as the dialog's inline error. */
+  private async save(): Promise<true> {
     this.submitted.set(true);
-    this.engineError.set(null);
-    if (this.check()) return;
+    const problem = this.check();
+    if (problem) throw new DialogActionError(problem);
     const name = this.name().trim();
     const rule: CustomAlertRule = {
-      id: this.start?.id ?? uniqueRuleId(name, this.data.takenIds),
+      id: this.rule()?.id ?? uniqueRuleId(name, [...this.takenIds()]),
       name,
       metric: this.metric(),
       op: this.op(),
@@ -181,10 +190,11 @@ export class RuleDialog {
       severity: this.severity(),
       enabled: this.enabled(),
     };
-    this.busy.set(true);
-    const error = await this.data.save(rule);
-    this.busy.set(false);
-    if (error) this.engineError.set(error.message);
-    else this.ref.close(true);
+    try {
+      await this.backend.upsertAlertRule(rule);
+    } catch (e) {
+      throw new DialogActionError(toCommandError(e).message);
+    }
+    return true;
   }
 }

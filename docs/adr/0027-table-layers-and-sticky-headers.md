@@ -132,3 +132,20 @@ above are fixed wherever they occur.
   covered; such an app should give the table a `maxHeight` that fits.
 - Material's sort arrow and menu items replace the family's own chevron glyphs and CDK menus in `pd-table`; a sortable
   header's accessible name is its label (the button inside the column header), with "Sort by …" as its description.
+
+## Amendment (2026-10-29): trees the app orders, Dyno's grids
+
+- **A second path to a tree grid.** Besides `groupBy` (one level of groups the table builds from a column), `tree` (`PdRowTree`:
+  `level`, `expanded`, optional `spans`) makes the rows a tree grid when the app lists them itself, in display order with folded
+  rows left out (Dyno's processes under their app and parent, its connections under their program). The two are exclusive
+  (dev mode throws); `tree` implies the app's order (`order="source"`) and switches the table's own filter off. The grid role is
+  `treegrid`; rows say `aria-level`, `aria-expanded` and their place among siblings, and the first cell is indented by
+  `--pd-tree-indent` a level.
+- **The app owns the fold state.** Right on a folded row and Left on an unfolded one emit `rowToggle`; the app changes its state
+  (so it can persist it) and the table focuses the row again once redrawn. Right on an unfolded row moves to its first child,
+  Left on any other row to its parent. The output is `rowToggle` because `toggle` is a native event name.
+- **Space** opens a row like Enter (the ARIA grid pattern's selection key).
+- **Rows are tracked by key and columns.** A column change (a side panel narrows the table) never recycles row views built for
+  other columns; the focused row is asked for again by its key if the virtual table removed its element.
+- `PdColumn.sortStart` sets the first click's direction (`desc` for amounts); `sortClearable="false"` keeps a list sorted;
+  `toolbar="false"` leaves out the toolbar of a small static table.

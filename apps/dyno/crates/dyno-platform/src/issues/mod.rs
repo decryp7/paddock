@@ -8,7 +8,7 @@ pub mod linux;
 pub mod macos;
 pub mod windows;
 
-use dyno_core::issues::{days_from_civil, IssueSource};
+use dyno_core::issues::{days_from_civil, IssueSource, ReadControl};
 use dyno_core::ports::PlatformError;
 use dyno_core::time::{Timestamp, DAY, HOUR, MINUTE, SECOND};
 use std::time::Duration;
@@ -18,6 +18,20 @@ use std::time::Duration;
 pub trait ToolRunner: Send + Sync {
     /// Runs `program` with `args`; a non-zero exit is an error carrying the start of the tool's error output.
     fn run(&self, program: &str, args: &[String], timeout: Duration) -> Result<String, PlatformError>;
+    /// Like [`run`](Self::run) with the output handed over line by line as it arrives, and the tool stopped at once when
+    /// `control` is cancelled. The default runs the tool to the end and hands over its lines (no streaming, no early stop).
+    fn run_lines(
+        &self,
+        program: &str,
+        args: &[String],
+        timeout: Duration,
+        control: &dyn ReadControl,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<(), PlatformError> {
+        let _ = control;
+        self.run(program, args, timeout)?.lines().for_each(on_line);
+        Ok(())
+    }
 }
 
 /// Spawns the real tool.
@@ -29,6 +43,22 @@ impl ToolRunner for OsRunner {
         let mut cmd = crate::process::command(program);
         cmd.args(args);
         crate::process::output_text(cmd, timeout)
+    }
+
+    fn run_lines(
+        &self,
+        program: &str,
+        args: &[String],
+        timeout: Duration,
+        control: &dyn ReadControl,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<(), PlatformError> {
+        // A heavy read of a log must not slow the user's work: lower priority the family's way (not through nice(1), which strips
+        // DYLD_* on macOS).
+        let mut cmd = crate::process::command(program);
+        cmd.args(args);
+        paddock_proc::lower_priority(&mut cmd);
+        crate::process::run_streaming(cmd, timeout, control, on_line)
     }
 }
 

@@ -44,7 +44,11 @@ nothing planned is in the code yet. The remaining engineering follow-ups are at 
 - **Forgejo's runner:** on Windows and macOS a user-provided binary (upstream publishes none); OpenPGP-verified updates on
   Linux, where upstream publishes signed binaries. The core already describes the kind (`RunnerKind::ForgejoRunner`).
 - **GitHub's self-hosted runner.**
-- **Per-runner `env` on Windows** (the table is validated everywhere but applied on macOS and Linux only).
+- **The host environment** *(accepted, planned)*: an Environment page with shared folders, variables, ports, secrets and
+  PATH additions for every runner, each runner's effective environment with its sources, size and clean-up per shared
+  folder, and the Actions cache server for all runners ([ADR 0022](adr/0022-host-environment-and-shared-folders.md)).
+- **Per-runner `env` on Windows**: applied today to runners in `service` mode only; interactive runners get it with
+  ADR 0022's WP-8.
 - **LaunchDaemon mode** for headless Macs and a **systemd system unit** for headless Linux hosts whose jobs need no GUI.
 - **One SCM service per runner** under a virtual account on Windows, as an option next to session mode.
 

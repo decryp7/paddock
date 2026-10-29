@@ -1,6 +1,6 @@
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem } from '@angular/cdk/menu';
+import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import type { AppTally, Issue, IssueKind } from '../../core/api.types';
+import type { AppTally, Issue, IssueKind, KindTally } from '../../core/api.types';
 import { ThemeService } from '../../core/theme';
 import { AsyncState } from '../../shared/async-state';
 import { Chart } from '../../shared/chart';
@@ -10,19 +10,16 @@ import { ISSUE_KIND_LABEL, ISSUE_SOURCE_LABEL, type Tone } from '../../shared/la
 import { Notifier } from '../../shared/notifier';
 import { ISSUE_WINDOWS, IssuesStore } from '../../state/issues.store';
 import { Lookups } from '../lookup/lookups';
-import {
-  type IssueFilter,
-  type IssueRow,
-  NO_FILTER,
-  STABILITY_LABEL,
-  filterIssues,
-  issueRows,
-  readSources,
-  scoreOption,
-  stabilityTone,
-  trendText,
-  unavailableSources,
-} from './issues-model';
+import { type IssueFilter, NO_FILTER, STABILITY_LABEL, filterIssues, issueRows, readSources, scoreOption, stabilityTone, trendText, unavailableSources } from './issues-model';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { MatTooltip } from '@angular/material/tooltip';
+import { SearchField } from '../../shared/search-field';
+import { MatMenuModule } from '@angular/material/menu';
+
+interface IssueLine extends Issue {
+  readonly day: string;
+}
 
 /**
  * What the operating system recorded going wrong: a stability score for today and the last days, the apps and kinds with
@@ -31,9 +28,8 @@ import {
  */
 @Component({
   selector: 'dy-issues-view',
-  imports: [AsyncState, Chart, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [AsyncState, Chart, Icon, PdTable, PdCell, MatMenuModule, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(keydown)': 'key($event)' },
   template: `
     <dy-async [loaded]="!!store.overview()" [error]="store.error()" what="issues" [rows]="5" (retry)="store.load()">
       @if (store.overview(); as o) {
@@ -58,46 +54,19 @@ import {
         @if (o.apps.length || o.kinds.length) {
           <div class="boards">
             @if (o.apps.length) {
-              <table class="table board" aria-label="Apps with the most issues">
-                <thead><tr><th>App</th><th class="r">Issues</th><th class="r">Latest</th></tr></thead>
-                <tbody>
-                  @for (a of o.apps.slice(0, 5); track a.name) {
-                    <tr class="pick" tabindex="0" [class.on]="filter().app === a.name" [attr.aria-label]="'Show only ' + a.name" (click)="toggleApp(a)" (keydown.enter)="toggleApp(a)">
-                      <td><span class="ell" [title]="a.name">{{ a.name }}</span></td>
-                      <td class="r">{{ a.count }}</td>
-                      <td class="r muted">{{ ago(a.last) }}</td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
+              <pd-table [toolbar]="false" label="Apps with the most issues" [rows]="appBoard()" [columns]="appColumns" [rowKey]="appKey" [filterable]="false" [selectedKey]="filter().app" (rowActivate)="toggleApp($event)" />
             }
             @if (o.kinds.length) {
-              <table class="table board" aria-label="Issues by kind">
-                <thead><tr><th>Kind</th><th class="r">Issues</th></tr></thead>
-                <tbody>
-                  @for (k of o.kinds; track k.kind) {
-                    <tr class="pick" tabindex="0" [class.on]="filter().kind === k.kind" [attr.aria-label]="'Show only ' + kindLabel(k.kind)" (click)="toggleKind(k.kind)" (keydown.enter)="toggleKind(k.kind)">
-                      <td>{{ kindLabel(k.kind) }}</td>
-                      <td class="r">{{ k.count }}</td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
+              <pd-table [toolbar]="false" label="Issues by kind" [rows]="o.kinds" [columns]="kindColumns" [rowKey]="kindKey" [filterable]="false" [selectedKey]="filter().kind" (rowActivate)="toggleKind($event.kind)" />
             }
           </div>
         }
 
         <div class="bar" role="group" aria-label="Filters">
-          <label class="search"><dy-icon name="search" /><input class="input" type="search" placeholder="Search apps and messages" aria-label="Search issues" [value]="filter().search" (input)="setFilter({ search: $any($event.target).value })" /></label>
-          <div class="seg" role="group" aria-label="Period">
-            @for (d of windows; track d) {
-              <button type="button" [attr.aria-pressed]="store.days() === d" (click)="store.setDays(d)">{{ d }} days</button>
-            }
-          </div>
+          <dy-search-field label="Search issues" placeholder="Search apps and messages" [value]="filter().search" (valueChange)="setFilter({ search: $event })" />
+          <pd-segmented-control label="Period" [options]="windowSegs" [value]="store.days() + ''" (valueChange)="store.setDays(+$event)" />
           @if (filter().app || filter().kind) {
-            <button type="button" class="chip-btn" aria-label="Clear the filter" (click)="clear()">
-              {{ filter().app ?? kindLabel(filter().kind!) }} <dy-icon name="close" />
-            </button>
+            <button type="button" matButton="outlined" [attr.aria-label]="'Clear the filter ' + (filter().app ?? kindLabel(filter().kind!))" (click)="clear()">{{ filter().app ?? kindLabel(filter().kind!) }} <dy-icon name="close" /></button>
           }
           <span class="grow"></span>
           <span class="faint src">{{ sourcesText() }}</span>
@@ -105,36 +74,16 @@ import {
 
         <div class="layout" [class.with-detail]="!!selected()">
           <div class="tablewrap">
-            @if (rows().length === 0) {
+            @if (lines().length === 0) {
               <div class="none">
                 <dy-icon [name]="o.total === 0 ? 'check' : 'filter'" />
                 <strong>{{ o.total === 0 ? 'No issues in the last ' + o.days + ' days' : 'Nothing matches this filter' }}</strong>
                 <span>{{ o.total === 0 ? 'The system logs Dyno can read hold no crashes, hangs or other problems for this period.' : 'Clear the filter to see every issue again.' }}</span>
               </div>
             } @else {
-              <table class="table issues" aria-label="Issues">
-                <thead><tr><th class="time">Time</th><th class="kind">Kind</th><th>App or event</th><th>Details</th><th class="acts"><span class="visually-hidden">Actions</span></th></tr></thead>
-                <tbody>
-                  @for (r of rows(); track r.key) {
-                    @if (r.kind === 'day') {
-                      <tr class="day">
-                        <td colspan="5">
-                          <button type="button" class="chev" [attr.aria-expanded]="r.open" [attr.aria-label]="(r.open ? 'Collapse ' : 'Expand ') + r.label" (click)="toggleDay(r.key)"><dy-icon [name]="r.open ? 'chevron-down' : 'chevron-right'" /></button>
-                          <strong>{{ r.label }}</strong><span class="faint cnt">{{ plural(r.count, 'issue') }}</span>
-                        </td>
-                      </tr>
-                    } @else {
-                      <tr class="row" tabindex="0" [attr.data-id]="r.issue.id" [class.sel]="selectedId() === r.issue.id" [cdkContextMenuTriggerFor]="menu" [cdkContextMenuTriggerData]="{ issue: r.issue }" (click)="select(r.issue)" (keydown.enter)="select(r.issue)" (keydown.shift.f10)="select(r.issue)" (contextmenu)="select(r.issue)">
-                        <td class="time num muted">{{ clock(r.issue.at) }}</td>
-                        <td class="kind"><span class="dot" [attr.data-tone]="dotTone(r.issue)" aria-hidden="true"></span>{{ kindLabel(r.issue.kind) }}</td>
-                        <td><span class="ell" [title]="subject(r.issue)">{{ subject(r.issue) }}</span></td>
-                        <td class="muted"><span class="ell" [title]="r.issue.evidence">{{ r.issue.evidence || r.issue.title }}</span></td>
-                        <td class="acts"><button type="button" class="ib" [attr.aria-label]="'Copy details of ' + subject(r.issue)" title="Copy details" (click)="copy(r.issue, $event)"><dy-icon name="copy" /></button></td>
-                      </tr>
-                    }
-                  }
-                </tbody>
-              </table>
+              <pd-table [toolbar]="false" label="Issues" [rows]="lines()" [columns]="columns" [rowKey]="lineKey" [filterable]="false" [maxHeight]="560" groupBy="day" [rowActions]="actions" [selectedKey]="selectedId()" (rowActivate)="select($event)" (action)="run($event)" (keydown.escape)="selectedId.set(null)">
+                <ng-template pdCell="kind" let-i><span class="dot" [attr.data-tone]="dotTone(i)" aria-hidden="true"></span>{{ kindLabel(i.kind) }}</ng-template>
+              </pd-table>
             }
           </div>
 
@@ -142,7 +91,7 @@ import {
             <aside class="detail" tabindex="-1" aria-label="Issue details" (keydown.escape)="selectedId.set(null)">
               <div class="dhead">
                 <strong>{{ s.title }}</strong>
-                <button type="button" class="ib" aria-label="Close details" (click)="selectedId.set(null)"><dy-icon name="close" /></button>
+                <button type="button" matIconButton matTooltip="Close details" aria-label="Close details" (click)="selectedId.set(null)"><dy-icon name="close" /></button>
               </div>
               <dl>
                 <dt>When</dt><dd>{{ when(s) }}</dd>
@@ -155,26 +104,18 @@ import {
                 <pre class="evidence sel">{{ s.evidence }}</pre>
               }
               <div class="dacts">
-                <button type="button" class="btn sm" (click)="copy(s)"><dy-icon name="copy" /> Copy</button>
-                @if (s.app) { <button type="button" class="btn sm" (click)="setFilter({ app: s.app })"><dy-icon name="filter" /> Only this app</button> }
+                <button type="button" matButton="outlined" (click)="copy(s)"><dy-icon name="copy" /> Copy</button>
+                @if (s.app) { <button type="button" matButton="outlined" (click)="setFilter({ app: s.app })"><dy-icon name="filter" /> Only this app</button> }
               </div>
             </aside>
           }
         </div>
       }
     </dy-async>
-
-    <ng-template #menu let-issue="issue">
-      <div class="menu" cdkMenu aria-label="Issue actions">
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copy(issue)"><dy-icon name="copy" /> Copy details</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchWeb(issue)"><dy-icon name="search" /> Search the web…</button>
-        @if (issue.app) { <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="setFilter({ app: issue.app })"><dy-icon name="filter" /> Only this app</button> }
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="setFilter({ kind: issue.kind })"><dy-icon name="filter" /> Only this kind</button>
-      </div>
-    </ng-template>
   `,
   styles: `
     :host { display: grid; gap: var(--sp-3); align-content: start; }
+    .chev { width: 22px; height: 22px; padding: 0; flex: none; --icon-size: 14px; }
     dy-async { display: grid; gap: var(--sp-3); }
     .hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-2) var(--sp-6); align-items: center; padding: var(--sp-4) var(--sp-5); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); }
     .score { display: flex; align-items: center; gap: var(--sp-4); min-width: 200px; }
@@ -189,41 +130,16 @@ import {
     .trend { grid-column: 1 / -1; margin: 0; color: var(--text-3); font-size: var(--fs-sm); }
     .note { margin: 0; display: flex; gap: var(--sp-2); align-items: flex-start; color: var(--text-2); font-size: var(--fs-sm); }
     .boards { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--sp-3); align-items: start; }
-    .board { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); overflow: hidden; }
-    .board .ell { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-    .pick { cursor: pointer; }
-    .pick.on td { background: var(--accent-soft); }
-    .pick:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
     .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; min-height: 44px; }
     .grow { flex: 1; }
     .src { font-size: var(--fs-xs); }
-    .search { position: relative; display: block; flex: 1 1 200px; min-width: 160px; max-width: 320px; }
-    .search dy-icon { position: absolute; left: 8px; top: 7px; --icon-size: 15px; color: var(--text-3); }
-    .search input { padding-left: 30px; width: 100%; }
-    .chip-btn { display: inline-flex; align-items: center; gap: 4px; height: var(--control-h); max-width: 260px; padding: 0 8px 0 10px; border: 1px solid var(--accent); border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent-text); font: var(--fw-medium) var(--fs-sm) / 1 var(--font-sans); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .chip-btn dy-icon { --icon-size: 13px; }
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 340px; }
-    .tablewrap { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); overflow: auto; max-height: 560px; min-width: 0; }
-    .issues { table-layout: fixed; }
-    .issues th.time, .issues td.time { width: 64px; }
-    .issues th.kind, .issues td.kind { width: 190px; }
-    .issues th.acts, .issues td.acts { width: 40px; padding: 0 4px; }
-    .issues td { overflow: hidden; text-overflow: ellipsis; }
-    .issues td.kind { display: table-cell; }
-    .issues td.kind .dot { margin-right: var(--sp-2); vertical-align: 1px; }
-    .ell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    tr.day td { height: 32px; background: var(--surface-inset); border-bottom: 1px solid var(--border-subtle); }
-    .cnt { margin-left: var(--sp-2); }
-    tr.day strong { font-weight: var(--fw-semibold); }
-    .chev { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 0; background: none; color: var(--text-3); border-radius: var(--r-sm); cursor: pointer; vertical-align: middle; }
-    .chev:hover { background: var(--surface-active); color: var(--text-1); }
-    tr.row { cursor: default; }
-    tr.row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-    tr.row.sel td { background: var(--accent-soft); }
-    tr.row.sel td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
-    .issues td.acts { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); text-align: right; }
-    tr.row:hover td.acts, tr.row:focus-within td.acts, tr.row.sel td.acts { opacity: 1; }
+    .tablewrap { min-width: 0; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: var(--sp-2); flex: none; background: var(--text-3); }
+    .dot[data-tone='bad'] { background: var(--bad); }
+    .dot[data-tone='warn'] { background: var(--warn); }
+    .dot[data-tone='info'] { background: var(--info); }
     .ib { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
     .ib:hover { background: var(--surface-active); color: var(--text-1); }
     .ib dy-icon { --icon-size: 15px; }
@@ -249,9 +165,9 @@ export class IssuesView {
   private readonly notifier = inject(Notifier);
   private readonly lookups = inject(Lookups);
   protected readonly windows = ISSUE_WINDOWS;
+  protected readonly windowSegs: SuSegment[] = ISSUE_WINDOWS.map((d) => ({ value: String(d), label: `${d} days` }));
   protected readonly filter = signal<IssueFilter>(NO_FILTER);
   protected readonly selectedId = signal<string | null>(null);
-  private readonly collapsed = signal<ReadonlySet<string>>(new Set());
   protected readonly plural = plural;
   protected readonly clock = formatClock;
   protected readonly kindLabel = (k: IssueKind) => ISSUE_KIND_LABEL[k];
@@ -274,7 +190,42 @@ export class IssuesView {
     return o.sources.length === 0 ? 'No log to read on this system' : `${read} of ${plural(o.sources.length, 'log')} read${when}`;
   });
   protected readonly visible = computed(() => filterIssues(this.store.overview()?.issues ?? [], this.filter()));
-  protected readonly rows = computed<IssueRow[]>(() => issueRows(this.visible(), this.now(), this.collapsed()));
+  /** The issues, each with the day it belongs to (the model builds the day headings; the table groups by them and folds them). */
+  protected readonly lines = computed<IssueLine[]>(() => {
+    const out: IssueLine[] = [];
+    let day = '';
+    for (const r of issueRows(this.visible(), this.now(), new Set())) {
+      if (r.kind === 'day') day = r.label;
+      else out.push({ ...r.issue, day });
+    }
+    return out;
+  });
+  protected readonly lineKey = (i: IssueLine): string => i.id;
+  protected readonly columns: PdColumn<IssueLine>[] = [
+    { key: 'day', header: 'Day', value: (i) => i.day, hidden: true, sortable: false },
+    { key: 'time', header: 'Time', value: (i) => i.at, text: (i) => formatClock(i.at), width: '64px', sortable: false },
+    { key: 'kind', header: 'Kind', value: (i) => ISSUE_KIND_LABEL[i.kind], width: '190px', sortable: false },
+    { key: 'subject', header: 'App or event', value: (i) => this.subject(i), required: true, width: 'minmax(0, 1fr)', sortable: false },
+    { key: 'details', header: 'Details', value: (i) => i.evidence || i.title, width: 'minmax(0, 1.4fr)', hideBelow: 640, sortable: false },
+  ];
+  protected readonly actions = (i: IssueLine): PdRowAction[] => [
+    { id: 'copy', label: 'Copy details', icon: 'copy', inline: true },
+    { id: 'web', label: 'Search the web…', icon: 'search' },
+    ...(i.app ? [{ id: 'app', label: 'Only this app', icon: 'search' }] : []),
+    { id: 'kind', label: 'Only this kind', icon: 'search' },
+  ];
+  protected readonly appBoard = computed(() => (this.store.overview()?.apps ?? []).slice(0, 5));
+  protected readonly appKey = (a: AppTally): string => a.name;
+  protected readonly kindKey = (k: KindTally): string => k.kind;
+  protected readonly appColumns: PdColumn<AppTally>[] = [
+    { key: 'name', header: 'App', value: (a) => a.name, required: true, sortable: false, width: 'minmax(0, 1fr)' },
+    { key: 'count', header: 'Issues', value: (a) => a.count, align: 'end', sortable: false, width: '80px' },
+    { key: 'last', header: 'Latest', value: (a) => a.last, text: (a) => this.ago(a.last), align: 'end', sortable: false, width: '100px' },
+  ];
+  protected readonly kindColumns: PdColumn<KindTally>[] = [
+    { key: 'kind', header: 'Kind', value: (k) => ISSUE_KIND_LABEL[k.kind], required: true, sortable: false, width: 'minmax(0, 1fr)' },
+    { key: 'count', header: 'Issues', value: (k) => k.count, align: 'end', sortable: false, width: '80px' },
+  ];
   protected readonly selected = computed(() => this.store.overview()?.issues.find((i) => i.id === this.selectedId()) ?? null);
 
   protected setFilter(f: Partial<IssueFilter>): void {
@@ -293,28 +244,16 @@ export class IssuesView {
     this.filter.update((f) => ({ ...f, kind: f.kind === k ? null : k }));
   }
 
-  protected toggleDay(key: string): void {
-    this.collapsed.update((c) => {
-      const next = new Set(c);
-      if (!next.delete(key)) next.add(key);
-      return next;
-    });
-  }
-
   protected select(i: Issue): void {
     this.selectedId.set(i.id);
   }
 
-  /** Up and Down move between rows. */
-  protected key(e: KeyboardEvent): void {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-    const rows = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('tr.row')];
-    const at = rows.indexOf(document.activeElement as HTMLElement);
-    const next = rows[at + (e.key === 'ArrowDown' ? 1 : -1)];
-    if (next) {
-      e.preventDefault();
-      next.focus();
-    }
+  protected run({ id, row }: PdRowActionEvent<IssueLine>): void {
+    this.select(row);
+    if (id === 'copy') void this.copy(row);
+    else if (id === 'web') this.searchWeb(row);
+    else if (id === 'app') this.setFilter({ app: row.app });
+    else this.setFilter({ kind: row.kind });
   }
 
   protected subject(i: Issue): string {

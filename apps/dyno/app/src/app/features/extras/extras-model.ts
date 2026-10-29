@@ -186,3 +186,14 @@ export function filterSoftware(items: readonly SoftwareItem[], search: string): 
 
 /** The first letter for an avatar tile. */
 export { initial, hue } from '../issues/issues-model';
+
+/** A row with its place in the list, for engine lists that carry no id of their own (a table row needs a key). */
+export type Numbered<T> = T & { readonly n: number };
+
+/** The rows of `list`, each with its place. */
+export function numbered<T>(list: readonly T[]): Numbered<T>[] {
+  return list.map((row, n) => ({ ...row, n }));
+}
+
+/** A numbered row's key. */
+export const numberKey = (row: { readonly n: number }): string => String(row.n);

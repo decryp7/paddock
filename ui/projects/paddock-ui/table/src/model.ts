@@ -11,6 +11,8 @@ export interface PdColumn<T> {
   readonly width?: string;
   /** Numbers, sizes and dates: right-aligned, tabular figures, never wrapped. */
   readonly align?: 'start' | 'end';
+  /** The direction a first click on the header sorts in (default ascending); `desc` for a column of amounts whose biggest come first. */
+  readonly sortStart?: 'asc' | 'desc';
   /** Sortable (default true). */
   readonly sortable?: boolean;
   /** Hidden while the table is narrower than this many pixels (rule 18: no horizontal scroll at 320). */
@@ -31,6 +33,49 @@ export interface PdColumn<T> {
    * having dropped out by `hideBelow`), and every row grows to two lines (row height + 12 px), so nothing overflows.
    */
   readonly foldBelow?: number;
+}
+
+/**
+ * How the rows of a table the app orders itself form a tree (processes under their app and parent, connections under their
+ * program): the app lists the rows in display order, with the folded ones left out, and says each row's level and fold state.
+ */
+export interface PdRowTree<T> {
+  /** The row's depth: 1 for the top rows. */
+  readonly level: (row: T) => number;
+  /** Whether the row is unfolded; null for a leaf. */
+  readonly expanded: (row: T) => boolean | null;
+  /** The row's first cell spans the whole row (a heading); such a row has no other cells and no actions. */
+  readonly spans?: (row: T) => boolean;
+}
+
+/** The place of every row among its siblings of a tree: `[position, count]` (1-based), by row index. Rows without a parent among the rows are siblings of the top level. */
+export function treePlaces<T>(rows: readonly T[], level: (row: T) => number): readonly (readonly [number, number])[] {
+  const parentOf: number[] = [];
+  const open: number[] = [];
+  rows.forEach((row, i) => {
+    const l = Math.max(1, level(row));
+    open.length = l - 1;
+    parentOf.push(l > 1 ? (open[l - 2] ?? -1) : -1);
+    open[l - 1] = i;
+  });
+  const counts = new Map<number, number>();
+  const seen = new Map<number, number>();
+  const out: [number, number][] = [];
+  const key = (i: number): number => parentOf[i] as number;
+  rows.forEach((_, i) => counts.set(key(i), (counts.get(key(i)) ?? 0) + 1));
+  rows.forEach((_, i) => {
+    const n = (seen.get(key(i)) ?? 0) + 1;
+    seen.set(key(i), n);
+    out.push([n, counts.get(key(i)) as number]);
+  });
+  return out;
+}
+
+/** The index of the row a tree's Left key goes up to: the nearest row above with a smaller level, or -1. */
+export function parentIndex<T>(rows: readonly T[], index: number, level: (row: T) => number): number {
+  const mine = level(rows[index] as T);
+  for (let i = index - 1; i >= 0; i -= 1) if (level(rows[i] as T) < mine) return i;
+  return -1;
 }
 
 /** The sort of a table: one column, one direction. */
@@ -154,11 +199,6 @@ export function nextIndex(count: number, current: number, key: string, page = 10
     default:
       return null;
   }
-}
-
-/** Shift+F10 or the Menu key: the keyboard's right-click (the browser also sends a `contextmenu` event for it). */
-export function isMenuKey(e: Pick<KeyboardEvent, 'key' | 'shiftKey'>): boolean {
-  return e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey);
 }
 
 /** Whether an event came from a control inside a row (a button, link or field), which must not open the row. */

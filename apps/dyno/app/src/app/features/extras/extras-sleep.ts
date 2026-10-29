@@ -1,15 +1,17 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import { PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import { AsyncState } from '../../shared/async-state';
 import { plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
-import { PREVENTS_LABEL, heldForText, wakeTimeText } from './extras-model';
+import type { SleepBlocker, WakeEvent } from '../../core/api.types';
+import { type Numbered, PREVENTS_LABEL, heldForText, numberKey, numbered, wakeTimeText } from './extras-model';
 import { EXTRAS_STYLES } from './extras-styles';
 
 /** Why the computer will not sleep (what holds it awake and for how long) and what woke it recently. */
 @Component({
   selector: 'dy-extras-sleep',
-  imports: [AsyncState, Icon],
+  imports: [AsyncState, Icon, PdTable],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="!!data()" [error]="store.sleep().error" what="sleep information" [rows]="5" (retry)="store.loadSleep()">
@@ -20,21 +22,7 @@ import { EXTRAS_STYLES } from './extras-styles';
         } @else if (s.blockers.length === 0) {
           <div class="none"><dy-icon name="check" /><strong>Nothing is keeping this computer awake</strong><span>It can go to sleep when it is idle.</span></div>
         } @else {
-          <div class="tablewrap">
-            <table class="table tbl" aria-label="Keeping this computer awake">
-              <thead><tr><th>Program</th><th class="w-prev">It prevents</th><th>Reason</th><th class="w-held r">Held for</th></tr></thead>
-              <tbody>
-                @for (b of s.blockers; track b.name + $index) {
-                  <tr>
-                    <td><span class="ell" [title]="b.name"><strong class="name">{{ b.name }}</strong></span></td>
-                    <td>{{ prevents(b.prevents) }}</td>
-                    <td class="muted"><span class="ell" [title]="b.reason">{{ b.reason }}</span></td>
-                    <td class="r num muted">{{ held(b.heldFor) }}</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
+          <pd-table [toolbar]="false" label="Keeping this computer awake" [rows]="blockerRows()" [columns]="blockerColumns" [rowKey]="rowNo" [filterable]="false" [maxHeight]="620" />
         }
 
         <h2 class="sec">Recent wakes @if (!s.wakesUnavailable) { <span class="faint muted">{{ plural(s.wakes.length, 'wake') }}</span> }</h2>
@@ -43,21 +31,12 @@ import { EXTRAS_STYLES } from './extras-styles';
         } @else if (s.wakes.length === 0) {
           <div class="none"><dy-icon name="clock" /><strong>No wakes recorded</strong><span>The system log holds no wake events for the recent past.</span></div>
         } @else {
-          <div class="tablewrap">
-            <table class="table tbl" aria-label="Recent wakes">
-              <thead><tr><th class="w-when">When</th><th>What woke it</th></tr></thead>
-              <tbody>
-                @for (w of s.wakes; track $index) {
-                  <tr><td class="num muted">{{ when(w.when) }}</td><td><span class="ell" [title]="w.reason">{{ w.reason }}</span></td></tr>
-                }
-              </tbody>
-            </table>
-          </div>
+          <pd-table [toolbar]="false" label="Recent wakes" [rows]="wakeRows()" [columns]="wakeColumns" [rowKey]="rowNo" [filterable]="false" [maxHeight]="620" />
         }
       }
     </dy-async>
   `,
-  styles: [EXTRAS_STYLES, `.name { font-weight: var(--fw-medium); } .w-prev { width: 220px; } .w-held { width: 110px; } .w-when { width: 180px; }`],
+  styles: [EXTRAS_STYLES],
 })
 export class ExtrasSleep implements OnInit {
   protected readonly store = inject(ExtrasStore);
@@ -66,6 +45,20 @@ export class ExtrasSleep implements OnInit {
   protected readonly prevents = (p: keyof typeof PREVENTS_LABEL) => PREVENTS_LABEL[p];
   protected readonly held = heldForText;
   protected readonly when = wakeTimeText;
+  /** Rows carry their place: the engine gives blockers and wakes no id. */
+  protected readonly blockerRows = computed(() => numbered(this.data()?.blockers ?? []));
+  protected readonly wakeRows = computed(() => numbered(this.data()?.wakes ?? []));
+  protected readonly rowNo = numberKey;
+  protected readonly blockerColumns: PdColumn<Numbered<SleepBlocker>>[] = [
+    { key: 'name', header: 'Program', value: (b) => b.name, required: true, sortable: false, width: 'minmax(0, 1.4fr)' },
+    { key: 'prevents', header: 'It prevents', value: (b) => PREVENTS_LABEL[b.prevents], sortable: false, width: '220px', hideBelow: 560 },
+    { key: 'reason', header: 'Reason', value: (b) => b.reason, sortable: false, width: 'minmax(0, 2fr)', hideBelow: 700 },
+    { key: 'held', header: 'Held for', value: (b) => b.heldFor, text: (b) => heldForText(b.heldFor), align: 'end', sortable: false, width: '110px' },
+  ];
+  protected readonly wakeColumns: PdColumn<Numbered<WakeEvent>>[] = [
+    { key: 'when', header: 'When', value: (w) => w.when, text: (w) => wakeTimeText(w.when), required: true, sortable: false, width: '180px' },
+    { key: 'reason', header: 'What woke it', value: (w) => w.reason, sortable: false, width: 'minmax(0, 1fr)' },
+  ];
 
   ngOnInit(): void {
     void this.store.ensure('sleep');

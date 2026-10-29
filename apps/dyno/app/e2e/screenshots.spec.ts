@@ -7,7 +7,21 @@ import { join } from 'node:path';
  * Deterministic: the clock is frozen, the mock is a macOS laptop, the timezone and locale are fixed and motion is reduced.
  */
 // Playwright runs from the app folder; the images live in the repository's docs.
-const OUT = join(process.cwd(), '..', 'docs', 'screenshots');
+/** Picks an option of a Material select (the list opens in an overlay on the page). */
+async function choose(page: Page, label: string, option: string | RegExp): Promise<void> {
+  await page.getByRole('combobox', { name: label }).click();
+  await page.getByRole('option', { name: option, exact: typeof option === 'string' }).click();
+}
+
+/** Opens the shell's Settings window (Mod+, on the mock's macOS) and shows Dyno's page of it. */
+async function openSettings(page: Page): Promise<void> {
+  await page.keyboard.press('ControlOrMeta+Comma');
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByText('Dyno', { exact: true }).click();
+}
+
+const OUT = process.env['SCREENSHOT_DIR'] ?? join(process.cwd(), '..', 'docs', 'screenshots');
 const FROZEN = Date.UTC(2026, 9, 22, 14, 30, 0);
 
 test.use({ timezoneId: 'UTC', locale: 'en-GB', reducedMotion: 'reduce', colorScheme: 'light' });
@@ -56,7 +70,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
       await page.getByRole('button', { name: /Sets/ }).click();
       await page.getByRole('menuitem', { name: /^Disk and network \d/ }).click();
       await page.getByRole('list', { name: 'Objects' }).getByRole('button', { name: /^Network Interface/ }).click();
-      await expect(page.getByRole('table', { name: 'Charted counters' })).toBeVisible();
+      await expect(page.getByRole('grid', { name: 'Charted counters' })).toBeVisible();
       await expect(page.locator('dy-chart canvas').first()).toBeVisible();
       await page.clock.runFor(2_500);
     },
@@ -72,6 +86,8 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
       await page.getByRole('button', { name: /Chart Bytes Sent \(en0\)/ }).click();
       await page.getByRole('button', { name: /Chart Bytes Transferred \(disk0\)/ }).click();
       await expect(page.locator('dy-chart canvas').first()).toBeVisible();
+      // No tooltip of the last click hovering over the list in the picture.
+      await page.mouse.move(2, 2);
       await page.clock.runFor(2_500);
     },
   },
@@ -79,7 +95,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     name: 'network',
     path: '/#/network',
     ready: async (page) => {
-      await page.getByRole('button', { name: 'Listening' }).click();
+      await page.getByRole('radio', { name: 'Listening' }).click();
       await expect(page.getByRole('grid', { name: 'Listening ports' })).toBeVisible();
     },
   },
@@ -155,7 +171,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/',
     ready: async (page) => {
       await page.getByRole('button', { name: 'Edit dashboard' }).click();
-      await page.getByLabel('Preset').selectOption('developer');
+      await choose(page, 'Preset', 'Developer');
       await page.clock.runFor(2_000);
     },
   },
@@ -164,7 +180,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/',
     ready: async (page) => {
       await page.getByRole('button', { name: 'Edit dashboard' }).click();
-      await page.getByLabel('Preset').selectOption('battery');
+      await choose(page, 'Preset', 'Battery');
       await page.clock.runFor(2_000);
     },
   },
@@ -173,26 +189,28 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/',
     ready: async (page) => {
       await page.getByRole('button', { name: 'Edit dashboard' }).click();
-      await page.getByLabel('Preset').selectOption('gaming');
+      await choose(page, 'Preset', 'Gaming');
       await page.clock.runFor(2_000);
     },
   },
   {
     name: 'settings-menu-bar',
-    path: '/#/settings',
+    path: '/#/',
+    size: { width: 1440, height: 1900 },
     ready: async (page) => {
+      await openSettings(page);
       const section = page.getByRole('region', { name: 'Menu bar items' });
       await section.getByRole('button', { name: 'Add item' }).click();
       await expect(section.getByRole('listitem')).toHaveCount(3);
       await section.getByRole('button', { name: 'Add item' }).click();
       await expect(section.getByRole('listitem')).toHaveCount(4);
-      await section.getByLabel('Style of item 1').selectOption('graphAndNumber');
-      await section.getByLabel('Metric of item 2').selectOption('memory');
-      await section.getByLabel('Style of item 2').selectOption('ring');
-      await section.getByLabel('Metric of item 3').selectOption('networkDown');
-      await section.getByLabel('Style of item 3').selectOption('lineGraph');
-      await section.getByLabel('Metric of item 4').selectOption('temperature');
-      await section.getByLabel('Style of item 4').selectOption('number');
+      await choose(page, 'Style of item 1', 'Graph and number');
+      await choose(page, 'Metric of item 2', 'Memory');
+      await choose(page, 'Style of item 2', 'Ring');
+      await choose(page, 'Metric of item 3', 'Network down');
+      await choose(page, 'Style of item 3', 'Line graph');
+      await choose(page, 'Metric of item 4', 'Temperature');
+      await choose(page, 'Style of item 4', 'Number');
       await section.scrollIntoViewIfNeeded();
       await page.clock.runFor(2_000);
     },
@@ -203,25 +221,25 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     size: { width: 1440, height: 1500 },
     ready: async (page) => {
       await expect(page.getByRole('heading', { name: 'Health', exact: true })).toBeVisible();
-      await expect(page.getByRole('region', { name: 'Start-up items' }).getByRole('table')).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Start-up items' }).getByRole('grid')).toBeVisible();
     },
   },
-  { name: 'backup', path: '/#/backup', ready: async (page) => void (await expect(page.getByRole('table', { name: 'Backup tools' })).toBeVisible()) },
+  { name: 'backup', path: '/#/backup', ready: async (page) => void (await expect(page.getByRole('grid', { name: 'Backup tools' })).toBeVisible()) },
   {
     name: 'extras-changes',
     path: '/#/extras?tab=changes',
-    ready: async (page) => void (await expect(page.getByRole('table', { name: 'What changed' })).toBeVisible()),
+    ready: async (page) => void (await expect(page.getByRole('treegrid', { name: 'What changed' })).toBeVisible()),
   },
   {
     name: 'extras-sleep',
     path: '/#/extras?tab=sleep',
-    ready: async (page) => void (await expect(page.getByRole('table', { name: 'Recent wakes' })).toBeVisible()),
+    ready: async (page) => void (await expect(page.getByRole('grid', { name: 'Recent wakes' })).toBeVisible()),
   },
   {
     name: 'extras-boot',
     path: '/#/extras?tab=boot',
     ready: async (page) => {
-      await expect(page.getByRole('table', { name: 'What slowed start-up' })).toBeVisible();
+      await expect(page.getByRole('grid', { name: 'What slowed start-up' })).toBeVisible();
       await expect(page.locator('dy-chart canvas').first()).toBeVisible();
       await page.clock.runFor(500);
     },
@@ -229,12 +247,12 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
   {
     name: 'extras-apps',
     path: '/#/extras?tab=apps',
-    ready: async (page) => void (await expect(page.getByRole('table', { name: 'Network and energy per app' })).toBeVisible()),
+    ready: async (page) => void (await expect(page.getByRole('grid', { name: 'Network and energy per app' })).toBeVisible()),
   },
   {
     name: 'extras-gpu',
     path: '/#/extras?tab=gpu',
-    ready: async (page) => void (await expect(page.getByRole('table', { name: 'GPU use per process' })).toBeVisible()),
+    ready: async (page) => void (await expect(page.getByRole('grid', { name: 'GPU use per process' })).toBeVisible()),
   },
   {
     name: 'extras-files',
@@ -242,20 +260,20 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     size: { width: 1440, height: 1320 },
     ready: async (page) => {
       await page.getByRole('button', { name: 'Choose a folder' }).click();
-      await expect(page.getByRole('table', { name: 'Large and duplicate files' })).toBeVisible();
+      await expect(page.getByRole('treegrid', { name: 'Large and duplicate files' })).toBeVisible();
     },
   },
   {
     name: 'extras-inventory',
     path: '/#/extras?tab=inventory',
-    ready: async (page) => void (await expect(page.getByRole('table', { name: 'Installed software' })).toBeVisible()),
+    ready: async (page) => void (await expect(page.getByRole('grid', { name: 'Installed software' })).toBeVisible()),
   },
   {
     name: 'extras-maintenance',
     path: '/#/extras?tab=maintenance',
     ready: async (page) => void (await expect(page.getByRole('region', { name: 'Maintenance windows' })).toContainText('Mon to Fri')),
   },
-  { name: 'settings', path: '/#/settings', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()) },
+  { name: 'settings', path: '/#/', size: { width: 1440, height: 1500 }, ready: async (page) => openSettings(page) },
   { name: 'alarms', path: '/#/alarms', ready: async (page) => void (await expect(page.getByRole('button', { name: /Acknowledge all/ })).toBeVisible()) },
   {
     name: 'alarms-rules',
@@ -264,6 +282,9 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     ready: async (page) => {
       await page.getByRole('tab', { name: 'Rules' }).click();
       await expect(page.getByRole('button', { name: 'Add rule' })).toBeVisible();
+      // No hover or focus state left on the tab in the picture.
+      await page.mouse.move(2, 2);
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     },
   },
   { name: 'recorder', path: '/#/recorder', size: { width: 1440, height: 1100 }, ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Flight recorder' })).toBeVisible()) },
@@ -272,7 +293,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     name: 'web-search',
     path: '/#/issues',
     ready: async (page) => {
-      await page.getByRole('table', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click({ button: 'right' });
+      await page.getByRole('treegrid', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click({ button: 'right' });
       await page.getByRole('menuitem', { name: 'Search the web…' }).click();
       await expect(page.getByRole('dialog', { name: 'Search the web' }).getByText(/Removed from the text/)).toBeVisible();
     },
@@ -281,7 +302,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     name: 'hash-search',
     path: '/#/processes',
     ready: async (page) => {
-      await page.getByRole('button', { name: 'All', exact: true }).click();
+      await page.getByRole('radio', { name: 'All', exact: true }).click();
       await page.getByLabel('Filter processes').fill('rustc');
       await page.locator('[role=row][data-key^="p"]').first().click({ button: 'right' });
       await page.getByRole('menuitem', { name: 'Search file hash on VirusTotal…' }).click();
@@ -293,7 +314,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/health',
     size: { width: 1440, height: 1100 },
     ready: async (page) => {
-      await page.getByRole('button', { name: /Hide system entries/ }).click();
+      await page.getByRole('checkbox', { name: /Hide system entries/ }).click();
       await expect(page.getByText(/hidden by the filter/)).toBeVisible();
     },
   },
@@ -303,7 +324,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/throttling',
     ready: async (page) => {
       await expect(page.getByRole('heading', { name: 'Running at full speed' })).toBeVisible();
-      await expect(page.getByRole('table')).toBeVisible();
+      await expect(page.getByRole('grid').first()).toBeVisible();
     },
   },
   {
@@ -312,7 +333,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     query: '&hw=hot',
     ready: async (page) => {
       await expect(page.getByRole('heading', { name: 'Slowed down by heat: 44% slower' })).toBeVisible();
-      await expect(page.getByRole('table')).toBeVisible();
+      await expect(page.getByRole('grid').first()).toBeVisible();
     },
   },
   {
@@ -340,7 +361,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     ready: async (page) => {
       await expect(page.getByRole('region', { name: 'Stability' })).toBeVisible();
       await expect(page.locator('dy-chart canvas').first()).toBeVisible();
-      await page.getByRole('table', { name: 'Issues', exact: true }).getByRole('row', { name: /Slack/ }).first().click();
+      await page.getByRole('treegrid', { name: 'Issues', exact: true }).getByRole('row', { name: /Slack/ }).first().click();
       await expect(page.getByRole('complementary', { name: 'Issue details' })).toBeVisible();
     },
   },
@@ -349,7 +370,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/issues',
     size: { width: 1440, height: 900 },
     ready: async (page) => {
-      await page.getByRole('button', { name: /New and unusual/ }).click();
+      await page.getByRole('radio', { name: /New and unusual/ }).click();
       await page.getByRole('row', { name: /updater-helper/ }).click();
       await expect(page.getByRole('complementary', { name: 'Program details' })).toBeVisible();
     },
@@ -371,7 +392,7 @@ for (const theme of ['dark', 'light'] as const) {
       if (screen.size) await page.setViewportSize(screen.size);
       await prepare(page, theme);
       await page.goto(`${screen.path.replace('/#/', `/?latency=0&chrome=macos${screen.mock ? `&mock=${screen.mock}` : ''}${screen.query ?? ''}#/`)}`);
-      await expect(page.locator('dy-shell, dy-tray').first()).toBeVisible();
+      await expect(page.locator('pd-shell-frame, dy-tray').first()).toBeVisible();
       await page.clock.runFor(45_000);
       await screen.ready(page);
       if (screen.name === 'tray') {
@@ -393,10 +414,10 @@ for (const theme of ['dark', 'light'] as const) {
         await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`) });
       }
       if (screen.name === 'dashboard') {
-        await page.getByRole('group', { name: 'CPU', exact: true }).getByRole('button', { name: 'Per core' }).click();
+        await page.getByRole('group', { name: 'CPU', exact: true }).getByRole('radio', { name: 'Per core' }).click();
         await page.clock.runFor(1_000);
         await page.getByRole('group', { name: 'CPU', exact: true }).screenshot({ path: join(OUT, `cpu-per-core-tile-${theme}.png`) });
-        await page.getByRole('group', { name: 'CPU', exact: true }).getByRole('button', { name: 'Overall' }).click();
+        await page.getByRole('group', { name: 'CPU', exact: true }).getByRole('radio', { name: 'Overall' }).click();
       }
       if (screen.name === 'dashboard') {
         // The whole page, for the README and for review (the 1440x900 image only shows the top).

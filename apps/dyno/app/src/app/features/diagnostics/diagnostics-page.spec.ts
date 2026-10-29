@@ -14,6 +14,7 @@ function render(fail: string[] = []) {
 const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
   for (let i = 0; i < 5; i++) {
     await f.whenStable();
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
     f.detectChanges();
   }
 };
@@ -24,7 +25,7 @@ describe('dy-diagnostics-page', () => {
     const { f, el, mock } = render();
     await settle(f);
     expect(el.querySelector('h1')?.textContent).toBe('Diagnostics bundle');
-    expect(el.querySelectorAll('tbody tr')).toHaveLength(11);
+    expect(el.querySelectorAll('pd-table [role="row"][data-key]')).toHaveLength(11);
     expect(el.querySelector('.strip')?.textContent).toContain('11 files');
     expect(el.querySelector('.strip')?.textContent).toContain('70 things redacted');
     expect(el.querySelector('.list li.zero')?.textContent).toContain('E-mail addresses');
@@ -41,7 +42,7 @@ describe('dy-diagnostics-page', () => {
     await settle(f);
     expect(mock.savedBundles).toHaveLength(1);
     expect(el.querySelector('.note.ok .path')?.textContent).toBe(mock.savedBundles[0]!.path);
-    expect(TestBed.inject(Notifier).toasts()[0]!.text).toContain('Saved dyno-diagnostics.zip');
+    expect(TestBed.inject(Notifier).recent()[0]!.text).toContain('Saved dyno-diagnostics.zip');
     el.querySelector<HTMLButtonElement>('[aria-label="Copy the saved path"]')!.click();
     await settle(f);
     expect(writeText).toHaveBeenCalledWith(mock.savedBundles[0]!.path);

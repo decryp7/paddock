@@ -149,3 +149,8 @@ export function changeLabel(c: AlarmChange): string {
   }
 }
 
+
+/** The rules after saving `rule`: it replaces the rule being edited (`editingId`), or is added at the end. */
+export function withRule(rules: readonly CustomAlertRule[], rule: CustomAlertRule, editingId: string | null): CustomAlertRule[] {
+  return editingId === null ? [...rules, rule] : rules.map((r) => (r.id === editingId ? rule : r));
+}

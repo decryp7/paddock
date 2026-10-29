@@ -20,6 +20,7 @@
     "node scripts/check-capabilities.mjs"
   ],
   "ui": [
+    "npm run build -w ui",
     "cd apps/dyno/app",
     "npm audit --omit=dev --audit-level=high",
     "npx ng lint",
@@ -29,13 +30,29 @@
     "TZ=Pacific/Auckland npx ng test --watch=false"
   ],
   "e2e": [
+    "npm run build -w ui",
+    "npm run build:e2e -w ui",
     "cd apps/dyno/app",
     "PW_PORT=$((4359 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=$E2E_SHARD"
   ],
   "e2eShards": 2,
   "e2eArtifacts": "apps/dyno/app/.angular/playwright-results",
   "e2eWebkit": [
+    "npm run build -w ui",
+    "npm run build:e2e -w ui",
     "cd apps/dyno/app",
     "PW_PORT=4362 npx playwright test --project=webkit --workers=1"
-  ]
+  ],
+  "notices": {
+    "name": "Dyno",
+    "manifests": [
+      "app/src-tauri/Cargo.toml",
+      "crates/dyno-agent/Cargo.toml",
+      "crates/dyno-cli/Cargo.toml"
+    ],
+    "npm": "app",
+    "out": [
+      "app/src-tauri/resources"
+    ]
+  }
 }

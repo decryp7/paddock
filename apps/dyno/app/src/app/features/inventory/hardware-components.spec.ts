@@ -15,6 +15,12 @@ function slots(list: DimmSlotModel[], alt = 'Two slots') {
   return f.nativeElement as HTMLElement;
 }
 
+/** The tooltip text of slot `i`: Material describes the slot with a hidden copy of its message. */
+function tip(el: HTMLElement, i: number): string {
+  const ids = el.querySelectorAll('.slot')[i]!.getAttribute('aria-describedby')!.split(' ');
+  return ids.map((id) => document.getElementById(id)?.textContent ?? '').join('\n');
+}
+
 describe('MemorySlots', () => {
   const full: DimmSlotModel = { name: 'DIMM_A1', channel: 'A', module: mod('ddr5'), tags: [{ label: 'Dual channel', tone: 'ok' }], note: 'Runs below its rated speed.' };
   const free: DimmSlotModel = { name: 'DIMM_B1', channel: 'B', module: null, tags: [], note: null };
@@ -27,15 +33,15 @@ describe('MemorySlots', () => {
     expect(el.querySelectorAll('.slot.free')).toHaveLength(1);
   });
 
-  it('prints size, type and the rated to running speed beside the drawing and keeps maker and part in the popover', () => {
+  it('prints size, type and the rated to running speed beside the drawing and keeps maker and part in the tooltip', () => {
     const el = slots([full]);
     const info = el.querySelector('.info')!.textContent!;
     expect(info).toContain('16 GB');
     expect(info).toContain('DDR5');
     expect(info).toContain('3200 → 2666 MT/s');
     expect(info).toContain('Dual channel');
-    expect(el.querySelector('.pop')!.textContent).toContain('CMK16');
-    expect(el.querySelector('.pop')!.textContent).toContain('Runs below its rated speed.');
+    expect(tip(el, 0)).toContain('CMK16');
+    expect(tip(el, 0)).toContain('Runs below its rated speed.');
     expect(el.querySelector('.speed.below')).not.toBeNull();
   });
 
@@ -45,7 +51,8 @@ describe('MemorySlots', () => {
     expect(rows.every((r) => r.tabIndex === 0)).toBe(true);
     expect(rows[0]!.getAttribute('aria-label')).toBe('DIMM_A1: 16 GB DDR5, 3200 → 2666 MT/s, Corsair. Runs below its rated speed.');
     expect(rows[1]!.getAttribute('aria-label')).toBe('DIMM_B1: free slot');
-    expect(el.querySelector(`#${rows[0]!.getAttribute('aria-describedby')!}`)).not.toBeNull();
+    expect(tip(el, 0)).toContain('Part number');
+    expect(tip(el, 1)).toContain('Nothing is installed in this slot.');
   });
 
   it('draws an empty socket with its latches open and a module with them closed', () => {
@@ -69,7 +76,7 @@ describe('MemorySlots', () => {
     expect(el.querySelector('.channel')).toBeNull();
     expect(el.querySelector('.speed')).toBeNull();
     expect(el.querySelector('.maker')!.textContent).toBe('Maker unknown');
-    expect(el.querySelector('.pop')!.textContent).toContain('Unknown');
+    expect(tip(el, 0)).toContain('Maker: Unknown');
     expect(slots([]).querySelectorAll('.slot')).toHaveLength(0);
   });
 });

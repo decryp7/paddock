@@ -1,13 +1,13 @@
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../core/backend';
-import { MockBackend } from '../core/mock-backend';
+import { jobsProviders, mockWithJobs, pump } from '../../testing/job-test-support';
 import { Notifier } from '../shared/notifier';
 import { IssuesStore } from './issues.store';
 import { UnusualStore } from './unusual.store';
 
 function setup() {
-  const mock = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000 });
-  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }] });
+  const { mock, jobs } = mockWithJobs();
+  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, jobsProviders(jobs)] });
   return { mock, issues: TestBed.inject(IssuesStore), unusual: TestBed.inject(UnusualStore), notifier: TestBed.inject(Notifier) };
 }
 
@@ -45,24 +45,84 @@ describe('IssuesStore', () => {
     expect(issues.overview()?.days).toBe(30);
   });
 
-  it('rescans once at a time and tells the person', async () => {
-    const { issues, mock, notifier } = setup();
-    const spy = vi.spyOn(mock, 'rescanIssues');
-    await Promise.all([issues.rescan(), issues.rescan()]);
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(issues.rescanning()).toBe(false);
-    expect(notifier.toasts().at(-1)?.text).toContain('Read the system logs');
-    spy.mockRejectedValueOnce({ code: 'timeout', message: 'slow' });
-    await issues.rescan();
-    expect(issues.error()?.message).toBe('slow');
-    expect(issues.rescanning()).toBe(false);
+  describe('rescan as a job', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('rescans once at a time and tells the person', async () => {
+      const { issues, mock, notifier } = setup();
+      const spy = vi.spyOn(mock, 'startJob');
+      await Promise.all([issues.rescan(), issues.rescan()]);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(issues.rescanning()).toBe(false);
+      expect(issues.rescanJob()).toBeNull();
+      expect(notifier.recent().at(-1)?.text).toContain('Read the system logs');
+      spy.mockRejectedValueOnce({ code: 'busy', message: 'Reading system logs is already running; wait for it or cancel it.' });
+      await issues.rescan();
+      expect(issues.error()?.message).toContain('already running');
+      expect(issues.rescanning()).toBe(false);
+    });
+
+    it('shows the progress from the shell\'s job status, and the page keeps what it had while it reads', async () => {
+      vi.useFakeTimers();
+      const { issues, mock } = setup();
+      await issues.load();
+      mock.jobSteps = 4;
+      mock.jobStepMs = 500;
+      const before = issues.overview();
+      const done = issues.rescan();
+      await pump(0);
+      expect(issues.rescanning()).toBe(true);
+      expect(issues.rescanJob()?.snapshot).toMatchObject({ title: 'Reading system logs', state: 'running', kind: 'rescan-issues' });
+      await pump(500);
+      expect(issues.rescanJob()?.snapshot).toMatchObject({ state: 'running', phase: { id: 'source-MacLog', done: 640, total: null } });
+      expect(issues.overview()).toBe(before);
+      await pump(2000);
+      await done;
+      expect(issues.rescanning()).toBe(false);
+      expect(issues.rescanJob()).toBeNull();
+    });
+
+    it('says "still working" and keeps going for minutes, with no timeout error', async () => {
+      vi.useFakeTimers();
+      const { issues, mock } = setup();
+      mock.jobsStalled = true;
+      const done = issues.rescan();
+      await pump(0);
+      expect(issues.rescanJob()?.stalled).toBe(false);
+      await pump(5 * 60_000);
+      expect(issues.error()).toBeNull();
+      expect(issues.rescanning()).toBe(true);
+      expect(issues.rescanJob()?.stalled).toBe(true);
+      void done;
+    });
+
+    it('Cancel stops the read at the engine, keeps what the page had and says so', async () => {
+      vi.useFakeTimers();
+      const { issues, mock, notifier } = setup();
+      await issues.load();
+      mock.jobSteps = 10;
+      mock.jobStepMs = 500;
+      const before = issues.overview();
+      const cancel = vi.spyOn(mock, 'cancelJob');
+      const done = issues.rescan();
+      await pump(500);
+      await issues.cancelRescan();
+      expect(cancel).toHaveBeenCalledTimes(1);
+      await pump(0);
+      await done;
+      expect(issues.rescanning()).toBe(false);
+      expect(issues.rescanJob()).toBeNull();
+      expect(issues.overview()).toBe(before);
+      expect(issues.error()).toBeNull();
+      expect(notifier.recent().at(-1)?.text).toBe('Stopped reading the system logs');
+    });
   });
 
   it('exports for Debrief, and a cancelled or failed dialog is handled', async () => {
     const { issues, mock, notifier } = setup();
     await issues.exportForDebrief();
     expect(issues.saved()?.path).toMatch(/\.jsonl$/);
-    expect(notifier.toasts().at(-1)?.text).toContain('dyno-issues.jsonl');
+    expect(notifier.recent().at(-1)?.text).toContain('dyno-issues.jsonl');
     const spy = vi.spyOn(mock, 'saveIssues').mockResolvedValueOnce(null);
     const before = issues.saved();
     await issues.exportForDebrief();
@@ -90,7 +150,7 @@ describe('UnusualStore', () => {
     expect(unusual.overview()).toMatchObject({ known: 0 });
     vi.spyOn(mock, 'forgetBaseline').mockRejectedValueOnce({ code: 'internal', message: 'bad' });
     await unusual.forget();
-    expect(notifier.toasts().at(-1)?.text).toBe('bad');
+    expect(notifier.recent().at(-1)?.text).toBe('bad');
   });
 
 });

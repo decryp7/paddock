@@ -158,6 +158,19 @@ changes here, every app's copy is updated in the same change.
     (e) Branch runs use the affected plan (rule 3); the full gates run once on main or at release.
     *Why:* CI runners are the scarcest resource, and every wasted run delays a release.
 
+## Performance analysis (user, 2026-10-29)
+51. **Slow means: more parallelism, or a cheaper operation.** When any operation is slow (import, indexing, scans, queries,
+    CI steps, tests), the analysis answers two questions with measurements:
+    (a) Can more threads or workers be assigned? Bounded by the kind of work (ER-20): CPU-bound work gets cores minus one,
+    I/O a few, memory-heavy work is limited by RAM; it runs at background priority with deterministic results.
+    (b) Can the operation be made cheaper? For example less work per item, no repeated work, a cheaper algorithm or format,
+    caching, batching, skipping.
+    Thread counts and similar tunables are Settings values with an "Auto" default, validated in the engine, not
+    constants. Every design or ADR with a long or bulk operation has a "Parallelism and cost" section. Every
+    performance review checks both questions. Results are recorded under rule 48.
+    *Why:* Debrief's import was bound by 2 Tantivy writer threads and a single-threaded catalogue, and regex was 38% of parse
+    time; these were found by accident, and should be found by design.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:

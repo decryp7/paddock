@@ -1134,3 +1134,21 @@ fn where_windows_cannot_be_placed_there_is_no_ghost() {
     window(&bare, "p-main-1");
     on_window_event(&os_window(&bare, "p-main-1"), &WindowEvent::Destroyed);
 }
+
+/// Inside a plugin hook (Tauri holds its plugin store there) a pop-out and the drag ghost are refused with their own code
+/// instead of deadlocking, and leave nothing behind.
+#[test]
+fn a_pop_out_or_a_ghost_opened_inside_a_plugin_hook_is_refused() {
+    let app = app();
+    let h = app.handle().clone();
+    let scope = paddock_commands::plugin_hook::plugin_hook_scope();
+    let e = open(&h, "main", request("pn.code")).unwrap_err();
+    assert_eq!(e.code, PanelErrorCode::InsidePluginHook, "{e}");
+    assert!(e.message.contains("tauri::Builder::setup"), "{e}");
+    assert!(state(&app).popouts().of_host("main").is_empty());
+    let e = ghost::start(&h, "main", ghost_request().parse().unwrap(), screens()).unwrap_err();
+    assert_eq!(e.code, PanelErrorCode::InsidePluginHook, "{e}");
+    assert!(h.get_webview_window(crate::ghost::GHOST_LABEL).is_none());
+    drop(scope);
+    assert!(open(&h, "main", request("pn.code")).is_ok());
+}

@@ -1,4 +1,4 @@
-import type { Measured, UnavailableReason } from './api.types';
+import type { Measured, UnavailableReason, UnreadableReason } from './api.types';
 
 /** Every reason, in the order of the wire contract (`contract/measured-wire.json`). */
 export const ALL_REASONS: readonly UnavailableReason[] = ['needsAdmin', 'notPermitted', 'notSupported', 'residentMemoryOnly'];
@@ -55,4 +55,37 @@ export function showMeasured<T>(m: Measured<T>, format: (v: T) => string): strin
 /** The value for a bar width or a sort: `0` when it was not read (the text beside it says Unavailable). */
 export function barValue(m: Measured<number>): number {
   return readValue(m) ?? 0;
+}
+
+/** The reason a folder was not read, in one sentence (the engine chose it from the OS error and the OS). */
+export function unreadableReasonText(reason: UnreadableReason): string {
+  switch (reason) {
+    case 'needsFullDiskAccess':
+      return 'Needs Full Disk Access: allow Dyno in System Settings › Privacy & Security › Full Disk Access';
+    case 'needsAdmin':
+      return reasonText('needsAdmin');
+    case 'protected':
+      return 'macOS protects this folder';
+    case 'other':
+      return 'The system could not read this folder';
+  }
+}
+
+/** The same in a few words, for the tag beside the folder. */
+export function unreadableShort(reason: UnreadableReason | null): string {
+  switch (reason) {
+    case 'needsFullDiskAccess':
+      return 'Needs Full Disk Access';
+    case 'needsAdmin':
+      return 'Needs administrator rights';
+    case 'protected':
+      return 'Protected by macOS';
+    default:
+      return 'Could not be read';
+  }
+}
+
+/** The tooltip and aria text of an unreadable folder: "Unavailable: <reason>". */
+export function unreadableText(reason: UnreadableReason | null): string {
+  return `${UNAVAILABLE}: ${unreadableReasonText(reason ?? 'other')}`;
 }
