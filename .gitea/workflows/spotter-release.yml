@@ -2,10 +2,10 @@
 # of ci.yml (apps/spotter/paddock.ci.json: Rust on Linux, Windows and macOS, the frontend), and its bundles, the macOS seal check,
 # and the release are the shared app-release.yml. This file is only the triggers and the app's facts.
 #
-#   push to main      installers on three OS and the real-app smoke when the change reaches Spotter (the same plan as ci.yml)
 #   a spotter-v* tag  the gates (ci.yml, only Spotter's legs), then installers, then the Gitea release with latest.json on
 #                     the release and on the moving spotter-latest release, which installed copies update from
-#   nightly           installers again, so a toolchain or runner change shows up the night it happens
+#   nightly           installers, so a toolchain or runner change shows up the night it happens (a push to main runs
+#                     ci.yml only: main lands in batches and the installers run once at the end, 2026-10-29)
 #   manual            installers without a release (the "one CI build with bundles" before a tag, rule 25); `gates: true`
 #                     also runs Spotter's ci.yml legs first
 #
@@ -18,7 +18,6 @@ name: spotter-release
 
 on:
   push:
-    branches: [main]
     tags: ["spotter-v*"]
   schedule:
     - cron: "5 1 * * *"
@@ -29,15 +28,14 @@ on:
         type: boolean
         default: false
 
-# A newer push to main supersedes the run still going; a tag has its own ref, so a release is never cancelled by a later push. The group differs from ci.yml's (that
+# A newer run of the same ref and event supersedes the one still going; a tag has its own ref, so a release is never cancelled. The group differs from ci.yml's (that
 # one is called below and names this workflow too), or the called workflow would cancel its caller.
 concurrency:
   group: ${{ github.workflow }}-run-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
-  # Runs the rest only when the change reaches Spotter; a push to main whose commit carries a spotter-v* tag is covered by
-  # the tag run.
+  # Runs the rest only when the change reaches Spotter (a tag or the nightly: always; a manual run: its affected plan).
   plan:
     name: plan
     runs-on: ubuntu-latest
@@ -69,10 +67,46 @@ jobs:
       # A manual run with gates is the "one CI build with bundles" before a tag: WebKit included, as the old bundles run was.
       webkit: ${{ github.event_name == 'workflow_dispatch' }}
 
+  # A tag (or a manual run with `gates: true`): the installers and, on a tag, the release, only past green gates. Gitea skips
+  # a job whose need was skipped whatever its `if` says, so the run without gates has a job of its own below.
   release:
     name: installers + release
     needs: [plan, gates]
-    if: ${{ !cancelled() && needs.plan.outputs.run == 'true' && (needs.gates.result == 'success' || (needs.gates.result == 'skipped' && !startsWith(github.ref, 'refs/tags/'))) }}
+    if: ${{ needs.plan.outputs.run == 'true' && needs.gates.result == 'success' }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: spotter
+      app-name: Spotter
+      app-dir: apps/spotter/app
+      cargo-dir: apps/spotter
+      tag-prefix: spotter-
+      latest-tag: spotter-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Spotter now updates from the Paddock releases, which a copy installed before this version does not look at."
+      # Spotter's UI imports the shared library from ui/dist, which the app build needs.
+      prepare: npm run build -w ui
+      cliff-config: apps/spotter/cliff.toml
+      cliff-paths: |
+        apps/spotter/**
+        crates/**
+        ui/**
+      # Spotter bundles no sidecar (no bundle.externalBin), so the macOS verify has none to start; the seal, the hardened-runtime
+      # and TeamIdentifier checks on the .app and the DMG still run. A sidecar added later is read from tauri.conf.json.
+      setup-node: false
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+  # The nightly and a manual run without gates: the installers (app-release publishes only on a tag). It needs only the plan,
+  # so the skipped gates cannot skip it. The same inputs as `release` (ci-actions.test.mjs compares them).
+  installers:
+    name: installers
+    needs: [plan]
+    if: ${{ needs.plan.outputs.run == 'true' && !startsWith(github.ref, 'refs/tags/') && github.event.inputs.gates != 'true' }}
     uses: ./.gitea/workflows/app-release.yml
     with:
       paddock-ref: ${{ github.sha }}

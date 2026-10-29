@@ -806,8 +806,9 @@ test('a kit app lists the OS legs its old workflow had, keeps its build folder o
       assert.equal(existsSync(join(PADDOCK, 'apps', app, copy)), false, `${app}: ${copy} is the kit's (rule 42/43)`);
     }
     const wf = read(join(WORKFLOWS, `${app}-release.yml`));
-    // A release never publishes past skipped gates on a tag: skipped is fine only when there is no tag to publish.
-    assert.match(wf, /if: \$\{\{ !cancelled\(\) && needs\.plan\.outputs\.run == 'true' && \(needs\.gates\.result == 'success' \|\| \(needs\.gates\.result == 'skipped' && !startsWith\(github\.ref, 'refs\/tags\/'\)\)\) \}\}/, `${app}: the release job needs green gates on a tag`);
+    // A release never publishes past skipped gates on a tag: the release job needs green gates; the run without gates has
+    // its own installers job (see the event test below).
+    assert.match(wf, /^  release:\n(?:    .*\n)*?    if: \$\{\{ needs\.plan\.outputs\.run == 'true' && needs\.gates\.result == 'success' \}\}$/m, `${app}: the release job needs green gates`);
     assert.match(wf, new RegExp(`gates:\\n(?:.*\\n)*?\\s+if: .*startsWith\\(github\\.ref, 'refs/tags/${app}-v'\\)`), `${app}: a tag always runs the gates`);
     assert.match(wf, /cancel-in-progress: true/, `${app}: a newer push supersedes (a tag has its own ref)`);
     // Every sidecar the bundle carries (bundle.externalBin) is started from the built macOS app.
@@ -1146,4 +1147,37 @@ test("debrief.yml: installers, real-app smoke and WebKit only on tags, the night
     assert.match(parseJobs(wf).find((j) => j.id === job).text, /^ {4}if: needs\.plan\.outputs\.run == 'true' && needs\.plan\.outputs\.full == 'true'$/m, `${job}: full runs only`);
   }
   assert.match(wf, /--shard=\$\{\{ matrix\.shard \}\}\/4 \$\{\{ needs\.plan\.outputs\.full != 'true' && '--project=chromium' \|\| '' \}\}/, 'WebKit only on full runs');
+});
+
+test("every kit app's nightly and manual runs build the installers when the plan marks the app; a tag builds them only past green gates", () => {
+  for (const app of KIT_APPS) {
+    const wf = read(join(WORKFLOWS, `${app}-release.yml`));
+    const jobs = parseJobs(wf);
+    const callers = jobs.filter((j) => /uses: \.\/\.gitea\/workflows\/app-release\.yml/.test(j.text)).map((j) => j.id);
+    const installers = (ev, extra = {}) => {
+      const r = jobResults(wf, { outputs: { run: 'true' }, ...ev, ...extra });
+      return callers.filter((c) => r.get(c) === 'success');
+    };
+    const needsGates = (id) => jobs.find((j) => j.id === id).needs.includes('gates');
+    const nightly = { event: 'schedule', ref: 'refs/heads/main' };
+    const manual = { event: 'workflow_dispatch', ref: 'refs/heads/main', inputs: { gates: 'false' } };
+    const manualGates = { event: 'workflow_dispatch', ref: 'refs/heads/main', inputs: { gates: 'true' } };
+    const tag = { event: 'push', ref: `refs/tags/${app}-v1.2.3` };
+    assert.equal(installers(nightly).length, 1, `${app}: the nightly builds the installers once (it skipped them after the skipped gates)`);
+    assert.equal(installers(manual).length, 1, `${app}: a manual run builds the installers once`);
+    for (const [what, ev] of [['a tag', tag], ['a manual run with gates', manualGates]]) {
+      const run = installers(ev);
+      assert.equal(run.length, 1, `${app}: ${what} builds the installers once`);
+      assert.ok(needsGates(run[0]), `${app}: ${what} builds them only after the gates`);
+      assert.deepEqual(installers(ev, { fail: ['gates'] }), [], `${app}: red gates on ${what} build nothing`);
+    }
+    for (const ev of [nightly, manual, tag]) assert.deepEqual(installers(ev, { outputs: { run: 'false' } }), [], `${app}: nothing when the plan does not mark ${app}`);
+    // The two callers build the same installers: one text from `uses:` to the end of the job.
+    const call = (id) => jobs.find((j) => j.id === id).text.replace(/^[\s\S]*?(    uses: )/, '$1').replace(/(\n\s*(#.*)?)+$/, '');
+    assert.equal(new Set(callers.map(call)).size, 1, `${app}: every app-release caller passes the same inputs and secrets`);
+    // Main lands in batches; a push to main gets ci.yml only, not a release workflow (2026-10-29).
+    const push = /^ {2}push:\n((?: {4}.*\n)+)/m.exec(wf)?.[1] ?? '';
+    assert.doesNotMatch(push, /branches:/, `${app}: no push-to-main trigger`);
+    assert.match(push, new RegExp(`tags: \\["${app}-v\\*"\\]`), `${app}: its tag still triggers`);
+  }
 });

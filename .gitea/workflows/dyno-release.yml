@@ -2,10 +2,10 @@
 # of ci.yml (apps/dyno/paddock.ci.json: Rust on Linux, Windows and macOS, the frontend with the Chromium and WebKit e2e), and its bundles, the macOS seal check,
 # the sidecar start and the release are the shared app-release.yml. This file is only the triggers and the app's facts.
 #
-#   push to main      installers on three OS and the real-app smoke when the change reaches Dyno (the same plan as ci.yml)
 #   a dyno-v* tag     the gates (ci.yml, only Dyno's legs, WebKit e2e included), then installers, then the Gitea release with latest.json on
 #                     the release and on the moving dyno-latest release, which installed copies update from
-#   nightly           installers again, so a toolchain or runner change shows up the night it happens
+#   nightly           installers, so a toolchain or runner change shows up the night it happens (a push to main runs
+#                     ci.yml only: main lands in batches and the installers run once at the end, 2026-10-29)
 #   manual            installers without a release (the "one CI build with bundles" before a tag, rule 25); `gates: true`
 #                     also runs Dyno's ci.yml legs first
 #
@@ -18,7 +18,6 @@ name: dyno-release
 
 on:
   push:
-    branches: [main]
     tags: ["dyno-v*"]
   schedule:
     - cron: "11 4 * * *"
@@ -29,15 +28,14 @@ on:
         type: boolean
         default: false
 
-# A newer push to main supersedes the run still going; a tag has its own ref, so a release is never cancelled by a later push. The group differs from ci.yml's (that
+# A newer run of the same ref and event supersedes the one still going; a tag has its own ref, so a release is never cancelled. The group differs from ci.yml's (that
 # one is called below and names this workflow too), or the called workflow would cancel its caller.
 concurrency:
   group: ${{ github.workflow }}-run-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
-  # Runs the rest only when the change reaches Dyno; a push to main whose commit carries a dyno-v* tag is covered by
-  # the tag run.
+  # Runs the rest only when the change reaches Dyno (a tag or the nightly: always; a manual run: its affected plan).
   plan:
     name: plan
     runs-on: ubuntu-latest
@@ -69,10 +67,50 @@ jobs:
       # A manual run with gates is the "one CI build with bundles" before a tag: WebKit included.
       webkit: ${{ github.event_name == 'workflow_dispatch' }}
 
+  # A tag (or a manual run with `gates: true`): the installers and, on a tag, the release, only past green gates. Gitea skips
+  # a job whose need was skipped whatever its `if` says, so the run without gates has a job of its own below.
   release:
     name: installers + release
     needs: [plan, gates]
-    if: ${{ !cancelled() && needs.plan.outputs.run == 'true' && (needs.gates.result == 'success' || (needs.gates.result == 'skipped' && !startsWith(github.ref, 'refs/tags/'))) }}
+    if: ${{ needs.plan.outputs.run == 'true' && needs.gates.result == 'success' }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: dyno
+      app-name: Dyno
+      app-dir: apps/dyno/app
+      cargo-dir: apps/dyno
+      tag-prefix: dyno-
+      latest-tag: dyno-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Dyno now updates from the Paddock releases, which a copy installed before this version does not look at."
+      cliff-config: apps/dyno/cliff.toml
+      cliff-paths: |
+        apps/dyno/**
+        crates/**
+        ui/**
+      # Every sidecar (bundle.externalBin) is started from the built macOS app with --version, which exits 0 (the old
+      # macos-verify-bundle.sh ran the same); dyno-agent and the dyno command have no --self-test.
+      sidecars: |
+        dyno-agent:--version
+        dyno:--version
+      # Run paths of the packaged binaries, and the executables a package must carry, on Linux and macOS; on macOS the agent
+      # also measures once from the built app (read-only).
+      bundle-check: apps/dyno/scripts/check-bundle.sh
+      setup-node: false
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+  # The nightly and a manual run without gates: the installers (app-release publishes only on a tag). It needs only the plan,
+  # so the skipped gates cannot skip it. The same inputs as `release` (ci-actions.test.mjs compares them).
+  installers:
+    name: installers
+    needs: [plan]
+    if: ${{ needs.plan.outputs.run == 'true' && !startsWith(github.ref, 'refs/tags/') && github.event.inputs.gates != 'true' }}
     uses: ./.gitea/workflows/app-release.yml
     with:
       paddock-ref: ${{ github.sha }}
