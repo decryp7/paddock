@@ -221,3 +221,54 @@ This settles the open conflict between "a second appender adds nothing" and "fou
 second appender adds 25%, a fourth falls back to 1.06x and writes a 55% larger file (more, smaller row groups). Neither 1.0x nor 1.8x
 holds as a rule; the gain is small, peaks at two writers and stays below one Parquet writer (1.15M events/s) on every count. The Quack
 harness's 355k against 200k was not reproduced here (a different harness and corpus).
+
+## Import of an 8 GB folder until search is ready (2026-10-29)
+
+The question: how long from "import folder" until search works, for the typical case of a folder of 7+ GB of logs, and where
+does the time go? Every block below gives the date, build, machine, load, corpus, command and numbers (rule 48).
+
+- Machine: Apple M4 Pro, 14 cores, 64 GB, macOS; corpus on a Samsung T7 Shield (USB SSD, about 1 GB/s at best).
+- Corpus: `large10`, 56,152,132 events in 8.07 GB, 618 files: 8 log4net text files of 587 MB, 6 CLEF files of 409 MB, 4 gzip
+  files, 600 small Serilog text files. It comes from `gen_large.py` scale 1.0 (invented data, never user logs).
+- Build: release. The harness `crates/debrief-store-duck/tests/import_ready.rs` is on branch `wip/debrief-duckdb2-prototypes`;
+  the code measured is `debrief/duckdb-2` at 9e3bb4a7f. The harness runs the shipped `StoreOptions` in-process with the store
+  worker's allocator and times, from the start: the import, the full-text index covering every segment, and the catalogue built.
+- Command: `DEBRIEF_READY_CORPUS=…/large10 DEBRIEF_READY_STORE=<new folder> cargo test --release --test import_ready -- --nocapture`,
+  through `/Volumes/d7sst7/dev-targets/duck2-bench/ready.sh`. Load is the 1-minute load at the start of each run; the run itself
+  adds about 9.
+- "Warm" means the corpus was read once just before (`cat > /dev/null`, 9.4 s for 7.2 GB from cold).
+
+### Baseline
+
+| Run | Load at start | Import | Events/s | Index ready | Catalogue ready | Peak RSS (import / after) |
+|---|---|---|---|---|---|---|
+| cold | 9.7 | 47.6 s | 1.18M | 222.7 s | 444.6 s | 1,918 / 2,463 MB |
+| cold, sampled with sample(1) | 9.7 | 54.6 s | 1.03M | 237.8 s | 433.1 s | 1,880 / 2,511 MB |
+| warm | 5.2 | 39.7 s | 1.41M | 208.3 s | 376.4 s | 1,902 / 2,564 MB |
+| warm | 9.96 | 46.1 s | 1.22M | 218.7 s | 386.3 s | 1,949 / 2,589 MB |
+
+Store: 4.95 GB (segments 2.82 GB, Tantivy index 1.52 GB, `data.duckdb` 222 MB). Search is ready 5 to 10 times later than the import
+ends, so the background builds are the long pole, not the import.
+
+### Where the time goes (sample(1) call trees, self time; `sampcat.py`, `sampwho.py`)
+
+Three windows of the sampled cold run: the import (1 to 47 s), index and catalogue (60 to 200 s), catalogue alone (240 to 420 s).
+
+1. **Import, parse threads** (about 7.5 of 8 busy):
+   - Regex 38%. 88% of that is `Regex::captures_at` in `LineParser::line`; the bounded backtracker resolves the groups.
+   - Threads blocked in `read()` 19% (cold only).
+   - memcpy 10%, other parsing 8%, zstd 6%, Parquet encoding 4%, Arrow batch building about 1%.
+
+   Large files are already split into 64 MB chunks parsed with rayon work stealing, largest file first. Warm, the threads stay
+   busy to the end. Cold, a 6 s near-idle stretch (16 to 22 s) is disk waits during the sequential newline pre-scans of the large
+   files: each large file is read twice, the second time from the page cache.
+2. **End of the import**: about 8 s at 3.5 cores is `pos::rebuild`, 20% of the warm import. Its plan is a window sort and then a
+   second full `ORDER BY pos` sort. The sort keys, about 1.3 GB at 56M rows, exceed the 192 MB limit and spill.
+3. **Index**: bound by Tantivy's 2 indexing threads (`WRITER_THREADS`, 64 MB heap), busy about 90%. The segment reader and the
+   docs pool mostly wait. About 330k docs/s.
+4. **Catalogue**: one thread, one source at a time.
+   - Entity extraction 34%, DuckDB row fetch 26%, allocation 14%.
+   - DuckDB also opens the segment files for every per-source query.
+   - About 1 core for 3 to 6 minutes.
+5. **No overlap**: the import holds the store's write lock for its whole length (`lib.rs`, `import_keeping`), so the index and
+   the catalogue start only when it ends.
