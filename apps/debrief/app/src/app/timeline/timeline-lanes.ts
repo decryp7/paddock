@@ -146,8 +146,7 @@ export type LanesEmpty = 'noSources' | 'noMatchMain' | 'noMatchOwn' | null;
     :host { display: block; }
     .row { display: flex; align-items: stretch; }
     .label { width: var(--tl-label-w); flex: none; }
-    /* Clipped sideways: a marker or run point at the lane's first or last moment overhangs by half a glyph (.glyph margin-left), and its button would take the clicks on the label's right edge. */
-    .plot { flex: 1; min-width: 0; position: relative; margin-right: var(--s-5); overflow-x: clip; }
+    .plot { flex: 1; min-width: 0; position: relative; margin-right: var(--s-5); }
     /* A lane is its band plus one sub-track per row of runs (--run-rows, set per lane). */
     .lane { --run-rows: 0; height: calc(var(--lane-h) + min(var(--run-rows), 1) * 3px + var(--run-rows) * var(--run-row-h)); transition: background-color var(--dur-fast) var(--ease); }
     .lane:hover { background: var(--bg-hover); }
@@ -183,8 +182,9 @@ export type LanesEmpty = 'noSources' | 'noMatchMain' | 'noMatchOwn' | null;
     /* laneFill: barcode. One bar per bucket, scaled within the lane. */
     :host-context([data-lane-fill='barcode']) .density .area { display: none; }
     :host-context([data-lane-fill='barcode']) .density .bars { display: inline; }
-    .ticks { position: absolute; left: 0; bottom: 1px; width: 100%; height: 6px; }
-    .ticks path { stroke: var(--mk-warning); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+    /* Inert: the 6 px strip and its 1.5 px strokes lie over the bottom of every annotation band and took its clicks. The count stays in the accessible name. */
+    .ticks { position: absolute; left: 0; bottom: 1px; width: 100%; height: 6px; pointer-events: none; }
+    .ticks path { pointer-events: none; stroke: var(--mk-warning); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
     .marker { position: absolute; top: 0; height: var(--lane-h); min-width: 24px; border: 0; padding: 0; background: transparent; cursor: pointer; z-index: 1; }
     /* The focus ring goes on the visible glyph, not the transparent hit area. */
     .marker:focus-visible { outline: none; }

@@ -64,6 +64,19 @@ export interface LayoutOptions {
 export const TARGET_PX = 24;
 const TARGET_HALF = TARGET_PX / 2;
 
+/**
+ * How far a marker's centre stays from the plot's left and right edges, in px: half a glyph (7) plus the keyboard focus ring
+ * (a 2 px outline at a 2 px offset, 4), so the first and last glyph and their ring lie inside the plot and never reach the
+ * lane label (WCAG 2.4.7). A marker at the very first or last moment is drawn this far in.
+ */
+export const MARKER_EDGE_INSET_PX = 11;
+
+/** A marker's centre in px from the plot's left, kept {@link MARKER_EDGE_INSET_PX} inside both edges. */
+export function markerX(leftPct: number, plotWidth: number): number {
+  const x = (leftPct / 100) * plotWidth;
+  return Math.max(MARKER_EDGE_INSET_PX, Math.min(x, plotWidth - MARKER_EDGE_INSET_PX));
+}
+
 /** Icon half-width plus a small gap, in px. */
 const ICON_HALF = 8;
 /** Badge sits this many px right of the marker centre. */
@@ -149,7 +162,7 @@ const overlaps = (a: Interval, b: Interval) => a.from < b.to && b.from < a.to;
  * badge, and higher counts win the space (low counts are dropped first).
  */
 export function placeBadges(markers: MarkerVm[], plotWidth: number): Set<MarkerVm> {
-  const x = (m: MarkerVm) => (m.left / 100) * plotWidth;
+  const x = (m: MarkerVm) => markerX(m.left, plotWidth);
   const icons = markers.map((m) => ({ m, from: x(m) - ICON_HALF, to: x(m) + ICON_HALF }));
   const placed: Interval[] = [];
   const shown = new Set<MarkerVm>();
@@ -173,7 +186,7 @@ export function placeBadges(markers: MarkerVm[], plotWidth: number): Set<MarkerV
  * target begins.
  */
 export function layoutTargets(shapes: LaidMarker[], plotWidth: number): MarkerTarget[] {
-  const items = shapes.map((marker, paint) => ({ marker, paint, x: (marker.left / 100) * plotWidth })).sort((a, b) => a.x - b.x || a.paint - b.paint);
+  const items = shapes.map((marker, paint) => ({ marker, paint, x: markerX(marker.left, plotWidth) })).sort((a, b) => a.x - b.x || a.paint - b.paint);
   const groups: { left: number; items: typeof items }[] = [];
   for (const item of items) {
     const cur = groups[groups.length - 1];
