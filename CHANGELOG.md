@@ -4,6 +4,20 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### The shell owns the start (ADR 0029; shared API, breaking)
+- `paddock-shell`: `Builder::tray(f)`, `Builder::launch(LaunchArgs)` and `Builder::add_to(tauri::Builder)` open the tray
+  and the main window from Tauri's own `setup`, after every plugin is set up (a window built inside a plugin hook
+  deadlocked the main thread: Spotter started with no window). A start that cannot open its window is logged and exits
+  with code 1. `Builder::setup` no longer opens windows. New `paddock_shell::testing::start` (feature `mock-runtime`):
+  the start test every app runs. The shell's plugin hooks are marked; a Dock click with no window and a file opened from
+  Finder open their window after the hook.
+- `paddock-commands`: `plugin_hook` (`plugin_hook_scope`, `in_plugin_hook`, `INSIDE_PLUGIN_HOOK`).
+- `paddock-window`: `after_plugin_hook` (window work after the hook, in order), `exit_with`, `HeadlessTray`; windows and
+  the tray popover refuse to be built inside a plugin hook with the new `WindowErrorCode` `insidePluginHook`.
+- `paddock-dialogs`, `paddock-panels`: dialogs, pop-outs and the drag ghost refuse to be built inside a plugin hook.
+- `paddock-workbench`: its plugin hooks are marked.
+- Spotter, the shell demo and the workbench demo use the new start; conformance C50 checks every app on the shell.
+
 ### Material: stepper theme (shared)
 - `material.css`: `mat-stepper` follows the family tokens (`--mat-stepper-*` from `--pd-*`, a 56 px header (24 px circle plus `--pd-space-4` above and below, Material's fixed height dropped), tighter header
   padding and lines, an outlined circle for steps not reached, no content inset; the geometry applies to horizontal steppers only). Spotter's add/edit watch flow is a linear

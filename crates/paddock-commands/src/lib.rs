@@ -57,6 +57,7 @@
 pub mod error;
 pub mod guard;
 pub mod labels;
+pub mod plugin_hook;
 pub mod table;
 pub mod testing;
 pub mod ts;

@@ -232,3 +232,39 @@ fn the_proxy_degradation_tells_the_user_what_to_fix() {
     let cause = spotter_app_lib::health::proxy_cause("socks");
     assert!(format!("{cause:?}").contains("http://host:port"));
 }
+
+/// Spotter's start as `run` composes it (rule 43), on the mock runtime with a headless tray: the tray and the main
+/// window open, after every plugin is set up (a window built inside a plugin hook deadlocked Spotter's start).
+#[test]
+fn the_start_opens_the_tray_and_the_main_window() {
+    use paddock_shell::testing::{start, Started};
+    let started = start(|| composed(paddock_window::launch::LaunchArgs::default()));
+    assert_eq!(
+        started,
+        Ok(Started {
+            main_window: true,
+            tray: true
+        })
+    );
+}
+
+/// Started at log-in (`--hidden`) with a tray: Spotter stays in the tray without a window.
+#[test]
+fn a_hidden_start_stays_in_the_tray() {
+    use paddock_shell::testing::{start, Started};
+    let launch = paddock_window::launch::LaunchArgs {
+        hidden: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        start(move || composed(launch)),
+        Ok(Started {
+            main_window: false,
+            tray: true
+        })
+    );
+}
+
+fn composed(launch: paddock_window::launch::LaunchArgs) -> tauri::Builder<tauri::test::MockRuntime> {
+    spotter_app_lib::app(tauri::test::mock_builder(), builder(), launch, paddock_window::tauri::HeadlessTray)
+}

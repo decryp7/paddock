@@ -13,7 +13,7 @@ links = "paddock-shell"
 
 [features]
 # Dialogs are not parented to a native window and nothing is shown natively: for tests on Tauri's mock runtime only.
-mock-runtime = ["paddock-dialogs/mock-runtime"]
+mock-runtime = ["paddock-dialogs/mock-runtime", "tauri/test"]
 # The start-up watchdog asks natively, and Report a Problem asks where to save, through `tauri-plugin-dialog` (the app registers
 # that plugin).
 native-dialogs = ["paddock-startup/dialog", "paddock-diag/dialog", "paddock-files/dialog"]

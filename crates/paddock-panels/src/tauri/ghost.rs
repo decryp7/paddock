@@ -78,6 +78,12 @@ fn ensure_window<R: Runtime>(
     if let Some(w) = crate::tauri::window(app, GHOST_LABEL) {
         return Ok(w);
     }
+    if paddock_commands::plugin_hook::in_plugin_hook() {
+        return Err(::tauri::Error::Io(std::io::Error::other(format!(
+            "the window \"{GHOST_LABEL}\" {}",
+            paddock_commands::plugin_hook::INSIDE_PLUGIN_HOOK
+        ))));
+    }
     let builder = WebviewWindowBuilder::new(app, GHOST_LABEL, WebviewUrl::App(GHOST_PAGE.into()))
         .title("Drag preview")
         .inner_size(size.width, size.height)

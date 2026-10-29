@@ -1,53 +1,68 @@
-//! Windows are never built inside a plugin's hooks. Tauri runs every plugin's `setup` and `on_event` while it holds its
-//! plugin store, and building a webview locks that store again (for the plugins' initialisation scripts) on the same
-//! thread: a window built there blocks the main thread for good (at start: no window, no menu, no log line). The shell
-//! marks its plugin hooks with [`plugin_hook_scope`]; building a window inside one fails at once with a message that
-//! names the fix: open windows from `tauri::Builder::setup` (after every plugin is set up), or after the hook returns
-//! ([`after_plugin_hook`]).
+//! Windows are never built inside a Tauri plugin hook (`setup`, `on_event`, `on_page_load`, `on_window_ready`,
+//! `on_webview_ready`): Tauri holds its plugin store there and building a webview locks it again on the same thread, a
+//! deadlock (see [`paddock_commands::plugin_hook`]). The shell marks its hooks with [`plugin_hook_scope`]; a window
+//! built inside one fails with [`WindowErrorCode::InsidePluginHook`]. Window work a hook triggers (a Dock click, a file
+//! opened from Finder) goes to [`after_plugin_hook`], which runs it on the main thread after the hook, in the order given.
 
 use crate::wire::{WindowError, WindowErrorCode};
-use ::tauri::{AppHandle, Runtime};
-use std::cell::Cell;
+use ::tauri::{AppHandle, Manager, Runtime};
+use paddock_commands::plugin_hook::INSIDE_PLUGIN_HOOK;
+pub use paddock_commands::plugin_hook::{PluginHookScope, in_plugin_hook, plugin_hook_scope};
+use std::collections::VecDeque;
+use std::sync::{Mutex, PoisonError};
 
-thread_local! {
-    /// How many plugin hooks this thread is inside of (nested scopes count).
-    static DEPTH: Cell<u32> = const { Cell::new(0) };
-}
+type Deferred<R> = Box<dyn FnOnce(&AppHandle<R>) + Send>;
 
-/// Marks this thread as running a plugin hook until it is dropped (see the module doc).
-#[must_use = "the scope ends when the guard is dropped"]
-pub struct PluginHookScope(());
-
-impl Drop for PluginHookScope {
-    fn drop(&mut self) {
-        DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
-    }
-}
-
-/// Starts a plugin hook scope on this thread: windows built inside it fail instead of deadlocking.
-pub fn plugin_hook_scope() -> PluginHookScope {
-    DEPTH.with(|d| d.set(d.get().saturating_add(1)));
-    PluginHookScope(())
-}
-
-/// Whether this thread is inside a plugin hook.
-pub fn in_plugin_hook() -> bool {
-    DEPTH.with(|d| d.get() > 0)
-}
+/// Window work deferred past a plugin hook, and whether a task is handing it to the main thread. One task at a time
+/// drains the queue, and the event loop runs what it is given in order, so the work runs in the order it was deferred.
+struct HookQueue<R: Runtime>(Mutex<(VecDeque<Deferred<R>>, bool)>);
 
 /// Runs `f` on the main thread after the plugin hook that calls this has returned (and Tauri has let go of its plugin
-/// store): the call is posted from an async task, so it goes through the event loop instead of running at once.
+/// store), in the order of the calls.
 pub fn after_plugin_hook<R: Runtime>(
     app: &AppHandle<R>,
     f: impl FnOnce(&AppHandle<R>) + Send + 'static,
 ) {
-    let app = app.clone();
-    ::tauri::async_runtime::spawn(async move {
+    // A second `manage` (two hooks racing) is refused and changes nothing.
+    app.manage(HookQueue::<R>(Mutex::new((VecDeque::new(), false))));
+    let Some(queue) = app.try_state::<HookQueue<R>>() else {
+        return;
+    };
+    let start = {
+        let mut q = queue.0.lock().unwrap_or_else(PoisonError::into_inner);
+        q.0.push_back(Box::new(f));
+        !std::mem::replace(&mut q.1, true)
+    };
+    if start {
+        let app = app.clone();
+        ::tauri::async_runtime::spawn(async move { drain(&app) });
+    }
+}
+
+/// Hands the queued work to the main thread, oldest first, until the queue is empty.
+fn drain<R: Runtime>(app: &AppHandle<R>) {
+    let Some(queue) = app.try_state::<HookQueue<R>>() else {
+        return;
+    };
+    loop {
+        let next = {
+            let mut q = queue.0.lock().unwrap_or_else(PoisonError::into_inner);
+            let next = q.0.pop_front();
+            q.1 = next.is_some();
+            next
+        };
+        let Some(f) = next else { return };
         let handle = app.clone();
-        if let Err(e) = app.run_on_main_thread(move || f(&handle)) {
-            log::warn!(Error = e.to_string().as_str(); "Could not run window work after a plugin hook");
-        }
-    });
+        logged(app.run_on_main_thread(move || f(&handle)));
+    }
+}
+
+/// Logs a failed hand-over (the app is shutting down); returns whether it worked.
+fn logged<E: std::fmt::Display>(result: Result<(), E>) -> bool {
+    if let Err(e) = &result {
+        log::warn!(Error = e.to_string().as_str(); "Could not run window work after a plugin hook");
+    }
+    result.is_ok()
 }
 
 /// `Ok` outside a plugin hook; inside one, the error that names the fix (`label` is the window asked for).
@@ -56,12 +71,8 @@ pub(crate) fn check_can_build(label: &str) -> Result<(), WindowError> {
         return Ok(());
     }
     Err(WindowError::new(
-        WindowErrorCode::NotReady,
-        format!(
-            "the window \"{label}\" cannot be opened inside a plugin's set-up or event hook: Tauri holds its plugin \
-             store there and building a webview would wait for it forever. Open windows from tauri::Builder::setup \
-             instead."
-        ),
+        WindowErrorCode::InsidePluginHook,
+        format!("the window \"{label}\" {INSIDE_PLUGIN_HOOK}"),
     ))
 }
 
@@ -70,27 +81,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_scope_marks_only_its_own_thread_and_ends_when_dropped() {
+    fn inside_a_scope_a_window_is_refused_with_its_own_code() {
         assert!(check_can_build("main").is_ok());
-        let outer = plugin_hook_scope();
-        {
-            let _inner = plugin_hook_scope();
-            assert!(in_plugin_hook());
-        }
-        assert!(in_plugin_hook(), "the outer scope still holds");
+        let scope = plugin_hook_scope();
         let e = check_can_build("main").unwrap_err();
-        assert_eq!(e.code, WindowErrorCode::NotReady);
+        assert_eq!(e.code, WindowErrorCode::InsidePluginHook);
         assert!(
             e.message.contains("tauri::Builder::setup") && e.message.contains("\"main\""),
             "{}",
             e.message
         );
-        assert!(
-            std::thread::spawn(|| !in_plugin_hook()).join().unwrap(),
-            "another thread is not in the hook"
-        );
-        drop(outer);
-        assert!(!in_plugin_hook());
+        drop(scope);
         assert!(check_can_build("main").is_ok());
+    }
+
+    #[test]
+    fn a_failed_hand_over_is_logged() {
+        assert!(logged::<String>(Ok(())));
+        assert!(!logged(Err("the event loop is gone")));
     }
 }

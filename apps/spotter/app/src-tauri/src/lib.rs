@@ -294,20 +294,20 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         .wrap(handler!())
 }
 
-/// The tray, then the main window (none when started at log-in with `--hidden` and a tray to come back from). Runs in
-/// `tauri::Builder::setup`, never in the shell's `setup`: Tauri runs plugin set-ups while it holds its plugin store, and
-/// building a webview there waits for that store forever (Spotter started with no window).
-pub fn open_at_start<R: Runtime>(
-    app: &tauri::AppHandle<R>,
-    launch: &paddock_window::launch::LaunchArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if !tray::create(app) {
-        applog::write("no tray icon; closing the window will quit the app");
-    }
-    paddock_window::tauri::start(app, launch).map_err(|e| {
-        applog::write(&format!("Spotter could not open its window: {}", e.message));
-        e.message.into()
-    })
+/// Spotter on `builder` (after the plugins already on it): the shell plugin `shell`, the tray drawn by `tray_backend`,
+/// the main window for `launch` (the shell opens both after every plugin is set up) and Spotter's guarded commands. The
+/// start `run` uses and the start test composes.
+pub fn app<R: Runtime>(
+    builder: tauri::Builder<R>,
+    shell: Builder<R>,
+    launch: paddock_window::launch::LaunchArgs,
+    tray_backend: impl paddock_window::tauri::TrayBackend<R>,
+) -> tauri::Builder<R> {
+    shell
+        .tray(move |app| tray::tray(app, tray_backend))
+        .launch(launch)
+        .add_to(builder)
+        .invoke_handler(invoke_handler())
 }
 
 /// Starts the app.
@@ -327,8 +327,6 @@ pub fn run() {
         Ok(())
     });
     let builder = tauri::Builder::default()
-        // The tray and the main window: after every plugin is set up (a window built in a plugin's set-up deadlocks).
-        .setup(move |app| open_at_start(app.handle(), &launch))
         // First: a second launch shows the running app's window instead of starting another engine.
         .plugin(tauri_plugin_single_instance::init(paddock_window::tauri::second_instance))
         .plugin(tauri_plugin_notification::init())
@@ -338,9 +336,8 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
-        ))
-        .plugin(shell.build())
-        .invoke_handler(invoke_handler());
+        ));
+    let builder = app(builder, shell, launch, tray::native());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     let builder = builder.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated);

@@ -163,6 +163,7 @@ export function rustRewrites({ id, name, identifier }, versions) {
       ['"binaries/shell-demo-agent"', `"binaries/${agent}"`],
       ['use paddock_shell_demo::', `use ${lib}::`],
       ['paddock_shell_demo::tray::', `${lib}::tray::`],
+      ['paddock_shell_demo::app(', `${lib}::app(`],
       ['app_dir().join("../../../ui/projects/shell-demo")', 'app_dir().join("..")'],
       ['"cd apps/shell-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app"', '"cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app"'],
       ['app_dir().join("../CHANGELOG.md")', 'app_dir().join("../../CHANGELOG.md")'],
@@ -230,6 +231,7 @@ export function workbenchRustRewrites({ id, name, identifier }, versions) {
     ],
     'tests/app.rs': [
       ['use paddock_workbench_demo::', `use ${lib}::`],
+      ['paddock_workbench_demo::app(', `${lib}::app(`],
       ['app_dir().join("../../../ui/projects/workbench-demo")', 'app_dir().join("..")'],
       ['"cd apps/workbench-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app"', '"cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app"'],
       ['snapshot["app"], "Paddock Workbench Demo"', `snapshot["app"], ${JSON.stringify(name)}`],

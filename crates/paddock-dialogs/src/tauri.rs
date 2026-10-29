@@ -362,6 +362,16 @@ fn build_window<R: Runtime>(
     min: (f64, f64),
     parent: &WebviewWindow<R>,
 ) -> Result<(), DialogError> {
+    if paddock_commands::plugin_hook::in_plugin_hook() {
+        return Err(DialogError::new(
+            DialogErrorCode::NotReady,
+            format!(
+                "the dialog \"{}\" {}",
+                spec.label,
+                paddock_commands::plugin_hook::INSIDE_PLUGIN_HOOK
+            ),
+        ));
+    }
     let at = placement::screen_position(place, spec.os);
     let c = window_config(spec, &at, place, min);
     let (r, g, b) = c.background;

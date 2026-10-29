@@ -219,6 +219,16 @@ fn build_window<R: Runtime>(
     placed: &Placed,
     host: &WebviewWindow<R>,
 ) -> Result<(), PanelError> {
+    if paddock_commands::plugin_hook::in_plugin_hook() {
+        return Err(PanelError::new(
+            PanelErrorCode::NotReady,
+            format!(
+                "the pop-out \"{}\" {}",
+                spec.label,
+                paddock_commands::plugin_hook::INSIDE_PLUGIN_HOOK
+            ),
+        ));
+    }
     let panels = panels(app)?;
     let p = placed.placement;
     let at = placement::screen_position(&p, spec.os);

@@ -850,6 +850,19 @@ pub fn quit<R: Runtime>(app: &AppHandle<R>) {
     exit(app, 0);
 }
 
+/// Ends the app with `code` through the window layer's exit (the app's hook; Tauri's exit without a window layer). For a
+/// start that cannot go on: logged by the caller, then this, instead of a panic in the event loop.
+pub fn exit_with<R: Runtime>(app: &AppHandle<R>, code: i32) {
+    match state(app) {
+        Ok(windows) => {
+            windows.exit.begin_quit();
+            let exit = windows.exit_app.clone();
+            exit(app, code);
+        }
+        Err(_) => app.exit(code),
+    }
+}
+
 /// The app keeps running in the tray after the last window: hidden with its family, or (the default) let it close.
 /// Returns whether the close is prevented.
 pub(crate) fn to_background<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) -> bool {
