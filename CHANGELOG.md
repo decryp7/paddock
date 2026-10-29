@@ -4,6 +4,17 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Rust developer and CI tool, phase R0 (ADR 0022)
+- New shared crates `paddock-slots` (numbered job slots over OS file locks, with a holder that always ends: job folder gone,
+  release, or `--max-hold-secs`), `paddock-repo-files` (the walk, its caps and a bounded-thread file hash) and
+  `paddock-repo-graph` (the project graph from Cargo and npm, the `History` port and its git adapter).
+- New `tools/paddock-dev` (its own workspace and lockfile) with `graph affected`, `ci slot acquire|release|status|hold` and
+  `self hash`, and the `./dev` / `dev.cmd` wrappers that build the tool or take it from `~/.paddock-dev/bin` (five newest kept).
+  The binary's name is a hash of the inputs in `inputs.txt`, the compiler, the build-affecting `CARGO_*` and `RUSTFLAGS`
+  variables and the text of every cargo config it reads (all `.cargo` folders up to the root, `$CARGO_HOME`, the tool's
+  `include` files). `./dev` says how to add `tools/` to a sparse checkout.
+- `ci.yml` gets a `paddock-dev` leg on Linux, Windows and macOS (fmt, clippy, nextest `ci` profile, cargo deny, lockfile check).
+
 ### `pd-table` on Angular Material's table (ADR 0027, decision 5)
 - `pd-table` is built on `mat-table`: a header-only table above the CDK virtual scroll viewport and the body table inside it,
   one `role="grid"`, so the header never moves with the rows (also on fast scrolls, jumps and End). `matSort` and

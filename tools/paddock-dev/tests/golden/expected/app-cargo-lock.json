@@ -1,0 +1,30 @@
+{
+ "all": false,
+ "crates": false,
+ "ui": false,
+ "eslint": false,
+ "conformance": false,
+ "tools": false,
+ "icons": false,
+ "ciImage": false,
+ "paddockDev": false,
+ "docs": false,
+ "apps": [
+  "z"
+ ],
+ "kinds": {
+  "z": [
+   "rust"
+  ]
+ },
+ "packages": {
+  "apps/z/app/src-tauri": [
+   "z"
+  ]
+ },
+ "why": {
+  "app:z": [
+   "apps/z/app/src-tauri/Cargo.lock"
+  ]
+ }
+}

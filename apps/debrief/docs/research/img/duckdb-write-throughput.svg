@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1152 624" width="1152" height="624" role="img" aria-labelledby="d2t d2d">
+  <title id="d2t">Write throughput by method</title>
+  <desc id="d2d">Events per second, linear scale, in two groups that are not comparable. Write path only, Quack harness, same 3M parsed batches, medians: Quack server 1 client 115k, 1 Appender 200k, 4 Appenders 355k, Parquet 8 writers 4.38M, 12 writers 4.41M. Full import with parsing: DuckDB 2.0 at load 33-65, 685k to 991k (2026-10-28, 16.8M events); DuckDB 1.5.6 at load 20-90, 1.0M to 1.55M (2026-10-27, 56M events).</desc>
+  <style>
+    /* diagrams/STYLE.md tokens, Debrief roles. Light by default, dark under prefers-color-scheme. */
+    .bg { fill: #ffffff; }
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 12px; fill: #14171C; }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace; }
+    .muted { fill: #565E6B; }
+    .title { font-size: 24px; font-weight: 600; }
+    .kind { font-size: 14px; }
+    .name { font-size: 14px; font-weight: 600; }
+    .glabel { font-weight: 600; fill: #565E6B; }
+    .foot { font-size: 12px; fill: #565E6B; }
+    .group { fill: #F8F9FA; stroke: #C4C7CD; stroke-width: 1; }
+    .group-ext { fill: #F8F9FA; stroke: #6B7380; stroke-width: 1; stroke-dasharray: 6 4; }
+    .n-own { fill: #E8EFFA; stroke: #1D5FD1; stroke-width: 1.5; }
+    .n-proc { fill: #F0F2F5; stroke: #565E6B; stroke-width: 1.5; }
+    .n-ext { fill: #F4F5F7; stroke: #6B7380; stroke-width: 1.5; stroke-dasharray: 6 4; }
+    .legend { fill: none; stroke: #C4C7CD; stroke-width: 1; }
+    .edge { stroke: #565E6B; stroke-width: 1.5; fill: none; }
+    .dash { stroke-dasharray: 6 4; }
+    .head { fill: #565E6B; }
+    .ohead { fill: none; stroke: #565E6B; stroke-width: 1.5; }
+    .t-own { fill: #1D5FD1; }
+    .b-own { fill: #1D5FD1; }
+    .b-cap { fill: #1D5FD1; fill-opacity: 0.35; stroke: #1D5FD1; stroke-width: 1.5; }
+    .b-proc { fill: #565E6B; }
+    .b-ext { fill: #6B7380; }
+    .grid { stroke: #C4C7CD; stroke-width: 1; }
+    .halo { paint-order: stroke; stroke: #ffffff; stroke-width: 4px; stroke-linejoin: round; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #15171B; }
+      text { fill: #ECEEF1; }
+      .muted, .glabel, .foot { fill: #A0A7B2; }
+      .group { fill: #121418; stroke: #353A42; }
+      .group-ext { fill: #121418; stroke: #7F8794; }
+      .n-own { fill: #202C3F; stroke: #5B9BFF; }
+      .n-proc { fill: #1B1E23; stroke: #A0A7B2; }
+      .n-ext { fill: #17191E; stroke: #7F8794; }
+      .legend { stroke: #353A42; }
+      .edge { stroke: #A0A7B2; }
+      .head { fill: #A0A7B2; }
+      .ohead { stroke: #A0A7B2; }
+      .t-own, .b-own, .b-cap { fill: #5B9BFF; }
+      .b-cap { stroke: #5B9BFF; }
+      .b-proc { fill: #A0A7B2; }
+      .b-ext { fill: #7F8794; }
+      .grid { stroke: #353A42; }
+      .halo { stroke: #15171B; }
+    }
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="head"/></marker>
+    <marker id="oh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M1,1 L9,5 L1,9" class="ohead"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="1152" height="624"/>
+    <text x="48" y="64" class="title">Write throughput by method</text>
+    <text x="48" y="88" class="kind muted">Bar chart · events per second, linear scale, Mac mini</text>
+    <text x="48" y="108" class="muted">Two groups that must not be compared with each other: the write path alone, and the full import with parsing.</text>
+    <text x="48" y="152" class="glabel">Write path only · Quack harness, the same 3M parsed batches, 2026-10-28, medians</text>
+    <line x1="400" y1="164" x2="400" y2="368" class="grid"/>
+    <line x1="520" y1="164" x2="520" y2="368" class="grid"/>
+    <line x1="640" y1="164" x2="640" y2="368" class="grid"/>
+    <line x1="760" y1="164" x2="760" y2="368" class="grid"/>
+    <line x1="880" y1="164" x2="880" y2="368" class="grid"/>
+    <line x1="1000" y1="164" x2="1000" y2="368" class="grid"/>
+    <text x="48" y="189" class="kind">Quack server, 1 client</text>
+    <rect x="400" y="172" width="13.8" height="24" rx="2" class="n-ext"/>
+    <text x="422" y="188" class="halo">115k</text>
+    <text x="48" y="229" class="kind">Appender, 1</text>
+    <rect x="400" y="212" width="24.0" height="24" rx="2" class="b-proc"/>
+    <text x="432" y="228" class="halo">200k</text>
+    <text x="48" y="269" class="kind">Appenders, 4</text>
+    <rect x="400" y="252" width="42.6" height="24" rx="2" class="b-proc"/>
+    <text x="451" y="268" class="halo">355k</text>
+    <text x="48" y="309" class="kind">Parquet, 8 writers</text>
+    <rect x="400" y="292" width="525.6" height="24" rx="2" class="b-own"/>
+    <text x="934" y="308" class="halo">4.38M</text>
+    <text x="48" y="349" class="kind">Parquet, 12 writers</text>
+    <rect x="400" y="332" width="529.2" height="24" rx="2" class="b-own"/>
+    <text x="937" y="348" class="halo">4.41M</text>
+    <text x="48" y="400" class="glabel">Full import, parse + write + catalog · performance.md, not comparable with the group above</text>
+    <line x1="400" y1="412" x2="400" y2="496" class="grid"/>
+    <line x1="520" y1="412" x2="520" y2="496" class="grid"/>
+    <line x1="640" y1="412" x2="640" y2="496" class="grid"/>
+    <line x1="760" y1="412" x2="760" y2="496" class="grid"/>
+    <line x1="880" y1="412" x2="880" y2="496" class="grid"/>
+    <line x1="1000" y1="412" x2="1000" y2="496" class="grid"/>
+    <text x="48" y="437" class="kind">Import, DuckDB 2.0, load 33–65</text>
+    <rect x="400" y="420" width="82.2" height="24" rx="2" class="b-own"/>
+    <rect x="482.2" y="420" width="36.7" height="24" rx="2" class="b-cap"/>
+    <text x="527" y="436" class="halo">685k–991k</text>
+    <text x="48" y="477" class="kind">Import, DuckDB 1.5.6, load 20–90</text>
+    <rect x="400" y="460" width="120.0" height="24" rx="2" class="b-own"/>
+    <rect x="520.0" y="460" width="66.0" height="24" rx="2" class="b-cap"/>
+    <text x="594" y="476" class="halo">1.0–1.55M</text>
+    <text x="400" y="516" class="muted" text-anchor="middle">0</text>
+    <text x="520" y="516" class="muted" text-anchor="middle">1M</text>
+    <text x="640" y="516" class="muted" text-anchor="middle">2M</text>
+    <text x="760" y="516" class="muted" text-anchor="middle">3M</text>
+    <text x="880" y="516" class="muted" text-anchor="middle">4M</text>
+    <text x="1000" y="516" class="muted" text-anchor="middle">5M</text>
+    <text x="700" y="536" class="muted" text-anchor="middle">events per second</text>
+    <rect x="48" y="560" width="816" height="40" rx="14" class="legend"/>
+    <rect x="64" y="572" width="24" height="16" rx="2" class="b-own"/>
+    <text x="96" y="584">Parquet fan-out (Debrief)</text>
+    <rect x="264" y="572" width="24" height="16" rx="2" class="b-proc"/>
+    <text x="296" y="584">Appender</text>
+    <rect x="376" y="572" width="24" height="16" rx="2" class="n-ext"/>
+    <text x="408" y="584">Quack server</text>
+    <rect x="512" y="572" width="24" height="16" rx="2" class="b-cap"/>
+    <text x="544" y="584">range: solid to the low end, faded from low to high</text>
+    <text x="1104" y="584" class="foot" text-anchor="end">Debrief · updated 2026-10-29</text>
+</svg>
