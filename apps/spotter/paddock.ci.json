@@ -42,5 +42,15 @@
     "npm run build:e2e -w ui",
     "cd apps/spotter/app",
     "PW_PORT=4372 npx playwright test --project=webkit --workers=1"
-  ]
+  ],
+  "notices": {
+    "name": "Spotter",
+    "manifests": [
+      "app/src-tauri/Cargo.toml"
+    ],
+    "npm": "app",
+    "out": [
+      "app/src-tauri/resources"
+    ]
+  }
 }
