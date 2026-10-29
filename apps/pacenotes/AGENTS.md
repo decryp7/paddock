@@ -139,5 +139,8 @@ development and UI tests only; features are not done until they work against the
 
 - Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
   `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
+- Specs never wait a fixed number of event-loop turns and never leave a patch behind (rule 49): wait on the condition
+  (Debrief: `openDialog()`), never let an optional chain perform a test's action, and patch a prototype only with
+  `vi.spyOn` (restored after each test).
 - Research official sources before choosing models or libraries; record what you found and when in the ADR.
 - Navigate code with Serena's symbol tools when available. Delegate mechanical work to cheaper models; keep

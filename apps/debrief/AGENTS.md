@@ -140,9 +140,6 @@ The app reads untrusted, possibly huge files and renders their content:
 
 ## Testing and quality gates
 
-- Specs follow rule 49 (test isolation): `openDialog()` from `src/testing/helpers.ts` for dialogs (they load lazily), `vi.spyOn`
-  for any patch, no optional-chain actions; ESLint enforces it.
-
 - Every change ships with tests. Every bug fix starts with a failing regression test.
 - Coverage targets: `debrief-core` ≥ 99% lines (`cargo llvm-cov -p debrief-core --summary-only`),
   Angular ≥ 80% lines overall and near 100% for stores, services and pure utilities.
@@ -196,6 +193,9 @@ The app reads untrusted, possibly huge files and renders their content:
 
 - Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
   `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
+- Specs never wait a fixed number of event-loop turns and never leave a patch behind (rule 49): wait on the condition
+  (Debrief: `openDialog()`), never let an optional chain perform a test's action, and patch a prototype only with
+  `vi.spyOn` (restored after each test).
 - Research before choosing libraries or patterns when unsure, and prefer
   well-maintained, permissively licensed (MIT/Apache-2.0) dependencies.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they

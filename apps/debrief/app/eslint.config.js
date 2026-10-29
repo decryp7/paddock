@@ -85,15 +85,15 @@ module.exports = defineConfig(
         },
         {
           selector:
-            "CallExpression[callee.object.name='Object'][callee.property.name=/^(defineProperty|defineProperties|assign)$/] > MemberExpression.arguments:first-child[property.name='prototype']",
+            "CallExpression[callee.object.name=/^(Object|Reflect)$/][callee.property.name=/^(defineProperty|defineProperties|assign)$/] > MemberExpression.arguments:first-child[property.name='prototype']",
           message:
-            'Object.defineProperty/assign on a prototype is a patch that is never restored and leaks into later specs. Use vi.spyOn(X.prototype, name, \'get\') (restoreMocks puts it back after each test) (lessons: test isolation, ER-21).',
+            'Object.defineProperty, Reflect.defineProperty or Object.assign on a prototype is a patch that is never restored and leaks into later specs. Use vi.spyOn(X.prototype, name, \'get\') (restoreMocks puts it back after each test) (lessons: test isolation, ER-21).',
         },
         {
           selector: [
             "ExpressionStatement > ChainExpression:has(CallExpression[callee.property.name='stack'])",
-            "ExpressionStatement > ChainExpression > CallExpression[callee.object.property.name='ref']",
-            "ExpressionStatement > ChainExpression > CallExpression[callee.object.object.optional=true]",
+            "ExpressionStatement > ChainExpression[expression.callee.object.property.name='ref']",
+            "ExpressionStatement > ChainExpression[expression.callee.object.optional=true]",
           ].join(', '),
           message:
             'An optional chain used as a statement does nothing when the dialog is not open yet (dialogs load lazily), so the test passes or hangs silently. Use `(await openDialog(dialogs)).ref.close()`, which fails when no dialog opens (lessons: test isolation, ER-21).',
