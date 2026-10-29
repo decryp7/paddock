@@ -114,11 +114,15 @@ did you click?") and a step signal (what the user did next). Key text is not sto
 resolution, locale and font settings where known. No accessibility snapshot: Sighter is pixels only (ADR 0001 decision 9).
 
 **Privacy**: redaction regions drawn before recording (applied before anything is written), and automatic redaction or pause around
-password fields detected from pixels: a masked-glyph (dot) check, a `password_field` detector class, text inputs redacted by default
-until classified, and a user hotkey to pause (ADR 0001, "Password fields and secrets, from pixels", with its limits). See section 10.
+password fields detected from pixels, classified in memory at capture time: a masked-glyph (dot) check, an OCR label cue ("Password",
+"PIN", localised), a `password_field` detector class, text inputs filled by default until classified, and a user hotkey to pause.
+Redaction is a **solid, permanent fill, never a blur**; stored frames carry a `redacted` flag; the same redaction runs before every
+store or send (imports, run recordings and screenshots, exports, diagnostics, Pitwall crops) (ADR 0001, "Password fields and secrets,
+from pixels", with its limits). See section 10.
 
-**Importing videos**: existing recordings (mp4/mkv/webm/mov) import with no event track; labelled by OCR + detector + VLM + review only
-(marked lower quality in the project).
+**Importing videos**: existing recordings (mp4/mkv/webm/mov) import with no event track; boxes by OCR + templates + the app's detector +
+review only, names and classes optionally suggested by the VLM for those boxes (marked lower quality in the project). Only redacted
+frames are stored; the source video is never copied into the project (ADR 0001, "Training from test-run videos").
 
 **Encoding**: our own recordings are stored as PNG/WebP frames with timestamps, plus an optional H.264/H.265 4:4:4 stream through the
 OS encoder (Media Foundation, VideoToolbox/AVFoundation, GStreamer/VA-API) or ffmpeg as an LGPL dynamic build. The common path needs no
@@ -185,7 +189,7 @@ disagreement, disagreement between the last two model versions).
 
 **Variation without image generation.** Diffusion models are too heavy for an 8 GB GPU and bad at UI text and layout. Use, in this order:
 1. **Real variation captured by the recorder**: DPI 100/125/150/200 percent, window sizes, light/dark/high-contrast themes, fonts, languages. The recorder's session metadata makes each axis explicit, and the studio shows coverage ("no 150 percent dark sessions yet").
-2. **Classic augmentation** designed for UIs: colour/theme jitter, scale 50 to 300 percent, font smoothing, JPEG, crop, blur, noise. No flips or rotations (text and layout are not symmetric).
+2. **Classic augmentation** designed for UIs: colour/theme jitter, scale jitter 0.9 to 1.1 only (frames are normalised to logical 100 % at run time and in training; display scales 100 to 300 percent are covered by that normalising and by HiDPI simulation, ADR 0001 "Training geometry matches inference"; amended 2026-10-29, was "scale 50 to 300 percent"), font smoothing, JPEG, crops on the inference tile grid, blur, noise. No flips or rotations (text and layout are not symmetric).
 3. **Synthetic compositing** of labelled elements: paste real labelled crops onto other real backgrounds/screens at varied positions and scales, with exact labels for free.
 
 Diffusion is at most an optional "Later" experiment.
@@ -207,7 +211,7 @@ crops), hard-cases gallery, held-out session test (different theme/scale/OS), si
 | Rust-native (burn, candle) | Not for v1: no maintained RT-DETR/D-FINE recipe with augmentation, EMA, matcher losses, mAP tooling. Revisit for a tiny YOLOX-style detector later. |
 | **Managed sandboxed Python/PyTorch runtime, downloaded on request** (recommended) | Like Debrief's FFmpeg/llama.cpp runtimes (ADR 0009/0033): pinned bundle (python-build-standalone + torch wheels per OS/accelerator + vendored training code), SHA-256 pinned, self-tested on a generated mini dataset, out-of-process worker over the one IPC, no network, only the dataset readable and output writable, memory/time caps, cancel. CUDA torch is 2 to 3 GB, so not in the installer. Python is downloaded data, not shipped app code; needs an ADR exception clause for the "Rust + Angular only" rule. **User decision 2026-10-24: Python is acceptable for training when there is no viable Rust choice** (the ADR records the exception; inference in the app stays Rust). |
 | Export-only | Always provided: COCO + YOLO txt + generated script + README, for users with their own GPU box or who reject a Python runtime. |
-| User-chosen remote host over SSH | Same runtime image by checksum, dataset pushed, weights pulled. No third-party cloud. |
+| User-chosen remote host over SSH | **Not in v1** (ADR 0001, "Training from test-run videos": local training only, opt-in CUDA). Possible later, through its own ADR: opt-in through `paddock-net` `Egress`, off by default, blocked by Offline mode, redacted frames only, a per-job allow-list and a confirmation with the frame count. |
 
 Accelerators: CUDA (Windows/Linux), ROCm (Linux, best effort), Apple MPS (smaller models, op gaps fall back to CPU), CPU everywhere.
 Import of an externally trained ONNX model with a compatibility check (input size, output layout, class list).
@@ -227,9 +231,10 @@ videos", decision 10):
 
 ### 6.2 Augmentation and synthetic data
 Detailed in ADR 0001 ("Augmentation and synthetic data"): photometric, the remote-codec preset, geometric without flips
-or rotations, composition (copy-paste, mosaic, occlusion), text re-rendering, label economy (tracking, active learning,
-hard negatives, class balancing) and synthetic screens recorded from the app under test; every technique is kept only
-if a held-out set of real, unaugmented frames shows a gain.
+or rotations, composition (copy-paste, occlusion), text re-rendering, label economy (tracking, active learning,
+hard negatives, class balancing) and synthetic screens recorded from the app under test, on 640 tiles cut on the
+inference grid with random-offset crops (no mosaic); every technique is kept only
+if a held-out set of real, unaugmented frames (split by session and by screen fingerprint) shows a gain.
 
 ## 7. The server API, clients and test layer
 
@@ -795,18 +800,23 @@ No accessibility or DOM sources (ADR 0001 decision 9); adapter hints are not a `
   | Plan drafting | the codebase tool is a separate decision; hand-written plans work | AI-drafted cases (the codebase tool's concern) |
   | Localisation language id / "is this translated" | OCR language detection (PaddleOCR lang models) and string comparison | semantic checks |
 - **One GPU.** Batch labelling and description jobs go to Pitwall at **batch priority and run only when idle** (no training, no interactive Playground request, optionally only when the machine is not in use); they pause and resume, are cancellable, and show an estimate and a per-project cap. Training reserves the GPU: Sighter asks Pitwall to unload the VLM first and restores it after. Interactive `locate` never waits on a batch job.
-- **Licences and privacy**: no AGPL/GPL/non-commercial models or code (section 8 table; UI-TARS Desktop and OmniParser's detector excluded as code or weights as stated there); strictly local (loopback, no cloud model, no telemetry); recordings may contain secrets (section 10: redaction before storage, no key text, secrets only by reference in plans and data tables, nothing leaves the machine except the two opt-in egresses: model/runtime downloads and the user-chosen test-management or training host); never click blindly.
+- **Licences and privacy**: no AGPL/GPL/non-commercial models or code (section 8 table; UI-TARS Desktop and OmniParser's detector excluded as code or weights as stated there); strictly local (loopback, no cloud model, no telemetry); recordings may contain secrets (section 10: redaction before storage, no key text, secrets only by reference in plans and data tables, nothing leaves the machine except the opt-in egresses: model/runtime downloads and the user-chosen test-management host; no training host in v1, ADR 0001); never click blindly.
 
 ### 9.1 Sighter to Pitwall contract (vision)
 **What Sighter sends**: Pitwall's OpenAI-compatible `/v1/chat/completions` with images inline (base64), under a Pitwall app key for Sighter
 (pairing code, key in the OS credential store, local only), at low job priority with cancel. Five request kinds, temperature 0:
-1. **Label suggestions**: "list the interactive elements" on a frame -> boxes + classes (feeds the review queue), **only for
-   a small selection of frames the user chooses, or after a confirmation that states the frame count and the expected
-   time** (rule 46; amended 2026-10-29 by the user, [ADR 0001](adr/0001-object-detector.md) decision 5). Whole recordings
-   are pre-labelled by the app's own trained detector; before the first model exists, by OCR, templates and the review
-   queue only (Sighter is 100 % computer vision, ADR 0001 decision 9).
+1. **Names and classes for existing boxes**: a frame with its computer-vision boxes numbered -> a name and a suggested
+   class per box (feeds the review queue). **The VLM never places boxes** (ADR 0001 decision 5; runtime grounding, kind 3,
+   is the one exception, used for one action and never stored). **Only for a small selection of frames the user
+   chooses, or after a confirmation that states the frame count and the expected time** (rule 46; amended 2026-10-29 by
+   the user, [ADR 0001](adr/0001-object-detector.md) decision 5; wording aligned in ADR 0001 revision 4, it was "label
+   suggestions: list the interactive elements -> boxes + classes"). Whole recordings are pre-labelled by the app's own
+   trained detector; before the first model exists, by OCR, templates and the review queue only (Sighter is 100 %
+   computer vision, ADR 0001 decision 9).
 2. **Element naming**: a numbered grid sheet of crops -> a name per crop ("Settings (gear)").
-3. **Grounding fallback**: "where is X" -> box, only when cheaper layers fail (never the default for unattended runs).
+3. **Grounding fallback**: "where is X" -> box, only when cheaper layers fail (never the default for unattended runs); the box is
+   used for that one action after the re-check, marked `source=vlm-grounding`, and never written into the dataset, the cache or the
+   review queue (ADR 0001, Context).
 4. **Step descriptions**: before/after frames + the click -> "Click the gear icon in the toolbar to open Settings" for reports and search.
 5. **Screen-state descriptions**: a short name and summary for a screen ("Save as dialog"), used for fingerprints and `assert_screen`.
 
@@ -823,13 +833,13 @@ UI-TARS-1.5-7B or Qwen2.5-VL-7B). Sighter asks by capability (`vision`, `auto:vi
 
 **Model fit on 8 GB**: at most a 7B 4-bit model (about 5 to 6 GB); Pitwall's memory management unloads it while Sighter trains.
 **Without Pitwall**: everything works (record, OCR, template, detector, training, serving); you lose automatic naming, step descriptions and the
-VLM fallback, and the review queue picks up the slack (Florence-2 ONNX optionally bootstraps boxes on CPU).
+VLM fallback, and the review queue picks up the slack (Florence-2 box bootstrapping is not in v1, ADR 0001).
 
 ## 10. Safety and privacy
 - **Never a blind click**: low confidence pauses (attended) or fails (unattended) with a screenshot and candidates; confidence gates per class (section 5).
 - **`act` guards**: off by default; per-key permission; bound to a window/process; deny-list of titles ("Delete account", UAC, Keychain prompts); no keystrokes into password fields; refuses secure-desktop surfaces; dry-run and step-by-step modes; max-actions cap; global panic hotkey (default Ctrl+Alt+Shift+Esc) and a visible "Sighter is driving" border; physical input pauses the run.
 - **Recorder privacy**: redaction regions applied before storage; auto-pause on password fields; typed key text not stored by default (keys recorded as events without characters unless the user opts in per project); consent screen before input capture; permission preflight per OS.
-- **Data**: recordings and datasets stay in the project folder; optional encrypted at rest; "delete recording but keep labels"; no network except user-requested runtime/model downloads and the user-chosen training host; VLM calls only to local Pitwall. Server: loopback only, hashed per-app keys, size caps, rate limits, logs hold no screenshots unless run logging is enabled per key.
+- **Data**: recordings and datasets stay in the project folder; optional encrypted at rest; "delete recording but keep labels"; no network except user-requested runtime/model downloads (no remote training host in v1, ADR 0001); VLM calls only to local Pitwall. Server: loopback only, hashed per-app keys, size caps, rate limits, logs hold no screenshots unless run logging is enabled per key.
 - **Agent mode and MCP rules** (7.14, user 2026-10-23): enforced in the MCP server, never in the client, so they hold for every host. Allow-listed apps and windows; confirmation by the user for destructive actions (send, delete, pay, install); step and time budget; a visible "agent in control" overlay with a stop hotkey; a full replay log of observations and actions; stdio or loopback only, local models only. Remote targets (7.15): the user confirms before a run starts on a remote PC; RDP credentials come from the OS credential store, never from plans, prompts or logs; the model sees screenshots only through local Pitwall.
 - Per AGENTS.md: validate every IPC/HTTP argument in Rust, parsers never panic, bounded inputs (image size, frame count, regex), plugin-free module guarded by `guard::catch`, every failure mode tested.
 
@@ -855,7 +865,7 @@ weight licence; optional FP16/INT8). Project = SQLite (sessions, frames, events,
 ## 12. VRAM and hardware (8 GB GPU target)
 | Workload | VRAM | Notes |
 |---|---|---|
-| Training RT-DETR-R18 / D-FINE-S / YOLOX-S at 640 px | ~3 to 7 GB, small batches (4 to 8), AMP | Fits 8 GB; 2k frames feasible on 6 GB or CPU slowly; Accurate presets (L/X, DEIMv2) want 12+ GB, so fall back to Fast or a remote host |
+| Training RT-DETR-R18 / D-FINE-S / YOLOX-S at 640 px | ~3 to 7 GB, small batches (4 to 8), AMP | Fits 8 GB; 2k frames feasible on 6 GB or CPU slowly; Accurate presets (L/X, DEIMv2) want 12+ GB, so fall back to Fast (no remote host in v1) |
 | Inference detector (ONNX, 640 px) | under 1 GB | Also runs on CPU |
 | OCR (PaddleOCR mobile) | a few hundred MB | CPU is fine |
 | 4-bit 7B VLM (Qwen2.5-VL / UI-TARS GGUF) | ~5 to 6 GB | **Not concurrent with training**; Pitwall's memory management unloads/loads and queues jobs |
@@ -931,7 +941,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 | Dataset | Variation coverage view (DPI/theme/language/codec gaps) | v1 | (own idea) |
 | Dataset | Sampled capture of uncertain run frames into the queue (active-learning loop) | v1 | Roboflow Dataset Upload |
 | Dataset | CVAT XML import/export | Later | CVAT |
-| Train & evaluate | Managed training, presets, export-only, remote SSH host | v1 (SSH Later) | Roboflow |
+| Train & evaluate | Managed training, presets, export-only; remote SSH host | v1 (remote host not in v1; Later only through its own ADR) | Roboflow |
 | Train & evaluate | mAP, confusion matrix, hard cases, held-out session test | v1 | Roboflow |
 | Train & evaluate | Active learning (uncertainty to review queue) | v1 | Roboflow |
 | Train & evaluate | Per-app model registry, versions, promote/rollback, compare | v1 | Roboflow, Tosca |

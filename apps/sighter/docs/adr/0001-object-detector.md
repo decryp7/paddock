@@ -2,13 +2,18 @@
 
 Status: proposed (2026-10-29). The user decided every question on 2026-10-29 (marked "user, 2026-10-29" below); none
 is open. Pending: the RT-DETRv4 licence review (plan item P4) and the DirectML egress gate of the spike (decision 4).
-The ADR goes to an independent review before it is accepted.
+The ADR goes to an independent review before it is accepted. Revision 4 (2026-10-29) answers the third independent
+review: gate conditions per execution provider, "Parallelism and cost" (rule 51), priority classes (ADR 0024), Patience
+instead of runtime budgets (ADR 0031), training geometry, password redaction, no remote training in v1, and the VLM's
+role; it reopens none of the user's decisions.
 
 Related: [proposal](../proposal.md) sections 6, 8, 9.1, 11, 12 and 15; [design review](../review/2026-10-design-review.md);
 research notes [2026-10-29-rf-detr](../research/2026-10-29-rf-detr.md) (this ADR's evidence) and the family note
 [2026-10-sighter-detector](../../../../docs/research/2026-10-sighter-detector.md); Sighter AGENTS.md ("Licences of
 models", "Pitwall is always optional", "Local only: no telemetry"); family rules 10 to 15, 23, 26, 42, 46 and 48;
-ADR 0024 (background work); Pacenotes ADR 0001 (static ONNX Runtime and rule 23).
+ADR 0024 (background work: priority classes, `paddock_proc::threads`, C40), ADR 0031 (patience, not wall clocks:
+stall judgements, caps on host ticks); rule 51 (parallelism and cost); Pacenotes ADR 0001 (static ONNX Runtime and rule
+23).
 
 ## Context
 
@@ -26,6 +31,15 @@ closed-set model trained on the user's own labelled frames (1k to 5k per app) an
 - keep rule 23 (one Team ID in the bundle, sidecars self-test from the built app);
 - work without Pitwall and without any network, send no telemetry, run deterministically on the CPU, and say which
   execution provider answered.
+
+**What the VLM may do.** Boxes come from computer vision: OCR, templates, the app's own detector and the user's review.
+Pitwall's VLM (proposal 9.1) **never places a box that becomes a label, a training box or a stored detection**: it names
+boxes that exist, suggests their class, and describes steps and screens. **Runtime grounding (proposal 9.1 kind 3) is
+the one exception**, and a narrow one: when every cheaper layer failed on one query, an attended run (or a step whose
+author enabled it) may ask Pitwall "where is X" and act on the returned box **for that one action only**, after the
+usual re-check before acting. The result is marked `source=vlm-grounding` in the run's trace, it is never written into
+the dataset, the cache or the review queue as a box (the frame is queued as "needs labelling", without the box), and
+unattended runs never use it by default.
 
 The proposal named RT-DETR, D-FINE/DEIM, DEIMv2 and RF-DETR as candidates; the backlog of 2026-10-27 asked "RF-DETR or
 UI-DETR-1?". The research note answers with today's official sources and one indicative measurement.
@@ -80,14 +94,33 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
    decision of 2026-10-24, recorded in proposal section 6 and the family note; this ADR closes proposal section 15
    question 1). The runtime is itself a `paddock-runtime` entry (pinned, hashed, self-tested, quarantined on failure).
    The training worker runs with no network: `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, and the sandbox denies
-   outbound connections (`rfdetr`'s DINOv2 backbone calls `from_pretrained`, which must find what it needs locally or
-   fail with a clear message). Start weights: the Apache COCO checkpoints only. **UI-DETR-1 is not in v1** (user,
+   outbound connections. **Where the DINOv2 files come from offline** (read in the `rfdetr` 1.11.2 wheel,
+   `rfdetr/models/backbone/dinov2.py` and `rfdetr/config.py`, 2026-10-29): N, S, M and L use the windowed backbone with
+   `patch_size` 16; for a patch size other than 14 the backbone sets `load_dinov2_weights = False` and builds
+   `WindowedDinov2WithRegistersBackbone(config)` from a JSON config **shipped inside the package**
+   (`rfdetr/models/backbone/dinov2_configs/dinov2_small.json` and siblings), so `from_pretrained("facebook/dinov2-…")`
+   is not called and nothing is fetched from the Hugging Face Hub; the backbone weights come from the COCO checkpoint
+   itself. The checkpoint is passed as a full path to the mirrored file (decision 6): `rfdetr` downloads only when the
+   file is missing (`download_pretrain_weights` skips an existing file), so the runtime always hands it a present,
+   SHA-256-checked file. The non-windowed path (`AutoBackbone.from_pretrained`) is used only by sizes Sighter refuses.
+   The runtime's self-test trains one step on a generated mini dataset with the network denied, which proves this for
+   each pinned `rfdetr` version. Start weights: the Apache COCO checkpoints only. **UI-DETR-1 is not in v1** (user,
    2026-10-29): neither as a labeller nor as start weights, because the licences of its training datasets are not
    stated.
 4. **Inference: `ort` with statically linked ONNX Runtime**, in Sighter's `sighter-infer` sidecar (started through
    `paddock-ipc`, supervised by `paddock-proc` with a memory cap measured as footprint per rule 26, `--self-test` per
    rule 23), shared with OCR.
-   - **GPU by default** (user, 2026-10-29): CoreML with `MLProgram` on macOS; DirectML on Windows, on Intel integrated
+   - **Process class** (ADR 0024): `sighter-infer` serves interactive locates, so it is launched at **`User`**, with
+     intra-op threads from `paddock_proc::threads(Cpu, User)` (performance cores − 1; 9 on the M4 Pro) and never
+     below `User`. Background work in it (pre-labelling, evaluation) runs on threads of class `Background`: **the class
+     travels with each IPC call** (ADR 0020 WP-9, tiered workers), and the sidecar's one GPU queue orders work by it
+     ("Parallelism and cost"). CoreML preparation runs in a **separate short-lived `sighter-infer --prepare` process
+     launched at `Background`**, so a 23–49 s compile never competes with locates at `User`.
+   - **GPU by default** (user, 2026-10-29): CoreML on macOS with `ModelFormat=MLProgram`, **`MLComputeUnits=CPUAndGPU`**
+     (the measured faster and quicker-to-compile setting: Small 640 p50 29.7 ms against 35.4 ms for `ALL`, session
+     creation 23.2 s against 49.1 s, [performance.md](../performance.md#2026-10-29-rf-detr-onnx-latency-indicative-docssighter-rfdetr);
+     `ALL` can place work on the Neural Engine, which the spike compares but does not default to),
+     `RequireStaticInputShapes=1` and `ModelCacheDirectory` set to the model's cache folder; DirectML on Windows, on Intel integrated
      or NVIDIA discrete GPUs, through our `DirectML.dll` or, if the gate below removes it, the system's. The CPU EP is
      the fallback, the reference and the determinism baseline. `error_on_failure` is set for the GPU EP so a failed
      registration is seen, never a silent CPU run.
@@ -134,13 +167,16 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
      start. Our own DirectML build of ONNX Runtime imports it like pyke's does (verify
      whether the import is delay-loaded): if it is not, a missing or broken `DirectML.dll` would stop even a CPU-only
      start, so the spike checks this and the self-test runs CPU first.
-5. **Not in Pitwall.** Pitwall stays optional and is the VLM layer for labelling help, naming and grounding fallback, each
-   a bounded, user-started request (rule 46). **Labelling** (user, 2026-10-29): whole recordings are pre-labelled by the
-   user's own trained detector for that app. Pitwall's VLM is used only on a small selection the user chooses, or after a
-   confirmation that states the frame count (and the expected time). Before the first model of an app exists,
-   pre-labelling comes from OCR, templates and the review queue only (decision 9, "100 % computer vision"), not from
-   the VLM per frame. This amends proposal 9.1's "label suggestions" request kind; the user approved the
-   amendment on 2026-10-29 and it is applied in the proposal.
+5. **Not in Pitwall.** Pitwall stays optional and is the VLM layer for **names and classes of boxes that already
+   exist**, step and screen descriptions, and the runtime grounding fallback (the one exception, see Context), each a
+   bounded, user-started request (rule 46). **The VLM never places boxes** in labels, datasets or stored detections.
+   **Labelling** (user, 2026-10-29): whole recordings are pre-labelled by the user's own trained detector for that app.
+   Pitwall's VLM names and classifies boxes only on a small selection the user chooses, or after a confirmation that
+   states the frame count (and the expected time). Before the first model of an app exists, boxes come from OCR,
+   templates and the review queue only (decision 9, "100 % computer vision"). This amends proposal 9.1's first request
+   kind, now "**names and classes for existing boxes**" (it was "label suggestions", which returned boxes); the user
+   approved the 2026-10-29 amendment, and revision 4 aligns its wording with decisions 10 and 16 (boxes from computer
+   vision only).
 6. **Model distribution.** The runtime detector is always made locally and stored immutable and content-hashed in the
    project registry with its `model.json` (classes, input size, normalisation, thresholds, dataset hash, metrics, parent,
    base checkpoint file name, its licence and pre-training lineage, and the `rfdetr` version). The only downloaded models
@@ -152,8 +188,14 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
    once, anything wrong refusing the whole catalogue. Downloads go through **`paddock-net` `Egress`** (the family's one
    outbound door, host allow-list = our Gitea) and `paddock-download` (hash while writing, rule 15), as a job. Nothing
    but a tiny self-test model ships in the installer.
-7. **Jobs.** Download, pre-labelling, evaluation, CoreML preparation and training are `paddock-jobs` jobs with
-   phase-labelled progress, Cancel and background priority (ER-17 to ER-20, ADR 0024). Locate is a bounded request.
+7. **Jobs.** Download, video import, pre-labelling, evaluation, CoreML preparation, dataset assembly and training are
+   `paddock-jobs` jobs with phase-labelled progress and Cancel (ER-17 to ER-20, ADR 0024), each with a priority class:
+   download, import, pre-labelling, evaluation and CoreML preparation run at **`Background`**; **training (with its
+   dataset assembly) runs at `User`**, because in v1 training is only ever started by the user and the user waits for
+   it (ADR 0024: the class is fixed at launch; a training run Sighter started on its own would be `Background`, and v1
+   has none). Locate is a bounded request: its liveness is a Patience stall judgement and its only limit is a cap from
+   the caller's step timeout ("Locate at run time: no budgets, a stall judgement and one cap"). Thread counts and the
+   other tunables are in "Parallelism and cost".
 8. **Screens, tiles and coordinates** as in the next section: frames are normalised to logical (100 %) scale per
    display, tiled at 640 with overlap, unchanged tiles reuse cached detections, the active window goes first, and boxes
    come back in physical pixels with their display and are converted to points at the input edge.
@@ -166,14 +208,16 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
    test-framework adapter (`Sighter.FlaUI`, `sighter-pywinauto`, the 7.13 helpers) may pass rectangles it already has
    (an element's bounding rectangle, a window handle's bounds) as **optional hints**: they narrow where Sighter looks
    and rank candidates, they **never replace detection** (a hint with no detected element inside it is "not found"),
-   and every result records them as **hint-sourced**. The cost and its mitigation are in Consequences.
+   and every result records them as **hint-sourced**. A hint states its coordinate space and enters through the one
+   coordinate chain ("Adapter hints: coordinate space"). The cost and its mitigation are in Consequences.
    **Secrets without accessibility**: see "Password fields and secrets, from pixels".
 10. **Main training path: video → auto-label → review → train** (user, 2026-10-29), detailed in "Training from
     test-run videos" below and in proposal section 6.1. Boxes always come from computer vision; Pitwall's VLM only
     names, describes and suggests a class for regions that already have boxes.
-11. **Spike before the first release**, per the research note's checklist; its numbers go into
-   [performance.md](../performance.md) as results blocks (rule 48) and can move the default preset or switch the CPU
-   preset to the fallback without changing this ADR.
+11. **Spike before the first release**, per the research note's checklist and the spike items of this ADR (listed in
+   "Spike items"); its numbers go into [performance.md](../performance.md) as results blocks (rule 48), under the
+   conditions of "Gate conditions per execution provider", and can move the default preset or switch the CPU preset to
+   the fallback without changing this ADR.
 
 ## Screen resolutions and HiDPI
 
@@ -185,12 +229,19 @@ Retina scaling where the logical size (points, or DIPs on Windows) differs from 
 Tiles are square, 640 or 960 px, with a **64 px overlap**. With an overlap of `o`, only an element **at most `o` px
 wide (and high) is guaranteed to lie whole inside some tile**; a wider element that straddles a seam is cut into parts
 in neighbouring tiles and relies on the **seam merge** (a pure function in `sighter-core` that joins boxes of the same
-class that touch or overlap across the seam). Should the overlap match the largest class width? No: wide classes
+class from neighbouring tiles whose parts in the shared overlap agree; the exact rule is in "Decisions for the pure
+core"). Should the overlap match the largest class width? No: wide classes
 (text boxes, tabs, toolbars, often 200–600 px) would need huge overlaps and many more tiles, and a wide element is
 still visible in both parts; the overlap is set to cover the **small classes** whose parts would be too small to
 detect (icons, checkboxes, radio buttons, small buttons: about 16–64 logical px), and the model card records the
 overlap and the largest small-class size measured in the training set. Recall at tile seams is a spike item. Tiles per
 frame = ⌈(W − 64) / (T − 64)⌉ × ⌈(H − 64) / (T − 64)⌉.
+
+**The grid, exactly** (one pure function in `sighter-core`, `tile_grid`, used by inference **and** by dataset assembly,
+so training tiles are the tiles the detector sees): the grid lies on the target's logical (100 %) space with its origin
+at the target's logical (0, 0); along each axis, an extent no larger than a tile gets one tile at 0 (padded to the tile
+size); a larger extent gets ⌈(extent − overlap) / (T − overlap)⌉ tiles at the stride T − overlap, the last one pulled
+back so that it ends on the edge. Tiles are numbered in raster order.
 
 | Frame (pixels fed to the detector) | 640 tiles | 960 tiles | Downscale to 640 instead: factor |
 |---|---|---|---|
@@ -210,7 +261,7 @@ about **16 px at the model's input** to be found reliably (COCO calls objects un
 | Approach | Smallest element, in physical pixels | Cost | Verdict |
 |---|---|---|---|
 | Downscale the whole frame to one 640 input | 16 × factor: 48 (1920), 64 (2560), 96 (4K), 128 (5K) | 1 run | **No**: a 16 pt checkbox at 200 % is 32 physical px and disappears at 4K/5K |
-| Tile at physical 1:1 | 16 at every size | 8 to 45 tiles (table) | Most detail, most cost; elements look 2× larger at 200 % than in 100 % training data (covered by the 50–300 % scale augmentation, proposal section 6) |
+| Tile at physical 1:1 | 16 at every size | 8 to 45 tiles (table) | Most detail, most cost; elements look 2× larger at 200 % than in the 100 % training data, which training does not cover (scale jitter stays near 1.0, "Training geometry matches inference"), so this is not used |
 | **Normalise to logical 100 % per display, then tile** (default, design review P1) | 16 logical px (16 pt), which is 32 physical px at 200 % | the logical size's tile count: 8 for 4K at 200 %, 15 for 5K at 200 % | **Default**: model sees the scale it was trained at; a 4K or 5K Retina display costs what its logical size costs |
 | Logical tiles plus a **1:1 fine pass** on chosen regions | 16 physical px in those regions | + tiles of the region only | For classes the model card marks as small (icons, checkboxes, grid cells) when recall below 16 pt is too low |
 
@@ -218,32 +269,61 @@ about **16 px at the model's input** to be found reliably (COCO calls objects un
 
 Projection = tile count × the measured per-tile time (RF-DETR Small at 640, batch 1, run one after another;
 [performance.md](../performance.md#2026-10-29-rf-detr-onnx-latency-indicative-docssighter-rfdetr), at load 18–24,
-indicative). **These are projections, not measurements.** Batching tiles on a GPU and using cores − 1 CPU threads
-(the run used 4) would both lower them; neither was measured.
+indicative). **These are projections, not measurements.** Batching tiles on a GPU and using `threads(Cpu, User)` CPU
+threads (9 on the M4 Pro; the run used 4) would both lower them; neither was measured.
 
 ### Latency budgets: gate and target
 
 User, 2026-10-29: Sighter is for UI test automation. A test step waits for the UI to settle anyway (hundreds of
 milliseconds to seconds), so a single locate matters less than **accuracy and reliability**; faster is still better.
-The locate budgets therefore come in two tiers. Their numbers are **named constants in one place** (a `budgets` module of
-`sighter-core` read by the benchmark harness and the spike, mirrored in [performance.md](../performance.md)), so changing
-a number is a one-line change.
+The locate budgets therefore come in two tiers. Their numbers are **named constants in one place** (the `budgets` module
+of `sighter_core::bench`, mirrored in [performance.md](../performance.md)), so changing a number is a one-line change.
+**They are constants for benchmarks only** (ADR 0031): the benchmark harness and the spike read them; **runtime code
+never reads them**, and no locate, job or sidecar call at run time is stopped because one of these numbers passed
+("Locate at run time: no budgets, a stall judgement and one cap").
 
 | Tier | Constant (proposed name) | 1920 × 1200 (or 4K at 200 %) | 3840 × 2160 at 100 % | Role |
 |---|---|---|---|---|
 | **Gate** (must pass) | `LOCATE_GATE_GPU_P95`, `LOCATE_GATE_CPU_P95` | full-frame locate p95 ≤ **500 ms** on the GPU (CoreML or DirectML), ≤ **2 s** on the CPU | p95 ≤ **1 s** GPU, ≤ **4 s** CPU | Release gate, sized for test steps that take seconds |
 | **Target** (not a gate) | `LOCATE_TARGET_GPU_P50`, `LOCATE_TARGET_GPU_P95`, `LOCATE_TARGET_CPU_P95` | p50 ≤ **80 ms** and p95 ≤ **250 ms** on the GPU; p95 ≤ **600 ms** on the CPU | same | For live and watch modes and fast suites; reached through changed tiles, priority order with early stop, or batching |
 
+The 4K gate constants are `LOCATE_GATE_GPU_P95_4K` and `LOCATE_GATE_CPU_P95_4K`.
+
+#### Gate conditions per execution provider
+
+A gate number means nothing without its conditions. The gate is measured by **one benchmark, `sighter-bench locate`**
+(a binary of a `sighter-bench` crate, to be added with the sidecar; it times through the harness in `sighter_core::bench`
+and **emits the rule-48 results block** for [performance.md](../performance.md) itself, with machine, load, build,
+corpus, command, runs, numbers, budget, verdict and footprint). It runs nightly in `.gitea/workflows/sighter-bench.yml`
+once Sighter has CI, and by hand in the spike until then. One process per row; rows of an A/B comparison are
+interleaved (benchmarks guide, rule 4).
+
+| | **CoreML** (macOS) | **CPU** (reference and fallback) | **DirectML** (Windows) |
+|---|---|---|---|
+| Reference machine | Mac mini M4 Pro, 14 cores (10 performance, 4 efficiency), 64 GB, macOS 27.x | (a) the same Mac mini; (b) the family's Windows host runner (`windows-latest`, a VM without a GPU: the CPU-only runner class, its vCPU count recorded in the block) | **None in the family yet.** A physical Windows 11 PC with a DirectX 12 GPU (Intel integrated Xe and one NVIDIA discrete card); the `windows-latest` runner is a VM and is not expected to expose a GPU (spike item S2 checks) |
+| Runner class | macOS host runner (`macos-latest`, on the Mac mini) | (a) `macos-latest`; (b) `windows-latest` | a local machine named by the user, never a CI runner; CI runs DirectML only as a functional check where a runner has a GPU |
+| Threads | intra-op `paddock_proc::threads(Cpu, User)` (9) for the CPU partitions; inter-op 1 | intra-op `threads(Cpu, User)`: 9 on the Mac mini; physical cores − 1 on a uniform runner; inter-op 1, sequential execution | intra-op `threads(Cpu, User)`; inter-op 1 |
+| EP options | `ModelFormat=MLProgram`, `MLComputeUnits=CPUAndGPU`, `RequireStaticInputShapes=1`, `ModelCacheDirectory` | none | device 0 (the adapter Windows lists first; its name recorded), `error_on_failure` |
+| Cache and model state | **warm**: the CoreML compiled-model cache present (prepared), session created and model loaded before timing; 5 warm-up locates discarded | **warm**: session created, 5 warm-up locates discarded | **warm**: session created, 5 warm-up locates discarded |
+| Cold rows (separate, not the locate gate) | model cold load with the cache present, against `MODEL_COLD_LOAD` (1.5 s); "prepare for this Mac" without a cache, recorded, no gate | model cold load against `MODEL_COLD_LOAD` | model cold load against `MODEL_COLD_LOAD` |
+| Load guard | the harness reads the 1-minute load before each row: **below 12** (benchmarks guide) for a gate verdict; **12 to 25**: the row runs and is marked indicative, never a gate verdict; **above 25** (`RUN_LOAD_LIMIT`): the row is skipped and the block says so | same | Windows has no load average: the harness records the processor queue length and CPU use for 10 s before the row and runs only when CPU use is below 20 %; nothing else may run on the machine |
+| Runs and percentile | **200 timed locates** per row, frames cycled from the corpus; p50 and p95 as `sorted[⌊p · (n − 1)⌋]` (the harness's rule; for n = 200 this is the 190th value for p95, the same as nearest rank) | same | same |
+| Corpus | 20 synthetic UI frames per size (1920 × 1200 and 3840 × 2160 at 100 %; 4K at 200 % normalised), rendered by the spike's generator (named in the block), never random tensors and never user captures | same | same |
+| What is timed (gate) | **one full-frame locate in `sighter-infer`**, from the frame already in memory (shared with the sidecar) to the merged result: **normalise** (resample to logical) → **tile** → **infer** (every tile, no early stop, the tile cache empty) → **merge** across seams, plus the IPC round trip from the server. **Capture is not in the gate** (proposal 7: "1080p screenshot in memory") and is a separate row; cache, template and OCR layers are off (the detector path, the worst case) | same | same |
+| Diagnostic rows (no gate) | inference only, per tile (`Session.run` of one 640 tile), the number the projections use; capture of one frame | same | same |
+| Status | indicative numbers only ([performance.md](../performance.md#2026-10-29-rf-detr-onnx-latency-indicative-docssighter-rfdetr): Python wheel, random tensor, 4 threads, load 18–24) | indicative, Mac only | **unmeasured**: no DirectML number exists; every DirectML verdict below is open until spike item S2 |
+
 | Frame (pixels fed to the detector) | 640 tiles | CPU EP, p50 (179 ms/tile) | CPU EP, p95 sum (276 ms/tile) | CoreML CPU+GPU, p50 / p95 sum (30 / 32 ms per tile) | **Gate** (full frame, p95) | **Target** (p50 ≤ 80 ms, p95 ≤ 250 ms GPU; p95 ≤ 600 ms CPU) |
 |---|---|---|---|---|---|---|
-| 1920 × 1200, or 4K at 200 % | 8 | ~1.4 s | ~2.2 s | ~0.24 s / ~0.26 s | GPU ≤ 500 ms: **projected to pass**; CPU ≤ 2 s: **projected over** (~2.2 s at 4 threads; cores − 1 threads may fit) | **over** on both as a whole frame |
+| 1920 × 1200, or 4K at 200 % | 8 | ~1.4 s | ~2.2 s | ~0.24 s / ~0.26 s | CoreML ≤ 500 ms: **projected to pass**; CPU ≤ 2 s: **projected over** (~2.2 s at 4 threads; 9 threads may fit) | **over** on both as a whole frame |
 | 2560 × 1440, or 5K at 200 % | 15 | ~2.7 s | ~4.1 s | ~0.45 s / ~0.48 s | no gate set (between the two sizes) | **over** |
-| 3840 × 2160 at 100 % | 28 | ~5.0 s | ~7.7 s | ~0.83 s / ~0.90 s | GPU ≤ 1 s: **projected to pass** (tight); CPU ≤ 4 s: **projected over** | **over** |
+| 3840 × 2160 at 100 % | 28 | ~5.0 s | ~7.7 s | ~0.83 s / ~0.90 s | CoreML ≤ 1 s: **projected to pass** (tight); CPU ≤ 4 s: **projected over** | **over** |
 | 5120 × 2880 at 100 % | 45 | ~8.1 s | ~12.4 s | ~1.3 s / ~1.4 s | no gate set | **over** |
 
-All verdicts are **projections, to be measured** (spike item 8). The gate is projected to pass on the GPU at both gate
+All verdicts are **projections, to be measured** (spike item 8). The GPU columns are **CoreML only**: DirectML has no
+measurement, so its gate verdict is open (spike item S2). The gate is projected to pass on CoreML at both gate
 sizes and to be missed on the CPU at 4 threads (~2.2 s at 1920 × 1200). **Plan to close the CPU gate**, part of the spike
-gate, tried in this order: (1) cores − 1 intra-op threads instead of 4; (2) the window scope (a typical app window is
+gate, tried in this order: (1) `threads(Cpu, User)` intra-op threads (9 on the M4 Pro) instead of 4; (2) the window scope (a typical app window is
 4–6 tiles, not 8); (3) the Fast (Nano) model, if the user trains one. The spike records which of these is needed. The target is missed by every whole frame and needs the measures below; none of them is measured yet.
 (Proposal section 7's "detector < 50 ms on a GPU at 640 px" is a per-tile figure; measured: ~30 ms.)
 
@@ -257,10 +337,39 @@ What the design does to reach the target, or the gate on a slow CPU, in this ord
 2. **Changed tiles only**: tiles whose pixels did not change since the last frame reuse their cached detections.
 3. **Priority order**: the focused window's and the pointer's tiles run first; a unique hit above the class threshold
    in the requested scope ends the locate early.
-4. **Batching** tiles in one run on a GPU EP (fixed input, no NMS: DETR batches well); on the CPU, cores − 1 threads.
-5. **A Fast (Nano) model**, if the user trained one for that app, on CPU-only runners, and **"Still working"** rather than a timeout for a full-screen pre-labelling job
-   (rule 12); an unattended locate that cannot finish inside its budget reports the scope it covered and fails as "not
-   found in time", never a guess (AGENTS.md: never click blindly).
+4. **Batching** tiles in one run on a GPU EP (fixed input, no NMS: DETR batches well); on the CPU, `threads(Cpu, User)`
+   intra-op threads.
+5. **A Fast (Nano) model**, if the user trained one for that app, on CPU-only runners, and **"Still working"** rather
+   than a timeout for a full-screen pre-labelling job (rule 12). A locate is never stopped by a budget; it ends when it
+   is done, when the judge finds the sidecar stuck, or when the **caller's step timeout** (the one cap) runs out, in
+   which case it reports the scope it covered and fails as "not found in time", never a guess (AGENTS.md: never click
+   blindly).
+
+### Locate at run time: no budgets, a stall judgement and one cap
+
+ADR 0031 (accepted) applies to every wait on `sighter-infer`:
+
+- **Budgets are benchmark constants only.** Runtime code never reads `LOCATE_GATE_*`, `LOCATE_TARGET_*` or
+  `MODEL_COLD_LOAD`.
+- **Liveness is a Patience stall judgement** (`paddock-jobs::patience`, ADR 0031 sections 2 and 5), keyed per call kind
+  (`CallKey("sighter.locate")`, `"sighter.load"`, `"sighter.selftest"`, `"sighter.prepare"`, `"sighter.train"`). **Tile
+  progress is the call progress signal**: the sidecar sends a `Progress` frame when a tile (or a batch of tiles) has
+  been inferred, from that work and never from a timer; the training worker sends one per optimiser step. While the
+  sidecar is starved, waiting for I/O or paused, no tick counts; a stuck sidecar (blocked for N ticks, or C CPU-seconds
+  without a finished tile) fails the call as a sidecar failure, and `paddock-proc` restarts it with backoff. C per key
+  is measured in the spike (the largest CPU time between two progress frames on the synthetic corpus, × 4; ADR 0031
+  section 5) and is a Setting with an "Auto" default (rule 51). Model load and the CoreML compile are one opaque ONNX
+  Runtime call each, with no progress frame inside: they are judged on CPU time and run state only (as ADR 0031
+  section 9 does for a peer without progress frames), so their C covers the longest measured compile (49 s, indicative)
+  with the margin.
+- **The only limit is a cap: the caller's step timeout**, which the client passes with the locate (the test step's
+  `timeout`, a product rule the user sets). It is **counted in host ticks** (`HostTickClock`), so a paused host does not
+  spend it, and when it fires it explains itself (ADR 0019): "Not found within the step's 10 s; searched the target
+  window, 6 of 8 tiles." A locate without a caller timeout (the studio, an attended "Find") has no cap and shows "Still
+  working" (rule 12) with Cancel.
+- Jobs (import, pre-labelling, dataset assembly, training, preparation) have **no cap** at all: they are judged for
+  stalls, show progress, and the user can cancel them (rule 12).
+
 
 ### Would segmenting the screen make it faster?
 
@@ -309,6 +418,7 @@ origin on the host.
   exceeds the frame output", WWDC22 session 10155); `SCStreamFrameInfo.scaleFactor` gives the window's scale per frame.
   Sighter sets the output size to the window size × `scaleFactor`, so a capture pixel is a host physical pixel; any
   other output size is an extra factor folded into `s`.
+- **Adapter hints** enter the same chain backwards; see "Adapter hints: coordinate space" below.
 - All of it is pure functions in `sighter-core`, with time and geometry passed in.
 - **Test item** (`sighter-core`, pure, synthetic layouts): two and three displays with mixed scale (100 % 1920 × 1200
   left, 200 % 3840 × 2160 right, 150 % 2560 × 1440 above with a negative origin); a box on a tile seam; a box at each
@@ -316,6 +426,70 @@ origin on the host.
   trips tile → capture → tile and remote → host input → remote within ±1 pixel of the finer grid; property tests over
   random layouts, scales and boxes. Plus one OS-level check per platform in the spike (a synthetic window at a known
   position on a 200 % display).
+
+### Decisions for the pure core
+
+Points the first `sighter-core` implementation needed and earlier revisions left open (coordinator, 2026-10-29):
+
+1. **The tile grid's edges** (confirmed, part of "one grid for training and inference"): the last tile of a row or column
+   is **pulled back so that it ends on the frame edge** (it overlaps its neighbour by more than 64); a frame side no larger
+   than one tile gets **a single tile at 0, padded** to the tile size (padding colour: the model card's normalisation
+   mean, so it reads as background). Dataset assembly cuts exactly these tiles, so training sees the same pulled-back
+   edge tiles and padded small frames as inference.
+2. **Seam merge**, precisely. Every detection carries the **tile it came from**. Two detections A and B of the same class
+   are merged only when (a) they come from **different, neighbouring tiles**, (b) **both intersect the overlap strip**
+   those two tiles share, and (c) **their parts inside that strip agree**: IoU(A ∩ strip, B ∩ strip) ≥ **0.5**
+   (`SEAM_IOU`, a validated tunable in (0, 1]). Both tiles see the same pixels in the strip, so the two parts of one cut
+   element cover the same strip region; two separate neighbours in the strip are each seen whole by both tiles and
+   pair up with their own copies, not with each other (the duplicates are then removed by class-aware NMS). Two
+   detections from the **same** tile are never merged. Merging is transitive (a box cut at a four-tile corner); the
+   merged box is the union with the best score. Test: two separate same-class buttons 4 points apart inside a strip
+   stay two; one wide text box cut by a seam becomes one; a box cut at a corner becomes one.
+3. **HUD sidecar format** (the run's overlay record): **JSON Lines**, file suffix **`.hud.jsonl`**, first line a header
+   `{"format":"sighter-hud","version":1,…}`. Limits: a line is at most **64 KiB**, a file at most **256 MiB** and
+   **1,000,000** lines (named constants; the reader stops with a clear message at a limit). Versions: a **higher major
+   version** is refused with "This HUD file was written by a newer Sighter"; unknown fields in a known version are
+   ignored (new fields are optional and additive); a malformed line is skipped and counted, never a panic. The HUD
+   holds boxes, classes, scores and labels, never pixels; labels of redacted regions are masked before they are written
+   (redaction before every store).
+4. **Confidence bands** (confirmed as defaults): **high ≥ 0.8** (the resolver's acting threshold τ) and **medium ≥ 0.5**,
+   below that low; both are validated Settings (0 < medium < high ≤ 1). They are set from measurements once a model
+   exists: spike item S8 compares them with each class's F1-optimal threshold from evaluation (proposal section 6) and
+   the wrong-click rate, and may move the defaults or make them per class.
+5. **Hint spaces and containment**: as in "Adapter hints: coordinate space" below (virtualised refused with its message;
+   containment 50 %).
+6. **`o`** (confirmed): the captured window's origin on the host, in the host input space (macOS global points; Windows
+   physical virtual-screen pixels), read just before acting; for a whole-display capture, the display's origin.
+   **Overlay items are generic over capture pixels and host input**: the HUD draws in host input space on Sighter's own
+   overlay window, and burned-in run recordings draw in capture pixels; both come from the same items through the chain.
+
+### Adapter hints: coordinate space
+
+A hint (decision 9) is a rectangle from the user's own framework adapter. It is parsed at the server's edge into a typed
+value that **names its space**; Sighter never guesses a space and never rescales a hint by a guessed factor.
+
+| Hint space (wire tag) | Where it comes from | How it enters the chain |
+|---|---|---|
+| `host-input` on **Windows**: physical virtual-screen pixels | an adapter on the host whose reading thread is **Per-Monitor DPI aware** (v1 or V2). UI Automation returns physical coordinates (Microsoft, "Understanding Screen Scaling Issues": "The UI Automation API does not use logical coordinates", `CurrentBoundingRectangle` among the listed properties; clients that are not DPI aware "will not obtain correct results"). pywinauto 0.6.9 makes its process Per-Monitor aware at import (`win32functions.py`: `SetProcessDpiAwareness(Process_Per_Monitor_DPI_Aware)`, read in the wheel 2026-10-29). `Sighter.FlaUI` runs its reads under `SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)` (whether UI Automation honours the thread context rather than the process's is spike item S6) | it is a `HostInput` rectangle: the chain's inverse input step (− `o`, the window origin read for this query) gives capture pixels, then − `c` and ÷ (`s` · `r`) give logical points: `Chain::input_to_logical`, the same inverse that input uses |
+| `host-input` on **macOS**: global points (top-left origin of the main display, the space of `CGEvent` and of the window list) | an adapter on the host | (point − `o`) × `h` = capture pixels, then as above: `Chain::input_to_logical` |
+| `remote-pixels`: pixels of the remote desktop (origin at its top-left) | an adapter running **inside** the remote machine or VM (the remote desktop's own virtual screen, Per-Monitor aware as above) | ÷ `r` gives remote logical points (the inverse of `logical_to_remote`); only for viewer-window targets with a known remote resolution |
+| `capture-pixels`, `logical` | rectangles taken from Sighter's **own earlier results** (a client narrowing a follow-up query to a box Sighter returned) | the chain's inverses (`capture_to_logical`), or as is |
+| `virtualised` (a `system`-aware or unaware reader) | an adapter that is not Per-Monitor aware | **refused** (below) |
+
+- The client states its DPI awareness with each hint (`per-monitor-v2`, `per-monitor`, `system`, `unaware`; `Sighter.FlaUI`
+  reads it with `GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext())`); `system` and `unaware` make the
+  hint `virtualised`. **A virtualised hint is refused** with a message that says what to fix ("The hint from <adapter>
+  is in DPI-virtualised coordinates; make the adapter Per-Monitor V2 DPI aware"), because Windows virtualises such
+  coordinates per monitor and no chain can undo that on mixed-DPI layouts; the locate itself goes on without the hint.
+  A hint without a space tag is refused at the edge.
+- After mapping, a hint is clipped to the query's scope and grown by a small margin (default 8 logical points, a
+  tunable) because it can be stale; a hint that falls outside the target is dropped and recorded. Hints then only
+  narrow and rank (decision 9): a detection **counts as inside a hint when at least 50 % of its area lies inside the
+  grown hint** (`HINT_CONTAINMENT`, default 0.5, a validated Setting in (0, 1]); detections below that are not
+  candidates for the hinted query. A hinted query with no detection inside is "not found", never the hint itself.
+- **Test item** (pure, synthetic): a hint on each display of the mixed-scale layout above, in both host spaces and in
+  `remote-pixels` with `r` = 1.5 and `s` = 0.5, maps to the logical rectangle of the element it names within ±1 logical
+  point; an unaware or untagged hint is refused with its reason.
 
 ## Remote desktops and VM consoles in a viewer window
 
@@ -405,90 +579,301 @@ must map host → remote → host within ±1 host pixel (part of the test item o
 
 The main way an app gets its model (user, 2026-10-29; proposal section 6.1):
 
-1. **Import**: a test-run video of a viewer window (or a local window) is imported as a `paddock-jobs` job with phases
-   (decode, sample, de-duplicate, store), progress on each phase's own scale and Cancel (ER-17 to ER-19). Frames come
-   through `paddock-video` (the shared FFmpeg runtime). **Near-duplicate frames are dropped**: a perceptual hash per
-   frame plus a mean-absolute-difference threshold, both tolerant of codec noise (the same quantised hashing as the
-   viewer-window tiles). The frame count after de-duplication is shown.
-2. **Auto-label**: the user starts it after a **confirmation that states the frame count and the expected time** (rule
-   46; amended proposal 9.1). **Boxes come from computer vision only**: OCR (text and text-bearing controls), templates
-   (crops the user marked), and the app's own detector once one exists. **Pitwall's vision model never places boxes**;
-   when Pitwall is present and the user agrees, it **names and describes** the boxed regions and **suggests a class**
-   from numbered crop sheets (proposal 9.1 "element naming"). That keeps the pipeline pixels-only (decision 9): the VLM
-   reads pixels too, and only labels what computer vision found. Without Pitwall, names come from OCR text.
+1. **Import**: a test-run video of a viewer window (or a local window) is imported as a `paddock-jobs` job at
+   `Background`, built as the rule-14 pipeline of "Parallelism and cost": **decode → de-duplicate → redact → infer →
+   store**, each a stage with its own progress on its own scale and Cancel (ER-17 to ER-19). Frames come through
+   `paddock-video` (the shared FFmpeg runtime). **Near-duplicate frames are dropped**: a perceptual hash per frame plus
+   a mean-absolute-difference threshold, both tolerant of codec noise (the same quantised hashing as the viewer-window
+   tiles). **Redaction runs before the store stage** ("Password fields and secrets, from pixels"): only redacted frames
+   are written, and **the user's source video is never copied into the project**; the project keeps its path, size and
+   SHA-256 (to find it again and to detect a changed file), and the frames. The infer stage runs only when the user
+   chose "Label with computer vision while importing" (it adds OCR, templates and the app's own detector, no VLM);
+   otherwise it passes frames through. The frame count after de-duplication is shown.
+2. **Auto-label**: boxes come from **computer vision only**: OCR (text and text-bearing controls), templates (crops
+   the user marked), and the app's own detector once one exists, either in the import pipeline or later over stored
+   frames (load → infer → store labels). **Pitwall's vision model never places boxes**; when Pitwall is present and the
+   user agrees, it **names** the boxed regions and **suggests a class** for each from numbered crop sheets (proposal 9.1
+   kind 1, "names and classes for existing boxes"), after a **confirmation that states the frame count and the expected
+   time** (rule 46). That keeps the pipeline pixels-only (decision 9): the VLM reads pixels too, and only labels what
+   computer vision found. Without Pitwall, names come from OCR text.
 3. **Review queue**: the most uncertain labels first (low detector score, disagreement between sources, a VLM class
    that differs from the detector's), with one-key accept and quick fix (proposal section 5).
-4. **Train**: RF-DETR **Small** as the app's own model, on the GPU: MPS on Apple Silicon (CoreML is for inference), the
-   opt-in CUDA runtime on NVIDIA (licence exception), else the CPU or a remote host. Augmentation per "Augmentation and
-   synthetic data".
-5. **After training**: later videos of the same app are pre-labelled by the app's own model; the VLM is used only for
-   **new, unknown screens** (a screen whose fingerprint matches no reviewed screen and where the detector is unsure),
-   again after a confirmation with the count.
+4. **Train**: RF-DETR **Small** as the app's own model, **on this computer only**: MPS on Apple Silicon (CoreML is for
+   inference), the opt-in CUDA runtime on NVIDIA (licence exception), else the CPU. Dataset assembly per "Training
+   geometry matches inference", augmentation per "Augmentation and synthetic data". **No remote training in v1**
+   (below).
+5. **After training**: later videos of the same app are pre-labelled by the app's own model; the VLM is used only to
+   name and classify boxes on **new, unknown screens** (a screen whose fingerprint matches no reviewed screen and where
+   the detector is unsure), again after a confirmation with the count.
+
+**Remote training: not in v1** (coordinator's decision of 2026-10-29, following "local first, opt-in online": the user
+approved local training with an opt-in CUDA runtime only). Proposal section 6's "user-chosen remote host over SSH" is
+removed from v1. The export-only path stays: the user may take an exported (redacted) dataset to another machine
+themselves; Sighter sends nothing. **Possible future work**, only through its own ADR: training on a host the user names, opt-in through `paddock-net` `Egress`, off
+by default and blocked by Offline mode, sending **redacted frames only**, with a per-job host allow-list and a
+confirmation that shows the host and the frame count before anything is sent.
 
 **Spike item**: label quality (precision and recall of auto-labels against a hand-reviewed set, per class) and time per
-frame (import, auto-label, review) on a real recorded test video of a test app (synthetic data, never real user
+frame (import, auto-label, review) on a recorded test video of a synthetic test app (synthetic data, never real user
 recordings: AGENTS.md).
+
+## Training geometry matches inference
+
+The detector only ever sees 640 tiles of frames normalised to logical 100 % ("Screens, tiles and coordinates"), so the
+training data is cut the same way. Dataset assembly (Rust, `sighter-core` and `sighter-frames`) does, per reviewed
+frame:
+
+1. **Normalise to logical 100 %** with the frame's recorded chain (the display scale `h` from the recorder's session
+   metadata; for imported videos the scale entered or confirmed at import, and `s` and `r` for viewer windows), with
+   the same resampling function inference uses. Boxes map through the same chain.
+2. **Cut the inference grid**: every tile of `tile_grid(width, height, 640, 64)`, exactly as at run time.
+3. **Add random-offset crops**: k extra 640 crops per frame (default 2, a dataset preset value) at uniformly random
+   offsets inside the frame, so elements are also seen away from the grid's fixed seams and edges. These replace the
+   2 × 2 mosaic of earlier revisions: a mosaic puts four frames' edges in the middle of a tile, a layout the detector
+   never sees at run time.
+4. **Clip boxes** to the tile or crop. **Visible-fraction rule**: a clipped box is kept when at least **40 %** of its
+   area is visible, or when its visible part is at least **64 logical points** along the cut side (wide elements cut by
+   a seam, which the seam merge joins at run time); otherwise it is dropped and the area it covered in the tile is
+   left as it is (DETR has no ignore regions; the spike checks whether filling it with background helps). Both numbers
+   are dataset preset values recorded in the model card.
+5. **Scale jitter stays narrow around 1.0**: 0.9 to 1.1 (per sample, applied to the 640 tile with its boxes, then
+   padded or cropped back to 640), to cover rounding and font-rendering differences. `rfdetr`'s `multi_scale` is
+   `off` and `expanded_scales` unused, because inference never sees another scale.
+6. **HiDPI is simulated, not scaled**: frames recorded or rendered at 125 %, 150 %, 175 % or 200 % (the recorder's
+   variation plan, proposal section 6 item 1) are resampled by 1/`h` to logical 100 % in step 1, exactly as at run
+   time, so the model learns the resampling artefacts it will meet (fractional factors such as 1/1.5 blur edges
+   differently from 1/2). Where only 100 % recordings exist, dataset assembly can render a 150 % or 200 % copy by
+   upsampling and resampling back, which is an approximation (real HiDPI rendering has more detail) and is marked as
+   such in the dataset.
+7. **Viewer scale** (`s` < 1) is simulated the same way: downsample by `s`, then resample by 1/`s`, as the chain does.
+
+This settles the old contradiction between "display scale 100–200 %" (this ADR) and "scale 50 to 300 percent"
+(proposal section 6): **there is no geometric scale augmentation beyond 0.9–1.1**; display scales from 100 % to 300 %
+are supported by normalising (at run time and in training), and HiDPI artefacts come from simulation. Proposal section
+6 is amended to match.
 
 ## Augmentation and synthetic data
 
 What the training runtime applies, with the RF-DETR or Albumentations option where one exists (read in the `rfdetr`
 repository at `f381551` and on PyPI, 2026-10-29). RF-DETR's default training stack is "resize/crop scale jitter plus
 horizontal flip at 50%" (`docs/learn/train/augmentations.md`); custom stacks are passed as `aug_config` (Albumentations
-transform names, `rfdetr[augment]`), with `multi_scale` (`per-batch`, `per-sample`, `off`), `expanded_scales` and
-`scale_jitter` for scale. RF-DETR has **no built-in mosaic, copy-paste or class balancing**; those are Sighter's.
-Albumentations transform names below are to be checked against the pinned version.
+transform names), with `multi_scale` (`per-batch`, `per-sample`, `off`), `expanded_scales` and `scale_jitter` for scale.
+RF-DETR has **no built-in copy-paste or class balancing**; those are Sighter's. Albumentations transform names below are
+to be checked against the pinned version.
 
 | Group | Technique | How (RF-DETR option or equivalent) | Notes |
 |---|---|---|---|
 | Photometric | Themes and accents, brightness, contrast, gamma, blur, noise | `aug_config`: `RandomBrightnessContrast`, `RandomGamma`, `HueSaturationValue` (accent shifts), `GaussianBlur`, `GaussNoise` | Real themes (light, dark, high contrast) come from recording, not from colour jitter |
 | Remote artefacts | The **remote-codec preset**: RDP/VNC-style JPEG, H.264/AVC, 16-bit colour, chroma blur, smart-sizing resampling | JPEG: `ImageCompression`; resampling: `Downscale`; 16-bit colour (RGB565) and chroma blur: small custom transforms; H.264/AVC: rendered offline through `paddock-video`'s FFmpeg at dataset export | Best: frames recorded through the same viewer and codec |
-| Geometric | Display scale 100–200 %, viewer scale 0.5–1×, small shifts and crops, window sizes | `multi_scale`, `expanded_scales`, `scale_jitter`; `Affine` with small translation; window sizes from recording | **No flips or rotations**: UI layout and text are not mirror- or rotation-symmetric (a flipped "Save" button or a right-to-left toolbar would teach the model shapes that never occur). RF-DETR's default flip is turned off by passing Sighter's own `aug_config` without `HorizontalFlip` |
-| Composition | Copy-paste of controls onto other screens and backgrounds; mosaic; occlusion by cursor, tooltips, dialogs | Sighter's dataset assembly (offline): paste reviewed crops with their boxes; 2 × 2 mosaics of frames; overlay cursor sprites, tooltip and dialog crops (partly occluded boxes kept or dropped by visible fraction) | Exact labels for free; keep pasted scale within the recorded scale range |
+| Geometric | Scale jitter 0.9–1.1, small shifts, random-offset crops, HiDPI and viewer-scale simulation, window sizes | `scale_jitter` narrow, `multi_scale=off`; `Affine` with small translation; crops and simulation in dataset assembly ("Training geometry matches inference"); window sizes from recording | **No flips or rotations**: UI layout and text are not mirror- or rotation-symmetric (a flipped "Save" button or a right-to-left toolbar would teach the model shapes that never occur). RF-DETR's default flip is turned off by passing Sighter's own `aug_config` without `HorizontalFlip` |
+| Composition | Copy-paste of controls onto other screens and backgrounds; occlusion by cursor, tooltips, dialogs | Sighter's dataset assembly (offline), **on the tile grid and random-offset crops** above: paste reviewed crops (already at logical 100 %) with their boxes; overlay cursor sprites, tooltip and dialog crops (occluded boxes kept or dropped by the visible-fraction rule) | Exact labels for free; pasted elements keep scale 1.0 (± the jitter) |
+| Redaction | The password fill applied at random to ordinary text inputs | Dataset assembly ("Password fields and secrets, from pixels") | So that a filled field does not mean "password" to the model |
 | Text | Re-render label text with other strings, lengths, fonts and languages | Offline: fill the text region with its background colour and draw new text (system fonts on the training machine) | Experiment: only kept if the held-out set shows a gain |
 | Label economy | Label propagation by tracking across video frames | Track each reviewed box into neighbouring frames (template match in a small search window); propagated boxes enter the review queue as "proposed" | Pure Rust in `sighter-core` |
 | | Active learning | Review queue orders frames by uncertainty (score margin, source disagreement) | `sighter-core` |
 | | Hard-negative mining | Regions the user rejected (false positives) are kept as background in their frames; frames with many rejections are sampled more | `sighter-core` dataset assembly |
 | | Class balancing | Repeat-factor sampling of frames that contain rare classes | `sighter-core` dataset assembly (no RF-DETR option) |
-| Synthetic screens | Run the app under test with varied themes, fonts, window sizes and data, and record it | Sighter's recorder with a variation plan (proposal section 6, item 1: "real variation captured by the recorder") | The most realistic "augmentation"; the studio shows coverage gaps |
+| Synthetic screens | Run the app under test with varied themes, fonts, window sizes, scales and data, and record it | Sighter's recorder with a variation plan (proposal section 6, item 1: "real variation captured by the recorder") | The most realistic "augmentation"; the studio shows coverage gaps |
 
-**Honest measurement.** A **held-out set of real, unaugmented frames**, split by recording session (never frames of
-the same session in train and test), is never augmented and never used for training. Each technique (or group) is
+**Honest measurement.** A **held-out set of real, unaugmented frames** is never augmented and never used for training.
+It is split **by recording session and by screen fingerprint**: no frame of a held-out session is in training, and no
+screen whose fingerprint (proposal section 5, the screen-state fingerprint) appears in the held-out set appears in
+training from any session, so the score measures new screens and not memorised ones. Each technique (or group) is
 switched **on and off** against it, with everything else fixed, and kept only if it raises per-class mAP@0.5:0.95 or
 lowers the wrong-click rate. **Spike item**: record which techniques actually raise accuracy, as results blocks in
 [performance.md](../performance.md) (rule 48).
 
-**Where the code goes.** Online augmentation (photometric, JPEG, resampling, scale, small shifts) runs in the **Python
-training runtime**, as an `aug_config` built from a Sighter preset and passed to `rfdetr`. Pinned libraries:
-Albumentations **2.0.8 (MIT)** through `rfdetr[augment]` (`albumentations>=1.4.24,<3.0.0`) and Kornia 0.9 (Apache-2.0).
-**Not AlbumentationsX**: the maintained successor on PyPI is AGPL-3.0 (2.5.1, 2026-10-11) and is excluded; the MIT
-Albumentations' last release is from 2025-05-27, so the runtime pins it and its licence is checked on every bump.
-Offline steps (de-duplication, copy-paste, mosaic, occlusion, text re-rendering, H.264 rendering, tracking, active
-learning, hard negatives, class balancing) are Rust in `sighter-core` and `sighter-frames`, which write a COCO dataset
-for the runtime. Shared pieces: `paddock-video` (decode, FFmpeg runtime, codec rendering), `paddock-jobs` (import,
-auto-label and training jobs), `paddock-runtime` (the Python runtime), `paddock-pitwall` (naming requests). The
-near-duplicate and tile hashing is one implementation in `sighter-core` for both uses.
+**Where the code goes.** Online augmentation (photometric, JPEG, resampling, the narrow scale jitter, small shifts) runs
+in the **Python training runtime**, as an `aug_config` built from a Sighter preset and passed to `rfdetr` with
+`augmentation_backend="albumentations"`. Pinned library: Albumentations **2.0.8 (MIT)**, installed directly at that
+version rather than through the `rfdetr[augment]` extra, because the extra also pulls in Kornia (`kornia<1,>=0.7`, in
+the 1.11.2 wheel's metadata), which Sighter does not use: **Kornia is not in the runtime**. Kornia is `rfdetr`'s GPU
+augmentation backend; it becomes a candidate only if the spike shows training bound by CPU-side augmentation (then it
+is added with its own entry, licence Apache-2.0, and its behaviour pinned: the research note records a behaviour change
+in an unreleased version). **Not AlbumentationsX**: the maintained successor on PyPI is AGPL-3.0 (2.5.1, 2026-10-11)
+and is excluded; the MIT Albumentations' last release is from 2025-05-27, so the runtime pins it and its licence is
+checked on every bump. Offline steps (de-duplication, normalising, grid tiles and crops, copy-paste, occlusion, the
+redaction fill, text re-rendering, H.264 rendering, tracking, active learning, hard negatives, class balancing) are Rust
+in `sighter-core` and `sighter-frames`, which write a COCO dataset of 640 tiles for the runtime. Shared pieces:
+`paddock-video` (decode, FFmpeg runtime, codec rendering), `paddock-jobs` (import, auto-label and training jobs),
+`paddock-runtime` (the Python runtime), `paddock-pitwall` (naming requests). The near-duplicate and tile hashing is one
+implementation in `sighter-core` for both uses.
 
 ## Password fields and secrets, from pixels
 
 Without accessibility (decision 9) there is no `IsPassword` flag, so the recorder's "pause around password fields"
-(AGENTS.md, proposal section 4) needs a pixels-only mechanism. Everything runs on each frame **in memory, before
-anything is written** (redaction before storage):
+(AGENTS.md, proposal section 4) needs a pixels-only mechanism.
+
+**When and how.** Every frame is **classified in memory at capture time** (the recorder) or at decode time (video
+import), **before anything is written or sent**. A region classified as a password field, or as a text input that is
+not yet known to be safe, gets a **solid fill**: one opaque colour (the field's own background colour, sampled at its
+inner border, so the field's outline stays visible and the class stays learnable), drawn over the field's inner text
+area. **Never a blur**: blurred text can be partly recovered, and short secrets such as PINs fall to guessing. **The
+fill is permanent**: the stored frame has no unfilled copy, and review cannot undo it. Each stored frame carries a
+**`redacted` flag** and the list of filled rectangles, so the studio shows them, evaluation knows them, and dataset
+assembly can treat them.
+
+**Classifiers**, combined (any one marks a field):
 
 1. **Masked-glyph check** (works before any model exists): inside text-box-like regions (a rectangle with a text
    baseline, found by the OCR text detector), a run of three or more identical, evenly spaced dot or asterisk glyphs
    (•, ●, ∗, *) marks a password field.
-2. **Detector class** `password_field` in every app's taxonomy, trained from reviewed frames like any other class.
-3. **Text inputs redacted by default until classified**: every region the detector or the OCR heuristic sees as a text
-   input is blurred in stored frames until it is classified as not a password field (by the detector with high
-   confidence or by the user in review).
-4. **User hotkey to pause** recording at once (and to resume), shown in the recorder's overlay.
-5. Typed key text is not stored by default (AGENTS.md), so keystrokes, the main leak, are covered independently.
+2. **OCR label cue**: OCR text in or next to the field (left of it, or just above it) that matches a password label
+   from a localised knowledge list ("Password", "Passcode", "PIN", "Passwort", "Kennwort", "Mot de passe",
+   "Contraseña", "Senha", "Пароль", "パスワード", "密码", "비밀번호" and others), shipped as a TOML pack and extendable by
+   the user (rule 21; a pack of the "secrets" kind). It catches an **empty** password field and fields with custom masks,
+   which the glyph check misses.
+3. **Detector class** `password_field` in every app's taxonomy, trained from reviewed frames like any other class.
+4. **Text inputs filled by default until classified**: every region the detector or the OCR heuristic sees as a text
+   input, and that the detector does not classify with high confidence as not a password field, is filled.
+5. **User hotkey to pause** recording at once (and to resume), shown in the recorder's overlay.
+6. Typed key text is not stored by default (AGENTS.md), so keystrokes, the main leak, are covered independently.
 
-**Limits:** a field that shows plain text ("show password" toggles), custom masks (shapes other than dots), secrets
-in ordinary fields (API keys, one-time codes), a mask that briefly shows the last typed character, and very small or
-heavily compressed fields (remote sessions) can be missed; the redact-by-default rule and the hotkey cover part of that,
-not all. **Spike item**: recall of the masked-glyph check and of the `password_field` class on synthetic login screens,
-local and RDP-compressed, at 100 % and 200 %.
+**Training with filled fields.** Dataset assembly applies **the same fill, at random, to ordinary text inputs** (a
+dataset preset probability, default 0.3; boxes keep their class), so a filled field does not by itself mean
+`password_field`. For `password_field` boxes it draws **synthetic mask dots** (a random count of • glyphs in the field's
+text colour) on the fill, because at run time the detector sees live password fields with their dots, never the fill.
+Neither step can leak a secret: the fill was applied at capture time, and the dots are synthetic.
+
+**Redaction before every store or send.** One function in `sighter-core` (pure: frame, classifier outputs → filled
+frame plus rectangles) is called on every path where pixels leave memory:
+
+| Path | Where redaction runs |
+|---|---|
+| Recorder | at capture, before the frame is encoded or written |
+| Video import | in the pipeline's redact stage, before the store stage; the user's source video is never copied into the project unredacted (only its path, size and hash are kept) |
+| Test runs | `run.mp4` (the run recording) and the step and failure screenshots of run reports, before encoding |
+| Exports | Debrief bundles and any report export (they are built from already redacted run artefacts, and the export re-checks the `redacted` flag) |
+| Diagnostics | diagnostics bundles and logs never include unredacted frames; screenshots in them are taken from redacted artefacts |
+| Pitwall | crop sheets and frames sent for naming, descriptions and grounding are cut from redacted frames; a crop that overlaps a filled rectangle is sent filled |
+
+A test per path (synthetic login screen, a known secret string rendered into a password field) asserts the bytes
+written or sent contain no unfilled pixel of that field.
+
+**Limits:** a field that shows plain text ("show password" toggles), custom masks without a label cue, secrets in
+ordinary fields (API keys, one-time codes), a mask that briefly shows the last typed character, and very small or
+heavily compressed fields (remote sessions) can be missed; the fill-by-default rule, the label cue and the hotkey cover
+part of that, not all. **Spike item**: recall of the masked-glyph check, the label cue and the `password_field` class
+on synthetic login screens, local and RDP-compressed, at 100 % and 200 %.
+
+## Parallelism and cost (rule 51)
+
+Every bulk operation, with (a) its threads and workers and (b) how it is made cheaper. **Thread counts come from
+`paddock_proc::threads(kind, class)`** (ADR 0024: cores by kind, never logical CPUs; `User` CPU work gets performance
+cores − 1, at least 1; `Background` gets the efficiency-core count on Apple silicon, physical cores / 2 on uniform
+CPUs), capped by the app's Performance setting, and each is a **Setting with an "Auto" default**, validated in the
+engine (rule 51): `import.decode_threads`, `import.workers`, `infer.cpu_threads`, `dataset.workers`,
+`training.data_workers`, `pipeline.queue_memory`. Results are deterministic: work is numbered at the source and
+committed in that order (rule 14).
+
+| Operation | Class | (a) Parallelism | (b) Cheaper | Cost estimate |
+|---|---|---|---|---|
+| **Video import** | `Background` | The rule-14 pipeline below: FFmpeg decode with `threads(Cpu, Background)` threads; de-duplication hashing and redaction on `threads(Cpu, Background)` workers; store on 4 writers (SSD I/O, rule 13) | Drop near-duplicates **inside FFmpeg** with `mpdecimate` ("Drop frames that do not differ greatly from the previous frame", FFmpeg filter docs) or a `select` on the scene score, so most frames never cross into Sighter, are never converted or hashed; `mpdecimate` still decodes every frame, so the only step before decode is `-skip_frame nokey` (keyframes only), which loses frames and is a spike comparison, not a default; decode at the size the chain needs, not larger | **Spike item S3**: frames per second per stage on a synthetic 10-minute 1920 × 1200 test-run video |
+| **Auto-label** (CV) | `Background` | Tiles of several frames batched on the GPU in `sighter-infer`'s queue (behind locates); OCR in the same sidecar; one frame per worker for the CPU stages | **Reuse OCR detections**: one OCR pass per frame hash serves the password classifiers, the OCR label source, names and the OCR-anchor layer; unchanged tiles of consecutive frames reuse the cached detections (the per-tile hash); fp16 and IO binding below | Detector only, projected from the indicative per-tile times: 8 tiles per 1920 × 1200 frame × ~30 ms (CoreML) ≈ 0.24 s per frame, about **8 minutes for 2,000 frames**; on 4 CPU threads ~1.4 s per frame, about **47 minutes**; OCR is extra and unmeasured. Projections, to be measured (S3) |
+| **Dataset assembly** | `User` (a phase of the user-started training job) | `threads(Cpu, User)` workers, one frame each (normalise, grid tiles, crops, clipping, fill, composition); encode and write on 4 writers | Tiles cut once per dataset snapshot and reused across training runs with the same preset (content-hashed); lossless WebP or PNG chosen by the spike's encode cost | ~10 tiles and crops per frame, so 2,000 frames give ~20,000 training images; time **spike item S3** |
+| **Training** | `User` | One GPU process; data-loader workers `threads(Cpu, User)`, capped by RAM (each worker holds decoded batches); batch size from free GPU memory | Train at 640 only (no multi-scale), fixed tile size; early stopping; fine-tune from the COCO checkpoint; fp16/AMP where the backend supports it (CUDA; MPS to be checked) | **Spike item S4**: minutes per epoch for RF-DETR Small on 20,000 tiles, on the M4 Pro (MPS), on an NVIDIA laptop (CUDA) and on the CPU; nothing is quoted until measured |
+| **CoreML preparation** | `Background` (separate `sighter-infer --prepare` process) | One compile per model; never two at once (a compile is memory-heavy) | Run once per model hash and OS version; the cache is kept with the model; prepare right after training so the first locate is warm | 23–49 s per model (indicative, at load 18–24, [performance.md](../performance.md#2026-10-29-rf-detr-onnx-latency-indicative-docssighter-rfdetr)) |
+
+**The import pipeline (rule 14).** Producers → bounded queue → workers, per stage:
+
+```text
+decode (FFmpeg, mpdecimate) → [queue] → de-duplicate → [queue] → redact → [queue] → infer (optional) → [queue] → store
+```
+
+- **Bounded queues**, sized in bytes, not frames (a 1920 × 1200 RGBA frame is about 9.2 MB, a 3840 × 2160 one about
+  33 MB): together at most `pipeline.queue_memory` (Auto: 512 MB, or less on machines with little RAM), split over the
+  stages. A full queue blocks its producer (back-pressure); nothing is dropped.
+- **Stage-specific workers**: decode is FFmpeg's own threads; de-duplicate hashes on workers and **compares in order**
+  at a single commit point (a frame is compared with the last kept frame, so this step is sequential but cheap);
+  redact and infer on workers; store on 4 writers.
+- **Cancel** reaches every stage; frames already stored stay consistent (the job writes into a new import folder and
+  swaps it in at the end, ER-18). **Progress** per stage on its own scale (decoded frames count up, kept frames,
+  redacted, labelled, stored).
+- **Determinism**: frames are numbered by their decode timestamp; the store commits in that order, so the same video
+  gives the same frame ids.
+
+**Sharing the GPU between locate and pre-labelling.** `sighter-infer` has **one GPU queue** per execution provider,
+ordered by the class each call carries: **locates first**, background work (pre-labelling, evaluation) after. The unit of
+work is **a tile, or a small batch of tiles**; a waiting locate goes next **between tiles**, so it waits at most for one
+batch already running (one tile is ~30 ms on CoreML; the background batch size is capped so a batch stays within a few
+tiles). Training runs in its own process on the same GPU and cannot be pre-empted per tile; while it runs, Sighter says
+"Training is using the graphics card; locating may be slower", and the spike measures locate p95 during training
+(S4).
+
+**Concurrent locates** (several targets or clients at once; the design review's "8 targets"): each locate is split into
+tiles in its own priority order; the queue serves locates **round-robin by tile**, so one full-screen locate cannot
+starve a small one, and on a GPU it **batches tiles of different locates together**. On the CPU there is one inference
+run at a time with `threads(Cpu, User)` intra-op threads, never a thread pool per locate (that would oversubscribe the
+cores). Two locates on the same frame hash and scope share one run (single-flight). The number of locates in flight is
+bounded (Auto: 8, a Setting); further locates wait for admission, which counts against their caller's step timeout like
+any other wait. Each locate's cap counts host ticks from its own start.
+
+**Cheaper options to try** (rule 51 b; each measured in the spike and kept only with a recorded gain):
+
+- **FFmpeg `mpdecimate` or a scene `select`** before frames leave FFmpeg (above), against Sighter's own hash alone.
+- **fp16**: an fp16 ONNX export for DirectML and the GPU; CoreML `MLProgram` can compute in fp16 on the GPU. Kept only
+  if the GPU self-test (decision 4) still matches the CPU answer within tolerance; the CPU stays fp32 (the determinism
+  reference).
+- **IO binding** (ONNX Runtime `IoBinding`): preallocated input and output buffers for a batch of tiles, filled in place
+  by normalise and tile, so no tensor is allocated or copied per call.
+- **Reusing OCR detections** across the password check, the OCR label source and the locate's OCR-anchor layer (one
+  pass per frame hash), and reusing tile detections across frames whose tiles did not change.
+
+## Priority classes and the C40 instance list (ADR 0024)
+
+Sighter's child-process launch sites, each through `paddock_proc::command(...).class(...)` (C40; Sighter is born
+compliant: the checks are errors for it from its first code, ADR 0024 rollout step 3):
+
+| Launch site (planned) | What it runs | Class | Threads |
+|---|---|---|---|
+| `sighter-infer` (server start) | inference sidecar: locate, OCR, pre-labelling, evaluation, the GPU self-test | **`User`**; the class travels per call (locate `User`, pre-labelling and evaluation `Background` threads inside) | intra-op `threads(Cpu, User)` |
+| `sighter-infer --prepare` | CoreML compile of one model into its cache | `Background` | `threads(Cpu, Background)` |
+| Capture helper (proposal section 4, out of process) | screen and window capture for locate and recording | `User` (serves interactive locates) | 1–2 |
+| Input helper (Windows, Per-Monitor V2) | `SendInput` for `act` | `User` | 1 |
+| FFmpeg through `paddock-video` (`ffprobe`, decode) | video import | `Background` | `threads(Cpu, Background)` (FFmpeg `-threads`) |
+| FFmpeg through `paddock-video` (encode) | H.264 rendering for the remote-codec preset (dataset assembly) | `User` (a phase of training) | `threads(Cpu, User)` |
+| Training worker (managed Python runtime, `paddock-runtime`) | `rfdetr` training | `User` while the user started it (all of v1) | data-loader workers `threads(Cpu, User)` |
+| Training runtime self-test (after download or update) | one step on a generated mini dataset | `Background` | `threads(Cpu, Background)` |
+
+**Amendment note for the integrator (ADR 0024, section 1, "Instances today").** The row "Pitcrew, Spotter, Sighter,
+Pacenotes – no priority set on children" gets Sighter's sites from the table above (Sighter has no code yet; the sites
+are planned and are checked by C40 from the first commit that adds them).
+
+## Amendment note for ADR 0031, section 7 (for the integrator)
+
+Rows to add to ADR 0031's instance table (Sighter has no code yet; these are the planned bounds, so C51 finds them
+classified from the first commit):
+
+| Where | Bound | Class | Note |
+|---|---|---|---|
+| Sighter server → `sighter-infer` locate call | a locate | L; C | judged on tile progress (`Progress` per finished tile or batch); the caller's step timeout is the only cap, on host ticks |
+| Sighter `sighter-infer` model load (session creation) | model load | L | one opaque ONNX Runtime call: CPU time and run state only; C from the measured load |
+| Sighter `sighter-infer` GPU self-test | start-up check of the user's model | L | progress per reference tile; a stuck self-test means "use the CPU" with the reason shown |
+| Sighter `sighter-infer --prepare` (CoreML preparation job) | CoreML compile | L | opaque compile: CPU time and run state; the job itself has no cap (rule 12) |
+| Sighter training worker (Python runtime) | a training job | L | progress per optimiser step from the worker's callback; no cap (rule 12), Cancel |
+| Sighter → Pitwall naming, descriptions, grounding (`paddock-pitwall`, loopback HTTP) | a VLM request | X | Pitwall is another app's service: its own timeouts, Retry, never counts toward a quarantine; long batches are a job with progress per item |
+| Sighter capture and input helpers | start and handshake | L | through `paddock-ipc`'s handshake (already a row) |
+
+## Spike items
+
+Collected from this ADR; each result is a rule-48 block in [performance.md](../performance.md).
+
+- **S1. Gate on CoreML and CPU** under "Gate conditions per execution provider": the locate gate at both sizes, cold
+  load, prepare time, the CPU-gate plan's steps, recall at tile seams.
+- **S2. DirectML, not yet measured at all.** On a physical Windows 11 PC with an Intel integrated GPU and on one with an
+  NVIDIA discrete GPU: the locate gate and cold load under the same conditions; the GPU self-test against the CPU answer;
+  whether the `windows-latest` VM runner exposes any DirectX 12 adapter; together with the DirectML licence gate (P6)
+  and the delay-load check of decision 4. Until S2 runs, DirectML is "supported, unmeasured".
+- **S3. Bulk cost**: import stage rates (decode, `mpdecimate` and scene `select` against Sighter's hash alone,
+  `-skip_frame nokey`), auto-label per frame on CoreML and CPU, dataset assembly time and encode format.
+- **S4. Training cost**: minutes per epoch for Small on 20,000 tiles (MPS, CUDA, CPU), memory, and locate p95 while
+  training runs.
+- **S5. Cheaper inference**: fp16 (self-test still matching), IO binding, batch size per EP, against the fp32 baseline.
+- **S6. Adapter hints**: whether UI Automation honours a Per-Monitor V2 **thread** context in a process that is not
+  DPI aware (the `Sighter.FlaUI` case); a synthetic window on a 150 % monitor beside a 100 % one.
+- **S7.** The items named in the text: auto-label quality, augmentation gains, password recall, compressed-frame
+  accuracy, occlusion on Windows, hashing cost, seam recall with `SEAM_IOU`.
+- **S8. Confidence bands**: per-class F1-optimal thresholds and wrong-click rate against the 0.8 and 0.5 defaults.
 
 ## Licence exceptions
 
@@ -498,7 +883,7 @@ exceptions, one shipped (conditional) and one downloaded on request:
 | File | Licence | Scope | Reason | Approved |
 |---|---|---|---|---|
 | `DirectML.dll` 1.15.4 (NuGet `Microsoft.AI.DirectML`, SHA-256-pinned) | Microsoft Software License Terms, Microsoft DirectX Machine Learning (DirectML): proprietary; distribution allowed only inside an application, for Windows and Xbox, not stand-alone; may collect data | Windows only, shipped next to `sighter-infer.exe`; never another file of that package, never another app. **Condition: the DirectML gate passes** (no outbound connection, and no ETW/TraceLogging provider or an inert one; decision 4, plan item P6); otherwise it is not shipped and Sighter uses the system `DirectML.dll` with a delay-loaded import (or a CPU-only build) or the CPU | DirectML is how the ONNX Runtime build reaches any DirectX 12 GPU (NVIDIA, AMD, Intel) on Windows; the build imports it | user, 2026-10-29 (conditional) |
-| NVIDIA CUDA runtime libraries (CUDA runtime, cuBLAS, cuDNN and the other NVIDIA libraries the pinned PyTorch CUDA wheels depend on) | NVIDIA CUDA EULA (v13.4) and the NVIDIA SDK licence with its cuDNN supplement (v. 2022-02-22): proprietary; runtime `.so`/`.dll` files distributable only "as incorporated in object code format into a software application" with "material additional functionality", "only accessed by your application" | **Training only**: the opt-in CUDA variant of the managed Python training runtime, **downloaded on request from the upstream hosts** (`download.pytorch.org` and `download-r2.pytorch.org` for the PyTorch CUDA wheels (about **1.9 GB** for the Windows wheel, `torch-2.14.1+cu130` cp312 checked at 1,990,608,063 bytes; about **0.55 GB** for the Linux x86-64 wheel plus the `nvidia-*` wheels, cuDNN alone about 0.5 GB); `pypi.org` and `files.pythonhosted.org` for the `nvidia-*` wheels they depend on, Linux), **never mirrored on our Gitea** (a stand-alone copy of NVIDIA's files would fall outside EULA 1.1.1's grant); never in the installer, never used by inference; NVIDIA's terms shown before the download; those hosts are on the `Egress` allow-list for this download job only | PyTorch has no other accelerator for NVIDIA GPUs; without it NVIDIA laptops train on the CPU or a remote host | user, 2026-10-29 |
+| NVIDIA CUDA runtime libraries (CUDA runtime, cuBLAS, cuDNN and the other NVIDIA libraries the pinned PyTorch CUDA wheels depend on) | NVIDIA CUDA EULA (v13.4) and the NVIDIA SDK licence with its cuDNN supplement (v. 2022-02-22): proprietary; runtime `.so`/`.dll` files distributable only "as incorporated in object code format into a software application" with "material additional functionality", "only accessed by your application" | **Training only**: the opt-in CUDA variant of the managed Python training runtime, **downloaded on request from the upstream hosts** (`download.pytorch.org` and `download-r2.pytorch.org` for the PyTorch CUDA wheels (about **1.9 GB** for the Windows wheel, `torch-2.14.1+cu130` cp312 checked at 1,990,608,063 bytes; about **0.55 GB** for the Linux x86-64 wheel plus the `nvidia-*` wheels, cuDNN alone about 0.5 GB); `pypi.org` and `files.pythonhosted.org` for the `nvidia-*` wheels they depend on, Linux), **never mirrored on our Gitea** (a stand-alone copy of NVIDIA's files would fall outside EULA 1.1.1's grant); never in the installer, never used by inference; NVIDIA's terms shown before the download; those hosts are on the `Egress` allow-list for this download job only | PyTorch has no other accelerator for NVIDIA GPUs; without it NVIDIA laptops train on the CPU (no remote training in v1) | user, 2026-10-29 |
 
 cargo-deny checks crates, not shipped DLLs or downloaded runtimes, so the exceptions are written in
 `apps/sighter/deny.toml` as a commented "non-crate binaries" list with these reasons, and the third-party notices list
@@ -515,7 +900,13 @@ against that list comes with the notices tooling.
   happens**: it is a large, outward-facing upload, so the agent doing it asks first and does not do it on its own.
 - **P2. Update the proposal** when this ADR is accepted (sections 6 and 8, see Consequences), and close proposal section
   15 question 1; restate section 7's locate budgets as the gate and target tiers. Section 9.1 was already amended, and
-  sections 6.1 and 6.2 added, on 2026-10-29.
+  sections 6.1 and 6.2 added, on 2026-10-29. Revision 4 applied now: section 4 (redaction by solid fill, imports
+  without VLM boxes), section 6 (scale augmentation 0.9–1.1 with HiDPI simulation; no remote SSH training in v1),
+  section 9.1 kind 1 ("names and classes for existing boxes"; no Florence-2 boxes) and section 10 (no training host).
+- **P7. Integrator's amendments** to family ADRs: Sighter's launch sites into ADR 0024's instance list ("Priority
+  classes and the C40 instance list") and Sighter's rows into ADR 0031 section 7 ("Amendment note for ADR 0031").
+- **P8. `sighter-bench`**: the `locate` benchmark of "Gate conditions per execution provider", emitting the rule-48
+  block, and the nightly workflow once Sighter has CI.
 - **P3. Shared single-file asset kind** in `paddock-runtime` (or a shared model catalogue), with Pacenotes' Model2Vec
   and Pitwall's model downloads as the other users (rule 42, rule of three); downloads through `paddock-net` `Egress`.
 - **P4. RT-DETRv4 licence review** (research note section 9): ask the authors for the checkpoints' licence and whether
@@ -565,7 +956,12 @@ against that list comes with the notices tooling.
   model card carries the base checkpoint's licence, notice and lineage; the user's own data and model stay the user's.
 - Proposal section 6 (presets), section 8 (licence table) and 9.1 are updated when this ADR is accepted: RF-DETR becomes
   primary, DEIMv2 moves to excluded (non-commercial), RT-DETRv4 is pending, UI-DETR-1 and the "Florence-2 bootstraps
-  boxes" idea are not v1, and 9.1's label suggestions follow decision 5 (applied on 2026-10-29).
+  boxes" idea are not v1, and 9.1's first request kind is "names and classes for existing boxes" (decision 5; applied
+  on 2026-10-29 and aligned in revision 4).
+- No remote training in v1: a computer without a usable GPU trains on the CPU (slowly) or the user takes an exported
+  dataset elsewhere; the possible future path is described in "Training from test-run videos".
+- Redaction is a solid, permanent fill: stored frames can never be un-redacted, so a field filled by mistake stays
+  filled in that recording (the price of filling by default).
 - A new app starts with no detector: until the user has reviewed enough frames to train the first model, labelling is
   OCR, templates and manual review. This is the price of leaving UI-DETR-1 out of v1 and of using pixels only.
 - **Cost of 100 % computer vision** (decision 9): no ground-truth element names, roles or states from the OS, so labels,
