@@ -166,6 +166,13 @@ mod tree {
         pub fn close(self) {}
 
         /// Ends the tool and everything it started, and reaps the tool.
+        #[cfg_attr(
+            unix,
+            expect(
+                clippy::disallowed_methods,
+                reason = "ADR 0033 WP-6: killpg before reaping; move to paddock_proc::Supervised"
+            )
+        )]
         pub fn end(&self, child: &mut Child) {
             #[cfg(unix)]
             {
@@ -355,6 +362,7 @@ pub(crate) mod tests {
     }
 
     #[cfg(windows)]
+    // ADR 0033 WP-6 (test): a tree by parent pids without start times; use paddock_proc::descendants
     fn tree_members(pid: u32) -> Vec<Member> {
         use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
         let mut sys = System::new();
@@ -422,6 +430,13 @@ pub(crate) mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg_attr(
+        unix,
+        expect(
+            clippy::disallowed_methods,
+            reason = "ADR 0033 WP-6 (test): kills tree members found by parent pids; use paddock_proc"
+        )
+    )]
     fn kill_pid(pid: u32) {
         if let Ok(p) = i32::try_from(pid) {
             let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(p), nix::sys::signal::Signal::SIGKILL);

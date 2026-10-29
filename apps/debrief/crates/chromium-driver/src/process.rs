@@ -30,6 +30,13 @@ impl Supervised {
     }
 
     /// Ends the process tree now and reaps it. Idempotent.
+    #[cfg_attr(
+        unix,
+        expect(
+            clippy::disallowed_methods,
+            reason = "ADR 0033 WP-5: killpg after try_wait may have reaped the leader; replace with paddock_proc::Supervised"
+        )
+    )]
     pub fn kill(&mut self) {
         let Some(mut c) = self.child.take() else { return };
         #[cfg(unix)]
@@ -58,6 +65,10 @@ impl Drop for Supervised {
 
 /// Whether a process with this id exists (used by leak tests).
 #[cfg(unix)]
+#[cfg_attr(
+    unix,
+    expect(clippy::disallowed_methods, reason = "ADR 0033 WP-5: a liveness probe by pid (signal 0)")
+)]
 pub fn process_exists(pid: u32) -> bool {
     // SAFETY: signal 0 only checks existence.
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }

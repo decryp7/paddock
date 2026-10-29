@@ -1,13 +1,18 @@
-// C53: nothing is ended by a bare pid (ADR 0033). The OS hands a freed pid on (Windows at once), so a pid kept from a
-// snapshot, a file or a parent link can name another program by the time it is signalled: Paddock's Windows CI killed one
-// test's browser network service while ending another test's browser. Every kill goes through `paddock_proc` with a
-// `ProcessId` (pid plus start time, checked before the kill) or through a handle or job object this process owns. Flagged,
-// in any Rust file outside the one implementation (`crates/paddock-proc/src/sys.rs`):
-// - `libc::kill(`, nix's `signal::kill(`, `killpg(` (a signal to a pid or a process group);
-// - `TerminateProcess(`, `TerminateJobObject(` (fine on a handle the code opened and checked; say so in a waiver);
-// - `taskkill` (any `"taskkill"` or `"taskkill.exe"` in code: `/T` follows parent pids that may have been handed on) and a
-//   `kill` or `pkill` command;
-// - sysinfo's `.kill()` / `.kill_with(..)` on a process looked up by pid (`.process(Pid::from_u32(..))`, `Pid::from(..)`).
+// C53: nothing is ended by a bare pid (ADR 0033, rule 53). The OS hands a freed pid on (Windows at once), so a pid kept from a
+// snapshot, a file or a parent link can name another program by the time it is signalled. Every kill goes through
+// `paddock_proc` with a `ProcessId` (pid plus start time, checked before the kill) or through a handle or job object this
+// process owns. The main check is Clippy's `disallowed-methods` (lint/clippy.toml and every workspace's clippy.toml:
+// `libc::kill`, `libc::killpg`, nix's `kill`/`killpg`, sysinfo's `Process::kill`/`kill_with`, resolved by path, so a renamed
+// import cannot hide one). This check covers what Clippy cannot see, in any Rust file outside the one implementation
+// (`crates/paddock-proc/src/sys.rs`):
+// - programs that kill by pid, named in string literals: `taskkill` (also `taskkill.exe`; `/T` follows parent pids that may
+//   have been handed on), `Stop-Process`, `/bin/kill`, and a `kill`/`pkill` command;
+// - Win32 calls: `TerminateProcess(`, `TerminateJobObject(` (fine on a handle the code opened and checked; say so in a
+//   waiver);
+// - open follow-ups: a comment or `#[expect]` reason naming `ADR 0033 WP-<n>` marks a known site (a bare-pid kill waived
+//   for Clippy, or a walk that follows parent pids without start times). Each needs a dated waiver in
+//   paddock.waivers.toml, so the follow-up cannot be forgotten.
+// Limits: a pid passed to another program by other means (a script file, a shell string built at run time) is not seen.
 // A justified site carries `// conformance: pid-kill — <reason>` on the line or the line above.
 import { error } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
@@ -18,20 +23,18 @@ const BARE_WAIVER = /conformance:\s*pid-kill/;
 const IMPLEMENTATION = new Set(['crates/paddock-proc/src/sys.rs']);
 
 const PATTERNS = [
-  { re: /\blibc::kill\s*\(/g, what: 'signals a bare pid (`libc::kill`)' },
-  { re: /\bsignal::kill\s*\(/g, what: 'signals a bare pid (`signal::kill`)' },
-  { re: /\bkillpg\s*\(/g, what: 'signals a process group by a bare pid (`killpg`)' },
   { re: /\bTerminateProcess\s*\(/g, what: 'ends a process with `TerminateProcess`' },
   { re: /\bTerminateJobObject\s*\(/g, what: 'ends a job with `TerminateJobObject`' },
-  { re: /\.kill_with\s*\(/g, what: "ends a process found by pid (sysinfo's `kill_with`)" },
 ];
 /** Programs that kill by pid; matched on the unmasked text, since their names are string literals. */
 const PROGRAMS = [
   { re: /"(taskkill)(?:\.exe)?"/g, quote: 0 },
+  { re: /"[^"\n]*\b(Stop-Process)\b[^"\n]*"/g, quote: 0 },
+  { re: /"(\/(?:usr\/)?bin\/kill)"/g, quote: 0 },
   { re: /\b(?:command|Command::new)\s*\(\s*"(kill|pkill)"/g, quote: -1 },
 ];
-/** sysinfo: a process looked up by a raw pid and killed in the same statement or the `if let` that follows. */
-const SYSINFO_LOOKUP = /\.process\s*\(\s*(?:sysinfo::)?Pid::from(?:_u32)?\s*\([^)]*\)\s*\)/g;
+/** An open ADR 0033 follow-up, in a comment or an `#[expect]` reason. */
+const FOLLOW_UP = /ADR 0033 (WP-\d+)/g;
 
 const lineAt = (text, index) => text.slice(0, index).split('\n').length;
 
@@ -48,17 +51,14 @@ export function pidKills(text) {
       if (masked[q] === '"') hits.push({ index: m.index, what: `runs \`${m[1]}\`, which ends processes by pid` });
     }
   }
-  for (const m of masked.matchAll(SYSINFO_LOOKUP)) {
-    // The lookup, then `.kill()` on it within the next few lines (`if let Some(p) = sys.process(..) { p.kill(); }`).
-    const after = masked.slice(m.index, m.index + 240);
-    if (/\.kill\s*\(\s*\)/.test(after)) hits.push({ index: m.index, what: "ends a process looked up by a bare pid (sysinfo's `kill`)" });
-  }
+  for (const m of text.matchAll(FOLLOW_UP)) hits.push({ index: m.index, what: `an open ADR 0033 follow-up (${m[1]}): a known bare-pid kill or parent-pid walk`, followUp: true });
   return hits
     .sort((a, b) => a.index - b.index)
-    .map(({ index, what }) => {
+    .map(({ index, what, followUp }) => {
       const line = lineAt(masked, index);
       const near = [lines[line - 1] ?? '', lines[line - 2] ?? ''].join('\n');
-      const waived = WAIVER.test(near) ? 'reason' : BARE_WAIVER.test(near) ? 'no-reason' : undefined;
+      // A follow-up marker is waived only in paddock.waivers.toml (dated), never inline.
+      const waived = followUp ? undefined : WAIVER.test(near) ? 'reason' : BARE_WAIVER.test(near) ? 'no-reason' : undefined;
       return { line, what, waived };
     });
 }
@@ -66,7 +66,7 @@ export function pidKills(text) {
 export default {
   id: 'C53',
   title: 'Nothing is ended by a bare pid',
-  rule: 40,
+  rule: 53,
   run(ctx) {
     const out = [];
     const fix =
@@ -74,11 +74,12 @@ export default {
     for (const f of ctx.files()) {
       if (!f.endsWith('.rs') || IMPLEMENTATION.has(f)) continue;
       const text = ctx.read(f);
-      if (!text || !/kill|Terminate(?:Process|JobObject)/.test(text)) continue;
+      if (!text || !/kill|Stop-Process|Terminate(?:Process|JobObject)|ADR 0033 WP-/.test(text)) continue;
       for (const k of pidKills(text)) {
         if (k.waived === 'reason') continue;
-        if (k.waived === 'no-reason') out.push(error('C53', 40, f, k.line, 'the pid-kill waiver gives no reason', 'Write `// conformance: pid-kill — <why this pid cannot have been handed on>`.'));
-        else out.push(error('C53', 40, f, k.line, `${k.what}: the pid may belong to another process by now`, fix));
+        if (k.waived === 'no-reason') out.push(error('C53', 53, f, k.line, 'the pid-kill waiver gives no reason', 'Write `// conformance: pid-kill — <why this pid cannot have been handed on>`.'));
+        else if (k.what.startsWith('an open')) out.push(error('C53', 53, f, k.line, k.what, 'Fix the site through paddock_proc (ADR 0033), or give it a dated waiver in paddock.waivers.toml.'));
+        else out.push(error('C53', 53, f, k.line, `${k.what}: the pid may belong to another process by now`, fix));
       }
     }
     return out;

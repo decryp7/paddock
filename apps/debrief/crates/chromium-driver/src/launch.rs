@@ -383,6 +383,13 @@ impl Drop for Chromium {
     }
 }
 
+#[cfg_attr(
+    unix,
+    expect(
+        clippy::disallowed_methods,
+        reason = "ADR 0033 WP-5: the watchdog killpg()s a pid captured at launch; move to paddock-chromium"
+    )
+)]
 fn kill_pid(pid: Option<u32>) {
     #[cfg(unix)]
     if let Some(p) = pid {

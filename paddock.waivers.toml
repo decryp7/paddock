@@ -93,87 +93,119 @@ path = "apps/spotter/crates/spotter-sources/tests/http_sources.rs"
 reason = "Spotter: an unreachable-source test on a freed port; to use HeldPort::reset"
 expires = "2026-12-31"
 
-# ADR 0033: kills by a bare pid in the apps and tools, each a dated follow-up (the shared crates go through paddock_proc).
+# ADR 0033 (rule 53): known bare-pid kills and parent-pid walks in the apps and tools, each a dated follow-up. Clippy
+# allows them through #[expect(clippy::disallowed_methods)] reasons that name the work package; C53 finds those markers.
+
+[[waiver]]
+check = "C53"
+path = "apps/debrief/app/src-tauri/src/health/commands/tests.rs"
+reason = "ADR 0033 WP-5: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
+expires = "2026-12-31"
+
 [[waiver]]
 check = "C53"
 path = "apps/debrief/crates/chromium-driver/src/launch.rs"
-reason = "Debrief WP-5: the watchdog killpg()s a pid captured at launch after is_running() may have reaped the browser; move to paddock-chromium or paddock_proc::Supervised"
+reason = "ADR 0033 WP-5: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
 expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
 path = "apps/debrief/crates/chromium-driver/src/process.rs"
-reason = "Debrief WP-5: killpg and taskkill /T after try_wait may have reaped the leader; replace with paddock_proc::Supervised"
+reason = "ADR 0033 WP-5: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
 expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
 path = "apps/debrief/crates/debrief-ai-worker/src/child.rs"
-reason = "Debrief WP-5: the atexit reaper SIGKILLs registered pids that try_wait already reaped; register ProcessIds"
+reason = "ADR 0033 WP-5: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
 expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
 path = "apps/debrief/crates/debrief-collect/src/runner.rs"
-reason = "Debrief WP-5 (test): kills a grandchild by the pid it printed; use paddock_proc::end with a ProcessId"
+reason = "ADR 0033 WP-5: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
 expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
 path = "apps/debrief/crates/debrief-ipc/src/process.rs"
-reason = "Debrief WP-5: OsChild::kill_group killpg()s after try_wait may have reaped the leader; kill through a ProcessId"
+reason = "ADR 0033 WP-5: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C53"
+path = "apps/debrief/crates/debrief-monitor/src/source.rs"
+reason = "ADR 0033 WP-5: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
 expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
 path = "apps/debrief/crates/debrief-plugin-windows/src/command.rs"
-reason = "Debrief WP-5 (test): kills a grandchild by the pid it printed; use paddock_proc::end with a ProcessId"
+reason = "ADR 0033 WP-5: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C53"
+path = "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs"
+reason = "ADR 0033 WP-5: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C53"
+path = "apps/dyno/crates/dyno-platform/src/macos/procinfo.rs"
+reason = "ADR 0033 WP-9: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C53"
+path = "apps/pitcrew/crates/pitcrew-core/src/usage.rs"
+reason = "ADR 0033 WP-6: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
 expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
 path = "apps/pitcrew/crates/pitcrew-service/src/disclaim.rs"
-reason = "Pitcrew WP-6 (test): killpg on a recorded pid; use paddock_proc"
+reason = "ADR 0033 WP-6: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
 expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
 path = "apps/pitcrew/crates/pitcrew-service/src/launch.rs"
-reason = "Pitcrew WP-6: kill_tree is taskkill /T or killpg on a pid (Adopted runners from the state file included); kill by ProcessId, the job object on Windows"
+reason = "ADR 0033 WP-6: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C53"
+path = "apps/pitcrew/crates/pitcrew-service/src/probe.rs"
+reason = "ADR 0033 WP-6: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
 expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
 path = "apps/pitcrew/crates/pitcrew-service/src/process.rs"
-reason = "Pitcrew WP-6: taskkill /T fallback and tree_members walk parent pids without start times; use paddock_proc::descendants and kill_tree"
+reason = "ADR 0033 WP-6: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
 expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
 path = "apps/pitcrew/crates/pitcrew-service/src/terminate.rs"
-reason = "Pitcrew WP-6: ProcessWatch asks and ends pids from the last probe; take a ProcessId and use paddock_proc::ask and end"
+reason = "ADR 0033 WP-6: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
 expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
 path = "apps/pitcrew/crates/pitcrew-service/tests/supervision.rs"
-reason = "Pitcrew WP-6 (test): kills a pid with the kill command; use paddock_proc::end"
+reason = "ADR 0033 WP-6: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
 expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
 path = "apps/pitwall/crates/pitwall-server/src/system.rs"
-reason = "Pitwall WP-7: sysinfo kill of an unreaped tokio child by pid (safe today, the child is not reaped); go through paddock_proc"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/spotter/crates/spotter-render/src/process.rs"
-reason = "Spotter WP-8: a copy of the old paddock_proc kill_tree (kill -KILL -- -pid, taskkill /T, sysinfo kill of snapshot pids after try_wait may have reaped the root); replace with paddock_proc::Supervised"
+reason = "ADR 0033 WP-7: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
 expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
 path = "tools/paddock-dev/tests/it/slots.rs"
-reason = "WP-9 (test): kills the slot holder by the pid it reported; use paddock_proc::ProcessId::of_recorded and end"
+reason = "ADR 0033 WP-9: bare-pid kill or parent-pid walk; fix through paddock_proc (ProcessId, Supervised, descendants)"
 expires = "2026-12-31"

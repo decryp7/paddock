@@ -13,6 +13,7 @@ pub struct ShortInfo {
 }
 
 /// The short BSD info of `pid`; `None` when the kernel won't say or the process is gone.
+// ADR 0033 WP-9: the parent pid is shown in the process tree without a start-time check (display only).
 pub fn short_info(pid: Pid) -> Option<ShortInfo> {
     // SAFETY: `proc_bsdshortinfo` is plain data for which zero is a valid bit pattern.
     let mut info: libc::proc_bsdshortinfo = unsafe { std::mem::zeroed() };

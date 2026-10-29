@@ -5,17 +5,18 @@ import { findingsOf, makeApp } from './helpers.mjs';
 
 const lines = (text) => pidKills(text).map((k) => k.line);
 
-test('C53 bad: signals, Windows ends, kill programs and sysinfo kills by pid', () => {
-  assert.deepEqual(lines('fn a(p: i32) {\n    unsafe { libc::kill(p, 9) };\n}\n'), [2]);
-  assert.deepEqual(lines('fn a(p: i32) {\n    unsafe { libc::killpg(p, 9) };\n}\n'), [2]);
-  assert.deepEqual(lines('fn a(p: i32) {\n    let _ = nix::sys::signal::kill(Pid::from_raw(p), Signal::SIGKILL);\n}\n'), [2]);
+test('C53 bad: Windows ends, kill programs and open follow-ups', () => {
   assert.deepEqual(lines('fn a(h: HANDLE) {\n    unsafe { TerminateProcess(h, 1) };\n}\n'), [2]);
   assert.deepEqual(lines('fn a(h: HANDLE) {\n    unsafe { TerminateJobObject(h, 1) };\n}\n'), [2]);
   assert.deepEqual(lines('fn a() {\n    Command::new("taskkill").args(["/T", "/F"]);\n}\n'), [2]);
   assert.deepEqual(lines('fn exe() -> PathBuf {\n    root.join("taskkill.exe")\n}\n'), [2]);
   assert.deepEqual(lines('fn a() {\n    std::process::Command::new("kill").arg("-9");\n    paddock_proc::command("pkill");\n}\n'), [2, 3]);
-  assert.deepEqual(lines('fn a() {\n    if let Some(p) = sys.process(Pid::from_u32(pid)) {\n        p.kill();\n    }\n}\n'), [2]);
-  assert.deepEqual(lines('fn a() {\n    proc_.kill_with(Signal::Term);\n}\n'), [2]);
+  assert.deepEqual(lines('fn a() {\n    ps.arg("Stop-Process -Id 42 -Force");\n    Command::new("/bin/kill");\n}\n'), [2, 3]);
+  const marked = pidKills('#[expect(clippy::disallowed_methods, reason = "ADR 0033 WP-5: killpg after reap")]\nfn a() {}\n// ADR 0033 WP-6: parent pids\n');
+  assert.deepEqual(marked.map((k) => [k.line, k.waived]), [[1, undefined], [3, undefined]]);
+  assert.match(marked[0].what, /WP-5/);
+  // conformance: pid-kill does not waive a follow-up marker
+  assert.equal(pidKills('// conformance: pid-kill — no\n// ADR 0033 WP-6: x\n')[0].waived, undefined);
 });
 
 test('C53 good: Child::kill, a lookup without a kill, comments and strings', () => {
@@ -23,6 +24,8 @@ test('C53 good: Child::kill, a lookup without a kill, comments and strings', () 
   assert.deepEqual(lines('fn a() {\n    let alive = sys.process(Pid::from_u32(pid)).is_some();\n}\n'), []);
   assert.deepEqual(lines('// libc::kill(p, 9) and Command::new("taskkill")\nfn a() {\n    let s = "TerminateProcess(h, 1) taskkill";\n}\n'), []);
   assert.deepEqual(lines('fn a() {\n    paddock_proc::kill_tree(id);\n    paddock_proc::end(id);\n}\n'), []);
+  // Clippy's disallowed-methods covers these now.
+  assert.deepEqual(lines('fn a(p: i32) {\n    unsafe { libc::kill(p, 9) };\n    if let Some(p) = sys.process(Pid::from_u32(pid)) { p.kill(); }\n}\n'), []);
 });
 
 test('C53 waivers: with a reason the site passes, without one it is reported', () => {
@@ -32,7 +35,7 @@ test('C53 waivers: with a reason the site passes, without one it is reported', (
 });
 
 test('C53 through the runner: an error per bare-pid kill, none in the one implementation or for a waived site', async () => {
-  const bad = 'fn a(p: i32) {\n    unsafe { libc::kill(p, 9) };\n}\n';
+  const bad = 'fn a() {\n    Command::new("taskkill");\n}\n';
   const waived = 'fn a(h: HANDLE) {\n    // conformance: pid-kill — a handle we own\n    unsafe { TerminateProcess(h, 1) };\n}\n';
   const bare = 'fn a(h: HANDLE) {\n    // conformance: pid-kill\n    unsafe { TerminateProcess(h, 1) };\n}\n';
   const f = await findingsOf(
