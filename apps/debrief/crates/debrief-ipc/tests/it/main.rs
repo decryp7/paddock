@@ -2,5 +2,6 @@
 //! Each module is a former `tests/<name>.rs`; run one with `cargo test --test it <name>::`.
 
 mod child_log;
+mod endpoint_exit;
 mod launch;
 mod properties;

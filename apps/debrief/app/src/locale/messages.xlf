@@ -4793,35 +4793,35 @@
         <source>The inference runtime (<x id="build" equiv-text="r.label"/>, <x id="size" equiv-text="formatBytes(r.downloadBytes)"/>) is downloaded first.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/ai/setup/setup-wizard.ts</context>
-          <context context-type="linenumber">344</context>
+          <context context-type="linenumber">345</context>
         </context-group>
       </trans-unit>
       <trans-unit id="ai.setup.start.installed" datatype="html">
         <source>Set up</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/ai/setup/setup-wizard.ts</context>
-          <context context-type="linenumber">361</context>
+          <context context-type="linenumber">362</context>
         </context-group>
       </trans-unit>
       <trans-unit id="ai.setup.start.download" datatype="html">
         <source>Download and set up</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/ai/setup/setup-wizard.ts</context>
-          <context context-type="linenumber">361</context>
+          <context context-type="linenumber">362</context>
         </context-group>
       </trans-unit>
       <trans-unit id="ai.setup.toolCalling" datatype="html">
         <source>Tool calling</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/ai/setup/setup-wizard.ts</context>
-          <context context-type="linenumber">367</context>
+          <context context-type="linenumber">368</context>
         </context-group>
       </trans-unit>
       <trans-unit id="ai.setup.noToolCalling" datatype="html">
         <source>No tool calling</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/ai/setup/setup-wizard.ts</context>
-          <context context-type="linenumber">367</context>
+          <context context-type="linenumber">368</context>
         </context-group>
       </trans-unit>
       <trans-unit id="ai.updates.kind.runtime" datatype="html">
@@ -10667,46 +10667,46 @@
         <source>This window couldn&apos;t open</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dialog-windows/dialog-shell.ts</context>
-          <context context-type="linenumber">54,55</context>
+          <context context-type="linenumber">55,56</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dialogWindow.report" datatype="html">
         <source>Report a problem…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dialog-windows/dialog-shell.ts</context>
-          <context context-type="linenumber">58,59</context>
+          <context context-type="linenumber">59,60</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dialogWindow.close" datatype="html">
         <source>Close</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dialog-windows/dialog-shell.ts</context>
-          <context context-type="linenumber">59,61</context>
+          <context context-type="linenumber">60,62</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dialog-windows/dialog-shell.ts</context>
-          <context context-type="linenumber">74,76</context>
+          <context context-type="linenumber">75,77</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dialogWindow.loading" datatype="html">
         <source>Loading…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dialog-windows/dialog-shell.ts</context>
-          <context context-type="linenumber">62,64</context>
+          <context context-type="linenumber">63,65</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dialogWindow.cancel" datatype="html">
         <source>Cancel</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dialog-windows/dialog-shell.ts</context>
-          <context context-type="linenumber">72,73</context>
+          <context context-type="linenumber">73,74</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dialogWindow.unknown" datatype="html">
         <source>This dialog is not known to this version of Debrief: <x id="id" equiv-text="this.route.id"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dialog-windows/dialog-shell.ts</context>
-          <context context-type="linenumber">211</context>
+          <context context-type="linenumber">217</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.panel.failed" datatype="html">
@@ -11694,21 +11694,21 @@
         <source><x id="name" equiv-text="name"/> — <x id="when" equiv-text="when"/>: <x id="headline" equiv-text="headline"/>. Click to open.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dumps/dump-marker-track.ts</context>
-          <context context-type="linenumber">108</context>
+          <context context-type="linenumber">106</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dumps.marker.openDump" datatype="html">
         <source>Open dump <x id="name" equiv-text="name"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dumps/dump-marker-track.ts</context>
-          <context context-type="linenumber">113</context>
+          <context context-type="linenumber">111</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dumps.marker.openUmdh" datatype="html">
         <source>Open UMDH log <x id="name" equiv-text="name"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dumps/dump-marker-track.ts</context>
-          <context context-type="linenumber">113</context>
+          <context context-type="linenumber">111</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dumps.thread.faulted" datatype="html">
@@ -27627,35 +27627,35 @@
         <source><x id="name" equiv-text="name"/> — <x id="when" equiv-text="when"/>. Click to open.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/profiling/integration/profile-span-track.ts</context>
-          <context context-type="linenumber">118</context>
+          <context context-type="linenumber">117</context>
         </context-group>
       </trans-unit>
       <trans-unit id="profiling.spanTrack.openHeapRange" datatype="html">
         <source>Open heap snapshot <x id="name" equiv-text="name"/> on the visible range</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/profiling/integration/profile-span-track.ts</context>
-          <context context-type="linenumber">125</context>
+          <context context-type="linenumber">124</context>
         </context-group>
       </trans-unit>
       <trans-unit id="profiling.spanTrack.openHeap" datatype="html">
         <source>Open heap snapshot <x id="name" equiv-text="name"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/profiling/integration/profile-span-track.ts</context>
-          <context context-type="linenumber">126</context>
+          <context context-type="linenumber">125</context>
         </context-group>
       </trans-unit>
       <trans-unit id="profiling.spanTrack.openProfileRange" datatype="html">
         <source>Open capture <x id="name" equiv-text="name"/> on the visible range</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/profiling/integration/profile-span-track.ts</context>
-          <context context-type="linenumber">129</context>
+          <context context-type="linenumber">128</context>
         </context-group>
       </trans-unit>
       <trans-unit id="profiling.spanTrack.openProfile" datatype="html">
         <source>Open capture <x id="name" equiv-text="name"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/profiling/integration/profile-span-track.ts</context>
-          <context context-type="linenumber">130</context>
+          <context context-type="linenumber">129</context>
         </context-group>
       </trans-unit>
       <trans-unit id="profiling.etl.reading" datatype="html">
@@ -38475,6 +38475,13 @@
         </context-group>
         <note priority="1" from="meaning">View title</note>
       </trans-unit>
+      <trans-unit id="timeline.chipStrip.more" datatype="html">
+        <source><x id="count" equiv-text="n"/> more captures, dumps and notes</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/timeline/timeline-chip-strip.ts</context>
+          <context context-type="linenumber">96</context>
+        </context-group>
+      </trans-unit>
       <trans-unit id="timeline.lanes.instance" datatype="html">
         <source>Instance</source>
         <context-group purpose="location">
@@ -39085,21 +39092,21 @@
         <source>events / bucket</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">82,84</context>
+          <context context-type="linenumber">84,86</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.histMaxTitle" datatype="html">
         <source>Events in the busiest bucket</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">84</context>
+          <context context-type="linenumber">86</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.histMax" datatype="html">
         <source>max <x id="INTERPOLATION" equiv-text="{{ histMax() }}"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">84,85</context>
+          <context context-type="linenumber">86,87</context>
         </context-group>
         <note priority="1" from="description">Scale of the events histogram</note>
       </trans-unit>
@@ -39107,84 +39114,84 @@
         <source>Right-click to analyse a moment</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">97</context>
+          <context context-type="linenumber">105</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.error.summary" datatype="html">
         <source>Couldn&apos;t load the timeline.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">152</context>
+          <context context-type="linenumber">160</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.marker.ariaMany" datatype="html">
         <source><x id="label" equiv-text="label"/> at <x id="time" equiv-text="at"/>, <x id="count" equiv-text="count"/> events</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">328</context>
+          <context context-type="linenumber">340</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.marker.ariaOne" datatype="html">
         <source><x id="label" equiv-text="label"/> at <x id="time" equiv-text="at"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">329</context>
+          <context context-type="linenumber">341</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.menu.noteMarker" datatype="html">
         <source>Add note to this marker…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">365</context>
+          <context context-type="linenumber">377</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.menu.showMarkerEvent" datatype="html">
         <source>Show its event</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">366</context>
+          <context context-type="linenumber">378</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.menu.noteSpan" datatype="html">
         <source>Add note to this span…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">374</context>
+          <context context-type="linenumber">386</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.menu.showRun" datatype="html">
         <source>Show this run</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">376</context>
+          <context context-type="linenumber">388</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.menu.showEvidence" datatype="html">
         <source>Show the evidence</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">377</context>
+          <context context-type="linenumber">389</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.menu.analyseMoment" datatype="html">
         <source>Analyse this moment</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">390</context>
+          <context context-type="linenumber">402</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.menu.noteMoment" datatype="html">
         <source>Add note at this moment…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">396</context>
+          <context context-type="linenumber">408</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.menu.noteRange" datatype="html">
         <source>Add note to the selected range…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-panel.ts</context>
-          <context context-type="linenumber">398</context>
+          <context context-type="linenumber">410</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.tip.count" datatype="html">

@@ -9,8 +9,9 @@ import { FakeContext } from '../../analysis/test-setup';
 import { ProfileViewState } from '../profile-view-state.store';
 import { ProfilingBackend } from '../profiling-backend';
 import { openDemoCaptures, setupProfiling } from '../testing/profiling-test-support';
+import { ProfileSpanHost } from '../../timeline/testing/chip-hosts';
 import { ProfileMomentSection } from './profile-moment';
-import { labelWidth, layoutSpans, ProfileSpanTrack } from './profile-span-track';
+import { labelWidth, layoutSpans } from './profile-span-track';
 import { at } from '../../../testing/must';
 
 type View = { from: number; to: number };
@@ -19,7 +20,7 @@ async function mountTrack(opts: Parameters<typeof setupProfiling>[0] = {}, view:
   const doubles = setupProfiling(opts);
   if (open) await openDemoCaptures();
   const spans = await doubles.backend.spans();
-  const fixture: ComponentFixture<ProfileSpanTrack> = TestBed.createComponent(ProfileSpanTrack);
+  const fixture: ComponentFixture<ProfileSpanHost> = TestBed.createComponent(ProfileSpanHost);
   const wide: View = { from: Math.min(...spans.map((s) => s.fromMs)) - 1000, to: Math.max(...spans.map((s) => s.toMs)) + 1000 };
   fixture.componentRef.setInput('view', view ?? wide);
   fixture.detectChanges();
@@ -32,7 +33,7 @@ const chips = (f: ComponentFixture<unknown>) => all<HTMLButtonElement>(f, '[data
 const span = (patch: Partial<ProfileSpan> & Pick<ProfileSpan, 'id' | 'fromMs' | 'toMs'>): ProfileSpan => ({ name: `cap-${patch.id}`, capture: 'profile', kind: null, ...patch });
 
 describe('layoutSpans', () => {
-  it('drops spans outside the view, positions in percent, stacks overlapping labels and clips ranges', () => {
+  it('drops spans outside the view, positions in percent and clips ranges', () => {
     const spans = [
       span({ id: 1, fromMs: 0, toMs: 100, name: 'before' }),
       span({ id: 2, fromMs: 1000, toMs: 3000, name: 'a' }),
@@ -40,13 +41,11 @@ describe('layoutSpans', () => {
       span({ id: 4, fromMs: 1900, toMs: 1900, name: 'heap', capture: 'heap' }),
       span({ id: 5, fromMs: 2000, toMs: 2500, name: 'inside' }),
     ];
-    const out = layoutSpans(spans, { from: 1000, to: 2000 }, 1000);
+    const out = layoutSpans(spans, { from: 1000, to: 2000 });
     expect(out.map((o) => o.span.id)).toEqual([2, 3, 4, 5]);
     expect(out[0]?.left).toBe(0);
     expect(out[0]?.width).toBe(100);
     expect(out[0]?.range).toEqual({ fromNs: 0, toNs: 1_000_000_000 });
-    expect(out[1]?.row).toBe(1);
-    expect(out[0]?.row).toBe(0);
     expect(out[2]?.range).toBeNull();
     expect(out[3]?.left).toBe(100);
     // a span fully inside is not clipped
@@ -71,12 +70,12 @@ describe('ProfileSpanTrack', () => {
     expect(all(fixture, '.band.heap').length).toBeGreaterThan(0);
   });
 
-  it('stacks overlapping labels on different rows via the top style', async () => {
+  it('stacks overlapping labels on different rows of the strip via the top style', async () => {
     const { fixture } = await mountTrack();
     const tops = new Set(chips(fixture).map((c) => c.style.top));
     expect(tops.size).toBeGreaterThan(1);
     for (const t of tops) expect(t).toMatch(/^\d+px$/);
-    expect(chips(fixture).every((c) => parseInt(c.style.top) >= 52)).toBe(true);
+    expect(chips(fixture).every((c) => parseInt(c.style.top) >= 2)).toBe(true);
   });
 
   it('renders no chips without a view or when the view excludes all captures', async () => {
@@ -142,7 +141,7 @@ describe('ProfileSpanTrack', () => {
         { provide: COMMAND_CONTEXT, useValue: new FakeContext() },
       ],
     });
-    const fixture = TestBed.createComponent(ProfileSpanTrack);
+    const fixture = TestBed.createComponent(ProfileSpanHost);
     fixture.componentRef.setInput('view', { from: 0, to: 1e15 });
     fixture.detectChanges();
     await settle(fixture, 3);
@@ -151,7 +150,7 @@ describe('ProfileSpanTrack', () => {
 
   it('shows no chips when loading the spans fails', async () => {
     setupProfiling({ options: { fail: { spans: 3 } } });
-    const fixture = TestBed.createComponent(ProfileSpanTrack);
+    const fixture = TestBed.createComponent(ProfileSpanHost);
     fixture.componentRef.setInput('view', { from: 0, to: 1e15 });
     fixture.detectChanges();
     await settle(fixture, 4);
