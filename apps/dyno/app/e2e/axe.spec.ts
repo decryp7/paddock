@@ -22,15 +22,24 @@ const tray: AxeTarget = {
     await expect(page.getByRole('button', { name: /Open Dyno/ })).toBeVisible();
   },
 };
-const palette: AxeTarget = {
-  name: 'command palette',
+const paletteTarget = (name: string, keys: string, typed: string, expected: RegExp | null): AxeTarget => ({
+  name,
   url: '/?latency=0#/',
   ready: async (page) => {
     await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible({ timeout: 45_000 });
-    await page.keyboard.press('ControlOrMeta+Shift+P');
-    await expect(page.getByRole('combobox', { name: /Type a command/ })).toBeFocused();
+    await page.keyboard.press(keys);
+    const input = page.getByRole('combobox', { name: /Type a command/ });
+    await expect(input).toBeFocused();
+    if (typed) await input.fill(typed);
+    if (expected) await expect(page.getByRole('option').first()).toHaveText(expected);
+    else await expect(page.getByTestId('palette-empty')).toBeVisible();
   },
-};
+});
+const palettes = [
+  paletteTarget('command palette: commands', 'ControlOrMeta+Shift+P', '', /./),
+  paletteTarget('command palette: go to, with a query', 'ControlOrMeta+p', 'proc', /Processes/),
+  paletteTarget('command palette: go to, nothing matches', 'ControlOrMeta+p', 'zzzzzz', null),
+];
 
 test.describe('Dyno accessibility (axe, WCAG 2.2 AA)', () => {
   test.setTimeout(600_000);
@@ -39,6 +48,6 @@ test.describe('Dyno accessibility (axe, WCAG 2.2 AA)', () => {
   });
   test('every dialog window and the tray popover have no violations in either theme', async ({ page }) => {
     expect(await axeEveryDialog(page, CONTRACT_FILES, { inputs: INPUTS })).toEqual({});
-    expect(await axeTargets(page, [tray, palette])).toEqual({});
+    expect(await axeTargets(page, [tray, ...palettes])).toEqual({});
   });
 });

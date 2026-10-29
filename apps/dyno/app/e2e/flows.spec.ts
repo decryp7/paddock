@@ -58,37 +58,76 @@ test.describe('screens', () => {
 });
 
 test.describe('command palette', () => {
-  test('Mod+P goes to a page: type its name and press Enter', async ({ page }) => {
+  const input = (page: Page) => page.getByRole('combobox', { name: /Type a command/ });
+  const dashboard = async (page: Page) => {
     await page.goto(url('/'));
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
+  };
+
+  test('Mod+P goes to a page: type its name and press Enter, and the focus lands on the page', async ({ page }) => {
+    await dashboard(page);
+    const sidebarPages = await page.getByRole('navigation', { name: 'Pages' }).getByRole('link').count();
     await page.keyboard.press('ControlOrMeta+p');
-    const input = page.getByRole('combobox', { name: /Type a command/ });
-    await expect(input).toBeFocused();
-    // Every page of the sidebar is listed.
-    await expect(page.getByRole('option')).toHaveCount(17);
-    await input.fill('flight');
+    await expect(input(page)).toBeFocused();
+    // Every page of the sidebar is listed, whatever their number.
+    await expect(page.getByRole('option')).toHaveCount(sidebarPages);
+    await input(page).fill('flight');
     await expect(page.getByRole('option')).toHaveCount(1);
     await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { level: 1, name: 'Flight recorder' })).toBeVisible();
-    await expect(input).toBeHidden();
+    await expect(input(page)).toBeHidden();
+    await expect(page.locator('#pd-main')).toBeFocused();
   });
 
-  test('Mod+Shift+P lists the commands and runs one; Escape closes it', async ({ page }) => {
-    await page.goto(url('/'));
-    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
+  test('going to the page that is already shown also lands the focus on the page', async ({ page }) => {
+    await dashboard(page);
+    await page.keyboard.press('ControlOrMeta+p');
+    await input(page).fill('dashboard');
+    await page.keyboard.press('Enter');
+    await expect(input(page)).toBeHidden();
+    await expect(page.locator('#pd-main')).toBeFocused();
+  });
+
+  test('keys typed right after the shortcut are kept, and an early Enter runs nothing', async ({ page }) => {
+    await dashboard(page);
+    // The first command of a window waits for the app's context chunk; once it is loaded the palette opens at once.
     await page.keyboard.press('ControlOrMeta+Shift+P');
-    const input = page.getByRole('combobox', { name: /Type a command/ });
-    await expect(input).toBeFocused();
-    await input.fill('> rescan');
+    await expect(input(page)).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(input(page)).toBeHidden();
+    await page.keyboard.press('ControlOrMeta+Shift+P');
+    // No waiting for the input: this is how fast people type.
+    await page.keyboard.type('check backup');
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { level: 1, name: 'Backup health' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+
+  test('Mod+Shift+P runs a command on its page, and Escape closes the palette', async ({ page }) => {
+    await dashboard(page);
+    await page.keyboard.press('ControlOrMeta+Shift+P');
+    await expect(input(page)).toBeFocused();
+    await input(page).fill('> system logs');
     await expect(page.getByRole('option')).toHaveCount(1);
     await page.keyboard.press('Enter');
+    // The command shows its page first, so the result is where the person looks.
+    await expect(page.getByRole('heading', { level: 1, name: 'Issues' })).toBeVisible();
     await expect(page.getByText(/Read the system logs/)).toBeVisible();
-    await expect(input).toBeHidden();
+    await expect(input(page)).toBeHidden();
 
     await page.keyboard.press('ControlOrMeta+Shift+P');
-    await expect(input).toBeFocused();
+    await expect(input(page)).toBeFocused();
     await page.keyboard.press('Escape');
-    await expect(input).toBeHidden();
+    await expect(input(page)).toBeHidden();
+  });
+
+  test('a command of another page shows that page: Why slow runs again where its result appears', async ({ page }) => {
+    await dashboard(page);
+    await page.keyboard.press('ControlOrMeta+Shift+P');
+    await input(page).fill('> why slow run again');
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { level: 1, name: 'Why is my PC slow?' })).toBeVisible();
+    await expect(page.locator('#pd-main')).toBeFocused();
   });
 });
 

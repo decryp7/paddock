@@ -1,39 +1,68 @@
 import { inject } from '@angular/core';
 import type { AppContextFactory } from '@decryp7/paddock-ui/shell';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
+import { ShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { BACKEND } from '../core/backend';
 import { Notifier } from '../shared/notifier';
 import { BackupStore } from '../state/backup.store';
 import { DiagnosisStore } from '../state/diagnosis.store';
+import { DiagnosticsStore } from '../state/diagnostics.store';
 import { HistoryStore } from '../state/history.store';
 import { IssuesStore } from '../state/issues.store';
+import { ReportsStore } from '../state/reports.store';
+import { SettingsStore } from '../state/settings.store';
 
-/** Dyno's part of the shell context: small and purpose-built (interface segregation). */
+/**
+ * Dyno's part of the shell context: small and purpose-built (interface segregation). Each action of a page that the
+ * command palette offers shows that page first (so the result, a busy state or an error is where the person looks, and
+ * the focus lands there), then does what the page's button does. `can*` mirror the buttons' disabled states.
+ */
 export interface DynoContext {
   /** Saves the flight recorder's last ten minutes. */
   capture(): Promise<void>;
-  /** Reads the stored history of the dashboard's range again. */
+  /** Dashboard: reads the stored history of the shown range again. */
   refreshHistory(): Promise<void>;
-  /** Reads the OS logs now (the Issues page's button). */
+  canRefreshHistory(): boolean;
+  /** Issues: reads the OS logs now. */
   rescanIssues(): Promise<void>;
-  /** Checks the backup tools now (Backup health's button). */
+  canRescanIssues(): boolean;
+  /** Issues: saves the window for Debrief. */
+  exportIssues(): Promise<void>;
+  canExportIssues(): boolean;
+  /** Backup health: checks the backup tools now. */
   checkBackup(): Promise<void>;
-  /** Runs the slowness check again (Why slow's button). */
+  canCheckBackup(): boolean;
+  /** Why slow: runs the check again. */
   runWhySlow(): Promise<void>;
+  canRunWhySlow(): boolean;
+  /** Reports: saves the shown week as Markdown. */
+  exportReport(): Promise<void>;
+  canExportReport(): boolean;
+  /** Diagnostics: saves the bundle. */
+  saveDiagnostics(): Promise<void>;
+  canSaveDiagnostics(): boolean;
+  /** Alarms: opens the new-rule window. */
+  addAlarmRule(): Promise<void>;
+  canAddAlarmRule(): boolean;
 }
+
+const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
 
 /** Built once, in the root injection context, when the shell first needs the context. */
 export const dynoContext: AppContextFactory<DynoContext> = () => {
   const backend = inject(BACKEND);
   const notifier = inject(Notifier);
+  const pages = inject(ShellPages);
+  const dialogs = inject(DialogService);
   const history = inject(HistoryStore);
   const issues = inject(IssuesStore);
   const backup = inject(BackupStore);
   const diagnosis = inject(DiagnosisStore);
+  const reports = inject(ReportsStore);
+  const diagnostics = inject(DiagnosticsStore);
+  const settings = inject(SettingsStore);
+
   return {
-    refreshHistory: () => history.load(),
-    rescanIssues: () => issues.rescan(),
-    checkBackup: () => backup.check(),
-    runWhySlow: () => diagnosis.run(),
     capture: async () => {
       try {
         const info = await backend.capture();
@@ -42,5 +71,55 @@ export const dynoContext: AppContextFactory<DynoContext> = () => {
         notifier.show(e instanceof Error ? e.message : 'The capture failed.', 'bad');
       }
     },
+    refreshHistory: async () => {
+      await pages.go('dy.dashboard');
+      await history.load();
+    },
+    canRefreshHistory: () => !history.loading(),
+    rescanIssues: async () => {
+      await pages.go('dy.issues');
+      await issues.rescan();
+    },
+    canRescanIssues: () => !issues.rescanning(),
+    exportIssues: async () => {
+      await pages.go('dy.issues');
+      if (!issues.overview()) await issues.load();
+      await issues.exportForDebrief();
+    },
+    canExportIssues: () => !issues.exporting(),
+    checkBackup: async () => {
+      await pages.go('dy.backup');
+      // The page's button waits for the first report; so does the command.
+      if (!backup.report()) await backup.load();
+      await backup.check();
+    },
+    canCheckBackup: () => !backup.busy(),
+    runWhySlow: async () => {
+      await pages.go('dy.why-slow');
+      await diagnosis.run();
+    },
+    canRunWhySlow: () => !diagnosis.running(),
+    exportReport: async () => {
+      await pages.go('dy.reports');
+      if (!reports.report()) await reports.load();
+      await reports.export('markdown');
+    },
+    canExportReport: () => reports.exporting() === null,
+    saveDiagnostics: async () => {
+      await pages.go('dy.diagnostics');
+      await diagnostics.save();
+    },
+    canSaveDiagnostics: () => !diagnostics.saving(),
+    addAlarmRule: async () => {
+      await pages.go('dy.alarms');
+      const current = settings.settings();
+      if (!current) return;
+      const outcome = await dialogs.open<true>(ALERT_RULE_DIALOG_ID, {
+        inputs: { rule: null, takenIds: (current.customAlerts ?? []).map((r) => r.id) },
+        title: 'Add alert rule',
+      }).closed;
+      if (outcome.kind === 'answered') await settings.load();
+    },
+    canAddAlarmRule: () => settings.settings() !== null,
   };
 };

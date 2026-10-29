@@ -1,7 +1,7 @@
 import { Injector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { AppearanceStore, BrowserAppearanceBackend, buildManifest, CommandService, ContributionRegistry, manifestDrift, provideAppearance, serializeManifest, SHELL_COMMANDS } from '@decryp7/paddock-ui/shell';
+import { AppearanceStore, BrowserAppearanceBackend, buildManifest, CommandService, ContributionRegistry, manifestDrift, ShellContextHost, provideAppearance, serializeManifest, SHELL_COMMANDS } from '@decryp7/paddock-ui/shell';
 import { provideMenus, provideSubmenus } from '@decryp7/paddock-ui/shell/menu';
 import { SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { assertContributionsValid, dialogTableProblems, provideShellTesting } from '@decryp7/paddock-ui/shell/testing';
@@ -13,6 +13,11 @@ import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS, DIALOGS } from './contributions';
 import { dynoContext } from './context';
 import { DIALOG_BASE_COMMANDS } from './dialog-base';
 import { NAV } from './nav';
+import { ReportsStore } from '../state/reports.store';
+import { DiagnosticsStore } from '../state/diagnostics.store';
+import { SettingsStore } from '../state/settings.store';
+import { ShellPages } from '@decryp7/paddock-ui/shell/pages';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { BackupStore } from '../state/backup.store';
 import { DiagnosisStore } from '../state/diagnosis.store';
 import { HistoryStore } from '../state/history.store';
@@ -62,21 +67,66 @@ describe('Dyno contributions', () => {
     await expect(TestBed.inject(CommandService).run('dy.capture')).resolves.toBe(true);
   });
 
-  it('give every palette command a working handler that reaches the page’s own store', async () => {
+  it('run every palette command on its page: show the page, then do what the page’s button does', async () => {
     const commands = TestBed.inject(CommandService);
-    expect(await commands.run('dy.refresh-history')).toBe(true);
-    expect(TestBed.inject(HistoryStore).history()).not.toBeNull();
-    expect(await commands.run('dy.rescan-issues')).toBe(true);
-    expect(TestBed.inject(IssuesStore).overview()).not.toBeNull();
-    expect(await commands.run('dy.check-backup')).toBe(true);
-    expect(TestBed.inject(BackupStore).report()).not.toBeNull();
-    expect(await commands.run('dy.run-why-slow')).toBe(true);
-    expect(TestBed.inject(DiagnosisStore).diagnosis()).not.toBeNull();
+    const go = vi.spyOn(TestBed.inject(ShellPages), 'go').mockResolvedValue(true);
+    const history = vi.spyOn(TestBed.inject(HistoryStore), 'load');
+    const rescan = vi.spyOn(TestBed.inject(IssuesStore), 'rescan');
+    const exportIssues = vi.spyOn(TestBed.inject(IssuesStore), 'exportForDebrief');
+    const check = vi.spyOn(TestBed.inject(BackupStore), 'check');
+    const run = vi.spyOn(TestBed.inject(DiagnosisStore), 'run');
+    const exportReport = vi.spyOn(TestBed.inject(ReportsStore), 'export');
+    const save = vi.spyOn(TestBed.inject(DiagnosticsStore), 'save');
+    await TestBed.inject(ShellContextHost).load();
+    const cases: [string, string, { mock: { calls: unknown[][] } }][] = [
+      ['dy.refresh-history', 'dy.dashboard', history],
+      ['dy.rescan-issues', 'dy.issues', rescan],
+      ['dy.export-issues', 'dy.issues', exportIssues],
+      ['dy.check-backup', 'dy.backup', check],
+      ['dy.run-why-slow', 'dy.why-slow', run],
+      ['dy.export-report', 'dy.reports', exportReport],
+      ['dy.save-diagnostics', 'dy.diagnostics', save],
+    ];
+    for (const [command, page, action] of cases) {
+      go.mockClear();
+      const before = action.mock.calls.length;
+      expect(await commands.run(command), command).toBe(true);
+      expect(go, command).toHaveBeenCalledWith(page);
+      expect(action.mock.calls.length, command).toBeGreaterThan(before);
+    }
+    expect(exportReport).toHaveBeenCalledWith('markdown');
+  });
+
+  it('open the new-rule window on the alarms page once the settings are loaded', async () => {
+    const commands = TestBed.inject(CommandService);
+    const go = vi.spyOn(TestBed.inject(ShellPages), 'go').mockResolvedValue(true);
+    const open = vi.spyOn(TestBed.inject(DialogService), 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'dismissed' }) } as never);
+    await TestBed.inject(ShellContextHost).load();
+    expect(commands.isEnabled(commands.find('dy.add-alarm-rule')!)).toBe(false);
+    await TestBed.inject(SettingsStore).load();
+    expect(commands.isEnabled(commands.find('dy.add-alarm-rule')!)).toBe(true);
+    expect(await commands.run('dy.add-alarm-rule')).toBe(true);
+    expect(go).toHaveBeenCalledWith('dy.alarms');
+    expect(open).toHaveBeenCalledWith('dy.alert-rule', expect.objectContaining({ inputs: expect.objectContaining({ rule: null }) }));
+  });
+
+  it('turn a command off while its page’s button would be off (no second run of a running check)', async () => {
+    const commands = TestBed.inject(CommandService);
+    await TestBed.inject(ShellContextHost).load();
+    const running = TestBed.inject(DiagnosisStore).run();
+    expect(commands.isEnabled(commands.find('dy.run-why-slow')!)).toBe(false);
+    await running;
+    expect(commands.isEnabled(commands.find('dy.run-why-slow')!)).toBe(true);
+    const rescan = TestBed.inject(IssuesStore).rescan();
+    expect(commands.isEnabled(commands.find('dy.rescan-issues')!)).toBe(false);
+    await rescan;
   });
 
   it('title every palette command in sentence case, under a category', () => {
     const own = TestBed.inject(ContributionRegistry).commands().filter((c) => c.id.startsWith('dy.'));
-    expect(own.map((c) => c.id)).toEqual(['dy.capture', 'dy.refresh-history', 'dy.rescan-issues', 'dy.check-backup', 'dy.run-why-slow']);
+    expect(own.map((c) => c.id)).toEqual([
+      'dy.capture', 'dy.refresh-history', 'dy.rescan-issues', 'dy.export-issues', 'dy.check-backup', 'dy.run-why-slow', 'dy.export-report', 'dy.save-diagnostics', 'dy.add-alarm-rule',
+    ]);
     for (const c of own) {
       expect(c.category).toBeDefined();
       expect(c.title.text).toMatch(/^[A-Z][a-z]/);

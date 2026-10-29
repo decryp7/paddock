@@ -93,6 +93,7 @@ const PAGES = NAV.map((item, index) =>
 );
 
 export const CONTRIBUTIONS: ContributionBatch<DynoContext> = {
+  // The palette's commands beyond capture are the pages' own buttons, named as the buttons are (the category names the page).
   commands: [
     defineCommand<DynoContext>({
       id: 'dy.capture',
@@ -104,25 +105,57 @@ export const CONTRIBUTIONS: ContributionBatch<DynoContext> = {
       id: 'dy.refresh-history',
       title: msg('dy.refresh-history', 'Refresh history'),
       category: msg('dy.category.dashboard', 'Dashboard'),
+      enabled: (ctx) => ctx.canRefreshHistory(),
       run: (ctx) => ctx.refreshHistory(),
     }),
     defineCommand<DynoContext>({
       id: 'dy.rescan-issues',
-      title: msg('dy.rescan-issues', 'Rescan issues'),
+      title: msg('dy.rescan-issues', 'Read the system logs now'),
       category: msg('dy.category.issues', 'Issues'),
+      enabled: (ctx) => ctx.canRescanIssues(),
       run: (ctx) => ctx.rescanIssues(),
     }),
     defineCommand<DynoContext>({
+      id: 'dy.export-issues',
+      title: msg('dy.export-issues', 'Export for Debrief…'),
+      category: msg('dy.category.issues', 'Issues'),
+      enabled: (ctx) => ctx.canExportIssues(),
+      run: (ctx) => ctx.exportIssues(),
+    }),
+    defineCommand<DynoContext>({
       id: 'dy.check-backup',
-      title: msg('dy.check-backup', 'Check backup now'),
+      title: msg('dy.check-backup', 'Check now'),
       category: msg('dy.category.backup', 'Backup health'),
+      enabled: (ctx) => ctx.canCheckBackup(),
       run: (ctx) => ctx.checkBackup(),
     }),
     defineCommand<DynoContext>({
       id: 'dy.run-why-slow',
-      title: msg('dy.run-why-slow', 'Run the slowness check again'),
+      title: msg('dy.run-why-slow', 'Run again'),
       category: msg('dy.category.why-slow', 'Why slow'),
+      enabled: (ctx) => ctx.canRunWhySlow(),
       run: (ctx) => ctx.runWhySlow(),
+    }),
+    defineCommand<DynoContext>({
+      id: 'dy.export-report',
+      title: msg('dy.export-report', 'Export Markdown…'),
+      category: msg('dy.category.reports', 'Reports'),
+      enabled: (ctx) => ctx.canExportReport(),
+      run: (ctx) => ctx.exportReport(),
+    }),
+    defineCommand<DynoContext>({
+      id: 'dy.save-diagnostics',
+      title: msg('dy.save-diagnostics', 'Save bundle…'),
+      category: msg('dy.category.diagnostics', 'Diagnostics'),
+      enabled: (ctx) => ctx.canSaveDiagnostics(),
+      run: (ctx) => ctx.saveDiagnostics(),
+    }),
+    defineCommand<DynoContext>({
+      id: 'dy.add-alarm-rule',
+      title: msg('dy.add-alarm-rule', 'Add rule…'),
+      category: msg('dy.category.alarms', 'Alarms'),
+      enabled: (ctx) => ctx.canAddAlarmRule(),
+      run: (ctx) => ctx.addAlarmRule(),
     }),
   ],
   pages: PAGES,

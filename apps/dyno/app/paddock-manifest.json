@@ -2,12 +2,24 @@
   "version": 1,
   "commands": [
     {
+      "id": "dy.add-alarm-rule",
+      "title": "dy.add-alarm-rule"
+    },
+    {
       "id": "dy.capture",
       "title": "dy.capture"
     },
     {
       "id": "dy.check-backup",
       "title": "dy.check-backup"
+    },
+    {
+      "id": "dy.export-issues",
+      "title": "dy.export-issues"
+    },
+    {
+      "id": "dy.export-report",
+      "title": "dy.export-report"
     },
     {
       "id": "dy.refresh-history",
@@ -20,6 +32,10 @@
     {
       "id": "dy.run-why-slow",
       "title": "dy.run-why-slow"
+    },
+    {
+      "id": "dy.save-diagnostics",
+      "title": "dy.save-diagnostics"
     },
     {
       "id": "pd.about.open",
@@ -225,14 +241,20 @@
     }
   },
   "messages": {
+    "dy.add-alarm-rule": "Add rule…",
     "dy.alert-rule.title": "Alert rule",
     "dy.capture": "Capture the last ten minutes",
+    "dy.category.alarms": "Alarms",
     "dy.category.backup": "Backup health",
     "dy.category.dashboard": "Dashboard",
+    "dy.category.diagnostics": "Diagnostics",
     "dy.category.issues": "Issues",
     "dy.category.recorder": "Flight recorder",
+    "dy.category.reports": "Reports",
     "dy.category.why-slow": "Why slow",
-    "dy.check-backup": "Check backup now",
+    "dy.check-backup": "Check now",
+    "dy.export-issues": "Export for Debrief…",
+    "dy.export-report": "Export Markdown…",
     "dy.file-hash.title": "Search the file's hash on VirusTotal",
     "dy.health.agent": "the Dyno agent",
     "dy.lockers.title": "What is locking this file?",
@@ -255,8 +277,9 @@
     "dy.page.throttling": "Throttling",
     "dy.page.why-slow": "Why slow",
     "dy.refresh-history": "Refresh history",
-    "dy.rescan-issues": "Rescan issues",
-    "dy.run-why-slow": "Run the slowness check again",
+    "dy.rescan-issues": "Read the system logs now",
+    "dy.run-why-slow": "Run again",
+    "dy.save-diagnostics": "Save bundle…",
     "dy.settings.general": "Dyno",
     "dy.status.agent": "The Dyno agent",
     "dy.web-search.title": "Search the web",
