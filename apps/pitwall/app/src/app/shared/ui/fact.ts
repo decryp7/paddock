@@ -27,20 +27,20 @@ import { Toasts } from '../../core/toasts';
       display: grid;
       grid-template-columns: 104px minmax(0, 1fr) auto;
       align-items: center;
-      column-gap: var(--sp-2);
+      column-gap: var(--pd-space-2);
       min-height: 26px;
-      font-size: var(--fs-base);
+      font-size: var(--pd-text-body);
     }
     .label {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .value {
       min-width: 0;
       overflow-wrap: anywhere;
     }
     .mono {
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
     }
   `,
 })

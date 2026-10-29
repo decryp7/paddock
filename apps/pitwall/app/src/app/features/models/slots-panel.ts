@@ -95,7 +95,7 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
     :host {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       width: 460px;
       max-width: calc(100vw - 32px);
       /* Taller than the window never hides Save: the panel scrolls inside the overlay. */
@@ -104,11 +104,11 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
       min-height: min(600px, calc(100vh - 24px));
       overflow-y: auto;
       box-sizing: border-box;
-      padding: var(--sp-4);
-      background: var(--bg-raised);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      box-shadow: var(--shadow-pop);
+      padding: var(--pd-space-4);
+      background: var(--pd-surface-3);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-card);
+      box-shadow: var(--pd-shadow-3);
     }
     p {
       margin: 0;
@@ -119,18 +119,18 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
       justify-content: space-between;
     }
     .title {
-      font-weight: var(--fw-semibold);
+      font-weight: var(--pd-weight-semibold);
     }
     .lead,
     .note,
     .sum {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .picks {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
     }
     .pick {
       display: flex;
@@ -138,64 +138,64 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
       align-items: center;
       gap: 2px;
       min-height: 52px;
-      padding: var(--sp-2);
+      padding: var(--pd-space-2);
       font: inherit;
-      color: var(--text);
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r-md);
+      color: var(--pd-text);
+      background: var(--pd-surface-1);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-control);
       cursor: default;
       &:hover {
-        background: var(--bg-hover);
+        background: var(--pd-hover);
       }
       &[aria-checked='true'] {
-        border-color: var(--accent);
-        box-shadow: 0 0 0 1px var(--accent);
+        border-color: var(--pd-accent);
+        box-shadow: 0 0 0 1px var(--pd-accent);
       }
       b {
-        font-size: var(--fs-lg, 16px);
+        font-size: var(--pd-text-subtitle, 16px);
         font-variant-numeric: tabular-nums;
       }
       span {
-        font-size: var(--fs-xs);
-        color: var(--text-3);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-subtle);
         font-variant-numeric: tabular-nums;
       }
       &[data-tone='warn'] span {
-        color: var(--warn);
+        color: var(--pd-warning);
       }
       &[data-tone='bad'] span {
-        color: var(--bad);
+        color: var(--pd-danger);
       }
     }
     .slider {
       display: grid;
       gap: 4px;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       input {
         width: 100%;
-        accent-color: var(--accent);
+        accent-color: var(--pd-accent);
       }
     }
     .answer {
       display: flex;
       align-items: flex-start;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
     }
     .err {
-      color: var(--bad);
+      color: var(--pd-danger);
     }
     .scroll {
       overflow-x: auto;
     }
     .fit-table tr.sel td {
-      background: color-mix(in srgb, var(--accent) 10%, transparent);
+      background: color-mix(in srgb, var(--pd-accent) 10%, transparent);
     }
     .foot {
       display: flex;
       justify-content: flex-end;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
     }
   `,
 })

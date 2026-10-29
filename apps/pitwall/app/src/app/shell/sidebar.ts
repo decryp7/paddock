@@ -106,16 +106,16 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
       display: flex;
       flex-direction: column;
       height: 100%;
-      padding: calc(var(--titlebar-h) + var(--sp-3)) var(--sp-2) var(--sp-3);
-      background: var(--bg-sidebar);
+      padding: calc(var(--pw-titlebar-h) + var(--pd-space-3)) var(--pd-space-2) var(--pd-space-3);
+      background: var(--pw-sidebar-bg);
       overflow: hidden;
       user-select: none;
     }
     .brand {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
-      padding: var(--sp-1) var(--sp-2) var(--sp-4);
+      gap: var(--pd-space-2);
+      padding: var(--pd-space-1) var(--pd-space-2) var(--pd-space-4);
     }
     .logo {
       width: 24px;
@@ -124,9 +124,9 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
     }
     .product {
       flex: 1;
-      font-weight: var(--fw-semibold);
-      font-size: var(--fs-lg);
-      letter-spacing: var(--tracking-tight);
+      font-weight: var(--pd-weight-semibold);
+      font-size: var(--pd-text-subtitle);
+      letter-spacing: normal;
     }
     /* One pill for the serving state; the port is in its tooltip. */
     .state {
@@ -135,27 +135,27 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
       gap: 6px;
       height: 22px;
       padding: 0 8px;
-      font-size: var(--fs-xs);
-      font-weight: var(--fw-medium);
-      color: var(--text-2);
-      background: var(--bg-active);
-      border-radius: var(--r-full);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-medium);
+      color: var(--pd-text-muted);
+      background: var(--pd-pressed);
+      border-radius: var(--pd-radius-pill);
       white-space: nowrap;
       .dot {
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: var(--text-3);
+        background: var(--pd-text-subtle);
       }
       &[data-state='serving'] .dot {
-        background: var(--ok);
+        background: var(--pd-success);
       }
       &[data-state='paused'] .dot,
       &[data-state='stopped'] .dot {
-        background: var(--warn);
+        background: var(--pd-warning);
       }
       &[data-state='down'] .dot {
-        background: var(--bad);
+        background: var(--pd-danger);
       }
     }
     nav {
@@ -166,24 +166,24 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
       overflow: auto;
     }
     .group {
-      padding: var(--sp-4) var(--sp-2) var(--sp-1);
-      font-size: var(--fs-xs);
-      font-weight: var(--fw-medium);
-      color: var(--text-2);
+      padding: var(--pd-space-4) var(--pd-space-2) var(--pd-space-1);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-medium);
+      color: var(--pd-text-muted);
     }
     .item {
       display: flex;
       align-items: center;
       gap: 10px;
       height: 30px;
-      padding: 0 var(--sp-2);
-      color: var(--text-2);
+      padding: 0 var(--pd-space-2);
+      color: var(--pd-text-muted);
       text-decoration: none;
-      border-radius: var(--r-md);
-      font-weight: var(--fw-medium);
+      border-radius: var(--pd-radius-control);
+      font-weight: var(--pd-weight-medium);
       transition:
-        background var(--dur-fast) var(--ease),
-        color var(--dur-fast) var(--ease);
+        background var(--pd-duration-micro) var(--pd-ease-move),
+        color var(--pd-duration-micro) var(--pd-ease-move);
       mat-icon {
         width: 16px;
         height: 16px;
@@ -194,14 +194,14 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
         white-space: nowrap;
       }
       &:hover {
-        background: var(--bg-hover);
-        color: var(--text);
+        background: var(--pd-hover);
+        color: var(--pd-text);
       }
       &.active {
-        background: var(--bg-active);
-        color: var(--text);
+        background: var(--pd-pressed);
+        color: var(--pd-text);
         mat-icon {
-          color: var(--accent);
+          color: var(--pd-accent);
         }
       }
     }
@@ -212,11 +212,11 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
       min-width: 18px;
       height: 18px;
       padding: 0 5px;
-      font-size: var(--fs-2xs);
-      font-weight: var(--fw-semibold);
-      color: var(--text-2);
-      background: var(--bg-active);
-      border-radius: var(--r-full);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-semibold);
+      color: var(--pd-text-muted);
+      background: var(--pd-pressed);
+      border-radius: var(--pd-radius-pill);
       mat-icon {
         width: 11px;
         height: 11px;
@@ -224,30 +224,30 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
       /* Counts are neutral: the accent is for action and selection, not for numbers. */
       &.attention {
         justify-content: center;
-        color: var(--text);
-        background: var(--bg-active);
+        color: var(--pd-text);
+        background: var(--pd-pressed);
       }
     }
     .foot {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-2);
-      padding-top: var(--sp-2);
+      gap: var(--pd-space-2);
+      padding-top: var(--pd-space-2);
     }
     .mem {
       display: grid;
       gap: 5px;
-      margin: 0 var(--sp-1);
-      padding: var(--sp-3);
+      margin: 0 var(--pd-space-1);
+      padding: var(--pd-space-3);
       color: inherit;
       text-decoration: none;
-      background: var(--bg-hover);
-      border-radius: var(--r-lg);
+      background: var(--pd-hover);
+      border-radius: var(--pd-radius-card);
       .mem-row {
         display: flex;
         justify-content: space-between;
-        font-size: var(--fs-xs);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-muted);
       }
       .meter {
         height: 4px;
@@ -257,7 +257,7 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
     .foot-row {
       display: flex;
       align-items: center;
-      gap: var(--sp-1);
+      gap: var(--pd-space-1);
       .settings {
         flex: 1;
       }
@@ -265,27 +265,27 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
     .theme {
       display: flex;
       padding: 2px;
-      background: var(--bg-hover);
-      border-radius: var(--r-md);
+      background: var(--pd-hover);
+      border-radius: var(--pd-radius-control);
       button {
         display: grid;
         place-items: center;
         width: 24px;
         height: 22px;
         padding: 0;
-        color: var(--text-3);
+        color: var(--pd-text-subtle);
         background: none;
         border: none;
-        border-radius: var(--r-sm);
+        border-radius: var(--pd-radius-tag);
         cursor: default;
         mat-icon {
           width: 13px;
           height: 13px;
         }
         &[aria-checked='true'] {
-          color: var(--text);
-          background: var(--bg-card);
-          box-shadow: var(--shadow-1);
+          color: var(--pd-text);
+          background: var(--pd-surface-1);
+          box-shadow: var(--pd-shadow-1);
         }
       }
     }

@@ -71,30 +71,16 @@ describe.each(THEMES)('%s theme tokens', (theme) => {
     expect(deltaE(t.history[0], t.history[1])).toBeGreaterThanOrEqual(15);
   });
 
-  it('keeps neighbouring series apart for protanopia and deuteranopia (ΔE ≥ 8) and for normal vision (ΔE ≥ 15)', () => {
+  // The series are the family palette (--pd-chart-1..8): its colour-vision separation (adjacent and the first five pairwise,
+  // under protanopia, deuteranopia and tritanopia) is measured once, by paddock-ui's token test (ui/test/tokens), not here.
+  it('takes the eight family slots in order', () => {
     expect(t.series.length).toBe(8);
-    expect(worstAdjacent(t.series, 'protan')).toBeGreaterThanOrEqual(8);
-    expect(worstAdjacent(t.series, 'deutan')).toBeGreaterThanOrEqual(8);
-    expect(worstAdjacent(t.series)).toBeGreaterThanOrEqual(15);
+    expect(new Set(t.series).size).toBe(8);
+    expect(t.history).toEqual(t.series.slice(0, 3));
   });
 
-  it('keeps the first three slots apart pairwise (charts with up to three series may put any two side by side)', () => {
-    const [a, b, c] = t.series as [string, string, string];
-    for (const [x, y] of [
-      [a, b],
-      [a, c],
-      [b, c],
-    ] as const) {
-      expect(Math.min(deltaE(x, y, 'protan'), deltaE(x, y, 'deutan'))).toBeGreaterThanOrEqual(8);
-      expect(deltaE(x, y)).toBeGreaterThanOrEqual(15);
-    }
-  });
-
-  it('gives chart marks at least 3:1 against the card (light slots 3–5 rely on legends and tooltips instead)', () => {
-    const relief = theme === 'light' ? new Set([2, 3, 4]) : new Set<number>();
-    t.series.forEach((c, i) => {
-      if (!relief.has(i)) expect(contrast(c, t.surface)).toBeGreaterThanOrEqual(3);
-    });
+  it('gives every chart mark at least 3:1 against the card', () => {
+    t.series.forEach((c) => expect(contrast(c, t.surface)).toBeGreaterThanOrEqual(3));
   });
 
   it('assigns series in order and folds overflow into the last slot', () => {

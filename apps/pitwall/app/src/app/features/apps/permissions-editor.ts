@@ -142,7 +142,7 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
   styles: `
     form {
       display: grid;
-      gap: var(--sp-5);
+      gap: var(--pd-space-4);
     }
     .group {
       margin: 0;
@@ -152,36 +152,36 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
     }
     legend {
       padding: 0;
-      margin-bottom: var(--sp-2);
-      font-size: var(--fs-sm);
-      font-weight: var(--fw-semibold);
-      color: var(--text);
+      margin-bottom: var(--pd-space-2);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-semibold);
+      color: var(--pd-text);
     }
     .choice {
       display: flex;
-      gap: var(--sp-5);
+      gap: var(--pd-space-4);
     }
     .radio,
     .check {
       display: inline-flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       cursor: default;
       input {
-        accent-color: var(--accent);
+        accent-color: var(--pd-accent);
         margin: 0;
       }
     }
     .models {
       list-style: none;
-      margin: var(--sp-3) 0 0;
-      padding: var(--sp-1) var(--sp-3);
+      margin: var(--pd-space-3) 0 0;
+      padding: var(--pd-space-1) var(--pd-space-3);
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0 var(--sp-4);
-      background: var(--bg-sunken);
-      border: 1px solid var(--border-soft);
-      border-radius: var(--r-md);
+      gap: 0 var(--pd-space-4);
+      background: var(--pd-surface-2);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-control);
       li {
         padding: 6px 0;
       }
@@ -192,29 +192,29 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
       text-overflow: ellipsis;
     }
     .hint {
-      margin-top: var(--sp-2);
-      font-size: var(--fs-sm);
+      margin-top: var(--pd-space-2);
+      font-size: var(--pd-text-label);
     }
     .seg {
       display: inline-flex;
       padding: 2px;
-      background: var(--bg-active);
-      border-radius: var(--r-md);
+      background: var(--pd-pressed);
+      border-radius: var(--pd-radius-control);
       button {
         height: 26px;
-        padding: 0 var(--sp-3);
+        padding: 0 var(--pd-space-3);
         font: inherit;
-        font-size: var(--fs-sm);
-        font-weight: var(--fw-medium);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        font-weight: var(--pd-weight-medium);
+        color: var(--pd-text-muted);
         background: none;
         border: none;
-        border-radius: var(--r-sm);
+        border-radius: var(--pd-radius-tag);
         cursor: default;
         &[aria-checked='true'] {
-          color: var(--text);
-          background: var(--bg-card);
-          box-shadow: var(--shadow-1);
+          color: var(--pd-text);
+          background: var(--pd-surface-1);
+          box-shadow: var(--pd-shadow-1);
         }
       }
     }
@@ -222,32 +222,32 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sp-4);
-      padding: var(--sp-2) 0;
-      border-top: 1px solid var(--border-soft);
+      gap: var(--pd-space-4);
+      padding: var(--pd-space-2) 0;
+      border-top: 1px solid var(--pd-hairline);
       &:first-of-type {
         border-top: none;
         padding-top: 0;
       }
       .t {
         display: block;
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
       .d {
-        font-size: var(--fs-sm);
+        font-size: var(--pd-text-label);
       }
     }
     .limits {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .field {
       display: grid;
       gap: 6px;
       label {
-        font-size: var(--fs-sm);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-muted);
       }
     }
     .with-unit {
@@ -258,27 +258,27 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
       }
       .unit {
         position: absolute;
-        right: var(--sp-3);
+        right: var(--pd-space-3);
         top: 50%;
         transform: translateY(-50%);
-        font-size: var(--fs-xs);
-        color: var(--text-3);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-subtle);
         pointer-events: none;
       }
     }
     .input[aria-invalid='true'] {
-      border-color: var(--bad);
+      border-color: var(--pd-danger);
     }
     .err {
-      font-size: var(--fs-xs);
-      color: var(--bad);
+      font-size: var(--pd-text-label);
+      color: var(--pd-danger);
     }
     .foot {
       display: flex;
       justify-content: flex-end;
-      gap: var(--sp-2);
-      padding-top: var(--sp-4);
-      border-top: 1px solid var(--border-soft);
+      gap: var(--pd-space-2);
+      padding-top: var(--pd-space-4);
+      border-top: 1px solid var(--pd-hairline);
     }
   `,
 })

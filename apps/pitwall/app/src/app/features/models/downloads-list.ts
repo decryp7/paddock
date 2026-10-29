@@ -73,9 +73,9 @@ export function etaMs(d: Download): number | null {
       display: grid;
       grid-template-columns: auto minmax(0, 1fr) auto;
       align-items: center;
-      gap: var(--sp-3);
-      padding: var(--sp-3) 0;
-      border-top: 1px solid var(--border-soft);
+      gap: var(--pd-space-3);
+      padding: var(--pd-space-3) 0;
+      border-top: 1px solid var(--pd-hairline);
       &:first-child {
         border-top: none;
         padding-top: 0;
@@ -100,14 +100,14 @@ export function etaMs(d: Download): number | null {
       place-items: center;
       width: 32px;
       height: 32px;
-      border-radius: var(--r-md);
-      background: var(--bg-hover);
-      color: var(--text-2);
+      border-radius: var(--pd-radius-control);
+      background: var(--pd-hover);
+      color: var(--pd-text-muted);
       align-self: start;
     }
     li[data-state='downloading'] .ic {
-      background: var(--accent-soft);
-      color: var(--accent);
+      background: var(--pd-accent-tint);
+      color: var(--pd-accent);
     }
     .main {
       display: grid;
@@ -118,11 +118,11 @@ export function etaMs(d: Download): number | null {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .name {
-      font-size: var(--fs-sm);
-      font-weight: var(--fw-medium);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-medium);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -130,19 +130,19 @@ export function etaMs(d: Download): number | null {
     .meta {
       display: flex;
       flex-wrap: wrap;
-      gap: var(--sp-2);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      gap: var(--pd-space-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       span + span::before {
         content: '·';
-        margin-right: var(--sp-2);
+        margin-right: var(--pd-space-2);
       }
     }
     .err {
-      font-size: var(--fs-sm);
-      color: var(--bad);
+      font-size: var(--pd-text-label);
+      color: var(--pd-danger);
       &.warn {
-        color: var(--warn);
+        color: var(--pd-warning);
       }
     }
   `,

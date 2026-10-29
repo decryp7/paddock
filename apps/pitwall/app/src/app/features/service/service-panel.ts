@@ -59,16 +59,16 @@ import { ServiceStore } from './service.store';
       min-width: 0;
     }
     pw-panel {
-      scroll-margin-top: var(--sp-6);
+      scroll-margin-top: var(--pd-space-6);
     }
     .row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sp-6);
+      gap: var(--pd-space-6);
       min-height: 52px;
-      padding: var(--sp-3) 0;
-      border-top: 1px solid var(--border-soft);
+      padding: var(--pd-space-3) 0;
+      border-top: 1px solid var(--pd-hairline);
       &:first-of-type {
         border-top: none;
         padding-top: 0;
@@ -78,17 +78,17 @@ import { ServiceStore } from './service.store';
       min-width: 0;
       .name {
         display: block;
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
       .hint {
         margin-top: 2px;
-        font-size: var(--fs-sm);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-muted);
         max-width: 480px;
       }
     }
     .pad {
-      padding: var(--sp-3) 0;
+      padding: var(--pd-space-3) 0;
     }
   `,
 })

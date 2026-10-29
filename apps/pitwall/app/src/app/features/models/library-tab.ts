@@ -232,13 +232,13 @@ export function contextText(tokens: number | null): string {
   styles: `
     :host {
       display: grid;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .disk {
       display: flex;
       gap: 1px;
       height: 8px;
-      border-radius: var(--r-full);
+      border-radius: var(--pd-radius-pill);
       overflow: hidden;
       .seg {
         flex-basis: 0;
@@ -246,16 +246,16 @@ export function contextText(tokens: number | null): string {
       }
     }
     [data-k='models'] {
-      --seg: var(--viz-1);
+      --seg: var(--pd-chart-1);
     }
     [data-k='engines'] {
-      --seg: var(--viz-2);
+      --seg: var(--pd-chart-2);
     }
     [data-k='partial'] {
-      --seg: var(--viz-3);
+      --seg: var(--pd-chart-3);
     }
     [data-k='free'] {
-      --seg: var(--track);
+      --seg: var(--pd-surface-2);
     }
     .disk .seg {
       background: var(--seg);
@@ -263,12 +263,12 @@ export function contextText(tokens: number | null): string {
     /* Direct labels under the bar, in the bar's order; each takes at least its own width. */
     .disk-labels {
       display: flex;
-      gap: var(--sp-4);
-      margin: var(--sp-2) 0 0;
+      gap: var(--pd-space-4);
+      margin: var(--pd-space-2) 0 0;
       padding: 0;
       list-style: none;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       li {
         flex: 1 1 auto;
         display: inline-flex;
@@ -281,35 +281,35 @@ export function contextText(tokens: number | null): string {
         height: 8px;
         border-radius: 2px;
         background: var(--seg);
-        box-shadow: inset 0 0 0 1px var(--border-strong);
+        box-shadow: inset 0 0 0 1px var(--pd-border-strong);
       }
       li:not([data-k='free']) i {
         box-shadow: none;
       }
       b {
-        font-weight: var(--fw-medium);
-        color: var(--text);
+        font-weight: var(--pd-weight-medium);
+        color: var(--pd-text);
       }
     }
     .unused {
-      margin: var(--sp-2) 0 0;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      margin: var(--pd-space-2) 0 0;
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .toolbar {
       display: flex;
       align-items: center;
       height: 44px;
-      padding: 0 var(--sp-4);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
-      border-bottom: 1px solid var(--border-soft);
+      padding: 0 var(--pd-space-4);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
+      border-bottom: 1px solid var(--pd-hairline);
     }
     .scroll {
       container-type: inline-size;
       overflow-x: auto;
       /* The last row's selected or hover background must not square off the panel's rounded corners. */
-      border-radius: 0 0 calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px);
+      border-radius: 0 0 calc(var(--pd-radius-card) - 1px) calc(var(--pd-radius-card) - 1px);
     }
     /* A narrow list (the detail panel is open, or a small window) drops the columns the panel repeats. */
     @container (max-width: 640px) {
@@ -330,26 +330,26 @@ export function contextText(tokens: number | null): string {
       right: 0;
       z-index: 2;
       width: 1%;
-      background: var(--bg-card);
-      box-shadow: -10px 0 8px -8px color-mix(in srgb, var(--text) 14%, transparent);
+      background: var(--pd-surface-1);
+      box-shadow: -10px 0 8px -8px color-mix(in srgb, var(--pd-text) 14%, transparent);
     }
     /* The action column's header cell sticks both ways (the corner, 4): above the header row (3) and the action cells (2). */
     .table th.act {
       z-index: 4;
     }
     .table tr:hover td.act {
-      background: color-mix(in srgb, var(--bg-card) 94%, var(--text));
+      background: color-mix(in srgb, var(--pd-surface-1) 94%, var(--pd-text));
     }
     .table tr.selected td.act {
-      background: color-mix(in srgb, var(--bg-card) 90%, var(--accent));
+      background: color-mix(in srgb, var(--pd-surface-1) 90%, var(--pd-accent));
     }
     .table th:first-child,
     .table td:first-child {
-      padding-left: var(--sp-4);
+      padding-left: var(--pd-space-4);
     }
     .table th:last-child,
     .table td:last-child {
-      padding-right: var(--sp-3);
+      padding-right: var(--pd-space-3);
     }
     .table td {
       height: 48px;
@@ -367,15 +367,15 @@ export function contextText(tokens: number | null): string {
     .line {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       min-width: 0;
     }
     .name {
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
-      font-size: var(--fs-base);
-      font-weight: var(--fw-semibold);
+      font-size: var(--pd-text-body);
+      font-weight: var(--pd-weight-semibold);
     }
     .glyphs {
       display: inline-flex;
@@ -385,42 +385,42 @@ export function contextText(tokens: number | null): string {
       mat-icon {
         width: 14px;
         height: 14px;
-        color: var(--text-3);
+        color: var(--pd-text-subtle);
       }
       .upd {
-        color: var(--accent);
+        color: var(--pd-accent);
       }
     }
     .repo {
       display: block;
       overflow: hidden;
       text-overflow: ellipsis;
-      font-size: var(--fs-xs);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .pinned {
       width: 13px;
       height: 13px;
       margin-left: 6px;
       vertical-align: -2px;
-      color: var(--text-3);
+      color: var(--pd-text-subtle);
     }
     .row-actions .btn.sm:not(.icon) {
       min-width: 64px;
     }
     .callout {
       display: grid;
-      gap: var(--sp-1);
+      gap: var(--pd-space-1);
       justify-items: start;
-      margin-bottom: var(--sp-3);
-      padding: var(--sp-2) var(--sp-3);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
-      background: var(--bg-sunken);
-      border-left: 3px solid var(--info);
-      border-radius: var(--r-sm);
+      margin-bottom: var(--pd-space-3);
+      padding: var(--pd-space-2) var(--pd-space-3);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
+      background: var(--pd-surface-2);
+      border-left: 3px solid var(--pd-info);
+      border-radius: var(--pd-radius-tag);
       b {
-        color: var(--text);
+        color: var(--pd-text);
       }
     }
     .facts {
@@ -428,28 +428,28 @@ export function contextText(tokens: number | null): string {
     }
     .settings {
       display: grid;
-      gap: var(--sp-3);
-      margin-top: var(--sp-4);
-      padding-top: var(--sp-3);
-      border-top: 1px solid var(--border-soft);
+      gap: var(--pd-space-3);
+      margin-top: var(--pd-space-4);
+      padding-top: var(--pd-space-3);
+      border-top: 1px solid var(--pd-hairline);
     }
     .field {
       display: grid;
       gap: 4px;
       justify-items: start;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       .select {
         width: 100%;
         height: 28px;
       }
     }
     .hint {
-      color: var(--text-2);
+      color: var(--pd-text-muted);
     }
     .plain {
-      font-size: var(--fs-base);
-      color: var(--text);
+      font-size: var(--pd-text-body);
+      color: var(--pd-text);
     }
     pw-select {
       display: block;

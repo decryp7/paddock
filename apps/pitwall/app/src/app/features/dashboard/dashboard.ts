@@ -177,39 +177,39 @@ export class PerfMeter {
     .page {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .page-head {
-      margin-bottom: var(--sp-2);
+      margin-bottom: var(--pd-space-2);
     }
     .offline {
-      color: var(--warn);
-      font-weight: var(--fw-medium);
+      color: var(--pd-warning);
+      font-weight: var(--pd-weight-medium);
     }
     .seg {
       display: inline-flex;
       padding: 2px;
-      background: var(--bg-active);
-      border-radius: var(--r-md);
+      background: var(--pd-pressed);
+      border-radius: var(--pd-radius-control);
       button {
         height: 24px;
-        padding: 0 var(--sp-3);
+        padding: 0 var(--pd-space-3);
         font: inherit;
-        font-size: var(--fs-sm);
-        font-weight: var(--fw-medium);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        font-weight: var(--pd-weight-medium);
+        color: var(--pd-text-muted);
         background: none;
         border: none;
-        border-radius: var(--r-sm);
+        border-radius: var(--pd-radius-tag);
         cursor: default;
-        transition: background var(--dur-fast) var(--ease);
+        transition: background var(--pd-duration-micro) var(--pd-ease-move);
         &:hover:not(:disabled) {
-          color: var(--text);
+          color: var(--pd-text);
         }
         &[aria-checked='true'] {
-          color: var(--text);
-          background: var(--bg-card);
-          box-shadow: var(--shadow-1);
+          color: var(--pd-text);
+          background: var(--pd-surface-1);
+          box-shadow: var(--pd-shadow-1);
         }
         &:disabled {
           cursor: default;
@@ -218,13 +218,13 @@ export class PerfMeter {
       &.small button {
         height: 22px;
         min-width: 40px;
-        padding: 0 var(--sp-2);
+        padding: 0 var(--pd-space-2);
       }
     }
     .grid {
       display: grid;
       grid-template-columns: repeat(12, minmax(0, 1fr));
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     /* The three live cards size to their content; they do not stretch to match the tallest. */
     .now {
@@ -255,18 +255,18 @@ export class PerfMeter {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-top: var(--sp-4);
+      margin-top: var(--pd-space-4);
       .section {
-        font-size: var(--fs-md);
+        font-size: var(--pd-text-body-lg);
       }
     }
     .legend {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
-      gap: var(--sp-3);
-      font-size: var(--fs-xs);
-      color: var(--text-2);
+      gap: var(--pd-space-3);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       span {
         display: inline-flex;
         align-items: center;
@@ -298,19 +298,19 @@ export class PerfMeter {
       .sep {
         width: 1px;
         height: 12px;
-        background: var(--border);
+        background: var(--pd-hairline);
       }
     }
     .perf {
       position: fixed;
-      right: var(--sp-3);
-      bottom: var(--sp-3);
-      padding: 2px var(--sp-2);
-      font: 11px var(--font-mono);
-      color: var(--text-2);
-      background: var(--bg-raised);
-      border: 1px solid var(--border);
-      border-radius: var(--r-sm);
+      right: var(--pd-space-3);
+      bottom: var(--pd-space-3);
+      padding: 2px var(--pd-space-2);
+      font: 11px var(--pd-font-mono);
+      color: var(--pd-text-muted);
+      background: var(--pd-surface-3);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-tag);
     }
     @media (max-width: 1200px) {
       .c3,

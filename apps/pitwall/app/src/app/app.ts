@@ -47,36 +47,36 @@ import { ToastHost } from './shared/ui/toast-host';
     .titlebar {
       position: fixed;
       inset: 0 0 auto 0;
-      height: var(--titlebar-h);
+      height: var(--pw-titlebar-h);
       z-index: 50;
     }
     .shell {
       display: grid;
-      grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+      grid-template-columns: var(--pd-sidebar-width) minmax(0, 1fr);
       height: 100%;
     }
     main {
       height: 100%;
       overflow: auto;
-      background: var(--bg-content);
-      border-left: 1px solid var(--border);
+      background: var(--pw-content-bg);
+      border-left: 1px solid var(--pd-hairline);
       outline: none;
       scrollbar-gutter: stable;
     }
     .notices {
-      padding: var(--sp-3) var(--sp-5) 0;
+      padding: var(--pd-space-3) var(--pd-space-4) 0;
     }
     .skip {
       position: fixed;
-      left: var(--sp-3);
+      left: var(--pd-space-3);
       top: -40px;
       z-index: 200;
-      padding: var(--sp-2) var(--sp-3);
-      background: var(--accent);
-      color: var(--text-on-accent);
-      border-radius: var(--r-md);
+      padding: var(--pd-space-2) var(--pd-space-3);
+      background: var(--pd-accent);
+      color: var(--pd-on-accent);
+      border-radius: var(--pd-radius-control);
       &:focus {
-        top: var(--sp-3);
+        top: var(--pd-space-3);
       }
     }
   `,

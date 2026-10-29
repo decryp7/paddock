@@ -46,7 +46,7 @@ import { EnginesStore } from './engines.store';
     .page {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-4);
+      gap: var(--pd-space-4);
     }
   `,
 })

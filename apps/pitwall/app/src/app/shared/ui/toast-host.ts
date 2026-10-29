@@ -21,28 +21,28 @@ import { Toasts } from '../../core/toasts';
   styles: `
     .stack {
       position: fixed;
-      right: var(--sp-5);
-      bottom: var(--sp-5);
+      right: var(--pd-space-4);
+      bottom: var(--pd-space-4);
       z-index: 1100;
       display: flex;
       flex-direction: column;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       pointer-events: none;
     }
     .toast {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       max-width: 420px;
-      padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
-      font-size: var(--fs-base);
-      color: var(--text);
-      background: var(--bg-raised);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      box-shadow: var(--shadow-pop);
+      padding: var(--pd-space-2) var(--pd-space-2) var(--pd-space-2) var(--pd-space-3);
+      font-size: var(--pd-text-body);
+      color: var(--pd-text);
+      background: var(--pd-surface-3);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-card);
+      box-shadow: var(--pd-shadow-3);
       pointer-events: auto;
-      animation: pw-pop var(--dur) var(--ease);
+      animation: pw-pop var(--pd-duration) var(--pd-ease-move);
       mat-icon {
         flex: none;
       }
@@ -50,13 +50,13 @@ import { Toasts } from '../../core/toasts';
         flex: 1;
       }
       &[data-tone='ok'] > mat-icon {
-        color: var(--ok);
+        color: var(--pd-success);
       }
       &[data-tone='bad'] > mat-icon {
-        color: var(--bad);
+        color: var(--pd-danger);
       }
       &[data-tone='info'] > mat-icon {
-        color: var(--accent);
+        color: var(--pd-accent);
       }
     }
   `,

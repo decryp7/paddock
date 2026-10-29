@@ -62,14 +62,14 @@ import { bytes, int, percent } from '../../shared/format';
     }
   `,
   styles: `
-    .jobs { display: flex; flex-direction: column; gap: var(--sp-2); }
-    .job { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-3); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--r-md); }
+    .jobs { display: flex; flex-direction: column; gap: var(--pd-space-2); }
+    .job { display: flex; flex-direction: column; gap: var(--pd-space-1); padding: var(--pd-space-3); background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); }
     .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-    .head { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+    .head { display: flex; align-items: baseline; gap: var(--pd-space-2); min-width: 0; }
     .title { font-weight: 600; }
-    .phase, .count, .note { color: var(--text-muted); font-size: var(--fs-sm); margin: 0; }
+    .phase, .count, .note { color: var(--pd-text-muted); font-size: var(--pd-text-label); margin: 0; }
     .count { margin-left: auto; font-variant-numeric: tabular-nums; }
-    .actions { display: flex; align-items: center; gap: var(--sp-2); }
+    .actions { display: flex; align-items: center; gap: var(--pd-space-2); }
   `,
 })
 export class JobsPanel {

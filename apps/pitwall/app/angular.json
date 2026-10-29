@@ -34,6 +34,9 @@
             ],
             "styles": [
               "@angular/cdk/overlay-prebuilt.css",
+              "../../../ui/dist/paddock-ui/css/paddock.css",
+              "../../../ui/dist/paddock-ui/css/controls.css",
+              "../../../ui/dist/paddock-ui/css/material.css",
               "src/styles.scss"
             ]
           },

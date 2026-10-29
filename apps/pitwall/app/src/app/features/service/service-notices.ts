@@ -38,7 +38,7 @@ import { ServiceStore } from './service.store';
   styles: `
     :host {
       display: grid;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
     }
     :host:empty {
       display: none;

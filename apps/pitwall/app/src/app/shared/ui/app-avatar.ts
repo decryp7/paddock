@@ -23,19 +23,19 @@ export function avatarHue(key: string): number {
       place-items: center;
       width: 20px;
       height: 20px;
-      font-size: var(--fs-xs);
-      font-weight: var(--fw-semibold);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-semibold);
       line-height: 1;
-      color: var(--text);
+      color: var(--pd-text);
       background: hsl(var(--h) 70% 55% / 0.24);
       box-shadow: inset 0 0 0 1px hsl(var(--h) 70% 55% / 0.5);
-      border-radius: var(--r-sm);
+      border-radius: var(--pd-radius-tag);
     }
     :host(.lg) {
       width: 40px;
       height: 40px;
-      font-size: var(--fs-lg);
-      border-radius: var(--r-lg);
+      font-size: var(--pd-text-subtitle);
+      border-radius: var(--pd-radius-card);
     }
   `,
 })

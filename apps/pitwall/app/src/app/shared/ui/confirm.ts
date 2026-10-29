@@ -26,20 +26,20 @@ export interface ConfirmOptions {
     :host {
       display: block;
       width: 400px;
-      padding: var(--sp-5);
+      padding: var(--pd-space-4);
     }
     h2 {
-      font-size: var(--fs-md);
-      margin-bottom: var(--sp-2);
+      font-size: var(--pd-text-body-lg);
+      margin-bottom: var(--pd-space-2);
     }
     p {
-      color: var(--text-2);
+      color: var(--pd-text-muted);
     }
     .row {
       display: flex;
       justify-content: flex-end;
-      gap: var(--sp-2);
-      margin-top: var(--sp-5);
+      gap: var(--pd-space-2);
+      margin-top: var(--pd-space-4);
     }
   `,
 })

@@ -37,19 +37,19 @@ import { MatTooltipModule } from '@angular/material/tooltip';
       flex: none;
       min-height: 0;
       max-height: 100%;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      box-shadow: var(--shadow-1), var(--card-highlight);
+      background: var(--pd-surface-1);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-card);
+      box-shadow: var(--pd-shadow-1);
       overflow: hidden;
     }
     header {
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
-      gap: var(--sp-2);
-      padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);
-      border-bottom: 1px solid var(--border-soft);
+      gap: var(--pd-space-2);
+      padding: var(--pd-space-3) var(--pd-space-3) var(--pd-space-3) var(--pd-space-4);
+      border-bottom: 1px solid var(--pd-hairline);
     }
     .titles {
       min-width: 0;
@@ -57,15 +57,15 @@ import { MatTooltipModule } from '@angular/material/tooltip';
       gap: 2px;
     }
     h2 {
-      font-size: var(--fs-md);
-      font-weight: var(--fw-semibold);
+      font-size: var(--pd-text-body-lg);
+      font-weight: var(--pd-weight-semibold);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .sub {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -80,14 +80,14 @@ import { MatTooltipModule } from '@angular/material/tooltip';
       flex: 1;
       min-height: 0;
       overflow: auto;
-      padding: var(--sp-3) var(--sp-4);
+      padding: var(--pd-space-3) var(--pd-space-4);
     }
     .toolbar {
       display: flex;
       flex-wrap: wrap;
-      gap: var(--sp-2);
-      padding: var(--sp-2) var(--sp-4);
-      border-bottom: 1px solid var(--border-soft);
+      gap: var(--pd-space-2);
+      padding: var(--pd-space-2) var(--pd-space-4);
+      border-bottom: 1px solid var(--pd-hairline);
     }
     .toolbar:empty {
       display: none;
@@ -95,9 +95,9 @@ import { MatTooltipModule } from '@angular/material/tooltip';
     footer {
       display: flex;
       flex-wrap: wrap;
-      gap: var(--sp-2);
-      padding: var(--sp-3) var(--sp-4);
-      border-top: 1px solid var(--border-soft);
+      gap: var(--pd-space-2);
+      padding: var(--pd-space-3) var(--pd-space-4);
+      border-top: 1px solid var(--pd-hairline);
     }
     footer:empty {
       display: none;

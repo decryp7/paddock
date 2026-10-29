@@ -114,25 +114,25 @@ import { BenchmarksStore } from './benchmarks.store';
     .page {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .grid {
       display: grid;
       grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       align-items: start;
     }
     ul {
       list-style: none;
       margin: 0;
-      padding: 0 var(--sp-4) var(--sp-2);
+      padding: 0 var(--pd-space-4) var(--pd-space-2);
     }
     li {
       display: flex;
       align-items: center;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       padding: 10px 0;
-      border-top: 1px solid var(--border-soft);
+      border-top: 1px solid var(--pd-hairline);
       &:first-child {
         border-top: none;
       }
@@ -144,23 +144,23 @@ import { BenchmarksStore } from './benchmarks.store';
       min-width: 0;
     }
     .name {
-      font-weight: var(--fw-medium);
+      font-weight: var(--pd-weight-medium);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .meta {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .score {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       white-space: nowrap;
       b {
-        font-size: var(--fs-md);
-        font-weight: var(--fw-semibold);
-        color: var(--text);
+        font-size: var(--pd-text-body-lg);
+        font-weight: var(--pd-weight-semibold);
+        color: var(--pd-text);
       }
     }
     /* Run is a quiet icon on hover or focus (while it runs it stays, with a spinner); "Run all" is the page's one primary. */
@@ -194,26 +194,26 @@ import { BenchmarksStore } from './benchmarks.store';
       }
     }
     .table {
-      margin-top: var(--sp-3);
+      margin-top: var(--pd-space-3);
       th:first-child,
       td:first-child {
-        padding-left: var(--sp-4);
+        padding-left: var(--pd-space-4);
       }
       th:last-child,
       td:last-child {
-        padding-right: var(--sp-4);
+        padding-right: var(--pd-space-4);
       }
     }
     .strong {
-      font-weight: var(--fw-medium);
+      font-weight: var(--pd-weight-medium);
     }
     .table b {
-      font-weight: var(--fw-semibold);
+      font-weight: var(--pd-weight-semibold);
     }
     .build,
     .when {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     @media (max-width: 1100px) {
       .grid {

@@ -100,41 +100,41 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
     .more {
       margin: 0;
       padding-top: 6px;
-      font-size: var(--fs-xs);
+      font-size: var(--pd-text-label);
     }
     .split {
-      margin-top: var(--sp-3);
-      padding-top: var(--sp-3);
-      border-top: 1px solid var(--border-soft);
+      margin-top: var(--pd-space-3);
+      padding-top: var(--pd-space-3);
+      border-top: 1px solid var(--pd-hairline);
     }
     .split-head {
       display: flex;
       justify-content: space-between;
-      margin-bottom: var(--sp-2);
-      font-size: var(--fs-xs);
-      color: var(--text-2);
+      margin-bottom: var(--pd-space-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .split-bar {
       display: flex;
       gap: 2px;
       height: 8px;
-      border-radius: var(--r-full);
-      background: var(--track);
+      border-radius: var(--pd-radius-pill);
+      background: var(--pd-surface-2);
       overflow: hidden;
       span {
         height: 100%;
-        transition: width var(--dur-slow) var(--ease);
+        transition: width var(--pd-duration-large) var(--pd-ease-move);
       }
     }
     .split-legend {
       display: flex;
       flex-wrap: wrap;
-      gap: var(--sp-1) var(--sp-3);
-      margin: var(--sp-2) 0 0;
+      gap: var(--pd-space-1) var(--pd-space-3);
+      margin: var(--pd-space-2) 0 0;
       padding: 0;
       list-style: none;
-      font-size: var(--fs-xs);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       li {
         display: inline-flex;
         align-items: center;
@@ -159,9 +159,9 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto auto;
       align-items: center;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       padding: 10px 0;
-      border-top: 1px solid var(--border-soft);
+      border-top: 1px solid var(--pd-hairline);
       &:first-child {
         border-top: none;
         padding-top: 2px;
@@ -174,7 +174,7 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
     .title {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       min-width: 0;
     }
     .state {
@@ -182,23 +182,23 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
       width: 7px;
       height: 7px;
       border-radius: 50%;
-      background: var(--text-3);
+      background: var(--pd-text-subtle);
       &[data-tone='ok'] {
-        background: var(--ok);
+        background: var(--pd-success);
       }
       &[data-tone='info'] {
-        background: var(--accent);
-        box-shadow: 0 0 0 3px var(--accent-soft);
+        background: var(--pd-accent);
+        box-shadow: 0 0 0 3px var(--pd-accent-tint);
       }
       &[data-tone='warn'] {
-        background: var(--warn);
+        background: var(--pd-warning);
       }
       &[data-tone='bad'] {
-        background: var(--bad);
+        background: var(--pd-danger);
       }
     }
     .name {
-      font-weight: var(--fw-medium);
+      font-weight: var(--pd-weight-medium);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -206,7 +206,7 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
     .pinned {
       width: 13px;
       height: 13px;
-      color: var(--text-3);
+      color: var(--pd-text-subtle);
       flex: none;
     }
     .main {
@@ -215,13 +215,13 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
     .meta {
       margin: 2px 0 0 15px;
       overflow: hidden;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       text-overflow: ellipsis;
       white-space: nowrap;
       span + span::before {
         content: '·';
-        margin: 0 var(--sp-2);
+        margin: 0 var(--pd-space-2);
       }
     }
     .side {
@@ -235,29 +235,29 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      font-size: var(--fs-sm);
-      font-weight: var(--fw-medium);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-medium);
       white-space: nowrap;
       mat-icon {
         width: 12px;
         height: 12px;
-        color: var(--text-3);
+        color: var(--pd-text-subtle);
       }
       &.busy {
-        color: var(--accent);
+        color: var(--pd-accent);
       }
     }
     .idle {
       display: block;
       width: 56px;
       height: 3px;
-      border-radius: var(--r-full);
-      background: var(--track);
+      border-radius: var(--pd-radius-pill);
+      background: var(--pd-surface-2);
       overflow: hidden;
       span {
         display: block;
         height: 100%;
-        background: var(--warn);
+        background: var(--pd-warning);
         transition: width 1s linear;
       }
     }
@@ -266,7 +266,7 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
       display: flex;
       gap: 2px;
       opacity: 0;
-      transition: opacity var(--dur-fast) var(--ease);
+      transition: opacity var(--pd-duration-micro) var(--pd-ease-move);
     }
     .row:hover .actions,
     .row:focus-within .actions {

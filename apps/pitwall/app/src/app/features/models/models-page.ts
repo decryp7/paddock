@@ -94,36 +94,36 @@ export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
   styles: `
     .tabs {
       display: flex;
-      gap: var(--sp-1);
-      margin-bottom: var(--sp-4);
-      border-bottom: 1px solid var(--border);
+      gap: var(--pd-space-1);
+      margin-bottom: var(--pd-space-4);
+      border-bottom: 1px solid var(--pd-hairline);
       button {
         position: relative;
         display: inline-flex;
         align-items: center;
         gap: 6px;
         height: 34px;
-        padding: 0 var(--sp-3);
+        padding: 0 var(--pd-space-3);
         font: inherit;
-        font-weight: var(--fw-medium);
-        color: var(--text-2);
+        font-weight: var(--pd-weight-medium);
+        color: var(--pd-text-muted);
         background: none;
         border: none;
         cursor: default;
         &:hover {
-          color: var(--text);
+          color: var(--pd-text);
         }
         &[aria-selected='true'] {
-          color: var(--text);
+          color: var(--pd-text);
           &::after {
             content: '';
             position: absolute;
-            left: var(--sp-2);
-            right: var(--sp-2);
+            left: var(--pd-space-2);
+            right: var(--pd-space-2);
             bottom: -1px;
             height: 2px;
             border-radius: 2px;
-            background: var(--accent);
+            background: var(--pd-accent);
           }
         }
       }

@@ -48,42 +48,42 @@ export function restartText(issue: EngineIssue, now: number): string | null {
       display: grid;
       grid-template-columns: auto minmax(0, 1fr) auto;
       align-items: center;
-      gap: var(--sp-3);
-      padding: var(--sp-3) var(--sp-4);
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-left: 3px solid var(--warn);
-      border-radius: var(--r-md);
-      animation: rise var(--dur-base) var(--ease);
+      gap: var(--pd-space-3);
+      padding: var(--pd-space-3) var(--pd-space-4);
+      background: var(--pd-surface-1);
+      border: 1px solid var(--pd-hairline);
+      border-left: 3px solid var(--pd-warning);
+      border-radius: var(--pd-radius-control);
+      animation: rise var(--pd-duration) var(--pd-ease-move);
       mat-icon {
-        color: var(--warn);
+        color: var(--pd-warning);
       }
       &[data-state='failed'] {
-        border-left-color: var(--bad);
+        border-left-color: var(--pd-danger);
         mat-icon {
-          color: var(--bad);
+          color: var(--pd-danger);
         }
       }
     }
     .title {
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
       b {
-        font-weight: var(--fw-semibold);
+        font-weight: var(--pd-weight-semibold);
       }
     }
     .count {
-      margin-left: var(--sp-2);
-      color: var(--text-3);
-      font-size: var(--fs-xs);
+      margin-left: var(--pd-space-2);
+      color: var(--pd-text-subtle);
+      font-size: var(--pd-text-label);
     }
     .msg {
       margin-top: 2px;
-      font-size: var(--fs-xs);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .when {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     @keyframes rise {
       from {

@@ -183,18 +183,18 @@ export function statusDetail(s: PresetStatus): string {
   styles: `
     :host {
       display: grid;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .scroll {
       overflow-x: auto;
-      margin-top: var(--sp-2);
+      margin-top: var(--pd-space-2);
     }
     .alias {
-      font-weight: var(--fw-medium);
+      font-weight: var(--pd-weight-medium);
     }
     .target,
     .via {
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
     }
     .target {
       display: block;
@@ -209,38 +209,38 @@ export function statusDetail(s: PresetStatus): string {
     .via {
       display: inline-block;
       max-width: 220px;
-      margin-left: var(--sp-2);
+      margin-left: var(--pd-space-2);
       overflow: hidden;
       vertical-align: bottom;
       text-overflow: ellipsis;
-      color: var(--text-2);
+      color: var(--pd-text-muted);
     }
     .defs {
       max-width: 260px;
       overflow: hidden;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       text-overflow: ellipsis;
     }
     .table td.act {
       width: 1%;
     }
     tr.editing td {
-      background: var(--accent-soft);
+      background: var(--pd-accent-tint);
     }
     .actions {
       display: inline-flex;
-      gap: var(--sp-1);
+      gap: var(--pd-space-1);
       align-items: center;
     }
     .editor {
       display: grid;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       &.four {
         grid-template-columns: repeat(4, minmax(0, 1fr));
       }
@@ -255,16 +255,16 @@ export function statusDetail(s: PresetStatus): string {
       display: grid;
       gap: 4px;
       label {
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-medium);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        font-weight: var(--pd-weight-medium);
+        color: var(--pd-text-muted);
       }
     }
     .toggle-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sp-6);
+      gap: var(--pd-space-6);
       > div {
         display: flex;
         flex-direction: column;
@@ -272,64 +272,64 @@ export function statusDetail(s: PresetStatus): string {
         min-width: 0;
       }
       .t {
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
       .d {
-        font-size: var(--fs-sm);
+        font-size: var(--pd-text-label);
       }
     }
     .badge {
       display: inline-block;
-      margin-left: var(--sp-2);
+      margin-left: var(--pd-space-2);
       padding: 0 6px;
-      font-size: var(--fs-xs);
-      font-weight: var(--fw-medium);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-medium);
       line-height: 18px;
-      color: var(--text-2);
-      background: var(--bg-active);
-      border-radius: var(--r-full);
+      color: var(--pd-text-muted);
+      background: var(--pd-pressed);
+      border-radius: var(--pd-radius-pill);
     }
     .hint {
       margin: 0;
-      font-size: var(--fs-xs);
+      font-size: var(--pd-text-label);
     }
     .err {
       display: flex;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       align-items: center;
       margin: 0;
-      padding: var(--sp-2) var(--sp-3);
-      font-size: var(--fs-sm);
-      background: var(--bad-soft);
-      border-radius: var(--r-md);
+      padding: var(--pd-space-2) var(--pd-space-3);
+      font-size: var(--pd-text-label);
+      background: var(--pd-danger-tint);
+      border-radius: var(--pd-radius-control);
       mat-icon {
         flex: none;
-        color: var(--bad);
+        color: var(--pd-danger);
       }
     }
     .preview {
-      padding: var(--sp-3);
-      background: var(--bg-sunken);
-      border-radius: var(--r-md);
+      padding: var(--pd-space-3);
+      background: var(--pd-surface-2);
+      border-radius: var(--pd-radius-control);
       p {
         display: flex;
         flex-wrap: wrap;
-        gap: var(--sp-2);
+        gap: var(--pd-space-2);
         align-items: center;
         margin: 0;
-        font-size: var(--fs-sm);
+        font-size: var(--pd-text-label);
       }
       p + p {
-        margin-top: var(--sp-2);
+        margin-top: var(--pd-space-2);
       }
       .bad {
-        color: var(--bad);
+        color: var(--pd-danger);
       }
     }
     .foot {
       display: flex;
       justify-content: flex-end;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
     }
   `,
 })
