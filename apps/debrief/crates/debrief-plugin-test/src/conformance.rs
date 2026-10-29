@@ -281,26 +281,23 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
         // Give up on it once it has read the whole file (the SDK stops reads at a cancel itself): what is checked
         // is that the importer's own work ends.
         let read_before = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed);
-        // Gives up on a read that makes no progress for 10 s, not on a slow one: a loaded machine reads the file
-        // late, and cancelling before the importer has it all ends the read (not the importer's own work).
-        let mut progress = (0, Instant::now());
-        // An overall bound too, so a plugin that trickles its reads cannot hold the tool for ever.
-        let overall = Instant::now();
-        loop {
-            let read = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed) - read_before;
-            if read >= content.len() as u64 {
-                break;
-            }
-            if read != progress.0 {
-                progress = (read, Instant::now());
-            } else if progress.1.elapsed() >= Duration::from_secs(10) {
-                break;
-            }
-            if overall.elapsed() >= Duration::from_secs(300) {
-                break;
-            }
-            if let Ok(StreamEvent::Done(_)) = stream.next(Some(Duration::from_millis(20))) {
+        // Waits for the host's signal that the whole file was read (a loaded machine reads it late, and cancelling
+        // before the importer has it all ends the read, not the importer's own work). The slice only bounds how
+        // long to wait before looking at the stream again; the hang guard only reports a plugin that never reads it.
+        let hang_guard = Instant::now();
+        while !p
+            .host
+            .wait_bytes_read(read_before + content.len() as u64, Duration::from_millis(20))
+        {
+            if let Ok(StreamEvent::Done(_)) = stream.next(Some(Duration::from_millis(1))) {
                 return Ok("the import ended before it could be cancelled".into());
+            }
+            if hang_guard.elapsed() >= READ_HANG_GUARD {
+                return Err(format!(
+                    "importer \"{}\" did not read the whole file within {} s (hung)",
+                    importer.id,
+                    READ_HANG_GUARD.as_secs()
+                ));
             }
         }
         let started = Instant::now();
@@ -333,6 +330,9 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
 }
 
 /// How long one import of a sample may take in the checks.
+/// Reports a plugin that never reads its whole input; never the condition for passing (the host signals that).
+const READ_HANG_GUARD: Duration = Duration::from_secs(300);
+
 const IMPORT_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// The frame limit of the `oversized-frames` check.

@@ -87,7 +87,9 @@ impl<'a> Control<'a> {
         }
     }
 
-    /// A search with no time limit that stops once `cancelled` says so.
+    /// A search with no time limit that stops once `cancelled` says so (tests: wall clock would make the answer depend
+    /// on the machine's load).
+    #[cfg(any(test, feature = "test-support"))]
     pub fn unbounded(cancelled: &'a (dyn Fn() -> bool + Sync)) -> Control<'a> {
         Control { deadline: None, cancelled }
     }

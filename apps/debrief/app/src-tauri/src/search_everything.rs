@@ -132,7 +132,10 @@ pub(crate) async fn search_with<R: Runtime>(
             let replaced = move || !is_newest(&label, id);
             let control = match budget {
                 Some(b) => Control::new(b, &replaced),
+                #[cfg(test)]
                 None => Control::unbounded(&replaced),
+                #[cfg(not(test))]
+                None => Control::new(search_all::BUDGET, &replaced),
             };
             match search_all::run(store.as_ref(), &corpus, &request, &control) {
                 Ok(reply) => Ok(reply),
@@ -227,7 +230,7 @@ mod tests {
         let found = search(&app, "timeout").unwrap().expect("words");
         assert!(found.events.total > 0, "the samples log timeouts");
         assert!(found.events.items.iter().all(|e| e.snippet.iter().any(|p| p.mark)));
-        assert_eq!(found.notes.outcome, KindOutcome::Complete, "the search ran out of its budget");
+        assert_eq!(found.notes.outcome, KindOutcome::Complete, "the notes search did not complete");
         assert_eq!(found.notes.total, 1);
         assert_eq!(found.notes.items[0].title, "Gateway timeouts");
         assert_eq!(found.notes.items[0].event, None);
