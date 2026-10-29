@@ -751,3 +751,10 @@ composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor D
 crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
 (`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
 not by guessing at the VM.
+
+## A work-stealing test picked its victim by position (2026-10-29, paddock-download)
+`a_slow_range_is_split_so_neither_the_tail_nor_the_hash_waits_on_it` made the range at offset 0 slow and expected it to be
+split. On a loaded Windows runner (CI 7110) its worker was descheduled before sending the request, and the other workers
+split the unstarted range below the split threshold, so nothing was left to split. **Guidance:** a test about work stealing
+must not pick the victim by its position; gate the fake so the victim is in flight before a stealer can run (ADR 0031,
+rule 49).
