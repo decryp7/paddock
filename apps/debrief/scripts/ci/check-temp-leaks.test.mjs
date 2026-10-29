@@ -96,6 +96,8 @@ test('the offenders are listed with their counts, most first', () => {
 test('the shared folders are scanned for endpoint-shaped names only, never for other files', () => {
   assert.ok(ENDPOINT_PATTERN.test('debrief-plugin-372eb9bd2f3d'));
   assert.ok(ENDPOINT_PATTERN.test('debrief-ipc-0123456789ab'));
+  // A test's own prefix with a random part (debrief-ipc tests/it/launch.rs: `debrief-test-gone-<8 hex>`), plus the 12 hex.
+  assert.ok(ENDPOINT_PATTERN.test('debrief-test-gone-1a2b3c4d-0123456789ab'));
   assert.ok(ENDPOINT_PATTERN.test('dbwAb3dEf'));
   for (const other of ['debrief-plugin-372eb9bd2f3', 'debrief-plugin-372eb9bd2f3dd', 'debrief-parity-x-1-ab', 'debrief', 'systemd-private-0123456789ab', 'dbw', 'dbwAb3dEf9', 'plugin-372eb9bd2f3d']) {
     assert.ok(!ENDPOINT_PATTERN.test(other), other);
@@ -156,5 +158,18 @@ test('--socket-dir scans the job\'s own socket folder for endpoint-shaped names,
     temp.done();
     sockets.done();
     shared.done();
+  }
+});
+
+test('an empty --socket-dir fails with 2 on Unix (a missing socket base is never skipped), and is allowed on Windows', () => {
+  const temp = scratch();
+  try {
+    const out = quiet();
+    assert.equal(main(['--dir', temp.dir, '--socket-dir', ''], out.log, () => [], 'darwin'), 2);
+    assert.equal(main(['--dir', temp.dir, '--socket-dir', ''], quiet().log, () => [], 'linux'), 2);
+    assert.equal(main(['--dir', temp.dir, '--socket-dir'], quiet().log, () => [], 'linux'), 2, 'no value at all');
+    assert.equal(main(['--dir', temp.dir, '--socket-dir', ''], quiet().log, () => [], 'win32'), 0, 'named pipes: no socket folder');
+  } finally {
+    temp.done();
   }
 });

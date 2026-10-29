@@ -18,7 +18,7 @@ export const PATTERN = /^(debrief|imt)-/;
  * looked for in the shared folders (`/tmp`, `$XDG_RUNTIME_DIR`) a socket falls back to when the temp folder is too long,
  * which hold other programs' files too. A confined test folder (`dbw` and six characters) counts as well.
  */
-export const ENDPOINT_PATTERN = /^(debrief(-[a-z]+)+-[0-9a-f]{12}|dbw[A-Za-z0-9]{6})$/;
+export const ENDPOINT_PATTERN = /^(debrief(-[a-z0-9]+)+-[0-9a-f]{12}|dbw[A-Za-z0-9]{6})$/;
 
 /** The shared folders endpoints can fall back to, besides the temp folder. */
 export function sharedDirs(env = process.env, temp = tmpdir()) {
@@ -90,7 +90,7 @@ function readBaseline(file) {
   }
 }
 
-export function main(argv, log = console, shared = sharedDirs) {
+export function main(argv, log = console, shared = sharedDirs, platform = process.platform) {
   const opt = (name) => {
     const i = argv.indexOf(name);
     return i >= 0 ? argv[i + 1] : undefined;
@@ -99,6 +99,12 @@ export function main(argv, log = console, shared = sharedDirs) {
   // Without `--dir`, or with `--shared`, the shared folders are scanned too, for endpoint-shaped names only (kept in the list
   // as full paths): a socket folder falls back to them when the temp folder's path is too long.
   const socketDir = opt('--socket-dir');
+  // CI passes "$PADDOCK_SOCKET_BASE": empty means the job's socket folder was never made, and the leak check would look in
+  // one folder fewer than the tests use. Windows has no socket folder (named pipes).
+  if (argv.includes('--socket-dir') && !socketDir && platform !== 'win32') {
+    log.error('--socket-dir is empty: the job has no socket folder (PADDOCK_SOCKET_BASE, conformance/ci/job-tmpdir.sh)');
+    return 2;
+  }
   const extra = [
     ...(socketDir ? [socketDir] : []),
     ...(argv.includes('--dir') && !argv.includes('--shared') ? [] : shared(process.env, dir).filter((d) => d !== dir && d !== socketDir)),
