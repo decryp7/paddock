@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
 import { DumpMarker } from '../core/api.types';
 import { formatDateTime } from '../core/format';
 import { WorkspaceStore } from '../core/workspace.store';
@@ -6,33 +6,24 @@ import { COMMAND_CONTEXT } from '../extensions/command-registry';
 import { headlineText } from './dump-headline';
 import { DumpsBackend } from './dumps-backend';
 import { DumpsStore } from './dumps.store';
+import { StripChip, TimelineChips } from '../timeline/timeline-chips';
 
 /** A marker placed on the visible log range (percent of the plot). */
 export interface MarkerVm {
   marker: DumpMarker;
   left: number;
-  /** Label row, so labels of nearby markers do not cover each other. */
-  row: number;
 }
 
 /** Estimated label width in px (as the profile span labels). */
 const labelWidth = (name: string) => Math.min(200, 14 + name.length * 6.5);
 
-/** Places markers inside the visible range (dropping the others) and stacks nearby labels. Pure. */
-export function layoutMarkers(markers: readonly DumpMarker[], view: { from: number; to: number }, widthPx = 1000): MarkerVm[] {
+/** Places markers inside the visible range (dropping the others). Pure. */
+export function layoutMarkers(markers: readonly DumpMarker[], view: { from: number; to: number }): MarkerVm[] {
   const span = Math.max(1, view.to - view.from);
-  const rowEnds: number[] = [];
   return markers
     .filter((m) => m.timeMs >= view.from && m.timeMs <= view.to)
     .sort((a, b) => a.timeMs - b.timeMs || a.id - b.id)
-    .map((m) => {
-      const left = ((m.timeMs - view.from) / span) * 100;
-      const x = (left / 100) * widthPx;
-      let row = rowEnds.findIndex((end) => end <= x);
-      if (row < 0) row = rowEnds.push(0) - 1;
-      rowEnds[row] = x + labelWidth(m.name) + 4;
-      return { marker: m, left, row };
-    });
+    .map((m) => ({ marker: m, left: ((m.timeMs - view.from) / span) * 100 }));
 }
 
 /**
@@ -45,26 +36,12 @@ export function layoutMarkers(markers: readonly DumpMarker[], view: { from: numb
   template: `
     @for (m of items(); track m.marker.id) {
       <div class="line" [class.critical]="m.marker.severity === 'critical'" [style.left.%]="m.left" aria-hidden="true"></div>
-      <button
-        type="button"
-        class="chip"
-        data-testid="dump-marker"
-        [style.left.%]="m.left"
-        [style.bottom.px]="4 + m.row * 16"
-        [title]="title(m)"
-        [attr.aria-label]="label(m)"
-        (pointerdown)="$event.stopPropagation()"
-        (click)="open(m)"
-      >{{ m.marker.kind === 'dump' ? '✖ ' : '▲ ' }}{{ m.marker.name }}</button>
     }
   `,
   styles: `
     :host { position: absolute; inset: 0; pointer-events: none; }
-    .line { position: absolute; top: 50px; bottom: 0; width: 0; border-left: 2px dotted var(--s3); }
+    .line { position: absolute; top: var(--tl-strip-top, 50px); bottom: 0; width: 0; border-left: 2px dotted var(--s3); }
     .line.critical { border-left-color: var(--lvl-fatal); }
-    .chip { pointer-events: auto; position: absolute; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: var(--fs-2xs); line-height: 14px; padding: 0 5px; border-radius: 3px; border: 1px solid var(--border-3); background: var(--bg-3); color: var(--text); cursor: pointer; z-index: 2; }
-    .chip:hover { background: var(--bg-hover); }
-    .chip:focus-visible { outline: 2px solid var(--focus-ring); }
   `,
 })
 export class DumpMarkerTrack {
@@ -77,11 +54,12 @@ export class DumpMarkerTrack {
   private readonly store = this.backend ? inject(DumpsStore) : null;
   private readonly context = inject(COMMAND_CONTEXT, { optional: true });
   private readonly workspace = inject(WorkspaceStore);
+  private readonly chips = inject(TimelineChips, { optional: true });
   private readonly markers = signal<DumpMarker[]>([]);
 
   protected readonly items = computed(() => {
     const v = this.view();
-    return v ? layoutMarkers(this.markers(), v, this.width()) : [];
+    return v ? layoutMarkers(this.markers(), v) : [];
   });
 
   constructor() {
@@ -89,6 +67,26 @@ export class DumpMarkerTrack {
       this.store?.version();
       untracked(() => void this.load());
     });
+    const chips = this.chips;
+    if (chips) {
+      chips.register('dump', computed(() => this.items().map((m) => this.chip(m))));
+      inject(DestroyRef).onDestroy(() => chips.clear('dump'));
+    }
+  }
+
+  private chip(m: MarkerVm): StripChip {
+    const text = `${m.marker.kind === 'dump' ? '✖ ' : '▲ '}${m.marker.name}`;
+    return {
+      id: `dump-${m.marker.id}`,
+      x: (m.left / 100) * this.width(),
+      w: labelWidth(m.marker.name),
+      text,
+      title: this.title(m),
+      label: this.label(m),
+      testid: 'dump-marker',
+      accent: 'var(--border-3)',
+      open: () => this.open(m),
+    };
   }
 
   private async load(): Promise<void> {

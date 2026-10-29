@@ -4,7 +4,7 @@ import { all, provideTinyBackend, settle } from '../../testing/helpers';
 import { at } from '../../testing/must';
 import { NoteAnchor, NoteItem } from '../core/api.types';
 import { NoteActions } from './note-actions';
-import { NoteTimelineTrack } from './note-timeline-track';
+import { NoteHost } from '../timeline/testing/chip-hosts';
 import { NotesStore } from './notes.store';
 
 const item = (id: string, anchor: NoteAnchor, text: string, severity: NoteItem['severity'] = 'info'): NoteItem => ({
@@ -30,7 +30,7 @@ describe('NoteTimelineTrack', () => {
         { provide: NoteActions, useValue: { edit } },
       ],
     });
-    const fixture = TestBed.createComponent(NoteTimelineTrack);
+    const fixture = TestBed.createComponent(NoteHost);
     fixture.componentRef.setInput('view', view);
     fixture.componentRef.setInput('width', 400);
     fixture.detectChanges();
@@ -50,7 +50,7 @@ describe('NoteTimelineTrack', () => {
     const flags = all<HTMLButtonElement>(fixture, '[data-testid=note-mark]');
     expect(flags.map((f) => f.textContent?.trim())).toEqual(['✎ Deploy started', '✎ Outage']);
     expect(at(flags, 0).getAttribute('aria-label')).toMatch(/^Note at .*: Deploy started\. Click to edit\.$/);
-    expect(at(flags, 0).style.left).toBe('25%');
+    expect(at(flags, 0).style.left).toBe('100px');
     expect(all(fixture, '.line')).toHaveLength(1);
     const span = all<HTMLElement>(fixture, '.span');
     expect(span).toHaveLength(1);
