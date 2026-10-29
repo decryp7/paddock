@@ -377,16 +377,15 @@ mod tests {
             evil.send("GET", "/", None, Duration::from_secs(1)).await,
             Err(LoopbackError::Invalid(_))
         ));
-        // A free port: nothing listens.
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let free = LoopbackPort::new(l.local_addr().unwrap().port()).unwrap();
-        drop(l);
-        let e = Client::new(free, None)
+        // A port held for the whole test that closes every connection without an answer (never a freed port: another
+        // test's server could take it). A broken exchange is `Http`; `Connect` (nothing listens) is mapped by its users' tests.
+        let held = paddock_testkit::net::HeldPort::hang_up();
+        let e = Client::new(LoopbackPort::new(held.port()).unwrap(), None)
             .send("GET", "/", None, Duration::from_secs(1))
             .await
             .err()
             .unwrap();
-        assert!(matches!(e, LoopbackError::Connect(..)), "{e}");
+        assert!(matches!(e, LoopbackError::Http(..)), "{e}");
         // A server that accepts but never answers: timeout.
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = LoopbackPort::new(l.local_addr().unwrap().port()).unwrap();

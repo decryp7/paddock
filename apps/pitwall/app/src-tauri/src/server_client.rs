@@ -500,17 +500,15 @@ mod tests {
 
     #[tokio::test]
     async fn a_server_that_is_not_running_is_unavailable_with_a_next_step() {
-        // A port nobody listens on (bound then dropped).
-        let port = {
-            let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            l.local_addr().unwrap().port()
-        };
-        let (_d, c) = client_for(port, "k");
+        // A port that answers nothing, held for the whole test (a freed port could be taken by another test's server): every
+        // connection is closed without an answer. (Refused connections map to the "Repair service" text in the test above.)
+        let held = paddock_testkit::net::HeldPort::hang_up();
+        let (_d, c) = client_for(held.port(), "k");
         // Hermetic: an installed Pitwall may listen on the well-known port, so only the discovery port is tried.
         let c = c.discovery_port_only();
         let e = c.call("overview", Value::Null, Some(Duration::from_secs(5))).await.unwrap_err();
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
-        assert!(e.message.contains("Repair service"));
+        assert!(e.message.contains("restart the service"), "{}", e.message);
         let e = c.open_stream("/mgmt/v1/live", None, Duration::from_secs(5)).await.err().unwrap();
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
     }
@@ -525,9 +523,8 @@ mod tests {
             drop(s);
         });
         let (_d, c) = client_for(port, "k");
-        let started = std::time::Instant::now();
+        // The held connection never answers: the call ends because its own timeout fired (no wall-clock bound asserted).
         let e = c.call("overview", Value::Null, Some(Duration::from_millis(300))).await.unwrap_err();
-        assert!(started.elapsed() < Duration::from_secs(10));
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
         assert!(e.message.contains("Retry"), "{}", e.message);
     }

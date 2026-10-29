@@ -67,6 +67,17 @@ pub fn disabled_in_login_items(status: RegistrationStatus, launchd_disabled: Opt
     }
 }
 
+/// What to say when macOS reports the launch agent as `NotFound`. Before the first registration that is simply how
+/// `SMAppService` answers for a service that was never set up, wherever the app is, so it says "not set up yet"; only after
+/// a registration did once work does a missing agent mean the app was moved out of its bundle's place.
+pub fn not_found_message(registered_before: bool) -> &'static str {
+    if registered_before {
+        "run Pitwall from /Applications (the launch agent is part of the app bundle)"
+    } else {
+        "The background service is not set up yet."
+    }
+}
+
 /// Reads `label`'s entry in the output of `launchctl print-disabled gui/<uid>`: `"label" => disabled` (older systems
 /// print `true`/`false`). `None` when the label is not listed.
 pub fn parse_print_disabled(output: &str, label: &str) -> Option<bool> {
@@ -171,6 +182,49 @@ pub trait RepairOps {
     fn service_answers(&mut self) -> bool;
     /// Waits (tests do not).
     fn pause(&mut self, how_long: Duration);
+    /// The user pressed Cancel. Checked between steps and while waiting; never in the middle of one.
+    fn cancelled(&mut self) -> bool {
+        false
+    }
+    /// The repair entered `phase`.
+    fn phase(&mut self, phase: RepairPhase) {
+        let _ = phase;
+    }
+}
+
+/// The stages of a repair, for the job that shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepairPhase {
+    /// Removing the old registration.
+    Removing,
+    /// Waiting until launchd has dropped the old job.
+    WaitingForLaunchd,
+    /// Registering the service again.
+    Registering,
+    /// Waiting for the registered service to answer.
+    Starting,
+}
+
+impl RepairPhase {
+    /// A stable id for the job's phase.
+    pub const fn id(self) -> &'static str {
+        match self {
+            RepairPhase::Removing => "remove",
+            RepairPhase::WaitingForLaunchd => "wait-launchd",
+            RepairPhase::Registering => "register",
+            RepairPhase::Starting => "start",
+        }
+    }
+
+    /// The words to show.
+    pub const fn label(self) -> &'static str {
+        match self {
+            RepairPhase::Removing => "Removing the old registration...",
+            RepairPhase::WaitingForLaunchd => "Waiting for macOS to drop the old registration...",
+            RepairPhase::Registering => "Registering the service with macOS...",
+            RepairPhase::Starting => "Waiting for the service to start...",
+        }
+    }
 }
 
 /// How a repair ended.
@@ -182,6 +236,8 @@ pub enum RepairOutcome {
     NeedsApproval,
     /// It did not come back; the text says why and what to do.
     Failed(String),
+    /// The user cancelled. The service is registered again or untouched, never left removed.
+    Cancelled,
 }
 
 /// Replaces the registration: unregister, `launchctl bootout`, wait until launchd has dropped the job, register. Launchd
@@ -191,12 +247,17 @@ pub enum RepairOutcome {
 pub fn run_repair(ops: &mut dyn RepairOps, say: &mut dyn FnMut(&str)) -> RepairOutcome {
     say("re-registering the service");
     for cycle in 0..=MAX_CYCLES {
+        if ops.cancelled() {
+            say("cancelled before the next step; nothing more was changed");
+            return RepairOutcome::Cancelled;
+        }
         if cycle > 0 {
             say(&format!(
                 "launchd still reports a stale registration; retry {cycle} of {MAX_CYCLES}"
             ));
         }
         say("removing the old registration");
+        ops.phase(RepairPhase::Removing);
         if let Err(e) = ops.unregister() {
             say(&format!("unregister did not succeed (continuing): {e}"));
         }
@@ -204,7 +265,15 @@ pub fn run_repair(ops: &mut dyn RepairOps, say: &mut dyn FnMut(&str)) -> RepairO
             say(&format!("bootout did not succeed (continuing): {e}"));
         }
         let mut waited = Duration::ZERO;
+        ops.phase(RepairPhase::WaitingForLaunchd);
+        let mut cancelled = false;
         while !ops.job_gone() {
+            if ops.cancelled() {
+                // Registering again first: a cancel never leaves the service removed.
+                say("cancelled; registering the service again before stopping");
+                cancelled = true;
+                break;
+            }
             if waited >= GONE_WAIT {
                 say("launchd still holds the old job; registering anyway");
                 break;
@@ -212,7 +281,10 @@ pub fn run_repair(ops: &mut dyn RepairOps, say: &mut dyn FnMut(&str)) -> RepairO
             ops.pause(GONE_POLL);
             waited += GONE_POLL;
         }
-        ops.pause(Duration::from_secs(2 * u64::from(cycle)));
+        if !cancelled {
+            ops.pause(Duration::from_secs(2 * u64::from(cycle)));
+        }
+        ops.phase(RepairPhase::Registering);
         match ops.register() {
             Ok(()) => say("registered"),
             Err(RegisterError::NeedsApproval) => {
@@ -221,13 +293,21 @@ pub fn run_repair(ops: &mut dyn RepairOps, say: &mut dyn FnMut(&str)) -> RepairO
             }
             Err(RegisterError::Other(e)) => say(&format!("register failed: {e}")),
         }
+        if cancelled {
+            return RepairOutcome::Cancelled;
+        }
         ops.pause(SETTLE);
         if ops.registration_stale() {
             continue;
         }
         say("launchd accepts the registration; waiting for the service to start");
         let mut waited = Duration::ZERO;
+        ops.phase(RepairPhase::Starting);
         loop {
+            if ops.cancelled() {
+                say("cancelled; the service stays registered");
+                return RepairOutcome::Cancelled;
+            }
             if ops.service_answers() {
                 say("the service answers again");
                 return RepairOutcome::Recovered;
@@ -327,6 +407,8 @@ impl RepairTracker {
                 now,
             ),
             RepairOutcome::Failed(why) => self.set(RepairState::Failed, why, now),
+            // The job shows the cancel; nothing is left on the Settings notice.
+            RepairOutcome::Cancelled => *self.inner.lock().unwrap_or_else(PoisonError::into_inner) = None,
         }
     }
 
@@ -356,6 +438,16 @@ mod tests {
     use super::*;
 
     const LABEL: &str = "net.decryptology.pitwall.service";
+
+    #[test]
+    fn a_service_that_was_never_registered_is_not_set_up_yet_and_never_blamed_on_the_apps_place() {
+        let first = not_found_message(false);
+        assert!(first.contains("not set up yet") && !first.contains("/Applications"), "{first}");
+        assert!(
+            not_found_message(true).contains("/Applications"),
+            "after a registration worked, a missing agent is a moved app"
+        );
+    }
 
     #[test]
     fn the_disabled_mapping() {
@@ -397,7 +489,10 @@ mod tests {
     #[test]
     fn macos_26_launchctl_output_goes_through_pitwalls_repair_decision() {
         let refused = parse_job(SPAWN_FAILED_MACOS_26);
-        assert!(refused.found && refused.stale(), "the refused job is recognised despite the nested blocks: {refused:?}");
+        assert!(
+            refused.found && refused.stale(),
+            "the refused job is recognised despite the nested blocks: {refused:?}"
+        );
         let running = parse_job(RUNNING_MACOS_26);
         assert!(running.found && running.running && !running.stale(), "{running:?}");
         // Pitwall's decision: a refused job whose server does not answer is repaired...
@@ -487,6 +582,9 @@ mod tests {
         unregister_fails: bool,
         /// How many `job_gone` questions say no.
         job_lingers_for: u32,
+        /// Cancel is pressed once this many calls were made (`None`: never).
+        cancel_after_calls: Option<usize>,
+        phases: Vec<RepairPhase>,
     }
 
     impl Fake {
@@ -500,6 +598,8 @@ mod tests {
                 register_results: Vec::new(),
                 unregister_fails: false,
                 job_lingers_for: 0,
+                cancel_after_calls: None,
+                phases: Vec::new(),
             }
         }
     }
@@ -549,6 +649,76 @@ mod tests {
         fn pause(&mut self, how_long: Duration) {
             self.pause_total += how_long;
         }
+        fn cancelled(&mut self) -> bool {
+            self.cancel_after_calls.is_some_and(|n| self.calls.len() >= n)
+        }
+        fn phase(&mut self, phase: RepairPhase) {
+            self.phases.push(phase);
+        }
+    }
+
+    #[test]
+    fn the_repair_reports_its_phases_in_order() {
+        let mut f = Fake::new(0, Some(0));
+        f.job_lingers_for = 1;
+        assert_eq!(run(&mut f).0, RepairOutcome::Recovered);
+        assert_eq!(
+            f.phases,
+            [
+                RepairPhase::Removing,
+                RepairPhase::WaitingForLaunchd,
+                RepairPhase::Registering,
+                RepairPhase::Starting
+            ]
+        );
+        for p in [
+            RepairPhase::Removing,
+            RepairPhase::WaitingForLaunchd,
+            RepairPhase::Registering,
+            RepairPhase::Starting,
+        ] {
+            assert!(!p.id().is_empty() && p.label().ends_with("..."), "{p:?}");
+        }
+    }
+
+    #[test]
+    fn a_cancel_before_anything_was_removed_changes_nothing() {
+        let mut f = Fake::new(0, Some(0));
+        f.cancel_after_calls = Some(0);
+        assert_eq!(run(&mut f).0, RepairOutcome::Cancelled);
+        assert!(f.calls.is_empty(), "{:?}", f.calls);
+    }
+
+    #[test]
+    fn a_cancel_while_waiting_for_launchd_still_registers_so_the_service_is_not_left_removed() {
+        let mut f = Fake::new(0, Some(0));
+        f.job_lingers_for = u32::MAX;
+        // Pressed once the old registration was removed (unregister, bootout).
+        f.cancel_after_calls = Some(2);
+        let (outcome, said) = run(&mut f);
+        assert_eq!(outcome, RepairOutcome::Cancelled);
+        assert_eq!(f.calls, ["unregister", "bootout", "register"]);
+        assert!(f.pause_total < GONE_WAIT, "it did not wait the full time");
+        assert!(said.iter().any(|m| m.contains("cancel")));
+    }
+
+    #[test]
+    fn a_cancel_while_the_service_starts_stops_the_wait_and_keeps_the_registration() {
+        let mut f = Fake::new(0, None);
+        f.cancel_after_calls = Some(4);
+        assert_eq!(run(&mut f).0, RepairOutcome::Cancelled);
+        assert_eq!(f.calls, ["unregister", "bootout", "register", "stale?"]);
+        assert!(f.pause_total < START_WAIT, "{:?}", f.pause_total);
+    }
+
+    #[test]
+    fn a_cancelled_repair_clears_the_notice() {
+        let t = RepairTracker::new();
+        let t0 = Instant::now();
+        t.begin(t0);
+        t.finish(&RepairOutcome::Cancelled, t0);
+        assert_eq!(t.current(t0), None);
+        assert!(t.start(t0), "a cancelled repair can be started again");
     }
 
     fn run(f: &mut Fake) -> (RepairOutcome, Vec<String>) {

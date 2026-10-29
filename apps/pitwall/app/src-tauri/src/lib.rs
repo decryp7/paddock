@@ -96,6 +96,8 @@ fn tray_action(app: &AppHandle<Wry>, action: TrayAction) {
 }
 
 /// Starts the app.
+// The deprecated blocking commands stay registered until the UI has moved to the jobs (WP-3 of Pitwall 1.1).
+#[allow(deprecated)]
 pub fn run() {
     let data_dir = app_state::data_dir().unwrap_or_default();
     let keys = Arc::new(credentials::StoredAdminKey::new(
@@ -209,6 +211,8 @@ pub fn run() {
             app_commands::start_install_service,
             app_commands::start_uninstall_service,
             app_commands::start_app_update,
+            app_commands::start_repair_service,
+            app_commands::start_check_updates,
             app_commands::job_cancel,
             app_commands::job_stop_waiting,
         ])
@@ -229,7 +233,7 @@ pub fn run() {
                         match service_install::repair_registration(&answers) {
                             Some(service_repair::RepairOutcome::Recovered | service_repair::RepairOutcome::NeedsApproval) => break,
                             // Failed: the next check tries again (bounded by REPAIR_ATTEMPTS); nothing to repair: keep watching.
-                            Some(service_repair::RepairOutcome::Failed(_)) | None => {}
+                            Some(service_repair::RepairOutcome::Failed(_) | service_repair::RepairOutcome::Cancelled) | None => {}
                         }
                     }
                 });

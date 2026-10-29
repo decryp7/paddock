@@ -67,5 +67,7 @@ workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# A held loopback port for "nothing answers there" (C39).
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tokio = { workspace = true, features = ["time", "sync", "rt", "rt-multi-thread", "macros", "net", "io-util", "test-util"] }
 tauri = { version = "2.12.4", features = ["test"] }

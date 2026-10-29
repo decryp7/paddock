@@ -549,7 +549,14 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         }
         "update_check_status" => ok(st.update_status()),
         "update_notices" => ok(st.update_notices()),
-        "check_updates_now" => ok(st.run_update_check().await.result),
+        "check_updates_now" => {
+            // Up to 40 repositories are asked one after another: a job on the app side, so it can be cancelled by `opId`.
+            // Dropping the check releases its guard and writes nothing (the state is saved when it finishes).
+            match cancellable(st, a, async { Ok(st.run_update_check().await.result) }).await? {
+                Some(result) => ok(result),
+                None => ok(json!({ "cancelled": true })),
+            }
+        }
         "set_update_check" => {
             let enabled: bool = arg(a, "enabled")?;
             let schedule: mgmt::UpdateSchedule = arg(a, "schedule")?;

@@ -4,6 +4,8 @@
 //! `pitwall-server install`). Pitwall never asks for or handles a password. Adapted from Pitcrew's service_install.
 
 use crate::service_repair::RepairNotice;
+#[cfg(not(target_os = "macos"))]
+use crate::service_repair::{RepairOutcome, RepairPhase};
 use pitwall_core::mgmt::{CommandError, ErrorCode};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -234,8 +236,8 @@ mod imp {
     use super::*;
     use crate::app_state::{self, AppState};
     use crate::service_repair::{
-        disabled_in_login_items, parse_job, parse_print_disabled, plan, run_repair, JobReport, Observed, Plan, RegisterError,
-        RegistrationStatus, RepairOps, RepairOutcome, REPAIR,
+        disabled_in_login_items, not_found_message, parse_job, parse_print_disabled, plan, run_repair, JobReport, Observed, Plan,
+        RegisterError, RegistrationStatus, RepairOps, RepairOutcome, RepairPhase, REPAIR,
     };
     use objc2_foundation::NSString;
     use objc2_service_management::{SMAppService, SMAppServiceStatus};
@@ -271,10 +273,7 @@ mod imp {
         let (installed, message) = match status {
             RegistrationStatus::Enabled => (true, None),
             RegistrationStatus::RequiresApproval => (true, Some("allow Pitwall in System Settings > General > Login Items".to_string())),
-            RegistrationStatus::NotFound => (
-                false,
-                Some("run Pitwall from /Applications (the launch agent is part of the app bundle)".to_string()),
-            ),
+            RegistrationStatus::NotFound => (false, Some(not_found_message(registered_version().is_some()).to_string())),
             RegistrationStatus::NotRegistered => (false, None),
         };
         let job = job_report();
@@ -395,31 +394,53 @@ mod imp {
                 record_version();
                 None
             }
-            Plan::Repair(_) => REPAIR.start(Instant::now()).then(|| perform(answers)),
+            Plan::Repair(_) => REPAIR.start(Instant::now()).then(|| perform(answers, &|| false, &|_| {})),
         }
     }
 
     /// The user pressed Repair: runs the repair in the background (progress in [`REPAIR`]). Refused when the user
     /// switched the item off in Login Items or the launch agent is missing from the app.
+    #[deprecated(note = "the UI moves to the repair job (`repair_blocking` through `start_repair_service`) in WP-3 of Pitwall 1.1")]
     pub fn request_repair(answers: impl Fn() -> bool + Send + 'static) -> Result<(), CommandError> {
+        refuse_when_not_repairable()?;
+        if REPAIR.start(Instant::now()) {
+            std::thread::spawn(move || {
+                perform(&answers, &|| false, &|_| {});
+            });
+        }
+        Ok(())
+    }
+
+    fn refuse_when_not_repairable() -> Result<(), CommandError> {
         if observe(false, true, None) == Plan::Nothing {
             return Err(CommandError::new(
                 ErrorCode::Forbidden,
                 "Pitwall's background item is switched off in System Settings > General > Login Items, or the app is not in /Applications. Switch it on there; Pitwall never does it for you.",
             ));
         }
-        if REPAIR.start(Instant::now()) {
-            std::thread::spawn(move || {
-                perform(&answers);
-            });
-        }
         Ok(())
     }
 
+    /// The repair as a job body: runs it on the calling (blocking) thread. `cancel` is asked between steps and while
+    /// waiting, `phase` gets each stage. Refused like [`request_repair`] and when another repair is working.
+    pub fn repair_blocking(
+        answers: &dyn Fn() -> bool,
+        cancel: &dyn Fn() -> bool,
+        phase: &dyn Fn(RepairPhase),
+    ) -> Result<RepairOutcome, CommandError> {
+        refuse_when_not_repairable()?;
+        if !REPAIR.start(Instant::now()) {
+            return Err(CommandError::new(ErrorCode::Conflict, "A repair is already working."));
+        }
+        Ok(perform(answers, cancel, phase))
+    }
+
     /// Runs the repair (the tracker is already working) and records the result.
-    fn perform(answers: &dyn Fn() -> bool) -> RepairOutcome {
+    fn perform(answers: &dyn Fn() -> bool, cancel: &dyn Fn() -> bool, phase: &dyn Fn(RepairPhase)) -> RepairOutcome {
         eprintln!("Pitwall: the background service cannot start (stale registration or new version): repairing");
-        let outcome = run_repair(&mut MacOps { answers }, &mut |step| eprintln!("Pitwall: repair: {step}"));
+        let outcome = run_repair(&mut MacOps { answers, cancel, phase }, &mut |step| {
+            eprintln!("Pitwall: repair: {step}")
+        });
         REPAIR.finish(&outcome, Instant::now());
         if outcome == RepairOutcome::Recovered {
             record_version();
@@ -431,6 +452,8 @@ mod imp {
     /// [`RepairOps`] over `SMAppService` and `launchctl`.
     struct MacOps<'a> {
         answers: &'a dyn Fn() -> bool,
+        cancel: &'a dyn Fn() -> bool,
+        phase: &'a dyn Fn(RepairPhase),
     }
 
     impl RepairOps for MacOps<'_> {
@@ -463,6 +486,12 @@ mod imp {
         }
         fn pause(&mut self, how_long: Duration) {
             std::thread::sleep(how_long);
+        }
+        fn cancelled(&mut self) -> bool {
+            (self.cancel)()
+        }
+        fn phase(&mut self, phase: RepairPhase) {
+            (self.phase)(phase);
         }
     }
 
@@ -608,7 +637,8 @@ mod imp {
 pub use imp::{install, os_state, uninstall};
 
 #[cfg(target_os = "macos")]
-pub use imp::{open_login_items, repair_registration, request_repair};
+#[allow(deprecated)]
+pub use imp::{open_login_items, repair_blocking, repair_registration, request_repair};
 
 /// Opens System Settings > General > Login Items, where the user switches the background item on. Only macOS has one.
 #[cfg(not(target_os = "macos"))]
@@ -618,6 +648,17 @@ pub fn open_login_items() -> Result<(), CommandError> {
 
 /// Repair exists on macOS only; elsewhere the service is installed or removed from the app.
 #[cfg(not(target_os = "macos"))]
+pub fn repair_blocking(
+    _answers: &dyn Fn() -> bool,
+    _cancel: &dyn Fn() -> bool,
+    _phase: &dyn Fn(RepairPhase),
+) -> Result<RepairOutcome, CommandError> {
+    Err(CommandError::new(ErrorCode::NotAvailable, "Repair exists on macOS only"))
+}
+
+/// Repair exists on macOS only; elsewhere the service is installed or removed from the app.
+#[cfg(not(target_os = "macos"))]
+#[deprecated(note = "the UI moves to the repair job (`start_repair_service`) in WP-3 of Pitwall 1.1")]
 pub fn request_repair(_answers: impl Fn() -> bool + Send + 'static) -> Result<(), CommandError> {
     Err(CommandError::new(ErrorCode::NotAvailable, "Repair exists on macOS only"))
 }
@@ -691,7 +732,13 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn repair_exists_on_macos_only() {
-        assert_eq!(request_repair(|| false).unwrap_err().code, ErrorCode::NotAvailable);
+        #[allow(deprecated)]
+        let old = request_repair(|| false);
+        assert_eq!(old.unwrap_err().code, ErrorCode::NotAvailable);
+        assert_eq!(
+            repair_blocking(&|| false, &|| false, &|_| {}).unwrap_err().code,
+            ErrorCode::NotAvailable
+        );
     }
 
     #[cfg(not(target_os = "macos"))]

@@ -19,6 +19,8 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["net", "time", "rt", "macros"] }
 
 [dev-dependencies]
+# A held loopback port for "nothing answers there" (C39).
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tokio = { workspace = true, features = ["net", "time", "rt-multi-thread", "macros", "io-util"] }
 
 [lints]
