@@ -11,6 +11,11 @@ Tests must not leave `debrief-*` or `imt-*` folders in the OS temp directory. CI
   endpoint shape (`debrief-<prefix>-<12 hex>`, or a confined test folder `dbw` plus six characters), never other files.
   A test that kills a host on purpose (the store worker's kill tests) confines it: `WorkerConfig::env` sets `TMPDIR` and
   `XDG_RUNTIME_DIR` to a short folder under `/tmp` that the test owns (`confined()` in `debrief-store-worker/tests/it/worker.rs`).
+- **Children that end by `exit`**: a child whose lifeline (stdin) closes ends with `process::exit`, which runs no
+  destructors. A host that is stopped while it starts a child (the store worker starting a plugin) would leave the
+  endpoint folder `debrief-plugin-<12 hex>` behind, so `debrief_ipc::endpoint::remove_live()` removes every live
+  endpoint folder right before that exit (`lifeline()` does). Anything else that ends a process without unwinding
+  must call it too.
 - **Rust tests**: make scratch folders with `tempfile::TempDir` (or `tempfile::Builder::new().prefix("debrief-...-")`) and
   keep the guard alive for the test, so the folder is removed on panic too. Unit tests in `debrief-core` use
   `crate::test_dirs::scratch_dir(prefix)`, which keeps the guard in a thread-local for the test's thread.

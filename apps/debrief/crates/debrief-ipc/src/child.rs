@@ -75,6 +75,8 @@ pub fn lifeline() {
     std::thread::spawn(|| {
         let mut sink = [0u8; 256];
         while matches!(io::stdin().read(&mut sink), Ok(n) if n > 0) {}
+        // `exit` runs no destructors: remove the endpoints of children this process was still starting.
+        crate::endpoint::remove_live();
         std::process::exit(0);
     });
 }
