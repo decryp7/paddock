@@ -15,7 +15,7 @@ async function make(tweak?: (m: MockBackend) => void) {
   const store = TestBed.inject(ProcessesStore);
   f.detectChanges();
   await f.whenStable();
-  await new Promise((r) => setTimeout(r, 5)); // the mock's first live update
+  await vi.waitFor(() => expect(store.processes().length).toBeGreaterThan(0)); // the mock's first live update
   f.detectChanges();
   return { f, mock, store, el: f.nativeElement as HTMLElement };
 }

@@ -18,7 +18,7 @@ async function make(os: 'windows' | 'macos' = 'windows', fail?: Set<string>) {
   TestBed.inject(LiveStore);
   f.detectChanges();
   await f.whenStable();
-  await new Promise((r) => setTimeout(r, 5));
+  await vi.waitFor(() => expect(store.processes().length).toBeGreaterThan(0)); // the mock's first live update
   f.detectChanges();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const c = f.componentInstance as any;
