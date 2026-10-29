@@ -87,15 +87,17 @@ test.describe('the watch stepper', () => {
     await expect(page.locator('#cfg-h')).toBeFocused();
   });
 
-  test('editing a watch starts at Configure and the Source step stays shut', async ({ page }) => {
+  test('editing a watch starts at Configure, has no Source step and names the source in the page head', async ({ page }) => {
     await page.goto('/#/watches/w-2/edit');
     await expect(page.getByRole('heading', { name: 'GitHub' })).toBeVisible();
-    await page.getByRole('tab', { name: /Source/ }).click();
+    await expect(page.getByRole('tab', { name: /Source/ })).toHaveCount(0);
+    await expect(page.locator('.source-line')).toHaveText(/^GitHub: /);
     await expect(page.getByRole('tab', { name: /Configure/ })).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByRole('button', { name: 'Back' })).toHaveCount(0);
   });
 
-  test('honours reduced motion', async ({ page }) => {
+  // Material's own behaviour: its slide animation is off under prefers-reduced-motion (the page adds nothing).
+  test('Material stops the step slide under reduced motion', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openGithub(page);
     await next(page).click();
@@ -155,6 +157,7 @@ test.describe('the watch stepper', () => {
       await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
       await page.goto('/#/watches/new');
       await expect(page.getByRole('heading', { name: STEP_HEADINGS[0] })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Node\.js/ })).toBeVisible();
       await page.screenshot({ path: `${dir}/1-source-${scheme}.png` });
       await page.getByRole('button', { name: 'Source kinds', exact: true }).click();
       await page.getByRole('button', { name: /GitHub/ }).click();
@@ -171,7 +174,11 @@ test.describe('the watch stepper', () => {
       await page.screenshot({ path: `${dir}/3-versions-${scheme}.png` });
       await next(page).click();
       await expect(page.getByRole('heading', { name: STEP_HEADINGS[3], exact: true })).toBeVisible();
-      await page.screenshot({ path: `${dir}/4-notify-${scheme}.png`, fullPage: true });
+      await expect(page.getByText('Working out the next check')).toHaveCount(0);
+      await settleTransitions(page);
+      await page.screenshot({ path: `${dir}/4-notify-${scheme}.png` });
+      await page.locator('main.pd-page').evaluate((e) => e.scrollTo(0, e.scrollHeight));
+      await page.screenshot({ path: `${dir}/4b-notify-bottom-${scheme}.png` });
       await next(page).click();
       await expect(page.getByRole('heading', { name: 'Review', level: 2 })).toBeVisible();
       await page.screenshot({ path: `${dir}/5-review-${scheme}.png` });

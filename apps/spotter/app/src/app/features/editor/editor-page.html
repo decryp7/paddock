@@ -3,6 +3,9 @@
     <div>
       <a class="back" routerLink="/watches"><mat-icon svgIcon="sp:arrow-left" aria-hidden="true" />All watches</a>
       <h1>{{ store.editing() ? 'Edit watch' : 'Add a watch' }}</h1>
+      @if (store.editing() && sourceSummary(); as summary) {
+        <p class="help source-line">{{ summary }}</p>
+      }
     </div>
   </header>
 
@@ -12,18 +15,19 @@
       linear
       labelPosition="end"
       aria-label="Watch setup steps"
-      [animationDuration]="motion"
-      [selectedIndex]="store.stepIndex()"
+      [selectedIndex]="openIndex()"
       (selectionChange)="onStep($event.selectedIndex)"
     >
       <ng-template matStepperIcon="done"><mat-icon svgIcon="sp:check" aria-hidden="true" /></ng-template>
-      <ng-template matStepperIcon="edit"><mat-icon svgIcon="sp:edit" aria-hidden="true" /></ng-template>
-      <mat-step label="Source" [completed]="done(0)" [editable]="!store.editing()">
-        <ng-template matStepContent>
-          <h2 id="src-h" class="step-h" tabindex="-1">Choose a source</h2>
-          <sp-source-step />
-        </ng-template>
-      </mat-step>
+      <ng-template matStepperIcon="edit"><mat-icon svgIcon="sp:check" aria-hidden="true" /></ng-template>
+      @if (!id()) {
+        <mat-step label="Source" [completed]="done(0)" [editable]="true">
+          <ng-template matStepContent>
+            <h2 id="src-h" class="step-h" tabindex="-1">Choose a source</h2>
+            <sp-source-step />
+          </ng-template>
+        </mat-step>
+      }
       <mat-step label="Configure" [completed]="done(1)" [editable]="true">
         <ng-template matStepContent>
           @if (store.kind(); as kind) {
@@ -206,10 +210,10 @@
                 <input id="name" class="input" [value]="draft().name" (input)="store.update(d => ({ ...d, name: value($event) }))" />
               </div>
               <dl class="surface kv">
-                <dt>Source</dt><dd>{{ store.kind()?.label }}: {{ draft().source.values['url'] ?? draft().source.values['repo'] ?? draft().source.values['path'] ?? draft().source.values['image'] ?? draft().source.values['package'] ?? draft().source.values['project'] ?? draft().source.values['crate'] ?? '' }}</dd>
+                <dt>Source</dt><dd>{{ sourceSummary() }}</dd>
                 <dt>Checks</dt><dd>{{ store.schedulePreview().value?.description ?? '—' }}</dd>
-                <dt>Versions</dt><dd>{{ draft().versions }}{{ draft().includePrereleases ? ', with pre-releases' : '' }}</dd>
-                <dt>Notify</dt><dd>{{ draft().notify.mode }}{{ draft().notify.nag ? ', keeps reminding' : '' }}</dd>
+                <dt>Versions</dt><dd>{{ schemeLabel() }}{{ draft().includePrereleases ? ', with pre-releases' : '' }}</dd>
+                <dt>Notify</dt><dd>{{ modeLabel() }}{{ draft().notify.nag ? ', keeps reminding' : '' }}</dd>
                 <dt>Actions</dt><dd>{{ draft().actions.length }} configured, {{ draft().channels.length }} extra channel{{ draft().channels.length === 1 ? '' : 's' }}</dd>
               </dl>
               <label class="check"><input type="checkbox" [checked]="draft().paused" (change)="store.update(d => ({ ...d, paused: checked($event) }))" /><span>Start paused</span></label>

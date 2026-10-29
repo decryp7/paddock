@@ -4,6 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Material: stepper theme (shared)
+- `material.css`: `mat-stepper` follows the family tokens (`--mat-stepper-*` from `--pd-*`, one header height (24 px circle plus `--pd-space-4` above and below), tighter header
+  padding and lines, an outlined circle for steps not reached, no content inset). Spotter's add/edit watch flow is a linear
+  `mat-stepper` on it and no longer carries its own stepper theme.
+
 ### Jobs: quietOnSuccess (shared API)
 - `paddock-jobs`: `JobSnapshot::quiet_on_success` (wire field `quietOnSuccess`, off by default and left out of the wire form while off),
   set with `JobContext::quiet_on_success()` / `Reporter::set_quiet_on_success()` and carried by every later snapshot, the terminal one
