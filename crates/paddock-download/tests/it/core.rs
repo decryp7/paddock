@@ -4,9 +4,10 @@
 use crate::support;
 
 use paddock_download::{
-    ByteRange, Config, ContentRange, DownloadError, Downloader, Fetch, Get, Headers, HostCaps,
-    Integrity, MAX_URL_LEN, Request, Response, Sha256Digest, Transport, TransportError,
-    TransportErrorKind, host_of, parse_content_range, parse_length, parse_retry_after, phases,
+    ByteRange, Config, ContentRange, DEFAULT_HOST_CAP, DownloadError, Downloader, Fetch, Get,
+    Headers, HostCaps, Integrity, MAX_URL_LEN, Request, Response, Sha256Digest, Transport,
+    TransportError, TransportErrorKind, host_of, parse_content_range, parse_length,
+    parse_retry_after, phases,
 };
 use paddock_jobs::{CancelReason, JobError};
 use std::io::{self, Cursor, Read};
@@ -520,12 +521,14 @@ fn a_tls_failure_is_not_retried() {
 }
 
 #[test]
-fn a_cancel_during_the_backoff_after_a_failure_ends_the_download_as_cancelled() {
+fn a_cancel_that_arrives_with_a_failed_attempt_ends_as_cancelled_without_another_request() {
     let dir = tempfile::tempdir().unwrap();
     let (ctx, _) = job();
     let token = ctx.cancel_token().clone();
     let t = Arc::new(Script::new(move |_, _| {
-        // The request fails while the user cancels: the back-off before the next attempt notices and does not try again.
+        // A coverage test for the halt path of the back-off after a failed attempt: the cancel arrives with the failure, so
+        // the download ends as cancelled after one request. It does not prove the back-off checks the cancel: the next
+        // attempt checks it too.
         token.cancel();
         Err(TransportError::new(TransportErrorKind::Timeout, "slow"))
     }));
@@ -690,10 +693,13 @@ fn a_slow_range_is_split_so_neither_the_tail_nor_the_hash_waits_on_it() {
     // The fake decides what is slow, not the clock (ADR 0031): the first range is held open until another connection takes
     // over part of it, and the other ranges are answered only once the first one was asked for, so no connection can finish
     // and split the first range before its request is sent (CI 7110: a late first worker found its range already split
-    // down to below `2 * min_block`, so nothing was left to split while it was slow).
+    // down to below `2 * min_block`, so nothing was left to split while it was slow). If the engine stops splitting a slow
+    // range, the held range never moves: the download ends as `Stalled` (or nextest's timeout ends the test), and the
+    // guard below then lets the held threads go.
     let data = blob(2 * 1024 * 1024);
     let d2 = data.clone();
     let gate = Arc::new(Gate::default());
+    let _release = Abandon(gate.clone());
     let g2 = gate.clone();
     let t = Script::new(move |g, _| {
         let r = g.range.unwrap();
@@ -711,12 +717,16 @@ fn a_slow_range_is_split_so_neither_the_tail_nor_the_hash_waits_on_it() {
     });
     let dir = tempfile::tempdir().unwrap();
     let t = Arc::new(t);
+    // Three connections take the three ranges inside the buffer window, so none is free to split before the first range is
+    // asked for. The held connections keep their host permits, so the count must stay within the host cap.
     let config = Config {
+        connections: 3,
         min_block: 8 * 1024,
         max_block: 128 * 1024,
         ..quick()
     };
-    let d = Downloader::new(t.clone()).with_config(config);
+    assert!(config.connections <= DEFAULT_HOST_CAP);
+    let d = Downloader::new(t.clone()).with_config(config.clone());
     let (ctx, rec) = job();
     let got = d
         .download(&ctx, &req_in(&dir, Integrity::Unpinned))
@@ -737,7 +747,7 @@ fn a_slow_range_is_split_so_neither_the_tail_nor_the_hash_waits_on_it() {
         .and_then(|r| r.end)
         .unwrap();
     assert!(
-        first_end + 1 >= 2 * 8 * 1024,
+        first_end + 1 >= 2 * config.min_block,
         "the first range was split before it was asked for: {ranges:?}"
     );
     assert!(
@@ -747,16 +757,23 @@ fn a_slow_range_is_split_so_neither_the_tail_nor_the_hash_waits_on_it() {
 }
 
 /// What the scripted server has seen: the end of the slow first range once asked for, and whether another range started
-/// inside it since.
+/// inside it since. `abandoned` ends every wait once the test is over, so no held thread outlives it.
 #[derive(Default)]
 struct Gate {
-    seen: Mutex<(Option<u64>, bool)>,
+    seen: Mutex<Seen>,
     moved: Condvar,
+}
+
+#[derive(Default)]
+struct Seen {
+    slow_end: Option<u64>,
+    split: bool,
+    abandoned: bool,
 }
 
 impl Gate {
     fn slow_asked(&self, end: u64) {
-        self.seen.lock().unwrap().0 = Some(end);
+        self.seen.lock().unwrap().slow_end = Some(end);
         self.moved.notify_all();
     }
 
@@ -764,10 +781,12 @@ impl Gate {
     fn other_asked(&self, start: u64) {
         let mut s = self
             .moved
-            .wait_while(self.seen.lock().unwrap(), |s| s.0.is_none())
+            .wait_while(self.seen.lock().unwrap(), |s| {
+                s.slow_end.is_none() && !s.abandoned
+            })
             .unwrap();
-        if s.0.is_some_and(|end| start <= end) {
-            s.1 = true;
+        if s.slow_end.is_some_and(|end| start <= end) {
+            s.split = true;
             self.moved.notify_all();
         }
     }
@@ -775,9 +794,27 @@ impl Gate {
     fn wait_for_split(&self) {
         drop(
             self.moved
-                .wait_while(self.seen.lock().unwrap(), |s| !s.1)
+                .wait_while(self.seen.lock().unwrap(), |s| !s.split && !s.abandoned)
                 .unwrap(),
         );
+    }
+
+    fn abandon(&self) {
+        // Not `unwrap`: this runs while a failed assert unwinds, and a poisoned lock must not turn that into an abort.
+        self.seen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .abandoned = true;
+        self.moved.notify_all();
+    }
+}
+
+/// Releases every wait of the gate when the test ends, however it ends.
+struct Abandon(Arc<Gate>);
+
+impl Drop for Abandon {
+    fn drop(&mut self) {
+        self.0.abandon();
     }
 }
 
