@@ -1,6 +1,6 @@
 # 28. `paddock-about` and `paddock-deps`: About and legal texts out of the updater; one dependency inventory for notices, SBOMs and Pacenotes
 
-- Status: Proposed — ready for acceptance (reviewed, rounds 1–3) (2026-10-29). The user approved the direction on 2026-10-29: About becomes its own crate, and one Rust
+- Status: Accepted (2026-10-29), by the user, after an independent review (rounds 1–4). The user approved the direction on 2026-10-29: About becomes its own crate, and one Rust
   dependency inventory replaces the JS notices tool, cargo-about and the two CycloneDX tools. Revised the same day after
   an independent review (five P1s: What's New for existing users, Debrief not on the shell, every app green per step, a
   fail-closed licence policy, owned paths per package). The user decided the last two open questions the same day
@@ -428,7 +428,9 @@ Pacenotes adopts `paddock-deps` for its dependency inventory view (plan VW1b; pr
    manifest under `apps/pacenotes/` enables `paddock-repo-graph`'s `cargo-metadata`, extends to `paddock-deps`'
    `cargo-metadata` feature. `paddock-deps`' `fetch` feature is allowed under `apps/pacenotes/` only in the one crate
    that runs the opt-in lookups (PN3) and forbidden in every other Pacenotes crate; it stays forbidden in
-   `tools/paddock-dev` (IN1's check, kept by PN3's test).
+   `tools/paddock-dev` (IN1's check, kept by PN3's test). The per-crate `fetch` allowance is a manifest rule only: Cargo unifies
+   features across a binary, so the runtime protection is the opt-in setting, the six-host `Egress` allow-list and PN3's
+   "setting off records no request" test.
 4. **Licences without a build.** In v1 the inventory shows the licence when the lockfile carries it (npm), and "not known
    offline" otherwise, never a guess. Licence resolution (v1.1 in the proposal) reads package caches already on the
    machine, read-only and only with the user's opt-in, because they are outside the workspace allow-list: the Cargo
