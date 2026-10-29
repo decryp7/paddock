@@ -15,7 +15,7 @@
 
 use crate::gate::Gate;
 use crate::{engine, lock};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use debrief_core::catalogue::*;
 use debrief_core::entities::extract;
 use debrief_core::ports::StoreResult;
@@ -60,18 +60,25 @@ fn pending(conn: &Connection) -> Result<Vec<u32>> {
 fn build(conn: &Connection, source: u32) -> Result<(Vec<Entry>, u64, u64)> {
     let mut tally = Tally::default();
     {
+        use duckdb::arrow::array::{Array, AsArray};
+        use duckdb::arrow::datatypes::{Int64Type, UInt64Type};
+        // Read in Arrow batches: no allocation per row (the row-at-a-time fetch spent a quarter of the time there).
         let mut stmt = conn.prepare("SELECT id, ts, message, exception FROM events WHERE source = ? LIMIT ?")?;
-        let mut rows = stmt.query(params![source, MAX_EVENTS_SCANNED as u64])?;
-        while let Some(r) = rows.next()? {
-            let (id, ts): (u64, Option<i64>) = (r.get(0)?, r.get(1)?);
-            let message: String = r.get(2)?;
-            let exception: Option<String> = r.get(3)?;
-            let mut texts = vec![message.as_str()];
-            if let Some(e) = exception.as_deref() {
-                texts.push(e);
+        for rb in stmt.query_arrow(params![source, MAX_EVENTS_SCANNED as u64])? {
+            let ids = rb.column(0).as_primitive_opt::<UInt64Type>().context("id type")?;
+            let ts = rb.column(1).as_primitive_opt::<Int64Type>().context("ts type")?;
+            let msg = rb.column(2).as_string_opt::<i32>().context("message type")?;
+            let exc = rb.column(3).as_string_opt::<i32>().context("exception type")?;
+            let mut texts: Vec<&str> = Vec::with_capacity(2);
+            for i in 0..rb.num_rows() {
+                texts.clear();
+                texts.push(msg.value(i));
+                if !exc.is_null(i) {
+                    texts.push(exc.value(i));
+                }
+                let found = extract(&texts);
+                tally.add_event(&found, ids.value(i), (!ts.is_null(i)).then(|| ts.value(i)));
             }
-            let found = extract(&texts);
-            tally.add_event(&found, id, ts);
         }
     }
     let sql = format!(
@@ -152,30 +159,55 @@ struct Shared {
     pending: AtomicU64,
     /// Sources whose build failed (not retried until the store is reopened).
     failed: Mutex<HashSet<u32>>,
+    /// Sources a worker is building now (the others take the next ones).
+    claimed: Mutex<HashSet<u32>>,
+    /// Tidying and committing, one worker at a time (their deletes would conflict).
+    writing: Mutex<()>,
 }
 
-/// The catalogue thread of a store; stopped and joined on drop.
+/// Catalogue workers by default: one source each at a time, at background priority (ER-20: CPU-bound, cores minus
+/// one, and at most as many as the parse threads, which bound the memory of the same number of sources in flight).
+pub fn default_workers() -> usize {
+    debrief_core::ingest::default_threads()
+}
+
+/// The catalogue threads of a store; stopped and joined on drop.
 pub(crate) struct CatalogueService {
     shared: Arc<Shared>,
-    handle: Option<std::thread::JoinHandle<()>>,
+    handles: Vec<std::thread::JoinHandle<()>>,
 }
 
 impl CatalogueService {
-    pub(crate) fn start(conn: Connection, gate: Gate) -> Result<CatalogueService> {
+    /// Starts `workers` threads (at least one), each with its own connection.
+    pub(crate) fn start(conn: Connection, gate: Gate, workers: usize) -> Result<CatalogueService> {
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
             wake: (Mutex::new(true), Condvar::new()),
             pending: AtomicU64::new(0),
             failed: Mutex::new(HashSet::new()),
+            claimed: Mutex::new(HashSet::new()),
+            writing: Mutex::new(()),
         });
-        let s = shared.clone();
-        let handle = std::thread::Builder::new()
-            .name("debrief-catalogue".into())
-            .spawn(move || run(&s, &conn, &gate))?;
-        Ok(CatalogueService {
-            shared,
-            handle: Some(handle),
-        })
+        let mut conns = Vec::new();
+        for _ in 1..workers.max(1) {
+            conns.push(conn.try_clone()?);
+        }
+        conns.push(conn);
+        let mut handles = Vec::new();
+        for (i, conn) in conns.into_iter().enumerate() {
+            let (s, gate) = (shared.clone(), gate.clone());
+            let spawned = std::thread::Builder::new().name(format!("debrief-catalogue-{i}")).spawn(move || {
+                debrief_core::threads::lower_priority();
+                run(&s, &conn, &gate)
+            });
+            match spawned {
+                Ok(h) => handles.push(h),
+                // Fewer workers is slower, not wrong; none is reported.
+                Err(e) if !handles.is_empty() => log::warn!("catalogue worker {i} could not start: {e}"),
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(CatalogueService { shared, handles })
     }
 
     pub(crate) fn wake(&self) {
@@ -188,7 +220,7 @@ impl Drop for CatalogueService {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::SeqCst);
         self.wake();
-        if let Some(h) = self.handle.take() {
+        for h in self.handles.drain(..) {
             let _ = h.join();
         }
     }
@@ -198,6 +230,7 @@ impl Drop for CatalogueService {
 fn step(s: &Shared, conn: &Connection, gate: &Gate) -> Result<bool> {
     let todo = {
         let Some(_pass) = gate.try_enter() else { return Ok(false) };
+        let _one = lock(&s.writing);
         conn.execute_batch(
             "DELETE FROM catalogue WHERE source NOT IN (SELECT id FROM sources);
              DELETE FROM catalogue_trigrams WHERE source NOT IN (SELECT id FROM sources);
@@ -208,7 +241,9 @@ fn step(s: &Shared, conn: &Connection, gate: &Gate) -> Result<bool> {
     let failed = lock(&s.failed).clone();
     let todo: Vec<u32> = todo.into_iter().filter(|id| !failed.contains(id)).collect();
     s.pending.store(todo.len() as u64, Ordering::SeqCst);
-    let Some(&source) = todo.first() else { return Ok(false) };
+    // The first source no other worker is building.
+    let Some(claim) = Claim::first(s, &todo) else { return Ok(false) };
+    let source = claim.0;
     let built = match build(conn, source) {
         Ok(b) => b,
         Err(e) => {
@@ -220,9 +255,28 @@ fn step(s: &Shared, conn: &Connection, gate: &Gate) -> Result<bool> {
     let (entries, dropped, guids) = built;
     // The write lock is taken without waiting for an import: the next turn tries again.
     let Some(_pass) = gate.try_enter() else { return Ok(false) };
+    let _one = lock(&s.writing);
     commit(conn, source, &entries, dropped, guids)?;
-    s.pending.store(todo.len() as u64 - 1, Ordering::SeqCst);
+    s.pending.store(todo.len().saturating_sub(1) as u64, Ordering::SeqCst);
     Ok(true)
+}
+
+/// A source taken by one worker until it is committed (or fails).
+struct Claim<'a>(u32, &'a Shared);
+
+impl<'a> Claim<'a> {
+    fn first(s: &'a Shared, todo: &[u32]) -> Option<Claim<'a>> {
+        let mut claimed = lock(&s.claimed);
+        let source = *todo.iter().find(|id| !claimed.contains(id))?;
+        claimed.insert(source);
+        Some(Claim(source, s))
+    }
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        lock(&self.1.claimed).remove(&self.0);
+    }
 }
 
 fn run(s: &Shared, conn: &Connection, gate: &Gate) {

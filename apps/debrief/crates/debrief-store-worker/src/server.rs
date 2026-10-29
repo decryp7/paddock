@@ -402,6 +402,7 @@ fn tuned(base: StoreOptions, tuning: &StoreTuning) -> StoreOptions {
             threads: tuning.index_threads.unwrap_or(base.index.threads),
         }
         .floored(),
+        catalogue_workers: base.catalogue_workers,
         spill_dir: tuning.spill_dir.clone().or(base.spill_dir),
         max_spill: tuning.max_spill_mb.map(mb).or(base.max_spill),
         allocator_flush: tuning.allocator_flush_mb.map(|m| format!("{m}MiB")).unwrap_or(base.allocator_flush),
