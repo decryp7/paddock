@@ -11,6 +11,7 @@ use ::tauri::{AppHandle, Manager, Runtime, Window};
 use std::time::Instant;
 
 /// A test never reads the user's mouse (rule 7): the one that tries fails here, at the read.
+/// A panic on a background thread (the ghost tracker) does not fail the test; only reads on the test's thread do.
 fn refuse_in_tests() {
     #[cfg(test)]
     panic!("a test read the user's mouse button; give its Panels a Pointer");
