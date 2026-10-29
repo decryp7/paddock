@@ -43,6 +43,11 @@ use paddock_jobs::CancelToken;
 pub trait Host: Send + Sync {
     /// Answers one call within its budget, or fails with a typed error. A cancelled `cancel` ends the call with
     /// [`HostError::Cancelled`]. The reply is data: no connection, snapshot or handle crosses back into the function.
+    ///
+    /// **Origin.** The host decides whether a model call is user-started from the job context it runs the function in,
+    /// never from the request: the `origin` field of [`HostCall::Complete`] is the function's claim, cross-checked against
+    /// the context. A background context refuses every model call whatever the field says, and a user context refuses a
+    /// request that claims `Background` (a function that mislabels its call has a bug the host should surface).
     fn call(&self, request: &HostRequest, cancel: &CancelToken) -> Result<HostReply, HostError>;
 }
 

@@ -1096,6 +1096,7 @@ name = "pacenotes-function-api"
 version = "0.1.0"
 dependencies = [
  "pacenotes-core",
+ "pacenotes-function-api",
  "paddock-jobs",
  "paddock-testkit",
  "postcard",

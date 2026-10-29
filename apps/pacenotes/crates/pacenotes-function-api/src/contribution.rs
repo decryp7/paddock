@@ -84,6 +84,9 @@ pub enum ContributionError {
         /// The name.
         name: String,
     },
+    /// A setting key uses the prefix reserved for the host's own settings.
+    #[error("setting key {0:?} starts with `host_`, which is reserved for the host")]
+    ReservedKey(String),
     /// Two of the same kind share a name.
     #[error("two {kind}s are named {name:?}")]
     Duplicate {
@@ -147,7 +150,7 @@ impl Contributions {
     /// Builds contributions once, when a function is registered: slugs, uniqueness, bounds, and that every view names a tool
     /// the function has.
     pub fn new(tools: Vec<ToolSpec>, views: Vec<ViewSpec>, settings: Vec<SettingSpec>) -> Result<Contributions, ContributionError> {
-        use ContributionError::{BadName, BadText, Duplicate, TooMany, UnknownTool};
+        use ContributionError::{BadName, BadText, Duplicate, ReservedKey, TooMany, UnknownTool};
         if tools.len() > MAX_PER_KIND || views.len() > MAX_PER_KIND || settings.len() > MAX_PER_KIND {
             return Err(TooMany);
         }
@@ -215,6 +218,9 @@ impl Contributions {
                     kind: "setting",
                     name: s.key.clone(),
                 });
+            }
+            if s.key.starts_with("host_") {
+                return Err(ReservedKey(s.key.clone()));
             }
             if !keys.insert(s.key.as_str()) {
                 return Err(Duplicate {

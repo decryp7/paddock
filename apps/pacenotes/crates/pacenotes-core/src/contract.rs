@@ -208,7 +208,7 @@ impl Store for MemoryStore {
         let mut symbols = self.state.lock().unwrap().2.get(&file).cloned().unwrap_or_default();
         let truncated = symbols.len() > limit;
         symbols.truncate(limit);
-        Ok(SymbolPage { symbols, truncated })
+        Ok(SymbolPage::new(symbols, truncated).expect("a test store holds few symbols"))
     }
 }
 
@@ -223,22 +223,22 @@ pub fn store_contract(store: &dyn Store, known: &RepoPath, unknown: &RepoPath) {
         "an unknown path has no id, and is not an error"
     );
     let page = store.symbols_in_file(file, 1000, &live).unwrap();
-    assert!(!page.truncated && page.symbols.len() >= 2);
+    assert!(!page.truncated() && page.symbols().len() >= 2);
     assert!(
-        page.symbols.windows(2).all(|w| w[0].span.start() <= w[1].span.start()),
+        page.symbols().windows(2).all(|w| w[0].span.start() <= w[1].span.start()),
         "ordered by span start"
     );
-    assert!(page.symbols.iter().all(|s| s.file == file));
+    assert!(page.symbols().iter().all(|s| s.file == file));
     let cut = store.symbols_in_file(file, 1, &live).unwrap();
     assert_eq!(
-        (cut.symbols.len(), cut.truncated),
+        (cut.symbols().len(), cut.truncated()),
         (1, true),
         "the limit bounds the page and says it cut"
     );
-    assert_eq!(cut.symbols[0], page.symbols[0]);
+    assert_eq!(cut.symbols()[0], page.symbols()[0]);
     let unknown_file = FileId::from_bytes([0xee; 16]);
     assert!(
-        store.symbols_in_file(unknown_file, 10, &live).unwrap().symbols.is_empty(),
+        store.symbols_in_file(unknown_file, 10, &live).unwrap().symbols().is_empty(),
         "an unknown file has no symbols"
     );
     assert_eq!(store.generation(&live).unwrap(), g1, "reads do not move the generation");

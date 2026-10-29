@@ -1,6 +1,6 @@
 // The real guard of ADR 0022 §3.7 (plan P0.1b): Pacenotes opens hostile repositories and never runs cargo in them, so
 // `paddock-repo-graph`'s `cargo-metadata` feature (which does) must be off in every build of this workspace. Ask cargo
-// itself, with every feature on: `cargo tree -e features --all-features -i paddock-repo-graph` must not show the feature.
+// itself, with every feature on: `cargo tree -e features --all-features --target all -i paddock-repo-graph` must not show the feature.
 // "The package is not in the graph" is a pass. Conformance C52 is the backstop that reads the manifests.
 import { execFileSync } from 'node:child_process';
 import { dirname } from 'node:path';
@@ -32,7 +32,7 @@ export function check(cwd, run = defaultRun) {
 
 function defaultRun(cwd) {
   try {
-    const stdout = execFileSync('cargo', ['tree', '-e', 'features', '--all-features', '-i', 'paddock-repo-graph'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000 });
+    const stdout = execFileSync('cargo', ['tree', '-e', 'features', '--all-features', '--target', 'all', '-i', 'paddock-repo-graph'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000 });
     return { status: 0, stdout, stderr: '' };
   } catch (e) {
     return { status: e.status ?? 1, stdout: String(e.stdout ?? ''), stderr: String(e.stderr ?? e.message) };

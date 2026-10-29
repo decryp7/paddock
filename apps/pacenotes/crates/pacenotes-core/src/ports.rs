@@ -123,13 +123,65 @@ pub struct SymbolRecord {
     pub confidence: Confidence,
 }
 
-/// A bounded page of symbols.
+/// The most symbols one page holds, whatever limit a caller asks for.
+pub const MAX_SYMBOLS_PER_PAGE: usize = 100_000;
+
+/// Why a page or reply is not valid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{what} holds {len} entries; at most {max} are allowed")]
+pub struct BoundError {
+    /// What was too long.
+    pub what: &'static str,
+    /// Its length.
+    pub len: usize,
+    /// The bound.
+    pub max: usize,
+}
+
+/// The wire form of a [`SymbolPage`].
+#[derive(Serialize, Deserialize)]
+pub(crate) struct SymbolPageWire {
+    pub(crate) symbols: Vec<SymbolRecord>,
+    pub(crate) truncated: bool,
+}
+
+impl TryFrom<SymbolPageWire> for SymbolPage {
+    type Error = BoundError;
+    fn try_from(w: SymbolPageWire) -> Result<SymbolPage, BoundError> {
+        SymbolPage::new(w.symbols, w.truncated)
+    }
+}
+
+/// A bounded page of symbols. Built through [`SymbolPage::new`], also when read from the wire.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(try_from = "SymbolPageWire")]
 pub struct SymbolPage {
-    /// Ordered by span start, at most the caller's limit.
-    pub symbols: Vec<SymbolRecord>,
-    /// True when the file declares more symbols than `symbols` holds.
-    pub truncated: bool,
+    symbols: Vec<SymbolRecord>,
+    truncated: bool,
+}
+
+impl SymbolPage {
+    /// A page of `symbols` (ordered by span start, at most [`MAX_SYMBOLS_PER_PAGE`]); `truncated` says the file declares more.
+    pub fn new(symbols: Vec<SymbolRecord>, truncated: bool) -> Result<SymbolPage, BoundError> {
+        if symbols.len() > MAX_SYMBOLS_PER_PAGE {
+            return Err(BoundError {
+                what: "a symbol page",
+                len: symbols.len(),
+                max: MAX_SYMBOLS_PER_PAGE,
+            });
+        }
+        Ok(SymbolPage { symbols, truncated })
+    }
+
+    /// The symbols, ordered by span start, at most the caller's limit.
+    pub fn symbols(&self) -> &[SymbolRecord] {
+        &self.symbols
+    }
+
+    /// True when the file declares more symbols than the page holds.
+    pub fn truncated(&self) -> bool {
+        self.truncated
+    }
 }
 
 /// The read side of the index. The one writer is a separate actor in `pacenotes-index`. Within one generation reads are
@@ -318,21 +370,73 @@ pub struct LspRequest {
 /// The most locations one reply holds.
 pub const MAX_LSP_LOCATIONS: usize = 10_000;
 
-/// A language server's answer: places in the repository, all [`Confidence::Exact`] by definition.
+/// The wire form of an [`LspReply`].
+#[derive(Serialize, Deserialize)]
+pub(crate) struct LspReplyWire {
+    pub(crate) locations: Vec<Location>,
+    pub(crate) truncated: bool,
+    pub(crate) outside_workspace: u32,
+}
+
+impl TryFrom<LspReplyWire> for LspReply {
+    type Error = BoundError;
+    fn try_from(w: LspReplyWire) -> Result<LspReply, BoundError> {
+        if w.locations.len() > MAX_LSP_LOCATIONS {
+            return Err(BoundError {
+                what: "a language-server reply",
+                len: w.locations.len(),
+                max: MAX_LSP_LOCATIONS,
+            });
+        }
+        Ok(LspReply {
+            locations: w.locations,
+            truncated: w.truncated,
+            outside_workspace: w.outside_workspace,
+        })
+    }
+}
+
+/// A language server's answer: places in the repository, all [`Confidence::Exact`] by definition. At most
+/// [`MAX_LSP_LOCATIONS`], also when read from the wire.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(try_from = "LspReplyWire")]
 pub struct LspReply {
-    /// The places the server named, at most [`MAX_LSP_LOCATIONS`].
-    pub locations: Vec<Location>,
-    /// True when the server named more places than `locations` holds.
-    pub truncated: bool,
+    locations: Vec<Location>,
+    truncated: bool,
+    outside_workspace: u32,
 }
 
 impl LspReply {
     /// A reply of `locations`, cut at [`MAX_LSP_LOCATIONS`] with `truncated` set.
-    pub fn bounded(mut locations: Vec<Location>) -> LspReply {
+    pub fn bounded(locations: Vec<Location>) -> LspReply {
+        LspReply::with_outside(locations, 0)
+    }
+
+    /// Like [`LspReply::bounded`], recording how many places the server named outside the workspace (dropped).
+    pub fn with_outside(mut locations: Vec<Location>, outside_workspace: u32) -> LspReply {
         let truncated = locations.len() > MAX_LSP_LOCATIONS;
         locations.truncate(MAX_LSP_LOCATIONS);
-        LspReply { locations, truncated }
+        LspReply {
+            locations,
+            truncated,
+            outside_workspace,
+        }
+    }
+
+    /// The places the server named inside the workspace.
+    pub fn locations(&self) -> &[Location] {
+        &self.locations
+    }
+
+    /// True when the server named more places than the reply holds.
+    pub fn truncated(&self) -> bool {
+        self.truncated
+    }
+
+    /// How many places the server named outside the workspace (standard library, dependencies); they are dropped, not
+    /// an error.
+    pub fn outside_workspace(&self) -> u32 {
+        self.outside_workspace
     }
 }
 
@@ -444,7 +548,8 @@ mod tests {
             span: Span::lines(1, 1).unwrap(),
         };
         let reply = LspReply::bounded(vec![loc.clone(); MAX_LSP_LOCATIONS + 1]);
-        assert_eq!((reply.locations.len(), reply.truncated), (MAX_LSP_LOCATIONS, true));
-        assert!(!LspReply::bounded(vec![loc]).truncated);
+        assert_eq!((reply.locations().len(), reply.truncated()), (MAX_LSP_LOCATIONS, true));
+        assert!(!LspReply::bounded(vec![loc.clone()]).truncated());
+        assert_eq!(LspReply::with_outside(vec![loc], 3).outside_workspace(), 3);
     }
 }

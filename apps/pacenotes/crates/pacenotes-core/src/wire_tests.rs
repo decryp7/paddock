@@ -41,7 +41,7 @@ const RULE: &str = "id = \"r\"\ntitle = \"T\"\nseverity = \"low\"\ngood = [\"a\"
 
 #[test]
 fn every_core_type_round_trips_through_json_and_postcard() {
-    let file = FileIdAllocator::new().issue();
+    let file = FileIdAllocator::new().issue().unwrap();
     let sym = SymbolId::derive(file, &Language::Known(KnownLanguage::Rust), SymbolKind::Function, "f", 0);
     let record = SymbolRecord {
         id: sym,
@@ -96,10 +96,7 @@ fn every_core_type_round_trips_through_json_and_postcard() {
     both(Check::Pattern("p".into()));
     both(Check::Markdown("m".into()));
     both(record.clone());
-    both(SymbolPage {
-        symbols: vec![record],
-        truncated: true,
-    });
+    both(SymbolPage::new(vec![record], true).unwrap());
     both(VectorHit {
         chunk: ChunkId::from_bytes([1; 16]),
         score: 0.5,
@@ -147,6 +144,30 @@ fn every_validated_type_refuses_an_invalid_value_on_json_and_postcard() {
     refuses::<ModelId>("ModelId", "\"no no\"", &"no no");
     refuses::<TokenBudget>("TokenBudget", "0", &0u32);
     refuses::<RuleId>("RuleId", "\"Bad Id\"", &"Bad Id");
+    let loc = Location {
+        path: path("a.rs"),
+        span: Span::lines(1, 1).unwrap(),
+    };
+    let too_many = vec![loc; crate::ports::MAX_LSP_LOCATIONS + 1];
+    refuses::<LspReply>(
+        "LspReply",
+        &serde_json::json!({ "locations": too_many, "truncated": false, "outside_workspace": 0 }).to_string(),
+        &(too_many, false, 0u32),
+    );
+    let sym = SymbolRecord {
+        id: SymbolId::from_bytes([1; 16]),
+        file: FileId::from_bytes([2; 16]),
+        kind: SymbolKind::Other,
+        qualified_name: "x".into(),
+        span: Span::lines(1, 1).unwrap(),
+        confidence: Confidence::Guess,
+    };
+    let too_many = vec![sym; crate::ports::MAX_SYMBOLS_PER_PAGE + 1];
+    refuses::<SymbolPage>(
+        "SymbolPage",
+        &serde_json::json!({ "symbols": too_many, "truncated": false }).to_string(),
+        &(too_many, false),
+    );
     refuses::<Download>("Download", r#"{"url":"http://x","sha256":"abc"}"#, &("http://x", "abc"));
 
     let pack = ServerPack::parse(PACK).unwrap();
@@ -191,4 +212,44 @@ fn every_validated_type_refuses_an_invalid_value_on_json_and_postcard() {
         bad: vec![],
     };
     refuses::<RuleSpec>("RuleSpec", &serde_json::to_string(&bad).unwrap(), &bad);
+}
+
+/// The class test lists its types by hand, so this test finds them: every type read through `try_from` or a hand-written
+/// `Deserialize` in this crate's sources must have a `refuses::<Type>` line above. Types made by a macro are named here.
+#[test]
+fn the_class_test_covers_every_validated_type() {
+    let this = include_str!("wire_tests.rs");
+    let mut names: Vec<String> = ["FileId", "SymbolId", "ChunkId"].map(String::from).to_vec();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.file_name().unwrap() == "wire_tests.rs" || path.extension().is_none_or(|e| e != "rs") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = source.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            if line.contains("#[serde(try_from") {
+                let decl = lines[i + 1..]
+                    .iter()
+                    .find(|l| l.contains("pub struct ") || l.contains("pub enum "))
+                    .unwrap();
+                let rest = decl.split("pub struct ").nth(1).or_else(|| decl.split("pub enum ").nth(1)).unwrap();
+                names.push(rest.split(|c: char| !c.is_alphanumeric()).next().unwrap().to_owned());
+            }
+            if let Some(rest) = line.strip_prefix("impl<'de> Deserialize<'de> for ") {
+                let name = rest.split(|c: char| !c.is_alphanumeric()).next().unwrap();
+                if !name.is_empty() {
+                    names.push(name.to_owned());
+                }
+            }
+        }
+    }
+    assert!(names.len() >= 14, "the scan found only {names:?}");
+    for name in &names {
+        assert!(
+            this.contains(&format!("refuses::<{name}>")),
+            "{name} is read through a validator but the class test does not check it"
+        );
+    }
 }

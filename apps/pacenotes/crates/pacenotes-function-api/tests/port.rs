@@ -34,7 +34,7 @@ fn rev() -> Rev {
 }
 
 fn symbol() -> SymbolRecord {
-    let file = FileIdAllocator::new().issue();
+    let file = FileIdAllocator::new().issue().unwrap();
     SymbolRecord {
         id: SymbolId::derive(file, &Language::Known(KnownLanguage::Rust), SymbolKind::Function, "f", 0),
         file,
@@ -238,6 +238,8 @@ fn hostile_bytes_never_panic_any_decoder() {
 /// A host that honours the cancel token and the budget, as every host must.
 struct BoundedHost {
     symbols: Vec<SymbolRecord>,
+    /// The job context the host runs the function in; it, not the request, decides who may call the model.
+    background: bool,
 }
 
 impl Host for BoundedHost {
@@ -252,10 +254,9 @@ impl Host for BoundedHost {
                 }
                 Ok(HostReply::Symbols(self.symbols.clone()))
             }
-            HostCall::Complete {
-                origin: Origin::Background,
-                ..
-            } => Err(HostError::Refused("the model answers only a person who is waiting".into())),
+            HostCall::Complete { origin, .. } if self.background || *origin == Origin::Background => {
+                Err(HostError::Refused("the model answers only a person who is waiting".into()))
+            }
             _ => Err(HostError::Refused("not in this fake".into())),
         }
     }
@@ -265,8 +266,17 @@ impl Host for BoundedHost {
 fn the_fake_host_passes_the_host_contract() {
     let host = BoundedHost {
         symbols: vec![symbol(), symbol(), symbol()],
+        background: false,
     };
-    host_contract(&HostFixture { host: &host, query: "f" });
+    let background = BoundedHost {
+        symbols: vec![],
+        background: true,
+    };
+    host_contract(&HostFixture {
+        host: &host,
+        background_host: &background,
+        query: "f",
+    });
 }
 
 /// A function whose only tool asks the host for symbols and passes cancel and budget errors on.
@@ -307,6 +317,7 @@ impl Function for Finder {
 fn a_function_passes_cancel_and_budget_errors_through() {
     let host = BoundedHost {
         symbols: vec![symbol(), symbol(), symbol()],
+        background: false,
     };
     let f = Finder(Contributions::default());
     let req = |budget| FunctionRequest {
@@ -357,4 +368,31 @@ fn a_host_request_is_bounded_and_exposes_its_parts() {
         query: "q".repeat(pacenotes_function_api::message::MAX_QUERY_BYTES + 1),
     };
     assert!(HostRequest::new(1, q, budget()).unwrap_err().to_string().contains("query"));
+}
+
+/// The class test lists its types by hand, so this test finds them: every type of this crate read through `try_from` must
+/// have a `refuses::<Type>` line in this file.
+#[test]
+fn the_class_test_covers_every_validated_type() {
+    let this = include_str!("port.rs");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let source = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+        let lines: Vec<&str> = source.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            if line.contains("#[serde(try_from") {
+                let decl = lines[i + 1..].iter().find(|l| l.contains("pub struct ")).unwrap();
+                let rest = decl.split("pub struct ").nth(1).unwrap();
+                names.push(rest.split(|c: char| !c.is_alphanumeric()).next().unwrap().to_owned());
+            }
+        }
+    }
+    assert!(names.len() >= 3, "the scan found only {names:?}");
+    for name in &names {
+        assert!(
+            this.contains(&format!("refuses::<{name}>")),
+            "{name} is read through a validator but the class test does not check it"
+        );
+    }
 }

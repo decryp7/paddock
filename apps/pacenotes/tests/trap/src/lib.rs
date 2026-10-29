@@ -8,8 +8,12 @@
 //! `rust-toolchain.toml`, a `.git/config` with `core.fsmonitor` and filter and diff drivers, and a proc-macro crate (each
 //! would leave the marker file). It would **leak** a made-up secret in `.env`. It would **escape**: symlinks to a folder,
 //! to a file and to `/`, a symlink loop, a nested `.git` file (a gitfile) pointing outside, and
-//! `.git/objects/info/alternates` pointing outside. An indexer is run over it and reports what it did as
-//! [`Observations`]; [`Observations::verdict`] says whether it ran nothing, leaked nothing and escaped nothing.
+//! `.git/objects/info/alternates` pointing outside. Each trap is *live*: the wrappers are executable scripts that touch the
+//! marker, the `.git` folders are valid repositories (so git would reach the `fsmonitor`, filter, diff and alternates
+//! settings), and the workspace crate really depends on the proc-macro crate and calls it; tests check that, and none of them
+//! ever runs a trap. An indexer is run over the repository and reports what it did as [`Observations`];
+//! [`Observations::verdict`] says whether it ran nothing, leaked nothing and escaped nothing, and requires one search reply
+//! per entry of [`TRAP_QUERIES`] so a missing check cannot pass.
 //!
 //! Everything is invented (ER-14): the "secret" is a fixed dummy string, nothing is taken from a real machine, and the
 //! repository lives in a [`Scratch`] folder that the test removes.
@@ -77,6 +81,12 @@ pub struct TrapRepo {
     pub outside_file: PathBuf,
     /// The marker any trapped command would create if it ran.
     pub marker: PathBuf,
+    /// The executable script (`rustc-wrapper`, runner) that touches the marker.
+    pub wrapper: PathBuf,
+    /// The nested repository whose `.git` is a gitfile pointing outside.
+    pub nested: PathBuf,
+    /// The repository folder outside the workspace that the gitfile points at.
+    pub outside_gitdir: PathBuf,
     /// The symlinks inside the workspace (empty where symlinks need privileges: Windows). Reading through any of them leaves
     /// the workspace or does not resolve.
     pub links: Vec<PathBuf>,
@@ -103,13 +113,16 @@ pub fn generate(scratch: &Scratch) -> Result<TrapRepo, TrapError> {
             // run-traps
             (
                 "trap/workspace/Cargo.toml",
-                "[package]\nname = \"trap\"\nversion = \"0.0.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n".to_owned(),
+                "[package]\nname = \"trap\"\nversion = \"0.0.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n\n[dependencies]\ntrap-macros = { path = \"macros\" }\n".to_owned(),
             ),
             (
                 "trap/workspace/build.rs",
                 format!("fn main() {{\n    std::fs::write(\"{m}\", \"the build script ran\").unwrap();\n}}\n"),
             ),
-            ("trap/workspace/src/lib.rs", "pub fn visible() -> u32 {\n    1\n}\n".to_owned()),
+            (
+                "trap/workspace/src/lib.rs",
+                "trap_macros::boom!();\n\npub fn visible() -> u32 {\n    1\n}\n".to_owned(),
+            ),
             (
                 "trap/workspace/package.json",
                 format!(
@@ -125,7 +138,7 @@ pub fn generate(scratch: &Scratch) -> Result<TrapRepo, TrapError> {
             ),
             (
                 "trap/workspace/rust-toolchain.toml",
-                format!("[toolchain]\nchannel = \"pn1-not-a-toolchain\"\npath = \"{outside}/toolchain\"\n"),
+                format!("[toolchain]\npath = \"{outside}/toolchain\"\n"),
             ),
             (
                 "trap/workspace/.git/config",
@@ -134,6 +147,9 @@ pub fn generate(scratch: &Scratch) -> Result<TrapRepo, TrapError> {
                 ),
             ),
             ("trap/workspace/.git/HEAD", "ref: refs/heads/main\n".to_owned()),
+            ("trap/outside/gitdir/HEAD", "ref: refs/heads/main\n".to_owned()),
+            ("trap/outside/toolchain/bin/rustc", format!("#!/bin/sh\necho ran > '{m}'\n")),
+            ("trap/MARKER-code-ran.sh", format!("#!/bin/sh\necho ran > '{m}'\n")),
             ("trap/workspace/.git/objects/info/alternates", format!("{outside}/objects\n")),
             ("trap/workspace/.gitattributes", "* filter=trap diff=trap\n".to_owned()),
             (
@@ -156,14 +172,44 @@ pub fn generate(scratch: &Scratch) -> Result<TrapRepo, TrapError> {
         ],
     )?;
 
+    // valid, empty repositories: git reaches their configuration
+    for dir in [
+        "trap/workspace/.git/refs/heads",
+        "trap/workspace/.git/objects/pack",
+        "trap/outside/gitdir/refs/heads",
+        "trap/outside/gitdir/objects/pack",
+    ] {
+        std::fs::create_dir_all(scratch.path(dir)).map_err(TrapError::Link)?;
+    }
+    let wrapper = scratch.path("trap/MARKER-code-ran.sh");
+    for script in [wrapper.clone(), scratch.path("trap/outside/toolchain/bin/rustc")] {
+        make_executable(&script)?;
+    }
+
     let outside_file = scratch.path("trap/outside/outside-secret.txt");
     let links = make_links(&workspace, &scratch.path("trap/outside"), &outside_file)?;
+    let nested = workspace.join("sub");
+    let outside_gitdir = scratch.path("trap/outside/gitdir");
     Ok(TrapRepo {
         workspace,
         outside_file,
         marker,
+        wrapper,
+        nested,
+        outside_gitdir,
         links,
     })
+}
+
+#[cfg(unix)]
+fn make_executable(path: &Path) -> Result<(), TrapError> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).map_err(TrapError::Link)
+}
+
+#[cfg(not(unix))]
+fn make_executable(_path: &Path) -> Result<(), TrapError> {
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -217,6 +263,9 @@ pub enum Breach {
     Unresolvable(PathBuf),
     /// A file the denylist must keep out of the index is in the `files` table.
     Indexed(String),
+    /// The store was not queried once per entry of [`TRAP_QUERIES`] (this many replies were given); a check that did not
+    /// run cannot pass.
+    Unchecked(usize),
 }
 
 fn contains_ci(haystack: &str, needle: &str) -> bool {
@@ -233,6 +282,9 @@ impl Observations {
         }
         if repo.marker.exists() {
             breaches.push(Breach::Ran(format!("marker {} exists", repo.marker.display())));
+        }
+        if self.search_replies.len() != TRAP_QUERIES.len() {
+            breaches.push(Breach::Unchecked(self.search_replies.len()));
         }
         let everything = String::from_utf8_lossy(&self.everything_stored_or_replied).into_owned() + "\n" + &self.search_replies.join("\n");
         if [SECRET, SECRET_FRAGMENT].iter().any(|n| contains_ci(&everything, n)) {
@@ -262,6 +314,10 @@ impl Observations {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn answered() -> Vec<String> {
+        vec!["no hits".to_owned(); TRAP_QUERIES.len()]
+    }
 
     fn trap() -> (Scratch, TrapRepo) {
         let scratch = Scratch::new();
@@ -336,7 +392,7 @@ mod tests {
             files_read: vec![repo.workspace.join("src/lib.rs"), repo.workspace.join("Cargo.toml")],
             indexed_files: vec!["src/lib.rs".into(), "Cargo.toml".into()],
             everything_stored_or_replied: b"symbol visible in src/lib.rs".to_vec(),
-            search_replies: vec!["no hits".into(); TRAP_QUERIES.len()],
+            search_replies: answered(),
             ..Observations::default()
         };
         assert_eq!(seen.verdict(&repo), vec![]);
@@ -350,7 +406,7 @@ mod tests {
             files_read: vec![repo.outside_file.clone()],
             indexed_files: vec![".env".into(), "sub/.env.local".into(), ".git/config".into()],
             everything_stored_or_replied: format!("{SECRET} {OUTSIDE_TEXT}").into_bytes(),
-            ..Observations::default()
+            search_replies: answered(),
         };
         let breaches = seen.verdict(&repo);
         assert!(breaches.contains(&Breach::Ran("cargo build".to_owned())));
@@ -370,9 +426,11 @@ mod tests {
             ("", "hit: pn1-dummy-secret-0f3a9c71"),
             ("", "...7D21E0B4..."),
         ] {
+            let mut replies = answered();
+            replies[1] = reply.to_owned();
             let seen = Observations {
                 everything_stored_or_replied: stored.as_bytes().to_vec(),
-                search_replies: vec![reply.to_owned()],
+                search_replies: replies,
                 ..Observations::default()
             };
             assert!(
@@ -386,7 +444,11 @@ mod tests {
     fn a_marker_on_disk_is_a_breach() {
         let (_s, repo) = trap();
         std::fs::write(&repo.marker, "x").expect("write marker");
-        assert!(matches!(Observations::default().verdict(&repo).as_slice(), [Breach::Ran(_)]));
+        let seen = Observations {
+            search_replies: answered(),
+            ..Observations::default()
+        };
+        assert!(matches!(seen.verdict(&repo).as_slice(), [Breach::Ran(_)]));
     }
 
     #[cfg(unix)]
@@ -398,12 +460,111 @@ mod tests {
         let looped = repo.workspace.join("loop-a");
         let seen = Observations {
             files_read: vec![through.clone(), file_link.clone(), looped.clone()],
+            search_replies: answered(),
             ..Observations::default()
         };
         assert_eq!(
             seen.verdict(&repo),
             vec![Breach::Escaped(through), Breach::Escaped(file_link), Breach::Unresolvable(looped)]
         );
+    }
+
+    #[test]
+    fn a_check_that_did_not_run_cannot_pass() {
+        let (_s, repo) = trap();
+        assert_eq!(Observations::default().verdict(&repo), vec![Breach::Unchecked(0)]);
+        let few = Observations {
+            search_replies: vec!["no hits".into(); TRAP_QUERIES.len() - 1],
+            ..Observations::default()
+        };
+        assert_eq!(few.verdict(&repo), vec![Breach::Unchecked(TRAP_QUERIES.len() - 1)]);
+        let many = Observations {
+            search_replies: vec!["no hits".into(); TRAP_QUERIES.len() + 1],
+            ..Observations::default()
+        };
+        assert_eq!(many.verdict(&repo), vec![Breach::Unchecked(TRAP_QUERIES.len() + 1)]);
+    }
+
+    // ---- liveness: every trap could fire. Nothing here runs a trap. -------------------------------------------------
+
+    #[cfg(unix)]
+    #[test]
+    fn the_wrappers_exist_and_are_executable_scripts_that_touch_the_marker() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_s, repo) = trap();
+        let rustc = repo.outside_gitdir.parent().expect("outside").join("toolchain/bin/rustc");
+        for script in [&repo.wrapper, &rustc] {
+            let meta = std::fs::metadata(script).expect("script exists");
+            assert!(meta.permissions().mode() & 0o111 != 0, "{script:?} is executable");
+            let text = std::fs::read_to_string(script).expect("script text");
+            assert!(
+                text.starts_with("#!/bin/sh\n") && text.contains(&*repo.marker.to_string_lossy()),
+                "{script:?}"
+            );
+        }
+        let cargo = std::fs::read_to_string(repo.workspace.join(".cargo/config.toml")).expect("config");
+        assert!(
+            cargo.contains(&*repo.wrapper.to_string_lossy()),
+            "rustc-wrapper and runners name the wrapper"
+        );
+        let toolchain = std::fs::read_to_string(repo.workspace.join("rust-toolchain.toml")).expect("toolchain");
+        assert!(toolchain.contains(&*repo.outside_gitdir.parent().expect("outside").join("toolchain").to_string_lossy()));
+    }
+
+    #[test]
+    fn the_workspace_crate_depends_on_the_proc_macro_crate_and_calls_it() {
+        let (_s, repo) = trap();
+        let manifest = std::fs::read_to_string(repo.workspace.join("Cargo.toml")).expect("manifest");
+        assert!(manifest.contains("trap-macros = { path = \"macros\" }"));
+        assert!(
+            std::fs::read_to_string(repo.workspace.join("src/lib.rs"))
+                .expect("lib")
+                .contains("trap_macros::boom!();")
+        );
+        assert!(
+            std::fs::read_to_string(repo.workspace.join("macros/src/lib.rs"))
+                .expect("macro")
+                .contains("pub fn boom")
+        );
+        assert!(repo.workspace.join("macros/Cargo.toml").is_file());
+    }
+
+    /// `git rev-parse --git-dir`: git accepts the folder as a repository, so it would go on to read its configuration.
+    /// (rev-parse does not refresh the index, so it does not run `core.fsmonitor`, and no filter or diff driver runs.)
+    #[allow(clippy::disallowed_methods)]
+    fn rev_parse(scratch: &Scratch, args: &[&str]) -> std::process::Output {
+        std::process::Command::new("git")
+            .args(args)
+            .arg("rev-parse")
+            .arg("--git-dir")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("HOME", scratch.home())
+            .output()
+            .expect("git is installed (the CI image and developer machines have it)")
+    }
+
+    #[test]
+    fn git_accepts_each_trap_repository() {
+        let (scratch, repo) = trap();
+        let ws = repo.workspace.to_string_lossy().into_owned();
+        let out = repo.outside_gitdir.to_string_lossy().into_owned();
+        let nested = repo.nested.to_string_lossy().into_owned();
+        for (what, args) in [
+            ("the workspace .git", vec!["-C", ws.as_str()]),
+            ("the gitdir outside", vec!["--git-dir", out.as_str()]),
+            ("the nested gitfile", vec!["-C", nested.as_str()]),
+        ] {
+            let o = rev_parse(&scratch, &args);
+            assert!(o.status.success(), "{what}: {}", String::from_utf8_lossy(&o.stderr));
+        }
+        let o = rev_parse(&scratch, &["-C", &nested]);
+        let resolved = String::from_utf8_lossy(&o.stdout).trim().to_owned();
+        assert!(
+            resolved.ends_with("outside/gitdir"),
+            "the gitfile leads out of the workspace: {resolved}"
+        );
+        assert!(!repo.marker.exists(), "checking the traps ran none");
     }
 
     /// The indexer exists from A3a (`pacenotes-index`); until then this is the failing test it must make pass.

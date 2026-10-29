@@ -19,12 +19,13 @@ pub const MAX_ITEMS: u32 = 100_000;
 /// The most bytes a single reply may carry: what one message can hold, from the codec's single bound.
 pub const MAX_BYTES: u32 = MAX_MESSAGE_BYTES as u32;
 
-/// Settings keys of the three limits.
-pub const SETTING_TICKS: &str = "budget_ticks";
+/// Settings keys of the three limits. They are owned by the host (the `host_` prefix is reserved: a function's own settings
+/// may not use it, see [`Contributions::new`](crate::Contributions::new)), which adds [`Budget::setting_specs`] once.
+pub const SETTING_TICKS: &str = "host_budget_ticks";
 /// Settings key of the item limit.
-pub const SETTING_ITEMS: &str = "budget_items";
+pub const SETTING_ITEMS: &str = "host_budget_items";
 /// Settings key of the byte limit.
-pub const SETTING_BYTES: &str = "budget_bytes";
+pub const SETTING_BYTES: &str = "host_budget_bytes";
 
 /// What a budget runs out of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

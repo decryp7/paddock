@@ -297,10 +297,33 @@ const SHELL_META: &[char] = &[';', '|', '&', '$', '`', '<', '>', '\n', '\r', '\0
 /// The largest `init_options` JSON text.
 pub const MAX_INIT_OPTIONS_BYTES: usize = 16 * 1024;
 
-/// Environment variables a pack may never set: they make the server load code of the pack's choosing.
+/// Environment variables a pack may never set: they make the server (or the runtime it starts on) load code of the pack's
+/// choosing. Refused: the loader families (`LD_*`, `DYLD_*`), every `*_OPTIONS` and `*_OPTS` and `*OPT` variable
+/// (`NODE_OPTIONS`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`, `PERL5OPT`, `RUBYOPT`) and the path, startup and rc variables of
+/// the common runtimes. A pack that needs one is a code plugin, not a declarative pack.
 fn forbidden_env(name: &str) -> bool {
+    const NAMED: &[&str] = &[
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "PYTHONHOME",
+        "PERL5LIB",
+        "RUBYLIB",
+        "BASH_ENV",
+        "ENV",
+        "NODE_PATH",
+        "CLASSPATH",
+        "GOFLAGS",
+        "RUSTC_WRAPPER",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "CARGO_BUILD_RUSTC_WRAPPER",
+    ];
     let n = name.to_ascii_uppercase();
-    n == "LD_PRELOAD" || n == "LD_LIBRARY_PATH" || n.starts_with("DYLD_") || n == "NODE_OPTIONS"
+    n.starts_with("LD_")
+        || n.starts_with("DYLD_")
+        || n.ends_with("_OPTIONS")
+        || n.ends_with("_OPTS")
+        || n.ends_with("OPT")
+        || NAMED.contains(&n.as_str())
 }
 
 fn check_command(field: &'static str, command: &str) -> Result<(), PackError> {
@@ -456,7 +479,7 @@ impl ServerPack {
             return Err(invalid(
                 "server.env",
                 format!("{name} makes the server load code of the pack's choosing"),
-                "Remove it; LD_PRELOAD, LD_LIBRARY_PATH, DYLD_* and NODE_OPTIONS are never set by a pack.",
+                "Remove it; loader, *_OPTIONS, interpreter path and startup variables are never set by a pack.",
             ));
         }
         if w.detect.len() > MAX_LIST / 2 {
@@ -826,9 +849,19 @@ command = "rust-analyzer scip ."
         for name in [
             "LD_PRELOAD",
             "ld_library_path",
+            "LD_AUDIT",
             "DYLD_INSERT_LIBRARIES",
             "DYLD_FRAMEWORK_PATH",
             "NODE_OPTIONS",
+            "JAVA_TOOL_OPTIONS",
+            "_JAVA_OPTIONS",
+            "PYTHONPATH",
+            "PYTHONSTARTUP",
+            "PERL5OPT",
+            "RUBYOPT",
+            "BASH_ENV",
+            "MALLOC_OPTS",
+            "RUSTC_WRAPPER",
         ] {
             let r = with(|g| {
                 g.replace(

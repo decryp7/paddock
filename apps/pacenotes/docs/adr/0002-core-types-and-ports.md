@@ -42,7 +42,11 @@ validation as its parser, so no format builds an invalid value; one test lists e
 (`wire_tests`), and another round-trips every type through both. `ServerPack` carries `init_options` as JSON text (an
 object, at most 16 KiB) so it crosses postcard; the core does not judge its content: the pack loader in `pacenotes-lsp`
 owns the check of known execution switches (rust-analyzer's `cargo.buildScripts`, `procMacro`) against the repository's
-trust state. A pack may not set `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_*` or `NODE_OPTIONS`.
+trust state. A pack may not set loader variables (`LD_*`, `DYLD_*`), any `*_OPTIONS`/`*_OPTS`/`*OPT` variable (`NODE_OPTIONS`,
+`JAVA_TOOL_OPTIONS`, `PERL5OPT`, `RUBYOPT`) or the path, startup and rc variables of common runtimes (`PYTHONPATH`,
+`PYTHONSTARTUP`, `BASH_ENV`, `NODE_PATH`, `RUSTC_WRAPPER`, ...). A language-server reply names places outside the workspace
+(the standard library, dependencies); they are dropped and counted (`outside_workspace`), not an error, and Windows drive
+letters and their percent encodings are one place. `LspReply` and `SymbolPage` are bounded on the wire too.
 
 ### Schemas with validation (types only; loaders in the crates that use them)
 
@@ -80,12 +84,16 @@ own test calls with its instance; the core ships an in-memory fake of each port 
 ### The function port's budget (package FN0)
 
 A call across the function port carries a `Budget` of **host ticks**, items and bytes. It is a *cap* in the sense of ADR 0031:
-the tick count is the host's own beats (a pause spends none, and a call that reports progress is not cut), the default
-lives in the settings a function contributes (`Budget::setting_specs`: 30 ticks, 1000 items, 1 MiB) and not in code, and
+the tick count is the host's own beats (a pause spends none; there is no progress channel across the port, so the cap is a
+plain count and does not stretch for a call that is still working), the default lives in the settings the host owns
+(`Budget::setting_specs`, keys `host_budget_*`, the `host_` prefix reserved so a function cannot clash: 30 ticks, 1000
+items, 1 MiB) and not in code, and
 the error that a limit raises says which limit, its value and the setting to change. The byte bound is the codec's message
 bound (4 MiB): one source. Items and bytes replace the per-call `limit` and `max_bytes` fields. A model call
-(`HostCall::Complete`) names its origin, and the host refuses `Origin::Background` (family rule 46); the contract test
-`host_contract` checks cancel, the budget's effect and that refusal for any host.
+(`HostCall::Complete`) names its origin as the function's claim; the host decides from the job context it runs the function
+in and cross-checks the claim: a background context refuses every model call whatever the field says, and a user context
+refuses a claim of `Background` (family rule 46). The contract test `host_contract` checks cancel, the budget's effect and
+both refusals for any host.
 
 ### Deviation from ADR 0022 §3.7
 

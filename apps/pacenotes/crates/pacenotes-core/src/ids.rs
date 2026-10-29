@@ -20,6 +20,9 @@ use crate::language::Language;
 /// Why a string is not an id.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum IdError {
+    /// The file id counter is used up.
+    #[error("the file id counter is used up; the store must be rebuilt")]
+    Exhausted,
     /// The prefix or the digits are wrong.
     #[error("expected `{prefix}` followed by {digits} hexadecimal digits, got {got:?}")]
     Malformed {
@@ -215,11 +218,15 @@ impl FileIdAllocator {
         FileIdAllocator { next: next_sequence }
     }
 
-    /// The id for a file seen for the first time.
-    pub fn issue(&mut self) -> FileId {
+    /// The id for a file seen for the first time. When the counter is used up (it never is in practice) this fails instead
+    /// of repeating an id.
+    pub fn issue(&mut self) -> Result<FileId, IdError> {
+        if self.next == u64::MAX {
+            return Err(IdError::Exhausted);
+        }
         let id = FileId::from_sequence(self.next);
-        self.next = self.next.saturating_add(1);
-        id
+        self.next += 1;
+        Ok(id)
     }
 
     /// The counter to store.
@@ -334,7 +341,7 @@ mod tests {
     /// a rename keeps every symbol id. That the store does keep it (a rename matched by fingerprint) is A3a's test.
     #[test]
     fn symbol_ids_are_deterministic_and_take_no_path() {
-        let file = FileIdAllocator::new().issue();
+        let file = FileIdAllocator::new().issue().unwrap();
         let a = SymbolId::derive(file, &rust(), SymbolKind::Function, "Outer::parse", 0);
         let b = SymbolId::derive(file, &rust(), SymbolKind::Function, "Outer::parse", 0);
         assert_eq!(a, b);
@@ -349,9 +356,9 @@ mod tests {
     #[test]
     fn moving_a_file_away_and_restoring_the_path_gives_two_different_ids() {
         let mut ids = FileIdAllocator::new();
-        let at_a = ids.issue();
+        let at_a = ids.issue().unwrap();
         // a moves to b: the store keeps `at_a` for the file now at b. A new file at a gets a new id.
-        let restored_a = ids.issue();
+        let restored_a = ids.issue().unwrap();
         assert_ne!(at_a, restored_a);
         let sym = |f| SymbolId::derive(f, &rust(), SymbolKind::Function, "parse", 0);
         assert_ne!(sym(at_a), sym(restored_a));
@@ -360,11 +367,15 @@ mod tests {
     #[test]
     fn the_allocator_resumes_without_reusing_an_id() {
         let mut first = FileIdAllocator::new();
-        let ids: Vec<_> = (0..3).map(|_| first.issue()).collect();
+        let ids: Vec<_> = (0..3).map(|_| first.issue().unwrap()).collect();
         let mut again = FileIdAllocator::resume(first.next_sequence());
-        let next = again.issue();
+        let next = again.issue().unwrap();
         assert!(!ids.contains(&next));
         assert_eq!(FileIdAllocator::default().next_sequence(), 0);
+        let mut full = FileIdAllocator::resume(u64::MAX - 1);
+        assert!(full.issue().is_ok());
+        assert_eq!(full.issue(), Err(IdError::Exhausted), "no id is repeated at the end of the counter");
+        assert!(IdError::Exhausted.to_string().contains("used up"));
         assert_eq!(FileId::from_sequence(1), ids[1]);
     }
 

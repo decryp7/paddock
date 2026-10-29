@@ -16,6 +16,13 @@ test('enablingLines finds each way of switching the feature on', () => {
   assert.deepEqual(enablingLines('[build-dependencies]\npaddock-repo-graph.features = ["cargo-metadata"]\n'), [2]);
 });
 
+test('a cfg header with = inside its quotes is a header, not an entry', () => {
+  const header = '[target.\'cfg(target_os = "windows")\'.dependencies]\n';
+  assert.deepEqual(enablingLines(`${header}paddock-repo-graph = { path = "x", features = ["cargo-metadata"] }\n`), [2]);
+  assert.deepEqual(enablingLines(`[target."cfg(all(unix, target_os = \\"linux\\"))".dependencies.paddock-repo-graph]\nfeatures = ["cargo-metadata"]\n`), [2]);
+  assert.deepEqual(entries(`${header}a = 1\n`).map((e) => e.table), [['target', 'cfg(target_os = "windows")', 'dependencies']]);
+});
+
 test('a multi-line features array is read', () => {
   const text = '[dependencies]\npaddock-repo-graph = {\n  path = "x",\n  features = [\n    "git-history", # fine\n    "cargo-metadata",\n  ],\n}\n';
   assert.deepEqual(enablingLines(text), [2]);

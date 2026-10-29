@@ -29,3 +29,8 @@ test('check runs cargo through the injected runner in the given folder', () => {
   const r = check('/x', (cwd) => { seen = cwd; return { status: 0, stdout: 'paddock-repo-graph v0.1.0\n' }; });
   assert.deepEqual([seen, r.ok], ['/x', true]);
 });
+
+test('cargo is asked about every target, so a cfg(...) dependency is seen', async () => {
+  const src = await import('node:fs').then((fs) => fs.readFileSync(new URL('./check-no-cargo-metadata.mjs', import.meta.url), 'utf8'));
+  assert.match(src, /'--target', 'all'/);
+});

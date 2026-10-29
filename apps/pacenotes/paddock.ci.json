@@ -5,6 +5,10 @@
   "os": [
     "ubuntu-latest"
   ],
+  "rustChecks": [
+    "cd apps/pacenotes",
+    "cargo llvm-cov nextest -p pacenotes-core -p pacenotes-function-api --profile ci --summary-only --ignore-filename-regex 'contract\\.rs|wire_tests\\.rs' --fail-under-lines 99"
+  ],
   "checks": [
     "node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C52",
     "cd apps/pacenotes",

@@ -84,9 +84,10 @@ export function entries(text) {
   for (let i = 0; i < lines.length; i++) {
     const line = stripComment(lines[i]).trim();
     if (!line) continue;
-    const header = /^\[\[?(.+?)\]\]?$/.exec(line);
-    if (header && !line.includes('=')) { table = splitKey(header[1]); continue; }
     const eq = equalsAt(line);
+    // A header starts with `[` and has no `=` outside quotes (`[target.'cfg(target_os = "windows")'.dependencies]` has one inside).
+    const header = line.startsWith('[') && eq < 0 ? /^\[\[?(.+?)\]\]?$/.exec(line) : null;
+    if (header) { table = splitKey(header[1]); continue; }
     if (eq < 0) continue;
     const start = i;
     let value = line.slice(eq + 1).trim();

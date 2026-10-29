@@ -1,5 +1,5 @@
 //! The contract test of a [`Host`], for the engine's real host and for every fake: cancel ends a call, a budget limits a
-//! reply, and a model call from background work is refused.
+//! reply, and a model call from background work is refused whatever the request claims.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -10,8 +10,10 @@ use crate::{Budget, BudgetKind, Host, HostCall, HostError, HostReply, HostReques
 
 /// What [`host_contract`] needs from the host under test: at least two symbols match `query`.
 pub struct HostFixture<'a> {
-    /// The host.
+    /// The host, running in a user-started context.
     pub host: &'a dyn Host,
+    /// The same host running in a background job context.
+    pub background_host: &'a dyn Host,
     /// A query that matches at least two symbols.
     pub query: &'a str,
 }
