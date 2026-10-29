@@ -109,6 +109,30 @@ describe('SettingsPage', () => {
     expect(await backend.getSettings()).toMatchObject({ notificationsPausedUntilMs: NOW + 3_600_000 });
   });
 
+  it('clicking the pause that is already selected restarts it for the full time', async () => {
+    const { f, backend } = await make();
+    const pause = vi.spyOn(backend, 'pauseNotifications');
+    tab(f, 'Pause notifications', 'Pause 1 hour').click();
+    await settle(f);
+    tab(f, 'Pause notifications', 'Pause 1 hour').click(); // the same option again
+    await settle(f);
+    expect(pause.mock.calls).toEqual([[60], [60]]);
+    tab(f, 'Pause notifications', 'On').click();
+    await settle(f);
+    tab(f, 'Pause notifications', 'On').click(); // already on: nothing to restart
+    await settle(f);
+    expect(pause.mock.calls).toEqual([[60], [60], [null]]);
+  });
+
+  it('shows what a cancelled install ended with inside the page', async () => {
+    const backend = makeMock();
+    vi.spyOn(backend, 'installRenderer').mockRejectedValue({ code: 'cancelled', message: 'Cancelled.', problems: [] });
+    const { f } = await make(backend);
+    (byText(f.nativeElement, 'button', 'Install Chromium') as HTMLButtonElement).click();
+    await settle(f);
+    expect(text(el(f, '.note[role=status]'))).toBe('Installation cancelled. Nothing was installed.');
+  });
+
   it('downloads Chromium once and then hides the button', async () => {
     const { f } = await make();
     (byText(f.nativeElement, 'button', 'Install Chromium') as HTMLButtonElement).click();
