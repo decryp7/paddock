@@ -144,6 +144,11 @@ pub enum Place {
 /// The shell plugin with Spotter's parts.
 pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>) -> Builder<R> {
     let attach = hub.clone();
+    let engine_hub = hub.clone();
+    let seams = match &place {
+        Place::Installed => lifecycle::Seams::installed(),
+        Place::Test { dir } => lifecycle::Seams::test(dir),
+    };
     let Net {
         downloader,
         proxy,
@@ -158,6 +163,16 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>) -> Builder<R> {
         .setup(move |app| {
             app.manage(ProxyChoice(proxy.clone()));
             attach.attach(app);
+            Ok(())
+        })
+        // The engine opens before the event loop runs, so no command can arrive before it exists; nothing here waits for
+        // the UI and nothing opens a window (the shell opens the tray and the window after every plugin, ADR 0029).
+        .setup(move |app| {
+            let state = lifecycle::init(app, &engine_hub, &seams).map_err(|e| {
+                (seams.note)(&format!("Spotter could not start: {e}"));
+                e
+            })?;
+            app.manage(state);
             Ok(())
         });
     let test_dir = match &place {
@@ -312,20 +327,12 @@ pub fn app<R: Runtime>(
 
 /// Starts the app.
 pub fn run() {
+    // First: the shared crates' log lines (the start's error among them) reach Spotter's daily log file (paddock-log).
+    let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
     let cwd = std::env::current_dir().ok();
     let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
     let hub = health::Hub::<tauri::Wry>::default();
-    let setup_hub = hub.clone();
-    let shell = shell::<tauri::Wry>(Place::Installed, &hub).setup(move |app| {
-        // The engine opens before the event loop runs, so no command can arrive before it exists; nothing here waits
-        // for the UI.
-        let state = lifecycle::init(app, &setup_hub).map_err(|e| {
-            applog::write(&format!("Spotter could not start: {e}"));
-            e
-        })?;
-        app.manage(state);
-        Ok(())
-    });
+    let shell = shell::<tauri::Wry>(Place::Installed, &hub);
     let builder = tauri::Builder::default()
         // First: a second launch shows the running app's window instead of starting another engine.
         .plugin(tauri_plugin_single_instance::init(paddock_window::tauri::second_instance))
@@ -337,8 +344,6 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
         ));
-    // The start's messages (no tray icon, a window that could not open) also go to Spotter's own log.
-    let shell = shell.start_log(applog::write);
     let builder = app(builder, shell, launch, tray::native());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
