@@ -56,8 +56,8 @@
 1. **The updater has two responsibilities.** Changing a legal document or What's New touches the crate that verifies
    signatures and installs updates, and an app cannot show About without pulling in the updater.
 2. **The licence check is wrong for `AND`, and the npm exception is not scoped to npm.** `nonPermissive` in
-   `generate.mjs` accepts a package when *any* identifier of its expression is allowed. Run on synthetic expressions on
-   2026-10-29 (the script is in this ADR's work notes, not committed):
+   `generate.mjs` accepts a package when *any* identifier of its expression is allowed. Measured by running
+   `nonPermissive` from `062587f80` on synthetic expressions on 2026-10-29 (DP1's first tests repeat these rows):
 
    | Expression | JS result | Correct |
    |---|---|---|
@@ -109,7 +109,8 @@ paddock-updater (no dependency on paddock-about)
 ```
 
 `paddock-updater` does not depend on `paddock-about`. The only fact About took from the updater is "this build can
-update itself". `paddock-shell` already depends on both and sets it: `About::updates_available(updater.available())`.
+update itself". `paddock-shell`, which already depends on the updater, gains `paddock-about` and sets it:
+`About::updates_available(updater.available())`.
 `paddock-about`'s dependencies are `paddock-commands`, `paddock-dialogs` (the About dialog contract, ADR 0026),
 `paddock-files` (the releases link, as today), `paddock-env`, `serde`, and `tauri` behind its feature.
 
@@ -129,7 +130,8 @@ let about = About::new("Dyno", version, seen)
 - The macro also checks the file's first line at compile time (a `const` assertion that it starts with
   `# Third-party notices`), so an empty or hand-written placeholder fails the build too.
 - `licence!(Mit | Apache)` embeds the family's licence texts once, from `paddock-about` itself. Every app's
-  `LICENSE-MIT` and `LICENSE-APACHE` are identical today (plan X27); the existing sync check keeps them identical.
+  `LICENSE-MIT` and `LICENSE-APACHE` are identical today (plan X27); conformance C28 (the repo baseline) keeps them
+  identical.
 - `LegalDoc` is a typed value (id newtype checked at construction, so `.legal` cannot be given a bad id from the macro).
   `.legal(id, title, text)` with strings stays for other documents.
 
