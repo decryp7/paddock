@@ -93,6 +93,7 @@ fn every_host_reply_round_trips() {
             },
         ],
         truncated: true,
+        skipped_names: 2,
     };
     for reply in [
         HostReply::FileId(None),

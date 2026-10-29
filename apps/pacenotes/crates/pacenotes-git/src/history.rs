@@ -14,6 +14,81 @@ pub const MAX_LOG_COMMITS: usize = 100_000;
 /// The most files recorded for one commit; a larger commit is recorded cut at this many.
 pub const MAX_FILES_PER_COMMIT: usize = 10_000;
 
+/// The longest author text kept.
+pub const MAX_AUTHOR_BYTES: usize = 128;
+
+fn cut_text(s: &mut String, max: usize) {
+    if s.len() > max {
+        let mut end = max;
+        while !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        s.truncate(end);
+    }
+}
+
+/// Whether the walk ended at the record limit (`true`), or why it failed: a cancel is [`HistoryError::Cancelled`] and an
+/// error of the diff that we did not cause by stopping it is a backend error.
+fn walk_outcome<E: std::fmt::Display>(stop: Stop, result: Result<(), E>) -> Result<bool, HistoryError> {
+    match (stop, result) {
+        (Stop::Cancelled, _) => Err(HistoryError::Cancelled),
+        (Stop::No, Err(e)) => Err(backend(e)),
+        (stop, _) => Ok(stop == Stop::Limit),
+    }
+}
+
+/// What a bounded tree walk found.
+struct Walked {
+    changes: Vec<FileChange>,
+    skipped_names: u32,
+    cut: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Stop {
+    No,
+    Limit,
+    Cancelled,
+}
+
+/// A tree-diff visitor that records changes like gix's recorder and stops the walk at a record limit or a cancel.
+struct Bounded<'a> {
+    recorder: gix::diff::tree::Recorder,
+    max_records: usize,
+    cancel: &'a CancelToken,
+    stop: Stop,
+}
+
+impl gix::diff::tree::Visit for Bounded<'_> {
+    fn pop_front_tracked_path_and_set_current(&mut self) {
+        self.recorder.pop_front_tracked_path_and_set_current();
+    }
+
+    fn push_back_tracked_path_component(&mut self, component: &gix::bstr::BStr) {
+        self.recorder.push_back_tracked_path_component(component);
+    }
+
+    fn push_path_component(&mut self, component: &gix::bstr::BStr) {
+        self.recorder.push_path_component(component);
+    }
+
+    fn pop_path_component(&mut self) {
+        self.recorder.pop_path_component();
+    }
+
+    fn visit(&mut self, change: gix::diff::tree::visit::Change) -> gix::diff::tree::visit::Action {
+        if self.cancel.is_cancelled() {
+            self.stop = Stop::Cancelled;
+            return std::ops::ControlFlow::Break(());
+        }
+        if self.recorder.records.len() >= self.max_records {
+            self.stop = Stop::Limit;
+            return std::ops::ControlFlow::Break(());
+        }
+        self.recorder.visit(change)
+    }
+}
+
 /// A repository opened by [`open`](crate::open). Cheap to share: every call takes its own thread-local handle.
 pub struct GixHistory {
     repo: gix::ThreadSafeRepository,
@@ -61,31 +136,51 @@ impl GixHistory {
         repo.find_commit(id).map_err(|_| HistoryError::UnknownRev(rev.to_string()))
     }
 
-    /// The files that changed between a commit's first parent and the commit (all of its files for a root commit), cut at
-    /// `limit`; renames are found by identical blob ids. Reads trees only.
-    fn tree_changes(repo: &gix::Repository, old: Option<&gix::Tree<'_>>, new: &gix::Tree<'_>) -> Result<Vec<FileChange>, HistoryError> {
+    /// The files that changed between two trees, at most about `limit` of them, plus how many have names that are not valid
+    /// [`RepoPath`]s and whether the walk stopped at the limit. Renames are found by identical blob ids. Reads trees only; the
+    /// walk is bounded (it stops after `2 * limit + 2` raw changes) and checks `cancel` at every change.
+    fn tree_changes(
+        repo: &gix::Repository,
+        old: Option<&gix::Tree<'_>>,
+        new: &gix::Tree<'_>,
+        limit: usize,
+        cancel: &CancelToken,
+    ) -> Result<Walked, HistoryError> {
         let empty = repo.empty_tree();
         let old = old.unwrap_or(&empty);
-        let mut recorder = gix::diff::tree::Recorder::default();
-        gix::diff::tree(
+        let mut bounded = Bounded {
+            recorder: gix::diff::tree::Recorder::default(),
+            max_records: limit.saturating_mul(2).saturating_add(2),
+            cancel,
+            stop: Stop::No,
+        };
+        let result = gix::diff::tree(
             gix::objs::TreeRefIter::from_bytes(&old.data, old.id.kind()),
             gix::objs::TreeRefIter::from_bytes(&new.data, new.id.kind()),
             gix::diff::tree::State::default(),
             &repo.objects,
-            &mut recorder,
-        )
-        .map_err(backend)?;
+            &mut bounded,
+        );
+        let cut = walk_outcome(bounded.stop, result)?;
 
         use gix::diff::tree::recorder::Change;
         let is_file = |mode: &gix::objs::tree::EntryMode| mode.is_blob() || mode.is_link();
+        let mut skipped = 0u32;
+        let mut parse = |path: &gix::bstr::BString| {
+            let parsed = RepoPath::parse(&path.to_string()).ok();
+            if parsed.is_none() {
+                skipped = skipped.saturating_add(1);
+            }
+            parsed
+        };
         // exact renames: a deleted and an added entry with the same blob id
         let mut deleted: BTreeMap<gix::ObjectId, Vec<RepoPath>> = BTreeMap::new();
         let mut added: Vec<(gix::ObjectId, RepoPath)> = Vec::new();
         let mut out: Vec<FileChange> = Vec::new();
-        for change in recorder.records {
+        for change in bounded.recorder.records {
             match change {
                 Change::Modification { entry_mode, path, .. } if is_file(&entry_mode) => {
-                    if let Ok(path) = RepoPath::parse(&path.to_string()) {
+                    if let Some(path) = parse(&path) {
                         out.push(FileChange {
                             path,
                             kind: ChangeKind::Modified,
@@ -93,12 +188,12 @@ impl GixHistory {
                     }
                 }
                 Change::Deletion { entry_mode, oid, path, .. } if is_file(&entry_mode) => {
-                    if let Ok(path) = RepoPath::parse(&path.to_string()) {
+                    if let Some(path) = parse(&path) {
                         deleted.entry(oid).or_default().push(path);
                     }
                 }
                 Change::Addition { entry_mode, oid, path, .. } if is_file(&entry_mode) => {
-                    if let Ok(path) = RepoPath::parse(&path.to_string()) {
+                    if let Some(path) = parse(&path) {
                         added.push((oid, path));
                     }
                 }
@@ -129,7 +224,11 @@ impl GixHistory {
             });
         }
         out.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(out)
+        Ok(Walked {
+            changes: out,
+            skipped_names: skipped,
+            cut,
+        })
     }
 
     /// What changed in each commit on the first-parent line from `from`, newest first, at most `max_commits` (and at most
@@ -151,17 +250,20 @@ impl GixHistory {
                 Some(parent) => Some(repo.find_commit(parent).map_err(backend)?.tree().map_err(backend)?),
                 None => None,
             };
-            let mut files: Vec<RepoPath> = Self::tree_changes(&repo, parent_tree.as_ref(), &tree)?
-                .into_iter()
-                .map(|c| c.path)
-                .collect();
+            let walked = Self::tree_changes(&repo, parent_tree.as_ref(), &tree, MAX_FILES_PER_COMMIT, cancel)?;
+            let truncated = walked.cut || walked.changes.len() > MAX_FILES_PER_COMMIT;
+            let skipped_names = walked.skipped_names;
+            let mut files: Vec<RepoPath> = walked.changes.into_iter().map(|c| c.path).collect();
             files.truncate(MAX_FILES_PER_COMMIT);
-            let author = commit.author().map_err(backend)?;
+            let mut author = commit.author().map_err(backend)?.email.to_string();
+            cut_text(&mut author, MAX_AUTHOR_BYTES);
             out.push(CommitChanges {
                 commit: hash_of(info.id)?,
                 time: commit.time().map_err(backend)?.seconds,
-                author: author.email.to_string(),
+                author,
                 files,
+                skipped_names,
+                truncated,
             });
         }
         Ok(out)
@@ -207,9 +309,77 @@ impl History for GixHistory {
         let old = Self::commit(&repo, from)?.tree().map_err(backend)?;
         let new = Self::commit(&repo, to)?.tree().map_err(backend)?;
         live(cancel)?;
-        let mut changes = Self::tree_changes(&repo, Some(&old), &new)?;
-        let truncated = changes.len() > limit;
+        let walked = Self::tree_changes(&repo, Some(&old), &new, limit, cancel)?;
+        let truncated = walked.cut || walked.changes.len() > limit;
+        let mut changes = walked.changes;
         changes.truncate(limit);
-        Ok(ChangeSet { changes, truncated })
+        Ok(ChangeSet {
+            changes,
+            truncated,
+            skipped_names: walked.skipped_names,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gix::diff::tree::Visit as _;
+    use gix::diff::tree::visit::Change;
+
+    fn change() -> Change {
+        Change::Deletion {
+            entry_mode: gix::objs::tree::EntryKind::Blob.into(),
+            oid: gix::ObjectId::null(gix::hash::Kind::Sha1),
+            relation: None,
+        }
+    }
+
+    #[test]
+    fn the_walk_stops_at_the_record_limit_and_at_a_cancel() {
+        let live = CancelToken::new();
+        let mut b = Bounded {
+            recorder: gix::diff::tree::Recorder::default(),
+            max_records: 2,
+            cancel: &live,
+            stop: Stop::No,
+        };
+        assert!(b.visit(change()).is_continue() && b.visit(change()).is_continue());
+        assert!(b.visit(change()).is_break() && b.stop == Stop::Limit);
+
+        let dead = CancelToken::new();
+        dead.cancel();
+        let mut b = Bounded {
+            recorder: gix::diff::tree::Recorder::default(),
+            max_records: 10,
+            cancel: &dead,
+            stop: Stop::No,
+        };
+        assert!(b.visit(change()).is_break() && b.stop == Stop::Cancelled);
+        assert!(b.recorder.records.is_empty());
+    }
+
+    #[test]
+    fn a_stopped_walk_is_a_cut_a_cancel_or_a_backend_error() {
+        assert_eq!(walk_outcome(Stop::No, Ok::<(), String>(())), Ok(false));
+        assert_eq!(walk_outcome(Stop::Limit, Err("the delegate cancelled".to_owned())), Ok(true));
+        assert_eq!(
+            walk_outcome(Stop::Cancelled, Err("the delegate cancelled".to_owned())),
+            Err(HistoryError::Cancelled)
+        );
+        assert!(matches!(
+            walk_outcome(Stop::No, Err("bad tree".to_owned())),
+            Err(HistoryError::Backend(_))
+        ));
+    }
+
+    #[test]
+    fn author_text_is_cut_on_a_character_boundary() {
+        let mut s = format!("a{}", "é".repeat(100));
+        cut_text(&mut s, MAX_AUTHOR_BYTES);
+        assert!(s.len() <= MAX_AUTHOR_BYTES && s.chars().skip(1).all(|c| c == 'é'));
+        let mut short = "a@b".to_owned();
+        cut_text(&mut short, MAX_AUTHOR_BYTES);
+        assert_eq!(short, "a@b");
     }
 }

@@ -88,7 +88,9 @@ the tick count is the host's own beats (a pause spends none; there is no progres
 plain count and does not stretch for a call that is still working), the default lives in the settings the host owns
 (`Budget::setting_specs`, keys `host_budget_*`, the `host_` prefix reserved so a function cannot clash: 30 ticks, 1000
 items, 1 MiB) and not in code, and
-the error that a limit raises says which limit, its value and the setting to change. The byte bound is the codec's message
+the error that a limit raises says which limit, its value and the setting to change. **The secret denylist stands in front of
+`HostCall::ReadAt` and of anything served over MCP, as well as in front of the index**: the `History` port reads the object
+database as it is (ADR 0004), so a committed `.env` is readable through it unless the host refuses the path. The byte bound is the codec's message
 bound (4 MiB): one source. Items and bytes replace the per-call `limit` and `max_bytes` fields. A model call
 (`HostCall::Complete`) names its origin as the function's claim; the host decides from the job context it runs the function
 in and cross-checks the claim: a background context refuses every model call whatever the field says, and a user context
@@ -132,11 +134,11 @@ and the measurements (rule 48) in `docs/performance.md`.
 
 ### Shared later
 
-Four things here are copies that belong in shared crates, and move only when shared code unfreezes after the Dyno and
+Five things here are copies or parallel designs that belong in shared crates, and move only when shared code unfreezes after the Dyno and
 Spotter tags (the plan's shared-code limit, rule 1): (1) `RepoPath` (other crates parse workspace-relative paths);
 (2) the postcard wire helpers (`pacenotes-function-api::codec`, which `paddock_ipc::wire` already covers, with its `Json`
 helper); (3) one canonical content `Fingerprint` for the family; (4) the `Budget`/cap vocabulary, with ADR 0031's policy
-types. Each copy carries a `TODO(shared-later, ADR 0002)` comment.
+types; (5) the `History` port, next to `paddock-repo-graph`'s (ADR 0004 says why the shapes differ today). Each copy carries a `TODO(shared-later, ADR 0002)` comment.
 
 ## Consequences
 

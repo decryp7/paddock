@@ -4,8 +4,12 @@ use std::path::{Path, PathBuf};
 
 use crate::history::GixHistory;
 
-/// How many levels of alternates are followed (git's own limit).
-const MAX_ALTERNATE_DEPTH: usize = 5;
+/// How many alternate object folders are followed.
+const MAX_ALTERNATES: usize = 8;
+/// How many entries of a git folder are checked for symbolic links.
+const MAX_GIT_DIR_ENTRIES: usize = 1_000_000;
+/// How deep the walk of a git folder goes (a git folder is `objects/ab/cdef...`, a few levels).
+const MAX_GIT_DIR_DEPTH: usize = 12;
 
 /// Why a workspace's repository was not opened.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -23,12 +27,22 @@ pub enum OpenError {
         /// Where it points.
         path: PathBuf,
     },
-    /// The alternates nest deeper than git follows; a chain that long is not read.
-    #[error("the repository's alternates nest more than {MAX_ALTERNATE_DEPTH} levels deep ({0}); it is not read")]
+    /// More alternate object folders than are followed.
+    #[error("the repository borrows objects from more than {MAX_ALTERNATES} folders ({0}); it is not read")]
     AlternatesTooDeep(PathBuf),
+    /// A symbolic link inside the git folder. Git never creates one there, and one can lead anywhere.
+    #[error("the git folder holds a symbolic link ({0}); git never creates one there, so the repository is not read")]
+    SymlinkInGitDir(PathBuf),
+    /// The git folder has more entries than are checked.
+    #[error("the git folder holds more than {MAX_GIT_DIR_ENTRIES} entries ({0}); it is not read")]
+    GitDirTooLarge(PathBuf),
     /// gix could not open the repository.
     #[error("the repository could not be opened: {0}")]
     Backend(String),
+}
+
+fn io_err(path: &Path, e: std::io::Error) -> OpenError {
+    OpenError::Backend(format!("{}: {e}", path.display()))
 }
 
 fn inside(root: &Path, path: &Path) -> bool {
@@ -83,24 +97,58 @@ fn read_first_line(path: &Path) -> Option<String> {
         .map(|s| s.lines().next().unwrap_or("").trim().to_owned())
 }
 
-/// Checks the alternates of the object folder `objects`, recursively; they must all lie inside `root`.
-fn check_alternates(root: &Path, objects: &Path, depth: usize) -> Result<(), OpenError> {
-    let file = objects.join("info/alternates");
-    let Ok(text) = std::fs::read_to_string(&file) else {
-        return Ok(());
-    };
-    if depth >= MAX_ALTERNATE_DEPTH {
+/// Checks the alternates of the object folder `objects` with gix's own resolver, the code that will read them, so the check
+/// and the read agree on quoting, escapes, relative paths and nesting. Every folder it returns must lie inside `root`.
+fn check_alternates(root: &Path, objects: &Path) -> Result<(), OpenError> {
+    let dirs = gix::odb::alternate::resolve(objects.to_path_buf(), root).map_err(|e| OpenError::Backend(e.to_string()))?;
+    if dirs.len() > MAX_ALTERNATES {
         return Err(OpenError::AlternatesTooDeep(objects.to_path_buf()));
     }
-    for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
-        let target = resolve(&objects.join(line));
+    for dir in dirs {
+        let target = resolve(&dir);
         if !inside(root, &target) {
             return Err(OpenError::OutsideWorkspace {
                 what: "alternates",
                 path: target,
             });
         }
-        check_alternates(root, &target, depth + 1)?;
+    }
+    Ok(())
+}
+
+/// The entries of `folder` with what each is (from `symlink_metadata`, never following a link): `(path, is_symlink, is_dir)`.
+fn entries_of(folder: &Path) -> Result<Vec<(PathBuf, bool, bool)>, OpenError> {
+    let read = || -> std::io::Result<Vec<(PathBuf, bool, bool)>> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(folder)? {
+            let path = entry?.path();
+            let meta = std::fs::symlink_metadata(&path)?;
+            out.push((path, meta.file_type().is_symlink(), meta.is_dir()));
+        }
+        Ok(out)
+    };
+    read().map_err(|e| io_err(folder, e))
+}
+
+/// Refuses any symbolic link under `dir`, walking without following links. Git creates none inside a git folder; a link
+/// there (to `objects/pack`, `packed-refs`, `refs/heads/x`) would make the read leave the workspace. Bounded in entries
+/// and depth.
+fn check_no_symlinks(dir: &Path, max_entries: usize, max_depth: usize) -> Result<(), OpenError> {
+    let mut stack = vec![(dir.to_path_buf(), 0usize)];
+    let mut seen = 0usize;
+    while let Some((folder, depth)) = stack.pop() {
+        for (path, is_symlink, is_dir) in entries_of(&folder)? {
+            seen += 1;
+            if seen > max_entries || (is_dir && depth + 1 > max_depth) {
+                return Err(OpenError::GitDirTooLarge(dir.to_path_buf()));
+            }
+            if is_symlink {
+                return Err(OpenError::SymlinkInGitDir(path));
+            }
+            if is_dir {
+                stack.push((path, depth + 1));
+            }
+        }
     }
     Ok(())
 }
@@ -112,6 +160,9 @@ pub fn open(workspace: &Path) -> Result<GixHistory, OpenError> {
         .canonicalize()
         .map_err(|_| OpenError::NotARepository(workspace.to_path_buf()))?;
     let dot_git = root.join(".git");
+    if std::fs::symlink_metadata(&dot_git).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(OpenError::SymlinkInGitDir(dot_git));
+    }
     let gitdir = if dot_git.is_dir() {
         resolve(&dot_git)
     } else if dot_git.is_file() {
@@ -147,7 +198,12 @@ pub fn open(workspace: &Path) -> Result<GixHistory, OpenError> {
             path: objects,
         });
     }
-    check_alternates(&root, &objects, 0)?;
+    // links first (so the alternates resolver below never follows one), then the alternates
+    check_no_symlinks(&gitdir, MAX_GIT_DIR_ENTRIES, MAX_GIT_DIR_DEPTH)?;
+    if common != gitdir {
+        check_no_symlinks(&common, MAX_GIT_DIR_ENTRIES, MAX_GIT_DIR_DEPTH)?;
+    }
+    check_alternates(&root, &objects)?;
 
     let options = gix::open::Options::isolated()
         .open_path_as_is(true)
@@ -162,6 +218,25 @@ pub fn open(workspace: &Path) -> Result<GixHistory, OpenError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_symlink_walk_is_bounded_in_entries_and_depth() {
+        let scratch = paddock_testkit::Scratch::new();
+        let root = scratch.path("g");
+        std::fs::create_dir_all(root.join("a/b/c")).unwrap();
+        for i in 0..5 {
+            std::fs::write(root.join(format!("f{i}")), "x").unwrap();
+        }
+        assert!(check_no_symlinks(&root, 100, 10).is_ok());
+        let too_many = check_no_symlinks(&root, 4, 10);
+        assert!(matches!(too_many, Err(OpenError::GitDirTooLarge(_))));
+        let too_deep = check_no_symlinks(&root, 100, 2);
+        assert!(matches!(too_deep, Err(OpenError::GitDirTooLarge(_))));
+        assert!(matches!(
+            check_no_symlinks(&scratch.path("missing"), 100, 10),
+            Err(OpenError::Backend(_))
+        ));
+    }
 
     #[test]
     fn lexical_applies_dot_and_dotdot_and_resolve_survives_an_empty_path() {

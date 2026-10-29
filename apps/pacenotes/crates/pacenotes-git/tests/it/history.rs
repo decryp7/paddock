@@ -271,7 +271,11 @@ fn a_gitfile_commondir_objects_link_or_alternate_that_leads_out_is_refused() {
     // alternates: absolute outside, relative outside, and a chain that starts inside and ends outside
     for line in [
         format!("{}\n", repo.dir.join(".git/objects").display()),
-        "../../../../elsewhere/objects\n".to_owned(),
+        format!(
+            "{}{}\n",
+            "../".repeat(repo.dir.join(".git/objects").components().count() - 1),
+            repo.dir.join(".git/objects").to_string_lossy().trim_start_matches('/')
+        ),
     ] {
         let alt = Repo::new();
         alt.commit(1_000, "ann", &[("a.rs", "1")]);
@@ -293,12 +297,12 @@ fn a_gitfile_commondir_objects_link_or_alternate_that_leads_out_is_refused() {
 }
 
 #[test]
-fn alternates_nested_deeper_than_git_follows_are_refused() {
+fn many_alternates_are_refused() {
     let repo = Repo::new();
     repo.commit(1_000, "ann", &[("a.rs", "1")]);
-    // .git/objects -> hop1 -> hop2 -> ... -> hop7, all inside the workspace
+    // .git/objects -> hop1 -> hop2 -> ... -> hop10, all inside the workspace
     let mut previous = repo.dir.join(".git/objects");
-    for i in 1..=7 {
+    for i in 1..=10 {
         let hop = repo.dir.join(format!("hop{i}/objects"));
         std::fs::create_dir_all(hop.join("info")).unwrap();
         std::fs::create_dir_all(previous.join("info")).unwrap();
@@ -391,4 +395,186 @@ fn the_sources_never_start_a_process() {
             assert!(!text.contains(forbidden), "{} mentions {forbidden}", path.display());
         }
     }
+}
+
+// ---- the two ways out that the first review found, and the rest of the git folder ---------------------------------------
+
+fn alternates_file(repo: &Repo) -> PathBuf {
+    let dir = repo.dir.join(".git/objects/info");
+    std::fs::create_dir_all(&dir).unwrap();
+    dir.join("alternates")
+}
+
+#[test]
+fn a_quoted_alternates_line_is_judged_by_the_parser_that_reads_it() {
+    let secret = Repo::new();
+    secret.commit(1_000, "ann", &[("secret.txt", "outside content")]);
+    let out = secret.dir.join(".git/objects");
+    for (what, line) in [
+        ("quoted", format!("\"{}\"\n", out.display())),
+        // octal escapes hide the slash and the letters from a naive check
+        (
+            "quoted with escapes",
+            format!("\"\\057{}\"\n", out.to_string_lossy().trim_start_matches('/')),
+        ),
+        ("quoted with a tab escape", format!("\"{}\\t\"\n", out.display())),
+    ] {
+        let repo = Repo::new();
+        repo.commit(1_000, "ann", &[("a.rs", "1")]);
+        std::fs::write(alternates_file(&repo), &line).unwrap();
+        let result = open(&repo.dir);
+        assert!(
+            matches!(
+                result,
+                Err(OpenError::OutsideWorkspace { what: "alternates", .. }) | Err(OpenError::Backend(_))
+            ),
+            "{what}: {:?}",
+            result.map(|_| "opened")
+        );
+    }
+}
+
+#[test]
+fn a_quoted_alternates_line_that_stays_inside_is_allowed() {
+    let repo = Repo::new();
+    let a = repo.commit(1_000, "ann", &[("a.rs", "1")]);
+    std::fs::create_dir_all(repo.dir.join("spare/objects")).unwrap();
+    std::fs::write(
+        alternates_file(&repo),
+        format!("\"{}\"\n", repo.dir.join("spare/objects").display()),
+    )
+    .unwrap();
+    assert_eq!(open(&repo.dir).unwrap().read_at(&a, &p("a.rs"), 10, &live()).unwrap(), b"1");
+}
+
+#[cfg(unix)]
+fn symlinked(repo: &Repo, target: &Path, link: &str) -> Result<pacenotes_git::GixHistory, OpenError> {
+    let at = repo.dir.join(".git").join(link);
+    if at.is_dir() {
+        std::fs::remove_dir_all(&at).unwrap();
+    } else {
+        let _ = std::fs::remove_file(&at);
+    }
+    std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(target, &at).unwrap();
+    open(&repo.dir)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_anywhere_in_the_git_folder_is_refused() {
+    let other = Repo::new();
+    other.commit(1_000, "ann", &[("secret.txt", "outside content")]);
+    other.git(&["gc", "-q"], 0);
+    for (what, target, link) in [
+        ("objects/pack", other.dir.join(".git/objects/pack"), "objects/pack"),
+        ("packed-refs", other.dir.join(".git/packed-refs"), "packed-refs"),
+        ("refs/heads/x", other.dir.join(".git/refs/heads/main"), "refs/heads/x"),
+        ("HEAD", other.dir.join(".git/HEAD"), "HEAD"),
+        ("objects/ab", other.dir.join(".git/objects/info"), "objects/ab"),
+    ] {
+        let repo = Repo::new();
+        repo.commit(1_000, "ann", &[("a.rs", "1")]);
+        match symlinked(&repo, &target, link) {
+            Err(OpenError::SymlinkInGitDir(path)) => assert!(path.ends_with(link), "{what}: {path:?}"),
+            other => panic!("{what}: {:?}", other.map(|_| "opened")),
+        }
+    }
+    // .git itself a link to a repository elsewhere
+    let ws = Scratch::new();
+    std::os::unix::fs::symlink(other.dir.join(".git"), ws.path("ws-dot-git")).ok();
+    std::fs::create_dir_all(ws.path("ws")).unwrap();
+    std::os::unix::fs::symlink(other.dir.join(".git"), ws.path("ws/.git")).unwrap();
+    assert!(matches!(open(&ws.path("ws")), Err(OpenError::SymlinkInGitDir(_))));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_inside_the_common_dir_is_refused_too() {
+    let repo = Repo::new();
+    repo.commit(1_000, "ann", &[("a.rs", "1")]);
+    let elsewhere = repo.dir.join("common");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    for entry in std::fs::read_dir(repo.dir.join(".git")).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_name() != "HEAD" {
+            std::fs::rename(entry.path(), elsewhere.join(entry.file_name())).unwrap();
+        }
+    }
+    std::fs::write(repo.dir.join(".git/commondir"), "../common\n").unwrap();
+    std::os::unix::fs::symlink("/etc", elsewhere.join("refs/heads/escape")).unwrap();
+    assert!(matches!(open(&repo.dir), Err(OpenError::SymlinkInGitDir(_))));
+    std::fs::remove_file(elsewhere.join("refs/heads/escape")).unwrap();
+    assert!(
+        !matches!(open(&repo.dir), Err(OpenError::SymlinkInGitDir(_))),
+        "without the link the common dir passes the link check"
+    );
+}
+
+#[test]
+fn file_names_that_are_not_repo_paths_are_counted_not_dropped() {
+    let repo = Repo::new();
+    let a = repo.commit(1_000, "ann", &[("ok.rs", "1"), ("weird\\kept.txt", "1"), ("weird\\gone.txt", "1")]);
+    std::fs::remove_file(repo.dir.join("weird\\gone.txt")).unwrap();
+    let b = repo.commit(2_000, "ann", &[("weird\\name.txt", "x"), ("weird\\kept.txt", "2"), ("ok.rs", "2")]);
+    let history = open(&repo.dir).unwrap();
+    let set = history.changed_between(&a, &b, 10, &live()).unwrap();
+    assert_eq!(set.changes.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(), ["ok.rs"]);
+    assert_eq!(set.skipped_names, 3, "one added, one modified and one deleted");
+    let log = history.log(&b, 10, &live()).unwrap();
+    assert_eq!((log[0].files.len(), log[0].skipped_names, log[0].truncated), (1, 3, false));
+}
+
+#[test]
+fn a_huge_commit_is_cut_at_the_limit_by_the_walk_itself() {
+    let repo = Repo::new();
+    let a = repo.commit(1_000, "ann", &[("x", "1")]);
+    let many: Vec<(String, String)> = (0..300).map(|i| (format!("f{i:03}.txt"), i.to_string())).collect();
+    let files: Vec<(&str, &str)> = many.iter().map(|(n, c)| (n.as_str(), c.as_str())).collect();
+    let b = repo.commit(2_000, "ann", &files);
+    let history = open(&repo.dir).unwrap();
+    let set = history.changed_between(&a, &b, 5, &live()).unwrap();
+    assert!(set.truncated && set.changes.len() == 5, "{} changes", set.changes.len());
+    assert_eq!(set.changes[0].path.as_str(), "f000.txt");
+}
+
+#[test]
+fn the_trap_with_extra_ways_out_is_refused() {
+    let scratch = Scratch::new();
+    let trap = pacenotes_trap::generate(&scratch).unwrap();
+    let outside_objects = trap.outside_gitdir.parent().unwrap().join("objects");
+    // a quoted alternates line to the outside folder
+    std::fs::write(
+        trap.workspace.join(".git/objects/info/alternates"),
+        format!("\"{}\"\n", outside_objects.display()),
+    )
+    .unwrap();
+    let r = open(&trap.workspace);
+    assert!(
+        matches!(r, Err(OpenError::OutsideWorkspace { what: "alternates", .. })),
+        "{:?}",
+        r.map(|_| "opened")
+    );
+    std::fs::remove_file(trap.workspace.join(".git/objects/info/alternates")).unwrap();
+    #[cfg(unix)]
+    {
+        let pack = trap.workspace.join(".git/objects/pack");
+        std::fs::remove_dir_all(&pack).unwrap();
+        std::os::unix::fs::symlink(outside_objects.join("pack"), &pack).unwrap();
+        assert!(matches!(open(&trap.workspace), Err(OpenError::SymlinkInGitDir(_))));
+    }
+    assert!(!trap.marker.exists());
+}
+
+#[test]
+fn a_missing_alternate_inside_the_workspace_is_ignored_and_one_that_cannot_be_resolved_is_refused() {
+    let repo = Repo::new();
+    repo.commit(1_000, "ann", &[("a.rs", "1")]);
+    std::fs::write(alternates_file(&repo), format!("{}\n", repo.dir.join("no-such/objects").display())).unwrap();
+    assert!(open(&repo.dir).is_ok(), "git ignores an alternate that is not there");
+    std::fs::write(alternates_file(&repo), format!("{}x\n", "../".repeat(60))).unwrap();
+    assert!(
+        matches!(open(&repo.dir), Err(OpenError::Backend(_))),
+        "a path that climbs above the root cannot be judged, so it is refused"
+    );
 }

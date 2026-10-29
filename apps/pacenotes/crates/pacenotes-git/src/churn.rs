@@ -15,6 +15,10 @@ pub struct CommitChanges {
     pub author: String,
     /// The files the commit changed.
     pub files: Vec<RepoPath>,
+    /// Changed files whose names are not valid [`RepoPath`]s; counted, not listed.
+    pub skipped_names: u32,
+    /// True when the commit changed more files than `files` holds.
+    pub truncated: bool,
 }
 
 /// How often and how recently one file changed.
@@ -113,6 +117,8 @@ mod tests {
             time,
             author: author.into(),
             files: files.iter().map(|f| p(f)).collect(),
+            skipped_names: 0,
+            truncated: false,
         }
     }
 

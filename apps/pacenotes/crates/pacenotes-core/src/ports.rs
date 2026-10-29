@@ -75,6 +75,9 @@ pub struct ChangeSet {
     pub changes: Vec<FileChange>,
     /// True when more files changed than `changes` holds.
     pub truncated: bool,
+    /// How many changed files are not listed because their names are not valid [`RepoPath`]s (a backslash, a control
+    /// character): counted, never silently dropped.
+    pub skipped_names: u32,
 }
 
 /// Read-only access to the repository's history. The adapter (gix, in process) never runs the `git` binary on the analysed
