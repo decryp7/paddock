@@ -162,7 +162,12 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
    hooks or injected code. Pre-labelling before an app's first model comes from OCR, templates and the review queue
    only. **Allowed:** window bounds, titles and the window list from the OS to pick and follow the capture target, and
    the pointer position: that is capture plumbing, not UI understanding, and it never names, classifies or locates an
-   element. The cost and its mitigation are in Consequences.
+   element. **Adapter hints** (user, 2026-10-29): Sighter itself never calls UIA, AX, MSAA or AT-SPI, but a user's own
+   test-framework adapter (`Sighter.FlaUI`, `sighter-pywinauto`, the 7.13 helpers) may pass rectangles it already has
+   (an element's bounding rectangle, a window handle's bounds) as **optional hints**: they narrow where Sighter looks
+   and rank candidates, they **never replace detection** (a hint with no detected element inside it is "not found"),
+   and every result records them as **hint-sourced**. The cost and its mitigation are in Consequences.
+   **Secrets without accessibility**: see "Password fields and secrets, from pixels".
 10. **Main training path: video → auto-label → review → train** (user, 2026-10-29), detailed in "Training from
     test-run videos" below and in proposal section 6.1. Boxes always come from computer vision; Pitwall's VLM only
     names, describes and suggests a class for regions that already have boxes.
@@ -237,8 +242,9 @@ a number is a one-line change.
 | 5120 × 2880 at 100 % | 45 | ~8.1 s | ~12.4 s | ~1.3 s / ~1.4 s | no gate set | **over** |
 
 All verdicts are **projections, to be measured** (spike item 8). The gate is projected to pass on the GPU at both gate
-sizes and to be missed on the CPU at 4 threads; the CPU gate then depends on cores − 1 threads, the window scope or the
-Fast model. The target is missed by every whole frame and needs the measures below; none of them is measured yet.
+sizes and to be missed on the CPU at 4 threads (~2.2 s at 1920 × 1200). **Plan to close the CPU gate**, part of the spike
+gate, tried in this order: (1) cores − 1 intra-op threads instead of 4; (2) the window scope (a typical app window is
+4–6 tiles, not 8); (3) the Fast (Nano) model, if the user trains one. The spike records which of these is needed. The target is missed by every whole frame and needs the measures below; none of them is measured yet.
 (Proposal section 7's "detector < 50 ms on a GPU at 640 px" is a per-tile figure; measured: ~30 ms.)
 
 Nano at 640 is ~142 ms per tile on the CPU (about 20 % less), so it does not change the picture for whole frames.
@@ -249,7 +255,7 @@ What the design does to reach the target, or the gate on a slow CPU, in this ord
    window's tiles, not the screen's: a 1200 × 800 logical window is 2 × 2 = 4 tiles (~0.7 s CPU, ~0.12 s GPU, projected;
    inside the gate, still over the target on its own).
 2. **Changed tiles only**: tiles whose pixels did not change since the last frame reuse their cached detections.
-3. **Priority order**: the focused element's and the pointer's tiles run first; a unique hit above the class threshold
+3. **Priority order**: the focused window's and the pointer's tiles run first; a unique hit above the class threshold
    in the requested scope ends the locate early.
 4. **Batching** tiles in one run on a GPU EP (fixed input, no NMS: DETR batches well); on the CPU, cores − 1 threads.
 5. **A Fast (Nano) model**, if the user trained one for that app, on CPU-only runners, and **"Still working"** rather than a timeout for a full-screen pre-labelling job
@@ -266,13 +272,13 @@ logical 100 % scale (1920 × 1200: 8 tiles, ~1.4 s CPU p50, ~0.24 s CoreML, proj
 |---|---|---|---|
 | 1. Tile the whole frame | **1.0×** of compute (the tiles cover more pixels than the frame, from the overlap and the edge tiles: +42 % at 1920 × 1200, +67 % at 2560 × 1440, +38 % at 3840 × 2160, +25 % at 5120 × 2880 with 640 tiles); faster wall-clock only by running tiles in parallel on spare cores or batching them on a GPU (not measured) | Nothing, at the tile scale | none |
 | 2. Only segments that changed since the last frame | **≈ changed tiles / all tiles**: 0 for a static screen; 1–3 of 8 (0.13–0.38×, ~0.2–0.5 s CPU) for a typical click that opens a menu or changes a few controls (projection) | Nothing if the change detection is right; misses a change the OS does not report (some GPU-drawn or remote-session surfaces) unless a per-tile pixel hash is the fallback; cache must be cleared on model change, theme or DPI change | macOS: `SCStreamFrameInfo.dirtyRects` (ScreenCaptureKit, macOS 12.3+): "a union of the rectangles redrawn and moved". Windows: Desktop Duplication `IDXGIOutputDuplication::GetFrameDirtyRects` and `GetFrameMoveRects` (Windows 8+; process move rects before dirty rects); otherwise a per-tile hash of the new frame (cheap, not measured) |
-| 3. Active window, or the region around the pointer or focus, first | Window 1200 × 800: 4 tiles, **0.5×**; pointer region: 1 tile, **0.13×** (~0.18 s CPU, ~30 ms GPU) | Elements outside the window: menus and pop-ups that open outside it, toasts, other windows of a multi-window app | Window bounds and focus from the capture or window APIs (`SCWindow` frames; `GetWindowRect`/DWM extended frame bounds on Windows; verify in the spike); pointer position |
+| 3. Active window, or the region around the focused window and pointer, first | Window 1200 × 800: 4 tiles, **0.5×**; pointer region: 1 tile, **0.13×** (~0.18 s CPU, ~30 ms GPU) | Elements outside the window: menus and pop-ups that open outside it, toasts, other windows of a multi-window app | Window bounds and focus from the capture or window APIs (`SCWindow` frames; `GetWindowRect`/DWM extended frame bounds on Windows; verify in the spike); pointer position |
 | 4. Cheap first pass (OCR) picks segments, detector runs on those only | OCR pass + detector on k tiles; OCR is not cheap on a whole frame (proposal: 150–500 ms CPU for 1080p, unverified) | Icon-only and custom-drawn controls with no text, which is exactly where the detector is needed | OCR (`sighter-ocr`) |
 | 5. Segments in priority order, results streamed | **1.0×** total if it runs to the end; **first result after one tile** (~0.18 s CPU, ~30 ms GPU); less if it stops early | With early stop: a better or second match elsewhere, so a query that needs uniqueness must finish its scope | none (scheduling in `sighter-core`) |
 
 **Default pipeline:** normalise each display's frame to logical 100 % → limit to the query's scope (target window by
 default) → split into 640 tiles with 64 px overlap → reuse cached detections for tiles the OS reports unchanged (dirty
-rects, else a per-tile hash) → run the remaining tiles in priority order (focus and pointer first, then the rest of the
+rects, else a per-tile hash) → run the remaining tiles in priority order (focused window and pointer first, then the rest of the
 scope), batched on a GPU EP → stop early only when a unique match above the threshold is found and the query allows it →
 merge boxes across seams (pure function in `sighter-core`). OCR stays a resolver layer and a label source, not the gate
 for the detector. **For a viewer window** (remote desktop or VM console): the scope is the viewer's content
@@ -280,21 +286,36 @@ rectangle mapped to remote pixels, changed tiles come from Sighter's own per-til
 priority goes to the pointer region and the most recently changed tiles (the remote "focused window" is not known from
 the host) ("Remote desktops and VM consoles in a viewer window").
 
-### Coordinates
+### Coordinates: one chain and one grid
 
-- The detector returns boxes in **tile pixels**; `sighter-core` maps them, with pure functions, to **frame physical
-  pixels** (tile offset, then undo the logical-scale normalisation) and tags each box with its **display id**.
-- At the input edge each `InputDriver` converts to what its OS wants: on macOS, points in the global display space (the
-  display's origin plus pixels ÷ its scale factor, which ScreenCaptureKit reports per frame as
-  `SCStreamFrameInfo.scaleFactor`); on Windows, the sidecar and the input helper run **Per-Monitor V2 DPI aware**, so
-  they see each display's raw pixels and every display can have its own scale (Microsoft: unaware or system-aware
-  processes get virtualised, scaled coordinates; `GetDpiForMonitor`/`GetDpiForWindow` give the per-monitor DPI).
-- Multi-monitor setups with mixed DPI: each display is captured, normalised and mapped on its own; a box never spans two
-  displays; a window that spans two is split by display.
+Every target, a local window, a whole display or a viewer window of a remote desktop, uses **one coordinate chain** and
+**one tile grid**. Symbols: `c` = the content rectangle's origin in the capture; `s` = viewer scale (capture pixels per
+remote pixel; 1 for a local window or display); `r` = the target's scale factor (remote pixels per remote logical
+point; for a local target, the display's scale `h`); `h` = the host display's scale factor; `o` = the captured window's
+origin on the host.
+
+- **Forward (frames)**: capture (host physical pixels) → crop the content rectangle at `c` → resample by `1 / (s · r)`
+  → **remote logical points**. Tiling (640, 64 px overlap) and the change hashes use this **single grid**, so tiles do not
+  move when a window moves and the model always sees the logical 100 % scale it was trained at.
+- **Boxes**: tile coordinate + tile offset = remote logical; × `r` = remote pixels; × `s` + `c` = capture pixels. Each
+  box carries its target and, for whole-display captures, its display id; a box never spans two displays.
+- **Input**: capture pixels → on macOS ÷ `h` + `o` (window origin in global points) = the CGEvent point; on Windows,
+  with the sidecar and the input helper **Per-Monitor V2 DPI aware** (they see raw pixels and per-monitor DPI;
+  unaware or system-aware processes get virtualised coordinates; `GetDpiForMonitor`/`GetDpiForWindow`), capture pixels
+  + `o` (window origin in physical virtual-screen pixels) = the `SendInput` point. The window origin is read just
+  before acting.
+- **Capture size on macOS**: ScreenCaptureKit writes into the size set in `SCStreamConfiguration` (`width`: "The width
+  of the output") and scales the window into it ("always performs hardware scaling on the captured window so it never
+  exceeds the frame output", WWDC22 session 10155); `SCStreamFrameInfo.scaleFactor` gives the window's scale per frame.
+  Sighter sets the output size to the window size × `scaleFactor`, so a capture pixel is a host physical pixel; any
+  other output size is an extra factor folded into `s`.
+- All of it is pure functions in `sighter-core`, with time and geometry passed in.
 - **Test item** (`sighter-core`, pure, synthetic layouts): two and three displays with mixed scale (100 % 1920 × 1200
   left, 200 % 3840 × 2160 right, 150 % 2560 × 1440 above with a negative origin); a box on a tile seam; a box at each
-  display edge; round trip tile → physical → logical → physical within ±1 px; property tests over random layouts and
-  boxes. Plus one OS-level check per platform in the spike (a synthetic window at a known position on a 200 % display).
+  display edge; viewer cases with `r` = 1 and **`r` = 1.5 together with `s` < 1 (0.75 and 0.5) on a 200 % host**; round
+  trips tile → capture → tile and remote → host input → remote within ±1 pixel of the finer grid; property tests over
+  random layouts, scales and boxes. Plus one OS-level check per platform in the spike (a synthetic window at a known
+  position on a 200 % display).
 
 ## Remote desktops and VM consoles in a viewer window
 
@@ -323,7 +344,8 @@ protocols repaint in tiles and rectangles of their own, and lossy codecs refine 
 for viewer windows Sighter **ignores OS dirty rects** and uses its own **per-tile hash** on the viewer's content area:
 
 1. Crop the viewer chrome (title bar, toolbars, scroll bars) to the content rectangle (below).
-2. Lay the tile grid in **remote-desktop pixels**, so tiles do not shift when the viewer window moves.
+2. Lay the tile grid on the **remote logical grid** of "Coordinates: one chain and one grid", so tiles do not shift
+   when the viewer window moves.
 3. Hash a slightly quantised, downsampled copy of each tile (codec noise must not count as a change); a tile counts as
    changed when the hash differs, confirmed by a mean-absolute-difference threshold.
 4. A changed tile is re-run only after it is stable for N frames (proposal 7.6's "stable frames"), so progressive
@@ -337,10 +359,8 @@ Three scales stack up: the **remote session's** resolution and scale factor (for
 150 %), the **viewer's** own scaling (1:1, fit-to-window, smart sizing, a VM console's zoom), and the **host display's**
 scale factor (the viewer window's physical pixels on the host).
 
-- **Mapping a box** (pure functions in `sighter-core`): tile pixels → viewer-capture pixels (host physical) → minus the
-  content rectangle's origin → divided by the viewer scale `s = content width / remote width` (and the same for height)
-  → **remote-desktop pixels** → divided by the remote scale factor → remote logical points, which is what the model is
-  normalised to.
+- **Mapping** uses the one chain of "Coordinates: one chain and one grid", with `s = content width / remote width`
+  (and the same for height) and `r` = the remote session's scale factor.
 - **How Sighter learns the remote resolution and the viewer scale**, in this order: (1) Sighter's own embedded client
   knows both exactly; (2) the target setup records the remote resolution and scale (entered or confirmed by the user,
   and stored with the target as proposal 7.15 already requires: "fixed session resolution and scaling per target");
@@ -359,16 +379,16 @@ scale factor (the viewer window's physical pixels on the host).
 
 ### Input into the viewer
 
-If Sighter clicks or types, it acts on the viewer window, so the mapping runs backwards: remote-desktop pixels → × `s`
-→ plus the content origin → plus the viewer window's current position on the host → host input coordinates (points on
-macOS, Per-Monitor V2 physical pixels on Windows, as in "Coordinates"). The viewer is brought to the front before input,
+If Sighter clicks or types, it acts on the viewer window, so the mapping runs backwards along the same chain: remote
+logical × `r` × `s` + `c` = capture pixels, then the input step of "Coordinates" with the viewer window's current
+origin. The viewer is brought to the front before input,
 and Sighter re-checks the content rectangle just before acting. Where a viewer filters injected input, Sighter fails with
 a message and a next step (proposal 7.6).
 
-**Test item** (pure, synthetic): remote 1920 × 1200 at 100 % and 3840 × 2160 at 150 %, shown 1:1, fit-to-window at
-`s = 0.75` and `s = 0.5`, fullscreen, moved, on a 100 % and a 200 % host display, and spanning two host displays; a click
-on a known remote pixel must land within ±1 remote pixel after the round trip remote → host → remote, and a box must map
-host → remote → host within ±1 host pixel.
+**Test item** (pure, synthetic): remote 1920 × 1200 at `r` = 1 and 3840 × 2160 at `r` = 1.5, shown 1:1, fit-to-window
+at `s = 0.75` and `s = 0.5`, fullscreen, moved, on a 100 % and a 200 % host display, and spanning two host displays; a
+click on a known remote pixel must land within ±1 remote pixel after the round trip remote → host → remote, and a box
+must map host → remote → host within ±1 host pixel (part of the test item of "Coordinates").
 
 ### Viewer window changes
 
@@ -378,8 +398,8 @@ host → remote → host within ±1 host pixel.
 | Resized | Re-derive the content rectangle and `s`; if `s` changed, drop the tile cache and warn if `s < 1` |
 | Fullscreen (or back) | Chrome disappears or returns: re-derive the content rectangle and `s`; input coordinates follow the new geometry |
 | Spans several monitors | One window capture gives one image; the window has one DPI on Windows (the monitor it is mostly on) and the mapping uses the window's geometry, so monitor borders do not matter; mixed-DPI tests cover it |
-| Minimised or hidden | Some viewers stop rendering when minimised (proposal 7.15): Sighter pauses with "The remote desktop window is minimised; restore it to continue", never acts on a stale frame |
-| Covered by another window | Window capture still returns the viewer's pixels where the OS supports it (verify per OS); before input the viewer is brought to the front |
+| Minimised or hidden | macOS: "when the source window is minimized, the stream output is paused" (WWDC22 session 10155). Windows: "Minimized windows are enumerated but not captured" (Microsoft's Windows.Graphics.Capture WPF and Win32 samples). Some viewers also stop rendering (proposal 7.15). Sighter pauses with "The remote desktop window is minimised; restore it to continue" and never acts on a stale frame |
+| Covered by another window | macOS: "When the source window is occluded or partially occluded, the stream output always includes the window's full content", also off-screen (WWDC22 10155). Windows: not documented; spike item. Before input the viewer is brought to the front either way |
 
 ## Training from test-run videos
 
@@ -448,6 +468,28 @@ for the runtime. Shared pieces: `paddock-video` (decode, FFmpeg runtime, codec r
 auto-label and training jobs), `paddock-runtime` (the Python runtime), `paddock-pitwall` (naming requests). The
 near-duplicate and tile hashing is one implementation in `sighter-core` for both uses.
 
+## Password fields and secrets, from pixels
+
+Without accessibility (decision 9) there is no `IsPassword` flag, so the recorder's "pause around password fields"
+(AGENTS.md, proposal section 4) needs a pixels-only mechanism. Everything runs on each frame **in memory, before
+anything is written** (redaction before storage):
+
+1. **Masked-glyph check** (works before any model exists): inside text-box-like regions (a rectangle with a text
+   baseline, found by the OCR text detector), a run of three or more identical, evenly spaced dot or asterisk glyphs
+   (•, ●, ∗, *) marks a password field.
+2. **Detector class** `password_field` in every app's taxonomy, trained from reviewed frames like any other class.
+3. **Text inputs redacted by default until classified**: every region the detector or the OCR heuristic sees as a text
+   input is blurred in stored frames until it is classified as not a password field (by the detector with high
+   confidence or by the user in review).
+4. **User hotkey to pause** recording at once (and to resume), shown in the recorder's overlay.
+5. Typed key text is not stored by default (AGENTS.md), so keystrokes, the main leak, are covered independently.
+
+**Limits:** a field that shows plain text ("show password" toggles), custom masks (shapes other than dots), secrets
+in ordinary fields (API keys, one-time codes), a mask that briefly shows the last typed character, and very small or
+heavily compressed fields (remote sessions) can be missed; the redact-by-default rule and the hotkey cover part of that,
+not all. **Spike item**: recall of the masked-glyph check and of the `password_field` class on synthetic login screens,
+local and RDP-compressed, at 100 % and 200 %.
+
 ## Licence exceptions
 
 Sighter's code and every bundled or downloaded component are permissive (Sighter `deny.toml`), with exactly two named
@@ -456,7 +498,7 @@ exceptions, one shipped (conditional) and one downloaded on request:
 | File | Licence | Scope | Reason | Approved |
 |---|---|---|---|---|
 | `DirectML.dll` 1.15.4 (NuGet `Microsoft.AI.DirectML`, SHA-256-pinned) | Microsoft Software License Terms, Microsoft DirectX Machine Learning (DirectML): proprietary; distribution allowed only inside an application, for Windows and Xbox, not stand-alone; may collect data | Windows only, shipped next to `sighter-infer.exe`; never another file of that package, never another app. **Condition: the DirectML gate passes** (no outbound connection, and no ETW/TraceLogging provider or an inert one; decision 4, plan item P6); otherwise it is not shipped and Sighter uses the system `DirectML.dll` with a delay-loaded import (or a CPU-only build) or the CPU | DirectML is how the ONNX Runtime build reaches any DirectX 12 GPU (NVIDIA, AMD, Intel) on Windows; the build imports it | user, 2026-10-29 (conditional) |
-| NVIDIA CUDA runtime libraries (CUDA runtime, cuBLAS, cuDNN and the other NVIDIA libraries the pinned PyTorch CUDA wheels depend on) | NVIDIA CUDA EULA (v13.4) and the NVIDIA SDK licence with its cuDNN supplement (v. 2022-02-22): proprietary; runtime `.so`/`.dll` files distributable only "as incorporated in object code format into a software application" with "material additional functionality", "only accessed by your application" | **Training only**: the opt-in CUDA variant of the managed Python training runtime, **downloaded on request from the upstream hosts** (`download.pytorch.org` for the PyTorch CUDA wheels; `pypi.org` and `files.pythonhosted.org` for the `nvidia-*` wheels they depend on, Linux), **never mirrored on our Gitea** (a stand-alone copy of NVIDIA's files would fall outside EULA 1.1.1's grant); never in the installer, never used by inference; NVIDIA's terms shown before the download; those hosts are on the `Egress` allow-list for this download job only | PyTorch has no other accelerator for NVIDIA GPUs; without it NVIDIA laptops train on the CPU or a remote host | user, 2026-10-29 |
+| NVIDIA CUDA runtime libraries (CUDA runtime, cuBLAS, cuDNN and the other NVIDIA libraries the pinned PyTorch CUDA wheels depend on) | NVIDIA CUDA EULA (v13.4) and the NVIDIA SDK licence with its cuDNN supplement (v. 2022-02-22): proprietary; runtime `.so`/`.dll` files distributable only "as incorporated in object code format into a software application" with "material additional functionality", "only accessed by your application" | **Training only**: the opt-in CUDA variant of the managed Python training runtime, **downloaded on request from the upstream hosts** (`download.pytorch.org` and `download-r2.pytorch.org` for the PyTorch CUDA wheels (about **1.9 GB** for the Windows wheel, `torch-2.14.1+cu130` cp312 checked at 1,990,608,063 bytes; about **0.55 GB** for the Linux x86-64 wheel plus the `nvidia-*` wheels, cuDNN alone about 0.5 GB); `pypi.org` and `files.pythonhosted.org` for the `nvidia-*` wheels they depend on, Linux), **never mirrored on our Gitea** (a stand-alone copy of NVIDIA's files would fall outside EULA 1.1.1's grant); never in the installer, never used by inference; NVIDIA's terms shown before the download; those hosts are on the `Egress` allow-list for this download job only | PyTorch has no other accelerator for NVIDIA GPUs; without it NVIDIA laptops train on the CPU or a remote host | user, 2026-10-29 |
 
 cargo-deny checks crates, not shipped DLLs or downloaded runtimes, so the exceptions are written in
 `apps/sighter/deny.toml` as a commented "non-crate binaries" list with these reasons, and the third-party notices list
@@ -572,7 +614,8 @@ against that list comes with the notices tooling.
     consoles in a viewer window").
 15. Pixels only: **Sighter is 100 % computer vision** for local and remote targets; OS window bounds are allowed only
     to pick and follow the capture target; pre-labelling before the first model is OCR, templates and review
-    (decision 9).
+    (decision 9). Adapter hints: a user's own framework adapter may pass rectangles it already has as optional,
+    recorded hints that never replace detection; Sighter itself never calls UIA, AX, MSAA or AT-SPI.
 16. Training path: **video → auto-label → review → train**; boxes from OCR, templates and the app's own detector;
     Pitwall's VLM only names, describes and suggests classes, after a confirmation with the count; RF-DETR Small on the
     GPU; later videos pre-labelled by the app's model, the VLM only for new screens (decision 10).

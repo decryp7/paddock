@@ -46,6 +46,7 @@ allow = [
 # - NVIDIA CUDA runtime libraries (CUDA runtime, cuBLAS, cuDNN, and the others the pinned PyTorch CUDA wheels need):
 #   NVIDIA CUDA EULA and the NVIDIA SDK licence with its cuDNN supplement, proprietary. Scope: training only, the
 #   opt-in CUDA variant of the managed Python training runtime, downloaded on request from download.pytorch.org,
+#   download-r2.pytorch.org,
 #   pypi.org and files.pythonhosted.org (never mirrored); never in the installer, never used by inference.
 #   Reason: PyTorch has no other accelerator for NVIDIA GPUs.
 #   Approved: user, 2026-10-29 (docs/adr/0001-object-detector.md, "Licence exceptions").
