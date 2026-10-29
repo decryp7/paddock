@@ -2,9 +2,9 @@
 
 Sighter's benchmarks, budgets and recorded results. How to run a benchmark reproducibly and the results template are in
 the family guide, [docs/benchmarks.md](../../../docs/benchmarks.md). Record every run there quoted (newest first) here.
-Sighter has no code in the tree yet, so it has no benchmarks and no results.
+The pure core (`crates/sighter-core`) has two benchmark examples, `bench_core` and `bench_hud` (clock and statistics from `paddock-bench`, memory from `paddock-proc`); no model is benchmarked yet. Both refuse to run above a 1-minute load of 25 and take the environment variables named in their header (`SIGHTER_BENCH_LOAD` is required).
 
-## Budgets (proposed, no test)
+## Budgets (proposed; the constants are in `sighter_core::bench::budgets`, read by benchmarks only)
 
 From the [design review](review/2026-10-design-review.md) §1.7 (2026-10-24):
 
@@ -24,7 +24,7 @@ detector < 50 ms on a GPU at 640 px.
 
 ## Gaps
 
-Every budget above needs a benchmark when the code lands, on synthetic captures. The
+The locate, cold-load and memory budgets above need a model and synthetic captures; only the HUD budgets are measured so far (below). The
 [detector research](../../../docs/research/2026-10-sighter-detector.md) quotes only third-party figures. Nothing was
 measured on our data.
 
@@ -32,43 +32,42 @@ measured on our data.
 
 ### 2026-10-29, HUD overhead (trace bus, overlay items, sidecar text) (sighter/core-wave-0)
 
-- **Commit:** 2b7071b5f
+- **Commit:** 9e2804845
 - **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
-- **Load:** 1-minute load 22.31 at start
+- **Load:** 1-minute load 18.54 at start (above the family guide's quiet threshold of about 12, with other agents' builds running: indication only)
 - **Build:** release; no model, no UI rendering
 - **Corpus:** synthetic: fixed-seed boxes (50 per frame, 300 per step) and 12 trace events per step
-- **Command:** `cargo run --release -p sighter-core --example bench_hud`
-- **Runs:** frame: 50 warm-up and 400 timed runs, p95; step: 6 interleaved A/B pairs of 100 timed runs after 20 warm-up, p50
+- **Command:** `SIGHTER_BENCH_LOAD=<load> nice -n 10 cargo run --release -p sighter-core --example bench_hud`
+- **Runs:** frame: 50 warm-up and 400 timed runs, nearest-rank p95; step: 6 interleaved A/B pairs of 100 timed runs after 20 warm-up, median (paddock-bench `summarize`)
 - **Numbers:**
 
   | Measure | Value | Budget | Verdict |
   |---|---|---|---|
-  | HUD work per frame, 50 detections, 2 viewers | 28.04 us | HUD per frame p95 <= 2.00 ms | within |
-  | Step p50, trace off | 25.33 us | none (reference) | reference |
-  | Step p50, trace on | 25.58 us (+1.0 %) | change <= 5 % | within |
+  | HUD work per frame, 50 detections, 2 viewers, p95 | 27.29 us | HUD per frame <= 2.00 ms | within |
+  | Step median, trace off | 25.04 us | none | indication |
+  | Step median, trace on | 25.62 us (+2.3 %) | change <= 5 % | within |
 
-- **Memory measure:** not measured
-- **Notes:** Pure-core cost only: drawing, the video sidecar write and the UI are not measured. Indicative unless the load is below about 12.
+- **Memory measure:** physical footprint at the end of the run 4.2 MB (paddock-proc::process_memory)
+- **Notes:** Pure-core cost only: drawing, the video sidecar write and the UI are not measured. Indicative unless the load is below about 12. Wall time 59.54 ms.
 
 ### 2026-10-29, sighter-core geometry, NMS and tile planning (sighter/core-wave-0)
 
-- **Commit:** 2b7071b5f
+- **Commit:** 9e2804845
 - **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
-- **Load:** 1-minute load 22.31 at start (other agents' builds running; an indication only)
+- **Load:** 1-minute load 18.54 at start (above the family guide's quiet threshold of about 12, with other agents' builds running: indication only)
 - **Build:** release; no model, no allocator override
 - **Corpus:** synthetic: 500 boxes from a fixed-seed generator in the example; a 3840 x 2160 grid
-- **Command:** `cargo run --release -p sighter-core --example bench_core`
-- **Runs:** single series, 20 warm-up and 200 timed runs; median and p95 (sorted[floor(p x (n - 1))])
+- **Command:** `SIGHTER_BENCH_LOAD=<load> nice -n 10 cargo run --release -p sighter-core --example bench_core`
+- **Runs:** single series, 20 warm-up and 200 timed runs; median and nearest-rank p95 (paddock-bench `summarize`)
 - **Numbers:**
 
   | Measure | Value | Budget | Verdict |
   |---|---|---|---|
-  | NMS, 500 boxes | 65.29 us | locate target CPU p95 <= 600.00 ms | within |
-  | Tile grid, 3840 x 2160 | 125 ns | HUD frame p95 <= 2.00 ms | within |
-  | Chain map, 500 boxes | 334 ns | HUD frame p95 <= 2.00 ms | within |
+  | NMS, 500 boxes, median | 62.54 us | none | indication |
+  | NMS, 500 boxes, p95 | 69.75 us | none | indication |
+  | Tile grid, 3840 x 2160, median | 84 ns | none | indication |
+  | Chain map, 500 boxes, median | 292 ns | none | indication |
 
-- **Memory measure:** not measured
-- **Notes:** wall time 13.94 ms; indicative only unless the load is below about 12
+- **Memory measure:** physical footprint at the end of the run 3.9 MB (paddock-proc::process_memory)
+- **Notes:** wall time 23.58 ms; no budget applies to these rows; indicative unless the load is below about 12
 
-
-None.
