@@ -22,6 +22,20 @@ const proc = (b: MockBackend, name: string): ProcessSample => b.liveUpdate('proc
 const ref = (p: ProcessSample) => ({ pid: p.pid, started: readValue(p.started) });
 
 describe('mockOptionsFromUrl', () => {
+  it('reads jobsteps as a whole number from 1 to 100 and ignores anything else', () => {
+    expect(mockOptionsFromUrl('?jobsteps=6').jobSteps).toBe(6);
+    for (const bad of ['0', '101', '2.5', 'many', '']) expect(mockOptionsFromUrl(`?jobsteps=${bad}`)).not.toHaveProperty('jobSteps');
+    expect(mockOptionsFromUrl('')).not.toHaveProperty('jobSteps');
+  });
+
+  it('a mock made with jobSteps keeps its jobs running past the first step', async () => {
+    const b = new MockBackend({ latencyMs: 0, jobSteps: 3 });
+    expect(b.jobSteps).toBe(3);
+    const id = await b.startJob({ rescanIssues: { query: { days: 14 } } });
+    expect(b.jobStatuses().find((j) => j.id === id)).toMatchObject({ state: 'running' });
+    expect(new MockBackend({ latencyMs: 0 }).jobSteps).toBe(1);
+  });
+
   it('defaults to a macOS laptop with latency', () => {
     expect(mockOptionsFromUrl('')).toEqual({ machine: 'laptop', os: 'macos', latencyMs: 150, fail: new Set() });
   });

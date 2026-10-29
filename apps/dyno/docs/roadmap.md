@@ -27,7 +27,7 @@ Status words are honest: **built** (code and tests committed), **in progress** (
 | WP-02 | CPU taming screen and profiles | dropped ([ADR 0021](adr/0021-monitoring-only.md)) |
 | WP-03 | Health score and startup items (view only) | built: Health page with reasons and the startup list; fix buttons and startup changes are dropped (ADR 0021) |
 | WP-05 | Tuning catalogue | dropped ([ADR 0021](adr/0021-monitoring-only.md)) |
-| WP-04 | Cleanup with quarantine and undo | dropped ([ADR 0021](adr/0021-monitoring-only.md)); the disk map (`DiskUsage`) stays: engine built, screen planned for 1.0 |
+| WP-04 | Cleanup with quarantine and undo | dropped ([ADR 0021](adr/0021-monitoring-only.md)); the disk map (`DiskUsage`) stays: engine and screen built (the Disk map page) |
 | WP-06 | Issues with statistics | built: macOS crash reports and unified log, Windows Event Log (`wevtutil`), Linux journal and `coredumpctl`; stored in SQLite; stability score, leaderboards, trend, JSON-lines export for Debrief; crashes chart, health reason and weekly report filled (G4); crash-loop alert and serious-issue alarms. Linux and Windows readers are verified by fixtures only (see Status) |
 | WP-07 | New and unusual processes | built: baseline with silent learning, scoring (first seen, location, system-name lookalikes, signature, many children or connections, new startup entry), "New and unusual" view with hide and restore (protect is dropped, ADR 0021). Windows signatures wait for G8 |
 | WP-08 | Alerts and the weekly report | built: weekly report from stored data (health trend, apps, disk forecast, issues, changes), Reports page with week selector, Markdown/HTML export; Why slow page (G10). Planned: alert history on the page, weekly OS notification (superseded in part by WP-26) |
@@ -136,7 +136,7 @@ Dropped ([ADR 0021](adr/0021-monitoring-only.md)); see [Dropped](#dropped).
 
 ## WP-04 Cleanup with quarantine and undo
 
-Dropped ([ADR 0021](adr/0021-monitoring-only.md)); see [Dropped](#dropped). The disk-space map (`DiskUsage`: bounded in depth, entries and time) stays, with its screen planned for 1.0.
+Dropped ([ADR 0021](adr/0021-monitoring-only.md)); see [Dropped](#dropped). The disk-space map (`DiskUsage`: bounded in depth, entries and time) stays, with its screen, the Disk map page, built.
 
 ## WP-05 Tuning catalogue
 
@@ -456,37 +456,40 @@ Not part of 1.0.0; anything new that only watches goes here. Anything that would
 
 ## Screenshot checklist
 
-The UI agent produces `docs/screenshots/<screen>-<dark|light>.png` (`npm run screenshots` in `app/`, against the mock). Each
-feature needs its images; a row is done when both exist and show the built screen, not a placeholder.
+`npm run screenshots` in `app/` writes `docs/screenshots/<screen>-<dark|light>.png` against the mock backend: pages from
+`e2e/screenshots.spec.ts`, the dialogs (Settings, the web and hash searches) as their own windows from
+`e2e/screenshots-docs-dialogs.spec.ts`. A row is done when both themes exist and show the built screen.
 
 | Feature | Screenshot | State |
 | --- | --- | --- |
-| Dashboard (live tiles, diagnosis, health) | `dashboard-dark.png`, `dashboard-light.png`, `dashboard-full-*.png` | built |
-| Processes (grouped tree, details) | `processes-*.png` | built |
-| Settings | `settings-*.png` | built |
-| Tray dropdown | `tray-*.png` | built |
-| Why slow | `why-slow-*.png` | real screen built; capture pending |
-| Health | `health-*.png` | built |
-| Reports and alerts | `reports-*.png` | real screen built; capture pending |
-| Issues with statistics | `issues-*.png` | built |
-| Unusual processes | `unusual-*.png` | built |
-| Web and hash search | `web-search-*.png`, `hash-search-*.png` | built |
-| Startup filter | `health-startup-filter-*.png` | built |
-| Benchmarks | `benchmarks-*.png`, `benchmarks-running-*.png`, `benchmarks-compare-*.png` | built |
-| Network | `network-*.png`, `network-connections-*.png` | built |
-| Performance counters | `counters-*.png`, `counters-search-*.png` | built |
-| Backup health | `backup-*.png` | built |
-| Per-core CPU tile (total and per-core toggle, P/E grouping) | `cpu-per-core-*.png` | in progress (WP-19) |
-| CPU detail with per-core heatmap | `cpu-detail-*.png` | in progress (WP-19) |
-| Tray popover on a desktop backdrop | `tray-popover-*.png` | in progress (WP-22) |
-| Widget gallery | `widget-gallery-*.png` | in progress (WP-21) |
-| Dashboard edit mode | `dashboard-edit-*.png` | in progress (WP-21) |
-| Presets | `presets-*.png` | in progress (WP-21) |
-| Customised menu bar (several tray items) | `menu-bar-*.png` | in progress (WP-21) |
-| Memory slot drawings, including Apple Silicon unified memory | `memory-slots-*.png`, `memory-slots-apple-silicon-*.png` | in progress (WP-20) |
-| Alarms: Active | `alarms-active-*.png` | planned (WP-26) |
-| Alarms: History | `alarms-history-*.png` | planned (WP-26) |
-| Alarms: Statistics | `alarms-statistics-*.png` | planned (WP-26) |
-| Diagnostics bundle preview | `diagnostics-bundle-*.png` | planned (WP-29) |
-| Throttling and forecasts | `throttling-*.png`, `throttling-hot-*.png`, `forecasts-*.png`, `baselines-*.png` | built (WP-23, WP-24, WP-25) |
-| Extras: What changed, Sleep, Boot, Apps, GPU, Files, Inventory, Maintenance | `extras-<tab>-*.png` | built (WP-13) |
+| Dashboard (live tiles, diagnosis, health) | `dashboard-*.png`, `dashboard-full-*.png` | captured |
+| Processes (grouped tree, details) | `processes-*.png` | captured |
+| Settings (the Settings window) | `settings-*.png`, `settings-menu-bar-*.png` | captured |
+| Tray popover on a desktop backdrop | `tray-*.png` | captured |
+| Why slow | `why-slow-*.png` | captured |
+| Health and the startup filter | `health-*.png`, `health-startup-filter-*.png` | captured |
+| Reports | `reports-*.png` | captured |
+| Issues with statistics | `issues-*.png` | captured |
+| Unusual processes | `unusual-*.png` | captured |
+| Web and hash search (browser hand-offs) | `web-search-*.png`, `hash-search-*.png` | captured |
+| Benchmarks | `benchmarks-*.png`, `benchmarks-running-*.png`, `benchmarks-compare-*.png` | captured |
+| Network | `network-*.png`, `network-connections-*.png` | captured |
+| Performance counters | `counters-*.png`, `counters-search-*.png` | captured |
+| Backup health | `backup-*.png` | captured |
+| Per-core CPU tile (total and per-core toggle, P/E grouping) | `cpu-per-core-tile-*.png` | captured (WP-19) |
+| CPU detail with per-core heatmap | `cpu-detail-*.png` | captured (WP-19) |
+| Widget gallery and dashboard edit mode | `widgets-edit-*.png` | captured (WP-21) |
+| Presets | `widgets-developer-*.png`, `widgets-battery-*.png`, `widgets-gaming-*.png`, `widgets-overview-*.png` | captured (WP-21) |
+| Customised menu bar (several tray items) | `settings-menu-bar-*.png` | captured (WP-21) |
+| Memory slot drawings, including Apple Silicon unified memory | `inventory-*.png`, `inventory-apple-*.png`, `inventory-ddr5-*.png`, `inventory-generic-*.png`, `inventory-laptop-*.png`, `inventory-soldered-*.png` | captured (WP-20) |
+| Alarms: Active | `alarms-*.png` | captured (WP-26) |
+| Alarms: History | `alarms-history-*.png` | captured (WP-26) |
+| Alarms: Rules, with the built-in alert statistics | `alarms-rules-*.png` | captured (WP-26) |
+| Diagnostics bundle preview | `diagnostics-*.png` | captured (WP-29) |
+| Throttling and forecasts | `throttling-*.png`, `throttling-hot-*.png`, `forecasts-*.png`, `baselines-*.png` | captured (WP-23, WP-24, WP-25) |
+| Extras: What changed, Sleep, Boot, Apps, GPU, Files, Inventory, Maintenance | `extras-<tab>-*.png` | captured (WP-13) |
+| Flight recorder | `recorder-*.png` | captured |
+| Disk map (chart and table) | `disk-map-*.png`, `disk-map-table-*.png` | captured |
+| Command palette | `command-palette-*.png` | captured |
+| Jobs (a running job with its phase and Cancel) | `jobs-*.png` | captured |
+| Cleanup, CPU taming rules, tuning, watched folders | none | not in 1.0 (dropped, [ADR 0021](adr/0021-monitoring-only.md)) |

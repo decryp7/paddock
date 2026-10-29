@@ -13,14 +13,6 @@ async function choose(page: Page, label: string, option: string | RegExp): Promi
   await page.getByRole('option', { name: option, exact: typeof option === 'string' }).click();
 }
 
-/** Opens the shell's Settings window (Mod+, on the mock's macOS) and shows Dyno's page of it. */
-async function openSettings(page: Page): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+Comma');
-  const dialog = page.getByRole('dialog');
-  await expect(dialog).toBeVisible();
-  await dialog.getByText('Dyno', { exact: true }).click();
-}
-
 const OUT = process.env['SCREENSHOT_DIR'] ?? join(process.cwd(), '..', 'docs', 'screenshots');
 const FROZEN = Date.UTC(2026, 9, 22, 14, 30, 0);
 
@@ -194,28 +186,6 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
     },
   },
   {
-    name: 'settings-menu-bar',
-    path: '/#/',
-    size: { width: 1440, height: 1900 },
-    ready: async (page) => {
-      await openSettings(page);
-      const section = page.getByRole('region', { name: 'Menu bar items' });
-      await section.getByRole('button', { name: 'Add item' }).click();
-      await expect(section.getByRole('listitem')).toHaveCount(3);
-      await section.getByRole('button', { name: 'Add item' }).click();
-      await expect(section.getByRole('listitem')).toHaveCount(4);
-      await choose(page, 'Style of item 1', 'Graph and number');
-      await choose(page, 'Metric of item 2', 'Memory');
-      await choose(page, 'Style of item 2', 'Ring');
-      await choose(page, 'Metric of item 3', 'Network down');
-      await choose(page, 'Style of item 3', 'Line graph');
-      await choose(page, 'Metric of item 4', 'Temperature');
-      await choose(page, 'Style of item 4', 'Number');
-      await section.scrollIntoViewIfNeeded();
-      await page.clock.runFor(2_000);
-    },
-  },
-  {
     name: 'health',
     path: '/#/health',
     size: { width: 1440, height: 1500 },
@@ -273,7 +243,6 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
     path: '/#/extras?tab=maintenance',
     ready: async (page) => void (await expect(page.getByRole('region', { name: 'Maintenance windows' })).toContainText('Mon to Fri')),
   },
-  { name: 'settings', path: '/#/', size: { width: 1440, height: 1500 }, ready: async (page) => openSettings(page) },
   { name: 'alarms', path: '/#/alarms', ready: async (page) => void (await expect(page.getByRole('button', { name: /Acknowledge all/ })).toBeVisible()) },
   {
     name: 'alarms-rules',
@@ -287,28 +256,19 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     },
   },
+  {
+    name: 'alarms-history',
+    path: '/#/alarms',
+    ready: async (page) => {
+      await page.getByRole('tab', { name: 'History' }).click();
+      await expect(page.getByRole('tab', { name: 'History', selected: true })).toBeVisible();
+      await page.mouse.move(2, 2);
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.clock.runFor(1_000);
+    },
+  },
   { name: 'recorder', path: '/#/recorder', size: { width: 1440, height: 1100 }, ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Flight recorder' })).toBeVisible()) },
   { name: 'diagnostics', path: '/#/diagnostics', ready: async (page) => void (await expect(page.getByRole('button', { name: /Save bundle/ })).toBeVisible()) },
-  {
-    name: 'web-search',
-    path: '/#/issues',
-    ready: async (page) => {
-      await page.getByRole('treegrid', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click({ button: 'right' });
-      await page.getByRole('menuitem', { name: 'Search the web…' }).click();
-      await expect(page.getByRole('dialog', { name: 'Search the web' }).getByText(/Removed from the text/)).toBeVisible();
-    },
-  },
-  {
-    name: 'hash-search',
-    path: '/#/processes',
-    ready: async (page) => {
-      await page.getByRole('radio', { name: 'All', exact: true }).click();
-      await page.getByLabel('Filter processes').fill('rustc');
-      await page.locator('[role=row][data-key^="p"]').first().click({ button: 'right' });
-      await page.getByRole('menuitem', { name: 'Search file hash on VirusTotal…' }).click();
-      await expect(page.getByRole('dialog', { name: /VirusTotal/ }).getByLabel('SHA-256 hash')).toBeVisible();
-    },
-  },
   {
     name: 'health-startup-filter',
     path: '/#/health',
@@ -411,15 +371,17 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
   },
   {
     name: 'jobs',
-    path: '/#/issues',
-    latency: 4_000,
+    path: '/#/backup',
+    latency: 150,
+    query: '&jobsteps=40',
     ready: async (page) => {
-      await page.getByRole('button', { name: 'Read the system logs now' }).click();
-      await page.clock.runFor(1_500);
+      // The Jobs list is opened first: a click made while a job runs waits for it to end, so the check is started with an event.
       await page.getByRole('button', { name: /^Jobs/ }).click();
-      await expect(page.getByRole('region', { name: 'Jobs' }).getByRole('listitem').first()).toBeVisible();
+      await page.getByRole('button', { name: 'Check now' }).dispatchEvent('click');
+      await page.clock.runFor(1_300);
+      const jobs = page.getByRole('region', { name: 'Jobs' });
+      await expect(jobs.getByRole('button', { name: /Cancel/ })).toBeVisible();
       await page.mouse.move(2, 2);
-      await page.clock.runFor(200);
     },
   },
   {

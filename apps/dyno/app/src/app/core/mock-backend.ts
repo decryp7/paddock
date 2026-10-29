@@ -133,16 +133,19 @@ export interface MockOptions {
   backup?: MockBackupVariant;
   /** Where the mock pushes the status of the jobs it runs (the shell's in-memory jobs backend); jobs run without one too. */
   jobs?: MockJobSink;
+  /** How many steps each job the mock starts takes before it ends (default 1: it ends at once; `?jobsteps=6` keeps it running for screenshots). */
+  jobSteps?: number;
 }
 
 /**
  * Reads the mock options from the page's query string: `?mock=` takes `windows`, `macos`, `linux` and/or `desktop`
- * (comma separated, e.g. `mock=linux,desktop`), `fail=health,whySlow` makes requests fail, `latency=0` removes the delay.
+ * (comma separated, e.g. `mock=linux,desktop`), `fail=health,whySlow` makes requests fail, `latency=0` removes the delay, `jobsteps=6` makes every job take that many steps.
  */
 export function mockOptionsFromUrl(search: string): MockOptions {
   const q = new URLSearchParams(search);
   const fail = q.get('fail');
   const latency = q.get('latency');
+  const jobSteps = q.get('jobsteps');
   const tokens = (q.get('mock') ?? '').split(',').map((t) => t.trim().toLowerCase());
   const os = (['windows', 'macos', 'linux'] as const).find((o) => tokens.includes(o));
   const cpu = tokens.includes('hybrid') ? 'hybrid' : tokens.includes('uniform') ? 'uniform' : undefined;
@@ -153,6 +156,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     latencyMs: latency !== null && Number.isFinite(Number(latency)) ? Number(latency) : 150,
     fail: new Set(fail ? fail.split(',') : []),
     ...(q.get('backup') === 'none' ? { backup: 'none' as const } : {}),
+    ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
   };
 }
 
@@ -227,6 +231,7 @@ export class MockBackend implements DynoBackend {
     this.settingsValue = { ...this.settingsValue, counters: demoCounterSettings(this.profile.os) };
     this.latencyMs = options.latencyMs ?? 0;
     this.jobSink = options.jobs;
+    this.jobSteps = options.jobSteps ?? 1;
     this.jobStepMs = this.latencyMs === 0 ? 0 : 400;
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
