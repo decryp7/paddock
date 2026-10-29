@@ -63,7 +63,7 @@ fn archive() -> Vec<u8> {
 
 fn download() -> Vec<u8> {
     let url = format!("https://codeload.github.com/sbousseaden/EVTX-ATTACK-SAMPLES/zip/{COMMIT}");
-    // The OS trust store (as `cargo xtask libduckdb`), so TLS-inspecting proxies work.
+    // The OS trust store (as `./dev fetch` does), so TLS-inspecting proxies work.
     let tls = ureq::tls::TlsConfig::builder()
         .root_certs(ureq::tls::RootCerts::PlatformVerifier)
         .build();

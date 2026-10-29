@@ -1,5 +1,5 @@
 //! Makes `cargo test` / `cargo run` find the prebuilt libduckdb at run time, with no `PATH` or `LD_LIBRARY_PATH`
-//! set by hand (e.g. after `cargo xtask libduckdb`).
+//! set by hand (e.g. after `./dev fetch libduckdb`).
 //!
 //! Cargo puts the linker search paths of build scripts on the library path of what it runs, but only those inside
 //! `target/<profile>/`; `DUCKDB_LIB_DIR` (a cache folder) is not. So the build script links (or copies) the
