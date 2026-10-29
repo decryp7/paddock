@@ -646,6 +646,31 @@ test('stable-workspace: ignored files of an earlier job (an embedded dist/, bina
   assert.ok(!existsSync(join(f.stable, 'dist')), 'generate_context! must never embed an earlier job\'s dist/');
 });
 
+test('stable-workspace: the checkout never keeps an alternate into the kept clones, even when the fetch is killed', () => {
+  const f = keptCloneFixture();
+  f.checkout();
+  assert.equal(f.run().status, 0);
+  f.checkout();
+  // A stale line from an earlier, killed run (under the kept folders' root) and an unrelated one the step must keep.
+  const alt = join(f.ws, '.git', 'objects', 'info', 'alternates');
+  const other = join(f.root, 'other.git');
+  f.git(f.root, 'init', '-q', '--bare', other);
+  const stale = join(f.root, 'home', '.paddock-ci', 'src', 'gone', '.git', 'objects');
+  writeFileSync(alt, `${stale}\n${join(other, 'objects')}\n`);
+  assert.equal(f.run().status, 0);
+  assert.equal(readFileSync(alt, 'utf8'), `${join(other, 'objects')}\n`, 'the stale line is gone, the unrelated one stays');
+  // Every fetch into the clone is killed (TERM to the shell running it), on both attempts: the trap still takes the
+  // borrowed alternate back out.
+  writeFileSync(alt, '');
+  f.checkout();
+  const realGit = spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } }).stdout.trim();
+  writeFileSync(join(f.bin, 'git'), `#!/bin/sh\ncase " $* " in *" fetch "*) kill -TERM $PPID; sleep 1; exit 1 ;; esac\nexec ${realGit} "$@"\n`, { mode: 0o755 });
+  const killed = f.run();
+  assert.equal(killed.status, 0, killed.stderr + killed.stdout);
+  const left = existsSync(join(f.ws, '.git', 'objects', 'info', 'alternates')) ? readFileSync(join(f.ws, '.git', 'objects', 'info', 'alternates'), 'utf8') : '';
+  assert.doesNotMatch(left, /\.paddock-ci/, 'no alternate into the kept clones is left behind');
+});
+
 test('stable-workspace: a lock left in the kept clone by a killed job does not break it for good: a fresh clone is made', () => {
   const f = keptCloneFixture();
   f.checkout();

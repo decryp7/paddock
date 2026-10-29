@@ -48,25 +48,38 @@ runs:
           # ones too (an earlier job's dist/ that generate_context! would embed, binaries/, gen/; the build folder is elsewhere).
           update() {
             local sha alt objs had
-            sha=$(git -C "$ws" rev-parse HEAD) || return 1
-            if [ ! -d "$stable/.git" ]; then
-              rm -rf "$stable" && git clone -q --no-checkout --no-tags "$ws" "$stable" || return 1
-              # No automatic gc inside a job (it would rewrite ~360 MB at a random moment, in the background): bounded below.
-              git -C "$stable" config gc.auto 0 && git -C "$stable" config maintenance.auto false || return 1
-            fi
             # The checkout is one commit deep and shares no commit with the clone, so a plain fetch resends the whole tree
             # (366.8 -> 713.8 MiB per job, review of 2026-10-29). For this fetch the checkout borrows the clone's objects
             # (an alternate) and the clone names its last commit (refs/paddock/kept): only what the new commit adds is sent.
             alt="$ws/.git/objects/info/alternates"
             objs="$stable/.git/objects"
-            if command -v cygpath >/dev/null; then objs=$(cygpath -m "$objs"); fi
+            local rootm="$root"
+            if command -v cygpath >/dev/null; then objs=$(cygpath -m "$objs"); rootm=$(cygpath -m "$root"); fi
+            # A line into the kept clones left by a run that was killed mid-fetch goes first; any other line stays.
+            if [ -f "$alt" ]; then
+              local line
+              while IFS= read -r line || [ -n "$line" ]; do
+                case "$line" in "$root"/* | "$rootm"/*) ;; *) printf '%s\n' "$line" ;; esac
+              done < "$alt" > "$alt.clean" && cat "$alt.clean" > "$alt" && rm -f "$alt.clean" || return 1
+            fi
+            if [ ! -d "$stable/.git" ]; then
+              rm -rf "$stable" && git clone -q --no-checkout --no-tags "$ws" "$stable" || return 1
+              # No automatic gc inside a job (it would rewrite ~360 MB at a random moment, in the background): bounded below.
+              git -C "$stable" config gc.auto 0 && git -C "$stable" config maintenance.auto false || return 1
+            fi
+            sha=$(git -C "$ws" rev-parse HEAD) || return 1
             had=false
             if [ -f "$alt" ]; then had=true; cp "$alt" "$alt.paddock"; fi
-            mkdir -p "$(dirname "$alt")" && printf '%s\n' "$objs" >> "$alt" || return 1
+            restore() { if [ "$had" = true ]; then if [ -f "$alt.paddock" ]; then cat "$alt.paddock" > "$alt" && rm -f "$alt.paddock"; fi; else rm -f "$alt"; fi; }
+            # The borrowed alternate is taken back out however the fetch ends, a cancelled job included.
+            trap 'restore; trap - EXIT INT TERM; exit 1' INT TERM
+            trap restore EXIT
+            mkdir -p "$(dirname "$alt")" && printf '%s\n' "$objs" >> "$alt" || { restore; trap - EXIT INT TERM; return 1; }
             # --update-shallow lets the clone take a commit whose parents it does not have.
             local st=0
             git -C "$stable" fetch -q --no-tags --update-shallow "$ws" HEAD || st=$?
-            if [ "$had" = true ]; then mv "$alt.paddock" "$alt"; else rm -f "$alt"; fi
+            restore
+            trap - EXIT INT TERM
             [ "$st" = 0 ] &&
               [ "$(git -C "$stable" rev-parse FETCH_HEAD)" = "$sha" ] &&
               git -C "$stable" checkout -q -f --detach "$sha" &&
