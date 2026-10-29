@@ -81,18 +81,66 @@ fn refresh_local_time(clock: &spotter_engine::clock::SystemClock) {
     clock.set_local_zone_name(iana_time_zone::get_timezone().ok());
 }
 
+/// What [`init`] takes from the machine: the installed app's folders, toasts and log; a test's keep to its folder, show
+/// no toast and write nothing to the user's log (rule 7).
+#[derive(Debug, Clone)]
+pub struct Seams {
+    /// The data folder; `None`: `SPOTTER_DATA_DIR` or the app's data folder.
+    pub data_dir: Option<std::path::PathBuf>,
+    /// Whether toasts go to the OS (its notification plugin).
+    pub os_toasts: bool,
+    /// Where the start-up notes go (Spotter's log when installed).
+    pub note: fn(&str),
+}
+
+impl Seams {
+    /// The installed app's.
+    pub fn installed() -> Seams {
+        Seams {
+            data_dir: None,
+            os_toasts: true,
+            note: applog::write,
+        }
+    }
+
+    /// A test's: data in `dir`, no OS toasts, notes to the `log` facade only.
+    pub fn test(dir: &std::path::Path) -> Seams {
+        Seams {
+            data_dir: Some(dir.join("data")),
+            os_toasts: false,
+            note: |m| log::info!("{m}"),
+        }
+    }
+}
+
+/// Toasts that show nothing (a test).
+struct NoToast;
+
+impl OsToast for NoToast {
+    fn show(&self, _: &str, _: &str) {}
+}
+
 /// Opens the engine and starts its background work; returns the shared state.
-pub fn init<R: Runtime>(app: &AppHandle<R>, hub: &Hub<R>) -> Result<Shared, String> {
-    let default_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("The data folder is not known: {e}"))?;
-    let data_dir = resolve_data_dir(std::env::var(DATA_DIR_ENV).ok().as_deref(), default_dir);
-    let default_downloads = app
-        .path()
-        .download_dir()
-        .map(|d| d.join("Spotter"))
-        .unwrap_or_else(|_| data_dir.join("downloads"));
+pub fn init<R: Runtime>(app: &AppHandle<R>, hub: &Hub<R>, seams: &Seams) -> Result<Shared, String> {
+    let data_dir = match &seams.data_dir {
+        Some(dir) => dir.clone(),
+        None => {
+            let default_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("The data folder is not known: {e}"))?;
+            resolve_data_dir(std::env::var(DATA_DIR_ENV).ok().as_deref(), default_dir)
+        }
+    };
+    // A test's downloads stay in its folder; the installed app's go to the user's Downloads.
+    let default_downloads = match &seams.data_dir {
+        Some(_) => data_dir.join("downloads"),
+        None => app
+            .path()
+            .download_dir()
+            .map(|d| d.join("Spotter"))
+            .unwrap_or_else(|_| data_dir.join("downloads")),
+    };
     let version = app.package_info().version.to_string();
     // The metadata client takes the proxy decision the shell's downloader was built with.
     let http = match app.try_state::<crate::ProxyChoice>() {
@@ -104,13 +152,19 @@ pub fn init<R: Runtime>(app: &AppHandle<R>, hub: &Hub<R>) -> Result<Shared, Stri
     let registry = crate::jobs::registry(app).ok_or("The shell's jobs are not set up.")?;
     let downloads = crate::jobs::Downloads::new(registry, downloader.clone(), http.clone());
     let notifier = ShellNotifier::new(
-        Arc::new(TauriToast(app.clone())),
+        if seams.os_toasts {
+            Arc::new(TauriToast(app.clone())) as Arc<dyn OsToast>
+        } else {
+            Arc::new(NoToast)
+        },
         opener(app),
         downloads.clone(),
         default_downloads.clone(),
     );
     // Before the first toast: the plugin shows buttons only for toasts that are shown after a handler exists.
-    toast::register(app);
+    if seams.os_toasts {
+        toast::register(app);
+    }
     let clock = Arc::new(spotter_engine::clock::SystemClock::new());
     refresh_local_time(&clock);
     let mut services = Services::new(Arc::new(credentials::KeyringSecrets));
@@ -120,7 +174,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>, hub: &Hub<R>) -> Result<Shared, Stri
     let engine = Engine::open(EngineConfig::new(&data_dir, &version), services).map_err(|e| e.to_string())?;
     notifier.attach(engine.clone());
     for w in engine.warnings() {
-        applog::write(&format!("start-up: {w}"));
+        (seams.note)(&format!("start-up: {w}"));
     }
 
     let (stop, stopped) = tokio::sync::watch::channel(false);
