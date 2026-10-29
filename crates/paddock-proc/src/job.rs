@@ -9,16 +9,72 @@ use std::io;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::process::Child;
 use std::ptr::null;
+use windows_sys::Win32::Foundation::ERROR_MORE_DATA;
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION,
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JobObjectExtendedLimitInformation, SetInformationJobObject,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_PROCESS_ID_LIST,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicProcessIdList,
+    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
 };
 
 /// A kill-on-close job; closing its handle (on drop) ends every process in it.
-pub(crate) struct Job(#[allow(dead_code)] OwnedHandle);
+pub(crate) struct Job(OwnedHandle);
+
+/// How one query of the job's id list ended.
+pub(crate) enum Query {
+    /// The list fit the buffer.
+    Done,
+    /// More processes than the buffer holds (the buffer has the first ones).
+    MoreData,
+    /// The job could not be queried.
+    Failed,
+}
+
+/// Reads the id list through `query`, which fills the given buffer (header, then ids). A full buffer is not a failure: the
+/// ids that were filled count (a tree of more than [`crate::MAX_TREE`] processes is measured by its first ones).
+pub(crate) fn pids_with(query: impl FnOnce(&mut [u64]) -> Query) -> Option<Vec<u32>> {
+    // The list header is two u32 and then the ids (usize); a u64 buffer is aligned for it.
+    let mut buf = vec![0u64; 1 + crate::MAX_TREE];
+    match query(&mut buf) {
+        Query::Failed => return None,
+        Query::Done | Query::MoreData => {}
+    }
+    let list = buf.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>();
+    // SAFETY: the buffer is at least as large and as aligned as the list header; the query wrote the count of ids it filled,
+    // and the count is clamped to the room the buffer has.
+    unsafe {
+        let n = ((*list).NumberOfProcessIdsInList as usize).min(crate::MAX_TREE);
+        let ids = (&raw const (*list).ProcessIdList).cast::<usize>();
+        Some((0..n).map(|i| *ids.add(i) as u32).collect())
+    }
+}
 
 impl Job {
+    /// The ids of the processes in the job (the child and every helper it started, even orphans), read from the job itself:
+    /// no walk of the machine's process list. At most [`crate::MAX_TREE`] ids; `None` when the job cannot be queried.
+    pub(crate) fn pids(&self) -> Option<Vec<u32>> {
+        let handle = self.0.as_raw_handle();
+        pids_with(|buf| {
+            // SAFETY: `buf` is a live u64 buffer of the size passed; the job handle is valid while `self` lives.
+            let ok = unsafe {
+                QueryInformationJobObject(
+                    handle,
+                    JobObjectBasicProcessIdList,
+                    buf.as_mut_ptr().cast(),
+                    std::mem::size_of_val(buf) as u32,
+                    std::ptr::null_mut(),
+                )
+            };
+            if ok != 0 {
+                Query::Done
+            } else if io::Error::last_os_error().raw_os_error() == Some(ERROR_MORE_DATA as i32) {
+                Query::MoreData
+            } else {
+                Query::Failed
+            }
+        })
+    }
+
     /// Puts `child` into a new kill-on-close job. Processes it starts afterwards join the job too (nested jobs: Windows 8
     /// and later, also when the app itself runs in a job).
     pub(crate) fn assign(child: &Child) -> io::Result<Job> {
@@ -50,5 +106,35 @@ impl Job {
             return Err(io::Error::last_os_error());
         }
         Ok(Job(job))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Writes a list header with `count` ids that are `1..=count` (as the kernel does) into `buf`.
+    fn fill(buf: &mut [u64], count: usize) {
+        buf[0] = (count as u64) << 32 | count as u64;
+        for (i, slot) in buf.iter_mut().skip(1).take(count).enumerate() {
+            *slot = i as u64 + 1;
+        }
+    }
+
+    #[test]
+    fn a_full_buffer_gives_the_ids_that_were_filled_and_a_failure_gives_none() {
+        let ids = pids_with(|b| {
+            fill(b, crate::MAX_TREE);
+            Query::MoreData
+        })
+        .unwrap();
+        assert_eq!(ids.len(), crate::MAX_TREE);
+        assert_eq!(ids.first(), Some(&1));
+        let few = pids_with(|b| {
+            fill(b, 3);
+            Query::Done
+        });
+        assert_eq!(few, Some(vec![1, 2, 3]));
+        assert_eq!(pids_with(|_| Query::Failed), None);
     }
 }

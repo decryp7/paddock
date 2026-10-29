@@ -5081,11 +5081,11 @@ version = "1.0.0"
 dependencies = [
  "paddock-download",
  "paddock-jobs",
+ "paddock-proc",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "spotter-core",
- "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
