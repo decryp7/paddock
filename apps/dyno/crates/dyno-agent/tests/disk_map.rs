@@ -318,7 +318,7 @@ fn a_node_is_revealed_by_id_and_only_a_node_of_a_kept_scan_can_be() {
 #[cfg(unix)]
 #[allow(unsafe_code)]
 #[test]
-fn a_folder_that_was_refused_is_read_again_by_a_retry_and_full_disk_access_is_named() {
+fn a_folder_that_was_refused_is_read_again_by_a_retry_and_full_disk_access_is_not_claimed_for_a_file_mode() {
     use std::os::unix::fs::PermissionsExt;
     // SAFETY: `geteuid` has no arguments and cannot fail.
     if unsafe { libc::geteuid() } == 0 {
@@ -341,10 +341,9 @@ fn a_folder_that_was_refused_is_read_again_by_a_retry_and_full_disk_access_is_na
     };
     let first = final_status(&running, &statuses, started.scan);
     assert_eq!(first.progress.unreadable, 1);
-    assert!(
-        first.needs_full_disk_access,
-        "the probe said the permission is missing and a folder was refused"
-    );
+    // A folder refused by its mode is EACCES, an ordinary rights problem, even while the permission probe says Full Disk Access
+    // is missing: the button that opens its settings would not help.
+    assert!(!first.needs_full_disk_access, "a file mode is not a privacy permission");
 
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
     let Reply::DiskScan(again) = ask(&peer, Request::RetryDiskScan { scan: started.scan }).unwrap() else {

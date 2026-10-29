@@ -1,4 +1,5 @@
-import { EVENTS, REQUEST_TIMEOUT_MS, TauriBackend, type InvokeFn, type ListenFn } from './tauri-backend';
+import type { JobSpec } from './api.types';
+import { EVENTS, TauriBackend, type InvokeFn, type ListenFn } from './tauri-backend';
 
 const REF = { pid: 7, started: 1000 };
 const SETTINGS = { launchAtLogin: true } as never;
@@ -17,6 +18,12 @@ function fake() {
   const emit = (name: string, payload: unknown) => handlers.get(name)?.forEach((h) => h({ payload }));
   return { backend, invoke, listen, emit, stops };
 }
+
+/** `startJob` answers the job's id; the shape test only looks at what was sent. */
+const started = async (b: TauriBackend, spec: JobSpec): Promise<string> => {
+  await b.startJob(spec);
+  return 'ok';
+};
 
 describe('TauriBackend: request shapes', () => {
   const cases: Array<[string, (b: TauriBackend) => Promise<unknown>, unknown]> = [
@@ -47,26 +54,27 @@ describe('TauriBackend: request shapes', () => {
     ['weeklyReport', (b) => b.weeklyReport(3), { weeklyReport: { weeksAgo: 3 } }],
     ['alerts', (b) => b.alerts(10), { alerts: { limit: 10 } }],
     ['changes', (b) => b.changes({ hours: 24 }), { changes: { query: { hours: 24 } } }],
-    ['sleepBlockers', (b) => b.sleepBlockers(), 'sleepBlockers'],
-    ['bootAnalysis', (b) => b.bootAnalysis(), 'bootAnalysis'],
-    ['appUsage', (b) => b.appUsage(), 'appUsage'],
     ['gpuProcesses', (b) => b.gpuProcesses(), 'gpuProcesses'],
-    ['softwareInventory', (b) => b.softwareInventory(), 'softwareInventory'],
-    ['findFiles', (b) => b.findFiles({ folder: '/x', mode: 'both', minBytes: 5 }), { findFiles: { query: { folder: '/x', mode: 'both', minBytes: 5 } } }],
+    ['startJob findFiles', (b) => started(b, { findFiles: { query: { folder: '/x', mode: 'both', minBytes: 5 } } }), { startJob: { spec: { findFiles: { query: { folder: '/x', mode: 'both', minBytes: 5 } } } } }],
+    ['startJob rescanIssues', (b) => started(b, { rescanIssues: { query: { days: 7 } } }), { startJob: { spec: { rescanIssues: { query: { days: 7 } } } } }],
+    ['startJob refreshBackup', (b) => started(b, 'refreshBackup'), { startJob: { spec: 'refreshBackup' } }],
+    ['startJob fileHash of a process', (b) => started(b, { fileHash: { source: { process: REF } } }), { startJob: { spec: { fileHash: { source: { process: REF } } } } }],
+    ['startJob fileHash of a path', (b) => started(b, { fileHash: { source: { path: '/a/b' } } }), { startJob: { spec: { fileHash: { source: { path: '/a/b' } } } } }],
+    ['startJob sleepBlockers', (b) => started(b, 'sleepBlockers'), { startJob: { spec: 'sleepBlockers' } }],
+    ['startJob bootAnalysis', (b) => started(b, 'bootAnalysis'), { startJob: { spec: 'bootAnalysis' } }],
+    ['startJob appUsage', (b) => started(b, 'appUsage'), { startJob: { spec: 'appUsage' } }],
+    ['startJob softwareInventory', (b) => started(b, 'softwareInventory'), { startJob: { spec: 'softwareInventory' } }],
+    ['jobResult', (b) => b.jobResult(4), { jobResult: { id: 4 } }],
     ['maintenance', (b) => b.maintenance(), 'maintenance'],
     ['backup', (b) => b.backup(), 'backup'],
-    ['refreshBackup', (b) => b.refreshBackup(), 'refreshBackup'],
     ['settings', (b) => b.settings(), 'settings'],
     ['saveSettings', (b) => b.saveSettings(SETTINGS), { saveSettings: { settings: SETTINGS } }],
     ['plugins', (b) => b.plugins(), 'plugins'],
     ['issues', (b) => b.issues({ days: 14 }), { issues: { query: { days: 14 } } }],
-    ['rescanIssues', (b) => b.rescanIssues({ days: 7 }), { rescanIssues: { query: { days: 7 } } }],
     ['unusual', (b) => b.unusual(), 'unusual'],
     ['forgetBaseline', (b) => b.forgetBaseline(), 'forgetBaseline'],
     ['searchSeed', (b) => b.searchSeed('Slack'), { searchSeed: { text: 'Slack' } }],
     ['webSearch', (b) => b.webSearch('slack high cpu'), { webSearch: { query: 'slack high cpu' } }],
-    ['fileHash of a process', (b) => b.fileHash({ process: REF }), { fileHash: { source: { process: REF } } }],
-    ['fileHash of a path', (b) => b.fileHash({ path: '/a/b' }), { fileHash: { source: { path: '/a/b' } } }],
     ['openVirusTotal', (b) => b.openVirusTotal('ab'.repeat(32)), { virusTotalUrl: { sha256: 'ab'.repeat(32) } }],
     ['startupOverview', (b) => b.startupOverview({ hideOs: true, hideSigned: false }), { startupOverview: { filter: { hideOs: true, hideSigned: false } } }],
   ];
@@ -114,7 +122,7 @@ describe('TauriBackend: request shapes', () => {
   });
 });
 
-describe('TauriBackend: errors and timeout', () => {
+describe('TauriBackend: errors', () => {
   it('turns a well-formed rejection into a CommandError', async () => {
     const { backend, invoke } = fake();
     invoke.mockRejectedValueOnce({ code: 'busy', message: 'no' });
@@ -128,36 +136,22 @@ describe('TauriBackend: errors and timeout', () => {
     await expect(backend.settings()).rejects.toEqual({ code: 'internal', message: 'boom' });
   });
 
-  describe('timeout', () => {
-    beforeEach(() => vi.useFakeTimers());
-    afterEach(() => vi.useRealTimers());
-
-    it('rejects with code timeout when the shell does not answer', async () => {
+  it('has no timer: a request the shell has not answered stays pending, however long it takes (ER-19)', async () => {
+    vi.useFakeTimers();
+    try {
       const { invoke, listen } = fake();
       invoke.mockReturnValue(new Promise(() => undefined));
-      const backend = new TauriBackend(invoke as unknown as InvokeFn, listen as unknown as ListenFn, 50);
-      const result = backend.health();
-      const assertion = expect(result).rejects.toEqual({ code: 'timeout', message: 'Dyno did not answer in time.' });
-      await vi.advanceTimersByTimeAsync(50);
-      await assertion;
-    });
-    it('does not time out once answered, and clears its timer', async () => {
-      const { backend } = fake();
-      await backend.health();
+      const backend = new TauriBackend(invoke as unknown as InvokeFn, listen as unknown as ListenFn);
+      let settled = false;
+      const done = () => (settled = true);
+      void backend.health().then(done, done);
+      void backend.pickFolder().then(done, done);
       expect(vi.getTimerCount()).toBe(0);
-    });
-    it('uses 15 s by default', async () => {
-      const { invoke } = fake();
-      invoke.mockReturnValue(new Promise(() => undefined));
-      const backend = new TauriBackend(invoke as unknown as InvokeFn, vi.fn() as unknown as ListenFn);
-      expect(REQUEST_TIMEOUT_MS).toBe(15_000);
-      let rejected: unknown;
-      backend.health().catch((e: unknown) => (rejected = e));
-      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS - 1);
-      expect(rejected).toBeUndefined();
-      await vi.advanceTimersByTimeAsync(1);
-      expect(rejected).toMatchObject({ code: 'timeout' });
-    });
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(settled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

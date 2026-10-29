@@ -24,6 +24,11 @@ describe('bar', () => {
     for (const v of [0, -1, NaN]) expect(bar(v, 10)).toBeNull();
     expect(bar(5, 0)).toBeNull();
   });
+  it('gives nothing for a value too small to read as a bar (a 1% sliver looks like a column divider)', () => {
+    expect(bar(0.2, 40)).toBeNull();
+    expect(bar(0.8, 40)).toBeNull();
+    expect(bar(2, 40)).toContain('5%');
+  });
   it('fills in proportion, capped at the full scale', () => {
     expect(bar(5, 10)).toContain('50%');
     expect(bar(50, 10)).toContain('100%');

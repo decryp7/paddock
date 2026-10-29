@@ -376,3 +376,58 @@ fn live_count_grows_during_the_walk() {
     assert_eq!(found.load(Ordering::Relaxed), 3000);
     assert_eq!(r.entries.len(), 3000);
 }
+
+#[test]
+fn with_modified_reports_the_modification_time_of_files_from_the_same_stat_as_the_size() {
+    let t = tempfile::tempdir().unwrap();
+    tree(t.path());
+    let found = AtomicU64::new(0);
+    let opts = WalkOptions {
+        with_size: true,
+        with_modified: true,
+        ..WalkOptions::default()
+    };
+    let r = par_walk(t.path(), &opts, &CancelToken::new(), &found).unwrap();
+    let file = r
+        .entries
+        .iter()
+        .find(|e| e.path.ends_with("top.txt"))
+        .unwrap();
+    assert_eq!(file.size, Some(7));
+    let want = fs::metadata(t.path().join("top.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    assert_eq!(file.modified, Some(want));
+    // Directories have neither.
+    let plain = par_walk(
+        t.path(),
+        &WalkOptions::default(),
+        &CancelToken::new(),
+        &found,
+    )
+    .unwrap();
+    assert!(
+        plain
+            .entries
+            .iter()
+            .all(|e| e.modified.is_none() && e.size.is_none()),
+        "off unless asked for"
+    );
+    let only_time = par_walk(
+        t.path(),
+        &WalkOptions {
+            with_modified: true,
+            ..WalkOptions::default()
+        },
+        &CancelToken::new(),
+        &found,
+    )
+    .unwrap();
+    assert!(
+        only_time
+            .entries
+            .iter()
+            .all(|e| e.size.is_none() && e.modified.is_some())
+    );
+}

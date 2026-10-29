@@ -181,7 +181,7 @@ export class PdShellFrame {
   /** After a navigation from the sidebar (or with nothing focused), the page gets focus so a screen reader starts there. */
   private focusPageAfterNavigation(): void {
     const active = this.doc.activeElement;
-    const fromSidebar = !active || active === this.doc.body || !!this.el.querySelector('#pd-pages-nav')?.contains(active);
+    const fromSidebar = !active || active === this.doc.body || !!this.el.querySelector('#pd-pages-nav')?.contains(active) || !!active.closest('[data-testid="palette"]');
     if (fromSidebar) this.el.querySelector<HTMLElement>('#pd-main')?.focus({ preventScroll: true });
   }
 }

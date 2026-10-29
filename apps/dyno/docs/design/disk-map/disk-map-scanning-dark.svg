@@ -1,0 +1,221 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900"><rect x="0" y="0" width="1440" height="900" rx="0" fill="#0e0f12" />
+<rect x="0" y="0" width="216" height="900" rx="0" fill="#121317" />
+<line x1="215.5" y1="0" x2="215.5" y2="900" stroke="rgba(255,255,255,0.08)"/>
+<defs><linearGradient id="appg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f27bb5"/><stop offset="1" stop-color="#b01e6e"/></linearGradient></defs>
+<rect x="16" y="50" width="24" height="24" rx="5.5" fill="url(#appg)" />
+<g transform="translate(18,52) scale(0.8333333333333334)"><path d="M5 17a7.5 7.5 0 1 1 14 0M12 13l3.5-4" fill="none" stroke="#ffffff" stroke-width="2.16" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="50" y="67" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="16" font-weight="600" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Dyno</text>
+<g transform="translate(18,99) scale(0.6666666666666666)"><path d="M4 13a8 8 0 0 1 16 0M12 13l4-4M4 17h16" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="111.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Dashboard</text>
+<g transform="translate(18,132) scale(0.6666666666666666)"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="144.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Processes</text>
+<g transform="translate(18,165) scale(0.6666666666666666)"><path d="M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM15.25 15.25 20 20" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="177.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Why slow</text>
+<g transform="translate(18,198) scale(0.6666666666666666)"><path d="M10 14V5a2 2 0 0 1 4 0v9a3.5 3.5 0 1 1-4 0z" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="210.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Throttling</text>
+<g transform="translate(18,231) scale(0.6666666666666666)"><path d="M12 4 21 19.5H3zM12 9v3.5" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="243.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Issues</text>
+<g transform="translate(18,264) scale(0.6666666666666666)"><path d="M7 7h10v10H7zM10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="276.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Inventory</text>
+<g transform="translate(18,297) scale(0.6666666666666666)"><path d="M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM3.5 12h17M12 3.5c-2.3 2.4-3.5 5.2-3.5 8.5s1.2 6.1 3.5 8.5c2.3-2.4 3.5-5.2 3.5-8.5S14.3 5.9 12 3.5Z" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="309.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Network</text>
+<g transform="translate(18,330) scale(0.6666666666666666)"><path d="M2.5 12h4l3-7.5 4 15 3-7.5h5" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="342.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Counters</text>
+<g transform="translate(18,363) scale(0.6666666666666666)"><path d="M5 17a7.5 7.5 0 1 1 14 0M12 13l3.5-4" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="375.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Benchmarks</text>
+<g transform="translate(18,396) scale(0.6666666666666666)"><path d="M6 10.5a6 6 0 0 1 12 0V16l1.5 2h-15L6 16zM10 20.5a2 2 0 0 0 4 0" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="408.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Alarms</text>
+<g transform="translate(18,429) scale(0.6666666666666666)"><path d="M4.5 19.5h15M7 16v-4M11 16V8M15 16v-6M19 16V6" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="441.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Reports</text>
+<g transform="translate(18,462) scale(0.6666666666666666)"><path d="M4 8h4l1.5-2h5L16 8h4v11H4zM12 10.5a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="474.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Flight recorder</text>
+<rect x="8" y="488" width="200" height="30" rx="6" fill="rgba(240,99,168,0.14)" />
+<rect x="8" y="494" width="2" height="18" rx="1" fill="#f063a8" />
+<g transform="translate(18,495) scale(0.6666666666666666)"><path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5H12zM14.5 2.75a7.25 7.25 0 0 1 6.75 6.75H14.5z" fill="none" stroke="#f063a8" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="507.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Disk map</text>
+<g transform="translate(18,528) scale(0.6666666666666666)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="540.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Watched folders</text>
+<g transform="translate(18,561) scale(0.6666666666666666)"><path d="M12 19.5s-7.5-4.5-7.5-10a4 4 0 0 1 7.5-2 4 4 0 0 1 7.5 2c0 5.5-7.5 10-7.5 10z" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="573.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Health</text>
+<g transform="translate(18,594) scale(0.6666666666666666)"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9M4.5 4.5V9H9M12 8v4l2.75 1.75" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="606.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Backup health</text>
+<g transform="translate(18,627) scale(0.6666666666666666)"><path d="M12 4 20 8.5 12 13 4 8.5zM5.5 12.5 12 16.2l6.5-3.7M5.5 16 12 19.7l6.5-3.7" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="639.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Extras</text>
+<g transform="translate(18,660) scale(0.6666666666666666)"><path d="M3.5 8h15v8h-15zM20.5 11v2M6.5 11v2M9.5 11v2" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="672.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Lifespan</text>
+<g transform="translate(18,693) scale(0.6666666666666666)"><path d="M5.75 3.5h7.75l4.75 5v12H5.75zM13.5 3.5v5h4.75M8.75 12.5h6.5M8.75 16h6.5" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="705.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Diagnostics</text>
+<g transform="translate(18,726) scale(0.6666666666666666)"><path d="M10.1 5.68L10.5 3.13L13.5 3.13L13.9 5.68L16.52 7.19L18.94 6.26L20.44 8.86L18.42 10.49L18.42 13.51L20.44 15.14L18.94 17.74L16.52 16.81L13.9 18.32L13.5 20.87L10.5 20.87L10.1 18.32L7.48 16.81L5.06 17.74L3.56 15.14L5.58 13.51L5.58 10.49L3.56 8.86L5.06 6.26L7.48 7.19ZM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="738.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Settings</text>
+<g transform="translate(18,866) scale(0.6666666666666666)"><path d="M4 5h16v14H4zM9.5 5v14" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="44" y="878.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Collapse</text>
+<line x1="216" y1="51.5" x2="1440" y2="51.5" stroke="rgba(255,255,255,0.08)"/>
+<rect x="240" y="11" width="168" height="30" rx="6" fill="#1b1e23" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+<g transform="translate(250,19) scale(0.5833333333333334)"><path d="M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM15.25 15.25 20 20" fill="none" stroke="#8b93a0" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="272" y="30.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#8b93a0" text-anchor="start" style="font-variant-numeric: tabular-nums" >Search</text>
+<rect x="364" y="17" width="17" height="18" rx="4" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1" />
+<text x="372.5" y="30" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#8b93a0" text-anchor="middle" style="font-variant-numeric: tabular-nums" >⌘</text>
+<rect x="384" y="17" width="17" height="18" rx="4" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1" />
+<text x="392.5" y="30" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#8b93a0" text-anchor="middle" style="font-variant-numeric: tabular-nums" >K</text>
+<circle cx="1328" cy="26" r="4" fill="#3dd68c"/>
+<text x="1338" y="30.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Monitoring</text>
+<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#1b1e23"/><line x1="0" y1="0" x2="0" y2="6" stroke="#8b93a0" stroke-width="1.6"/></pattern><pattern id="ghost" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#1b1e23"/><line x1="0" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.08)" stroke-width="2"/></pattern></defs>
+<text x="240" y="92" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="18" font-weight="600" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Disk map</text>
+<text x="240" y="112" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Macintosh HD · APFS · internal</text>
+<rect x="240.5" y="132.5" width="146.58" height="28" rx="6" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1" />
+<g transform="translate(249,138.5) scale(0.6666666666666666)"><path d="M3.5 13.5h17v5.5h-17zM5 13.5 7.25 5.5h9.5L19 13.5" fill="none" stroke="#a0a7b2" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="271" y="151" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Macintosh HD</text>
+<g transform="translate(365.58000000000004,140.5) scale(0.5)"><path d="M6 9l6 6 6-6" fill="none" stroke="#a0a7b2" stroke-width="3.00" stroke-linecap="round" stroke-linejoin="round"/></g>
+<line x1="399.08000000000004" y1="136" x2="399.08000000000004" y2="156" stroke="rgba(255,255,255,0.16)"/>
+<g transform="translate(414.58000000000004,138) scale(0.6666666666666666)"><path d="M14.5 6 8.5 12l6 6" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="442.58000000000004" y="151" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13"><tspan fill="#eceef1" font-weight="600">Macintosh HD</tspan></text>
+<rect x="1244.5" y="132.5" width="172" height="28" rx="6" fill="#1b1e23" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+<rect x="1246.5" y="134.5" width="83.0" height="24" rx="5" fill="rgba(240,99,168,0.14)" stroke="#f063a8" stroke-width="1" />
+<g transform="translate(1256.0,140) scale(0.5833333333333334)"><path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5H12zM14.5 2.75a7.25 7.25 0 0 1 6.75 6.75H14.5z" fill="none" stroke="#f063a8" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="1276.0" y="151" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Chart</text>
+<g transform="translate(1340.0,140) scale(0.5833333333333334)"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="#a0a7b2" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="1360.0" y="151" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Table</text>
+<line x1="240" y1="168.5" x2="1416" y2="168.5" stroke="rgba(255,255,255,0.08)"/>
+<rect x="240.5" y="176.5" width="1175" height="63" rx="10" fill="#15171b" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+<text x="256" y="200" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Scanning Macintosh HD</text>
+<text x="423.705" y="200" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Reading folders</text>
+<text x="1304" y="200" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >1,116,387 items · 325.9 GB of 579.4 GB counted</text>
+<rect x="256" y="214" width="1032" height="6" rx="3" fill="#1b1e23" />
+<rect x="256" y="214" width="580.4777355885399" height="6" rx="3" fill="#f063a8" />
+<text x="1304" y="232" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >~40 s left</text>
+<rect x="1320.5" y="192.5" width="80" height="31" rx="6" fill="#1b1e23" stroke="rgba(255,255,255,0.16)" stroke-width="1" />
+<text x="1360" y="212.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#eceef1" text-anchor="middle" style="font-variant-numeric: tabular-nums" >Cancel</text>
+<rect x="240.5" y="256.5" width="615" height="619" rx="10" fill="#15171b" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+<defs><path id="lp0_0" d="M550.22,433.02A127.0,127.0 0 0 1 649.19,636.74" fill="none"/><path id="lp0_1" d="M549.97,447.02A113.0,113.0 0 0 1 638.04,628.28" fill="none"/><path id="lp1_0" d="M551.16,379.03A181.0,181.0 0 0 1 692.22,669.37" fill="none"/></defs>
+<path d="M548.90,410.00A150,150 0 0 1 666.47,652.00L620.88,616.15A92,92 0 0 0 548.90,468.00Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M548.90,358.00A202,202 0 0 1 707.35,684.14L668.05,653.24A152,152 0 0 0 548.90,408.00Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M548.90,316.00A244,244 0 0 1 789.55,594.48L749.97,588.68A204,204 0 0 0 548.90,356.00Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M548.90,280.00A280,280 0 0 1 774.20,394.98L746.67,414.93A246,246 0 0 0 548.90,314.00Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M775.26,396.44A280,280 0 0 1 814.46,473.98L782.07,484.32A246,246 0 0 0 747.73,416.39Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M815.01,475.69A280,280 0 0 1 827.80,549.33L793.82,550.52A246,246 0 0 0 782.62,486.03Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M827.86,551.13A280,280 0 0 1 827.47,577.28L793.54,575.07A246,246 0 0 0 793.88,552.31Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M827.35,579.08A280,280 0 0 1 825.17,599.70L791.53,594.77A246,246 0 0 0 793.42,576.87Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M789.29,596.26A244,244 0 0 1 740.37,710.10L708.92,685.38A204,204 0 0 0 749.71,590.46Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M824.91,601.48A280,280 0 0 1 784.76,709.49L756.07,691.24A246,246 0 0 0 791.27,596.55Z" fill="#60aeeb" opacity="1.0"/>
+<path d="M783.79,711.01A280,280 0 0 1 768.67,732.35L741.94,711.34A246,246 0 0 0 755.10,692.76Z" fill="#71b6ec" opacity="1.0"/>
+<path d="M665.36,653.42A150,150 0 0 1 589.55,704.13L573.82,648.30A92,92 0 0 0 619.76,617.57Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M706.24,685.56A202,202 0 0 1 664.11,725.29L635.56,684.25A152,152 0 0 0 666.93,654.65Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M739.26,711.52A244,244 0 0 1 728.58,724.10L699.07,697.09A204,204 0 0 0 707.81,686.79Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M767.56,733.77A280,280 0 0 1 759.12,743.93L733.56,721.51A246,246 0 0 0 740.83,712.75Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M757.93,745.28A280,280 0 0 1 755.13,748.41L730.05,725.45A246,246 0 0 0 732.37,722.86Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M727.36,725.43A244,244 0 0 1 717.03,735.97L689.42,707.02A204,204 0 0 0 697.86,698.42Z" fill="#f2b23d" opacity="1.0"/>
+<path d="M753.91,749.74A280,280 0 0 1 741.87,762.03L718.41,737.42A246,246 0 0 0 728.84,726.78Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M715.72,737.21A244,244 0 0 1 707.36,744.77L681.34,714.39A204,204 0 0 0 688.12,708.26Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M740.57,763.27A280,280 0 0 1 733.99,769.30L711.49,743.81A246,246 0 0 0 717.10,738.66Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M732.65,770.49A280,280 0 0 1 730.77,772.12L708.66,746.29A246,246 0 0 0 710.14,745.00Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M705.99,745.94A244,244 0 0 1 699.29,751.43L674.60,719.96A204,204 0 0 0 679.98,715.56Z" fill="#f2b23d" opacity="1.0"/>
+<path d="M729.40,773.29A280,280 0 0 1 721.51,779.76L700.52,753.01A246,246 0 0 0 707.29,747.46Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M697.87,752.55A244,244 0 0 1 692.35,756.72L668.81,724.38A204,204 0 0 0 673.19,721.07Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M720.09,780.87A280,280 0 0 1 713.55,785.82L693.53,758.33A246,246 0 0 0 699.11,754.12Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M690.90,757.78A244,244 0 0 1 688.10,759.77L665.26,726.93A204,204 0 0 0 667.35,725.44Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M662.64,726.32A202,202 0 0 1 638.33,740.68L616.17,695.86A152,152 0 0 0 634.08,685.28Z" fill="#f2b23d" opacity="1.0"/>
+<path d="M636.71,741.48A202,202 0 0 1 620.63,748.49L602.86,701.75A152,152 0 0 0 614.55,696.65Z" fill="#f3aa25" opacity="1.0"/>
+<path d="M618.95,749.13A202,202 0 0 1 608.58,752.70L593.80,704.94A152,152 0 0 0 601.18,702.39Z" fill="#f2b23d" opacity="1.0"/>
+<path d="M606.86,753.23A202,202 0 0 1 603.65,754.18L590.09,706.06A152,152 0 0 0 592.08,705.47Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M587.82,704.62A150,150 0 0 1 522.05,707.74L532.43,650.67A92,92 0 0 0 572.09,648.79Z" fill="#3dd39d" opacity="1.0"/>
+<path d="M601.92,754.67A202,202 0 0 1 565.45,761.24L561.35,711.41A152,152 0 0 0 588.36,706.54Z" fill="#3dd39d" opacity="1.0"/>
+<path d="M613.31,795.10A244,244 0 0 1 577.30,802.23L572.65,762.51A204,204 0 0 0 602.46,756.60Z" fill="#3dd39d" opacity="1.0"/>
+<path d="M623.08,829.75A280,280 0 0 1 613.49,832.23L605.64,799.15A246,246 0 0 0 613.85,797.02Z" fill="#3dd39d" opacity="1.0"/>
+<path d="M611.73,832.65A280,280 0 0 1 603.32,834.48L596.71,801.13A246,246 0 0 0 603.89,799.57Z" fill="#52d6a7" opacity="1.0"/>
+<path d="M601.56,834.83A280,280 0 0 1 595.01,836.03L589.41,802.49A246,246 0 0 0 594.95,801.48Z" fill="#3dd39d" opacity="1.0"/>
+<path d="M593.24,836.32A280,280 0 0 1 581.49,837.99L577.54,804.22A246,246 0 0 0 587.63,802.79Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M575.51,802.44A244,244 0 0 1 568.89,803.10L565.61,763.24A204,204 0 0 0 570.86,762.72Z" fill="#52d6a7" opacity="1.0"/>
+<path d="M579.71,838.20A280,280 0 0 1 571.84,838.98L569.06,805.10A246,246 0 0 0 575.75,804.43Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M563.66,761.39A202,202 0 0 1 540.36,761.86L542.47,711.90A152,152 0 0 0 559.56,711.56Z" fill="#52d6a7" opacity="1.0"/>
+<path d="M567.10,803.25A244,244 0 0 1 554.96,803.90L553.97,763.91A204,204 0 0 0 563.82,763.39Z" fill="#3dd39d" opacity="1.0"/>
+<path d="M570.05,839.13A280,280 0 0 1 555.86,839.89L555.01,805.90A246,246 0 0 0 567.26,805.24Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M553.16,803.95A244,244 0 0 1 548.29,804.00L548.39,764.00A204,204 0 0 0 552.17,763.96Z" fill="#52d6a7" opacity="1.0"/>
+<path d="M554.06,839.93A280,280 0 0 1 548.20,840.00L548.28,806.00A246,246 0 0 0 553.21,805.94Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M546.49,804.00A244,244 0 0 1 538.58,803.82L540.27,763.85A204,204 0 0 0 546.59,764.00Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M538.56,761.78A202,202 0 0 1 521.29,760.23L528.12,710.69A152,152 0 0 0 540.67,711.82Z" fill="#3dd39d" opacity="1.0"/>
+<path d="M536.78,803.74A244,244 0 0 1 529.70,803.31L532.85,763.44A204,204 0 0 0 538.48,763.78Z" fill="#3dd39d" opacity="1.0"/>
+<path d="M535.26,839.71A280,280 0 0 1 526.87,839.20L529.54,805.31A246,246 0 0 0 536.70,805.74Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M527.91,803.17A244,244 0 0 1 521.91,802.60L526.33,762.85A204,204 0 0 0 531.05,763.29Z" fill="#52d6a7" opacity="1.0"/>
+<path d="M525.08,839.06A280,280 0 0 1 517.93,838.38L521.69,804.59A246,246 0 0 0 527.75,805.17Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M520.12,802.40A244,244 0 0 1 515.55,801.83L521.02,762.21A204,204 0 0 0 524.54,762.65Z" fill="#3dd39d" opacity="1.0"/>
+<path d="M516.14,838.18A280,280 0 0 1 510.63,837.49L515.28,803.81A246,246 0 0 0 519.90,804.39Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M519.51,759.98A202,202 0 0 1 512.74,758.90L521.69,709.71A152,152 0 0 0 526.34,710.45Z" fill="#52d6a7" opacity="1.0"/>
+<path d="M513.77,801.59A244,244 0 0 1 505.23,800.22L512.39,760.87A204,204 0 0 0 519.23,761.96Z" fill="#a2acb1" opacity="1.0"/>
+<path d="M520.28,707.42A150,150 0 0 1 469.34,687.72L500.05,638.52A92,92 0 0 0 530.66,650.35Z" fill="url(#hatch)" opacity="1.0" stroke="#8b93a0"/>
+<path d="M467.81,686.77A150,150 0 0 1 547.10,410.00L547.10,468.00A92,92 0 0 0 498.53,637.56Z" fill="url(#ghost)" opacity="1.0" stroke="rgba(255,255,255,0.16)" stroke-dasharray="3 3"/>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#0e0f12" style="font-variant-numeric: tabular-nums"><textPath href="#lp0_0" startOffset="50%" text-anchor="middle">Users</textPath></text>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#0e0f12" style="font-variant-numeric: tabular-nums"><textPath href="#lp0_1" startOffset="50%" text-anchor="middle">219.5 GB</textPath></text>
+<text font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#0e0f12" style="font-variant-numeric: tabular-nums"><textPath href="#lp1_0" startOffset="50%" text-anchor="middle">alex</textPath></text>
+<circle cx="548.0" cy="560.0" r="88" fill="#15171b"/>
+<text x="548.0" y="530.0" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#eceef1" text-anchor="middle" style="font-variant-numeric: tabular-nums" >Macintosh HD</text>
+<text x="548.0" y="564.0" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" style="font-variant-numeric: tabular-nums"><tspan font-size="28" font-weight="600" fill="#eceef1">325.9</tspan><tspan font-size="13" fill="#a0a7b2" dx="3">GB</tspan></text>
+<text x="548.0" y="586.0" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="middle" style="font-variant-numeric: tabular-nums" >counted so far</text>
+<text x="548.0" y="603.0" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="middle" style="font-variant-numeric: tabular-nums" >1,116,387 items</text>
+<rect x="872.5" y="256.5" width="543" height="619" rx="10" fill="#15171b" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+<text x="888" y="281" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >In this folder</text>
+<rect x="1000.47" y="268" width="18.105" height="18" rx="9" fill="#22262c" />
+<text x="1009.5225" y="281" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="11" font-weight="500" fill="#a0a7b2" text-anchor="middle" style="font-variant-numeric: tabular-nums" >5</text>
+<rect x="888" y="294" width="130.575" height="2" rx="1" fill="#f063a8" />
+<text x="1040.575" y="281" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Largest files</text>
+<text x="1156.3700000000001" y="281" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Oldest files</text>
+<text x="1264.95" y="281" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Duplicate hints</text>
+<line x1="872" y1="296.5" x2="1416" y2="296.5" stroke="rgba(255,255,255,0.08)"/>
+<rect x="873" y="297" width="542" height="28" rx="0" fill="#1b1e23" />
+<text x="888" y="315" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Name</text>
+<text x="1324" y="315" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >Size</text>
+<text x="1400" y="315" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="500" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >Share</text>
+<rect x="888" y="336" width="10" height="10" rx="2.5" fill="#60aeeb" />
+<g transform="translate(906,334) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#a0a7b2" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="928" y="345.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Users</text>
+<rect x="1158" y="339" width="72" height="4" rx="2" fill="#1b1e23" />
+<rect x="1158" y="339" width="25.635036496350363" height="4" rx="2" fill="#5e6775" />
+<text x="1324" y="345.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="end" style="font-variant-numeric: tabular-nums" >219.5 GB</text>
+<text x="1400" y="345.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >35.6%</text>
+<line x1="888" y1="356.5" x2="1400" y2="356.5" stroke="rgba(255,255,255,0.08)"/>
+<rect x="888" y="368" width="10" height="10" rx="2.5" fill="#f3aa25" />
+<g transform="translate(906,366) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#a0a7b2" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="928" y="377.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Applications</text>
+<rect x="1158" y="371" width="72" height="4" rx="2" fill="#1b1e23" />
+<rect x="1158" y="371" width="7.217518248175183" height="4" rx="2" fill="#5e6775" />
+<text x="1324" y="377.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="end" style="font-variant-numeric: tabular-nums" >61.8 GB</text>
+<text x="1400" y="377.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >10.0%</text>
+<line x1="888" y1="388.5" x2="1400" y2="388.5" stroke="rgba(255,255,255,0.08)"/>
+<rect x="888" y="400" width="10" height="10" rx="2.5" fill="#3dd39d" />
+<g transform="translate(906,398) scale(0.5833333333333334)"><path d="M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" fill="none" stroke="#a0a7b2" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="928" y="409.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Library</text>
+<rect x="1158" y="403" width="72" height="4" rx="2" fill="#1b1e23" />
+<rect x="1158" y="403" width="5.208759124087591" height="4" rx="2" fill="#5e6775" />
+<text x="1324" y="409.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="end" style="font-variant-numeric: tabular-nums" >44.6 GB</text>
+<text x="1400" y="409.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >7.2%</text>
+<line x1="888" y1="420.5" x2="1400" y2="420.5" stroke="rgba(255,255,255,0.08)"/>
+<rect x="888" y="432" width="10" height="10" rx="2.5" fill="url(#hatch)" stroke="#8b93a0" stroke-width="1" />
+<g transform="translate(906,430) scale(0.5833333333333334)"><path d="M5.5 11h13v9.5h-13zM8 11V7.5a4 4 0 0 1 8 0V11M12 15v2" fill="none" stroke="#a0a7b2" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="928" y="441.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Hidden space</text>
+<rect x="1158" y="435" width="72" height="4" rx="2" fill="#1b1e23" />
+<rect x="1158" y="435" width="4.332846715328467" height="4" rx="2" fill="#5e6775" />
+<text x="1324" y="441.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="end" style="font-variant-numeric: tabular-nums" >37.1 GB</text>
+<text x="1400" y="441.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >6.0%</text>
+<line x1="888" y1="452.5" x2="1400" y2="452.5" stroke="rgba(255,255,255,0.08)"/>
+<rect x="888" y="464" width="10" height="10" rx="2.5" fill="url(#ghost)" stroke="#8b93a0" stroke-width="1" />
+<g transform="translate(906,462) scale(0.5833333333333334)"><path d="M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 7.5V12l3 2" fill="none" stroke="#a0a7b2" stroke-width="2.57" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="928" y="473.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="500" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Not counted yet</text>
+<rect x="1158" y="467" width="72" height="4" rx="2" fill="#1b1e23" />
+<rect x="1158" y="467" width="29.605839416058394" height="4" rx="2" fill="#5e6775" />
+<text x="1324" y="473.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="end" style="font-variant-numeric: tabular-nums" >253.5 GB</text>
+<text x="1400" y="473.5" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >41.1%</text>
+<line x1="888" y1="484.5" x2="1400" y2="484.5" stroke="rgba(255,255,255,0.08)"/>
+<text x="888" y="519" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="600" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Hidden space · 37.1 GB measured so far</text>
+<rect x="888" y="539" width="10" height="10" rx="2.5" fill="url(#hatch)" stroke="#8b93a0" stroke-width="1" />
+<text x="906" y="548" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Purgeable space</text>
+<text x="906" y="565" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >macOS frees it when space is needed</text>
+<text x="1324" y="548" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="end" style="font-variant-numeric: tabular-nums" >13.1 GB</text>
+<rect x="888" y="585" width="10" height="10" rx="2.5" fill="url(#hatch)" stroke="#8b93a0" stroke-width="1" />
+<text x="906" y="594" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >macOS and other volumes in this container</text>
+<text x="906" y="611" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Sealed System volume 11.4 GB, Preboot 7.1 GB, VM 4.3 GB, Recovery 1.2 GB</text>
+<text x="1324" y="594" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="end" style="font-variant-numeric: tabular-nums" >24.0 GB</text>
+<rect x="888" y="631" width="10" height="10" rx="2.5" fill="url(#hatch)" stroke="#8b93a0" stroke-width="1" />
+<text x="906" y="640" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#eceef1" text-anchor="start" style="font-variant-numeric: tabular-nums" >Snapshots and files Dyno can’t read</text>
+<text x="906" y="657" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >3 local Time Machine snapshots; their size is what the scan can’t explain</text>
+<text x="1324" y="640" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="13" font-weight="400" fill="#a0a7b2" text-anchor="end" style="font-variant-numeric: tabular-nums" >After the scan</text>
+<line x1="873" y1="841.5" x2="1415" y2="841.5" stroke="rgba(255,255,255,0.08)"/>
+<text x="888" y="863" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="400" fill="#a0a7b2" text-anchor="start" style="font-variant-numeric: tabular-nums" >Sizes only grow while the scan runs; nothing is changed on disk.</text></svg>

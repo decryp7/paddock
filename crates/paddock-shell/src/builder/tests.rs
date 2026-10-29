@@ -279,6 +279,7 @@ fn a_bad_first_run_step_fails_the_start_naming_the_checklist() {
 
 /// Waits until the work deferred so far has run (the deferred work runs in order, so a marker queued last arrives
 /// after it; a hang guard only lost work reaches), then checks the main window exists.
+#[cfg(target_os = "macos")]
 fn wait_for_main(app: &tauri::App<MockRuntime>) {
     let (tx, rx) = std::sync::mpsc::channel();
     paddock_window::tauri::after_plugin_hook(app.handle(), move |_| {

@@ -14,6 +14,7 @@ Dyno has two things called "bench":
 | Benchmark | Measures | Command | Corpus | Budget asserted | CI | Results |
 |---|---|---|---|---|---|---|
 | `dyno-agent bench [seconds] [none\|summary\|processes]` (`crates/dyno-agent/src/cli.rs`) | The agent's own CPU (share of one core) and memory with nobody watching, a summary subscriber or a processes subscriber; JSON output | `cargo run --release -p dyno-agent -- bench 25 processes` | The live machine (read-only) | none | No. `scripts/check-bundle.sh` (`dyno-release.yml`) runs `dyno-agent once`, a smoke test with no budget | below; [architecture.md](architecture.md#dynos-own-overhead) |
+| `cargo test --release -p dyno-agent --test finder_bench -- --ignored --nocapture` (`crates/dyno-agent/tests/finder_bench.rs`) | The file finder (large and duplicate files) on a generated tree, by the number of threads reading it | the command | 400 folders, 50,000 small files and 300 files of about 1 MiB (100 files with two copies each), made in a temp folder | none (a measurement; the checks are the finder's unit tests) | no | [File finder](#file-finder-2026-10-29) |
 | `app/angular.json` budgets | The initial bundle | `cd app && npx ng build` | — | initial warn 900 kB / error 1.5 MB; component style warn 16 kB / error 32 kB | `ci.yml` Dyno leg | — |
 
 ## Budgets
@@ -104,3 +105,28 @@ Dyno has two things called "bench":
 
 - **Notes:** 2% of one core on 14 cores is about 0.14% of the machine. A quiet re-run on a release build on each OS is
   needed. Source: [architecture.md](architecture.md#dynos-own-overhead).
+
+## File finder (2026-10-29)
+
+Rule 48: the finder was sequential (one thread walked, then hashed); P1-4 of the review (ER-20, rule 51) moved it to
+`paddock_jobs::par_walk` and `par_map_ordered` (4 to 8 threads on an SSD, 2 on a network share, 1 on a spinning disk; the results
+come back in input order, so the answer does not depend on the count, which a unit test checks).
+
+**Corpus:** 400 folders, 50,000 files of 5 bytes, 300 files of 1 MiB + 17 bytes (100 distinct, each with two copies in other
+folders), in a temp folder on the internal APFS SSD of the Mac mini, mode "Both", the 1 MiB floor. Release build, `nice -n 10`.
+**Conditions:** the machine was **busy** (load average 25 to 44 from other agents' builds), so the numbers are noisy; the first
+sequential run was disturbed most (median 4.37 s). Three runs per row; best and median in seconds. Like for like: the same
+tree, the same query and the same machine within one session.
+
+| Code | Threads | Best | Median |
+|---|---|---|---|
+| before (commit 6c73efd75, sequential walk and hashing) | 1 | 1.04 to 1.63 | 1.51 to 4.37 |
+| after | 1 | 1.00 to 1.18 | 1.04 to 1.24 |
+| after | 2 | 0.58 to 0.70 | 0.60 to 0.83 |
+| after | 4 | 0.32 to 0.37 | 0.38 to 0.40 |
+| after | 8 | 0.23 to 0.33 | 0.25 to 0.37 |
+
+So 4 threads take about a third of the time and 8 about a quarter to a third of it, on a corpus that sits in the OS file cache.
+The corpus is small and warm; a large cold folder spends its time waiting for the disk, where parallel reads help more on an
+SSD, and not at all on a spinning disk (hence one thread there). **Not measured:** a spinning disk and a network share (none to
+hand); their thread counts follow ER-20's table and the disk map's.

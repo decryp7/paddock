@@ -6,6 +6,7 @@
 //! change, run this test with `DYNO_UPDATE_WIRE_FIXTURE=1` and commit the result together with the TypeScript.
 
 use dyno_core::disk::index::{DiskIndex, ScanLimits, Sizes};
+use dyno_core::disk::reason::UnreadableReason;
 use dyno_core::disk::scan::{DiskScanStatus, DiskTarget, ScanFailure, ScanPhase, ScanProgress, ScanState};
 use dyno_core::disk::volume::{NetworkProtocol, Volume, VolumeLocation};
 use dyno_core::protocol::Request;
@@ -79,7 +80,7 @@ fn children() -> Value {
     i.add_file(root, "vm.img", Sizes { on_disk: 100, logical: 90 }, Timestamp(1_650_000_000_000));
     i.add_mount_point(root, "Volumes");
     let locked = i.add_folder(root, "private").unwrap();
-    i.mark_unreadable(locked);
+    i.mark_unreadable(locked, UnreadableReason::NeedsFullDiskAccess);
     i.finish_listing(users);
     to_value(i.children(root, 0, 10, 0.0).unwrap()).unwrap()
 }
@@ -107,7 +108,7 @@ fn rings() -> Value {
     );
     i.add_file(users, "notes", Sizes::same(3), Timestamp(1_700_000_000_000));
     let locked = i.add_folder(root, "private").unwrap();
-    i.mark_unreadable(locked);
+    i.mark_unreadable(locked, UnreadableReason::NeedsFullDiskAccess);
     i.finish_listing(users);
     to_value(i.rings(root, 2, 0.0, 10).unwrap()).unwrap()
 }

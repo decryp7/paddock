@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import type { MaintenanceSettings, MaintenanceWindow, Weekday } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { ActionTip } from '../../shared/action-tip';
+import { PdActionTip } from '@decryp7/paddock-ui/table';
 import { Icon } from '../../shared/icon';
 import { MatSlideToggle } from '@angular/material/slide-toggle';
 import { ExtrasStore } from '../../state/extras.store';
@@ -29,7 +29,7 @@ import { TimeField } from '../../shared/time-field';
  */
 @Component({
   selector: 'dy-extras-maintenance',
-  imports: [ActionTip, TimeField, PdDayPicker, MatButton, MatIconButton, AsyncState, Icon, MatSlideToggle],
+  imports: [PdActionTip, TimeField, PdDayPicker, MatButton, MatIconButton, AsyncState, Icon, MatSlideToggle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="!!draft()" [error]="settings.error()" what="maintenance windows" [rows]="4" (retry)="settings.load()">
@@ -51,7 +51,7 @@ import { TimeField } from '../../shared/time-field';
               @for (w of d.windows; track $index; let i = $index) {
                 <li class="win" [class.off]="!d.enabled">
                   <pd-day-picker [value]="w.days" [label]="'Days of window ' + (i + 1)" (valueChange)="setDays(i, w, $event)" />
-                  <span class="win-end" dyActionTip>
+                  <span class="win-end" pdActionTip>
                   <dy-time-field shown="From" clustered [label]="'From, window ' + (i + 1)" [value]="time(w.startMinute)" (timeChange)="setTime(i, w, 'startMinute', $event)" />
                   <dy-time-field shown="To" clustered [label]="'To, window ' + (i + 1)" [value]="time(w.endMinute)" (timeChange)="setTime(i, w, 'endMinute', $event)" />
                   <span class="sum muted">{{ summary(w) }}</span>
@@ -83,7 +83,7 @@ import { TimeField } from '../../shared/time-field';
   styles: [
     EXTRAS_STYLES,
     `
-      .form { display: grid; gap: var(--sp-3); max-width: 960px; padding: var(--sp-4) var(--sp-5); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); }
+      .form { display: grid; min-width: 0; gap: var(--sp-3); max-width: 960px; padding: var(--sp-4) var(--sp-5); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); }
       .lede { margin: 0; color: var(--text-2); }
       .status { margin: 0; display: flex; align-items: center; font-weight: var(--fw-medium); }
       .row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
@@ -92,7 +92,7 @@ import { TimeField } from '../../shared/time-field';
       .lbl { display: grid; gap: 2px; }
       .lbl small { color: var(--text-3); font-size: var(--fs-sm); }
       .windows { list-style: none; margin: 0; padding: 0; display: grid; }
-      .win { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
+      .win { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
       .win.off { opacity: 0.55; }
       .win-end { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
       .sum { flex: 1 1 120px; min-width: 0; font-size: var(--fs-sm); }
