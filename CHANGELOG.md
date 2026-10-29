@@ -4,6 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Dialog buttons
+- `@decryp7/paddock-ui/shell/dialogs`: the filled (primary) dialog button uses `--pd-accent-fill` with `--pd-on-accent` and
+  `--pd-accent-fill-hover` (it used the accent text colour, 2.18:1 with white ink in dark mode). `test:tokens` checks both pairs
+  for every accent, scheme and contrast mode.
+
 ### Rust developer and CI tool, phase R0 (ADR 0022)
 - New shared crates `paddock-slots` (numbered job slots over OS file locks, with a holder that always ends: job folder gone,
   release, or `--max-hold-secs`), `paddock-repo-files` (the walk, its caps and a bounded-thread file hash) and
