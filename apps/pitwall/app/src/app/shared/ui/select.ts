@@ -47,27 +47,27 @@ export interface SelectOption {
       display: inline-flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       width: 100%;
       min-width: 160px;
       height: 30px;
-      padding: 0 var(--sp-2) 0 var(--sp-3);
+      padding: 0 var(--pd-space-2) 0 var(--pd-space-3);
       font: inherit;
-      font-size: var(--fs-base);
-      color: var(--text);
+      font-size: var(--pd-text-body);
+      color: var(--pd-text);
       text-align: left;
-      background: var(--bg-input);
-      border: 1px solid var(--border-strong);
-      border-radius: var(--r-md);
+      background: var(--pd-surface-1);
+      border: 1px solid var(--pd-border-strong);
+      border-radius: var(--pd-radius-control);
       cursor: default;
       outline: none;
       transition:
-        border-color var(--dur-fast) var(--ease),
-        box-shadow var(--dur-fast) var(--ease);
+        border-color var(--pd-duration-micro) var(--pd-ease-move),
+        box-shadow var(--pd-duration-micro) var(--pd-ease-move);
       &:focus-visible,
       &[aria-expanded='true'] {
-        border-color: var(--accent);
-        box-shadow: 0 0 0 3px var(--accent-soft);
+        border-color: var(--pd-accent);
+        box-shadow: 0 0 0 3px var(--pd-accent-tint);
       }
       &:disabled {
         opacity: 0.5;
@@ -76,7 +76,7 @@ export interface SelectOption {
         flex: none;
         width: 14px;
         height: 14px;
-        color: var(--text-2);
+        color: var(--pd-text-muted);
       }
     }
     .txt {

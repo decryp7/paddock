@@ -68,19 +68,19 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
     .depth {
       display: flex;
       flex-wrap: wrap;
-      gap: 0 var(--sp-2);
-      margin: 0 0 var(--sp-2);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      gap: 0 var(--pd-space-2);
+      margin: 0 0 var(--pd-space-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       span + span::before {
         content: '·';
-        margin-right: var(--sp-2);
+        margin-right: var(--pd-space-2);
       }
     }
     .none {
-      padding: var(--sp-3) 0;
-      color: var(--text-3);
-      font-size: var(--fs-sm);
+      padding: var(--pd-space-3) 0;
+      color: var(--pd-text-subtle);
+      font-size: var(--pd-text-label);
     }
     .jobs {
       list-style: none;
@@ -90,9 +90,9 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
         display: grid;
         grid-template-columns: auto minmax(0, 1fr) auto;
         align-items: center;
-        gap: var(--sp-3);
+        gap: var(--pd-space-3);
         padding: 8px 0;
-        border-top: 1px solid var(--border-soft);
+        border-top: 1px solid var(--pd-hairline);
         &:first-child {
           border-top: none;
         }
@@ -101,7 +101,7 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
     /* Cancel is a quiet icon that appears with the pointer or keyboard focus, not a row of text buttons. */
     .cancel {
       opacity: 0;
-      transition: opacity var(--dur-fast) var(--ease);
+      transition: opacity var(--pd-duration-micro) var(--pd-ease-move);
     }
     li:hover .cancel,
     li:focus-within .cancel,
@@ -117,39 +117,39 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
       width: 7px;
       height: 7px;
       border-radius: 50%;
-      border: 1.5px solid var(--text-3);
+      border: 1.5px solid var(--pd-text-subtle);
       &[data-state='running'] {
-        border-color: var(--accent);
-        background: var(--accent);
-        box-shadow: 0 0 0 3px var(--accent-soft);
+        border-color: var(--pd-accent);
+        background: var(--pd-accent);
+        box-shadow: 0 0 0 3px var(--pd-accent-tint);
       }
     }
     .line1 {
       display: flex;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       align-items: baseline;
       .app {
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
       .kind {
-        font-size: var(--fs-xs);
-        color: var(--text-3);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-subtle);
       }
     }
     .line2 {
       display: flex;
-      gap: var(--sp-2);
-      font-size: var(--fs-xs);
-      color: var(--text-3);
+      gap: var(--pd-space-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-subtle);
       span + span::before {
         content: '·';
-        margin-right: var(--sp-2);
+        margin-right: var(--pd-space-2);
       }
     }
     .more {
-      padding-top: var(--sp-2);
-      font-size: var(--fs-xs);
-      color: var(--text-3);
+      padding-top: var(--pd-space-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-subtle);
     }
     .prog {
       height: 3px;

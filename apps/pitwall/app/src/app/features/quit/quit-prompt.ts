@@ -30,27 +30,27 @@ export type QuitAnswer = { stopServing: boolean; remember: boolean } | null;
     :host {
       display: block;
       width: 480px;
-      padding: var(--sp-5);
+      padding: var(--pd-space-4);
     }
     h2 {
-      font-size: var(--fs-md);
-      margin-bottom: var(--sp-2);
+      font-size: var(--pd-text-body-lg);
+      margin-bottom: var(--pd-space-2);
     }
     p {
-      color: var(--text-2);
-      margin-bottom: var(--sp-3);
+      color: var(--pd-text-muted);
+      margin-bottom: var(--pd-space-3);
     }
     .remember {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
-      font-size: var(--fs-sm);
+      gap: var(--pd-space-2);
+      font-size: var(--pd-text-label);
     }
     .row {
       display: flex;
       justify-content: flex-end;
-      gap: var(--sp-2);
-      margin-top: var(--sp-5);
+      gap: var(--pd-space-2);
+      margin-top: var(--pd-space-4);
     }
   `,
 })

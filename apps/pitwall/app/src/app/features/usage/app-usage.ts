@@ -125,38 +125,38 @@ const METRICS: { id: UsageMetric; label: string }[] = [
     :host {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .cache {
-      margin-bottom: var(--sp-3);
+      margin-bottom: var(--pd-space-3);
     }
     .controls {
       display: flex;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
     }
     .seg {
       display: inline-flex;
       padding: 2px;
-      background: var(--bg-active);
-      border-radius: var(--r-md);
+      background: var(--pd-pressed);
+      border-radius: var(--pd-radius-control);
       button {
         height: 24px;
-        padding: 0 var(--sp-3);
+        padding: 0 var(--pd-space-3);
         font: inherit;
-        font-size: var(--fs-sm);
-        font-weight: var(--fw-medium);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        font-weight: var(--pd-weight-medium);
+        color: var(--pd-text-muted);
         background: none;
         border: none;
-        border-radius: var(--r-sm);
+        border-radius: var(--pd-radius-tag);
         cursor: default;
         &:hover {
-          color: var(--text);
+          color: var(--pd-text);
         }
         &[aria-checked='true'] {
-          color: var(--text);
-          background: var(--bg-card);
-          box-shadow: var(--shadow-1);
+          color: var(--pd-text);
+          background: var(--pd-surface-1);
+          box-shadow: var(--pd-shadow-1);
         }
       }
     }
@@ -164,36 +164,36 @@ const METRICS: { id: UsageMetric; label: string }[] = [
     .figures {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: var(--sp-4);
-      margin: 0 0 var(--sp-3);
-      padding-bottom: var(--sp-3);
-      border-bottom: 1px solid var(--border-soft);
+      gap: var(--pd-space-4);
+      margin: 0 0 var(--pd-space-3);
+      padding-bottom: var(--pd-space-3);
+      border-bottom: 1px solid var(--pd-hairline);
       dt {
-        font-size: var(--fs-sm);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-muted);
       }
       dd {
         margin: 2px 0 0;
-        font-size: var(--fs-lg);
-        font-weight: var(--fw-semibold);
+        font-size: var(--pd-text-subtitle);
+        font-weight: var(--pd-weight-semibold);
       }
       .bad {
-        color: var(--bad);
+        color: var(--pd-danger);
       }
     }
     .note {
-      margin: var(--sp-2) 0 0;
-      font-size: var(--fs-sm);
+      margin: var(--pd-space-2) 0 0;
+      font-size: var(--pd-text-label);
     }
     .none {
       margin: 0;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .limits {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-4);
+      gap: var(--pd-space-4);
       margin: 0;
       padding: 0;
       list-style: none;
@@ -201,59 +201,59 @@ const METRICS: { id: UsageMetric; label: string }[] = [
     .head {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       .name {
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
       .reset {
         margin-left: auto;
-        font-size: var(--fs-sm);
+        font-size: var(--pd-text-label);
       }
     }
     .bar {
       height: 8px;
-      margin: var(--sp-2) 0 var(--sp-1);
+      margin: var(--pd-space-2) 0 var(--pd-space-1);
       overflow: hidden;
-      background: var(--bg-sunken);
-      border: 1px solid var(--border-soft);
-      border-radius: var(--r-full);
+      background: var(--pd-surface-2);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-pill);
       .fill {
         display: block;
         height: 100%;
-        background: var(--text-3);
-        border-radius: var(--r-full);
+        background: var(--pd-text-subtle);
+        border-radius: var(--pd-radius-pill);
       }
     }
     li[data-state='warning'] .fill {
-      background: var(--warn);
+      background: var(--pd-warning);
     }
     li[data-state='exceeded'] .fill {
-      background: var(--bad);
+      background: var(--pd-danger);
     }
     .nums {
       display: flex;
       justify-content: space-between;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .msg {
-      margin: var(--sp-1) 0 0;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      margin: var(--pd-space-1) 0 0;
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .recent {
       th:first-child,
       td:first-child {
-        padding-left: var(--sp-4);
+        padding-left: var(--pd-space-4);
       }
       th:last-child,
       td:last-child {
-        padding-right: var(--sp-4);
+        padding-right: var(--pd-space-4);
       }
     }
     .ep {
       max-width: 220px;
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;

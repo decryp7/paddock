@@ -232,27 +232,27 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
   styles: `
     .engine {
       display: grid;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .surface {
       overflow-x: auto;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      box-shadow: var(--shadow-1), var(--card-highlight);
+      background: var(--pd-surface-1);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-card);
+      box-shadow: var(--pd-shadow-1);
     }
     .choice {
       display: flex;
       align-items: flex-end;
       flex-wrap: wrap;
-      gap: var(--sp-4);
+      gap: var(--pd-space-4);
       .field {
         display: grid;
         gap: 4px;
         label {
-          font-size: var(--fs-sm);
-          font-weight: var(--fw-medium);
-          color: var(--text-2);
+          font-size: var(--pd-text-label);
+          font-weight: var(--pd-weight-medium);
+          color: var(--pd-text-muted);
         }
         pw-select {
           min-width: 300px;
@@ -262,29 +262,29 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
         flex: 1;
         min-width: 240px;
         padding-bottom: 6px;
-        font-size: var(--fs-sm);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-muted);
       }
     }
     .section-head {
       display: flex;
       align-items: baseline;
-      gap: var(--sp-3);
-      margin-top: var(--sp-3);
+      gap: var(--pd-space-3);
+      margin-top: var(--pd-space-3);
       h3 {
-        font-size: var(--fs-md);
-        font-weight: var(--fw-semibold);
+        font-size: var(--pd-text-body-lg);
+        font-weight: var(--pd-weight-semibold);
       }
       .faint {
-        font-size: var(--fs-sm);
+        font-size: var(--pd-text-label);
       }
     }
     .link {
       padding: 0;
       font: inherit;
-      font-size: var(--fs-sm);
-      font-weight: var(--fw-medium);
-      color: var(--accent);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-medium);
+      color: var(--pd-accent);
       background: none;
       border: none;
       cursor: default;
@@ -294,39 +294,39 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
     }
     .table th:first-child,
     .table td:first-child {
-      padding-left: var(--sp-4);
+      padding-left: var(--pd-space-4);
     }
     .table th:last-child,
     .table td:last-child {
-      padding-right: var(--sp-3);
+      padding-right: var(--pd-space-3);
     }
     .bname {
-      font-weight: var(--fw-semibold);
-      margin-right: var(--sp-2);
+      font-weight: var(--pd-weight-semibold);
+      margin-right: var(--pd-space-2);
     }
     .active {
       display: inline-flex;
       align-items: center;
       gap: 3px;
-      margin-right: var(--sp-2);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      margin-right: var(--pd-space-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       mat-icon {
         width: 13px;
         height: 13px;
-        color: var(--ok);
+        color: var(--pd-success);
       }
     }
     .pinned {
       width: 13px;
       height: 13px;
       vertical-align: -2px;
-      color: var(--accent);
+      color: var(--pd-accent);
     }
     .devices {
       max-width: 260px;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .dev {
       display: block;
@@ -338,8 +338,8 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
       width: 1%;
     }
     .warn {
-      color: var(--warn);
-      font-weight: var(--fw-medium);
+      color: var(--pd-warning);
+      font-weight: var(--pd-weight-medium);
     }
     .leftovers {
       margin: 0;
@@ -349,10 +349,10 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
         display: grid;
         grid-template-columns: 160px minmax(0, 1fr) auto;
         align-items: center;
-        gap: var(--sp-3);
+        gap: var(--pd-space-3);
         min-height: 44px;
-        padding: 0 var(--sp-4);
-        border-top: 1px solid var(--border-soft);
+        padding: 0 var(--pd-space-4);
+        border-top: 1px solid var(--pd-hairline);
         &:first-child {
           border-top: none;
         }
@@ -366,16 +366,16 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
         display: grid;
         grid-template-columns: minmax(180px, 1fr) minmax(0, 1.4fr) 110px 92px;
         align-items: center;
-        gap: var(--sp-3);
+        gap: var(--pd-space-3);
         min-height: 44px;
-        padding: 0 var(--sp-4);
-        border-top: 1px solid var(--border-soft);
+        padding: 0 var(--pd-space-4);
+        border-top: 1px solid var(--pd-hairline);
         &:first-child {
           border-top: none;
         }
       }
       .faint {
-        font-size: var(--fs-sm);
+        font-size: var(--pd-text-label);
       }
       .btn {
         justify-self: end;
@@ -388,8 +388,8 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       mat-icon {
         width: 12px;
         height: 12px;
@@ -397,7 +397,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
     }
     .installing {
       display: grid;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       margin: 0;
       padding: 0;
       list-style: none;
@@ -405,39 +405,39 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
         display: grid;
         grid-template-columns: minmax(0, 260px) 1fr auto;
         align-items: center;
-        gap: var(--sp-3);
-        font-size: var(--fs-sm);
+        gap: var(--pd-space-3);
+        font-size: var(--pd-text-label);
       }
     }
     .none {
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
     }
     .callout p {
       margin: 0;
     }
     .caps-row td {
       padding-top: 0;
-      background: var(--bg-sunken);
+      background: var(--pd-surface-2);
     }
     .caps {
       display: grid;
-      gap: var(--sp-2);
-      margin: var(--sp-2) 0;
+      gap: var(--pd-space-2);
+      margin: var(--pd-space-2) 0;
       padding: 0;
       list-style: none;
       li {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: var(--sp-3);
-        font-size: var(--fs-sm);
+        gap: var(--pd-space-3);
+        font-size: var(--pd-text-label);
       }
       .status {
         min-width: 150px;
       }
       .cap-name {
         min-width: 200px;
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
     }
   `,

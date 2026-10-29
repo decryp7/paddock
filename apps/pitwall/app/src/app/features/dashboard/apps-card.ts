@@ -69,54 +69,54 @@ export function limitsText(l: AppLimits): string {
   styles: `
     :host {
       display: block;
-      margin: 0 calc(-1 * var(--sp-4)) calc(-1 * var(--sp-2));
+      margin: 0 calc(-1 * var(--pd-space-4)) calc(-1 * var(--pd-space-2));
       overflow-x: auto;
     }
     .table th:first-child,
     .table td:first-child {
-      padding-left: var(--sp-4);
+      padding-left: var(--pd-space-4);
     }
     .table th:last-child,
     .table td:last-child {
-      padding-right: var(--sp-4);
+      padding-right: var(--pd-space-4);
     }
     .app {
       display: inline-flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
     }
     .avatar {
       display: grid;
       place-items: center;
       width: 20px;
       height: 20px;
-      font-size: var(--fs-2xs);
-      font-weight: var(--fw-semibold);
-      color: var(--text);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-semibold);
+      color: var(--pd-text);
       background: color-mix(in srgb, var(--c) 24%, transparent);
       box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent);
-      border-radius: var(--r-sm);
+      border-radius: var(--pd-radius-tag);
     }
     .nm {
-      font-weight: var(--fw-medium);
+      font-weight: var(--pd-weight-medium);
     }
     .conn {
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      border: 1.5px solid var(--text-3);
+      border: 1.5px solid var(--pd-text-subtle);
       &.on {
-        border-color: var(--ok);
-        background: var(--ok);
+        border-color: var(--pd-success);
+        background: var(--pd-success);
       }
     }
     .bad {
-      color: var(--bad);
-      font-weight: var(--fw-medium);
+      color: var(--pd-danger);
+      font-weight: var(--pd-weight-medium);
     }
     .limits {
-      color: var(--text-2);
-      font-size: var(--fs-sm);
+      color: var(--pd-text-muted);
+      font-size: var(--pd-text-label);
     }
     .lim {
       display: block;

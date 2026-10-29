@@ -183,33 +183,33 @@ export function fitDetail(f: Fit): string {
         margin: 0;
       }
       .head {
-        font-weight: var(--fw-semibold);
+        font-weight: var(--pd-weight-semibold);
       }
       ul {
-        margin: var(--sp-1) 0 0;
+        margin: var(--pd-space-1) 0 0;
         padding: 0;
         list-style: none;
-        color: var(--text-2);
+        color: var(--pd-text-muted);
       }
       .mono {
-        font-size: var(--fs-sm);
+        font-size: var(--pd-text-label);
       }
     }
     :host {
       display: grid;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .search {
       position: relative;
       display: flex;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       mat-icon {
         position: absolute;
         left: 11px;
         top: 9px;
         width: 15px;
         height: 15px;
-        color: var(--text-3);
+        color: var(--pd-text-subtle);
       }
       .input {
         flex: 1;
@@ -223,45 +223,45 @@ export function fitDetail(f: Fit): string {
     .chips {
       display: flex;
       flex-wrap: wrap;
-      gap: var(--sp-1);
-      padding: 0 var(--sp-4) var(--sp-2);
+      gap: var(--pd-space-1);
+      padding: 0 var(--pd-space-4) var(--pd-space-2);
     }
     .chip {
       height: 24px;
-      padding: 0 var(--sp-3);
+      padding: 0 var(--pd-space-3);
       font: inherit;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       background: none;
-      border: 1px solid var(--border-strong);
-      border-radius: var(--r-full);
+      border: 1px solid var(--pd-border-strong);
+      border-radius: var(--pd-radius-pill);
       cursor: default;
       &:hover {
-        color: var(--text);
-        background: var(--bg-hover);
+        color: var(--pd-text);
+        background: var(--pd-hover);
       }
       &[aria-pressed='true'] {
-        color: var(--accent);
-        background: var(--accent-soft);
-        border-color: var(--accent);
+        color: var(--pd-accent);
+        background: var(--pd-accent-tint);
+        border-color: var(--pd-accent);
       }
     }
     /* A recommendation is one line: name, what it is, the verdict, and a download that appears on hover. */
     .rec-list {
       margin: 0;
-      padding: 0 0 var(--sp-1);
+      padding: 0 0 var(--pd-space-1);
       list-style: none;
     }
     .rec {
       display: grid;
       grid-template-columns: minmax(160px, 1.2fr) minmax(0, 1fr) 80px 96px;
       align-items: center;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       min-height: 40px;
-      padding: 0 var(--sp-4);
-      border-top: 1px solid var(--border-soft);
+      padding: 0 var(--pd-space-4);
+      border-top: 1px solid var(--pd-hairline);
       &:hover {
-        background: var(--bg-hover);
+        background: var(--pd-hover);
       }
     }
     .rec .reveal {
@@ -276,28 +276,28 @@ export function fitDetail(f: Fit): string {
       justify-self: end;
     }
     .in-lib {
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
     }
     .rec-name {
-      font-weight: var(--fw-semibold);
+      font-weight: var(--pd-weight-semibold);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .rec-meta {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .cols {
       display: grid;
       grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       align-items: start;
     }
     .list {
       list-style: none;
-      margin: var(--sp-2) 0 0;
-      padding: 0 var(--sp-2) var(--sp-2);
+      margin: var(--pd-space-2) 0 0;
+      padding: 0 var(--pd-space-2) var(--pd-space-2);
       max-height: 640px;
       overflow: auto;
     }
@@ -306,33 +306,33 @@ export function fitDetail(f: Fit): string {
       flex-direction: column;
       gap: 4px;
       width: 100%;
-      padding: 10px var(--sp-2);
+      padding: 10px var(--pd-space-2);
       font: inherit;
       color: inherit;
       text-align: left;
       background: none;
       border: none;
-      border-radius: var(--r-md);
+      border-radius: var(--pd-radius-control);
       cursor: default;
       &:hover {
-        background: var(--bg-hover);
+        background: var(--pd-hover);
       }
       &.sel {
-        background: var(--accent-soft);
-        box-shadow: inset 2px 0 0 var(--accent);
+        background: var(--pd-accent-tint);
+        box-shadow: inset 2px 0 0 var(--pd-accent);
       }
     }
     .repo {
-      font-weight: var(--fw-medium);
+      font-weight: var(--pd-weight-medium);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .meta {
       display: flex;
-      gap: var(--sp-3);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      gap: var(--pd-space-3);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       span {
         display: inline-flex;
         align-items: center;
@@ -344,34 +344,34 @@ export function fitDetail(f: Fit): string {
       }
     }
     .callout {
-      margin-bottom: var(--sp-3);
+      margin-bottom: var(--pd-space-3);
     }
     .proj {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
-      margin-bottom: var(--sp-3);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      gap: var(--pd-space-2);
+      margin-bottom: var(--pd-space-3);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .table {
-      margin: 0 calc(-1 * var(--sp-4));
-      width: calc(100% + 2 * var(--sp-4));
+      margin: 0 calc(-1 * var(--pd-space-4));
+      width: calc(100% + 2 * var(--pd-space-4));
       th:first-child,
       td:first-child {
-        padding-left: var(--sp-4);
+        padding-left: var(--pd-space-4);
       }
       th:last-child,
       td:last-child {
-        padding-right: var(--sp-4);
+        padding-right: var(--pd-space-4);
       }
     }
     .q {
-      font-weight: var(--fw-medium);
+      font-weight: var(--pd-weight-medium);
     }
     .parts {
-      margin-left: var(--sp-2);
-      font-size: var(--fs-sm);
+      margin-left: var(--pd-space-2);
+      font-size: var(--pd-text-label);
     }
     .table td.act {
       width: 1%;
@@ -382,8 +382,8 @@ export function fitDetail(f: Fit): string {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
   `,
 })

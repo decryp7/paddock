@@ -61,26 +61,26 @@ export const SHOWN = 3;
     }
     .banner {
       display: grid;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       mat-icon {
-        color: var(--info);
+        color: var(--pd-info);
       }
     }
     .summary {
       grid-template-columns: auto minmax(0, 1fr) auto;
       align-items: center;
-      gap: var(--sp-3);
-      font-size: var(--fs-sm);
+      gap: var(--pd-space-3);
+      font-size: var(--pd-text-label);
     }
     header {
       display: flex;
       align-items: center;
-      gap: var(--sp-3);
-      font-size: var(--fs-sm);
+      gap: var(--pd-space-3);
+      font-size: var(--pd-text-label);
     }
     ul {
       display: grid;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       margin: 0;
       padding: 0;
       list-style: none;
@@ -90,9 +90,9 @@ export const SHOWN = 3;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sp-3);
-      padding: var(--sp-2) 0;
-      border-top: 1px solid var(--border-soft);
+      gap: var(--pd-space-3);
+      padding: var(--pd-space-2) 0;
+      border-top: 1px solid var(--pd-hairline);
     }
     li .reveal {
       opacity: 0;
@@ -108,8 +108,8 @@ export const SHOWN = 3;
       }
     }
     .kind {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .what {
       display: grid;
@@ -119,22 +119,22 @@ export const SHOWN = 3;
     .line {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       flex-wrap: wrap;
     }
     .why {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .meta {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       overflow-wrap: anywhere;
     }
     .act {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       flex-shrink: 0;
     }
     .more {

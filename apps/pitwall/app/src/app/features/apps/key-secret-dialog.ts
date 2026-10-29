@@ -50,18 +50,18 @@ export interface KeySecretData {
     :host {
       display: block;
       width: 520px;
-      padding: var(--sp-5);
+      padding: var(--pd-space-4);
     }
     .head {
       display: flex;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       align-items: center;
-      margin-bottom: var(--sp-4);
+      margin-bottom: var(--pd-space-4);
       h2 {
-        font-size: var(--fs-md);
+        font-size: var(--pd-text-body-lg);
       }
       p {
-        font-size: var(--fs-sm);
+        font-size: var(--pd-text-label);
       }
     }
     .ic {
@@ -69,43 +69,43 @@ export interface KeySecretData {
       place-items: center;
       width: 34px;
       height: 34px;
-      border-radius: var(--r-lg);
-      color: var(--accent);
-      background: var(--accent-soft);
+      border-radius: var(--pd-radius-card);
+      color: var(--pd-accent);
+      background: var(--pd-accent-tint);
     }
     .warn {
       display: flex;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       align-items: flex-start;
-      padding: var(--sp-3);
-      font-size: var(--fs-sm);
-      background: var(--warn-soft);
-      border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
-      border-radius: var(--r-md);
+      padding: var(--pd-space-3);
+      font-size: var(--pd-text-label);
+      background: var(--pd-warning-tint);
+      border: 1px solid color-mix(in srgb, var(--pd-warning) 30%, transparent);
+      border-radius: var(--pd-radius-control);
       mat-icon {
         flex: none;
-        color: var(--warn);
+        color: var(--pd-warning);
         margin-top: 1px;
       }
     }
     .secret {
       display: flex;
-      gap: var(--sp-2);
-      margin-top: var(--sp-4);
+      gap: var(--pd-space-2);
+      margin-top: var(--pd-space-4);
       input {
         flex: 1;
         min-width: 0;
         height: 34px;
-        padding: 0 var(--sp-3);
-        font-size: var(--fs-sm);
-        color: var(--text);
-        background: var(--bg-sunken);
-        border: 1px solid var(--border-strong);
-        border-radius: var(--r-md);
+        padding: 0 var(--pd-space-3);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text);
+        background: var(--pd-surface-2);
+        border: 1px solid var(--pd-border-strong);
+        border-radius: var(--pd-radius-control);
         outline: none;
         &:focus {
-          border-color: var(--accent);
-          box-shadow: 0 0 0 3px var(--accent-soft);
+          border-color: var(--pd-accent);
+          box-shadow: 0 0 0 3px var(--pd-accent-tint);
         }
       }
       .btn {
@@ -114,16 +114,16 @@ export interface KeySecretData {
     }
     .status {
       min-height: 18px;
-      margin-top: var(--sp-1);
-      font-size: var(--fs-xs);
-      color: var(--warn);
+      margin-top: var(--pd-space-1);
+      font-size: var(--pd-text-label);
+      color: var(--pd-warning);
     }
     .row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-top: var(--sp-3);
-      font-size: var(--fs-sm);
+      margin-top: var(--pd-space-3);
+      font-size: var(--pd-text-label);
     }
   `,
 })

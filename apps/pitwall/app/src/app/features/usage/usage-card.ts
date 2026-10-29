@@ -64,51 +64,51 @@ import { UsageStore } from './usage.store';
     }
     .controls {
       display: flex;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
     }
     .seg {
       display: inline-flex;
       padding: 2px;
-      background: var(--bg-active);
-      border-radius: var(--r-md);
+      background: var(--pd-pressed);
+      border-radius: var(--pd-radius-control);
       button {
         height: 22px;
         min-width: 40px;
-        padding: 0 var(--sp-2);
+        padding: 0 var(--pd-space-2);
         font: inherit;
-        font-size: var(--fs-sm);
-        font-weight: var(--fw-medium);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        font-weight: var(--pd-weight-medium);
+        color: var(--pd-text-muted);
         background: none;
         border: none;
-        border-radius: var(--r-sm);
+        border-radius: var(--pd-radius-tag);
         cursor: default;
         &:hover {
-          color: var(--text);
+          color: var(--pd-text);
         }
         &[aria-checked='true'] {
-          color: var(--text);
-          background: var(--bg-card);
-          box-shadow: var(--shadow-1);
+          color: var(--pd-text);
+          background: var(--pd-surface-1);
+          box-shadow: var(--pd-shadow-1);
         }
       }
     }
     .cache {
-      margin-top: var(--sp-3);
+      margin-top: var(--pd-space-3);
     }
     .totals {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-      gap: var(--sp-1) var(--sp-4);
-      margin: var(--sp-2) 0 0;
+      gap: var(--pd-space-1) var(--pd-space-4);
+      margin: var(--pd-space-2) 0 0;
       padding: 0;
       list-style: none;
       li {
         display: grid;
         grid-template-columns: 10px minmax(0, 1fr) auto auto auto auto;
         align-items: center;
-        gap: var(--sp-2);
-        font-size: var(--fs-sm);
+        gap: var(--pd-space-2);
+        font-size: var(--pd-text-label);
       }
       .swatch {
         width: 10px;
@@ -117,8 +117,8 @@ import { UsageStore } from './usage.store';
       }
       .nm {
         overflow: hidden;
-        font-weight: var(--fw-medium);
-        color: var(--text);
+        font-weight: var(--pd-weight-medium);
+        color: var(--pd-text);
         text-decoration: none;
         text-overflow: ellipsis;
         white-space: nowrap;

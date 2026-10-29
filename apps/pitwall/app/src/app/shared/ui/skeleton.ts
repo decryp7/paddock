@@ -13,13 +13,13 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
   styles: `
     :host {
       display: grid;
-      gap: var(--sp-2);
-      padding: var(--sp-1) 0;
+      gap: var(--pd-space-2);
+      padding: var(--pd-space-1) 0;
     }
     .line {
       display: block;
-      border-radius: var(--r-sm);
-      background: linear-gradient(90deg, var(--skeleton) 0%, var(--skeleton-shine) 50%, var(--skeleton) 100%);
+      border-radius: var(--pd-radius-tag);
+      background: linear-gradient(90deg, var(--pd-skeleton) 0%, var(--pd-skeleton-shine) 50%, var(--pd-skeleton) 100%);
       background-size: 200% 100%;
       animation: shimmer 1.4s ease-in-out infinite;
     }

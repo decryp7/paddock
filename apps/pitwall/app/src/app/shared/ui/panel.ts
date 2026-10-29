@@ -52,22 +52,22 @@ import { Skeleton } from './skeleton';
       display: flex;
       flex-direction: column;
       min-width: 0;
-      padding: var(--sp-4);
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      box-shadow: var(--shadow-1), var(--card-highlight);
+      padding: var(--pd-space-4);
+      background: var(--pd-surface-1);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-card);
+      box-shadow: var(--pd-shadow-1);
     }
     :host(.flush) {
       padding: 0;
       header {
-        padding: var(--sp-3) var(--sp-4) 0;
+        padding: var(--pd-space-3) var(--pd-space-4) 0;
       }
       .error {
-        margin: 0 var(--sp-4) var(--sp-3);
+        margin: 0 var(--pd-space-4) var(--pd-space-3);
       }
       pw-skeleton {
-        padding: var(--sp-2) var(--sp-4) var(--sp-4);
+        padding: var(--pd-space-2) var(--pd-space-4) var(--pd-space-4);
       }
     }
     header {
@@ -75,33 +75,33 @@ import { Skeleton } from './skeleton';
       align-items: center;
       flex-wrap: wrap;
       justify-content: space-between;
-      gap: var(--sp-1) var(--sp-3);
+      gap: var(--pd-space-1) var(--pd-space-3);
       min-height: 24px;
-      margin-bottom: var(--sp-3);
+      margin-bottom: var(--pd-space-3);
     }
     .titles {
       display: flex;
       align-items: baseline;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       min-width: 0;
     }
     h2 {
       display: flex;
       align-items: center;
       gap: 7px;
-      font-size: var(--fs-base);
-      font-weight: var(--fw-semibold);
+      font-size: var(--pd-text-body);
+      font-weight: var(--pd-weight-semibold);
       letter-spacing: 0;
       white-space: nowrap;
       mat-icon {
         width: 15px;
         height: 15px;
-        color: var(--text-3);
+        color: var(--pd-text-subtle);
       }
     }
     .sub {
-      color: var(--text-3);
-      font-size: var(--fs-sm);
+      color: var(--pd-text-subtle);
+      font-size: var(--pd-text-label);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -109,22 +109,22 @@ import { Skeleton } from './skeleton';
     .actions {
       display: flex;
       align-items: center;
-      gap: var(--sp-1);
+      gap: var(--pd-space-1);
       flex: 0 1 auto;
       min-width: 0;
     }
     .error {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
-      margin-bottom: var(--sp-3);
-      padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
-      font-size: var(--fs-sm);
-      color: var(--text);
-      background: var(--bad-soft);
-      border-radius: var(--r-md);
+      gap: var(--pd-space-2);
+      margin-bottom: var(--pd-space-3);
+      padding: var(--pd-space-2) var(--pd-space-2) var(--pd-space-2) var(--pd-space-3);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text);
+      background: var(--pd-danger-tint);
+      border-radius: var(--pd-radius-control);
       mat-icon {
-        color: var(--bad);
+        color: var(--pd-danger);
         flex: none;
       }
       .msg {

@@ -221,17 +221,17 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
     .page {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       height: 100%;
-      padding-bottom: var(--sp-6);
+      padding-bottom: var(--pd-space-6);
     }
     .page-head {
-      margin-bottom: var(--sp-2);
+      margin-bottom: var(--pd-space-2);
     }
     .filters {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       min-height: 44px;
     }
     .search {
@@ -244,7 +244,7 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
         width: 14px;
         height: 14px;
         transform: translateY(-50%);
-        color: var(--text-3);
+        color: var(--pd-text-subtle);
         pointer-events: none;
       }
       .input {
@@ -258,68 +258,68 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
     .seg {
       display: inline-flex;
       padding: 2px;
-      background: var(--bg-active);
-      border-radius: var(--r-md);
+      background: var(--pd-pressed);
+      border-radius: var(--pd-radius-control);
       button {
         display: inline-flex;
         align-items: center;
         gap: 6px;
         height: 26px;
-        padding: 0 var(--sp-3);
+        padding: 0 var(--pd-space-3);
         font: inherit;
-        font-size: var(--fs-sm);
-        font-weight: var(--fw-medium);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        font-weight: var(--pd-weight-medium);
+        color: var(--pd-text-muted);
         background: none;
         border: none;
-        border-radius: var(--r-sm);
+        border-radius: var(--pd-radius-tag);
         cursor: default;
         &[aria-checked='true'] {
-          color: var(--text);
-          background: var(--bg-card);
-          box-shadow: var(--shadow-1);
+          color: var(--pd-text);
+          background: var(--pd-surface-1);
+          box-shadow: var(--pd-shadow-1);
         }
       }
     }
     .shown {
       margin-left: auto;
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
       white-space: nowrap;
     }
     .pop {
       display: flex;
       flex-direction: column;
       min-width: 168px;
-      padding: var(--sp-1);
-      background: var(--bg-raised);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      box-shadow: var(--shadow-pop);
+      padding: var(--pd-space-1);
+      background: var(--pd-surface-3);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-card);
+      box-shadow: var(--pd-shadow-3);
     }
     .opt {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       height: 28px;
       padding: 0 8px;
       font: inherit;
       text-align: left;
-      color: var(--text);
+      color: var(--pd-text);
       background: none;
       border: none;
-      border-radius: var(--r-sm);
+      border-radius: var(--pd-radius-tag);
       cursor: default;
       mat-icon {
         width: 14px;
         height: 14px;
         visibility: hidden;
-        color: var(--accent);
+        color: var(--pd-accent);
       }
       &[aria-checked='true'] mat-icon {
         visibility: visible;
       }
       &:hover {
-        background: var(--bg-hover);
+        background: var(--pd-hover);
       }
     }
     .body {
@@ -377,11 +377,11 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       display: grid;
       grid-template-columns: var(--cols);
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       height: 40px;
-      padding: 0 var(--sp-3) 0 var(--sp-4);
-      font-size: var(--fs-sm);
-      border-bottom: 1px solid var(--border-soft);
+      padding: 0 var(--pd-space-3) 0 var(--pd-space-4);
+      font-size: var(--pd-text-label);
+      border-bottom: 1px solid var(--pd-hairline);
       white-space: nowrap;
       cursor: default;
       outline: none;
@@ -391,22 +391,22 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
         text-overflow: ellipsis;
       }
       &:hover {
-        background: var(--bg-hover);
+        background: var(--pd-hover);
       }
       &:focus-visible {
-        box-shadow: inset 0 0 0 2px var(--accent-ring);
+        box-shadow: inset 0 0 0 2px var(--pd-accent-ring);
       }
       &.sel {
-        background: var(--accent-soft);
-        box-shadow: inset 2px 0 0 var(--accent);
+        background: var(--pd-accent-tint);
+        box-shadow: inset 2px 0 0 var(--pd-accent);
       }
     }
     .row.head {
       height: 34px;
-      font-size: var(--fs-xs);
-      font-weight: var(--fw-medium);
-      color: var(--text-3);
-      border-bottom: 1px solid var(--border);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-medium);
+      color: var(--pd-text-subtle);
+      border-bottom: 1px solid var(--pd-hairline);
       &:hover {
         background: none;
       }
@@ -419,16 +419,16 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       background: inherit;
     }
     .row:not(.head) .sticky {
-      background: var(--bg-card);
+      background: var(--pd-surface-1);
     }
     .row.sel .sticky {
-      background: color-mix(in srgb, var(--bg-card) 90%, var(--accent));
+      background: color-mix(in srgb, var(--pd-surface-1) 90%, var(--pd-accent));
     }
     .row:hover .sticky {
-      background: color-mix(in srgb, var(--bg-card) 95%, var(--text));
+      background: color-mix(in srgb, var(--pd-surface-1) 95%, var(--pd-text));
     }
     .head .sticky {
-      background: var(--bg-card);
+      background: var(--pd-surface-1);
     }
     .r {
       text-align: right;
@@ -437,32 +437,32 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       display: inline-flex;
       align-items: center;
       gap: 3px;
-      font-size: var(--fs-sm);
-      color: var(--text-3);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-subtle);
       mat-icon {
         width: 12px;
         height: 12px;
       }
     }
     .c-status {
-      padding-left: var(--sp-3);
+      padding-left: var(--pd-space-3);
     }
     .t {
-      color: var(--text-2);
+      color: var(--pd-text-muted);
     }
     .app {
       display: inline-flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       .nm {
         overflow: hidden;
         text-overflow: ellipsis;
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
     }
     .ep {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .vp {
       flex: 1;

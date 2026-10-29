@@ -101,37 +101,37 @@ import { UpdatesStore } from '../updates/updates.store';
     .tray {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       height: 100%;
-      padding: var(--sp-3) var(--sp-4) var(--sp-4);
-      background: var(--bg-content);
+      padding: var(--pd-space-3) var(--pd-space-4) var(--pd-space-4);
+      background: var(--pw-content-bg);
       overflow: hidden;
     }
     .pairing {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
-      padding: var(--sp-2) var(--sp-3);
+      gap: var(--pd-space-2);
+      padding: var(--pd-space-2) var(--pd-space-3);
       font: inherit;
-      font-size: var(--fs-sm);
-      color: var(--text);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text);
       text-align: left;
-      background: var(--accent-soft);
-      border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-      border-radius: var(--r-md);
+      background: var(--pd-accent-tint);
+      border: 1px solid color-mix(in srgb, var(--pd-accent) 35%, transparent);
+      border-radius: var(--pd-radius-control);
       mat-icon {
-        color: var(--accent);
+        color: var(--pd-accent);
       }
     }
     .down {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sp-2);
-      padding: var(--sp-2) var(--sp-3);
-      font-size: var(--fs-sm);
-      background: var(--bad-soft);
-      border-radius: var(--r-md);
+      gap: var(--pd-space-2);
+      padding: var(--pd-space-2) var(--pd-space-3);
+      font-size: var(--pd-text-label);
+      background: var(--pd-danger-tint);
+      border-radius: var(--pd-radius-control);
     }
     header {
       display: flex;
@@ -144,7 +144,7 @@ import { UpdatesStore } from '../updates/updates.store';
       flex: none;
     }
     h1 {
-      font-size: var(--fs-lg);
+      font-size: var(--pd-text-subtitle);
     }
     .title {
       flex: 1;
@@ -159,36 +159,36 @@ import { UpdatesStore } from '../updates/updates.store';
       gap: 6px;
       height: 22px;
       padding: 0 8px;
-      font-size: var(--fs-xs);
-      font-weight: var(--fw-medium);
-      color: var(--text-2);
-      background: var(--bg-active);
-      border-radius: var(--r-full);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-medium);
+      color: var(--pd-text-muted);
+      background: var(--pd-pressed);
+      border-radius: var(--pd-radius-pill);
       white-space: nowrap;
       .dot {
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: var(--text-3);
+        background: var(--pd-text-subtle);
       }
       &[data-state='serving'] .dot {
-        background: var(--ok);
+        background: var(--pd-success);
       }
       &[data-state='paused'] .dot,
       &[data-state='stopped'] .dot {
-        background: var(--warn);
+        background: var(--pd-warning);
       }
       &[data-state='down'] .dot {
-        background: var(--bad);
+        background: var(--pd-danger);
       }
     }
     .mem,
     .stats,
     .models {
-      padding: var(--sp-3);
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
+      padding: var(--pd-space-3);
+      background: var(--pd-surface-1);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-card);
     }
     .mem {
       display: grid;
@@ -196,19 +196,19 @@ import { UpdatesStore } from '../updates/updates.store';
       .row {
         display: flex;
         align-items: center;
-        gap: var(--sp-2);
+        gap: var(--pd-space-2);
       }
       .k {
         width: 40px;
-        font-size: var(--fs-xs);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-muted);
       }
       .v {
         flex: 1;
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
       .small {
-        font-size: var(--fs-xs);
+        font-size: var(--pd-text-label);
       }
       .meter {
         margin-bottom: 4px;
@@ -217,39 +217,39 @@ import { UpdatesStore } from '../updates/updates.store';
     .stats {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      padding: var(--sp-2) var(--sp-3);
+      padding: var(--pd-space-2) var(--pd-space-3);
       > div {
         display: flex;
         flex-direction: column;
         align-items: center;
       }
       b {
-        font-size: var(--fs-xl);
-        font-weight: var(--fw-semibold);
+        font-size: var(--pd-text-title);
+        font-weight: var(--pd-weight-semibold);
         font-variant-numeric: tabular-nums;
         line-height: 1.2;
       }
       span {
-        font-size: var(--fs-xs);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-muted);
       }
     }
     .models {
       flex: 1;
       min-height: 0;
       overflow: auto;
-      padding-top: var(--sp-2);
+      padding-top: var(--pd-space-2);
       h2 {
-        margin-bottom: var(--sp-1);
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-medium);
-        color: var(--text-2);
+        margin-bottom: var(--pd-space-1);
+        font-size: var(--pd-text-label);
+        font-weight: var(--pd-weight-medium);
+        color: var(--pd-text-muted);
       }
     }
     footer {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       .wide {
         grid-column: 1 / -1;
         height: 32px;

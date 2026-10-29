@@ -20,8 +20,8 @@ import { MatIconModule } from '@angular/material/icon';
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: var(--sp-1);
-      padding: var(--sp-6) var(--sp-4);
+      gap: var(--pd-space-1);
+      padding: var(--pd-space-6) var(--pd-space-4);
       text-align: center;
     }
     .icon {
@@ -29,27 +29,27 @@ import { MatIconModule } from '@angular/material/icon';
       place-items: center;
       width: 36px;
       height: 36px;
-      margin-bottom: var(--sp-2);
-      border-radius: var(--r-lg);
-      background: var(--bg-hover);
-      color: var(--text-3);
+      margin-bottom: var(--pd-space-2);
+      border-radius: var(--pd-radius-card);
+      background: var(--pd-hover);
+      color: var(--pd-text-subtle);
       mat-icon {
         width: 18px;
         height: 18px;
       }
     }
     .title {
-      font-weight: var(--fw-medium);
+      font-weight: var(--pd-weight-medium);
     }
     .text {
       max-width: 360px;
-      color: var(--text-2);
-      font-size: var(--fs-sm);
+      color: var(--pd-text-muted);
+      font-size: var(--pd-text-label);
     }
     .actions:not(:empty) {
-      margin-top: var(--sp-3);
+      margin-top: var(--pd-space-3);
       display: flex;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
     }
   `,
 })

@@ -36,8 +36,8 @@ import { EmptyState } from '../../shared/ui/empty-state';
       display: block;
       min-height: 0;
       overflow: auto;
-      margin: 0 calc(-1 * var(--sp-2));
-      padding: 0 var(--sp-2);
+      margin: 0 calc(-1 * var(--pd-space-2));
+      padding: 0 var(--pd-space-2);
       /* A list longer than its card fades out instead of showing a half item at the edge. */
       mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
     }
@@ -50,8 +50,8 @@ import { EmptyState } from '../../shared/ui/empty-state';
       position: relative;
       display: grid;
       grid-template-columns: 24px minmax(0, 1fr);
-      gap: var(--sp-3);
-      padding: 0 0 var(--sp-3);
+      gap: var(--pd-space-3);
+      padding: 0 0 var(--pd-space-3);
       &:not(:last-child)::before {
         content: '';
         position: absolute;
@@ -59,7 +59,7 @@ import { EmptyState } from '../../shared/ui/empty-state';
         top: 26px;
         bottom: 2px;
         width: 1px;
-        background: var(--border);
+        background: var(--pd-hairline);
       }
     }
     .ic {
@@ -68,36 +68,36 @@ import { EmptyState } from '../../shared/ui/empty-state';
       width: 24px;
       height: 24px;
       border-radius: 50%;
-      background: var(--bg-hover);
-      color: var(--text-2);
+      background: var(--pd-hover);
+      color: var(--pd-text-muted);
       mat-icon {
         width: 13px;
         height: 13px;
       }
     }
     li[data-tone='warn'] .ic {
-      background: var(--warn-soft);
-      color: var(--warn);
+      background: var(--pd-warning-tint);
+      color: var(--pd-warning);
     }
     li[data-tone='bad'] .ic {
-      background: var(--bad-soft);
-      color: var(--bad);
+      background: var(--pd-danger-tint);
+      color: var(--pd-danger);
     }
     .msg {
       padding-top: 3px;
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
       line-height: 1.4;
     }
     .meta {
       display: flex;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       margin-top: 2px;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .reason::before {
       content: '·';
-      margin-right: var(--sp-2);
+      margin-right: var(--pd-space-2);
     }
   `,
 })

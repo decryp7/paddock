@@ -117,43 +117,43 @@ import { Skeleton } from '../../shared/ui/skeleton';
     :host {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .tile {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       min-width: 0;
-      padding: var(--sp-4);
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      box-shadow: var(--shadow-1), var(--card-highlight);
+      padding: var(--pd-space-4);
+      background: var(--pd-surface-1);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-card);
+      box-shadow: var(--pd-shadow-1);
     }
     .head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       min-height: 20px;
     }
     .label {
       display: inline-flex;
       align-items: center;
       gap: 7px;
-      font-size: var(--fs-sm);
-      font-weight: var(--fw-medium);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-medium);
+      color: var(--pd-text-muted);
       white-space: nowrap;
       mat-icon {
         width: 15px;
         height: 15px;
-        color: var(--text-3);
+        color: var(--pd-text-subtle);
       }
     }
     .gpu-name {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -162,57 +162,57 @@ import { Skeleton } from '../../shared/ui/skeleton';
       display: flex;
       align-items: baseline;
       gap: 3px;
-      font-size: var(--fs-3xl);
-      font-weight: var(--fw-semibold);
+      font-size: var(--pd-text-display);
+      font-weight: var(--pd-weight-semibold);
       letter-spacing: -0.02em;
       line-height: 1;
       font-variant-numeric: tabular-nums;
       .unit {
-        font-size: var(--fs-base);
-        font-weight: var(--fw-medium);
-        color: var(--text-3);
+        font-size: var(--pd-text-body);
+        font-weight: var(--pd-weight-medium);
+        color: var(--pd-text-subtle);
         letter-spacing: 0;
       }
       .of {
-        margin-left: var(--sp-2);
-        font-size: var(--fs-base);
-        font-weight: var(--fw-regular);
-        color: var(--text-3);
+        margin-left: var(--pd-space-2);
+        font-size: var(--pd-text-body);
+        font-weight: var(--pd-weight-regular);
+        color: var(--pd-text-subtle);
         letter-spacing: 0;
       }
       &.small {
-        font-size: var(--fs-xl);
+        font-size: var(--pd-text-title);
       }
     }
     .stack {
       display: flex;
       gap: 2px;
       height: 6px;
-      border-radius: var(--r-full);
-      background: var(--track);
+      border-radius: var(--pd-radius-pill);
+      background: var(--pd-surface-2);
       overflow: hidden;
       .seg {
         height: 100%;
-        transition: width var(--dur-slow) var(--ease);
+        transition: width var(--pd-duration-large) var(--pd-ease-move);
       }
       .own {
-        background: var(--accent);
-        border-radius: var(--r-full) 0 0 var(--r-full);
+        background: var(--pd-accent);
+        border-radius: var(--pd-radius-pill) 0 0 var(--pd-radius-pill);
       }
       .other {
-        background: color-mix(in srgb, var(--text-3) 55%, transparent);
+        background: color-mix(in srgb, var(--pd-text-subtle) 55%, transparent);
       }
     }
     .foot {
       display: flex;
       justify-content: space-between;
-      gap: var(--sp-2);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      gap: var(--pd-space-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       white-space: nowrap;
       b {
-        font-weight: var(--fw-medium);
-        color: var(--text);
+        font-weight: var(--pd-weight-medium);
+        color: var(--pd-text);
       }
     }
     .key {
@@ -222,7 +222,7 @@ import { Skeleton } from '../../shared/ui/skeleton';
       margin-right: 6px;
       border-radius: 2px;
       &.own {
-        background: var(--accent);
+        background: var(--pd-accent);
       }
     }
     .bars {
@@ -234,21 +234,21 @@ import { Skeleton } from '../../shared/ui/skeleton';
       display: grid;
       grid-template-columns: 34px 1fr 40px;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
     }
     .bar-label {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .bar-val {
-      font-size: var(--fs-base);
-      font-weight: var(--fw-medium);
+      font-size: var(--pd-text-body);
+      font-weight: var(--pd-weight-medium);
       text-align: right;
     }
     .trio {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       > div {
         display: grid;
         grid-template-columns: auto 1fr;
@@ -258,16 +258,16 @@ import { Skeleton } from '../../shared/ui/skeleton';
       }
       .k {
         grid-column: 1 / -1;
-        font-size: var(--fs-xs);
-        color: var(--text-3);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-subtle);
       }
       b {
-        font-size: var(--fs-md);
-        font-weight: var(--fw-semibold);
+        font-size: var(--pd-text-body-lg);
+        font-weight: var(--pd-weight-semibold);
       }
       .u {
-        font-size: var(--fs-xs);
-        color: var(--text-3);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-subtle);
         white-space: nowrap;
       }
     }

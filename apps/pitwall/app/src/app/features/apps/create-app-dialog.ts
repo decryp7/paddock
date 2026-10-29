@@ -22,21 +22,21 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
     :host {
       display: block;
       width: 420px;
-      padding: var(--sp-5);
+      padding: var(--pd-space-4);
     }
     h2 {
-      font-size: var(--fs-md);
-      margin-bottom: var(--sp-1);
+      font-size: var(--pd-text-body-lg);
+      margin-bottom: var(--pd-space-1);
     }
     p {
-      font-size: var(--fs-sm);
-      margin-bottom: var(--sp-4);
+      font-size: var(--pd-text-label);
+      margin-bottom: var(--pd-space-4);
     }
     label {
       display: block;
       margin-bottom: 6px;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .input {
       width: 100%;
@@ -44,8 +44,8 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
     .row {
       display: flex;
       justify-content: flex-end;
-      gap: var(--sp-2);
-      margin-top: var(--sp-5);
+      gap: var(--pd-space-2);
+      margin-top: var(--pd-space-4);
     }
   `,
 })
