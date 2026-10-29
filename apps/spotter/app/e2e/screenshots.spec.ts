@@ -1,4 +1,4 @@
-import { test, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 /**
  * Documentation screenshots (`SCREENSHOTS=1 npx playwright test --project=screenshots`): 1440x900 at 2x, both themes.
@@ -10,8 +10,15 @@ const NOW = new Date('2026-10-22T12:00:00Z');
 /** The units a frame is cut between. */
 const BLOCKS = 'main header.page-head, main dl.strip, main section, main section > *, main .section-head, main li, main tbody tr, main footer.foot, main .body > *';
 
-async function settle(page: Page, ms = 900): Promise<void> {
-  await page.waitForTimeout(ms);
+/** Waits for the screen to be what a user sees (no sleep, rule 49): no skeleton, every avatar answered, fonts and images decoded, a frame drawn. */
+async function settle(page: Page): Promise<void> {
+  await expect(page.locator('pd-skeleton')).toHaveCount(0);
+  await expect(page.locator('sp-avatar[data-state="pending"]')).toHaveCount(0);
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await Promise.all([...document.images].map((img) => img.decode().catch(() => undefined)));
+    await new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+  });
 }
 
 async function open(page: Page, url: string): Promise<void> {
@@ -105,7 +112,7 @@ async function frames(page: Page, name: string, scheme: string, opts: { blocks?:
       const sc = [...document.querySelectorAll('*')].find((e) => e.scrollHeight > e.clientHeight + 40 && getComputedStyle(e).overflowY !== 'visible');
       if (sc) sc.scrollTop += by;
     }, frame.next);
-    await settle(page, 300);
+    await settle(page);
     n++;
   }
 }
@@ -121,7 +128,7 @@ async function section(page: Page, from: string, to: string, file: string): Prom
     const sc = [...document.querySelectorAll('*')].find((e) => e.scrollHeight > e.clientHeight + 40 && getComputedStyle(e).overflowY !== 'visible');
     if (sc) sc.scrollTop -= 16;
   });
-  await settle(page, 500);
+  await settle(page);
   const keep = await page.locator(to).evaluate((e) => Math.ceil((e.closest('section') ?? e).getBoundingClientRect().bottom + 16));
   const vp = page.viewportSize() ?? { width: 1440, height: 900 };
   await page.screenshot({ path: file, clip: { x: 0, y: 0, width: vp.width, height: Math.min(keep, vp.height) } });
@@ -138,7 +145,7 @@ for (const scheme of ['dark', 'light'] as const) {
     for (const [name, url] of shots) {
       test(`${name} ${scheme}`, async ({ page }) => {
         await open(page, url);
-        await settle(page, 1400);
+        await settle(page);
         await frames(page, name, scheme);
       });
     }
@@ -147,7 +154,7 @@ for (const scheme of ['dark', 'light'] as const) {
       test(`${name} ${scheme}`, async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 1030 });
         await open(page, url);
-        await settle(page, 1400);
+        await settle(page);
         await trimInnerScrollers(page);
         await page.screenshot({ path: `${OUT}/${name}-${scheme}.png` });
       });
@@ -156,21 +163,21 @@ for (const scheme of ['dark', 'light'] as const) {
     for (const [name, url] of [['dashboard-empty', '/?mock=empty'], ['watches-empty', '/?mock=empty#/watches']] as const) {
       test(`${name} ${scheme}`, async ({ page }) => {
         await open(page, url);
-        await settle(page, 1000);
+        await settle(page);
         await page.screenshot({ path: `${OUT}/${name}-${scheme}.png`, clip: { x: 0, y: 0, width: 1440, height: 560 } });
       });
     }
     // Settings is a dialog window of the shell (not a route): its screenshots return with the shared dialogs (ADR 0026 §7).
     test(`cadence ${scheme}`, async ({ page }) => {
       await open(page, '/');
-      await settle(page, 1400);
+      await settle(page);
       await section(page, '#cad-h', '#cad-h', `${OUT}/dashboard-cadence-${scheme}.png`);
     });
     test(`release panel ${scheme}`, async ({ page }) => {
       await open(page, '/#/watches/w-2');
-      await settle(page, 1200);
+      await settle(page);
       await page.locator('tbody tr').nth(1).click();
-      await settle(page, 400);
+      await settle(page);
       await trimInnerScrollers(page);
       await page.screenshot({ path: `${OUT}/watch-detail-panel-${scheme}.png` });
     });
@@ -179,29 +186,29 @@ for (const scheme of ['dark', 'light'] as const) {
       await page.setViewportSize({ width: 372, height: 600 });
       await page.clock.setFixedTime(NOW);
       await page.goto('/#/tray');
-      await settle(page, 1200);
+      await settle(page);
       const height = await page.locator('pd-tray-popover').evaluate((e) => Math.ceil(e.getBoundingClientRect().height));
       await page.setViewportSize({ width: 372, height: height + 12 });
-      await settle(page, 300);
+      await settle(page);
       await page.screenshot({ path: `${OUT}/tray-${scheme}.png` });
     });
     test(`charts ${scheme}`, async ({ page }) => {
       await open(page, '/');
-      await settle(page, 1400);
+      await settle(page);
       await section(page, '#chart-h', '#rel-h', `${OUT}/dashboard-charts-${scheme}.png`);
     });
     test(`row menu ${scheme}`, async ({ page }) => {
       await open(page, '/#/watches');
-      await settle(page, 1200);
+      await settle(page);
       await page.locator('tbody tr', { hasText: 'Orbit server' }).click({ button: 'right', position: { x: 160, y: 24 } });
-      await settle(page, 400);
+      await settle(page);
       await page.screenshot({ path: `${OUT}/watches-menu-${scheme}.png` });
     });
     test(`feed menu ${scheme}`, async ({ page }) => {
       await open(page, '/');
-      await settle(page, 1200);
+      await settle(page);
       await page.locator('sp-whats-new li.item').nth(1).click({ button: 'right', position: { x: 220, y: 24 } });
-      await settle(page, 400);
+      await settle(page);
       // Whole rows only: end the picture at the last feed row that fits in the window.
       const keep = await page.evaluate(() => {
         const win = window.innerHeight;
@@ -214,24 +221,22 @@ for (const scheme of ['dark', 'light'] as const) {
       await open(page, '/#/watches/new');
       await page.getByRole('button', { name: /Node\.js/ }).click();
       await page.getByRole('table', { name: 'Releases found' }).waitFor();
-      // The shell's notification toast (a browser is needed for JavaScript pages) sits over the footer buttons.
-      await page.evaluate(() => document.querySelector('pd-notification-host')?.remove());
       await page.getByRole('button', { name: 'Next' }).click();
       await page.getByRole('button', { name: 'Next' }).click();
       await page.getByRole('group', { name: 'How to schedule checks' }).getByRole('button', { name: 'Cron' }).click();
       await page.getByLabel('Cron expression').fill('0 * * * *');
-      await settle(page, 1200);
+      await settle(page);
       await trimInnerScrollers(page);
       await page.screenshot({ path: `${OUT}/wizard-schedule-${scheme}.png` });
     });
     test(`wizard ${scheme}`, async ({ page }) => {
       await open(page, '/#/watches/new');
-      await settle(page, 700);
+      await settle(page);
       await page.screenshot({ path: `${OUT}/wizard-source-${scheme}.png` });
       // The preview lists every release it reports ("12 releases found"): a taller window shows all of them above the footer.
       await page.setViewportSize({ width: 1440, height: 960 });
       await page.getByRole('button', { name: /Node\.js/ }).click();
-      await settle(page, 1600);
+      await settle(page);
       await trimInnerScrollers(page);
       await hideRowsUnderFooter(page);
       await page.screenshot({ path: `${OUT}/wizard-configure-${scheme}.png` });

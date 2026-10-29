@@ -3,7 +3,6 @@ import { TestBed } from '@angular/core/testing';
 import { shellPorts } from '@decryp7/paddock-ui/shell/testing';
 import { Router } from '@angular/router';
 import { EditorPage } from './editor-page';
-import { SCHEDULE_DEBOUNCE_MS } from './editor.store';
 import { SettingsStore } from '../../state/settings.store';
 import { appProviders, byText, flush, makeMock, routeStub, settle, text, type as typeInto } from '../../../testing/test-helpers';
 
@@ -131,16 +130,17 @@ describe('EditorPage: adding a watch', () => {
     expect(pressed(f)).toEqual(['Every…', 'Minutes']);
     await fill(f, 'sp-schedule-editor input[aria-label="Interval"]', '0', 'change'); // below one: ignored
     expect((q(f, 'sp-schedule-editor input[aria-label="Interval"]') as HTMLInputElement).value).toBe('45');
-    await new Promise((r) => setTimeout(r, SCHEDULE_DEBOUNCE_MS + 50));
-    await settle(f);
-    expect(text(q(f, 'sp-schedule-editor .preview'))).toContain('Next check');
     await click(f, button(f, 'Newer than installed'));
 
     // Review
     await goNext(f);
     expect((q(f, '#name') as HTMLInputElement).value).toBe('tool');
     expect(text(q(f, 'dl'))).toContain('GitHub: owner/tool');
-    expect(text(q(f, 'dl'))).toContain('Every 45 minutes');
+    // The schedule reaches the draft after its debounce: wait for what the review shows, not for a time to pass.
+    await vi.waitFor(async () => {
+      await settle(f);
+      expect(text(q(f, 'dl'))).toContain('Every 45 minutes');
+    });
     expect(button(f, 'Next')).toBeNull();
     await click(f, button(f, 'Add watch'));
     await flush(5);
