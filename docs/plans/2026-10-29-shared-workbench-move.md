@@ -166,7 +166,7 @@ ADR 0014 §10). A phase that touches the frozen set waits for both tags.
 
 | # | Package | Owned files | Failing test first | Days |
 |---|---|---|---|---|
-| 0a | **Release-freeze check** (conformance; rules 1 and 40). See below | `conformance/src/checks/` (new check), `conformance/bin/release-freeze.mjs`, `conformance/test/`, `conformance/fixtures/`, `conformance/README.md` row; `paddock.conformance.json` entry and schema, the integrate procedure step and `lefthook.yml` line (integrating agent) | see below | 2.5 |
+| 0a | **Release-freeze check** (conformance; rules 1 and 40). See below | `conformance/src/checks/` (new check), `conformance/bin/release-freeze.mjs`, `conformance/test/`, `conformance/fixtures/`, `conformance/README.md` row; `paddock.conformance.json` entry and schema, the integrate procedure step and the `lefthook.yml` pre-push entry (integrating agent; the user installs lefthook) | see below | 2.5 |
 
 Package 0a in detail. It depends on `feat/e2e-hit-test` having landed (item 3), and builds on `fix/affected-narrow-global`.
 
@@ -178,24 +178,32 @@ Package 0a in detail. It depends on `feat/e2e-hit-test` having landed (item 3), 
   closure's folders are frozen (section 4), plus the declared `extra` list. `affected.mjs` today treats all of `ui/` as
   one package (`scripts/affected.mjs:368`), so the graph is a new module that `affected.mjs` can use later; the narrowing
   of its global triggers is being done on `fix/affected-narrow-global` by another agent, and 0a does not change them.
-  Rust: `crates/<name>/` for every `paddock-*` package in a frozen app's own `Cargo.lock`, plus
-  `crates/paddock-workspace-hack/`.
+  Rust: `crates/<name>/` for every `paddock-*` package in a frozen app's own `Cargo.lock`, read from the declared
+  release branch's tip (`git show <branch>:apps/<app>/Cargo.lock`), not from `main`, plus `crates/paddock-workspace-hack/`.
 - **Lockfiles.** A small lock-diff parser reads a frozen app's `Cargo.lock` at the base and at the head (TOML
   `[[package]]` entries: name, version, source, checksum, dependencies) and fails on any added, removed or changed
   entry, with the entry named; the same for that app's `package-lock.json` entries under its workspace.
 - **Where it blocks: locally, before the push.** Branch CI here is `workflow_dispatch` and work lands on `main` through
   local merges that are then pushed, so a CI check can only report afterwards. The check is a CLI,
-  `node conformance/bin/release-freeze.mjs --range origin/main...HEAD --source <branch>`, run by the integrating agent as
-  a step of the integrate procedure before every push to `main` (and from `lefthook.yml`'s pre-push hook when the
-  current branch is `main`). It exits non-zero and lists the frozen paths a change touches.
+  `node conformance/bin/release-freeze.mjs --range origin/main...HEAD`, run by the integrating agent as a step of the
+  integrate procedure before every push to `main`; that step is the real gate. The CLI derives the source itself and
+  takes no `--source` to trust: for each commit in the range, a merge commit is exempt when its second parent (`<commit>^2`)
+  is an ancestor of a declared release branch's tip; any other commit touching a frozen path fails. It exits non-zero
+  and lists the commits and frozen paths. A `lefthook.yml` pre-push entry runs the same CLI when a pushed remote ref
+  read from stdin is `refs/heads/main` (not when the current branch is `main`). Agents never install lefthook; only
+  the user runs `npx lefthook install`.
 - **In CI, as a second line.** On `workflow_dispatch` and `push`, the source is `github.ref_name` and the diff is taken
   against `git merge-base origin/main HEAD` (never the plan job's `PLAN_BASE`). On a push to `main`, each new commit is
   checked: a merge commit is exempt when its second parent is an ancestor of a declared release branch's tip (and then
   both apps' gates are added to the plan); any other commit touching a frozen path fails the run. A dispatch on a
   declared release branch is exempt and adds both apps' gates.
 - **Failing tests first.**
-  - CLI: `--source feat/x` with a range touching `ui/projects/paddock-ui/shell/pages/` exits non-zero and names the path;
-    `--source dyno/shell-1.0` with the same range passes and reports both apps' gates; after both tags exist, it passes.
+  - CLI: a range whose non-merge commit touches `ui/projects/paddock-ui/shell/pages/` exits non-zero and names the commit
+    and path; a range whose merge commit has its second parent in `dyno/shell-1.0`'s history passes and reports both apps' gates;
+    after both tags exist, both pass.
+  - Hook: stdin naming `refs/heads/main` runs the CLI; stdin naming only `refs/heads/feat/x` does not.
+  - Lockfiles: the frozen set comes from the branch tips; a fixture where `main`'s `apps/dyno/Cargo.lock` differs from
+    the tip's uses the tip's.
   - Dispatch: `ref_name` `feat/x` touching `shell/pages/` fails; `ref_name` `spotter/shell-1.0` passes; the diff base is
     the merge base, so a `main` that moved on does not count its own commits.
   - Push to `main`: a merge commit whose second parent is in `dyno/shell-1.0` passes; a merge commit whose second parent
@@ -304,8 +312,8 @@ coordinator runs them within the load limit and behind the release work (rule 1)
 
 1. **Release freeze** (package 0a, decided W5). One joint freeze for the releases in flight; frozen paths derived from
    the apps' own `Cargo.lock` files, `paddock-workspace-hack` and the `paddock-ui` entry-point closure, plus a declared
-   list with reasons; blocks locally before the push to `main` (`release-freeze --range origin/main...HEAD --source
-   <branch>`), and reports in CI on dispatch and push, where a merge of a declared release branch is exempt and runs
+   list with reasons; blocks locally before the push to `main` (`release-freeze --range origin/main...HEAD`, which derives the source from
+   merge ancestry), and reports in CI on dispatch and push, where a merge of a declared release branch is exempt and runs
    both apps' gates. Makes rule 1's "don't change
    shared code the release depends on" checked instead of remembered.
 2. **One dock, one planner.** `dockview` is imported only under `ui/projects/paddock-ui/workbench/dock/`, and no file
