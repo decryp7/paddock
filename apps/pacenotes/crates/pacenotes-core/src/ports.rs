@@ -31,6 +31,9 @@ pub enum HistoryError {
         /// The cap that was given.
         limit: u64,
     },
+    /// The path is on the secret denylist: its content is never served (ADR 0005).
+    #[error("{0} is withheld (secret denylist)")]
+    Denied(RepoPath),
     /// The revision is unknown to the repository.
     #[error("unknown revision {0}")]
     UnknownRev(String),

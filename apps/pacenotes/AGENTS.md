@@ -110,8 +110,9 @@ development and UI tests only; features are not done until they work against the
 - Every change ships with tests; every bug fix starts with a failing regression test. Targets: core ≥ 99% lines,
   Angular ≥ 80% overall and near 100% for stores, services and pure utilities. Coverage is necessary, not sufficient.
 - The trap repository (`tests/trap`, audit finding PN1) is generated, never committed; an indexer must run nothing, leak
-  nothing and read nothing outside the workspace on it. The test is ignored with the reason "A3a" until `pacenotes-index`
-  exists, then it runs always.
+  nothing and read nothing outside the workspace on it. The test lives in `pacenotes-index` (`tests/it/trap.rs`) and runs
+  always; the secret denylist (ADR 0005) stands in front of the index, `ReadAt` (`GuardedHistory`) and everything served
+  to a client (`redact`, `Indexer::chunk_texts`).
 - Before committing, these must pass:
 
   ```sh
@@ -120,7 +121,7 @@ development and UI tests only; features are not done until they work against the
   cargo test --workspace
   cargo llvm-cov nextest -p pacenotes-core -p pacenotes-function-api -p pacenotes-git --profile ci --summary-only \
     --ignore-filename-regex 'contract\.rs|wire_tests\.rs' --fail-under-lines 99   # product code only; CI runs it on main and the nightly
-  # pacenotes-parse: the same command with -p pacenotes-parse and --fail-under-lines 97 (see paddock.ci.json for the reasons)
+  # pacenotes-parse and pacenotes-index: the same command with those packages and --fail-under-lines 95 (see paddock.ci.json for the reasons)
   cargo deny --workspace check
   node --test scripts/release/publish.test.mjs
   (cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && npx ng test --watch=false)

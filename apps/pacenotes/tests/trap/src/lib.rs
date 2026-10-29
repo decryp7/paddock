@@ -644,16 +644,4 @@ mod tests {
         assert!(repo.workspace.join(".git/objects/info/alternates").is_file());
         assert!(!repo.marker.exists(), "checking the traps ran none");
     }
-
-    /// The indexer exists from A3a (`pacenotes-index`); until then this is the failing test it must make pass.
-    #[test]
-    #[ignore = "A3a"]
-    fn indexing_the_trap_runs_nothing_leaks_nothing_and_escapes_nothing() {
-        let (_s, repo) = trap();
-        // A3a replaces this with: index `repo.workspace` through the process-spawn seam and the read seam, run
-        // TRAP_QUERIES through the store's search and read API, collect the Observations, and assert that
-        // `seen.verdict(&repo)` is empty.
-        let _ = &repo;
-        panic!("the indexer of A3a is not written yet; this test fails until it exists");
-    }
 }

@@ -303,6 +303,33 @@ impl SymbolKind {
     }
 }
 
+impl SymbolKind {
+    /// Every kind, in declaration order.
+    pub const ALL: [SymbolKind; 16] = [
+        SymbolKind::Module,
+        SymbolKind::Class,
+        SymbolKind::Struct,
+        SymbolKind::Interface,
+        SymbolKind::Trait,
+        SymbolKind::Enum,
+        SymbolKind::Function,
+        SymbolKind::Method,
+        SymbolKind::Constructor,
+        SymbolKind::Field,
+        SymbolKind::Property,
+        SymbolKind::Variable,
+        SymbolKind::Constant,
+        SymbolKind::TypeAlias,
+        SymbolKind::Macro,
+        SymbolKind::Other,
+    ];
+
+    /// The kind with this [`SymbolKind::name`].
+    pub fn from_name(name: &str) -> Option<SymbolKind> {
+        SymbolKind::ALL.into_iter().find(|k| k.name() == name)
+    }
+}
+
 impl SymbolId {
     /// The id of a symbol. `disambiguator` tells apart symbols that share a kind and a qualified name in one file
     /// (overloads, a function defined twice under `#ifdef`); use 0 for the first.
@@ -475,5 +502,9 @@ mod tests {
         let names: std::collections::BTreeSet<_> = kinds.iter().map(|k| k.name()).collect();
         assert_eq!(names.len(), kinds.len(), "every kind has its own name");
         assert_eq!(serde_json::to_string(&TypeAlias).unwrap(), "\"type_alias\"");
+        for k in SymbolKind::ALL {
+            assert_eq!(SymbolKind::from_name(k.name()), Some(k));
+        }
+        assert_eq!(SymbolKind::from_name("nope"), None);
     }
 }
