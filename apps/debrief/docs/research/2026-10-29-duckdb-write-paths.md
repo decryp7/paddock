@@ -11,9 +11,10 @@ the database the normal way, is writing separate Parquet files faster, and does 
 right one for data that is edited. For bulk, append-only events it is the slow way: on the same 3M parsed batches, the
 same Mac and DuckDB 2.0, one Appender wrote 200k events/s and four wrote 355k (1.8×, at about twice the memory), while 8
 threads each writing their own zstd Parquet segment wrote 4.38M (Quack harness, medians). A second Appender gave 1.0× on
-the writer bench, so the two benches disagree on how much Appenders scale, but both put them far below the fan-out. The
-`.duckdb` catalog keeps a `VIEW` over `read_parquet([...], union_by_name = true)`. DuckDB 2.0 brings storage format
-2.0.0 (version 69) for the native file, not a new exchange format; Parquet is still the format for writing in parallel.
+the writer bench (indicative), so the two benches disagree on how much Appenders scale, but both put them far below the
+fan-out. The `.duckdb` catalog keeps a `VIEW` over `read_parquet([...], union_by_name = true)`. DuckDB 2.0 brings
+storage format 2.0.0 (version 69) for the native file, not a new exchange format; Parquet is still the format for
+writing in parallel.
 
 ## Context
 
@@ -183,8 +184,9 @@ For the two import bars, the solid bar runs to the low end of the measured range
 | Parquet, 1 writer | 1 | ≈725k | +2 MB |
 | Parquet, 8 writers, small sample | 8 | 5.1M | not recorded |
 
-The writer bench's 387k for one Appender is 1.9× the Quack harness's 200k on the same Mac and DuckDB version. The gap is
-unexplained: the writer bench's corpus, batch size and table schema are not recorded, so the two cannot be compared.
+The writer bench's 387k (indicative) for one Appender is 1.9× the Quack harness's 200k on the same Mac and DuckDB
+version. The gap is unexplained: the writer bench's corpus, batch size and table schema are not recorded, so the two
+cannot be compared.
 
 Not measured: `INSERT` row by row, DuckLake.
 
@@ -193,7 +195,7 @@ Not measured: `INSERT` row by row, DuckLake.
 | Method | Writers that help | Updates and deletes | Use it for |
 |---|---|---|---|
 | `INSERT` row by row | 1 | easy, transactional | settings, small edits, user notes |
-| Appender into a native table | the benches disagree: 1.0× for a 2nd (writer bench), 1.8× for 4 at about 2× memory (Quack harness) | easy, transactional | moderate volumes that will be edited |
+| Appender into a native table | the benches disagree: 1.0× for a 2nd (writer bench, indicative), 1.8× for 4 at about 2× memory (Quack harness) | easy, transactional | moderate volumes that will be edited |
 | One Parquet writer | 1 | rewrite the file | exports, one-off loads |
 | Parquet per thread + view | `min(cores − 1, 8)`; 12 gave no more than 8 | by a deletion list, then compaction | **bulk append-only events (Debrief)** |
 | Quack server | 4 help, at a large memory cost | easy, transactional | remote clients; not for Debrief |
@@ -205,11 +207,11 @@ Measured so far, each within one run on one corpus:
 
 - **Parquet writers scale with the thread count up to the cap.** R2b (same corpus, same run): 261–409k events/s with 1
   writer, 0.97–1.7M with 8, roughly 4×. Quack harness: 12 writers gave no more than 8 (4.41M against 4.38M).
-- **Appenders scale poorly, and the two benches disagree on how much.** Writer bench: 1.0× for a second Appender. Quack
-  harness: 1.8× for four (200k to 355k events/s) at about twice the memory (1.83 GB footprint at a 192 MB limit). R2b on
-  the Windows VM: 2/4/8 appenders 61–75k events/s, with no gain from 2 to 8. None of these is linear.
-- **The real import is bounded by parsing.** With the same 8 threads it reaches 685k–991k (DuckDB 2.0, load 33–65); the
-  writers alone are not the limit, but the two figures come from different runs and corpora and are not compared here.
+- **Appenders scale poorly, and the two benches disagree on how much.** Writer bench (indicative): 1.0× for a second
+  Appender. Quack harness: 1.8× for four (200k to 355k events/s) at about twice the memory (1.83 GB footprint at a 192
+  MB limit). R2b on the Windows VM: 2/4/8 appenders 61–75k events/s, with no gain from 2 to 8. None of these is linear.
+- **The import is CPU-bound** (DuckDB 2.0 note §5.2, about 4.5 µs of CPU per text event); how that splits between
+  parsing and Parquet encoding is not measured here.
 - **Data size**: no measured curve yet. R2b's 10M-event run (ADR 0014 "Measured (R2b, release, the same VM)") gives one
   point: 123k events/s end to end, peak RSS 415 MB, write-side reads under 0.5 s.
 
@@ -256,9 +258,9 @@ The R2b figures in brackets are Windows VM, older code and data, and not like-fo
 Why fan-out wins for appends:
 
 - **Nothing shared while writing.** DuckDB allows parallel appends, but in our runs extra Appenders scaled poorly (1.0×
-  for a 2nd on the writer bench, 1.8× for 4 at about 2× memory in the Quack harness). R2b (DuckDB 1.5.6, Windows VM)
-  traced the limit to string compression on the native write path. Separate files share nothing until the view reads
-  them.
+  for a 2nd on the writer bench, indicative, 1.8× for 4 at about 2× memory in the Quack harness). R2b (DuckDB 1.5.6,
+  Windows VM) traced the limit to string compression on the native write path. Separate files share nothing until the
+  view reads them.
 - **Compression runs in every thread.** The segments are written by the Rust `parquet` crate, not by DuckDB, so DuckDB's
   memory limit does not apply to them. Each writer encodes and zstd-compresses its own row groups, so compression scales
   with the threads instead of sitting on one path.
@@ -281,10 +283,10 @@ What fan-out costs:
 
 - **Storage format 2.0.0 (version 69)** applies to the native `.duckdb` file. DuckDB 2.0 enables `DICT_FSST` string
   compression by default and stores deletes compactly ([2.0
-  highlights](https://duckdb.org/2026/08/17/duckdb-20-highlights.html)); files created by 2.0 use version 69, which
-  1.5.6 cannot read ([migration guide](https://duckdb.org/docs/2.0/operations_manual/migration.html)). It is not a file
-  you write in parallel. On the DuckDB 2.0 branch Debrief's catalog is pinned at `v1.5.0` for now (plan: Later); main
-  still runs DuckDB 1.5.6. The events are in Parquet, so v2 would only shrink the small catalog.
+  highlights](https://duckdb.org/2026/08/17/duckdb-20-highlights.html), August preview); files created by 2.0 use
+  version 69, which 1.5.6 cannot read ([migration guide](https://duckdb.org/docs/2.0/operations_manual/migration.html)).
+  It is not a file you write in parallel. On the DuckDB 2.0 branch Debrief's catalog is pinned at `v1.5.0` for now
+  (plan: Later); main still runs DuckDB 1.5.6. The events are in Parquet, so v2 would only shrink the small catalog.
 - **Parquet** is still the format for writing in parallel. DuckDB reads and writes it natively, and every segment is a
   standard file other tools can open.
 - **DuckLake** is a table format, not a new file format. It is a catalog (tables, snapshots, delete files) over Parquet
@@ -323,8 +325,8 @@ Parquet write path and standardises the catalog.
 
 ## Open questions
 
-- The writer-bench rows need results blocks in performance.md (rule 48) before they can be quoted outside this note.
-- Why the writer bench's single Appender (387k) is 1.9× the Quack harness's (200k).
+- The writer-bench rows need results blocks in performance.md (rule 48); until then they are indicative only.
+- Why the writer bench's single Appender (387k, indicative) is 1.9× the Quack harness's (200k).
 - The scaling and per-method query tables above are placeholders until those runs finish.
 - How much memory DuckDB returns to macOS and Windows after lowering `memory_limit`.
 - The cause of the extra 190 MB held after a 2.0 import.
@@ -349,7 +351,7 @@ Repo (paths from `apps/debrief`):
 DuckDB (official, read 2026-10-29):
 
 - DuckDB 2.0.0 announcement: https://duckdb.org/2026/10/21/announcing-duckdb-200
-- DuckDB 2.0 highlights: https://duckdb.org/2026/08/17/duckdb-20-highlights.html
+- DuckDB 2.0 highlights (August preview): https://duckdb.org/2026/08/17/duckdb-20-highlights.html
 - Migration guide 2.0 (storage versions): https://duckdb.org/docs/2.0/operations_manual/migration.html
 - VARIANT type: https://duckdb.org/docs/2.0/sql/data_types/variant.html
 - jemalloc: https://duckdb.org/docs/2.0/internals/jemalloc.html

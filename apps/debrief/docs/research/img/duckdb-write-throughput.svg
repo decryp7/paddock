@@ -12,7 +12,7 @@
     .kind { font-size: 14px; }
     .name { font-size: 14px; font-weight: 600; }
     .glabel { font-weight: 600; fill: #565E6B; }
-    .foot { font-size: 11px; fill: #565E6B; }
+    .foot { font-size: 12px; fill: #565E6B; }
     .group { fill: #F8F9FA; stroke: #C4C7CD; stroke-width: 1; }
     .group-ext { fill: #F8F9FA; stroke: #6B7380; stroke-width: 1; stroke-dasharray: 6 4; }
     .n-own { fill: #E8EFFA; stroke: #1D5FD1; stroke-width: 1.5; }
@@ -25,7 +25,7 @@
     .ohead { fill: none; stroke: #565E6B; stroke-width: 1.5; }
     .t-own { fill: #1D5FD1; }
     .b-own { fill: #1D5FD1; }
-    .b-cap { fill: #1D5FD1; fill-opacity: 0.35; }
+    .b-cap { fill: #1D5FD1; fill-opacity: 0.35; stroke: #1D5FD1; stroke-width: 1.5; }
     .b-proc { fill: #565E6B; }
     .b-ext { fill: #6B7380; }
     .grid { stroke: #C4C7CD; stroke-width: 1; }
@@ -44,6 +44,7 @@
       .head { fill: #A0A7B2; }
       .ohead { stroke: #A0A7B2; }
       .t-own, .b-own, .b-cap { fill: #5B9BFF; }
+      .b-cap { stroke: #5B9BFF; }
       .b-proc { fill: #A0A7B2; }
       .b-ext { fill: #7F8794; }
       .grid { stroke: #353A42; }
@@ -66,7 +67,7 @@
     <line x1="880" y1="164" x2="880" y2="368" class="grid"/>
     <line x1="1000" y1="164" x2="1000" y2="368" class="grid"/>
     <text x="48" y="189" class="kind">Quack server, 1 client</text>
-    <rect x="400" y="172" width="13.8" height="24" rx="2" class="b-ext"/>
+    <rect x="400" y="172" width="13.8" height="24" rx="2" class="n-ext"/>
     <text x="422" y="188" class="halo">115k</text>
     <text x="48" y="229" class="kind">Appender, 1</text>
     <rect x="400" y="212" width="24.0" height="24" rx="2" class="b-proc"/>
@@ -107,7 +108,7 @@
     <text x="96" y="584">Parquet fan-out (Debrief)</text>
     <rect x="264" y="572" width="24" height="16" rx="2" class="b-proc"/>
     <text x="296" y="584">Appender</text>
-    <rect x="376" y="572" width="24" height="16" rx="2" class="b-ext"/>
+    <rect x="376" y="572" width="24" height="16" rx="2" class="n-ext"/>
     <text x="408" y="584">Quack server</text>
     <rect x="512" y="572" width="24" height="16" rx="2" class="b-cap"/>
     <text x="544" y="584">range: solid to the low end, faded from low to high</text>
