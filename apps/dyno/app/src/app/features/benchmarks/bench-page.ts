@@ -166,7 +166,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
               <div class="tablewrap">
                 <pd-table [toolbar]="false" label="Saved runs" [rows]="o.runs" [columns]="runColumns" [rowKey]="runKey" [filterable]="false" [maxHeight]="420">
                   <ng-template pdCell="pick" let-r><mat-checkbox [checked]="picked().includes(r.id)" [aria-label]="'Select ' + r.label" (change)="pick(r.id)" /></ng-template>
-                  <ng-template pdCell="run" let-r>{{ r.label }}@if (r.phase) { <span class="badge outline">{{ r.phase === 'before' ? 'Before' : 'After' }}</span> }</ng-template>
+                  <ng-template pdCell="run" let-r><span class="runcell"><span class="slot">@if (r.phase) { <span class="badge outline">{{ r.phase === 'before' ? 'Before' : 'After' }}</span> }</span><span class="ell" [matTooltip]="r.label">{{ r.label }}</span></span></ng-template>
                   <ng-template pdCell="actions" let-r><button type="button" matButton="text" [attr.aria-label]="'Delete ' + r.label" (click)="store.remove(r.id)"><dy-icon name="trash" /></button></ng-template>
                 </pd-table>
               </div>
@@ -178,9 +178,9 @@ const KINDS: { kind: BenchKind; text: string }[] = [
   `,
   styles: `
     :host { display: block; }
-    dy-async { display: grid; gap: var(--sp-4); }
-    .page { display: grid; gap: var(--sp-4); align-content: start; }
-    .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) 0; }
+    dy-async { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
+    .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); align-content: start; }
+    .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) 0; }
     .kind { position: relative; display: flex; align-items: center; gap: var(--sp-3); padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); }
     .kind[data-on='true'] { border-color: var(--border-strong); background: var(--surface-2); }
     .kind dy-icon { --icon-size: 20px; color: var(--text-3); flex: none; }
@@ -204,7 +204,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     .note, .warning, .load { margin: 0; padding: var(--sp-2) var(--sp-4); color: var(--text-2); }
     .load { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
     .warning { display: flex; gap: var(--sp-2); align-items: center; color: var(--warn); }
-    .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: var(--sp-3); padding: var(--sp-2) var(--sp-4) 0; }
+    .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: var(--sp-3); padding: var(--sp-2) var(--sp-4) 0; }
     .result { display: flex; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-lg); background: var(--surface-inset); min-width: 0; align-items: flex-start; }
     .result .art { flex: none; width: 96px; display: grid; place-items: center; padding-top: var(--sp-1); }
     .result .art dy-device-art { width: 72px; }
@@ -224,7 +224,10 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     .num { font-variant-numeric: tabular-nums; }
     .faint { color: var(--text-3); }
     small { color: var(--text-3); }
-    .badge.outline { margin-left: var(--sp-2); }
+    /* The Before/After badge has a slot of its own before the label, so a long label ellipsises instead of pushing it out of the cell. */
+    .runcell { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+    .slot { flex: none; width: 58px; }
+    .ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   `,
 })
 export class BenchPage implements OnInit, OnDestroy {

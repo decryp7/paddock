@@ -9,6 +9,7 @@ import { ViewPrefs } from '../../core/view-prefs';
 import { HealthStore } from '../../state/health.store';
 import { HealthHero } from '../dashboard/health-hero';
 import { MatCheckbox } from '@angular/material/checkbox';
+import { MatTooltip } from '@angular/material/tooltip';
 
 const IMPACT_LABEL: Record<ImpactRating, string> = { notMeasured: 'Not measured', low: 'Low', medium: 'Medium', high: 'High' };
 const IMPACT_TONE: Record<ImpactRating, 'ok' | 'warn' | 'bad' | null> = { notMeasured: null, low: 'ok', medium: 'warn', high: 'bad' };
@@ -18,7 +19,7 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
 /** Health: the score and its reasons, and what starts at sign-in. Dyno only shows these; it changes nothing. */
 @Component({
   selector: 'dy-health-page',
-  imports: [MatCheckbox, AsyncState, HealthHero, Icon, PdTable, PdCell],
+  imports: [MatTooltip, MatCheckbox, AsyncState, HealthHero, Icon, PdTable, PdCell],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -44,7 +45,7 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
           <div class="tablewrap">
             <pd-table [toolbar]="false" label="Programs that start at sign-in" [rows]="sorted()" [columns]="columns" [rowKey]="rowKey" [filterable]="false" [rowHeight]="36" [maxHeight]="480">
               <ng-template pdCell="name" let-e><span class="two"><strong class="nm">{{ e.name }}</strong><small class="faint">{{ e.publisher ?? 'Unknown publisher' }}</small></span></ng-template>
-              <ng-template pdCell="impact" let-e><span class="nowrap"><span class="dot" [attr.data-tone]="tone(e)" aria-hidden="true"></span>{{ impact(e) }}@if (e.impact.rating !== 'notMeasured') { <small class="faint num"> {{ secs(e.impact.cpuSecs) }} CPU · {{ bytes(e.impact.diskBytes) }}</small> }</span></ng-template>
+              <ng-template pdCell="impact" let-e><span class="impact" [matTooltip]="impactFull(e)"><span class="dot" [attr.data-tone]="tone(e)" aria-hidden="true"></span><span class="lbl">{{ impact(e) }}</span>@if (e.impact.rating !== 'notMeasured') { <small class="faint num ell">{{ secs(e.impact.cpuSecs) }} CPU · {{ bytes(e.impact.diskBytes) }}</small> }</span></ng-template>
             </pd-table>
           </div>
           <p class="shown">Showing {{ store.startup().length }} of {{ store.startupCounts().total }} entries@if (hidden() > 0) {, {{ hidden() }} hidden by the filter}.</p>
@@ -54,18 +55,23 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
   `,
   styles: `
     :host { display: block; }
-    .page { display: grid; gap: var(--sp-4); align-content: start; }
+    .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); align-content: start; }
     .tablewrap { margin: 0 var(--sp-4) var(--sp-3); }
     .two { display: grid; min-width: 0; line-height: 1.25; }
     .two > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .two small { font-size: var(--fs-xs); }
+    /* The measured numbers ellipsise (the whole text is the tooltip); the rating and its dot never shrink. */
+    .impact { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+    .lbl { flex: none; }
+    .ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .nowrap { white-space: nowrap; }
+    .table td.nowrap:nth-child(2) { white-space: normal; }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: var(--sp-2); background: var(--border-strong); }
     .dot[data-tone='ok'] { background: var(--ok); }
     .dot[data-tone='warn'] { background: var(--warn); }
     .dot[data-tone='bad'] { background: var(--bad); }
     .faint { color: var(--text-3); }
-    .filters { display: flex; gap: var(--sp-2); }
+    .filters { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
     .shown { margin: 0 var(--sp-4) var(--sp-3); color: var(--text-3); font-size: var(--fs-sm); }
   `,
 })
@@ -82,6 +88,7 @@ export class HealthPage implements OnInit {
   protected readonly secs = formatSeconds;
   protected readonly state = (e: StartupEntry) => startupStateText(e.state);
   protected readonly impact = (e: StartupEntry) => IMPACT_LABEL[e.impact.rating];
+  protected readonly impactFull = (e: StartupEntry): string => (e.impact.rating === 'notMeasured' ? IMPACT_LABEL[e.impact.rating] : `${IMPACT_LABEL[e.impact.rating]}: ${this.secs(e.impact.cpuSecs)} CPU · ${this.bytes(e.impact.diskBytes)}`);
   protected readonly tone = (e: StartupEntry) => IMPACT_TONE[e.impact.rating];
   protected readonly rowKey = (e: StartupEntry): string => e.id;
   protected readonly columns: PdColumn<StartupEntry>[] = [
