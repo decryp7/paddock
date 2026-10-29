@@ -2,10 +2,10 @@
 //! is touched (rule 7).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use paddock_commands::testing::{sync_generated, WriteMode};
 use dyno_app_lib::dialogs::DIALOGS;
 use dyno_app_lib::health::Hub;
 use dyno_app_lib::{shell, Place, COMMANDS, MANIFEST};
+use paddock_commands::testing::{sync_generated, WriteMode};
 
 fn builder() -> paddock_shell::Builder<tauri::test::MockRuntime> {
     let dir = tempfile::tempdir().unwrap();
@@ -37,9 +37,24 @@ fn the_manifest_repeats_each_dialogs_contract_exactly() {
         assert_eq!(m["width"].as_f64(), Some(entry.width_px()), "{} width", entry.id);
         assert_eq!(m["height"].as_f64(), entry.height_px(), "{} height", entry.id);
         assert_eq!(m["instanced"].as_bool(), Some(entry.instanced), "{} instanced", entry.id);
-        assert_eq!(m["requiredChoice"].as_bool(), Some(entry.required_choice), "{} requiredChoice", entry.id);
-        assert_eq!(m["modality"].as_str(), Some(format!("{:?}", c.modality).to_lowercase().as_str()), "{} modality", entry.id);
-        assert_eq!(m["kind"].as_str(), Some(format!("{:?}", c.kind).to_lowercase().as_str()), "{} kind", entry.id);
+        assert_eq!(
+            m["requiredChoice"].as_bool(),
+            Some(entry.required_choice),
+            "{} requiredChoice",
+            entry.id
+        );
+        assert_eq!(
+            m["modality"].as_str(),
+            Some(format!("{:?}", c.modality).to_lowercase().as_str()),
+            "{} modality",
+            entry.id
+        );
+        assert_eq!(
+            m["kind"].as_str(),
+            Some(format!("{:?}", c.kind).to_lowercase().as_str()),
+            "{} kind",
+            entry.id
+        );
     }
 }
 

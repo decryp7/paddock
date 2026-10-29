@@ -394,10 +394,7 @@ mod tests {
     fn the_settings_model_maps_to_items() {
         let default = items_from_settings(&TrayItemSettings::default());
         assert_eq!(default.len(), 2);
-        assert_eq!(
-            (default[0].glyph, &default[0].metric),
-            (Glyph::Bars, &Metric::CpuTotal)
-        );
+        assert_eq!((default[0].glyph, &default[0].metric), (Glyph::Bars, &Metric::CpuTotal));
         let s = TrayItemSettings {
             version: 1,
             items: vec![
@@ -438,11 +435,7 @@ mod tests {
         let got: Vec<(&str, Glyph)> = items.iter().map(|i| (i.id.as_str(), i.glyph)).collect();
         assert_eq!(
             got,
-            [
-                ("cpu-1", Glyph::Ring),
-                ("memory-2", Glyph::Number),
-                ("cpu-3", Glyph::CoreBars)
-            ]
+            [("cpu-1", Glyph::Ring), ("memory-2", Glyph::Number), ("cpu-3", Glyph::CoreBars)]
         );
         assert!(items.iter().all(|i| i.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')));
         assert_eq!(parse_items(&"cpu:ring,".repeat(20)).len(), 8, "at most eight items");

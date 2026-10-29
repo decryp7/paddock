@@ -282,7 +282,10 @@ mod tests {
         again.name = "  Busy  ".into();
         upsert_rule(&mut rules, again).unwrap();
         assert_eq!(rules.len(), 1);
-        assert_eq!((rules[0].limit, rules[0].name.as_str(), rules[0].for_secs), (80.0, "Busy", MAX_FOR_SECS));
+        assert_eq!(
+            (rules[0].limit, rules[0].name.as_str(), rules[0].for_secs),
+            (80.0, "Busy", MAX_FOR_SECS)
+        );
         assert!(upsert_rule(&mut rules, rule("bad id", CustomMetric::CpuTotal, CustomOp::Above, 1.0, 0)).is_err());
         assert!(upsert_rule(&mut rules, rule("n", CustomMetric::CpuTotal, CustomOp::Above, f64::NAN, 0)).is_err());
         assert_eq!(rules.len(), 1);
