@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Native feel: the Copy menu stays open on macOS
+- `installNativeFeel` opens the Copy menu after the right button is released when the browser sent `contextmenu` on the press (WebKit on macOS). Drawn on the press, the menu was closed at once by the release's own `auxclick` (a click outside the CDK overlay), so it vanished as the user let go.
+
 ### `providePaddockMaterial`: tooltips wait 500 ms
 - `providePaddockMaterial()` provides `MAT_TOOLTIP_DEFAULT_OPTIONS` with `showDelay: 500` (`PADDOCK_TOOLTIP_OPTIONS`), the design guide's delay for the tooltip every icon-only button carries. Every app that provides it gets the delay without setting it per tooltip.
 

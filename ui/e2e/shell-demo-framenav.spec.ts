@@ -101,22 +101,35 @@ for (const colorScheme of THEMES) {
 test.describe('copy menu', () => {
   test('a right click on selected text opens Copy at the pointer, focused; Escape closes it and Copy copies', async ({ app, page, pageErrors }) => {
     await installTauriFake(page, { platform: 'mac', otherwise: 'null' });
-    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    // The page's clipboard is a recorder: no browser permission (WebKit knows no clipboard permissions), nothing on the
+    // machine's clipboard (rule 7).
+    await page.addInitScript(() => {
+      const copied: string[] = [];
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: async (t: string) => void copied.push(t), readText: async () => copied.at(-1) ?? '' },
+      });
+    });
     await app.frame.open();
     const text = page.getByTestId('app-context');
-    await text.evaluate((el) => {
-      el.classList.add('pd-selectable');
-      const r = document.createRange();
-      r.selectNodeContents(el);
-      getSelection()?.removeAllRanges();
-      getSelection()?.addRange(r);
-    });
+    // Selects the whole line before each right-click: closing the menu may collapse the selection, and a right-click on
+    // unselected text then selects the word under the pointer (macOS WebKit), as natively.
+    const selectLine = () =>
+      text.evaluate((el) => {
+        el.classList.add('pd-selectable');
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        getSelection()?.removeAllRanges();
+        getSelection()?.addRange(r);
+      });
+    await selectLine();
     await text.click({ button: 'right', position: { x: 20, y: 8 } });
     const item = page.getByRole('menuitem', { name: 'Copy' });
     await expect(item).toBeVisible();
     await expect(item).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(item).toHaveCount(0);
+    await selectLine();
     await text.click({ button: 'right', position: { x: 20, y: 8 } });
     await page.getByRole('menuitem', { name: 'Copy' }).click();
     await expect(page.getByRole('menuitem', { name: 'Copy' })).toHaveCount(0);

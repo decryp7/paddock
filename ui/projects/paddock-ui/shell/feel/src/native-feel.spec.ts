@@ -211,6 +211,33 @@ describe('native feel: the installed guard', () => {
     expect(fire(el('p').firstChild!, new MouseEvent('contextmenu', { bubbles: true, cancelable: true })).defaultPrevented).toBe(true);
   });
 
+  it('opens Copy after the right button is released when the menu event came while it was held (macOS, regression)', () => {
+    // WebKit on macOS sends contextmenu on the press: a menu drawn then was closed by the release's own auxclick (the CDK
+    // overlay counts it as a click outside), so the Copy menu vanished as the user let go.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(el('p'));
+      window.getSelection()?.addRange(range);
+      const held = fire(el('p'), new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 6, buttons: 2 }));
+      expect(held.defaultPrevented).toBe(true);
+      expect(copied).toEqual([]);
+      fire(el('p'), new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 2 }));
+      fire(el('p'), new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 2 }));
+      expect(copied).toEqual([]);
+      vi.runAllTimers();
+      expect(copied).toEqual([{ x: 5, y: 6, text: 'some log text' }]);
+      // A press that never ends in a release of the right button (another press first) opens nothing.
+      fire(el('p'), new MouseEvent('contextmenu', { bubbles: true, cancelable: true, buttons: 2 }));
+      fire(el('p'), new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+      fire(el('p'), new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 2 }));
+      vi.runAllTimers();
+      expect(copied).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('offers Copy only when the right-click is on the selected text, not on an ancestor such as body (regression)', () => {
     const menu = (target: Element) => fire(target, new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 1, clientY: 2 }));
     const range = document.createRange();
