@@ -479,11 +479,11 @@ fn gzip(data: &[u8]) -> Vec<u8> {
 }
 
 /// A zip of `files`. Names may repeat, as in real archives: zip's writer refuses a repeated name, so such an archive is
-/// written by hand ([`stored_zip`]).
+/// written by hand ([`crate::common::stored_zip`]).
 fn zip_of(files: &[(String, Vec<u8>)]) -> Vec<u8> {
     let mut names = std::collections::HashSet::new();
     if !files.iter().all(|(name, _)| names.insert(name.as_str())) {
-        return stored_zip(files);
+        return crate::common::stored_zip(files);
     }
     let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     for (name, data) in files {
@@ -493,57 +493,12 @@ fn zip_of(files: &[(String, Vec<u8>)]) -> Vec<u8> {
     w.finish().unwrap().into_inner()
 }
 
-/// A zip of uncompressed entries written field by field (PKWARE APPNOTE 6.3.10, sections 4.3.7, 4.3.12 and 4.3.16): a
-/// local header and the data per entry, the central directory, the end record. Any names, repeated ones too.
-fn stored_zip(files: &[(String, Vec<u8>)]) -> Vec<u8> {
-    const DOS_DATE_1980_01_01: u16 = 0x21;
-    let (mut out, mut central) = (Vec::new(), Vec::new());
-    for (name, data) in files {
-        let mut crc = flate2::Crc::new();
-        crc.update(data);
-        let (name, len, offset) = (name.as_bytes(), data.len() as u32, out.len() as u32);
-        let common = |b: &mut Vec<u8>| {
-            for v in [20u16, 0, 0, 0, DOS_DATE_1980_01_01] {
-                b.extend(v.to_le_bytes()); // version needed, flags, method (stored), time, date
-            }
-            for v in [crc.sum(), len, len] {
-                b.extend(v.to_le_bytes()); // CRC-32, compressed and uncompressed size
-            }
-            b.extend((name.len() as u16).to_le_bytes());
-            b.extend(0u16.to_le_bytes()); // extra field length
-        };
-        out.extend(0x0403_4b50u32.to_le_bytes());
-        common(&mut out);
-        out.extend(name);
-        out.extend(data);
-        central.extend(0x0201_4b50u32.to_le_bytes());
-        central.extend(20u16.to_le_bytes()); // version made by
-        common(&mut central);
-        for v in [0u16, 0, 0] {
-            central.extend(v.to_le_bytes()); // comment length, disk number, internal attributes
-        }
-        central.extend(0u32.to_le_bytes()); // external attributes
-        central.extend(offset.to_le_bytes());
-        central.extend(name);
-    }
-    let (start, size, count) = (out.len() as u32, central.len() as u32, files.len() as u16);
-    out.extend(central);
-    out.extend(0x0605_4b50u32.to_le_bytes());
-    for v in [0u16, 0, count, count] {
-        out.extend(v.to_le_bytes()); // this disk, the directory's disk, entries here, entries in all
-    }
-    out.extend(size.to_le_bytes());
-    out.extend(start.to_le_bytes());
-    out.extend(0u16.to_le_bytes()); // comment length
-    out
-}
-
 /// Regression (CI 7107, job 21333): the archive strategy drew two entries with the same name, and building the zip panicked
 /// inside the strategy (zip's writer refuses a duplicate name), outside the property's guard, so no input was shrunk or
 /// kept. Real archives can hold duplicate names (appending tools write them); the strategy must build them and `expand`
-/// must take them: the last entry of a name wins, as a lookup by name in the zip format does.
+/// must take them. Both entries are kept, the second as `a (2).log` (the user's decision of 2026-10-29).
 #[test]
-fn the_archive_strategy_builds_zips_with_duplicate_names_and_the_last_entry_wins() {
+fn the_archive_strategy_builds_zips_with_duplicate_names_and_both_entries_are_kept() {
     let z = zip_of(&[
         ("a.log".to_string(), b"first".to_vec()),
         ("b.log".to_string(), b"other".to_vec()),
@@ -553,9 +508,13 @@ fn the_archive_strategy_builds_zips_with_duplicate_names_and_the_last_entry_wins
     let got: Vec<(String, Vec<u8>)> = entries.into_iter().map(|e| (e.name.unwrap(), e.bytes)).collect();
     assert_eq!(
         got,
-        [("a.log".to_string(), b"second".to_vec()), ("b.log".to_string(), b"other".to_vec())]
+        [
+            ("a.log".to_string(), b"first".to_vec()),
+            ("b.log".to_string(), b"other".to_vec()),
+            ("a (2).log".to_string(), b"second".to_vec())
+        ]
     );
-    assert_eq!(archive::read_entry(z, "dup.zip", "a.log").unwrap(), b"second");
+    assert_eq!(archive::read_entry(z, "dup.zip", "a (2).log").unwrap(), b"second");
 }
 
 fn archive_bytes() -> impl Strategy<Value = Vec<u8>> {

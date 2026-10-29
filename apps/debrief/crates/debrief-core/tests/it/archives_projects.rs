@@ -409,3 +409,60 @@ fn imports_report_progress_and_can_be_cancelled() {
     assert_eq!(ws.summary().total, 200);
     assert!(ws.summary().unrecognized.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Repeated names in a zip (the user's decision of 2026-10-29): every entry is kept; the second of a full path becomes
+// `<stem> (2)<.ext>` in the same folder, then `(3)` and so on, never the name of a real entry.
+// ---------------------------------------------------------------------------
+
+fn entries_of(files: &[(&str, &[u8])]) -> Vec<(String, Vec<u8>)> {
+    let files: Vec<(String, Vec<u8>)> = files.iter().map(|(n, b)| (n.to_string(), b.to_vec())).collect();
+    debrief_core::archive::expand("dup.zip", crate::common::stored_zip(&files))
+        .expect("the archive expands")
+        .into_iter()
+        .map(|e| (e.name.unwrap(), e.bytes))
+        .collect()
+}
+
+#[test]
+fn two_entries_with_one_path_are_both_kept_with_their_contents() {
+    let got = entries_of(&[("logs/app.log", b"first"), ("logs/app.log", b"second")]);
+    assert_eq!(
+        got,
+        [
+            ("logs/app.log".to_string(), b"first".to_vec()),
+            ("logs/app (2).log".to_string(), b"second".to_vec())
+        ]
+    );
+}
+
+#[test]
+fn a_third_entry_with_the_same_path_is_numbered_three() {
+    let got = entries_of(&[("x.log", b"1"), ("x.log", b"2"), ("x.log", b"3"), ("noext", b"a"), ("noext", b"b")]);
+    let names: Vec<&str> = got.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["x.log", "x (2).log", "x (3).log", "noext", "noext (2)"]);
+    assert_eq!(got[2].1, b"3");
+}
+
+#[test]
+fn a_generated_name_never_takes_the_name_of_a_real_entry() {
+    // The real `x (2).log` comes before or after the repeated `x.log`: either way the copy becomes `x (3).log`.
+    for files in [
+        vec![("x.log", &b"real"[..]), ("x (2).log", &b"own"[..]), ("x.log", &b"copy"[..])],
+        vec![("x.log", &b"real"[..]), ("x.log", &b"copy"[..]), ("x (2).log", &b"own"[..])],
+    ] {
+        let got = entries_of(&files);
+        let find = |n: &str| got.iter().find(|(name, _)| name == n).map(|(_, b)| b.clone());
+        assert_eq!(got.len(), 3, "{got:?}");
+        assert_eq!(find("x.log").as_deref(), Some(&b"real"[..]));
+        assert_eq!(find("x (2).log").as_deref(), Some(&b"own"[..]));
+        assert_eq!(find("x (3).log").as_deref(), Some(&b"copy"[..]));
+    }
+}
+
+#[test]
+fn a_renamed_entry_is_read_again_by_its_new_name() {
+    let z = crate::common::stored_zip(&[("a.log".into(), b"one".to_vec()), ("a.log".into(), b"two".to_vec())]);
+    assert_eq!(debrief_core::archive::read_entry(z.clone(), "dup.zip", "a.log").unwrap(), b"one");
+    assert_eq!(debrief_core::archive::read_entry(z, "dup.zip", "a (2).log").unwrap(), b"two");
+}

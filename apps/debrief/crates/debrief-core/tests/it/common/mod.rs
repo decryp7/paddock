@@ -208,3 +208,48 @@ pub fn quiet<T>(f: impl FnOnce() -> T) -> T {
     std::panic::set_hook(Box::new(move |info| prev(info)));
     out
 }
+
+/// A zip of uncompressed entries written field by field (PKWARE APPNOTE 6.3.10, sections 4.3.7, 4.3.12 and 4.3.16): a
+/// local header and the data per entry, the central directory, the end record. Any names, repeated ones too.
+pub fn stored_zip(files: &[(String, Vec<u8>)]) -> Vec<u8> {
+    const DOS_DATE_1980_01_01: u16 = 0x21;
+    let (mut out, mut central) = (Vec::new(), Vec::new());
+    for (name, data) in files {
+        let mut crc = flate2::Crc::new();
+        crc.update(data);
+        let (name, len, offset) = (name.as_bytes(), data.len() as u32, out.len() as u32);
+        let common = |b: &mut Vec<u8>| {
+            for v in [20u16, 0, 0, 0, DOS_DATE_1980_01_01] {
+                b.extend(v.to_le_bytes()); // version needed, flags, method (stored), time, date
+            }
+            for v in [crc.sum(), len, len] {
+                b.extend(v.to_le_bytes()); // CRC-32, compressed and uncompressed size
+            }
+            b.extend((name.len() as u16).to_le_bytes());
+            b.extend(0u16.to_le_bytes()); // extra field length
+        };
+        out.extend(0x0403_4b50u32.to_le_bytes());
+        common(&mut out);
+        out.extend(name);
+        out.extend(data);
+        central.extend(0x0201_4b50u32.to_le_bytes());
+        central.extend(20u16.to_le_bytes()); // version made by
+        common(&mut central);
+        for v in [0u16, 0, 0] {
+            central.extend(v.to_le_bytes()); // comment length, disk number, internal attributes
+        }
+        central.extend(0u32.to_le_bytes()); // external attributes
+        central.extend(offset.to_le_bytes());
+        central.extend(name);
+    }
+    let (start, size, count) = (out.len() as u32, central.len() as u32, files.len() as u16);
+    out.extend(central);
+    out.extend(0x0605_4b50u32.to_le_bytes());
+    for v in [0u16, 0, count, count] {
+        out.extend(v.to_le_bytes()); // this disk, the directory's disk, entries here, entries in all
+    }
+    out.extend(size.to_le_bytes());
+    out.extend(start.to_le_bytes());
+    out.extend(0u16.to_le_bytes()); // comment length
+    out
+}

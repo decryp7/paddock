@@ -43,6 +43,9 @@ pub struct ImportEnv<'a> {
 pub enum Outcome {
     Imported(SourceReport),
     Unrecognized(UnrecognizedFile),
+    /// Something the user should know that is not a failure (the import report's notices): an archive entry kept
+    /// under a new name because the archive names its path more than once.
+    Notice(String),
 }
 
 fn unrecognized(path: &str, name: &str, reason: impl Into<String>) -> Outcome {
@@ -149,7 +152,16 @@ pub(super) fn import_path_with(
     } else {
         FileKind::Compressed
     };
-    entries
+    let notices: Vec<Outcome> = entries
+        .iter()
+        .filter_map(|e| Some((e.renamed_from.as_deref()?, e.name.as_deref()?)))
+        .map(|(own, kept)| {
+            Outcome::Notice(format!(
+                "{name}/{kept}: {name} has more than one entry named {own}; this one was imported as {kept} so that none is lost"
+            ))
+        })
+        .collect();
+    let mut outcomes: Vec<Outcome> = entries
         .into_iter()
         .filter_map(|entry| {
             let (source_path, source_name) = match (&entry.name, compressed) {
@@ -182,7 +194,9 @@ pub(super) fn import_path_with(
                 None,
             ))
         })
-        .collect()
+        .collect();
+    outcomes.extend(notices);
+    outcomes
 }
 
 /// Imports one source from a seekable reader whose first bytes are `head`.

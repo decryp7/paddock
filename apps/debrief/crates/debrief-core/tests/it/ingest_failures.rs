@@ -323,3 +323,35 @@ impl BatchSink for CancelAfterFirst {
         self.inner.abort_source(id)
     }
 }
+
+/// A zip that names one path twice imports both entries (the second as `<stem> (2)<.ext>`) and says so in a notice the
+/// import report lists (the user's decision of 2026-10-29).
+#[test]
+fn a_repeated_path_in_a_zip_imports_both_entries_and_notes_the_rename() {
+    let d = TempDir::new("dup-zip");
+    let files = [("web/app.log".to_string(), LOG.to_vec()), ("web/app.log".to_string(), LOG.to_vec())];
+    let p = d.write("dup.zip", &crate::common::stored_zip(&files));
+    let cancel = AtomicBool::new(false);
+    let mut sink = Sink::default();
+    let out = import_path(&env(&cancel), &p, "dup.zip", &HashSet::new(), &mut sink);
+    let imported: Vec<&str> = out
+        .iter()
+        .filter_map(|o| match o {
+            Outcome::Imported(r) => Some(r.name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(imported, ["dup.zip/web/app.log", "dup.zip/web/app (2).log"], "{out:?}");
+    let notices: Vec<&str> = out
+        .iter()
+        .filter_map(|o| match o {
+            Outcome::Notice(n) => Some(n.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(notices.len(), 1, "{out:?}");
+    assert!(
+        notices[0].contains("dup.zip/web/app (2).log") && notices[0].contains("web/app.log"),
+        "{notices:?}"
+    );
+}
