@@ -20,8 +20,8 @@ one test per contract; each test is written first (ER-11).
 | `RepoPath` | a workspace-relative path, `/` separated | parsed once at the edge: not empty, not absolute, no `..`, no `.` segment, no NUL, no backslash, at most 4096 bytes and 255 per segment; Windows drive prefixes refused |
 | `Span`, `Location` | 1-based line, 1-based column in UTF-8 bytes; `Location = RepoPath + Span` | `start <= end`; a span never wraps |
 | `Fingerprint` | SHA-256 of normalised content, 32 bytes | a file's content with line endings normalised to `\n`; used for rename matching and baselines |
-| `FileId` | opaque 128-bit id minted once when the index first sees a file | **survives renames**: the index re-binds the same `FileId` to the new path when the fingerprint matches (A3a) |
-| `SymbolId`, `ChunkId` | 128-bit hash, displayed `sym:<32 hex>` and `chk:<32 hex>` | `SymbolId = H(FileId, language, kind, qualified name, disambiguator)`; **no path in it**, so a rename keeps every symbol id (rule 14: ids derive from identity, not order or place); a changed qualified name is a new id, by design |
+| `FileId` | opaque 128-bit id issued by the store from a persistent counter (`FileIdAllocator`); never recomputed | **survives renames**: the index re-binds the same `FileId` to the new path when the fingerprint matches (A3a). It is issued, not hashed from path and content, because `git mv a b` followed by a new file at `a` with the same content would otherwise give two files one id |
+| `SymbolId`, `ChunkId` | 128-bit hash, displayed `sym:<32 hex>` and `chk:<32 hex>` | `SymbolId = H(FileId, language, kind, qualified name, disambiguator)`; **no path in it**, so a rename that keeps the `FileId` keeps every symbol id (rule 14: ids derive from identity, not order or place); a changed qualified name is a new id, by design |
 | `Rev` | `Commit(CommitHash)` or `WorkingTree(Generation)` | `CommitHash` is 40 or 64 lowercase hex; `Generation` is the index generation counter, so caches keyed by `Rev` never serve an older index |
 | `Tier` | `Text < Syntax < Semantic` | ordered; "tier 3 failed" is a missing `Semantic` fact, never an error of the whole answer |
 | `Confidence` | `Guess < Heuristic < Resolved < Exact` | every reference, call edge and link carries one; the UI shows it (proposal 20.1) |
@@ -29,7 +29,20 @@ one test per contract; each test is written first (ER-11).
 | `Severity` | `Info < Low < Medium < High < Blocker` | proposal section 8 |
 | `FindingState` | `Open`, `Confirmed`, `Dismissed`, `Fixed`, `Suppressed` | a transition table (`FindingState::transition`) refuses illegal moves with a typed error; a state is an enum, never flags |
 
-All types derive `serde` and are stable on the wire; none holds a `String` where a validated newtype exists.
+**Qualified name.** The chain of containers *inside the file*, joined by the language's separator (`Outer::Inner::method`,
+`Class.method`, `Type#member`), never a module path derived from where the file lives (a Rust `crate::a::b` from
+`src/a/b.rs`, a Python dotted module from the folder, a Java package from the directory). Otherwise moving a file would
+change every id in it. The module path is a separate, mutable column of the `symbols` table, shown to users and used to
+resolve imports, and it is not part of the id.
+
+**Wire rules.** All types derive `serde`. Wire enums are externally tagged only (postcard cannot read internally or
+adjacently tagged ones). A validated type (`Position`, `Span`, `RepoPath`, `ServerPack`, `Download`, `RuleSpec`, `Budget`,
+`Contributions`, `HostRequest`, ...) has private fields and is read through `#[serde(try_from = ...)]` into the same
+validation as its parser, so no format builds an invalid value; one test lists every such type and checks JSON and postcard
+(`wire_tests`), and another round-trips every type through both. `ServerPack` carries `init_options` as JSON text (an
+object, at most 16 KiB) so it crosses postcard; the core does not judge its content: the pack loader in `pacenotes-lsp`
+owns the check of known execution switches (rust-analyzer's `cargo.buildScripts`, `procMacro`) against the repository's
+trust state. A pack may not set `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_*` or `NODE_OPTIONS`.
 
 ### Schemas with validation (types only; loaders in the crates that use them)
 
@@ -45,14 +58,16 @@ All types derive `serde` and are stable on the wire; none holds a `String` where
 
 ### Ports (traits owned by the core; adapters elsewhere)
 
-Every port method takes a `&CancelToken` (from `paddock-jobs`) when it can block or run long, returns a typed error
-that never panics on bad input, and is object safe. A port documents its error semantics; every adapter honours them
+Every port method takes a `&CancelToken` (from `paddock-jobs`) when it can block or run long (every `Store` read, since
+each may touch disk), returns a typed error that never panics on bad input, bounds what it returns (`symbols_in_file`
+takes a limit and reports truncation; `embed` takes at most 256 texts of 64 KiB; a language-server reply holds at most
+10,000 locations) and is object safe. `Llm::complete` returns the model that answered with the text. A port documents its error semantics; every adapter honours them
 (Liskov).
 
 | Port | Methods (A1) | Contract | Contract test (written first) |
 |---|---|---|---|
 | `History` | `head`, `read_at(rev, path, max_bytes)`, `changed_between(from, to, limit)` | reads never touch the working tree; a missing path is `NotFound`, not an empty file; `max_bytes` caps the read and an over-long file is `TooLarge`; `changed_between` is sorted and capped, and says when it truncated | `history_contract`: not found vs empty, size cap, sorted and truncation flag, cancel before work |
-| `Store` | `generation`, `file_id(path)`, `symbols_in_file(file)` (read side) | reads are consistent within one generation; the writer is a single actor behind a separate trait in `pacenotes-index` | `store_contract`: a read never mixes two generations; unknown file is `None` |
+| `Store` | `generation`, `file_id(path)`, `symbols_in_file(file, limit)` (read side), each with a cancel token | reads are consistent within one generation; the writer is a single actor behind a separate trait in `pacenotes-index` | `store_contract`: a read never mixes two generations; unknown file is `None` |
 | `Embedder` | `model`, `dimension`, `embed(texts, cancel)` | the returned vectors have `dimension` entries each, one per text, in order; the model id is recorded with every vector (**vectors of different models never mix**) | `embedder_contract`: count, order, dimension, cancel |
 | `VectorIndex` | `model`, `insert`, `remove`, `nearest(query, k)` | refuses a vector of another model or dimension; `nearest` is deterministic for equal scores (by id) | `vector_index_contract`: mix refused, deterministic ties, remove then absent |
 | `LanguageServer` | `request(feature, params, cancel)` | a malformed or oversized reply is `BadReply`, a stopped or quarantined server is `Unavailable` (callers fall back to tier 2) | `language_server_contract`: both errors, never a panic |
@@ -61,6 +76,25 @@ that never panics on bad input, and is object safe. A port documents its error s
 
 Each contract test is a generic function in `pacenotes_core::contract` (behind the `testing` feature) that any adapter's
 own test calls with its instance; the core ships an in-memory fake of each port that passes it.
+
+### The function port's budget (package FN0)
+
+A call across the function port carries a `Budget` of **host ticks**, items and bytes. It is a *cap* in the sense of ADR 0031:
+the tick count is the host's own beats (a pause spends none, and a call that reports progress is not cut), the default
+lives in the settings a function contributes (`Budget::setting_specs`: 30 ticks, 1000 items, 1 MiB) and not in code, and
+the error that a limit raises says which limit, its value and the setting to change. The byte bound is the codec's message
+bound (4 MiB): one source. Items and bytes replace the per-call `limit` and `max_bytes` fields. A model call
+(`HostCall::Complete`) names its origin, and the host refuses `Origin::Background` (family rule 46); the contract test
+`host_contract` checks cancel, the budget's effect and that refusal for any host.
+
+### Deviation from ADR 0022 §3.7
+
+§3.7 says to extend the WP-C6 check so that no manifest under `apps/pacenotes/` enables `paddock-repo-graph`'s
+`cargo-metadata`. The guard is two things instead, because WP-C6 checks copies of CI scripts and shares no mechanism with
+this: (1) the real guard in Pacenotes' own CI leg, `cargo tree -e features --all-features -i paddock-repo-graph`, which sees
+the resolved graph ("not in the graph" passes); (2) conformance C52 as a backstop that reads the manifests with a small
+TOML reader (multi-line arrays, quoted headers, `package` renames, `alias/cargo-metadata` forwards, `#` in strings) and runs
+from that leg's checks.
 
 ### Index schema v1 (the contract `pacenotes-index` implements in A3a)
 
@@ -76,6 +110,25 @@ written to committable TOML, so a rebuild loses no decision (proposal section 14
 The grammar-pack manifest of tier 2 (`pack.toml` with grammar source, queries and capabilities, proposal 7.2) is not
 specified yet: tier 2 ships compiled-in grammars first (A2) and the manifest schema follows with the first non-core
 pack. `Store` is the read side only; `Forge` waits for the Gitea integration.
+
+### Parallelism and cost (rule 51)
+
+Stage 1 has no bulk operation of its own; the contracts above fix what the bulk operations of A3a and A-embed must obey so
+that they can be both parallel and cheap. Parallel: reads (`Store`, `History`) are independent and bounded by the kind of
+work (SSD reads a few at a time, CPU work cores minus one), the one writer is a single actor behind a bounded queue, and
+embedding takes batches of at most 256 texts, which is the unit a worker pool maps over, with deterministic ordering (output
+in input order; ties by id). Cheaper: `Fingerprint` lets the index skip unchanged files and match renames without
+re-parsing; `symbols_in_file` and every reply are bounded so a large repository never builds one huge answer; no per-item
+model call (an `Llm` call needs a user origin). A3a's design records the thread counts as settings with an "Auto" default
+and the measurements (rule 48) in `docs/performance.md`.
+
+### Shared later
+
+Four things here are copies that belong in shared crates, and move only when shared code unfreezes after the Dyno and
+Spotter tags (the plan's shared-code limit, rule 1): (1) `RepoPath` (other crates parse workspace-relative paths);
+(2) the postcard wire helpers (`pacenotes-function-api::codec`, which `paddock_ipc::wire` already covers, with its `Json`
+helper); (3) one canonical content `Fingerprint` for the family; (4) the `Budget`/cap vocabulary, with ADR 0031's policy
+types. Each copy carries a `TODO(shared-later, ADR 0002)` comment.
 
 ## Consequences
 
