@@ -56,6 +56,10 @@ pub trait Sink: Send + Sync {
     fn activity(&self, entry: ActivityEntry);
     /// An alarm changed (raised, acknowledged, cleared...).
     fn alarm(&self, _change: dyno_core::alarms::AlarmChange) {}
+    /// A disk scan's status changed (at most four per second, a final one at the end).
+    fn disk_scan(&self, _status: dyno_core::disk::scan::DiskScanStatus) {}
+    /// The volumes mounted now changed.
+    fn disk_volumes(&self, _volumes: Vec<dyno_core::disk::volume::Volume>) {}
     /// The connection state changed.
     fn agent(&self, status: AgentStatus);
     /// A connection was made: the shell reads what it needs from the agent (settings, for the tray).
@@ -370,6 +374,8 @@ impl AgentLink {
             Message::Alert(a) => sink.alert(a),
             Message::Activity(a) => sink.activity(a),
             Message::Alarm(c) => sink.alarm(c),
+            Message::DiskScan(s) => sink.disk_scan(*s),
+            Message::DiskVolumes(v) => sink.disk_volumes(v),
             _ => {}
         });
         Peer::start(conn, opts).map(Arc::new).map_err(|e| e.to_string())
@@ -756,8 +762,12 @@ mod tests {
         // The agent's own errors keep their code.
         let err = r
             .link
-            .call(Request::DiskUsage {
-                path: Some("relative".into()),
+            .call(Request::DiskChildren {
+                scan: 99,
+                node: None,
+                offset: 0,
+                limit: 1,
+                min_fraction: 0.0,
             })
             .unwrap_err();
         assert_ne!(err.code, ErrorCode::AgentUnavailable);

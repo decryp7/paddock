@@ -43,6 +43,49 @@ pub const RECENT_SAMPLES: usize = 180;
 /// Facts are refreshed at most this often.
 pub const FACTS_TTL: Duration = Duration::from_secs(300);
 
+/// Disk scan statuses waiting for one app: the latest of each scan. A status replaces the older one of its scan, so a slow app
+/// sees fewer events but always the newest, and a final state (done, cancelled, failed) is never dropped.
+#[derive(Default)]
+pub struct ScanSlot(Mutex<std::collections::BTreeMap<u64, dyno_core::disk::scan::DiskScanStatus>>);
+
+impl ScanSlot {
+    /// Keeps `status` unless a newer event of the same scan is already waiting.
+    pub fn put(&self, status: dyno_core::disk::scan::DiskScanStatus) {
+        let mut m = lock(&self.0);
+        match m.get(&status.scan) {
+            Some(old) if old.seq >= status.seq => {}
+            _ => {
+                m.insert(status.scan, status);
+            }
+        }
+    }
+
+    /// Everything waiting, oldest scan first; the slot is empty afterwards.
+    pub fn take(&self) -> Vec<dyno_core::disk::scan::DiskScanStatus> {
+        std::mem::take(&mut *lock(&self.0)).into_values().collect()
+    }
+}
+
+/// The newest volume list waiting for one app, with the ticket of the listing it came from: an older listing never replaces a
+/// newer one, and the list is never dropped for a full queue.
+#[derive(Default)]
+pub struct VolumesSlot(Mutex<Option<(u64, Vec<dyno_core::disk::volume::Volume>)>>);
+
+impl VolumesSlot {
+    /// Keeps the list unless a newer listing's is already waiting.
+    pub fn put(&self, ticket: u64, volumes: Vec<dyno_core::disk::volume::Volume>) {
+        let mut m = lock(&self.0);
+        if m.as_ref().is_none_or(|(old, _)| *old < ticket) {
+            *m = Some((ticket, volumes));
+        }
+    }
+
+    /// The list waiting, if any; the slot is empty afterwards.
+    pub fn take(&self) -> Option<Vec<dyno_core::disk::volume::Volume>> {
+        lock(&self.0).take().map(|(_, v)| v)
+    }
+}
+
 /// A connected app that wants live updates.
 pub struct Sub {
     /// Connection id.
@@ -51,6 +94,10 @@ pub struct Sub {
     pub detail: Arc<AtomicU8>,
     /// Bounded: a slow app loses frames, it never slows the sampler.
     pub tx: SyncSender<Message>,
+    /// Disk scan statuses, latest per scan: never a lossy queue (a final state must arrive).
+    pub scans: Arc<ScanSlot>,
+    /// The volume list, newest only, same reason.
+    pub volumes: Arc<VolumesSlot>,
 }
 
 impl Sub {
@@ -193,6 +240,8 @@ pub struct Shared {
     pub hardware: crate::hardware::HardwareCentre,
     /// "Is this normal?" baselines learned from history.
     pub baselines: crate::baselines::BaselineCentre,
+    /// The disk map: volumes and scans (read-only).
+    pub disk: Arc<crate::disk::centre::DiskCentre>,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -205,6 +254,17 @@ impl Shared {
     /// defaults with a note in the activity log). Returns the sampler's two ports separately. `details` is a second
     /// process source used only for on-demand details, so a slow `lsof` never delays a sampling tick.
     pub fn build(dirs: Dirs, platform: Platform, details: Box<dyn ProcessSource>, reveal: Reveal) -> Result<Built, String> {
+        Shared::build_with(dirs, platform, details, reveal, crate::disk::DiskPorts::none())
+    }
+
+    /// [`Shared::build`] with the disk map's machine ports given (tests pass fixed ones).
+    pub fn build_with(
+        dirs: Dirs,
+        platform: Platform,
+        details: Box<dyn ProcessSource>,
+        reveal: Reveal,
+        disk_ports: crate::disk::DiskPorts,
+    ) -> Result<Built, String> {
         let t = now();
         let mut notes: Vec<String> = Vec::new();
         if let Err(e) = std::fs::create_dir_all(dirs.root()) {
@@ -226,6 +286,7 @@ impl Shared {
         let (settings, warn) = files::load(&dirs.settings(), dyno_core::settings::parse);
         notes.extend(warn);
         let settings = settings.unwrap_or_default().normalised();
+        let settings_limits = settings.disk.limits();
         let alarms = crate::alarms::AlarmCentre::load(&store, settings.alarms);
         let mut core = Core {
             store,
@@ -266,7 +327,7 @@ impl Shared {
             issues,
             links,
         } = platform;
-        let shared = Shared {
+        let shared = Arc::new_cyclic(|me| Shared {
             plugins: dyno_plugin_host::PluginHost::new(dyno_plugin_host::HostConfig::new(dirs.plugins())),
             dirs,
             core: Mutex::new(core),
@@ -294,12 +355,21 @@ impl Shared {
             ),
             hardware: crate::hardware::HardwareCentre::os(),
             baselines: crate::baselines::BaselineCentre::new(),
+            disk: Arc::new(crate::disk::centre::DiskCentre::new(
+                Arc::new(crate::disk::fs::OsDirSource),
+                disk_ports.volumes,
+                Arc::new(crate::disk::BroadcastStatus(me.clone())),
+                Arc::new(crate::disk::centre::SystemClock::default()),
+                disk_ports.access,
+                cores,
+                settings_limits,
+            )),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),
             next_conn: AtomicU64::new(1),
-        };
-        Ok((Arc::new(shared), sensors, processes))
+        });
+        Ok((shared, sensors, processes))
     }
 
     /// A new connection id.
@@ -347,6 +417,25 @@ impl Shared {
             }
         }
         best
+    }
+
+    /// Hands a scan status to every connected app: it replaces the older one of the same scan that has not been sent yet, and
+    /// the connection's push thread is woken. Nothing is lost but intermediate events.
+    pub fn broadcast_scan(&self, status: &dyno_core::disk::scan::DiskScanStatus) {
+        for s in lock(&self.subs).iter() {
+            s.scans.put(status.clone());
+            // The message only wakes the push thread; the content is in the slot. A full queue means the thread is awake
+            // anyway and looks at the slot after every message.
+            let _ = s.tx.try_send(Message::DiskScan(Box::new(status.clone())));
+        }
+    }
+
+    /// Hands a changed volume list to every connected app, newest listing wins; like scan statuses it is never lost to a full queue.
+    pub fn broadcast_volumes(&self, ticket: u64, volumes: &[dyno_core::disk::volume::Volume]) {
+        for s in lock(&self.subs).iter() {
+            s.volumes.put(ticket, volumes.to_vec());
+            let _ = s.tx.try_send(Message::DiskVolumes(Vec::new()));
+        }
     }
 
     /// Sends `m` to every connected app (dropping it for a slow one).

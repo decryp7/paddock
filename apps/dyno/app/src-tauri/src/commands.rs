@@ -129,6 +129,23 @@ pub async fn save_inventory_report(
     .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
 }
 
+/// The file finder and a folder scan of the disk map look only in a folder the person picked in the OS dialog
+/// (`pick_folder`); a volume scan names a volume the agent itself listed.
+fn check_picked(picked: &PickedFolders, request: &Request) -> Result<(), CommandError> {
+    let folder = match request {
+        Request::FindFiles { query } => &query.folder,
+        Request::StartDiskScan {
+            target: dyno_core::disk::scan::DiskTarget::Folder { path },
+        } => path,
+        _ => return Ok(()),
+    };
+    if picked.allows(folder) {
+        Ok(())
+    } else {
+        Err(CommandError::bad("Choose the folder with the Choose folder button first."))
+    }
+}
+
 /// The one command of the engine contract: `invoke('dyno', { request })`.
 #[tauri::command]
 pub async fn dyno(
@@ -144,12 +161,7 @@ pub async fn dyno(
         request,
         Request::LookupIp { .. } | Request::WebSearch { .. } | Request::VirusTotalUrl { .. }
     );
-    // The file finder looks only in a folder the person picked in the OS dialog (`pick_folder`).
-    if let Request::FindFiles { query } = &request {
-        if !picked.allows(&query.folder) {
-            return Err(CommandError::bad("Choose the folder with the Choose folder button first."));
-        }
-    }
+    check_picked(&picked, &request)?;
     let (link, shell, label) = (link.inner().clone(), shell.inner().clone(), webview.label().to_string());
     let value = tauri::async_runtime::spawn_blocking(move || handle(&link, &shell, &label, request))
         .await
@@ -368,6 +380,22 @@ mod tests {
         }
         assert!(!picked.allows(&dir));
         assert!(picked.allows(&format!("/picked/{}", MAX_PICKED + 2)));
+    }
+
+    #[test]
+    fn a_disk_scan_of_a_folder_needs_a_picked_folder_but_a_volume_does_not() {
+        use serde_json::json;
+        let picked = PickedFolders::default();
+        let dir = std::env::temp_dir().to_string_lossy().into_owned();
+        let folder = parse_request(json!({"startDiskScan": {"target": {"folder": {"path": dir}}}})).unwrap();
+        assert!(check_picked(&picked, &folder).is_err(), "nobody picked it");
+        picked.remember(&dir);
+        assert!(check_picked(&picked, &folder).is_ok());
+        let volume = parse_request(json!({"startDiskScan": {"target": {"volume": {"id": "/"}}}})).unwrap();
+        assert!(check_picked(&PickedFolders::default(), &volume).is_ok());
+        assert!(check_picked(&PickedFolders::default(), &Request::WhySlow).is_ok());
+        let finder = parse_request(json!({"findFiles": {"query": {"folder": dir, "minBytes": 1}}})).unwrap();
+        assert!(check_picked(&PickedFolders::default(), &finder).is_err());
     }
 
     #[test]
