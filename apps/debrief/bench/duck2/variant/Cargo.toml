@@ -1,0 +1,13 @@
+[package]
+name = "variant-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+parquet = { version = "=60.0.0", features = ["variant_experimental", "arrow", "zstd"] }
+arrow = "=60.0.0"
+arrow-array = "=60.0.0"
+arrow-schema = "=60.0.0"
+
+[workspace]

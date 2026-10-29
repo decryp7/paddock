@@ -1,0 +1,11 @@
+[package]
+name = "rx-bench"
+version = "0.0.0"
+edition = "2021"
+publish = false
+[dependencies]
+regex = "1"
+regex-automata = "0.4"
+[profile.release]
+debug = false
+[workspace]
