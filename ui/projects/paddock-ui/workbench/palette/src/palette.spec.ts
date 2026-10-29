@@ -369,7 +369,58 @@ describe('namesPaletteProvider', () => {
   });
 });
 
+/** A key pressed on the document, as the shortcut handler sees it. */
+function press(key: string, init: KeyboardEventInit = {}): KeyboardEvent {
+  const e = new KeyboardEvent('keydown', { key, cancelable: true, bubbles: true, ...init });
+  document.dispatchEvent(e);
+  return e;
+}
+
 describe('PdCommandPalette', () => {
+  it('keeps the keys typed before the input has the focus', async () => {
+    const { store } = setup();
+    const { fixture, element } = await render(PdCommandPalette);
+    store.open();
+    // Before change detection draws the input: the shortcut was pressed a moment ago.
+    expect(press('f').defaultPrevented).toBe(true);
+    press('o');
+    press('x');
+    press('Backspace');
+    press('l');
+    expect(store.query()).toBe('>fol');
+    // A shortcut's own keys are left to their handlers.
+    expect(press('p', { ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(store.query()).toBe('>fol');
+    await settle(fixture);
+    const input = element.querySelector<HTMLInputElement>('[data-testid="palette-input"]')!;
+    expect(input.value).toBe('>fol');
+    expect(document.activeElement).toBe(input);
+    expect(input.selectionStart).toBe(4);
+    expect(ran).toEqual([]);
+    // Escape before the input is there closes the palette too.
+    store.close();
+    await settle(fixture);
+    store.open();
+    expect(press('Escape').defaultPrevented).toBe(true);
+    expect(store.isOpen()).toBe(false);
+  });
+
+  it('holds an Enter pressed early until the input is there, then accepts the row of what was typed', async () => {
+    const { store } = setup();
+    const { fixture } = await render(PdCommandPalette);
+    store.open();
+    press('f');
+    press('o');
+    press('l');
+    expect(press('Enter').defaultPrevented).toBe(true);
+    // Nothing ran yet, and not the first row of the list nobody looked at.
+    expect(ran).toEqual([]);
+    expect(store.isOpen()).toBe(true);
+    await settle(fixture);
+    expect(ran).toEqual(['open-folder']);
+    expect(store.isOpen()).toBe(false);
+  });
+
   it('renders the list, highlights, handles keys and returns focus on Escape', async () => {
     const { store } = setup();
     const opener = document.createElement('button');

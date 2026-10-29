@@ -1,5 +1,5 @@
 import { DOCUMENT } from '@angular/common';
-import { afterNextRender, ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, Injector, untracked, viewChild } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, Injector, signal, untracked, viewChild } from '@angular/core';
 import { PdPathText } from '@decryp7/paddock-ui';
 import { PdIcon } from '@decryp7/paddock-ui/shell';
 import { titleParts, type TitlePart } from './match';
@@ -17,6 +17,7 @@ let nextId = 0;
   selector: 'pd-command-palette',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdIcon, PdPathText],
+  host: { '(document:keydown)': 'onEarlyKey($event)' },
   template: `
     @if (store.isOpen()) {
       <div class="pd-pal-backdrop" data-testid="palette-backdrop" (mousedown)="close()"></div>
@@ -27,8 +28,8 @@ let nextId = 0;
           role="combobox"
           [attr.aria-label]="t.input"
           aria-autocomplete="list"
-          aria-expanded="true"
-          [attr.aria-controls]="listId"
+          [attr.aria-expanded]="store.rows().length > 0"
+          [attr.aria-controls]="store.rows().length ? listId : null"
           [attr.aria-activedescendant]="activeId()"
           [placeholder]="store.placeholder()"
           autocomplete="off"
@@ -36,6 +37,8 @@ let nextId = 0;
           data-testid="palette-input"
           [value]="store.query()"
           (input)="store.setQuery($any($event.target).value)"
+          (focus)="onFocus($event)"
+          (blur)="onBlur()"
           (keydown)="onKey($event)"
         />
         <div class="pd-pal-status" role="status" data-testid="palette-status">
@@ -46,8 +49,12 @@ let nextId = 0;
             <button type="button" class="pd-pal-retry" data-testid="palette-retry" (click)="store.retry()">{{ t.retry }}</button>
           } @else if (store.suggesting()) {
             <span data-testid="palette-did-you-mean">{{ didYouMean() }}</span>
+          } @else if (!store.rows().length) {
+            <!-- Said in the live status (a screen reader hears it); the listbox is drawn only while it has options. -->
+            <span class="pd-pal-none" data-testid="palette-empty">{{ emptyText() }}</span>
           }
         </div>
+        @if (store.rows().length) {
         <ul class="pd-pal-list" role="listbox" [attr.aria-label]="t.results" [id]="listId" data-testid="palette-list">
           @for (row of store.rows(); track row.key; let i = $index) {
             @if (row.heading) {
@@ -85,12 +92,9 @@ let nextId = 0;
                 <kbd class="pd-pal-kbd">{{ row.keybinding }}</kbd>
               }
             </li>
-          } @empty {
-            @if (!store.isLoading()) {
-              <li class="pd-pal-none" role="presentation" data-testid="palette-empty">{{ emptyText() }}</li>
-            }
           }
         </ul>
+        }
         <div class="pd-pal-hints" aria-hidden="true">
           @for (p of store.prefixes(); track p.prefix) {
             <span class="pd-pal-hint" [class.pd-active]="p.active" data-testid="palette-hint"><kbd>{{ p.prefix }}</kbd> {{ p.title }}</span>
@@ -120,7 +124,7 @@ let nextId = 0;
     .pd-pal-detail { flex: 0 1 40%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .pd-pal-group { padding: var(--pd-space-2) var(--pd-space-3) var(--pd-space-1); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-semibold); }
     .pd-pal-kbd, .pd-pal-hint kbd { flex: none; font-family: var(--pd-font-sans); font-variant-numeric: tabular-nums; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
-    .pd-pal-none { padding: var(--pd-space-3); color: var(--pd-text-muted); }
+    .pd-pal-none { padding: var(--pd-space-2) 0; color: var(--pd-text-muted); font-size: var(--pd-text-body); }
     .pd-pal-hint.pd-active, .pd-pal-hint.pd-active kbd { color: var(--pd-text); font-weight: var(--pd-weight-semibold); }
     .pd-pal-hints { display: flex; flex-wrap: wrap; gap: var(--pd-space-3); padding: var(--pd-space-1) var(--pd-space-2) 0; border-top: 1px solid var(--pd-hairline); color: var(--pd-text-muted); font-size: var(--pd-text-label); }
   `,
@@ -151,24 +155,87 @@ export class PdCommandPalette {
       : $localize`:@@pd.wb.palette.empty-query:No command matches “${searched}:query:”`;
   });
   private returnFocus: HTMLElement | null = null;
+  /** The input has the focus (it is drawn and focused a moment after the palette opens). */
+  protected inputFocused = false;
+  private readonly focused = signal(false);
+  /** Enter was pressed before the input had the focus: it accepts once the typed query's rows are in. */
+  private pendingEnter = false;
 
   constructor() {
     let wasOpen = false;
+    effect(() => {
+      const ready = this.store.isOpen() && this.focused() && !this.store.isLoading();
+      untracked(() => {
+        if (!ready || !this.pendingEnter) return;
+        this.pendingEnter = false;
+        void this.accept(this.store.active());
+      });
+    });
+    // effect-state: focus and the early-key flags live outside the signal graph (the DOM's focus); this resets them when the palette closes.
     // Focus is outside the signal graph: remember where it was when the palette opens, and put the caret in the input.
     effect(() => {
       const open = this.store.isOpen();
       untracked(() => {
         if (open && !wasOpen) {
           this.returnFocus = this.doc.activeElement as HTMLElement | null;
-          afterNextRender(() => this.input()?.nativeElement.focus(), { injector: this.injector });
+          afterNextRender(
+            () => {
+              const input = this.input()?.nativeElement;
+              if (!input) return;
+              input.focus();
+              this.markFocused(input);
+            },
+            { injector: this.injector },
+          );
         }
         if (!open && wasOpen) {
+          this.pendingEnter = false;
+          this.inputFocused = false;
+          this.focused.set(false);
           this.returnFocus?.focus?.();
           this.returnFocus = null;
         }
       });
       wasOpen = open;
     });
+  }
+
+  protected onFocus(e: Event): void {
+    this.markFocused(e.target as HTMLInputElement);
+  }
+
+  private markFocused(input: HTMLInputElement): void {
+    this.inputFocused = true;
+    this.focused.set(true);
+    // Keys kept for the input (above) may be newer than what was drawn: the next key must land on the whole query.
+    if (input.value !== this.store.query()) input.value = this.store.query();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+
+  protected onBlur(): void {
+    this.inputFocused = false;
+    this.focused.set(false);
+  }
+
+  /**
+   * Keys typed between the shortcut and the input getting the focus (a render later) are not lost: a printable key or
+   * Backspace edits the query, Enter waits for the input and the rows of what was typed (it must not run a row of a list nobody has looked at), Escape closes.
+   */
+  protected onEarlyKey(e: KeyboardEvent): void {
+    if (!this.store.isOpen() || this.inputFocused || e.defaultPrevented || e.isComposing) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      this.close();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      this.pendingEnter = true;
+    } else if (e.key === 'Backspace') {
+      e.preventDefault();
+      this.store.setQuery(this.store.query().slice(0, -1));
+    } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      this.store.setQuery(this.store.query() + e.key);
+    }
   }
 
   protected optionId(i: number): string {

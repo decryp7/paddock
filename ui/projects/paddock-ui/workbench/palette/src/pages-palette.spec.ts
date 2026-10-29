@@ -1,19 +1,21 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { CommandService, definePage, msg, ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { WorkbenchRegistry } from '@decryp7/paddock-ui/workbench';
 import { KEY_PLATFORM } from '@decryp7/paddock-ui/shell/menu';
 import { provideShellTesting, settle } from '@decryp7/paddock-ui/shell/testing';
 import { PaletteStore } from './palette.store';
 import { PALETTE_RECENT_STORAGE } from './recent';
 import { PALETTE_COMMANDS } from './provide-palette';
-import { providePagesPalette } from './pages-palette';
+import { GO_TO_PAGE_PROVIDER, providePagesPalette, type PagesPaletteOptions } from './pages-palette';
+import { AppMenu, provideMenus } from '@decryp7/paddock-ui/shell/menu';
 
 interface Ctx {
   readonly hasBackup: boolean;
 }
 const load = () => Promise.resolve(class {});
 
-function setup(hasBackup = false) {
+function setup(hasBackup = false, options: PagesPaletteOptions = {}) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
@@ -29,7 +31,7 @@ function setup(hasBackup = false) {
             ],
           },
         ],
-        providers: [{ provide: KEY_PLATFORM, useValue: 'other' }, { provide: PALETTE_RECENT_STORAGE, useValue: null }, providePagesPalette()],
+        providers: [provideMenus({ appName: 'Test' }), { provide: KEY_PLATFORM, useValue: 'other' }, { provide: PALETTE_RECENT_STORAGE, useValue: null }, providePagesPalette(options)],
       }),
     ],
   });
@@ -75,6 +77,57 @@ describe('providePagesPalette', () => {
     store.setQuery('zzzz');
     await settle();
     expect(store.rows()).toEqual([]);
+  });
+
+  it('hands the page on accept to the main region, also when it is the page shown', async () => {
+    const { store } = setup();
+    const main = document.createElement('main');
+    main.id = 'pd-main';
+    main.tabIndex = -1;
+    document.body.append(main);
+    await TestBed.inject(ShellContextHost).load();
+    store.open('');
+    await settle();
+    expect(await store.accept(0)).toBe(true);
+    expect(document.activeElement).toBe(main);
+    main.remove();
+  });
+
+  it('answers no more rows than the request’s limit', async () => {
+    setup();
+    await TestBed.inject(ShellContextHost).load();
+    const provider = TestBed.inject(WorkbenchRegistry).paletteProviders.find((p) => p.id === GO_TO_PAGE_PROVIDER)!;
+    const ctx = await TestBed.inject(ShellContextHost).load();
+    const answer = await provider.search('', ctx, { limit: 1, signal: new AbortController().signal });
+    expect(answer.map((i) => i.label)).toEqual(['Dashboard']);
+  });
+
+  it('puts the pages behind a prefix, or leaves them out', async () => {
+    const prefixed = setup(false, { goToPages: { prefix: '#' } });
+    await TestBed.inject(ShellContextHost).load();
+    prefixed.store.open('#proc');
+    await settle();
+    expect(prefixed.store.rows().map((r) => r.label)).toEqual(['Processes']);
+    prefixed.store.open('');
+    expect(prefixed.store.source()).toEqual({ kind: 'commands' });
+
+    const none = setup(false, { goToPages: false });
+    await TestBed.inject(ShellContextHost).load();
+    none.store.open('proc');
+    expect(none.store.source()).toEqual({ kind: 'commands' });
+    expect(none.store.prefixes().map((p) => p.prefix)).toEqual(['>']);
+  });
+
+  it('lists the palette in the View menu, so the native menu bar carries it with its keys', async () => {
+    setup();
+    await TestBed.inject(ShellContextHost).load();
+    await settle();
+    const view = TestBed.inject(AppMenu).menus().find((m) => m.id === 'view');
+    const labels = (view?.items ?? []).flatMap((n) => (n.kind === 'item' ? [{ label: n.label, key: n.keybinding }] : []));
+    expect(labels).toEqual([
+      { label: 'Show all commands', key: 'Mod+Shift+P' },
+      { label: 'Go to…', key: 'Mod+P' },
+    ]);
   });
 
   it('opens the commands list with Mod+Shift+P', async () => {

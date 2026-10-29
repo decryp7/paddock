@@ -128,7 +128,16 @@ export class ShellPages {
       console.warn(`[paddock-pages] there is no page ${id}`);
       return false;
     }
-    void this.router.navigateByUrl(`/${this.path(id)}`);
+    void this.go(id);
     return true;
+  }
+
+  /** Shows a page by id and resolves once the navigation is done (false: no such page, or the navigation was refused). */
+  go(id: string): Promise<boolean> {
+    if (!this.all.some((p) => p.id === id)) {
+      console.warn(`[paddock-pages] there is no page ${id}`);
+      return Promise.resolve(false);
+    }
+    return this.router.navigateByUrl(`/${this.path(id)}`);
   }
 }

@@ -8,7 +8,7 @@
 export { PdCommandPalette } from './src/command-palette';
 export { PaletteStore, PALETTE_LIMIT, PALETTE_TIMERS, PALETTE_COMMON_COMMANDS, type PaletteRow, type PaletteSource, type PaletteTimers, type PaletteStoreType } from './src/palette.store';
 export { PaletteRecent, PALETTE_RECENT_STORAGE, PALETTE_RECENT_KEY, MAX_RECENT } from './src/recent';
-export { providePagesPalette, GO_TO_PAGE_PROVIDER } from './src/pages-palette';
+export { providePagesPalette, GO_TO_PAGE_PROVIDER, type PagesPaletteOptions } from './src/pages-palette';
 export { providePalette, PALETTE_COMMANDS, type PaletteOptions } from './src/provide-palette';
 export {
   namesPaletteProvider,
