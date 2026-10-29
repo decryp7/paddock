@@ -188,3 +188,36 @@ every query is far under 0.5 s in all formats, so the Parquet default does not n
 Not measured, honestly: the real pipeline with the sink swapped (the importer's sink interface would need an Appender implementation; the
 write-stage numbers above bound it), end-to-end time until search is ready for each, the compacted-Parquet, DuckLake, Quack, VARIANT and
 scaling-with-size cells, and the cold-cache runs (they need a cache purge this account cannot run). They are listed in the ADR as open.
+
+### Results blocks recorded after the fact (rule 48)
+
+**Writer bench, first run (the 387k / 725k / 5.1M figures quoted in the ADR and reports).** Harness
+`crates/debrief-store-duck/tests/it/layout_bakeoff.rs`; command
+`DEBRIEF_BENCH_COPIES=20 DEBRIEF_THREADS=8 cargo test --release -p debrief-store-duck --test it layout_bakeoff:: -- --ignored --nocapture`;
+corpus: 20 copies of the invented samples (about 0.56M events, 28k per copy); build: branch `debrief/duckdb-2` at 7b5653fdd plus the
+progress relay later committed as 08cf9f036, DuckDB 2.0.0; machine: M4 Pro, 14 cores; load: not recorded (the machine was shared; the
+later runs below were taken at load 2 to 4). Results: native table with one Arrow appender 387,515 events/s (peak +526 MB, 324.5 MB on
+disk); one Parquet writer 725,432 events/s (peak +2 MB, 38.1 MB, 48 segments); eight writers 5,087,660 events/s (115 ms, peak +9 MB).
+These are lower than the quiet runs of the writer table above for the appender (737k to 745k at load 2.6 to 3.6) and the one-writer
+case (1.15M); the first run was taken under load, so treat the quiet figures as the reference.
+
+**Quiet real import, 1.3 to 1.55 million events/s.** Not measured by this branch: it is the research note's figure
+(`docs/research/2026-10-duckdb-2-and-large-data.md`, branch `docs/research-duckdb-2` c755e717d, measured at 355fd94ae with DuckDB 1.5.6):
+56,152,132 events in 8.07 GB, the release CLI plus store worker (`debrief import`), 36 to 56 s, parse pool `min(cores - 1, 8)`, corpus from
+`gen_large.py` scale 1.0 (invented), machine M4 Pro; load: not recorded beyond "quiet". This branch's own pair runs (load 33 to 65) reached
+0.69M to 0.99M events/s on a 2.42 GB corpus and must not be read as the pipeline's speed. Re-measure on a quiet machine with
+`ab.sh LABEL 156|200 large03` (scale 0.3) before quoting a number.
+
+**More than one Appender (`DEBRIEF_APPENDERS=1,2,4`, 20 copies, load 2.1 to 2.8, three runs).** n appenders on n connections of one
+database, each appending its share of the batches in its own transaction, one checkpoint at the end:
+
+| Appenders | Events/s | Against one | Peak over baseline | On disk |
+|---|---|---|---|---|
+| 1 | 738k to 744k | 1.00x | +477 to +479 MB | 324.5 MB |
+| 2 | 925k to 937k | 1.25x | +217 to +316 MB | 327.4 MB |
+| 4 | 774k to 793k | 1.06x | +157 to +180 MB | 504 to 506 MB |
+
+This settles the open conflict between "a second appender adds nothing" and "four in-process appenders gain 1.8x": in this harness a
+second appender adds 25%, a fourth falls back to 1.06x and writes a 55% larger file (more, smaller row groups). Neither 1.0x nor 1.8x
+holds as a rule; the gain is small, peaks at two writers and stays below one Parquet writer (1.15M events/s) on every count. The Quack
+harness's 355k against 200k was not reproduced here (a different harness and corpus).

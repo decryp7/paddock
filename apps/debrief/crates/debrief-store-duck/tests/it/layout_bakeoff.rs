@@ -236,6 +236,45 @@ fn storage_layouts() {
     );
     let rate = |ms: f64| total as f64 / (ms / 1000.0);
 
+    // A-n: the same, with n appenders on n connections of one database, each appending its share of the batches
+    // (`DEBRIEF_APPENDERS`, default "2,4"): does a second or fourth appender add throughput?
+    for n in std::env::var("DEBRIEF_APPENDERS")
+        .unwrap_or_else(|_| "2,4".into())
+        .split(',')
+        .filter_map(|v| v.trim().parse::<usize>().ok())
+    {
+        let dir = TempDir::new("layout-an");
+        let c = open(&dir.0.join("data.duckdb"));
+        c.execute_batch(DDL).unwrap();
+        let peak = Peak::start();
+        let (_, ms) = time(|| {
+            std::thread::scope(|scope| {
+                for k in 0..n {
+                    let conn = c.try_clone().unwrap();
+                    let share: Vec<_> = batches.iter().skip(k).step_by(n).collect();
+                    scope.spawn(move || {
+                        conn.execute_batch("BEGIN").unwrap();
+                        {
+                            let mut app = conn.appender("events").unwrap();
+                            for b in share {
+                                app.append_record_batch(b.record_batch().clone()).unwrap();
+                            }
+                            app.flush().unwrap();
+                        }
+                        conn.execute_batch("COMMIT").unwrap();
+                    });
+                }
+            });
+            c.execute_batch("CHECKPOINT").unwrap();
+        });
+        eprintln!(
+            "A native table, {n} appenders: {:.0} events/s ({ms:.0} ms), peak +{} MB, {:.1} MB on disk",
+            rate(ms),
+            peak.mb(),
+            dir_size(&dir.0) as f64 / 1e6
+        );
+    }
+
     // A: native table, one appender for the whole import in one transaction, checkpoint at the end.
     for raw_mode in ["raw", "raw only if different"] {
         let dir = TempDir::new("layout-a");
