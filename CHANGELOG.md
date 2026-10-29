@@ -12,6 +12,10 @@ Conventional Commits; one semver tag for the whole repo.
   generated `JOB_SNAPSHOT_FIXTURES` carry a quiet job, so both sides test the same wire form. Spotter uses it for the source test and
   the check of one watch.
 
+### Copy menu in WebKit
+- `@decryp7/paddock-ui/shell/feel`: the guard keeps the `auxclick` that WebKit sends after a context menu from reaching the app, so the
+  Copy menu it just opened is no longer closed as an outside click.
+
 ### Dialog buttons
 - `@decryp7/paddock-ui/shell/dialogs`: the filled (primary) dialog button uses `--pd-accent-fill` with `--pd-on-accent` and
   `--pd-accent-fill-hover` (it used the accent text colour, 2.18:1 with white ink in dark mode). `test:tokens` checks both pairs

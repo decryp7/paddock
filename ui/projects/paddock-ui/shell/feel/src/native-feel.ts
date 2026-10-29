@@ -187,6 +187,24 @@ export function installNativeFeel(win: Window, o: FeelOptions, hooks: FeelHooks 
   const wheel = (e: WheelEvent) => {
     if (!e.defaultPrevented && shouldBlockWheel(e)) e.preventDefault();
   };
+  // WebKit sends an `auxclick` (button 2) after the context menu opened. To an overlay that is a click outside it, which closes
+  // the Copy menu at once. The first one is kept from the app; the next press ends the guard (a window that never sends it
+  // loses nothing).
+  const swallowOpeningAuxclick = () => {
+    const eat = (e: MouseEvent) => {
+      if (e.button !== 2) return;
+      e.stopImmediatePropagation();
+      done();
+    };
+    const done = () => {
+      win.removeEventListener('auxclick', eat, true);
+      win.removeEventListener('mousedown', done, true);
+      win.removeEventListener('keydown', done, true);
+    };
+    win.addEventListener('auxclick', eat, true);
+    win.addEventListener('mousedown', done, true);
+    win.addEventListener('keydown', done, true);
+  };
   const menu = (e: MouseEvent) => {
     const el = elementOf(e.target);
     const selected = selectedTextAt(el, win.getSelection(), e.clientX, e.clientY);
@@ -200,6 +218,7 @@ export function installNativeFeel(win: Window, o: FeelOptions, hooks: FeelHooks 
     if (action === 'copy' && selected !== null && hooks.copyMenu) {
       e.preventDefault();
       hooks.copyMenu(e.clientX, e.clientY, selected);
+      swallowOpeningAuxclick();
     }
   };
   const files = (e: DragEvent) => {
