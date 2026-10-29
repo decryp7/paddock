@@ -157,13 +157,13 @@ frames. "Same as..." applies one label to all look-alike crops (preview grid, un
 dialog, toast, progress, image, label, password field, plus custom classes (a TOML table, data not code). No mapping from UIA / AX /
 ARIA roles: Sighter reads no accessibility data (ADR 0001 decision 9).
 
-**Dataset**: splits by session (never by frame, to avoid leakage between near-identical frames), quality checks (duplicates,
+**Dataset**: splits by session and by screen fingerprint (never by frame, to avoid leakage between near-identical frames; ADR 0001), quality checks (duplicates,
 overlapping or tiny boxes, class imbalance, label/source disagreements), export to COCO JSON and YOLO txt (CVAT XML for round-tripping),
 and import of existing labels (COCO, YOLO, Label Studio JSON) so users can bring prior work.
 
 ### The review queue (manual labelling)
 Anything not identified automatically is flagged; nothing is silently dropped or guessed. Flag when:
-- no source proposes an element the pixels say exists (edge density, VLM or detector box without another source), or a region is only seen by one weak source;
+- no source proposes an element the pixels say exists (edge density, or a detector box without another source; the VLM never proposes boxes, ADR 0001), or a region is only seen by one weak source;
 - a source's confidence is below the threshold (default 0.6) or it returned no class;
 - sources disagree on class, or on box (IoU below 0.5), or two classes are within 0.1;
 - the class is unknown (not in the taxonomy) or OCR is unreadable.

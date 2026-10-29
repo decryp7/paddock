@@ -306,7 +306,7 @@ interleaved (benchmarks guide, rule 4).
 | EP options | `ModelFormat=MLProgram`, `MLComputeUnits=CPUAndGPU`, `RequireStaticInputShapes=1`, `ModelCacheDirectory` | none | device 0 (the adapter Windows lists first; its name recorded), `error_on_failure` |
 | Cache and model state | **warm**: the CoreML compiled-model cache present (prepared), session created and model loaded before timing; 5 warm-up locates discarded | **warm**: session created, 5 warm-up locates discarded | **warm**: session created, 5 warm-up locates discarded |
 | Cold rows (separate, not the locate gate) | model cold load with the cache present, against `MODEL_COLD_LOAD` (1.5 s); "prepare for this Mac" without a cache, recorded, no gate | model cold load against `MODEL_COLD_LOAD` | model cold load against `MODEL_COLD_LOAD` |
-| Load guard | the harness reads the 1-minute load before each row: **below 12** (benchmarks guide) for a gate verdict; **12 to 25**: the row runs and is marked indicative, never a gate verdict; **above 25** (`RUN_LOAD_LIMIT`): the row is skipped and the block says so | same | Windows has no load average: the harness records the processor queue length and CPU use for 10 s before the row and runs only when CPU use is below 20 %; nothing else may run on the machine |
+| Load guard | the harness reads the 1-minute load before each row: **below 12** (benchmarks guide) for a gate verdict; **12 to 25**: the row runs and is marked indicative, never a gate verdict; **above 25** (`RUN_LOAD_LIMIT`): the row is skipped and the block says so. A nightly gate failure measured at a load above 8 is re-run once when the load is below 8 before it counts; both runs go into the block | same | Windows has no load average: the harness records the processor queue length and CPU use for 10 s before the row and runs only when CPU use is below 20 %; nothing else may run on the machine |
 | Runs and percentile | **200 timed locates** per row, frames cycled from the corpus; p50 and p95 as `sorted[⌊p · (n − 1)⌋]` (the harness's rule; for n = 200 this is the 190th value for p95, the same as nearest rank) | same | same |
 | Corpus | 20 synthetic UI frames per size (1920 × 1200 and 3840 × 2160 at 100 %; 4K at 200 % normalised), rendered by the spike's generator (named in the block), never random tensors and never user captures | same | same |
 | What is timed (gate) | **one full-frame locate in `sighter-infer`**, from the frame already in memory (shared with the sidecar) to the merged result: **normalise** (resample to logical) → **tile** → **infer** (every tile, no early stop, the tile cache empty) → **merge** across seams, plus the IPC round trip from the server. **Capture is not in the gate** (proposal 7: "1080p screenshot in memory") and is a separate row; cache, template and OCR layers are off (the detector path, the worst case) | same | same |
@@ -455,7 +455,10 @@ Points the first `sighter-core` implementation needed and earlier revisions left
 4. **Confidence bands** (confirmed as defaults): **high ≥ 0.8** (the resolver's acting threshold τ) and **medium ≥ 0.5**,
    below that low; both are validated Settings (0 < medium < high ≤ 1). They are set from measurements once a model
    exists: spike item S8 compares them with each class's F1-optimal threshold from evaluation (proposal section 6) and
-   the wrong-click rate, and may move the defaults or make them per class.
+   the wrong-click rate, and may move the defaults or make them per class. They are **not the labelling
+   thresholds**: the bands judge a calibrated detector score when a locate acts at run time, while the review queue's
+   fusion score (proposal section 5) flags a label below 0.6 and auto-accepts it only at 0.85 or more with no
+   disagreeing source; auto-accept is stricter than "high" because a wrong label is learned by every later model.
 5. **Hint spaces and containment**: as in "Adapter hints: coordinate space" below (virtualised refused with its message;
    containment 50 %).
 6. **`o`** (confirmed): the captured window's origin on the host, in the host input space (macOS global points; Windows
@@ -485,8 +488,9 @@ value that **names its space**; Sighter never guesses a space and never rescales
 - After mapping, a hint is clipped to the query's scope and grown by a small margin (default 8 logical points, a
   tunable) because it can be stale; a hint that falls outside the target is dropped and recorded. Hints then only
   narrow and rank (decision 9): a detection **counts as inside a hint when at least 50 % of its area lies inside the
-  grown hint** (`HINT_CONTAINMENT`, default 0.5, a validated Setting in (0, 1]); detections below that are not
-  candidates for the hinted query. A hinted query with no detection inside is "not found", never the hint itself.
+  grown hint** (`HINT_CONTAINMENT`, default 0.5, a validated Setting in (0, 1]), **or when at least that fraction of
+  the hint's area lies inside the detection** (a hint smaller than its element, such as the inner text area of a
+  field); detections that meet neither are not candidates for the hinted query. A hinted query with no detection inside is "not found", never the hint itself.
 - **Test item** (pure, synthetic): a hint on each display of the mixed-scale layout above, in both host spaces and in
   `remote-pixels` with `r` = 1.5 and `s` = 0.5, maps to the logical rectangle of the element it names within ±1 logical
   point; an unaware or untagged hint is refused with its reason.
@@ -729,9 +733,12 @@ assembly can treat them.
 5. **User hotkey to pause** recording at once (and to resume), shown in the recorder's overlay.
 6. Typed key text is not stored by default (AGENTS.md), so keystrokes, the main leak, are covered independently.
 
-**Training with filled fields.** Dataset assembly applies **the same fill, at random, to ordinary text inputs** (a
-dataset preset probability, default 0.3; boxes keep their class), so a filled field does not by itself mean
-`password_field`. For `password_field` boxes it draws **synthetic mask dots** (a random count of • glyphs in the field's
+**Training with filled fields.** Dataset assembly applies **the same fill to ordinary text inputs** (boxes keep their
+class), so a filled field does not by itself mean `password_field`. It aims at a **target filled fraction**, not a
+fixed probability: counting the fills already made at capture (fill by default leaves many ordinary inputs filled), it
+fills further ordinary text inputs, chosen at random, only until ordinary inputs make up at least the target share of
+all filled fields in the dataset (default 0.5, a dataset preset value recorded in the model card), and never fills
+more than needed. For a dataset with no capture-time fills it fills that share of a random sample of inputs. For `password_field` boxes it draws **synthetic mask dots** (a random count of • glyphs in the field's
 text colour) on the fill, because at run time the detector sees live password fields with their dots, never the fill.
 Neither step can leak a secret: the fill was applied at capture time, and the dots are synthetic.
 
@@ -740,7 +747,7 @@ frame plus rectangles) is called on every path where pixels leave memory:
 
 | Path | Where redaction runs |
 |---|---|
-| Recorder | at capture, before the frame is encoded or written |
+| Recorder | at capture, before the frame is encoded or written; **on overload** (the classifier queue full) the recorder drops new frames, counts them and shows "Recording at N fps, frames skipped"; it **never writes an unclassified frame** |
 | Video import | in the pipeline's redact stage, before the store stage; the user's source video is never copied into the project unredacted (only its path, size and hash are kept) |
 | Test runs | `run.mp4` (the run recording) and the step and failure screenshots of run reports, before encoding |
 | Exports | Debrief bundles and any report export (they are built from already redacted run artefacts, and the export re-checks the `redacted` flag) |
@@ -762,15 +769,17 @@ Every bulk operation, with (a) its threads and workers and (b) how it is made ch
 `paddock_proc::threads(kind, class)`** (ADR 0024: cores by kind, never logical CPUs; `User` CPU work gets performance
 cores − 1, at least 1; `Background` gets the efficiency-core count on Apple silicon, physical cores / 2 on uniform
 CPUs), capped by the app's Performance setting, and each is a **Setting with an "Auto" default**, validated in the
-engine (rule 51): `import.decode_threads`, `import.workers`, `infer.cpu_threads`, `dataset.workers`,
-`training.data_workers`, `pipeline.queue_memory`. Results are deterministic: work is numbered at the source and
+engine (rule 51): `recorder.classify_workers`, `recorder.queue_memory`, `import.decode_threads`, `import.workers`,
+`import.store_writers`, `infer.cpu_threads`, `dataset.workers`, `dataset.store_writers`, `training.data_workers`,
+`pipeline.queue_memory`. Results are deterministic: work is numbered at the source and
 committed in that order (rule 14).
 
 | Operation | Class | (a) Parallelism | (b) Cheaper | Cost estimate |
 |---|---|---|---|---|
-| **Video import** | `Background` | The rule-14 pipeline below: FFmpeg decode with `threads(Cpu, Background)` threads; de-duplication hashing and redaction on `threads(Cpu, Background)` workers; store on 4 writers (SSD I/O, rule 13) | Drop near-duplicates **inside FFmpeg** with `mpdecimate` ("Drop frames that do not differ greatly from the previous frame", FFmpeg filter docs) or a `select` on the scene score, so most frames never cross into Sighter, are never converted or hashed; `mpdecimate` still decodes every frame, so the only step before decode is `-skip_frame nokey` (keyframes only), which loses frames and is a spike comparison, not a default; decode at the size the chain needs, not larger | **Spike item S3**: frames per second per stage on a synthetic 10-minute 1920 × 1200 test-run video |
+| **Recorder** (capture-time classification and redaction) | `User` (the user is recording) | Capture → **bounded in-memory queue, sized in bytes** (`recorder.queue_memory`, Auto: 256 MB, with the 2-frame floor of the import pipeline below) → **classifier workers** (`recorder.classify_workers`, Auto `threads(Cpu, User)`; the masked-glyph check, the OCR label cue and the detector's `password_field` class, the last two through `sighter-infer` calls of class `User`) → fill → encode and write | **Reuse the per-tile hash**: a tile whose hash did not change since the last classified frame keeps its earlier classification and fill rectangles, and only changed tiles are classified again (a fill rectangle is reused only when every tile it touches is unchanged); the recorder's own change trigger (proposal section 4) already skips identical frames | **Spike item S3**: classification cost per frame and per changed tile, and the sustained frames per second at 1920 × 1200 and 4K on CoreML and CPU |
+| **Video import** | `Background` | The rule-14 pipeline below: FFmpeg decode with `threads(Cpu, Background)` threads; de-duplication hashing and redaction on `threads(Cpu, Background)` workers; store on `import.store_writers` writers (Auto 4: SSD I/O, rule 13) | Drop near-duplicates **inside FFmpeg** with `mpdecimate` ("Drop frames that do not differ greatly from the previous frame", FFmpeg filter docs) or a `select` on the scene score, so most frames never cross into Sighter, are never converted or hashed; `mpdecimate` still decodes every frame, so the only step before decode is `-skip_frame nokey` (keyframes only), which loses frames and is a spike comparison, not a default; decode at the size the chain needs, not larger | **Spike item S3**: frames per second per stage on a synthetic 10-minute 1920 × 1200 test-run video |
 | **Auto-label** (CV) | `Background` | Tiles of several frames batched on the GPU in `sighter-infer`'s queue (behind locates); OCR in the same sidecar; one frame per worker for the CPU stages | **Reuse OCR detections**: one OCR pass per frame hash serves the password classifiers, the OCR label source, names and the OCR-anchor layer; unchanged tiles of consecutive frames reuse the cached detections (the per-tile hash); fp16 and IO binding below | Detector only, projected from the indicative per-tile times: 8 tiles per 1920 × 1200 frame × ~30 ms (CoreML) ≈ 0.24 s per frame, about **8 minutes for 2,000 frames**; on 4 CPU threads ~1.4 s per frame, about **47 minutes**; OCR is extra and unmeasured. Projections, to be measured (S3) |
-| **Dataset assembly** | `User` (a phase of the user-started training job) | `threads(Cpu, User)` workers, one frame each (normalise, grid tiles, crops, clipping, fill, composition); encode and write on 4 writers | Tiles cut once per dataset snapshot and reused across training runs with the same preset (content-hashed); lossless WebP or PNG chosen by the spike's encode cost | ~10 tiles and crops per frame, so 2,000 frames give ~20,000 training images; time **spike item S3** |
+| **Dataset assembly** | `User` (a phase of the user-started training job) | `threads(Cpu, User)` workers, one frame each (normalise, grid tiles, crops, clipping, fill, composition); encode and write on `dataset.store_writers` writers (Auto 4) | Tiles cut once per dataset snapshot and reused across training runs with the same preset (content-hashed); lossless WebP or PNG chosen by the spike's encode cost | ~10 tiles and crops per frame, so 2,000 frames give ~20,000 training images; time **spike item S3** |
 | **Training** | `User` | One GPU process; data-loader workers `threads(Cpu, User)`, capped by RAM (each worker holds decoded batches); batch size from free GPU memory | Train at 640 only (no multi-scale), fixed tile size; early stopping; fine-tune from the COCO checkpoint; fp16/AMP where the backend supports it (CUDA; MPS to be checked) | **Spike item S4**: minutes per epoch for RF-DETR Small on 20,000 tiles, on the M4 Pro (MPS), on an NVIDIA laptop (CUDA) and on the CPU; nothing is quoted until measured |
 | **CoreML preparation** | `Background` (separate `sighter-infer --prepare` process) | One compile per model; never two at once (a compile is memory-heavy) | Run once per model hash and OS version; the cache is kept with the model; prepare right after training so the first locate is warm | 23–49 s per model (indicative, at load 18–24, [performance.md](../performance.md#2026-10-29-rf-detr-onnx-latency-indicative-docssighter-rfdetr)) |
 
@@ -781,11 +790,13 @@ decode (FFmpeg, mpdecimate) → [queue] → de-duplicate → [queue] → redact 
 ```
 
 - **Bounded queues**, sized in bytes, not frames (a 1920 × 1200 RGBA frame is about 9.2 MB, a 3840 × 2160 one about
-  33 MB): together at most `pipeline.queue_memory` (Auto: 512 MB, or less on machines with little RAM), split over the
-  stages. A full queue blocks its producer (back-pressure); nothing is dropped.
+  33 MB, a 5120 × 2880 one about 59 MB): together at most `pipeline.queue_memory` (Auto: 512 MB, or less on machines
+  with little RAM), split over the stages. **Floor**: every queue holds at least **2 frames at the largest frame size
+  of the job**; when Auto (or a user value) is below that, it is **raised automatically** to the floor and the job's
+  details say so. A full queue blocks its producer (back-pressure); nothing is dropped.
 - **Stage-specific workers**: decode is FFmpeg's own threads; de-duplicate hashes on workers and **compares in order**
   at a single commit point (a frame is compared with the last kept frame, so this step is sequential but cheap);
-  redact and infer on workers; store on 4 writers.
+  redact and infer on workers; store on `import.store_writers` writers (Auto 4).
 - **Cancel** reaches every stage; frames already stored stay consistent (the job writes into a new import folder and
   swaps it in at the end, ER-18). **Progress** per stage on its own scale (decoded frames count up, kept frames,
   redacted, labelled, stored).
@@ -863,16 +874,22 @@ Collected from this ADR; each result is a rule-48 block in [performance.md](../p
 - **S2. DirectML, not yet measured at all.** On a physical Windows 11 PC with an Intel integrated GPU and on one with an
   NVIDIA discrete GPU: the locate gate and cold load under the same conditions; the GPU self-test against the CPU answer;
   whether the `windows-latest` VM runner exposes any DirectX 12 adapter; together with the DirectML licence gate (P6)
-  and the delay-load check of decision 4. Until S2 runs, DirectML is "supported, unmeasured".
+  and the delay-load check of decision 4. Until S2 runs, DirectML is "supported, unmeasured", and **a Windows release
+  of Sighter waits for S2**, unless the user waives the gate for that release; a waiver is recorded (date, release,
+  reason) in this ADR's notes and the release notes. Which PC to measure on is the user's to name.
 - **S3. Bulk cost**: import stage rates (decode, `mpdecimate` and scene `select` against Sighter's hash alone,
-  `-skip_frame nokey`), auto-label per frame on CoreML and CPU, dataset assembly time and encode format.
+  `-skip_frame nokey`), auto-label per frame on CoreML and CPU, dataset assembly time and encode format, and the
+  **recorder's capture-time classification**: cost per frame and per changed tile, sustained fps before frames are
+  skipped, at 1920 × 1200 and 4K, on CoreML and CPU.
 - **S4. Training cost**: minutes per epoch for Small on 20,000 tiles (MPS, CUDA, CPU), memory, and locate p95 while
   training runs.
 - **S5. Cheaper inference**: fp16 (self-test still matching), IO binding, batch size per EP, against the fp32 baseline.
 - **S6. Adapter hints**: whether UI Automation honours a Per-Monitor V2 **thread** context in a process that is not
   DPI aware (the `Sighter.FlaUI` case); a synthetic window on a 150 % monitor beside a 100 % one.
 - **S7.** The items named in the text: auto-label quality, augmentation gains, password recall, compressed-frame
-  accuracy, occlusion on Windows, hashing cost, seam recall with `SEAM_IOU`.
+  accuracy, occlusion on Windows, hashing cost, seam recall with `SEAM_IOU`; and a **synthetic evaluation set with
+  live (unfilled) text inputs and password fields with their dots**, because training frames carry fills the
+  detector never sees at run time: `text_input` and `password_field` recall on it, for each target filled fraction.
 - **S8. Confidence bands**: per-class F1-optimal thresholds and wrong-click rate against the 0.8 and 0.5 defaults.
 
 ## Licence exceptions
@@ -967,9 +984,8 @@ against that list comes with the notices tooling.
 - **Cost of 100 % computer vision** (decision 9): no ground-truth element names, roles or states from the OS, so labels,
   names and classes come from the user's review. Mitigation: OCR text inside or next to a box is the default label and
   name (the user confirms or corrects it in the review queue), and the VLM can suggest names for a small user-chosen
-  selection (rule 46). Follow-up: Sighter AGENTS.md ("Vision first": accessibility trees as an optional `LabelSource`)
-  and proposal sections 5, 8 (`LabelSource` list: `A11yUia`, `A11yAx`, `A11yAtspi`, `Dom`) still describe accessibility
-  sources and must be updated to match (plan item P2).
+  selection (rule 46). Sighter AGENTS.md ("100 % computer vision") and proposal sections 5 and 8 (the `LabelSource`
+  list has no accessibility or DOM sources) were updated to match in revision 3.
 - The mirror makes downloads independent of Roboflow's URLs (the Large checkpoint already moved once), and costs about
   1.5 GB on our Gitea. Updating a checkpoint is a new mirror entry with a new hash, never an overwrite.
 - Other execution providers (research note section 11): v1 inference stays CPU, CoreML and DirectML, which already use

@@ -42,8 +42,9 @@ Apply these deliberately. They are not decoration:
   verify it against the official repo before adopting.
 - **Never click blindly.** Anything that acts on the UI acts on a located, scored element. Unreviewed elements block
   unattended runs; low confidence returns "needs labelling" rather than a guess.
-- **Recordings may contain secrets.** Redaction is applied before anything is written, password fields detected from
-  pixels are redacted or pause capture (text inputs redacted until classified, a pause hotkey; ADR 0001),
+- **Recordings may contain secrets.** Redaction is applied before anything is written or sent: password fields detected
+  from pixels get a **permanent solid fill, never a blur** (text inputs filled by default until classified, a pause
+  hotkey; frames carry a `redacted` flag; ADR 0001),
   typed key text is not stored by default, run folders have retention caps, and recordings are never logged, uploaded or
   committed.
 - **Tests never touch TCC-protected folders or real user data** (Desktop, Documents, Downloads, Photos, and similar),
