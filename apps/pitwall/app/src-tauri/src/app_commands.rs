@@ -5,6 +5,7 @@ use crate::app_state::{self, AppState, FirstRun};
 use crate::commands::{forward, SharedClient};
 use crate::jobs::{self, JobEvent, JobSink, JobSpec, Jobs, Outcome};
 use crate::service_install::{self, ServiceInstall};
+use crate::service_repair::{RepairOutcome, RepairPhase};
 use crate::updater::{self, AppUpdateStatus, UpdateInfo};
 use paddock_jobs::{Phase, Unit};
 use pitwall_core::mgmt::{CommandError, ErrorCode};
@@ -65,11 +66,15 @@ pub async fn uninstall_service(client: State<'_, SharedClient>) -> Result<Servic
 /// Repairs the background service (macOS): removes the registration launchd refuses, waits until launchd dropped it and
 /// registers again. Runs in the background; the state it returns shows the progress. This is the app's own business and
 /// does not need the server.
+// WP-3 moves the UI to `start_repair_service`; this goes then.
+#[deprecated(note = "use start_repair_service (a job with phases and Cancel); the UI moves over in WP-3 of Pitwall 1.1")]
 #[tauri::command]
 pub async fn repair_service(client: State<'_, SharedClient>) -> Result<ServiceInstall, CommandError> {
     let c = client.inner().clone();
     let answers = move || tauri::async_runtime::block_on(forward(c.as_ref(), "overview", Value::Null)).is_ok();
-    tauri::async_runtime::spawn_blocking(move || service_install::request_repair(answers))
+    #[allow(deprecated)]
+    let started = tauri::async_runtime::spawn_blocking(move || service_install::request_repair(answers));
+    started
         .await
         .map_err(|e| internal(format!("repairing the service stopped unexpectedly: {e}")))??;
     Ok(compose_state(client.inner()).await)
@@ -129,13 +134,15 @@ pub async fn app_update_status(app: AppHandle) -> Result<AppUpdateStatus, Comman
 
 /// Checks for a release; only when the user asks.
 #[tauri::command]
-pub async fn check_app_update(app: AppHandle) -> Result<Option<UpdateInfo>, CommandError> {
+pub async fn check_app_update(app: AppHandle, client: State<'_, SharedClient>) -> Result<Option<UpdateInfo>, CommandError> {
+    updater::refuse_when_offline(client.as_ref()).await?;
     updater::check(&app).await
 }
 
 /// Installs the update found by the last check, then restarts the app.
 #[tauri::command]
-pub async fn install_app_update(app: AppHandle) -> Result<(), CommandError> {
+pub async fn install_app_update(app: AppHandle, client: State<'_, SharedClient>) -> Result<(), CommandError> {
+    updater::refuse_when_offline(client.as_ref()).await?;
     updater::install(&app, |_| {}).await
 }
 
@@ -368,11 +375,100 @@ async fn state_json(client: &SharedClient) -> Result<Value, CommandError> {
     serde_json::to_value(compose_state(client).await).map_err(|e| internal(format!("the service state could not be read: {e}")))
 }
 
+/// Repairs the background service in the background (`repair_service` as a job, macOS). The phases follow the repair
+/// (removing, waiting for macOS to drop the old registration, registering, waiting for the service); Cancel stops it at the
+/// next step and never leaves the service removed. The result is the service state.
+#[tauri::command]
+pub async fn start_repair_service(
+    client: State<'_, SharedClient>,
+    jobs: State<'_, Arc<Jobs>>,
+    on_event: Channel<JobEvent>,
+) -> Result<u64, CommandError> {
+    let client = client.inner().clone();
+    let spec = spec(
+        "repair-service",
+        "Repairing the background service",
+        "Re-registering the service with macOS...",
+    );
+    let c = client.clone();
+    Ok(jobs::start(jobs.inner(), spec, channel_sink(on_event), move |ctx| {
+        let answers = move || tauri::async_runtime::block_on(forward(c.as_ref(), "overview", Value::Null)).is_ok();
+        repair_job(ctx, client, move |cancel, phase| {
+            service_install::repair_blocking(&answers, cancel, phase)
+        })
+    }))
+}
+
+/// The body of the repair job: `runner` does the blocking repair on a blocking thread, asking `cancel` between steps and
+/// reporting each phase. Cancel shows "Cancelling" and waits for the repair to reach a safe step.
+async fn repair_job(
+    ctx: paddock_jobs::JobContext,
+    client: SharedClient,
+    runner: impl FnOnce(&dyn Fn() -> bool, &dyn Fn(RepairPhase)) -> Result<RepairOutcome, CommandError> + Send + 'static,
+) -> Result<Outcome, CommandError> {
+    let token = ctx.cancel_token().clone();
+    let progress = ctx.clone();
+    let run =
+        tokio::task::spawn_blocking(move || runner(&|| token.is_cancelled(), &|p| progress.phase(Phase::discovering(p.id(), p.label()))));
+    tokio::pin!(run);
+    let mut showed_cancelling = false;
+    let outcome = loop {
+        tokio::select! {
+            r = &mut run => break r,
+            () = jobs::cancelled(ctx.cancel_token()), if !showed_cancelling => {
+                showed_cancelling = true;
+                ctx.phase(Phase::discovering("cancelling", "Cancelling..."));
+            }
+        }
+    }
+    .map_err(|e| internal(format!("repairing the service stopped unexpectedly: {e}")))??;
+    match outcome {
+        RepairOutcome::Recovered => Ok(Outcome::Done(state_json(&client).await?)),
+        RepairOutcome::NeedsApproval => Err(CommandError::new(
+            ErrorCode::Forbidden,
+            "macOS needs your approval: allow Pitwall in System Settings > General > Login Items.",
+        )),
+        RepairOutcome::Failed(why) => Err(internal(why)),
+        RepairOutcome::Cancelled => Ok(Outcome::Cancelled),
+    }
+}
+
+/// Asks Hugging Face about the downloaded models in the background (`check_updates_now` as a job). Up to 40 repositories
+/// are asked one after another; Cancel stops the check and writes nothing. In offline mode the server answers the outcome
+/// `offline` without a request.
+#[tauri::command]
+pub async fn start_check_updates(
+    client: State<'_, SharedClient>,
+    jobs: State<'_, Arc<Jobs>>,
+    on_event: Channel<JobEvent>,
+) -> Result<u64, CommandError> {
+    let spec = spec(
+        "check-updates",
+        "Checking for model updates",
+        "Asking Hugging Face about your models",
+    );
+    Ok(server_job(
+        jobs.inner(),
+        client.inner().clone(),
+        channel_sink(on_event),
+        spec,
+        run_nonce(),
+        "check_updates_now",
+        serde_json::json!({}),
+    ))
+}
+
 /// Downloads and installs the update in the background (`install_app_update` as a job); the app restarts when it is done.
 /// The download reports bytes. Cancel drops the download, which leaves the installed version untouched and the found update
 /// in place for another try.
 #[tauri::command]
-pub async fn start_app_update(app: AppHandle, jobs: State<'_, Arc<Jobs>>, on_event: Channel<JobEvent>) -> Result<u64, CommandError> {
+pub async fn start_app_update(
+    app: AppHandle,
+    client: State<'_, SharedClient>,
+    jobs: State<'_, Arc<Jobs>>,
+    on_event: Channel<JobEvent>,
+) -> Result<u64, CommandError> {
+    updater::refuse_when_offline(client.as_ref()).await?;
     let mut spec = spec("app-update", "Updating Pitwall", "Preparing the update");
     spec.own_progress = true;
     Ok(jobs::start(jobs.inner(), spec, channel_sink(on_event), move |ctx| async move {
@@ -608,6 +704,98 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn cancelling_a_benchmark_tells_the_server_to_stop_it_and_ends_cancelled() {
         cancelling("run_benchmark", serde_json::json!({ "modelId": "m" }), "benchmark").await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_model_update_check_is_a_cancellable_job_that_tells_the_server_to_stop_it() {
+        cancelling("check_updates_now", serde_json::json!({}), "check-updates").await;
+    }
+
+    type Runner = Box<dyn FnOnce(&dyn Fn() -> bool, &dyn Fn(RepairPhase)) -> Result<RepairOutcome, CommandError> + Send>;
+
+    /// Starts the repair job over `runner` and returns its id with the events it sends.
+    fn start_repair(jobs: &Arc<Jobs>, runner: Runner) -> (u64, Arc<Events>) {
+        let (sink, events) = collector();
+        let client: SharedClient = Arc::new(CancelAware::new());
+        let id = jobs::start(jobs, spec("repair-service", "t", "p"), sink, move |ctx| {
+            repair_job(ctx, client, runner)
+        });
+        (id, events)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_repair_job_shows_the_repairs_phases_and_ends_with_the_service_state() {
+        let jobs = jobs();
+        let (id, events) = start_repair(
+            &jobs,
+            Box::new(|_, phase| {
+                phase(RepairPhase::Removing);
+                phase(RepairPhase::Registering);
+                Ok(RepairOutcome::Recovered)
+            }),
+        );
+        events.until_terminal().await;
+        assert!(
+            matches!(events.last(), Some(JobEvent::Done { job_id, .. }) if job_id == id),
+            "{:?}",
+            events.all()
+        );
+        let all = events.all();
+        let seen = phases(&all);
+        assert!(
+            seen.contains(&RepairPhase::Removing.label()) && seen.contains(&RepairPhase::Registering.label()),
+            "{seen:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelling_the_repair_job_asks_the_repair_to_stop_and_ends_cancelled() {
+        let jobs = jobs();
+        let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let (id, events) = start_repair(
+            &jobs,
+            Box::new(move |cancel, _| {
+                started_tx.send(()).unwrap();
+                // Works until the job asks it to stop (no sleep: it only yields).
+                while !cancel() {
+                    std::thread::yield_now();
+                }
+                Ok(RepairOutcome::Cancelled)
+            }),
+        );
+        started_rx.recv().await.unwrap();
+        assert!(jobs.cancel(id));
+        events.until_terminal().await;
+        assert_eq!(
+            events.last(),
+            Some(JobEvent::Cancelled {
+                job_id: id,
+                stopped_waiting: false
+            })
+        );
+        assert_eq!(jobs.running(), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_repair_that_needs_approval_or_fails_fails_the_job_with_words_to_show() {
+        let jobs = jobs();
+        let cases: Vec<(Result<RepairOutcome, CommandError>, &str)> = vec![
+            (Ok(RepairOutcome::NeedsApproval), "Login Items"),
+            (Ok(RepairOutcome::Failed("did not start".into())), "did not start"),
+            (
+                Err(CommandError::new(ErrorCode::Conflict, "A repair is already working.")),
+                "already working",
+            ),
+        ];
+        for (result, word) in cases {
+            let (_, events) = start_repair(&jobs, Box::new(move |_, _| result));
+            events.until_terminal().await;
+            assert!(
+                matches!(events.last(), Some(JobEvent::Failed { error, .. }) if error.message.contains(word)),
+                "{word}: {:?}",
+                events.all()
+            );
+        }
     }
 
     #[tokio::test(start_paused = true)]

@@ -681,30 +681,52 @@ async fn an_idle_models_context_is_cleared_before_its_weights_are_released() {
         h.rpc("set_model_idle", json!({"id": "tiny-q4_k_m", "idleSecs": 2})).await.status,
         200
     );
+    // Time is moved by hand: the idle timers read the injected clock, so nothing here sleeps.
+    let now = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(pitwall_server::paths::now_ms()));
+    let clock = now.clone();
+    h.st.serving.set_clock(std::sync::Arc::new(move || clock.load(Ordering::SeqCst)));
+    let advance = |ms: u64| {
+        now.fetch_add(ms, Ordering::SeqCst);
+    };
     let ask = || h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[]);
     assert_eq!(ask().await.status, 200);
     h.st.serving.tick();
     assert_eq!(h.erases.load(Ordering::SeqCst), 0, "not idle long enough");
 
     // Half the idle time has passed: the context goes, the weights stay.
-    tokio::time::sleep(std::time::Duration::from_millis(1300)).await;
-    h.st.serving.tick();
-    for _ in 0..100 {
-        if h.erases.load(Ordering::SeqCst) >= 1 {
-            break;
+    advance(1300);
+    let actions = h.st.serving.tick();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, pitwall_core::memory::Action::ReleaseContext(..))),
+        "the context is released: {actions:?}"
+    );
+    // The erase runs in the background against the fake engine: wait for the condition, not for a time.
+    // The event is raised after every slot was erased.
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            let ev = h.rpc("events", json!({"limit": 50})).await.json().to_string();
+            if ev.contains("Cleared the context") {
+                break;
+            }
+            tokio::task::yield_now().await;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
+    })
+    .await
+    .expect("the context was cleared");
     let erased = h.erases.load(Ordering::SeqCst);
-    assert!(erased >= 1, "the engine's slots were erased");
     assert_eq!(h.st.serving.loaded().len(), 1, "still loaded");
+    // The planner may name the model again; the release itself runs only once per idle period.
     h.st.serving.tick();
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    for _ in 0..200 {
+        tokio::task::yield_now().await;
+    }
     assert_eq!(h.erases.load(Ordering::SeqCst), erased, "only once per idle period");
 
     // The next request makes it eligible again; past the idle time the weights go too.
     assert_eq!(ask().await.status, 200);
-    tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+    advance(2100);
     h.st.serving.tick();
     assert!(h.st.serving.loaded().is_empty(), "unloaded after the full idle time");
 }

@@ -5,8 +5,11 @@
 //! "Updates are not available in this build". Checks happen only when the user asks. After an install the app restarts;
 //! the server restarts itself once it is idle and finds its own program replaced. (Adapted from Pitcrew's updater.)
 
+use crate::commands::forward;
+use crate::server_client::ServerClient;
 use pitwall_core::mgmt::{CommandError, ErrorCode};
 use serde::Serialize;
+use serde_json::Value;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_updater::UpdaterExt;
@@ -138,6 +141,21 @@ fn status_for(has_key: bool, version: String) -> AppUpdateStatus {
     }
 }
 
+/// What an update check or install says when the server is in offline mode.
+pub const OFFLINE_MESSAGE: &str =
+    "Pitwall is in offline mode, so it does not look for or download updates. Turn offline mode off in Settings > Network to update.";
+
+/// Refuses with [`ErrorCode::Offline`] while the server's `network.offline` is on: offline mode stops every outbound
+/// request, the app's own update check and download included (ADR 0017). The server is the single source of truth for the
+/// setting (`update_check_status.offline`). A server that cannot be asked does not block: the setting is unknown, and
+/// the check fails by itself when there is no network.
+pub async fn refuse_when_offline(client: &dyn ServerClient) -> Result<(), CommandError> {
+    match forward(client, "update_check_status", Value::Null).await {
+        Ok(status) if status.get("offline") == Some(&Value::Bool(true)) => Err(CommandError::new(ErrorCode::Offline, OFFLINE_MESSAGE)),
+        _ => Ok(()),
+    }
+}
+
 /// Checks for a release (one HTTPS GET of latest.json; signatures are verified at install).
 pub async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<Option<UpdateInfo>, CommandError> {
     let Some(k) = key(app) else {
@@ -190,6 +208,33 @@ mod tests {
 
     // The shape of a Tauri updater public key (base64 of "untrusted comment: ...\nRW..."), not a real key.
     const KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDAwMDAwMDAwMDAwMDAwMDAKUldRQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=";
+
+    use crate::server_client::fake::{FakeServer, Reply};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn offline_mode_refuses_an_update_check_or_install_with_the_offline_code() {
+        let server = FakeServer::new();
+        server.reply("update_check_status", Reply::Ok(json!({ "offline": true })));
+        let e = refuse_when_offline(&server).await.unwrap_err();
+        assert_eq!(e.code, ErrorCode::Offline);
+        assert_eq!(e.message, OFFLINE_MESSAGE);
+        assert_eq!(server.calls().len(), 1, "the setting was read from the server, nothing else asked");
+    }
+
+    #[tokio::test]
+    async fn online_or_an_unreachable_server_does_not_block_an_update() {
+        let server = FakeServer::new();
+        server.reply("update_check_status", Reply::Ok(json!({ "offline": false })));
+        assert!(refuse_when_offline(&server).await.is_ok());
+        server.reply("update_check_status", Reply::Err(crate::server_client::unavailable()));
+        assert!(
+            refuse_when_offline(&server).await.is_ok(),
+            "unknown setting: the check fails by itself without a network"
+        );
+        server.reply("update_check_status", Reply::Ok(json!({})));
+        assert!(refuse_when_offline(&server).await.is_ok());
+    }
 
     #[test]
     fn a_pending_update_survives_being_read_so_a_cancelled_install_can_be_tried_again() {

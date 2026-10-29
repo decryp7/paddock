@@ -179,6 +179,7 @@ rpc!(
     update_notices => "update_notices");
 rpc!(
     /// Asks Hugging Face now (repository ids of downloaded models only; refused in offline mode).
+    #[deprecated(note = "use start_check_updates (a job with Cancel); the UI moves over in WP-3 of Pitwall 1.1")]
     check_updates_now => "check_updates_now");
 rpc!(
     /// Turns the scheduled update check on or off and sets how often it runs.
@@ -569,7 +570,12 @@ mod tests {
     async fn forward_gives_up_when_a_client_never_answers() {
         struct Never;
         impl ServerClient for Never {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Option<Duration>) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(
+                &'a self,
+                _: &'a str,
+                _: Value,
+                _: Option<Duration>,
+            ) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(std::future::pending())
             }
             fn open_stream<'a>(
@@ -661,7 +667,12 @@ mod tests {
         }
         struct Client;
         impl ServerClient for Client {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Option<Duration>) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(
+                &'a self,
+                _: &'a str,
+                _: Value,
+                _: Option<Duration>,
+            ) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(async { Ok(Value::Null) })
             }
             fn open_stream<'a>(
@@ -696,7 +707,12 @@ mod tests {
         }
         struct Client;
         impl ServerClient for Client {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Option<Duration>) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(
+                &'a self,
+                _: &'a str,
+                _: Value,
+                _: Option<Duration>,
+            ) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(async { Ok(Value::Null) })
             }
             fn open_stream<'a>(
@@ -734,7 +750,12 @@ mod tests {
         }
         struct Client(Arc<AtomicBool>);
         impl ServerClient for Client {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Option<Duration>) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(
+                &'a self,
+                _: &'a str,
+                _: Value,
+                _: Option<Duration>,
+            ) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(async { Ok(Value::Null) })
             }
             fn open_stream<'a>(

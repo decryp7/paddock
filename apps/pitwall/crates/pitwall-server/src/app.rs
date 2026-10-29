@@ -495,7 +495,7 @@ impl AppState {
                     unified: g.unified,
                 })
                 .collect(),
-            pitwall_rss: system::rss(std::process::id()),
+            pitwall_rss: system::memory(std::process::id()),
             foreground_busy: false,
         }
     }

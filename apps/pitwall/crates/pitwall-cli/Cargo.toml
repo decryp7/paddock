@@ -30,6 +30,8 @@ keyring = "4.2"
 
 [dev-dependencies]
 tempfile.workspace = true
+# A held loopback port for "nothing answers there" (C39: a test never frees a port it probes).
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tokio = { workspace = true, features = ["rt", "net", "time", "io-util", "macros"] }
 
 [lints]

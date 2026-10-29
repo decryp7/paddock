@@ -82,12 +82,17 @@ pub fn free_disk(path: &std::path::Path) -> u64 {
         .map_or(0, sysinfo::Disk::available_space)
 }
 
-/// Resident memory of a process in bytes (0 when unreadable).
-pub fn rss(pid: u32) -> u64 {
-    let mut s = sysinfo::System::new();
-    let p = sysinfo::Pid::from_u32(pid);
-    s.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), true);
-    s.process(p).map_or(0, sysinfo::Process::memory)
+/// What a process really uses, in bytes (0 when unreadable): the physical footprint on macOS, PSS on Linux, the private
+/// working set on Windows (rule 26, `paddock-proc`). The resident size is not used: on macOS it counts pages the kernel has
+/// not reclaimed yet (a 535 MB worker showed 1,965 MB), which made a loaded model look much bigger than it is and
+/// released models that fit.
+pub fn memory(pid: u32) -> u64 {
+    memory_with(pid, paddock_proc::process_memory)
+}
+
+/// [`memory`] over a reader (tests give a fake): `None` (no such process) is 0.
+pub fn memory_with(pid: u32, read: impl Fn(u32) -> Option<u64>) -> u64 {
+    read(pid).unwrap_or(0)
 }
 
 /// Asks a process to end (SIGTERM; `force`: kills it). Only ever used on engine processes this server started. Where the
@@ -116,6 +121,13 @@ pub fn pid_alive(pid: u32) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_process_is_measured_by_what_it_really_uses_and_a_missing_one_is_zero() {
+        // The reader is the shared one (footprint, PSS); a fake gives a footprint far below the resident size.
+        assert_eq!(memory_with(7, |pid| (pid == 7).then_some(535 << 20)), 535 << 20);
+        assert_eq!(memory_with(8, |pid| (pid == 7).then_some(535 << 20)), 0);
+    }
+
     #[tokio::test]
     async fn hardware_and_memory_are_read() {
         let hw = detect_hardware().await;
@@ -125,7 +137,7 @@ mod tests {
         assert!(host_memory()(&hw).total > 0, "the default reader is the host");
         assert_eq!(room_from(&s, &hw, 7).ram_releasable, 7);
         assert!(pid_alive(std::process::id()));
-        assert!(rss(std::process::id()) > 0);
+        assert!(memory(std::process::id()) > 0);
         let _ = free_disk(std::path::Path::new("."));
     }
 }

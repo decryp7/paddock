@@ -3179,15 +3179,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-testkit"
+version = "0.1.0"
+dependencies = [
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "socket2",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-workspace-hack"
 version = "0.1.0"
 dependencies = [
+ "aho-corasick",
  "base64 0.23.1",
  "bitflags 2.13.2",
  "block2",
  "cairo-sys-rs",
  "chrono",
  "crc32fast",
+ "crossbeam-utils",
  "deranged",
  "digest 0.11.3",
  "email_address",
@@ -3393,6 +3405,7 @@ dependencies = [
  "objc2-service-management",
  "paddock-jobs",
  "paddock-service",
+ "paddock-testkit",
  "pitwall-core",
  "pitwall-loopback",
  "serde",
@@ -3416,6 +3429,7 @@ name = "pitwall-cli"
 version = "1.0.4"
 dependencies = [
  "keyring",
+ "paddock-testkit",
  "pitwall-core",
  "pitwall-loopback",
  "serde",
@@ -3447,6 +3461,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "paddock-testkit",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
@@ -3461,6 +3476,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "getrandom 0.3.4",
+ "paddock-proc",
  "pitwall-core",
  "pitwall-loopback",
  "reqwest 0.12.28",
