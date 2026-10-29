@@ -60,7 +60,7 @@ Later stays out.
 |---|---|---|
 | Workspaces and safety | Open a folder; workspace allow-list; canonical paths, symlink escape refused; secret denylist and redaction of every reply; never execute repository code; read-only towards repositories; local only, no telemetry | AGENTS.md "Pacenotes-specific rules"; proposal §6.10 |
 | Index, tier 1 (text) | Incremental index of every file: full-text and regex search, file tree, git history, hot spots, docs, build-system detection from manifests only | proposal §20.1, §20.2 step 1 |
-| Index, tier 2 (syntax) | tree-sitter symbols, outline, imports, approximate (confidence-labelled) references and call graph, syntax-aware chunks; parsing in worker processes with limits | proposal §6.1, §14, §20.1 |
+| Index, tier 2 (syntax) | tree-sitter grammars for the eight v1 languages plus Kotlin (decided order: Go, Java and Kotlin, C and C++, then the rest); symbols, outline, imports, approximate (confidence-labelled) references and call graph, syntax-aware chunks; parsing in worker processes with limits | proposal §6.1, §14, §20.1 |
 | Index, tier 3 (semantic) | LSP client with eight built-in language packs (C, C++, C#, Java, TypeScript/JavaScript, Rust, Python, Go); servers never bundled; started only after "Trust this repository"; supervised, cached by index revision | proposal §20.4 (decision 2026-10-23); AGENTS.md trust rule |
 | Search | Text, structural and semantic search fused with RRF; Model2Vec + BM25 by default; Qwen re-rank of the top ~50 when Pitwall runs; "Deep index with Qwen" as a confirmed job | ADR 0001 and its amendment; proposal §21 |
 | Understand | Repo map with token budget, outline, read symbol, find symbol, references, call graph and call-path trace, stack-trace and log-site resolution, ownership (blame, CODEOWNERS), churn and hot spots, complexity metrics, entry points and public API, manifest package graph, architecture summary | architecture-direction "The plugins"; proposal §6.1, §6.2 |
@@ -125,14 +125,17 @@ out-of-process plugins on `paddock-plugin-host` later. To keep that later move m
   (its module doc, `crates/paddock-guard/src/lib.rs`), and `paddock-plugin-test`'s `FakeHost` runs a plugin in the same
   process, so it cannot test hang or memory containment either. The hang and memory containment tests belong to the
   packaging work after v1, with a plugin wrapper binary per function on `paddock-plugin-host`.
-- **The remaining risk, plainly:** a function that hangs without checking its token keeps its thread, and if it held the
-  SQLite writer, indexing and every write would stop behind it. Mitigation: function code never runs while the writer
-  is held. Host calls read from WAL snapshots; a function returns its results as data, and the host writes them in its
-  own short transaction after the call has returned. The write handle is a type the port cannot carry (not
-  serialisable, not `Send` into function code), and F1 tests it: a function that blocks forever after a host call
-  leaves the indexer able to commit, and the abandoned call is reported.
-- Checked by package F1 (section 4): a `cargo tree` check of each function crate against the explicit allow-list, and a
-  round-trip test of every port message through postcard.
+- **The remaining risk, plainly:** a function that hangs without checking its token keeps its thread. If it held the
+  SQLite writer, indexing and every write would stop behind it; if it held a read snapshot, the WAL could not be
+  checkpointed and would grow. The mitigation is structural:
+  - **One writer actor** in `pacenotes-index` owns the only SQLite write connection. Every other component (the index
+    job, review, links, suppressions, the CLI's engine) sends it write batches over a bounded queue and gets a typed
+    result back; no other code can open or hold the writer, because no other code has the connection.
+  - **Each host call opens and closes its read transaction inside the call.** Results are copied out as data before the
+    call returns, so no snapshot or connection ever crosses into function code.
+  - A function returns its results as data; the host turns them into a write batch for the actor after the call.
+- Checked by package F1 (section 4): a `cargo tree` check of each function crate against the explicit allow-list, a
+  round-trip test of every port message through postcard, and the writer and checkpoint tests ("F1 in detail", section 4).
 
 This is a user decision that amends AGENTS.md's "Plugin architecture" ("no in-process plugins") for the first party's
 functions in v1; P0.1 records the amendment there.
@@ -146,7 +149,7 @@ follow proposal §14 under `apps/pacenotes/crates/`.
 |---|---|---|---|
 | `pacenotes-core` | ids (`SymbolId`, `ChunkId`, stable by rule 14), `Location`, `Rev`, `Confidence`, `Tier`, `Language`, finding state enum, language-pack and rule schemas (types and validation only) | `History`, `Store`, `Embedder`, `VectorIndex`, `LanguageServer`, `Llm`, `Forge` (later) | `paddock-names` types |
 | `pacenotes-parse` | tree-sitter extraction (symbols, outline, imports, call candidates, chunks), query packs as files, limits (bytes, nodes, time) | none; the worker binary is its adapter | `paddock-ipc`, `paddock-guard`, `paddock-proc` (worker) |
-| `pacenotes-index` | schema v1 and migrations, change set from a snapshot, fingerprints, rename matching (path, then fingerprint) | `Store` (SQLite adapter here) | `paddock-repo-files` (walk, hashing), `paddock-watch` (changes), `paddock-env` (`VersionedFile`), `paddock-files` (allow-list grants) |
+| `pacenotes-index` | the writer actor (the only write connection, write batches over a bounded queue), schema v1 and migrations, change set from a snapshot, fingerprints, rename matching (path, then fingerprint) | `Store` (SQLite adapter here) | `paddock-repo-files` (walk, hashing), `paddock-watch` (changes), `paddock-env` (`VersionedFile`), `paddock-files` (allow-list grants) |
 | `pacenotes-git` | churn, hot-spot ranking, blame aggregation | `History` adapter on gix (in process; never the `git` binary on the analysed repository) | `paddock-repo-graph`'s `History` port where the shapes agree (ADR 0022 §6) |
 | `pacenotes-search` | chunker, BM25/FTS5 query building, identifier matching, RRF, deterministic re-rank score | `Embedder`, `VectorIndex` adapters (Model2Vec worker, Pitwall, the spike's winner) | `paddock-embed` (X55a, new), `paddock-names` |
 | `pacenotes-lsp` | LSP client state machine, request/response cache by index revision, trust record | `LanguageServer` adapter: child processes | `paddock-proc` (supervised, memory cap, kill-tree), `paddock-packs` (language packs), `paddock-download`/`paddock-runtime` (pinned server downloads on click) |
@@ -412,7 +415,7 @@ coverage core with its tests, so stage 2 starts with the hardest pure parts prov
 | DG4 | Diagram UI (B): preview, diff overlay, "Open in draw.io" (validated path, with a timeout), write with a diff preview and confirmation before removal | `apps/pacenotes/app/src/app/diagrams/` | nothing is written before the preview is accepted; a file changed on disk since the preview is not overwritten | DG3, D4 | 4 |
 | RQ3 | Requirements UI (C): import with the mapping editor and live preview, matrix, impact view, link confirm and reject | `apps/pacenotes/app/src/app/requirements/` | nothing is auto-accepted; a document over the limit shows the limit and its setting (ADR 0019) | RQ2, D4 | 5 |
 | D6 | Coverage and tests UI, and the MCP tools for diagrams, requirements and tests (D) | `apps/pacenotes/app/src/app/coverage/`, `pacenotes-mcp/src/{diagrams,requirements,tests}.rs` | `generate_diagram` returns XML as text and writes nothing; `patch_coverage` matches the engine's | CV2, RQ2, DG3, D3 | 4 |
-| F1 | The function port, checked (A); details below the table | `apps/pacenotes/function-port.toml`, `scripts/check-function-port.*`, `pacenotes-function-api/tests/`, `apps/pacenotes/tests/writer/` | a planted dependency of `pacenotes-review` on `paddock-pitwall` fails the check; a function that blocks forever does not stop the indexer's next commit | A4, C3, C4, RQ2, CV2, DG2, FN1 | 3 |
+| F1 | The function port, checked (A); details below the table | `apps/pacenotes/function-port.toml`, `scripts/check-function-port.*`, `pacenotes-function-api/tests/`, `apps/pacenotes/tests/writer/` | a planted dependency of `pacenotes-review` on `paddock-pitwall` fails the check; a function blocked inside or after a host call stops neither commits nor a WAL checkpoint | A4, C3, C4, RQ2, CV2, DG2, FN1 | 3 |
 | F2 | Budgets (rule 16, rule 48): startup, time to first result, index throughput, query latency, memory as physical footprint (rule 26), on generated repositories; nightly (A) | `apps/pacenotes/benches/`, `docs/performance.md` | a budget breach fails the nightly job | A3, B2 | 2 |
 | F2b | ADR 0001's measurement plan (B): BM25 + Model2Vec against + Qwen re-rank of the top 50 against the deep index (recall@5, MRR, latency); indexing time, peak memory and index size per 1M lines; re-rank latency on CPU-only machines; results in `performance.md` and ADR 0001 | `apps/pacenotes/benches/search/`, `docs/performance.md`, `docs/adr/0001-embeddings.md` | the harness fails when the default no longer meets ADR 0001's bar | B2, F2 | 2 |
 
@@ -425,20 +428,22 @@ F1 in detail:
 - A postcard round trip of every port message.
 - In the engine: panic attribution and quarantine through `paddock-guard` (a panicking function is attributed and
   quarantined while the index stays usable).
-- The writer rule of section 2.1: no host call holds the SQLite writer across a call into function code; the
-  blocking-function test above.
+- The writer rules of section 2.1, tested: a function that blocks forever inside a host call, and one that blocks after
+  its last host call, stop neither the writer actor's next commits nor a WAL checkpoint (`PRAGMA wal_checkpoint(TRUNCATE)`
+  succeeds and the WAL stays under a bounded size while the function is still blocked); opening a second write
+  connection outside the actor fails (a test over the crate's public API).
 - Not in v1: hang and memory containment tests (they need a separate process; the packaging work after v1).
 
 ### 4.10 Wave 7b: headless, admin, the other views, Debrief's side of the bridge (about 21 agent-days; about seven days at four agents: stream A 7, B 5, C 4, D 5)
 
 | # | Package | Owned files | Failing test first | Depends | Days |
 |---|---|---|---|---|---|
-| H1 | Headless CLI and service (A): `pacenotes index`, `search`, `review`, `trust` and `untrust` (explicit flag), `serve --stdio`; the single-writer lock shared with the app (WAL); `paddock-cli` exit codes and `--json` | `apps/pacenotes/crates/pacenotes-cli/` | a second writer waits or refuses with a message, never corrupts; `trust` without its flag refuses | A3, C3, D3 | 4 |
+| H1 | Headless CLI and service (A): `pacenotes index`, `search`, `review`, `trust` and `untrust` (explicit flag), `serve --stdio`; the single-writer lock shared with the app (WAL): only the process that holds it runs a writer actor; `paddock-cli` exit codes and `--json` | `apps/pacenotes/crates/pacenotes-cli/` | a second writer waits or refuses with a message, never corrupts; `trust` without its flag refuses | A3, C3, D3 | 4 |
 | VW1a | Structure views' UI (B): architecture map, API surface, entry points, change impact; tables in `pd-table`, CSV and Markdown export from the engine | `apps/pacenotes/app/src/app/views/structure/` | each view's four states; every row opens at `path:line`; an export equals the engine's | D4, A4, A5 | 3 |
 | VW1b | Inventory views' UI (A): hot spots, owners, complexity, TODO, dependency and config inventories, reading tour | `apps/pacenotes/app/src/app/views/inventories/` | as VW1a | D4, A4 | 3 |
 | MC1 | MCP loopback HTTP transport (B): Streamable HTTP on loopback with bearer keys from `paddock-secrets`, request and result caps, the call log view; the Pitwall toolsets (`orient`, `code`, `review`, `diagrams`, `requirements`, `tests`) are Pitwall work, listed in `apps/pitwall/docs/roadmap.md` Phase 4 (about 2 days there, not counted here) | `pacenotes-mcp/src/http/`, `app/src/app/mcp/log/` | a request without a key or from a non-loopback address is refused; an oversized request is refused before parsing | D3 | 2 |
 | AD1 | Admin (D): index health (unparsed files with reasons, tier per language, rebuild), settings export and import, pack manager, ignore editor, the "Low memory" preset, autosave and versioned state of review and links | `apps/pacenotes/app/src/app/admin/`, `app/src-tauri/src/admin/` | a corrupt settings file loads defaults with one notification; the preset changes each of its knobs | D4, B4 | 5 |
-| BR1 | Debrief's side of the bridge (C; Debrief work, in **Debrief 1.3**, the release after 1.2): Debrief asks Pacenotes over MCP for log sites, exceptions and config keys and shows the verdict with evidence; the `pacenotes://` deep link both ways through `paddock-siblings`; "not installed" with a next step | new `apps/debrief/app/src-tauri/src/code_check.rs` (the MCP client call and the sibling hand-off), new `apps/debrief/app/src/app/investigate/code-check/` (the verdict panel and its spec), one declared line each in Debrief's command table and contributions, `apps/debrief/app/e2e/code-check.e2e.ts` | without Pacenotes, Debrief shows "not installed" with a next step; a verdict is shown with its confidence | C4, D3 | 4 |
+| BR1 | Debrief's side of the bridge (C; Debrief work, in **Debrief 1.3**, the release after 1.2): Debrief asks Pacenotes over MCP for log sites, exceptions and config keys and shows the verdict with evidence; the `pacenotes://` deep link both ways through `paddock-siblings`; "not installed" with a next step | new `apps/debrief/app/src-tauri/src/investigate/code_check.rs` (the MCP client call and the sibling hand-off) with one line in `investigate/mod.rs`; `apps/debrief/app/src/app/investigate/investigate-backend.ts` and `investigate/mock/` (the backend call and its mock); new `investigate/code-check/` (the verdict panel and its spec); one declared line each in Debrief's command table and contributions; `apps/debrief/app/e2e/code-check.e2e.ts`; the line in `apps/debrief/docs/roadmap.md` | without Pacenotes, Debrief shows "not installed" with a next step; a verdict is shown with its confidence | C4, D3 | 4 |
 
 ### 4.11 Wave 8: release (about 5 days)
 
@@ -510,7 +515,8 @@ the planning figure at four agents is in the same range once waits on Debrief 1.
    (proposal §20.4), so this adds one grammar to the eight packs.
 5. **The embedding model** (potion-code-16M-v2) is downloaded the first time someone uses semantic search, not bundled in
    the installer. Semantic search is opt-in per repository. The download is verified (SHA-256 while writing) and runs as
-   a job with progress and Cancel (package B2).
+   a job with progress and Cancel (package B2). Recorded in ADR 0001 as an amendment of 2026-10-29 (it answers the
+   ADR's "decide at packaging time").
 
 ### 7.2 Open questions for the user
 
