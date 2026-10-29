@@ -5,6 +5,10 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ## Unreleased
 
+### Fixed
+
+- **Timeline:** a marker at the first or last moment of a lane no longer sticks out over the lane label and takes the clicks on the label's right edge
+
 ### Changed
 
 - **Updates:** Debrief now updates from the Paddock repository's releases, signed with the Paddock family's update key. A copy installed before this release cannot update itself to it: download this release once by hand and install it over the old one; later releases update as usual

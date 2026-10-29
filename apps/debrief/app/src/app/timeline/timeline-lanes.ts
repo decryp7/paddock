@@ -146,7 +146,8 @@ export type LanesEmpty = 'noSources' | 'noMatchMain' | 'noMatchOwn' | null;
     :host { display: block; }
     .row { display: flex; align-items: stretch; }
     .label { width: var(--tl-label-w); flex: none; }
-    .plot { flex: 1; min-width: 0; position: relative; margin-right: var(--s-5); }
+    /* Clipped sideways: a marker or run point at the lane's first or last moment overhangs by half a glyph (.glyph margin-left), and its button would take the clicks on the label's right edge. */
+    .plot { flex: 1; min-width: 0; position: relative; margin-right: var(--s-5); overflow-x: clip; }
     /* A lane is its band plus one sub-track per row of runs (--run-rows, set per lane). */
     .lane { --run-rows: 0; height: calc(var(--lane-h) + min(var(--run-rows), 1) * 3px + var(--run-rows) * var(--run-row-h)); transition: background-color var(--dur-fast) var(--ease); }
     .lane:hover { background: var(--bg-hover); }
