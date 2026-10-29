@@ -6,7 +6,7 @@ import { MatTooltip } from '@angular/material/tooltip';
  * shows (part of) this text, so a tooltip that is always present would be read twice by a screen reader (the tooltip becomes the
  * element's description); here the message is set only while the pointer is over a clipped element, and empty otherwise.
  */
-@Directive({ selector: '[dyFullText]', hostDirectives: [MatTooltip] })
+@Directive({ selector: '[dyFullText]', hostDirectives: [MatTooltip], host: { '[attr.data-full-text]': 'dyFullText() || null' } })
 export class FullTextTip {
   /** The text the element shows in full. */
   readonly dyFullText = input.required<string | null | undefined>();

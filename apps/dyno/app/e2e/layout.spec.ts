@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
-import { dialogContracts, dialogWindowUrl } from '@decryp7/paddock-e2e';
+import { dialogContracts, dialogWindowUrl, textClippedWithoutEllipsis, textCutOffWithoutTooltip } from '@decryp7/paddock-e2e';
 import { FIXTURES } from './dialog-fixtures';
 import { NAV } from '../src/app/shell/nav';
+import { EXTRAS_TABS } from '../src/app/features/extras/extras-model';
 
 /**
  * No table row of any Dyno page clips its own content at the window sizes the app supports (900 px is the window minimum in
@@ -29,14 +30,14 @@ async function clipped(page: Page): Promise<string[]> {
 
 /** A state of the app to measure: a page, or a page with its detail panel open, a second view or a tab. */
 type State = { name: string; path: string; setup?: (page: Page) => Promise<void> };
-const EXTRAS = ['changes', 'sleep', 'boot', 'apps', 'gpu', 'files', 'inventory', 'maintenance'];
+const EXTRAS = EXTRAS_TABS.map((t) => t.id);
 
 const STATES: State[] = [
   ...PAGES.map((p): State => ({ name: p || 'dashboard', path: p })),
   ...EXTRAS.map((t): State => ({ name: `extras ${t}`, path: `extras?tab=${t}` })),
   { name: 'alarms rules', path: 'alarms', setup: (page) => page.getByRole('tab', { name: 'Rules' }).click() },
   { name: 'alarms detail open', path: 'alarms', setup: async (page) => {
-      await page.locator('.grid .row').first().click();
+      await page.getByRole('grid', { name: 'Open alarms' }).getByRole('row').nth(1).click();
       await expect(page.locator('dy-alarm-detail')).toBeVisible();
     },
   },
@@ -47,7 +48,7 @@ const STATES: State[] = [
     },
   },
   { name: 'issues detail open', path: 'issues', setup: async (page) => {
-      await page.getByRole('table', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click();
+      await page.getByRole('treegrid', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click();
       await expect(page.getByRole('complementary', { name: 'Issue details' })).toBeVisible();
     },
   },
@@ -59,10 +60,19 @@ const STATES: State[] = [
       await page.getByRole('searchbox', { name: 'Search counters' }).fill('bytes');
       const results = page.getByRole('list', { name: 'Search results' });
       for (const n of [/^Chart Bytes Received \(en0\)/, /^Chart Bytes Sent \(en0\)/]) await results.getByRole('button', { name: n }).click();
-      await expect(page.getByRole('table', { name: 'Charted counters' })).toBeVisible();
+      await expect(page.getByRole('grid', { name: 'Charted counters' })).toBeVisible();
     },
   },
   { name: 'network listening', path: 'network', setup: (page) => page.getByRole('radio', { name: 'Listening' }).click() },
+  {
+    name: 'network listening, ungrouped',
+    path: 'network',
+    setup: async (page) => {
+      await page.getByRole('radio', { name: 'Listening' }).click();
+      await page.getByRole('radio', { name: 'None' }).click();
+      await expect(page.getByRole('columnheader', { name: 'Program' })).toBeVisible();
+    },
+  },
 ];
 
 /** Opens a state and waits until it is drawn: its heading is there and no skeleton or indeterminate progress bar is left. */
@@ -77,7 +87,7 @@ async function openState(page: Page, state: State): Promise<void> {
   await page.evaluate(() => document.fonts.ready);
 }
 
-test.describe('rows never clip their content', () => {
+test.describe('rows never clip their content, and text that is cut says so with an ellipsis', () => {
   test.setTimeout(300_000);
   for (const width of WIDTHS) {
     test(`at a ${width} px window`, async ({ page }) => {
@@ -85,7 +95,7 @@ test.describe('rows never clip their content', () => {
       const problems: Record<string, string[]> = {};
       for (const state of STATES) {
         await openState(page, state);
-        const found = [...new Set(await clipped(page))];
+        const found = [...new Set([...(await clipped(page)), ...(await textClippedWithoutEllipsis(page))])];
         if (found.length) problems[state.name] = found;
       }
       expect(problems).toEqual({});
@@ -108,58 +118,17 @@ const UI = '../../../ui/projects/paddock-ui/shell';
 const CONTRACTS = dialogContracts('src/app/generated/dialog-contracts.ts', ...['about', 'confirm'].map((p) => `${UI}/${p}/generated/dialog-contracts.ts`));
 
 async function cutOff(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
+  const wide = await page.evaluate(() => {
     const out: string[] = [];
     const vw = document.documentElement.clientWidth;
-    const name = (el: Element) => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}.${String((el as HTMLElement).className?.toString?.() ?? '').trim().split(/\s+/).slice(0, 3).join('.')}`;
     if (document.documentElement.scrollWidth > vw + 1) out.push(`document scrolls sideways: ${document.documentElement.scrollWidth} > ${vw}`);
     for (const el of Array.from(document.querySelectorAll<HTMLElement>('.pd-page'))) {
-      if (el.scrollWidth > el.clientWidth + 1) out.push(`${name(el)} content ${el.scrollWidth}px wider than the page ${el.clientWidth}px`);
-    }
-    const seen = new Set<string>();
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      const text = (n.textContent ?? '').trim();
-      const parent = n.parentElement;
-      if (!text || !parent) continue;
-      const ps = getComputedStyle(parent);
-      if (ps.visibility === 'hidden' || ps.display === 'none') continue;
-      const r = document.createRange();
-      r.selectNodeContents(n);
-      const tr = r.getBoundingClientRect();
-      if (tr.width === 0 || tr.height === 0) continue;
-      // The element that clips this text: the nearest ancestor that does not let its content overflow sideways.
-      let clip: Element | null = null;
-      for (let a: Element | null = parent; a && a !== document.body; a = a.parentElement) {
-        if (getComputedStyle(a).overflowX !== 'visible') { clip = a; break; }
-      }
-      if (clip) {
-        const cr = clip.getBoundingClientRect();
-        if (cr.width <= 2 || cr.height <= 2) continue; // visually hidden text
-      }
-      // A truncation with an ellipsis is a decision, accepted only on the clipping element itself, when it says its full text
-      // (a tooltip or a label) and the text is not something that must never be cut: a control, a tab, a number.
-      let never = false;
-      for (let e: Element | null = parent; e && e !== document.body; e = e.parentElement) {
-        if (e.matches('button, a, [role="tab"], .mdc-button__label, .num')) never = true;
-        if (e === clip) break;
-      }
-      const says = clip !== null && (clip.classList.contains('mat-mdc-tooltip-trigger') || clip.hasAttribute('aria-label') || clip.hasAttribute('title'));
-      if (clip && getComputedStyle(clip).textOverflow === 'ellipsis' && says && !never) continue;
-      if (tr.right > vw + 1 && tr.left < vw) {
-        const k = `edge:${name(parent)}`;
-        if (!seen.has(k)) { seen.add(k); out.push(`text past the window edge (${Math.round(tr.right)} > ${vw}): "${text.slice(0, 50)}" in ${name(parent)}`); }
-      }
-      if (clip) {
-        const cr = clip.getBoundingClientRect();
-        if (tr.right > cr.right + 1 || tr.left < cr.left - 1) {
-          const k = `cut:${name(parent)}`;
-          if (!seen.has(k)) { seen.add(k); out.push(`cut without a tooltipped ellipsis: "${text.slice(0, 50)}" in ${name(parent)} (by ${name(clip)})`); }
-        }
-      }
+      if (el.scrollWidth > el.clientWidth + 1) out.push(`${el.tagName.toLowerCase()}.pd-page content ${el.scrollWidth}px wider than the page ${el.clientWidth}px`);
     }
     return out;
   });
+  // The shared rule (paddock-e2e): text beyond its box or the window, or cut by its own box, unless an accepted ellipsis.
+  return [...wide, ...(await textCutOffWithoutTooltip(page)), ...(await textClippedWithoutEllipsis(page))];
 }
 
 test.describe('nothing is cut off', () => {

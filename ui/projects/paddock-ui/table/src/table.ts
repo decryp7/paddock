@@ -3,6 +3,7 @@ import { NgTemplateOutlet } from '@angular/common';
 import {
   afterNextRender,
   ChangeDetectionStrategy,
+  isDevMode,
   Component,
   computed,
   contentChild,
@@ -26,6 +27,7 @@ import { MatContextMenuTrigger, MatMenu, MatMenuContent, MatMenuItem, MatMenuTri
 import { MatSort, MatSortHeader, type Sort } from '@angular/material/sort';
 import { MatCell, MatCellDef, MatColumnDef, MatHeaderCell, MatHeaderCellDef, MatHeaderRow, MatHeaderRowDef, MatRow, MatRowDef, MatTable } from '@angular/material/table';
 import { MatTooltip } from '@angular/material/tooltip';
+import { PdActionTip } from './action-tip';
 import { PdContextMenuKeys } from '@decryp7/paddock-ui/material';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdMiddleText } from './middle-text';
@@ -40,13 +42,16 @@ import {
   inlineActions,
   menuActions,
   nextIndex,
+  parentIndex,
   PD_HEADER_HEIGHT,
   rowHeightFor,
   PD_FOLD_EXTRA,
   shownColumns,
   sortRows,
+  treePlaces,
   type PdColumn,
   type PdRowAction,
+  type PdRowTree,
   type PdSort,
   type PdTableItem,
 } from './model';
@@ -144,12 +149,14 @@ const VIRTUAL_BUFFER_ROWS = 8;
     MatContextMenuTrigger,
     PdContextMenuKeys,
     MatTooltip,
+    PdActionTip,
     MatIconButton,
     PdGlyph,
     PdMiddleText,
   ],
-  host: { '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"' },
+  host: { '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"', '(document:pointerdown)': 'onPointerDownAnywhere($event)' },
   template: `
+    @if (toolbar()) {
     <div class="pd-toolbar">
       @if (filterable()) {
         <label class="pd-filter">
@@ -171,26 +178,28 @@ const VIRTUAL_BUFFER_ROWS = 8;
         </button>
       }
     </div>
+    }
     <!-- One grid (a tree grid when grouped: group rows expand, their rows are a level below): a header-only table above the scrolling body, so the header never moves with the rows (ADR 0027). There is no
          horizontal scroll (columns drop out instead), so the two tables share their tracks (--pd-cols) and need no syncing
          sideways; the header keeps the width of the body's scrollbar (--pd-gutter). -->
     <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the grid only receives keydown bubbling from its rows and sort headers, which are the focus stops (roving tabindex) -->
     <div
       class="pd-grid"
-      [attr.role]="groupBy() ? 'treegrid' : 'grid'"
+      [attr.role]="groupBy() || tree() ? 'treegrid' : 'grid'"
       [style.--pd-cols]="gridTemplate()"
       [style.--pd-gutter.px]="gutter()"
       [attr.aria-label]="label()"
       [attr.aria-busy]="state() === 'loading'"
       [attr.aria-rowcount]="items().length + 1"
       (keydown)="onKeydown($event)"
+      (focusin)="onFocusIn($event)"
       (focusout)="onFocusOut($event)"
     >
-      <mat-table role="rowgroup" class="pd-head-table" [dataSource]="noLines" matSort [matSortActive]="sort()?.key ?? ''" [matSortDirection]="sort()?.direction ?? ''" (matSortChange)="onSort($event)">
+      <mat-table role="rowgroup" class="pd-head-table" [dataSource]="noLines" matSort [matSortDisableClear]="!sortClearable()" [matSortActive]="sort()?.key ?? ''" [matSortDirection]="sort()?.direction ?? ''" (matSortChange)="onSort($event)">
         @for (c of columns2(); track c.key) {
           <ng-container [matColumnDef]="c.key">
             @if (c.sortable !== false) {
-              <mat-header-cell *matHeaderCellDef mat-sort-header class="pd-th pd-sort" [class.pd-end]="c.align === 'end'" [class.pd-sorted]="sort()?.key === c.key" [arrowPosition]="c.align === 'end' ? 'before' : 'after'" [sortActionDescription]="sortLabel(c)">
+              <mat-header-cell *matHeaderCellDef mat-sort-header class="pd-th pd-sort" [class.pd-end]="c.align === 'end'" [class.pd-sorted]="sort()?.key === c.key" [arrowPosition]="c.align === 'end' ? 'before' : 'after'" [start]="c.sortStart ?? 'asc'" [sortActionDescription]="sortLabel(c)">
                 <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
               </mat-header-cell>
             } @else {
@@ -212,7 +221,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
         <mat-table class="pd-body-table" [attr.role]="state() === 'ready' && lines().length ? 'rowgroup' : null" [dataSource]="lines()" [trackBy]="trackLine" (contentChanged)="onRowsDrawn()">
           @for (c of columns2(); track c.key; let k = $index) {
             <ng-container [matColumnDef]="c.key">
-              <mat-cell *matCellDef="let line" class="pd-cell" [attr.role]="cellRole" [class.pd-end]="c.align === 'end'" [class.pd-first]="k === 0" [class.pd-group-cell]="line.kind === 'group' && k === 0" [class.pd-group-summary]="line.kind === 'group' && k > 0">
+              <mat-cell *matCellDef="let line" class="pd-cell" [attr.role]="cellRole" [class.pd-end]="c.align === 'end'" [class.pd-first]="k === 0" [style.--pd-tree-level]="k === 0 ? indent(line) : null" [class.pd-group-cell]="line.kind === 'group' && k === 0" [class.pd-group-summary]="line.kind === 'group' && k > 0">
                 @switch (line.kind) {
                   @case ('skeleton') {
                     <span class="pd-skel" [class.pd-skel-end]="c.align === 'end'" [style.width.%]="40 + ((line.n * 17 + c.key.length * 11) % 50)"></span>
@@ -225,7 +234,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
                       <span class="pd-group-name" [class.pd-mono]="isMono(line.key)">{{ line.label || t.none }}</span>
                       <span class="pd-group-count">{{ formatCount(line.count) }}</span>
                     } @else {
-                      {{ line.cells?.[c.key] ?? '' }}
+                      <span class="pd-text">{{ line.cells?.[c.key] ?? '' }}</span>
                     }
                   }
                   @default {
@@ -235,7 +244,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
                     } @else if (c.truncate === 'middle') {
                       <pd-middle-text [value]="text(c, line.row)" />
                     } @else {
-                      <span class="pd-text" [matTooltip]="text(c, line.row)" [matTooltipDisabled]="true" matTooltipShowDelay="500" #tip="matTooltip" (mouseenter)="tip.disabled = !isTruncated($event)" (mouseleave)="tip.disabled = true">{{ text(c, line.row) }}</span>
+                      <span class="pd-text" [attr.data-full-text]="text(c, line.row)" [matTooltip]="text(c, line.row)" [matTooltipDisabled]="true" matTooltipShowDelay="500" #tip="matTooltip" (mouseenter)="tip.disabled = !isTruncated($event)" (mouseleave)="tip.disabled = true">{{ text(c, line.row) }}</span>
                     }
                   }
                 }
@@ -244,18 +253,18 @@ const VIRTUAL_BUFFER_ROWS = 8;
           }
           @if (actionWidth()) {
             <ng-container [matColumnDef]="actionsColumn">
-              <mat-cell *matCellDef="let line" class="pd-cell pd-actions" [attr.role]="cellRole">
+              <mat-cell *matCellDef="let line" class="pd-cell pd-actions" [attr.role]="cellRole" pdActionTip>
                 @if (line.kind === 'row') {
                   @let actions = actionsOf(line.row);
                   @if (actions.length) {
                     @if (!narrow()) {
                       @for (a of inline(actions); track a.id) {
-                        <button type="button" matIconButton tabindex="-1" class="pd-icon-btn pd-inline" [attr.aria-label]="a.label" [matTooltip]="a.label" [disabled]="a.disabled" (click)="act(a, line.row, $event)">
+                        <button type="button" matIconButton tabindex="-1" class="pd-icon-btn pd-inline" [attr.aria-label]="a.label" [disabled]="a.disabled" (click)="act(a, line.row, $event)">
                           <pd-glyph [name]="a.icon ?? ''" [size]="14" />
                         </button>
                       }
                     }
-                    <button type="button" matIconButton tabindex="-1" class="pd-icon-btn pd-more" [attr.aria-label]="t.more" [matTooltip]="t.more" [matMenuTriggerFor]="rowMenu" [matMenuTriggerData]="{ row: line.row }">
+                    <button type="button" matIconButton tabindex="-1" class="pd-icon-btn pd-more" [attr.aria-label]="t.more" [matMenuTriggerFor]="rowMenu" [matMenuTriggerData]="{ row: line.row }">
                       <pd-glyph name="more" [size]="16" />
                     </button>
                   }
@@ -268,13 +277,14 @@ const VIRTUAL_BUFFER_ROWS = 8;
             class="pd-row"
             [class.pd-group]="line.kind === 'group'"
             [class.pd-group-grid]="line.kind === 'group' && !!line.cells"
+            [class.pd-span]="spans(line)"
             [class.pd-skeleton]="line.kind === 'skeleton'"
             [class.pd-folded]="folded() && line.kind === 'row'"
             [class.pd-selected]="isSelected(line)"
             [class.pd-menu-open]="line.kind === 'row' && menuKey() === rowKey()(line.row)"
             [attr.aria-hidden]="line.kind === 'skeleton' ? 'true' : null"
-            [attr.aria-expanded]="line.kind === 'group' ? !line.collapsed : null"
-            [attr.aria-level]="!groupBy() || line.kind === 'skeleton' ? null : line.kind === 'group' ? 1 : 2"
+            [attr.aria-expanded]="line.kind === 'group' ? !line.collapsed : treeExpanded(line)"
+            [attr.aria-level]="treeLevel(line)"
             [attr.aria-posinset]="treePlace().get(line)?.pos ?? null"
             [attr.aria-setsize]="treePlace().get(line)?.size ?? null"
             [attr.aria-rowindex]="line.kind === 'skeleton' ? null : indexOf(line) + 2"
@@ -373,7 +383,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
        header and values share one right edge. */
     .pd-grid .pd-header { padding-inline-end: calc(var(--pd-space-3) + var(--pd-gutter, 0px)); height: var(--pd-table-head); min-height: var(--pd-table-head); border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); font-family: inherit; letter-spacing: normal; }
     .pd-grid .pd-th, .pd-grid .pd-cell { display: flex; align-items: center; flex: none; min-width: 0; min-height: 0; padding: 0; border: 0; overflow: hidden; white-space: nowrap; background: none; color: inherit; font: inherit; letter-spacing: normal; align-self: stretch; }
-    .pd-grid .pd-th.pd-end, .pd-grid .pd-cell.pd-end { justify-content: flex-end; text-align: end; }
+    .pd-grid .pd-th.pd-end, .pd-grid .pd-cell.pd-end { justify-content: safe flex-end; text-align: end; }
     .pd-grid .pd-sort { cursor: pointer; }
     .pd-grid .pd-sort:hover, .pd-grid .pd-sorted { color: var(--pd-text); }
     .pd-grid .pd-th .mat-sort-header-container { min-width: 0; max-width: 100%; gap: var(--pd-space-1); border-radius: var(--pd-radius-tag); }
@@ -390,6 +400,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
     .pd-grid .pd-row:focus-visible { outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring); outline-offset: -2px; }
     /* Selected: the accent tint with a 2 px accent bar on the left (the guide). */
     .pd-grid .pd-row.pd-selected { background: var(--pd-accent-tint, var(--pd-hover)); box-shadow: inset 2px 0 0 var(--pd-accent); }
+    .pd-grid .pd-cell.pd-first { padding-inline-start: calc(var(--pd-tree-level, 0) * var(--pd-tree-indent)); }
     .pd-grid .pd-cell.pd-end { font-variant-numeric: tabular-nums; }
     .pd-grid .pd-cell.pd-first { font-weight: var(--pd-weight-medium); }
     .pd-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -397,6 +408,9 @@ const VIRTUAL_BUFFER_ROWS = 8;
     .pd-grid .pd-group { background: var(--pd-surface-2); color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); cursor: pointer; }
     .pd-grid .pd-group:not(.pd-group-grid) { grid-template-columns: minmax(0, 1fr); }
     .pd-grid .pd-group:not(.pd-group-grid) .pd-cell:not(.pd-group-cell) { display: none; }
+    /* A tree row whose first cell is a heading (a program) spans the row. */
+    .pd-grid .pd-span { grid-template-columns: minmax(0, 1fr); }
+    .pd-grid .pd-span .pd-cell:not(.pd-first) { display: none; }
     .pd-grid .pd-group-summary { color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
     .pd-grid .pd-group-cell { gap: var(--pd-space-2); }
     .pd-group-name.pd-mono { font-family: var(--pd-font-mono); font-size: var(--pd-text-label); }
@@ -440,6 +454,8 @@ export class PdTable<T> {
   readonly label = input.required<string>();
   /** Actions of a row; none means a row without a menu. */
   readonly rowActions = input<(row: T) => readonly PdRowAction[]>(NO_ACTIONS);
+  /** The toolbar above the grid (the filter, the row count, the Columns menu); `false` for a small static table that needs none of them. */
+  readonly toolbar = input(true);
   /** Shows the filter field. */
   readonly filterable = input(true);
   /** Row height in pixels: 24, 32 or 36, the family's densities (UI guide §3); default: the density the page is in (Standard 32). */
@@ -464,6 +480,14 @@ export class PdTable<T> {
   readonly countLabel = input<((shown: number, total: number) => string) | null>(null);
   /** What an empty table says. */
   readonly emptyText = input($localize`:@@pd.table.empty:Nothing to show yet.`);
+  /** `source`: the rows arrive in the order to show (the app sorts and filters them, as a tree needs); the table only shows the sort and reports it. */
+  readonly order = input<'sorted' | 'source'>('sorted');
+  /** Makes the rows a tree grid (levels, folding with Left and Right, indented first cells); see {@link PdRowTree}. Not with `groupBy`. */
+  readonly tree = input<PdRowTree<T> | null>(null);
+  /** The keyboard asked to fold or unfold a tree row (Left on an unfolded row, Right on a folded one); the app changes its fold state. */
+  readonly rowToggle = output<T>();
+  /** A header cycles ascending, descending, none (default); with `false` only ascending and descending, so the list is never unsorted. */
+  readonly sortClearable = input(true);
   /** The sort (two-way). */
   readonly sort = model<PdSort | null>(null);
   /** The filter text (two-way). */
@@ -546,25 +570,33 @@ export class PdTable<T> {
   /** The column ids the header and every row draw, in order. */
   protected readonly displayed = computed(() => [...this.columns2().map((c) => c.key), ...(this.actionWidth() ? [ACTIONS_COLUMN] : [])]);
 
-  private readonly filtered = computed(() => filterRows(this.rows(), this.columns(), this.query()));
+  private readonly filtered = computed(() => (this.tree() ? this.rows() : filterRows(this.rows(), this.columns(), this.query())));
   /** The rows after filtering and sorting. */
-  protected readonly ordered = computed(() => sortRows(this.filtered(), this.columns(), this.sort()));
+  protected readonly ordered = computed(() => (this.order() === 'source' || this.tree() ? this.filtered() : sortRows(this.filtered(), this.columns(), this.sort())));
   /** The lines: rows, with group headings when grouped. */
   protected readonly items = computed<readonly PdTableItem<T>[]>(() => {
     const key = this.groupBy();
+    if (key && this.tree() && isDevMode()) throw new Error('pd-table: `tree` and `groupBy` are two ways to form a tree grid; use one.');
     return groupItems(this.ordered(), key ? this.columns().find((c) => c.key === key) : undefined, this.collapsed(), this.groupSummary());
   });
   /** What the table draws: the lines, five placeholders while loading, nothing on an error (the message is below the header). */
   protected readonly lines = computed<readonly PdLine<T>[]>(() => (this.state() === 'loading' ? SKELETON : this.state() === 'error' ? [] : this.items()));
   private readonly positions = computed(() => new Map<PdLine<T>, number>(this.lines().map((l, i) => [l, i])));
   /** Each line's place by its key ({@link trackLine}): a line keeps its key when lines come and go above it. */
-  private readonly keyIndex = computed(() => new Map(this.lines().map((l, i) => [this.trackLine(i, l), i] as const)));
+  private readonly keyIndex = computed(() => new Map(this.lines().map((l, i) => [this.lineKey(l), i] as const)));
   /**
    * Where each line sits in the tree of a grouped table (a virtual table draws only some of the rows, so the tree grid says
    * their place): a group among the groups, a row among its group's rows (the group's count). Empty when not grouped.
    */
   protected readonly treePlace = computed(() => {
     const place = new Map<PdLine<T>, { pos: number; size: number }>();
+    const tree = this.tree();
+    if (tree) {
+      const rows = this.lines().filter((l): l is { readonly kind: 'row'; readonly row: T } => l.kind === 'row');
+      const spots = treePlaces(rows.map((l) => l.row), tree.level);
+      rows.forEach((l, i) => place.set(l, { pos: (spots[i] as readonly [number, number])[0], size: (spots[i] as readonly [number, number])[1] }));
+      return place;
+    }
     if (!this.groupBy()) return place;
     const lines = this.lines();
     const groups = lines.filter((l) => l.kind === 'group').length;
@@ -591,7 +623,8 @@ export class PdTable<T> {
     const custom = this.countLabel();
     if (custom) return custom(this.ordered().length, this.rows().length);
     const [shown, total] = [n.format(this.ordered().length), n.format(this.rows().length)];
-    return this.ordered().length === this.rows().length ? $localize`:@@pd.table.count:${total} rows` : $localize`:@@pd.table.countOf:${shown} of ${total} rows`;
+    if (this.ordered().length === this.rows().length) return this.rows().length === 1 ? $localize`:@@pd.table.count1:1 row` : $localize`:@@pd.table.count:${total} rows`;
+    return this.rows().length === 1 ? $localize`:@@pd.table.countOf1:${shown} of 1 row` : $localize`:@@pd.table.countOf:${shown} of ${total} rows`;
   });
 
   constructor() {
@@ -613,10 +646,14 @@ export class PdTable<T> {
     });
     // The lines changed: a row the keyboard was waiting for is forgotten only when it is gone (it is waited for by its key, so
     // a group folding above it does not lose it), and the sort headers' stops follow the rows.
+    let drawnColumns: readonly PdColumn<T>[] | null = null;
     effect(() => {
       const keys = this.keyIndex();
-      this.columns2();
+      const columns = this.columns2();
       untracked(() => {
+        // The columns changed (the pane narrowed or widened): the rows are drawn again, so the row that holds the focus is focused again once they are.
+        if (drawnColumns !== null && drawnColumns !== columns) this.holdFocus();
+        drawnColumns = columns;
         if (this.pendingFocus !== null && !keys.has(this.pendingFocus)) this.pendingFocus = null;
         afterNextRender(
           () => {
@@ -634,14 +671,44 @@ export class PdTable<T> {
     });
   }
 
+  /** Remembers the row that has the focus, to focus it again once the rows are drawn again. */
+  private holdFocus(): void {
+    const row = document.activeElement?.closest<HTMLElement>('.pd-body [role="row"][data-key]');
+    if (row && this.host.contains(row) && this.pendingFocus === null) this.pendingFocus = `r:${row.dataset['key'] as string}`;
+  }
+
   /** A line's key: its kind as a prefix (`r:` a row's own key, `g:` a group's name, `s:` a placeholder), so an app's row key never equals a group's. */
-  protected trackLine = (_: number, line: PdLine<T>): string => (line.kind === 'skeleton' ? `s:${line.n}` : line.kind === 'group' ? `g:${line.key}` : `r:${this.rowKey()(line.row)}`);
+  protected lineKey(line: PdLine<T>): string {
+    return line.kind === 'skeleton' ? `s:${line.n}` : line.kind === 'group' ? `g:${line.key}` : `r:${this.rowKey()(line.row)}`;
+  }
+  /** What the body table tracks a line by: its key and the columns it is drawn with, so the CDK never reuses a row view built for other columns (stale cells). */
+  protected trackLine = (_: number, line: PdLine<T>): string => `${this.lineKey(line)}|${this.displayed().join(',')}`;
   /** The line's place in the table (a virtual table draws only a window of them). */
   protected indexOf(line: PdLine<T>): number {
     return this.positions().get(line) as number;
   }
   protected isSelected(line: PdLine<T>): boolean {
     return line.kind === 'row' && this.selectedKey() === this.rowKey()(line.row);
+  }
+  /** The level of a line in the tree grid: a group is 1 and its rows 2; a tree's rows have the level the app gives. */
+  protected treeLevel(line: PdLine<T>): number | null {
+    if (line.kind === 'skeleton') return null;
+    if (this.groupBy()) return line.kind === 'group' ? 1 : 2;
+    const tree = this.tree();
+    return tree && line.kind === 'row' ? tree.level(line.row) : null;
+  }
+  protected treeExpanded(line: PdLine<T>): boolean | null {
+    const tree = this.tree();
+    return tree && line.kind === 'row' ? tree.expanded(line.row) : null;
+  }
+  protected spans(line: PdLine<T>): boolean {
+    const tree = this.tree();
+    return !!tree?.spans && line.kind === 'row' && tree.spans(line.row);
+  }
+  /** The depth of a tree row below the top, for the indent of its first cell (`--pd-tree-indent` a level). */
+  protected indent(line: PdLine<T>): number | null {
+    const level = this.tree() ? this.treeLevel(line) : null;
+    return level === null || level < 2 ? null : level - 1;
   }
   protected text(c: PdColumn<T>, row: T): string {
     return cellText(c, row);
@@ -727,16 +794,41 @@ export class PdTable<T> {
     afterNextRender(
       () => {
         this.updateTabStops();
+        this.restoreLostFocus();
         this.focusPending();
       },
       { injector: this.injector },
     );
   }
 
+  /**
+   * The key of the row that has the focus. When the app puts the rows in another order (live values), the browser drops the focus
+   * of a row element that was moved, whether or not the element is still there; the row is then focused again by its key.
+   */
+  private focusedRow: string | null = null;
+  protected onFocusIn(e: FocusEvent): void {
+    const row = e.target instanceof Element ? e.target.closest<HTMLElement>('.pd-body [role="row"][data-key]') : null;
+    this.focusedRow = row ? `r:${row.dataset['key'] as string}` : null;
+  }
+  /** A click anywhere outside the grid moves the focus away on purpose (to the page, when it hits nothing focusable): forget the row. */
+  protected onPointerDownAnywhere(e: Event): void {
+    if (e.target instanceof Node && !this.host.contains(e.target)) this.focusedRow = null;
+  }
+  /** The focus fell to the page while a row of this grid had it (its element was removed or moved): ask for the row again by its key. */
+  private restoreLostFocus(): void {
+    const held = this.focusedRow;
+    if (held === null || document.activeElement !== document.body || this.pendingFocus !== null) return;
+    this.focusedRow = null;
+    if (this.keyIndex().has(held)) this.pendingFocus = held;
+  }
+
   /** The focus left the grid for another element: forget a row still waiting to be focused, so it never takes the focus back. */
   protected onFocusOut(e: FocusEvent): void {
     const to = e.relatedTarget;
-    if (to instanceof Node && !this.host.querySelector('.pd-grid')?.contains(to)) this.pendingFocus = null;
+    if (to instanceof Node && !this.host.querySelector('.pd-grid')?.contains(to)) {
+      this.pendingFocus = null;
+      this.focusedRow = null;
+    }
   }
 
   protected onKeydown(e: KeyboardEvent): void {
@@ -748,7 +840,7 @@ export class PdTable<T> {
     const target = e.target.closest<HTMLElement>('[role="row"][data-index]');
     if (!target || e.target !== target) return;
     const index = Number(target.dataset['index']);
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' || e.key === ' ') {
       const item = this.items()[index];
       e.preventDefault();
       if (item?.kind === 'group') this.toggleFromKeyboard(item.key);
@@ -756,6 +848,7 @@ export class PdTable<T> {
       return;
     }
     const item = this.items()[index];
+    if (item?.kind === 'row' && this.treeKey(e, index, item.row)) return;
     if (item?.kind === 'group' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
       // The tree grid: Right expands a collapsed group, and on an expanded one moves to its first row; Left collapses it.
       e.preventDefault();
@@ -791,6 +884,41 @@ export class PdTable<T> {
     if (to === null) return;
     e.preventDefault();
     this.moveTo(to);
+  }
+
+  /**
+   * The tree grid's keys on a row of a tree: Right unfolds a folded row and on an unfolded one moves to its first child; Left folds
+   * an unfolded row and otherwise moves up to the row's parent. True when the key was used (a leaf's Right goes to its buttons).
+   */
+  private treeKey(e: KeyboardEvent, index: number, row: T): boolean {
+    const tree = this.tree();
+    if (!tree || (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft')) return false;
+    const open = tree.expanded(row);
+    const rows = this.items().map((l) => (l.kind === 'row' ? l.row : null));
+    const lines = rows.map((r) => r as T);
+    if (e.key === 'ArrowRight') {
+      if (open === null) return false;
+      e.preventDefault();
+      if (!open) this.toggleTree(row);
+      else if (rows[index + 1] && tree.level(lines[index + 1] as T) > tree.level(row)) this.moveTo(index + 1);
+      return true;
+    }
+    if (open === true) {
+      e.preventDefault();
+      this.toggleTree(row);
+      return true;
+    }
+    const up = parentIndex(lines, index, tree.level);
+    if (up < 0) return false;
+    e.preventDefault();
+    this.moveTo(up);
+    return true;
+  }
+  /** Asks the app to fold or unfold a tree row and keeps the focus on it once the table has redrawn. */
+  private toggleTree(row: T): void {
+    this.rowToggle.emit(row);
+    this.pendingFocus = `r:${this.rowKey()(row)}`;
+    afterNextRender(() => this.focusPending(), { injector: this.injector });
   }
 
   /** The sortable column headers' buttons (Material's sort header containers), in order. */
@@ -862,7 +990,9 @@ export class PdTable<T> {
     if (top < offset) viewport.scrollToOffset(top);
     else if (top + this.rowPx() > offset + visible) viewport.scrollToOffset(top + this.rowPx() - visible);
     const line = this.lines()[index];
-    this.pendingFocus = line ? this.trackLine(index, line) : null;
+    this.pendingFocus = line ? this.lineKey(line) : null;
+    // A row that is drawn already takes the focus now (a key pressed right after this one then acts on it); one that is not, once drawn.
+    this.focusPending();
     afterNextRender(() => this.focusPending(), { injector: this.injector });
   }
 

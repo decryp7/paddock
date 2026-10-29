@@ -18,9 +18,12 @@ function render(options: ConstructorParameters<typeof MockBackend>[0] = {}) {
 const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
   for (let i = 0; i < 6; i++) {
     await f.whenStable();
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
     f.detectChanges();
   }
 };
+/** A tool's row in the shared table. */
+const ROW = '[role="row"][data-key]';
 const btn = (el: HTMLElement, text: string) => [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes(text))!;
 
 describe('dy-backup-page', () => {
@@ -33,29 +36,30 @@ describe('dy-backup-page', () => {
     await settle(f);
     expect(el.querySelector('h1')?.textContent).toBe('Backup health');
     expect(el.querySelector('[aria-label="Summary"] h2')?.textContent).toBe('restic backup is out of date');
-    const rows = [...el.querySelectorAll('table[aria-label="Backup tools"] tbody tr')];
+    const rows = [...el.querySelectorAll('[aria-label="Backup tools"] [role="row"][data-key]')];
     expect(rows.map((r) => r.querySelector('strong')?.textContent)).toEqual(['Time Machine', 'restic', 'BorgBackup']);
     expect(el.querySelectorAll('.page-head button[matButton="filled"]')).toHaveLength(1);
-    expect(el.querySelectorAll('table thead')).toHaveLength(1);
+    expect(el.querySelectorAll('pd-table')).toHaveLength(1);
     expect(el.querySelector('[aria-label="Summary"] p')?.textContent).toBe('Checked 40 min ago');
   });
 
   it('shows the status of every tool as a dot and a word', async () => {
     const { f, el } = render();
     await settle(f);
-    const [tm, restic, borg] = [...el.querySelectorAll('tr.row')];
-    expect(tm!.querySelector('.state')!.textContent!.trim()).toBe('Healthy');
-    expect(tm!.querySelector('.state .dot')!.getAttribute('aria-hidden')).toBe('true');
-    expect(restic!.querySelector('.state')!.textContent).toContain('Out of date');
-    expect(restic!.querySelector('.state .dot')!.getAttribute('data-tone')).toBe('bad');
-    expect(borg!.querySelector('.state')!.textContent).toContain('Could not check');
-    expect(tm!.querySelector('.when')!.textContent).toContain('3 h ago');
+    const [tm, restic, borg] = [...el.querySelectorAll(ROW)];
+    const cell = (r: Element, n: number) => r.querySelectorAll('[role="gridcell"]')[n]!;
+    expect(cell(tm!, 1).textContent!.trim()).toBe('Healthy');
+    expect(cell(tm!, 1).querySelector('.dot')!.getAttribute('aria-hidden')).toBe('true');
+    expect(cell(restic!, 1).textContent).toContain('Out of date');
+    expect(cell(restic!, 1).querySelector('.dot')!.getAttribute('data-tone')).toBe('bad');
+    expect(cell(borg!, 1).textContent).toContain('Could not check');
+    expect(cell(tm!, 2).textContent).toContain('3 h ago');
   });
 
   it('opens the next step in the side panel and Esc closes it and returns to the row', async () => {
     const { f, el } = render();
     await settle(f);
-    const row = el.querySelector<HTMLElement>('tr[data-tool="restic"]')!;
+    const row = el.querySelector<HTMLElement>(`${ROW}[data-key="restic"]`)!;
     row.click();
     await settle(f);
     const panel = el.querySelector('[aria-label="Backup details"]')!;
@@ -63,24 +67,41 @@ describe('dy-backup-page', () => {
     expect(panel.textContent).toContain('never starts a backup');
     row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await settle(f);
+    expect(document.activeElement).toBe(row);
+    await settle(f);
     expect(el.querySelector('[aria-label="Backup details"]')).toBeNull();
-    el.querySelector<HTMLElement>('[aria-label="Details of BorgBackup"]')!.click();
+    [...el.querySelectorAll<HTMLElement>(ROW)][2]!.querySelector<HTMLElement>('[aria-label="Details"]')!.click();
     await settle(f);
     el.querySelector<HTMLElement>('[aria-label="Close details"]')!.click();
     await settle(f);
     expect(el.querySelector('[aria-label="Backup details"]')).toBeNull();
   });
 
-  it('moves between rows with the arrow keys', async () => {
+  it('moves between rows with the arrow keys, one tab stop for the grid', async () => {
     const { f, el } = render();
     await settle(f);
-    const rows = [...el.querySelectorAll<HTMLElement>('tr.row')];
+    const rows = [...el.querySelectorAll<HTMLElement>(ROW)];
+    expect(rows.filter((r) => r.tabIndex === 0)).toHaveLength(1);
     rows[0]!.focus();
-    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    const key = (target: Element, k: string) => target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+    key(rows[0]!, 'ArrowDown');
+    await settle(f);
     expect(document.activeElement).toBe(rows[1]);
-    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    key(rows[1]!, 'ArrowUp');
+    await settle(f);
     expect(document.activeElement).toBe(rows[0]);
-    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+    key(rows[0]!, 'End');
+    await settle(f);
+    expect(document.activeElement).toBe(rows[2]);
+    // Right goes into the row's buttons, Escape comes back to the row.
+    key(rows[2]!, 'ArrowRight');
+    expect((document.activeElement as HTMLElement).getAttribute('aria-label')).toBe('Details');
+    key(document.activeElement!, 'Escape');
+    expect(document.activeElement).toBe(rows[2]);
+    key(rows[2]!, 'Enter');
+    await settle(f);
+    expect(el.querySelector('[aria-label="Backup details"]')).not.toBeNull();
+    expect(rows[2]!.getAttribute('aria-selected')).toBe('true');
   });
 
   it('copies a summary to the clipboard, and says when copying is refused', async () => {
@@ -89,7 +110,7 @@ describe('dy-backup-page', () => {
     const notifier = TestBed.inject(Notifier);
     const write = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: write }, configurable: true });
-    el.querySelector<HTMLElement>('tr[data-tool="restic"]')!.click();
+    el.querySelector<HTMLElement>(`${ROW}[data-key="restic"]`)!.click();
     await settle(f);
     btn(el, 'Copy').click();
     await settle(f);
@@ -123,7 +144,7 @@ describe('dy-backup-page', () => {
     btn(el, 'Check now').click();
     await settle(f);
     expect(el.querySelector('[role="alert"]')?.textContent).toContain('The tools did not answer.');
-    expect(el.querySelectorAll('tr.row')).toHaveLength(3);
+    expect(el.querySelectorAll(ROW)).toHaveLength(3);
   });
 
   it('treats finding no backup tool as a normal state that names what Dyno looks for', async () => {
@@ -133,7 +154,7 @@ describe('dy-backup-page', () => {
     expect(none.querySelector('strong')?.textContent).toBe('No backup tool found');
     for (const name of ['Time Machine', 'Windows Backup', 'File History', 'restic', 'Borg', 'Duplicati']) expect(none.textContent).toContain(name);
     expect(el.textContent).toContain('never runs or manages a backup');
-    expect(el.querySelector('table')).toBeNull();
+    expect(el.querySelector('pd-table')).toBeNull();
     expect(el.querySelector('[role="alert"]')).toBeNull();
     const spy = vi.spyOn(mock, 'refreshBackup');
     btn(el, 'Check again').click();

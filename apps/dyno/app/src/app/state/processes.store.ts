@@ -69,6 +69,10 @@ export const ProcessesStore = signalStore(
         const s = store.sort();
         patchState(store, { sort: s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'name' || key === 'user' ? 'asc' : 'desc' } });
       },
+      /** Sets the sort (a click on a column header of the table). */
+      setSort(sort: Sort): void {
+        patchState(store, { sort });
+      },
       toggle(row: Row): void {
         if (!row.expandable) return;
         patchState(store, (st) => {

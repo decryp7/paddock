@@ -126,7 +126,7 @@ test.describe('processes', () => {
     await expect(details.getByText('Command line')).toBeVisible();
     await details.getByRole('tab', { name: 'Libraries' }).click();
     await expect(details.locator('.mono').first()).toBeVisible();
-    await row.getByRole('button', { name: /Actions for/ }).click();
+    await row.getByRole('button', { name: 'More actions' }).click();
     await expect(page.getByRole('menuitem', { name: 'Details' })).toBeVisible();
     await expect(page.getByRole('menuitem', { name: /End|Suspend|Priority|Cap CPU/ })).toHaveCount(0);
   });
@@ -296,13 +296,14 @@ test.describe('counters', () => {
     await objects.getByRole('button', { name: /^Network Interface/ }).click();
     await choose(page, 'Instance', 'en0');
     await page.getByRole('button', { name: 'Chart Bytes Sent' }).click();
-    const table = page.getByRole('table', { name: 'Charted counters' });
-    await expect(table.getByRole('row', { name: /Bytes Sent \(en0\)/ })).toBeVisible();
+    const table = page.getByRole('grid', { name: 'Charted counters' });
+    const charted = table.getByRole('row', { name: /Bytes Sent \(en0\)/ });
+    await expect(charted).toBeVisible();
     await expect(page.getByRole('group', { name: 'Events on the timeline' })).toContainText('Network');
     await expect(page.locator('dy-chart canvas').first()).toBeVisible();
-    await page.getByRole('button', { name: 'Pin Bytes Sent (en0)' }).click();
+    await charted.getByRole('button', { name: 'Pin', exact: true }).click();
     await expect(page.getByText('Counter pinned')).toBeVisible();
-    await page.getByRole('button', { name: 'More actions for Bytes Sent (en0)' }).click();
+    await charted.getByRole('button', { name: 'More actions' }).click();
     await page.getByRole('menuitem', { name: 'Add to the dashboard' }).click();
     await expect(page.getByText('Added to the dashboard')).toBeVisible();
     await page.getByRole('link', { name: 'Dashboard' }).first().click();
@@ -317,7 +318,7 @@ test.describe('counters', () => {
     await results.getByRole('button', { name: /Chart Bytes Received \(en0\)/ }).click();
     await page.getByRole('button', { name: /Sets/ }).click();
     await page.getByRole('menuitem', { name: /^Disk and network \d/ }).click();
-    await expect(page.getByRole('table', { name: 'Charted counters' }).getByRole('row')).toHaveCount(4);
+    await expect(page.getByRole('grid', { name: 'Charted counters' }).getByRole('row')).toHaveCount(4);
     await page.getByRole('searchbox', { name: 'Search counters' }).fill('zzzz');
     await expect(page.getByText('No counter matches')).toBeVisible();
   });
@@ -326,7 +327,7 @@ test.describe('counters', () => {
 test.describe('network', () => {
   test('one dense table: grouped by program with collapsible group rows, loopback hidden, Look up IP only for public peers', async ({ page }) => {
     await page.goto(url('/network'));
-    const grid = page.getByRole('grid', { name: 'Connections' });
+    const grid = page.getByRole('treegrid', { name: 'Connections' });
     await expect(grid.getByRole('row', { name: /Google Chrome/ }).first()).toBeVisible();
     await expect(page.getByRole('row', { name: /142.250.74.46/ })).toBeVisible();
     await page.getByRole('button', { name: 'Collapse Google Chrome' }).click();
@@ -334,20 +335,21 @@ test.describe('network', () => {
     await page.getByRole('button', { name: 'Expand Google Chrome' }).click();
     await page.getByRole('radiogroup', { name: 'Group by' }).getByRole('radio', { name: 'None' }).click();
     await expect(page.getByRole('button', { name: 'Collapse Slack' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Look up IP 10.0.0.8' })).toBeDisabled();
-    await expect(page.getByRole('button', { name: 'Look up IP 142.250.74.46' })).toBeEnabled();
+    const flat = page.getByRole('grid', { name: 'Connections' });
+    await expect(flat.getByRole('row', { name: /10\.0\.0\.8/ }).getByRole('button', { name: 'Look up IP' })).toBeDisabled();
+    await expect(flat.getByRole('row', { name: /142\.250\.74\.46/ }).getByRole('button', { name: 'Look up IP' })).toBeEnabled();
   });
 
   test('listening tab marks exposed listeners first; loopback shows on request; Enter opens the detail panel', async ({ page }) => {
     await page.goto(url('/network'));
     await page.getByRole('radio', { name: 'Listening' }).click();
-    const grid = page.getByRole('grid', { name: 'Listening ports' });
+    const grid = page.getByRole('treegrid', { name: 'Listening ports' });
     await expect(grid.getByText('Exposed').first()).toBeVisible();
     await expect(grid.getByText('postgres')).toHaveCount(0);
     await page.getByRole('checkbox', { name: 'Show loopback' }).click();
     await expect(grid.getByText('postgres').first()).toBeVisible();
-    await grid.focus();
-    await page.keyboard.press('ArrowDown');
+    // The first row after the header is a program; Down reaches its first socket, Enter opens it.
+    await grid.getByRole('row').nth(1).focus();
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
     await expect(page.getByRole('complementary', { name: 'Details' })).toBeVisible();
@@ -367,9 +369,11 @@ test.describe('network', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Throttling' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Running at full speed' })).toBeVisible();
     await expect(page.getByText('Confidence: high')).toBeVisible();
-    const table = page.getByRole('table', { name: /slowed down in the last 30 days/ });
+    const table = page.getByRole('grid', { name: /slowed down in the last 30 days/ });
     await expect(table.getByRole('row')).toHaveCount(6);
     await expect(table.getByRole('columnheader', { name: /Speed lost/ })).toBeVisible();
+    await expect(table.getByRole('columnheader', { name: /Started/ })).toHaveAttribute('aria-sort', 'descending');
+    await table.getByRole('button', { name: /Started/ }).click();
     await table.getByRole('button', { name: /Started/ }).click();
     await expect(table.getByRole('columnheader', { name: /Started/ })).toHaveAttribute('aria-sort', 'ascending');
     const inputs = page.getByRole('button', { name: 'What Dyno can see on this machine' });
@@ -441,7 +445,7 @@ test.describe('issues', () => {
     await page.goto(url('/issues'));
     await expect(page.getByRole('heading', { name: 'Issues', exact: true })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Stability' })).toBeVisible();
-    const table = page.getByRole('table', { name: 'Issues', exact: true });
+    const table = page.getByRole('treegrid', { name: 'Issues', exact: true });
     await expect(table.getByText('Today').first()).toBeVisible();
     await table.getByRole('row', { name: /Safari/ }).click();
     const detail = page.getByRole('complementary', { name: 'Issue details' });
@@ -452,7 +456,7 @@ test.describe('issues', () => {
 
   test('a row\'s context menu opens with Shift+F10, reaches every action, and Escape gives the focus back to the row', async ({ page }) => {
     await page.goto(url('/issues'));
-    const table = page.getByRole('table', { name: 'Issues', exact: true });
+    const table = page.getByRole('treegrid', { name: 'Issues', exact: true });
     const row = table.getByRole('row', { name: /Safari/ }).first();
     await row.focus();
     await page.keyboard.press('Shift+F10');
@@ -473,7 +477,7 @@ test.describe('issues', () => {
   test('a right-click right after hovering a row leaves no tooltip behind, and the first Escape closes the menu', async ({ page }) => {
     await page.clock.install();
     await page.goto(url('/issues'));
-    const table = page.getByRole('table', { name: 'Issues', exact: true });
+    const table = page.getByRole('treegrid', { name: 'Issues', exact: true });
     const row = table.getByRole('row', { name: /Safari/ }).first();
     await row.hover(); // the row's centre is the program-name cell
     await row.click({ button: 'right' }); // the same point, before any tooltip has shown
@@ -490,8 +494,8 @@ test.describe('issues', () => {
 
   test('a leaderboard row filters the table to one app and the chip clears it', async ({ page }) => {
     await page.goto(url('/issues'));
-    await page.getByRole('row', { name: 'Show only Mail' }).click();
-    const table = page.getByRole('table', { name: 'Issues', exact: true });
+    await page.getByRole('grid', { name: 'Apps with the most issues' }).getByRole('row', { name: /Mail/ }).click();
+    const table = page.getByRole('treegrid', { name: 'Issues', exact: true });
     await expect(table.getByRole('row', { name: /Slack/ })).toHaveCount(0);
     await expect(table.getByRole('row', { name: /Mail/ }).first()).toBeVisible();
     await page.getByRole('button', { name: 'Clear the filter' }).click();
@@ -501,7 +505,7 @@ test.describe('issues', () => {
   test('the new and unusual view lists reasons and offers no action on a program', async ({ page }) => {
     await page.goto(url('/issues'));
     await page.getByRole('radio', { name: /New and unusual/ }).click();
-    const table = page.getByRole('table', { name: 'New and unusual programs' });
+    const table = page.getByRole('grid', { name: 'New and unusual programs' });
     await expect(table.getByRole('row', { name: /updater-helper/ })).toContainText('Unusual because it runs from a temporary folder');
     await expect(page.getByRole('button', { name: 'Protect updater-helper' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Hide ngrok' })).toHaveCount(0);
@@ -522,7 +526,7 @@ test.describe('right-click search (nothing is sent until the click)', () => {
   test('a process searches the web with the text shown and edited first', async ({ page }) => {
     await page.goto(url('/processes'));
     await page.getByLabel('Filter processes').fill('rustc');
-    await page.locator('[role=row][data-key^="g"]').first().getByRole('button', { name: /Actions for/ }).click();
+    await page.locator('[role=row][data-key^="g"]').first().getByRole('button', { name: 'More actions' }).click();
     await page.getByRole('menuitem', { name: 'Search the web…' }).click();
     const dialog = page.getByRole('dialog', { name: /Search the web/ });
     await expect(dialog.getByText('Nothing leaves your computer until you click Search')).toBeVisible();
@@ -551,7 +555,7 @@ test.describe('right-click search (nothing is sent until the click)', () => {
 
   test('an issue shows what was removed from the text', async ({ page }) => {
     await page.goto(url('/issues'));
-    await page.getByRole('table', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click({ button: 'right' });
+    await page.getByRole('treegrid', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Search the web…' }).click();
     const dialog = page.getByRole('dialog', { name: /Search the web/ });
     await expect(dialog.getByText(/Removed from the text: 1 home folder/)).toBeVisible();
@@ -564,7 +568,7 @@ test.describe('startup filter', () => {
   test('hides the system and signed entries, shows the counts and remembers the choice', async ({ page }) => {
     await page.goto(url('/health'));
     const section = page.getByRole('region', { name: 'Start-up items' });
-    const rows = section.locator('tbody tr');
+    const rows = section.locator('[role=row][data-key]');
     await expect(rows.first()).toBeVisible();
     await expect(section.getByText(/Showing \d+ of \d+ entries\./)).toBeVisible();
     const before = await rows.count();
@@ -594,7 +598,7 @@ test.describe('backup health', () => {
     await page.goto(url('/backup'));
     await expect(page.getByRole('heading', { level: 1, name: 'Backup health' })).toBeVisible();
     await expect(page.getByRole('heading', { level: 2, name: 'restic backup is out of date' })).toBeVisible();
-    const table = page.getByRole('table', { name: 'Backup tools' });
+    const table = page.getByRole('grid', { name: 'Backup tools' });
     await expect(table.getByRole('row', { name: /Time Machine/ })).toContainText('Healthy');
     await expect(table.getByRole('row', { name: /restic/ })).toContainText('Out of date');
     await expect(table.getByRole('row', { name: /BorgBackup/ })).toContainText('Could not check');
@@ -628,19 +632,19 @@ test.describe('extras', () => {
   test('every tab opens and shows its data', async ({ page }) => {
     await page.goto(url('/extras'));
     await expect(page.getByRole('heading', { level: 1, name: 'Extras' })).toBeVisible();
-    await expect(page.getByRole('table', { name: 'What changed' })).toContainText('Updated Visual Studio Code');
+    await expect(page.getByRole('treegrid', { name: 'What changed' })).toContainText('Updated Visual Studio Code');
     await page.getByRole('tab', { name: 'Sleep' }).click();
-    await expect(page.getByRole('table', { name: 'Keeping this computer awake' })).toContainText('coreaudiod');
-    await expect(page.getByRole('table', { name: 'Recent wakes' })).toContainText('Lid open');
+    await expect(page.getByRole('grid', { name: 'Keeping this computer awake' })).toContainText('coreaudiod');
+    await expect(page.getByRole('grid', { name: 'Recent wakes' })).toContainText('Lid open');
     await page.getByRole('tab', { name: 'Boot' }).click();
     await expect(page.getByRole('region', { name: 'Last start-up' })).toContainText('47.2 s');
-    await expect(page.getByRole('table', { name: 'What slowed start-up' })).toContainText('Docker Desktop');
+    await expect(page.getByRole('grid', { name: 'What slowed start-up' })).toContainText('Docker Desktop');
     await page.getByRole('tab', { name: 'Apps' }).click();
-    await expect(page.getByRole('table', { name: 'Network and energy per app' })).toContainText('Google Chrome');
+    await expect(page.getByRole('grid', { name: 'Network and energy per app' })).toContainText('Google Chrome');
     await page.getByRole('tab', { name: 'GPU' }).click();
-    await expect(page.getByRole('table', { name: 'GPU use per process' })).toContainText('WindowServer');
+    await expect(page.getByRole('grid', { name: 'GPU use per process' })).toContainText('WindowServer');
     await page.getByRole('tab', { name: 'Inventory' }).click();
-    await expect(page.getByRole('table', { name: 'Installed software' })).toContainText('Visual Studio Code');
+    await expect(page.getByRole('grid', { name: 'Installed software' })).toContainText('Visual Studio Code');
     await page.getByRole('tab', { name: 'Maintenance' }).click();
     await expect(page.getByText('never limits anything you click')).toBeVisible();
     await expect(page.getByRole('region', { name: 'Maintenance windows' })).toContainText('Mon to Fri, 22:00 to 02:00 the next day');

@@ -1,20 +1,21 @@
-import { Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { MatTooltip } from '@angular/material/tooltip';
 import { By } from '@angular/platform-browser';
-import { ActionTip } from './action-tip';
+import { PdActionTip } from './action-tip';
 
 @Component({
-  imports: [ActionTip],
-  template: `<span dyActionTip><button class="a" aria-label="Edit rule">e</button><button class="b" aria-label="Delete rule">d</button><i class="gap">-</i></span>`,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdActionTip],
+  template: `<span pdActionTip><button class="a" aria-label="Edit rule">e</button><button class="b" aria-label="Delete rule">d</button><i class="gap">-</i></span>`,
 })
 class Host {}
 
-describe('dyActionTip', () => {
+describe('pdActionTip', () => {
   function setup() {
     const f = TestBed.createComponent(Host);
     f.detectChanges();
-    const tip = f.debugElement.query(By.directive(ActionTip)).injector.get(MatTooltip);
+    const tip = f.debugElement.query(By.directive(PdActionTip)).injector.get(MatTooltip);
     const over = (sel: string) => f.nativeElement.querySelector(sel).dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
     return { f, tip, over };
   }

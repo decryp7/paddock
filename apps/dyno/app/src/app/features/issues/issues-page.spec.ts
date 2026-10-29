@@ -32,6 +32,7 @@ function render(fail: string[] = [], prepare: (mock: MockBackend) => void = () =
 const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
   for (let i = 0; i < 6; i++) {
     await f.whenStable();
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
     f.detectChanges();
   }
 };
@@ -43,8 +44,8 @@ describe('dy-issues-page', () => {
     await settle(f);
     expect(el.querySelector('h1')?.textContent).toBe('Issues');
     expect(el.querySelector('[aria-label="Stability"] .big')?.textContent).toMatch(/\d+/);
-    expect(el.querySelectorAll('table[aria-label="Apps with the most issues"] tbody tr').length).toBe(5);
-    expect(el.querySelectorAll('table[aria-label="Issues"] tr.day').length).toBeGreaterThan(2);
+    expect(el.querySelectorAll('[role$="grid"][aria-label="Apps with the most issues"] [role="row"][data-key]').length).toBe(5);
+    expect(el.querySelectorAll('[role$="grid"][aria-label="Issues"] .pd-group').length).toBeGreaterThan(2);
     expect(el.textContent).toContain('2 of 2 logs read');
     expect(el.querySelector('pd-segmented-control .pd-count')?.textContent?.trim()).toBe('5');
   });
@@ -52,18 +53,19 @@ describe('dy-issues-page', () => {
   it('filters by a leaderboard row, clears it, collapses a day and opens evidence as plain text', async () => {
     const { f, el } = render();
     await settle(f);
-    (el.querySelector('tr[aria-label="Show only Mail"]') as HTMLElement).click();
+    (el.querySelector('[role$="grid"][aria-label="Apps with the most issues"] [role="row"][data-key="Mail"]') as HTMLElement).click();
     await settle(f);
-    const rows = [...el.querySelectorAll('table[aria-label="Issues"] tr.row')];
+    const rows = [...el.querySelectorAll('[role$="grid"][aria-label="Issues"] [role="row"][data-key]:not(.pd-group)')];
     expect(rows.length).toBe(3);
     expect(rows.every((r) => r.textContent!.includes('Mail'))).toBe(true);
     (el.querySelector('[aria-label^="Clear the filter"]') as HTMLElement).click();
     await settle(f);
-    expect(el.querySelectorAll('table[aria-label="Issues"] tr.row').length).toBeGreaterThan(3);
-    (el.querySelector('tr.day button') as HTMLElement).click();
+    expect(el.querySelectorAll('[role$="grid"][aria-label="Issues"] [role="row"][data-key]:not(.pd-group)').length).toBeGreaterThan(3);
+    const day = () => el.querySelector('[role$="grid"][aria-label="Issues"] .pd-group') as HTMLElement;
+    day().click();
     await settle(f);
-    expect(el.querySelector('tr.day button')?.getAttribute('aria-expanded')).toBe('false');
-    (el.querySelectorAll('tr.row')[0] as HTMLElement).click();
+    expect(day().getAttribute('aria-expanded')).toBe('false');
+    (el.querySelectorAll('[role$="grid"][aria-label="Issues"] [role="row"][data-key]:not(.pd-group)')[0] as HTMLElement).click();
     await settle(f);
     const detail = el.querySelector('[aria-label="Issue details"]')!;
     expect(detail.querySelector('pre.evidence')).not.toBeNull();
@@ -127,7 +129,7 @@ describe('dy-issues-page', () => {
     await settle(f);
     btn(el, 'New and unusual').click();
     await settle(f);
-    const table = el.querySelector('table[aria-label="New and unusual programs"]')!;
+    const table = el.querySelector('[role$="grid"][aria-label="New and unusual programs"]')!;
     expect(table.textContent).toContain('Unusual because it runs from a temporary folder');
     expect(table.textContent).not.toMatch(/malware|virus/i);
     expect(el.querySelector('[aria-label="Protect updater-helper"]')).toBeNull();
@@ -140,7 +142,7 @@ describe('dy-issues-page', () => {
     await settle(f);
     btn(el, 'New and unusual').click();
     await settle(f);
-    (el.querySelectorAll('tr.row')[0] as HTMLElement).click();
+    (el.querySelectorAll('[role$="grid"] [role="row"][data-key]')[0] as HTMLElement).click();
     await settle(f);
     const d = el.querySelector('[aria-label="Program details"]')!;
     expect(d.textContent).toContain('It is not signed by any publisher.');

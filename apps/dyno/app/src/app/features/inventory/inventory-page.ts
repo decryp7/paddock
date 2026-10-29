@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { Hint, HintKind, MemoryArray } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatBytes, formatCount, formatGhz } from '../../shared/format';
@@ -11,7 +12,7 @@ import { driveKind } from './device-geometry';
 import { MemorySlots } from './memory-slots';
 import { isAppleSilicon } from './package-geometry';
 import { toDimmSlots, toSocPackage } from './hardware-adapter';
-import { describeSlots, kindLabel, slotModel, speedLabel } from './slot-model';
+import { type SlotView, describeSlots, kindLabel, slotModel, speedLabel } from './slot-model';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 
 const HINT_ICON: Record<HintKind, IconName> = {
@@ -40,7 +41,7 @@ const HINT_TONE: Record<HintKind, string> = {
 /** What is installed: the memory (slots drawn as sockets, or Apple silicon's unified memory) with upgrade hints from the engine. */
 @Component({
   selector: 'dy-inventory-page',
-  imports: [SuSegmentedControl, AsyncState, ChipPackage, DeviceArt, Icon, MemorySlots],
+  imports: [SuSegmentedControl, AsyncState, ChipPackage, DeviceArt, Icon, MemorySlots, PdTable, PdCell],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -73,22 +74,10 @@ const HINT_TONE: Record<HintKind, string> = {
                 <div class="drawing"><dy-memory-slots [slots]="dimmSlots()" [alt]="alt()" /></div>
               } @else {
                 <div class="tablewrap">
-                  <table class="table">
-                    <caption class="visually-hidden">Memory modules</caption>
-                    <thead><tr><th>Slot</th><th class="r">Size</th><th>Type</th><th class="r">Speed</th><th>Maker</th><th>Part number</th></tr></thead>
-                    <tbody>
-                      @for (s of model().slots; track s.index) {
-                        <tr>
-                          <td>{{ s.name }}</td>
-                          @if (s.module; as m) {
-                            <td class="r num">{{ bytes(m.capacityBytes) }}</td><td>{{ kind(m.kind) }}</td><td class="r num">{{ speed(m) }}</td><td>{{ m.manufacturer ?? '—' }}</td><td class="mono">{{ m.partNumber ?? '—' }}</td>
-                          } @else {
-                            <td colspan="5" class="faint">Empty</td>
-                          }
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
+                  <pd-table [toolbar]="false" label="Memory modules" [rows]="model().slots" [columns]="slotColumns" [rowKey]="slotKey" [filterable]="false" [maxHeight]="420">
+                    <ng-template pdCell="size" let-s>@if (s.module) {<span class="num">{{ bytes(s.module.capacityBytes) }}</span>} @else {<span class="faint">Empty</span>}</ng-template>
+                    <ng-template pdCell="part" let-s><span class="mono">{{ s.module?.partNumber ?? (s.module ? '—' : '') }}</span></ng-template>
+                  </pd-table>
                 </div>
               }
             } @else if (unified(); as u) {
@@ -160,7 +149,8 @@ const HINT_TONE: Record<HintKind, string> = {
     .device strong { font: var(--fw-semibold) var(--fs-base) / 20px var(--font-sans); overflow-wrap: anywhere; }
     .device .sub { color: var(--text-2); font-size: var(--fs-sm); line-height: 18px; }
     .drawing { padding: var(--sp-3) var(--sp-4); }
-    .tablewrap { padding: var(--sp-2) var(--sp-4); overflow-x: auto; }
+    .tablewrap { padding: var(--sp-2) var(--sp-4); }
+    .mono { font: 12px/1.4 var(--font-mono); }
     .faint { color: var(--text-3); }
     .chipwrap { display: flex; align-items: center; gap: var(--sp-6); padding: var(--sp-4); flex-wrap: wrap; }
     .chipwrap .soc { flex: 1 1 520px; min-width: 0; }
@@ -186,6 +176,15 @@ export class InventoryPage implements OnInit {
   protected readonly bytes = formatBytes;
   protected readonly n = formatCount;
   protected readonly kind = kindLabel;
+  protected readonly slotKey = (s: SlotView): string => String(s.index);
+  protected readonly slotColumns: PdColumn<SlotView>[] = [
+    { key: 'slot', header: 'Slot', value: (s) => s.name, required: true, sortable: false, width: 'minmax(0, 1fr)' },
+    { key: 'size', header: 'Size', value: (s) => s.module?.capacityBytes ?? null, text: (s) => (s.module ? formatBytes(s.module.capacityBytes) : 'Empty'), align: 'end', sortable: false, width: '90px' },
+    { key: 'type', header: 'Type', value: (s) => (s.module ? kindLabel(s.module.kind) : ''), sortable: false, width: '90px' },
+    { key: 'speed', header: 'Speed', value: (s) => (s.module ? speedLabel(s.module) : ''), align: 'end', sortable: false, width: '110px' },
+    { key: 'maker', header: 'Maker', value: (s) => (s.module ? (s.module.manufacturer ?? '—') : ''), sortable: false, width: 'minmax(0, 1fr)', hideBelow: 560 },
+    { key: 'part', header: 'Part number', value: (s) => (s.module ? (s.module.partNumber ?? '—') : ''), sortable: false, width: 'minmax(0, 1.4fr)', hideBelow: 700 },
+  ];
   protected readonly speed = speedLabel;
   protected readonly slots = computed<MemoryArray | null>(() => {
     const m = this.store.inventory()?.memory;

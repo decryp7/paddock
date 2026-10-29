@@ -1,48 +1,27 @@
-import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
-import { ActionTip } from '../../shared/action-tip';
-import { FullTextTip } from '../../shared/full-text-tip';
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal, viewChild } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
+import { NgTemplateOutlet } from '@angular/common';
+import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdRowTree } from '@decryp7/paddock-ui/table';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import type { ConnectionRow, ListenerRow, NetProto } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatRate, formatRelative } from '../../shared/format';
+import { FullTextTip } from '../../shared/full-text-tip';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
 import { NetworkStore } from '../../state/network.store';
 import { Lookups } from '../lookup/lookups';
-import {
-  type GroupBy,
-  type TableRow,
-  connectionLine,
-  endpoint,
-  exposureBadge,
-  initial,
-  listenerLine,
-  lookupBlockedReason,
-  middleEllipsis,
-  ownerName,
-  ownerReason,
-  portService,
-  protoText,
-  reachTone,
-  sortListeners,
-  stateView,
-  summarise,
-  tableRows,
-} from './network-model';
+import { type GroupBy, type TableRow, connectionLine, endpoint, exposureBadge, initial, listenerLine, lookupBlockedReason, middleEllipsis, ownerName, ownerReason, portService, protoText, reachTone, sortListeners, stateView, summarise, tableRows } from './network-model';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
 import { SearchField } from '../../shared/search-field';
 import { MatCheckbox } from '@angular/material/checkbox';
 import { MatMenuModule } from '@angular/material/menu';
-import { RowMenu } from '../../shared/row-menu';
 
 type Tab = 'connections' | 'listening';
 type Row = TableRow<ConnectionRow> | TableRow<ListenerRow>;
 
 const COLLAPSED_KEY = 'dyno.networkCollapsed';
-const ROW_H = 36;
 
 function readCollapsed(): Set<string> {
   try {
@@ -61,7 +40,7 @@ function readCollapsed(): Set<string> {
  */
 @Component({
   selector: 'dy-network-page',
-  imports: [ActionTip, FullTextTip, RowMenu, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton, AsyncState, Icon, RouterLink, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf],
+  imports: [AsyncState, FullTextTip, Icon, NgTemplateOutlet, PdTable, PdCell, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -105,80 +84,65 @@ function readCollapsed(): Set<string> {
             <p class="note"><dy-icon name="info" /> {{ s.truncated }} more rows are hidden. Narrow the search.</p>
           }
           <div class="layout" [class.with-detail]="!!selectedItem()">
-            <div class="grid" role="grid" [attr.aria-label]="tab() === 'connections' ? 'Connections' : 'Listening ports'" [attr.aria-rowcount]="rows().length" tabindex="0" (keydown)="key($event)" [style.--cols]="cols()">
-              <div class="head" role="row">
-                @if (tab() === 'connections') {
-                  @if (group() !== 'process') { <span role="columnheader">Program</span> }
-                  <span role="columnheader">Remote</span>
-                  @if (store.resolveNames()) { <span role="columnheader">Host name</span> }
-                  <span role="columnheader">Service</span>
-                  <span role="columnheader">Protocol</span>
-                  <span role="columnheader">State</span>
-                  @if (showLocal()) { <span role="columnheader">Local</span> }
-                  <span role="columnheader">Since</span>
+            <pd-table
+              [label]="tab() === 'connections' ? 'Connections' : 'Listening ports'"
+              order="source"
+              [tree]="tree()"
+              [rows]="rows()"
+              [columns]="columns()"
+              [rowKey]="rowKey"
+              [filterable]="false"
+              [countLabel]="noCount"
+              [rowHeight]="36"
+              [maxHeight]="bodyMax()"
+              [rowActions]="actions"
+              [emptyText]="emptyText()"
+              [(selectedKey)]="selectedKey"
+              (rowActivate)="activate($event)"
+              (rowToggle)="toggle($event.key)"
+              (action)="run($event)"
+              (keydown)="key($event)"
+            >
+              <ng-template pdCell="prog" let-r>
+                @if (r.kind === 'group') {
+                  <ng-container *ngTemplateOutlet="groupCell; context: { $implicit: r }" />
                 } @else {
-                  @if (group() !== 'process') { <span role="columnheader">Program</span> }
-                  <span role="columnheader">Service</span>
-                  <span role="columnheader">Address</span>
-                  <span role="columnheader">Protocol</span>
-                  <span role="columnheader">Since</span>
+                  <span class="av" aria-hidden="true" [attr.title]="reason(r.item.owner)">{{ ini(name(r.item.owner)) }}</span><span class="truncate" [dyFullText]="name(r.item.owner)">{{ name(r.item.owner) }}</span>
                 }
-                <span role="columnheader" class="visually-hidden">Actions</span>
-              </div>
-              <cdk-virtual-scroll-viewport [itemSize]="rowHeight" class="viewport" [style.height.px]="viewportHeight()">
-                <div *cdkVirtualFor="let r of rows(); trackBy: rowKey; let i = index" class="row" role="row" [class.group-row]="r.kind === 'group'" [class.selected]="selectedKey() === r.key" [attr.aria-rowindex]="i + 1" [attr.aria-expanded]="r.kind === 'group' ? r.open : null" tabindex="-1" (contextmenu)="pick(r)" (keydown.shift.f10)="pick(r)" (click)="pick(r)" (keyup.space)="pick(r)" (dblclick)="activate(r)" dyRowMenu [matContextMenuTriggerFor]="rowMenu" [matContextMenuTriggerData]="{ row: r }" [matContextMenuTriggerDisabled]="!(r.kind === 'item')">
-                  @if (r.kind === 'group') {
-                    <span class="gname" role="gridcell">
-                      <button type="button" matIconButton [matTooltip]="(r.open ? 'Collapse ' : 'Expand ') + r.title" class="chev" [attr.aria-label]="(r.open ? 'Collapse ' : 'Expand ') + r.title" (click)="toggle(r.key, $event)"><dy-icon [name]="r.open ? 'chevron-down' : 'chevron-right'" /></button>
-                      @if (group() === 'process') { <span class="av" aria-hidden="true">{{ ini(r.title) }}</span> }
-                      <strong class="truncate">{{ r.title }}</strong>
-                      <span class="meta">{{ r.count }} {{ tab() === 'connections' ? (r.count === 1 ? 'connection' : 'connections') : (r.count === 1 ? 'port' : 'ports') }}@if (tab() === 'connections' && group() === 'process') { · {{ r.hosts }} {{ r.hosts === 1 ? 'host' : 'hosts' }} }@if (r.exposed) { · <span class="exp">{{ r.exposed }} exposed</span> }</span>
-                      @if (tab() === 'connections' && group() === 'process' && trafficOf(r.title); as tr) { <span class="traffic num" [matTooltip]="'Receiving ' + rate(tr.rxBps) + ', sending ' + rate(tr.txBps) + ' (bytes per second over the last few seconds)'">↓ {{ rate(tr.rxBps) }} · ↑ {{ rate(tr.txBps) }}</span> }
-                    </span>
-                  } @else if (tab() === 'connections') {
-                    @let c = conn(r);
-                    @if (group() !== 'process') {
-                      <span class="cell prog" role="gridcell"><span class="av" aria-hidden="true">{{ ini(name(c.owner)) }}</span><span class="truncate" [matTooltip]="reason(c.owner) ?? ''">{{ name(c.owner) }}</span></span>
-                    }
-                    <span class="cell remote" role="gridcell" [class.indent]="group() === 'process'"><span class="truncate" [matTooltip]="c.remote">{{ short(c.remote) }}</span><span class="addr">:{{ c.remotePort }}</span></span>
-                    @if (store.resolveNames()) {
-                      <span class="cell muted" role="gridcell"><span class="truncate" [matTooltip]="hostName(c) ?? ''">{{ hostName(c) ?? (c.lookupOk ? '—' : 'Private address') }}</span></span>
-                    }
-                    <span class="cell" role="gridcell"><span class="truncate" [dyFullText]="service(c.remotePort)">{{ service(c.remotePort) }}</span></span>
-                    <span class="cell muted" role="gridcell">{{ protoText(c.proto, c.ipv6) }}</span>
-                    <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="state(c).tone" aria-hidden="true"></span>{{ state(c).text }}</span>
-                    @if (showLocal()) { <span class="cell addr" role="gridcell">{{ ep(c.local, c.localPort) }}</span> }
-                    <span class="cell muted" role="gridcell">{{ since(c.firstSeen) }}</span>
-                  } @else {
-                    @let l = lis(r);
-                    @if (group() !== 'process') {
-                      <span class="cell prog" role="gridcell"><span class="av" aria-hidden="true">{{ ini(name(l.owner)) }}</span><span class="truncate" [matTooltip]="reason(l.owner) ?? ''">{{ name(l.owner) }}</span></span>
-                    }
-                    <span class="cell" role="gridcell" [class.indent]="group() === 'process'"><span class="truncate" [dyFullText]="service(l.port)">{{ service(l.port) }}</span></span>
-                    <span class="cell" role="gridcell"><span class="addr">{{ l.local }}</span> <span class="reach" [attr.data-tone]="reachTone(l)" [matTooltip]="badge(l).hint"><dy-icon [name]="l.exposure === 'allInterfaces' ? 'globe' : l.exposure === 'loopback' ? 'lock' : 'network'" /> {{ badge(l).label }}</span></span>
-                    <span class="cell muted" role="gridcell">{{ protoText(l.proto, l.ipv6) }}</span>
-                    <span class="cell muted" role="gridcell">{{ since(l.firstSeen) }}</span>
-                  }
-                  @if (r.kind === 'item') {
-                  <span class="cell acts" role="gridcell" dyActionTip>
-                    @if (r.kind === 'item') {
-                      @if (tab() === 'connections') {
-                        @let c2 = conn(r);
-                        <button type="button" matIconButton [disabled]="!!blocked(c2)" [attr.aria-label]="'Look up IP ' + c2.remote" (click)="lookup(c2, $event)"><dy-icon name="external" /></button>
-                        <button type="button" matIconButton [attr.aria-label]="'Copy connection to ' + c2.remote" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
-                      } @else {
-                        <button type="button" matIconButton aria-label="Copy listener" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
-                      }
-                      <a matIconButton routerLink="/processes" aria-label="Show process" (click)="$event.stopPropagation()"><dy-icon name="processes" /></a>
-                    }
-                  </span>
-                  }
-                </div>
-              </cdk-virtual-scroll-viewport>
-              @if (rows().length === 0) {
-                <p class="empty">{{ tab() === 'connections' ? 'No connections with these filters.' : 'Nothing is listening with these filters.' }}</p>
-              }
-            </div>
+              </ng-template>
+              <ng-template pdCell="remote" let-r>
+                @if (r.kind === 'group') {
+                  <ng-container *ngTemplateOutlet="groupCell; context: { $implicit: r }" />
+                } @else {
+                  <span class="remote"><span class="truncate" [title]="r.item.remote">{{ short(r.item.remote) }}</span><span class="addr">:{{ r.item.remotePort }}</span></span>
+                }
+              </ng-template>
+              <ng-template pdCell="service" let-r>
+                @if (r.kind === 'group') {
+                  <ng-container *ngTemplateOutlet="groupCell; context: { $implicit: r }" />
+                } @else {
+                  <span class="truncate" [dyFullText]="service(tab() === 'connections' ? r.item.remotePort : r.item.port)">{{ service(tab() === 'connections' ? r.item.remotePort : r.item.port) }}</span>
+                }
+              </ng-template>
+              <ng-template pdCell="host" let-r>@if (r.kind === 'item') {<span class="truncate" [title]="hostName(r.item) ?? ''">{{ hostName(r.item) ?? (r.item.lookupOk ? '—' : 'Private address') }}</span>}</ng-template>
+              <ng-template pdCell="state" let-r>@if (r.kind === 'item') {<span class="dot" [attr.data-tone]="state(r.item).tone" aria-hidden="true"></span>{{ state(r.item).text }}}</ng-template>
+              <ng-template pdCell="address" let-r>
+                @if (r.kind === 'item') {
+                <span class="addr">{{ r.item.local }}</span>
+                <span class="reach" [attr.data-tone]="reachTone(r.item)" [title]="badge(r.item).hint"><dy-icon [name]="r.item.exposure === 'allInterfaces' ? 'globe' : r.item.exposure === 'loopback' ? 'lock' : 'network'" /> {{ badge(r.item).label }}</span>
+                }
+              </ng-template>
+            </pd-table>
+
+            <ng-template #groupCell let-r>
+              <span class="gname">
+                <button type="button" class="chev" tabindex="-1" [attr.aria-label]="(r.open ? 'Collapse ' : 'Expand ') + r.title" (click)="toggle(r.key, $event)"><dy-icon [name]="r.open ? 'chevron-down' : 'chevron-right'" /></button>
+                @if (group() === 'process') { <span class="av" aria-hidden="true">{{ ini(r.title) }}</span> }
+                <strong class="truncate">{{ r.title }}</strong>
+                <span class="meta">{{ r.count }} {{ tab() === 'connections' ? (r.count === 1 ? 'connection' : 'connections') : (r.count === 1 ? 'port' : 'ports') }}@if (tab() === 'connections' && group() === 'process') { · {{ r.hosts }} {{ r.hosts === 1 ? 'host' : 'hosts' }} }@if (r.exposed) { · <span class="exp">{{ r.exposed }} exposed</span> }</span>
+                @if (tab() === 'connections' && group() === 'process' && trafficOf(r.title); as tr) { <span class="traffic num" [title]="'Receiving ' + rate(tr.rxBps) + ', sending ' + rate(tr.txBps) + ' (bytes per second over the last few seconds)'">↓ {{ rate(tr.rxBps) }} · ↑ {{ rate(tr.txBps) }}</span> }
+              </span>
+            </ng-template>
 
             @if (selectedItem(); as sel) {
               <aside class="detail" aria-label="Details">
@@ -214,28 +178,6 @@ function readCollapsed(): Set<string> {
         }
       </dy-async>
     </div>
-    <mat-menu #rowMenu="matMenu" aria-label="Row actions">
-      <ng-template matMenuContent let-row="row">
-        @if (row.kind === 'item') {
-          @if (isConn(row.item)) {
-            <button mat-menu-item [disabled]="!!blocked(asConn(row.item))" (click)="lookup(asConn(row.item))"><dy-icon name="external" /> Look up IP</button>
-            <button mat-menu-item [disabled]="!asConn(row.item).lookupOk" (click)="store.resolveOne(asConn(row.item).remote)"><dy-icon name="globe" /> Resolve host name</button>
-            <button mat-menu-item (click)="copyText(asConn(row.item).remote)"><dy-icon name="copy" /> Copy address</button>
-            <button mat-menu-item (click)="store.setQuery({ search: asConn(row.item).remote })"><dy-icon name="filter" /> Filter to this host</button>
-          } @else {
-            <button mat-menu-item (click)="copyText(listenerLine(asListener(row.item)))"><dy-icon name="copy" /> Copy listener</button>
-          }
-          <button mat-menu-item (click)="copyRow(row)"><dy-icon name="copy" /> Copy as text</button>
-          <button mat-menu-item (click)="showProcess()"><dy-icon name="processes" /> Show process</button>
-          @if (row.item.owner.kind === 'process') {
-            <button mat-menu-item (click)="searchWeb(row.item.owner.name)"><dy-icon name="search" /> Search the web…</button>
-            @if (row.item.owner.path) {
-              <button mat-menu-item (click)="searchHash(row.item.owner.path, row.item.owner.name)"><dy-icon name="shield" /> Search file hash on VirusTotal…</button>
-            }
-          }
-        }
-      </ng-template>
-    </mat-menu>
   `,
   styles: `
     :host { display: block; }
@@ -254,29 +196,21 @@ function readCollapsed(): Set<string> {
     .note { margin: 0; display: flex; gap: var(--sp-2); align-items: flex-start; color: var(--text-2); font-size: var(--fs-sm); }
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 320px; }
-    .grid { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); overflow: hidden; outline-offset: 2px; }
-    .head, .row { display: grid; grid-template-columns: var(--cols); align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); }
-    .head { height: 30px; border-bottom: 1px solid var(--border); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-xs); position: sticky; top: 0; z-index: 3; }
-    .row { height: 36px; border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-sm); cursor: default; }
-    .row.group-row { background: var(--surface-inset); }
-    .row.group-row .gname { grid-column: 1 / -1; }
-    .row:hover { background: var(--surface-hover); }
-    .row.selected { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
-    .cell { min-width: 0; display: flex; align-items: center; gap: var(--sp-2); overflow: hidden; white-space: nowrap; }
-    .cell.indent { padding-left: 26px; }
     .muted { color: var(--text-2); }
     .truncate { overflow: hidden; text-overflow: ellipsis; }
     .addr { font: var(--fw-regular) var(--fs-xs) / 1 var(--font-mono); color: var(--text-3); }
-    .gname { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+    .gname { display: flex; flex: 1; align-items: center; gap: var(--sp-2); min-width: 0; }
     .meta { flex: none; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
     .exp { color: var(--warn); }
     .av { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; background: var(--surface-active); color: var(--text-2); font: var(--fw-semibold) 11px / 1 var(--font-sans); }
-    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border-strong); flex: none; }
+    .remote { display: flex; align-items: baseline; min-width: 0; gap: 1px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border-strong); flex: none; margin-inline-end: var(--sp-2); }
     .dot[data-tone='ok'] { background: var(--ok); }
     .dot[data-tone='warn'] { background: var(--warn); }
-    .acts { justify-content: flex-end; gap: 2px; opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
-    .row:hover .acts, .row:focus-within .acts, .row.selected .acts { opacity: 1; }
-    .empty { margin: 0; padding: var(--sp-6); text-align: center; color: var(--text-3); }
+    .ib { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
+    .ib:hover:not(:disabled) { background: var(--surface-active); color: var(--text-1); }
+    .ib:disabled { opacity: 0.35; cursor: default; }
+    .ib dy-icon { --icon-size: 15px; }
     .detail { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); padding: var(--sp-3) var(--sp-4); display: grid; gap: var(--sp-2); }
     .dhead { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
     dl { margin: 0; display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px var(--sp-3); font-size: var(--fs-sm); }
@@ -303,14 +237,13 @@ export class NetworkPage implements OnInit, OnDestroy {
   protected readonly thisPc = computed(() => this.connections().find((c) => c.local !== '127.0.0.1' && c.local !== '::1' && !c.local.startsWith('fe80'))?.local ?? null);
   private readonly router = inject(Router);
   private readonly lookups = inject(Lookups);
+  private readonly destroyRef = inject(DestroyRef);
   protected readonly trafficByName = computed(() => new Map((this.store.snapshot()?.traffic ?? []).map((t) => [t.name, t])));
   protected readonly trafficOf = (title: string) => this.trafficByName().get(title) ?? null;
   protected readonly rate = formatRate;
   protected readonly hostName = (c: ConnectionRow): string | null => this.store.names()[c.remote] ?? null;
   protected readonly noteDismissed = signal(false);
   protected readonly short = (a: string) => middleEllipsis(a);
-  protected readonly rowHeight = ROW_H;
-  private readonly viewport = viewChild(CdkVirtualScrollViewport);
 
   protected readonly connections = computed<ConnectionRow[]>(() => this.store.snapshot()?.connections ?? []);
   protected readonly listeners = computed<ListenerRow[]>(() => sortListeners(this.store.snapshot()?.listeners ?? []));
@@ -321,14 +254,53 @@ export class NetworkPage implements OnInit, OnDestroy {
       ? tableRows(this.connections(), by, this.collapsed())
       : tableRows(this.listeners(), by, this.collapsed(), (l) => l.exposure === 'allInterfaces');
   });
-  protected readonly viewportHeight = computed(() => Math.min(Math.max(this.rows().length, 1) * ROW_H, 560));
-  protected readonly cols = computed(() => {
-    // Minimums small enough that the usual columns fit the 673 px page of a 900 px window; a cell shows an ellipsis (and a tooltip) when it is tighter still.
-    const prog = this.group() !== 'process' ? 'minmax(70px, 1.2fr) ' : '';
-    return this.tab() === 'connections'
-      ? `${prog}minmax(110px, 2fr) ${this.store.resolveNames() ? 'minmax(90px, 2fr) ' : ''}minmax(70px, 1fr) 68px 96px ${this.showLocal() ? 'minmax(100px, 1.2fr) ' : ''}72px 72px`
-      : `${prog}minmax(80px, 1.5fr) minmax(190px, 2fr) 68px 80px 84px`;
+  /** The columns follow the tab, the grouping and the options; a group's heading spans the row, from the first column. */
+  protected readonly columns = computed<PdColumn<Row>[]>(() => {
+    // A program name needs room to be read: the Listening table gives it more, taken from Service (the badge and 0.0.0.0 need about 150 px).
+    const progWidth = this.tab() === 'connections' ? 'minmax(90px, 1.2fr)' : 'minmax(110px, 1.4fr)';
+    const prog: PdColumn<Row>[] = this.group() !== 'process' ? [{ key: 'prog', header: 'Program', value: (r) => this.itemOwner(r), width: progWidth, sortable: false }] : [];
+    if (this.tab() === 'connections') {
+      return [
+        ...prog,
+        { key: 'remote', header: 'Remote', value: (r) => this.itemRemote(r), required: true, width: 'minmax(110px, 2fr)', sortable: false },
+        ...(this.store.resolveNames() ? [{ key: 'host', header: 'Host name', value: (r: Row) => (r.kind === 'item' ? (this.hostName(r.item as ConnectionRow) ?? '') : ''), width: 'minmax(90px, 2fr)', sortable: false }] : []),
+        { key: 'service', header: 'Service', value: (r) => this.itemService(r), width: 'minmax(70px, 1fr)', sortable: false },
+        { key: 'proto', header: 'Protocol', value: (r) => (r.kind === 'item' ? protoText((r.item as ConnectionRow).proto, (r.item as ConnectionRow).ipv6) : ''), width: '68px', sortable: false },
+        { key: 'state', header: 'State', value: (r) => (r.kind === 'item' ? stateView((r.item as ConnectionRow).state).text : ''), width: '96px', sortable: false },
+        ...(this.showLocal() ? [{ key: 'local', header: 'Local', value: (r: Row) => (r.kind === 'item' ? endpoint((r.item as ConnectionRow).local, (r.item as ConnectionRow).localPort) : ''), width: 'minmax(100px, 1.2fr)', sortable: false }] : []),
+        { key: 'since', header: 'Since', value: (r) => this.itemSince(r), text: (r) => (r.kind === 'item' ? this.since(this.itemSince(r)) : ''), width: '72px', sortable: false },
+      ];
+    }
+    return [
+      ...prog,
+      { key: 'service', header: 'Service', value: (r) => this.itemService(r), required: true, width: 'minmax(70px, 1fr)', sortable: false },
+      { key: 'address', header: 'Address', value: (r) => (r.kind === 'item' ? (r.item as ListenerRow).local : ''), width: 'minmax(200px, 1.4fr)', sortable: false },
+      { key: 'proto', header: 'Protocol', value: (r) => (r.kind === 'item' ? protoText((r.item as ListenerRow).proto, (r.item as ListenerRow).ipv6) : ''), width: '68px', sortable: false },
+      { key: 'since', header: 'Since', value: (r) => this.itemSince(r), text: (r) => (r.kind === 'item' ? this.since(this.itemSince(r)) : ''), width: '80px', sortable: false },
+    ];
   });
+  private readonly groupedTree: PdRowTree<Row> = { level: (r) => (r.kind === 'group' ? 1 : 2), expanded: (r) => (r.kind === 'group' ? r.open : null), spans: (r) => r.kind === 'group' };
+  /** Programs or remote hosts: groups at level 1, their sockets below. Ungrouped, the table is a plain grid. */
+  protected readonly tree = computed(() => (this.group() === 'none' || (this.tab() === 'listening' && this.group() === 'host') ? null : this.groupedTree));
+  private readonly viewportHeight = signal(typeof window === 'undefined' ? 900 : window.innerHeight);
+  /** The rows scroll inside the table, which takes what the window leaves under the filters and the summary. */
+  protected readonly bodyMax = computed(() => Math.max(240, this.viewportHeight() - 300));
+  protected readonly noCount = (): string => '';
+  protected readonly emptyText = computed(() => (this.tab() === 'connections' ? 'No connections with these filters.' : 'Nothing is listening with these filters.'));
+  protected readonly rowKey = (r: Row): string => r.key;
+  private itemOwner(r: Row): string {
+    return r.kind === 'item' ? ownerName((r.item as ConnectionRow | ListenerRow).owner) : r.title;
+  }
+  private itemRemote(r: Row): string {
+    return r.kind === 'item' ? (r.item as ConnectionRow).remote : r.title;
+  }
+  private itemService(r: Row): string {
+    if (r.kind === 'group') return r.title;
+    return portService(this.isConn(r.item as ConnectionRow | ListenerRow) ? (r.item as ConnectionRow).remotePort : (r.item as ListenerRow).port);
+  }
+  private itemSince(r: Row): number | null {
+    return r.kind === 'item' ? (r.item as ConnectionRow | ListenerRow).firstSeen : null;
+  }
   protected readonly selectedItem = computed(() => {
     const k = this.selectedKey();
     const r = this.rows().find((x) => x.key === k);
@@ -347,7 +319,6 @@ export class NetworkPage implements OnInit, OnDestroy {
   protected readonly state = (c: ConnectionRow) => stateView(c.state);
   protected readonly badge = (l: ListenerRow) => exposureBadge(l.exposure);
   protected readonly reachTone = reachTone;
-  protected readonly rowKey = (_: number, r: Row) => r.key;
   protected readonly conn = (r: Row) => (r as { item: ConnectionRow }).item;
   protected readonly lis = (r: Row) => (r as { item: ListenerRow }).item;
   protected readonly isConn = (x: ConnectionRow | ListenerRow): x is ConnectionRow => 'remote' in x;
@@ -356,6 +327,9 @@ export class NetworkPage implements OnInit, OnDestroy {
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
 
   ngOnInit(): void {
+    const onResize = () => this.viewportHeight.set(window.innerHeight);
+    window.addEventListener('resize', onResize);
+    this.destroyRef.onDestroy(() => window.removeEventListener('resize', onResize));
     void this.store.start();
   }
 
@@ -411,38 +385,58 @@ export class NetworkPage implements OnInit, OnDestroy {
     }
   }
 
-  protected pick(r: Row): void {
-    this.selectedKey.set(r.key);
-  }
-
+  /** A row was opened (a click, Enter or Space): a group folds, anything else is the one the side panel shows. */
   protected activate(r: Row): void {
     if (r.kind === 'group') this.toggle(r.key);
   }
 
+  /** The row actions of a socket (a group heading has none): look up and copy on hover, the rest in the menu. */
+  protected readonly actions = (r: Row): PdRowAction[] => {
+    if (r.kind !== 'item') return [];
+    const item = r.item as ConnectionRow | ListenerRow;
+    const process = [
+      { id: 'process', label: 'Show process', icon: 'activity' },
+      ...(item.owner.kind === 'process' ? [{ id: 'web', label: 'Search the web…', icon: 'search' }] : []),
+      ...(item.owner.kind === 'process' && item.owner.path ? [{ id: 'hash', label: 'Search file hash on VirusTotal…', icon: 'shield' }] : []),
+    ];
+    if (!this.isConn(item)) return [{ id: 'copyrow', label: 'Copy as text', icon: 'copy', inline: true }, { id: 'copy', label: 'Copy listener', icon: 'copy' }, ...process];
+    return [
+      { id: 'lookup', label: 'Look up IP', icon: 'external', inline: true, disabled: !!lookupBlockedReason(item) },
+      { id: 'copyrow', label: 'Copy as text', icon: 'copy', inline: true },
+      { id: 'resolve', label: 'Resolve host name', icon: 'globe', disabled: !item.lookupOk },
+      { id: 'copy', label: 'Copy address', icon: 'copy' },
+      { id: 'filter', label: 'Filter to this host', icon: 'search' },
+      ...process,
+    ];
+  };
+
+  protected run({ id, row }: PdRowActionEvent<Row>): void {
+    if (row.kind !== 'item') return;
+    const item = row.item as ConnectionRow | ListenerRow;
+    this.selectedKey.set(row.key);
+    if (id === 'lookup' && this.isConn(item)) this.lookup(item);
+    else if (id === 'copyrow') void this.copyRow(row);
+    else if (id === 'resolve' && this.isConn(item)) void this.store.resolveOne(item.remote);
+    else if (id === 'copy') void this.copyText(this.isConn(item) ? item.remote : listenerLine(item));
+    else if (id === 'filter' && this.isConn(item)) void this.store.setQuery({ search: item.remote });
+    else if (id === 'process') this.showProcess();
+    else if (id === 'web') this.searchWeb(ownerName(item.owner));
+    else if (id === 'hash' && item.owner.kind === 'process' && item.owner.path) this.searchHash(item.owner.path, item.owner.name);
+  }
+
+  /** Escape closes the side panel; Ctrl or Cmd+C copies the focused socket (unless text is selected). */
   protected key(e: KeyboardEvent): void {
-    const rows = this.rows();
-    if (rows.length === 0) return;
-    const i = Math.max(0, rows.findIndex((r) => r.key === this.selectedKey()));
-    const go = (n: number) => {
-      const j = Math.min(rows.length - 1, Math.max(0, n));
-      this.selectedKey.set(rows[j]!.key);
-      this.viewport()?.scrollToIndex(Math.max(0, j - 2));
-    };
-    const cur = rows[i]!;
-    const mod = e.metaKey || e.ctrlKey;
-    if (e.key === 'ArrowDown') go(this.selectedKey() === null ? 0 : i + 1);
-    else if (e.key === 'ArrowUp') go(i - 1);
-    else if (e.key === 'Home') go(0);
-    else if (e.key === 'End') go(rows.length - 1);
-    else if (e.key === 'ArrowLeft' && cur.kind === 'group' && cur.open) this.toggle(cur.key);
-    else if (e.key === 'ArrowRight' && cur.kind === 'group' && !cur.open) this.toggle(cur.key);
-    else if (e.key === 'Enter') {
-      if (cur.kind === 'group') this.toggle(cur.key);
-      else this.selectedKey.set(cur.key);
-    } else if (e.key === 'Escape') this.selectedKey.set(null);
-    else if (mod && e.key.toLowerCase() === 'c' && cur.kind === 'item' && !window.getSelection()?.toString()) void this.copyRow(cur);
-    else return;
-    e.preventDefault();
+    if (e.key === 'Escape' && this.selectedKey() !== null) {
+      this.selectedKey.set(null);
+      e.preventDefault();
+    } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c' && !window.getSelection()?.toString()) {
+      const focused = e.target instanceof Element ? e.target.closest<HTMLElement>('[role="row"][data-key]') : null;
+      const row = this.rows().find((r) => r.key === focused?.dataset['key']);
+      if (row?.kind === 'item') {
+        e.preventDefault();
+        void this.copyRow(row);
+      }
+    }
   }
 
   protected searchWeb(name: string): void {

@@ -4,8 +4,18 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-e2e`: a truncation must say its full text
+- `isSilentlyClipped` now fails an ellipsis unless the element says its full text (`isAcceptedEllipsis`: a non-empty `data-full-text`, title, aria-label or Material tooltip message) and is not in a button, link, tab or `.num`. New exports: `isAcceptedEllipsis`, `unacceptedTextClips`, `textCutOffWithoutTooltip`, `ELLIPSIS_NEVER_WITHIN`, `ELLIPSIS_NEVER_SELF`; the checks read facts in the page and decide in Node, with no `new Function`.
+- `pd-table`'s truncating text cell sets `data-full-text`.
+
 ### Tab nav bars: links size to their label
 - `@decryp7/paddock-ui` scss (`_material.scss`): `mat-tab-link` in a `mat-tab-nav-bar` has no 160 px minimum and `--pd-space-3` side padding, so eight tabs fit a 900 px window. Tab rows in apps that used the minimum get narrower tabs.
+### `pd-table`: one tooltip for a row's actions (`PdActionTip`), and the focus follows a reordered row
+- `PdActionTip` (`pdActionTip`, from `@decryp7/paddock-ui/table`; moved from Dyno's `dyActionTip`) puts one tooltip left of a cluster of icon buttons, named after the button the pointer or the keyboard is on. pd-table's row actions use it, so a tooltip never covers the next row's actions.
+- A focused row keeps the focus when the app puts the rows in another order (live values): the table asks for the row again by its key once the browser dropped the focus, whether or not the element is still there. A click outside the grid forgets the row.
+
+### `@decryp7/paddock-e2e`: `expectNoSilentClipping`
+- `textClippedWithoutEllipsis(page)`, `expectNoSilentClipping(page)` and the pure `isSilentlyClipped(probe)`: fail when an element cuts its own text (hidden overflow, narrower than the text) without `text-overflow: ellipsis`.
 
 ### Dyno: pages no longer clip at 900 and 1024 px
 - Network's Listening table keeps the exposure badge whole at 900 px; truncated names in the dashboard feed, widgets and the Network service column show their full text in a tooltip. The layout e2e now also measures every state (detail panels, tabs, second views), every Settings page (with the advanced fields) and every dialog, and accepts an ellipsis only on the clipping element when it has a tooltip or a label and is not a control, a tab or a number.
@@ -24,6 +34,20 @@ Conventional Commits; one semver tag for the whole repo.
 ### `@decryp7/paddock-ui/schedule` exports its time-field building blocks
 - New exports: `PdKeepTimeOnEscape` (the `pdKeepTime` directive: Escape in a closed time field keeps the time), `TIME_PROVIDERS`, `timeToDate`, `dateToTime`, `timeOptions` and `TimeProblems`, so an app can put a `mat-timepicker` in its own form with the editors' behaviour (24-hour times, the half-hour list, a problem shown once the field was left). Dyno's `dy-time-field` is the first user.
 
+### `pd-table`: rows an app orders itself, and trees of rows
+- `PdColumn.sortStart` (`asc` default, `desc` for columns of amounts) sets the direction of a header's first click. The body tracks
+  rows by key and columns, so a column change never leaves recycled row views with the old cells. `tree` implies the app's order
+  and no built-in filter, and throws in dev mode together with `groupBy`. The indent is `--pd-tree-indent` (the exported
+  `PD_TREE_INDENT` is gone). Group summaries are ellipsised and end-aligned cells clip at their end (`safe flex-end`); the
+  count says "1 row".
+- `order="source"` shows the rows in the order the app gives them (the table only shows the sort and reports it through `sort`),
+  for a list the engine or a tree orders (processes under their parent, sorted within each level).
+- `tree` (`PdRowTree`: `level`, `expanded`, optional `spans`) makes the rows a tree grid: `aria-level`, `aria-expanded`,
+  places among siblings, an indent per level on the first cell, and a spanning heading row. Right unfolds a folded row and on an
+  unfolded one moves to its first child, Left folds an unfolded row or goes up to the parent (`rowToggle` asks the app to fold; it
+  owns the fold state, so it can keep it). Space opens a row like Enter. `treePlaces`, `parentIndex` and `PD_TREE_INDENT` are
+  exported. `sortClearable="false"` keeps a header cycling between ascending and descending only. The row that has the focus keeps it
+  when the columns change (a side panel opened and the table narrowed), once the rows are drawn again.
 ### The dialog frame's filled button uses the page primary's colours
 - `.pd-frame-btn--filled` takes `--pd-accent-fill` with `--pd-on-accent`, the same as `.pd-btn--primary` and Material's filled button, so a dialog's primary and a page's primary are one colour in both schemes (`--pd-accent-control` is for toggles and checkmarks).
 

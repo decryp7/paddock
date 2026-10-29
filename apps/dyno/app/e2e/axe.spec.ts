@@ -15,10 +15,6 @@ const target = (p: string): AxeTarget => ({
     await page.waitForTimeout(800);
   },
 });
-// The network page's rows are the one grid still made of div rows with aria-rowindex (axe: aria-conditional-attr). Rebuilding it
-// as the shared table is phase c; it is the only exclusion, and the rest of that page is still checked.
-const NETWORK_GRID = ['div[role="row"][aria-rowindex]'];
-
 const tray: AxeTarget = {
   name: 'tray popover',
   url: '/?latency=0#/tray',
@@ -30,10 +26,7 @@ const tray: AxeTarget = {
 test.describe('Dyno accessibility (axe, WCAG 2.2 AA)', () => {
   test.setTimeout(600_000);
   test('every screen has no violations in either theme', async ({ page }) => {
-    expect(await axeTargets(page, PAGES.filter((p) => p !== 'network').map(target))).toEqual({});
-  });
-  test('the network page has no violations outside its row grid (phase c rebuilds that)', async ({ page }) => {
-    expect(await axeTargets(page, [target('network')], { exclude: NETWORK_GRID })).toEqual({});
+    expect(await axeTargets(page, PAGES.map(target))).toEqual({});
   });
   test('every dialog window and the tray popover have no violations in either theme', async ({ page }) => {
     expect(await axeEveryDialog(page, CONTRACT_FILES, { inputs: INPUTS })).toEqual({});
