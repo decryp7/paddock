@@ -627,6 +627,11 @@ The family release. Highlights: the survey work packages X21 to X54 (shared crat
   #494FDB as in the CSS.
 
 ### Added
+- `paddock-chromium`: a page's first load waits (within its timeout, on events) until the tab's own first navigation, reported
+  by `Page.enable`, has committed or stopped, so it cannot cancel the load (`net::ERR_ABORTED`); an abort the driver cannot name
+  carries the tab's navigation, lifecycle and document network events; only documents' network events are logged.
+  `discover::TEST_ISOLATION_FLAGS` keeps a test browser off the network (no proxy lookup, no host but loopback resolves). The
+  fake browser has `UserAction::SlowStartPage`/`FinishStartPage`.
 - `paddock-chromium` on Windows: every end of the browser (the time limit's included) goes through its `Supervised`, so the
   kill-on-close job closes with it; the Chrome for Testing self-test checks the version manifest and a headless page dump (Chrome
   prints no `--version` there). The real-browser test runs on macOS and Windows CI too (install action, `catalogue:`).

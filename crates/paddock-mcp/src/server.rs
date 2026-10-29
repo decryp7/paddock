@@ -16,8 +16,8 @@ use paddock_log::Redact;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard, mpsc};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The server's bounds (ADR 0007 rule 4).
@@ -118,7 +118,7 @@ pub struct Server {
     clock: Arc<dyn Clock>,
     audit: Arc<dyn AuditSink>,
     redactor: Arc<dyn Redact>,
-    abandoned: Arc<AtomicUsize>,
+    abandoned: Arc<Abandoned>,
 }
 
 fn read<T>(l: &RwLock<T>) -> RwLockReadGuard<'_, T> {
@@ -161,7 +161,7 @@ impl Server {
             clock,
             audit,
             redactor,
-            abandoned: Arc::new(AtomicUsize::new(0)),
+            abandoned: Arc::new(Abandoned::default()),
         }
     }
 
@@ -520,7 +520,7 @@ impl Server {
                 format!("Invalid arguments for {name}: {m}."),
             );
         }
-        if self.abandoned.load(Ordering::SeqCst) >= self.limits.max_abandoned {
+        if self.abandoned.count() >= self.limits.max_abandoned {
             return fail(
                 Outcome::Refused,
                 "The server is busy finishing earlier slow calls. Try again in a moment.".into(),
@@ -614,19 +614,90 @@ impl Server {
         std::thread::spawn(move || {
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(&ctx, &args)));
             let _ = tx.send(Msg::Done(r));
-            if st
-                .compare_exchange(RUNNING, FINISHED, Ordering::SeqCst, Ordering::SeqCst)
-                .is_err()
-            {
-                abandoned.fetch_sub(1, Ordering::SeqCst);
-            }
+            abandoned.finish(&st);
         });
         wait(&rx, &state, &cancel, &self.abandoned, timeout)
+    }
+
+    /// Test hook: returns once no abandoned call is counted. It is unbounded, so never use it on a server whose tools can hang
+    /// forever; a real graceful stop would be a separate design.
+    #[doc(hidden)]
+    pub fn wait_for_abandoned_calls(&self) {
+        self.abandoned.wait_until_none();
     }
 
     /// The calendar time the server's clock reports.
     pub fn now(&self) -> SystemTime {
         self.clock.wall()
+    }
+}
+
+/// The calls abandoned (past their limit or cancelled) whose threads have not ended, and the waiters parked until none is left.
+/// The state change of a call and its count change happen under one lock, and every count change notifies, so a waiter never
+/// misses the count reaching zero and a call that finished is never counted at all.
+#[derive(Default)]
+struct Abandoned {
+    inner: Mutex<AbandonedState>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct AbandonedState {
+    n: usize,
+    waiters: usize,
+}
+
+impl Abandoned {
+    fn guard(&self) -> MutexGuard<'_, AbandonedState> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Marks a running call abandoned and counts it; false when it had already finished (then it is not counted).
+    fn abandon(&self, state: &AtomicU8) -> bool {
+        let mut g = self.guard();
+        let ok = state
+            .compare_exchange(RUNNING, ABANDONED, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok();
+        if ok {
+            g.n += 1;
+            self.changed.notify_all();
+        }
+        ok
+    }
+
+    /// Called by the call's thread when it ends: marks it finished, or, when it was abandoned meanwhile, uncounts it.
+    fn finish(&self, state: &AtomicU8) {
+        if state
+            .compare_exchange(RUNNING, FINISHED, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            let mut g = self.guard();
+            g.n = g.n.saturating_sub(1);
+            self.changed.notify_all();
+        }
+    }
+
+    fn count(&self) -> usize {
+        self.guard().n
+    }
+
+    #[cfg(test)]
+    fn waiters(&self) -> usize {
+        self.guard().waiters
+    }
+
+    fn wait_until_none(&self) {
+        let mut g = self.guard();
+        g.waiters += 1;
+        while g.n > 0 {
+            g = self
+                .changed
+                .wait(g)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        g.waiters -= 1;
     }
 }
 
@@ -637,7 +708,7 @@ fn wait(
     rx: &mpsc::Receiver<Msg>,
     state: &AtomicU8,
     cancel: &CancelToken,
-    abandoned: &AtomicUsize,
+    abandoned: &Abandoned,
     timeout: Duration,
 ) -> Run {
     let stop = match rx.recv_timeout(timeout) {
@@ -647,17 +718,12 @@ fn wait(
         },
         Err(_) => Run::TimedOut,
     };
-    abandoned.fetch_add(1, Ordering::SeqCst);
-    if state
-        .compare_exchange(RUNNING, ABANDONED, Ordering::SeqCst, Ordering::SeqCst)
-        .is_ok()
-    {
+    if abandoned.abandon(state) {
         cancel.cancel_with(CancelReason::Deadline);
         return stop;
     }
     // It finished in the instant between the stop and now. A call past its time limit takes the answer; a call the client
     // cancelled stays unanswered, because the cancel was read first (MCP: the receiver does not answer a cancelled request).
-    abandoned.fetch_sub(1, Ordering::SeqCst);
     match stop {
         Run::Cancelled => Run::Cancelled,
         _ => rx.iter().find_map(settled).unwrap_or(Run::Panicked),
@@ -772,7 +838,7 @@ mod tests {
         tx.send(Msg::Cancelled).unwrap();
         tx.send(Msg::Done(Ok(Ok(ToolOutput::text("late")))))
             .unwrap();
-        let (state, abandoned) = (AtomicU8::new(FINISHED), AtomicUsize::new(0));
+        let (state, abandoned) = (AtomicU8::new(FINISHED), Abandoned::default());
         let run = wait(
             &rx,
             &state,
@@ -784,23 +850,50 @@ mod tests {
             matches!(run, Run::Cancelled),
             "a call the client cancelled got its tool's answer"
         );
-        assert_eq!(
-            abandoned.load(Ordering::SeqCst),
-            0,
-            "a finished call is not abandoned"
-        );
+        assert_eq!(abandoned.count(), 0, "a finished call is not abandoned");
     }
 
     #[test]
     fn a_call_that_times_out_as_its_tool_ends_without_an_answer_is_a_panic() {
         let (tx, rx) = mpsc::channel();
         drop(tx);
-        let (state, abandoned) = (AtomicU8::new(FINISHED), AtomicUsize::new(0));
+        let (state, abandoned) = (AtomicU8::new(FINISHED), Abandoned::default());
         let run = wait(&rx, &state, &CancelToken::new(), &abandoned, Duration::ZERO);
         assert!(
             matches!(run, Run::Panicked),
             "a tool that ended without an answer counts as a panic"
         );
-        assert_eq!(abandoned.load(Ordering::SeqCst), 0);
+        assert_eq!(abandoned.count(), 0);
+    }
+
+    /// A waiter parked until no abandoned call is left is woken when the abandoned call's thread ends.
+    #[test]
+    fn ending_an_abandoned_call_wakes_a_parked_waiter() {
+        let (state, abandoned) = (AtomicU8::new(RUNNING), Arc::new(Abandoned::default()));
+        assert!(abandoned.abandon(&state));
+        let (done_tx, done_rx) = mpsc::channel();
+        let a = abandoned.clone();
+        std::thread::spawn(move || {
+            a.wait_until_none();
+            let _ = done_tx.send(());
+        });
+        while abandoned.waiters() < 1 {
+            std::thread::yield_now();
+        }
+        // Limit: a spurious condvar wakeup after `finish` would let the waiter see 0 even without the notify, so a missing notify is
+        // caught with near certainty, not with proof.
+        abandoned.finish(&state);
+        done_rx
+            .recv_timeout(Duration::from_secs(10)) // conformance: hang-guard
+            .expect("the waiter was never woken");
+        assert_eq!(abandoned.count(), 0);
+    }
+
+    #[test]
+    fn a_call_that_finished_cannot_be_abandoned_or_counted() {
+        let (state, abandoned) = (AtomicU8::new(RUNNING), Abandoned::default());
+        abandoned.finish(&state);
+        assert!(!abandoned.abandon(&state));
+        assert_eq!(abandoned.count(), 0);
     }
 }
