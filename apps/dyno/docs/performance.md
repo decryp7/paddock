@@ -35,7 +35,7 @@ Dyno has two things called "bench":
 
 ### 2026-10-29, release identity of the rlib-only crate type (docs/link-time)
 
-- **Commit:** A/B: base cb3329e0f (template crate types) → change 451948bbb (`crate-type = ["rlib"]`); research note
+- **Commit:** A/B: base cb3329e0f (template crate types) → change 451948bbb (`crate-type = ["rlib"]`): pre-rebase cb3329e0f (parent cae1649f9) → 451948bbb, same content as 784264b1d's crate-type diff; both kept on the branch `wip/link-time-ab`; research note
   [2026-10-29-link-time.md](../../../docs/research/2026-10-29-link-time.md#release-identity)
 - **Machine:** Mac mini M4 Pro (Mac16,11), 14 cores, 64 GB, macOS 27.2, Xcode 27.1 (`ld-27037.1`); rustc 1.99.1
 - **Load:** 1-minute load 16-43 (other agents building)
@@ -51,12 +51,12 @@ Dyno has two things called "bench":
   | Size, `__text` | 11,205,808 B, 7,776,740 B | 11,205,824 B, 7,778,404 B | none | +16 B, +1,664 B |
   | Functions with different instructions (unstripped, by demangled name) | 10,694 named | 10,692 named; 19 differ (addresses, `TypeId` constants, inlining) | — | not semantic |
   | `cargo test -p dyno-app --profile dist` | 74 passed, 1 failed | 74 passed, 1 failed (the same test) | — | same |
-  | App unit after `cargo clean -p dyno-app` | 84 s | 70 s | none | indication only (load 16-25) |
+  | App unit after `cargo clean -p dyno-app` | 84.2 s | 69.8 s | none | indication only (load 16-25) |
 
 - **Memory measure:** not measured
 - **Notes:** the failing test (`native_feel::tests::debug_windows_keep_reload_and_devtools_but_never_zoom`) asserts a
-  debug build and fails in any release profile. Analysis scripts and outputs: `/Volumes/d7sst7/dev-targets/target/link-time-tools/`
-  (machine-local, `classify.py`, `disfn.sh`).
+  debug build and fails in any release profile. Analysis: [`scripts/perf/link-time/classify.py`](../../../scripts/perf/link-time/classify.py) and
+  [`disfn.sh`](../../../scripts/perf/link-time/disfn.sh); their outputs are machine-local in `/Volumes/d7sst7/dev-targets/target/link-time-tools/`.
 
 ### 2026-10-29, incremental rebuild and link time (docs/link-time)
 
@@ -66,7 +66,7 @@ Dyno has two things called "bench":
 - **Load:** 1-minute load 3.7-6.0 during the measured builds; other agents mostly idle; no other job of mine running
 - **Build:** debug (`dev`: deps opt-level 2, `debug = "line-tables-only"`, `split-debuginfo = "unpacked"`), default features
 - **Corpus:** none (the compiler is measured); synthetic one-line change in the app crate
-- **Command:** Probe build: `perl` replaces `pub fn __link_probe() -> u32 { N }` at the end of `app/src-tauri/src/lib.rs`, then `CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=<private> CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=cc-timed.sh LINKMODE=ld|lld cargo build -p dyno-app [--features dynamic_linking] [--config 'profile.dev.package.dyno-app.debug=false|"full"']`; crate type switched by editing `[lib] crate-type`. `cc-timed.sh` runs `cc` (with `--ld-path=<toolchain>/gcc-ld/ld64.lld` and `SDKROOT=MacOSX26.5.sdk` for lld) and logs each link's duration. Phase split: the same with `--timings`. Scripts: `/Volumes/d7sst7/dev-targets/target/link-time-tools/` (not committed).
+- **Command:** Probe build: `perl` replaces `pub fn __link_probe() -> u32 { N }` at the end of `app/src-tauri/src/lib.rs`, then `CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=<private> CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=cc-timed.sh LINKMODE=ld|lld cargo build -p dyno-app [--features dynamic_linking] [--config 'profile.dev.package.dyno-app.debug=false|"full"']`; crate type switched by editing `[lib] crate-type`. [`cc-timed.sh`](../../../scripts/perf/link-time/cc-timed.sh) runs `cc` (with `--ld-path=<toolchain>/gcc-ld/ld64.lld` and `SDKROOT=MacOSX26.5.sdk` for lld) and logs each link's duration. Phase split: the same with `--timings`. The probe loop and round driver were throw-away shell scripts in `/Volumes/d7sst7/dev-targets/target/link-time-tools/` (machine-local); the linker wrapper is committed.
 - **Runs:** 3 rounds, interleaved (every configuration once per round, each after an uncounted warm-up build); median (range) of wall time; link = median duration of the linker call
 - **Numbers:**
 

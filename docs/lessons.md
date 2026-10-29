@@ -645,11 +645,17 @@ This is the same lesson as "A turn budget in a test wait is a timeout in disguis
 
 ## 2026-10-29: the Tauri template's crate types cost more than the linker (all apps)
 
-An incremental debug rebuild of Debrief spent 0.85 s in Apple's `ld` but about 1.5 s writing a 1.0 GB static archive and
-linking a cdylib, both from Tauri's template `crate-type = ["staticlib", "cdylib", "rlib"]`, which only iOS and Android
-use. `rlib` alone cut the rebuild by 25% (Debrief) and 38% (Dyno); lld was slower than ld-prime and cannot read the
-macOS 27 SDK. Dropping the crate types also changes release output, though not its behaviour: cargo hashes each unit's LTO mode
-into `-C metadata`, so the dependencies are compiled bitcode-only under new hashes (other `TypeId` values, folding and
-inlining). Also: cargo fingerprints the linker, so a timing wrapper set as the linker after a build recompiles everything.
-**Guidance:** app crates build an rlib only; measure link time with a linker wrapper set before the first build, and
-compare release binaries function by function, not by checksum. Details: [research/2026-10-29-link-time.md](research/2026-10-29-link-time.md).
+An incremental debug rebuild of Debrief spent 0.61 s linking the binary, but about 1.5 s writing a 1.0 GB static archive
+(about 1.25 s) and linking an unused cdylib (0.24 s), both from Tauri's template
+`crate-type = ["staticlib", "cdylib", "rlib"]`, which only iOS and Android use. `rlib` alone cut the rebuild by 25%
+(Debrief) and 38% (Dyno); lld was slower than ld-prime and cannot read the macOS 27 SDK. Dropping the crate types also
+changes release output, though not its behaviour (verified function by function on Dyno): cargo hashes each unit's LTO
+mode into `-C metadata`, so the dependencies are compiled bitcode-only under new hashes (other `TypeId` values, folding
+and inlining). Also: cargo fingerprints the linker, so a timing wrapper set as the linker after a build recompiles
+everything. **Guidance:** app crates build an rlib only; measure link time with a linker wrapper
+([`scripts/perf/link-time/cc-timed.sh`](../scripts/perf/link-time/cc-timed.sh)) set before the first build, and compare
+release binaries function by function ([`classify.py`](../scripts/perf/link-time/classify.py)), not by checksum.
+Results: [Debrief](../apps/debrief/docs/performance.md#2026-10-29-incremental-rebuild-and-link-time-docslink-time),
+[Dyno](../apps/dyno/docs/performance.md#2026-10-29-incremental-rebuild-and-link-time-docslink-time),
+[Dyno release identity](../apps/dyno/docs/performance.md#2026-10-29-release-identity-of-the-rlib-only-crate-type-docslink-time);
+details: [research/2026-10-29-link-time.md](research/2026-10-29-link-time.md).
