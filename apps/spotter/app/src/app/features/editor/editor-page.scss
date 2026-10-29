@@ -10,26 +10,8 @@
     height: 16px;
   }
 }
-/* Material's stepper, on the family tokens: no card, the page background, the accent for the current step. */
+/* The stepper itself is themed by the shared Material theme (material.css); only what is Spotter's own is here. */
 .stepper {
-  --mat-stepper-container-color: transparent;
-  --mat-stepper-header-hover-state-layer-color: var(--pd-hover);
-  --mat-stepper-header-focus-state-layer-color: var(--pd-hover);
-  --mat-stepper-header-label-text-color: var(--pd-text-muted);
-  --mat-stepper-header-selected-state-label-text-color: var(--pd-text);
-  --mat-stepper-header-icon-background-color: var(--pd-surface-3);
-  --mat-stepper-header-icon-foreground-color: var(--pd-text);
-  --mat-stepper-header-selected-state-icon-background-color: var(--pd-accent-fill);
-  --mat-stepper-header-selected-state-icon-foreground-color: var(--pd-on-accent);
-  --mat-stepper-header-done-state-icon-background-color: var(--pd-accent-tint);
-  --mat-stepper-header-done-state-icon-foreground-color: var(--pd-accent);
-  --mat-stepper-header-edit-state-icon-background-color: var(--pd-accent-tint);
-  --mat-stepper-header-edit-state-icon-foreground-color: var(--pd-accent);
-  --mat-stepper-line-color: var(--pd-border-strong);
-  --mat-stepper-header-label-text-font: var(--pd-font-sans);
-  --mat-stepper-header-label-text-size: var(--pd-text-body);
-  --mat-stepper-header-selected-state-label-text-weight: var(--pd-weight-semibold);
-  background: transparent;
   min-width: 0;
 }
 .step-h {
@@ -38,7 +20,7 @@
   margin-bottom: var(--pd-space-4);
 }
 h2[tabindex='-1']:focus-visible {
-  outline: 2px solid var(--pd-focus-ring, var(--pd-accent));
+  outline: var(--pd-focus-width) solid var(--pd-focus-ring);
   outline-offset: 2px;
 }
 .cols {

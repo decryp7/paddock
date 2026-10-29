@@ -4,7 +4,6 @@
 @use '@angular/cdk' as cdk;
 @use 'styles/controls';
 @use 'styles/layout';
-@use 'styles/stepper';
 
 @include cdk.overlay();
 @include cdk.a11y-visually-hidden();

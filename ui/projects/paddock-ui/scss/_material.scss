@@ -550,6 +550,25 @@
   --mat-button-text-label-text-weight: var(--pd-weight-medium);
   --mat-button-tonal-label-text-weight: var(--pd-weight-medium);
   --mat-button-protected-label-text-weight: var(--pd-weight-medium);
+
+  // Stepper (mat-stepper): no card, the page background, the accent for the open step; an unreached step is a quiet circle with a 1 px outline.
+  --mat-stepper-container-color: transparent;
+  --mat-stepper-header-hover-state-layer-color: var(--pd-hover);
+  --mat-stepper-header-focus-state-layer-color: var(--pd-hover);
+  --mat-stepper-header-label-text-color: var(--pd-text-muted);
+  --mat-stepper-header-selected-state-label-text-color: var(--pd-text);
+  --mat-stepper-header-label-text-font: var(--pd-font-sans);
+  --mat-stepper-header-label-text-size: var(--pd-text-body);
+  --mat-stepper-header-selected-state-label-text-weight: var(--pd-weight-semibold);
+  --mat-stepper-header-icon-background-color: var(--pd-surface-2);
+  --mat-stepper-header-icon-foreground-color: var(--pd-text-muted);
+  --mat-stepper-header-selected-state-icon-background-color: var(--pd-accent-fill);
+  --mat-stepper-header-selected-state-icon-foreground-color: var(--pd-on-accent);
+  --mat-stepper-header-done-state-icon-background-color: var(--pd-accent-tint);
+  --mat-stepper-header-done-state-icon-foreground-color: var(--pd-accent);
+  --mat-stepper-header-edit-state-icon-background-color: var(--pd-accent-tint);
+  --mat-stepper-header-edit-state-icon-foreground-color: var(--pd-accent);
+  --mat-stepper-line-color: var(--pd-border-strong);
 }
 
 // A projected glyph (pd-glyph, mat-icon, an svg) sits centred on the label with a 4 px gap: the label is a flex row, not a text line
@@ -776,4 +795,33 @@ html .mat-mdc-checkbox:not(:is(.mat-mdc-cell, .mat-mdc-header-cell, .mat-mdc-foo
 html .mat-mdc-slide-toggle:has(.mdc-switch:focus-visible) .mdc-switch__track {
   outline: calc(var(--pd-focus-width) / 0.75) solid var(--pd-focus-ring);
   outline-offset: 2px;
+}
+
+// ---- Stepper geometry: tighter headers and lines than Material's 24 px (five headers fit beside a sidebar at 900 px), an outlined
+// circle for steps not reached yet, inline-SVG icons at 16 px, and no inset on the content (the page owns its margins).
+html .mat-stepper-horizontal,
+html .mat-stepper-vertical {
+  background: transparent;
+}
+
+html .mat-step-header {
+  padding: var(--pd-space-4) var(--pd-space-2);
+}
+
+html .mat-stepper-horizontal-line {
+  min-width: var(--pd-space-4);
+  margin: 0;
+}
+
+html .mat-horizontal-content-container {
+  padding: var(--pd-space-4) 0 0;
+}
+
+html .mat-step-icon:not(.mat-step-icon-selected):not(.mat-step-icon-state-done):not(.mat-step-icon-state-edit) {
+  box-shadow: inset 0 0 0 1px var(--pd-border-strong);
+}
+
+html .mat-step-icon mat-icon {
+  width: 16px;
+  height: 16px;
 }

@@ -21,6 +21,9 @@ import { SourceStep } from './source-step';
 /** The heading each step moves focus to when it opens (the first heading of the step's content). */
 const STEP_HEADING: Record<EditorStep, string> = { source: 'src-h', configure: 'cfg-h', versions: 'ver-h', notify: 'sch-h', review: 'rev-h' };
 
+/** The notification modes in words (the review shows these, not the wire ids). */
+const NOTIFY_MODE_LABEL: Record<string, string> = { 'every-new': 'Every new release', 'newer-than-installed': 'Newer than installed', off: 'Nothing' };
+
 /** The add/edit wizard (a linear `mat-stepper`): source, configure (with a live test), versions, notifications and actions, review. */
 @Component({
   selector: 'sp-editor-page',
@@ -42,8 +45,6 @@ export class EditorPage {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
 
-  /** Material's slide between steps, none for people who asked for reduced motion. */
-  protected readonly motion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches ? '0ms' : '150ms';
   protected readonly schemes = SCHEME_OPTIONS;
   protected readonly draft = this.store.draft;
   /** Whether a step's own input is complete (UI convenience only: the engine re-validates on test and save). */
@@ -86,16 +87,35 @@ export class EditorPage {
     });
   }
 
-  /** A step counts as done when it was reached and its input is complete; linear mode then lets the next one open. */
+  /**
+   * A step counts as done when it was reached and it and every step before it are complete, so clearing a required field shuts the later
+   * headers again. Linear mode then lets the next step open; Material marks that next step `aria-disabled` until it is done, although
+   * it opens (its own default for a step that is neither open nor done).
+   */
   protected done(index: number): boolean {
-    const step = STEPS[index]?.id;
-    if (!step) return false;
-    return (this.store.editing() && index === 0) || (index <= this.furthest() && this.valid(step));
+    return index <= this.furthest() && STEPS.slice(0, index + 1).every((s) => this.valid(s.id));
   }
+
+  /** In edit mode (the route has an id: known before the watch has loaded) the stepper has no Source step, so its indexes start one step later. */
+  private get offset(): number {
+    return this.id() ? 1 : 0;
+  }
+
+  protected readonly openIndex = computed(() => Math.max(0, this.store.stepIndex() - this.offset));
+
+  /** The source in words, for the page head (editing) and the review: the kind and its main address. */
+  protected readonly sourceSummary = computed(() => {
+    const v = this.draft().source.values;
+    const main = v['url'] ?? v['repo'] ?? v['path'] ?? v['image'] ?? v['package'] ?? v['project'] ?? v['crate'] ?? '';
+    const label = this.store.kind()?.label ?? '';
+    return label && main ? `${label}: ${main}` : label || main;
+  });
+  protected readonly schemeLabel = computed(() => SCHEME_OPTIONS.find((o) => o.value === this.draft().versions)?.label ?? this.draft().versions);
+  protected readonly modeLabel = computed(() => NOTIFY_MODE_LABEL[this.draft().notify.mode] ?? this.draft().notify.mode);
 
   /** The stepper opened a step (header click or keyboard): the store follows. */
   protected onStep(index: number): void {
-    const to = STEPS[index]?.id;
+    const to = STEPS[index + this.offset]?.id;
     if (to && to !== this.store.step()) this.store.setStep(to);
   }
 
