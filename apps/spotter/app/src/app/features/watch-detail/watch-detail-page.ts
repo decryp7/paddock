@@ -14,7 +14,7 @@ import { breakablePath } from '../../shared/format';
 import { middleEllipsis } from '../../shared/identity';
 import { AgoPipe, AgoShortPipe } from '../../shared/ui/ago.pipe';
 import { Avatar } from '../../shared/ui/avatar';
-import { Confirm } from '../../shared/ui/confirm-dialog';
+import { Confirm, deleteWatchPrompt } from '../../shared/ui/confirm';
 import { Panel } from '../../shared/ui/panel';
 import { MenuButton, MenuPanel, type MenuEntry } from '../../shared/ui/row-menu';
 import { RowItem, RowList } from '../../shared/ui/row-nav';
@@ -164,12 +164,7 @@ export class WatchDetailPage {
   protected async remove(): Promise<void> {
     const d = this.detail();
     if (!d) return;
-    const ok = await this.confirm.ask({
-      title: `Delete "${d.spec.name}"?`,
-      message: 'Spotter stops watching it and forgets its history. Downloaded files stay where they are.',
-      confirmLabel: 'Delete watch',
-      danger: true,
-    });
+    const ok = await this.confirm.ask(deleteWatchPrompt(d.spec.name));
     if (ok && (await this.watches.remove(this.id()))) await this.router.navigate(['/watches']);
   }
 
