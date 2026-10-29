@@ -99,12 +99,17 @@ Pacenotes: toolsets `orient`, `code`, `review`, `diagrams`, `requirements` and `
 - Below-normal process priority for engines is applied on Windows only; decide the macOS and Linux equivalent.
 - Pin updates for llama.cpp as reviewed changes that pass the end-to-end test.
 
-## 1.1 follow-ups: jobs in the UI (ADR 0024)
+## 1.1: jobs in the UI (ADR 0024)
 
-- Mirror the job wire types in `api.types.ts` when the UI moves onto the jobs: `JobEvent.progress` gains `unit`
-  (`items` | `bytes`; format a size for bytes) and `canStopWaiting`; `JobEvent.cancelled` gains `stoppedWaiting`; add the
-  `job_stop_waiting` command. Show "Stop waiting" next to Cancel while `canStopWaiting` is true, and say on a cancelled
-  job with `stoppedWaiting` that the server may still be working (Repair service is the way out).
+- **Done (WP-3).** The UI runs model loads, benchmarks, the model update check, service install, uninstall and Repair and the
+  app update as jobs (`start_*` commands over a channel; `TauriBackend.job`): no UI timeout (`JOB_METHODS` bypass
+  `withTimeout`, ER-19), phase-labelled progress with a growing count, Cancel in every phase, "Stop waiting" while
+  `canStopWaiting` and a "Still working" note after a quiet spell (`JobsService`, `pw-jobs-panel`). A cancelled job rejects
+  with the `cancelled` code, which toasts as information, not as an error.
+- **Left for 1.1.** The old blocking commands (`load_model`, `run_benchmark`, `check_updates_now`, `install_service`,
+  `uninstall_service`, `repair_service`, `install_app_update`, `request_repair`) are now unused by the UI: delete them and
+  their registration. `checkAppUpdate` and `appUpdateStatus` are quick calls and keep a 30 s timeout. The shell, Material
+  and dialog-as-window move (WP-2) is not started.
 
 ## Next (hand-off, 2026-10-22)
 

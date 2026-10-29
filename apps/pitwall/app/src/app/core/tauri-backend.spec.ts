@@ -1,5 +1,6 @@
-import type { AppPermissions, LiveUpdate, PlaygroundEvent, PlaygroundRequest, PresetDraft, Settings } from './api.types';
+import type { AppPermissions, JobEvent, LiveUpdate, PlaygroundEvent, PlaygroundRequest, PresetDraft, Settings } from './api.types';
 import type { PitwallBackend } from './backend';
+import { JOB_METHODS } from './backend';
 import { LIVE_EVENT, TauriBackend, type TauriBridge } from './tauri-backend';
 
 interface Call {
@@ -58,6 +59,8 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['clearCache', (b) => b.clearCache({ kind: 'app', appId: 'debrief' }), 'clear_cache', { scope: { kind: 'app', appId: 'debrief' } }],
   ['applyPreset', (b) => b.applyPreset('lowMemory'), 'apply_preset', { preset: 'lowMemory' }],
   ['cancelJob', (b) => b.cancelJob('j1'), 'cancel_job', { id: 'j1' }],
+  ['jobCancel', (b) => b.jobCancel(7), 'job_cancel', { id: 7 }],
+  ['jobStopWaiting', (b) => b.jobStopWaiting(7), 'job_stop_waiting', { id: 7 }],
   ['localModels', (b) => b.localModels(), 'local_models', undefined],
   ['searchModels', (b) => b.searchModels('qwen'), 'search_models', { query: 'qwen' }],
   ['repoFiles', (b) => b.repoFiles('a/b'), 'repo_files', { repo: 'a/b' }],
@@ -65,7 +68,6 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['downloads', (b) => b.downloads(), 'downloads', undefined],
   ['cancelDownload', (b) => b.cancelDownload('d1'), 'cancel_download', { id: 'd1' }],
   ['deleteModel', (b) => b.deleteModel('m1'), 'delete_model', { id: 'm1' }],
-  ['loadModel', (b) => b.loadModel('m1'), 'load_model', { id: 'm1' }],
   ['unloadModel', (b) => b.unloadModel('m1'), 'unload_model', { id: 'm1' }],
   ['pinModel', (b) => b.pinModel('m1', true), 'pin_model', { id: 'm1', pinned: true }],
   ['setModelIdle', (b) => b.setModelIdle('m1', null), 'set_model_idle', { id: 'm1', idleSecs: null }],
@@ -98,7 +100,6 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['resolvePreset', (b) => b.resolvePreset(DRAFT, 'old'), 'resolve_preset', { preset: DRAFT, editing: 'old' }],
   ['updateCheckStatus', (b) => b.updateCheckStatus(), 'update_check_status', undefined],
   ['updateNotices', (b) => b.updateNotices(), 'update_notices', undefined],
-  ['checkUpdatesNow', (b) => b.checkUpdatesNow(), 'check_updates_now', undefined],
   ['setUpdateCheck', (b) => b.setUpdateCheck(true, 'daily'), 'set_update_check', { enabled: true, schedule: 'daily' }],
   ['dismissUpdate', (b) => b.dismissUpdate('m#betterQuant', 7), 'dismiss_update', { id: 'm#betterQuant', snoozeDays: 7 }],
   ['dismissUpdate for good', (b) => b.dismissUpdate('m#betterQuant', null), 'dismiss_update', { id: 'm#betterQuant', snoozeDays: null }],
@@ -113,20 +114,26 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['requests', (b) => b.requests(500), 'requests', { limit: 500 }],
   ['requestContent', (b) => b.requestContent('r1'), 'request_content', { id: 'r1' }],
   ['benchmarks', (b) => b.benchmarks(), 'benchmarks', undefined],
-  ['runBenchmark', (b) => b.runBenchmark('m1'), 'run_benchmark', { modelId: 'm1' }],
   ['settings', (b) => b.settings(), 'settings', undefined],
   ['saveSettings', (b) => b.saveSettings(SETTINGS), 'save_settings', { settings: SETTINGS }],
   ['appUpdateStatus', (b) => b.appUpdateStatus(), 'app_update_status', undefined],
   ['checkAppUpdate', (b) => b.checkAppUpdate(), 'check_app_update', undefined],
-  ['installAppUpdate', (b) => b.installAppUpdate(), 'install_app_update', undefined],
   ['serviceState', (b) => b.serviceState(), 'service_state', undefined],
-  ['installService', (b) => b.installService(), 'install_service', undefined],
-  ['uninstallService', (b) => b.uninstallService(), 'uninstall_service', undefined],
-  ['repairService', (b) => b.repairService(), 'repair_service', undefined],
   ['declineService', (b) => b.declineService(), 'decline_service', undefined],
   ['openLoginItems', (b) => b.openLoginItems(), 'open_login_items', undefined],
   ['autostart', (b) => b.autostart(), 'get_autostart', undefined],
   ['setAutostart', (b) => b.setAutostart(true), 'set_autostart', { enabled: true }],
+];
+
+/** The calls that run as jobs: method, the `start_*` command and its arguments (`onEvent` is the job's channel). */
+const JOBS: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<string, unknown>][] = [
+  ['loadModel', (b) => b.loadModel('m1'), 'start_load_model', { id: 'm1' }],
+  ['runBenchmark', (b) => b.runBenchmark('m1'), 'start_benchmark', { modelId: 'm1' }],
+  ['checkUpdatesNow', (b) => b.checkUpdatesNow(), 'start_check_updates', {}],
+  ['installService', (b) => b.installService(), 'start_install_service', {}],
+  ['uninstallService', (b) => b.uninstallService(), 'start_uninstall_service', {}],
+  ['repairService', (b) => b.repairService(), 'start_repair_service', {}],
+  ['installAppUpdate', (b) => b.installAppUpdate(), 'start_app_update', {}],
 ];
 
 describe('TauriBackend', () => {
@@ -137,8 +144,8 @@ describe('TauriBackend', () => {
   });
 
   it('covers every request/response method of the backend interface', () => {
-    const methods = Object.getOwnPropertyNames(TauriBackend.prototype).filter((m) => m !== 'constructor' && m !== 'run');
-    const pinned = new Set([...TABLE.map((r) => r[0]), 'subscribe', 'onQuitAsk', 'chat']);
+    const methods = Object.getOwnPropertyNames(TauriBackend.prototype).filter((m) => m !== 'constructor' && m !== 'run' && m !== 'job');
+    const pinned = new Set([...TABLE.map((r) => r[0]), ...JOBS.map((r) => r[0]), 'subscribe', 'onQuitAsk', 'chat', 'jobEvents']);
     expect(methods.filter((m) => !pinned.has(m))).toEqual([]);
   });
 
@@ -227,5 +234,64 @@ describe('TauriBackend', () => {
     new TauriBackend(bridge).chat(REQ, (e) => events.push(e));
     for (let i = 0; i < 4; i++) await Promise.resolve();
     expect(events).toEqual([{ kind: 'error', error: { code: 'notFound', message: 'No such model' } }]);
+  });
+
+  describe('jobs', () => {
+    it('every job method is declared in JOB_METHODS and the other way round', () => {
+      expect(JOBS.map((r) => r[0]).sort()).toEqual([...JOB_METHODS].sort());
+    });
+
+    it.each(JOBS)('%s starts its job over a channel and resolves with the result of the done event', async (_n, call, cmd, args) => {
+      const { bridge, calls, channels } = fakeBridge(() => 1);
+      const pending = call(new TauriBackend(bridge));
+      await Promise.resolve();
+      expect(calls).toEqual([{ cmd, args: { ...args, onEvent: { channel: 1 } } }]);
+      channels[0]!({ kind: 'done', jobId: 1, result: { ok: true } } satisfies JobEvent);
+      await expect(pending).resolves.toEqual({ ok: true });
+    });
+
+    it('forwards every event to the job listeners until they stop, and never times out a quiet job', async () => {
+      vi.useFakeTimers();
+      try {
+        const { bridge, channels } = fakeBridge(() => 1);
+        const backend = new TauriBackend(bridge);
+        const seen: JobEvent[] = [];
+        const stop = backend.jobEvents((e) => seen.push(e));
+        let settled = false;
+        const pending = backend.loadModel('m1').finally(() => (settled = true));
+        await vi.advanceTimersByTimeAsync(24 * 3600 * 1000);
+        expect(settled).toBe(false);
+        const progress: JobEvent = { kind: 'progress', jobId: 1, phase: 'Loading', done: 3, total: null, unit: 'items', canStopWaiting: false, elapsedSecs: 3, cancellable: true, notCancellableReason: null };
+        channels[0]!(progress);
+        stop();
+        channels[0]!({ kind: 'done', jobId: 1, result: null });
+        await pending;
+        expect(seen).toEqual([progress]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rejects with the typed error of a failed job, and with the cancelled code for a cancelled one', async () => {
+      const failed = fakeBridge(() => 1);
+      const a = new TauriBackend(failed.bridge).loadModel('m1');
+      failed.channels[0]!({ kind: 'failed', jobId: 1, error: { code: 'insufficientMemory', message: 'Too big.' } });
+      await expect(a).rejects.toEqual({ code: 'insufficientMemory', message: 'Too big.' });
+
+      const cancelled = fakeBridge(() => 1);
+      const b = new TauriBackend(cancelled.bridge).runBenchmark('m1');
+      cancelled.channels[0]!({ kind: 'cancelled', jobId: 1, stoppedWaiting: false });
+      await expect(b).rejects.toEqual({ code: 'cancelled', message: 'Cancelled.' });
+
+      const stopped = fakeBridge(() => 1);
+      const c = new TauriBackend(stopped.bridge).runBenchmark('m1');
+      stopped.channels[0]!({ kind: 'cancelled', jobId: 1, stoppedWaiting: true });
+      await expect(c).rejects.toMatchObject({ code: 'cancelled', message: expect.stringContaining('may still be working') });
+    });
+
+    it('rejects when the job cannot start (for example offline mode refuses the update)', async () => {
+      const { bridge } = fakeBridge(() => Promise.reject({ code: 'offline', message: 'Offline mode is on.' }));
+      await expect(new TauriBackend(bridge).installAppUpdate()).rejects.toEqual({ code: 'offline', message: 'Offline mode is on.' });
+    });
   });
 });
