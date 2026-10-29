@@ -11,7 +11,9 @@
 //!   usable at once and import speed does not depend on indexing speed. A segment is indexed by deleting
 //!   the documents of its key, adding its rows and committing, then marking it `indexed` in the catalog: a
 //!   crash in between is repaired by indexing it again, never by duplicates.
-//! - The writer's heap is [`WRITER_HEAP`] (64 MB, the ADR budget) and only exists while indexing.
+//! - The writer runs one thread per usable core with [`WRITER_HEAP_PER_THREAD`] each, as many as fit in [`WRITER_HEAP_MAX`]
+//!   (the import memory: the index is built when an import has finished); the heaps only exist while indexing. Its
+//!   threads run at background priority on macOS and Linux (they take the indexing thread's).
 //! - The commit payload names the catalog's `fts_epoch`; an index that is missing, damaged or from another
 //!   epoch is recreated and every segment indexed again.
 
@@ -37,12 +39,20 @@ use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextO
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 use tantivy::{doc, DocId, Index, IndexReader, IndexWriter, Order, ReloadPolicy, Score, SegmentReader, Term};
 
+/// The writer's threads (at least one) and each thread's heap (the budget's share, at least
+/// [`MIN_HEAP_PER_THREAD`]). Unlike Tantivy's `writer_with_num_threads`, not capped at 8 threads.
+fn writer_shape(budget: WriterBudget) -> (usize, usize) {
+    let threads = budget.threads.max(1);
+    (threads, (budget.heap / threads).max(MIN_HEAP_PER_THREAD))
+}
+
 /// Folder of the index in a store folder.
 pub const INDEX_DIR: &str = "index";
 
-/// Heap of the index writer (ADR 0014 memory budget), shared by its threads.
-pub const WRITER_HEAP: usize = 64 << 20;
-pub const WRITER_THREADS: usize = 2;
+/// Heap of each index writer thread by default (Settings ▸ Performance ▸ Search index memory per thread).
+pub const WRITER_HEAP_PER_THREAD: usize = 64 << 20;
+/// The most the writer's heaps take together by default: the import memory budget (ADR 0014, 768 MB).
+pub const WRITER_HEAP_MAX: usize = 768 << 20;
 
 /// What the index writer may use while indexing: its heap (bytes, shared by its threads; Tantivy needs at least
 /// 15 MB per thread) and threads.
@@ -68,9 +78,11 @@ impl WriterBudget {
 
 impl Default for WriterBudget {
     fn default() -> Self {
+        // ER-20: CPU-bound work gets the cores minus one, here also bounded by the memory.
+        let threads = threads(WorkKind::Cpu, None).clamp(1, WRITER_HEAP_MAX / WRITER_HEAP_PER_THREAD);
         WriterBudget {
-            heap: WRITER_HEAP,
-            threads: WRITER_THREADS,
+            heap: threads * WRITER_HEAP_PER_THREAD,
+            threads,
         }
     }
 }
@@ -258,11 +270,15 @@ impl Fts {
         Ok((Fts { index, reader, f, budget }, true))
     }
 
+    /// The index writer, with [`writer_shape`]'s threads and heaps. Its threads are started by the calling thread and
+    /// take its priority on macOS and Linux (the indexing thread runs at background priority; Windows starts them normal).
     fn writer(&self) -> Result<IndexWriter> {
-        let threads = self.budget.threads.max(1);
-        Ok(self
-            .index
-            .writer_with_num_threads(threads, self.budget.heap.max(threads * (15 << 20)))?)
+        let (threads, heap_per_thread) = writer_shape(self.budget);
+        let options = tantivy::indexer::IndexWriterOptions::builder()
+            .num_worker_threads(threads)
+            .memory_budget_per_thread(heap_per_thread)
+            .build();
+        Ok(self.index.writer_with_options(options)?)
     }
 
     fn commit(&self, w: &mut IndexWriter, epoch: u64) -> Result<()> {
@@ -710,6 +726,8 @@ fn failing_segment<'a>(e: &anyhow::Error, batch: &'a [String]) -> Option<&'a Str
 }
 
 fn run(s: &FtsShared, dir: &Path, conn: &Connection, gate: &Gate, epoch: u64) {
+    // Background priority, for this thread and the writer's threads it starts (they inherit it on macOS and Linux).
+    lower_priority();
     let seg_dir = dir.join(SEGMENTS_DIR);
     while !s.stop.load(Ordering::SeqCst) {
         // One segment per turn, under the write lock (imports and compaction wait for at most one).
@@ -775,6 +793,24 @@ mod tests {
             ]
         );
         assert!(!WordsTokenizer.token_stream("").advance());
+    }
+
+    #[test]
+    fn the_writer_runs_the_configured_threads_each_with_its_share_of_the_heap() {
+        let mb = 1 << 20;
+        assert_eq!(writer_shape(WriterBudget { heap: 6 * 64 * mb, threads: 6 }), (6, 64 * mb));
+        // More than Tantivy's 8-thread convenience constructor allows.
+        assert_eq!(writer_shape(WriterBudget { heap: 13 * 32 * mb, threads: 13 }), (13, 32 * mb));
+        // Tantivy's floor of 15 MB a thread; at least one thread.
+        assert_eq!(writer_shape(WriterBudget { heap: mb, threads: 4 }), (4, 15 * mb));
+        assert_eq!(writer_shape(WriterBudget { heap: 0, threads: 0 }), (1, 15 * mb));
+        // The writer is built with that shape.
+        let dir = std::env::temp_dir().join(format!("debrief-fts-shape-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (fts, _) = Fts::open_or_create(&dir, 1, WriterBudget { heap: 10 * 16 * mb, threads: 10 }).unwrap();
+        let w = fts.writer().expect("10 threads of 16 MB");
+        drop(w);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

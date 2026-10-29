@@ -1,6 +1,7 @@
 //! The processes' knobs derived from the settings, by pure functions (ADR 0031 §2): budgets in, knobs out. With the
-//! defaults they are today's tested values (8 cores: 7 parse threads, DuckDB 4 threads and 192 MB, a 64 MB index
-//! writer with 2 threads, a 2 GiB cap), so ADR 0014's memory tests keep guarding them.
+//! defaults they are today's tested values (8 cores: 7 parse threads, DuckDB 4 threads and 192 MB, a 2 GiB cap), so
+//! ADR 0014's memory tests keep guarding them; the index writer takes the usable cores with 64 MB each, within the
+//! import memory (it runs when an import has finished).
 
 use super::section::WORKER_BASE_MB;
 use super::PerformanceSettings;
@@ -16,8 +17,6 @@ pub const MB_PER_PARSE_THREAD: u32 = 96;
 pub const MAX_AUTO_PARSE_THREADS: u32 = 8;
 /// The smallest DuckDB memory limit derived from the query budget, MB.
 const MIN_DUCK_MB: u32 = 64;
-/// The index writer's heap is this fraction of the import budget (768 MB → 64 MB).
-const INDEX_HEAP_SHARE: u32 = 12;
 
 /// Cores Debrief's thread pools may use: all but the ones left free, at least one.
 pub fn usable_cores(s: &PerformanceSettings, cores: u32) -> u32 {
@@ -32,6 +31,21 @@ pub fn parse_threads(s: &PerformanceSettings, cores: u32) -> u32 {
     }
     // At least one: the usable cores are at least one.
     (s.import_budget_mb / MB_PER_PARSE_THREAD).clamp(1, usable_cores(s, cores).min(MAX_AUTO_PARSE_THREADS))
+}
+
+/// Search index writer threads: the setting within the usable cores, or (0) the usable cores, as many as fit their heaps
+/// in the import budget (the index is built when an import has finished, so it may use that memory). At least one.
+pub fn index_threads(s: &PerformanceSettings, cores: u32) -> u32 {
+    let usable = usable_cores(s, cores);
+    if s.index_writer_threads > 0 {
+        return s.index_writer_threads.min(usable);
+    }
+    (s.import_budget_mb / s.index_heap_per_thread_mb.max(1)).clamp(1, usable)
+}
+
+/// The search index writer's heap, MB: a heap per thread.
+pub fn index_heap_mb(s: &PerformanceSettings, cores: u32) -> u32 {
+    index_threads(s, cores).saturating_mul(s.index_heap_per_thread_mb)
 }
 
 /// DuckDB's memory limit, MB: the setting, or (0) the query budget minus the worker's base.
@@ -50,8 +64,8 @@ pub fn store_tuning(s: &PerformanceSettings, cores: u32) -> StoreTuning {
         parse_threads: Some(parse_threads(s, cores) as usize),
         duck_threads: Some(s.query_threads.min(usable).max(1) as usize),
         memory_limit_mb: Some(u64::from(duck_memory_mb(s))),
-        index_heap_mb: Some(u64::from(s.import_budget_mb / INDEX_HEAP_SHARE)),
-        index_threads: Some(s.index_threads.min(usable).max(1) as usize),
+        index_heap_mb: Some(u64::from(index_heap_mb(s, cores))),
+        index_threads: Some(index_threads(s, cores) as usize),
         spill_dir: (!spill.is_empty()).then(|| PathBuf::from(spill)),
         max_spill_mb: (s.max_spill_mb > 0).then_some(u64::from(s.max_spill_mb)),
         allocator_flush_mb: Some(u64::from(s.allocator_flush_mb)),
@@ -103,7 +117,7 @@ mod tests {
         // debrief_store_duck's defaults: default_threads() on 8 cores (7), DUCK_THREADS, MEMORY_LIMIT, the index writer.
         assert_eq!(t.parse_threads, Some(7));
         assert_eq!((t.duck_threads, t.memory_limit_mb), (Some(4), Some(192)));
-        assert_eq!((t.index_heap_mb, t.index_threads), (Some(64), Some(2)));
+        assert_eq!((t.index_heap_mb, t.index_threads), (Some(448), Some(7)));
         assert_eq!((t.allocator_flush_mb, t.allocator_background_threads), (Some(32), Some(true)));
         assert_eq!((t.spill_dir, t.max_spill_mb, t.plugin_cpu_percent), (None, None, None));
         let l = worker_launch(&d, 8);
@@ -115,13 +129,43 @@ mod tests {
     }
 
     #[test]
+    fn the_index_writer_gets_the_usable_cores_within_the_import_memory() {
+        let d = PerformanceSettings::default();
+        // Auto: the usable cores (one left free), at most as many 64 MB heaps as fit in the 768 MB import memory.
+        let t = store_tuning(&d, 14);
+        assert_eq!((t.index_threads, t.index_heap_mb), (Some(12), Some(768)), "13 usable, 12 heaps fit");
+        let t = store_tuning(&d, 8);
+        assert_eq!((t.index_threads, t.index_heap_mb), (Some(7), Some(448)));
+        assert_eq!(store_tuning(&d, 1).index_threads, Some(1), "a single core still indexes");
+        // A bigger heap per thread: fewer threads.
+        let big = PerformanceSettings {
+            index_heap_per_thread_mb: 256,
+            ..d.clone()
+        };
+        assert_eq!((index_threads(&big, 14), index_heap_mb(&big, 14)), (3, 768));
+        // A heap bigger than the whole import memory: one thread with that heap.
+        let huge = PerformanceSettings {
+            index_heap_per_thread_mb: 1024,
+            ..d.clone()
+        };
+        assert_eq!((index_threads(&huge, 14), index_heap_mb(&huge, 14)), (1, 1024));
+        // An explicit count wins, within the usable cores.
+        let four = PerformanceSettings {
+            index_writer_threads: 4,
+            ..d.clone()
+        };
+        assert_eq!((index_threads(&four, 14), index_heap_mb(&four, 14)), (4, 256));
+        assert_eq!(index_threads(&four, 3), 2, "3 cores, one left free");
+    }
+
+    #[test]
     fn budgets_and_cores_size_the_knobs() {
         let s = PerformanceSettings {
             import_budget_mb: 384,
             query_budget_mb: 236,
             leave_cores_free: 2,
             query_threads: 8,
-            index_threads: 4,
+            index_writer_threads: 4,
             ..PerformanceSettings::default()
         };
         // 384 MB: 4 parse threads; 4 cores minus 2 free: 2.
@@ -129,7 +173,7 @@ mod tests {
         assert_eq!(parse_threads(&s, 4), 2);
         let t = store_tuning(&s, 4);
         assert_eq!((t.duck_threads, t.index_threads, t.memory_limit_mb), (Some(2), Some(2), Some(128)));
-        assert_eq!(t.index_heap_mb, Some(32));
+        assert_eq!(t.index_heap_mb, Some(128), "2 threads of 64 MB");
         // A single core with one left free still gets a thread.
         assert_eq!(usable_cores(&s, 1), 1);
         // Explicit values win.

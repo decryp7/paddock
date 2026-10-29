@@ -7,6 +7,8 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ### Changed
 
+- **Search:** The word-search index is built with every core but the ones left free (at background priority, so Debrief stays responsive), as many threads as fit in the import memory, instead of two. Settings ▸ Performance ▸ Search index threads (0 is Auto, the default) and Search index memory per thread (64 MB by default) set them; a value you chose for the old Search index threads setting is not kept
+
 - **Database engine:** Debrief now runs on DuckDB 2.0. Searches for text in messages use about half the processor time and queries need less memory. The database of an existing project keeps its format, and a new project is written in a format the previous Debrief can still open. A project saved by a newer Debrief than yours now says so and asks you to update, instead of showing a database error
 - **SQL console:** DuckDB 2.0 changed some SQL rules that affect your own queries: `~` and `!~` match anywhere in the text (a partial match), `!` binds tighter than other operators, `X'...'` and `B'...'` are binary and bit-string literals, integer division and remainder by zero are errors, and `SHOW name` prints a setting when no table has that name
 - **macOS:** Debrief now supports Apple silicon Macs only (DuckDB drops Intel Macs in 2.1 and Debrief follows it). Intel Macs can keep using Debrief 1.1.1, which no longer receives updates
