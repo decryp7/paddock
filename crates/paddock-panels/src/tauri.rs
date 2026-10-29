@@ -102,6 +102,26 @@ pub struct PanelsBuilder {
     pointer: Arc<dyn Pointer>,
 }
 
+/// The default mouse button source: the OS in an app; in tests and on the mock runtime (other crates' tests) one that
+/// cannot tell, so no test ever reads the user's mouse (rule 7).
+fn default_pointer() -> Arc<dyn Pointer> {
+    #[cfg(any(test, feature = "mock-runtime"))]
+    return Arc::new(CannotTell);
+    #[cfg(not(any(test, feature = "mock-runtime")))]
+    return Arc::new(native::OsPointer);
+}
+
+/// A mouse button source that cannot tell (as on Linux): the default in tests.
+#[cfg(any(test, feature = "mock-runtime"))]
+struct CannotTell;
+
+#[cfg(any(test, feature = "mock-runtime"))]
+impl Pointer for CannotTell {
+    fn primary_button_down(&self) -> Option<bool> {
+        None
+    }
+}
+
 /// Where the state of the primary mouse button comes from: the OS by default, a scripted source in tests (which never
 /// read the user's mouse, rule 7).
 pub trait Pointer: Send + Sync {
@@ -163,7 +183,7 @@ impl Panels {
         PanelsBuilder {
             route: DEFAULT_ROUTE.to_string(),
             bounds_file: None,
-            pointer: Arc::new(native::OsPointer),
+            pointer: default_pointer(),
         }
     }
 
