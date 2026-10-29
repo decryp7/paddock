@@ -39,10 +39,29 @@ pub const SEGMENTS_DIR: &str = "segments";
 const TMP: &str = "tmp";
 
 fn props() -> WriterProperties {
-    WriterProperties::builder()
-        .set_compression(Compression::ZSTD(ZstdLevel::default()))
-        .set_max_row_group_row_count(Some(ROW_GROUP_ROWS))
-        .build()
+    // Experiment knobs (DEBRIEF_EXP_*), measured in ADR 0014's import tuning; unset means the shipped values.
+    let compression = match std::env::var("DEBRIEF_EXP_COMPRESSION").as_deref() {
+        Ok("none") => Compression::UNCOMPRESSED,
+        Ok("snappy") => Compression::SNAPPY,
+        Ok("lz4") => Compression::LZ4_RAW,
+        Ok(z) if z.starts_with("zstd") => z[4..]
+            .parse::<i32>()
+            .ok()
+            .and_then(|l| ZstdLevel::try_new(l).ok())
+            .map_or(Compression::ZSTD(ZstdLevel::default()), Compression::ZSTD),
+        _ => Compression::ZSTD(ZstdLevel::default()),
+    };
+    let rows = std::env::var("DEBRIEF_EXP_ROWGROUP")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(ROW_GROUP_ROWS);
+    let mut b = WriterProperties::builder()
+        .set_compression(compression)
+        .set_max_row_group_row_count(Some(rows));
+    if std::env::var("DEBRIEF_EXP_DICT").as_deref() == Ok("0") {
+        b = b.set_dictionary_enabled(false);
+    }
+    b.build()
 }
 
 /// The file name of the segment starting at `first_id` (`generation` tells rewritten segments apart).

@@ -26,6 +26,12 @@ const EXIT_WAIT: Duration = Duration::from_secs(2);
 /// runtime need, and the coverage profile path so instrumented test builds can report. Nothing else of
 /// Debrief's environment (tokens, proxies, user variables) reaches a child unless it is named.
 pub const KEPT_ENV: &[&str] = &[
+    // EXPERIMENT (import tuning; not to be committed): the knobs the import benchmark sets.
+    "DEBRIEF_EXP_THREADS",
+    "DEBRIEF_EXP_CHUNK_MB",
+    "DEBRIEF_EXP_COMPRESSION",
+    "DEBRIEF_EXP_ROWGROUP",
+    "DEBRIEF_EXP_DICT",
     "PATH",
     "SystemRoot",
     "SYSTEMROOT",

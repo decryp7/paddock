@@ -28,6 +28,9 @@ use std::path::{Path, PathBuf};
 /// [`MAX_DEFAULT_THREADS`] so the worker stays within its memory budget (each parse thread holds a chunk
 /// buffer, a batch and its store writer's buffers). Settings can raise it.
 pub fn default_threads() -> usize {
+    if let Some(n) = std::env::var("DEBRIEF_EXP_THREADS").ok().and_then(|v| v.parse::<usize>().ok()) {
+        return n.max(1);
+    }
     crate::threads::threads(crate::threads::WorkKind::Cpu, None).clamp(1, MAX_DEFAULT_THREADS)
 }
 
@@ -47,7 +50,10 @@ impl Default for ParallelOptions {
     fn default() -> Self {
         ParallelOptions {
             threads: default_threads(),
-            chunk_target: CHUNK_TARGET,
+            chunk_target: std::env::var("DEBRIEF_EXP_CHUNK_MB")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .map_or(CHUNK_TARGET, |mb| mb << 20),
         }
     }
 }
