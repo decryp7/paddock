@@ -84,6 +84,14 @@ fn runtime(args: &[&str]) -> WorkerRuntime {
     WorkerRuntime::new(config(args), Box::new(big_machine))
 }
 
+/// A runtime whose worker is never taken for stalled: for tests of crashes, whose restart on a loaded machine can take
+/// longer than the short stall timeout of `config` and would turn a crash into "stopped responding".
+fn runtime_without_stalls(args: &[&str]) -> WorkerRuntime {
+    let mut c = config(args);
+    c.stall_timeout = Duration::from_secs(60);
+    WorkerRuntime::new(c, Box::new(big_machine))
+}
+
 fn ask(p: &dyn LlmProvider, text: &str) -> debrief_ai::Result<debrief_ai::llm::ChatResponse> {
     p.chat(
         &ChatRequest {
@@ -202,7 +210,7 @@ fn a_hang_times_out_and_the_worker_is_killed() {
 
 #[test]
 fn three_crashes_quarantine_the_ai_for_the_session() {
-    let rt = runtime(&["--crash-on-chat"]);
+    let rt = runtime_without_stalls(&["--crash-on-chat"]);
     let loaded = rt.load(&model(GpuMode::Cpu).req).unwrap();
     for i in 1..=2 {
         let e = ask(loaded.provider.as_ref(), "x").unwrap_err();
