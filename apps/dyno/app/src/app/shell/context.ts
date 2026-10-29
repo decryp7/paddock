@@ -41,9 +41,8 @@ export interface DynoContext {
   /** Diagnostics: saves the bundle. */
   saveDiagnostics(): Promise<void>;
   canSaveDiagnostics(): boolean;
-  /** Alarms: opens the new-rule window. */
+  /** Alarms: opens the new-rule window (reads the settings first when they are not loaded yet). */
   addAlarmRule(): Promise<void>;
-  canAddAlarmRule(): boolean;
 }
 
 const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
@@ -72,46 +71,47 @@ export const dynoContext: AppContextFactory<DynoContext> = () => {
       }
     },
     refreshHistory: async () => {
-      await pages.go('dy.dashboard');
+      await pages.goAndFocus('dy.dashboard');
       await history.load();
     },
     canRefreshHistory: () => !history.loading(),
     rescanIssues: async () => {
-      await pages.go('dy.issues');
+      await pages.goAndFocus('dy.issues');
       await issues.rescan();
     },
     canRescanIssues: () => !issues.rescanning(),
     exportIssues: async () => {
-      await pages.go('dy.issues');
+      await pages.goAndFocus('dy.issues');
       if (!issues.overview()) await issues.load();
       await issues.exportForDebrief();
     },
     canExportIssues: () => !issues.exporting(),
     checkBackup: async () => {
-      await pages.go('dy.backup');
+      await pages.goAndFocus('dy.backup');
       // The page's button waits for the first report; so does the command.
       if (!backup.report()) await backup.load();
       await backup.check();
     },
     canCheckBackup: () => !backup.busy(),
     runWhySlow: async () => {
-      await pages.go('dy.why-slow');
+      await pages.goAndFocus('dy.why-slow');
       await diagnosis.run();
     },
     canRunWhySlow: () => !diagnosis.running(),
     exportReport: async () => {
-      await pages.go('dy.reports');
+      await pages.goAndFocus('dy.reports');
       if (!reports.report()) await reports.load();
       await reports.export('markdown');
     },
     canExportReport: () => reports.exporting() === null,
     saveDiagnostics: async () => {
-      await pages.go('dy.diagnostics');
+      await pages.goAndFocus('dy.diagnostics');
       await diagnostics.save();
     },
     canSaveDiagnostics: () => !diagnostics.saving(),
     addAlarmRule: async () => {
-      await pages.go('dy.alarms');
+      await pages.goAndFocus('dy.alarms');
+      if (!settings.settings()) await settings.load();
       const current = settings.settings();
       if (!current) return;
       const outcome = await dialogs.open<true>(ALERT_RULE_DIALOG_ID, {
@@ -120,6 +120,5 @@ export const dynoContext: AppContextFactory<DynoContext> = () => {
       }).closed;
       if (outcome.kind === 'answered') await settings.load();
     },
-    canAddAlarmRule: () => settings.settings() !== null,
   };
 };

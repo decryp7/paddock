@@ -223,6 +223,8 @@ export class PdCommandPalette {
    */
   protected onEarlyKey(e: KeyboardEvent): void {
     if (!this.store.isOpen() || this.inputFocused || e.defaultPrevented || e.isComposing) return;
+    // A key on another part of the palette (a row's button, Retry) is that control's own.
+    if (e.target instanceof Element && e.target.closest('[data-testid="palette"]') && e.target !== this.input()?.nativeElement) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       this.close();

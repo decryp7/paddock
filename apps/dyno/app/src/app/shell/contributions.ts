@@ -154,7 +154,6 @@ export const CONTRIBUTIONS: ContributionBatch<DynoContext> = {
       id: 'dy.add-alarm-rule',
       title: msg('dy.add-alarm-rule', 'Add rule…'),
       category: msg('dy.category.alarms', 'Alarms'),
-      enabled: (ctx) => ctx.canAddAlarmRule(),
       run: (ctx) => ctx.addAlarmRule(),
     }),
   ],

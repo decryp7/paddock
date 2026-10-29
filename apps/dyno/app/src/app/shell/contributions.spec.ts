@@ -97,17 +97,33 @@ describe('Dyno contributions', () => {
     expect(exportReport).toHaveBeenCalledWith('markdown');
   });
 
-  it('open the new-rule window on the alarms page once the settings are loaded', async () => {
+  it('open the new-rule window on the alarms page, reading the settings first when they are missing', async () => {
     const commands = TestBed.inject(CommandService);
     const go = vi.spyOn(TestBed.inject(ShellPages), 'go').mockResolvedValue(true);
     const open = vi.spyOn(TestBed.inject(DialogService), 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'dismissed' }) } as never);
+    const settings = TestBed.inject(SettingsStore);
+    const load = vi.spyOn(settings, 'load');
     await TestBed.inject(ShellContextHost).load();
-    expect(commands.isEnabled(commands.find('dy.add-alarm-rule')!)).toBe(false);
-    await TestBed.inject(SettingsStore).load();
-    expect(commands.isEnabled(commands.find('dy.add-alarm-rule')!)).toBe(true);
+    expect(settings.settings()).toBeNull();
     expect(await commands.run('dy.add-alarm-rule')).toBe(true);
+    expect(load).toHaveBeenCalledTimes(1);
     expect(go).toHaveBeenCalledWith('dy.alarms');
     expect(open).toHaveBeenCalledWith('dy.alert-rule', expect.objectContaining({ inputs: expect.objectContaining({ rule: null }) }));
+    // Loaded already: it is not read again.
+    expect(await commands.run('dy.add-alarm-rule')).toBe(true);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('leave the focus on the page when the page was already shown (no navigation moves it)', async () => {
+    const main = document.createElement('main');
+    main.id = 'pd-main';
+    main.tabIndex = -1;
+    document.body.append(main);
+    vi.spyOn(TestBed.inject(ShellPages), 'go').mockResolvedValue(true);
+    await TestBed.inject(ShellContextHost).load();
+    expect(await TestBed.inject(CommandService).run('dy.run-why-slow')).toBe(true);
+    expect(document.activeElement).toBe(main);
+    main.remove();
   });
 
   it('turn a command off while its page’s button would be off (no second run of a running check)', async () => {

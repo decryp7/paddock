@@ -1,4 +1,3 @@
-import { DOCUMENT } from '@angular/common';
 import { EnvironmentProviders, inject, Injector, makeEnvironmentProviders } from '@angular/core';
 import { msg } from '@decryp7/paddock-ui/shell';
 import { ShellPages } from '@decryp7/paddock-ui/shell/pages';
@@ -56,8 +55,7 @@ export function providePagesPalette(options: PagesPaletteOptions = {}): Environm
           },
           accept: async (item) => {
             // The palette closes under the focus: land on the page (also when it is the one shown), where a screen reader starts.
-            await injector.get(ShellPages).go(item.id);
-            injector.get(DOCUMENT).getElementById('pd-main')?.focus({ preventScroll: true });
+            await injector.get(ShellPages).goAndFocus(item.id);
           },
         }),
       ],

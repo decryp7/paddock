@@ -405,6 +405,23 @@ describe('PdCommandPalette', () => {
     expect(store.isOpen()).toBe(false);
   });
 
+  it('leaves a key on another control of the palette to that control', async () => {
+    const { store } = setup();
+    const { fixture, element } = await render(PdCommandPalette);
+    store.open();
+    await settle(fixture);
+    // The input is not the focus (it is re-opened without it): a key on a row or button of the palette is theirs.
+    store.setQuery('>zzzzzz');
+    await settle(fixture);
+    const control = document.createElement('button');
+    element.querySelector('[data-testid="palette"]')!.append(control);
+    (document.activeElement as HTMLElement).blur();
+    const e = new KeyboardEvent('keydown', { key: 'x', cancelable: true, bubbles: true });
+    control.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(false);
+    expect(store.query()).toBe('>zzzzzz');
+  });
+
   it('holds an Enter pressed early until the input is there, then accepts the row of what was typed', async () => {
     const { store } = setup();
     const { fixture } = await render(PdCommandPalette);

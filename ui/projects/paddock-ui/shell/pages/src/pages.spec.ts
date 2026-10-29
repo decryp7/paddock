@@ -412,6 +412,21 @@ describe('pd-shell-frame with provideShellPages', () => {
     expect(warn).toHaveBeenCalledWith('[paddock-pages] there is no page t.none');
   });
 
+  it('goAndFocus shows the page and focuses the page region, also when the page is already shown', async () => {
+    const { router, el } = await boot();
+    document.body.append(el);
+    const pages = TestBed.inject(ShellPages);
+    expect(await pages.goAndFocus('t.about')).toBe(true);
+    expect(document.activeElement).toBe(el.querySelector('#pd-main'));
+    (document.activeElement as HTMLElement).blur();
+    // The same page again: no navigation happens, the focus still lands.
+    await pages.goAndFocus('t.about');
+    expect(router.url).toBe('/about');
+    expect(document.activeElement).toBe(el.querySelector('#pd-main'));
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await pages.goAndFocus('t.none')).toBe(false);
+  });
+
   it('the sidebar button collapses to the rail and back, and the rail names its links', async () => {
     const { el, fixture, frame } = await boot();
     const toggle = el.querySelector<HTMLButtonElement>('[data-testid="sidebar-toggle"]') as HTMLButtonElement;
