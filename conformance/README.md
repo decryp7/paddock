@@ -68,7 +68,13 @@ Writes `THIRD_PARTY_NOTICES.md` (Rust licences from `cargo about generate` with 
 dependencies from `package-lock.json` and `node_modules`), deterministic. `--check` fails when the committed file is stale;
 a package none of whose licence options is permissive fails both modes. The allowed licences are one list
 (`src/notices/licences.mjs`), equal to `templates/repo/deny.toml` and `about.toml` (a test keeps them equal). Install first:
-`cargo install cargo-about --locked --features cli`, `npm ci --omit=dev --ignore-scripts`.
+`cargo install cargo-about --version 0.9.2 --locked --features cli`, `npm ci --omit=dev --ignore-scripts`.
+
+In the monorepo an app states its facts once, in the `notices` block of `apps/<app>/paddock.ci.json`
+(`{ "name", "manifests": [...], "npm": "app", "out": ["app/src-tauri/resources"] }`, paths relative to the app), and runs
+`scripts/notices.sh <app> [--check]` (`paddock-notices --config ...`). `npm` may be a workspace of the root lock: only its
+production closure is listed. Without an `about.toml` of its own an app uses `templates/repo/about.toml`. CI (`app-gates`) runs
+the `--check` on the Linux leg of every app with the block.
 
 ## Configuration
 
