@@ -494,15 +494,15 @@ describe('mock extras and backup health', () => {
     expect(await b.saveInventoryReport('markdown')).toMatchObject({ path: expect.stringMatching(/\.md$/) });
     expect(await b.saveInventoryReport('json')).toMatchObject({ path: expect.stringMatching(/\.json$/) });
     expect(b.savedInventories).toEqual(['markdown', 'json']);
-    expect(await b.pickFolder()).toBe('/Users/sam/Projects');
+    expect(await b.pickFolder()).toBe('/Users/alex/Projects');
     expect(b.pickedFolders).toBe(1);
   });
 
   it('findFiles job: modes, the size floor and a folder that must be absolute', async () => {
     const b = fresh();
     const find = async (query: FinderQuery) => ((await runJob(b, { findFiles: { query } })) as { finder: FinderResult }).finder;
-    const both = await find({ folder: '/Users/sam/Projects/', mode: 'both', minBytes: 50 * 1024 ** 2 });
-    expect(both.folder).toBe('/Users/sam/Projects');
+    const both = await find({ folder: '/Users/alex/Projects/', mode: 'both', minBytes: 50 * 1024 ** 2 });
+    expect(both.folder).toBe('/Users/alex/Projects');
     expect(both.large).toHaveLength(8);
     expect(both.duplicates).toHaveLength(3);
     expect(both.limit).toBeNull();

@@ -84,7 +84,7 @@ export function mockThrottling(os: MockOs, now: number, scenario?: HardwareScena
       headline: 'Slowed down by heat: 44% slower',
       explanation:
         'The CPU is giving up about 44% of its speed because the system reports a heat limit. Free the vents, move the machine off soft surfaces, and check for a fan that has stopped or is clogged with dust.',
-      evidence: [ev('Load', '96%'), ev('Clock', '1780 MHz of 3200 MHz'), ev('Temperature', '99 °C'), ev('Limit set by the system', '55% of full speed')],
+      evidence: [ev('Load', '96%'), ev('Clock', '1780 MHz of 4500 MHz'), ev('Temperature', '99 °C'), ev('Limit set by the system', '55% of full speed')],
     };
     return { at: now, reading, current, episodes: past, minutes30d: total([...past, current]), inputs: inputs(os, sc) };
   }
@@ -111,7 +111,7 @@ export function mockThrottling(os: MockOs, now: number, scenario?: HardwareScena
       confidence: 'high',
       headline: 'Running at full speed',
       explanation: 'The CPU is busy and its clock is where it should be.',
-      evidence: [ev('Load', '78%'), ev('Clock', '3180 MHz of 3200 MHz'), ev('Temperature', '71 °C')],
+      evidence: [ev('Load', '78%'), ev('Clock', '4400 MHz of 4500 MHz'), ev('Temperature', '71 °C')],
     },
     current: null,
     episodes: past,

@@ -34,7 +34,7 @@ describe('network model', () => {
   });
 
   it('states are sentence case and only the meaningful ones are coloured', () => {
-    expect(stateView('established')).toEqual({ text: 'Established', tone: 'ok' });
+    expect(stateView('established')).toEqual({ text: 'Established', tone: null });
     expect(stateView('timeWait')).toEqual({ text: 'Time wait', tone: null });
     expect(stateView('closeWait').tone).toBe('warn');
     expect(stateView('synSent').text).toBe('Connecting');

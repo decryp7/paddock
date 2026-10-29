@@ -78,7 +78,7 @@ function readCollapsed(): Set<string> {
       <dy-async [loaded]="!!store.snapshot()" [error]="store.error()" what="network" [rows]="5" (retry)="store.load()">
         @if (store.snapshot(); as s) {
           @if (s.unknownOwners > 0 && !noteDismissed()) {
-            <p class="note"><dy-icon name="info" /> <span>{{ s.unknownOwners }} {{ s.unknownOwners === 1 ? 'socket has' : 'sockets have' }} an owner the OS will not name without elevated rights.</span> <button type="button" matIconButton matTooltip="Dismiss this note" aria-label="Dismiss this note" (click)="noteDismissed.set(true)"><dy-icon name="close" /></button></p>
+            <p class="note"><dy-icon name="info" /> <span>{{ s.unknownOwners }} {{ s.unknownOwners === 1 ? 'socket has' : 'sockets have' }} an owner the OS will not name without administrator rights.</span> <button type="button" matIconButton matTooltip="Dismiss this note" aria-label="Dismiss this note" (click)="noteDismissed.set(true)"><dy-icon name="close" /></button></p>
           }
           @if (s.truncated > 0) {
             <p class="note"><dy-icon name="info" /> {{ s.truncated }} more rows are hidden. Narrow the search.</p>

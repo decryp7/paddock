@@ -7,7 +7,7 @@ import { PdShellFrame, provideShellPages } from '@decryp7/paddock-ui/shell/pages
 import { provideContributions, provideShellContext, provideShellVersionCheck } from '@decryp7/paddock-ui/shell';
 import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
 import { tauriDialogIo } from '@decryp7/paddock-ui/shell/dialogs';
-import { provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
+import { MENU_MODE, provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
 import { provideShellSettings, SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { MockStartupBackend, reportBootstrapFailure, TauriStartupBackend, windowReady } from '@decryp7/paddock-ui/shell/startup';
 import { LANGUAGE_CONFIG, LocalStorageLanguageStorage } from '@decryp7/paddock-ui/shell/i18n';
@@ -61,6 +61,8 @@ export function bootMainWindow(): Promise<unknown> {
       provideShellAbout({ about: aboutBackend, updates: updatesBackend, main: true, ready: windowReady }),
       provideContributions(SETTINGS_CONTRIBUTIONS),
       provideShellSettings({ backend: settingsBackend, appearance: { gate: windowReady } }),
+      // The browser build shows the macOS desktop app's menu mode (native menu bar: no in-window menu, room for the window buttons) on `?menu=native`.
+      ...(!ipc && new URLSearchParams(window.location.search).get('menu') === 'native' ? [{ provide: MENU_MODE, useValue: 'native' as const }] : []),
       provideSubmenus(),
       // Mod+Shift+P lists the commands, Mod+P goes to a page (the shared palette on the pages frame).
       providePagesPalette({ commonCommands: ['pd.settings.open', 'dy.refresh-history', 'dy.rescan-issues', 'dy.capture'] }),

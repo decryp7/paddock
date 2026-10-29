@@ -66,7 +66,7 @@ describe('dy-alarms-page, Active', () => {
     const { f, el } = render();
     await settle(f);
     const shelved = arows(el).find((r) => text(r).includes('rustc has used'))!;
-    expect(shelved.querySelector('.sfx')?.textContent).toMatch(/^Shelved until \d\d:\d\d$/);
+    expect(shelved.querySelector('.sfx')).toBeNull();
     expect(el.querySelectorAll('.badge, .pill')).toHaveLength(0);
   });
 
@@ -97,13 +97,13 @@ describe('dy-alarms-page, Active', () => {
     await settle(f);
     button(arows(el)[1]!, 'Shelve for 1 hour')!.click();
     await settle(f);
-    expect(text(arows(el)[1]!)).toContain('Shelved until');
+    expect(text(arows(el)[1]!)).not.toContain('Shelved until');
     button(arows(el)[1]!, 'More actions')!.click();
     await settle(f);
     expect(['Shelve for 1 hour', 'Shelve until tomorrow', 'Shelve until restart'].every((l) => menuItem(l))).toBe(true);
     menuItem('Shelve until restart')!.click();
     await settle(f);
-    expect(text(arows(el)[1]!)).toContain('Shelved until restart');
+    expect(text(arows(el)[1]!)).not.toContain('Shelved until restart');
     expect(mock.isShelved((await mock.alarms({ states: [], minSeverity: null, rule: null, includeShelved: true, limit: 10 })).find((a) => a.id === 7)!)).toBe(true);
   });
 

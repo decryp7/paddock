@@ -1,3 +1,5 @@
+import { PlatformService } from '../../core/platform';
+import { osTerms, niceText } from '../../shared/os-terms';
 import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
@@ -68,11 +70,13 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                     <span class="badge" [attr.data-tone]="sig().tone">@if (sig().verified) {<dy-icon name="shield-check" />} {{ sig().text }}</span>
                   </dd>
                   <dt>Started</dt><dd class="num">{{ show(x.process.started, since) }}</dd>
-                  <dt>Priority</dt><dd>{{ x.priority ? priorityLabel(x.priority) : 'Not available on this computer' }}</dd>
-                  <dt>Cores</dt><dd class="num">{{ x.affinity === null ? 'Not available on this computer' : affinity(x.affinity) }}</dd>
-                  <dt>Efficiency mode</dt><dd>{{ x.efficiencyMode === null ? 'Not available on this computer' : x.efficiencyMode ? 'On' : 'Off' }}</dd>
+                  <dt>{{ terms.hasEfficiencyMode ? 'Priority' : 'Nice value' }}</dt><dd>{{ x.priority ? (terms.hasEfficiencyMode ? priorityLabel(x.priority) : niceOf(x.priority)) : 'Not available on this computer' }}</dd>
+                  @if (terms.hasEfficiencyMode) {
+                    <dt>Cores</dt><dd class="num">{{ x.affinity === null ? 'Not available on this computer' : affinity(x.affinity) }}</dd>
+                    <dt>Efficiency mode</dt><dd>{{ x.efficiencyMode === null ? 'Not available on this computer' : x.efficiencyMode ? 'On' : 'Off' }}</dd>
+                  }
                   <dt>Threads</dt><dd class="num">{{ x.threads === null ? '—' : count(x.threads) }}</dd>
-                  <dt>Handles</dt><dd class="num">{{ x.handles === null ? '—' : count(x.handles) }}</dd>
+                  <dt>{{ terms.handles }}</dt><dd class="num">{{ x.handles === null ? '—' : count(x.handles) }}</dd>
                   <dt>Starts with</dt><dd>{{ x.startupSource ?? 'Not a startup item' }}</dd>
                   <dt>Now</dt><dd class="num">{{ show(x.process.cpu, pct) }} CPU · {{ show(x.process.memory, bytes) }}</dd>
                 </dl>
@@ -185,6 +189,8 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
   `,
 })
 export class ProcessDetailsPanel {
+  protected readonly terms = osTerms(inject(PlatformService).platform);
+  protected readonly niceOf = (p: keyof typeof PRIORITY_LABEL) => niceText(p, PRIORITY_LABEL[p]);
   protected readonly store = inject(ProcessesStore);
   private readonly live = inject(LiveStore);
   protected readonly tab = signal<Tab>('overview');

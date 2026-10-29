@@ -1,3 +1,5 @@
+import { PlatformService } from '../../core/platform';
+import { osTerms } from '../../shared/os-terms';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import type { Cause, Diagnosis } from '../../core/api.types';
@@ -92,7 +94,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
               <span class="spacer"></span>
               @for (h of c.hints; track h.text) {
                 @if (hintPath(h); as path) {
-                  <a matButton="outlined" [routerLink]="path">{{ h.text }}</a>
+                  <a matButton="outlined" [routerLink]="path">{{ hintText(h) }}</a>
                 } @else {
                   <span class="wait">{{ h.text }}</span>
                 }
@@ -167,6 +169,9 @@ import { FullTextTip } from '../../shared/full-text-tip';
   `,
 })
 export class WhySlowPage implements OnInit {
+  private readonly terms = osTerms(inject(PlatformService).platform);
+  /** A hint's label; the task-manager hint names this OS's own viewer. */
+  protected readonly hintText = (h: { text: string; link?: unknown }): string => (h.link === 'taskManager' ? `Open ${this.terms.taskManager}` : h.text);
   protected readonly store = inject(DiagnosisStore);
   private readonly notifier = inject(Notifier);
 

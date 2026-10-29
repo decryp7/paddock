@@ -55,7 +55,7 @@ const STATE_TEXT: Record<SocketState, string> = {
 
 /** Sentence-case state with a dot tone: only the meaningful ones are coloured. */
 export function stateView(s: SocketState): { text: string; tone: 'ok' | 'warn' | null } {
-  return { text: STATE_TEXT[s], tone: s === 'established' ? 'ok' : s === 'closeWait' ? 'warn' : null };
+  return { text: STATE_TEXT[s], tone: s === 'closeWait' ? 'warn' : null };
 }
 
 /** `TCP · v4`. */

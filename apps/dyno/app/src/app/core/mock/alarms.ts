@@ -74,7 +74,7 @@ export function demoHistory(alarms: readonly Alarm[]): AlarmChange[] {
 /** Ten minutes of one-second samples ending at `at`, with a CPU burst in the middle (a build) so a capture has a story. */
 export function recorderSamples(at: number, seconds = 600): RecorderSample[] {
   const out: RecorderSample[] = [];
-  const total = 24 * GB;
+  const total = 48 * GB;
   for (let i = 0; i < seconds; i++) {
     const t = (at / 1000) - (seconds - i);
     const burst = i > seconds * 0.45 && i < seconds * 0.8 ? 1 : 0;

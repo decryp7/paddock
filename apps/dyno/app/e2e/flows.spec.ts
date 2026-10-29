@@ -752,7 +752,7 @@ test.describe('extras', () => {
     await page.goto(url('/extras', '').replace('#/extras', '#/extras?tab=inventory'));
     await page.getByRole('button', { name: /Export report/ }).click();
     await page.getByRole('menuitem', { name: /Markdown/ }).click();
-    await expect(page.getByText('/Users/sam/Documents/dyno-inventory.md')).toBeVisible();
+    await expect(page.getByText('/Users/alex/Documents/dyno-inventory.md')).toBeVisible();
   });
 
   test('Maintenance windows can be edited and saved', async ({ page }) => {

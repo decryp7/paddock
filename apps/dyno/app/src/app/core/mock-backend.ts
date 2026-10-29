@@ -1,3 +1,4 @@
+import { osTerms } from '../shared/os-terms';
 import type { SuJobPhase, SuJobSnapshot, SuJobState } from '@decryp7/paddock-ui';
 import type { Measured } from './api.types';
 import { readValue } from './measured';
@@ -929,8 +930,8 @@ export class MockBackend implements DynoBackend {
 
   private runs(): BenchRun[] {
     return (this.benchRuns ??= [
-      mockRun('r3', this.start - 2 * 60 * MIN, 'Power mode: High performance (after)', 1.12, { group: 'Power mode: High performance', phase: 'after' }, this.profile.cores),
-      mockRun('r2', this.start - 3 * 60 * MIN, 'Power mode: High performance (before)', 1, { group: 'Power mode: High performance', phase: 'before' }, this.profile.cores),
+      mockRun('r3', this.start - 2 * 60 * MIN, `${osTerms(this.profile.os).powerExample} (after)`, 1.12, { group: osTerms(this.profile.os).powerExample, phase: 'after' }, this.profile.cores),
+      mockRun('r2', this.start - 3 * 60 * MIN, `${osTerms(this.profile.os).powerExample} (before)`, 1, { group: osTerms(this.profile.os).powerExample, phase: 'before' }, this.profile.cores),
       mockRun('r1', this.start - 2 * DAY, 'Baseline', 0.99, { load: { cpuPercent: 31, memoryPercent: 61, onBattery: false } }, this.profile.cores),
     ]);
   }
@@ -1018,7 +1019,7 @@ export class MockBackend implements DynoBackend {
         alerts: 2,
         highlights: [
           'Your computer averaged 17% CPU and 58% memory, peaking at 99% CPU.',
-          'The VirtualBox service crashed 6 times today: check its virtual machine settings.',
+          'The VirtualBox service crashed 6 times this week: check its virtual machine settings.',
           'Sign-in takes 9 s longer than a month ago: 2 new startup apps.',
         ],
         scoreTrend: [66, 68, 71, 70, 72, 74].map((score, i) => ({ at: from + i * 28 * 60 * MIN, score })),
@@ -1143,14 +1144,14 @@ export class MockBackend implements DynoBackend {
   saveInventoryReport(format: InventoryFormat): Promise<SavedInventory | null> {
     return this.reply('saveInventoryReport', () => {
       this.savedInventories.push(format);
-      return { path: `/Users/sam/Documents/dyno-inventory.${format === 'markdown' ? 'md' : 'json'}`, bytes: 18_204 };
+      return { path: `/Users/alex/Documents/dyno-inventory.${format === 'markdown' ? 'md' : 'json'}`, bytes: 18_204 };
     });
   }
 
   pickFolder(): Promise<string | null> {
     return this.reply('pickFolder', () => {
       this.pickedFolders++;
-      return '/Users/sam/Projects';
+      return '/Users/alex/Projects';
     });
   }
 

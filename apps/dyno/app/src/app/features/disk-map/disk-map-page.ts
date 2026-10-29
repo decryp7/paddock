@@ -565,9 +565,9 @@ export class DiskMapPage implements OnInit {
 
   protected readonly skeletonRows = [1, 2, 3, 4, 5, 6, 7, 8, 9];
   protected readonly groups = VOLUME_GROUPS;
-  /** Everything the folder holds: the rows above the fold, the folded small ones and the files that have no row of their own. */
-  protected folderCount(level: { shown: number; other: { count: number }; loose: { count: number } }): number {
-    return level.shown + level.other.count + level.loose.count;
+  /** The rows a folder's list or table shows: the rows above the fold, the one row for the folded small ones (when it has a size) and the files that have no row of their own. */
+  protected folderCount(level: { shown: number; other: { count: number; bytes: number }; loose: { bytes: number } }): number {
+    return level.shown + (level.other.count > 0 && level.other.bytes > 0 ? 1 : 0) + (level.loose.bytes > 0 ? 1 : 0);
   }
   protected readonly tableColumns = ['name', 'bytes', 'items', 'newestChange', 'share', 'actions'];
   protected readonly viewSegs: SuSegment[] = [{ value: 'chart', label: 'Chart' }, { value: 'table', label: 'Table' }];
