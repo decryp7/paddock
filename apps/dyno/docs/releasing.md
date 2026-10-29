@@ -3,13 +3,11 @@
 A `dyno-v*` tag on `main` runs `.gitea/workflows/dyno-release.yml` (repo root): first the gates (Dyno's legs of `ci.yml`, WebKit e2e included), then the shared `app-release.yml`, whose `bundle` jobs build the installers (Windows NSIS on the
 `windows-latest` host runner, the macOS `.dmg` on the `macos-latest` host runner, and a `.deb` plus AppImage on a Linux
 container), and the `release` job publishes a Gitea release with the installers, release notes (`RELEASE_NOTES.md`, from
-git-cliff) and `latest.json`, the release information Dyno's updater reads. Installers are also built for the nightly run
+git-cliff, or from the CHANGELOG for the first release) and `latest.json`, the release information Dyno's updater reads. Installers are also built for the nightly run
 of `main` and manual runs (`workflow_dispatch`), and are uploaded as workflow artifacts (the v3 artifact actions, which
 Gitea Actions supports).
 
-```sh
-git tag dyno-v0.2.0 && git push origin dyno-v0.2.0
-```
+See *Cutting the release* below for the tag (`dyno-v1.0.0` for the first release).
 
 The version in the tag must match `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml`. Pre-releases are not
 offered to users: updaters read `latest.json` of the *latest* release. The `release` job needs every other job to pass
@@ -45,43 +43,56 @@ folders (never a build directory), the macOS seal must verify, and `dyno-agent` 
   installed. A build without the public key says "Updates are not available in this build" and never checks.
 - `latest.json` is written by the shared `publish-release` action (`conformance/release/`) from the signed installers (`*.sig` next to each); its tests are in `conformance/`.
 
-## One-time set-up: Dyno's own signing key
+## Signing: the family updater key
 
-Dyno needs its **own** key pair; never reuse another product's updater key.
+Dyno signs its updates with the **Paddock family key**, not a key of its own. These secrets live once, in the **paddock**
+repository (`decryp7/paddock`, Settings > Actions > Secrets), and `dyno-release.yml` maps them to the names the shared
+`app-release.yml` reads:
 
-1. Generate it on a trusted machine, with a strong password:
+| Secret in `decryp7/paddock` | Passed as | Value |
+| --- | --- | --- |
+| `PADDOCK_TAURI_SIGNING_PRIVATE_KEY` | `TAURI_SIGNING_PRIVATE_KEY` | the family private key |
+| `PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
+| `PADDOCK_TAURI_UPDATER_PUBKEY` | `TAURI_UPDATER_PUBKEY` | the matching public key |
+| `RELEASE_TOKEN` | `RELEASE_TOKEN` | a Gitea access token with `write:repository`, used to publish the release |
+| `APPLE_SIGNING_IDENTITY` | `APPLE_SIGNING_IDENTITY` | only once there is a Developer ID; empty means ad-hoc |
 
-   ```sh
-   cd app
-   npx tauri signer generate -w ~/.tauri/dyno-updater.key
-   ```
+With the three key secrets set, the bundle jobs build with `createUpdaterArtifacts` and the public key (passed as
+`tauri build --config`). **Without them (forks, pull requests) every build still works**: installers are produced unsigned and
+without update support, and the release job publishes no `latest.json`. The committed `tauri.conf.json` keeps `pubkey` empty,
+so a local `npx tauri build` works without the private key.
 
-2. Set four **repository secrets** in Gitea (Settings > Actions > Secrets) of `decryp7/dyno`:
-
-   | Secret | Value |
-   | --- | --- |
-   | `TAURI_SIGNING_PRIVATE_KEY` | the contents of `dyno-updater.key` |
-   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
-   | `TAURI_UPDATER_PUBKEY` | the contents of `dyno-updater.key.pub` |
-   | `RELEASE_TOKEN` | a Gitea access token with `write:repository` scope, used to publish the release |
-
-   With the first three set, the bundle jobs build with `createUpdaterArtifacts` and the public key (passed as
-   `tauri build --config`). **Without them (forks, pull requests, a fresh repository) every build still works**: installers are
-   produced unsigned and without update support, and the release job publishes no `latest.json`. The committed
-   `tauri.conf.json` keeps `pubkey` empty, so local `npx tauri build` works without the private key.
-
-3. **Back up the private key and its password** (password manager plus an offline copy). Never commit it.
+The key is generated, backed up (password manager plus an offline copy) and rotated for the whole family, never per app and
+never in this app's folder. It is never committed and never in a test VM
+(testing uses throwaway keys, see [testing-manual.md](testing-manual.md#install-and-update-in-a-throwaway-vm)).
 
 **If the private key is lost**, no further update can be signed for the key built into installed copies: users install the
 next version by hand. **If it leaks**, generate a new pair, publish a release signed with the new key, tell users to
 reinstall from the releases page, and revoke the old secrets.
 
-## Before tagging
+## Cutting the release
 
-- `main` is green (all jobs of `build.yml`).
-- `CHANGELOG`/release notes read well: `git cliff --latest` (Conventional Commits; no attribution trailers).
-- The overhead numbers in `docs/architecture.md` were re-measured on a quiet machine for this release (roadmap G13).
-- `docs/screenshots` match the built screens (`npm run screenshots` in `app/`).
+1. Everything below under *Before tagging* is done, and `main` is green.
+2. Bump the version in `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml` (and the lock files) in a normal change.
+   Give the `CHANGELOG.md` section its date.
+3. Tag the commit that carries them, from `main`, and push the tag:
+
+   ```sh
+   git tag dyno-v1.0.0 && git push origin dyno-v1.0.0
+   ```
+
+   Release **only from a tag, in CI** (ER-15): never build or upload release installers from a workstation. A local build
+   is for trying and is never published. **Never tag a commit whose message has `[skip ci]`** (ER-16): the tag would
+   have no CI run to build from.
+4. Watch the `dyno-release` run: the gates, then the three bundles, then the release job. It publishes the Gitea release
+   (installers, `.sig` files, release notes) and writes `latest.json` to the release and to the moving `dyno-latest`
+   release that installed copies read.
+
+**Release notes.** `app-release.yml` normally asks git-cliff for the commits since the previous `dyno-v*` tag under
+`apps/dyno/**`, `crates/**` and `ui/**`. The first release has no earlier tag, and the shared paths reach back through the
+whole monorepo (hundreds of commits that are not Dyno's), so `dyno-release.yml` sets `first-release-changelog:
+apps/dyno/CHANGELOG.md`: while no other `dyno-v*` tag exists, the notes are that file's `## [<version>]` section, and the run
+fails if the section is missing or empty. From `dyno-v1.0.1` on, git-cliff takes over.
 
 ## First launch note
 

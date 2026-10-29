@@ -40,7 +40,45 @@ Record: date, OS and version, Dyno version, load average at the time, result per
 | 21 | `dyno-agent service status` after Launch at login | "installed, running" |
 | 22 | Install a newer build over the old one | The agent restarts into the new build; the app reconnects; no manual step (macOS: re-registration happens by itself) |
 | 23 | `kill` the agent | It comes back within seconds (macOS, Linux); on Windows the app starts it |
-| 24 | Updater with a signed test release | Verified, installed, restarted; a tampered `.sig` is refused |
+| 24 | Install and update in a throwaway VM | The plan [below](#install-and-update-in-a-throwaway-vm), rows 24a to 24h |
+
+### Install and update in a throwaway VM
+
+Local only, never in CI. Run it before tagging, on the build the tag would ship. Builds happen on the host; the VM only
+installs and runs them.
+
+**Machines.** A fresh standard-user (non-administrator) VM per run, reverted to its clean snapshot afterwards: macOS in
+Tart (a clone of the base image), Windows in the unactivated Windows test VM (no licence is needed to run the tests; the
+desktop watermark is expected). Linux is covered by the `.deb` and AppImage checks in rows 1 to 20 and is not part of this plan.
+
+**Keys.** Test keys only. Generate a throwaway pair on the host (`npx tauri signer generate -w <scratch>/dyno-test.key`, a
+throwaway password). The real family key (`PADDOCK_TAURI_*`) never leaves CI: it is not on the host, in a VM, or in a
+shared folder. Test bundles are never uploaded, tagged or published (ER-15); delete them with the VM clone.
+
+**Builds, on the host** (the same `tauri build` as CI, plus `--config` to swap the key and the feed; the committed
+`tauri.conf.json` is not edited):
+
+- `1.0.0-test` and `1.0.1-test`: the version bumped in a scratch worktree only, `createUpdaterArtifacts` on, `pubkey` = the
+  test public key, `plugins.updater.endpoints` = the local feed URL (an `http://` URL on the host needs
+  `plugins.updater.dangerousInsecureTransportProtocol: true` in the same override; fine for a test build, never for a release).
+- `latest.json` for the feed is written by `conformance/release/latest-json.mjs` from the 1.0.1-test installers and their
+  `.sig` files; serve the folder from the host (`python3 -m http.server`, bound to the VM network only). Share bundles
+  into the VM through a read-only folder, not a copy of the repository.
+- The **CI-built signed 1.0.0** (the installers of the release run, or of a manual `dyno-release` run with gates) carries
+  the real public key and the public feed baked in, so it cannot read a local feed or accept a test signature. It is used
+  for the install rows only (24a, 24b, 24h); the update rows (24c to 24g) start from `1.0.0-test`, which is built with the
+  same flags, sidecars and bundle checks.
+
+| # | Steps | Expected |
+| --- | --- | --- |
+| 24a | Windows VM, standard user: run the CI-built `Dyno_1.0.0_x64-setup.exe` | Installs per user with no administrator prompt; Dyno starts; SmartScreen shows the documented "More info > Run anyway" path |
+| 24b | macOS VM, standard user: open the CI-built `.dmg`, drag Dyno to Applications, right-click > Open once | Starts after the Open Anyway step; the agent is registered (`dyno-agent service status`: installed, running); no administrator prompt |
+| 24c | Install `1.0.0-test` on each VM, turn on update checks, let the dashboard fill for a minute, note the agent's process id | History is recording; the version in About reads `1.0.0` |
+| 24d | Windows: with the feed running, Settings > Updates > Check for updates, then Install | The NSIS installer runs **passively** (progress only, no wizard pages, no prompt); Dyno restarts on `1.0.1`; the earlier history is still there |
+| 24e | macOS: the same on the Tart VM | The `.app.tar.gz` is downloaded, verified and swapped into place; the app relaunches on `1.0.1`; `codesign --verify --deep` still passes on the new bundle; no second copy is left behind |
+| 24f | After 24d and 24e: `dyno status`, the process list of the agent | The agent runs from the new build (new process id; `dyno-agent --version` shows the new version), the app reconnected by itself, nothing was started by hand; kill the agent: it comes back within seconds (macOS) or the app starts it (Windows) |
+| 24g | Reset the VM to the `1.0.0-test` snapshot. Corrupt one byte of the `.sig` in the feed folder (or point `latest.json` at a `.sig` of another version), then check and install | The update is refused with a signature message; the installed version, the agent and the history are untouched. Put the good `.sig` back: the update installs. Repeat once with a `latest.json` that names the `1.0.1-test` bundle but a `.sig` made with a different test key |
+| 24h | Revert both VMs. Check the host: no test key in the repository or the worktree, no test bundle in a release folder, the feed server stopped | Nothing to publish or clean up; record date, VM image, macOS and Windows versions, and the result per row |
 
 ## Privileges
 

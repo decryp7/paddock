@@ -76,6 +76,10 @@ on:
         description: "Paths whose commits belong in the app's changelog, one glob per line (apps/pitcrew/**). Empty: all commits."
         type: string
         default: ""
+      first-release-changelog:
+        description: "The app's CHANGELOG.md. With no earlier tag of the app, the notes are this file's section of the tagged version instead of git-cliff's whole history (the monorepo's shared paths reach back years). Empty: git-cliff always."
+        type: string
+        default: ""
       prepare:
         description: "A command run at `root` after `npm ci`, before the build (an app whose UI imports the shared library: npm run build -w ui). Empty: none."
         type: string
@@ -297,7 +301,16 @@ jobs:
           CONFIG: ${{ inputs.cliff-config }}
           PATHS: ${{ inputs.cliff-paths }}
           PREFIX: ${{ inputs.tag-prefix }}
+          FIRST_CHANGELOG: ${{ inputs.first-release-changelog }}
+          TAG: ${{ github.ref_name }}
         run: |
+          # The first release of an app has no earlier tag: its notes are the CHANGELOG section of that version.
+          if [ -n "$FIRST_CHANGELOG" ] && [ -z "$(git tag -l "${PREFIX}v*" | grep -vxF "$TAG")" ]; then
+            version="${TAG#"${PREFIX}v"}"
+            awk -v v="$version" 'index($0, "## [" v "]") == 1 {on=1; next} on && /^## / {exit} on' "$FIRST_CHANGELOG" > release/CHANGELOG-latest.md
+            if [ ! -s release/CHANGELOG-latest.md ]; then echo "::error::$FIRST_CHANGELOG has no non-empty section for $version"; exit 1; fi
+            exit 0
+          fi
           command -v git-cliff >/dev/null || cargo install git-cliff --locked
           args=(--latest --strip header -o release/CHANGELOG-latest.md)
           if [ -n "$CONFIG" ]; then args+=(--config "$CONFIG"); fi
