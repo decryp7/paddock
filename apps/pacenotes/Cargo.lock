@@ -2065,6 +2065,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pacenotes-worker"
+version = "0.1.0"
+dependencies = [
+ "pacenotes-core",
+ "pacenotes-index",
+ "pacenotes-parse",
+ "pacenotes-trap",
+ "pacenotes-worker",
+ "paddock-ipc",
+ "paddock-jobs",
+ "paddock-proc",
+ "paddock-testkit",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "paddock-env"
 version = "0.1.0"
 dependencies = [
@@ -2072,6 +2089,23 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "paddock-ipc"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "libc",
+ "paddock-env",
+ "paddock-jobs",
+ "paddock-proc",
+ "paddock-workspace-hack",
+ "postcard",
+ "serde",
+ "serde_json",
+ "subtle",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2084,6 +2118,16 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "sha2",
+]
+
+[[package]]
+name = "paddock-proc"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "paddock-workspace-hack",
+ "sysinfo",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

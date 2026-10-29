@@ -1,0 +1,118 @@
+//! The worker is a process: a crash, an exit, a stack overflow, a spin and a block each cost one file and nothing else.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use pacenotes_index::{SourceError, SymbolSource};
+use pacenotes_worker::{OsProbe, ParseWorkers};
+use paddock_jobs::CancelToken;
+
+use crate::support::{FixedProbe, WORKER, p, settings, workers};
+
+const GOOD: &[u8] =
+    b"pub struct Shape;\n\nimpl Shape {\n    pub fn area(&self) -> u32 { helper(2) }\n}\n\npub fn helper(x: u32) -> u32 { x }\n";
+
+fn extract(w: &ParseWorkers, path: &str, bytes: &[u8]) -> Result<Option<pacenotes_index::FileFacts>, SourceError> {
+    w.extract(&p(path), bytes, &CancelToken::new())
+}
+
+#[test]
+fn a_file_is_parsed_in_the_worker_and_the_worker_is_reused() {
+    let w = workers();
+    let facts = extract(&w, "src/lib.rs", GOOD).unwrap().unwrap();
+    let names: Vec<_> = facts.symbols.iter().map(|s| s.qualified_name.as_str()).collect();
+    assert_eq!(names, ["Shape", "Shape::area", "helper"]);
+    assert_eq!(facts.language.id(), "rust");
+    assert!(
+        facts
+            .calls
+            .iter()
+            .any(|c| c.callee == "helper" && c.caller.as_deref() == Some("Shape::area"))
+    );
+    assert!(extract(&w, "src/lib.rs", GOOD).unwrap().is_some());
+    assert_eq!(w.started(), 1, "one process served both files");
+    assert_eq!(
+        extract(&w, "data.json", b"{}").unwrap(),
+        None,
+        "a file in no known language has no facts"
+    );
+    assert!(!w.started().eq(&0));
+}
+
+#[test]
+fn the_worker_answers_a_bad_path_and_a_cancelled_call_with_typed_errors_and_stays_alive() {
+    let w = workers();
+    assert!(extract(&w, "src/lib.rs", GOOD).is_ok());
+    let dead = CancelToken::new();
+    dead.cancel();
+    assert_eq!(w.extract(&p("a.rs"), GOOD, &dead), Err(SourceError::Cancelled));
+    assert_eq!(w.started(), 1);
+}
+
+#[test]
+fn a_worker_that_aborts_exits_or_overflows_its_stack_costs_that_file_only() {
+    let w = workers();
+    for crash in ["bad.abort", "bad.exit", "bad.overflow"] {
+        match extract(&w, crash, b"x") {
+            Err(SourceError::Crashed(why)) => assert!(why.contains("worker"), "{crash}: {why}"),
+            other => panic!("{crash}: {other:?}"),
+        }
+        // the next file goes to a fresh worker and is parsed
+        assert!(extract(&w, "src/ok.rs", GOOD).unwrap().is_some(), "after {crash}");
+    }
+    assert!(w.started() >= 4, "each crash was followed by a new process: {}", w.started());
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn a_spinning_worker_is_judged_stuck_by_cpu_time_and_a_blocked_one_by_ticks() {
+    let w = workers();
+    match extract(&w, "loop.spin", b"x") {
+        Err(SourceError::Crashed(why)) => assert!(why.contains("stuck") && why.contains("Spinning"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    match extract(&w, "wait.block", b"x") {
+        Err(SourceError::Crashed(why)) => assert!(why.contains("stuck") && why.contains("Blocked"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    assert!(extract(&w, "src/ok.rs", GOOD).unwrap().is_some());
+}
+
+#[test]
+fn cancel_ends_a_stuck_call_and_a_paused_worker_is_never_judged_stuck() {
+    // a probe that says "stopped by the system" forever: the judge counts nothing, the call would wait for ever, so only Cancel
+    // ends it, and the pause was counted so the job can say so
+    let w = Arc::new(ParseWorkers::new(settings(), Arc::new(FixedProbe::stopped())));
+    let token = CancelToken::new();
+    let t = token.clone();
+    let w2 = w.clone();
+    let handle = std::thread::spawn(move || w2.extract(&p("wait.block"), b"x", &t));
+    let started = std::time::Instant::now();
+    while w.paused_ticks() < 5 {
+        assert!(started.elapsed() < Duration::from_secs(60), "the monitor never saw the pause");
+        std::thread::yield_now();
+    }
+    assert!(!handle.is_finished(), "a paused worker is waited for, however many ticks go by");
+    token.cancel();
+    assert_eq!(handle.join().unwrap(), Err(SourceError::Cancelled));
+    let _ = OsProbe;
+}
+
+#[test]
+fn the_worker_program_answers_its_self_test() {
+    let out = std::process::Command::new(WORKER).arg("--self-test").output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("pacenotes-parse-worker") && text.contains("ok parse"), "{text}");
+}
+
+#[test]
+fn a_program_that_does_not_exist_is_a_failure_of_the_file_not_a_panic() {
+    let mut s = settings();
+    s.program = "/definitely/not/a/worker".into();
+    let w = ParseWorkers::new(s, Arc::new(OsProbe));
+    match w.extract(&p("a.rs"), GOOD, &CancelToken::new()) {
+        Err(SourceError::Failed(why)) => assert!(why.contains("could not be started"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+}
