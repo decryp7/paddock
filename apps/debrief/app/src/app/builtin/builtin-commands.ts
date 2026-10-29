@@ -13,6 +13,7 @@ import { TimelineZoom } from '../timeline/zoom';
 import { WelcomeService } from '../welcome/welcome';
 import { SettingsStore } from '../settings/settings.store';
 import { UiPrefsStore } from '../core/workspace/ui-prefs.store';
+import { NarrowWindow } from '../shell/narrow-window';
 
 /** Built-in commands: everything the menus offer, available from the palette and key bindings. */
 @Injectable({ providedIn: 'root' })
@@ -28,6 +29,7 @@ export class BuiltinCommands {
   private readonly about = inject(AboutService);
   private readonly prefs = inject(SettingsStore);
   private readonly uiPrefs = inject(UiPrefsStore);
+  private readonly narrow = inject(NarrowWindow);
 
   private showOverWelcome(id: string): void {
     this.welcome.stepAside();
@@ -56,8 +58,8 @@ export class BuiltinCommands {
     { id: CLEAR_CACHE_COMMAND, title: $localize`:@@settings.storage.cmd.clearCache:Clear cache…`, category: $localize`:@@builtin.category.help:Help`, run: () => this.settings.open(STORAGE_ID) },
     { id: 'settings.appearance', title: $localize`:@@builtin.cmd.settings.appearance:Open settings: Appearance`, category: $localize`:@@builtin.category.view:View`, run: () => this.settings.open(APPEARANCE_ID) },
     { id: SETTINGS_DIAGNOSTICS_COMMAND, title: $localize`:@@builtin.cmd.settings.diagnostics:Open settings: Diagnostics`, category: $localize`:@@builtin.category.view:View`, run: () => this.settings.open(DIAGNOSTICS_SECTION) },
-    { id: 'view.toggleSidebar', title: $localize`:@@builtin.cmd.view.toggleSidebar:Toggle sidebar`, category: $localize`:@@builtin.category.view:View`, keybinding: 'Mod+B', run: () => this.store.toggleSidebar() },
-    { id: 'view.resetExplorerWidth', title: $localize`:@@builtin.cmd.view.resetExplorerWidth:Reset Explorer width`, category: $localize`:@@builtin.category.view:View`, run: () => this.uiPrefs.resetExplorerWidth() },
+    { id: 'view.toggleSidebar', title: $localize`:@@builtin.cmd.view.toggleSidebar:Toggle sidebar`, category: $localize`:@@builtin.category.view:View`, keybinding: 'Mod+B', run: () => this.narrow.toggle() },
+    { id: 'view.resetExplorerWidth', title: $localize`:@@builtin.cmd.view.resetExplorerWidth:Reset Explorer width`, category: $localize`:@@builtin.category.view:View`, when: () => this.uiPrefs.explorerWidthChosen(), run: () => this.uiPrefs.resetExplorerWidth() },
     { id: 'view.resetLayout', title: $localize`:@@builtin.cmd.view.resetLayout:Reset layout`, category: $localize`:@@builtin.category.view:View`, run: () => this.dock.reset() },
     { id: 'view.theme.system', title: $localize`:@@builtin.cmd.view.theme.system:Theme: Follow system`, category: $localize`:@@builtin.category.view:View`, run: () => this.store.setTheme(null) },
     { id: 'view.theme.calm', title: $localize`:@@builtin.cmd.view.theme.calm:Theme: Calm`, category: $localize`:@@builtin.category.view:View`, run: () => this.store.setTheme('calm') },

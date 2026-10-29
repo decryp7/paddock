@@ -4,6 +4,7 @@ import { provideTinyBackend, query, settle } from '../../testing/helpers';
 import { TimeCursor } from '../analysis/time-cursor';
 import { WorkspaceStore } from '../core/workspace.store';
 import { LiveFollow } from '../live/live-follow.store';
+import { EXPLORER_WIDTH, UiPrefsStore } from '../core/workspace/ui-prefs.store';
 import { SettingsStore } from '../settings/settings.store';
 import { LiveTail } from '../workspace/live-tail';
 import { sharedQuery, sharedRange, sharedRecord, sharedUiState } from './shared-state';
@@ -94,6 +95,24 @@ describe('shared UI state of a window group', () => {
     expect(typeof read('data')).toBe('number');
   });
 
+  it('the Explorer width and its chosen flag travel as one value: a Reset in the host reaches a pop-out with chosen=false', () => {
+    localStorage.clear();
+    TestBed.configureTestingModule({ providers: provideTinyBackend() });
+    const explorer = sharedUiState(TestBed.inject(Injector)).find((v) => v.key === 'explorer')!;
+    const prefs = TestBed.inject(UiPrefsStore);
+    expect(explorer.direction).toBe('fromHost');
+    explorer.apply({ width: 480, chosen: true });
+    expect(explorer.read()).toEqual({ width: 480, chosen: true });
+    // The host resets: the value the pop-out receives carries chosen=false and the default width.
+    explorer.apply({ width: 480, chosen: false });
+    expect(explorer.read()).toEqual({ width: EXPLORER_WIDTH.default, chosen: false });
+    expect(prefs.explorerWidthChosen()).toBe(false);
+    // Anything malformed is ignored, never half applied.
+    explorer.apply({ width: 'x', chosen: true });
+    explorer.apply({ width: 500 });
+    expect(explorer.read()).toEqual({ width: EXPLORER_WIDTH.default, chosen: false });
+  });
+
   describe('a guest that shows less creates fewer stores (Paddock rules 32/34)', () => {
     /** The tokens `sharedUiState` asks the injector for, in order. */
     function asked(scope: 'full' | 'summary' | 'display'): { keys: string[]; tokens: unknown[] } {
@@ -106,13 +125,13 @@ describe('shared UI state of a window group', () => {
 
     it('display: only the preference stores, no workspace, cursor, follow or live tail', () => {
       const { keys, tokens } = asked('display');
-      expect(keys).toEqual(['theme', 'scheme', 'uiFont', 'timezone', 'explorerWidth', 'explorerWidthChosen', 'lifecycle', 'dateFormat', 'density', 'sourceColors']);
+      expect(keys).toEqual(['theme', 'scheme', 'uiFont', 'timezone', 'explorer', 'lifecycle', 'dateFormat', 'density', 'sourceColors']);
       for (const heavy of [WorkspaceStore, TimeCursor, LiveFollow, LiveTail]) expect(tokens).not.toContain(heavy);
     });
 
     it('summary: adds the data version through the data store, still no workspace facade', () => {
       const { keys, tokens } = asked('summary');
-      expect(keys).toEqual(['theme', 'scheme', 'uiFont', 'timezone', 'explorerWidth', 'explorerWidthChosen', 'lifecycle', 'dateFormat', 'density', 'sourceColors', 'data']);
+      expect(keys).toEqual(['theme', 'scheme', 'uiFont', 'timezone', 'explorer', 'lifecycle', 'dateFormat', 'density', 'sourceColors', 'data']);
       for (const heavy of [WorkspaceStore, TimeCursor, LiveFollow, LiveTail]) expect(tokens).not.toContain(heavy);
     });
 

@@ -2,7 +2,7 @@ import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyR
 import { ErrorDetails } from '../ui/error-details';
 import { RecordView } from '../core/api.types';
 import { DebriefBackend } from '../core/backend';
-import { formatCount, formatDateTime } from '../core/format';
+import { formatCount, formatDateTime, formatFull } from '../core/format';
 import { describeError } from '../core/logger';
 import { QueryStore } from '../core/workspace/query.store';
 import { SelectionStore } from '../core/workspace/selection.store';
@@ -32,7 +32,7 @@ import { SourceColors, SourceMark } from '../sources/source-colors.store';
 import { stripeBackground } from '../sources/source-colors';
 import { LiveArrival, liveMode, PagedRowsStore } from './paged-rows.store';
 import { writeEventDrag } from '../core/event-drag';
-import { GRID_COLUMN_MINS, MESSAGE_COLUMN_MIN } from './message-column';
+import { GRID, timeFullWidth } from './message-column';
 
 export { SCROLL_IDLE_MS } from './paged-rows.store';
 
@@ -81,6 +81,8 @@ export interface RowVm {
   /** The event has notes: what the glyph says (the first note's first line), else null. */
   note: string | null;
   time: string;
+  /** The full date and time with its zone (the tooltip of the compact time). */
+  timeFull: string;
   /** The event has no timestamp: it is in the grid but not on the timeline (the time cell says so). */
   untimed: boolean;
   levelVar: string;
@@ -108,7 +110,7 @@ export type GridRowVm = RowVm | PlaceholderVm;
 @Component({
   selector: 'debrief-events-grid',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '[style.--row-h.px]': 'rowH()' },
+  host: { '[style.--row-h.px]': 'rowH()', '[style.--grid-gap.px]': 'GRID.gap', '[style.--grid-pad.px]': 'GRID.padX' },
   imports: [Icon, MarkerIcon, ClickOutside, VirtualList, NewEventsPill, NextSteps, ErrorDetails],
   template: `
     <div class="bar">
@@ -157,7 +159,7 @@ export type GridRowVm = RowVm | PlaceholderVm;
     >
       <div class="header" role="row" aria-rowindex="1" [style.grid-template-columns]="columns()">
         <span class="hcell" role="columnheader"><span class="sr-only" i18n="@@grid.header.marker">Marker</span></span>
-        <span class="hcell" role="columnheader" [attr.aria-sort]="prefs.descending() ? 'descending' : 'ascending'">
+        <span #timeHead class="hcell" role="columnheader" [attr.aria-sort]="prefs.descending() ? 'descending' : 'ascending'">
           <button class="sort" (click)="prefs.toggleSort()" i18n="@@grid.header.time">Time {{ prefs.descending() ? '↓' : '↑' //i18n(ph="direction") }}</button>
         </span>
         <span class="hcell" role="columnheader" i18n="@@grid.header.level">Level</span>
@@ -198,7 +200,7 @@ export type GridRowVm = RowVm | PlaceholderVm;
               @if (v.untimed) {
                 <span class="mono time untimed" role="gridcell" title="This event has no timestamp, so it is not on the timeline" i18n-title="@@grid.untimedTitle" i18n="@@grid.untimed">no time</span>
               } @else {
-                <span class="mono time" role="gridcell">{{ v.time }}</span>
+                <span class="mono time" role="gridcell" [attr.title]="compactTime() ? v.timeFull : null">{{ compactTime() ? v.time.slice(-12) : v.time }}</span>
               }
               <span class="lvl" role="gridcell" [attr.data-level]="v.level" [title]="v.levelCode"><span class="dot" [style.background]="v.levelVar"></span><span [class]="v.quietLevel ? 'sr' : 'code'">{{ v.levelCode }}</span></span>
               <span class="inst ellipsis" role="gridcell" [title]="v.row.group"><span class="inst-name">{{ v.instName }}</span>@if (v.instRest) { <span class="inst-rest"> · {{ v.instRest }}</span> }</span>
@@ -233,7 +235,7 @@ export type GridRowVm = RowVm | PlaceholderVm;
     .cols { right: 0; top: 30px; width: 280px; display: flex; flex-direction: column; gap: 6px; }
     .err-card { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 80%; padding: 14px 18px; border: 1px solid var(--border-3); border-radius: 8px; background: var(--bg-3); color: var(--text); text-align: center; }
     .col-opt { width: 100%; display: flex; align-items: center; gap: 8px; height: 24px; color: var(--text-2); font-size: var(--fs-sm); }
-    .header { position: sticky; top: 0; z-index: 2; height: ${HEADER_H}px; display: grid; align-items: center; column-gap: 10px; padding: 0 14px; font-size: var(--fs-xs); color: var(--muted); border-bottom: 1px solid var(--border); background: var(--bg-2); }
+    .header { position: sticky; top: 0; z-index: 2; height: ${HEADER_H}px; display: grid; align-items: center; column-gap: var(--grid-gap); padding: 0 var(--grid-pad); font-size: var(--fs-xs); color: var(--muted); border-bottom: 1px solid var(--border); background: var(--bg-2); }
     .hcell { display: flex; align-items: center; gap: 4px; min-width: 0; }
     .sort { border: 0; background: transparent; color: inherit; font-size: var(--fs-xs); padding: 0; text-align: left; cursor: pointer; }
     .sort:hover { color: var(--text); }
@@ -241,7 +243,7 @@ export type GridRowVm = RowVm | PlaceholderVm;
     .viewport { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; position: relative; outline: none; }
     .viewport:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
     .layer { position: sticky; top: ${HEADER_H}px; overflow: hidden; }
-    .row { position: absolute; left: 0; right: 0; height: var(--row-h, 26px); display: grid; align-items: center; column-gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--grid-line); cursor: default; }
+    .row { position: absolute; left: 0; right: 0; height: var(--row-h, 26px); display: grid; align-items: center; column-gap: var(--grid-gap); padding: 0 var(--grid-pad); border-bottom: 1px solid var(--grid-line); cursor: default; }
     .row:hover { background: var(--bg-hover); }
     .row.sel { background-color: var(--bg-sel); box-shadow: inset 2px 0 0 var(--accent); }
     /* The row keyboard focus is on (aria-activedescendant), while the grid has focus. */
@@ -299,6 +301,7 @@ export class EventsGrid {
   /** The theme's row height for the density in effect (the virtual scroll needs it in pixels). */
   protected readonly rowH = computed(() => px(this.theme.tokens()['row-h']) || FALLBACK_ROW_H);
   private readonly viewport = viewChild<ElementRef<HTMLElement>>('viewport');
+  private readonly timeHead = viewChild<ElementRef<HTMLElement>>('timeHead');
 
   /** The rows: paging, eviction, generations and live refreshes (no DOM). */
   protected readonly rows: PagedRowsStore = new PagedRowsStore({
@@ -348,11 +351,20 @@ export class EventsGrid {
   /** The scrollTop we last wrote ourselves; scroll events at that position carry no new information. */
   private writtenScroll = Number.NaN;
 
+  protected readonly GRID = GRID;
+
   protected readonly columns = computed(() => {
-    // Narrow windows: the time and source columns give way before the message, which keeps its minimum (MESSAGE_COLUMN_MIN).
-    const extra = this.prefs.extraColumns().map(() => 'minmax(90px, 150px)').join(' ');
-    return `${GRID_COLUMN_MINS.mark}px minmax(${GRID_COLUMN_MINS.time}px, 150px) ${GRID_COLUMN_MINS.severity}px minmax(${GRID_COLUMN_MINS.source}px, 240px) ${extra} minmax(${MESSAGE_COLUMN_MIN}px, 1fr)`;
+    // Narrow windows: the time and source columns give way before the message, which keeps its minimum (GRID.message); the time
+    // column grows to the full date and time of the date format and shows the compact time below that.
+    const m = GRID.min;
+    const extra = this.prefs.extraColumns().map(() => `minmax(${m.extra}px, ${GRID.max.extra}px)`).join(' ');
+    return `${m.mark}px minmax(${m.time}px, ${timeFullWidth(this.settings.dateFormat())}px) ${m.severity}px minmax(${m.source}px, ${GRID.max.source}px) ${extra} minmax(${GRID.message}px, 1fr)`.replace(/\s+/g, ' ');
   });
+
+  /** The width of the time column now, px (measured from the header; 0 until measured). */
+  private readonly timeTrack = signal(0);
+  /** The time column is narrower than the full date and time: rows show the time only (the full one is in the tooltip). */
+  protected readonly compactTime = computed(() => this.timeTrack() > 0 && this.timeTrack() < timeFullWidth(this.settings.dateFormat()));
 
   protected readonly colCount = computed(() => 5 + this.prefs.extraColumns().length);
 
@@ -416,6 +428,7 @@ export class EventsGrid {
         marker: first === undefined ? null : { kind: first, color: kind?.color ?? null, label: kind?.label ?? first },
         note: noteLabel(notes.get(row.id)),
         time: formatDateTime(row.ts, tz, true, dateFormat),
+        timeFull: formatFull(row.ts, tz, dateFormat),
         untimed: row.tsState === 'untimed' || row.ts === null,
         levelVar: LEVEL_VARS[row.level],
         levelCode: LEVEL_CODES[row.level],
@@ -487,7 +500,13 @@ export class EventsGrid {
       const measure = () => this.viewportH.set(Math.max(0, el.clientHeight - HEADER_H));
       const ro = new ResizeObserver(measure);
       ro.observe(el);
-      destroyRef.onDestroy(() => ro.disconnect());
+      const head = this.timeHead()?.nativeElement;
+      const track = new ResizeObserver(() => this.timeTrack.set(Math.round(head?.getBoundingClientRect().width ?? 0)));
+      if (head) track.observe(head);
+      destroyRef.onDestroy(() => {
+        ro.disconnect();
+        track.disconnect();
+      });
       measure();
     });
   }

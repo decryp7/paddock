@@ -234,7 +234,9 @@ function shortPath(path: string): string {
     /* The sash on the inner edge: a wide grab area over the border. Hover and drag draw the accent strip; keyboard focus draws the focus ring at full strength (the strip is too faint to be the focus indicator). */
     .sash { position: absolute; inset-block: 0; inset-inline-end: -3px; width: 6px; z-index: 2; cursor: col-resize; touch-action: none; background: transparent; outline: none; }
     .sash:hover, .sash.pd-sash-dragging { background: color-mix(in srgb, var(--accent) 60%, transparent); }
-    .sash:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0; }
+    .sash:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+    /* A 24 px grab area (the 6 px strip is what is drawn): an invisible band either side, so the edge is easy to hit. */
+    .sash::before { content: ''; position: absolute; inset-block: 0; inset-inline: -9px; }
     .skew { flex: none; font-size: var(--fs-2xs); padding: 0 5px; border-radius: 7px; border: 1px solid var(--accent); color: var(--text-2); }
   `,
 })

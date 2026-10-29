@@ -1,8 +1,10 @@
+import { DOCUMENT } from '@angular/common';
 import { computed, DestroyRef, effect, inject, Injectable, untracked } from '@angular/core';
 import { ShellUiStore } from '../core/workspace/shell-ui.store';
-import { EXPLORER_WIDTH, UiPrefsStore } from '../core/workspace/ui-prefs.store';
+import { UiPrefsStore } from '../core/workspace/ui-prefs.store';
 import { WorkspaceStore } from '../core/workspace.store';
 import { DockService } from '../dock/dock.service';
+import { explorerAction, fitExplorer } from './explorer-fit';
 
 /**
  * Keeps the window usable when it is narrow, by the layout plan (ADR 0056) and not by window-width constants: the
@@ -19,6 +21,7 @@ export class NarrowWindow {
   private readonly prefs = inject(UiPrefsStore);
   private readonly shell = inject(ShellUiStore);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly document = inject(DOCUMENT);
   /** The sidebar was open when the window narrowed and was closed by this service. */
   private closedByNarrowing = false;
   private started = false;
@@ -47,8 +50,19 @@ export class NarrowWindow {
    */
   private readonly chosen = this.prefs.explorerWidthChosen;
 
+  /** The Explorer's width and the room it lends the dock, from the user's wish and the rooms the plan found last. */
+  private readonly fit = computed(() =>
+    fitExplorer({
+      open: this.store.sidebarOpen(),
+      chosen: this.chosen(),
+      wish: this.prefs.explorerWidth(),
+      hardRoom: this.shell.explorerRoom(),
+      columnRoom: this.shell.explorerColumnRoom(),
+    }),
+  );
+
   /** The width the Explorer is shown at, px: the user's, within the room it has now (all the window leaves the Events view when the user chose the width, else what leaves every column its own). */
-  readonly width = computed(() => Math.min(this.prefs.explorerWidth(), this.chosen() ? this.shell.explorerRoom() : this.shell.explorerColumnRoom()));
+  readonly width = computed(() => this.fit().shown);
 
   /** A drag of the Explorer's sash began: the plan is not asked about the Explorer until `release`. */
   hold(): void {
@@ -79,23 +93,36 @@ export class NarrowWindow {
     const wish = this.prefs.explorerWidth();
     const shown = this.width();
     // The window the plan sees is the dock plus the Explorer as it is on screen now (the width to show may differ until it renders).
-    const onScreen = open ? Math.round(document.getElementById('debrief-explorer')?.getBoundingClientRect().width || shown) : wish;
+    const onScreen = open ? Math.round(this.document.getElementById('debrief-explorer')?.getBoundingClientRect().width || shown) : wish;
     const verdict = this.dock.explorerVerdict(open, onScreen);
-    this.dock.setExplorerYield(open && !this.chosen() ? shown - EXPLORER_WIDTH.min : 0);
+    const hardRoom = open ? this.dock.explorerRoom(true, onScreen) : this.shell.explorerRoom();
+    const columnRoom = open ? this.dock.explorerColumnRoom(true, onScreen) : this.shell.explorerColumnRoom();
+    this.dock.setExplorerYield(this.fit().yield);
     if (open) {
-      this.shell.setExplorerRoom(this.dock.explorerRoom(true, onScreen));
-      this.shell.setExplorerColumnRoom(this.dock.explorerColumnRoom(true, onScreen));
+      this.shell.setExplorerRoom(hardRoom);
+      this.shell.setExplorerColumnRoom(columnRoom);
     }
-    if (open) {
-      // No room beside the message column's minimum: the Explorer is closed again, also when the user has just opened it
-      // (there is no overlay mode); it reopens at the user's width when the window is wide enough.
-      if (verdict === 'hide') {
-        this.closedByNarrowing = true;
-        this.store.toggleSidebar();
-      } else this.closedByNarrowing = false;
-    } else if (verdict === 'show' && this.closedByNarrowing) {
-      this.closedByNarrowing = false;
+    const next = explorerAction(open, verdict, this.closedByNarrowing);
+    this.closedByNarrowing = next.closedByNarrowing;
+    if (next.action !== 'none') this.store.toggleSidebar();
+  }
+
+  /**
+   * Opens or closes the Explorer for the user (Ctrl+B, the activity bar, the View menu). Closing is always allowed. Opening is
+   * judged before anything renders: an Explorer that cannot fit at its minimum beside the Events view at its minimum stays closed,
+   * and a notice says to widen the window.
+   */
+  toggle(): void {
+    if (this.store.sidebarOpen() || this.dock.explorerFits()) {
       this.store.toggleSidebar();
+      return;
     }
+    this.dock.notifyExplorerCannotFit();
+  }
+
+  /** Opens the Explorer if it is closed and fits (focus moves and menu commands that need it); true when it is open after. */
+  ensureOpen(): boolean {
+    if (!this.store.sidebarOpen()) this.toggle();
+    return this.store.sidebarOpen();
   }
 }

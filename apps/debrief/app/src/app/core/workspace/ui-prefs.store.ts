@@ -105,8 +105,9 @@ export const UiPrefsStore = signalStore(
     setExplorerWidth: (width: number) => patchState(store, { explorerWidth: clampExplorerWidth(width), explorerWidthChosen: true }),
     /** Back to the default width, which yields to the other columns again ("Reset Explorer width"). */
     resetExplorerWidth: () => patchState(store, { explorerWidth: EXPLORER_WIDTH.default, explorerWidthChosen: false }),
-    /** Pop-outs follow the main window's flag. */
-    setExplorerWidthChosen: (explorerWidthChosen: boolean) => patchState(store, { explorerWidthChosen }),
+    /** Applies the Explorer's width and whether the user chose it as one value (a pop-out follows the host; never a width without its flag). */
+    applyExplorerPrefs: (explorerWidth: number, explorerWidthChosen: boolean) =>
+      patchState(store, explorerWidthChosen ? { explorerWidth: clampExplorerWidth(explorerWidth), explorerWidthChosen: true } : { explorerWidth: EXPLORER_WIDTH.default, explorerWidthChosen: false }),
     removeColumn: (field: string) => patchState(store, { extraColumns: store.extraColumns().filter((c) => c !== field) }),
     /** The preferences to persist. */
     snapshot: (): Prefs => ({

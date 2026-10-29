@@ -1,7 +1,8 @@
 import { inject, Injectable, Injector } from '@angular/core';
 import type { DockviewApi, DockviewGroupPanel } from 'dockview';
 import { LayoutPlan, OpenView, ViewLayout, planLayout, restorable, SavedHints } from '../layout-plan/layout-plan';
-import { EXPLORER_WIDTH } from '../core/workspace/ui-prefs.store';
+import { EXPLORER_WIDTH, UiPrefsStore } from '../core/workspace/ui-prefs.store';
+import { eventsViewMinWidth } from '../grid/message-column';
 import { NotificationsStore } from '../notifications/notifications.store';
 import { autoHideReduce } from './auto-hide';
 import { DockContext } from './dock-context';
@@ -48,6 +49,7 @@ const NO_SLOT: DockSlot = { referencePanel: null, direction: 'within' };
 @Injectable({ providedIn: 'root' })
 export class DockLayout {
   private readonly ctx = inject(DockContext);
+  private readonly prefs = inject(UiPrefsStore);
   private readonly lazy = inject(Injector);
   /** Panels in the order they were last opened (newest first): a view opened in the background was still used just now. */
   private opened: string[] = [];
@@ -66,7 +68,7 @@ export class DockLayout {
       if (p.group.api.location.type !== 'grid') continue;
       const view = this.ctx.views.find(p.id);
       if (!view) continue;
-      const layout = viewLayout(view);
+      const layout = this.declared(view);
       const full = view.fullHeight || (layout.area === 'document' && columns.has(p.group.id) && !this.ctx.displaced.has(p.id));
       out.push({ id: p.id, layout, row: this.rowOf(p.id, view), group: this.ctx.displaced.get(p.id)?.into ? p.id : p.group.id, ...this.recencyOf(p.id, fresh), ...(full ? { fullHeight: true } : {}) });
     }
@@ -75,6 +77,14 @@ export class DockLayout {
       if (d.into === null && view && !out.some((o) => o.id === d.id) && this.ctx.isAutoHidden(d.id)) out.push({ id: d.id, layout: viewLayout(view), row: viewRow(view), group: d.id, ...(view.fullHeight ? { fullHeight: true } : {}) });
     }
     return [...out, ...extra];
+  }
+
+  /** A view's declared layout; the Events view's minimum width grows with the grid's extra columns (they are part of what it needs). */
+  private declared(view: Parameters<typeof viewLayout>[0]): ViewLayout {
+    const layout = viewLayout(view);
+    if (view?.id !== 'events') return layout;
+    const min = Math.max(layout.min.width, eventsViewMinWidth(this.prefs.extraColumns().length));
+    return { ...layout, min: { ...layout.min, width: min }, pref: { ...layout.pref, width: Math.max(layout.pref.width, min) } };
   }
 
   /** The row of the main column a panel sits in: an extra instance of a view (a second timeline) is stacked below the first, in a row of its own. */
@@ -225,10 +235,18 @@ export class DockLayout {
     if (!this.ctx.displaced.size || !(api.width > 0 && api.height > 0)) return [];
     const box = this.ctx.container?.getBoundingClientRect();
     if (box && (box.width <= 0 || box.height <= 0)) return [];
-    // Where the Explorer can still give up width, the room is counted with the Explorer at its minimum, which the Explorer then really gives
-    // (it shrinks, it never grows back by itself): that room needs no hysteresis margin, so Reset Explorer width brings a tabbed column back.
-    const margin = this.ctx.explorerYield > 0 ? { ...GROW_BACK_MARGIN, width: 0 } : GROW_BACK_MARGIN;
-    return restorable({ width: api.width + this.ctx.explorerYield, height: api.height }, this.openViews(api), [...this.ctx.displaced.keys()], margin, this.hints());
+    const ids = [...this.ctx.displaced.keys()];
+    const views = this.openViews(api);
+    const own = { width: api.width, height: api.height };
+    const withMargin = restorable(own, views, ids, GROW_BACK_MARGIN, this.hints());
+    const yielded = this.ctx.explorerYield;
+    if (yielded <= 0) return withMargin;
+    // The window the dock would have with the Explorer at its minimum (`own` plus what it lends) is steady: the Explorer shrinks to give
+    // it and never grows back by itself, so a view that fits there needs no hysteresis margin (Reset Explorer width brings a tabbed
+    // column back at once). Only the lent room is exempt: with nothing lent (a chosen width) the margin applies as everywhere.
+    const none = { width: 0, height: GROW_BACK_MARGIN.height };
+    const lent = restorable({ width: api.width + yielded, height: api.height }, views, ids, none, this.hints());
+    return [...new Set([...withMargin, ...lent])];
   }
 
   /** The order displaced views return in: one whose slot is relative to another returning view goes after it (Home beside Registry beside the assistant). */
@@ -420,6 +438,23 @@ export class DockLayout {
     const views = this.openViews(api, [this.explorerView()]);
     if (open) return planLayout(viewport, views, this.hints()).hidden.some((h) => h.id === EXPLORER_ID) ? 'hide' : 'keep';
     return restorable(viewport, views, [EXPLORER_ID], GROW_BACK_MARGIN, this.hints()).includes(EXPLORER_ID) ? 'show' : 'keep';
+  }
+
+  /** Would a closed Explorer fit at its minimum beside what is docked (the plan does not hide it)? */
+  explorerFits(api: DockviewApi): boolean {
+    const size = this.dockSize(api);
+    if (!size) return true;
+    const plan = planLayout({ width: size.width, height: size.height }, this.openViews(api, [this.explorerView()]), this.hints());
+    return !plan.hidden.some((h) => h.id === EXPLORER_ID);
+  }
+
+  /** The notice for an Explorer that stays closed because the window is too narrow. */
+  notifyExplorerCannotFit(): void {
+    this.lazy.get(NotificationsStore, null)?.showLocal({
+      severity: 'info',
+      title: $localize`:@@dock.explorer.cannotFit.title:Widen the window to show the Explorer`,
+      body: $localize`:@@dock.explorer.cannotFit.body:There is no room for it beside the events grid at its minimum width.`,
+    });
   }
 
   /** The one notification for a saved layout that was fitted to this window, with Undo (ADR 0056, section 3). */

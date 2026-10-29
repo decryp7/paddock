@@ -102,6 +102,8 @@ export class FakeDock {
   readonly activeViewId = signal<string | null>(null);
   /** Like `DockService.ready`: the dock has its layout. */
   readonly ready = signal(true);
+  /** The Explorer always fits in a fake dock (`DockService.explorerFits`). */
+  explorerFits = () => true;
 }
 
 export function provideFakeDock(dock = new FakeDock()): Provider[] {

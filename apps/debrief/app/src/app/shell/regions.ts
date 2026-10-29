@@ -3,6 +3,7 @@ import { DockService } from '../dock/dock.service';
 import { PANEL } from '../dock/dock-context';
 import { DebriefCommand } from '../extensions/tokens';
 import { WorkspaceStore } from '../core/workspace.store';
+import { NarrowWindow } from './narrow-window';
 
 /** Marks a shell region (activity bar, side bar, filter bar, status bar): a landmark that F6 focuses. */
 export const REGION_ATTR = 'data-debrief-region';
@@ -55,6 +56,7 @@ export function focusRegion(region: HTMLElement): void {
 @Injectable({ providedIn: 'root' })
 export class RegionNavigator {
   private readonly store = inject(WorkspaceStore);
+  private readonly narrow = inject(NarrowWindow);
   private readonly dock = inject(DockService);
 
   /** Moves focus to the next (1) or previous (-1) region, wrapping around. */
@@ -77,8 +79,7 @@ export class RegionNavigator {
 
   /** Focuses the side bar, opening it first. */
   sidebar(): void {
-    if (!this.store.sidebarOpen()) this.store.toggleSidebar();
-    focusWhenThere(`[${REGION_ATTR}="sidebar"]`);
+    if (this.narrow.ensureOpen()) focusWhenThere(`[${REGION_ATTR}="sidebar"]`);
   }
 
   /** Brings the events grid to the front and focuses it. */

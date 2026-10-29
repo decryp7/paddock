@@ -9,7 +9,7 @@ import { stableCenter } from '../src/app/layout-plan/layout-scenarios.playwright
 // the tab menu's "Float", the group's ⋯ panel menu or Window ▸ Float panel. Tabs are dragged
 // with pointer events.
 
-// Metrics opens beside the timeline only where the window holds the Explorer (240 px), Events (702), Registry and Metrics side by side; at 1440 px it is a tab behind the timeline.
+// Metrics opens beside the timeline only where the window holds the Explorer (240 px), Events (680), Registry and Metrics side by side; at 1440 px it is a tab behind the timeline.
 test.use({ viewport: { width: 1800, height: 900 } });
 
 const tab = (page: Page, name: string) => page.getByRole('tab', { name, exact: true });
@@ -166,12 +166,14 @@ test.describe('floating a panel deliberately', () => {
     expect(await page.evaluate(([x, y]) => !!document.elementFromPoint(x!, y!)?.closest('.dv-resize-container .dv-void-container'), [centre.x, centre.y])).toBe(true);
   });
 
-  test('from Window ▸ Float panel at 1440 px, where Metrics is a tab behind the timeline: it floats the active tab, Metrics, not the timeline', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    // Metrics shares the timeline's group here: click it to make it the active tab, then float.
-    await expect(groupOf(page, 'Timeline')).toContainText('Metrics');
+  test('Window ▸ Float panel floats the tab the user is working in when a late re-plan tabs it behind the timeline', async ({ page }) => {
+    // Metrics is active in a column of its own at 1800 px; the window narrows to 1440 px, where the plan tabs it into the timeline's group.
+    await page.setViewportSize({ width: 1800, height: 900 });
+    await expect.poll(async () => (await groupOf(page, 'Timeline').innerText()).includes('Metrics')).toBe(false);
     await tab(page, 'Metrics').click();
-    await expect(tab(page, 'Metrics')).toHaveAttribute('aria-selected', 'true');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect.poll(async () => (await groupOf(page, 'Timeline').innerText()).includes('Metrics')).toBe(true);
+    await expect.poll(() => page.locator('[data-plan-runs]').first().getAttribute('data-plan-pending')).toBe('0');
     await chooseMenu(page, 'Window', 'Float panel');
     await expect(floating(page).getByRole('tab', { name: 'Metrics', exact: true })).toBeVisible();
     await expect(floating(page).getByRole('tab', { name: 'Timeline', exact: true })).toHaveCount(0);

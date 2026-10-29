@@ -2,6 +2,7 @@ import { SettingsStore } from '../../settings/settings.store';
 import { SidebarSections } from '../sidebar-sections';
 import { afterNextRender, computed, inject, Injectable, InjectionToken, Injector } from '@angular/core';
 import { isTauri } from '../../core/platform';
+import { NarrowWindow } from '../narrow-window';
 import { WorkspaceStore } from '../../core/workspace.store';
 import { DockService } from '../../dock/dock.service';
 import { PANEL_WINDOWS } from '../../dock/panel-windows';
@@ -38,6 +39,7 @@ export class AppMenu {
   private readonly palette = inject(PaletteService);
   private readonly panelWindows = inject(PANEL_WINDOWS, { optional: true });
   private readonly injector = inject(Injector);
+  private readonly narrow = inject(NarrowWindow);
   private readonly prefs = inject(SettingsStore);
   private readonly sections = inject(SidebarSections);
   private readonly recent = inject(RecentService);
@@ -93,8 +95,8 @@ export class AppMenu {
 
   /** Shows the sidebar (if hidden) with the Fields section expanded and puts the focus in the fields filter. */
   private showFields(): void {
-    if (!this.store.sidebarOpen()) this.store.toggleSidebar();
+    const open = this.narrow.ensureOpen();
     this.sections.setFieldsOpen(true);
-    afterNextRender(() => document.querySelector<HTMLInputElement>('debrief-fields-panel input.filter, debrief-fields-panel input[aria-label="Filter fields"]')?.focus(), { injector: this.injector });
+    if (open) afterNextRender(() => document.querySelector<HTMLInputElement>('debrief-fields-panel input.filter, debrief-fields-panel input[aria-label="Filter fields"]')?.focus(), { injector: this.injector });
   }
 }

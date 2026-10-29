@@ -1,4 +1,4 @@
-import { afterNextRender, ApplicationRef, computed, EnvironmentInjector, inject, Injectable, Injector, signal } from '@angular/core';
+import { afterNextRender, ApplicationRef, computed, effect, EnvironmentInjector, inject, Injectable, Injector, signal, untracked } from '@angular/core';
 import type { DockviewApi, DockviewGroupPanel } from 'dockview';
 import { dockview, loadDockview } from './dockview-loader';
 import { Logger } from '../core/logger';
@@ -8,6 +8,7 @@ import { ContextMenuService } from '../ui/context-menu.service';
 import { AngularContentRenderer, MissingViewRenderer } from './angular-panel';
 import { AutoHideEvent, autoHideReduce, EMPTY_AUTO_HIDE } from './auto-hide';
 import { DockAutoHide } from './dock-auto-hide';
+import { UiPrefsStore } from '../core/workspace/ui-prefs.store';
 import { DockContext } from './dock-context';
 import { keepGroupsUnscrolled, labelTabOverflow, observeFloatingAria } from './dock-dom';
 import { DockSlot, isLayoutTarget, Point, Rect, resolveGuideDrop, Side } from './dock-geometry';
@@ -119,6 +120,18 @@ export class DockService {
       show: (id) => this.show(id),
       revealInspector: () => this.revealInspector(),
       syncConditionalViews: () => this.syncConditionalViews(),
+    });
+    // The Events view's minimum width counts the grid's extra columns: a change re-plans the dock.
+    const prefs = inject(UiPrefsStore);
+    let extraColumns = prefs.extraColumns().length;
+    effect(() => {
+      const count = prefs.extraColumns().length;
+      untracked(() => {
+        if (count === extraColumns) return;
+        extraColumns = count;
+        const api = this.ctx.api;
+        if (api && this.ctx.apiReady()) this.fitToWindow(api, null);
+      });
     });
   }
 
@@ -929,6 +942,17 @@ export class DockService {
   /** How many px the Explorer can give up beside the dock (see `DockContext.explorerYield`); the next plan uses it. */
   setExplorerYield(px: number): void {
     this.ctx.explorerYield = Math.max(0, Math.round(px));
+  }
+
+  /** Would a closed Explorer fit at its minimum beside what is docked, with the Events view at its minimum (no margin: the user asked for it)? */
+  explorerFits(): boolean {
+    const api = this.api;
+    return !api || this.layout.explorerFits(api);
+  }
+
+  /** Tells the user the Explorer stays closed because the window is too narrow for it. */
+  notifyExplorerCannotFit(): void {
+    this.layout.notifyExplorerCannotFit();
   }
 
   /** The widest the Explorer is shown at when the user has not chosen a width (see `DockLayout.explorerColumnRoom`). */

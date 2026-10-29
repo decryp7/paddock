@@ -99,8 +99,11 @@ test.describe('narrow window', () => {
     const sash = page.getByRole('separator', { name: 'Resize the Explorer' });
     await sash.focus();
     const start = await width();
-    for (let i = 0; i < 20 && (await width()) < 360; i++) await page.keyboard.press('ArrowRight');
-    const chosen = await width();
+    // Eleven key presses, no reads between them (a read lags the draw); the Explorer then settles at the width they chose.
+    for (let i = 0; i < 11; i++) await page.keyboard.press('ArrowRight');
+    let last = -1;
+    await expect.poll(async () => { const now = await width(); const quiet = now === last; last = now; return quiet; }, { intervals: [100] }).toBe(true);
+    const chosen = last;
     expect(chosen).toBeGreaterThan(start);
 
     // 1100 px holds the Explorer at its minimum and the message column at its minimum, but not the width chosen.
@@ -159,6 +162,25 @@ test.describe('narrow window', () => {
     await expect(sidebar(page)).toHaveCount(0);
     const msg = page.locator('debrief-events-grid [role=row].row').first().locator('.msg');
     await expect.poll(async () => (await msg.boundingBox())!.width).toBeGreaterThanOrEqual(MESSAGE_COLUMN_MIN);
+    await resize(page, 1440);
+    await expect(sidebar(page)).toBeVisible();
+  });
+
+  test('900 px: Ctrl+B does not open an Explorer that cannot fit; the sidebar never renders and a notice says to widen the window', async ({ page }) => {
+    await resize(page, 900);
+    await expect(sidebar(page)).toHaveCount(0);
+    await page.evaluate(() => {
+      const w = window as unknown as { __rendered: number };
+      w.__rendered = 0;
+      new MutationObserver((records) => {
+        for (const r of records) for (const n of r.addedNodes) if ((n as Element).nodeName === 'DEBRIEF-SIDEBAR') w.__rendered++;
+      }).observe(document.body, { childList: true, subtree: true });
+    });
+    await page.keyboard.press('ControlOrMeta+b');
+    await expect(page.getByText('Widen the window to show the Explorer')).toBeVisible();
+    await expect(sidebar(page)).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __rendered: number }).__rendered)).toBe(0);
+    // Wide enough again: Ctrl+B opens it.
     await resize(page, 1440);
     await expect(sidebar(page)).toBeVisible();
   });

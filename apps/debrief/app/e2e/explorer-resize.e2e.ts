@@ -92,7 +92,7 @@ async function planIdle(page: Page): Promise<void> {
         last = pending ? -1 : now;
         return quiet;
       },
-      { intervals: [100], timeout: 15_000, message: 'the dock keeps re-planning' },
+      { intervals: [100], message: 'the dock keeps re-planning' },
     )
     .toBe(true);
 }

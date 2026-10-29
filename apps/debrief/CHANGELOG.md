@@ -5,7 +5,14 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ## Unreleased
 
+### Added
+
+- **Explorer:** The Explorer can be resized by dragging its inner edge or with the arrow keys, Home and End on the handle; the width is kept for the next session. Until you set a width the Explorer gives way (down to 240 px) so Registry and Home keep their own columns; a width you set wins, and View ▸ Reset Explorer width goes back to the default
+- **Grid:** Below the width of a full date and time the Time column shows the time only (`09:00:00.000`), with the full date and time in its tooltip; the message column never gets narrower than 360 px, and extra columns count towards the room the Events view asks for
+
 ### Changed
+
+- **Explorer:** In a window too narrow for the Explorer, Ctrl+B no longer flashes it open; a notice asks you to widen the window
 
 - **Updates:** Debrief now updates from the Paddock repository's releases, signed with the Paddock family's update key. A copy installed before this release cannot update itself to it: download this release once by hand and install it over the old one; later releases update as usual
 

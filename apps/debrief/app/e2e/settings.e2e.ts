@@ -24,6 +24,8 @@ async function openWithShortcut(page: Page) {
 }
 
 test('settings dialog changes the theme, colour scheme, date format and density, and persists them', async ({ page, browserName }, testInfo) => {
+  // Wide enough for the full ISO date and time in the Time column (below that the grid shows the time only).
+  await page.setViewportSize({ width: 1920, height: 900 });
   const csp = watchCsp(page);
   await openApp(page);
   await page.getByRole('button', { name: 'Settings' }).click();

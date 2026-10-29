@@ -113,15 +113,15 @@ describe('DockLayout.fit', () => {
     expect(eventsActive.api.setActive).toHaveBeenCalled();
   });
 
-  it('gives a new Home column its preferred width at 1920 and shrinks only what the plan says at 1600', () => {
+  it('gives a new Home column its preferred width at 1920 and shrinks only what the plan says at 1560', () => {
     const layout = setup();
     const wide = fakeDock(1920, 1080, { 'timeline+events': { width: 1000, height: 1080 }, 'ai-chat': { width: 372, height: 1080 }, home: { width: 548, height: 1080 } });
     layout.fit(wide.api, { sizes: true, fresh: ['home'] });
     expect(wide.groups[2]!.api.setSize).toHaveBeenCalledWith({ width: 700 });
-    const narrow = fakeDock(1600, 900, { 'timeline+events': { width: 520, height: 900 }, 'ai-chat': { width: 372, height: 900 }, home: { width: 548, height: 900 } });
+    const narrow = fakeDock(1560, 900, { 'timeline+events': { width: 520, height: 900 }, 'ai-chat': { width: 372, height: 900 }, home: { width: 548, height: 900 } });
     const plan = layout.fit(narrow.api, { sizes: true, fresh: ['home'] })!;
     expect(plan.tabbed).toEqual([]);
-    expect(narrow.groups[2]!.api.setSize).toHaveBeenCalledWith({ width: 1600 - EVENTS_VIEW_MIN_WIDTH - 372 });
+    expect(narrow.groups[2]!.api.setSize).toHaveBeenCalledWith({ width: 1560 - EVENTS_VIEW_MIN_WIDTH - 372 });
   });
 
   it('auto-hides a side tool to the right edge when there is no room left even after tabbing', () => {

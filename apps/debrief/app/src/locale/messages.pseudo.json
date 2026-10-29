@@ -1509,6 +1509,8 @@
     "dock.commands.pinAll": "⟦Þîîñ ááļļ ţöööļ ŵîîñðööŵš⟧",
     "dock.commands.popOut": "⟦Þööþ ööûûţ ţö ŵîîñðööŵ⟧",
     "dock.commands.switcher": "⟦Šŵîîţçĥ þááñééļ (Çţŕļ+Ţáƀ)⟧",
+    "dock.explorer.cannotFit.body": "⟦Ţĥééŕéé îîš ñö ŕööööɱ ƒööŕ îţ ƀééšîîðéé ţĥé ééṽééñţš ĝŕîîð áţ îîţš ɱîîñîîɱûɱ ŵîîðţĥ.⟧",
+    "dock.explorer.cannotFit.title": "⟦Ŵîîðééñ ţĥéé ŵîñðööŵ ţöö šĥööŵ ţĥé ÉÉẋþļööŕééŕ⟧",
     "dock.floatCue.cancel": "⟦Ŕééļééáášé ţöö çááñçééļ⟧",
     "dock.floatCue.window": "⟦Ŕééļééáášé ţöö ööþééñ îñ áá ñééŵ ŵîîñðöŵ⟧",
     "dock.groupActions.autoHide": "⟦ÅÅûûţöö-ĥîðéé {$title}⟧",

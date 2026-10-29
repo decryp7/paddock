@@ -153,9 +153,27 @@ What was built, and where it refines the decision above:
 - **Planner** (`app/src/app/layout-plan/`, self-contained, moves to `paddock-ui` unchanged). One extra rule: the
   *anchor* (highest priority column, row or cell) is elastic: it counts at its minimum and takes all leftover room;
   everything else starts at `pref` (the user's dragged size when there is one) and yields lowest priority first.
-- **Explorer and sidebar.** The Explorer is a view of the plan (`area: 'side'`, `edge: 'left'`, min and pref 300 (the sidebar has a fixed width: the plan opens or closes it, never resizes it),
-  priority 80) that lives outside the dock. `NarrowWindow` asks `DockService.explorerVerdict` and closes or reopens the
-  sidebar; the old window-width constants (1100 px for the Explorer, 1000 px for tool windows) are gone.
+- **Explorer and sidebar.** The Explorer is a view of the plan (`area: 'side'`, `edge: 'left'`, priority 80) that lives
+  outside the dock. `NarrowWindow` asks `DockService.explorerVerdict` and closes or reopens the sidebar; the old
+  window-width constants (1100 px for the Explorer, 1000 px for tool windows) are gone. The Explorer is resizable
+  (amended 2026-10-29; it was a fixed 300 px that the plan never resized):
+  - **Range.** Its declared width is 240 px at least (the plan's `min`), 272 px by default and 640 px at most
+    (`EXPLORER_WIDTH`). The plan always sees it at its minimum: it is closed only when even that does not fit.
+  - **Message column.** The Events view declares its minimum from the grid's geometry (`GRID` in `grid/message-column.ts`):
+    the message column keeps 360 px, the other columns their minimums (the time column shows the compact time
+    `09:00:00.000` below its full width), plus the gaps, the row padding, the scroll bar and the grid's extra columns.
+    That is 680 px with no extra column; the Explorer and every other column give way before it.
+  - **Chosen flag.** `explorerWidthChosen` in the preferences says the user set the width (a drag or the keys, also back to
+    272 px). Prefs without it load as not chosen, with the default width. View ▸ Reset Explorer width clears it.
+  - **Yield.** An unchosen width yields to the other columns: it is shown at the room that leaves every column its own
+    (`explorerColumnRoom`, not below 240 px), so Registry and Home keep their columns at 1440 px. The dock plans with what the
+    Explorer can give up (`DockContext.explorerYield`, its width less 240 px), and a view that returns only because of that
+    lent room needs no grow-back margin (the Explorer shrinks and never grows back by itself, so it cannot flap). A chosen
+    width wins: it is shown up to the room that keeps the Events view at its minimum (`explorerRoom`, the cap of a drag or
+    the keys), the dock tabs the lower-priority columns, and nothing but a narrower window makes it give way again.
+  - **Opening.** An Explorer that cannot fit at 240 px beside the Events view at its minimum is not opened by Ctrl+B, the
+    activity bar or the View menu: the decision is made before anything renders, and a notice says to widen the window. The
+    pure parts (`shell/explorer-fit.ts`) are tested directly.
 - **Side-by-side documents.** Groups of one row (`OpenView.group`) are cells of the row and share the column's width
   like columns share the window's; a cell that does not fit is tabbed into the highest-priority cell.
 - **Not saved over, and never blocked.** A fit is not a held state. The views the plan moved away are recorded
