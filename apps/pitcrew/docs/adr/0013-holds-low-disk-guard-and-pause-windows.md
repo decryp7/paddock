@@ -1,6 +1,7 @@
 # 13. Holds: the low-disk guard and pause windows
 
 - Status: accepted (2026-10-23)
+- Amended by [ADR 0022](0022-host-environment-and-shared-folders.md) (accepted 2026-10-29): the guard watches every volume a runner writes to, `SpaceCache` is keyed by volume, and two hold reasons (`SharedFolderUnavailable`, `SecretUnavailable`).
 - Related: ADR 0006 (supervision and housekeeping); code: `pitcrew_core::{hold, disk_guard, pause}`,
   `pitcrew_service::{probe, supervisor::holds}`, Settings > Disk guard and Pause windows, the hold badge on runner cards
 

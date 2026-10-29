@@ -1,6 +1,7 @@
 # 9. Linux: a systemd user service, XDG paths, and the login-shell PATH for runners
 
 - Status: accepted (2026-10-22)
+- Amended by [ADR 0022](0022-host-environment-and-shared-folders.md) (accepted 2026-10-29): a host environment layer over the login shell's PATH, and a longer reserved list (old entries keep applying with a warning).
 - Related: ADR 0001, ADR 0003 (service model); code: `pitcrew_core::{service_paths, service_spec, runner_env}`,
   `pitcrew_service::{platform::linux, login_env, paths}`, `app/src-tauri/src/service_install.rs`
 
