@@ -24,8 +24,9 @@
 // every given file: --delay-load <dll> (the DLL must be delay-loaded, never an ordinary import, so its absence degrades
 // instead of stopping the start), --not-direct <dll> (if imported at all, then only delay-loaded: for a DLL the linker
 // may drop when nothing calls it), --no-import <dll> (the DLL in no import table at all) and --no-network (no import of
-// winhttp.dll, wininet.dll or ws2_32.dll: the binary opens no connection through them; a run-time egress test is still
-// the proof).
+// winhttp.dll, wininet.dll, urlmon.dll, websocket.dll, ws2_32.dll or mswsock.dll: the binary opens no connection through
+// them; a run-time egress test is still the proof). The rules apply to every given file alike, so they are refused with
+// --src-tauri, whose file list mixes an app's binaries: check such a binary on its own, with the paths form.
 //
 // Limits: a DLL loaded at run time with LoadLibrary is not in any import table, so this check cannot see what it needs;
 // such a DLL must be shipped and listed (bundle.resources) to be checked itself.
@@ -120,7 +121,7 @@ export function peImports(bytes) {
 }
 
 /** DLLs through which a Windows program opens network connections. */
-export const NETWORK_DLLS = ['winhttp.dll', 'wininet.dll', 'ws2_32.dll'];
+export const NETWORK_DLLS = ['winhttp.dll', 'wininet.dll', 'urlmon.dll', 'websocket.dll', 'ws2_32.dll', 'mswsock.dll'];
 
 /**
  * The findings of the extra import rules for one file's tables (see the header); empty when it follows them.
@@ -325,6 +326,10 @@ export function parseArgs(argv) {
   }
   if (!!opts.srcTauri !== !!opts.binDir) throw new Error('--src-tauri and --bin-dir go together');
   if (opts.srcTauri && opts.paths.length) throw new Error('give either --src-tauri/--bin-dir or paths, not both');
+  const { delayLoad, notDirect, noImport, noNetwork } = opts.rules;
+  if (opts.srcTauri && (delayLoad.length || notDirect.length || noImport.length || noNetwork)) {
+    throw new Error('the import rules apply to every file alike: use them with given paths, not with --src-tauri');
+  }
   if (!opts.srcTauri && !opts.paths.length) throw new Error('nothing to check');
   return opts;
 }

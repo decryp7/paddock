@@ -231,6 +231,9 @@ test('the import rules: delay-load, no import and no network, case-insensitively
   assert.deepEqual(ruleFindings({ imports: SYSTEM, delayImports: [] }, cpu), []);
   assert.deepEqual(ruleFindings({ imports: SYSTEM, delayImports: ['DirectML.dll'] }, cpu), ['imports directml.dll (it must not)']);
   assert.deepEqual(ruleFindings({ imports: ['WinHTTP.dll', 'wininet.dll'], delayImports: [] }, cpu), ['imports winhttp.dll, wininet.dll (a network API)']);
+  for (const d of ['urlmon.dll', 'WebSocket.dll', 'MSWSOCK.dll']) {
+    assert.equal(ruleFindings({ imports: [d], delayImports: [] }, { noNetwork: true }).length, 1, d);
+  }
   assert.deepEqual(ruleFindings({ imports: ['WinHTTP.dll'], delayImports: [] }), [], 'no rules, no findings');
   // --not-direct: absent or delay-loaded is fine, an ordinary import is not.
   const nd = { notDirect: ['dxcore.dll'] };
@@ -259,4 +262,7 @@ test('the import rules on synthetic PE files and through the CLI', () => {
   assert.equal(run('--no-import', 'DirectML.dll', f('gpu.exe')).status, 1);
   assert.equal(run('--delay-load').status, 2);
   assert.deepEqual(parseArgs(['--no-import', 'a.dll', '--not-direct', 'b.dll', '--no-network', 'x.exe']).rules, { delayLoad: [], notDirect: ['b.dll'], noImport: ['a.dll'], noNetwork: true });
+  assert.throws(() => parseArgs(['--no-network', '--src-tauri', 's', '--bin-dir', 'b']), /given paths, not with --src-tauri/);
+  assert.throws(() => parseArgs(['--src-tauri', 's', '--bin-dir', 'b', '--delay-load', 'x.dll']), /not with --src-tauri/);
+  assert.equal(run('--no-network', '--src-tauri', root, '--bin-dir', root).status, 2);
 });

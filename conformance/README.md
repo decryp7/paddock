@@ -114,8 +114,8 @@ workflow that uses the actions can drop the steps they replace, and C03, C04 and
 Windows installer ships, named by the Tauri configuration, imports the VC++ runtime, VCRUNTIME140.dll, MSVCP140.dll and
 kin, or is missing; `<file-or-folder>...` checks given paths; pure Node, no dumpbin; `tauri-bundle.sh` runs it after
 every NSIS build). Extra import rules for a binary that links optional DLLs: `--delay-load <dll>` (only a delay-load
-import), `--not-direct <dll>` (delay-loaded if imported at all), `--no-import <dll>` and `--no-network` (no WinHTTP, WinINet or Winsock import); Sighter's ONNX Runtime builds
-use them.
+import), `--not-direct <dll>` (delay-loaded if imported at all), `--no-import <dll>` and `--no-network` (no WinHTTP, WinINet, URLMon, WebSocket or Winsock import); with given paths only, never with
+`--src-tauri`, since they apply to every file alike. Sighter's ONNX Runtime builds use them.
 
 `telemetry-bytes.mjs [--allow-telemetry-group] <file>...` fails when a native library or binary carries a way to send
 telemetry to Microsoft: the 1DS SDK (plain or mangled), curl, mbedTLS, a collector host, or a TraceLogging provider in the
