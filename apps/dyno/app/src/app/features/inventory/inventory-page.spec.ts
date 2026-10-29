@@ -38,11 +38,11 @@ describe('InventoryPage', () => {
   });
 
   it('says why the modules are unknown when only the total is available', async () => {
-    const inv: SystemInventory = { ...mockInventory('windows'), memory: { totalOnly: { total: 16 * 1024 ** 3, reason: { reason: 'The OS did not answer.', needsHelper: true } } }, hints: [] };
+    const inv: SystemInventory = { ...mockInventory('windows'), memory: { totalOnly: { total: 16 * 1024 ** 3, reason: { reason: 'The OS did not answer.' } } }, hints: [] };
     const f = await render(inv);
     const el = f.nativeElement as HTMLElement;
     expect(el.textContent).toContain('16 GB installed');
-    expect(el.textContent).toContain('needs the Dyno helper');
+    expect(el.textContent).not.toContain('helper');
   });
 
   it('shows an inline error with Retry', async () => {

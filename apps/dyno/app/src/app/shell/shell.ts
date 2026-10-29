@@ -13,7 +13,6 @@ import { SettingsStore } from '../state/settings.store';
 import { CommandPalette } from './command-palette';
 import { ComingDialog } from './coming-dialog';
 import { COMING, NAV } from './nav';
-import { ProfileSwitcher } from './profile-switcher';
 
 const COLLAPSED_KEY = 'dyno.sidebarCollapsed';
 
@@ -25,10 +24,10 @@ function readCollapsed(): boolean {
   }
 }
 
-/** The main window: sidebar navigation, the top bar (search, profile, agent status, Dyno's overhead) and the page. */
+/** The main window: sidebar navigation, the top bar (search, agent status, Dyno's overhead) and the page. */
 @Component({
   selector: 'dy-shell',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, Icon, ProfileSwitcher, Toasts, MatTooltip],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, Icon, Toasts, MatTooltip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     '[class.collapsed]': 'collapsed()',
@@ -86,7 +85,6 @@ function readCollapsed(): boolean {
           <span class="keys"><kbd>{{ platform.mod }}</kbd><kbd>K</kbd></span>
         </button>
         <span class="spacer" [attr.data-tauri-drag-region]="platform.overlayTitleBar ? '' : null"></span>
-        <dy-profile-switcher />
         <div class="agent" [attr.data-state]="live.agent().state" role="status" [matTooltip]="agentTip()">
           <span class="pulse"></span>
           <span>{{ agentText() }}</span>

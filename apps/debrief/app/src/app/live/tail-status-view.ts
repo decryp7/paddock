@@ -86,7 +86,7 @@ export const STATUS_POLL_MS = 2000;
     .totals .bad { color: var(--danger-text); }
     .list { flex: 1; min-height: 0; overflow: auto; }
     table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
-    th { position: sticky; top: 0; background: var(--bg-2); text-align: left; font-weight: 600; color: var(--muted); padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th { position: sticky; top: 0; z-index: 3; background: var(--bg-2); text-align: left; font-weight: 600; color: var(--muted); padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
     td { padding: 4px 8px; border-bottom: 1px solid var(--border); color: var(--text-2); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .r { text-align: right; }
     .nowrap { white-space: nowrap; }

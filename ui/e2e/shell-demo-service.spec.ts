@@ -9,7 +9,7 @@ test.describe('background service (plan X4)', () => {
     await app.settings.open({ page: 'pd.login' }, '?service=notInstalled');
     await expect(page.getByTestId('service-condition')).toContainText('Not installed');
     const install = page.getByRole('button', { name: 'Install' });
-    await expect(install).toHaveClass(/pd-service__btn--primary/);
+    await expect(install).toHaveClass(/mat-mdc-unelevated-button/);
     await expect(page.getByRole('button', { name: 'Repair' })).toHaveCount(0);
     // The login switch is an ordinary setting beneath the status.
     await expect(app.settings.field('launchAtLogin').getByRole('switch', { name: 'Open at login' })).not.toBeChecked();
@@ -35,7 +35,7 @@ test.describe('background service (plan X4)', () => {
     await expect(page.getByTestId('service-still-working')).toContainText('Still working');
     await expect(page.getByTestId('service-condition')).toContainText('Repairing');
     await expect(page.getByRole('button', { name: 'Repair' })).toHaveCount(0);
-    await expect(page.locator('progress')).toHaveAccessibleName('Working…');
+    await expect(page.locator('mat-progress-bar')).toHaveAccessibleName('Working…');
     // Nothing gives up on it.
     await page.waitForTimeout(1500);
     await expect(page.getByTestId('service-still-working')).toBeVisible();
@@ -60,7 +60,7 @@ test.describe('background service (plan X4)', () => {
     await expect(page.getByTestId('service-condition')).toContainText('Switched off');
     await expect(page.getByTestId('service-message')).toContainText('switched off in Login Items');
     await expect(page.locator('.pd-service__actions button')).toHaveText(['Open Login Items…']);
-    await expect(page.getByRole('button', { name: 'Open Login Items…' })).toHaveClass(/pd-service__btn--primary/);
+    await expect(page.getByRole('button', { name: 'Open Login Items…' })).toHaveClass(/mat-mdc-unelevated-button/);
     await page.getByRole('button', { name: 'Open Login Items…' }).click();
     await expect(page.getByTestId('service-failure')).toHaveCount(0);
     await expect(page.getByTestId('service-condition')).toContainText('Switched off');

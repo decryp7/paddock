@@ -1,0 +1,134 @@
+[
+ {
+  "name": "crate-source",
+  "files": [
+   "crates/a/src/lib.rs"
+  ]
+ },
+ {
+  "name": "crates-workspace-manifest",
+  "files": [
+   "crates/Cargo.toml"
+  ]
+ },
+ {
+  "name": "leaf-crate-and-its-app",
+  "files": [
+   "crates/b/src/lib.rs"
+  ]
+ },
+ {
+  "name": "ui-source-reaches-npm-tsconfig-angular-and-frontend-dist",
+  "files": [
+   "ui/projects/lib/src/a.ts"
+  ]
+ },
+ {
+  "name": "eslint-source-reaches-ui-through-the-eslint-config",
+  "files": [
+   "eslint/src/index.cjs"
+  ]
+ },
+ {
+  "name": "tsconfig-of-an-app",
+  "files": [
+   "apps/y/app/tsconfig.json"
+  ]
+ },
+ {
+  "name": "angular-json-of-an-app",
+  "files": [
+   "apps/y/app/angular.json"
+  ]
+ },
+ {
+  "name": "tauri-shell-config",
+  "files": [
+   "apps/z/app/src-tauri/tauri.conf.json"
+  ]
+ },
+ {
+  "name": "app-cargo-lock",
+  "files": [
+   "apps/z/app/src-tauri/Cargo.lock"
+  ]
+ },
+ {
+  "name": "app-rust-source",
+  "files": [
+   "apps/x/app/src-tauri/src/main.rs"
+  ]
+ },
+ {
+  "name": "app-ui-source",
+  "files": [
+   "apps/x/app/src/main.ts"
+  ]
+ },
+ {
+  "name": "shared-workflow",
+  "files": [
+   ".gitea/workflows/ci.yml"
+  ]
+ },
+ {
+  "name": "app-workflow",
+  "files": [
+   ".gitea/workflows/x.yml"
+  ]
+ },
+ {
+  "name": "docs-only",
+  "files": [
+   "docs/readme.md",
+   ".gitignore"
+  ]
+ },
+ {
+  "name": "declared-doc-inputs",
+  "files": [
+   "docs/rules.md",
+   "crates/a/CHANGELOG.md"
+  ]
+ },
+ {
+  "name": "unknown-root-file",
+  "files": [
+   "Mystery"
+  ]
+ },
+ {
+  "name": "icons-of-one-app-and-the-pipeline",
+  "files": [
+   "icons/x/a.svg",
+   "icons/tools/make.mjs"
+  ]
+ },
+ {
+  "name": "conformance-and-scripts",
+  "files": [
+   "conformance/src/a.mjs",
+   "scripts/a.mjs"
+  ]
+ },
+ {
+  "name": "lockfile-named-without-a-diff",
+  "files": [
+   "package-lock.json"
+  ]
+ },
+ {
+  "name": "everything",
+  "all": true
+ },
+ {
+  "name": "range-with-edit-deletion-and-lock-change",
+  "base": "fixture-base",
+  "head": "fixture-head"
+ },
+ {
+  "name": "range-from-an-unknown-base",
+  "base": "no-such-revision",
+  "head": "fixture-head"
+ }
+]

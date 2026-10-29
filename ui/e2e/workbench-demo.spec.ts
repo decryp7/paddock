@@ -67,7 +67,7 @@ test.describe('activity bar and Explorer (plan W4)', () => {
     await page.keyboard.press('Escape');
     await wb.explorer.expand('wd.files', 'docs');
     const long = wb.explorer.node('wd.files', 'docs/architecture-overview-of-the-request-pipeline.md');
-    await expect(long.getByTestId('path-text')).toHaveAttribute('title', /architecture-overview-of-the-request-pipeline\.md$/);
+    await expect(long.getByTestId('path-text')).toHaveAttribute('data-full', /architecture-overview-of-the-request-pipeline\.md$/);
   });
 });
 
@@ -303,6 +303,9 @@ test.describe('review 1 (X50)', () => {
       }).length,
     );
     expect(cut).toBe(0);
+    // The pointer still rests on the activity button, whose matTooltip is open: the first Escape dismisses a tooltip (WCAG 1.4.13), so move away first.
+    await page.mouse.move(300, 600);
+    await expect(page.locator('.mat-mdc-tooltip')).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(wb.frame.sidebar).toHaveCount(0);
     await expectNoHorizontalScroll(page);
@@ -357,4 +360,25 @@ test('a pop-out window boots its shell and its one view (regression: the page ke
   await expect(page.getByTestId('code-lines')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('pd-popout-shell')).toBeVisible();
   expect(pageErrors).toEqual([]);
+});
+
+test('the rename row in Manage layouts: the buttons stand on the field\'s line, and focus returns to Rename when it ends', async ({ page }) => {
+  const wb = new WorkbenchApp(page);
+  await wb.frame.open();
+  await page.getByRole('menuitem', { name: 'Window', exact: true }).click();
+  await page.getByRole('menuitem', { name: /Save layout/i }).click();
+  await page.getByTestId('dialog-action-save').click();
+  await page.getByRole('menuitem', { name: 'Window', exact: true }).click();
+  await page.getByRole('menuitem', { name: /Manage layouts/i }).click();
+  await page.getByTestId('layout-manage-rename-start').first().click();
+  const centre = async (sel: string): Promise<number> => {
+    const box = (await page.locator(sel).first().boundingBox())!;
+    return box.y + box.height / 2;
+  };
+  const outline = await centre('.pd-lmd__rename .mdc-notched-outline');
+  expect(Math.abs((await centre('[data-testid=layout-manage-rename-ok]')) - outline)).toBeLessThanOrEqual(1);
+  expect(Math.abs((await centre('[data-testid=layout-manage-rename-cancel]')) - outline)).toBeLessThanOrEqual(1);
+  await expect(page.getByTestId('layout-manage-rename')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('layout-manage-rename-start').first()).toBeFocused();
 });

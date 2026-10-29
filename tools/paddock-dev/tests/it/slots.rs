@@ -1,0 +1,380 @@
+//! `dev ci slot` end to end with the real binary: acquire, status, release, a race of many processes, a killed holder and an
+//! owner folder that disappears.
+#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+use paddock_slots::{FsLocks, SlotId, SlotLocks};
+use serde_json::Value;
+use std::path::Path;
+use std::process::Command;
+use std::time::Duration;
+
+const POLL: &str = "20";
+
+fn dev(args: &[&str]) -> (i32, Value, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        .args(["--json"])
+        .args(args)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    (
+        out.status.code().unwrap(),
+        serde_json::from_str(text.trim()).unwrap_or(Value::Null),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+fn acquire(root: &Path, owner: &Path, max: &str) -> (i32, Value, String) {
+    dev(&[
+        "ci",
+        "slot",
+        "acquire",
+        "--max",
+        max,
+        "--owner",
+        owner.to_str().unwrap(),
+        "--root",
+        root.to_str().unwrap(),
+        "--poll-ms",
+        POLL,
+        // Whatever a failing test leaves behind ends by itself (tests leave no process on the machine).
+        "--max-hold-secs",
+        "120",
+    ])
+}
+
+/// Takes a slot with the real binary and returns (slot, token).
+fn take(root: &Path, owner: &Path, max: &str) -> (String, String) {
+    let (code, v, err) = acquire(root, owner, max);
+    assert_eq!(code, 0, "{v} {err}");
+    (v["slot"].as_str().unwrap().to_string(), v["token"].as_str().unwrap().to_string())
+}
+
+fn release(root: &Path, slot: &str, token: &str) -> (i32, Value, String) {
+    dev(&[
+        "ci",
+        "slot",
+        "release",
+        "--slot",
+        slot,
+        "--token",
+        token,
+        "--root",
+        root.to_str().unwrap(),
+    ])
+}
+
+fn is_free(root: &Path, n: u32) -> bool {
+    FsLocks::new(root).try_lock(SlotId::new(n).unwrap()).unwrap().is_some()
+}
+
+fn wait_until_free(root: &Path, n: u32) {
+    let locks = FsLocks::new(root);
+    let id = SlotId::new(n).unwrap();
+    assert!(
+        paddock_slots::wait_free(&locks, id, Duration::from_secs(60), Duration::from_millis(20)).unwrap(),
+        "slot s{n} never became free"
+    );
+}
+
+#[test]
+fn acquire_status_and_release() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let (code, v, _) = acquire(&root, &job, "2");
+    assert_eq!((code, v["slot"].as_str()), (0, Some("s1")), "{v}");
+    assert!(v["holder_pid"].as_u64().is_some());
+    let token = v["token"].as_str().unwrap().to_string();
+    assert!(!token.is_empty());
+    let (_, v, _) = dev(&["ci", "slot", "status", "--max", "2", "--root", root.to_str().unwrap()]);
+    assert_eq!(v["slots"][0]["busy"], true);
+    assert_eq!(v["slots"][1]["busy"], false);
+    assert_eq!(v["slots"][0]["owner"].as_str().map(|o| o.ends_with("job")), Some(true));
+    let (code, v, _) = release(&root, "s1", &token);
+    assert_eq!((code, v["released"].clone()), (0, true.into()));
+    assert!(is_free(&root, 1));
+    assert!(job.exists(), "release does not touch the job folder");
+    let (code, v, _) = release(&root, "bogus", "t");
+    assert_eq!((code, v["kind"].clone()), (2, "usage".into()));
+}
+
+#[test]
+fn a_full_house_is_refused_and_bad_arguments_are_usage() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let (_, token) = take(&root, &job, "1");
+    let (code, v, err) = acquire(&root, &job, "1");
+    assert_eq!((code, v["kind"].clone()), (4, "refused".into()));
+    assert!(err.contains("busy"));
+    assert_eq!(acquire(&root, &job, "0").0, 2);
+    assert_eq!(acquire(&root, &d.path().join("missing"), "1").0, 2);
+    assert_eq!(dev(&["ci", "slot", "status", "--max", "0", "--root", root.to_str().unwrap()]).0, 2);
+    release(&root, "s1", &token);
+}
+
+#[test]
+fn the_slot_frees_when_the_job_folder_is_removed() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    assert_eq!(acquire(&root, &job, "1").0, 0);
+    assert!(!is_free(&root, 1));
+    std::fs::remove_dir(&job).unwrap();
+    wait_until_free(&root, 1);
+}
+
+#[test]
+fn a_killed_holder_frees_its_slot_at_once() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let (_, v, _) = acquire(&root, &job, "1");
+    let pid = v["holder_pid"].as_u64().unwrap().to_string();
+    assert!(!is_free(&root, 1));
+    let killed = if cfg!(windows) {
+        Command::new("taskkill").args(["/F", "/PID", &pid]).status()
+    } else {
+        Command::new("kill").args(["-9", &pid]).status()
+    };
+    assert!(killed.unwrap().success());
+    wait_until_free(&root, 1);
+    assert!(job.exists());
+}
+
+#[test]
+fn racing_acquirers_never_share_a_slot() {
+    const SLOTS: usize = 3;
+    const RACERS: usize = 8;
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("ci");
+    let jobs: Vec<_> = (0..RACERS).map(|i| d.path().join(format!("job{i}"))).collect();
+    jobs.iter().for_each(|j| std::fs::create_dir(j).unwrap());
+    let start = std::sync::Barrier::new(RACERS);
+    let results: Vec<(i32, Value, String)> = std::thread::scope(|s| {
+        let handles: Vec<_> = jobs
+            .iter()
+            .map(|job| {
+                let (root, start) = (&root, &start);
+                s.spawn(move || {
+                    start.wait();
+                    acquire(root, job, &SLOTS.to_string())
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let mut got: Vec<String> = results
+        .iter()
+        .filter(|r| r.0 == 0)
+        .map(|r| r.1["slot"].as_str().unwrap().to_string())
+        .collect();
+    got.sort();
+    assert_eq!(got, ["s1", "s2", "s3"], "exactly the three slots, each once: {results:?}");
+    assert!(
+        results.iter().filter(|r| r.0 != 0).all(|r| r.0 == 4),
+        "the others are refused, not failed"
+    );
+    for n in 1..=SLOTS as u32 {
+        dev(&[
+            "ci",
+            "slot",
+            "release",
+            "--slot",
+            &format!("s{n}"),
+            "--root",
+            root.to_str().unwrap(),
+        ]);
+    }
+}
+
+/// A pipe the job's runner waits on must not be kept open by the holder (a descriptor above 2 inherited by `acquire`).
+#[cfg(unix)]
+#[test]
+fn the_holder_does_not_keep_an_inherited_pipe_open() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let script = r#"exec 7>&1 1>/dev/null; exec "$0" ci slot acquire --max 1 --owner "$1" --root "$2" --poll-ms 20 --max-hold-secs 120"#;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (bin, job_arg, root_arg) = (
+        env!("CARGO_BIN_EXE_paddock-dev"),
+        job.display().to_string(),
+        root.display().to_string(),
+    );
+    std::thread::spawn(move || {
+        // `output()` returns only when every holder of the pipe's write end has closed it.
+        let out = Command::new("sh").args(["-c", script, bin, &job_arg, &root_arg]).output().unwrap();
+        let _ = tx.send(out.status.code());
+    });
+    let code = rx
+        .recv_timeout(Duration::from_secs(60))
+        .expect("the pipe stayed open: the holder kept an inherited descriptor");
+    assert_eq!(code, Some(0));
+    assert!(!is_free(&root, 1), "the holder is still running");
+    // The step's output went to /dev/null, so the holder's own record gives the token to release with.
+    let token = FsLocks::new(&root).read_owner(SlotId::new(1).unwrap()).unwrap().token;
+    assert_eq!(release(&root, "s1", &token).0, 0);
+    assert!(is_free(&root, 1));
+}
+
+/// Windows hands a child every inheritable handle of its parent, and Unix runs the same shape of check through the descriptor
+/// test above: a step's output pipe must be closed when `acquire` ends, whatever the holder does.
+#[test]
+fn the_step_output_pipe_closes_when_acquire_ends_even_though_the_holder_lives_on() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (bin, job_arg, root_arg) = (
+        env!("CARGO_BIN_EXE_paddock-dev"),
+        job.display().to_string(),
+        root.display().to_string(),
+    );
+    std::thread::spawn(move || {
+        // `output()` returns only when every holder of the stdout and stderr pipes has closed it.
+        let out = Command::new(bin)
+            .args([
+                "ci",
+                "slot",
+                "acquire",
+                "--max",
+                "1",
+                "--owner",
+                &job_arg,
+                "--root",
+                &root_arg,
+                "--poll-ms",
+                POLL,
+                "--max-hold-secs",
+                "120",
+            ])
+            .output()
+            .unwrap();
+        let _ = tx.send((out.status.code(), String::from_utf8_lossy(&out.stdout).trim().to_string()));
+    });
+    let (code, said) = rx
+        .recv_timeout(Duration::from_secs(60))
+        .expect("the step's pipe stayed open: the holder inherited it");
+    assert_eq!(code, Some(0));
+    let token = said.split_whitespace().nth(1).unwrap().to_string();
+    assert!(!is_free(&root, 1), "the holder is still running");
+    release(&root, "s1", &token);
+}
+
+#[test]
+fn a_release_with_the_wrong_token_leaves_the_slot_with_its_holder() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let (slot, token) = take(&root, &job, "1");
+    let (code, _, _) = release(&root, &slot, "not-the-token");
+    assert_eq!(
+        code, 0,
+        "a slot that is not yours is not yours to release, and that is not an error"
+    );
+    assert!(!is_free(&root, 1), "the holder keeps it");
+    assert_eq!(release(&root, &slot, &token).0, 0);
+    assert!(is_free(&root, 1));
+}
+
+#[test]
+fn a_program_inside_the_job_folder_cannot_hold_a_slot() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir_all(job.join("bin")).unwrap();
+    let copy = job.join("bin").join(if cfg!(windows) { "paddock-dev.exe" } else { "paddock-dev" });
+    std::fs::copy(env!("CARGO_BIN_EXE_paddock-dev"), &copy).unwrap();
+    let out = Command::new(&copy)
+        .args([
+            "--json",
+            "ci",
+            "slot",
+            "acquire",
+            "--max",
+            "1",
+            "--owner",
+            job.to_str().unwrap(),
+            "--root",
+            root.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("inside the job folder"));
+    assert!(is_free(&root, 1), "no holder was started");
+}
+
+#[test]
+fn acquire_is_never_refused_because_a_status_probe_looked_at_the_slot() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            let locks = FsLocks::new(&root);
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = paddock_slots::slot_states(&locks, 1);
+            }
+        });
+        for _ in 0..8 {
+            let (slot, token) = take(&root, &job, "1");
+            assert_eq!(release(&root, &slot, &token).0, 0);
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+}
+
+#[test]
+fn failures_of_the_slot_files_are_reported_with_exit_1_by_every_command() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let file_root = d.path().join("not-a-folder");
+    std::fs::write(&file_root, "x").unwrap();
+    let r = file_root.to_str().unwrap();
+    assert_eq!(dev(&["ci", "slot", "status", "--max", "1", "--root", r]).0, 1);
+    assert_eq!(release(&file_root, "s1", "t").0, 1);
+    assert_eq!(
+        dev(&["ci", "slot", "hold", "--max", "1", "--owner", job.to_str().unwrap(), "--root", r]).0,
+        1
+    );
+    assert_eq!(
+        dev(&["ci", "slot", "hold", "--max", "0", "--owner", job.to_str().unwrap(), "--root", r]).0,
+        2
+    );
+    assert_eq!(acquire(&file_root, &job, "1").0, 1, "a CI home that is a file cannot be created");
+    // The home exists but its slots folder is a file: the holder cannot take a slot and says nothing.
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("slots"), "x").unwrap();
+    let (code, v, err) = acquire(&root, &job, "1");
+    assert_eq!(code, 1, "{v}");
+    assert!(err.contains("ended before it took a slot"), "{err}");
+}
+
+#[test]
+fn a_holder_lets_go_at_its_lifetime_cap_while_the_job_folder_still_exists() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let (code, _, err) = dev(&[
+        "ci",
+        "slot",
+        "acquire",
+        "--max",
+        "1",
+        "--owner",
+        job.to_str().unwrap(),
+        "--root",
+        root.to_str().unwrap(),
+        "--poll-ms",
+        POLL,
+        "--max-hold-secs",
+        "1",
+    ]);
+    assert_eq!(code, 0, "{err}");
+    assert!(!is_free(&root, 1), "held at first");
+    wait_until_free(&root, 1);
+    assert!(job.exists(), "the job folder was never removed");
+}

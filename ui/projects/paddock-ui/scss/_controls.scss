@@ -163,7 +163,7 @@
   // translucent halo alone measured 1.7:1 and is not an indicator.
   &:focus-visible {
     border-color: var(--pd-accent);
-    outline: 2px solid var(--pd-focus-ring);
+    outline: var(--pd-focus-width) solid var(--pd-focus-ring);
     outline-offset: 2px;
   }
 
@@ -353,7 +353,7 @@
     }
 
     &:focus-visible {
-      outline: 2px solid var(--pd-focus-ring);
+      outline: var(--pd-focus-width) solid var(--pd-focus-ring);
       outline-offset: 2px;
     }
 
@@ -412,7 +412,7 @@
   }
 
   &:focus-visible {
-    outline: 2px solid var(--pd-focus-ring);
+    outline: var(--pd-focus-width) solid var(--pd-focus-ring);
     outline-offset: 2px;
   }
 
@@ -611,7 +611,7 @@
 
   &:focus-visible {
     background: var(--pd-hover);
-    outline: 2px solid var(--pd-focus-ring);
+    outline: var(--pd-focus-width) solid var(--pd-focus-ring);
     outline-offset: -2px;
   }
 
@@ -619,6 +619,29 @@
   &[aria-disabled='true'] {
     opacity: 0.4;
     cursor: default;
+  }
+}
+
+// A Material menu with the popup-menu classes (`<mat-menu class="pd-popmenu">`, pd-table's menus) keeps the family's items:
+// Material's own item rules are as specific as the ones above and load after them, so these name the panel too.
+.pd-popmenu .pd-popmenu__item {
+  min-height: 28px;
+  padding: 0 var(--pd-space-3);
+  border-radius: var(--pd-radius-tag);
+  color: var(--pd-text);
+  font-size: var(--pd-text-body);
+
+  &:focus-visible {
+    background: var(--pd-hover);
+    outline: 2px solid var(--pd-focus-ring);
+    outline-offset: -2px;
+  }
+
+  .mat-mdc-menu-item-text {
+    display: flex;
+    align-items: center;
+    gap: var(--pd-space-2);
+    font: inherit;
   }
 }
 

@@ -103,7 +103,7 @@ test('a pop-out window boots the pop-out shell through the panel layer, with its
 });
 
 test('a dialog window boots the dialog shell and shares the display state; one the app does not know ends in a designed error', async ({ app, page, pageErrors }) => {
-  const ipc = await desktop(page, { dialog_close: null, dialog_fit_height: null });
+  const ipc = await desktop(page, { dialog_close: null, dialog_ready: null, dialog_fit: null });
   // The demo has no dialogs of its own yet (`bootDialogWindow`'s `dialogs` is empty): any id is unknown to it.
   await app.dialogs.openWindow('wd.nothing', {});
   await expect(app.dialogs.shell).toContainText("This window couldn't open");

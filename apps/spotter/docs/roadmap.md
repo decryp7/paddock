@@ -35,8 +35,12 @@ coverage (98.6% / 98.2% lines, see Engine); screenshots at 1440x900 @2x in `docs
 - OS web view renderer: only the status kind and the `Unavailable` hint exist; no renderer is built on the OS web view
   (it cannot be supervised or isolated). Not started.
 - Windows type-check of `spotter-render` and the shell relies on the Windows CI runner (compiled there in run 4).
-- The CDP driver is still inside `spotter-render` (modules `cdp`, `launch`, `page`, `process`, `discover`, `ready`,
-  `challenge`, `install`, `manifest`); extraction to the shared paddock repo is pending.
+- Open (ER-22, after 1.0.0): move `spotter-render` onto the shared `crates/paddock-chromium` and delete its copy of the
+  driver (modules `cdp`, `launch`, `page`, `process`, `discover`, `ready`, `challenge`, `install`, `manifest`). The two
+  copies are kept in step by hand until then: the ERR_ABORTED diagnostics, the wait for a tab's own first navigation and
+  the test browser's isolation flags (fix/spotter-err-aborted, 2026-10-28) went into both. What stays here is the
+  `PageRenderer` adapter, `status` and Spotter's tests; the shared crate's fake browser replaces the hand-written CDP fake
+  in `page.rs`'s tests.
 
 ## UI
 

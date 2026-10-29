@@ -10,6 +10,7 @@ use spotter_render::process::processes_mentioning;
 use spotter_render::{ChromiumRenderer, PageRenderer, RenderError};
 use std::path::Path;
 use std::time::{Duration, Instant};
+use support::net_log::NetLog;
 use support::{serve, Reply};
 
 const PAGE: &str = "<!doctype html><html><head><title>Rendered</title></head><body><div id=v>loading</div><ul id=r></ul>\
@@ -55,11 +56,16 @@ async fn site() -> u16 {
     .await
 }
 
-fn renderer(b: Browser, base: &Path) -> ChromiumRenderer {
-    ChromiumRenderer::new(base, base)
+/// A headless renderer for the test browser, and the net log its browser writes (a failed assertion shows its tail).
+fn renderer(b: Browser, base: &Path) -> (ChromiumRenderer, NetLog) {
+    let log = NetLog::new();
+    let mut flags = test_browser_flags();
+    flags.extend(log.flags());
+    let r = ChromiumRenderer::new(base, base)
         .with_browser(b)
         .with_mode(Mode::Headless)
-        .with_extra_args(test_browser_flags())
+        .with_extra_args(flags);
+    (r, log)
 }
 
 /// No browser process mentions the folder any more (allowing a moment for the OS to reap).
@@ -81,16 +87,20 @@ async fn renders_a_scripted_page_and_leaves_nothing_behind() {
     let port = site().await;
     let base = tempfile::tempdir().unwrap();
     let marker = base.path().to_string_lossy().to_string();
-    let r = renderer(b, base.path());
+    let (r, log) = renderer(b, base.path());
     let page = r
         .render(&format!("http://127.0.0.1:{port}/"), Some("li.rel"), Duration::from_secs(40))
         .await
-        .unwrap();
+        .unwrap_or_else(|e| panic!("{e:?}\n{}", log.tail()));
     assert!(page.html.contains("version 1.2.3"), "script output missing: {}", page.html);
     assert!(page.html.contains("item 3"));
     assert_eq!(page.final_url, format!("http://127.0.0.1:{port}/"));
     assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0, "throwaway profile not deleted");
     assert_no_leftovers(&marker);
+    // The test browser stays off the network (discover::TEST_ISOLATION_FLAGS): it connected to the test server only.
+    let addresses = log.connected_addresses();
+    assert!(!addresses.is_empty(), "the net log saw no connection at all\n{}", log.tail());
+    assert!(addresses.iter().all(|a| a.starts_with("127.0.0.1:")), "{addresses:?}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -118,13 +128,13 @@ async fn challenges_become_needs_you() {
     let Some(b) = browser() else { return };
     let port = site().await;
     let base = tempfile::tempdir().unwrap();
-    let r = renderer(b, base.path());
+    let (r, log) = renderer(b, base.path());
     for path in ["captcha", "login"] {
         let e = r
             .render(&format!("http://127.0.0.1:{port}/{path}"), Some("#never"), Duration::from_secs(40))
             .await
             .unwrap_err();
-        assert!(matches!(e, RenderError::NeedsYou(_)), "{path}: {e:?}");
+        assert!(matches!(e, RenderError::NeedsYou(_)), "{path}: {e:?}\n{}", log.tail());
     }
 }
 
@@ -135,7 +145,7 @@ async fn a_missing_element_times_out_as_failed() {
     let port = site().await;
     let base = tempfile::tempdir().unwrap();
     let marker = base.path().to_string_lossy().to_string();
-    let r = renderer(b, base.path());
+    let (r, log) = renderer(b, base.path());
     let e = r
         .render(&format!("http://127.0.0.1:{port}/"), Some("#absent"), Duration::from_secs(15))
         .await
@@ -143,7 +153,7 @@ async fn a_missing_element_times_out_as_failed() {
     // On a loaded runner starting the browser can use up the whole budget before the wait begins; either way the
     // render fails (it is never reported as ready) and says why.
     let expected = |m: &str| m.contains("did not appear") || m.contains("did not finish in time");
-    assert!(matches!(&e, RenderError::Failed(m) if expected(m)), "{e:?}");
+    assert!(matches!(&e, RenderError::Failed(m) if expected(m)), "{e:?}\n{}", log.tail());
     assert_no_leftovers(&marker);
 }
 
@@ -154,13 +164,13 @@ async fn a_server_that_never_answers_is_stopped_at_the_timeout() {
     let port = site().await;
     let base = tempfile::tempdir().unwrap();
     let marker = base.path().to_string_lossy().to_string();
-    let r = renderer(b, base.path());
+    let (r, log) = renderer(b, base.path());
     let t = Instant::now();
     let e = r
         .render(&format!("http://127.0.0.1:{port}/hang"), None, Duration::from_secs(6))
         .await
         .unwrap_err();
-    assert!(matches!(e, RenderError::Failed(_)), "{e:?}");
+    assert!(matches!(e, RenderError::Failed(_)), "{e:?}\n{}", log.tail());
     // Start-up has its own limit; the hang itself must end at the 6 s page budget, not at the watchdog.
     assert!(
         t.elapsed() < spotter_render::launch::lifetime_for(Duration::from_secs(6)),
@@ -216,6 +226,37 @@ async fn a_load_replaced_by_another_navigation_names_it() {
     assert_no_leftovers(&marker);
 }
 
+/// A load Chrome cancels for a reason the driver does not name (here a `204 No Content`, which Chrome also reports as
+/// `net::ERR_ABORTED`) carries what the browser reported about the tab, so a cause nobody has seen yet (Windows CI run
+/// 6563) can be read off the error instead of guessed at.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unexplained_abort_says_what_the_browser_reported() {
+    let _turn = serial();
+    let Some(b) = browser() else { return };
+    let port = serve(|_| Reply::Status(204)).await;
+    let base = tempfile::tempdir().unwrap();
+    let marker = base.path().to_string_lossy().to_string();
+    let (r, log) = renderer(b, base.path());
+    let e = r
+        .render(&format!("http://127.0.0.1:{port}/empty"), None, Duration::from_secs(40))
+        .await
+        .unwrap_err();
+    let m = e.to_string();
+    assert!(
+        m.contains("net::ERR_ABORTED") && m.contains("what the browser reported"),
+        "{m}\n{}",
+        log.tail()
+    );
+    // The document request and its answer are in it, after the mark where the navigation was sent.
+    let after = m.split("[Page.navigate sent]").nth(1).unwrap_or_default();
+    assert!(
+        after.contains(&format!("requestWillBeSent url=http://127.0.0.1:{port}/empty")) && after.contains("status=204"),
+        "{m}\n{}",
+        log.tail()
+    );
+    assert_no_leftovers(&marker);
+}
+
 /// An address that answers with a file is reported as a download, not as a page that "did not load: net::ERR_ABORTED".
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_download_address_is_reported_as_a_download() {
@@ -224,12 +265,16 @@ async fn a_download_address_is_reported_as_a_download() {
     let port = serve(|_| Reply::Bytes(b"PK\x05\x06".to_vec())).await;
     let base = tempfile::tempdir().unwrap();
     let marker = base.path().to_string_lossy().to_string();
-    let r = renderer(b, base.path());
+    let (r, log) = renderer(b, base.path());
     let e = r
         .render(&format!("http://127.0.0.1:{port}/release.zip"), None, Duration::from_secs(40))
         .await
         .unwrap_err();
-    assert!(matches!(&e, RenderError::Failed(m) if m.contains("download")), "{e:?}");
+    assert!(
+        matches!(&e, RenderError::Failed(m) if m.contains("download")),
+        "{e:?}\n{}",
+        log.tail()
+    );
     assert_no_leftovers(&marker);
 }
 

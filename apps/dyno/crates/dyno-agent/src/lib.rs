@@ -1,4 +1,4 @@
-//! Dyno's background agent: samples the machine, keeps the history, runs the rules, answers the app over dyno-ipc and
+//! Dyno's background agent: samples the machine, keeps the history, answers the app over dyno-ipc and
 //! is installed as a per-user service (ADR 0002, 0008, 0010). It runs without the window, so history never stops.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
@@ -6,21 +6,17 @@ pub mod agent;
 pub mod alarms;
 pub mod baselines;
 pub mod bench;
-pub mod cleanup;
 pub mod cli;
 pub mod counters;
 pub mod diagnostics;
 pub mod discovery;
+pub mod disk;
 pub mod extras;
 pub mod filehash;
 pub mod files;
 pub mod handlers;
-pub mod handlers_cleanup;
 pub mod handlers_search;
-pub mod handlers_watch;
 pub mod hardware;
-pub mod helper_centre;
-pub mod helper_link;
 pub mod inventory;
 pub mod issues;
 pub mod netwatch;
@@ -32,9 +28,7 @@ pub mod sampler;
 pub mod server;
 pub mod service;
 pub mod store;
-pub mod tuning;
 pub mod unusual;
-pub mod watch;
 
 use agent::Shared;
 use std::sync::Arc;
@@ -49,14 +43,36 @@ pub struct Running {
 }
 
 impl Running {
-    /// Starts the agent over `platform`'s ports in `dirs`.
+    /// Starts the agent over `platform`'s ports in `dirs`, with a disk map that sees no volumes (see [`disk::DiskPorts::none`]).
+    /// The real agent uses [`Running::start_os`].
     pub fn start(
         dirs: paths::Dirs,
         platform: dyno_platform::Platform,
         details: Box<dyn dyno_core::ports::ProcessSource>,
         reveal: agent::Reveal,
     ) -> Result<Running, String> {
-        let (shared, sensors, processes) = Shared::build(dirs, platform, details, reveal)?;
+        Running::start_with(dirs, platform, details, reveal, disk::DiskPorts::none())
+    }
+
+    /// [`Running::start`] for the real machine: the disk map lists the real volumes and asks the OS for access rights.
+    pub fn start_os(
+        dirs: paths::Dirs,
+        platform: dyno_platform::Platform,
+        details: Box<dyn dyno_core::ports::ProcessSource>,
+        reveal: agent::Reveal,
+    ) -> Result<Running, String> {
+        Running::start_with(dirs, platform, details, reveal, disk::DiskPorts::os())
+    }
+
+    /// [`Running::start`] with the disk map's machine ports given (tests pass fixed ones).
+    pub fn start_with(
+        dirs: paths::Dirs,
+        platform: dyno_platform::Platform,
+        details: Box<dyn dyno_core::ports::ProcessSource>,
+        reveal: agent::Reveal,
+        disk_ports: disk::DiskPorts,
+    ) -> Result<Running, String> {
+        let (shared, sensors, processes) = Shared::build_with(dirs, platform, details, reveal, disk_ports)?;
         let (host, discovery) = server::bind(&shared).map_err(|e| format!("Dyno could not open its private endpoint: {e}"))?;
         let mut threads = Vec::new();
         let s = shared.clone();
@@ -67,6 +83,8 @@ impl Running {
                 .map_err(|e| format!("could not start the sampler: {e}"))?,
         );
         inventory::warm(&shared);
+        // The volume list is asked for once now, off every request path, so the first page or scan never waits for it.
+        shared.disk.refresh_in_background();
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()
@@ -118,13 +136,6 @@ impl Running {
                 .name("dyno-netwatch".into())
                 .spawn(move || netwatch::run(&s))
                 .map_err(|e| format!("could not start the network change watcher: {e}"))?,
-        );
-        let s = shared.clone();
-        threads.push(
-            std::thread::Builder::new()
-                .name("dyno-watched".into())
-                .spawn(move || handlers_watch::run(&s))
-                .map_err(|e| format!("could not start the watched folders sweeper: {e}"))?,
         );
         let s = shared.clone();
         threads.push(

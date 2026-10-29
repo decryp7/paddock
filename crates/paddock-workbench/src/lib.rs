@@ -41,6 +41,14 @@ paddock_commands::command_table! {
     Quiet [MAIN | DIALOG] limit 1088 * paddock_commands::KIB => tauri::layout_set,
 }
 
+paddock_dialogs::dialogs! {
+    /// The dock's layout dialogs (ADR 0026 §3): Save layout calls nothing (the dock saves the name it answers); Manage
+    /// layouts reads and edits the named layouts through the layout store.
+    pub static DIALOGS;
+    "pd.wb.dock.layout-save" => Form(Modal) { width: Some(Narrow) },
+    "pd.wb.dock.layout-manage" => Form(Modeless) { commands: &[dialog_callable::layout_get, dialog_callable::layout_set] },
+}
+
 #[cfg(feature = "tauri")]
 pub mod tauri;
 

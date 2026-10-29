@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "The spike's windows: core only (events for the show notice).",
+  "windows": ["*"],
+  "permissions": ["core:default"]
+}

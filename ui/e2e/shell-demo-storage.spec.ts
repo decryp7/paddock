@@ -37,7 +37,7 @@ test.describe('storage (plan X32)', () => {
 
     await expect(page.getByTestId('storage-clear-cache')).not.toHaveClass(/primary/);
     await page.getByTestId('storage-clear-cache').click();
-    const confirm = page.getByRole('dialog', { name: 'Clear cache?' });
+    const confirm = page.getByRole('alertdialog', { name: 'Clear cache?' });
     await expect(confirm).toContainText('The app rebuilds it when it needs it.');
     await expect(confirm.getByRole('button', { name: 'Keep' })).toBeFocused();
     expect(await axeViolations(page)).toEqual([]);
@@ -47,7 +47,7 @@ test.describe('storage (plan X32)', () => {
     await expect(page.getByTestId('storage-working')).toHaveCount(0);
 
     await page.getByTestId('storage-clear-cache').click();
-    await page.getByRole('dialog', { name: 'Clear cache?' }).getByRole('button', { name: 'Clear', exact: true }).click();
+    await page.getByRole('alertdialog', { name: 'Clear cache?' }).getByRole('button', { name: 'Clear cache', exact: true }).click();
     // The job shows at once (its phase text changes every few hundred ms in the demo, so it is not asserted: the unit tests hold it).
     await expect(page.getByTestId('storage-working')).toBeVisible();
     await expect(page.getByTestId('storage-result')).toContainText('freed');
@@ -60,9 +60,9 @@ test.describe('storage (plan X32)', () => {
   test("the user's own data names itself in the confirmation and is cleared one category at a time", async ({ app, page }) => {
     await openStorage(app, page);
     await clearFromMenu(page, 'logs', 'Clear logs');
-    const confirm = page.getByRole('dialog', { name: 'Clear logs?' });
+    const confirm = page.getByRole('alertdialog', { name: 'Delete logs?' });
     await expect(confirm.getByTestId('storage-confirm-data')).toContainText('your own data');
-    await confirm.getByRole('button', { name: 'Clear', exact: true }).click();
+    await confirm.getByRole('button', { name: 'Delete logs', exact: true }).click();
     await expect(page.getByTestId('storage-result')).toContainText('freed');
     await expect(page.locator('.pd-row[data-key="logs"]')).toBeVisible();
   });
@@ -70,7 +70,7 @@ test.describe('storage (plan X32)', () => {
   test('Cancel stops a clear between items and says what was done', async ({ app, page }) => {
     await openStorage(app, page);
     await clearFromMenu(page, 'logs', 'Clear logs');
-    await page.getByRole('dialog', { name: 'Clear logs?' }).getByRole('button', { name: 'Clear', exact: true }).click();
+    await page.getByRole('alertdialog', { name: 'Delete logs?' }).getByRole('button', { name: 'Delete logs', exact: true }).click();
     await page.getByTestId('storage-cancel').click();
     await expect(page.getByTestId('storage-result')).toContainText('Stopped');
   });
@@ -106,7 +106,7 @@ test.describe('storage (plan X32)', () => {
     await expect(page.getByTestId('storage-working')).toBeVisible();
     const tree = page.getByTestId('storage-tree');
     await expect(tree).toContainText('What is in Cache');
-    await expect(tree.getByRole('grid', { name: 'What is in Cache' })).toBeVisible();
+    await expect(tree.getByRole('treegrid', { name: 'What is in Cache' })).toBeVisible();
     // The biggest folder first, with its contents below its heading; the smallest items are one line.
     await expect(tree).toContainText('thumbnails');
     await expect(tree).toContainText('7 smaller items');

@@ -1,3 +1,5 @@
+import { answered, DISMISSED } from '@decryp7/paddock-ui/shell';
+import { vi } from 'vitest';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { MAX_KEYS, MCP_KEY_DIALOG_ID, MCP_REVOKE_DIALOG_ID, MemoryMcpBackend, provideShellMcp, type MemoryMcpOptions } from '@decryp7/paddock-ui/shell/mcp';
@@ -6,6 +8,15 @@ import { PdMcpPage } from './mcp-page';
 
 async function settle(rounds = 12): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
+}
+
+/** Waits until every pd-table on the page has drawn what it shows: its rows, or its empty, error or loading state (Material's table in the CDK viewport draws its rows in the next frame). */
+async function tablesDrawn(el: HTMLElement): Promise<void> {
+  await vi.waitFor(() => {
+    for (const t of el.querySelectorAll('pd-table')) {
+      if (!t.querySelector('.pd-body [role="row"], .pd-empty')) throw new Error('pd-table has not drawn its rows yet');
+    }
+  });
 }
 
 const text = (el: Element): string => (el.textContent ?? '').replace(/\s+/g, ' ').trim();
@@ -19,11 +30,11 @@ class FakeDialogs {
   open(id: string, options: { inputs?: Record<string, unknown> } = {}) {
     this.opened.push({ id, inputs: options.inputs ?? {} });
     const closed = (async () => {
-      if (id === MCP_REVOKE_DIALOG_ID) return this.revokeAnswer;
+      if (id === MCP_REVOKE_DIALOG_ID) return this.revokeAnswer === undefined ? DISMISSED : answered(this.revokeAnswer);
       await this.memory.issueKey('Pitwall');
-      return true;
+      return answered(true);
     })();
-    return { closed, close: () => undefined };
+    return { closed, dismiss: () => undefined };
   }
 }
 
@@ -39,6 +50,8 @@ describe('the AI access page', () => {
       await fixture.whenStable();
       await settle();
       await fixture.whenStable();
+      await tablesDrawn(el);
+      await fixture.whenStable();
     };
     await flush();
     const q = (id: string): HTMLElement | null => el.querySelector(`[data-testid="${id}"]`);
@@ -46,21 +59,24 @@ describe('the AI access page', () => {
       (typeof id === 'string' ? q(id) : id)!.click();
       await flush();
     };
-    const toggle = async (id: string): Promise<void> => click(id);
-    return { fixture, el, q, click, toggle, flush, memory, dialogs };
+    /** The real checkbox inside a Material toggle or checkbox host (what the user clicks and a screen reader reads). */
+    const box = (id: string): HTMLElement => q(id)!.querySelector<HTMLElement>('input, button[role="switch"]')!;
+    const isOn = (id: string): boolean => box(id).getAttribute('aria-checked') === 'true' || (box(id) as HTMLInputElement).checked === true;
+    const toggle = async (id: string): Promise<void> => click(box(id));
+    return { fixture, el, q, box, click, toggle, isOn, flush, memory, dialogs };
   }
 
   it('shows it off, the read-only tools, the action apart and off, no clients yet, and an empty log', async () => {
     const p = await open();
     expect(text(p.q('mcp-page')!)).toContain('AI access (MCP)');
     expect(text(p.el)).toContain('AI access is off');
-    expect((p.q('mcp-enabled') as HTMLInputElement).checked).toBe(false);
-    expect((p.q('mcp-tool-search_events') as HTMLInputElement).checked).toBe(true);
+    expect(p.isOn('mcp-enabled')).toBe(false);
+    expect(p.isOn('mcp-tool-search_events')).toBe(true);
     expect(text(p.q('mcp-tools')!)).toContain('Search events');
     expect(text(p.q('mcp-tools')!)).not.toContain('Export a report');
     expect(text(p.q('mcp-actions')!)).toContain('Allow Export a report');
     expect(text(p.q('mcp-actions-warning')!)).toContain('change something');
-    expect((p.q('mcp-action-export_report') as HTMLInputElement).checked).toBe(false);
+    expect(p.isOn('mcp-action-export_report')).toBe(false);
     expect(p.q('mcp-no-clients')).not.toBeNull();
     expect(p.q('mcp-keys')).toBeNull();
     expect(text(p.el)).toContain('No client has called a tool yet.');
@@ -85,7 +101,7 @@ describe('the AI access page', () => {
     const p = await open({ saveError: { code: 'storeUnavailable', message: 'The settings file is read-only.', retryable: true } });
     await p.toggle('mcp-enabled');
     expect(text(p.q('mcp-save-error')!)).toContain('The settings file is read-only.');
-    expect((p.q('mcp-enabled') as HTMLInputElement).checked).toBe(false);
+    expect(p.isOn('mcp-enabled')).toBe(false);
     await p.click('mcp-save-error-dismiss');
     expect(p.q('mcp-save-error')).toBeNull();
   });

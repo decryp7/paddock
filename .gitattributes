@@ -23,3 +23,7 @@ crates/*/fixtures/** -text
 
 # Windows batch files keep CRLF.
 *.cmd text eol=crlf
+
+# The ./dev wrapper and the tool's input list are read by sh: LF on every checkout.
+/dev text eol=lf
+/tools/paddock-dev/inputs.txt text eol=lf

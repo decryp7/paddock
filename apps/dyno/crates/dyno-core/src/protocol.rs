@@ -5,21 +5,19 @@
 use crate::activity::ActivityEntry;
 use crate::alerts::Alert;
 use crate::anomaly::Anomaly;
-use crate::cleanup::{CleanupCategory, CleanupOutcome, CleanupScan, DeleteMode, QuarantineEntry, SizeNode};
 use crate::diagnosis::Diagnosis;
 use crate::forecast::DiskTrend;
 use crate::grouping::AppGroup;
 use crate::health::HealthReport;
 use crate::history::{Consumer, HistoryPoint, HistoryRange};
 use crate::metrics::{MemoryPressure, SystemSample};
-use crate::process::{Locker, ProcessAction, ProcessDetails, ProcessRef, ProcessSample};
+use crate::others::OtherUsers;
+use crate::process::{Locker, ProcessDetails, ProcessRef, ProcessSample};
 use crate::report::WeeklyReport;
-use crate::rules::{ActiveAction, ProfileId, RuleSet};
 use crate::settings::Settings;
 use crate::snapshot::{SnapshotDiff, SnapshotInfo};
-use crate::startup::{StartupEntry, StartupState};
+use crate::startup::StartupEntry;
 use crate::time::Timestamp;
-use crate::tuning::TuningSuggestion;
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any incompatible change.
@@ -49,20 +47,6 @@ pub enum Request {
     ProcessDetails {
         /// The process.
         target: ProcessRef,
-    },
-    /// Act on a process.
-    Act {
-        /// The process.
-        target: ProcessRef,
-        /// What to do.
-        action: ProcessAction,
-    },
-    /// Act on every process of an app.
-    ActOnGroup {
-        /// The group id.
-        group_id: String,
-        /// What to do.
-        action: ProcessAction,
     },
     /// Who holds a file open.
     Lockers {
@@ -104,87 +88,10 @@ pub enum Request {
         /// At most this many.
         limit: u32,
     },
-    /// Undo an activity entry.
-    Undo {
-        /// The entry.
-        activity_id: String,
-    },
-    /// Release what rules are doing to a process now.
-    ReleaseAction {
-        /// The process.
-        target: ProcessRef,
-    },
-    /// The rule set.
-    Rules,
-    /// Save the rule set.
-    SaveRules {
-        /// The new set.
-        rules: RuleSet,
-    },
-    /// Switch profile.
-    SetProfile {
-        /// The profile.
-        profile: ProfileId,
-    },
-    /// Pause or resume all rules.
-    PauseRules {
-        /// Paused.
-        paused: bool,
-    },
-    /// Cleanup categories.
-    CleanupCategories,
-    /// Scan categories.
-    ScanCleanup {
-        /// Category ids.
-        categories: Vec<String>,
-    },
-    /// Delete items of a scan.
-    RunCleanup {
-        /// The scan.
-        scan_id: String,
-        /// The items.
-        item_ids: Vec<String>,
-        /// Recycle Bin or quarantine.
-        mode: DeleteMode,
-    },
-    /// Quarantines.
-    Quarantine,
-    /// Restore a quarantine.
-    RestoreQuarantine {
-        /// Its id.
-        id: String,
-    },
-    /// The size tree of a folder (the system disk when absent).
-    DiskUsage {
-        /// The folder.
-        path: Option<String>,
-    },
     /// The health report.
     Health,
-    /// Tuning suggestions.
-    Tuning,
-    /// Apply a tuning suggestion.
-    ApplyTuning {
-        /// Its id.
-        id: String,
-    },
-    /// Revert a tuning suggestion.
-    RevertTuning {
-        /// Its id.
-        id: String,
-        /// Put the previous setting back even though something else changed it since Dyno applied it.
-        #[serde(default)]
-        force: bool,
-    },
     /// Startup entries.
     StartupEntries,
-    /// Change a startup entry.
-    SetStartupState {
-        /// The entry.
-        id: String,
-        /// The new state.
-        state: StartupState,
-    },
     /// The weekly report for the seven days ending `weeks_ago` weeks before now (0 = the last seven days; at most 52).
     WeeklyReport {
         /// How many weeks back the week ends.
@@ -366,14 +273,6 @@ pub enum Request {
     Lifespan,
     /// What is usual for this time of the week, and how the current values compare. Appended.
     Baselines,
-    // ---- the privileged helper (WP-01, ADR 0016) ----
-    /// Whether the privileged helper is installed and usable (answers `Helper`). Appended.
-    HelperStatus,
-    /// Installs or updates the helper after the user confirmed; the system's permission prompt opens. Answers `Helper`
-    /// at once with the state `installing`; poll `HelperStatus`. Sent only from the confirmation dialog. Appended.
-    InstallHelper,
-    /// Removes the helper (answers `Helper`). Appended.
-    UninstallHelper,
 
     // ---- issues and unusual programs (WP-06, WP-07) ----
     /// The Issues page: crashes, hangs and other problems the OS recorded, with the stability score, leaderboards and how
@@ -396,17 +295,7 @@ pub enum Request {
         days: u32,
     },
     /// New and unusual programs. A query. Appended.
-    Unusual {
-        /// Also list the programs the user ignored or protected.
-        include_ignored: bool,
-    },
-    /// Ignores, protects or restores a program on the list; answers the list. Appended.
-    UnusualAct {
-        /// The program's key from the list.
-        key: String,
-        /// What to do.
-        action: crate::unusual::baseline::UnusualAction,
-    },
+    Unusual,
     /// Forgets the baseline of programs; learning starts again. Appended.
     ForgetBaseline,
 
@@ -439,47 +328,6 @@ pub enum Request {
         /// What to hide.
         filter: crate::startup::StartupFilter,
     },
-    /// The watched folders. A query. Appended.
-    WatchedFolders,
-    /// Adds a watched folder, switched off until its preview was shown. Sent only by the shell, after the person chose the
-    /// folder in the OS dialog (the webview's own requests for it are refused). Answers the list. Appended.
-    AddWatchedFolder {
-        /// The folder the person chose.
-        path: String,
-        /// A template to start from.
-        template: Option<String>,
-        /// How long files may stay, seconds.
-        keep_for_secs: u32,
-        /// Include subfolders.
-        recursive: bool,
-    },
-    /// Changes a watched folder; turning one on needs its preview first. Answers the list. Appended.
-    SetWatchedFolder {
-        /// The folder.
-        id: String,
-        /// A new keep-for time, seconds.
-        keep_for_secs: Option<u32>,
-        /// Turn sweeping on or off.
-        enabled: Option<bool>,
-        /// Include subfolders or not.
-        recursive: Option<bool>,
-    },
-    /// Stops watching a folder; its files are left alone. Answers the list. Appended.
-    RemoveWatchedFolder {
-        /// The folder.
-        id: String,
-    },
-    /// What a sweep of the folder would move right now (a dry run; changes nothing except remembering the preview).
-    /// Appended.
-    PreviewWatchedFolder {
-        /// The folder.
-        id: String,
-    },
-    /// Sweeps the folder now, after its preview. Answers the list. Appended.
-    SweepWatchedFolder {
-        /// The folder.
-        id: String,
-    },
     // ---- extras, backup health and taming proof (WP-13, WP-14, WP-36) ----
     /// "What changed": installs, updates, new startup items and setting changes in a window. A query. Appended.
     Changes {
@@ -509,16 +357,6 @@ pub enum Request {
         /// What and where.
         query: crate::extras::files::FinderQuery,
     },
-    /// Removes files of a finder result the user selected, through the cleanup policy (re-checked, to the Trash or the
-    /// quarantine). Answers the outcome. Appended.
-    RemoveFoundFiles {
-        /// The finder result.
-        scan_id: String,
-        /// The selected files.
-        ids: Vec<String>,
-        /// Where they go.
-        mode: DeleteMode,
-    },
     /// The maintenance windows' state now. A query. Appended.
     Maintenance,
     /// Backup health (Time Machine, Windows Backup, File History, restic, Borg, Duplicati): the last check, without
@@ -526,6 +364,74 @@ pub enum Request {
     Backup,
     /// Checks the backups now (read-only tools with timeouts) and answers the report. Appended.
     RefreshBackup,
+
+    // ---- the disk map (ADR 0024 job: pushed `Message::DiskScan` events, no polling) ----
+    /// The volumes mounted now: internal, external and network, with capacity. Appended.
+    DiskVolumes,
+    /// Starts a scan of a volume or a folder and answers its status at once; a second start of the same target answers
+    /// the running scan. Appended.
+    StartDiskScan {
+        /// What to scan.
+        target: crate::disk::scan::DiskTarget,
+    },
+    /// Stops a scan and returns at once; what was counted stays. Appended.
+    CancelDiskScan {
+        /// The scan.
+        scan: u64,
+    },
+    /// The status of every kept scan (what a window that opens late needs). Appended.
+    DiskScans,
+    /// One page of one level of a scan: the children of a folder, biggest first, the small ones folded into "other". Appended.
+    DiskChildren {
+        /// The scan.
+        scan: u64,
+        /// The folder (the scan's root when absent).
+        node: Option<u32>,
+        /// Where the page starts.
+        offset: u32,
+        /// How many children at most (1 to 256).
+        limit: u32,
+        /// Children below this share of the folder (0 to 1) are folded into "other"; 0 shows all.
+        min_fraction: f64,
+    },
+    /// The full path of a node, for Reveal and Copy path. Appended.
+    DiskPath {
+        /// The scan.
+        scan: u64,
+        /// The node.
+        node: u32,
+    },
+    /// Several levels of a scan under a folder in one answer: the nested children down to `rings` deep (1 to 6), those with at
+    /// least `min_share` of the folder (0 to 1) shown and the rest folded into each level's "other", at most `max_nodes` nodes
+    /// (1 to 2000) in all. Appended.
+    DiskRings {
+        /// The scan.
+        scan: u64,
+        /// The centre (the scan's root when absent).
+        node: Option<u32>,
+        /// How many levels.
+        rings: u8,
+        /// The smallest share of the centre a child may have to be shown.
+        min_share: f64,
+        /// The most nodes in the answer.
+        max_nodes: u32,
+    },
+    /// Reads the folders a finished scan could not open once more, and only those; answers the scan's status at once. The
+    /// scan runs again as a job (same id, new events). Appended.
+    RetryDiskScan {
+        /// The scan.
+        scan: u64,
+    },
+    /// Opens the system's privacy pane where Full Disk Access is given (macOS; other systems answer `Unsupported` with the
+    /// reason). Appended.
+    OpenFullDiskAccessSettings,
+    /// Shows a node in Finder, Explorer or the file manager. The path comes from the scan, never from the caller. Appended.
+    DiskReveal {
+        /// The scan.
+        scan: u64,
+        /// The node.
+        node: u32,
+    },
 }
 
 /// Dyno's own cost.
@@ -556,16 +462,13 @@ pub struct LiveUpdate {
     pub top_memory: Vec<AppGroup>,
     /// Dyno's cost.
     pub overhead: Overhead,
-    /// Active profile.
-    pub profile: ProfileId,
-    /// Rules paused.
-    pub rules_paused: bool,
-    /// What rules are doing now.
-    pub active_actions: Vec<ActiveAction>,
     /// Every process, when a subscriber asked for them.
     pub processes: Option<Vec<ProcessSample>>,
     /// Every group, likewise.
     pub groups: Option<Vec<AppGroup>>,
+    /// Other users' processes folded into one row; `processes` and `groups` leave them out. `None` when there are none
+    /// or the grouping is off.
+    pub other_users: Option<OtherUsers>,
 }
 
 /// A marker on the history timeline.
@@ -584,16 +487,6 @@ pub struct TimelineEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TimelineEventKind {
-    /// A rule lowered priority or turned on efficiency mode.
-    Throttle,
-    /// A rule capped CPU.
-    Cap,
-    /// A rule released an app.
-    Release,
-    /// A cleanup ran.
-    Cleanup,
-    /// A tuning change.
-    Tuning,
     /// An alert.
     Alert,
     /// The machine started.
@@ -683,7 +576,7 @@ pub struct PluginInfo {
     pub state: PluginState,
     /// The last error.
     pub error: Option<String>,
-    /// What it contributes ("sensors", "cleanup", "actions").
+    /// What it contributes ("sensors").
     pub contributes: Vec<String>,
 }
 
@@ -713,22 +606,8 @@ pub enum Reply {
     Anomalies(Vec<Anomaly>),
     /// History.
     History(Box<History>),
-    /// The rule set.
-    Rules(Box<RuleSet>),
-    /// Cleanup categories.
-    Categories(Vec<CleanupCategory>),
-    /// A scan.
-    Scan(Box<CleanupScan>),
-    /// A cleanup's outcome.
-    Outcome(CleanupOutcome),
-    /// Quarantines.
-    Quarantines(Vec<QuarantineEntry>),
-    /// A size tree.
-    SizeTree(Box<SizeNode>),
     /// The health report.
     Health(Box<HealthReport>),
-    /// Tuning suggestions.
-    Tuning(Vec<TuningSuggestion>),
     /// Startup entries.
     Startup(Vec<StartupEntry>),
     /// The weekly report.
@@ -790,9 +669,6 @@ pub enum Reply {
     Lifespan(Box<crate::lifespan::LifespanOverview>),
     /// The baseline comparison. Appended.
     Baselines(Box<crate::baseline::BaselineOverview>),
-    // ---- the privileged helper (WP-01, ADR 0016) ----
-    /// The helper's state. Appended.
-    Helper(Box<crate::helper_wire::HelperStatus>),
 
     // ---- issues and unusual programs (WP-06, WP-07) ----
     /// The Issues page. Appended.
@@ -809,10 +685,6 @@ pub enum Reply {
     FileHash(crate::weblinks::FileHashInfo),
     /// The filtered startup list. Appended.
     StartupOverview(Box<crate::startup::StartupOverview>),
-    /// The watched folders. Appended.
-    Watched(Box<crate::watch::WatchOverview>),
-    /// A dry run of a sweep. Appended.
-    WatchPreview(Box<crate::watch::WatchPreview>),
     // ---- extras, backup health and taming proof (WP-13, WP-14, WP-36) ----
     /// What changed. Appended.
     Changes(Box<crate::extras::changes::ChangeTimeline>),
@@ -834,6 +706,18 @@ pub enum Reply {
     Maintenance(crate::extras::maintenance::MaintenanceStatus),
     /// Backup health. Appended.
     Backup(Box<crate::backup::BackupReport>),
+    /// The volumes. Appended.
+    DiskVolumes(Vec<crate::disk::volume::Volume>),
+    /// One scan's status. Appended.
+    DiskScan(Box<crate::disk::scan::DiskScanStatus>),
+    /// Every kept scan's status. Appended.
+    DiskScans(Vec<crate::disk::scan::DiskScanStatus>),
+    /// One page of one level. Appended.
+    DiskChildren(Box<crate::disk::index::DiskChildren>),
+    /// A node's full path. Appended.
+    DiskPath(String),
+    /// Several levels of a scan.
+    DiskRings(Box<crate::disk::index::DiskRings>),
 }
 
 /// The inventory report that was written.
@@ -862,14 +746,7 @@ impl Reply {
             Reply::Diagnosis(x) => v(x),
             Reply::Anomalies(x) => v(x),
             Reply::History(x) => v(x),
-            Reply::Rules(x) => v(x),
-            Reply::Categories(x) => v(x),
-            Reply::Scan(x) => v(x),
-            Reply::Outcome(x) => v(x),
-            Reply::Quarantines(x) => v(x),
-            Reply::SizeTree(x) => v(x),
             Reply::Health(x) => v(x),
-            Reply::Tuning(x) => v(x),
             Reply::Startup(x) => v(x),
             Reply::Report(x) => v(x),
             Reply::Alerts(x) => v(x),
@@ -898,15 +775,12 @@ impl Reply {
             Reply::Throttling(x) => v(x),
             Reply::Lifespan(x) => v(x),
             Reply::Baselines(x) => v(x),
-            Reply::Helper(x) => v(x),
             Reply::Issues(x) => v(x),
             Reply::IssuesSaved(x) => v(x),
             Reply::Unusual(x) => v(x),
             Reply::SearchSeed(x) => v(x),
             Reply::FileHash(x) => v(x),
             Reply::StartupOverview(x) => v(x),
-            Reply::Watched(x) => v(x),
-            Reply::WatchPreview(x) => v(x),
             Reply::Changes(x) => v(x),
             Reply::Sleep(x) => v(x),
             Reply::Boot(x) => v(x),
@@ -917,6 +791,12 @@ impl Reply {
             Reply::FileFinder(x) => v(x),
             Reply::Maintenance(x) => v(x),
             Reply::Backup(x) => v(x),
+            Reply::DiskVolumes(x) => v(x),
+            Reply::DiskScan(x) => v(x),
+            Reply::DiskScans(x) => v(x),
+            Reply::DiskChildren(x) => v(x),
+            Reply::DiskPath(x) => v(x),
+            Reply::DiskRings(x) => v(x),
         }
     }
 }
@@ -933,8 +813,6 @@ pub enum ErrorCode {
     AccessDenied,
     /// Not possible here.
     Unsupported,
-    /// The process is protected.
-    Protected,
     /// The request is invalid.
     BadRequest,
     /// It took too long.
@@ -996,6 +874,10 @@ pub enum Message {
     Activity(ActivityEntry),
     /// Agent → app: an alarm changed (raised, acknowledged, cleared...). Appended.
     Alarm(crate::alarms::AlarmChange),
+    /// Agent → app: a disk scan's status changed (at most four per second per scan, a final one at the end). Appended.
+    DiskScan(Box<crate::disk::scan::DiskScanStatus>),
+    /// Agent → app: the volumes mounted now changed (one came, one went, one stopped answering). Appended.
+    DiskVolumes(Vec<crate::disk::volume::Volume>),
 }
 
 #[cfg(test)]
@@ -1003,40 +885,13 @@ mod tests {
     use super::*;
     use crate::metrics::fixtures::sample;
     use crate::ports::PlatformError;
-    use crate::process::Priority;
 
     fn round(m: &Message) -> Message {
         postcard::from_bytes(&postcard::to_stdvec(m).unwrap()).unwrap()
     }
 
     #[test]
-    fn a_revert_without_force_does_not_overwrite_a_changed_setting() {
-        let r: Request = serde_json::from_str(r#"{"revertTuning":{"id":"powerPlan"}}"#).unwrap();
-        assert_eq!(
-            r,
-            Request::RevertTuning {
-                id: "powerPlan".into(),
-                force: false
-            }
-        );
-        let forced: Request = serde_json::from_str(r#"{"revertTuning":{"id":"x","force":true}}"#).unwrap();
-        assert!(matches!(forced, Request::RevertTuning { force: true, .. }));
-    }
-
-    #[test]
     fn requests_have_the_json_shape_of_api_types() {
-        let j = serde_json::to_value(Request::Act {
-            target: ProcessRef {
-                pid: 4,
-                started: Timestamp(9),
-            },
-            action: ProcessAction::SetPriority(Priority::Idle),
-        })
-        .unwrap();
-        assert_eq!(
-            j,
-            serde_json::json!({"act": {"target": {"pid": 4, "started": 9}, "action": {"setPriority": "idle"}}})
-        );
         assert_eq!(serde_json::to_value(Request::WhySlow).unwrap(), "whySlow");
         let r: Request = serde_json::from_value(serde_json::json!({"weeklyReport": {"weeksAgo": 2}})).unwrap();
         assert_eq!(r, Request::WeeklyReport { weeks_ago: 2 });
@@ -1049,15 +904,6 @@ mod tests {
                 ..
             }
         ));
-        let r: Request =
-            serde_json::from_value(serde_json::json!({"runCleanup": {"scanId": "s", "itemIds": ["a"], "mode": "quarantine"}})).unwrap();
-        assert!(matches!(
-            r,
-            Request::RunCleanup {
-                mode: DeleteMode::Quarantine,
-                ..
-            }
-        ));
         let r: Request = serde_json::from_value(serde_json::json!({"history": {"range": "week", "end": null}})).unwrap();
         assert_eq!(
             r,
@@ -1066,14 +912,6 @@ mod tests {
                 end: None
             }
         );
-        let r: Request = serde_json::from_value(serde_json::json!({"setStartupState": {"id": "x", "state": {"delayed": 30}}})).unwrap();
-        assert!(matches!(
-            r,
-            Request::SetStartupState {
-                state: StartupState::Delayed(30),
-                ..
-            }
-        ));
     }
 
     #[test]
@@ -1099,18 +937,15 @@ mod tests {
             top_cpu: vec![],
             top_memory: vec![],
             overhead: Overhead::default(),
-            profile: ProfileId::Gaming,
-            rules_paused: false,
-            active_actions: vec![],
             processes: None,
             groups: Some(vec![]),
+            other_users: None,
         };
         for m in [
             Message::Request(Box::new(Request::SaveSettings { settings: Box::default() })),
-            Message::Request(Box::new(Request::SaveRules { rules: RuleSet::default() })),
             Message::Live(Box::new(live)),
             Message::Reply(Box::new(Ok(Reply::Settings(Box::default())))),
-            Message::Reply(Box::new(Err(AgentError::new(ErrorCode::Protected, "no")))),
+            Message::Reply(Box::new(Err(AgentError::new(ErrorCode::Busy, "no")))),
         ] {
             assert_eq!(round(&m), m);
         }
@@ -1126,9 +961,6 @@ mod tests {
             Reply::Lockers(vec![]),
             Reply::Snapshots(vec![]),
             Reply::Anomalies(vec![]),
-            Reply::Categories(vec![]),
-            Reply::Quarantines(vec![]),
-            Reply::Tuning(vec![]),
             Reply::Startup(vec![]),
             Reply::Alerts(vec![]),
             Reply::Plugins(vec![]),
@@ -1139,7 +971,6 @@ mod tests {
                 crate::inventory::MemoryLayout::unified(1, Default::default(), None),
                 vec![],
             ))),
-            Reply::Rules(Box::default()),
             Reply::Alarms(vec![]),
             Reply::AlarmStats(Box::default()),
             Reply::AlarmChanges(vec![]),
@@ -1171,12 +1002,6 @@ mod tests {
             })),
             Reply::Url("https://example.com/".into()),
             Reply::RecorderSnapshots(vec![]),
-            Reply::Helper(Box::new(crate::helper_wire::assess(
-                crate::helper::TuningHost::Linux,
-                Ok(()),
-                crate::helper_wire::Probe::Absent,
-                "1",
-            ))),
             Reply::ReportSaved(crate::report::SavedReport {
                 path: "/x.md".into(),
                 bytes: 1,
@@ -1202,21 +1027,78 @@ mod tests {
         }
     }
 
-    #[test]
-    fn helper_requests_and_status_have_the_json_shape_of_api_types() {
-        for (name, r) in [
-            ("helperStatus", Request::HelperStatus),
-            ("installHelper", Request::InstallHelper),
-            ("uninstallHelper", Request::UninstallHelper),
-        ] {
-            assert_eq!(serde_json::to_value(&r).unwrap(), name);
-            assert_eq!(serde_json::from_value::<Request>(serde_json::json!(name)).unwrap(), r);
+    fn disk_status() -> crate::disk::scan::DiskScanStatus {
+        use crate::disk::scan::*;
+        DiskScanStatus {
+            scan: 1,
+            seq: 1,
+            name: "Macintosh HD".into(),
+            target: DiskTarget::Folder { path: "/x".into() },
+            volume: None,
+            state: ScanState::Running,
+            phase: ScanPhase::ReadingFolders,
+            progress: ScanProgress::default(),
+            truncated: false,
+            unreadable_first: vec![],
+            needs_full_disk_access: false,
+            items_per_second: Some(10),
+            eta_seconds: None,
+            hidden_bytes: None,
+            scanned_at: None,
         }
-        let status = crate::helper_wire::assess(crate::helper::TuningHost::Macos, Ok(()), crate::helper_wire::Probe::Absent, "1");
-        let j = Reply::Helper(Box::new(status)).into_json().unwrap();
-        assert_eq!(j["state"], "notInstalled");
-        assert_eq!(j["error"], serde_json::Value::Null);
-        assert!(j["prompt"].as_str().unwrap().contains("password"));
+    }
+
+    #[test]
+    fn disk_map_requests_replies_and_pushes_survive_postcard_and_json() {
+        let index = crate::disk::index::DiskIndex::new("r", crate::disk::index::ScanLimits::default());
+        let page = index.children(index.root(), 0, 10, 0.0).unwrap();
+        let replies = [
+            Reply::DiskVolumes(vec![]),
+            Reply::DiskScan(Box::new(disk_status())),
+            Reply::DiskScans(vec![disk_status()]),
+            Reply::DiskChildren(Box::new(page)),
+            Reply::DiskPath("/x".into()),
+            Reply::DiskRings(Box::new(index.rings(index.root(), 2, 0.0, 10).unwrap())),
+        ];
+        for r in replies {
+            let m = Message::Reply(Box::new(Ok(r.clone())));
+            assert_eq!(round(&m), m);
+            assert!(r.into_json().is_ok());
+        }
+        let requests = [
+            Request::DiskVolumes,
+            Request::StartDiskScan {
+                target: crate::disk::scan::DiskTarget::Volume { id: "/".into() },
+            },
+            Request::CancelDiskScan { scan: 1 },
+            Request::DiskScans,
+            Request::DiskChildren {
+                scan: 1,
+                node: Some(2),
+                offset: 0,
+                limit: 48,
+                min_fraction: 0.004,
+            },
+            Request::DiskPath { scan: 1, node: 2 },
+            Request::RetryDiskScan { scan: 1 },
+            Request::DiskReveal { scan: 1, node: 2 },
+            Request::OpenFullDiskAccessSettings,
+            Request::DiskRings {
+                scan: 1,
+                node: Some(2),
+                rings: 3,
+                min_share: 0.01,
+                max_nodes: 500,
+            },
+        ];
+        for r in requests {
+            let m = Message::Request(Box::new(r));
+            assert_eq!(round(&m), m);
+        }
+        let push = Message::DiskScan(Box::new(disk_status()));
+        assert_eq!(round(&push), push);
+        let volumes = Message::DiskVolumes(vec![]);
+        assert_eq!(round(&volumes), volumes);
     }
 
     #[test]
@@ -1260,15 +1142,6 @@ mod tests {
         assert!(matches!(r, Request::Changes { query } if query.around.is_none()));
         let r: Request = serde_json::from_value(serde_json::json!({"findFiles": {"query": {"folder": "/x", "minBytes": 5}}})).unwrap();
         assert!(matches!(r, Request::FindFiles { query } if query.mode == crate::extras::files::FinderMode::Both));
-        let r: Request =
-            serde_json::from_value(serde_json::json!({"removeFoundFiles": {"scanId": "s", "ids": ["a"], "mode": "recycleBin"}})).unwrap();
-        assert!(matches!(
-            r,
-            Request::RemoveFoundFiles {
-                mode: DeleteMode::RecycleBin,
-                ..
-            }
-        ));
         let r: Request =
             serde_json::from_value(serde_json::json!({"saveInventoryReport": {"path": "/r.md", "format": "markdown"}})).unwrap();
         assert!(matches!(r, Request::SaveInventoryReport { .. }));
@@ -1343,16 +1216,6 @@ mod search_watch_tests {
             }),
             serde_json::json!({"startupOverview": {"filter": {"hideOs": true, "hideSigned": false}}})
         );
-        assert_eq!(j(Request::WatchedFolders), serde_json::json!("watchedFolders"));
-        assert_eq!(
-            j(Request::SetWatchedFolder {
-                id: "w-1".into(),
-                keep_for_secs: Some(600),
-                enabled: None,
-                recursive: None
-            }),
-            serde_json::json!({"setWatchedFolder": {"id": "w-1", "keepForSecs": 600, "enabled": null, "recursive": null}})
-        );
         assert_eq!(serde_json::to_value(TimelineEventKind::Network).unwrap(), "network");
     }
 
@@ -1364,29 +1227,13 @@ mod search_watch_tests {
             Request::FileHash {
                 source: crate::weblinks::HashSource::Process(ProcessRef {
                     pid: 3,
-                    started: Timestamp(4),
+                    started: Some(Timestamp(4)),
                 }),
             },
             Request::VirusTotalUrl { sha256: "0".repeat(64) },
             Request::StartupOverview {
                 filter: Default::default(),
             },
-            Request::WatchedFolders,
-            Request::AddWatchedFolder {
-                path: "/x".into(),
-                template: Some("installers".into()),
-                keep_for_secs: 600,
-                recursive: true,
-            },
-            Request::SetWatchedFolder {
-                id: "w-1".into(),
-                keep_for_secs: None,
-                enabled: Some(true),
-                recursive: Some(false),
-            },
-            Request::RemoveWatchedFolder { id: "w-1".into() },
-            Request::PreviewWatchedFolder { id: "w-1".into() },
-            Request::SweepWatchedFolder { id: "w-1".into() },
         ];
         for r in reqs {
             assert_eq!(round(&r), r);
@@ -1397,11 +1244,5 @@ mod search_watch_tests {
         });
         assert_eq!(round(&seed), seed);
         assert_eq!(seed.into_json().unwrap()["removed"][0], "1 IP address");
-        let watched = Reply::Watched(Box::new(crate::watch::WatchOverview {
-            folders: vec![],
-            templates: crate::watch::template_infos(),
-        }));
-        assert_eq!(round(&watched), watched);
-        assert_eq!(watched.into_json().unwrap()["templates"][0]["id"], "installers");
     }
 }

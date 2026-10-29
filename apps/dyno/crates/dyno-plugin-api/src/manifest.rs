@@ -12,19 +12,13 @@ pub const API_VERSION: u32 = 1;
 pub enum Contribution {
     /// Extra sensor readings.
     Sensors,
-    /// Cleanup categories.
-    Cleanup,
-    /// Actions rules can trigger.
-    Actions,
 }
 
 impl Contribution {
-    /// The name used in `plugin.toml` and in the UI (`sensors`, `cleanup`, `actions`).
+    /// The name used in `plugin.toml` and in the UI (`sensors`).
     pub fn as_str(self) -> &'static str {
         match self {
             Contribution::Sensors => "sensors",
-            Contribution::Cleanup => "cleanup",
-            Contribution::Actions => "actions",
         }
     }
 }
@@ -99,13 +93,10 @@ mod tests {
     fn a_manifest_lists_each_contribution_once() {
         let m = Manifest::new("x", "X", "1.0")
             .contributing(Contribution::Sensors)
-            .contributing(Contribution::Sensors)
-            .contributing(Contribution::Actions);
-        assert_eq!(m.contributes, vec![Contribution::Sensors, Contribution::Actions]);
-        assert!(m.contributes(Contribution::Actions) && !m.contributes(Contribution::Cleanup));
+            .contributing(Contribution::Sensors);
+        assert_eq!(m.contributes, vec![Contribution::Sensors]);
+        assert!(m.contributes(Contribution::Sensors));
         assert_eq!(m.api_version, API_VERSION);
-        assert_eq!(Contribution::Cleanup.as_str(), "cleanup");
         assert_eq!(Contribution::Sensors.as_str(), "sensors");
-        assert_eq!(Contribution::Actions.as_str(), "actions");
     }
 }

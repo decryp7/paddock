@@ -83,7 +83,7 @@ impl RecorderSample {
     /// The sample for `s`, with the busiest of `groups` (the latest process table; empty when none was taken yet).
     pub fn from_system(s: &SystemSample, groups: &[AppGroup]) -> RecorderSample {
         let mut top: Vec<&AppGroup> = groups.iter().collect();
-        top.sort_by(|a, b| b.cpu.total_cmp(&a.cpu));
+        top.sort_by(|a, b| b.cpu_read().total_cmp(&a.cpu_read()));
         RecorderSample {
             at: s.at,
             cpu_total: s.cpu.total,
@@ -99,8 +99,8 @@ impl RecorderSample {
                 .take(TOP_PROCESSES)
                 .map(|g| RecorderProcess {
                     name: g.name.chars().take(MAX_NAME).collect(),
-                    cpu: g.cpu,
-                    memory: g.memory,
+                    cpu: g.cpu_read(),
+                    memory: g.memory_read(),
                 })
                 .collect(),
         }
@@ -284,9 +284,10 @@ mod tests {
             name: name.into(),
             exe: None,
             pids: vec![1],
-            cpu,
-            memory: 1 << 20,
-            disk_bps: 0.0,
+            cpu: crate::process::Measured::Value(cpu),
+            memory: crate::process::Measured::Value(1 << 20),
+            disk_bps: crate::process::Measured::Value(0.0),
+            partial: false,
         }
     }
 

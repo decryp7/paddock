@@ -1,3 +1,4 @@
+import { readValue } from '../core/measured';
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../core/backend';
 import { MockBackend } from '../core/mock-backend';
@@ -130,7 +131,7 @@ describe('ProcessesStore: selection', () => {
     const { mock, store } = setup();
     feed(mock, store);
     const p = mock.liveUpdate('processes').processes![0]!;
-    const promise = store.select({ pid: p.pid, started: p.started });
+    const promise = store.select({ pid: p.pid, started: readValue(p.started) });
     expect(store.detailsLoading()).toBe(true);
     expect(store.details()).toBeNull();
     await promise;
@@ -140,7 +141,7 @@ describe('ProcessesStore: selection', () => {
   it('select(null) clears everything', async () => {
     const { mock, store } = setup();
     const p = mock.liveUpdate('processes').processes![0]!;
-    await store.select({ pid: p.pid, started: p.started });
+    await store.select({ pid: p.pid, started: readValue(p.started) });
     await store.select(null);
     expect(store.selected()).toBeNull();
     expect(store.details()).toBeNull();
@@ -158,9 +159,9 @@ describe('ProcessesStore: selection', () => {
     const real = mock.processDetails.bind(mock);
     let release!: (d: ProcessDetails) => void;
     vi.spyOn(mock, 'processDetails').mockImplementationOnce(() => new Promise((r) => (release = r))).mockImplementation(real);
-    const first = store.select({ pid: a!.pid, started: a!.started });
-    await store.select({ pid: b!.pid, started: b!.started });
-    release(await real({ pid: a!.pid, started: a!.started }));
+    const first = store.select({ pid: a!.pid, started: readValue(a!.started) });
+    await store.select({ pid: b!.pid, started: readValue(b!.started) });
+    release(await real({ pid: a!.pid, started: readValue(a!.started) }));
     await first;
     expect(store.details()?.process.pid).toBe(b!.pid);
   });
@@ -169,8 +170,8 @@ describe('ProcessesStore: selection', () => {
     const [a, b] = mock.liveUpdate('processes').processes!;
     let fail!: (e: unknown) => void;
     vi.spyOn(mock, 'processDetails').mockImplementationOnce(() => new Promise((_r, rej) => (fail = rej)));
-    const first = store.select({ pid: a!.pid, started: a!.started });
-    await store.select({ pid: b!.pid, started: b!.started });
+    const first = store.select({ pid: a!.pid, started: readValue(a!.started) });
+    await store.select({ pid: b!.pid, started: readValue(b!.started) });
     fail({ code: 'internal', message: 'late' });
     await first;
     expect(store.detailsError()).toBeNull();
@@ -178,52 +179,13 @@ describe('ProcessesStore: selection', () => {
   });
 });
 
-describe('ProcessesStore: actions', () => {
-  const target = (mock: MockBackend, name = 'cargo') => {
-    const p = mock.liveUpdate('processes').processes!.find((x) => x.name === name)!;
-    return { ref: { pid: p.pid, started: p.started }, groupId: null, name: p.name } as const;
-  };
+describe('ProcessesStore: requests', () => {
 
-  it('act on a process logs an undoable entry with an Undo toast', async () => {
-    const { mock, store, notifier, activity } = setup();
-    expect(await store.act(target(mock), 'suspend')).toBe(true);
-    expect(store.busy()).toBe(false);
-    expect(store.actionError()).toBeNull();
-    expect(activity.entries()[0]?.title).toMatch(/Suspended/);
-    const toast = notifier.toasts().at(-1)!;
-    expect(toast.action?.label).toBe('Undo');
-    const undo = vi.spyOn(activity, 'undo');
-    toast.action!.run();
-    expect(undo).toHaveBeenCalledWith(activity.entries()[0]!.id);
-  });
-  it('act on a group goes through actOnGroup', async () => {
+  it('a failed request sets actionError and dismissError clears it', async () => {
     const { mock, store } = setup();
-    const spy = vi.spyOn(mock, 'actOnGroup');
-    const ref = vi.spyOn(mock, 'act');
-    expect(await store.act({ ref: null, groupId: 'cargo', name: 'Rust build' }, { setPriority: 'idle' })).toBe(true);
-    expect(spy).toHaveBeenCalledWith('cargo', { setPriority: 'idle' });
-    expect(ref).not.toHaveBeenCalled();
-  });
-  it('a group row without an id falls back to an empty id', async () => {
-    const { mock, store } = setup();
-    const spy = vi.spyOn(mock, 'actOnGroup');
-    expect(await store.act({ ref: null, groupId: null, name: 'x' }, 'end')).toBe(false);
-    expect(spy).toHaveBeenCalledWith('', 'end');
-  });
-  it('act without an entry title toasts the action and name; non-undoable has no button', async () => {
-    const { mock, store, notifier } = setup();
-    vi.spyOn(mock, 'act').mockResolvedValue({ id: 'e', at: NOW, kind: 'manual', title: '', detail: '', undo: 'notUndoable', bytes: null });
-    await store.act(target(mock), 'end');
-    const toast = notifier.toasts().at(-1)!;
-    expect(toast.text).toBe('End: cargo');
-    expect(toast.action).toBeNull();
-  });
-  it('act failure sets actionError, returns false, and dismissError clears it', async () => {
-    const { mock, store } = setup();
-    const dyno = mock.liveUpdate('processes').processes!.find((p) => p.protectedReason)!;
-    expect(await store.act({ ref: { pid: dyno.pid, started: dyno.started }, groupId: null, name: dyno.name }, 'end')).toBe(false);
-    expect(store.actionError()?.code).toBe('protected');
-    expect(store.busy()).toBe(false);
+    vi.spyOn(mock, 'openLocation').mockRejectedValueOnce({ code: 'notFound', message: 'gone' });
+    await store.openLocation({ pid: 1, started: 1 });
+    expect(store.actionError()?.code).toBe('notFound');
     store.dismissError();
     expect(store.actionError()).toBeNull();
   });
@@ -241,10 +203,10 @@ describe('ProcessesStore: actions', () => {
     const { mock, store } = setup();
     const p = mock.liveUpdate('processes').processes!;
     const withExe = p.find((x) => x.exe)!;
-    await store.openLocation({ pid: withExe.pid, started: withExe.started });
+    await store.openLocation({ pid: withExe.pid, started: readValue(withExe.started) });
     expect(store.actionError()).toBeNull();
     const kernel = p.find((x) => !x.exe)!;
-    await store.openLocation({ pid: kernel.pid, started: kernel.started });
+    await store.openLocation({ pid: kernel.pid, started: readValue(kernel.started) });
     expect(store.actionError()?.code).toBe('unsupported');
   });
 });

@@ -27,19 +27,15 @@ const DEFAULT_HOURS = 72;
 
 const CHANGES: { ago: number; kind: Change['kind']; title: string; detail: string }[] = [
   { ago: 25 * MIN, kind: 'updated', title: 'Updated Visual Studio Code', detail: '1.112.0 to 1.113.1' },
-  { ago: 2 * HOUR + 10 * MIN, kind: 'setting', title: 'Turned on the Night display schedule', detail: 'Sunset to sunrise' },
   { ago: 5 * HOUR, kind: 'startupAdded', title: 'New startup item Zoom Opener', detail: 'com.zoom.ZoomOpener' },
   { ago: 9 * HOUR + 40 * MIN, kind: 'installed', title: 'Installed Figma', detail: 'Version 126.4.2' },
-  { ago: 11 * HOUR, kind: 'cleanup', title: 'Cleaned 3 categories', detail: 'Temporary files, crash reports, npm cache to the 7-day quarantine' },
   { ago: DAY + 3 * HOUR, kind: 'updated', title: 'Updated Docker Desktop', detail: '4.62.0 to 4.63.2' },
   { ago: DAY + 3 * HOUR + 4 * MIN, kind: 'updated', title: 'Updated Node.js', detail: '24.9.0 to 24.10.1' },
   { ago: DAY + 8 * HOUR, kind: 'startupRemoved', title: 'Startup item removed: Dropbox Updater', detail: 'com.dropbox.DropboxUpdater' },
   { ago: DAY + 8 * HOUR + 12 * MIN, kind: 'removed', title: 'Removed Dropbox', detail: 'Was version 235.4.4' },
-  { ago: DAY + 20 * HOUR, kind: 'setting', title: 'Changed the sampling interval', detail: 'From every 2 seconds to every second' },
   { ago: 2 * DAY + 2 * HOUR, kind: 'installed', title: 'Installed Linear', detail: 'Version 1.28.0' },
   { ago: 2 * DAY + 6 * HOUR, kind: 'updated', title: 'Updated Google Chrome', detail: '155.0.7632.76 to 156.0.7712.48' },
   { ago: 2 * DAY + 6 * HOUR + 3 * MIN, kind: 'startupAdded', title: 'New startup item Google Updater', detail: 'com.google.keystone.agent' },
-  { ago: 2 * DAY + 15 * HOUR, kind: 'cleanup', title: 'Scheduled cleanup', detail: 'Developer build output to the Trash' },
   { ago: 3 * DAY + HOUR, kind: 'installed', title: 'Installed Homebrew package ripgrep', detail: 'Version 15.1.0' },
   { ago: 4 * DAY + 5 * HOUR, kind: 'updated', title: 'Updated Slack', detail: '4.41.98 to 4.41.105' },
   { ago: 6 * DAY + 2 * HOUR, kind: 'installed', title: 'Installed Rectangle', detail: 'Version 0.88' },
@@ -176,7 +172,7 @@ export function mockSoftware(): SoftwareInventory {
 const file = (id: string, path: string, bytes: number, modifiedAgo: number, now: number): FoundFile => ({ id, path, bytes: Math.round(bytes), modified: now - modifiedAgo });
 
 /** The finder's answer for a folder: about eight big files and three groups of duplicates. */
-export function mockFinder(query: FinderQuery, now: number, removed: ReadonlySet<string>): FinderResult {
+export function mockFinder(query: FinderQuery, now: number): FinderResult {
   const root = query.folder.replace(/\/+$/, '');
   const f = (id: string, rel: string, bytes: number, ago: number) => file(id, `${root}/${rel}`, bytes, ago, now);
   const large = [
@@ -209,10 +205,8 @@ export function mockFinder(query: FinderQuery, now: number, removed: ReadonlySet
       ['d3b', 'docs/shared/quarterly-review.pdf', 44 * DAY - HOUR],
       ['d3c', 'docs/Q3/quarterly-review-final.pdf', 20 * DAY],
     ]),
-  ]
-    .map((g) => ({ ...g, files: g.files.filter((x) => !removed.has(x.id)) }))
-    .filter((g) => g.files.length > 1);
-  const keep = (x: FoundFile) => x.bytes >= query.minBytes && !removed.has(x.id);
+  ];
+  const keep = (x: FoundFile) => x.bytes >= query.minBytes;
   const wantLarge = query.mode !== 'duplicates';
   const wantDup = query.mode !== 'large';
   const dups = wantDup ? duplicates.filter((g) => g.bytesEach >= query.minBytes) : [];
@@ -226,16 +220,6 @@ export function mockFinder(query: FinderQuery, now: number, removed: ReadonlySet
     wastedBytes: dups.reduce((a, g) => a + g.wastedBytes, 0),
   };
 }
-
-/** Every file id of the demo result (what a removal may name). */
-export const FINDER_IDS = ['l1', 'l2', 'l3', 'l4', 'l5', 'l6', 'l7', 'l8', 'd1a', 'd1b', 'd1c', 'd2a', 'd2b', 'd3a', 'd3b', 'd3c'];
-
-/** The duplicate groups of the demo result, by file id (the engine never removes every copy of one). */
-export const FINDER_GROUPS: string[][] = [
-  ['d1a', 'd1b', 'd1c'],
-  ['d2a', 'd2b'],
-  ['d3a', 'd3b', 'd3c'],
-];
 
 // ---------------------------------------------------------------------------------------------- maintenance
 

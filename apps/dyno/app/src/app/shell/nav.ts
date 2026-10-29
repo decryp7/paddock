@@ -11,7 +11,7 @@ export interface NavItem {
 /** The main window's screens, in sidebar order. */
 export const NAV: NavItem[] = [
   { path: '/', label: 'Dashboard', icon: 'dashboard', keywords: 'home overview health live' },
-  { path: '/processes', label: 'Processes', icon: 'processes', keywords: 'task manager apps end kill suspend' },
+  { path: '/processes', label: 'Processes', icon: 'processes', keywords: 'task manager apps processes cpu memory details' },
   { path: '/why-slow', label: 'Why slow', icon: 'why', keywords: 'diagnosis slow cause evidence lag freeze cpu memory disk heat' },
   { path: '/throttling', label: 'Throttling', icon: 'temperature', keywords: 'throttle slowed down heat thermal clock speed power limit battery saver cpu slower' },
   { path: '/issues', label: 'Issues', icon: 'alert', keywords: 'crashes hangs problems errors stability score unexpected shutdown new programs unusual first seen baseline' },
@@ -19,19 +19,15 @@ export const NAV: NavItem[] = [
   { path: '/network', label: 'Network', icon: 'network', keywords: 'ports listening connections sockets firewall exposed ip remote host' },
   { path: '/counters', label: 'Counters', icon: 'trend', keywords: 'performance counters perfmon pdh raw metrics browse search chart pin disk queue page faults network interface proc' },
   { path: '/benchmarks', label: 'Benchmarks', icon: 'gauge', keywords: 'benchmark speed score cpu memory disk before after compare' },
-  { path: '/rules', label: 'CPU taming', icon: 'rules', keywords: 'rules profiles throttle cap protected gaming meeting battery' },
   { path: '/alarms', label: 'Alarms', icon: 'bell', keywords: 'alerts notifications acknowledge shelve mute thresholds custom rules' },
   { path: '/reports', label: 'Reports', icon: 'reports', keywords: 'weekly report summary week trend export markdown html' },
   { path: '/recorder', label: 'Flight recorder', icon: 'camera', keywords: 'timeline capture snapshot last ten minutes' },
-  { path: '/cleanup', label: 'Cleanup', icon: 'cleanup', keywords: 'temp caches disk space free up quarantine trash recycle bin developer build output' },
-  { path: '/watched', label: 'Watched folders', icon: 'folder', keywords: 'downloads screenshots keep for old files expire quarantine automatic cleanup sweep' },
   { path: '/health', label: 'Health', icon: 'health', keywords: 'score reasons startup apps sign-in' },
   { path: '/backup', label: 'Backup health', icon: 'restore', keywords: 'backup time machine restic borg file history duplicati stale last backup' },
   { path: '/extras', label: 'Extras', icon: 'layers', keywords: 'what changed installs updates sleep wake blockers boot startup time apps network energy gpu large files duplicates software inventory maintenance windows' },
   { path: '/lifespan', label: 'Lifespan', icon: 'battery', keywords: 'ssd disk battery life wear forecast replace endurance capacity cycles' },
-  { path: '/tuning', label: 'Tuning', icon: 'sparkle', keywords: 'power plan sleep hibernation battery charge limit indexing visual effects background apps suggestions undo' },
   { path: '/diagnostics', label: 'Diagnostics', icon: 'file', keywords: 'bundle zip bug report redacted support' },
-  { path: '/settings', label: 'Settings', icon: 'settings', keywords: 'theme tray plugins about preferences helper administrator install uninstall' },
+  { path: '/settings', label: 'Settings', icon: 'settings', keywords: 'theme tray plugins about preferences' },
 ];
 
 /** What is on the roadmap but has no screen: listed in one dialog, never as a route or a page of its own. */

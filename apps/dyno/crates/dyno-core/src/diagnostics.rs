@@ -543,7 +543,7 @@ pub fn validate_destination(path: &str) -> Result<PathBuf, BundleError> {
             "Give the full path of the file to save, for example C:\\Users\\you\\Desktop\\dyno-diagnostics.zip.",
         ));
     }
-    if crate::cleanup::has_dot_segment(p) {
+    if crate::disk::has_dot_segment(p) {
         return Err(bad("The save path may not contain \"..\"."));
     }
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");

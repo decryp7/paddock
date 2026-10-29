@@ -131,10 +131,10 @@ export function mockLifespan(os: MockOs, machine: 'laptop' | 'desktop', scenario
       forecast({
         subject: 'ssd',
         name: 'SSD',
-        outcome: { unavailable: { reason: 'Dyno reads SSD wear through smartmontools, which is not installed. Install it (on macOS: brew install smartmontools) or wait for Dyno’s privileged helper.' } },
+        outcome: { unavailable: { reason: 'Dyno reads SSD wear through smartmontools, which is not installed. Install it (on macOS: brew install smartmontools).' } },
         confidence: 'low',
         headline: 'Disk life cannot be estimated',
-        explanation: 'Dyno reads SSD wear through smartmontools, which is not installed. Install it (on macOS: brew install smartmontools) or wait for Dyno’s privileged helper.',
+        explanation: 'Dyno reads SSD wear through smartmontools, which is not installed. Install it (on macOS: brew install smartmontools).',
         basis: [],
         historyDays: 0,
         readings: 0,

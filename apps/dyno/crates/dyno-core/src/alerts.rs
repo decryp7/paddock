@@ -124,7 +124,7 @@ impl Alerts {
                     AlertKind::LowDisk,
                     sev,
                     format!("{} is almost full", d.name),
-                    format!("{} free ({free:.0}%). Cleanup can free space safely.", bytes(d.free)),
+                    format!("{} free ({free:.0}%).", bytes(d.free)),
                 );
             }
         }
@@ -177,7 +177,7 @@ impl Alerts {
             );
         }
         let sustain = i64::from(st.long_high_cpu_minutes) * MINUTE;
-        for g in groups.iter().filter(|g| g.cpu > HIGH_CPU) {
+        for g in groups.iter().filter(|g| g.cpu_read() > HIGH_CPU) {
             let key = format!("cpu:{}", g.id);
             live.push(key.clone());
             self.maybe(
@@ -192,7 +192,7 @@ impl Alerts {
                     "{} has used over {HIGH_CPU:.0}% CPU for {} minutes",
                     g.name, st.long_high_cpu_minutes
                 ),
-                "A rule can tame it automatically next time (CPU taming).".into(),
+                "Check the task manager to see what it is doing.".into(),
             );
         }
         self.since.retain(|k, _| live.contains(k));
@@ -244,9 +244,10 @@ mod tests {
             name: "Hog".into(),
             exe: None,
             pids: vec![1],
-            cpu,
-            memory: 0,
-            disk_bps: 0.0,
+            cpu: crate::process::Measured::Value(cpu),
+            memory: crate::process::Measured::Value(0),
+            disk_bps: crate::process::Measured::Value(0.0),
+            partial: false,
         }
     }
 
