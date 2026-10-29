@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, provideAppInitializer } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
+import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 import { PdShellFrame, provideShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { provideContributions, provideShellContext, provideShellVersionCheck } from '@decryp7/paddock-ui/shell';
 import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
@@ -48,6 +49,7 @@ export function bootMainWindow(): Promise<unknown> {
   return bootstrapApplication(SpotterShell, {
     providers: [
       provideIcons(),
+      providePaddockMaterial(),
       { provide: BACKEND, useFactory: createBackend },
       provideSpotterAppearance(),
       {

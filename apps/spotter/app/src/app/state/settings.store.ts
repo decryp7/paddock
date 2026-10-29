@@ -166,7 +166,7 @@ export const SettingsStore = signalStore(
         try {
           const status = await backend.installRenderer();
           patchState(store, { renderer: { value: status, loading: false, error: null } });
-          toast.success('Browser installed');
+          toast.success('Chromium installed');
         } catch (e) {
           if (isCancelled(e)) toast.info('Installation cancelled', 'Nothing was installed.');
           else fail('The browser could not be installed', e);

@@ -153,7 +153,7 @@ describe('SettingsStore', () => {
     await p;
     expect(store.rendererBusy()).toBe(false);
     expect(store.renderer().value?.kind).toBe('chromium-downloaded');
-    expect(notices().at(-1)?.message).toBe('Browser installed');
+    expect(notices().at(-1)?.message).toBe('Chromium installed');
     vi.spyOn(backend, 'installRenderer').mockRejectedValue(down);
     await store.installRenderer();
     expect(store.rendererBusy()).toBe(false);

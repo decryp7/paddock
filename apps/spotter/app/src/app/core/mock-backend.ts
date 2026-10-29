@@ -716,7 +716,7 @@ export class MockBackend implements SpotterBackend {
 
   installRenderer(): Promise<RendererStatus> {
     return this.call('installRenderer', () =>
-      this.jobs.run('sp.install-renderer', 'Installing the browser', async (tick) => {
+      this.jobs.run('sp.install-renderer', 'Installing Chromium', async (tick) => {
         const archive = 156_237_824;
         for (let i = 0; i <= 6; i++) await tick('downloading', 'Downloading', 'bytes', Math.round((archive * i) / 6), archive);
         const expanded = 612_368_384;
