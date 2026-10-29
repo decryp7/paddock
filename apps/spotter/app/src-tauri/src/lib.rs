@@ -337,6 +337,8 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
         ));
+    // The start's messages (no tray icon, a window that could not open) also go to Spotter's own log.
+    let shell = shell.start_log(applog::write);
     let builder = app(builder, shell, launch, tray::native());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
