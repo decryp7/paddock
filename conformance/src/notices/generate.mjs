@@ -62,10 +62,13 @@ export function workspaceProduction(lock, ws) {
       if (!base) return null;
     }
   };
+  // A peer the workspace itself declares only as a devDependency (e.g. @angular/compiler-cli, a peer of @angular/localize) is a
+  // build tool here, not shipped.
+  const devOnly = new Set(Object.keys(entry.devDependencies ?? {}).filter((n) => !(n in (entry.dependencies ?? {})) && !(n in (entry.optionalDependencies ?? {}))));
   const deps = (e) => [
     ...Object.keys(e.dependencies ?? {}),
     ...Object.keys(e.optionalDependencies ?? {}),
-    ...Object.keys(e.peerDependencies ?? {}).filter((n) => !e.peerDependenciesMeta?.[n]?.optional),
+    ...Object.keys(e.peerDependencies ?? {}).filter((n) => !e.peerDependenciesMeta?.[n]?.optional && !devOnly.has(n)),
   ];
   const seen = new Set();
   const todo = deps(entry).map((n) => resolveFrom(ws, n));
@@ -197,8 +200,8 @@ export function render(rust, npm, appName = 'This application') {
 
 /**
  * Whether an SPDX expression is acceptable under `allowed`: AND needs every term, OR at least one (AND binds tighter),
- * parentheses group, `X WITH exception` is allowed when the whole phrase is listed or X is (an exception only widens what
- * X permits). A trailing `+` (the deprecated "or later" spelling) is dropped. An expression that does not parse is refused.
+ * parentheses group, `X WITH exception` is allowed only when the whole phrase is listed, as cargo-deny does (an unknown
+ * exception id is refused, whatever X is). A trailing `+` (the deprecated "or later" spelling) is dropped. An expression that does not parse is refused.
  */
 export function expressionAllowed(expr, allowed) {
   const tokens = expr.replace(/\(/g, ' ( ').replace(/\)/g, ' ) ').split(/\s+/).filter(Boolean);
@@ -218,7 +221,7 @@ export function expressionAllowed(expr, allowed) {
       i++;
       const exc = tokens[i++];
       if (exc === undefined || exc === '(' || exc === ')') throw new Error('bad exception');
-      return allowed.has(`${t} WITH ${exc}`) || id(t);
+      return allowed.has(`${t} WITH ${exc}`);
     }
     return id(t);
   }
