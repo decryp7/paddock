@@ -193,7 +193,8 @@ Apply these deliberately. They are not decoration:
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
 - Work a person waits for never runs at an OS's starvable background level (rule 52: macOS QoS `BACKGROUND` and
-  `PRIO_DARWIN_BG`, Windows background modes and idle/lowest priorities, Linux `SCHED_IDLE` and idle I/O): lowered work
-  uses `QOS_CLASS_UTILITY`, nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`; a starvable level only for work nobody waits on,
-  with `// conformance: background-qos — <why>` (C54).
+  `PRIO_DARWIN_BG`, Windows background modes and idle/lowest priorities, Linux `SCHED_IDLE` and idle I/O; for a service,
+  launchd `ProcessType` `Background` (or `Adaptive` without XPC), `LowPriorityIO` and systemd `IOSchedulingClass=idle`):
+  lowered work uses `QOS_CLASS_UTILITY`, nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`; a starvable level only for work
+  nobody waits on, with a `conformance: background-qos — <why>` comment (C54).
 - Spawn subagents by role: implementer (Sonnet, mechanical), designer, reviewer, researcher (Opus); see `.claude/agents/`.

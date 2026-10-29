@@ -100,3 +100,61 @@ check = "C54"
 path = "apps/dyno/crates/dyno-platform/src/priority.rs"
 reason = "Dyno: background_current_thread() uses QOS_CLASS_BACKGROUND and THREAD_MODE_BACKGROUND_BEGIN; to move to the gentle levels or carry inline background-qos waivers once it is known that nothing waits on those threads"
 expires = "2026-12-31"
+
+# C54 (rule 52), service level: launchd ProcessType Background / LowPriorityIO and systemd IOSchedulingClass=idle. The
+# shared renderer applies them to every Background or low_priority() service; the fix is ADR 0020's priority helper
+# deciding per class (a service someone waits on renders at User), not a per-app patch. Each file is waived separately so
+# a new use is still caught.
+[[waiver]]
+check = "C54"
+path = "crates/paddock-service/src/render.rs"
+reason = "paddock-service: renders LowPriorityIO and IOSchedulingClass=idle for every low_priority() service; to follow ADR 0020's priority helper (the class decides the level)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C54"
+path = "crates/paddock-service/src/spec.rs"
+reason = "paddock-service: ProcessType::Background maps to launchd Background; to follow ADR 0020's priority helper"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C54"
+path = "crates/paddock-service/src/golden.rs"
+reason = "paddock-service: the golden specs request ProcessType::Background as the apps do today; changes with the renderer (ADR 0020 helper)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C54"
+path = "crates/paddock-service/tests/golden/*"
+reason = "paddock-service: golden outputs of the renderer (ProcessType Background, LowPriorityIO, IOSchedulingClass=idle); regenerated with the ADR 0020 helper follow-up"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C54"
+path = "apps/debrief/crates/debrief-agent/src/service/launchd.rs"
+reason = "Debrief: the headless diagnostics agent's daemon plist is ProcessType Background; scheduled collection nobody watches, but triggered captures may be waited on; to decide with the ADR 0020 helper"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C54"
+path = "apps/dyno/app/src-tauri/macos/net.decryptology.dyno.agent.plist"
+reason = "Dyno: the agent plist is ProcessType Background while the app's live views wait on its samples; being checked separately (Dyno review)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C54"
+path = "apps/dyno/crates/dyno-agent/src/service/spec.rs"
+reason = "Dyno: the agent's plist (ProcessType Background) and unit (IOSchedulingClass=idle) while the app waits on its samples; being checked separately (Dyno review)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C54"
+path = "apps/dyno/crates/dyno-helper/src/install.rs"
+reason = "Dyno: the privileged helper's plist is ProcessType Background while the user waits for its actions; being checked separately (Dyno review)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C54"
+path = "apps/shell-demo/src-tauri/*"
+reason = "shell demo: its heartbeat agent is a Background, low_priority service (plist and paddock-service spec); follows the ADR 0020 helper"
+expires = "2026-12-31"

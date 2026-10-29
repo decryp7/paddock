@@ -176,7 +176,9 @@ changes here, every app's copy is updated in the same change.
     `BACKGROUND` and process background (`PRIO_DARWIN_BG`, `taskpolicy -b`); on Windows `THREAD_MODE_BACKGROUND_BEGIN`,
     `PROCESS_MODE_BACKGROUND_BEGIN`, `IDLE_PRIORITY_CLASS`, `THREAD_PRIORITY_IDLE` and `THREAD_PRIORITY_LOWEST` (the
     background modes also drop I/O and memory priority to the lowest); on Linux `SCHED_IDLE` and the idle I/O class
-    (`ioprio` `IOPRIO_CLASS_IDLE`). Lowered work that a caller may wait for (an analysis behind a report, a pool an
+    (`ioprio` `IOPRIO_CLASS_IDLE`). The same levels set for a whole service count too: launchd `ProcessType`
+    `Background` (and `Adaptive` when the service has no XPC `MachServices` to raise it), `LowPriorityIO` `true`, and
+    systemd `IOSchedulingClass=idle`. Lowered work that a caller may wait for (an analysis behind a report, a pool an
     import waits on through a lock, a download, anything a person started) uses the gentle level instead:
     `QOS_CLASS_UTILITY` on macOS, nice 10 on Linux, `THREAD_PRIORITY_BELOW_NORMAL` on Windows (Debrief's
     `debrief_core::threads::lower_priority`). A busy machine slows such work, never stops it. A starvable level is only
