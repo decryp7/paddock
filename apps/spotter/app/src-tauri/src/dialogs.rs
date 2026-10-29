@@ -14,6 +14,9 @@ paddock_dialogs::dialogs! {
         height: Some(640),
         commands: &[
             prefix(shell::settings::ALL, "settings_"),
+            // The page shows the browser install's phase and Cancel from the window's own jobs list (`provideShellJobs`).
+            shell::jobs::job_cancel,
+            shell::jobs::jobs_snapshot,
             app::app_info,
             app::choose_folder,
             app::get_autostart,

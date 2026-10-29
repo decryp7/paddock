@@ -11,7 +11,7 @@ export const DIALOG_CONTRACTS = {
     height: 640,
     instanced: false,
     requiredChoice: false,
-    commands: ['app_info', 'choose_folder', 'get_autostart', 'get_settings', 'install_renderer', 'mail_status', 'open', 'pause_notifications', 'renderer_status', 'save_settings', 'send_test_email', 'set_autostart', 'set_mail_password', 'settings_*'],
+    commands: ['app_info', 'choose_folder', 'get_autostart', 'get_settings', 'install_renderer', 'job_cancel', 'jobs_snapshot', 'mail_status', 'open', 'pause_notifications', 'renderer_status', 'save_settings', 'send_test_email', 'set_autostart', 'set_mail_password', 'settings_*'],
   },
 } as const;
 
