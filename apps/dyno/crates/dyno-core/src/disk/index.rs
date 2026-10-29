@@ -97,6 +97,13 @@ pub enum IndexError {
     NoSuchNode,
 }
 
+impl Node {
+    /// Whether this node is a refused (or partly refused) folder that Full Disk Access would open.
+    fn needs_fda(&self) -> bool {
+        self.reason == Some(UnreadableReason::NeedsFullDiskAccess) && (self.kind == NodeKind::Unreadable || self.partial)
+    }
+}
+
 struct Node {
     parent: u32,
     first_child: u32,
@@ -190,6 +197,8 @@ pub struct DiskIndex {
     limits: ScanLimits,
     truncated: bool,
     skipped_folders: u64,
+    /// Refused (or partly refused) folders whose reason is Full Disk Access, kept up to date by every change of a node's state.
+    needing_fda: u64,
 }
 
 /// What a name too long to be real is stored as. No supported file system has such a name, so this is never a path to walk; it
@@ -213,6 +222,7 @@ impl DiskIndex {
             limits: limits.validated(),
             truncated: false,
             skipped_folders: 0,
+            needing_fda: 0,
         };
         let name = i.intern(root_name.as_ref());
         i.nodes.push(Node {
@@ -373,16 +383,30 @@ impl DiskIndex {
 
     /// Marks a folder as unreadable: it stays incomplete for good, and so do its ancestors.
     pub fn mark_unreadable(&mut self, node: NodeId, reason: UnreadableReason) {
+        self.change(node, |n| {
+            n.kind = NodeKind::Unreadable;
+            n.reason = Some(reason);
+        });
+    }
+
+    /// Applies `f` to a node and keeps the Full Disk Access counter in step with whether the node counts.
+    fn change(&mut self, node: NodeId, f: impl FnOnce(&mut Node)) {
         let n = &mut self.nodes[node.0 as usize];
-        n.kind = NodeKind::Unreadable;
-        n.reason = Some(reason);
+        let was = n.needs_fda();
+        f(n);
+        match (was, n.needs_fda()) {
+            (false, true) => self.needing_fda += 1,
+            (true, false) => self.needing_fda = self.needing_fda.saturating_sub(1),
+            _ => {}
+        }
     }
 
     /// Marks a reopened folder as unreadable again with the reason it had (a retry was cut short before it was read).
     pub fn restore_unreadable(&mut self, node: NodeId) {
-        let n = &mut self.nodes[node.0 as usize];
-        n.kind = NodeKind::Unreadable;
-        n.reason.get_or_insert(UnreadableReason::Other);
+        self.change(node, |n| {
+            n.kind = NodeKind::Unreadable;
+            n.reason.get_or_insert(UnreadableReason::Other);
+        });
     }
 
     /// Opens every unreadable folder for another try and returns their ids. Each one is a folder being listed again, so
@@ -391,11 +415,15 @@ impl DiskIndex {
     /// (it was not refused at the door) is left alone: listing it again would count its files twice.
     pub fn reopen_unreadable(&mut self) -> Vec<NodeId> {
         let mut out = Vec::new();
-        for (id, n) in self.nodes.iter_mut().enumerate() {
+        for id in 0..self.nodes.len() {
+            let n = &self.nodes[id];
             if n.kind == NodeKind::Unreadable && n.child_count == 0 && n.loose_items == 0 {
-                n.kind = NodeKind::Folder;
-                n.open = 1;
-                out.push(NodeId(u32::try_from(id).unwrap_or(NONE)));
+                let node = NodeId(u32::try_from(id).unwrap_or(NONE));
+                self.change(node, |n| {
+                    n.kind = NodeKind::Folder;
+                    n.open = 1;
+                });
+                out.push(node);
             }
         }
         out
@@ -423,17 +451,15 @@ impl DiskIndex {
     /// Marks a folder as listed but with something in it that could not be read: its size is a lower bound, it stays incomplete
     /// for good (it cannot be read again without counting its files twice), and so do its ancestors.
     pub fn mark_partial(&mut self, node: NodeId, reason: UnreadableReason) {
-        let n = &mut self.nodes[node.0 as usize];
-        n.partial = true;
-        n.reason = Some(reason);
+        self.change(node, |n| {
+            n.partial = true;
+            n.reason = Some(reason);
+        });
     }
 
     /// How many folders (refused, or partly refused) the OS would read if Full Disk Access were given.
     pub fn needing_full_disk_access(&self) -> u64 {
-        self.nodes
-            .iter()
-            .filter(|n| n.reason == Some(UnreadableReason::NeedsFullDiskAccess) && (n.kind == NodeKind::Unreadable || n.partial))
-            .count() as u64
+        self.needing_fda
     }
 
     /// Adds a file under `parent`. A notable file gets a node; any other is folded into `parent`'s loose totals.
@@ -750,6 +776,38 @@ mod tests {
             kids.iter().find(|k| k.name == "Mail").unwrap().unreadable_reason,
             Some(UnreadableReason::NeedsFullDiskAccess)
         );
+    }
+
+    #[test]
+    fn the_full_disk_access_count_follows_every_change_of_state_without_scanning() {
+        use UnreadableReason::{NeedsAdmin, NeedsFullDiskAccess};
+        let mut i = DiskIndex::new("v", ScanLimits::default());
+        let root = i.root();
+        let (a, b, c) = (
+            i.add_folder(root, "a").unwrap(),
+            i.add_folder(root, "b").unwrap(),
+            i.add_folder(root, "c").unwrap(),
+        );
+        assert_eq!(i.needing_full_disk_access(), 0);
+        i.mark_unreadable(a, NeedsFullDiskAccess);
+        i.mark_unreadable(b, NeedsAdmin);
+        assert_eq!(i.needing_full_disk_access(), 1, "only the Full Disk Access reason counts");
+        i.mark_partial(c, NeedsFullDiskAccess);
+        assert_eq!(i.needing_full_disk_access(), 2, "a partly refused folder counts too");
+        i.mark_unreadable(a, NeedsFullDiskAccess);
+        assert_eq!(i.needing_full_disk_access(), 2, "marking again does not count twice");
+        i.mark_unreadable(a, NeedsAdmin);
+        assert_eq!(i.needing_full_disk_access(), 1, "a changed reason leaves the count");
+        i.mark_unreadable(a, NeedsFullDiskAccess);
+        let reopened = i.reopen_unreadable();
+        assert_eq!(reopened.len(), 2, "a and b were refused at the door");
+        assert_eq!(
+            i.needing_full_disk_access(),
+            1,
+            "a reopened folder is not refused now; c stays partly refused"
+        );
+        i.restore_unreadable(a);
+        assert_eq!(i.needing_full_disk_access(), 2, "a cut-short retry puts it back with its reason");
     }
 
     #[test]

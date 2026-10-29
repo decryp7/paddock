@@ -116,6 +116,21 @@ test.describe('disk map', () => {
             const r = row?.getBoundingClientRect();
             if (r && a.width > 0 && (a.right > r.right + 1 || a.left < r.left - 1)) out.push(`row actions leave their row: ${Math.round(a.right)} > ${Math.round(r.right)}`);
           }
+          // The footer row ("Files directly in this folder") lines up with the body rows: same swatch, same columns, text not cut.
+          const foot = document.querySelector<HTMLElement>('tr.mat-mdc-footer-row:not(.foot-off)');
+          const body = document.querySelector<HTMLElement>('tbody tr.mat-mdc-row');
+          if (foot && body) {
+            const left = (el: Element | null) => Math.round(el?.getBoundingClientRect().left ?? -1);
+            const right = (el: Element | null) => Math.round(el?.getBoundingClientRect().right ?? -1);
+            if (left(foot.querySelector('.swatch')) !== left(body.querySelector('.swatch'))) out.push('footer swatch is not under the body swatches');
+            const cells = (tr: HTMLElement) => Array.from(tr.querySelectorAll('td'));
+            for (const i of [1, 2, 4]) {
+              if (right(cells(foot)[i] ?? null) !== right(cells(body)[i] ?? null)) out.push(`footer column ${i} is not aligned with the body rows`);
+            }
+            const txt = foot.querySelector<HTMLElement>('.txt');
+            const cell = foot.querySelector('td');
+            if (txt && cell && (txt.scrollWidth > txt.clientWidth + 1 || right(txt) > right(cell) - 8)) out.push('footer text is cut by its cell');
+          }
           if (document.documentElement.scrollWidth > window.innerWidth) out.push(`the page scrolls sideways: ${document.documentElement.scrollWidth} > ${window.innerWidth}`);
           return out;
         });

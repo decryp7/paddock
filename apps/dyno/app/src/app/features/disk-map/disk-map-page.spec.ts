@@ -482,7 +482,7 @@ describe('dy-disk-map-page', () => {
     btn(r.el, 'Table')!.click();
     await settle(r.f);
     const foot = r.el.querySelector('tfoot tr, tr.mat-mdc-footer-row')!;
-    expect(foot.textContent).toContain('Files in this folder');
+    expect(foot.textContent).toContain('Files directly in this folder');
     expect(foot.textContent).toContain(formatBytes(loose.bytes));
     const input = r.el.querySelector<HTMLInputElement>('input[type="search"]')!;
     input.value = 'ale';

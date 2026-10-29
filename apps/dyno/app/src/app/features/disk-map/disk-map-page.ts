@@ -53,7 +53,7 @@ import {
   selector: 'dy-disk-map-page',
   imports: [
     AsyncState, Icon, PdSunburst, MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger, MatProgressBar, RowMenu, SearchField, SuSegmentedControl, MatButton, MatIconButton, MatTooltip,
-    MatTable, MatColumnDef, MatHeaderCellDef, MatHeaderCell, MatCellDef, MatCell, MatHeaderRowDef, MatHeaderRow, MatRowDef, MatRow, MatNoDataRow, MatFooterCellDef, MatFooterCell, MatFooterRowDef, MatFooterRow, MatFooterCell, MatFooterCellDef, MatFooterRow, MatFooterRowDef, MatSort, MatSortHeader,
+    MatTable, MatColumnDef, MatHeaderCellDef, MatHeaderCell, MatCellDef, MatCell, MatHeaderRowDef, MatHeaderRow, MatRowDef, MatRow, MatNoDataRow, MatFooterCell, MatFooterCellDef, MatFooterRow, MatFooterRowDef, MatSort, MatSortHeader,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
@@ -343,7 +343,7 @@ import {
                         <span class="tag warn">{{ tagText(r.node) }}</span>
                       }
                     </td>
-                    <td mat-footer-cell *matFooterCellDef class="nm">@if (loose(); as l) { <span class="swatch" aria-hidden="true"></span><span class="name"><dy-icon name="file" /><span class="txt">Files in this folder</span></span> }</td>
+                    <td mat-footer-cell *matFooterCellDef class="nm">@if (loose(); as l) { <span class="swatch" aria-hidden="true"></span><span class="name"><dy-icon name="file" /><span class="txt">Files directly in this folder</span></span> }</td>
                   </ng-container>
                   <ng-container matColumnDef="bytes">
                     <th mat-header-cell *matHeaderCellDef mat-sort-header="bytes" class="num">Size</th>
@@ -522,18 +522,19 @@ import {
     .tablewrap { overflow: auto; }
     .share-col { white-space: nowrap; }
     table { width: 100%; table-layout: fixed; }
-    .mat-column-bytes { width: 84px; }
-    .mat-column-items { width: 76px; }
+    .mat-column-bytes { width: 76px; }
+    .mat-column-items { width: 64px; }
     .mat-column-newestChange { width: 104px; }
-    .mat-column-share { width: 116px; }
-    .mat-column-actions { width: 80px; }
+    .mat-column-share { width: 100px; }
+    .mat-column-actions { width: 72px; }
     th, td { white-space: nowrap; }
-    th.mat-mdc-header-cell, td.mat-mdc-cell { padding-inline: var(--sp-2); }
+    th.mat-mdc-header-cell, td.mat-mdc-cell, td.mat-mdc-footer-cell { padding-inline: var(--sp-2); }
+    td.mat-mdc-footer-cell { font: inherit; color: var(--text-1); }
     td.num, td.share-col { overflow: visible; text-overflow: clip; }
     td.nm { overflow: hidden; text-overflow: ellipsis; }
     td.nm button.name { padding: 0 var(--sp-1); min-width: 0; max-width: calc(100% - 28px); vertical-align: middle; }
     td.nm .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    td.nm .name { max-width: calc(100% - 24px); min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-2); vertical-align: middle; }
+    td.nm .name { min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-2); vertical-align: middle; }
     td.nm .swatch { display: inline-block; margin-right: var(--sp-2); vertical-align: middle; }
     td.nm .tag { margin-left: var(--sp-2); }
     th.num, td.num { text-align: right; }
@@ -748,6 +749,7 @@ export class DiskMapPage implements OnInit {
     if (id) this.hostEl.querySelector<SVGElement>(`pd-sunburst [data-id="${id}"]`)?.focus();
   }
 
+  /** The chart's right-click or Shift+F10: the same menu as a row's, for the folder or file under it. */
   protected onChartMenu(e: { point: PdSunburstPoint; x: number; y: number }): void {
     const n = nodeOfChartId(e.point.node.id);
     if (n === null) return;

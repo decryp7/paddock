@@ -121,6 +121,9 @@ fn is_own_privacy_protected(path: &Path, home: Option<&Path>) -> bool {
 /// what is missing, otherwise the folder is protected by macOS in another way (Photos, iCloud, Time Machine, removable and
 /// network volumes). "Permission denied" is ordinary rights, except for a protected folder of the current user when Full Disk
 /// Access is missing (the hint list). Windows and Linux: either refusal is a rights problem.
+///
+/// While Full Disk Access is missing, every macOS EPERM is reported as [`UnreadableReason::NeedsFullDiskAccess`], including reads
+/// that System Integrity Protection blocks and that granting the permission would not open: the errno cannot tell them apart.
 pub fn unreadable_reason(error: &ReadError, ctx: &ReasonContext, path: &Path) -> UnreadableReason {
     match (error, ctx.os) {
         (ReadError::NotPermitted, Os::MacOs) if ctx.fda_missing => UnreadableReason::NeedsFullDiskAccess,
