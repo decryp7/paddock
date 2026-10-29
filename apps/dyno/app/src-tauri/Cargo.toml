@@ -1,6 +1,6 @@
 [package]
 name = "dyno-app"
-description = "Dyno: measures, explains and tunes your PC (tray app and window over the Dyno agent)"
+description = "Dyno: measures and explains your PC (tray app and window over the Dyno agent)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

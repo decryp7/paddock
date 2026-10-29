@@ -1,0 +1,17 @@
+# Spike for ADR 0026 package 1.1-0: can a dialog window open hidden and lay out before it is shown? Not product code:
+# it is its own workspace, is never published and is not part of any app's CI. See README.md.
+[workspace]
+
+[package]
+name = "dialog-hidden-spike"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = [] }
+serde_json = "1"

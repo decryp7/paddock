@@ -2,7 +2,6 @@ import { EVENTS, REQUEST_TIMEOUT_MS, TauriBackend, type InvokeFn, type ListenFn 
 
 const REF = { pid: 7, started: 1000 };
 const SETTINGS = { theme: 'dark' } as never;
-const RULES = { rules: [] } as never;
 
 function fake() {
   const invoke = vi.fn().mockResolvedValue('ok');
@@ -22,8 +21,6 @@ function fake() {
 describe('TauriBackend: request shapes', () => {
   const cases: Array<[string, (b: TauriBackend) => Promise<unknown>, unknown]> = [
     ['processDetails', (b) => b.processDetails(REF), { processDetails: { target: REF } }],
-    ['act', (b) => b.act(REF, { setPriority: 'idle' }), { act: { target: REF, action: { setPriority: 'idle' } } }],
-    ['actOnGroup', (b) => b.actOnGroup('chrome', 'end'), { actOnGroup: { groupId: 'chrome', action: 'end' } }],
     ['lockers', (b) => b.lockers('/tmp/x'), { lockers: { path: '/tmp/x' } }],
     ['openLocation', (b) => b.openLocation(REF), { openLocation: { target: REF } }],
     ['takeSnapshot', (b) => b.takeSnapshot('before'), { takeSnapshot: { label: 'before' } }],
@@ -34,28 +31,9 @@ describe('TauriBackend: request shapes', () => {
     ['history', (b) => b.history('week', 5), { history: { range: 'week', end: 5 } }],
     ['history now', (b) => b.history('hour', null), { history: { range: 'hour', end: null } }],
     ['activity', (b) => b.activity(30), { activity: { limit: 30 } }],
-    ['undo', (b) => b.undo('act-1'), { undo: { activityId: 'act-1' } }],
-    ['releaseAction', (b) => b.releaseAction(REF), { releaseAction: { target: REF } }],
-    ['rules', (b) => b.rules(), 'rules'],
-    ['saveRules', (b) => b.saveRules(RULES), { saveRules: { rules: RULES } }],
-    ['setProfile', (b) => b.setProfile('gaming'), { setProfile: { profile: 'gaming' } }],
-    ['pauseRules', (b) => b.pauseRules(true), { pauseRules: { paused: true } }],
-    ['cleanupCategories', (b) => b.cleanupCategories(), 'cleanupCategories'],
-    ['scanCleanup', (b) => b.scanCleanup(['temp']), { scanCleanup: { categories: ['temp'] } }],
-    ['runCleanup', (b) => b.runCleanup('s1', ['i1'], 'quarantine'), { runCleanup: { scanId: 's1', itemIds: ['i1'], mode: 'quarantine' } }],
-    ['quarantine', (b) => b.quarantine(), 'quarantine'],
-    ['restoreQuarantine', (b) => b.restoreQuarantine('q1'), { restoreQuarantine: { id: 'q1' } }],
     ['diskUsage', (b) => b.diskUsage(null), { diskUsage: { path: null } }],
     ['health', (b) => b.health(), 'health'],
-    ['tuning', (b) => b.tuning(), 'tuning'],
-    ['applyTuning', (b) => b.applyTuning('t'), { applyTuning: { id: 't' } }],
-    ['revertTuning', (b) => b.revertTuning('t'), { revertTuning: { id: 't', force: false } }],
-    ['revertTuning forced', (b) => b.revertTuning('t', true), { revertTuning: { id: 't', force: true } }],
-    ['helperStatus', (b) => b.helperStatus(), 'helperStatus'],
-    ['installHelper', (b) => b.installHelper(), 'installHelper'],
-    ['uninstallHelper', (b) => b.uninstallHelper(), 'uninstallHelper'],
     ['startupEntries', (b) => b.startupEntries(), 'startupEntries'],
-    ['setStartupState', (b) => b.setStartupState('s', { delayed: 30 }), { setStartupState: { id: 's', state: { delayed: 30 } } }],
     ['weeklyReport', (b) => b.weeklyReport(3), { weeklyReport: { weeksAgo: 3 } }],
     ['alerts', (b) => b.alerts(10), { alerts: { limit: 10 } }],
     ['changes', (b) => b.changes({ hours: 24 }), { changes: { query: { hours: 24 } } }],
@@ -65,7 +43,6 @@ describe('TauriBackend: request shapes', () => {
     ['gpuProcesses', (b) => b.gpuProcesses(), 'gpuProcesses'],
     ['softwareInventory', (b) => b.softwareInventory(), 'softwareInventory'],
     ['findFiles', (b) => b.findFiles({ folder: '/x', mode: 'both', minBytes: 5 }), { findFiles: { query: { folder: '/x', mode: 'both', minBytes: 5 } } }],
-    ['removeFoundFiles', (b) => b.removeFoundFiles('s', ['a'], 'quarantine'), { removeFoundFiles: { scanId: 's', ids: ['a'], mode: 'quarantine' } }],
     ['maintenance', (b) => b.maintenance(), 'maintenance'],
     ['backup', (b) => b.backup(), 'backup'],
     ['refreshBackup', (b) => b.refreshBackup(), 'refreshBackup'],
@@ -74,8 +51,7 @@ describe('TauriBackend: request shapes', () => {
     ['plugins', (b) => b.plugins(), 'plugins'],
     ['issues', (b) => b.issues({ days: 14 }), { issues: { query: { days: 14 } } }],
     ['rescanIssues', (b) => b.rescanIssues({ days: 7 }), { rescanIssues: { query: { days: 7 } } }],
-    ['unusual', (b) => b.unusual(true), { unusual: { includeIgnored: true } }],
-    ['unusualAct', (b) => b.unusualAct('/a', 'protect'), { unusualAct: { key: '/a', action: 'protect' } }],
+    ['unusual', (b) => b.unusual(), 'unusual'],
     ['forgetBaseline', (b) => b.forgetBaseline(), 'forgetBaseline'],
     ['searchSeed', (b) => b.searchSeed('Slack'), { searchSeed: { text: 'Slack' } }],
     ['webSearch', (b) => b.webSearch('slack high cpu'), { webSearch: { query: 'slack high cpu' } }],
@@ -83,15 +59,6 @@ describe('TauriBackend: request shapes', () => {
     ['fileHash of a path', (b) => b.fileHash({ path: '/a/b' }), { fileHash: { source: { path: '/a/b' } } }],
     ['openVirusTotal', (b) => b.openVirusTotal('ab'.repeat(32)), { virusTotalUrl: { sha256: 'ab'.repeat(32) } }],
     ['startupOverview', (b) => b.startupOverview({ hideOs: true, hideSigned: false }), { startupOverview: { filter: { hideOs: true, hideSigned: false } } }],
-    ['watchedFolders', (b) => b.watchedFolders(), 'watchedFolders'],
-    [
-      'setWatchedFolder sends absent fields as null',
-      (b) => b.setWatchedFolder('w-1', { enabled: true }),
-      { setWatchedFolder: { id: 'w-1', keepForSecs: null, enabled: true, recursive: null } },
-    ],
-    ['removeWatchedFolder', (b) => b.removeWatchedFolder('w-1'), { removeWatchedFolder: { id: 'w-1' } }],
-    ['previewWatchedFolder', (b) => b.previewWatchedFolder('w-1'), { previewWatchedFolder: { id: 'w-1' } }],
-    ['sweepWatchedFolder', (b) => b.sweepWatchedFolder('w-1'), { sweepWatchedFolder: { id: 'w-1' } }],
   ];
 
   it.each(cases)('%s sends the externally tagged request through the dyno command', async (_name, call, request) => {
@@ -111,13 +78,6 @@ describe('TauriBackend: request shapes', () => {
     const { backend, invoke } = fake();
     await backend.saveIssues(30);
     expect(invoke).toHaveBeenCalledWith('save_issues', { days: 30 });
-  });
-
-  it('addWatchedFolder asks the shell for the folder dialog and never sends a path from the webview', async () => {
-    const { backend, invoke } = fake();
-    await backend.addWatchedFolder({ template: 'installers', keepForSecs: 600, recursive: false });
-    expect(invoke).toHaveBeenCalledWith('add_watched_folder', { template: 'installers', keepForSecs: 600, recursive: false });
-    expect(JSON.stringify(invoke.mock.calls)).not.toContain('path');
   });
 
   it('saveInventoryReport and pickFolder ask the shell for its dialogs', async () => {
@@ -146,15 +106,15 @@ describe('TauriBackend: request shapes', () => {
 describe('TauriBackend: errors and timeout', () => {
   it('turns a well-formed rejection into a CommandError', async () => {
     const { backend, invoke } = fake();
-    invoke.mockRejectedValueOnce({ code: 'protected', message: 'no' });
-    await expect(backend.whySlow()).rejects.toEqual({ code: 'protected', message: 'no' });
+    invoke.mockRejectedValueOnce({ code: 'busy', message: 'no' });
+    await expect(backend.whySlow()).rejects.toEqual({ code: 'busy', message: 'no' });
   });
   it('turns other rejections into internal errors', async () => {
     const { backend, invoke } = fake();
     invoke.mockRejectedValueOnce('plain text');
-    await expect(backend.rules()).rejects.toEqual({ code: 'internal', message: 'plain text' });
+    await expect(backend.settings()).rejects.toEqual({ code: 'internal', message: 'plain text' });
     invoke.mockRejectedValueOnce(new Error('boom'));
-    await expect(backend.rules()).rejects.toEqual({ code: 'internal', message: 'boom' });
+    await expect(backend.settings()).rejects.toEqual({ code: 'internal', message: 'boom' });
   });
 
   describe('timeout', () => {

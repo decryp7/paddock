@@ -95,3 +95,13 @@ fn the_table_has_the_storage_commands_for_main_windows_and_dialogs() {
         paddock_commands::Kind::Query
     );
 }
+
+/// The dialog contracts of this crate as TypeScript (ADR 0026 §3), beside its other generated files.
+#[test]
+fn generated_dialog_contracts_are_current() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../ui/projects/paddock-ui/shell/storage/generated/dialog-contracts.ts");
+    let text =
+        paddock_dialogs::ts::contracts_module("paddock-storage", &crate::DIALOGS, REGENERATE);
+    testing::sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
+}

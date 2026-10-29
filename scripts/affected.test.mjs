@@ -3,9 +3,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join, posix } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
@@ -40,6 +40,13 @@ describe('the graph of this tree', () => {
     assert.deepEqual(r.packages['apps/shell-demo/src-tauri'], ['paddock-shell-demo', 'shell-demo-agent']);
   });
 
+  test('the e2e port and build guard (imported by relative path by every app config) mark the UI half of every app', () => {
+    for (const f of ['ui/projects/paddock-e2e/src/env.ts', 'ui/projects/paddock-e2e/src/build-guard.ts']) {
+      const r = run(f);
+      for (const a of APPS) assert.ok(r.apps.includes(a), `${f} reaches ${a}`);
+    }
+  });
+
   // Paddock 234f6911: a ui/ shell change broke the shell demo job, which has no npm or Cargo edge to ui/ (spike §2).
   test('a ui change marks the Tauri shells that embed a ui build (frontendDist), both halves', () => {
     const r = run('ui/projects/paddock-ui/shell/src/public-api.ts');
@@ -48,6 +55,28 @@ describe('the graph of this tree', () => {
     assert.deepEqual(r.apps, ['shell-demo', 'spotter', 'workbench-demo']);
     assert.deepEqual(r.kinds.spotter, ['ui']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust', 'ui']);
+  });
+
+  test('a generated ui file marks the crate that checks it, so a stale one fails on the branch', () => {
+    const r = run('ui/projects/paddock-ui/shell/generated/dialogs.ts');
+    assert.ok(r.crates && r.ui);
+    assert.ok(r.packages.crates.includes('paddock-dialogs'));
+    // A generated file no crate names marks every crate of the workspace (fail safe).
+    const unknown = run('ui/projects/paddock-ui/shell/generated/no-such-file.json');
+    assert.ok(unknown.crates);
+    assert.ok(unknown.packages.crates.length > 5);
+    // Other files in ui/ (not generated) do not mark crates.
+    assert.ok(!run('ui/projects/paddock-ui/shell/src/public-api.ts').crates);
+  });
+
+  test("an app's Cargo.toml and capabilities run conformance (C48 reads them), other app files do not", () => {
+    for (const f of ['apps/shell-demo/src-tauri/capabilities/dialog.json', 'apps/shell-demo/src-tauri/Cargo.toml', 'apps/debrief/app/src-tauri/capabilities/dialog.json']) {
+      const r = run(f);
+      assert.ok(r.conformance, f);
+      assert.deepEqual(r.apps, [f.split('/')[1]], f);
+    }
+    assert.ok(!run('apps/shell-demo/src-tauri/src/lib.rs').conformance);
+    assert.ok(!run('apps/shell-demo/README.md').conformance);
   });
 
   test("ui's ESLint config reaches ../eslint, so a preset change runs ui's lint", () => {
@@ -92,6 +121,16 @@ describe('the graph of this tree', () => {
     assert.deepEqual([s.tools, s.ui, s.crates], [true, true, false]);
     const i = run('ci-image/Dockerfile');
     assert.deepEqual([i.ciImage, i.ui, i.apps], [true, true, []]);
+  });
+
+  test('the developer tool is its own project: its folder and the ./dev wrapper mark it, and the shared crates it uses reach it', () => {
+    const own = run('tools/paddock-dev/src/lib.rs');
+    assert.deepEqual([own.paddockDev, own.tools, own.crates, own.apps], [true, false, false, []]);
+    for (const f of ['dev', 'dev.cmd']) assert.deepEqual([run(f).paddockDev, run(f).all], [true, false], f);
+    assert.ok(run('crates/paddock-slots/src/lib.rs').paddockDev, 'a path dependency of the tool reaches it');
+    assert.ok(run('crates/paddock-cli/src/lib.rs').paddockDev);
+    assert.ok(run('.cargo/config.toml').paddockDev, 'global inputs reach it');
+    assert.equal(run('tools/bootstrap.sh').paddockDev, false);
   });
 
   test('every project of a changed file is in the plan, and no app outside apps/ appears', () => {
@@ -574,5 +613,15 @@ describe('command line: incomplete or unknown arguments are refused, never plann
     assert.equal(parseArgs(['origin/main', '--explain']).explain, true);
     assert.deepEqual(parseArgs(['--files', 'a,b', '--explain']).files, ['a', 'b']);
     assert.equal(parseArgs(['--all']).all, true);
+  });
+});
+
+describe('paths from cargo metadata on Windows', () => {
+  test('repoRelative gives a / path where path.relative would give a \\ one', () => {
+    const win = (root, p) => repoRelative(root, p, win32.relative, win32.sep);
+    assert.equal(win('C:\\work\\paddock', 'C:\\work\\paddock\\crates\\paddock-cli'), 'crates/paddock-cli');
+    assert.equal(win('C:\\work\\paddock', 'c:\\WORK\\paddock\\apps\\x\\app\\src-tauri'), 'apps/x/app/src-tauri', 'drive letter and case do not matter on Windows');
+    assert.equal(win('C:\\work\\paddock', 'C:\\work\\paddock'), '');
+    assert.equal(repoRelative('/r', '/r/crates/a'), 'crates/a');
   });
 });

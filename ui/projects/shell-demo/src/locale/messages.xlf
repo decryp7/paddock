@@ -35,6 +35,9 @@
       <trans-unit id="sd.dialog.rename" datatype="html">
         <source>Rename</source>
       </trans-unit>
+      <trans-unit id="sd.dialog.unsaved" datatype="html">
+        <source>Unsaved changes</source>
+      </trans-unit>
       <trans-unit id="sd.engine.break" datatype="html">
         <source>Break the demo engine</source>
       </trans-unit>

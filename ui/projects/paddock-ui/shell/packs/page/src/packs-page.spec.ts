@@ -40,7 +40,7 @@ describe('the Knowledge packs page', () => {
     expect(el.textContent).toContain('Yours');
     expect(el.querySelectorAll('.pd-packs__row').length).toBe(2);
     expect(q('packs-problems-cleanup')).toBeNull();
-    expect(q('packs-reload')?.classList.contains('pd-packs__btn--primary')).toBe(false);
+    expect(q('packs-reload')?.classList.contains('mat-mdc-unelevated-button')).toBe(false);
   });
 
   it('names a refused pack and why in an alert, and makes Reload the primary button', async () => {
@@ -51,7 +51,7 @@ describe('the Knowledge packs page', () => {
     expect(alert?.textContent).toContain('line 2, column 3');
     assertStatusGlyphs(el);
     expect(q('packs-warnings-cleanup')?.textContent).toContain('unknown key "extra"');
-    expect(q('packs-reload')?.classList.contains('pd-packs__btn--primary')).toBe(true);
+    expect(q('packs-reload')?.classList.contains('mat-mdc-unelevated-button')).toBe(true);
   });
 
   it('counts several refused packs', async () => {
@@ -89,7 +89,7 @@ describe('the Knowledge packs page', () => {
     await fixture.whenStable();
     expect(q('packs-still-working')?.textContent).toContain('Still working');
     expect((q('packs-reload') as HTMLButtonElement).disabled).toBe(true);
-    expect(fixture.nativeElement.querySelector('progress')?.getAttribute('aria-label')).toBe('Reading the packs…');
+    expect(fixture.nativeElement.querySelector('mat-progress-bar')?.getAttribute('aria-label')).toBe('Reading the packs…');
     release();
     await settle();
     await fixture.whenStable();

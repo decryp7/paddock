@@ -21,50 +21,23 @@ const LEG = [{ kind: 'accent', label: 'Type in dyno-core' }, { kind: 'core', lab
   save('uml-class-domain', d, r1 + d.rect.proc[3]);
 }
 
-// ---------- rules and actions ----------
+// ---------- findings ----------
 {
-  const d = P({ title: 'Domain model — rules and actions', kind: 'UML · Class diagram', w: 1500,
-    desc: 'A RuleSet holds rules; each rule is a ladder of steps that apply ProcessActions; every change is recorded as an ActivityEntry with the record that undoes it.' });
-  const W = 336, G = 104, cx = (i) => 48 + i * (W + G);
-  cls(d, 'ruleset', cx(0), Y, W, { name: 'RuleSet', attrs: ['rules: Vec<Rule>', 'protected: Vec<String>', 'profile: ProfileId', 'paused: bool'] });
-  cls(d, 'rule', cx(1), Y, W, { name: 'Rule', attrs: ['id, name, enabled', 'condition: RuleCondition', 'ladder: Vec<RuleStep>', 'release_after_secs: u32', 'profiles: Vec<ProfileId>'] });
-  cls(d, 'step', cx(2), Y, W, { name: 'RuleStep', attrs: ['action: StepAction', 'after_secs: u32'] });
-  const r1 = Y + d.rect.rule[3] + 72;
-  cls(d, 'engine', cx(0), r1, W, { name: 'Engine', attrs: ['state per (rule, app)'], ops: ['tick(Tick) -> Vec<Command>'] });
-  cls(d, 'profile', cx(1), r1, W, { name: 'ProfileId', stereotype: 'enumeration', role: 'core', attrs: ['Normal · Gaming · Meeting', 'OnBattery · BuildingCode'] });
-  cls(d, 'action', cx(2), r1, W, { name: 'ProcessAction', stereotype: 'enumeration', role: 'core', attrs: ['End', 'Suspend · Resume', 'SetPriority(Priority)', 'SetAffinity(mask)', 'SetEfficiencyMode(bool)', 'SetCpuCap(Option<u8>)'] });
-  const r2 = Math.max(r1 + d.rect.action[3], r1 + d.rect.engine[3]) + 72;
-  cls(d, 'activity', cx(0), r2, W, { name: 'ActivityEntry', attrs: ['id, at, kind', 'title, detail', 'undo: UndoState', 'bytes: Option<u64>'] });
-  cls(d, 'undo', cx(2), r2, W, { name: 'UndoRecord', stereotype: 'enumeration', role: 'core', attrs: ['Process { target, actions }', 'Startup { entry_id, previous }', 'Tuning { id }', 'Quarantine { id }'] });
-  link(d, 'ruleset', 'R', 'rule', 'L', { arrow: 'open', label: '0..*' });
-  link(d, 'rule', 'R', 'step', 'L', { ...comp, label: '1..*' });
-  link(d, 'step', 'B', 'action', 'T', { dash: true, arrow: 'open', label: 'applies' });
-  link(d, 'engine', 'T', 'ruleset', 'B', { dash: true, arrow: 'open', label: 'evaluates' });
-  link(d, 'rule', 'B', 'profile', 'T', { arrow: 'open', label: '0..*' });
-  link(d, 'activity', 'R', 'undo', 'L', { arrow: 'open', label: 'holds', t: [0.5, (d.rect.activity[1] + d.rect.activity[3] / 2 - d.rect.undo[1]) / d.rect.undo[3]] });
-  link(d, 'undo', 'T', 'action', 'B', { dash: true, arrow: 'open', label: 'undoes with' });
-  d.legend(LEG);
-  save('uml-class-rules', d, r2 + Math.max(d.rect.activity[3], d.rect.undo[3]));
-}
-
-// ---------- insight and changes ----------
-{
-  const d = P({ title: 'Domain model — diagnosis and changes', kind: 'UML · Class diagram', w: 1500,
-    desc: 'What Dyno tells the owner (causes, health, alerts) and what it can change (startup entries, cleanup, admin tuning through the helper).' });
-  const W = 336, G = 104, cx = (i) => 48 + i * (W + G);
+  const d = P({ title: 'Domain model — findings', kind: 'UML · Class diagram', w: 1208,
+    desc: 'What Dyno tells the owner: causes, health reasons, alarms, OS issues, startup entries and history. Nothing here changes the machine.' });
+  const W = 312, G = 88, cx = (i) => 48 + i * (W + G);
   cls(d, 'diag', cx(0), Y, W, { name: 'Diagnosis', attrs: ['headline: String', 'causes: Vec<Cause>'] });
-  cls(d, 'cause', cx(1), Y, W, { name: 'Cause', attrs: ['kind, title, explanation', 'confidence: f32', 'evidence: Vec<Evidence>', 'suggestions: Vec<Suggestion>'] });
-  cls(d, 'health', cx(2), Y, W, { name: 'HealthReport', attrs: ['score: u32, grade', 'reasons: Vec<HealthReason>'] });
+  cls(d, 'cause', cx(1), Y, W, { name: 'Cause', attrs: ['kind, title, explanation', 'confidence: f32', 'evidence: Vec<Evidence>', 'hints: Vec<Hint> (text only)'] });
+  cls(d, 'health', cx(2), Y, W, { name: 'HealthReport', attrs: ['score: u32, grade', 'reasons: Vec<HealthReason>', '(reasons only, no fixes)'] });
   const r1 = Y + d.rect.cause[3] + 72;
-  cls(d, 'alert', cx(0), r1, W, { name: 'Alert', attrs: ['id, at, kind, severity', 'title, detail'] });
-  cls(d, 'startup', cx(1), r1, W, { name: 'StartupEntry', attrs: ['id, name, command, exe', 'location: StartupLocation', 'state: StartupState', 'impact: StartupImpact'] });
-  cls(d, 'hist', cx(2), r1 + 0, W, { name: 'HistoryPoint', attrs: ['at: Timestamp, tier', 'cpu, cpu_min, cpu_max', 'memory, disk, net (same shape)'] });
-  const r2 = r1 + d.rect.startup[3] + 72;
-  cls(d, 'scan', cx(0), r2, W, { name: 'CleanupScan', attrs: ['id, at, total_bytes', 'results: Vec<CategoryResult>', 'items: CleanupItem (path, bytes,', '  reason, selected)'] });
-  cls(d, 'helper', cx(1), r2, W, { name: 'HelperAction', stereotype: 'enumeration', role: 'core', attrs: ['SetPowerScheme', 'SetVisualEffects', 'SetIndexingExcluded', 'SetDefenderExcluded', 'SetLowPowerMode', 'SetMachineStartupEnabled'] });
-  cls(d, 'tuning', cx(2), r2, W, { name: 'TuningSuggestion', attrs: ['id, title, plan', 'preview lines, inverse'] });
+  cls(d, 'alarm', cx(0), r1, W, { name: 'Alarm', attrs: ['id, rule, key', 'severity: Severity', 'state: AlarmState', 'first_seen, last_seen', 'repeat_count, current_value'] });
+  cls(d, 'astate', cx(1), r1, W, { name: 'AlarmState', stereotype: 'enumeration', role: 'core', attrs: ['Active', 'Acknowledged', 'Cleared', 'ClearedUnacknowledged'] });
+  cls(d, 'issue', cx(2), r1, W, { name: 'Issue', attrs: ['id, at, kind: IssueKind', 'severity, app, title', 'evidence: String', 'source: IssueSourceId'] });
+  const r2 = r1 + d.rect.alarm[3] + 72;
+  cls(d, 'startup', cx(0), r2, W, { name: 'StartupEntry', attrs: ['id, name, command, exe', 'location: StartupLocation', 'state: StartupState (shown)', 'impact: StartupImpact'] });
+  cls(d, 'hist', cx(1), r2, W, { name: 'HistoryPoint', attrs: ['at: Timestamp, tier', 'cpu, cpu_min, cpu_max', 'memory, disk, net (same shape)'] });
   link(d, 'diag', 'R', 'cause', 'L', { arrow: 'open', label: '0..*' });
-  link(d, 'helper', 'R', 'tuning', 'L', { dash: true, arrow: 'open', label: 'Used by', t: [(d.rect.tuning[3] / 2) / d.rect.helper[3], 0.5] });
-  d.legend(LEG);
-  save('uml-class-insight', d, r2 + d.rect.helper[3]);
+  link(d, 'alarm', 'R', 'astate', 'L', { arrow: 'open', label: 'state', t: [(d.rect.astate[3] / 2) / d.rect.alarm[3], 0.5] });
+  d.legend([LEG[0], LEG[1], { kind: 'line', label: 'Association' }]);
+  save('uml-class-insight', d, r2 + Math.max(d.rect.startup[3], d.rect.hist[3]));
 }

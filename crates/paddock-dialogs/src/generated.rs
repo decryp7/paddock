@@ -21,13 +21,14 @@ fn text() -> String {
         crate::Kind::decl(),
         crate::Modality::decl(),
         crate::Size::decl(),
-        crate::Contract::decl(),
-        crate::ContractFile::decl(),
+        crate::Measure::decl(),
         crate::Remembered::decl(),
+        crate::Theme::decl(),
         crate::DialogRequest::decl(),
         crate::DialogInfo::decl(),
         crate::DialogStart::decl(),
         crate::DialogResult::decl(),
+        crate::DialogShown::decl(),
         crate::DialogClosed::decl(),
         crate::DialogErrorCode::decl(),
         crate::DialogError::decl(),
@@ -43,9 +44,10 @@ fn text() -> String {
         .join(", ");
     format!(
         "{header}{types}\
-/** The events of the dialog layer: to the opener (`result`, `closed`) and to the dialog (`closeRequested`). */
+/** The events of the dialog layer: to the opener (`result`, `shown`, `closed`) and to the dialog (`closeRequested`). */
 export const DIALOG_EVENTS = {{
   result: '{}',
+  shown: '{}',
   closed: '{}',
   closeRequested: '{}',
 }} as const;
@@ -54,9 +56,26 @@ export const DIALOG_EVENTS = {{
 export const DIALOG_BASE_COMMANDS = [{base}] as const;
 ",
         crate::RESULT_EVENT,
+        crate::SHOWN_EVENT,
         crate::CLOSED_EVENT,
         crate::CLOSE_REQUESTED_EVENT,
     )
+}
+
+/// The kind table every app shares (ADR 0026 §3).
+fn kinds_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../ui/projects/paddock-ui/shell/generated/dialog-kinds.ts")
+}
+
+#[test]
+fn generated_kind_table_is_current() {
+    let synced = testing::sync_generated(
+        &kinds_path(),
+        &crate::ts::kinds_module(REGENERATE),
+        WriteMode::from_env(),
+    );
+    synced.unwrap_or_else(|e| panic!("{e}"));
 }
 
 #[test]

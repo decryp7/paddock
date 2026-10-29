@@ -575,3 +575,91 @@ left to the runner's test timeout, which names the test (rule 5).
 Hand-rolled components (for example `pd-table`'s sticky header over virtual scroll) cost us bugs that the Angular
 Material and CDK equivalents already solve and test. **Rule:** use a Material component wherever one fits and CDK for
 the behaviour Material lacks; hand-roll only what neither provides, with the reason in the doc comment (rule 47).
+
+## aws-lc's jitter entropy aborts on Windows VMs; build with AWS_LC_SYS_NO_JITTER_ENTROPY=1 (2026-10-28, Spotter)
+
+Spotter's one test that completes a TLS ClientHello died twice on the Windows runner (a VM) with 0xc0000409, no panic
+and an empty stderr (runs 6457 and 6628). The probable cause: the first random draw in a process seeds aws-lc's
+generator from CPU Jitter Entropy, which calls `abort()` when the jitter source fails its health tests three times
+(aws/aws-lc-rs#1072, open, seen on Windows VMs and at early boot), and the MSVC CRT turns `abort()` into a fast fail
+with that code, which reads like a stack overrun. Not caught in a dump; on the Mac 8,680 fresh processes under load
+never failed. The shipped app takes the same path for mail and HTTPS. **Rule:** an app that links aws-lc (rustls'
+default provider, reqwest's `rustls`) sets `AWS_LC_SYS_NO_JITTER_ENTROPY = { value = "1", force = true }` in its
+`.cargo/config.toml` `[env]`, with a test that reads it through `option_env!`, and never sets the target-suffixed
+variant, which the build script reads first. Windows 0xc0000409 is any self-triggered abort (`abort()`, `__fastfail`,
+`/GS`), not proof of a buffer overrun: look for a C `abort()` first.
+
+## A fake clock next to real processes must not run away from the real one (2026-10-28, Pitcrew)
+Pitcrew's supervision tests drive the supervisor with a fake clock but real runner processes, and failed or timed out
+only on a loaded CI runner (run 6628): (1) a test took the runner's "task started" line for the job's process, then
+jumped the clock 120 s with no look at the processes in between, so the job counted as over (its process started
+after the line under load); (2) the job's start is the fake clock's time while its processes' start times come from
+the real clock, so a clock that ran ahead while the machine was slow put the leftovers outside the job
+(`ATTRIBUTION_SLACK`, 10 s) and they were never found; (3) a 60 s clock step during a leftover's stop passed the stop
+timeout before a slow process could exit; (4) real-time job lengths (`sleep 3`) and 80 clock steps, each a full
+process-table read, scaled with the load. **Rule:** a test double's job lasts until the test releases it, never a real
+time; a test waits for what the system under test has *seen* (its usage, its list), not for the input it was given;
+while the system compares the fake clock with real OS timestamps, the clock follows the real one (`until_real`) and
+holds still while a real process reacts to a signal (step it only where the product needs time to pass, such as a
+job's end after `IDLE_CONFIRM`); a tool's timeout ends its whole tree: on Unix its own session (`setsid`, so an
+interactive login shell gets no `SIGTTIN` either) and `killpg`, on Windows a kill-on-close job object, which also holds
+helpers that left the tree (`taskkill /T` misses those); otherwise `cmd /c`'s and a login shell's children outlive it
+(nextest's "leaky"). A test of a timeout gives up on a condition (the tree is complete), never on a time budget.
+Reproduce with a delay knob in the fake (`spawn_delay_ms`), not by hoping for load.
+
+## Unrecorded benchmark conditions made 182k and 1.3M events/s look like a contradiction (2026-10-29)
+Two quoted ingest numbers, about 182k and 1.3M events/s, were argued over as if one was wrong. Neither came with machine,
+load, build profile, corpus or command, so nobody could tell whether they differed by a release build, a quiet machine, a
+different corpus or a real regression, and stale figures kept being quoted from ADRs and old job logs. **Rule:** record
+every benchmark you quote as a results block (date, commit, machine, load, build, corpus and generator, exact command,
+runs, numbers with budget and verdict, physical-footprint memory) in the owning `docs/performance.md` or
+`docs/benchmarks.md`, and link it from wherever the number is quoted; a number without a block is not evidence (rule 48).
+
+## A sticky header needs a z-index above everything that scrolls under it (2026-10-28, all apps)
+"The cell covers the header when scrolling": a `position: sticky` header with `z-index: auto` paints in tree order with the
+rows, so a later cell that is positioned or makes a stacking context (opacity on muted rows or hover actions, a relative
+badge, a transform) paints over it, and a sticky column at the header's own z-index wins the tie. Fourteen tables in three
+apps and the shared shell had it (ADR 0027 lists them); none showed with the mock data, so a run-time sweep alone would not have found them.
+**Rule:** every sticky header sets a z-index from the table ladder (`--pd-z-table-header` above sticky columns above row
+actions) and an opaque background; C43 checks every instance and `expectHeaderOnTop` checks a grid at run time (ADR 0027,
+rule 40).
+
+
+## Stale servers and stale builds (e2e and screenshots, 2026-10-28)
+
+Three times in one night tests and screenshots ran against old code: (1) `reuseExistingServer: true` on fixed ports
+(4300 to 4302 and the apps' own) silently reused another worktree's or an old dev server, so the tests "passed on the old
+code"; (2) `ui/dist` and the generated, untracked `ui/projects/paddock-ui/css/*.css` were older than their sources, so
+screenshots showed old text and a reviewer reported a bug that existed only in stale CSS. **Rule:** one mechanism in `@decryp7/paddock-e2e`
+(ER-21, rule 42), not another warning. A running server is reused only with `PW_REUSE_SERVER=1` (default never, and
+never on CI; `reuseServer()`, `paddockConfig`); `e2ePort` derives the local default port from the worktree (`20000 +
+(hash(git top level) mod 160) * 100 +` the config's last two digits: disjoint blocks) and still refuses a default on CI
+(`e2ePortOrCiDefault` keeps the apps' fixed CI ports); and the config checks, at load and so before any server starts,
+that what it consumes of ui is built from the current sources. The build writes a content stamp (`css/.source-hash` by
+`npm run build:css`, `ui/dist/.source-hash` by `npm run build -w ui`); the check recomputes the hash of `scss/**` (and
+every file of the package for the dist, except tests, bin/ and the generated css) and fails with "rebuild ui: npm run build -w ui" on a mismatch, a missing stamp or
+a missing css entry. A content hash, not mtimes: unchanged rebuilds, checkouts and touches never false-fail. Which
+guard: `paddockConfig({ buildGuard: 'none' | 'ui' | 'ui-dist', uiRoot })`; an app's own config calls
+`appBuildGuard(__dirname, uiRoot)`, which picks `ui-dist` only when the app's tsconfig maps `@decryp7/paddock-ui` to
+`ui/dist` (today Spotter), else nothing. `PW_SKIP_BUILD_GUARD=1` skips it. The ui config checks the css only with `PW_REUSE_SERVER=1` (its webServers run `build:css` themselves). Dot-files (`.DS_Store`) are ignored; README and doc edits under `projects/paddock-ui` mark the dist stale on purpose (every non-test file counts). A direct `ng build paddock-ui` leaves `ui/dist` unstamped, so the guard fails: build with `npm run build -w ui`. Tests: `build-guard.test.ts`, `env.test.ts`
+(including every app config on a fresh checkout). Proposed binding rule (the user decides): every Playwright config
+uses these three, and `scripts/new-app.mjs` templates do.
+## 2026-10-29: a harness that stands in for a plugin must stand in for its routing and its ACL
+
+The ADR 0026 real-window probe ended "no report within 90s: the dialog page never became ready" on macOS, and it looked like
+a product fault (a hidden window that never readies). It was the harness: the page sends the shell's commands as
+`plugin:paddock-shell|dialog_take_input`, but the probe registered them as bare app commands and had no ACL, so Tauri
+refused every call ("paddock-shell.window_pong not allowed. Plugin not found") before the probe's handler saw it. The page
+booted fine (the DOM was there, and the ready of ADR 0026 §4.2 took about 10 ms once the calls arrived). "Refused" was told
+from "never made" only by silence in the probe's own log, and confirmed by calling a command from the webview by hand; the
+probe could not tell them apart. **Rule (guidance):** a probe or test that replaces the app's plugin registers a plugin of
+the same name and an ACL resolved from the app's real capability file, so a wrong capability fails it; it prints every call
+it receives, with its time, and the calls seen when it gives up. A refusal itself shows only in the webview console or as a
+`RuntimeAuthority` check, so a harness that needs to name it asks the authority, not the log. C48 checks the capability file
+of every app on the shared shell.
+
+## Chromium tests compared a loaded machine with a product timeout (2026-10-28, paddock-chromium)
+
+Three `paddock-chromium` tests failed on CI runs of several branches and never on a quiet machine: (1) `a_real_browser_reads_a_page_and_closes_cleanly` and `a_cancelled_load_says_whether_it_was_a_download_or_replaced` asserted `Browser.close()`, whose 5 s grace (`CLOSE_GRACE`, the product's bound before it kills the tree) is a fine product choice but a time budget as a test assertion: a loaded runner let Chrome take longer (macOS 6662, Windows 6726, 13 s test); (2) `a_page_is_read_snapshot_by_snapshot` pushed a 16 MiB page (`MAX_HTML` + 1) through the fake browser in a debug build to see the size cap refuse it, which outlasted the 10 s call timeout on a macOS runner and gave `Timeout` instead of "larger". **Rule:** a test asserts the mechanism (the browser exits by itself and is not killed; the cap refuses a page one byte over it), never that it happened within a product timeout; give the code under test the cap as a parameter so a few bytes prove it; wait on the condition (`close_gracefully` returns the moment Chrome exits) with a hang guard that only stops a browser that never exits. A failing wait names what the thing it waited for reported (the load's own result), so the next failure carries its cause.
+
+This is the same lesson as "A turn budget in a test wait is a timeout in disguise" for assertions on a product's own grace period: wait on the condition, and let a generous hang guard (never an expectation) stop only a thing that never ends. A third cause was found in the same test by review: its server took one connection at a time with a blocking read, so an idle socket Chrome opened (a preconnect or backup connect) could hide the real request; each connection now has its thread and a failed wait prints what the server saw. C30 now flags a non-negated `assert!` over a bare `.close()` or `.close_gracefully(..)` (the calls that wait out a grace). Waive `close_gracefully` with `// conformance: hang-guard` and a grace of at least 10 s, or either call with `// conformance: grace-free — <why>` when the thing had ended already; a forced end (`assert!(!b.close_gracefully(Duration::ZERO))`) is not flagged.

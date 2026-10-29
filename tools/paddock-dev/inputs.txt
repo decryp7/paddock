@@ -1,0 +1,11 @@
+# The files and folders that decide the binary (ADR 0022 §3.3): the input hash is git's hash over `git ls-tree HEAD` of
+# these paths plus the compiler's release and commit-hash lines. One path per line, relative to the repository root, no
+# globs. tests/inputs.rs compares the list with `cargo metadata` (normal and build path dependencies only).
+tools/paddock-dev
+crates/Cargo.toml
+crates/paddock-cli
+crates/paddock-proc
+crates/paddock-repo-graph
+crates/paddock-slots
+crates/paddock-workspace-hack
+.cargo/config.toml

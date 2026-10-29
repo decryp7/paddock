@@ -77,8 +77,8 @@ impl HistoryWriter {
         self.apps.ticks += 1;
         for g in groups {
             let e = self.apps.apps.entry(g.name.clone()).or_default();
-            e.0 += f64::from(g.cpu);
-            e.1 = e.1.max(g.memory);
+            e.0 += f64::from(g.cpu_read());
+            e.1 = e.1.max(g.memory_read());
         }
         Ok(())
     }
@@ -155,6 +155,7 @@ pub fn roll_up(store: &Store, now: Timestamp) -> Result<()> {
 mod tests {
     use super::*;
     use dyno_core::history::HistoryPoint;
+    use dyno_core::process::Measured;
 
     fn raw(store: &Store, at: i64, cpu: f32) {
         store
@@ -225,9 +226,10 @@ mod tests {
             name: name.into(),
             exe: None,
             pids: vec![1],
-            cpu,
-            memory: 100,
-            disk_bps: 0.0,
+            cpu: Measured::Value(cpu),
+            memory: Measured::Value(100),
+            disk_bps: Measured::Value(0.0),
+            partial: false,
         };
         for i in 0..30 {
             s.at = Timestamp(i * 1_000);

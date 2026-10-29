@@ -1,5 +1,5 @@
 //! The tray / menu-bar items (Windows notification area, macOS menu bar, Linux appindicator): one tray icon per item
-//! (`tray_model` says what each draws), each with the same menu (Open, Pause rules, Quit) and a left click that opens
+//! (`tray_model` says what each draws), each with the same menu (Open, Quit) and a left click that opens
 //! a popover (`popover.rs`): the shared `#/tray` page, or the item's own `#/popover/<id>` page.
 //! Before the first update, and while the agent is away, the static template icons from `icons/tray` stand in.
 
@@ -8,7 +8,6 @@ use crate::logging;
 use crate::popover::{self, Rect, Style};
 use crate::tray_model::{Frame, ItemSpec, Opens};
 use crate::window;
-use dyno_core::protocol::Request;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::image::Image;
@@ -19,7 +18,6 @@ use tauri::{AppHandle, Manager, Wry};
 /// The main popover's window label (in `capabilities/default.json`).
 pub const DROPDOWN: &str = "tray";
 const OPEN: &str = "open";
-const PAUSE: &str = "pause";
 const QUIT: &str = "quit";
 
 /// The tray id of an item.
@@ -37,10 +35,10 @@ pub fn popover_target(spec: &ItemSpec) -> (String, String) {
     }
 }
 
-/// Menu items kept to change their text, and which items currently show a drawn picture.
+/// The ids of the items that have a tray icon, and which of them currently show a drawn picture.
 #[derive(Default)]
 pub struct TrayState {
-    pause: Mutex<HashMap<String, MenuItem<Wry>>>,
+    items: Mutex<std::collections::HashSet<String>>,
     painted: Mutex<HashMap<String, bool>>,
 }
 
@@ -76,26 +74,15 @@ pub fn dark_taskbar() -> bool {
     }
 }
 
-fn pause_text(paused: bool) -> &'static str {
-    if paused {
-        "Resume rules"
-    } else {
-        "Pause rules"
-    }
-}
-
-fn build_menu(app: &AppHandle<Wry>) -> tauri::Result<(Menu<Wry>, MenuItem<Wry>)> {
-    let pause = MenuItem::with_id(app, PAUSE, pause_text(false), true, None::<&str>)?;
-    let menu = Menu::with_items(
+fn build_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
+    Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, OPEN, "Open Dyno", true, None::<&str>)?,
-            &pause,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, QUIT, "Quit Dyno", true, None::<&str>)?,
         ],
-    )?;
-    Ok((menu, pause))
+    )
 }
 
 fn style() -> Style {
@@ -107,7 +94,7 @@ fn style() -> Style {
 
 /// Creates the tray icon of one item.
 fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
-    let (menu, pause) = build_menu(app)?;
+    let menu = build_menu(app)?;
     let icon = Image::from_bytes(static_icon_bytes(dark_taskbar()))?;
     let (label, route) = popover_target(spec);
     TrayIconBuilder::with_id(tray_id(&spec.id))
@@ -118,7 +105,6 @@ fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             OPEN => window::show_main(app),
-            PAUSE => toggle_pause(app),
             QUIT => quit(app),
             _ => {}
         })
@@ -144,7 +130,7 @@ fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
             }
         })
         .build(app)?;
-    lock(&app.state::<TrayState>().pause).insert(spec.id.clone(), pause);
+    lock(&app.state::<TrayState>().items).insert(spec.id.clone());
     Ok(())
 }
 
@@ -155,7 +141,7 @@ pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec]) -> tauri::Result<()>
         app.manage(TrayState::default());
     }
     let state = app.state::<TrayState>();
-    let old: Vec<String> = lock(&state.pause).drain().map(|(id, _)| id).collect();
+    let old: Vec<String> = lock(&state.items).drain().collect();
     for id in old {
         let _ = app.remove_tray_by_id(&tray_id(&id));
     }
@@ -166,8 +152,8 @@ pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec]) -> tauri::Result<()>
     Ok(())
 }
 
-/// Draws a frame on an item: the pixels, the tooltip, and the Pause item's text.
-pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame, paused: bool) {
+/// Draws a frame on an item: the pixels and the tooltip.
+pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame) {
     let Some(tray) = app.tray_by_id(&tray_id(item)) else { return };
     // macOS wants a template image (black with alpha; the menu bar tints it for light, dark and inactive states);
     // Windows and Linux get Dyno's own colours.
@@ -178,9 +164,6 @@ pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame, paused: bool) {
     let _ = tray.set_icon_as_template(template);
     let _ = tray.set_tooltip(Some(frame.tooltip.clone()));
     if let Some(state) = app.try_state::<TrayState>() {
-        if let Some(p) = lock(&state.pause).get(item) {
-            let _ = p.set_text(pause_text(paused));
-        }
         lock(&state.painted).insert(item.to_string(), true);
     }
 }
@@ -197,18 +180,6 @@ pub fn show_disconnected(app: &AppHandle<Wry>) {
             let _ = tray.set_tooltip(Some("Dyno — the agent is not running"));
         }
     }
-}
-
-fn toggle_pause(app: &AppHandle<Wry>) {
-    let link = app.state::<Arc<AgentLink>>().inner().clone();
-    let shell = app.state::<Arc<crate::shell::Shell>>().inner().clone();
-    std::thread::spawn(move || {
-        if let Err(e) = link.call(Request::PauseRules {
-            paused: !shell.rules_paused(),
-        }) {
-            logging::info(&format!("could not pause the rules: {}", e.message));
-        }
-    });
 }
 
 /// Quits for real: asks the link what to do about the agent (see `link::stop_agent_on_quit`), then exits.
@@ -236,12 +207,6 @@ mod tests {
         for dark in [false, true] {
             assert_eq!(&static_icon_bytes(dark)[1..4], b"PNG");
         }
-    }
-
-    #[test]
-    fn the_pause_item_says_what_a_click_does() {
-        assert_eq!(pause_text(false), "Pause rules");
-        assert_eq!(pause_text(true), "Resume rules");
     }
 
     #[test]

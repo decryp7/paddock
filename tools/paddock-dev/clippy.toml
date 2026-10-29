@@ -1,0 +1,5 @@
+# The family's clippy preset (lint/clippy.toml): programs start through paddock-proc.
+disallowed-methods = [
+    { path = "std::process::Command::new", reason = "use paddock-proc: no console window on Windows, always bounded and killed with its parent" },
+    { path = "std::env::temp_dir", reason = "tests use a scratch folder (tempfile) and production code uses an explicit folder" },
+]

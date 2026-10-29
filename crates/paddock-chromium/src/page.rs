@@ -431,6 +431,12 @@ text: document.body ? document.body.innerText.slice(0, {TEXT_EXCERPT}) : ''}})"
 
     /// The document's `outerHTML` and the current address; a document over [`MAX_HTML`] is refused.
     pub fn capture(&self) -> Result<(String, String)> {
+        self.capture_within(MAX_HTML)
+    }
+
+    /// [`capture`](Self::capture) with the cap as a parameter, so a test can prove the refusal with a few bytes instead of
+    /// moving [`MAX_HTML`] through a debug build on a loaded machine (that took longer than [`CALL`] on a CI runner).
+    pub(crate) fn capture_within(&self, max: usize) -> Result<(String, String)> {
         let v =
             self.evaluate("({html: document.documentElement.outerHTML, url: location.href})")?;
         let html = v
@@ -438,7 +444,7 @@ text: document.body ? document.body.innerText.slice(0, {TEXT_EXCERPT}) : ''}})"
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        if html.len() > MAX_HTML {
+        if html.len() > max {
             return Err(Error::Protocol(
                 "the page is larger than the allowed size".into(),
             ));

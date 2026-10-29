@@ -76,3 +76,13 @@ test('options: prefix is required; signalForms forbids reactive forms; extra rul
   assert.equal(await ignored.isPathIgnored(join(dir, 'src/gen/x.ts')), true);
   assert.equal(await ignored.isPathIgnored(join(dir, 'dist/x.ts')), true);
 });
+
+test('dialog contents draw no footer of their own (ADR 0026)', async () => {
+  const dialog = `import { ChangeDetectionStrategy, Component } from '@angular/core';
+@Component({ selector: 'pc-rename-dialog', changeDetection: ChangeDetectionStrategy.OnPush, template: '<p>Name</p><div class="pc-actions"><button type="button">Cancel</button></div>' })
+export class RenameDialog {}
+`;
+  const found = await lint({ 'src/app/rename-dialog.ts': dialog });
+  assert.equal(found.filter((f) => f.endsWith('paddock/dialog-frame-footer')).length, 2, found.join('\n'));
+  assert.deepEqual(await lint({ 'src/app/plain.component.ts': dialog.replace('pc-rename-dialog', 'pc-plain').replace('RenameDialog', 'Plain') }), []);
+});

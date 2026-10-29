@@ -1,6 +1,7 @@
 import { defineCommand, defineDialog, defineMenuItem, defineSettingsPage, msg, type ContributionBatch, type DialogDef, type ProvidersLoader, type SettingsPageDef } from '@decryp7/paddock-ui/shell';
 import { SETUP_PAGE_ID } from '../generated/setup';
 import type { SetupCommand } from '../generated/setup-commands';
+import { DIALOG_CONTRACTS } from '../generated/dialog-contracts';
 
 // The set-up part's contributions: static data and loaders only (lazy by construction, plan §9). The checklist's window and
 // the Settings page, and the providers they need, are chunks of their own, loaded when they open.
@@ -12,7 +13,7 @@ export const SETUP_DIALOG_ID = 'pd.setup';
 export const SETUP_SETTINGS_PAGE = SETUP_PAGE_ID;
 
 /** What the checklist may call: the Set-up window's contract and, in the Settings dialog's, the Set-up page's. */
-export const SETUP_DIALOG_COMMANDS = ['setup_state', 'setup_act', 'setup_repair', 'setup_skip', 'setup_finish'] as const satisfies readonly SetupCommand[];
+export const SETUP_DIALOG_COMMANDS = DIALOG_CONTRACTS[SETUP_DIALOG_ID].commands satisfies readonly SetupCommand[];
 
 export interface SetupWindowOptions {
   /**
@@ -37,13 +38,8 @@ export interface SetupWindowOptions {
  */
 export function defineSetup(options: SetupWindowOptions): { readonly dialog: DialogDef; readonly page: SettingsPageDef } {
   return {
-    dialog: defineDialog({
-      id: SETUP_DIALOG_ID,
-      kind: 'tool',
+    dialog: defineDialog(DIALOG_CONTRACTS[SETUP_DIALOG_ID], {
       title: msg('pd.setup.title', 'Set-up'),
-      width: 560,
-      height: 520,
-      commands: SETUP_DIALOG_COMMANDS,
       providers: options.providers,
       load: options.loadDialog,
     }),
