@@ -1,0 +1,58 @@
+# Sighter model-weights catalogue (ADR 0001 decision 6, plan item P1, work package SW9).
+# One entry per file: Gitea mirror URL, size, SHA-256 (ours), licence, upstream URL and upstream MD5.
+# Shape follows the paddock-runtime catalogues (format, name, version, source, license, then entries); the parser for
+# single-file entries is the shared asset kind of SW11 (plan item P3), which must refuse the whole file on anything wrong.
+# Mirrored 2026-10-29 from rfdetr 1.11.2; see apps/sighter/docs/weights.md.
+format = 1
+name = "sighter-weights"
+version = "1.11.2"
+source = "Roboflow RF-DETR COCO checkpoints (https://github.com/roboflow/rf-detr), mirrored on https://dev.decryptology.net"
+license = "Apache-2.0"
+
+[[model]]
+key = "rf-detr-nano rf-detr-nano.pth 366287238 d8d6b9ee57d4d0ed2b1f305163624712a0532cb7bce0c747317984fc5457440d nano_coco/checkpoint_best_regular.pth fb6504cce7fbdc783f7a46991f07639f 384"
+file = ""
+url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-weights/1.11.2/"
+size = 
+sha256 = ""
+license = "Apache-2.0"
+upstream_url = "https://storage.googleapis.com/rfdetr/"
+upstream_md5 = ""
+resolution = 
+lineage = "DINOv2 (Apache-2.0) -> Objects365 pre-training (no licence stated) -> COCO (Roboflow checkpoint, Apache-2.0)"
+
+[[model]]
+key = "rf-detr-small rf-detr-small.pth 386045550 d81979a9213a2109345158ce9232668df4c1ae52e9b8db3f2ec0a8cbad959b33 small_coco/checkpoint_best_regular.pth fb37061c1af7bace359c91b723a8d5c1 512"
+file = ""
+url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-weights/1.11.2/"
+size = 
+sha256 = ""
+license = "Apache-2.0"
+upstream_url = "https://storage.googleapis.com/rfdetr/"
+upstream_md5 = ""
+resolution = 
+lineage = "DINOv2 (Apache-2.0) -> Objects365 pre-training (no licence stated) -> COCO (Roboflow checkpoint, Apache-2.0)"
+
+[[model]]
+key = "rf-detr-medium rf-detr-medium.pth 404992918 749ff6071828aaffac63e204c4f4135ed3d6cdae4d702e086c360edc3b5768c8 medium_coco/checkpoint_best_regular.pth 7223f764a87b863f02eb8d52bf0ce2ee 576"
+file = ""
+url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-weights/1.11.2/"
+size = 
+sha256 = ""
+license = "Apache-2.0"
+upstream_url = "https://storage.googleapis.com/rfdetr/"
+upstream_md5 = ""
+resolution = 
+lineage = "DINOv2 (Apache-2.0) -> Objects365 pre-training (no licence stated) -> COCO (Roboflow checkpoint, Apache-2.0)"
+
+[[model]]
+key = "rf-detr-large rf-detr-large-2026.pth 135954129 0f4e20e19a99c0f8a62b5685f57f6c8b5c371c59081feda6752a0561a79ccf38 rf-detr-large-2026.pth 5cb72153541cbcb9aa6efa26222acc75 704"
+file = ""
+url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-weights/1.11.2/"
+size = 
+sha256 = ""
+license = "Apache-2.0"
+upstream_url = "https://storage.googleapis.com/rfdetr/"
+upstream_md5 = ""
+resolution = 
+lineage = "DINOv2 (Apache-2.0) -> Objects365 pre-training (no licence stated) -> COCO (Roboflow checkpoint, Apache-2.0)"
