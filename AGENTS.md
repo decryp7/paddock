@@ -45,6 +45,11 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - **Affected tests (rule 3).** `node scripts/affected.mjs origin/main --explain` lists the projects a change reaches (the
   Cargo and npm graphs, Tauri `frontendDist`, `tsconfig`/`angular.json`/ESLint config paths, declared doc inputs). Run
   those, plus the touched specs. CI runs the same plan; nightly.yml runs everything.
+  Only `rust-toolchain`, the root `package.json`, `.npmrc`, `.nvmrc`, `.gitattributes` and `tsconfig/` still mark
+  everything; the table above `GLOBAL` in `scripts/affected.mjs` says what every other former global reaches:
+  `scripts/affected*.mjs` mark tools and ui (the plan job and the tools job run its tests), `.cargo/` and `lint/` the Rust
+  builds, a `ci.yml` change only the jobs whose text changed (everything if the file cannot be split into jobs or its
+  header changed), a shared action only the jobs and workflows that use it.
 - **Ownership.** [CODEOWNERS](CODEOWNERS) (Go regular expressions, Gitea's syntax) says who owns which paths; a brief
   names the paths its task owns. Shared integration points (`crates/*/src/lib.rs`, `crates/Cargo.toml`, `public-api.ts`,
   `_tokens.scss`, the root `package.json`, `.gitea/`, `renovate.json`, `CODEOWNERS`) are changed by the integrating agent

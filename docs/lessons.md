@@ -680,3 +680,15 @@ Results: [Debrief](../apps/debrief/docs/performance.md#2026-10-29-incremental-re
 [Dyno](../apps/dyno/docs/performance.md#2026-10-29-incremental-rebuild-and-link-time-docslink-time),
 [Dyno release identity](../apps/dyno/docs/performance.md#2026-10-29-release-identity-of-the-rlib-only-crate-type-docslink-time);
 details: [research/2026-10-29-link-time.md](research/2026-10-29-link-time.md).
+
+## 2026-10-29: a "global" input must mean every build, or the branch runs everything (affected planner)
+
+`scripts/affected.mjs` treated the whole of `.gitea/`, the planner's own files, `.cargo/`, `lint/` and `conformance/(ci|release)/`
+as global, so a branch that added one id to the conformance `--only` list in `ci.yml` (feat/icons-mat-registry) or one line
+to `affected.test.mjs` (dyno/shell-1.0) ran every app, crate and UI job, against the rule that branches get affected runs
+and the full gates run once on main. **Guidance:** a file is global only when every build reads it (`rust-toolchain`, the
+root `package.json`, `.npmrc`, `.nvmrc`, `tsconfig/`). Narrow the rest to what it reaches and write the reasoning as a table
+next to `GLOBAL`: the planner's files mark tools and ui (the `plan` and `tools` jobs run `affected.test.mjs`, which guards
+an under-selecting planner change), `ci.yml` marks the jobs whose text changed (line-based split; everything when it cannot
+be split or the header changed), a shared action marks the jobs and workflows that use it, `.cargo/` and `lint/` the Rust
+builds. Anything that cannot be narrowed still fails safe to everything.
