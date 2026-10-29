@@ -69,7 +69,7 @@ node cap bounds the walk.
    other licence would be recorded here before merging).
 2. The crate's `tree-sitter-language` version matches the runtime's; one `Cargo.lock` entry per crate.
 3. The golden outline of the language (generated files, no real code) passes before the next language is added: the
-   order above is also the order of work, one commit per language.
+   order above is also the order of work. (A2 landed the tables and the goldens of all ten languages in one commit instead of one commit each: the dependencies compile as one set, and each language's golden outline and table-versus-grammar test passed before its table was relied on.)
 
 ## Limits (what the parser library enforces, per file)
 

@@ -38,6 +38,13 @@ impl TryFrom<RawPosition> for Position {
     }
 }
 
+impl Default for Position {
+    /// Line 1, column 1: the start of a file.
+    fn default() -> Position {
+        Position { line: 1, column: 1 }
+    }
+}
+
 impl Position {
     /// A position; `None` when a coordinate is 0.
     pub fn new(line: u32, column: u32) -> Option<Position> {
@@ -84,6 +91,16 @@ impl Span {
             return Err(SpanError::Reversed);
         }
         Ok(Span { start, end })
+    }
+
+    /// The span between two positions in either order. It cannot fail, for callers whose positions come from a parser that
+    /// guarantees a node's start is not after its end.
+    pub fn covering(a: Position, b: Position) -> Span {
+        if a <= b {
+            Span { start: a, end: b }
+        } else {
+            Span { start: b, end: a }
+        }
     }
 
     /// A span covering whole lines `first..=last` (columns 1 to the end of `last`, shown as column 1 of the next line).
@@ -139,6 +156,13 @@ mod tests {
         assert_eq!(Span::new(p(2, 1), p(1, 9)), Err(SpanError::Reversed));
         assert!(Span::new(p(2, 5), p(2, 5)).is_ok());
         assert_eq!(Span::lines(0, 1), Err(SpanError::ZeroBased));
+    }
+
+    #[test]
+    fn covering_orders_its_ends_and_the_default_position_is_the_start_of_a_file() {
+        let s = Span::covering(p(5, 1), p(2, 3));
+        assert_eq!((s.start(), s.end()), (p(2, 3), p(5, 1)));
+        assert_eq!(Span::covering(p(1, 1), p(1, 1)).start(), Position::default());
     }
 
     #[test]

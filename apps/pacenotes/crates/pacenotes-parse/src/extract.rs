@@ -3,26 +3,37 @@
 use std::ops::ControlFlow;
 
 use pacenotes_core::{Position, Span, SymbolKind};
-use paddock_jobs::CancelToken;
 use tree_sitter::Node;
 
 use crate::lang::ParseLanguage;
 use crate::model::{CallCandidate, Import, Outline, ParsedSymbol};
 use crate::spec::{Names, SymbolRule, spec};
-use crate::{Limits, ParseError, chunk};
+use crate::{Limits, ParseError, Stop, chunk};
 
 /// The longest name, target or callee kept, in bytes.
 const MAX_NAME_BYTES: usize = 256;
 const MAX_TARGET_BYTES: usize = 512;
+/// The deepest container nesting listed; deeper symbols are skipped and the outline is marked partial.
+pub const MAX_CONTAINER_DEPTH: usize = 64;
+/// The longest qualified name kept, in bytes, cut on a character boundary.
+pub const MAX_QUALIFIED_BYTES: usize = 1024;
 /// How often the walk looks at the cancel token, in nodes.
 const CANCEL_EVERY: usize = 1024;
 
-/// What the walk remembers about an ancestor.
-#[derive(Default)]
+/// What the walk remembers about an ancestor: small and `Copy`, so a node inherits its parent's facts in constant time (no
+/// rescan of the ancestors, which made a deeply nested file quadratic).
+#[derive(Clone, Copy, Default)]
 struct Frame {
-    container: Option<String>,
-    container_kind: Option<SymbolKind>,
-    callable: Option<String>,
+    /// This node is a container; the index of its name in `State::names`.
+    container: Option<usize>,
+    /// The nearest container-or-callable ancestor (or this node) is a type, so a function here is a method.
+    in_type: bool,
+    /// Inside a function, method or constructor (locals are skipped).
+    inside_callable: bool,
+    /// The enclosing callable: its index in `Outline::symbols`.
+    caller: Option<usize>,
+    /// A container was skipped for depth: nothing below it is listed.
+    capped: bool,
 }
 
 fn text(node: Node<'_>, bytes: &[u8]) -> String {
@@ -50,11 +61,13 @@ fn name_text(node: Node<'_>, bytes: &[u8]) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
-fn span(node: Node<'_>) -> Option<Span> {
-    let (a, b) = (node.start_position(), node.end_position());
-    let start = Position::new(u32::try_from(a.row + 1).ok()?, u32::try_from(a.column + 1).ok()?)?;
-    let end = Position::new(u32::try_from(b.row + 1).ok()?, u32::try_from(b.column + 1).ok()?)?;
-    Span::new(start, end).ok()
+fn position(point: tree_sitter::Point) -> Position {
+    let to_u32 = |n: usize| u32::try_from(n + 1).unwrap_or(u32::MAX);
+    Position::new(to_u32(point.row), to_u32(point.column)).unwrap_or_default()
+}
+
+fn span(node: Node<'_>) -> Span {
+    Span::covering(position(node.start_position()), position(node.end_position()))
 }
 
 /// The last identifier-like name inside `node`: `a.b.parse` gives `parse`.
@@ -145,6 +158,11 @@ fn names(rule: &SymbolRule, node: Node<'_>, bytes: &[u8]) -> Vec<(Option<String>
     let one = |n: Option<String>| n.map(|n| vec![(None, n)]).unwrap_or_default();
     match rule.names {
         Names::Literal(l) => one(Some((*l).to_owned())),
+        Names::FieldOr(f, default) => one(Some(
+            node.child_by_field_name(f)
+                .and_then(|n| name_text(n, bytes))
+                .unwrap_or_else(|| (*default).to_owned()),
+        )),
         Names::Field(f) => one(node.child_by_field_name(f).and_then(|n| name_text(n, bytes))),
         Names::AllFields(f) => {
             let mut cursor = node.walk();
@@ -207,33 +225,38 @@ struct State<'a> {
     language: ParseLanguage,
     bytes: &'a [u8],
     out: Outline,
+    /// Names of the containers seen, by index (each is a slice of the source, so together at most the file's size).
+    names: Vec<String>,
+    /// The containers enclosing the node being visited, as indices into `names`; never deeper than [`MAX_CONTAINER_DEPTH`].
+    containers: Vec<usize>,
 }
 
 impl State<'_> {
-    fn qualified(&self, frames: &[Frame], qualifier: Option<&str>, name: &str) -> String {
-        let sep = self.language.separator();
-        let mut parts: Vec<&str> = frames.iter().filter_map(|f| f.container.as_deref()).collect();
-        if let Some(q) = qualifier {
-            parts.push(q);
-        }
+    fn qualified(&self, qualifier: Option<&str>, name: &str) -> String {
+        let mut parts: Vec<&str> = self.containers.iter().map(|&i| self.names[i].as_str()).collect();
+        parts.extend(qualifier);
         parts.push(name);
-        parts.join(sep)
+        let mut joined = parts.join(self.language.separator());
+        cut(&mut joined, MAX_QUALIFIED_BYTES);
+        joined
     }
 
-    fn visit(&mut self, node: Node<'_>, frames: &[Frame]) -> Frame {
+    fn visit(&mut self, node: Node<'_>, parent: Frame) -> Frame {
         let table = spec(self.language);
         let kind = node.kind();
+        // what a node that declares nothing hands down: everything it inherited, and not being a container itself
+        let inherited = Frame { container: None, ..parent };
         if !node.is_named() {
-            return Frame::default();
+            return inherited;
         }
         if let Some(rule) = table.symbols.iter().find(|r| r.kind == kind) {
-            return self.symbol(rule, node, frames);
+            return self.symbol(rule, node, parent);
         }
         if let Some(rule) = table.imports.iter().find(|r| r.kind == kind) {
-            if let (Some(target), Some(span)) = (import_target(rule.field, node, self.bytes), span(node)) {
+            if let (Some(target), Some(span)) = (import_target(rule.field, node, self.bytes), Some(span(node))) {
                 self.out.imports.push(Import { target, span });
             }
-            return Frame::default();
+            return inherited;
         }
         if let Some(rule) = table.calls.iter().find(|r| r.kind == kind) {
             let callee = if rule.callee.is_empty() {
@@ -241,8 +264,8 @@ impl State<'_> {
             } else {
                 node.child_by_field_name(rule.callee)
             };
-            if let (Some(name), Some(span)) = (callee.and_then(|c| last_name(c, self.bytes, 0)), span(node)) {
-                let caller = frames.iter().rev().find_map(|f| f.callable.clone());
+            if let (Some(name), Some(span)) = (callee.and_then(|c| last_name(c, self.bytes, 0)), Some(span(node))) {
+                let caller = parent.caller.map(|i| self.out.symbols[i].qualified_name.clone());
                 self.out.calls.push(CallCandidate {
                     callee: name,
                     caller,
@@ -250,16 +273,20 @@ impl State<'_> {
                 });
             }
         }
-        Frame::default()
+        inherited
     }
 
-    fn symbol(&mut self, rule: &SymbolRule, node: Node<'_>, frames: &[Frame]) -> Frame {
-        let inside_callable = frames.iter().any(|f| f.callable.is_some());
-        if (rule.skip_in_callable && inside_callable) || rule.needs_field.is_some_and(|f| node.child_by_field_name(f).is_none()) {
-            return Frame::default();
+    fn symbol(&mut self, rule: &SymbolRule, node: Node<'_>, parent: Frame) -> Frame {
+        let inherited = Frame { container: None, ..parent };
+        if (rule.skip_in_callable && parent.inside_callable) || rule.needs_field.is_some_and(|f| node.child_by_field_name(f).is_none()) {
+            return inherited;
+        }
+        if parent.capped {
+            self.out.partial = true;
+            return inherited;
         }
         let found = names(rule, node, self.bytes);
-        let mut frame = Frame::default();
+        let mut frame = inherited;
         for (i, (qualifier, name)) in found.iter().enumerate() {
             let mut kind = match (rule.refine, rule.symbol) {
                 (Some(f), _) => f(node),
@@ -269,34 +296,37 @@ impl State<'_> {
             if function_value(node) {
                 kind = SymbolKind::Function;
             }
-            let in_type = frames
-                .iter()
-                .rev()
-                .find(|f| f.container_kind.is_some() || f.callable.is_some())
-                .and_then(|f| f.container_kind)
-                .is_some_and(is_type_like);
             let qualified_name_member = self.language == ParseLanguage::Cpp && name.contains("::");
-            if kind == SymbolKind::Function && (in_type || qualified_name_member) {
+            if kind == SymbolKind::Function && (parent.in_type || qualified_name_member) {
                 kind = SymbolKind::Method;
             }
-            let qualified = self.qualified(frames, qualifier.as_deref(), name);
-            if let (Some(_), Some(span)) = (rule.symbol, span(node)) {
-                let depth = frames.iter().filter(|f| f.container.is_some()).count();
+            // a container this deep is not listed, and nothing below it is: the outline says so
+            if rule.container && i == 0 && self.containers.len() >= MAX_CONTAINER_DEPTH {
+                self.out.partial = true;
+                return Frame { capped: true, ..inherited };
+            }
+            let qualified = self.qualified(qualifier.as_deref(), name);
+            let mut index = None;
+            if let (Some(_), span) = (rule.symbol, span(node)) {
+                index = Some(self.out.symbols.len());
                 self.out.symbols.push(ParsedSymbol {
                     kind,
                     name: name.clone(),
-                    qualified_name: qualified.clone(),
+                    qualified_name: qualified,
                     span,
-                    depth: u32::try_from(depth).unwrap_or(u32::MAX),
+                    depth: u32::try_from(self.containers.len()).unwrap_or(u32::MAX),
                 });
             }
             if i == 0 {
                 if rule.container {
-                    frame.container = Some(name.clone());
-                    frame.container_kind = Some(kind);
+                    self.names.push(name.clone());
+                    frame.container = Some(self.names.len() - 1);
+                    frame.in_type = is_type_like(kind);
                 }
                 if is_callable(kind) {
-                    frame.callable = Some(qualified);
+                    frame.inside_callable = true;
+                    frame.in_type = false;
+                    frame.caller = index;
                 }
             }
         }
@@ -304,34 +334,60 @@ impl State<'_> {
     }
 }
 
-pub(crate) fn parse(language: ParseLanguage, bytes: &[u8], limits: &Limits, cancel: &CancelToken) -> Result<Outline, ParseError> {
+thread_local! {
+    /// One parser per language per thread, reused between files (rule 51: constructing a parser and loading its tables is
+    /// the part of a small parse that costs).
+    static PARSERS: std::cell::RefCell<std::collections::HashMap<ParseLanguage, tree_sitter::Parser>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Runs `f` with this thread's parser for `language`, created and loaded on first use.
+fn with_parser<R>(language: ParseLanguage, f: impl FnOnce(&mut tree_sitter::Parser) -> R) -> Result<R, ParseError> {
+    PARSERS.with(|cell| {
+        let mut parsers = cell.borrow_mut();
+        let parser = match parsers.entry(language) {
+            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::hash_map::Entry::Vacant(e) => {
+                let mut parser = tree_sitter::Parser::new();
+                parser.set_language(&language.grammar()?).map_err(|err| ParseError::Grammar {
+                    language: language.id(),
+                    why: err.to_string(),
+                })?;
+                e.insert(parser)
+            }
+        };
+        Ok(f(parser))
+    })
+}
+
+pub(crate) fn parse<S: Stop>(language: ParseLanguage, bytes: &[u8], limits: &Limits, stop: &S) -> Result<Outline, ParseError> {
     if bytes.len() > limits.max_bytes {
         return Err(ParseError::TooLarge {
             len: bytes.len(),
             max: limits.max_bytes,
         });
     }
-    if cancel.is_cancelled() {
+    if stop.stopped() {
         return Err(ParseError::Cancelled);
     }
-    let mut parser = tree_sitter::Parser::new();
-    parser.set_language(&language.grammar()?).map_err(|e| ParseError::Grammar {
-        language: language.id(),
-        why: e.to_string(),
-    })?;
     let mut cancelled = false;
-    let tree = {
-        let mut progress = |_: &tree_sitter::ParseState| {
-            if cancel.is_cancelled() {
-                cancelled = true;
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
+    let tree = with_parser(language, |parser| {
+        let tree = {
+            let mut progress = |_: &tree_sitter::ParseState| {
+                if stop.stopped() {
+                    cancelled = true;
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            };
+            let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress);
+            parser.parse_with_options(&mut |offset, _| bytes.get(offset..).unwrap_or_default(), None, Some(options))
         };
-        let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress);
-        parser.parse_with_options(&mut |offset, _| bytes.get(offset..).unwrap_or_default(), None, Some(options))
-    };
+        if cancelled {
+            parser.reset(); // a stopped parse leaves the parser mid-file
+        }
+        tree
+    })?;
     if cancelled {
         return Err(ParseError::Cancelled);
     }
@@ -349,6 +405,8 @@ pub(crate) fn parse(language: ParseLanguage, bytes: &[u8], limits: &Limits, canc
             partial: false,
             has_errors: tree.root_node().has_error(),
         },
+        names: Vec::new(),
+        containers: Vec::new(),
     };
     let mut cursor = tree.walk();
     let mut frames: Vec<Frame> = Vec::new();
@@ -359,11 +417,14 @@ pub(crate) fn parse(language: ParseLanguage, bytes: &[u8], limits: &Limits, canc
             state.out.partial = true;
             break;
         }
-        if visited.is_multiple_of(CANCEL_EVERY) && cancel.is_cancelled() {
+        if visited.is_multiple_of(CANCEL_EVERY) && stop.stopped() {
             return Err(ParseError::Cancelled);
         }
-        let frame = state.visit(cursor.node(), &frames);
+        let frame = state.visit(cursor.node(), frames.last().copied().unwrap_or_default());
         if cursor.goto_first_child() {
+            if let Some(name) = frame.container {
+                state.containers.push(name);
+            }
             frames.push(frame);
             continue;
         }
@@ -374,7 +435,9 @@ pub(crate) fn parse(language: ParseLanguage, bytes: &[u8], limits: &Limits, canc
             if !cursor.goto_parent() {
                 break 'walk;
             }
-            frames.pop();
+            if frames.pop().is_some_and(|f| f.container.is_some()) {
+                state.containers.pop();
+            }
         }
     }
     let total_lines =

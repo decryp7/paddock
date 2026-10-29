@@ -94,3 +94,35 @@ fn imports_lose_their_keyword_and_quotes() {
         ["System.IO", "static System.Math"]
     );
 }
+
+#[test]
+fn declarations_the_grammar_recovers_from_without_a_name_give_no_symbol_and_no_panic() {
+    for (language, source) in [
+        (
+            ParseLanguage::Go,
+            "package p\nfunc () M() {}\nfunc (x) N() {}\nfunc (x []) O() {}\nfunc (*) P() {}\n",
+        ),
+        (
+            ParseLanguage::C,
+            "int () { return 0; }\nint (*) { }\nstruct { int a; };\ntypedef ;\n",
+        ),
+        (ParseLanguage::Cpp, "int () {}\nnamespace { void f() {} }\nclass { int a; };\n"),
+        (ParseLanguage::Rust, "impl {}\nimpl for {}\nfn () {}\nstruct;\n"),
+        (ParseLanguage::Java, "class { void m() {} }\nvoid () {}\n"),
+        (ParseLanguage::Python, "def (x): pass\nclass : pass\nimport\nfrom import x\n"),
+        (ParseLanguage::JavaScript, "function () {}\nclass {}\nconst = 1;\nimport ;\n"),
+        (ParseLanguage::Kotlin, "fun () {}\nclass\nimport\n"),
+        (ParseLanguage::CSharp, "class { void M() {} }\nusing ;\n"),
+    ] {
+        let o = outline(language, source);
+        assert!(o.symbols.iter().all(|s| !s.name.is_empty()), "{}: {:?}", language.id(), o.symbols);
+    }
+}
+
+#[test]
+fn a_name_longer_than_the_cap_is_cut_on_a_character_boundary() {
+    let name = format!("a{}", "é".repeat(200));
+    let o = outline(ParseLanguage::Java, &format!("class {name} {{}}\n"));
+    assert_eq!(o.symbols.len(), 1);
+    assert!(o.symbols[0].name.len() <= 256 && o.symbols[0].name.chars().skip(1).all(|c| c == 'é'));
+}

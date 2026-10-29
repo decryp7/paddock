@@ -25,3 +25,22 @@ interface Greeter {
 enum class Mode { FAST, SLOW }
 
 fun topLevel(x: Int): Int = x + 1
+
+fun String.shout(): String = this.uppercase()
+
+suspend fun fetch(id: Int): Int = id
+
+class Holder {
+    companion object {
+        const val LIMIT = 3
+        fun create(): Holder = Holder()
+    }
+}
+
+fun page() {
+    html {
+        body {
+            text("hi")
+        }
+    }
+}

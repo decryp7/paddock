@@ -20,10 +20,11 @@ fn type_like(kind: SymbolKind) -> bool {
     )
 }
 
-fn lines(first: u32, last: u32) -> Option<Span> {
-    let start = Position::new(first, 1)?;
-    let end = Position::new(last.saturating_add(1), 1)?;
-    Span::new(start, end).ok()
+fn lines(first: u32, last: u32) -> Span {
+    Span::covering(
+        Position::new(first.max(1), 1).unwrap_or_default(),
+        Position::new(last.saturating_add(1).max(1), 1).unwrap_or_default(),
+    )
 }
 
 /// The last line a span covers (an end at column 1 is the line before).
@@ -41,13 +42,11 @@ fn pieces(out: &mut Vec<Chunk>, first: u32, last: u32, symbol: Option<&str>) {
     let mut start = first;
     while start <= last {
         let end = last.min(start.saturating_add(MAX_CHUNK_LINES - 1));
-        if let Some(span) = lines(start, end) {
-            out.push(Chunk {
-                span,
-                symbol: symbol.map(str::to_owned),
-                ordinal,
-            });
-        }
+        out.push(Chunk {
+            span: lines(start, end),
+            symbol: symbol.map(str::to_owned),
+            ordinal,
+        });
         ordinal += 1;
         start = end.saturating_add(1);
         if end == u32::MAX {
@@ -73,13 +72,11 @@ pub fn build(symbols: &[ParsedSymbol], total_lines: u32) -> Vec<Chunk> {
         let mut ordinal = 0;
         while start <= total_lines {
             let end = total_lines.min(start + WINDOW_LINES - 1);
-            if let Some(span) = lines(start, end) {
-                out.push(Chunk {
-                    span,
-                    symbol: None,
-                    ordinal,
-                });
-            }
+            out.push(Chunk {
+                span: lines(start, end),
+                symbol: None,
+                ordinal,
+            });
             ordinal += 1;
             start = end + 1;
         }
@@ -96,7 +93,7 @@ mod tests {
             kind,
             name: name.into(),
             qualified_name: name.into(),
-            span: lines(first, last).unwrap(),
+            span: lines(first, last),
             depth,
         }
     }

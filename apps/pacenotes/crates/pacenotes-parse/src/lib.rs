@@ -68,7 +68,26 @@ pub enum ParseError {
     NoTree,
 }
 
+/// Something that can ask a parse to stop. A [`CancelToken`] does; a test injects one that stops after a number of checks, so
+/// cancel during the parse and during the walk can be tested without timing (ER-18).
+pub trait Stop {
+    /// True when the parse should stop now. Called before the parse, from the parser's progress callback while it runs, and
+    /// every 1024 nodes of the walk.
+    fn stopped(&self) -> bool;
+}
+
+impl Stop for CancelToken {
+    fn stopped(&self) -> bool {
+        self.is_cancelled()
+    }
+}
+
 /// Parses `bytes` as `language` and extracts the outline. Any bytes are accepted; invalid UTF-8 is read lossily for names.
 pub fn parse(language: ParseLanguage, bytes: &[u8], limits: &Limits, cancel: &CancelToken) -> Result<Outline, ParseError> {
     extract::parse(language, bytes, limits, cancel)
+}
+
+/// Like [`parse`] with any [`Stop`].
+pub fn parse_with<S: Stop>(language: ParseLanguage, bytes: &[u8], limits: &Limits, stop: &S) -> Result<Outline, ParseError> {
+    extract::parse(language, bytes, limits, stop)
 }
