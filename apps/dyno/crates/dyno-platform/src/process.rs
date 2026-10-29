@@ -158,7 +158,9 @@ pub fn run_streaming(
         _ => PlatformError::Failed(format!("Could not run {program}: {e}")),
     })?;
     // Never a guess: pid 0 would signal our own process group. A child with no id is ended and reported.
-    let guard = match TreeGuard::new(tool.process(), paddock_proc::kill_tree) {
+    let guard = match TreeGuard::new(tool.process(), |id| {
+        paddock_proc::kill_tree(id);
+    }) {
         Ok(g) => std::sync::Arc::new(g),
         Err(e) => {
             tool.kill();

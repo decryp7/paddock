@@ -45,11 +45,13 @@ pub use login::{
 pub use run::{DEFAULT_MAX_OUTPUT, Limits, Outcome, Output, RunError, run_bounded};
 pub use supervised::{MemoryCap, Registry, Sampler, Supervised, end_all, global_registry};
 pub use tree::{
-    Terminated, ask, descendants_of, end, is_alive, kill_tree, processes_mentioning, terminate,
+    Terminated, TreeEnding, ask, descendants_of, end, is_alive, kill_tree, processes_mentioning,
+    terminate,
 };
 pub use usage::{
-    ProcEntry, Row, Table, descendants, identity, parse_pss, process_memory, read_pss, snapshot,
-    table_from, tree_memory, tree_memory_with,
+    MAX_TREE, OsSource, ProcEntry, ProcessSource, Row, Table, descendants, identity, parse_pss,
+    process_memory, read_children, read_pss, snapshot, table_from, tree_memory, tree_memory_from,
+    tree_memory_of, tree_memory_with,
 };
 pub use watch::{
     MemoryEvent, MemoryListener, MemoryUse, MemoryWatch, REARM_PERCENT, Verdict, WARN_PERCENT,

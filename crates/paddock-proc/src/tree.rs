@@ -32,10 +32,16 @@ pub(crate) trait Os {
     /// Ends `id` if its pid still belongs to it. Windows overrides this with a check and a kill on one process handle,
     /// which leaves no gap between the two.
     fn end(&self, id: ProcessId) -> Ending {
-        let h = holder(id, self.start_of(id.pid()));
-        let sent = h == Holder::Same && self.kill_pid(id.pid());
-        Ending::of(h, sent)
+        check_then_kill(self, id)
     }
+}
+
+/// Ends `id` if the start time of its pid's holder is still its own: the check, then the kill (a gap of microseconds on
+/// macOS; Linux closes it with a pidfd, Windows with a handle).
+fn check_then_kill<O: Os + ?Sized>(os: &O, id: ProcessId) -> Ending {
+    let h = holder(id, os.start_of(id.pid()));
+    let sent = h == Holder::Same && os.kill_pid(id.pid());
+    Ending::of(h, sent)
 }
 
 /// The operating system.
@@ -73,20 +79,35 @@ impl Os for RealOs {
     fn end(&self, id: ProcessId) -> Ending {
         crate::sys::end_if(id)
     }
+
+    #[cfg(target_os = "linux")]
+    fn end(&self, id: ProcessId) -> Ending {
+        crate::sys::signal_by_pidfd(id, crate::sys::SIGKILL)
+            .unwrap_or_else(|| check_then_kill(self, id))
+    }
 }
 
-/// Ends `root` and the processes below it, each by identity: the tree is read from one look at the process table, and
-/// every process in it is ended only if its pid still belongs to it when its turn comes (ending the root ends its
-/// children too, and Windows hands their pids on at once; ADR 0033). A pid that names another process by then is skipped
-/// with a warning. `root_is_ours`: the root is a child of this process that has not been reaped, so its pid cannot have
-/// been handed on (its start time may no longer be readable once it exited).
+/// What ending one process of a tree found, root first.
+pub type TreeEnding = Vec<(ProcessId, Ending)>;
+
+/// Ends `root` and the processes below it, each by identity: every process is ended only if its pid still belongs to it
+/// when its turn comes (ending the root ends its children too, and Windows hands their pids on at once; ADR 0033). A pid
+/// that names another process by then is skipped, and a kill the OS refused is reported; both are logged.
+///
+/// The tree is `members` when given (a Windows job's members, identified through a handle each: no parent pid is followed)
+/// and otherwise read from one look at the process table, following parent pids by age ([`usage::descendants`]).
+/// `root_is_ours`: the root is a child of this process that has not been reaped, so its pid cannot have been handed on
+/// (its start time may no longer be readable once it exited).
 pub(crate) fn kill_tree_on(
     os: &dyn Os,
     root: ProcessId,
     root_is_ours: bool,
-) -> Vec<(ProcessId, Ending)> {
-    let table = os.table();
-    let kids = usage::descendants(&table, root);
+    members: Option<Vec<ProcessId>>,
+) -> TreeEnding {
+    let kids = match members {
+        Some(m) => m.into_iter().filter(|p| p.pid() != root.pid()).collect(),
+        None => usage::descendants(&os.table(), root),
+    };
     let mut out = Vec::with_capacity(kids.len() + 1);
     let root_holder = if root_is_ours {
         Holder::Same
@@ -106,11 +127,29 @@ pub(crate) fn kill_tree_on(
     }
     out.extend(kids.into_iter().map(|kid| (kid, os.end(kid))));
     for (id, e) in &out {
-        if let Ending::NotOurs(now) = e {
-            warn_not_ours(*id, *now);
+        match e {
+            Ending::NotOurs(now) => warn_not_ours(*id, *now),
+            Ending::Refused => {
+                log::warn!("Could not end {id} of the tree of {root}: the system refused")
+            }
+            Ending::Ended | Ending::Gone => {}
         }
     }
     out
+}
+
+/// Ends `root` and everything below it. A child started by this crate leads its own process group (Unix), which is
+/// signalled as a whole while the root is still the process `root` names (or is gone with no new holder of its pid); every
+/// process of the tree is then ended by identity, so a pid handed on since the tree was read is left alone (ADR 0033).
+/// Windows ends each process through a handle after checking its creation time (never `taskkill /T`, which follows parent
+/// pids). Safe to call for a process that is already gone. Returns what it found for each process, root first.
+pub fn kill_tree(root: ProcessId) -> TreeEnding {
+    kill_tree_on(&RealOs, root, false, None)
+}
+
+/// [`kill_tree`] for a child of this process that has not been reaped, with its job's members on Windows.
+pub(crate) fn kill_child_tree(root: ProcessId, members: Option<Vec<ProcessId>>) -> TreeEnding {
+    kill_tree_on(&RealOs, root, true, members)
 }
 
 /// Every process below `root` (not including it), from a fresh look at the process table.
@@ -118,43 +157,38 @@ pub fn descendants_of(root: ProcessId) -> Vec<ProcessId> {
     usage::descendants(&usage::snapshot(), root)
 }
 
-/// Ends `root` and everything below it. A child started by this crate leads its own process group (Unix), which is
-/// signalled as a whole while the root is still the process `root` names; every process of the tree is then ended by
-/// identity, so a pid handed on since the tree was read is left alone (ADR 0033). Windows ends each process through a
-/// handle after checking its creation time (never `taskkill /T`, which follows parent pids). Safe to call for a process
-/// that is already gone.
-pub fn kill_tree(root: ProcessId) {
-    kill_tree_on(&RealOs, root, false);
-}
-
-/// [`kill_tree`] for a child of this process that has not been reaped.
-pub(crate) fn kill_child_tree(root: ProcessId) {
-    kill_tree_on(&RealOs, root, true);
-}
-
 /// Asks one process (not its group, which may contain the caller) to stop: SIGTERM, or a close request on Windows. Only
 /// while its pid still belongs to it. Returns whether the request was delivered.
 pub fn ask(id: ProcessId) -> bool {
-    match holder(id, crate::sys::start_time(id.pid())) {
-        Holder::Same => {}
-        Holder::Gone => return false,
-        Holder::Other(now) => {
-            warn_not_ours(id, now);
-            return false;
-        }
-    }
-    #[cfg(unix)]
-    {
-        crate::sys::signal_pid(id.pid(), crate::sys::SIGTERM)
-    }
+    #[cfg(target_os = "linux")]
+    let (found, sent) = match crate::sys::signal_by_pidfd(id, crate::sys::SIGTERM) {
+        Some(Ending::Ended) => (Holder::Same, true),
+        Some(Ending::Refused) => (Holder::Same, false),
+        Some(Ending::Gone) => (Holder::Gone, false),
+        Some(Ending::NotOurs(now)) => (Holder::Other(now), false),
+        None => ask_checked(id),
+    };
     #[cfg(windows)]
-    {
-        crate::sys::close_request(id.pid())
+    let (found, sent) = crate::sys::close_request(id);
+    #[cfg(not(any(target_os = "linux", windows)))]
+    let (found, sent) = ask_checked(id);
+    if let Holder::Other(now) = found {
+        warn_not_ours(id, now);
     }
-    #[cfg(not(any(unix, windows)))]
-    {
-        false
-    }
+    sent
+}
+
+/// SIGTERM after the identity check (macOS, and Linux without pidfds).
+#[cfg(unix)]
+fn ask_checked(id: ProcessId) -> (Holder, bool) {
+    let found = holder(id, crate::sys::start_time(id.pid()));
+    let sent = found == Holder::Same && crate::sys::signal_pid(id.pid(), crate::sys::SIGTERM);
+    (found, sent)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn ask_checked(id: ProcessId) -> (Holder, bool) {
+    (holder(id, crate::sys::start_time(id.pid())), false)
 }
 
 /// Ends one process now (SIGKILL, `TerminateProcess`), without touching its group or children, if its pid still belongs
@@ -204,15 +238,17 @@ pub fn terminate(id: ProcessId, grace: Duration) -> Terminated {
     Terminated::Killed
 }
 
-/// The processes whose command line mentions `needle` (leak checks: a throwaway folder name is unique to a run).
+/// The processes whose command line mentions `needle` (leak checks: a throwaway folder name is unique to a run). The
+/// identities are read first and the command lines after: a pid handed on between the two keeps the identity of the
+/// process that had it first, so ending the result ([`end`]) finds the new holder and leaves it alone.
 pub fn processes_mentioning(needle: &str) -> Vec<ProcessId> {
+    let table: Table = usage::snapshot();
     let mut sys = System::new();
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
         ProcessRefreshKind::nothing().with_cmd(sysinfo::UpdateKind::Always),
     );
-    let table: Table = usage::snapshot();
     sys.processes()
         .iter()
         .filter(|(_, p)| p.cmd().iter().any(|a| a.to_string_lossy().contains(needle)))
@@ -317,7 +353,7 @@ mod port_tests {
     #[test]
     fn a_stale_snapshot_entry_never_kills_the_process_that_holds_its_pid_now() {
         let os = browser_whose_pid_is_handed_on();
-        let out = kill_tree_on(&os, ProcessId::new(10, at(100)), true);
+        let out = kill_tree_on(&os, ProcessId::new(10, at(100)), true, None);
         assert_eq!(
             os.running(11),
             Some(at(900)),
@@ -348,7 +384,7 @@ mod port_tests {
             ],
             unchanged,
         );
-        let out = kill_tree_on(&os, ProcessId::new(10, at(100)), false);
+        let out = kill_tree_on(&os, ProcessId::new(10, at(100)), false, None);
         assert!(out.iter().all(|(_, e)| *e == Ending::Ended), "{out:?}");
         assert_eq!(out.len(), 3);
         assert_eq!(os.running(10).or(os.running(11)).or(os.running(12)), None);
@@ -362,7 +398,7 @@ mod port_tests {
             &[(10, Some(1), 500), (11, Some(10), 200), (13, Some(10), 600)],
             unchanged,
         );
-        let out = kill_tree_on(&os, ProcessId::new(10, at(100)), false);
+        let out = kill_tree_on(&os, ProcessId::new(10, at(100)), false, None);
         assert!(
             os.groups.lock().unwrap().is_empty(),
             "the new holder's group is never signalled"
@@ -380,7 +416,7 @@ mod port_tests {
         let gone = FakeOs::new(&[(11, Some(10), 200), (20, Some(1), 50)], |t| {
             t.remove(&20);
         });
-        let out = kill_tree_on(&gone, ProcessId::new(10, at(100)), false);
+        let out = kill_tree_on(&gone, ProcessId::new(10, at(100)), false, None);
         assert_eq!(
             out,
             [
@@ -389,6 +425,26 @@ mod port_tests {
             ]
         );
         assert_eq!(gone.running(20), None, "the group was signalled");
+    }
+
+    /// Windows: the job's member list is the tree; no table is read and no parent pid followed, so a stranger that claims the
+    /// root as its parent is left alone.
+    #[test]
+    fn a_job_member_list_is_the_tree() {
+        let os = FakeOs::new(
+            &[
+                (1, None, 1),
+                (10, Some(1), 100),
+                (11, Some(10), 200),
+                (12, Some(10), 300),
+            ],
+            unchanged,
+        );
+        let members = vec![ProcessId::new(10, at(100)), ProcessId::new(11, at(200))];
+        let out = kill_tree_on(&os, ProcessId::new(10, at(100)), true, Some(members));
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!(os.running(12), Some(at(300)), "not a member: not ended");
+        assert_eq!(os.running(11), None);
     }
 
     #[test]
@@ -407,7 +463,7 @@ mod port_tests {
             }
         }
         assert_eq!(
-            kill_tree_on(&Stubborn, ProcessId::new(5, at(1)), false),
+            kill_tree_on(&Stubborn, ProcessId::new(5, at(1)), false, None),
             [(ProcessId::new(5, at(1)), Ending::Refused)]
         );
     }

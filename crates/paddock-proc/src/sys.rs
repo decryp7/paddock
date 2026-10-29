@@ -8,6 +8,10 @@ mod unix {
     use std::process::Command;
 
     /// Sends `signal` to the process group `pgid`; false when there is no such group.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the one implementation: callers checked the group's leader by identity (ADR 0033)"
+    )]
     pub fn signal_group(pgid: u32, signal: i32) -> bool {
         let Ok(pgid) = libc::pid_t::try_from(pgid) else {
             return false;
@@ -20,6 +24,10 @@ mod unix {
     }
 
     /// Sends `signal` to one process; false when there is no such process.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the one implementation: callers checked the process by identity just before (ADR 0033)"
+    )]
     pub fn signal_pid(pid: u32, signal: i32) -> bool {
         let Ok(pid) = libc::pid_t::try_from(pid) else {
             return false;
@@ -96,6 +104,66 @@ mod unix {
         }
     }
 
+    /// The direct children of `pid` (`proc_listchildpids`: asks the kernel for that parent only, no scan of the process
+    /// list). `Some(empty)` for a process without children or one that is gone, `None` when the kernel failed to answer.
+    #[cfg(target_os = "macos")]
+    pub fn child_pids(pid: u32) -> Option<Vec<u32>> {
+        child_pids_in(pid, 1024)
+    }
+
+    /// [`child_pids`] starting with room for `room` pids (the buffer grows when it is full; tests start small).
+    #[cfg(target_os = "macos")]
+    pub fn child_pids_in(pid: u32, room: usize) -> Option<Vec<u32>> {
+        let Ok(pid) = libc::pid_t::try_from(pid) else {
+            return Some(Vec::new());
+        };
+        let mut buf = vec![0 as libc::pid_t; room];
+        loop {
+            let bytes = libc::c_int::try_from(buf.len() * std::mem::size_of::<libc::pid_t>())
+                .unwrap_or(libc::c_int::MAX);
+            // SAFETY: the kernel writes at most `bytes` bytes into `buf`, which is that large.
+            let n = unsafe { libc::proc_listchildpids(pid, buf.as_mut_ptr().cast(), bytes) };
+            match read_listing(n, buf.len()) {
+                Listing::Unknown => return None,
+                Listing::Grow => buf.resize(buf.len() * 4, 0),
+                Listing::Count(n) => {
+                    return Some(
+                        buf.iter()
+                            .take(n)
+                            .filter_map(|p| u32::try_from(*p).ok())
+                            .filter(|p| *p != 0)
+                            .collect(),
+                    );
+                }
+            }
+        }
+    }
+
+    /// What `proc_listchildpids` answered, for a buffer of `room` pids.
+    #[cfg(target_os = "macos")]
+    #[derive(Debug, PartialEq, Eq)]
+    pub(crate) enum Listing {
+        /// The kernel could not say (-1: the call failed), which is not "no children".
+        Unknown,
+        /// The buffer was full, so the list may have been cut: grow it and ask again.
+        Grow,
+        /// This many pids were written.
+        Count(usize),
+    }
+
+    /// Reads the answer `n` (a count of pids, not bytes; -1 on failure) of a call that had room for `room` pids.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn read_listing(n: libc::c_int, room: usize) -> Listing {
+        let Ok(n) = usize::try_from(n) else {
+            return Listing::Unknown;
+        };
+        if n >= room && room < (1 << 20) {
+            Listing::Grow
+        } else {
+            Listing::Count(n)
+        }
+    }
+
     /// Ignores SIGTERM in this process (tests).
     #[cfg(test)]
     pub fn ignore_sigterm() {
@@ -109,16 +177,66 @@ mod unix {
 #[cfg(unix)]
 pub use unix::*;
 
-/// A close request to `pid` alone (`taskkill` without `/T` or `/F`: never a tree, whose members `taskkill` would find by
-/// parent pids that may have been handed on).
+/// A close request to `id` alone (`taskkill` without `/T` or `/F`: never a tree, whose members `taskkill` would find by
+/// parent pids that may have been handed on). A handle with `SYNCHRONIZE` is held across the `taskkill` call, after its
+/// creation time was checked: while it is open the process object, and so its pid, cannot be handed on, so the request
+/// reaches `id` or nobody. Returns who held the pid and whether the request was delivered.
 #[cfg(windows)]
-pub fn close_request(pid: u32) -> bool {
-    let mut cmd = crate::command("taskkill");
-    cmd.args(["/PID", &pid.to_string()]);
-    cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    cmd.status().is_ok_and(|s| s.success())
+pub fn close_request(id: crate::ProcessId) -> (crate::Holder, bool) {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    };
+    // SAFETY: OpenProcess takes plain values; the handle is used only while open and closed below.
+    unsafe {
+        let h = OpenProcess(
+            PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+            0,
+            id.pid(),
+        );
+        if h.is_null() {
+            return (crate::holder(id, start_time(id.pid())), false);
+        }
+        let found = crate::holder(id, creation_time(h));
+        let sent = found == crate::Holder::Same && {
+            let mut cmd = crate::command("taskkill");
+            cmd.args(["/PID", &id.pid().to_string()]);
+            cmd.stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            cmd.status().is_ok_and(|s| s.success())
+        };
+        CloseHandle(h);
+        (found, sent)
+    }
+}
+
+/// `pid` by identity if it is a member of the job `job`: the membership and the creation time are read through one process
+/// handle, so a pid that left the job and was handed on is not mistaken for a member.
+#[cfg(windows)]
+pub fn identity_in_job(
+    pid: u32,
+    job: windows_sys::Win32::Foundation::HANDLE,
+) -> Option<crate::ProcessId> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::JobObjects::IsProcessInJob;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    // SAFETY: OpenProcess takes plain values; the handle is used only while open and closed below; `inside` is a writable
+    // BOOL.
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let mut inside = 0;
+        let started = if IsProcessInJob(h, job, &raw mut inside) != 0 && inside != 0 {
+            creation_time(h)
+        } else {
+            None
+        };
+        CloseHandle(h);
+        started.map(|s| crate::ProcessId::new(pid, s))
+    }
 }
 
 /// When `pid` started (Windows: its creation time), or `None` when there is no such process or it cannot be opened.
@@ -183,32 +301,47 @@ pub fn end_if(id: crate::ProcessId) -> crate::Ending {
     }
 }
 
-/// When `pid` started, from `pbi_start_tvsec`/`pbi_start_tvusec`, or `None` when there is no such process or it is not
-/// ours to look at.
+/// When `pid` started: `kp_proc.p_starttime` of `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_PID, pid)`, or `None` when there is
+/// no such process. Unlike `proc_pidinfo(PROC_PIDTBSDINFO)`, which refuses a process of another effective user (a setuid
+/// child such as `/usr/bin/top` gives EPERM), the sysctl answers for every process, zombies included.
 #[cfg(target_os = "macos")]
 pub fn start_time(pid: u32) -> Option<crate::StartTime> {
     let pid = libc::c_int::try_from(pid).ok()?;
-    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
-    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
-    // SAFETY: proc_pidinfo writes at most `size` bytes into a buffer of that size; the contents are read only when it filled
-    // the whole structure.
-    let n = unsafe {
-        libc::proc_pidinfo(
-            pid,
-            libc::PROC_PIDTBSDINFO,
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid];
+    // `struct kinfo_proc` is 648 bytes on 64-bit macOS; a larger, u64-aligned buffer leaves room for growth.
+    let mut buf = [0u64; 128];
+    let mut len = std::mem::size_of_val(&buf);
+    // SAFETY: the kernel writes at most `len` bytes into `buf`, which is that large, and sets `len` to what it wrote.
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as libc::c_uint,
+            buf.as_mut_ptr().cast(),
+            &raw mut len,
+            std::ptr::null_mut(),
             0,
-            info.as_mut_ptr().cast(),
-            size,
         )
     };
-    if n != size {
+    start_from_kinfo(rc, len, &buf)
+}
+
+/// The start time in a `kinfo_proc` the sysctl answered with `rc` and `len` bytes: `kp_proc` comes first, and its first
+/// member is the union whose `p_starttime` (a `timeval`: seconds as `i64`, then microseconds as `i32`) sits at offset 0.
+/// No process gives `len` 0.
+#[cfg(target_os = "macos")]
+pub(crate) fn start_from_kinfo(
+    rc: libc::c_int,
+    len: usize,
+    buf: &[u64],
+) -> Option<crate::StartTime> {
+    if rc != 0 || len < 16 {
         return None;
     }
-    // SAFETY: zero-initialised plain integers, filled by the call.
-    let i = unsafe { info.assume_init() };
-    i.pbi_start_tvsec
-        .checked_mul(1_000_000)?
-        .checked_add(i.pbi_start_tvusec)
+    let secs = u64::try_from(buf[0] as i64).ok()?;
+    let micros = u64::try_from((buf[1] as u32) as i32).ok()?;
+    secs.checked_mul(1_000_000)?
+        .checked_add(micros)
+        .filter(|&t| t > 0)
         .map(crate::StartTime::from_micros)
 }
 
@@ -218,11 +351,60 @@ pub fn start_time(pid: u32) -> Option<crate::StartTime> {
     use crate::identity::{micros_from_ticks, parse_btime, parse_stat_start};
     use std::sync::OnceLock;
     static BOOT: OnceLock<Option<u64>> = OnceLock::new();
-    let boot = (*BOOT.get_or_init(|| parse_btime(&std::fs::read_to_string("/proc/stat").ok()?)))?;
+    let boot = (*BOOT.get_or_init(|| {
+        let b = std::fs::read_to_string("/proc/stat").ok().and_then(|t| parse_btime(&t));
+        if b.is_none() {
+            log::warn!("The boot time could not be read from /proc/stat: no process can be identified, so none is ended by pid");
+        }
+        b
+    }))?;
     // SAFETY: sysconf takes an integer and has no preconditions.
     let hz = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok()?;
     let ticks = parse_stat_start(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)?;
     micros_from_ticks(boot, ticks, hz).map(crate::StartTime::from_micros)
+}
+
+/// Sends `signal` to `id` if its pid still belongs to it, through a pidfd (Linux 5.3 and later): the pidfd is opened first and names one
+/// process for good; the start time read afterwards is that process's as long as the pidfd says it still runs, and the
+/// signal goes through the pidfd, so a pid handed on in between is never signalled. `None` when the kernel has no pidfds
+/// (the caller checks and signals instead).
+#[cfg(target_os = "linux")]
+pub fn signal_by_pidfd(id: crate::ProcessId, signal: i32) -> Option<crate::Ending> {
+    use crate::{Ending, Holder, holder};
+    use std::os::fd::{FromRawFd, OwnedFd};
+    let pid = libc::pid_t::try_from(id.pid()).ok()?;
+    // SAFETY: pidfd_open takes a pid and flags and returns a new descriptor or -1.
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+    if fd < 0 {
+        let e = std::io::Error::last_os_error();
+        return match e.raw_os_error() {
+            Some(libc::ESRCH) => Some(Ending::Gone),
+            _ => None,
+        };
+    }
+    // SAFETY: a fresh descriptor this function owns.
+    let fd = unsafe { OwnedFd::from_raw_fd(fd as libc::c_int) };
+    let send = |sig: libc::c_int| {
+        use std::os::fd::AsRawFd;
+        // SAFETY: pidfd_send_signal takes the descriptor, a signal, no siginfo and no flags.
+        unsafe {
+            libc::syscall(
+                libc::SYS_pidfd_send_signal,
+                fd.as_raw_fd(),
+                sig,
+                std::ptr::null::<libc::siginfo_t>(),
+                0,
+            ) == 0
+        }
+    };
+    let now = start_time(id.pid());
+    // Signal 0 checks that the pidfd's process still runs: then `now` was read from it, not from a newer holder.
+    if !send(0) {
+        return Some(Ending::Gone);
+    }
+    let found = holder(id, now);
+    let sent = found == Holder::Same && send(signal);
+    Some(Ending::of(found, sent))
 }
 
 /// Elsewhere: the start time sysinfo reports, in whole seconds.
@@ -264,6 +446,36 @@ pub fn private_working_set(pid: u32) -> Option<u64> {
     }
 }
 
+/// `(pid, parent)` of every process, from one snapshot (`CreateToolhelp32Snapshot`: Windows has no per-parent call). The
+/// snapshot is a full list of the machine's processes and threads, but reads no memory, command lines or times, so it is
+/// lighter than a full refresh; callers take it at most once per tree walk.
+#[cfg(windows)]
+pub fn process_parents() -> Option<Vec<(u32, u32)>> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
+    // SAFETY: the snapshot handle is closed below; the entry is a zero-initialised struct whose size field is set as the API
+    // requires, and it is read only after a successful call.
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut list = Vec::new();
+        let mut ok = Process32FirstW(snap, &raw mut entry);
+        while ok != 0 {
+            list.push((entry.th32ProcessID, entry.th32ParentProcessID));
+            ok = Process32NextW(snap, &raw mut entry);
+        }
+        CloseHandle(snap);
+        Some(list)
+    }
+}
+
 /// Makes the child lead its own process group (Unix only).
 #[cfg(not(unix))]
 pub fn own_group(_cmd: &mut std::process::Command) {}
@@ -271,6 +483,82 @@ pub fn own_group(_cmd: &mut std::process::Command) {}
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    /// macOS: the start time comes from `kinfo_proc` (offset 0: seconds, then microseconds) and agrees with what sysinfo
+    /// reads through `proc_pidinfo` for a process of our own.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_start_time_is_read_from_kinfo_proc() {
+        let mut buf = [0u64; 128];
+        buf[0] = 1_700_000_000;
+        buf[1] = 250_000 | (0xdead_u64 << 32);
+        assert_eq!(
+            start_from_kinfo(0, 648, &buf).map(crate::StartTime::as_micros),
+            Some(1_700_000_000_250_000)
+        );
+        assert_eq!(start_from_kinfo(-1, 648, &buf), None, "the call failed");
+        assert_eq!(start_from_kinfo(0, 0, &buf), None, "no such process");
+        assert_eq!(start_from_kinfo(0, 648, &[0; 2]), None, "a zero start");
+        assert_eq!(
+            start_from_kinfo(0, 648, &[u64::MAX, 0]),
+            None,
+            "a negative start"
+        );
+        let me = std::process::id();
+        let ours = start_time(me).unwrap().as_micros();
+        let mut sys = sysinfo::System::new();
+        let pid = sysinfo::Pid::from_u32(me);
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+        assert_eq!(ours / 1_000_000, sys.process(pid).unwrap().start_time());
+        assert_eq!(start_time(u32::MAX), None, "not a pid_t");
+        assert_eq!(start_time(i32::MAX as u32), None, "no such process");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_failed_listing_is_unknown_not_an_empty_list() {
+        assert_eq!(
+            read_listing(-1, 1024),
+            Listing::Unknown,
+            "-1 is the call failing"
+        );
+        assert_eq!(read_listing(0, 1024), Listing::Count(0), "0 is no children");
+        assert_eq!(read_listing(3, 1024), Listing::Count(3));
+        assert_eq!(
+            read_listing(4, 4),
+            Listing::Grow,
+            "a full buffer may have cut the list"
+        );
+        assert_eq!(
+            read_listing(1 << 20, 1 << 20),
+            Listing::Count(1 << 20),
+            "the buffer's ceiling"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn children_are_listed_for_one_pid_and_the_buffer_grows() {
+        let mut kids: Vec<_> = (0..3)
+            .map(|_| {
+                std::process::Command::new("sleep")
+                    .arg("60")
+                    .spawn()
+                    .unwrap()
+            })
+            .collect();
+        let me = std::process::id();
+        for room in [1, 2, 3, 1024] {
+            let mut got = child_pids_in(me, room).unwrap();
+            got.retain(|p| kids.iter().any(|k| k.id() == *p));
+            assert_eq!(got.len(), 3, "room {room}");
+        }
+        assert_eq!(child_pids_in(u32::MAX, 4), Some(vec![]), "not a pid_t");
+        for k in &mut kids {
+            let _ = k.kill();
+            let _ = k.wait();
+        }
+    }
 
     #[test]
     fn ids_that_could_hit_the_caller_or_everything_are_refused() {

@@ -46,17 +46,9 @@ impl ProcessId {
 
     /// The process that holds `pid` now, if it started no later than `written_ms` (ms since the Unix epoch): for a pid
     /// read from a file the process wrote about itself after it started (a discovery or lock file). A holder that started
-    /// after the file was written got the pid when the writer had ended; it is `None`, with a warning.
+    /// after the file was written got the pid when the writer had ended; it is `None` (the record is stale).
     pub fn of_recorded(pid: u32, written_ms: i64) -> Option<ProcessId> {
-        let id = ProcessId::of(pid)?;
-        if started_by(id.started, written_ms) {
-            Some(id)
-        } else {
-            log::warn!(
-                "Not trusting {id}: it started after its record was written ({written_ms} ms), so it is another process"
-            );
-            None
-        }
+        ProcessId::of(pid).filter(|id| started_by(id.started, written_ms))
     }
 
     /// The process id.
@@ -102,9 +94,12 @@ pub fn holder(id: ProcessId, now: Option<StartTime>) -> Holder {
     }
 }
 
-/// How far a start time may lie after a wall-clock time and still be before it: Linux counts start times from the boot
-/// time in whole seconds.
+/// How far a start time may lie after a wall-clock time written in whole milliseconds and still be before it: Linux counts
+/// start times from the boot time in whole seconds; elsewhere the record's millisecond is rounded down.
+#[cfg(target_os = "linux")]
 const CLOCK_SLACK_MICROS: u64 = 1_000_000;
+#[cfg(not(target_os = "linux"))]
+const CLOCK_SLACK_MICROS: u64 = 999;
 
 /// Whether a process that started at `started` can have written a record at `written_ms` (ms since the Unix epoch).
 pub(crate) fn started_by(started: StartTime, written_ms: i64) -> bool {
@@ -246,7 +241,15 @@ mod tests {
     #[test]
     fn a_record_is_written_by_a_process_that_started_before_it() {
         assert!(started_by(at(5_000_000), 5_000));
-        assert!(started_by(at(5_900_000), 5_000), "within the slack");
+        assert!(
+            started_by(at(5_000_999), 5_000),
+            "within the record's millisecond"
+        );
+        assert_eq!(
+            started_by(at(5_900_000), 5_000),
+            cfg!(target_os = "linux"),
+            "Linux allows the boot time's second"
+        );
         assert!(
             !started_by(at(6_000_001), 5_000),
             "started after the record was written"
