@@ -42,7 +42,7 @@ In the repository: `scripts/vm-win.sh` (daily use), `scripts/vm-win/prepare.sh` 
 | RAM while running | 8 GB resident, plus Fusion overhead; given back on stop. Run it only when a test needs it, and never two Windows VMs at once |
 | VM disk | grows up to 80 GB; a fresh Windows 11 install usually takes about 25 to 35 GB [unverified estimate] |
 | Snapshots | `clean-baseline` costs almost nothing when taken; each test run's changes grow a redo log until the next revert |
-| Windows ISO | about 5 to 7 GB [unverified estimate]; may be deleted after `baseline` |
+| Windows ISO | 8.5 GB (the en-GB build 26300 image, measured 2026-10-29); may be deleted after `baseline` |
 | Setup disc + payload | about 170 MB + 70 MB |
 
 Budget about 50 GB on d7 for a working VM with a baseline and a few test runs.
@@ -69,7 +69,7 @@ work through the keychain. Choose B only if the keychain step is unwanted.
 
 ## One-time setup (the user)
 
-1. **Get the Windows 11 Arm64 ISO from Microsoft** (about 5 to 7 GB; needs your OK to download). Use one of the official
+1. **Get the Windows 11 Arm64 ISO from Microsoft** (8.5 GB; needs your OK to download). Use one of the official
    routes, no mirrors:
    - Microsoft's page <https://www.microsoft.com/software-download/windows11arm64>: choose *Windows 11 (multi-edition ISO
      for Arm64)*, the language *English International* (the en-GB image this VM uses), and download through the browser. Save or move the file to
@@ -84,11 +84,18 @@ work through the keychain. Choose B only if the keychain step is unwanted.
 3. **Option A only, add the TPM** (the VM must be off):
    1. Create the password and keep it in the login keychain:
       `security add-generic-password -s paddock-win11-test-vm -a vmrun -w "$(openssl rand -base64 24)"`,
-      then show it once to paste: `security find-generic-password -s paddock-win11-test-vm -a vmrun -w`.
+      then copy it to the clipboard without showing it and without a trailing newline:
+      `security find-generic-password -s paddock-win11-test-vm -a vmrun -w | tr -d '\n' | pbcopy`.
    2. In Fusion: *File > Open* `/Volumes/d7sst7/vms/paddock-win11-test/vm/paddock-win11-test.vmwarevm`, then
       *Settings > Encryption & Restrictions*: turn on encryption, choose **Only the files needed to support a TPM are
       encrypted**, paste the password, and leave *Remember password in Mac Keychain* off (the script reads its own item).
    3. *Settings > Add Device > Trusted Platform Module > Add*. Close the settings and quit the VM window (do not start it).
+   4. Check the password before going on; this must print `Total snapshots: 0`, not "Incorrect password":
+      `"/Applications/VMware Fusion.app/Contents/Library/vmrun" -T fusion -vp "$(security find-generic-password -s
+      paddock-win11-test-vm -a vmrun -w)" listSnapshots <vm dir>/vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx`.
+      If it fails and nobody knows the password the VM was encrypted with, the VM cannot be opened again: while nothing is
+      installed yet, delete `vm/paddock-win11-test.vmwarevm`, run `scripts/vm-win/prepare.sh --vm-only` (keys and both
+      ISOs stay as they are) and repeat this step.
 4. **Install**: `scripts/vm-win.sh install`. It opens the VM in a Fusion window once; click into it and press a key at
    *Press any key to boot from CD or DVD*. Setup then runs unattended: partitions the disk, installs Windows 11 Pro,
    creates both accounts, and at the first logon `firstlogon.ps1` installs OpenSSH Server and Git, sets power, the test

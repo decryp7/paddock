@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prepares the local Windows 11 Arm test VM in VMware Fusion (docs/testing/windows-test-vm.md). Local only, never CI.
 #
-#   scripts/vm-win/prepare.sh [--no-tpm] [--lang <tag>] [--input-locale <id>]
+#   scripts/vm-win/prepare.sh [--no-tpm] [--lang <tag>] [--input-locale <id>] [--vm-only]
 #
 # Creates, under PADDOCK_WIN_VM_DIR (default /Volumes/d7sst7/vms/paddock-win11-test, never under $HOME):
 #   keys/            SSH key pairs for paddock-test and paddock-admin, the setup passwords (all mode 600)
@@ -14,6 +14,8 @@
 # --no-tpm  builds the VM without a virtual TPM: Setup skips the TPM and Secure Boot checks (LabConfig), nothing is
 #           encrypted and vmrun needs no password. Without it the user adds a TPM in Fusion, which encrypts the TPM
 #           files (not the disk) with a password kept in the login keychain (see the doc, "TPM").
+# --vm-only (re)creates only a missing VM folder and leaves keys, payload and both ISOs exactly as they are (to rebuild
+#           the VM, delete vm/paddock-win11-test.vmwarevm first; the setup disc must already exist).
 # --lang    the Windows language and locale, which must be the ISO's language (default en-GB; Setup fails on a language
 #           the image does not have). --input-locale is the keyboard as <language id>:<layout id>; it defaults for
 #           en-GB (0809:00000809) and en-US (0409:00000409) and is required for any other language.
@@ -26,6 +28,7 @@ lib="$fusion/Contents/Library"
 name=paddock-win11-test
 max_load=${PADDOCK_VM_MAX_LOAD:-25}
 no_tpm=false
+vm_only=false
 lang=en-GB
 input_locale=
 
@@ -34,6 +37,7 @@ while [ $# -gt 0 ]; do
   a=$1; shift
   case $a in
     --no-tpm) no_tpm=true ;;
+    --vm-only) vm_only=true ;;
     --lang) [ $# -gt 0 ] || die "--lang needs a value"; lang=$1; shift ;;
     --input-locale) [ $# -gt 0 ] || die "--input-locale needs a value"; input_locale=$1; shift ;;
     -h | --help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -58,6 +62,7 @@ awk -v l="$load" -v m="$max_load" 'BEGIN{exit !(l<m)}' || die "1-minute load $lo
 mkdir -p "$dir"/{keys,payload,iso,vm}
 chmod 700 "$dir/keys"
 
+if ! $vm_only; then # keys, passwords, payload and the setup disc
 echo "== SSH keys (key-only logins; the private keys stay on this Mac)"
 for user in paddock-test paddock-admin; do
   [ -f "$dir/keys/$user" ] || ssh-keygen -q -t ed25519 -N '' -C "$user@paddock-win11-test" -f "$dir/keys/$user"
@@ -119,6 +124,9 @@ hdiutil makehybrid -quiet -iso -joliet -default-volume-name PADDOCKSETUP -o "$di
 rm -rf "$stage"
 chmod 600 "$dir/iso/paddock-setup.iso"
 echo "  ok iso/paddock-setup.iso ($lang, keyboard $input_locale, $($no_tpm && echo 'no TPM' || echo 'virtual TPM'))"
+
+fi
+$vm_only && { [ -f "$dir/iso/paddock-setup.iso" ] || die "--vm-only needs an existing setup disc; run without it first"; }
 
 echo "== VM"
 vmdir="$dir/vm/$name.vmwarevm"

@@ -85,6 +85,15 @@ describe('guard rails', () => {
     assert.match(run('vm-win/prepare.sh', ['--lang', 'de-DE', '--input-locale', 'qwertz']).stderr, /--input-locale must look like/);
   });
 
+  test('prepare.sh --vm-only refuses to run without a setup disc and changes nothing else', () => {
+    const dir = join(scratch, 'vm-only');
+    const fusion = join(scratch, 'VmOnlyFusion.app');
+    mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
+    const r = run('vm-win/prepare.sh', ['--vm-only'], { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: fusion, PADDOCK_VM_MAX_LOAD: '100000' });
+    assert.match(r.stderr, /needs an existing setup disc/);
+    assert.equal(r.stdout.includes('== SSH keys'), false);
+  });
+
   test('vm-win.sh rejects unknown commands with usage', () => {
     const r = run('vm-win.sh', ['destroy']);
     assert.equal(r.status, 2);
