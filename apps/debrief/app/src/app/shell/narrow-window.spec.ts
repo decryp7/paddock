@@ -68,6 +68,22 @@ describe('NarrowWindow (the Explorer follows the layout plan)', () => {
     expect(spy).toHaveBeenLastCalledWith(0);
   });
 
+  it('a width the user chose is shown within the whole room and takes nothing from the dock\'s yield; the default width yields to the other columns', () => {
+    const { narrow } = setup();
+    const dock = TestBed.inject(DockService);
+    const spy = vi.spyOn(dock, 'setExplorerYield');
+    vi.spyOn(dock, 'explorerRoom').mockReturnValue(600);
+    vi.spyOn(dock, 'explorerColumnRoom').mockReturnValue(250);
+    narrow.evaluate();
+    narrow.evaluate(); // the rooms found by the first call are the ones the second shows
+    expect(narrow.width()).toBe(250);
+    expect(spy).toHaveBeenLastCalledWith(250 - EXPLORER_WIDTH.min);
+    TestBed.inject(UiPrefsStore).setExplorerWidth(500);
+    narrow.evaluate();
+    expect(narrow.width()).toBe(500);
+    expect(spy).toHaveBeenLastCalledWith(0);
+  });
+
   it('re-evaluates after every dock re-plan, and starts once', () => {
     const { narrow, store, set, listeners, verdicts } = setup();
     narrow.start();

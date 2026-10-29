@@ -931,6 +931,12 @@ export class DockService {
     this.ctx.explorerYield = Math.max(0, Math.round(px));
   }
 
+  /** The widest the Explorer is shown at when the user has not chosen a width (see `DockLayout.explorerColumnRoom`). */
+  explorerColumnRoom(open: boolean, explorerWidth: number): number {
+    const api = this.api;
+    return api ? this.layout.explorerColumnRoom(api, open, explorerWidth) : EXPLORER_WIDTH.max;
+  }
+
   /** The widest the Explorer may be now without being shrunk or closed by the plan (see `DockLayout.explorerRoom`). */
   explorerRoom(open: boolean, explorerWidth: number): number {
     const api = this.api;

@@ -166,6 +166,17 @@ test.describe('floating a panel deliberately', () => {
     expect(await page.evaluate(([x, y]) => !!document.elementFromPoint(x!, y!)?.closest('.dv-resize-container .dv-void-container'), [centre.x, centre.y])).toBe(true);
   });
 
+  test('from Window ▸ Float panel at 1440 px, where Metrics is a tab behind the timeline: it floats the active tab, Metrics, not the timeline', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // Metrics shares the timeline's group here: click it to make it the active tab, then float.
+    await expect(groupOf(page, 'Timeline')).toContainText('Metrics');
+    await tab(page, 'Metrics').click();
+    await expect(tab(page, 'Metrics')).toHaveAttribute('aria-selected', 'true');
+    await chooseMenu(page, 'Window', 'Float panel');
+    await expect(floating(page).getByRole('tab', { name: 'Metrics', exact: true })).toBeVisible();
+    await expect(floating(page).getByRole('tab', { name: 'Timeline', exact: true })).toHaveCount(0);
+  });
+
   test('from Window ▸ Float panel (the active panel)', async ({ page }) => {
     await tab(page, 'Metrics').click();
     await chooseMenu(page, 'Window', 'Float panel');

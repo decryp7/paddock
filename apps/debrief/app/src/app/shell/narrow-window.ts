@@ -33,12 +33,20 @@ export class NarrowWindow {
     this.evaluate();
   }
 
-  /** The width the Explorer is shown at, px: the user's, within the room the plan has now. */
-  readonly width = computed(() => Math.min(this.prefs.explorerWidth(), this.shell.explorerRoom()));
+  /**
+   * The user has set a width of their own (anything but the default): an explicit resize wins over the other columns, which
+   * the dock tabs; the default width yields to them instead (the Explorer shrinks so Registry or Home keep their column).
+   */
+  private readonly chosen = computed(() => this.prefs.explorerWidth() !== EXPLORER_WIDTH.default);
+
+  /** The width the Explorer is shown at, px: the user's, within the room it has now (all the window leaves the Events view when the user chose the width, else what leaves every column its own). */
+  readonly width = computed(() => Math.min(this.prefs.explorerWidth(), this.chosen() ? this.shell.explorerRoom() : this.shell.explorerColumnRoom()));
 
   /** A drag of the Explorer's sash began: the plan is not asked about the Explorer until `release`. */
   hold(): void {
     this.held = true;
+    // An explicit resize takes room from the other columns: the dock plans with the window it really has.
+    this.dock.setExplorerYield(0);
   }
 
   /** The sash is gone (the Explorer closed mid-drag): a drag that never ended must not leave the plan held. */
@@ -63,8 +71,11 @@ export class NarrowWindow {
     const wish = this.prefs.explorerWidth();
     const shown = this.width();
     const verdict = this.dock.explorerVerdict(open, open ? shown : wish);
-    this.dock.setExplorerYield(open ? shown - EXPLORER_WIDTH.min : 0);
-    if (open) this.shell.setExplorerRoom(this.dock.explorerRoom(true, shown));
+    this.dock.setExplorerYield(open && !this.chosen() ? shown - EXPLORER_WIDTH.min : 0);
+    if (open) {
+      this.shell.setExplorerRoom(this.dock.explorerRoom(true, shown));
+      this.shell.setExplorerColumnRoom(this.dock.explorerColumnRoom(true, shown));
+    }
     if (open) {
       // No room beside the message column's minimum: the Explorer is closed again, also when the user has just opened it
       // (there is no overlay mode); it reopens at the user's width when the window is wide enough.

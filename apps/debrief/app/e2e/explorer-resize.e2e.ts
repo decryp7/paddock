@@ -1,7 +1,6 @@
 import { expect, Page, test } from '@playwright/test';
 import { openApp } from './app';
-import { openAiApp, openChat } from './ai-support';
-import { measureGroups } from '../src/app/layout-plan/layout-scenarios.playwright';
+import { MESSAGE_COLUMN_MIN } from '../src/app/grid/message-column';
 
 // The Explorer is a view of the layout plan (ADR 0056) with a declared minimum and maximum width; the user resizes it by
 // dragging the sash at its inner edge. It was a fixed 272 px column with no sash at all (reported 2026-10-27).
@@ -139,33 +138,65 @@ test('dragging the Explorer wider than the window allows stops at the room the p
   await expect(page.locator('debrief-sidebar')).toBeVisible();
 });
 
-test('at 1440 px the Explorer gives way to the other columns: a drag stops at the room they leave and tabs nothing, and the width stays after a re-plan', async ({ page }) => {
+/** The Registry group's text: it holds "Events" when Registry has been tabbed into the Events group. */
+const registryTabbed = async (page: Page): Promise<boolean> =>
+  (await page.locator('.dv-groupview').filter({ has: page.getByRole('tab', { name: 'Registry', exact: true }) }).innerText()).includes('Events');
+
+const messageWidth = async (page: Page): Promise<number> =>
+  (await page.locator('debrief-events-grid [role=row].row').first().locator('.msg').boundingBox())!.width;
+
+test('at 1440 px an explicit resize wins: dragging to 500 px tabs Registry, keeps the message column, and the width survives a re-plan and a reload', async ({ page }) => {
+  await page.addInitScript(() => { if (!sessionStorage.getItem('seeded')) { localStorage.clear(); sessionStorage.setItem('seeded', '1'); } });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await openAiApp(page);
-  await openChat(page);
+  await openApp(page);
   await planIdle(page);
-  const groups = async (): Promise<number> => (await measureGroups(page)).length;
-  const before = await groups();
-  const sash = page.getByRole('separator', { name: 'Resize the Explorer' });
-  const box = (await page.locator('debrief-sidebar').boundingBox())!;
+  // By itself the layout prefers Registry's column: the Explorer is small.
+  expect(await registryTabbed(page)).toBe(false);
+  const start = await sidebarWidth(page);
+  expect(start).toBeLessThan(300);
   const flips = await flipsDuring(page, async () => {
-    await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(box.x + box.width - 1 + 600, box.y + box.height / 2, { steps: 12 });
-    await page.mouse.up();
+    await dragEdge(page, 500 - start);
     await planIdle(page);
   });
-  const max = Number(await sash.getAttribute('aria-valuemax'));
-  expect(max).toBeGreaterThanOrEqual(Number(await sash.getAttribute('aria-valuemin')));
-  await expect.poll(() => sidebarWidth(page)).toBe(max);
-  // No other column was tabbed or auto-hidden for the Explorer's sake.
-  expect(await groups()).toBe(before);
+  await expect.poll(() => sidebarWidth(page)).toBe(500);
+  await expect.poll(() => registryTabbed(page)).toBe(true);
+  expect(await messageWidth(page)).toBeGreaterThanOrEqual(MESSAGE_COLUMN_MIN);
+  // A re-plan at the same window size keeps it.
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.setViewportSize({ width: 1440, height: 900 });
   await planIdle(page);
-  expect(await sidebarWidth(page)).toBe(max);
+  expect(await sidebarWidth(page)).toBe(500);
+  expect(await registryTabbed(page)).toBe(true);
   expect(flips).toBe(0);
-  await expect(page.locator('debrief-sidebar')).toBeVisible();
+  // And a reload.
+  await page.reload();
+  await expect(page.getByRole('grid', { name: 'Events' })).toBeVisible();
+  await planIdle(page);
+  await expect.poll(() => sidebarWidth(page)).toBe(500);
+  expect(await registryTabbed(page)).toBe(true);
+  expect(await messageWidth(page)).toBeGreaterThanOrEqual(MESSAGE_COLUMN_MIN);
+});
+
+test('at 1440 px the keyboard resize goes as far as the message column allows, and only a narrower window makes the Explorer give way', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openApp(page);
+  await planIdle(page);
+  const sash = page.getByRole('separator', { name: 'Resize the Explorer' });
+  await sash.focus();
+  await page.keyboard.press('End');
+  await planIdle(page);
+  const max = Number(await sash.getAttribute('aria-valuemax'));
+  expect(max).toBeGreaterThan(400);
+  await expect.poll(() => sidebarWidth(page)).toBe(max);
+  expect(await messageWidth(page)).toBeGreaterThanOrEqual(MESSAGE_COLUMN_MIN);
+  // Narrower: the Explorer gives way (the message column keeps its minimum); wider again: back at the chosen width.
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await planIdle(page);
+  expect(await sidebarWidth(page)).toBeLessThan(max);
+  expect(await messageWidth(page)).toBeGreaterThanOrEqual(MESSAGE_COLUMN_MIN);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await planIdle(page);
+  await expect.poll(() => sidebarWidth(page)).toBe(max);
 });
 
 test('an Explorer closed in the middle of a drag does not leave the plan held: the window can still narrow it away', async ({ page }) => {

@@ -165,10 +165,12 @@ export class DockLayout {
       // A view opened just now has no earlier place to capture, but it is still recorded as a guest of its host (so the host is not
       // mistaken for a full-height column on the next plan) and can return to its default place when there is room.
       if (!this.ctx.displaced.has(t.id)) this.record({ id: t.id, slot: fresh.includes(t.id) ? NO_SLOT : (options.capture?.(t.id) ?? NO_SLOT), into: t.into });
-      // A view that yields joins the group as a background tab; the tab in front stays, unless the user just opened it.
+      // A view that yields joins the group as a background tab; the tab in front stays, unless the user just opened it or is working in it.
       const front = target.group.activePanel;
+      // The panel the user is working in (the active one) stays in front when it yields: a late re-plan must not take the tab they just chose away.
+      const inUse = api.activePanel === panel;
       panel.api.moveTo({ group: target.group, position: 'center' });
-      if (fresh.includes(t.id) && !options.background) panel.api.setActive();
+      if ((fresh.includes(t.id) && !options.background) || inUse) panel.api.setActive();
       else front?.api.setActive();
     }
     for (const h of plan.hidden) {
@@ -380,12 +382,25 @@ export class DockLayout {
 
   /**
    * The widest the Explorer may be right now, px, within its declared limits: its maximum, or the window less the minimum of
-   * every column the plan keeps with the Explorer at its minimum (so no column is tabbed for the Explorer's sake). This is the cap of
-   * a drag, and the width the Explorer is shown at when the window cannot hold the user's width. It does not depend on the
-   * Explorer's own width (the room is the window less the dock's minimums), so it cannot flap. `explorerWidth` is the width the
-   * Explorer has now (it is part of the window when open).
+   * the dock's highest-priority column (the Events view, with the message column at its minimum). This is the cap of an explicit
+   * resize (a drag or the keys): the lower-priority columns yield to it as they do when the window shrinks, the dock tabs them. It
+   * does not depend on the Explorer's own width (the room is the window less the dock's minimum), so it cannot flap.
+   * `explorerWidth` is the width the Explorer has now (it is part of the window when open).
    */
   explorerRoom(api: DockviewApi, open: boolean, explorerWidth: number): number {
+    const size = this.dockSize(api);
+    if (!size) return EXPLORER_WIDTH.max;
+    const viewport = { width: size.width + (open ? explorerWidth : 0), height: size.height };
+    const plan = planLayout(viewport, this.openViews(api), this.hints());
+    const dockMin = plan.columns.find((c) => c.anchor)?.minWidth ?? 0;
+    return Math.max(EXPLORER_WIDTH.min, Math.min(EXPLORER_WIDTH.max, viewport.width - dockMin));
+  }
+
+  /**
+   * The widest the Explorer is shown at when the user has not chosen a width: the window less the minimum of every column the
+   * plan keeps with the Explorer at its minimum, so the layout never tabs a column for the Explorer's sake (it shrinks first).
+   */
+  explorerColumnRoom(api: DockviewApi, open: boolean, explorerWidth: number): number {
     const size = this.dockSize(api);
     if (!size) return EXPLORER_WIDTH.max;
     const viewport = { width: size.width + (open ? explorerWidth : 0), height: size.height };

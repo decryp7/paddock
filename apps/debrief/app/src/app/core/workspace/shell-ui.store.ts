@@ -9,16 +9,19 @@ interface ShellUiState {
   focusSearchNonce: number;
   /** The widest the layout plan lets the Explorer be right now, px (set by `NarrowWindow`; the user's width is shown within it). */
   explorerRoom: number;
+  /** The widest the Explorer is shown at while the user has not chosen a width: the room that leaves every other column its own (set by `NarrowWindow`). */
+  explorerColumnRoom: number;
 }
 
 /** Transient shell flags: the sidebar, the drop overlay and focus requests for the search box. */
 export const ShellUiStore = signalStore(
   { providedIn: 'root' },
-  withState<ShellUiState>({ sidebarOpen: true, dropHover: false, focusSearchNonce: 0, explorerRoom: EXPLORER_WIDTH.max }),
+  withState<ShellUiState>({ sidebarOpen: true, dropHover: false, focusSearchNonce: 0, explorerRoom: EXPLORER_WIDTH.max, explorerColumnRoom: EXPLORER_WIDTH.max }),
   withMethods((store) => ({
     toggleSidebar: () => patchState(store, (s) => ({ sidebarOpen: !s.sidebarOpen })),
     setDropHover: (dropHover: boolean) => patchState(store, { dropHover }),
     setExplorerRoom: (room: number) => patchState(store, { explorerRoom: clampExplorerWidth(room) }),
+    setExplorerColumnRoom: (room: number) => patchState(store, { explorerColumnRoom: clampExplorerWidth(room) }),
     focusSearch: () => patchState(store, (s) => ({ focusSearchNonce: s.focusSearchNonce + 1 })),
   })),
 );
