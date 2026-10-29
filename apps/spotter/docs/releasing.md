@@ -20,8 +20,12 @@ This is about **Spotter's own** updates, not the releases Spotter watches for.
 ## How Spotter's updates work
 
 - **Opt-in.** Spotter never checks on its own unless the user turns on automatic update checks (off by default); a
-  manual check always works. (The checking UI is not built yet; the updater plugin is wired and the app reports
-  whether the build can update.)
+  manual check always works. Checking, downloading and installing are the shell's Updates window (Help ▸ Check for
+  updates, and the About dialog): `paddock-updater` finds the update and downloads it through the app's downloader, and
+  its installer, `PluginInstaller` over `tauri-plugin-updater` (registered in `run()`; `paddock-shell/install` is
+  enabled in `app/src-tauri/Cargo.toml`), verifies the signature again and installs the platform's package. A build
+  without an installer would find updates it can never install, so `updater_tests` in `lib.rs` checks the built app
+  has one, and `plugins.updater` in `tauri.conf.json` keeps `installMode: passive` for the Windows installer.
 - **One endpoint.** A check is one HTTPS GET of
   `https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json` (the moving `spotter-latest` release of the Paddock monorepo; copies installed before the move are reinstalled once by hand)
   (`plugins.updater.endpoints` in `tauri.conf.json`). It carries no identifier or usage data.
@@ -83,3 +87,9 @@ by the same step (and `conformance/test/ci-actions.test.mjs` fails until `spotte
 ## First launch note
 
 Apple notarization and Windows code signing are deferred until after the releases settle (decision 2026-10-23). Until then the release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
+
+## Before tagging
+
+The branch gates are the affected ones; the tag runs everything (see above). Before a first release, also by hand on one
+machine per OS: install the previous build, publish a newer one to a test feed, and check that Updates finds it **and installs
+it** (the installer is only reached from the real window), then that Spotter starts again on the new version.
