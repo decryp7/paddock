@@ -42,31 +42,40 @@ impl FileLocks for LsofLocks {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Stdio;
+    use std::io::{BufRead, BufReader};
+    use std::process::{Child, Stdio};
+
+    /// Kills and reaps its child when dropped, so no assertion or `unwrap` can leave the dummy running.
+    struct Reaped(Child);
+
+    impl Drop for Reaped {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
 
     #[test]
     fn finds_a_dummy_that_holds_a_temp_file_and_nobody_for_a_free_one() {
         let dir = tempfile::tempdir().unwrap();
         let held = dir.path().join("held.txt");
         std::fs::write(&held, b"x").unwrap();
-        // `tail -f` keeps the file open.
-        let mut child = crate::process::command("tail")
-            .arg("-f")
-            .arg(&held)
-            .stdout(Stdio::null())
-            .spawn()
-            .unwrap();
-        let mut found = Vec::new();
-        for _ in 0..50 {
-            found = LsofLocks.lockers(&held).unwrap();
-            if !found.is_empty() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        let _ = child.kill();
-        let _ = child.wait();
-        assert!(found.iter().any(|l| l.process.pid == child.id() && l.name == "tail"), "{found:?}");
+        // The shell opens the file on descriptor 3, says so, and becomes `tail`, which keeps the descriptor: when "ready"
+        // arrives the file is already held (no polling for it), and the pid is the one `lsof` must name.
+        let mut dummy = Reaped(
+            crate::process::command("sh")
+                .args(["-c", "exec 3< \"$1\"; echo ready; exec tail -f /dev/null", "sh"])
+                .arg(&held)
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let mut ready = String::new();
+        BufReader::new(dummy.0.stdout.take().unwrap()).read_line(&mut ready).unwrap();
+        assert_eq!(ready.trim(), "ready");
+        // `lsof` can time out on a loaded machine (its own limit is 15 s): ask again, a few times, instead of failing on the first.
+        let found = (0..4).find_map(|_| LsofLocks.lockers(&held).ok()).expect("lsof answered");
+        assert!(found.iter().any(|l| l.process.pid == dummy.0.id() && l.name == "tail"), "{found:?}");
         let free = dir.path().join("free.txt");
         std::fs::write(&free, b"y").unwrap();
         assert!(LsofLocks.lockers(&free).unwrap().is_empty());
