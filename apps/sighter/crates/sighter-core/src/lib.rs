@@ -7,3 +7,4 @@
 pub mod chain;
 pub mod detect;
 pub mod geometry;
+pub mod tiling;
