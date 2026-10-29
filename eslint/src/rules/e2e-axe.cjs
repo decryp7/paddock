@@ -11,7 +11,7 @@ module.exports = {
     docs: { description: 'ER-12: browser specs run axe through the kit (axeViolations), which settles animations first.' },
     schema: [],
     messages: {
-      direct: 'Run axe through `axeViolations` of @decryp7/paddock-e2e (it waits for animations), not `{{source}}` directly (ER-12).',
+      direct: 'Run axe through a helper that waits for animations (`axeViolations` of @decryp7/paddock-e2e, or the app\'s own `axe.ts`), not `{{source}}` directly (ER-12).',
     },
   },
   create(context) {

@@ -92,3 +92,16 @@ test('a browser spec runs axe through the kit; an axe.ts helper and unit specs o
   assert.deepEqual(await lint({ 'e2e/x.spec.ts': code, 'app/e2e/y.e2e.ts': code }), ['e2e/x.spec.ts: paddock/e2e-axe-through-kit', 'app/e2e/y.e2e.ts: paddock/e2e-axe-through-kit']);
   assert.deepEqual(await lint({ 'e2e/axe.ts': code, 'src/app/z.ts': code }), []);
 });
+
+test('e2eAxe() is the same check as a block on its own, for an app with its own config', async () => {
+  const { e2eAxe } = require('../src/index.cjs');
+  const code = "import AxeBuilder from '@axe-core/playwright';\nexport const a = AxeBuilder;\n";
+  for (const [p, text] of Object.entries({ 'own/e2e/x.e2e.ts': code, 'own/e2e/axe.ts': code })) {
+    mkdirSync(dirname(join(dir, p)), { recursive: true });
+    writeFileSync(join(dir, p), text);
+  }
+  const tseslint = require('typescript-eslint');
+  const eslint = new ESLint({ cwd: dir, overrideConfigFile: true, overrideConfig: defineConfig({ files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } }, e2eAxe()) });
+  const results = await eslint.lintFiles(['own/e2e/x.e2e.ts', 'own/e2e/axe.ts']);
+  assert.deepEqual(results.flatMap((r) => r.messages.map((m) => `${r.filePath.slice(dir.length + 1)}: ${m.ruleId}`)), ['own/e2e/x.e2e.ts: paddock/e2e-axe-through-kit']);
+});
