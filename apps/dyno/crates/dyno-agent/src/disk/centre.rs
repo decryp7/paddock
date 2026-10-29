@@ -132,7 +132,7 @@ impl Meta {
             progress: snap.progress,
             truncated: snap.truncated,
             unreadable_first: snap.unreadable_first,
-            needs_full_disk_access: self.fda_missing && snap.progress.unreadable > 0,
+            needs_full_disk_access: snap.needs_full_disk_access,
             items_per_second: running
                 .then(|| per_second(snap.progress.items.saturating_sub(p.base.1), elapsed))
                 .flatten(),
@@ -160,6 +160,7 @@ impl Meta {
             },
             truncated: false,
             unreadable_first: Vec::new(),
+            needs_full_disk_access: false,
         };
         let mut p = lock(&self.state);
         p.gate.allow(self.clock.now_ms());
@@ -543,12 +544,14 @@ impl DiskCentre {
             spawn: super::engine::os_spawn,
             stat_limit: STAT_LIMIT,
             listing_progress_every: super::engine::LISTING_PROGRESS_EVERY,
-            os: dyno_core::disk::reason::Os::current(),
+            reasons: dyno_core::disk::reason::ReasonContext::current(meta.fda_missing),
         };
         meta.announce(r.total_bytes);
         let walk = Walk::start(self.source.clone(), r.root.clone(), &r.name, cfg, meta.clone()).map_err(|e| {
             let (code, message) = match e {
-                ReadError::PermissionDenied => (ErrorCode::AccessDenied, "Dyno is not allowed to read that folder.".to_string()),
+                ReadError::PermissionDenied | ReadError::NotPermitted => {
+                    (ErrorCode::AccessDenied, "Dyno is not allowed to read that folder.".to_string())
+                }
                 ReadError::NotFound => (ErrorCode::NotFound, "That folder does not exist any more.".to_string()),
                 ReadError::Unreachable(_) => (ErrorCode::Timeout, "That volume is not answering.".to_string()),
                 ReadError::Other(m) => (ErrorCode::BadRequest, m),
@@ -1242,10 +1245,13 @@ mod tests {
         fs.file(&ok, "x", 30);
         let lib = fs.dir(&root, "Library");
         fs.file(&lib, "big", 5 * MB);
-        fs.fail_open(&lib, ReadError::PermissionDenied);
+        // What macOS answers when privacy protection refuses: EPERM.
+        fs.fail_open(&lib, ReadError::NotPermitted);
         (fs, lib)
     }
 
+    // macOS only: the scan asks this machine's OS how to read a refusal; the rules per OS are tested in `dyno_core::disk::reason`.
+    #[cfg(target_os = "macos")]
     #[test]
     fn missing_full_disk_access_is_named_only_when_folders_were_refused() {
         let (fs, _) = refused_library();

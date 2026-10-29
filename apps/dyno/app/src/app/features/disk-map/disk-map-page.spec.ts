@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
+import { formatBytes } from '../../shared/format';
 import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { Notifier } from '../../shared/notifier';
@@ -450,15 +451,54 @@ describe('dy-disk-map-page', () => {
     await settle(r.f);
     const row = r.el.querySelector<HTMLElement>('.rows .item')!;
     expect(row.textContent).toContain('Unavailable');
-    expect(row.textContent).toContain('Unreadable');
+    expect(row.textContent).toContain('Needs Full Disk Access');
+    expect(row.textContent).not.toContain('Unreadable');
     const why = row.querySelector('.size')!.getAttribute('aria-describedby');
     expect(document.getElementById(why!)?.textContent).toContain('Needs Full Disk Access');
     expect(row.textContent).not.toMatch(/\b0 B\b/);
     btn(r.el, 'Table')!.click();
     await settle(r.f);
-    const cells = [...r.el.querySelectorAll('tbody tr')].find((tr) => tr.textContent?.includes('Unreadable'))!.textContent;
+    const cells = [...r.el.querySelectorAll('tbody tr')].find((tr) => tr.textContent?.includes('Needs Full Disk Access'))!.textContent;
     expect(cells).toContain('Unavailable');
     expect(cells).not.toMatch(/\b0 B\b/);
+  });
+
+  it('shows a mount point with its own icon and a dash, never "0 B"', async () => {
+    const r = await scanned();
+    btn(r.el, 'Table')!.click();
+    await settle(r.f);
+    const tr = [...r.el.querySelectorAll('tbody tr')].find((t) => t.textContent?.includes('Volumes'))!;
+    const mount = r.store.rows().find((x) => x.node.name === 'Volumes')!.node;
+    expect(mount.kind).toBe('mountPoint');
+    expect((r.f.componentInstance as unknown as { iconOf(n: unknown): string }).iconOf(mount)).toBe('disk');
+    expect(tr.textContent).not.toMatch(/\b0 B\b/);
+    expect(tr.querySelector('td.num')!.textContent?.trim()).toBe('–');
+  });
+
+  it('adds the files that have no row of their own as the last row of the table, so the rows add up', async () => {
+    const r = await scanned();
+    const loose = r.store.level()!.loose;
+    expect(loose.bytes).toBeGreaterThan(0);
+    btn(r.el, 'Table')!.click();
+    await settle(r.f);
+    const foot = r.el.querySelector('tfoot tr, tr.mat-mdc-footer-row')!;
+    expect(foot.textContent).toContain('Files in this folder');
+    expect(foot.textContent).toContain(formatBytes(loose.bytes));
+    const input = r.el.querySelector<HTMLInputElement>('input[type="search"]')!;
+    input.value = 'ale';
+    input.dispatchEvent(new Event('input'));
+    await settle(r.f);
+    expect(r.el.querySelector('tr.mat-mdc-footer-row')!.classList.contains('foot-off')).toBe(true);
+  });
+
+  it('gives focus back to the segment the chart menu was opened for when the menu closes', async () => {
+    const r = await scanned();
+    const seg = arc(r.el, `n${idOf(r, 'Users')}`);
+    seg.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
+    await settle(r.f);
+    document.querySelector<HTMLElement>('.cdk-overlay-backdrop')!.click();
+    await settle(r.f, true);
+    expect(document.activeElement).toBe(seg);
   });
 
   it('opens a list row\'s menu from the keyboard (Shift+F10) as a Material menu', async () => {

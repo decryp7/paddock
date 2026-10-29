@@ -2,7 +2,7 @@
 
 use super::source::ReadError;
 use serde::{Deserialize, Serialize};
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 /// Why one folder is unreadable. The engine decides; the UI only words it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -10,8 +10,10 @@ use std::path::{Component, Path};
 pub enum UnreadableReason {
     /// macOS refused a folder under a privacy-protected location: the user can allow it in Full Disk Access.
     NeedsFullDiskAccess,
-    /// The OS refused for lack of rights (Windows and Linux, and macOS outside the privacy-protected locations).
+    /// The OS refused for lack of rights (Windows and Linux, and macOS "permission denied").
     NeedsAdmin,
+    /// macOS protects the folder (it said "operation not permitted") and Full Disk Access is not what is missing.
+    Protected,
     /// Any other error (a read failure, a folder that vanished, ...).
     Other,
 }
@@ -40,11 +42,36 @@ impl Os {
     }
 }
 
-/// Folders under a home folder that macOS protects with a privacy permission (TCC): reading them needs Full Disk Access.
+/// What the reason depends on besides the error: the OS, whether macOS Full Disk Access is missing, and whose home folder it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReasonContext {
+    /// The OS whose rules apply.
+    pub os: Os,
+    /// Whether Full Disk Access is known to be missing (always false off macOS).
+    pub fda_missing: bool,
+    /// The home folder of the user running Dyno, when known.
+    pub home: Option<PathBuf>,
+}
+
+impl ReasonContext {
+    /// This machine's OS and the user's home folder; `fda_missing` as asked of the OS once per scan.
+    pub fn current(fda_missing: bool) -> ReasonContext {
+        ReasonContext {
+            os: Os::current(),
+            fda_missing,
+            home: std::env::var_os("HOME").map(PathBuf::from),
+        }
+    }
+}
+
+/// Folders under a home folder that macOS protects with a privacy permission (TCC). Only a hint, used when the error does not say
+/// (a plain "permission denied" on a path that is protected for the user running Dyno); the error code decides first.
 const HOME_PROTECTED: &[&[&str]] = &[
     &["Desktop"],
     &["Documents"],
     &["Downloads"],
+    &[".Trash"],
+    &["Pictures", "Photos Library.photoslibrary"],
     &["Library", "Mail"],
     &["Library", "Messages"],
     &["Library", "Safari"],
@@ -55,31 +82,53 @@ const HOME_PROTECTED: &[&[&str]] = &[
     &["Library", "IdentityServices"],
     &["Library", "Containers"],
     &["Library", "Group Containers"],
+    &["Library", "Daemon Containers"],
+    &["Library", "Biome"],
+    &["Library", "Mobile Documents"],
+    &["Library", "Metadata", "CoreSpotlight"],
     &["Library", "Application Support", "AddressBook"],
     &["Library", "Application Support", "CallHistoryDB"],
+    &["Library", "Application Support", "MobileSync"],
     &["Library", "Application Support", "com.apple.TCC"],
 ];
 
-/// Whether `path` is a macOS location behind a privacy permission.
-fn is_privacy_protected(path: &Path) -> bool {
-    let parts: Vec<String> = path
-        .components()
+fn components(path: &Path) -> Vec<String> {
+    path.components()
         .filter_map(|c| match c {
             Component::Normal(n) => Some(n.to_string_lossy().into_owned()),
             _ => None,
         })
-        .collect();
-    let starts = |at: usize, prefix: &[&str]| parts.len() >= at + prefix.len() && prefix.iter().zip(&parts[at..]).all(|(a, b)| a == b);
-    // .../Users/<name>/<protected>; anywhere in the path, so a volume mounted under /Volumes or /System/Volumes/Data counts too.
-    let in_home = (0..parts.len()).any(|k| parts[k] == "Users" && parts.len() > k + 2 && HOME_PROTECTED.iter().any(|p| starts(k + 2, p)));
-    in_home || (0..parts.len()).any(|k| starts(k, &["Library", "Application Support", "com.apple.TCC"]))
+        .collect()
 }
 
-/// The reason a folder at `path` could not be read, from the typed error and the OS.
-pub fn unreadable_reason(error: &ReadError, os: Os, path: &Path) -> UnreadableReason {
-    match error {
-        ReadError::PermissionDenied if os == Os::MacOs && is_privacy_protected(path) => UnreadableReason::NeedsFullDiskAccess,
-        ReadError::PermissionDenied => UnreadableReason::NeedsAdmin,
+/// Whether `path` is one of the user's own privacy-protected folders: under `home` (the same user), not another user's.
+fn is_own_privacy_protected(path: &Path, home: Option<&Path>) -> bool {
+    let Some(home) = home else { return false };
+    let (parts, base) = (components(path), components(home));
+    // A volume mounted under /Volumes or /System/Volumes/Data shows the same home folder after its prefix.
+    (0..=parts.len().saturating_sub(base.len())).any(|k| {
+        parts.len() >= k + base.len()
+            && parts[k..k + base.len()] == base[..]
+            && HOME_PROTECTED
+                .iter()
+                .any(|p| parts.len() >= k + base.len() + p.len() && p.iter().zip(&parts[k + base.len()..]).all(|(a, b)| a == b))
+    })
+}
+
+/// The reason a folder at `path` could not be read, from the typed error and where it happened.
+///
+/// On macOS "operation not permitted" ([`ReadError::NotPermitted`]) is the privacy protection: Full Disk Access when that is
+/// what is missing, otherwise the folder is protected by macOS in another way (Photos, iCloud, Time Machine, removable and
+/// network volumes). "Permission denied" is ordinary rights, except for a protected folder of the current user when Full Disk
+/// Access is missing (the hint list). Windows and Linux: either refusal is a rights problem.
+pub fn unreadable_reason(error: &ReadError, ctx: &ReasonContext, path: &Path) -> UnreadableReason {
+    match (error, ctx.os) {
+        (ReadError::NotPermitted, Os::MacOs) if ctx.fda_missing => UnreadableReason::NeedsFullDiskAccess,
+        (ReadError::NotPermitted, Os::MacOs) => UnreadableReason::Protected,
+        (ReadError::PermissionDenied, Os::MacOs) if ctx.fda_missing && is_own_privacy_protected(path, ctx.home.as_deref()) => {
+            UnreadableReason::NeedsFullDiskAccess
+        }
+        (ReadError::PermissionDenied | ReadError::NotPermitted, _) => UnreadableReason::NeedsAdmin,
         _ => UnreadableReason::Other,
     }
 }
@@ -88,58 +137,106 @@ pub fn unreadable_reason(error: &ReadError, os: Os, path: &Path) -> UnreadableRe
 mod tests {
     use super::*;
     use std::io;
-    use std::path::PathBuf;
 
-    fn denied() -> ReadError {
-        ReadError::PermissionDenied
+    fn ctx(os: Os, fda_missing: bool) -> ReasonContext {
+        ReasonContext {
+            os,
+            fda_missing,
+            home: Some(PathBuf::from("/Users/alex")),
+        }
+    }
+    fn why(e: &ReadError, c: &ReasonContext, p: &str) -> UnreadableReason {
+        unreadable_reason(e, c, Path::new(p))
     }
 
     #[test]
-    fn macos_denial_under_a_privacy_protected_folder_needs_full_disk_access() {
+    fn macos_not_permitted_is_full_disk_access_only_while_it_is_missing() {
+        let e = ReadError::NotPermitted;
         for p in [
             "/Users/alex/Library/Mail",
-            "/Users/alex/Library/Messages/chat.db",
-            "/Users/alex/Library/Safari",
+            "/Users/alex/.Trash",
+            "/Volumes/Backups/Time Machine",
+            "/Volumes/USB/x",
+            "/anything",
+        ] {
+            assert_eq!(why(&e, &ctx(Os::MacOs, true), p), UnreadableReason::NeedsFullDiskAccess, "{p}");
+            assert_eq!(
+                why(&e, &ctx(Os::MacOs, false), p),
+                UnreadableReason::Protected,
+                "{p}: granted, so not a reason to grant it"
+            );
+        }
+    }
+
+    #[test]
+    fn macos_permission_denied_is_an_ordinary_rights_problem() {
+        let e = ReadError::PermissionDenied;
+        for p in [
+            "/private/var/root",
+            "/Users/alex/Projects/secret",
+            "/Users/bob",
+            "/Users/bob/Desktop",
+            "/Users/bob/Library/Mail",
+        ] {
+            for fda_missing in [true, false] {
+                assert_eq!(why(&e, &ctx(Os::MacOs, fda_missing), p), UnreadableReason::NeedsAdmin, "{p}");
+            }
+        }
+    }
+
+    #[test]
+    fn another_users_protected_folder_is_never_a_full_disk_access_matter() {
+        // Mode 700 in someone else's home: EACCES, whatever the permission says.
+        assert_eq!(
+            why(&ReadError::PermissionDenied, &ctx(Os::MacOs, true), "/Users/bob/Desktop"),
+            UnreadableReason::NeedsAdmin
+        );
+    }
+
+    #[test]
+    fn the_path_hint_covers_the_users_own_protected_folders_when_the_error_does_not_say() {
+        let c = ctx(Os::MacOs, true);
+        for p in [
+            "/Users/alex/Library/Mail",
             "/Users/alex/Desktop",
             "/Users/alex/Documents/taxes",
-            "/Users/alex/Downloads",
-            "/Library/Application Support/com.apple.TCC",
-            "/Volumes/Macintosh HD/Users/alex/Library/Mail",
+            "/Users/alex/.Trash",
+            "/Users/alex/Pictures/Photos Library.photoslibrary/originals",
+            "/Users/alex/Library/Application Support/MobileSync/Backup",
+            "/Users/alex/Library/Mobile Documents/com~apple~CloudDocs",
+            "/Users/alex/Library/Metadata/CoreSpotlight",
+            "/Users/alex/Library/Biome",
+            "/Users/alex/Library/Daemon Containers",
             "/System/Volumes/Data/Users/alex/Desktop",
         ] {
             assert_eq!(
-                unreadable_reason(&denied(), Os::MacOs, &PathBuf::from(p)),
+                why(&ReadError::PermissionDenied, &c, p),
                 UnreadableReason::NeedsFullDiskAccess,
                 "{p}"
             );
         }
+        assert_eq!(
+            why(&ReadError::PermissionDenied, &c, "/Users/alex/Library/Caches/x"),
+            UnreadableReason::NeedsAdmin
+        );
+        assert_eq!(
+            why(&ReadError::PermissionDenied, &ctx(Os::MacOs, false), "/Users/alex/Desktop"),
+            UnreadableReason::NeedsAdmin
+        );
+        let no_home = ReasonContext { home: None, ..c };
+        assert_eq!(
+            why(&ReadError::PermissionDenied, &no_home, "/Users/alex/Desktop"),
+            UnreadableReason::NeedsAdmin
+        );
     }
 
     #[test]
-    fn macos_denial_elsewhere_is_an_ordinary_rights_problem() {
-        for p in [
-            "/private/var/root",
-            "/Users/alex/Projects/secret",
-            "/Users/alex/Library/Caches/x",
-            "/Users",
-        ] {
-            assert_eq!(
-                unreadable_reason(&denied(), Os::MacOs, &PathBuf::from(p)),
-                UnreadableReason::NeedsAdmin,
-                "{p}"
-            );
-        }
-    }
-
-    #[test]
-    fn windows_and_linux_denial_needs_administrator_rights_wherever_it_is() {
+    fn windows_and_linux_refusals_need_administrator_rights_either_way() {
         for os in [Os::Windows, Os::Linux] {
-            for p in ["/Users/alex/Library/Mail", "C:\\Windows\\System32\\config", "/root"] {
-                assert_eq!(
-                    unreadable_reason(&denied(), os, Path::new(p)),
-                    UnreadableReason::NeedsAdmin,
-                    "{os:?} {p}"
-                );
+            for e in [ReadError::PermissionDenied, ReadError::NotPermitted] {
+                for p in ["/Users/alex/Library/Mail", "C:\\Windows\\System32\\config", "/root"] {
+                    assert_eq!(why(&e, &ctx(os, false), p), UnreadableReason::NeedsAdmin, "{os:?} {p}");
+                }
             }
         }
     }
@@ -148,24 +245,20 @@ mod tests {
     fn any_other_error_has_its_own_reason_on_every_os() {
         let other = ReadError::Other(io::Error::other("input/output error").to_string());
         for os in [Os::MacOs, Os::Windows, Os::Linux] {
-            assert_eq!(
-                unreadable_reason(&other, os, Path::new("/Users/alex/Library/Mail")),
-                UnreadableReason::Other
-            );
-            assert_eq!(
-                unreadable_reason(&ReadError::NotFound, os, Path::new("/x")),
-                UnreadableReason::Other
-            );
+            assert_eq!(why(&other, &ctx(os, true), "/Users/alex/Library/Mail"), UnreadableReason::Other);
+            assert_eq!(why(&ReadError::NotFound, &ctx(os, true), "/x"), UnreadableReason::Other);
         }
     }
 
     #[test]
     fn serialises_in_camel_case() {
-        assert_eq!(
-            serde_json::to_string(&UnreadableReason::NeedsFullDiskAccess).unwrap(),
-            "\"needsFullDiskAccess\""
-        );
-        assert_eq!(serde_json::to_string(&UnreadableReason::NeedsAdmin).unwrap(), "\"needsAdmin\"");
-        assert_eq!(serde_json::to_string(&UnreadableReason::Other).unwrap(), "\"other\"");
+        for (r, s) in [
+            (UnreadableReason::NeedsFullDiskAccess, "needsFullDiskAccess"),
+            (UnreadableReason::NeedsAdmin, "needsAdmin"),
+            (UnreadableReason::Protected, "protected"),
+            (UnreadableReason::Other, "other"),
+        ] {
+            assert_eq!(serde_json::to_string(&r).unwrap(), format!("\"{s}\""));
+        }
     }
 }

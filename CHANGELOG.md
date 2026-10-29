@@ -14,7 +14,7 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### Dyno: the disk map screen on the shell
 - New nav entry `Disk map` (`/disk-map`): scan a volume or folder as a job with live phase-labelled progress and Cancel, ring chart (`pd-sunburst`) beside a list or a `mat-table`, drill-down, capacity strip with hidden space, Full Disk Access and "Unavailable" states with a reason, Settings limits (items kept per scan, large file size).
-- The engine says why each unreadable folder was refused (`DiskNode.unreadableReason`: `needsFullDiskAccess` for a macOS denial under a privacy-protected location, `needsAdmin` for any other denial, `other` for other errors); the map shows it as the reason of its Unavailable mark.
+- The engine says why each unreadable folder was refused (`DiskNode.unreadableReason`). On macOS "operation not permitted" (EPERM) is `needsFullDiskAccess` while Full Disk Access is missing and `protected` ("macOS protects this folder") when it is already granted; "permission denied" (EACCES) is `needsAdmin`, except a privacy-protected folder of the user's own home while Full Disk Access is missing (a path hint). Windows and Linux: either refusal is `needsAdmin`; any other error is `other`. The Full Disk Access button shows only when a refused folder has that reason. `PROTOCOL_VERSION` is 2 for the new field (jobs-1.0 bumps to 2 as well: one bump covers both while unreleased).
 
 ### `providePaddockMaterial`: tooltips wait 500 ms
 - `providePaddockMaterial()` provides `MAT_TOOLTIP_DEFAULT_OPTIONS` with `showDelay: 500` (`PADDOCK_TOOLTIP_OPTIONS`), the design guide's delay for the tooltip every icon-only button carries. Every app that provides it gets the delay without setting it per tooltip.

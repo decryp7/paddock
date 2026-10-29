@@ -1,15 +1,16 @@
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, ElementRef, OnInit, computed, inject, signal, viewChild } from '@angular/core';
 import { MatButton, MatIconButton } from '@angular/material/button';
-import { MatCell, MatCellDef, MatColumnDef, MatHeaderCell, MatHeaderCellDef, MatHeaderRow, MatHeaderRowDef, MatNoDataRow, MatRow, MatRowDef, MatTable } from '@angular/material/table';
+import { MatCell, MatCellDef, MatColumnDef, MatHeaderCell, MatHeaderCellDef, MatHeaderRow, MatHeaderRowDef, MatFooterCell, MatFooterCellDef, MatFooterRow, MatFooterRowDef, MatNoDataRow, MatRow, MatRowDef, MatTable } from '@angular/material/table';
 import { MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
 import { MatProgressBar } from '@angular/material/progress-bar';
 import { MatSort, MatSortHeader, type Sort } from '@angular/material/sort';
 import { MatTooltip } from '@angular/material/tooltip';
+import type { IconName } from '../../shared/icons';
 import { SuSegmentedControl, readPaddockTokens, type SuSegment } from '@decryp7/paddock-ui';
 import { PdSunburst, branchSlots, slotColour, type PdSunburstPoint } from '@decryp7/paddock-ui/chart';
 import type { DiskNode, Volume } from '../../core/api.types';
 import { PlatformService } from '../../core/platform';
-import { UNAVAILABLE, unreadableText } from '../../core/measured';
+import { UNAVAILABLE, unreadableShort, unreadableText } from '../../core/measured';
 import { AsyncState } from '../../shared/async-state';
 import { formatBytes, formatCount, formatAgo, formatDate, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -35,6 +36,7 @@ import {
   revealLabel,
   phaseLabel,
   shareText,
+  sharePercent,
   sortRows,
   stoppedAt,
   volumeFree,
@@ -51,7 +53,7 @@ import {
   selector: 'dy-disk-map-page',
   imports: [
     AsyncState, Icon, PdSunburst, MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger, MatProgressBar, RowMenu, SearchField, SuSegmentedControl, MatButton, MatIconButton, MatTooltip,
-    MatTable, MatColumnDef, MatHeaderCellDef, MatHeaderCell, MatCellDef, MatCell, MatHeaderRowDef, MatHeaderRow, MatRowDef, MatRow, MatNoDataRow, MatSort, MatSortHeader,
+    MatTable, MatColumnDef, MatHeaderCellDef, MatHeaderCell, MatCellDef, MatCell, MatHeaderRowDef, MatHeaderRow, MatRowDef, MatRow, MatNoDataRow, MatFooterCellDef, MatFooterCell, MatFooterRowDef, MatFooterRow, MatFooterCell, MatFooterCellDef, MatFooterRow, MatFooterRowDef, MatSort, MatSortHeader,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
@@ -275,13 +277,16 @@ import {
                       @if (r.drillable) {
                         <button type="button" class="name link" [attr.aria-label]="'Open ' + r.node.name + ', ' + bytes(r.node.bytes) + ', ' + r.share + ' of this folder'" (click)="store.open(r.node)"><dy-icon name="folder" /><span class="txt">{{ r.node.name }}</span></button>
                       } @else {
-                        <span class="name"><dy-icon [name]="r.node.kind === 'unreadable' ? 'lock' : 'file'" /><span class="txt">{{ r.node.name }}</span></span>
+                        <span class="name"><dy-icon [name]="iconOf(r.node)" /><span class="txt">{{ r.node.name }}</span></span>
                       }
                       @if (!r.node.complete) {
-                        <span class="tag warn">{{ r.node.kind === 'unreadable' ? 'Unreadable' : 'Incomplete' }}</span>
+                        <span class="tag warn">{{ tagText(r.node) }}</span>
                       }
                       @if (r.node.kind === 'unreadable') {
                         <span class="size num muted" [matTooltip]="unavailableWhy(r.node.unreadableReason)">{{ unavailable }}</span>
+                        <span class="pct num muted" aria-hidden="true">–</span>
+                      } @else if (r.node.kind === 'mountPoint') {
+                        <span class="size num muted" matTooltip="Another volume: not counted here">–</span>
                         <span class="pct num muted" aria-hidden="true">–</span>
                       } @else {
                         <span class="size num">{{ bytes(r.node.bytes) }}</span>
@@ -332,47 +337,56 @@ import {
                       @if (r.drillable) {
                         <button type="button" matButton="text" class="name" (click)="store.open(r.node)"><dy-icon name="folder" />{{ r.node.name }}</button>
                       } @else {
-                        <span class="name"><dy-icon [name]="r.node.kind === 'unreadable' ? 'lock' : 'file'" />{{ r.node.name }}</span>
+                        <span class="name"><dy-icon [name]="iconOf(r.node)" />{{ r.node.name }}</span>
                       }
                       @if (!r.node.complete) {
-                        <span class="tag warn">{{ r.node.kind === 'unreadable' ? 'Unreadable' : 'Incomplete' }}</span>
+                        <span class="tag warn">{{ tagText(r.node) }}</span>
                       }
                     </td>
+                    <td mat-footer-cell *matFooterCellDef class="nm">@if (loose(); as l) { <span class="swatch" aria-hidden="true"></span><span class="name"><dy-icon name="file" /><span class="txt">Files in this folder</span></span> }</td>
                   </ng-container>
                   <ng-container matColumnDef="bytes">
                     <th mat-header-cell *matHeaderCellDef mat-sort-header="bytes" class="num">Size</th>
                     <td mat-cell *matCellDef="let r" class="num">
                       @if (r.node.kind === 'unreadable') {
                         <span class="muted" [matTooltip]="unavailableWhy(r.node.unreadableReason)">{{ unavailable }}</span>
+                      } @else if (r.node.kind === 'mountPoint') {
+                        <span class="muted" matTooltip="Another volume: not counted here">–</span>
                       } @else {
                         {{ bytes(r.node.bytes) }}
                       }
                     </td>
+                    <td mat-footer-cell *matFooterCellDef class="num">@if (loose(); as l) { {{ bytes(l.bytes) }} }</td>
                   </ng-container>
                   <ng-container matColumnDef="items">
                     <th mat-header-cell *matHeaderCellDef mat-sort-header="items" class="num">Items</th>
-                    <td mat-cell *matCellDef="let r" class="num">{{ r.node.kind === 'unreadable' ? '–' : formatCount(r.node.items) }}</td>
+                    <td mat-cell *matCellDef="let r" class="num">{{ isCounted(r.node) ? formatCount(r.node.items) : '–' }}</td>
+                    <td mat-footer-cell *matFooterCellDef class="num">@if (loose(); as l) { {{ formatCount(l.items) }} }</td>
                   </ng-container>
                   <ng-container matColumnDef="newestChange">
                     <th mat-header-cell *matHeaderCellDef mat-sort-header="newestChange" class="num">Newest change</th>
                     <td mat-cell *matCellDef="let r" class="num muted">{{ date(r.node.newestChange) }}</td>
+                    <td mat-footer-cell *matFooterCellDef></td>
                   </ng-container>
                   <ng-container matColumnDef="share">
                     <th mat-header-cell *matHeaderCellDef class="share-col">Share</th>
                     <td mat-cell *matCellDef="let r" class="share-col">
-                      @if (r.node.kind === 'unreadable') {
+                      @if (!isCounted(r.node)) {
                         <span class="muted" aria-hidden="true">–</span>
                       } @else {
                         <span class="minibar" aria-hidden="true"><span [style.width.%]="r.percent"></span></span><span class="num">{{ r.share }}</span>
                       }
                     </td>
+                    <td mat-footer-cell *matFooterCellDef class="share-col">@if (loose(); as l) { <span class="minibar" aria-hidden="true"><span [style.width.%]="l.percent"></span></span><span class="num">{{ l.share }}</span> }</td>
                   </ng-container>
                   <ng-container matColumnDef="actions">
                     <th mat-header-cell *matHeaderCellDef class="row-acts"><span class="visually-hidden">Actions</span></th>
                     <td mat-cell *matCellDef="let r" class="row-acts"><button type="button" matIconButton [matTooltip]="revealText" [attr.aria-label]="revealText + ': ' + r.node.name" (click)="store.reveal(r.node.id)"><dy-icon name="folder" /></button><button type="button" matIconButton matTooltip="Copy path" [attr.aria-label]="'Copy path of ' + r.node.name" (click)="copyPath(r.node.id)"><dy-icon name="copy" /></button></td>
+                    <td mat-footer-cell *matFooterCellDef class="row-acts"></td>
                   </ng-container>
                   <tr mat-header-row *matHeaderRowDef="tableColumns"></tr>
                   <tr mat-row *matRowDef="let r; columns: tableColumns" dyRowMenu [matContextMenuTriggerFor]="rowMenu" [matContextMenuTriggerData]="{ row: r }"></tr>
+                  <tr mat-footer-row *matFooterRowDef="tableColumns" [class.foot-off]="!loose()"></tr>
                   <tr class="mat-row" *matNoDataRow><td class="muted none" [attr.colspan]="tableColumns.length">No row matches "{{ filter() }}".</td></tr>
                 </table>
               </div>
@@ -417,7 +431,7 @@ import {
       </ng-template>
     </mat-menu>
 
-    <span #chartMenuAnchor class="menu-anchor" aria-hidden="true" [matMenuTriggerFor]="rowMenu" [style.left.px]="menuAt().x" [style.top.px]="menuAt().y"></span>
+    <span #chartMenuAnchor class="menu-anchor" aria-hidden="true" [matMenuTriggerFor]="rowMenu" (menuClosed)="refocusChart()" [style.left.px]="menuAt().x" [style.top.px]="menuAt().y"></span>
   `,
   styles: `
     :host { display: block; }
@@ -482,7 +496,6 @@ import {
     .main { display: grid; grid-template-columns: minmax(300px, 616px) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
     @media (max-width: 1100px) { .main { grid-template-columns: minmax(0, 1fr); } }
     .centre { display: grid; gap: var(--sp-2); padding: var(--sp-5); justify-items: start; }
-    .centre h2 { margin: 0; font-size: var(--fs-lg); overflow-wrap: anywhere; }
     .centre p { margin: 0; }
     .chart-slot { width: 100%; max-width: 560px; margin: 0 auto; }
     .chart-slot:empty { display: none; }
@@ -519,7 +532,8 @@ import {
     td.num, td.share-col { overflow: visible; text-overflow: clip; }
     td.nm { overflow: hidden; text-overflow: ellipsis; }
     td.nm button.name { padding: 0 var(--sp-1); min-width: 0; max-width: calc(100% - 28px); vertical-align: middle; }
-    td.nm .name { display: inline-flex; align-items: center; gap: var(--sp-2); vertical-align: middle; }
+    td.nm .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    td.nm .name { max-width: calc(100% - 24px); min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-2); vertical-align: middle; }
     td.nm .swatch { display: inline-block; margin-right: var(--sp-2); vertical-align: middle; }
     td.nm .tag { margin-left: var(--sp-2); }
     th.num, td.num { text-align: right; }
@@ -532,9 +546,9 @@ import {
     .minibar span { display: block; height: 100%; background: var(--chart-8); }
     .none { text-align: center; padding: var(--sp-6); }
     .table-foot { display: flex; align-items: center; justify-content: space-between; padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--border-subtle); }
+    tr.foot-off { display: none; }
     .menu-anchor { position: fixed; width: 0; height: 0; pointer-events: none; }
     .menu-label { padding: var(--sp-2) var(--sp-4) var(--sp-1); font-size: var(--fs-xs); font-weight: var(--fw-medium); color: var(--text-3); }
-    .unavail { color: var(--text-3); }
     .vol { display: grid; text-align: left; }
     .vol .muted { font-size: var(--fs-sm); }
     .warn-text { color: var(--warn); }
@@ -704,6 +718,36 @@ export class DiskMapPage implements OnInit {
   }
 
   /** The chart's right-click or Shift+F10: the same menu as a row's, for the folder or file under it. */
+  /** The "Files directly in this folder" row of the table: the files that have no row of their own, so the rows add up. */
+  protected readonly loose = computed(() => {
+    const level = this.store.level();
+    if (!level || level.loose.bytes === 0 || this.filter().trim() !== '' || this.onlyIds() !== null) return null;
+    return { bytes: level.loose.bytes, items: level.loose.items, percent: sharePercent(level.loose.bytes, level.node.bytes), share: shareText(level.loose.bytes, level.node.bytes) };
+  });
+
+  /** Mount points and refused folders have no size of their own here: the list and the table show "–" or Unavailable. */
+  protected isCounted(node: DiskNode): boolean {
+    return node.kind !== 'unreadable' && node.kind !== 'mountPoint';
+  }
+
+  protected iconOf(node: DiskNode): IconName {
+    return node.kind === 'unreadable' ? 'lock' : node.kind === 'mountPoint' ? 'disk' : node.kind === 'file' ? 'file' : 'folder';
+  }
+
+  /** The tag beside a name: why a refused folder was refused (visible words, not only a tooltip), or that part of a folder is missing. */
+  protected tagText(node: DiskNode): string {
+    return node.kind === 'unreadable' ? unreadableShort(node.unreadableReason) : 'Incomplete';
+  }
+
+  /** The segment the chart's menu was opened for: focus goes back to it when the menu closes (the chart has no method for this yet). */
+  private chartMenuFor: string | null = null;
+
+  protected refocusChart(): void {
+    const id = this.chartMenuFor;
+    this.chartMenuFor = null;
+    if (id) this.hostEl.querySelector<SVGElement>(`pd-sunburst [data-id="${id}"]`)?.focus();
+  }
+
   protected onChartMenu(e: { point: PdSunburstPoint; x: number; y: number }): void {
     const n = nodeOfChartId(e.point.node.id);
     if (n === null) return;
@@ -711,6 +755,7 @@ export class DiskMapPage implements OnInit {
     const node = rings ? findRingNode(rings, n) : null;
     if (!node) return;
     const trigger = this.chartMenu();
+    this.chartMenuFor = e.point.node.id;
     this.menuAt.set({ x: e.x, y: e.y });
     this.cdr.detectChanges();
     trigger.menuData = { row: { node, drillable: node.hasChildren && node.kind === 'folder' } };

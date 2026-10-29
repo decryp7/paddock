@@ -21,7 +21,7 @@ use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any incompatible change.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// How much a live subscriber wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

@@ -422,8 +422,18 @@ impl DiskIndex {
 
     /// Marks a folder as listed but with something in it that could not be read: its size is a lower bound, it stays incomplete
     /// for good (it cannot be read again without counting its files twice), and so do its ancestors.
-    pub fn mark_partial(&mut self, node: NodeId) {
-        self.nodes[node.0 as usize].partial = true;
+    pub fn mark_partial(&mut self, node: NodeId, reason: UnreadableReason) {
+        let n = &mut self.nodes[node.0 as usize];
+        n.partial = true;
+        n.reason = Some(reason);
+    }
+
+    /// How many folders (refused, or partly refused) the OS would read if Full Disk Access were given.
+    pub fn needing_full_disk_access(&self) -> u64 {
+        self.nodes
+            .iter()
+            .filter(|n| n.reason == Some(UnreadableReason::NeedsFullDiskAccess) && (n.kind == NodeKind::Unreadable || n.partial))
+            .count() as u64
     }
 
     /// Adds a file under `parent`. A notable file gets a node; any other is folded into `parent`'s loose totals.
@@ -798,7 +808,7 @@ mod tests {
         let r = i.root();
         let a = i.add_folder(r, "a").unwrap();
         i.add_file(a, "x", Sizes::same(5), Timestamp(1));
-        i.mark_partial(a);
+        i.mark_partial(a, UnreadableReason::NeedsAdmin);
         i.finish_listing(a);
         i.finish_listing(r);
         assert!(!i.node(a).unwrap().complete && !i.is_complete());

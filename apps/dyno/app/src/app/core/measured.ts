@@ -61,11 +61,27 @@ export function barValue(m: Measured<number>): number {
 export function unreadableReasonText(reason: UnreadableReason): string {
   switch (reason) {
     case 'needsFullDiskAccess':
-      return 'Needs Full Disk Access: allow Dyno in System Settings, Privacy & Security';
+      return 'Needs Full Disk Access: allow Dyno in System Settings › Privacy & Security › Full Disk Access';
     case 'needsAdmin':
       return reasonText('needsAdmin');
+    case 'protected':
+      return 'macOS protects this folder';
     case 'other':
       return 'The system could not read this folder';
+  }
+}
+
+/** The same in a few words, for the tag beside the folder. */
+export function unreadableShort(reason: UnreadableReason | null): string {
+  switch (reason) {
+    case 'needsFullDiskAccess':
+      return 'Needs Full Disk Access';
+    case 'needsAdmin':
+      return 'Needs administrator rights';
+    case 'protected':
+      return 'Protected by macOS';
+    default:
+      return 'Could not be read';
   }
 }
 

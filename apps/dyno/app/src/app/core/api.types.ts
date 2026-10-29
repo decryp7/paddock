@@ -526,8 +526,8 @@ export interface DiskScanStatus {
 
 export type NodeKind = 'folder' | 'file' | 'mountPoint' | 'unreadable';
 
-/** Why one folder could not be read: macOS privacy (Full Disk Access), missing rights, or another error. */
-export type UnreadableReason = 'needsFullDiskAccess' | 'needsAdmin' | 'other';
+/** Why one folder could not be read: macOS privacy (Full Disk Access), missing rights, protected by macOS in another way, or another error. */
+export type UnreadableReason = 'needsFullDiskAccess' | 'needsAdmin' | 'protected' | 'other';
 
 /** A node of a scan. */
 export interface DiskNode {
