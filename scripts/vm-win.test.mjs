@@ -20,8 +20,12 @@ const run = (script, args, env = {}) =>
 describe('autounattend.xml.in', () => {
   const xml = read('vm-win/autounattend.xml.in');
 
+  test('is well-formed where Setup is strict: no double hyphen inside a comment', () => {
+    for (const [, body] of xml.matchAll(/<!--([\s\S]*?)-->/g)) assert.ok(!body.includes('--'), `comment contains "--": ${body.trim().slice(0, 80)}`);
+  });
+
   test('has exactly the placeholders prepare.sh fills', () => {
-    assert.deepEqual([...new Set(xml.match(/@@[A-Z_]+@@/g))].sort(), ['@@ADMIN_PASSWORD@@', '@@TEST_PASSWORD@@', '@@TPM_BYPASS@@']);
+    assert.deepEqual([...new Set(xml.match(/@@[A-Z_]+@@/g))].sort(), ['@@ADMIN_PASSWORD@@', '@@INPUT_LOCALE@@', '@@LANG@@', '@@TEST_PASSWORD@@', '@@TPM_BYPASS@@']);
   });
 
   test('carries no product key but the published generic Pro key (the VM stays unactivated)', () => {
@@ -73,6 +77,12 @@ describe('guard rails', () => {
   test('prepare.sh refuses a VM folder under $HOME and unknown options', () => {
     assert.match(run('vm-win/prepare.sh', [], { PADDOCK_WIN_VM_DIR: join(homedir(), 'vms') }).stderr, /must not be under \$HOME/);
     assert.match(run('vm-win/prepare.sh', ['--key=x']).stderr, /unknown option/);
+  });
+
+  test('prepare.sh checks the language and needs a keyboard for languages it has no default for', () => {
+    assert.match(run('vm-win/prepare.sh', ['--lang', 'english']).stderr, /--lang must look like en-GB/);
+    assert.match(run('vm-win/prepare.sh', ['--lang', 'de-DE']).stderr, /--input-locale is required for de-DE/);
+    assert.match(run('vm-win/prepare.sh', ['--lang', 'de-DE', '--input-locale', 'qwertz']).stderr, /--input-locale must look like/);
   });
 
   test('vm-win.sh rejects unknown commands with usage', () => {

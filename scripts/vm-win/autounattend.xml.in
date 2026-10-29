@@ -2,6 +2,7 @@
 <!--
   Answer file for the local Windows 11 Arm test VM (docs/testing/windows-test-vm.md). Local only, never CI.
   prepare.sh fills the @@...@@ placeholders and writes the result to the setup disc; the filled copy never enters git.
+  The language and keyboard must be ones the ISO contains (prepare.sh options lang and input-locale; default en-GB).
   Product key: the Microsoft-published generic KMS client key for Windows 11 Pro (GVLK). It only selects the edition so
   Setup runs without the key page; it never activates Windows (no KMS host), and the user decided on 2026-10-29 that this
   test VM stays unactivated. Source: https://learn.microsoft.com/en-us/windows-server/get-started/kms-client-activation-keys
@@ -10,12 +11,12 @@
   <settings pass="windowsPE">
     <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="arm64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
       <SetupUILanguage>
-        <UILanguage>en-US</UILanguage>
+        <UILanguage>@@LANG@@</UILanguage>
       </SetupUILanguage>
-      <InputLocale>en-US</InputLocale>
-      <SystemLocale>en-US</SystemLocale>
-      <UILanguage>en-US</UILanguage>
-      <UserLocale>en-US</UserLocale>
+      <InputLocale>@@INPUT_LOCALE@@</InputLocale>
+      <SystemLocale>@@LANG@@</SystemLocale>
+      <UILanguage>@@LANG@@</UILanguage>
+      <UserLocale>@@LANG@@</UserLocale>
     </component>
     <component name="Microsoft-Windows-Setup" processorArchitecture="arm64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
 @@TPM_BYPASS@@
@@ -88,10 +89,10 @@
   </settings>
   <settings pass="oobeSystem">
     <component name="Microsoft-Windows-International-Core" processorArchitecture="arm64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-      <InputLocale>en-US</InputLocale>
-      <SystemLocale>en-US</SystemLocale>
-      <UILanguage>en-US</UILanguage>
-      <UserLocale>en-US</UserLocale>
+      <InputLocale>@@INPUT_LOCALE@@</InputLocale>
+      <SystemLocale>@@LANG@@</SystemLocale>
+      <UILanguage>@@LANG@@</UILanguage>
+      <UserLocale>@@LANG@@</UserLocale>
     </component>
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="arm64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
       <OOBE>

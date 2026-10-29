@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prepares the local Windows 11 Arm test VM in VMware Fusion (docs/testing/windows-test-vm.md). Local only, never CI.
 #
-#   scripts/vm-win/prepare.sh [--no-tpm]
+#   scripts/vm-win/prepare.sh [--no-tpm] [--lang <tag>] [--input-locale <id>]
 #
 # Creates, under PADDOCK_WIN_VM_DIR (default /Volumes/d7sst7/vms/paddock-win11-test, never under $HOME):
 #   keys/            SSH key pairs for paddock-test and paddock-admin, the setup passwords (all mode 600)
@@ -14,6 +14,9 @@
 # --no-tpm  builds the VM without a virtual TPM: Setup skips the TPM and Secure Boot checks (LabConfig), nothing is
 #           encrypted and vmrun needs no password. Without it the user adds a TPM in Fusion, which encrypts the TPM
 #           files (not the disk) with a password kept in the login keychain (see the doc, "TPM").
+# --lang    the Windows language and locale, which must be the ISO's language (default en-GB; Setup fails on a language
+#           the image does not have). --input-locale is the keyboard as <language id>:<layout id>; it defaults for
+#           en-GB (0809:00000809) and en-US (0409:00000409) and is required for any other language.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -23,15 +26,29 @@ lib="$fusion/Contents/Library"
 name=paddock-win11-test
 max_load=${PADDOCK_VM_MAX_LOAD:-25}
 no_tpm=false
+lang=en-GB
+input_locale=
 
 die() { echo "prepare: $*" >&2; exit 1; }
-for a in "$@"; do
+while [ $# -gt 0 ]; do
+  a=$1; shift
   case $a in
     --no-tpm) no_tpm=true ;;
+    --lang) [ $# -gt 0 ] || die "--lang needs a value"; lang=$1; shift ;;
+    --input-locale) [ $# -gt 0 ] || die "--input-locale needs a value"; input_locale=$1; shift ;;
     -h | --help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option $a (see --help)" ;;
   esac
 done
+[[ $lang =~ ^[a-z]{2,3}-[A-Z]{2}$ ]] || die "--lang must look like en-GB, got $lang"
+if [ -z "$input_locale" ]; then
+  case $lang in
+    en-GB) input_locale=0809:00000809 ;;
+    en-US) input_locale=0409:00000409 ;;
+    *) die "--input-locale is required for $lang (e.g. 0407:00000407 for de-DE)" ;;
+  esac
+fi
+[[ $input_locale =~ ^[0-9a-fA-F]{4}:[0-9a-fA-F]{8}$ ]] || die "--input-locale must look like 0809:00000809, got $input_locale"
 
 case "$dir/" in "$HOME"/*) die "PADDOCK_WIN_VM_DIR must not be under \$HOME (ER-14): $dir" ;; esac
 [ -d "$lib" ] || die "VMware Fusion not found at $fusion (set FUSION_APP)"
@@ -85,11 +102,13 @@ else
   bypass='      <!-- TPM: Fusion virtual TPM (no LabConfig bypass) -->'
 fi
 ( umask 077
-  BYPASS="$bypass" ADMIN_PW="$admin_pw" TEST_PW="$test_pw" awk '
+  BYPASS="$bypass" ADMIN_PW="$admin_pw" TEST_PW="$test_pw" LANG_TAG="$lang" INPUT_LOCALE="$input_locale" awk '
     /@@TPM_BYPASS@@/ { print ENVIRON["BYPASS"]; next }
-    { gsub(/@@ADMIN_PASSWORD@@/, ENVIRON["ADMIN_PW"]); gsub(/@@TEST_PASSWORD@@/, ENVIRON["TEST_PW"]); print }
+    { gsub(/@@ADMIN_PASSWORD@@/, ENVIRON["ADMIN_PW"]); gsub(/@@TEST_PASSWORD@@/, ENVIRON["TEST_PW"])
+      gsub(/@@LANG@@/, ENVIRON["LANG_TAG"]); gsub(/@@INPUT_LOCALE@@/, ENVIRON["INPUT_LOCALE"]); print }
   ' "$here/autounattend.xml.in" >"$stage/autounattend.xml" )
 grep -Eq '@@[A-Z_]+@@' "$stage/autounattend.xml" && die "autounattend.xml still has a placeholder"
+xmllint --noout "$stage/autounattend.xml" || die "autounattend.xml is not well-formed XML; Windows Setup would reject it"
 cp "$here/firstlogon.ps1" "$stage/setup/"
 cp "$here/payload.lock" "$dir"/payload/*.exe "$dir"/payload/*.msi "$stage/payload/"
 cp "$dir/keys/paddock-test.pub" "$dir/keys/paddock-admin.pub" "$stage/keys/"
@@ -99,7 +118,7 @@ rm -f "$dir/iso/paddock-setup.iso"
 hdiutil makehybrid -quiet -iso -joliet -default-volume-name PADDOCKSETUP -o "$dir/iso/paddock-setup.iso" "$stage"
 rm -rf "$stage"
 chmod 600 "$dir/iso/paddock-setup.iso"
-echo "  ok iso/paddock-setup.iso"
+echo "  ok iso/paddock-setup.iso ($lang, keyboard $input_locale, $($no_tpm && echo 'no TPM' || echo 'virtual TPM'))"
 
 echo "== VM"
 vmdir="$dir/vm/$name.vmwarevm"

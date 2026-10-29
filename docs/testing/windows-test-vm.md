@@ -12,6 +12,7 @@ Background and the hypervisor choice: the research note
 | --- | --- |
 | Hypervisor | VMware Fusion 26.0.1 (free), `vmrun` headless; everything inside the guest over OpenSSH (Fusion has no guest commands for Arm guests) |
 | Guest | Windows 11 Pro on Arm, **not activated** (user decision 2026-10-29: no licence key; Setup uses Microsoft's generic Pro key, which only picks the edition) |
+| Language | English (United Kingdom): `en-GB` UI and locales, UK keyboard (`0809:00000809`), matching the ISO (`Windows11_Client_arm64_en-gb_26300_9457`, build 26300, SHA-256 `500bcb6f…7dee61`) |
 | Size | 4 vCPU, 8 GB RAM, 80 GB growable NVMe disk, NAT with a fixed MAC (`00:50:56:2A:D0:C7`) |
 | Accounts | `paddock-admin` (setup and admin tasks), `paddock-test` (standard user; tests run as this user) |
 | Access | SSH, key-only, from this Mac only (firewall rule: local subnet); keys in `<vm dir>/keys` |
@@ -71,13 +72,15 @@ work through the keychain. Choose B only if the keychain step is unwanted.
 1. **Get the Windows 11 Arm64 ISO from Microsoft** (about 5 to 7 GB; needs your OK to download). Use one of the official
    routes, no mirrors:
    - Microsoft's page <https://www.microsoft.com/software-download/windows11arm64>: choose *Windows 11 (multi-edition ISO
-     for Arm64)*, the language *English (United States)*, and download through the browser. Save or move the file to
+     for Arm64)*, the language *English International* (the en-GB image this VM uses), and download through the browser. Save or move the file to
      `/Volumes/d7sst7/vms/paddock-win11-test/iso/windows11-arm64.iso`.
    - or Fusion's *File > New > Get Windows from Microsoft*, which downloads Microsoft's ESD and converts it to an ISO.
      Cancel the wizard after the ISO is saved and move the ISO to the path above. (Older Fusion releases built broken
      24H2 images with it; 26.0.1 is current, but prefer Microsoft's page.)
 2. **Prepare** (already done once on 2026-10-29; re-run after changing the scripts or to switch to option B):
-   `scripts/vm-win/prepare.sh` (or `--no-tpm`). It never downloads Windows.
+   `scripts/vm-win/prepare.sh` (or `--no-tpm`). It never downloads Windows. The answer file's language must be one the
+   ISO contains, or Setup stops at the language step: the default is `--lang en-GB` (keyboard `0809:00000809`); for
+   another ISO pass `--lang <tag>` and, except for en-US, `--input-locale <language id>:<layout id>`.
 3. **Option A only, add the TPM** (the VM must be off):
    1. Create the password and keep it in the login keychain:
       `security add-generic-password -s paddock-win11-test-vm -a vmrun -w "$(openssl rand -base64 24)"`,
