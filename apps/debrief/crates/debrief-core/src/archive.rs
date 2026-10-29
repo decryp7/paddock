@@ -30,6 +30,10 @@ pub fn is_zip(bytes: &[u8]) -> bool {
 }
 
 /// Expands `bytes` (the content of `file_name`) into the files to import.
+///
+/// An archive that names one file more than once (tools that append to an archive write such files) is not refused: each
+/// name gives one entry, the last one of that name, in the place of the first, as a lookup by name in a zip does. The
+/// earlier entries of the name are not read (pinned in `tests/it/properties.rs`).
 pub fn expand(file_name: &str, bytes: Vec<u8>) -> Result<Vec<Entry>> {
     expand_capped(file_name, bytes, MAX_ENTRY_BYTES, MAX_ARCHIVE_BYTES)
 }
