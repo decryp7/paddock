@@ -285,7 +285,8 @@ pub fn run_repair(ops: &mut dyn RepairOps, say: &mut dyn FnMut(&str)) -> RepairO
             ops.pause(Duration::from_secs(2 * u64::from(cycle)));
         }
         ops.phase(RepairPhase::Registering);
-        match ops.register() {
+        let registered = ops.register();
+        match &registered {
             Ok(()) => say("registered"),
             Err(RegisterError::NeedsApproval) => {
                 say("macOS needs approval in Login Items; stopping");
@@ -294,6 +295,18 @@ pub fn run_repair(ops: &mut dyn RepairOps, say: &mut dyn FnMut(&str)) -> RepairO
             Err(RegisterError::Other(e)) => say(&format!("register failed: {e}")),
         }
         if cancelled {
+            // A cancel is only clean when the service is registered again and launchd accepts it.
+            if let Err(RegisterError::Other(e)) = registered {
+                let why = format!("Cancelled, but registering the service again failed: {e}. {NEXT_STEPS}");
+                say(&why);
+                return RepairOutcome::Failed(why);
+            }
+            ops.pause(SETTLE);
+            if ops.registration_stale() {
+                let why = format!("Cancelled, but launchd still reports a stale registration. {NEXT_STEPS}");
+                say(&why);
+                return RepairOutcome::Failed(why);
+            }
             return RepairOutcome::Cancelled;
         }
         ops.pause(SETTLE);
@@ -697,9 +710,29 @@ mod tests {
         f.cancel_after_calls = Some(2);
         let (outcome, said) = run(&mut f);
         assert_eq!(outcome, RepairOutcome::Cancelled);
-        assert_eq!(f.calls, ["unregister", "bootout", "register"]);
+        assert_eq!(f.calls, ["unregister", "bootout", "register", "stale?"]);
         assert!(f.pause_total < GONE_WAIT, "it did not wait the full time");
         assert!(said.iter().any(|m| m.contains("cancel")));
+    }
+
+    #[test]
+    fn a_cancel_whose_restoring_registration_fails_is_a_failure_that_keeps_the_notice() {
+        let mut f = Fake::new(0, Some(0));
+        f.job_lingers_for = u32::MAX;
+        f.cancel_after_calls = Some(2);
+        f.register_results = vec![Err(RegisterError::Other("busy".into()))];
+        let RepairOutcome::Failed(why) = run(&mut f).0 else { panic!("a service left removed is not a clean cancel") };
+        assert!(why.starts_with("Cancelled, but registering the service again failed: busy"), "{why}");
+        assert!(why.contains("Login Items"), "{why}");
+        // A registration launchd still reports as stale is not a clean cancel either.
+        let mut f = Fake::new(1, Some(0));
+        f.job_lingers_for = u32::MAX;
+        f.cancel_after_calls = Some(2);
+        let RepairOutcome::Failed(why) = run(&mut f).0 else { panic!("stale after the cancel") };
+        assert!(why.contains("Cancelled") && why.contains("stale"), "{why}");
+        let t = RepairTracker::new();
+        t.finish(&RepairOutcome::Failed(why), Instant::now());
+        assert!(t.current(Instant::now()).is_some(), "the notice stays");
     }
 
     #[test]
