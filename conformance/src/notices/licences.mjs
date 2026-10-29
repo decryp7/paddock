@@ -23,6 +23,9 @@ export const EXCEPTIONS = [
   { kind: 'npm', license: 'CC-BY-4.0', packages: ['caniuse-lite'], reason: 'browser-support data used at build time; the attribution it requires is in the notices' },
 ];
 
+// Pre-approved by the user for npm packages only (none ships today, so they are not listed): Python-2.0 and BlueOak-1.0.0.
+// Whoever adds a package that needs one adds an exception for that package here, with a reason; no further approval is needed.
+
 /** The licence ids package `name` of ecosystem `kind` may use: the allow list plus the exceptions that name it. */
 export function allowedFor(kind, name) {
   return new Set([...ALLOWED, ...EXCEPTIONS.filter((e) => e.kind === kind && e.packages.includes(name)).map((e) => e.license)]);
