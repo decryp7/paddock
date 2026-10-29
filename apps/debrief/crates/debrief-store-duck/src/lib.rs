@@ -61,6 +61,10 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuar
 /// DuckDB's memory limit (ADR 0014 memory budget); it spills to the store's `tmp` folder beyond it.
 pub const MEMORY_LIMIT: &str = "192MB";
 
+/// DuckDB's memory limit while an import compacts and orders the events (the import memory budget: parsing is over, so
+/// the import may use it; the limit goes back to [`MEMORY_LIMIT`] afterwards).
+pub const IMPORT_MEMORY_LIMIT: &str = "768MB";
+
 /// Allocations DuckDB's allocator may keep cached after a task (`allocator_flush_threshold`).
 pub const ALLOCATOR_FLUSH: &str = "32MiB";
 
@@ -79,6 +83,8 @@ pub struct StoreOptions {
     pub memory_limit: String,
     /// The full-text index writer's heap and threads (applies when the store opens).
     pub index: fts::WriterBudget,
+    /// DuckDB's memory limit while an import compacts and orders the events ([`IMPORT_MEMORY_LIMIT`]).
+    pub import_memory_limit: String,
     /// Where DuckDB spills beyond its memory limit: a folder per store below this one (see [`spill_folder`]);
     /// `None`: the store folder's `tmp` (applies when the store opens).
     pub spill_dir: Option<PathBuf>,
@@ -98,12 +104,32 @@ impl Default for StoreOptions {
             duck_threads: DUCK_THREADS,
             memory_limit: MEMORY_LIMIT.to_string(),
             index: fts::WriterBudget::default(),
+            import_memory_limit: IMPORT_MEMORY_LIMIT.to_string(),
             spill_dir: None,
             max_spill: None,
             allocator_flush: ALLOCATOR_FLUSH.to_string(),
             allocator_background_threads: true,
         }
     }
+}
+
+/// Runs `f` with DuckDB's memory limit at `raised` and sets it back to `normal` afterwards, also when `f` fails (the
+/// limit is the database's, so every connection sees it while `f` runs).
+pub(crate) fn with_memory<T, E>(
+    conn: &Connection,
+    raised: &str,
+    normal: &str,
+    f: impl FnOnce(&Connection) -> Result<T, E>,
+) -> Result<T, E> {
+    let set = |limit: &str| conn.execute_batch(&format!("SET memory_limit = '{}'", limit.replace('\'', "''")));
+    if let Err(e) = set(raised) {
+        log::warn!("could not raise DuckDB's memory limit to {raised}: {e}");
+    }
+    let result = f(conn);
+    if let Err(e) = set(normal) {
+        log::error!("could not set DuckDB's memory limit back to {normal}: {e}");
+    }
+    result
 }
 
 /// The spill folder of the store in `dir` below the chosen spill folder `base`: one folder per store (stores never
@@ -136,6 +162,7 @@ impl StoreOptions {
                 heap: 16 << 20,
                 threads: 1,
             },
+            import_memory_limit: LOW_MEMORY_LIMIT.to_string(),
             ..StoreOptions::default()
         }
     }
@@ -228,6 +255,9 @@ pub(crate) struct Inner {
     pub(crate) import_window: RwLock<debrief_core::ingest::ImportWindow>,
     /// Held by whatever rewrites the catalog (an import, compaction, positions, removal).
     pub(crate) write_lock: Arc<Mutex<()>>,
+    /// Held by the heavy DuckDB work that must not share the memory limit: an import's compaction and ordering, and the
+    /// catalogue's per-source aggregate, so the catalogue never starves the ordering of the memory limit.
+    pub(crate) heavy: Arc<Mutex<()>>,
     /// The full-text index and its indexing thread (`None` when the index cannot be opened: search then
     /// fails with the reason, everything else works).
     fts: Option<fts::FtsService>,
@@ -322,27 +352,42 @@ impl Inner {
     ///
     /// `progress` names each stage and is polled for Cancel: a cancelled import skips the compaction (only an
     /// optimisation; the next change retries) but still orders the events, so what was read stays usable.
-    fn maintain(&self, conn: &Connection, progress: Option<&ImportProgress>) {
+    fn maintain(&self, conn: &Connection, progress: Option<&ImportProgress>) -> Vec<String> {
         let stage = |label: &str| {
             if let Some(p) = progress {
                 p.set_stage(Some(label));
             }
         };
+        let mut notices = Vec::new();
         let tc = std::time::Instant::now();
-        if progress.is_some_and(|p| p.cancel_flag().load(Ordering::SeqCst)) {
-            log::info!("import cancelled: segment compaction skipped");
-        } else {
-            stage("Compacting segments");
-            match compact::compact(conn, &self.dir, &self.schema) {
-                Ok(c) if c.replaced > 0 => log::info!("compacted {} segments into {}", c.replaced, c.written),
-                Ok(_) => {}
-                Err(e) => log::warn!("segment compaction failed: {e:#}"),
+        let (raised, normal) = {
+            let o = read_lock(&self.options);
+            (o.import_memory_limit.clone(), o.memory_limit.clone())
+        };
+        // No catalogue query runs beside the compaction and the ordering, which get the import's memory: the ordering
+        // ran out of memory beside eight catalogue workers once, leaving the events unordered.
+        let _heavy = lock(&self.heavy);
+        let ordered = with_memory(conn, &raised, &normal, |conn| {
+            if progress.is_some_and(|p| p.cancel_flag().load(Ordering::SeqCst)) {
+                log::info!("import cancelled: segment compaction skipped");
+            } else {
+                stage("Compacting segments");
+                match compact::compact(conn, &self.dir, &self.schema) {
+                    Ok(c) if c.replaced > 0 => log::info!("compacted {} segments into {}", c.replaced, c.written),
+                    Ok(_) => {}
+                    Err(e) => log::warn!("segment compaction failed: {e:#}"),
+                }
             }
-        }
-        stage("Ordering events by time");
-        log::debug!("import: compact {:?}", tc.elapsed());
-        if let Err(e) = pos::rebuild(conn) {
-            log::warn!("time-order positions could not be rebuilt: {e}");
+            stage("Ordering events by time");
+            log::debug!("import: compact {:?}", tc.elapsed());
+            pos::rebuild_or_mark(conn)
+        });
+        if let Err(e) = ordered {
+            log::error!("time-order positions could not be rebuilt: {e}");
+            notices.push(format!(
+                "Debrief could not put the events in time order ({e}), so the event list may be incomplete. It tries \
+                 again when the project opens and after the next import."
+            ));
         }
         log::debug!("import: pos {:?}", tc.elapsed());
         stage("Saving the index");
@@ -359,6 +404,7 @@ impl Inner {
         }
         // The burst's free pages go back to the OS now: the process may idle afterwards.
         debrief_alloc::release();
+        notices
     }
 
     pub(crate) fn conn(&self) -> StoreResult<Conn<'_>> {
@@ -595,10 +641,13 @@ impl Inner {
         parsers::record(&conn, &parser_set).map_err(engine)?;
         record_fingerprints(&conn, &fingerprints);
         let t2 = t0.elapsed();
-        self.maintain(&conn, Some(progress));
+        let maintenance_notices = self.maintain(&conn, Some(progress));
         self.bump_version(&conn)?;
         log::debug!("import: parse {t1:?} finish {t2:?} maintained {:?}", t0.elapsed());
-        let mut report = ImportReport::default();
+        let mut report = ImportReport {
+            notices: maintenance_notices,
+            ..ImportReport::default()
+        };
         let mut unrecognized = Vec::new();
         for o in outcomes {
             match o {
@@ -788,6 +837,12 @@ impl DuckStore {
         conn.execute_batch(schema::CACHE_DDL).map_err(engine)?;
         conn.execute_batch(lanes::DDL).map_err(engine)?;
         conn.execute_batch(schema::ADDED_DDL).map_err(engine)?;
+        // A rebuild of the positions that failed (pos::STALE) is done again now: they must never stay missing.
+        if pos::is_stale(&conn) {
+            if let Err(e) = with_memory(&conn, &opts.import_memory_limit, &opts.memory_limit, pos::rebuild_or_mark) {
+                log::error!("time-order positions are still missing after a retry: {e}");
+            }
+        }
         Ok(Self::with(dir, conn, schema, parsers, registry, opts))
     }
 
@@ -816,6 +871,7 @@ impl DuckStore {
         };
         let parsers = Arc::new(parsers);
         let write_lock = Arc::new(Mutex::new(()));
+        let heavy = Arc::new(Mutex::new(()));
         let started = conn
             .try_clone()
             .map_err(anyhow::Error::from)
@@ -830,7 +886,7 @@ impl DuckStore {
         let catalogue = conn
             .try_clone()
             .map_err(anyhow::Error::from)
-            .and_then(|c| catalogue::CatalogueService::start(c, write_lock.clone()))
+            .and_then(|c| catalogue::CatalogueService::start(c, write_lock.clone(), heavy.clone()))
             .map_err(|e| log::warn!("the catalogue is unavailable: {e:#}"))
             .ok();
         DuckStore {
@@ -851,6 +907,7 @@ impl DuckStore {
                 importing: AtomicBool::new(false),
                 import_window: RwLock::new(Default::default()),
                 write_lock,
+                heavy,
                 fts,
                 catalogue,
                 fts_error,
