@@ -445,6 +445,9 @@ impl Runner {
         }
         let alive = self.config.is_alive.clone();
         let gone = |pid: u32| !alive(pid);
+        // The pid comes from the file and may name another process by now: only the process that started before the file
+        // was written is ended (ADR 0033).
+        let companion = paddock_proc::ProcessId::of_recorded(d.pid, d.started_ms);
         match &self.config.replace {
             Replace::Never => {
                 return Err(format!(
@@ -453,11 +456,15 @@ impl Runner {
                 ));
             }
             Replace::Terminate { grace } => {
-                paddock_proc::terminate(d.pid, *grace);
+                if let Some(id) = companion {
+                    paddock_proc::terminate(id, *grace);
+                }
             }
             Replace::Ask { ask, grace } => {
-                if !(ask(d) && self.poll_until(*grace, || gone(d.pid))) {
-                    paddock_proc::terminate(d.pid, Duration::ZERO);
+                if !(ask(d) && self.poll_until(*grace, || gone(d.pid)))
+                    && let Some(id) = companion
+                {
+                    paddock_proc::terminate(id, Duration::ZERO);
                 }
             }
         }

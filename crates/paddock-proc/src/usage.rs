@@ -6,12 +6,24 @@
 //! kernel has not reclaimed (a worker with a 535 MB footprint showed 1,965 MB). On Windows it is the private working set.
 //! The resident size is only the fallback for a process whose real memory cannot be read.
 
+use crate::identity::{ProcessId, StartTime};
 use std::collections::HashMap;
 use std::path::Path;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
-/// `pid -> (parent, resident bytes)` for real processes only.
-pub type Table = HashMap<u32, (Option<u32>, u64)>;
+/// `pid -> row` for real processes only.
+pub type Table = HashMap<u32, Row>;
+
+/// One real process in a [`Table`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Row {
+    /// Parent process, if known. Only a pid: the parent may have ended and its pid been handed on (see [`descendants`]).
+    pub parent: Option<u32>,
+    /// Resident bytes.
+    pub rss: u64,
+    /// When it started, if the OS said.
+    pub started: Option<StartTime>,
+}
 
 /// One row of the OS process list, before the thread entries are dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +34,8 @@ pub struct ProcEntry {
     pub parent: Option<u32>,
     /// Resident bytes.
     pub rss: u64,
+    /// When it started, if the OS said.
+    pub started: Option<StartTime>,
     /// Linux thread entry (shows up in the list beside the real processes).
     pub is_thread: bool,
 }
@@ -31,12 +45,21 @@ pub fn table_from(entries: impl IntoIterator<Item = ProcEntry>) -> Table {
     entries
         .into_iter()
         .filter(|e| !e.is_thread)
-        .map(|e| (e.pid, (e.parent, e.rss)))
+        .map(|e| {
+            (
+                e.pid,
+                Row {
+                    parent: e.parent,
+                    rss: e.rss,
+                    started: e.started,
+                },
+            )
+        })
         .collect()
 }
 
-/// A look at the OS process table: parents and resident memory only (command lines, environments and working folders
-/// are slow to read on Windows and nothing here needs them).
+/// A look at the OS process table: parents, start times and resident memory only (command lines, environments and
+/// working folders are slow to read on Windows and nothing here needs them).
 pub fn snapshot() -> Table {
     let mut sys = System::new();
     sys.refresh_processes_specifics(
@@ -48,28 +71,45 @@ pub fn snapshot() -> Table {
         pid: pid.as_u32(),
         parent: p.parent().map(Pid::as_u32),
         rss: p.memory(),
+        started: crate::sys::start_time(pid.as_u32()),
         is_thread: p.thread_kind().is_some(),
     }))
 }
 
-/// Every process below `root` (not including it), in no particular order.
-pub fn descendants(table: &Table, root: u32) -> Vec<u32> {
-    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
-    for (&pid, &(parent, _)) in table {
-        if let Some(p) = parent
+/// The process in `table` with this pid, by identity.
+pub fn identity(table: &Table, pid: u32) -> Option<ProcessId> {
+    table.get(&pid)?.started.map(|s| ProcessId::new(pid, s))
+}
+
+/// Every process below `root` (not including it), in no particular order. A parent link is only a pid, so a process
+/// counts as a child only if it started no earlier than its parent: a process whose parent ended has a parent pid that
+/// may since name a newer, unrelated process (Windows hands pids on at once), and that process's "children" would be
+/// strangers. When `root` itself is gone and its pid names a newer process, only the processes that started between
+/// the two are `root`'s (orphans on Windows keep their parent pid). A process whose start time is unknown is not counted.
+pub fn descendants(table: &Table, root: ProcessId) -> Vec<ProcessId> {
+    let mut children: HashMap<u32, Vec<ProcessId>> = HashMap::new();
+    for (&pid, row) in table {
+        if let (Some(p), Some(s)) = (row.parent, row.started)
             && pid != p
         {
-            children.entry(p).or_default().push(pid);
+            children.entry(p).or_default().push(ProcessId::new(pid, s));
         }
     }
+    // The root's children end where a newer holder of its pid began.
+    let root_until = match table.get(&root.pid()).and_then(|r| r.started) {
+        Some(s) if s != root.started() => Some(s),
+        _ => None,
+    };
     let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::from([root]);
-    let mut frontier = vec![root];
-    while let Some(p) = frontier.pop() {
-        for &kid in children.get(&p).into_iter().flatten() {
-            if seen.insert(kid) {
+    let mut seen = std::collections::HashSet::from([root.pid()]);
+    let mut frontier = vec![(root, root_until)];
+    while let Some((p, until)) = frontier.pop() {
+        for &kid in children.get(&p.pid()).into_iter().flatten() {
+            let after_parent = kid.started() >= p.started();
+            let before_successor = until.is_none_or(|u| kid.started() < u);
+            if after_parent && before_successor && seen.insert(kid.pid()) {
                 out.push(kid);
-                frontier.push(kid);
+                frontier.push((kid, None));
             }
         }
     }
@@ -79,9 +119,15 @@ pub fn descendants(table: &Table, root: u32) -> Vec<u32> {
 /// Memory of `root` and its descendants, in bytes; `better` may give a process a more exact figure than its resident
 /// size (its PSS), a process it returns `None` for counts by resident size.
 pub fn tree_memory_with(table: &Table, root: u32, better: impl Fn(u32) -> Option<u64>) -> u64 {
+    let Some(id) = identity(table, root) else {
+        // Gone, or its start time is unknown: only its own figure.
+        return table
+            .get(&root)
+            .map_or(0, |r| better(root).unwrap_or(r.rss));
+    };
     std::iter::once(root)
-        .chain(descendants(table, root))
-        .filter_map(|p| better(p).or_else(|| table.get(&p).map(|e| e.1)))
+        .chain(descendants(table, id).into_iter().map(ProcessId::pid))
+        .filter_map(|p| better(p).or_else(|| table.get(&p).map(|e| e.rss)))
         .fold(0u64, u64::saturating_add)
 }
 
@@ -121,7 +167,7 @@ fn proportional(_pid: u32) -> Option<u64> {
 /// resident size if that cannot be read). `None` when there is no such process (or it is a thread id).
 pub fn process_memory(pid: u32) -> Option<u64> {
     let table = snapshot();
-    proportional(pid).or_else(|| table.get(&pid).map(|e| e.1))
+    proportional(pid).or_else(|| table.get(&pid).map(|e| e.rss))
 }
 
 /// The memory of the tree at `root` (see [`process_memory`]), 0 when it is gone.
@@ -137,13 +183,24 @@ mod tests {
 Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          90000 kB\nShared_Clean:      70000 kB\n";
     const MB: u64 = 1 << 20;
 
+    /// A row that started at `pid` µs, so a child (a higher pid in these tables) starts after its parent.
     fn entry(pid: u32, parent: Option<u32>, rss: u64, is_thread: bool) -> ProcEntry {
         ProcEntry {
             pid,
             parent,
             rss,
+            started: Some(StartTime::from_micros(u64::from(pid))),
             is_thread,
         }
+    }
+
+    fn id(pid: u32) -> ProcessId {
+        ProcessId::new(pid, StartTime::from_micros(u64::from(pid)))
+    }
+
+    fn pids(mut v: Vec<ProcessId>) -> Vec<u32> {
+        v.sort();
+        v.into_iter().map(ProcessId::pid).collect()
     }
 
     #[test]
@@ -210,17 +267,74 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
             entry(6, Some(7), 1, false),
             entry(7, Some(6), 1, false),
         ]);
-        let mut d = descendants(&table, 1);
-        d.sort();
-        assert_eq!(d, vec![2, 3]);
-        let mut d = descendants(&table, 6);
-        d.sort();
-        assert_eq!(d, vec![7], "a parent cycle terminates");
+        assert_eq!(pids(descendants(&table, id(1))), vec![2, 3]);
+        assert_eq!(
+            pids(descendants(&table, id(6))),
+            vec![7],
+            "a parent cycle terminates"
+        );
         assert!(
-            descendants(&table, 5).is_empty(),
+            descendants(&table, id(5)).is_empty(),
             "self-parent is not its own child"
         );
         assert_eq!(tree_memory_with(&table, 1, |_| None).saturating_add(0), 3);
+    }
+
+    fn row(pid: u32, parent: u32, started: Option<u64>) -> ProcEntry {
+        ProcEntry {
+            pid,
+            parent: Some(parent),
+            rss: 1,
+            started: started.map(StartTime::from_micros),
+            is_thread: false,
+        }
+    }
+
+    /// Regression (ADR 0033): on Windows a parent pid outlives its process. A process that started before its "parent" is
+    /// the orphan of an earlier holder of that pid, not a child, and must not be counted or ended with the tree.
+    #[test]
+    fn a_child_older_than_its_parent_is_a_stranger() {
+        let root = ProcessId::new(10, StartTime::from_micros(100));
+        let table = table_from([
+            row(10, 1, Some(100)),
+            row(11, 10, Some(200)),
+            row(12, 10, Some(50)),
+            row(13, 11, Some(150)),
+            row(14, 10, None),
+            row(15, 10, Some(100)),
+        ]);
+        assert_eq!(
+            pids(descendants(&table, root)),
+            vec![11, 15],
+            "12 and 13 are older than their parents, 14 is unknown"
+        );
+        assert_eq!(tree_memory_with(&table, 10, |_| None), 3);
+    }
+
+    #[test]
+    fn a_gone_root_keeps_only_the_orphans_older_than_the_new_holder_of_its_pid() {
+        let root = ProcessId::new(10, StartTime::from_micros(100));
+        let table = table_from([
+            row(10, 1, Some(500)),
+            row(11, 10, Some(200)),
+            row(16, 10, Some(600)),
+            row(17, 11, Some(300)),
+        ]);
+        assert_eq!(pids(descendants(&table, root)), vec![11, 17]);
+        let gone = table_from([row(11, 10, Some(200)), row(16, 10, Some(90))]);
+        assert_eq!(pids(descendants(&gone, root)), vec![11]);
+        assert_eq!(identity(&gone, 10), None);
+        assert_eq!(
+            tree_memory_with(&gone, 10, |_| None),
+            0,
+            "a gone root counts nothing"
+        );
+        let unknown = table_from([row(10, 1, None), row(11, 10, Some(200))]);
+        assert_eq!(
+            tree_memory_with(&unknown, 10, |_| Some(7)),
+            7,
+            "an unknown start counts the root alone"
+        );
     }
 
     #[test]
@@ -252,7 +366,7 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
             .collect();
         let table = snapshot();
         let me = std::process::id();
-        let own = table.get(&me).map_or(0, |e| e.1);
+        let own = table.get(&me).map_or(0, |e| e.rss);
         let total = tree_memory_with(&table, me, |_| None);
         drop(stop);
         for t in threads {
@@ -294,7 +408,7 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
             }
         }
         let pid = c.id().unwrap();
-        let rss = snapshot().get(&pid).map_or(0, |e| e.1);
+        let rss = snapshot().get(&pid).map_or(0, |e| e.rss);
         let real = process_memory(pid).unwrap();
         let tree = tree_memory(pid);
         assert!(

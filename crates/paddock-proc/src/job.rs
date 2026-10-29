@@ -12,11 +12,11 @@ use std::ptr::null;
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JobObjectExtendedLimitInformation, SetInformationJobObject,
+    JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
 };
 
 /// A kill-on-close job; closing its handle (on drop) ends every process in it.
-pub(crate) struct Job(#[allow(dead_code)] OwnedHandle);
+pub(crate) struct Job(OwnedHandle);
 
 impl Job {
     /// Puts `child` into a new kill-on-close job. Processes it starts afterwards join the job too (nested jobs: Windows 8
@@ -50,5 +50,20 @@ impl Job {
             return Err(io::Error::last_os_error());
         }
         Ok(Job(job))
+    }
+}
+
+impl Job {
+    /// Ends every process in the job now, through the job's handle: no pid is looked up, so none can have been handed on
+    /// (ADR 0033). The job stays open; closing it later ends whatever joined since.
+    pub(crate) fn terminate(&self) {
+        // SAFETY: a valid job handle owned by `self`.
+        // conformance: pid-kill — a job handle this value owns: no pid is looked up
+        if unsafe { TerminateJobObject(self.0.as_raw_handle(), 1) } == 0 {
+            log::warn!(
+                "Could not end the job of a child: {}",
+                io::Error::last_os_error()
+            );
+        }
     }
 }

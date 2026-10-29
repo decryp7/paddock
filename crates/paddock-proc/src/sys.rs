@@ -1,5 +1,5 @@
-//! The few platform calls, in one small file: signals and priority on Unix, `taskkill` on Windows. Everything here is a
-//! single call that hands over to tested code or makes one OS request.
+//! The few platform calls, in one small file: signals and priority on Unix, process handles and `taskkill` on Windows, and
+//! when a process started. Everything here is a single call that hands over to tested code or makes one OS request.
 #![allow(unsafe_code)]
 
 #[cfg(unix)]
@@ -109,21 +109,137 @@ mod unix {
 #[cfg(unix)]
 pub use unix::*;
 
-/// `taskkill` for `pid` and its tree, politely (`force` false: a close request) or at once.
+/// A close request to `pid` alone (`taskkill` without `/T` or `/F`: never a tree, whose members `taskkill` would find by
+/// parent pids that may have been handed on).
 #[cfg(windows)]
-pub fn taskkill(pid: u32, force: bool) -> bool {
+pub fn close_request(pid: u32) -> bool {
     let mut cmd = crate::command("taskkill");
-    cmd.args(["/T", "/PID", &pid.to_string()]);
-    if force {
-        cmd.arg("/F");
-    }
+    cmd.args(["/PID", &pid.to_string()]);
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     cmd.status().is_ok_and(|s| s.success())
 }
 
-/// Makes the child lead its own process group (Unix); Windows trees are ended by `taskkill /T`.
+/// When `pid` started (Windows: its creation time), or `None` when there is no such process or it cannot be opened.
+#[cfg(windows)]
+pub fn start_time(pid: u32) -> Option<crate::StartTime> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    // SAFETY: OpenProcess takes plain values; the handle is closed below.
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let t = creation_time(h);
+        CloseHandle(h);
+        t
+    }
+}
+
+/// The creation time of the process behind `h`.
+#[cfg(windows)]
+fn creation_time(h: windows_sys::Win32::Foundation::HANDLE) -> Option<crate::StartTime> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::GetProcessTimes;
+    let mut t = [FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    }; 4];
+    let [c, e, k, u] = &mut t;
+    // SAFETY: a valid process handle and four writable FILETIMEs.
+    if unsafe { GetProcessTimes(h, c, e, k, u) } == 0 {
+        return None;
+    }
+    let ft = (u64::from(t[0].dwHighDateTime) << 32) | u64::from(t[0].dwLowDateTime);
+    crate::identity::micros_from_filetime(ft).map(crate::StartTime::from_micros)
+}
+
+/// Ends `id` if its pid still belongs to it: the check and the kill go through one process handle, which keeps the process
+/// object (and so its pid) from being handed on in between.
+#[cfg(windows)]
+pub fn end_if(id: crate::ProcessId) -> crate::Ending {
+    use crate::identity::{Ending, holder};
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, TerminateProcess,
+    };
+    // SAFETY: OpenProcess takes plain values; the handle is used only while open and closed below.
+    unsafe {
+        let h = OpenProcess(
+            PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+            0,
+            id.pid(),
+        );
+        if h.is_null() {
+            // Gone, or not ours to end: say which without acting.
+            return Ending::of(holder(id, start_time(id.pid())), false);
+        }
+        let found = holder(id, creation_time(h));
+        let sent = found == crate::Holder::Same && TerminateProcess(h, 1) != 0;
+        CloseHandle(h);
+        Ending::of(found, sent)
+    }
+}
+
+/// When `pid` started, from `pbi_start_tvsec`/`pbi_start_tvusec`, or `None` when there is no such process or it is not
+/// ours to look at.
+#[cfg(target_os = "macos")]
+pub fn start_time(pid: u32) -> Option<crate::StartTime> {
+    let pid = libc::c_int::try_from(pid).ok()?;
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
+    // SAFETY: proc_pidinfo writes at most `size` bytes into a buffer of that size; the contents are read only when it filled
+    // the whole structure.
+    let n = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if n != size {
+        return None;
+    }
+    // SAFETY: zero-initialised plain integers, filled by the call.
+    let i = unsafe { info.assume_init() };
+    i.pbi_start_tvsec
+        .checked_mul(1_000_000)?
+        .checked_add(i.pbi_start_tvusec)
+        .map(crate::StartTime::from_micros)
+}
+
+/// When `pid` started: the boot time plus its start tick (`/proc/<pid>/stat`), or `None` when there is no such process.
+#[cfg(target_os = "linux")]
+pub fn start_time(pid: u32) -> Option<crate::StartTime> {
+    use crate::identity::{micros_from_ticks, parse_btime, parse_stat_start};
+    use std::sync::OnceLock;
+    static BOOT: OnceLock<Option<u64>> = OnceLock::new();
+    let boot = (*BOOT.get_or_init(|| parse_btime(&std::fs::read_to_string("/proc/stat").ok()?)))?;
+    // SAFETY: sysconf takes an integer and has no preconditions.
+    let hz = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok()?;
+    let ticks = parse_stat_start(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)?;
+    micros_from_ticks(boot, ticks, hz).map(crate::StartTime::from_micros)
+}
+
+/// Elsewhere: the start time sysinfo reports, in whole seconds.
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+pub fn start_time(pid: u32) -> Option<crate::StartTime> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let mut sys = System::new();
+    let id = Pid::from_u32(pid);
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[id]),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    sys.process(id)
+        .map(|p| crate::StartTime::from_micros(p.start_time().saturating_mul(1_000_000)))
+}
+
 /// The private working set of `pid` in bytes (the part of the working set that is not shared with other processes), or
 /// `None` when the process is gone or cannot be opened.
 #[cfg(windows)]
@@ -148,6 +264,7 @@ pub fn private_working_set(pid: u32) -> Option<u64> {
     }
 }
 
+/// Makes the child lead its own process group (Unix only).
 #[cfg(not(unix))]
 pub fn own_group(_cmd: &mut std::process::Command) {}
 

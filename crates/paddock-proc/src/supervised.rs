@@ -2,7 +2,8 @@
 //! memory cap, so nothing leaks. A [`Registry`] knows every supervised tree, so [`end_all`] can end them at shutdown or
 //! in a panic hook even when the owners never get to drop them.
 
-use crate::tree::{self, Terminated, kill_tree};
+use crate::identity::ProcessId;
+use crate::tree::{self, Terminated, kill_child_tree, kill_tree};
 use crate::usage;
 use crate::watch::{MemoryEvent, MemoryListener, MemoryWatch, Verdict};
 use std::collections::BTreeSet;
@@ -16,9 +17,10 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-/// The process ids of the trees that are being supervised. Cheap to clone; clones share the list.
+/// The roots of the trees that are being supervised, by identity (a root that ended and was reaped has a pid the OS may
+/// hand on; [`Registry::end_all`] leaves such a pid alone). Cheap to clone; clones share the list.
 #[derive(Debug, Clone, Default)]
-pub struct Registry(Arc<Mutex<BTreeSet<u32>>>);
+pub struct Registry(Arc<Mutex<BTreeSet<ProcessId>>>);
 
 impl Registry {
     /// An empty registry.
@@ -26,27 +28,27 @@ impl Registry {
         Registry::default()
     }
 
-    fn add(&self, pid: u32) {
-        lock(&self.0).insert(pid);
+    fn add(&self, id: ProcessId) {
+        lock(&self.0).insert(id);
     }
 
-    fn remove(&self, pid: u32) {
-        lock(&self.0).remove(&pid);
+    fn remove(&self, id: ProcessId) {
+        lock(&self.0).remove(&id);
     }
 
-    /// The roots of the trees still supervised.
+    /// The pids of the roots of the trees still supervised.
     pub fn pids(&self) -> Vec<u32> {
-        lock(&self.0).iter().copied().collect()
+        lock(&self.0).iter().map(|id| id.pid()).collect()
     }
 
     /// Ends every registered tree now and forgets them; returns how many were registered. The owning [`Supervised`]
     /// values still reap their children when they are dropped or waited for.
     pub fn end_all(&self) -> usize {
-        let pids = std::mem::take(&mut *lock(&self.0));
-        for pid in &pids {
-            kill_tree(*pid);
+        let roots = std::mem::take(&mut *lock(&self.0));
+        for root in &roots {
+            kill_tree(*root);
         }
-        pids.len()
+        roots.len()
     }
 }
 
@@ -124,7 +126,8 @@ struct Watcher {
 }
 
 impl Watcher {
-    fn start(pid: u32, cap: MemoryCap, shared: Arc<Shared>) -> Watcher {
+    fn start(id: ProcessId, cap: MemoryCap, shared: Arc<Shared>) -> Watcher {
+        let pid = id.pid();
         let (stop, stopped) = mpsc::channel::<()>();
         let thread = std::thread::Builder::new()
             .name("paddock-proc-memory".into())
@@ -156,7 +159,8 @@ impl Watcher {
                         Verdict::Warn(u) => tell(MemoryEvent::Warning(u)),
                         Verdict::Stop(u) => {
                             shared.over.store(cap.limit.max(1), Ordering::Relaxed);
-                            kill_tree(pid);
+                            // By identity: the owner may have reaped the child meanwhile.
+                            kill_tree(id);
                             return tell(MemoryEvent::Stopped(u));
                         }
                     }
@@ -180,7 +184,8 @@ pub struct Supervised {
     /// Windows: the kill-on-close job the child runs in (`None` when Windows refused one; the tree kill still applies).
     #[cfg(windows)]
     job: Option<crate::job::Job>,
-    pid: u32,
+    /// The root by identity; `None` only when the OS would not say when the child started.
+    process: Option<ProcessId>,
     registry: Registry,
     watcher: Option<Watcher>,
     shared: Arc<Shared>,
@@ -205,17 +210,22 @@ impl Supervised {
     ) -> std::io::Result<Supervised> {
         crate::sys::own_group(&mut cmd);
         let child = cmd.spawn()?;
-        let pid = child.id();
+        // Not reaped yet, so the pid is still this child's.
+        let process = ProcessId::of(child.id());
         #[cfg(windows)]
         let job = crate::job::Job::assign(&child).ok();
-        registry.add(pid);
         let shared = Arc::new(Shared::default());
-        let watcher = cap.map(|c| Watcher::start(pid, c, shared.clone()));
+        // Without a start time (the OS would not say, which does not happen for an unreaped child) the child is ended
+        // through its handle only: no registry entry, no tree walk, no memory cap.
+        let watcher = process.and_then(|id| {
+            registry.add(id);
+            cap.map(|c| Watcher::start(id, c, shared.clone()))
+        });
         Ok(Supervised {
             child: Some(child),
             #[cfg(windows)]
             job,
-            pid,
+            process,
             registry: registry.clone(),
             watcher,
             shared,
@@ -238,6 +248,11 @@ impl Supervised {
     /// The process id while the child has not been killed or waited for.
     pub fn id(&self) -> Option<u32> {
         self.child.as_ref().map(Child::id)
+    }
+
+    /// The child by identity while it has not been killed or waited for.
+    pub fn process(&self) -> Option<ProcessId> {
+        self.child.as_ref().and(self.process)
     }
 
     /// The child's piped standard input, once.
@@ -292,7 +307,7 @@ impl Supervised {
             self.kill();
             return Terminated::Gone;
         }
-        if tree::ask(self.pid) {
+        if self.process.is_some_and(tree::ask) {
             let end = Instant::now().checked_add(grace);
             while self.is_running() && end.is_some_and(|e| Instant::now() < e) {
                 std::thread::sleep(Duration::from_millis(25));
@@ -310,7 +325,18 @@ impl Supervised {
     /// Ends the whole process tree now and reaps it. Idempotent.
     pub fn kill(&mut self) {
         if let Some(mut c) = self.child.take() {
-            kill_tree(c.id());
+            // Windows: the job ends every process in it at once, by handle, with no pid to go stale.
+            #[cfg(windows)]
+            if let Some(job) = &self.job {
+                job.terminate();
+            }
+            // Not reaped yet (`try_wait` reaps one that has ended): its pid and group are still its own.
+            let unreaped = matches!(c.try_wait(), Ok(None));
+            match self.process {
+                Some(id) if unreaped => kill_child_tree(id),
+                Some(id) => kill_tree(id),
+                None => {}
+            }
             let _ = c.kill();
             let _ = c.wait();
         }
@@ -321,7 +347,9 @@ impl Supervised {
         // Windows: closing the job ends whatever of the tree is left (helpers that left it included).
         #[cfg(windows)]
         drop(self.job.take());
-        self.registry.remove(self.pid);
+        if let Some(id) = self.process {
+            self.registry.remove(id);
+        }
         if let Some(w) = self.watcher.take() {
             w.finish();
         }
@@ -627,7 +655,7 @@ mod tests {
                 break;
             }
         }
-        let rss = usage::snapshot().get(&s.id().unwrap()).map_or(0, |e| e.1);
+        let rss = usage::snapshot().get(&s.id().unwrap()).map_or(0, |e| e.rss);
         assert!(
             rss > cap_bytes,
             "precondition: the resident size {rss} is over the cap {cap_bytes}"

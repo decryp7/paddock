@@ -13,11 +13,15 @@
 //!
 //! - [`self_test`]: the `--self-test` every sidecar answers, started from the built app by CI (rule 23).
 //!
-//! Unix children lead their own process group (killed with `killpg`); Windows trees end through `taskkill /T /F`, and every
-//! supervised Windows child runs in a kill-on-close job object, so its helpers end with it even when they left its tree or the
-//! app crashed. Both are backed by a walk of the process table for helpers that left the group.
+//! Processes are named by identity ([`ProcessId`]: pid plus start time), never by a bare pid, because the OS hands a freed
+//! pid on (Windows at once): anything ended is first checked to still be the process that was meant (ADR 0033).
+//!
+//! Unix children lead their own process group (killed with `killpg`); every supervised Windows child runs in a kill-on-close
+//! job object, which ends the whole tree by handle, so its helpers end with it even when they left its tree or the app
+//! crashed. Both are backed by a walk of the process table, by identity, for helpers that left the group or the job.
 
 mod command;
+mod identity;
 #[cfg(windows)]
 mod job;
 mod login;
@@ -33,6 +37,7 @@ mod watch;
 mod testchild;
 
 pub use command::{CREATE_NO_WINDOW, KEPT_ENV, clean_env, command, lower_priority};
+pub use identity::{Ending, Holder, ProcessId, StartTime, holder};
 pub use login::{
     MAX_PATH_LEN, SHELL_TIMEOUT, ask_shell, login_path, merge_path, parse_probe_output,
     probe_script, shell_candidates,
@@ -43,8 +48,8 @@ pub use tree::{
     Terminated, ask, descendants_of, end, is_alive, kill_tree, processes_mentioning, terminate,
 };
 pub use usage::{
-    ProcEntry, Table, descendants, parse_pss, process_memory, read_pss, snapshot, table_from,
-    tree_memory, tree_memory_with,
+    ProcEntry, Row, Table, descendants, identity, parse_pss, process_memory, read_pss, snapshot,
+    table_from, tree_memory, tree_memory_with,
 };
 pub use watch::{
     MemoryEvent, MemoryListener, MemoryUse, MemoryWatch, REARM_PERCENT, Verdict, WARN_PERCENT,

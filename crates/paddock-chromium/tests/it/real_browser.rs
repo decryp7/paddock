@@ -162,7 +162,8 @@ fn a_load_the_network_service_lost_names_the_restart() {
     });
     let base = tempfile::tempdir().unwrap();
     let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
-    let browser = b.pid().expect("the browser's process");
+    let browser = paddock_proc::ProcessId::of(b.pid().expect("the browser's process"))
+        .expect("the browser's start time");
     let page = b.new_page().unwrap();
     let url = format!("http://127.0.0.1:{port}/lost");
     let loaded = std::thread::scope(|s| {
@@ -174,12 +175,14 @@ fn a_load_the_network_service_lost_names_the_restart() {
             .network_service_pid()
             .expect("the process list")
             .expect("the browser names its network service");
-        // Only a process of the browser this test launched is ended (rule 7: nothing else on the machine).
-        assert!(
-            paddock_proc::descendants_of(browser).contains(&pid),
-            "the network service {pid} is a process of the test's browser {browser}"
-        );
-        paddock_proc::end(pid);
+        // Only a process of the browser this test launched is ended (rule 7: nothing else on the machine), by identity.
+        let service = paddock_proc::descendants_of(browser)
+            .into_iter()
+            .find(|p| p.pid() == pid)
+            .unwrap_or_else(|| {
+                panic!("the network service {pid} is a process of the test's browser {browser}")
+            });
+        paddock_proc::end(service);
         load.join().unwrap()
     });
     let e = loaded.expect_err("the load was lost").to_string();

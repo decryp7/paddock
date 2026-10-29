@@ -8,6 +8,7 @@ repository.workspace = true
 publish = ["decryp7"]
 
 [dependencies]
+log = "0.4"
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
