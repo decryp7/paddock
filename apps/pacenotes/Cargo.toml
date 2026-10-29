@@ -16,6 +16,8 @@ version = "0.1.0"
 paddock-testkit = { path = "../../crates/paddock-testkit" }
 paddock-jobs = { path = "../../crates/paddock-jobs" }
 pacenotes-core = { path = "crates/pacenotes-core" }
+pacenotes-git = { path = "crates/pacenotes-git" }
+pacenotes-trap = { path = "tests/trap" }
 pacenotes-function-api = { path = "crates/pacenotes-function-api" }
 
 # Dependencies are optimised even in debug builds; workspace crates stay at opt-level 0 for fast rebuilds.
