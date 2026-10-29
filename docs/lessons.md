@@ -722,3 +722,11 @@ Nobody asked whether more workers or a cheaper operation would help until the nu
 any slow operation, measure both: can more threads or workers run it (bounded by the kind of work), and can each item cost
 less? Make thread counts Settings with an "Auto" default, and give long or bulk designs a "Parallelism and cost" section
 (rule 51).
+
+## A fake server's polling timeout belongs after the handshake (2026-10-29)
+Spotter's and `paddock-chromium`'s fake DevTools servers set their 10 ms polling read timeout before
+`tungstenite::accept`, so on a loaded runner a client whose upgrade request came a tick late was dropped mid-handshake
+(Windows os error 10053). Debrief's copy had hit the same bug earlier ("Handshake not finished") and was fixed alone.
+**Rule:** a fake server completes its protocol handshake with a blocking read and only then sets a polling timeout; the
+regression test keeps the client quiet for many ticks before it shakes hands. A fix in one copy of duplicated code is
+searched for in the others the same day.
