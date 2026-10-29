@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-/// A short folder under `/tmp` that is the only place a process started with [`Confined::env`] makes endpoint folders.
+/// A short folder (in the job's socket base, else under `/tmp`) that is the only place a process started with [`Confined::env`] makes endpoint folders.
 ///
 /// It is short because an endpoint's socket path is limited to [`crate::endpoint::MAX_SOCKET_PATH`] bytes: in macOS' long
 /// temp folder a path does not fit, and `create_named` would go on to `/tmp`, outside the folder. Removed when dropped.
@@ -15,13 +15,29 @@ pub struct Confined {
     path: PathBuf,
 }
 
-/// Makes a [`Confined`] folder. Test-only: it panics (`expect`) when `/tmp` cannot hold a folder or the folder vanishes,
-/// which fails the test that asked for it, the right outcome there; product code must not call it.
+/// Makes a [`Confined`] folder in the job's socket base when there is one (CI's job-tmpdir sets
+/// [`crate::endpoint::SOCKET_BASE_VAR`] to a short folder of the job's own), else in `/tmp`. Test-only: it panics (`expect`)
+/// when the folder cannot be made or vanishes, which fails the test that asked for it, the right outcome there; product code
+/// must not call it.
 pub fn confined_tmp() -> Confined {
+    confined_tmp_in(&confined_base(std::env::var_os(crate::endpoint::SOCKET_BASE_VAR)))
+}
+
+/// Where [`confined_tmp`] makes its folder: the socket base when it names a folder, else `/tmp`.
+pub fn confined_base(socket_base: Option<std::ffi::OsString>) -> PathBuf {
+    socket_base
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .filter(|d| d.is_dir())
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+}
+
+/// A [`Confined`] folder in `base` (which must be short: see [`Confined`]).
+pub fn confined_tmp_in(base: &Path) -> Confined {
     let dir = tempfile::Builder::new()
         .prefix("dbw")
-        .tempdir_in("/tmp")
-        .expect("a folder under /tmp");
+        .tempdir_in(base)
+        .expect("a confined folder in the socket base");
     let path = dir.path().canonicalize().expect("the folder exists");
     Confined { dir, path }
 }
@@ -43,5 +59,24 @@ impl Confined {
         let path = self.dir.path().to_path_buf();
         drop(self.dir);
         path
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// CI (2026-10-29): confined folders went straight to the shared `/tmp`; a job's own socket folder comes first.
+    #[test]
+    fn a_confined_folder_goes_in_the_job_socket_base_when_there_is_one() {
+        let base = tempfile::tempdir().unwrap();
+        assert_eq!(confined_base(Some(base.path().as_os_str().to_owned())), base.path());
+        assert_eq!(confined_base(None), Path::new("/tmp"));
+        assert_eq!(confined_base(Some("".into())), Path::new("/tmp"));
+        assert_eq!(confined_base(Some(base.path().join("gone").into_os_string())), Path::new("/tmp"));
+        let c = confined_tmp_in(base.path());
+        assert!(c.path().starts_with(base.path().canonicalize().unwrap()));
+        let gone = c.remove();
+        assert!(!gone.exists());
     }
 }
