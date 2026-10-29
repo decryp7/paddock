@@ -114,7 +114,7 @@ fn run() -> Result<(), String> {
     }
     install_signal_handlers();
     let (platform, details) = platforms();
-    let running = Running::start(dirs, platform, details, reveal())?;
+    let running = Running::start_os(dirs, platform, details, reveal())?;
     eprintln!("dyno-agent {} running (pid {})", env!("CARGO_PKG_VERSION"), running.discovery.pid);
     while !running.stopped() && !SIGNALLED.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(200));
@@ -194,7 +194,7 @@ fn bench(seconds: u64, who: &str) -> Result<(), String> {
     let tmp = tempfile_dir()?;
     let dirs = Dirs::at(tmp.join("data"));
     let (platform, details) = platforms();
-    let running = Running::start(dirs.clone(), platform, details, Box::new(|_| Ok(())))?;
+    let running = Running::start_os(dirs.clone(), platform, details, Box::new(|_| Ok(())))?;
     let (peer, _) = connect(&dirs)?;
     let seen = Arc::new(Mutex::new((0u64, 0f32, 0u64)));
     let s = seen.clone();

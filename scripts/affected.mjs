@@ -8,7 +8,7 @@
 //   options: --explain   the reason for every project
 //
 // Projects: `crates` (the shared Cargo workspace), `ui` (the shared Angular workspace), `eslint`, `conformance`, `tools`
-// (tools/, templates/ and the scripts' tests), `icons`, `ci-image` and `app:<name>` for every apps/<name>/ with a
+// (tools/, templates/ and the scripts' tests), `paddock-dev` (tools/paddock-dev/ and the ./dev wrapper), `icons`, `ci-image` and `app:<name>` for every apps/<name>/ with a
 // paddock.ci.json. A changed file marks the project that owns it, then every project that reaches it through the graph,
 // read from the working tree:
 //   - Cargo path dependencies of every Cargo workspace (`cargo metadata --no-deps`, run inside the repo: cargo reads
@@ -31,9 +31,18 @@
 // No dependencies; Node 22+.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
-import { dirname, join, posix, relative, resolve } from 'node:path';
+import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from '../conformance/src/util/is-main.mjs';
+
+/**
+ * `p` relative to `root`, always with `/` separators: every key of the graphs is a `/` path, and on Windows `path.relative`
+ * returns `crates\\paddock-cli`, which matches none of them (the crate and its apps were then unreachable).
+ * `rel` and `separator` are injectable so that a test can use `path.win32`.
+ */
+export function repoRelative(root, p, rel = relative, separator = sep) {
+  return rel(root, p).split(separator).join('/');
+}
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const git = (args, cwd = ROOT) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -65,6 +74,12 @@ export function appOfWorkflow(path, appNames) {
   return hits[0] ?? null;
 }
 
+/**
+ * Files every app's playwright.config.ts imports by relative path (the e2e port and build guard of @decryp7/paddock-e2e): no
+ * npm or tsconfig edge says so, so a change to one re-runs the UI half of every app.
+ */
+export const E2E_GUARD_INPUTS = /^ui\/projects\/paddock-e2e\/src\/(env|build-guard)\.ts$/;
+
 /** Editor and VCS metadata: marks nothing. */
 export const META = [/(^|\/)\.gitignore$/, /^\.editorconfig$/, /(^|\/)\.DS_Store$/, /^lefthook\.yml$/];
 
@@ -93,6 +108,7 @@ const OWNERS = [
   [/^eslint\//, ['eslint']],
   [/^conformance\//, ['conformance']],
   [/^paddock\.(conformance\.json|waivers\.toml)$/, ['conformance']],
+  [/^(tools\/paddock-dev\/|dev$|dev\.cmd$)/, ['paddock-dev']], // the developer tool (ADR 0022): its own three-OS leg
   [/^(tools|templates)\//, ['tools']],
   // The scripts' tests run in the ui job (`npm run test:scripts`) and in the tools job.
   [/^scripts\//, ['tools', 'ui']],
@@ -171,8 +187,8 @@ export function cargoGraph(files, root = ROOT) {
     }
     const workspace = dirname(m);
     for (const p of meta.packages) {
-      const dir = relative(root, dirname(p.manifest_path));
-      const deps = p.dependencies.filter((d) => d.path).map((d) => relative(root, d.path));
+      const dir = repoRelative(root, dirname(p.manifest_path));
+      const deps = p.dependencies.filter((d) => d.path).map((d) => repoRelative(root, d.path));
       crates.set(dir, { name: p.name, workspace, deps });
     }
   }
@@ -203,7 +219,7 @@ export function npmGraph(files, root = ROOT) {
     const dist = JSON.parse(readFileSync(join(root, f), 'utf8')).build?.frontendDist;
     if (typeof dist !== 'string' || /^https?:/.test(dist)) continue;
     const self = dirname(f);
-    const target = nodeOf(relative(root, resolve(root, self, dist)), pkgs.keys());
+    const target = nodeOf(repoRelative(root, resolve(root, self, dist)), pkgs.keys());
     if (!target || self === target || self.startsWith(`${target}/`)) continue;
     if (!pkgs.has(self)) pkgs.set(self, { name: self, deps: [] });
     edge(self, target);
@@ -212,7 +228,7 @@ export function npmGraph(files, root = ROOT) {
   for (const f of files.filter((x) => /(^|\/)(tsconfig[^/]*\.json|angular\.json|eslint\.config\.[cm]?js)$/.test(x))) {
     const from = nodeOf(f, pkgs.keys());
     if (!from) continue;
-    for (const ref of pathRefs(readFileSync(join(root, f), 'utf8'))) edge(from, nodeOf(relative(root, resolve(root, dirname(f), ref)), pkgs.keys()));
+    for (const ref of pathRefs(readFileSync(join(root, f), 'utf8'))) edge(from, nodeOf(repoRelative(root, resolve(root, dirname(f), ref)), pkgs.keys()));
   }
   return pkgs;
 }
@@ -265,11 +281,11 @@ export function lockDiff(before, after) {
 
 // ------------------------------------------------------------------------------------------------------------- plan
 
-const PROJECTS = ['crates', 'ui', 'eslint', 'conformance', 'tools', 'icons', 'ci-image'];
+const PROJECTS = ['crates', 'ui', 'eslint', 'conformance', 'tools', 'icons', 'ci-image', 'paddock-dev'];
 
 /**
  * The plan for a list of changed files. `graph` is { cargo, npm, apps } from the readers above; `all` selects everything.
- * Result: { all, crates, ui, eslint, conformance, tools, icons, ciImage, docs, apps: [name], kinds: { app: ['rust','ui'] },
+ * Result: { all, crates, ui, eslint, conformance, tools, icons, ciImage, paddockDev, docs, apps: [name], kinds: { app: ['rust','ui'] },
  * packages: { workspace: [crate] } } and `why` with `explain`.
  */
 export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockAfter = null, all = false, explain = false } = {}) {
@@ -304,6 +320,12 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     if (GLOBAL.some((r) => r.test(f))) {
       markAll(`global ${f}`);
       continue;
+    }
+    if (E2E_GUARD_INPUTS.test(f)) {
+      for (const name of apps.keys()) {
+        mark(`app:${name}`, `e2e guard ${f}`);
+        kind(`app:${name}`, 'ui');
+      }
     }
     if (f === 'package-lock.json') {
       for (const ws of lockDiff(lockBefore, lockAfter)) {
@@ -394,6 +416,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     tools: set.has('tools'),
     icons: set.has('icons'),
     ciImage: set.has('ci-image'),
+    paddockDev: set.has('paddock-dev'),
     docs,
     apps: [...set].filter((p) => p.startsWith('app:') && apps.has(p.slice(4))).map((p) => p.slice(4)).sort(),
     kinds: Object.fromEntries([...kinds].filter(([p]) => apps.has(p.slice(4))).map(([p, k]) => [p.slice(4), [...k].sort()]).sort()),
@@ -508,6 +531,7 @@ export function onlyApp(plan, app) {
     tools: false,
     icons: false,
     ciImage: false,
+    paddockDev: false,
     docs: false,
     apps: [app],
     kinds: { [app]: ['rust', 'ui'] },
@@ -594,7 +618,7 @@ export function summary(plan, reason, legs) {
     '',
     '| Project | Runs |',
     '|---|---|',
-    ...['crates', 'ui', 'eslint', 'conformance', 'tools'].map((p) => `| ${p} | ${yes(plan[p])} |`),
+    ...['crates', 'ui', 'eslint', 'conformance', 'tools', 'paddockDev'].map((p) => `| ${p} | ${yes(plan[p])} |`),
     ...legs.map((l) => `| app ${l.app}${l.os === LINUX ? '' : ` (${l.os})`} | ${l.e2e_leg ? `${l.e2e_leg.replace('-', ' ')}${l.e2e_shard ? ` ${l.e2e_shard}` : ''}` : [l.rust && 'rust', l.ui && 'ui'].filter(Boolean).join(' + ') || 'checks only'}${l.filter ? ` (\`${l.filter}\`)` : ''} |`),
   ];
   if (plan.docs && !legs.length && !plan.crates && !plan.ui) lines.push('', 'Docs only: nothing to build.');
@@ -648,6 +672,7 @@ async function ci(env, { app = null } = {}) {
     conformance: plan.conformance,
     tools: plan.tools,
     icons: plan.icons,
+    paddock_dev: plan.paddockDev,
     apps: JSON.stringify(legs),
     any_app: legs.length > 0,
   };

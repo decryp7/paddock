@@ -6,8 +6,8 @@
   "description": "The shared design system of the Paddock app family: tokens, components and chart theme.",
   "scripts": {
     "ng": "ng",
-    "build:css": "node scripts/build-css.mjs",
-    "build": "npm run build:css && ng build paddock-ui",
+    "build:css": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-css.mjs",
+    "build": "npm run build:css && ng build paddock-ui && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/stamp-dist.mjs",
     "test": "npm run build:css && ng test paddock-ui --watch=false && ng test workbench-demo --watch=false",
     "test:tokens": "vitest run --config vitest.tokens.config.ts",
     "gallery": "npm run build:css && ng serve gallery --port 4300",

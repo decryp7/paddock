@@ -65,3 +65,15 @@ export { dialogFitProblems, openEveryDialog, measureDialogWindow, FIT_SCALES, FI
 export { WorkbenchApp, WorkbenchFrame, WorkbenchActivityBar, WorkbenchExplorer, WorkbenchPalette } from './workbench.ts';
 export { renderFlaky, type Flaky } from './retried-reporter.ts';
 export { readVersion, RELEASE_VERSION } from './version.ts';
+export {
+  appBuildGuard,
+  appBuildGuardOf,
+  assertFreshBuilds,
+  reuseServer,
+  uiConfigGuard,
+  stampBuild,
+  staleBuilds,
+  sourceHash,
+  REBUILD_HINT,
+  type BuildGuard,
+} from './build-guard.ts';

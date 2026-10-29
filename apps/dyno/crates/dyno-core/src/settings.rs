@@ -138,6 +138,8 @@ pub struct Settings {
     pub hardware_alarms: HardwareAlarms,
     /// New and unusual programs: learn a baseline and list what is new (observe-only).
     pub unusual: crate::unusual::UnusualSettings,
+    /// The disk map's limits.
+    pub disk: crate::disk::settings::DiskSettings,
     /// Maintenance windows: when Dyno's heavier background work may run (off: any time).
     pub maintenance: crate::extras::maintenance::MaintenanceSettings,
     /// Backup health checks: how stale is too stale, and where to find the tools.
@@ -185,6 +187,7 @@ impl Default for Settings {
             baselines: Default::default(),
             hardware_alarms: Default::default(),
             unusual: Default::default(),
+            disk: Default::default(),
             maintenance: Default::default(),
             backup: Default::default(),
         }
@@ -217,6 +220,7 @@ impl Settings {
         self.custom_alerts = crate::alarms::custom::normalise_rules(self.custom_alerts);
         self.counters = self.counters.normalised();
         self.unusual = self.unusual.clamped();
+        self.disk = self.disk.clamped();
         // A damaged value falls back to its default rather than blocking the whole file.
         self.maintenance.windows.truncate(crate::extras::maintenance::MAX_WINDOWS);
         if self.maintenance.validate().is_err() {
@@ -329,6 +333,17 @@ mod tests {
         let j = serde_json::to_value(Settings::default()).unwrap();
         assert!(j["dashboard"]["presets"].is_array());
         assert_eq!(j["trayItems"]["items"][0]["metric"], "cpuTotal");
+    }
+
+    #[test]
+    fn disk_settings_are_optional_clamped_and_camel_case() {
+        let (s, w) = parse(r#"{"theme":"dark"}"#);
+        assert!(w.is_none());
+        assert_eq!(s.disk, crate::disk::settings::DiskSettings::default());
+        let (s, _) = parse(r#"{"disk":{"scanFolders":1,"notableFileMib":2}}"#);
+        assert_eq!((s.disk.scan_folders, s.disk.notable_file_mib), (10_000, 2));
+        let j = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(j["disk"], serde_json::json!({"scanFolders": 2_000_000, "notableFileMib": 10}));
     }
 
     #[test]

@@ -3458,12 +3458,14 @@ dependencies = [
 name = "paddock-workspace-hack"
 version = "0.1.0"
 dependencies = [
+ "aho-corasick",
  "base64 0.23.1",
  "bitflags 2.13.2",
  "block2",
  "cairo-sys-rs",
  "chrono",
  "crc32fast",
+ "crossbeam-utils",
  "deranged",
  "digest 0.11.3",
  "email_address",

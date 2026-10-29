@@ -15,12 +15,15 @@ copied). Read them before any change; their reasons are in [docs/lessons.md](doc
 ## Layout
 
 ```
-crates/          shared Rust crates, one Cargo workspace (crates/Cargo.toml)
+crates/          shared Rust crates, one Cargo workspace (crates/Cargo.toml); paddock-slots, paddock-repo-files and
+                 paddock-repo-graph are the libraries under tools/paddock-dev
 ui/              @decryp7/paddock-ui, @decryp7/paddock-e2e, the gallery and the demo UIs (one Angular workspace)
 apps/<app>/      one app each (debrief, dyno, pacenotes, pitcrew, pitwall, sighter, spotter and the two demos), its tree
                  unchanged below its folder, its own Cargo workspace and Cargo.lock, and paddock.ci.json (its CI contract)
 conformance/ eslint/ tsconfig/ lint/ icons/ templates/    shared checks, presets, the icon pipeline, new-app templates
 docs/            family docs: rules, lessons, ADRs, plans, research; an app's docs stay in apps/<app>/docs
+tools/paddock-dev  the Rust developer and CI tool (ADR 0022: its own Cargo workspace and lockfile; run it with `./dev`, which
+                 builds or fetches the binary its inputs name)
 scripts/         family scripts: affected.mjs (CI's plan), publish.mjs, new-app.mjs, demo-release.mjs
 .gitea/          ci.yml (plan and affected jobs), nightly.yml, each app's <app>.yml, the shared actions
 package.json     the one npm workspace and package-lock.json (ui, eslint, icons, the demos, apps/*/app)
@@ -29,7 +32,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 ## Working in the monorepo
 
 - **Worktrees (rule 2).** Every agent works in its own worktree of `paddock`; for app work a sparse one:
-  `git sparse-checkout set --cone crates ui scripts docs apps/<app>`. Never work in the main checkout; never `git stash`.
+  `git sparse-checkout set --cone crates ui scripts docs tools apps/<app>`. Never work in the main checkout; never `git stash`.
 - **Build folders.** One `CARGO_TARGET_DIR` per app per worktree, kept between tasks for the same app (reusing it is
   what makes rebuilds fast; sccache gives almost nothing across worktrees, ADR 0014 §1).
 - **Cargo.** There is no root Cargo workspace: `crates/` and each app are their own workspaces, so each app builds with
@@ -74,6 +77,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 
 ## Testing and quality gates
 
+- **E2E and screenshots run on fresh code (guidance; a binding rule is proposed).** A running dev server is reused only with `PW_REUSE_SERVER=1`; default ports derive from the worktree path (`e2ePort` in `@decryp7/paddock-e2e`); a config that consumes `ui/dist` or the css fails at load with "rebuild ui: npm run build -w ui" when they were built from older sources (`build-guard.ts`, content stamps; lessons.md). New Playwright configs use these.
 - Every change ships with tests; every bug fix starts with a failing test. A colour change keeps `npm run test:tokens`
   green (WCAG AA/AAA pairs, CVD separation); change the tokens, not the test.
 - Before committing, the gates of the affected projects, for example:
