@@ -277,16 +277,19 @@ fn a_bad_first_run_step_fails_the_start_naming_the_checklist() {
     assert!(err.contains("set-up checklist"), "{err}");
 }
 
-/// Waits (with a hang guard only lost work reaches) until the main window exists.
+/// Waits until the work deferred so far has run (the deferred work runs in order, so a marker queued last arrives
+/// after it; a hang guard only lost work reaches), then checks the main window exists.
 fn wait_for_main(app: &tauri::App<MockRuntime>) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while app.get_webview_window("main").is_none() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the main window never opened"
-        );
-        std::thread::yield_now();
-    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    paddock_window::tauri::after_plugin_hook(app.handle(), move |_| {
+        let _ = tx.send(());
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the deferred work ran");
+    assert!(
+        app.get_webview_window("main").is_some(),
+        "the main window opened"
+    );
 }
 
 /// A start that cannot open its window ends the app through the window layer's exit (code 1), never a panic; a start
@@ -303,12 +306,10 @@ fn a_start_that_cannot_open_its_window_exits_with_code_1() {
                 .exit_app(move |_, code| seen.lock().unwrap().push(code))
                 .build()
         }));
-    let report = StartReport::new(None);
-    started(app.handle(), &report, Ok(()));
+    started(app.handle(), Ok(()));
     assert!(exits.lock().unwrap().is_empty());
     started(
         app.handle(),
-        &report,
         Err(WindowError::new(
             paddock_window::WindowErrorCode::Failed,
             "no screen",
@@ -345,87 +346,4 @@ fn a_file_opened_from_finder_opens_the_main_window_after_the_hook() {
         },
     );
     wait_for_main(&app);
-}
-
-/// A tray backend for a desktop without a tray.
-struct NoTrayHere;
-
-impl paddock_window::tauri::TrayBackend<MockRuntime> for NoTrayHere {
-    fn create(
-        &self,
-        _: &AppHandle<MockRuntime>,
-        _: &paddock_window::tray::TrayView,
-    ) -> Result<(), String> {
-        Err("no status-notifier host".into())
-    }
-    fn update(
-        &self,
-        _: &AppHandle<MockRuntime>,
-        _: &paddock_window::tray::TrayView,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-/// The start's messages also reach the app's own log (its `start_log` hook): a desktop without a tray, and a start that
-/// cannot open its window.
-#[test]
-fn the_start_messages_reach_the_apps_own_log() {
-    let lines = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-    let seen = lines.clone();
-    let started_app = crate::testing::start(move || {
-        Builder::new(identity())
-            .in_memory()
-            .native_menu(false)
-            .windows(|_| Windows::builder(WindowConfig::new("Shell Demo")).build())
-            .tray(|_| {
-                paddock_window::tauri::Tray::new(NoTrayHere, |_| {
-                    paddock_window::tray::TrayView::new("Shell Demo", vec![], "normal")
-                })
-            })
-            .launch(LaunchArgs::default())
-            .start_log(move |line| seen.lock().unwrap().push(line.to_string()))
-            .add_to(mock_builder())
-    });
-    assert_eq!(
-        started_app,
-        Ok(crate::testing::Started {
-            main_window: true,
-            tray: false
-        })
-    );
-    let got = lines.lock().unwrap().clone();
-    assert!(got.iter().any(|l| l.contains("No tray icon")), "{got:?}");
-
-    let exits = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let codes = exits.clone();
-    let app = app(Builder::new(identity())
-        .in_memory()
-        .native_menu(false)
-        .windows(move |_| {
-            Windows::builder(WindowConfig::new("Shell Demo"))
-                .exit_app(move |_, code| codes.lock().unwrap().push(code))
-                .build()
-        }));
-    let heard = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-    let h = heard.clone();
-    let report = StartReport::new(Some(Arc::new(move |line: &str| {
-        h.lock().unwrap().push(line.to_string())
-    })));
-    started(
-        app.handle(),
-        &report,
-        Err(WindowError::new(
-            paddock_window::WindowErrorCode::Failed,
-            "no screen",
-        )),
-    );
-    assert_eq!(*exits.lock().unwrap(), [1]);
-    let heard = heard.lock().unwrap().clone();
-    assert!(
-        heard
-            .iter()
-            .any(|l| l.contains("could not open its window") && l.contains("no screen")),
-        "{heard:?}"
-    );
 }

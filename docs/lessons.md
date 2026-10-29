@@ -694,5 +694,7 @@ Dyno, Pitcrew's shell branch and both demos) and the shell's run-event hook a si
 **Rule (ADR 0029):** the shell opens the start (`Builder::tray`, `Builder::launch`, `Builder::add_to`); apps never call
 `paddock_window::tauri::start`; window work a hook triggers runs after it (`after_plugin_hook`); every shared plugin
 marks its hooks with `plugin_hook_scope`, and Paddock's window builders refuse to build inside one. Each app tests its
-composed start with `paddock_shell::testing::start` (C50). Also: a start-up hang with an empty log is checked first
-with a symbolised stack, not by guessing at the VM.
+composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor Dyno installed a backend for the `log`
+crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
+(`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
+not by guessing at the VM.

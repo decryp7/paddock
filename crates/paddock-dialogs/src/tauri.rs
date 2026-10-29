@@ -310,6 +310,9 @@ fn open_on<R: Runtime>(
     };
     if let Err(e) = build_window(app, &spec, &place, (min_w, min_h), &parent) {
         dialogs.remove(&label);
+        if e.code == DialogErrorCode::InsidePluginHook {
+            return Err(e);
+        }
         return Err(DialogError::new(
             DialogErrorCode::Failed,
             format!("could not open the dialog window: {e}"),
@@ -364,7 +367,7 @@ fn build_window<R: Runtime>(
 ) -> Result<(), DialogError> {
     if paddock_commands::plugin_hook::in_plugin_hook() {
         return Err(DialogError::new(
-            DialogErrorCode::NotReady,
+            DialogErrorCode::InsidePluginHook,
             format!(
                 "the dialog \"{}\" {}",
                 spec.label,

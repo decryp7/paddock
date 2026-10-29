@@ -4,3 +4,4 @@
 
 mod plugin;
 mod shell_demo;
+mod start;

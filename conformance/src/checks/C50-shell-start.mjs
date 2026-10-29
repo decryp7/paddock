@@ -2,22 +2,48 @@
 // opened their main window from the shell's `setup`, inside Tauri's plugin set-up, where building a webview deadlocks the
 // main thread (Spotter 1.0 started with no window, 2026-10-29). The shell now opens the tray and the main window itself
 // (`Builder::tray`, `Builder::launch`, `Builder::add_to`); an app (a `src-tauri/Cargo.toml` depending on `paddock-shell`)
-// must not call `paddock_window::tauri::start` in its own sources, and one of its Rust tests must run its composed start
-// through `paddock_shell::testing::start` (the main window opens; `--hidden` with a tray opens none).
+// must not open its main window itself (`paddock_window::tauri::start` or `create_main`, by path or `use`) nor give
+// `tauri::Builder` a `setup` of its own (it replaces the shell's), must install `paddock_log` (else every shared crate's
+// log line is lost), and one of its Rust tests must run its composed start through `paddock_shell::testing::start` and
+// check `main_window`.
 import { error } from '../finding.mjs';
 
 const code = (text) => text.replace(/\/\/.*$/gm, '');
 
+/** Whether `src` opens the main window itself: `paddock_window::tauri::start` or `create_main`, by path or imported. */
+function opensItsOwnWindow(src) {
+  if (/paddock_window::tauri::(start|create_main)\b/.test(src)) return true;
+  for (const m of src.matchAll(/use\s+paddock_window::tauri::\{([^}]*)\}/g)) {
+    if (/(^|[,\s])(start|create_main)\b/.test(m[1])) return true;
+  }
+  return false;
+}
+
+/** Whether `src` gives a `tauri::Builder` a `setup` of its own (it would replace the one `Builder::add_to` gives it). */
+function setsUpTauri(src) {
+  for (const m of src.matchAll(/tauri::Builder::(default|new)\s*\(\s*\)/g)) {
+    const end = src.indexOf(';', m.index);
+    if (/\.setup\s*\(/.test(src.slice(m.index, end < 0 ? undefined : end))) return true;
+  }
+  return false;
+}
+
 /** What is wrong with one app: `tests` and `sources` are the texts of its Rust tests and its other Rust sources. */
 export function startProblems({ tests, sources }) {
   const out = [];
-  const tested = tests.some((t) => {
-    const c = code(t);
-    return /paddock_shell::testing::start\b/.test(c) || (/paddock_shell::testing::\{[^}]*\bstart\b/.test(c) && /\bstart\s*\(/.test(c));
-  });
-  if (!tested) out.push('no start test: none of its Rust tests runs the composed start through paddock_shell::testing::start');
-  if (sources.some((s) => /paddock_window::tauri::start\s*\(/.test(code(s)))) {
-    out.push('opens its own main window (paddock_window::tauri::start): the shell opens it (Builder::launch and Builder::add_to)');
+  const starts = tests.map(code).filter((c) => /paddock_shell::testing::start\b/.test(c) || (/paddock_shell::testing::\{[^}]*\bstart\b/.test(c) && /\bstart\s*\(/.test(c)));
+  if (!starts.length) out.push('no start test: none of its Rust tests runs the composed start through paddock_shell::testing::start');
+  else if (!starts.some((c) => /\bmain_window\b/.test(c))) out.push('the start test never checks main_window (that the main window opened)');
+  const src = sources.map(code);
+  if (src.some(opensItsOwnWindow)) {
+    out.push('opens its own main window (paddock_window::tauri::start or create_main): the shell opens it (Builder::launch and Builder::add_to)');
+  }
+  if (src.some(setsUpTauri)) {
+    out.push("gives tauri::Builder a setup of its own, which replaces the start Builder::add_to gives it: put the app's set-up in the shell's setup");
+  }
+  const logs = (c) => /paddock_shell::logging::install\s*\(/.test(c) || (/paddock_log::/.test(c) && /\.install\s*\(/.test(c));
+  if (!src.some(logs)) {
+    out.push("installs no paddock_log: the shared crates' log lines (the start's error among them) go nowhere");
   }
   return out;
 }

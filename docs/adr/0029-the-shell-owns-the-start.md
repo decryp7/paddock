@@ -1,6 +1,6 @@
 # 29. The shell owns the start: the tray and the main window open after every plugin is set up
 
-- Status: Accepted (2026-10-29; the coordinator decided the design after an independent review of the fix)
+- Status: Accepted (2026-10-29), by the user, after independent review rounds 1–2
 - Date: 2026-10-29
 - Related: ER-11, ER-14, ER-21 (recurring bugs mean a missing design rule), rules 40, 42, 43; ADR 0012 (the app shell),
   ADR 0026 (the shared dialog API); lesson "a window built inside a plugin hook deadlocks the main thread" (2026-10-29)
@@ -20,8 +20,10 @@ tauri::Builder::build → AppManager::initialize_plugins → (paddock-shell plug
   → WebviewManager::prepare_pending_webview → Mutex<PluginStore>::lock   (held by initialize_plugins: self-deadlock)
 ```
 
-Tauri 2 holds its plugin store while it runs every plugin's `setup`, `on_event`, `on_page_load`, `on_window_ready` and
-`on_webview_ready`, and building a webview locks that store again on the same thread. The shell's `Builder::setup` runs
+Tauri 2 holds its plugin store while it runs every plugin's `setup`, `on_event`, `on_page_load`, `on_window_ready`,
+`on_webview_ready` and `on_navigation`, and while it calls a plugin's invoke handler; building a webview locks that store
+again on the same thread. (The invoke handlers are safe only because every Paddock command is `async`: the handler
+schedules the command and returns before its body runs.) The shell's `Builder::setup` runs
 the app's closure inside the shell plugin's `setup`, so an app that opened its tray and main window there (the obvious
 place) deadlocked before the event loop ran. Five copies had the same mistake: Spotter, Dyno (`dyno/shell-1.0`), Pitcrew
 (`pitcrew/shell-1.1`), the shell demo and the workbench demo; the shell's own run-event hook had a sixth (a Dock click
@@ -33,9 +35,11 @@ build a webview this way, so only an installed app showed it.
 1. **The shell opens the start.** `paddock_shell::Builder::tray(f)` (the app's tray: backend, model, actions) and
    `Builder::launch(LaunchArgs)` declare it; `Builder::add_to(tauri::Builder)` adds the plugin and Tauri's `setup`, which
    runs after every plugin is set up and outside the plugin store's lock: the tray, then `paddock_window::tauri::start`
-   (no window for `--hidden` with a tray). A start that cannot open its window is logged and ends the app with code 1
-   through the window layer's exit (`exit_with`), not a panic in the event loop. Apps no longer call `start` themselves;
-   the shell's `Builder::setup` is for state only. `add_to` takes `tauri::Builder::setup`; an app that needs its own
+   (no window for `--hidden` with a tray). A start that cannot open its window is logged (`log::error!` with the reason
+   as its `Error` field) and ends the app with code 1 through the window layer's exit (`exit_with`), not a panic in the
+   event loop. A shell built with `build()` that has a tray or a launch fails the start ("tray/launch need
+   Builder::add_to"). Apps no longer call `start` themselves; the shell's `Builder::setup` is for state only, and each
+   app's own set-up (Spotter's engine, Dyno's agent link) lives there, so the start test covers it. `add_to` takes `tauri::Builder::setup`; an app that needs its own
    Tauri set-up adds it to the shell (a later need, not built now).
 2. **Window work a hook triggers runs after the hook.** `paddock_window::tauri::after_plugin_hook` queues it; one task
    hands it to the main thread through the event loop, in the order given. The shell's run-event hook uses it for
@@ -43,13 +47,18 @@ build a webview this way, so only an installed app showed it.
 3. **Defence in depth: windows refuse to be built inside a hook.** `paddock_commands::plugin_hook` marks a thread inside a
    hook (`plugin_hook_scope`, not `Send`); the shell and the workbench plugin mark every hook they register. Every
    Paddock window builder checks it first and fails with a message that names the fix: `paddock-window` (windows, tray
-   popover; error code `insidePluginHook`), `paddock-dialogs` (dialogs), `paddock-panels` (pop-outs, the drag ghost).
+   popover), `paddock-dialogs` (dialogs), `paddock-panels` (pop-outs, the drag ghost), each with the error code
+   `insidePluginHook`.
 4. **Every app tests its start (rule 43).** `paddock_shell::testing::start` (feature `mock-runtime`) builds the app's own
    composition on the mock runtime with a `HeadlessTray`, runs Tauri's set-up once and reports whether the main window
    and the tray exist; a hang is reported as a deadlock after a hang guard. Each app has the start test and a `--hidden`
    case; the OS plugins (single instance, autostart, updater) stay out (rule 7). The demos carry the test, so a new app
-   from `scripts/new-app.mjs` starts with it. Conformance **C50** fails an app on the shell without the test, or one that
-   calls `paddock_window::tauri::start` itself.
+   from `scripts/new-app.mjs` starts with it. Conformance **C50** fails an app on the shell without the test (or one that
+   never checks `main_window`), one that opens its window itself (`start` or `create_main`, by path or `use`), one that
+   gives `tauri::Builder` a `setup` of its own (it would replace the shell's), and one that installs no log.
+5. **Every app installs the family log first** (`paddock_shell::logging::install`, over `paddock-log`, ER-22): without a
+   `log` backend every line of the shared crates is lost (the start's error, failed windows, dialogs and pop-outs, the
+   start-up watchdog), which is part of why Spotter's hang left nothing in its log.
 
 ## Consequences
 

@@ -33,6 +33,7 @@
 
 mod builder;
 mod commands;
+pub mod logging;
 pub mod manifest;
 pub mod notifications;
 pub mod permissions;
