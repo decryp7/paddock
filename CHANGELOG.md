@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-jobs`: `WalkOptions::with_modified`
+- `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
+
 ### `paddock-jobs`: the `wire` module
 - New `paddock_jobs::wire` (`WireSnapshot`, `WireState`, `WirePhase`): the postcard-safe form of a `JobSnapshot` for apps whose jobs run in an agent process and are relayed to the UI as `paddock://jobs` events (Dyno is the first). It converts both ways without loss.
 ### `pd-sunburst` in `@decryp7/paddock-ui/chart` (docs/plans/pd-sunburst.md)
