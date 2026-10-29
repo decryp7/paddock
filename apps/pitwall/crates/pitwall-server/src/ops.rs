@@ -102,15 +102,16 @@ mod tests {
         let mut ops = Ops::default();
         let a = ops.begin("same", 0);
         let b = ops.begin("same", 0);
-        let (wa, wb) = (a.clone(), b.clone());
-        let ta = tokio::spawn(async move { wa.notified().await });
-        let tb = tokio::spawn(async move { wb.notified().await });
-        // Both are waiting before the cancel is sent.
-        for _ in 0..20 {
-            tokio::task::yield_now().await;
-        }
+        let (mut na, mut nb) = (std::pin::pin!(a.notified()), std::pin::pin!(b.notified()));
+        // Both are registered as waiters before the cancel is sent (no scheduling involved).
+        na.as_mut().enable();
+        nb.as_mut().enable();
         ops.cancel("same", 1);
-        let both = tokio::time::timeout(std::time::Duration::from_secs(30), async { (ta.await, tb.await) }).await;
+        let both = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            na.await;
+            nb.await;
+        })
+        .await;
         assert!(both.is_ok(), "both operations were woken by one cancel");
     }
 

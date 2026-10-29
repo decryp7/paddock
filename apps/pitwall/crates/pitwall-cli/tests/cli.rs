@@ -533,9 +533,9 @@ fn a_call_that_never_answers_times_out() {
     t.join().unwrap();
 }
 
-/// A loopback port that is bound and held but not listening: connecting is refused (Linux and Windows; macOS drops the
-/// attempt instead, so the test below does not run there).
-#[cfg(not(target_os = "macos"))]
+/// A loopback port that is bound and held but not listening: connecting is refused (Linux only: macOS drops the attempt, and Windows reports
+/// the refusal after about 2 s of SYN retries, close to the client's 3 s connect timeout).
+#[cfg(target_os = "linux")]
 fn refused_port() -> (socket2::Socket, u16) {
     let s = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
     s.bind(&std::net::SocketAddr::from(([127, 0, 0, 1], 0)).into()).unwrap();
@@ -543,7 +543,7 @@ fn refused_port() -> (socket2::Socket, u16) {
     (s, port)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
 #[test]
 fn nothing_listening_is_exit_3_with_the_next_step() {
     let (_held, port) = refused_port();

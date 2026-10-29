@@ -401,11 +401,11 @@ mod tests {
     }
 }
 
-#[cfg(all(test, not(target_os = "macos")))]
+#[cfg(all(test, target_os = "linux"))]
 mod refused_tests {
     use super::*;
 
-    /// A loopback port that is bound and held but not listening: connecting is refused (Linux and Windows; macOS drops the
+    /// A loopback port that is bound and held but not listening: connecting is refused (Linux only: Windows reports the refusal after about 2 s of SYN retries, close to the 3 s connect timeout, and macOS drops the
     /// attempt instead, so these tests do not run there). The socket keeps the port taken for as long as it is alive.
     fn refused_port() -> (socket2::Socket, u16) {
         let s = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();

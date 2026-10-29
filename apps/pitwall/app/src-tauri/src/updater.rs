@@ -178,15 +178,50 @@ impl OfflineKnown {
         let flag = match method {
             "update_check_status" => reply.get("offline"),
             "overview" => reply.get("server").and_then(|s| s.get("offline")),
+            "settings" | "save_settings" => reply.get("network").and_then(|n| n.get("offline")),
             _ => None,
         };
         if let Some(b) = flag.and_then(Value::as_bool) {
             self.set(b);
         }
     }
+
+    /// Learns from one frame of the live feed: a `server` update carries `server.offline`. Frames that are not JSON or
+    /// do not carry it say nothing.
+    pub fn observe_frame(&self, frame: &str) {
+        if let Ok(v) = serde_json::from_str::<Value>(frame) {
+            if v.get("kind").and_then(Value::as_str) == Some("server") {
+                self.observe("overview", &json_server(&v));
+            }
+        }
+    }
 }
 
-/// A client that tells [`OfflineKnown`] about every status or overview answer that passes through.
+/// A `server` frame as an overview-shaped value, so one reader serves both.
+fn json_server(frame: &Value) -> Value {
+    serde_json::json!({ "server": frame.get("server").cloned().unwrap_or(Value::Null) })
+}
+
+/// A live stream that tells [`OfflineKnown`] about every frame it passes on.
+struct ObservedFrames {
+    inner: Box<dyn crate::server_client::FrameStream>,
+    known: std::sync::Arc<OfflineKnown>,
+}
+
+impl crate::server_client::FrameStream for ObservedFrames {
+    fn next_frame(&mut self) -> crate::server_client::BoxFuture<'_, Result<Option<String>, CommandError>> {
+        Box::pin(async move {
+            let frame = self.inner.next_frame().await?;
+            if let Some(f) = &frame {
+                self.known.observe_frame(f);
+            }
+            Ok(frame)
+        })
+    }
+}
+
+/// A client that tells [`OfflineKnown`] about every status, overview or settings answer, and every live `server` frame, that
+/// passes through.
 pub struct Observing {
     inner: std::sync::Arc<dyn ServerClient>,
     known: std::sync::Arc<OfflineKnown>,
@@ -219,7 +254,13 @@ impl ServerClient for Observing {
         body: Option<Value>,
         open_timeout: std::time::Duration,
     ) -> crate::server_client::BoxFuture<'a, Result<Box<dyn crate::server_client::FrameStream>, CommandError>> {
-        self.inner.open_stream(path, body, open_timeout)
+        Box::pin(async move {
+            let inner = self.inner.open_stream(path, body, open_timeout).await?;
+            Ok(Box::new(ObservedFrames {
+                inner,
+                known: self.known.clone(),
+            }) as Box<dyn crate::server_client::FrameStream>)
+        })
     }
 }
 
@@ -351,6 +392,40 @@ mod tests {
         // Last seen offline: refused as offline.
         known.set(true);
         assert_eq!(refuse_when_offline(&down, &known).await.unwrap_err().code, ErrorCode::Offline);
+    }
+
+    #[tokio::test]
+    async fn a_settings_read_or_save_updates_the_last_known_value() {
+        for method in ["settings", "save_settings"] {
+            let inner = FakeServer::new();
+            inner.reply(method, Reply::Ok(json!({ "network": { "offline": true, "lanEnabled": false } })));
+            let known = std::sync::Arc::new(OfflineKnown::default());
+            let client = Observing::new(std::sync::Arc::new(inner), known.clone());
+            forward(&client, method, Value::Null).await.unwrap();
+            assert_eq!(known.get(), Some(true), "{method}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_live_server_frame_updates_the_last_known_value_and_other_frames_do_not() {
+        let inner = FakeServer::new();
+        inner.stream(Ok(vec![
+            r#"{"kind":"memory","sample":{}}"#.into(),
+            "not json".into(),
+            r#"{"kind":"server","server":{"offline":true}}"#.into(),
+        ]));
+        let known = std::sync::Arc::new(OfflineKnown::default());
+        let client = Observing::new(std::sync::Arc::new(inner), known.clone());
+        let mut stream = client
+            .open_stream("/mgmt/v1/live", None, std::time::Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert!(stream.next_frame().await.unwrap().is_some());
+        assert_eq!(known.get(), None, "a frame without the flag says nothing");
+        assert!(stream.next_frame().await.unwrap().is_some());
+        assert_eq!(known.get(), None, "a frame that is not JSON is passed on and ignored");
+        assert!(stream.next_frame().await.unwrap().is_some());
+        assert_eq!(known.get(), Some(true));
     }
 
     #[tokio::test]
