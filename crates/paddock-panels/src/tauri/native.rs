@@ -116,7 +116,7 @@ pub(super) fn content_lost(e: &::tauri::Error) {
 }
 
 /// The ghost window could not be created; the dragging window shows its own preview.
-pub(super) fn ghost_unavailable(e: &::tauri::Error) {
+pub(super) fn ghost_unavailable(e: &crate::wire::PanelError) {
     warn(
         "Could not create the drag ghost; the window shows its own preview",
         e,

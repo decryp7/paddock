@@ -144,6 +144,11 @@ pub enum Place {
 /// The shell plugin with Spotter's parts.
 pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>) -> Builder<R> {
     let attach = hub.clone();
+    let engine_hub = hub.clone();
+    let seams = match &place {
+        Place::Installed => lifecycle::Seams::installed(),
+        Place::Test { dir } => lifecycle::Seams::test(dir),
+    };
     let Net {
         downloader,
         proxy,
@@ -158,6 +163,16 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>) -> Builder<R> {
         .setup(move |app| {
             app.manage(ProxyChoice(proxy.clone()));
             attach.attach(app);
+            Ok(())
+        })
+        // The engine opens before the event loop runs, so no command can arrive before it exists; nothing here waits for
+        // the UI and nothing opens a window (the shell opens the tray and the window after every plugin, ADR 0029).
+        .setup(move |app| {
+            let state = lifecycle::init(app, &engine_hub, &seams).map_err(|e| {
+                (seams.note)(&format!("Spotter could not start: {e}"));
+                e
+            })?;
+            app.manage(state);
             Ok(())
         });
     let test_dir = match &place {
@@ -307,27 +322,30 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         .wrap(handler!())
 }
 
+/// Spotter on `builder` (after the plugins already on it): the shell plugin `shell`, the tray drawn by `tray_backend`,
+/// the main window for `launch` (the shell opens both after every plugin is set up) and Spotter's guarded commands. The
+/// start `run` uses and the start test composes.
+pub fn app<R: Runtime>(
+    builder: tauri::Builder<R>,
+    shell: Builder<R>,
+    launch: paddock_window::launch::LaunchArgs,
+    tray_backend: impl paddock_window::tauri::TrayBackend<R>,
+) -> tauri::Builder<R> {
+    shell
+        .tray(move |app| tray::tray(app, tray_backend))
+        .launch(launch)
+        .add_to(builder)
+        .invoke_handler(invoke_handler())
+}
+
 /// Starts the app.
 pub fn run() {
+    // First: the shared crates' log lines (the start's error among them) reach Spotter's daily log file (paddock-log).
+    let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
     let cwd = std::env::current_dir().ok();
     let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
     let hub = health::Hub::<tauri::Wry>::default();
-    let setup_hub = hub.clone();
-    let shell = shell::<tauri::Wry>(Place::Installed, &hub).setup(move |app| {
-        // The engine opens before the event loop runs, so no command can arrive before it exists; nothing here waits
-        // for the UI.
-        let state = lifecycle::init(app, &setup_hub).map_err(|e| {
-            applog::write(&format!("Spotter could not start: {e}"));
-            e
-        })?;
-        app.manage(state);
-        if !tray::create(app) {
-            applog::write("no tray icon; closing the window will quit the app");
-        }
-        // Started at log-in (`--hidden`): stay in the tray without a window (only when there is a tray to come back from).
-        paddock_window::tauri::start(app, &launch)?;
-        Ok(())
-    });
+    let shell = shell::<tauri::Wry>(Place::Installed, &hub);
     let builder = tauri::Builder::default()
         // First: a second launch shows the running app's window instead of starting another engine.
         .plugin(tauri_plugin_single_instance::init(paddock_window::tauri::second_instance))
@@ -338,9 +356,8 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
-        ))
-        .plugin(shell.build())
-        .invoke_handler(invoke_handler());
+        ));
+    let builder = app(builder, shell, launch, tray::native());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     let builder = builder.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated);

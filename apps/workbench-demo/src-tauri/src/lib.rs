@@ -169,8 +169,25 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         .wrap(handler!())
 }
 
+/// The demo on `builder`: the shell plugin `shell` (it opens the main window for `launch` after every plugin is set
+/// up), then the workbench plugin and the demo's guarded commands. The start `run` uses and the start test composes.
+pub fn app<R: Runtime>(
+    builder: tauri::Builder<R>,
+    shell: Builder<R>,
+    workbench: paddock_workbench::Builder<R>,
+    launch: paddock_window::launch::LaunchArgs,
+) -> tauri::Builder<R> {
+    shell
+        .launch(launch)
+        .add_to(builder)
+        .plugin(workbench.build())
+        .invoke_handler(invoke_handler())
+}
+
 /// The app: the two plugins, the demo's guarded commands and the main window.
 pub fn run() {
+    // First: the shared crates' log lines (the start's error among them) reach the app's daily log file.
+    let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
     let place = Place::Installed;
     let started = link(&place).and_then(|link| {
         let workbench = workbench::<tauri::Wry>(&place, link.clone())?;
@@ -185,15 +202,8 @@ pub fn run() {
     };
     let cwd = std::env::current_dir().ok();
     let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
-    let shell = shell.setup(move |app| {
-        paddock_window::tauri::start(app, &launch)?;
-        Ok(())
-    });
-    let app = tauri::Builder::default()
-        .plugin(shell.build())
-        .plugin(workbench.build())
-        .invoke_handler(invoke_handler())
-        .build(tauri::generate_context!());
+    let app =
+        app(tauri::Builder::default(), shell, workbench, launch).build(tauri::generate_context!());
     match app {
         // A pop-out closing while the app quits docks nothing back (the layout keeps it for next time).
         Ok(app) => app.run(|app, event| {

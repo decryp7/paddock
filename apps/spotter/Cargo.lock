@@ -3538,6 +3538,7 @@ dependencies = [
  "paddock-files",
  "paddock-health",
  "paddock-jobs",
+ "paddock-log",
  "paddock-mcp",
  "paddock-menu",
  "paddock-packs",

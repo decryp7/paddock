@@ -189,6 +189,9 @@ pub(super) fn open_on<R: Runtime>(
     };
     if let Err(e) = build_window(app, &spec, &placed, &host_window) {
         panels.popouts.remove(&label);
+        if e.code == PanelErrorCode::InsidePluginHook {
+            return Err(e);
+        }
         return Err(failed(format!(
             "could not open a window for the panel: {e}"
         )));
@@ -219,6 +222,16 @@ fn build_window<R: Runtime>(
     placed: &Placed,
     host: &WebviewWindow<R>,
 ) -> Result<(), PanelError> {
+    if paddock_commands::plugin_hook::in_plugin_hook() {
+        return Err(PanelError::new(
+            PanelErrorCode::InsidePluginHook,
+            format!(
+                "the pop-out \"{}\" {}",
+                spec.label,
+                paddock_commands::plugin_hook::INSIDE_PLUGIN_HOOK
+            ),
+        ));
+    }
     let panels = panels(app)?;
     let p = placed.placement;
     let at = placement::screen_position(&p, spec.os);
@@ -382,6 +395,9 @@ pub fn set_keep_on_top<R: Runtime>(
     };
     if let Err(e) = build_window(app, &spec, &placed, &host) {
         panels.popouts.remove(&fresh);
+        if e.code == PanelErrorCode::InsidePluginHook {
+            return Err(e);
+        }
         return Err(failed(format!("could not rebuild the window: {e}")));
     }
     // Forget the old one first: its destruction must not dock the panel back.

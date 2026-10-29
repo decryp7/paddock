@@ -3,7 +3,7 @@
 //! (`index.html#/tray`) and what closing the last window does are the shell's (`paddock-window`); without a tray the
 //! shell quits when the last window closes.
 
-use paddock_window::tauri::{create_tray, refresh_tray, NativeTray, PopoverSpec, Popovers, Tray};
+use paddock_window::tauri::{refresh_tray, NativeTray, PopoverSpec, Popovers, Tray, TrayBackend};
 use paddock_window::tray::{disabled, item, TrayEntry, TrayView};
 use spotter_engine::view::WatchSummary;
 use tauri::image::Image;
@@ -167,18 +167,21 @@ fn image(name: &str) -> Option<Image<'static>> {
     Image::from_bytes(icon_bytes(state, dark_taskbar())).ok()
 }
 
-/// The shell's tray with Spotter's model, and the popover. Call from the app's set-up, before the main window. Returns
-/// whether the icon exists (Linux without a status-notifier host has none).
-pub fn create<R: Runtime>(app: &AppHandle<R>) -> bool {
+/// The native tray icon: template images on macOS, a light or dark variant elsewhere.
+pub fn native() -> NativeTray {
+    NativeTray::new(image).menu_on_left_click(false)
+}
+
+/// The shell's tray with Spotter's model, drawn by `backend`, and the popover (the shell creates it at start, before the
+/// main window; [`native`] in the app, a headless one in tests).
+pub fn tray<R: Runtime>(app: &AppHandle<R>, backend: impl TrayBackend<R>) -> Tray<R> {
     app.manage(Popovers::new().popover(None, PopoverSpec::new(POPOVER_ROUTE, "Spotter")));
-    let native = NativeTray::new(image).menu_on_left_click(false);
-    let tray = Tray::new(native, |app| {
+    Tray::new(backend, |app| {
         let (watches, paused) = crate::lifecycle::snapshot(app);
         view(&watches, paused)
     })
     .popover(true)
-    .on_action(|app, id| crate::lifecycle::on_menu(app, id));
-    create_tray(app, tray)
+    .on_action(|app, id| crate::lifecycle::on_menu(app, id))
 }
 
 /// Redraws the tray after the watches changed (only when the model differs).
