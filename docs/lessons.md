@@ -751,3 +751,13 @@ composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor D
 crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
 (`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
 not by guessing at the VM.
+
+## 2026-10-29: `ControlOrMeta` follows the test machine, the app follows the page (Dyno's WebKit leg)
+
+Dyno's WebKit e2e on the Linux runner failed every shortcut test (command palette, Settings with `Mod+,`, and the axe
+pass over the palette): `devices['Desktop Safari']` gives the page a Mac user agent, so the shell's `currentPlatform`
+binds `Mod` to Cmd, while Playwright's `ControlOrMeta` resolves on the host (Linux) and pressed Ctrl. The branch runs are
+Chromium-only and the macOS runner has a Mac host and a Mac page, so only the WebKit-on-Linux leg (main pushes) saw it,
+and the Settings tests had been red there since that leg began. **Rule:** e2e tests press the app's shortcuts with
+`pressMod(page, 'Mod+…')` from `@decryp7/paddock-e2e`, which reads the page's navigator; never `ControlOrMeta` for an
+app shortcut. The selftest `mod-key.shot.ts` makes the mismatch on any host by giving the page the other platform.

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pressMod } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -15,7 +16,7 @@ async function choose(page: Page, label: string, option: string | RegExp): Promi
 
 /** Opens the shell's Settings window (Mod+, on the mock's macOS) and shows Dyno's page of it. */
 async function openSettings(page: Page): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await dialog.getByText('Dyno', { exact: true }).click();
