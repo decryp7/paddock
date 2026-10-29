@@ -115,3 +115,23 @@ test('sharedDirs names /tmp and the runtime folder, once each, and not the temp 
   assert.deepEqual(sharedDirs({ XDG_RUNTIME_DIR: '/tmp' }, '/var/tmp'), ['/tmp']);
   assert.deepEqual(sharedDirs({}, '/tmp'), []);
 });
+
+test('--dir with --shared scans the given folder and the shared socket folders (a CI job\'s own TMPDIR, 2026-10-29)', () => {
+  const temp = scratch();
+  const shared = scratch();
+  try {
+    const file = join(temp.dir, '..', `${temp.dir.split('/').pop()}-base.json`);
+    const args = ['--dir', temp.dir, '--shared'];
+    assert.equal(main([...args, '--snapshot', file], quiet().log, () => [shared.dir]), 0);
+    // A socket folder that fell back to a shared folder (the job's temp path was too long) still counts.
+    mkdirSync(join(shared.dir, 'debrief-plugin-372eb9bd2f3d'));
+    const out = quiet();
+    assert.equal(main([...args, '--check', file], out.log, () => [shared.dir]), 1);
+    rmSync(file, { force: true });
+    // Without --shared, --dir alone scans only that folder, as before.
+    assert.equal(main(['--dir', temp.dir], quiet().log, () => [shared.dir]), 0);
+  } finally {
+    temp.done();
+    shared.done();
+  }
+});

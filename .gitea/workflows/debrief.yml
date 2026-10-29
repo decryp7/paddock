@@ -161,6 +161,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A temp folder of this job's own as TMPDIR (ER-14): the tests and the leak check never touch the runner user's shared
+      # temp folder, which local runs on the same host use too. Removed by the job's last step.
+      - uses: ./.gitea/actions/job-tmpdir
+
       - uses: ./.gitea/actions/setup-rust
 
       # The pinned cargo-nextest (the image's; the step fails when it is another version).
@@ -186,7 +190,7 @@ jobs:
           case "$out" in *CHROMIUM_TEST_PATH=*) ;; *) echo "::error::the test browser installer printed no CHROMIUM_TEST_PATH"; exit 1 ;; esac
 
       - name: Temp folders before the tests
-        run: node scripts/ci/check-temp-leaks.mjs --snapshot "$RUNNER_TEMP/temp-leaks.json"
+        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TMPDIR" --shared --snapshot "$RUNNER_TEMP/temp-leaks.json"
 
       # nextest runs every test in its own process, in parallel across crates, and reports every failure;
       # .config/nextest.toml serialises the tests that time real child processes. The ci profile never retries (a flaky
@@ -211,7 +215,7 @@ jobs:
       # Tests clean up after themselves (docs/testing/temp-leaks.md): a debrief-* / imt-* folder left behind fails the job.
       - name: No temp folders left behind
         if: ${{ !cancelled() }}
-        run: node scripts/ci/check-temp-leaks.mjs --check "$RUNNER_TEMP/temp-leaks.json"
+        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TMPDIR" --shared --check "$RUNNER_TEMP/temp-leaks.json"
 
       # The analyses' memory budget (ADR 0014) is the shipped worker's: measured on a release build, Linux only
       # (DuckDB's jemalloc is the allocator there; the test skips itself in debug builds).
@@ -226,6 +230,11 @@ jobs:
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
+
+      - uses: ./.gitea/actions/job-tmpdir
+        if: always()
+        with:
+          mode: remove
 
   # The same tests on the macOS host runner: the contained-plugin sandbox (sandbox-exec profiles, the private socket,
   # symlinked temp paths) and other platform code only run here; a macOS-only bug once passed the Linux-only suite.
@@ -244,6 +253,10 @@ jobs:
         working-directory: apps/debrief
     steps:
       - uses: actions/checkout@v4
+
+      # A temp folder of this job's own as TMPDIR (ER-14): the tests and the leak check never touch the runner user's shared
+      # temp folder, which local runs on the same host use too. Removed by the job's last step.
+      - uses: ./.gitea/actions/job-tmpdir
 
       - uses: ./.gitea/actions/stable-workspace
         with:
@@ -281,7 +294,7 @@ jobs:
 
       - name: Temp folders before the tests
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: node scripts/ci/check-temp-leaks.mjs --snapshot "$RUNNER_TEMP/temp-leaks.json"
+        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TMPDIR" --shared --snapshot "$RUNNER_TEMP/temp-leaks.json"
 
       - name: Tests (workspace)
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
@@ -295,10 +308,15 @@ jobs:
       - name: No temp folders left behind
         if: ${{ !cancelled() }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: node scripts/ci/check-temp-leaks.mjs --check "$RUNNER_TEMP/temp-leaks.json"
+        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TMPDIR" --shared --check "$RUNNER_TEMP/temp-leaks.json"
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
+
+      - uses: ./.gitea/actions/job-tmpdir
+        if: always()
+        with:
+          mode: remove
 
   # The plugin SDK as an author uses it: a project of every kind from `cargo debrief-plugin new` builds, and one of them
   # passes `cargo debrief-plugin test` (conformance in the sandbox, then its own tests). The examples themselves are
@@ -417,6 +435,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A temp folder of this job's own as TMPDIR (ER-14): the tests and the leak check never touch the runner user's shared
+      # temp folder, which local runs on the same host use too. Removed by the job's last step.
+      - uses: ./.gitea/actions/job-tmpdir
+
       # npm's download cache and the Angular build cache kept on the runner's /sccache mount (Node is the image's).
       - uses: ./.gitea/actions/node-caches
         with:
@@ -462,9 +484,14 @@ jobs:
 
       - name: Frontend unit tests
         run: |
-          node ../scripts/ci/check-temp-leaks.mjs --snapshot "${RUNNER_TEMP:-/tmp}/temp-leaks-ui.json"
+          node ../scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TMPDIR" --shared --snapshot "$RUNNER_TEMP/temp-leaks-ui.json"
           npx ng test --watch=false --coverage
-          node ../scripts/ci/check-temp-leaks.mjs --check "${RUNNER_TEMP:-/tmp}/temp-leaks-ui.json"
+          node ../scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TMPDIR" --shared --check "$RUNNER_TEMP/temp-leaks-ui.json"
+
+      - uses: ./.gitea/actions/job-tmpdir
+        if: always()
+        with:
+          mode: remove
 
   # Four shards that run at the same time, each with its own production build (Angular's cache kept per shard) and port.
   # Playwright's Chromium and WebKit come with the image: nothing is downloaded. Branch and pull request runs test in

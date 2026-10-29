@@ -1094,3 +1094,62 @@ test("app-gates runs every command list through run-commands.sh, which names the
   assert.match(good.stdout, /4361/, 'shell expansion works as in the old bash -c');
   assert.equal(run('cd nowhere').status, 1);
 });
+
+// ---- A job's own temp folder (ER-14, 2026-10-29) ----
+// The Mac runner's Debrief job scanned the runner user's shared temp folder, which the agents' local test runs on the same
+// Mac use too: a local run that died made a CI job fail with leaks it did not cause, and the CI tests wrote there too.
+
+/** Runs the job-tmpdir action's step for `mode` in a fake runner folder; returns the result and what it exported. */
+function runJobTmpdir(mode, { os = 'macOS', root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-job-tmpdir-'))) } = {}) {
+  const text = read(join(ACTIONS, 'job-tmpdir', 'action.yml'));
+  const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
+  mkdirSync(join(root, 'runner-temp'), { recursive: true });
+  const envFile = join(root, 'github-env');
+  if (!existsSync(envFile)) writeFileSync(envFile, '');
+  const r = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', body], {
+    env: { PATH: '/usr/bin:/bin', RUNNER_OS: os, RUNNER_TEMP: join(root, 'runner-temp'), GITHUB_ENV: envFile, MODE: mode },
+    encoding: 'utf8',
+  });
+  const exported = Object.fromEntries(read(envFile).split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+  return { ...r, root, exported };
+}
+
+test('job-tmpdir gives the job a fresh temp folder of its own under RUNNER_TEMP as TMPDIR, and removes it at the end', () => {
+  const first = runJobTmpdir('setup');
+  assert.equal(first.status, 0, first.stderr + first.stdout);
+  const dir = first.exported.PADDOCK_JOB_TMPDIR;
+  assert.ok(dir && dir.startsWith(join(first.root, 'runner-temp') + '/'), `inside the runner's per-job folder (${dir})`);
+  assert.equal(first.exported.TMPDIR, dir, 'TMPDIR: what Rust, Node and the tests use for temp folders');
+  assert.equal(first.exported.TMP, undefined, 'TMP and TEMP only on Windows');
+  assert.ok(existsSync(dir));
+  // A folder left by an earlier step or job of this runner folder starts empty again.
+  writeFileSync(join(dir, 'debrief-left-over'), '');
+  assert.equal(runJobTmpdir('setup', { root: first.root }).status, 0);
+  assert.ok(!existsSync(join(dir, 'debrief-left-over')));
+  const removed = runJobTmpdir('remove', { root: first.root });
+  assert.equal(removed.status, 0, removed.stderr);
+  assert.ok(!existsSync(dir), 'removed at the end of the job');
+  const win = runJobTmpdir('setup', { os: 'Windows' });
+  assert.equal(win.exported.TMP, win.exported.PADDOCK_JOB_TMPDIR, 'Windows reads TMP and TEMP');
+  assert.equal(win.exported.TEMP, win.exported.PADDOCK_JOB_TMPDIR);
+  assert.notEqual(runJobTmpdir('other').status, 0, 'an unknown mode fails');
+});
+
+test('every job that runs check-temp-leaks sets its own TMPDIR first, scans only it (and the shared socket folders), and removes it last', () => {
+  let checked = 0;
+  for (const file of readdirSync(WORKFLOWS).filter((f) => f.endsWith('.yml'))) {
+    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+      if (!job.text.includes('check-temp-leaks.mjs')) continue; // the script itself, not its own tests (check-temp-leaks.test.mjs)
+      checked += 1;
+      const where = `${file}:${job.id}`;
+      const setup = job.text.search(/- uses: \.\/\.gitea\/actions\/job-tmpdir\n(?!\s+with:\n\s+mode: remove)/);
+      assert.ok(setup >= 0, `${where}: uses ./.gitea/actions/job-tmpdir`);
+      assert.ok(setup < job.text.indexOf('check-temp-leaks.mjs'), `${where}: before its first check-temp-leaks`);
+      const runs = [...job.text.matchAll(/check-temp-leaks\.mjs([^\n]*)/g)].map((m) => m[1]);
+      for (const args of runs) assert.match(args, /--dir "\$PADDOCK_JOB_TMPDIR" --shared/, `${where}: check-temp-leaks${args} scans the job's own folder`);
+      const remove = job.text.search(/- uses: \.\/\.gitea\/actions\/job-tmpdir\n\s+if: always\(\)\n\s+with:\n\s+mode: remove/);
+      assert.ok(remove > job.text.lastIndexOf('check-temp-leaks.mjs'), `${where}: removes the folder after its last check, if: always()`);
+    }
+  }
+  assert.ok(checked >= 3, `found the jobs (${checked})`);
+});
