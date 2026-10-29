@@ -1,0 +1,148 @@
+{
+  "chromium/apps-detail@1024": [
+    "div.detail > pw-app-usage > pw-panel.flush > table.table.recent is 631px in a 412px container (by 220px)",
+    "fieldset.group > ul.models > li > label.check is 178px in a 168px container (by 10px)",
+    "fieldset.group > ul.models > li > label.check is 180px in a 168px container (by 12px)",
+    "fieldset.group > ul.models > li > label.check is 195px in a 168px container (by 27px)",
+    "fieldset.group > ul.models > li > label.check is 210px in a 168px container (by 42px)",
+    "fieldset.group > ul.models > li > label.check is 220px in a 168px container (by 52px)",
+    "pw-root > div.shell > main#main scrolls sideways (976px in 788px)"
+  ],
+  "chromium/apps-detail@900": [
+    "div.detail > pw-app-usage > pw-panel.flush > table.table.recent is 631px in a 288px container (by 344px)",
+    "div.hero-top > div.htitle > p > span.faint is 52px in a 158px container (by 20px) · 600/min · 20k req/day · 5.0M/day · 120M/mo · ×2",
+    "div.layout > div.detail > pw-panel.flush > table.table.keys is 310px in a 288px container (by 23px)",
+    "fieldset.group > ul.models > li > label.check is 147px in a 106px container (by 41px)",
+    "fieldset.group > ul.models > li > label.check is 167px in a 106px container (by 61px)",
+    "fieldset.group > ul.models > li > label.check is 167px in a 106px container (by 61px)",
+    "fieldset.group > ul.models > li > label.check is 178px in a 106px container (by 72px)",
+    "fieldset.group > ul.models > li > label.check is 180px in a 106px container (by 74px)",
+    "fieldset.group > ul.models > li > label.check is 195px in a 106px container (by 89px)",
+    "fieldset.group > ul.models > li > label.check is 210px in a 106px container (by 104px)",
+    "fieldset.group > ul.models > li > label.check is 220px in a 106px container (by 114px)",
+    "pw-apps-page > div.page > header.page-head > div.actions is 100px in a 600px container (by 48px)",
+    "pw-panel > header > div.actions > div.controls is 361px in a 254px container (by 107px)",
+    "pw-root > div.shell > main#main scrolls sideways (976px in 664px)"
+  ],
+  "chromium/apps@1024": [
+    "div.detail > pw-app-usage > pw-panel.flush > table.table.recent is 525px in a 412px container (by 114px)",
+    "pw-root > div.shell > main#main scrolls sideways (870px in 788px)"
+  ],
+  "chromium/apps@900": [
+    "div.detail > pw-app-usage > pw-panel.flush > table.table.recent is 525px in a 288px container (by 238px)",
+    "div.layout > div.detail > pw-panel.flush > table.table.keys is 310px in a 288px container (by 23px)",
+    "pw-apps-page > div.page > header.page-head > div.actions is 100px in a 600px container (by 48px)",
+    "pw-panel > header > div.actions > div.controls is 361px in a 254px container (by 107px)",
+    "pw-root > div.shell > main#main scrolls sideways (870px in 664px)"
+  ],
+  "chromium/benchmarks@900": [
+    "pw-benchmarks-page > div.page > pw-panel.flush > table.table is 662px in a 600px container (by 63px)",
+    "pw-root > div.shell > main#main scrolls sideways (695px in 664px)"
+  ],
+  "chromium/dashboard-down@900": [
+    "div.grid > pw-panel.c4 > div.error > button.btn.sm is 49px in a 260px container (by 8px) Retry",
+    "div.grid > pw-panel.c4 > div.error > button.btn.sm is 49px in a 260px container (by 8px) Retry",
+    "div.grid > pw-panel.c4 > div.error > button.btn.sm is 49px in a 260px container (by 8px) Retry",
+    "div.grid > pw-panel.c5 > div.error > button.btn.sm is 49px in a 260px container (by 8px) Retry"
+  ],
+  "chromium/dashboard-update@1280": [
+    "div.page > div.grid > pw-panel.c7 > pw-apps-card scrolls sideways (662px in 565px)",
+    "section.tile > div.trio > div > span.k is 72px in a 62px container (by 10px) Prompt",
+    "section.tile > div.trio > div > span.u is 28px in a 62px container (by 10px) tok/s"
+  ],
+  "chromium/dashboard-update@900": [
+    "div.page > div.grid > pw-panel.c7 > pw-apps-card scrolls sideways (662px in 598px)"
+  ],
+  "chromium/dashboard@1280": [
+    "div.page > div.grid > pw-panel.c7 > pw-apps-card scrolls sideways (662px in 565px)",
+    "section.tile > div.trio > div > span.k is 72px in a 62px container (by 10px) Prompt",
+    "section.tile > div.trio > div > span.u is 28px in a 62px container (by 10px) tok/s"
+  ],
+  "chromium/dashboard@900": [
+    "div.page > div.grid > pw-panel.c7 > pw-apps-card scrolls sideways (662px in 598px)"
+  ],
+  "chromium/engines@1024": [
+    "div.page > pw-engine-card > section.engine > div.surface scrolls sideways (813px in 722px)"
+  ],
+  "chromium/engines@900": [
+    "div.page > pw-engine-card > section.engine > div.surface scrolls sideways (813px in 598px)"
+  ],
+  "chromium/models-preset-form@1024": [
+    "div#panel-presets > pw-presets-tab > pw-panel.flush > div.scroll scrolls sideways (1160px in 722px)",
+    "form.editor > div.grid.four > div.field > input#pw-preset-context is 172px in a 164px container (by 9px)",
+    "form.editor > div.grid.four > div.field > input#pw-preset-max is 172px in a 164px container (by 9px)",
+    "form.editor > div.grid.four > div.field > input#pw-preset-temperature is 172px in a 164px container (by 9px)",
+    "form.editor > div.grid.four > div.field > input#pw-preset-topp is 172px in a 164px container (by 9px)",
+    "form.editor > div.grid.four > div.field > label is 172px in a 164px container (by 9px) Context (tokens)",
+    "form.editor > div.grid.four > div.field > label is 172px in a 164px container (by 9px) Max tokens",
+    "form.editor > div.grid.four > div.field > label is 172px in a 164px container (by 9px) Temperature",
+    "form.editor > div.grid.four > div.field > label is 172px in a 164px container (by 9px) Top-p"
+  ],
+  "chromium/models-preset-form@1280": [
+    "div#panel-presets > pw-presets-tab > pw-panel.flush > div.scroll scrolls sideways (1160px in 978px)"
+  ],
+  "chromium/models-preset-form@900": [
+    "div#panel-presets > pw-presets-tab > pw-panel.flush > div.scroll scrolls sideways (1160px in 598px)",
+    "form.editor > div.grid.four > div.field > input#pw-preset-context is 172px in a 133px container (by 40px)",
+    "form.editor > div.grid.four > div.field > input#pw-preset-max is 172px in a 133px container (by 40px)",
+    "form.editor > div.grid.four > div.field > input#pw-preset-temperature is 172px in a 133px container (by 40px)",
+    "form.editor > div.grid.four > div.field > input#pw-preset-topp is 172px in a 133px container (by 40px)",
+    "form.editor > div.grid.four > div.field > label is 172px in a 133px container (by 40px) Context (tokens)",
+    "form.editor > div.grid.four > div.field > label is 172px in a 133px container (by 40px) Max tokens",
+    "form.editor > div.grid.four > div.field > label is 172px in a 133px container (by 40px) Temperature",
+    "form.editor > div.grid.four > div.field > label is 172px in a 133px container (by 40px) Top-p"
+  ],
+  "chromium/models-presets@1024": [
+    "div#panel-presets > pw-presets-tab > pw-panel.flush > div.scroll scrolls sideways (1160px in 722px)"
+  ],
+  "chromium/models-presets@1280": [
+    "div#panel-presets > pw-presets-tab > pw-panel.flush > div.scroll scrolls sideways (1160px in 978px)"
+  ],
+  "chromium/models-presets@900": [
+    "div#panel-presets > pw-presets-tab > pw-panel.flush > div.scroll scrolls sideways (1160px in 598px)"
+  ],
+  "chromium/models-slots@1024": [
+    "pw-library-tab > div.with-panel > pw-panel.flush > div.scroll scrolls sideways (407px in 350px)"
+  ],
+  "chromium/models-slots@900": [
+    "pw-library-tab > div.with-panel > pw-panel.flush > div.scroll scrolls sideways (407px in 226px)"
+  ],
+  "chromium/playground@900": [
+    "section.pane > header.pane-head > pw-select.model > button#pg-model-0 is 160px in a 146px container (by 14px)"
+  ],
+  "chromium/requests-detail@1024": [
+    "div.page > div.filters > pw-select.select > button#pw-req-app is 160px in a 140px container (by 33px)",
+    "pw-panel.table-panel.flush > div.tbl > div.sheet > cdk-virtual-scroll-viewport.cdk-virtual-scroll-viewport.vp scrolls sideways (988px in 350px)"
+  ],
+  "chromium/requests-detail@1280": [
+    "div.page > div.with-panel.fill > pw-panel.table-panel.flush > div.tbl scrolls sideways (662px in 606px)",
+    "div.tbl > div.sheet > div.row.head > span.c-status is 68px in a 606px container (by 56px) Status",
+    "pw-panel.table-panel.flush > div.tbl > div.sheet > cdk-virtual-scroll-viewport.cdk-virtual-scroll-viewport.vp scrolls sideways (988px in 606px)"
+  ],
+  "chromium/requests-detail@900": [
+    "div.page > div.filters > pw-select.select > button#pw-req-app is 160px in a 140px container (by 33px)",
+    "div.page > div.with-panel.fill > pw-panel.table-panel.flush > div.tbl scrolls sideways (348px in 226px)",
+    "div.tbl > div.sheet > div.row.head > span.c-status is 120px in a 226px container (by 122px) Status",
+    "pw-panel.table-panel.flush > div.tbl > div.sheet > cdk-virtual-scroll-viewport.cdk-virtual-scroll-viewport.vp scrolls sideways (988px in 226px)",
+    "pw-requests-page > div.page > div.filters > button.btn.ghost is 89px in a 600px container (by 4px) Columns"
+  ],
+  "chromium/requests@1024": [
+    "div.page > div.filters > pw-select.select > button#pw-req-app is 160px in a 140px container (by 33px)",
+    "pw-panel.table-panel.flush > div.tbl > div.sheet > cdk-virtual-scroll-viewport.cdk-virtual-scroll-viewport.vp scrolls sideways (988px in 722px)"
+  ],
+  "chromium/requests@1280": [
+    "div.page > div.with-panel.fill > pw-panel.table-panel.flush > div.tbl scrolls sideways (980px in 978px)",
+    "pw-panel.table-panel.flush > div.tbl > div.sheet > cdk-virtual-scroll-viewport.cdk-virtual-scroll-viewport.vp scrolls sideways (988px in 980px)"
+  ],
+  "chromium/requests@900": [
+    "div.page > div.filters > pw-select.select > button#pw-req-app is 160px in a 140px container (by 33px)",
+    "div.page > div.with-panel.fill > pw-panel.table-panel.flush > div.tbl scrolls sideways (662px in 598px)",
+    "div.tbl > div.sheet > div.row.head > span.c-status is 68px in a 598px container (by 64px) Status",
+    "page scrolls sideways by 28px",
+    "pw-panel.table-panel.flush > div.tbl > div.sheet > cdk-virtual-scroll-viewport.cdk-virtual-scroll-viewport.vp scrolls sideways (988px in 598px)",
+    "pw-requests-page > div.page > div.filters > button.btn.ghost is 89px in a 600px container (by 4px) Columns"
+  ],
+  "chromium/settings@900": [
+    "pw-panel#set-cache > div.row > div.cap > div.seg is 156px in a 134px container (by 23px)"
+  ]
+}

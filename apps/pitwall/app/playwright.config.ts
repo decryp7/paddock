@@ -15,13 +15,14 @@ export default defineConfig({
   testMatch: '**/*.e2e.ts',
   fullyParallel: true,
   forbidOnly: CI,
-  retries: CI ? 2 : 0,
+  // A flake is fixed, not retried (rule 5): no retries, in CI either.
+  retries: 0,
   workers: 1,
   outputDir: './.angular/playwright-results',
   reporter: [['list']],
   use: {
     baseURL: `http://localhost:${PORT}`,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
     viewport: { width: 1440, height: 900 },
   },
   projects: [
