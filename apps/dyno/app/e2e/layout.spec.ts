@@ -24,6 +24,28 @@ async function clipped(page: Page): Promise<string[]> {
   }, ROWS);
 }
 
+/**
+ * Text that is cut without an ellipsis (ER-21: this kind of bug kept coming back): any element that holds text of its own, hides
+ * its overflow and is narrower than its text must say so with `text-overflow: ellipsis`. Nothing is "clipped quietly".
+ */
+async function clippedWithoutEllipsis(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const out: string[] = [];
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+      if (el.clientWidth === 0 || el.scrollWidth <= el.clientWidth + 1) continue;
+      if (!Array.from(el.childNodes).some((n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim() !== '')) continue;
+      const css = getComputedStyle(el);
+      if (css.overflowX === 'visible' || css.overflowX === 'auto' || css.overflowX === 'scroll') continue;
+      // The screen-reader-only text is clipped on purpose.
+      if (css.position === 'absolute' && el.clientWidth <= 1) continue;
+      if (css.textOverflow === 'ellipsis') continue;
+      const name = `${el.tagName.toLowerCase()}.${String(el.className).trim().split(/\s+/).join('.')}`;
+      out.push(`${name} "${(el.textContent ?? '').trim().slice(0, 40)}": text needs ${el.scrollWidth}px, has ${el.clientWidth}px, no ellipsis`);
+    }
+    return out;
+  });
+}
+
 /** A state of the app to measure: a page, or a page with its detail panel open, a second view or a tab. */
 type State = { name: string; path: string; setup?: (page: Page) => Promise<void> };
 const EXTRAS = ['changes', 'sleep', 'boot', 'apps', 'gpu', 'files', 'inventory', 'maintenance'];
@@ -62,7 +84,7 @@ const STATES: State[] = [
   { name: 'network listening', path: 'network', setup: (page) => page.getByRole('radio', { name: 'Listening' }).click() },
 ];
 
-test.describe('rows never clip their content', () => {
+test.describe('rows never clip their content, and text that is cut says so with an ellipsis', () => {
   test.setTimeout(300_000);
   for (const width of WIDTHS) {
     test(`at a ${width} px window`, async ({ page }) => {
@@ -76,7 +98,7 @@ test.describe('rows never clip their content', () => {
           await state.setup(page);
           await page.mouse.move(0, 0);
         }
-        const found = [...new Set(await clipped(page))];
+        const found = [...new Set([...(await clipped(page)), ...(await clippedWithoutEllipsis(page))])];
         if (found.length) problems[state.name] = found;
       }
       expect(problems).toEqual({});

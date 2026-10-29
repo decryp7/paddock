@@ -73,6 +73,7 @@ test.describe('keyboard on the shared grids', () => {
 
   test('processes: Enter on a scrolled row opens the details, the row keeps the focus, every drawn row has the header\'s cells, and Escape closes the panel', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 600 });
+    await page.clock.install();
     await page.goto(url('/processes'));
     await page.getByRole('button', { name: 'All', exact: true }).click();
     const grid = page.getByRole('treegrid', { name: 'Processes' });
@@ -80,13 +81,15 @@ test.describe('keyboard on the shared grids', () => {
     await grid.getByRole('row').nth(3).focus();
     await page.mouse.move(600, 400);
     await page.mouse.wheel(0, 400);
-    await page.waitForTimeout(500);
+    // The wheel moved the rows under the header: wait for that, not for a time.
+    await expect.poll(() => page.evaluate(() => document.querySelector('.pd-body')?.scrollTop ?? 0)).toBeGreaterThan(0);
     const focused = page.locator('.pd-body [role=row]:focus');
     await grid.locator('.pd-body [role=row][data-key]').nth(6).focus();
     const key = await page.evaluate(() => (document.activeElement as HTMLElement).dataset['key']);
     await page.keyboard.press('Enter');
     await expect(page.getByRole('complementary', { name: 'Process details' })).toBeVisible();
-    await page.waitForTimeout(1200);
+    // Three live updates (the mock's clock is the page's): the row still has the focus afterwards.
+    await page.clock.runFor(3000);
     await expect(focused).toHaveAttribute('data-key', key as string);
     const counts = await page.evaluate(() => {
       const head = document.querySelectorAll('.pd-head-table [role=columnheader]').length;
@@ -96,5 +99,38 @@ test.describe('keyboard on the shared grids', () => {
     expect(new Set(counts.rows)).toEqual(new Set([counts.head]));
     await page.keyboard.press('Escape');
     await expect(page.getByRole('complementary', { name: 'Process details' })).toHaveCount(0);
+  });
+});
+
+test.describe('live updates keep the keyboard where it was', () => {
+  test('processes sorted by CPU: a focused row keeps the focus while the rows reorder, the keys keep working, Escape closes the details', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.clock.install();
+    await page.goto(url('/processes'));
+    await page.getByRole('button', { name: 'All', exact: true }).click();
+    const grid = page.getByRole('treegrid', { name: 'Processes' });
+    await expect(grid).toBeVisible();
+    const rows = grid.locator('.pd-body [role=row][data-key]');
+    await rows.nth(4).focus();
+    const key = await page.evaluate(() => (document.activeElement as HTMLElement).dataset['key'] as string);
+    const order = () => page.evaluate(() => [...document.querySelectorAll('.pd-body [role=row][data-key]')].map((r) => (r as HTMLElement).dataset['key']));
+    const before = await order();
+    // Drive the live updates by the clock until the rows came in another order (bounded: a refresh every second).
+    for (let i = 0; i < 20 && JSON.stringify(await order()) === JSON.stringify(before); i++) await page.clock.runFor(1000);
+    expect(await order()).not.toEqual(before);
+    await expect(page.locator(`.pd-body [role=row][data-key="${key}"]`)).toBeFocused();
+    // The keyboard still works from there.
+    const at = (await order()).indexOf(key);
+    await page.keyboard.press('ArrowDown');
+    await expect(rows.nth(at + 1)).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(page.locator(`.pd-body [role=row][data-key="${key}"]`)).toBeFocused();
+    // Enter opens the details; more updates; Escape closes them and the row keeps the focus.
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('complementary', { name: 'Process details' })).toBeVisible();
+    await page.clock.runFor(3000);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('complementary', { name: 'Process details' })).toHaveCount(0);
+    await expect(page.locator(`.pd-body [role=row][data-key="${key}"]`)).toBeFocused();
   });
 });

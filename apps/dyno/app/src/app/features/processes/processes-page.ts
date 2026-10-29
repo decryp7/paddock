@@ -1,10 +1,12 @@
 import { PdCell, PdTable, PdTableEmpty, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdRowTree, type PdSort } from '@decryp7/paddock-ui/table';
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, OnDestroy, OnInit, afterNextRender, computed, effect, inject, input, linkedSignal, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import type { CommandError } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { formatBytes, formatCount, formatPercent, formatRate, plural } from '../../shared/format';
 import { bar } from '../../shared/heat';
+import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
 import { LiveStore } from '../../state/live.store';
 import { Lookups } from '../lookup/lookups';
@@ -23,7 +25,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
 /** The task manager: every app and process, grouped by app, as a tree or flat; sortable, searchable, with a details panel and lookups. Read-only: nothing here changes a process. */
 @Component({
   selector: 'dy-processes-page',
-  imports: [Icon, FormsModule, PdTable, PdCell, PdTableEmpty, ProcessDetailsPanel, MatMenuModule, SearchField, MatTooltip, SuSegmentedControl, MatButton, MatIconButton],
+  imports: [AsyncState, Icon, FormsModule, PdTable, PdCell, PdTableEmpty, ProcessDetailsPanel, MatMenuModule, SearchField, MatTooltip, SuSegmentedControl, MatButton, MatIconButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap">
@@ -53,6 +55,9 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
 
       <div class="body" [class.open]="!!store.selected()">
         <section class="table card" #frame>
+          @if (agentError(); as e) {
+            <dy-async [loaded]="false" [error]="e" what="processes" (retry)="retry()" />
+          } @else {
           <pd-table
             label="Processes"
             order="source"
@@ -121,6 +126,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
             </ng-template>
             <div pdTableEmpty class="empty"><dy-icon name="search" /><strong>No process matches “{{ store.query() }}”.</strong><button type="button" matButton="outlined" (click)="store.setQuery('')">Clear filter</button></div>
           </pd-table>
+          }
         </section>
         @if (store.selected()) {
           <dy-process-details />
@@ -232,6 +238,16 @@ export class ProcessesPage implements OnInit, OnDestroy {
       const q = this.q();
       if (q !== undefined) this.store.setQuery(q);
     });
+  }
+
+  /** The agent stopped before any process list came: the table says so, with Retry (no list will come by itself). */
+  protected readonly agentError = computed<CommandError | null>(() => {
+    const a = this.live.agent();
+    return a.state === 'failed' && !this.store.connected() ? { code: 'agentUnavailable', message: a.message ?? 'Dyno’s background agent stopped, so there is no process list.' } : null;
+  });
+  protected retry(): void {
+    this.store.stop();
+    this.store.start();
   }
 
   ngOnInit(): void {

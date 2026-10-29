@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
+import { LiveStore } from '../../state/live.store';
 import { ProcessesStore } from '../../state/processes.store';
 import { nextFrame } from '../../testing/frame';
 import { ProcessesPage } from './processes-page';
@@ -39,6 +40,21 @@ describe('ProcessesPage', () => {
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
     expect(el.querySelector('[data-testid="table-loading"]')).not.toBeNull();
+    f.destroy();
+  });
+  it('says so, with Retry, when the agent failed before any process list came, and asks again on Retry', async () => {
+    const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
+    const live = vi.spyOn(mock, 'onLive');
+    TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
+    const f = TestBed.createComponent(ProcessesPage);
+    TestBed.inject(LiveStore).setAgent({ state: 'failed', message: 'The agent stopped.' });
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('The agent stopped.');
+    expect(el.querySelector('[role="treegrid"]')).toBeNull();
+    const calls = live.mock.calls.length;
+    [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Retry'))!.click();
+    expect(live.mock.calls.length).toBe(calls + 1);
     f.destroy();
   });
   it('shows the Other users row with a one-line note and without a row menu', async () => {

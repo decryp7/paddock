@@ -113,7 +113,7 @@ function readCollapsed(): Set<string> {
                 @if (r.kind === 'group') {
                   <ng-container *ngTemplateOutlet="groupCell; context: { $implicit: r }" />
                 } @else {
-                  <span class="truncate" [title]="r.item.remote">{{ short(r.item.remote) }}</span><span class="addr">:{{ r.item.remotePort }}</span>
+                  <span class="remote"><span class="truncate" [title]="r.item.remote">{{ short(r.item.remote) }}</span><span class="addr">:{{ r.item.remotePort }}</span></span>
                 }
               </ng-template>
               <ng-template pdCell="service" let-r>
@@ -202,7 +202,8 @@ function readCollapsed(): Set<string> {
     .meta { min-width: 0; flex: 0 4 auto; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
     .exp { color: var(--warn); }
     .av { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; background: var(--surface-active); color: var(--text-2); font: var(--fw-semibold) 11px / 1 var(--font-sans); }
-    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border-strong); flex: none; }
+    .remote { display: flex; align-items: baseline; min-width: 0; gap: 1px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border-strong); flex: none; margin-inline-end: var(--sp-2); }
     .dot[data-tone='ok'] { background: var(--ok); }
     .dot[data-tone='warn'] { background: var(--warn); }
     .ib { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }

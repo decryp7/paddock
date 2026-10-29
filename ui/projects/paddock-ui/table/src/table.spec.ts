@@ -872,7 +872,7 @@ describe('pd-table', () => {
     expect(f.componentInstance.sort()).toEqual({ key: 'size', direction: 'desc' });
   });
 
-  it('says one row, not "1 rows", and refuses a tree together with groups', async () => {
+  it('says one row, not "1 rows", and leaves the rows of a tree to the app (no built-in filter)', async () => {
     const f = await setup();
     f.componentInstance.rows.set([DATA[0]!]);
     await settle(f);
@@ -884,8 +884,18 @@ describe('pd-table', () => {
     await settle(f);
     // A tree is the app's list: the table's own filter does not apply.
     expect(names(f)).toEqual(['Zeta', 'alpha', 'Mid']);
-    const table = f.debugElement.query((d) => d.name === 'pd-table').componentInstance as { items(): unknown; groupBy: { set?: unknown } };
+    const table = f.debugElement.query((d) => d.name === 'pd-table').componentInstance as { items(): unknown };
     expect(table.items()).toHaveLength(3);
+  });
+
+  it('throws in dev mode when a table is given a tree together with groups', async () => {
+    const f = await setup();
+    f.componentInstance.tree.set({ level: () => 1, expanded: () => null });
+    await settle(f);
+    const table = f.debugElement.query((d) => d.name === 'pd-table').componentInstance as { items(): unknown };
+    f.componentInstance.groupBy.set('kind');
+    f.detectChanges();
+    expect(() => table.items()).toThrow('use one');
   });
 
   it('keeps the focus on a row whose place changed when the app reorders the rows (live updates)', async () => {
