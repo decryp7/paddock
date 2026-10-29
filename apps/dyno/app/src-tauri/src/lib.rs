@@ -164,6 +164,19 @@ pub fn invoke_handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + '
         .wrap(handler!())
 }
 
+/// Dyno on `builder` (after the plugins already on it): the shell plugin `shell`, the tray drawn by `tray_backend`, the
+/// main window for `launch` (none for `--hidden` with a tray). The start `run` uses (it adds Dyno's guarded commands)
+/// and the start test composes.
+pub fn app<R: Runtime>(
+    builder: tauri::Builder<R>,
+    shell: Builder<R>,
+    launch: paddock_window::launch::LaunchArgs,
+    tray_backend: impl paddock_window::tauri::TrayBackend<R>,
+) -> tauri::Builder<R> {
+    // The shell opens both after every plugin is set up (ADR 0029: a window built inside a plugin hook deadlocks).
+    shell.tray(move |_| tray::tray(tray_backend)).launch(launch).add_to(builder)
+}
+
 /// Starts the app.
 pub fn run() {
     let cwd = std::env::current_dir().ok();
@@ -180,18 +193,12 @@ pub fn run() {
         app.manage(events.clone());
         app.manage(link.clone());
         app.manage(commands::PickedFolders::default());
-        let items = shell::initial_items(&dyno_core::settings::Settings::default().tray_items);
-        if !tray::create(app, items) {
-            logging::info("no tray icon; closing the window will quit the app");
-        }
         link.spawn()?;
         let beat = events.clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_secs(3));
             beat.replay_status();
         });
-        // Started at log-in (`--hidden`): stay in the tray without a window (only when there is a tray to come back from).
-        paddock_window::tauri::start(app, &launch)?;
         // After an update launchd may refuse the registered agent (a rebuilt app has a new code identity on macOS) or
         // keep the old job: replace the registration once per version and whenever launchd says it is stale
         // (`service_repair`), in the background, so measuring resumes without the user's help.
@@ -216,9 +223,9 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![paddock_window::launch::HIDDEN_FLAG]),
-        ))
-        .plugin(shell.build())
-        .invoke_handler(invoke_handler());
+        ));
+    let items = shell::initial_items(&dyno_core::settings::Settings::default().tray_items);
+    let builder = app(builder, shell, launch, tray::DynoTray::new(items)).invoke_handler(invoke_handler());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     let builder = builder.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated);
