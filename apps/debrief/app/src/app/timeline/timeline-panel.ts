@@ -156,7 +156,7 @@ function timelineSource(): TimelineSource {
     <debrief-timeline-tooltips [marker]="hover()" [run]="runHover()" [annotation]="annHover()" />
   `,
   styles: `
-    :host { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--bg-1); overflow: hidden; position: relative; }
+    :host { --plot-inset: 12px; flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--bg-1); overflow: hidden; position: relative; }
     .err-card { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 80%; padding: 14px 18px; border: 1px solid var(--border-3); border-radius: 8px; background: var(--bg-3); color: var(--text); text-align: center; }
     .wrap { position: relative; flex: 1; min-height: 0; user-select: none; }
     .wrap.panning { cursor: grabbing; }
@@ -164,7 +164,8 @@ function timelineSource(): TimelineSource {
     .sticky { position: sticky; top: 0; z-index: 3; background: var(--bg-1); }
     .row { display: flex; align-items: stretch; }
     .label { width: var(--tl-label-w); flex: none; }
-    .plot { flex: 1; min-width: 0; position: relative; margin-right: var(--s-5); }
+    /* The time scale is inset from both sides (--plot-inset, PLOT_EDGE_INSET_PX): a marker or run point at the first or last moment has a 24 px hit area and a glyph with its focus ring that reach this far past the scale, and must stay clear of the label column. Every row and layer shares the one inset, so they line up. */
+    .plot { flex: 1; min-width: 0; position: relative; margin-left: var(--plot-inset, 12px); margin-right: max(var(--s-5), var(--plot-inset, 12px)); }
     .small { font-size: var(--fs-xs); }
     .hist-label { display: flex; flex-direction: column; justify-content: flex-end; gap: 1px; padding: 0 var(--s-3) 3px var(--s-4); }
     .scale { font-size: var(--fs-2xs); color: var(--muted); }

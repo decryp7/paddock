@@ -41,10 +41,11 @@ test.describe('nothing covers an interactive element', () => {
   // hit-test-2 (fixed): a marker at a lane's first moment overhung the label column by 7 px (`.glyph { margin-left: -7px }`) and its
   // button took the clicks on the label's right edge. Clipping the plot cut the glyph and its focus ring (WCAG 2.4.7), so the
   // markers are kept MARKER_EDGE_INSET_PX inside the plot instead.
-  test('the first and last glyph of every lane, with their focus ring, lie inside the plot', async ({ page }) => {
+  test('the first and last glyph of every lane, with their focus ring, stay inside the time scale\'s inset', async ({ page }) => {
     await openApp(page);
     const outside = await page.evaluate(() => {
       const RING = 4; // outline 2 px at an offset of 2 px
+      const INSET = 12; // the time scale's inset (--plot-inset): the glyph and its ring may use it, not the label column
       const bad: string[] = [];
       let seen = 0;
       for (const plot of document.querySelectorAll('debrief-timeline-panel .plot.track')) {
@@ -54,8 +55,8 @@ test.describe('nothing covers an interactive element', () => {
         const first = glyphs.reduce((a, b) => (b.left < a.left ? b : a));
         const last = glyphs.reduce((a, b) => (b.right > a.right ? b : a));
         seen++;
-        if (first.left - RING < p.left - 0.5) bad.push(`first glyph ring at ${Math.round(first.left - RING - p.left)} px`);
-        if (last.right + RING > p.right + 0.5) bad.push(`last glyph ring at +${Math.round(last.right + RING - p.right)} px`);
+        if (first.left - RING < p.left - INSET - 0.5) bad.push(`first glyph ring ${Math.round(p.left - INSET - (first.left - RING))} px into the label column`);
+        if (last.right + RING > p.right + INSET + 0.5) bad.push(`last glyph ring ${Math.round(last.right + RING - p.right - INSET)} px past the inset`);
       }
       return seen > 0 ? bad : ['no lane with markers'];
     });
@@ -121,8 +122,12 @@ test.describe('nothing covers an interactive element', () => {
         const r = label.getBoundingClientRect();
         const own = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
         if (r.width === 0 || !own || !label.contains(own)) return []; // scrolled out of the panel
-        const hit = document.elementFromPoint(r.right - 2, r.top + r.height / 2);
-        return hit && label.contains(hit) ? [] : [`${label.getAttribute('aria-label')?.slice(0, 30)} -> ${hit?.className}`];
+        // Every pixel row of the label's last 3 px (a run point's hit area is a few px tall and sits off the centre).
+        const rows = Array.from({ length: Math.floor(r.height) - 2 }, (_, i) => r.top + 1 + i).filter((y) => label.contains(document.elementFromPoint(r.left + r.width / 2, y))); // rows the panel shows
+        return rows.flatMap((y) => [r.right - 1, r.right - 3].map((x) => [x, y] as const)).flatMap(([x, y]) => {
+          const hit = document.elementFromPoint(x, y);
+          return hit && label.contains(hit) ? [] : [`${label.getAttribute('aria-label')?.slice(0, 24)} y+${Math.round(y - r.top)} -> ${hit?.getAttribute('class')?.slice(0, 20)}`];
+        }).slice(0, 2);
       }),
     );
     expect(wrong).toEqual([]);

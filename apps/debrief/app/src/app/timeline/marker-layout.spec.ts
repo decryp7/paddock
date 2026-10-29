@@ -1,4 +1,4 @@
-import { badgeWidth, CROWD_MIN, MARKER_EDGE_INSET_PX, markerX, mergeCrowds, defaultMaxShapes, LaidMarker, layoutLane, layoutTargets, MarkerTarget, MarkerVm, placeBadges, TARGET_PX } from './marker-layout';
+import { badgeWidth, CROWD_MIN, PLOT_EDGE_INSET_PX, mergeCrowds, defaultMaxShapes, LaidMarker, layoutLane, layoutTargets, MarkerTarget, MarkerVm, placeBadges, TARGET_PX } from './marker-layout';
 import { at } from '../../testing/must';
 
 const mk = (kind: string, left: number, count = 1, id = Math.round(left * 100)): MarkerVm => ({
@@ -173,17 +173,11 @@ describe('marker hit targets (WCAG 2.5.8)', () => {
   });
 });
 
-describe('markerX', () => {
-  it('keeps a marker centre half a glyph plus its focus ring inside both plot edges', () => {
-    expect(markerX(0, 1000)).toBe(MARKER_EDGE_INSET_PX);
-    expect(markerX(100, 1000)).toBe(1000 - MARKER_EDGE_INSET_PX);
-    expect(markerX(50, 1000)).toBe(500);
-    expect(markerX(0.5, 1000)).toBe(MARKER_EDGE_INSET_PX); // 5 px is inside the inset
-  });
-
-  it('puts the first glyph (14 px wide) and a 4 px ring inside the plot', () => {
+describe('plot edge inset', () => {
+  it('is half a hit area, so the first target and its glyph with a 4 px ring fit in it', () => {
+    expect(PLOT_EDGE_INSET_PX).toBe(TARGET_PX / 2);
     const [t] = layoutTargets([{ ...mk('error', 0), showCount: false }], 1000);
     const glyphLeft = t!.left + t!.members[0]!.offset - 7;
-    expect(glyphLeft - 4).toBeGreaterThanOrEqual(0);
+    expect(glyphLeft - 4).toBeGreaterThanOrEqual(-PLOT_EDGE_INSET_PX);
   });
 });

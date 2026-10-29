@@ -10,7 +10,14 @@ partly covered), and the timeline legend's Evidence menu lists every annotation 
 equivalent control for WCAG 2.5.8 (target size)". The hit test therefore allows the pair `['button.marker', 'button.ann']`
 (`apps/debrief/app/e2e/hit-test.e2e.ts`).
 
-What it costs a pointer user: a band under a busy lane is hard to hit, and the band's tooltip rarely shows. Options to weigh,
+What it costs a pointer user: a band under a busy lane is hard to hit, and the band's tooltip rarely shows. Two related cases of the same family (also decided by nobody):
+
+- **Coincident points hide each other.** Annotation points (`button.ann.point`, 24 px, z-index 1) and event markers at the same or nearly
+  the same moment stack: the later one in the DOM takes every click, and the others are reachable only through the Evidence menu.
+- **A band can be fully hidden.** Bands are painted least severe first, so a more severe band with the same span (or a wider one)
+  covers a less severe one completely (a 6 px critical band over an info band of the same span); only the Evidence menu reaches it.
+
+Options to weigh,
 none decided:
 
 - give the bands their own strip (a row above or below the markers) so neither covers the other;

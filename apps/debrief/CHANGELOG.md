@@ -7,7 +7,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ### Fixed
 
-- **Timeline:** a marker at the first or last moment of a lane is drawn a little inside the lane, so it and its focus ring no longer stick out over the lane label and take the clicks on the label's right edge. The warning ticks along the foot of a lane no longer take clicks meant for the annotation bands (their hover hint is gone; the count stays in their accessible name), and where annotation bands overlap, the most severe is on top
+- **Timeline:** a marker at the first or last moment of a lane is drawn inside the lane: the time scale is inset 12 px from both sides in every row, so a marker or run point and its focus ring no longer stick out over the lane label and take the clicks on the label's right edge. The warning ticks along the foot of a lane no longer take clicks meant for the annotation bands (their "N warnings — zoom in for detail" hint is now on the lane label's tooltip), and where annotation bands overlap, the most severe is on top
 
 ### Changed
 

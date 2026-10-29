@@ -42,7 +42,7 @@ export type LanesEmpty = 'noSources' | 'noMatchMain' | 'noMatchOwn' | null;
       @let runs = runLayout().get(l.lane.key);
       <!-- A lane: the band (volume, annotations, markers), then its runs on stacked sub-tracks. -->
       <div class="row lane" [class.odd]="odd" [class.colored]="!!l.color" [class.sparse]="l.sparse" [style.--run-rows]="rowsOf(runs)" [style.--lane-c]="l.color">
-        <button class="label lane-label" [class.filtered]="l.filtered" (click)="toggleGroup.emit(l.lane.key)" [title]="l.title + (l.meta ? '\n' + l.meta : '')">
+        <button class="label lane-label" [class.filtered]="l.filtered" (click)="toggleGroup.emit(l.lane.key)" [title]="l.title + (l.meta ? '\n' + l.meta : '') + (l.tickCount ? '\n' + tickTitle(l.tickCount) : '')">
           <span class="label-body">
             <span class="key-row">
               @for (m of l.marks; track m.swatch.slot) {
@@ -146,7 +146,8 @@ export type LanesEmpty = 'noSources' | 'noMatchMain' | 'noMatchOwn' | null;
     :host { display: block; }
     .row { display: flex; align-items: stretch; }
     .label { width: var(--tl-label-w); flex: none; }
-    .plot { flex: 1; min-width: 0; position: relative; margin-right: var(--s-5); }
+    /* The time scale is inset from both sides (--plot-inset, PLOT_EDGE_INSET_PX): a marker or run point at the first or last moment has a 24 px hit area and a glyph with its focus ring that reach this far past the scale, and must stay clear of the label column. Every row and layer shares the one inset, so they line up. */
+    .plot { flex: 1; min-width: 0; position: relative; margin-left: var(--plot-inset, 12px); margin-right: max(var(--s-5), var(--plot-inset, 12px)); }
     /* A lane is its band plus one sub-track per row of runs (--run-rows, set per lane). */
     .lane { --run-rows: 0; height: calc(var(--lane-h) + min(var(--run-rows), 1) * 3px + var(--run-rows) * var(--run-row-h)); transition: background-color var(--dur-fast) var(--ease); }
     .lane:hover { background: var(--bg-hover); }
