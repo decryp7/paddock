@@ -385,7 +385,7 @@ coverage core with its tests, so stage 2 starts with the hardest pure parts prov
 
 | # | Package | Owned files | Failing test first | Depends | Days |
 |---|---|---|---|---|---|
-| B4 | `pacenotes-lsp` and the eight packs (B): client, supervision (timeouts, memory cap, back-off, quarantine, idle stop), answers cached by revision, trust record and dialog, pinned downloads on click | `apps/pacenotes/crates/pacenotes-lsp/`, `packs/lsp/*.toml`, `app/src/app/trust/` | an untrusted repository never starts a server (fake server, process table), and the trap test, extended with a language-server pack for it, starts none; three crashes quarantine it and tier 2 stays visible; revoke kills the tree | A3 | 5 |
+| B4 | `pacenotes-lsp` and the eight packs (B): clangd (C, C++), Roslyn LSP (C#), jdtls (Java), typescript-language-server (TypeScript/JavaScript), rust-analyzer (Rust), basedpyright (Python), gopls (Go); client, supervision (timeouts, memory cap, back-off, quarantine, idle stop), answers cached by revision, trust record and dialog, pinned downloads on click | `apps/pacenotes/crates/pacenotes-lsp/`, `packs/lsp/*.toml`, `app/src/app/trust/` | an untrusted repository never starts a server (fake server, process table), and the trap test, extended with a language-server pack for it, starts none; three crashes quarantine it and tier 2 stays visible; revoke kills the tree | A3 | 5 |
 | A5 | `pacenotes-graph` (A): model, zoom aggregation, cycles, shortest path, diff, layer rules as review findings, bounded subgraph layout, draw.io and SVG export through the diagram writer | `apps/pacenotes/crates/pacenotes-graph/` | a 5,000-node generated graph returns at most the viewport's cap plus hidden counts; a forbidden edge becomes a finding with the path as evidence | A4 | 5 |
 | C4 | Debrief bridge as a function (C): the shared stack-trace crate extracted from `debrief-core/src/exceptions.rs` with Debrief adopting it in the same change; log-site template match, exception reachability, config usage, throw sites, bulk enrichment; deep links through `paddock-siblings` | new shared crate under `crates/`, Debrief's `exceptions.rs` users, `apps/pacenotes/crates/pacenotes-check/` | `exception_not_throwable_here` is never certain under dynamic dispatch; a changed format string gives `template_changed`; Debrief's exception tests stay green on the shared crate | A3, FN0 | 5 |
 | D3 | `pacenotes-mcp` on `paddock-mcp` (D): read-only tools of §13 and §22 for search, understand, review, bridge; keys, grants, budgets, call log; the MCP clients dialog | `apps/pacenotes/crates/pacenotes-mcp/`, `app/src/app/mcp/` | a reply never contains a denylisted secret; an over-budget call returns `truncated` with a cursor; no tool that writes is listed | A4, C3 | 4 |
@@ -521,6 +521,11 @@ the planning figure at four agents is in the same range once waits on Debrief 1.
    a job with progress and Cancel (package B2). Recorded in ADR 0001 as an amendment of 2026-10-29 (it answers the
    ADR's "decide at packaging time").
 
+6. **Default language servers:** Roslyn LSP (MIT) for C# and basedpyright (MIT) for Python; the other packs as in
+   proposal §20.4 (clangd, jdtls, typescript-language-server, rust-analyzer, gopls). This replaces the proposal's
+   csharp-ls default. Servers stay unbundled; the licences ADR (section 5, ADR 9) records each server's licence and the
+   terms of the binary Pacenotes downloads or detects, verified against the official repository.
+
 ### 7.2 Open questions for the user
 
 1. **Semantic search caps.** Semantic search is opt-in per repository (ADR 0001, AGENTS.md); what are the default
@@ -531,15 +536,13 @@ the planning figure at four agents is in the same range once waits on Debrief 1.
    Copilot and Cursor files as read-only sources behind toggles (proposal questions 20, 21)?
 4. **Framework recognisers.** Which of ASP.NET routes and DI, Spring routes and beans, Express, Django/FastAPI/Flask and
    Go `net/http`/gin routes (proposal §20.4)?
-5. **Default language servers.** csharp-ls for C# until the Roslyn binary's terms are confirmed; pyright or basedpyright
-   for Python (proposal question 31)?
-6. **Dependency graph kinds.** Internal modules, packages, files, symbols, imports and calls first; services, tables,
+5. **Dependency graph kinds.** Internal modules, packages, files, symbols, imports and calls first; services, tables,
    topics and endpoints as recognisers grow (proposal question 26)?
-7. **Canonical draw.io files.** May Pacenotes rewrite `.drawio` files into the canonical uncompressed one-cell-per-line
+6. **Canonical draw.io files.** May Pacenotes rewrite `.drawio` files into the canonical uncompressed one-cell-per-line
    form (proposal question 13)?
-8. **Requirement samples.** Which requirement documents do you have (Word headings, Excel columns), and may the first
+7. **Requirement samples.** Which requirement documents do you have (Word headings, Excel columns), and may the first
     mapping packs be designed on anonymised same-shape samples (proposal question 11)?
-9. **Name and trademark.** The trademark search for "Pacenotes" is still open (proposal question 1); it is needed before
+8. **Name and trademark.** The trademark search for "Pacenotes" is still open (proposal question 1); it is needed before
     a public release.
 
 ## Appendix A. The backend note of 2026-10-28, folded in
