@@ -38,6 +38,14 @@ allow = [
 #   Licence: Microsoft Software License Terms, Microsoft DirectX Machine Learning (DirectML), proprietary; may be
 #   distributed only inside an application, not stand-alone. Reason: Sighter's ONNX Runtime build imports it to reach
 #   DirectX 12 GPUs (NVIDIA, AMD, Intel) on Windows; the inference sidecar cannot start without it.
+#   Condition: the spike's egress test shows no outbound connection from it; otherwise it is not shipped and Sighter
+#   uses the system DirectML.dll or the CPU.
+#   Approved: user, 2026-10-29, conditional (docs/adr/0001-object-detector.md, "Licence exceptions").
+#
+# - NVIDIA CUDA runtime libraries (CUDA runtime, cuBLAS, cuDNN, and the others the pinned PyTorch CUDA wheels need):
+#   NVIDIA CUDA EULA and cuDNN licence, proprietary. Scope: training only, the opt-in CUDA variant of the managed Python
+#   training runtime, downloaded on request; never in the installer, never used by inference.
+#   Reason: PyTorch has no other accelerator for NVIDIA GPUs.
 #   Approved: user, 2026-10-29 (docs/adr/0001-object-detector.md, "Licence exceptions").
 
 [bans]

@@ -783,7 +783,11 @@ runner has no GPU/Pitwall, or icons have no text.
 ### 9.1 Sighter to Pitwall contract (vision)
 **What Sighter sends**: Pitwall's OpenAI-compatible `/v1/chat/completions` with images inline (base64), under a Pitwall app key for Sighter
 (pairing code, key in the OS credential store, local only), at low job priority with cancel. Five request kinds, temperature 0:
-1. **Label suggestions**: "list the interactive elements" on a distinct frame -> boxes + classes (feeds the review queue).
+1. **Label suggestions**: "list the interactive elements" on a frame -> boxes + classes (feeds the review queue), **only for
+   a small selection of frames the user chooses, or after a confirmation that states the frame count and the expected
+   time** (rule 46; amended 2026-10-29 by the user, [ADR 0001](adr/0001-object-detector.md) decision 5). Whole recordings
+   are pre-labelled by the app's own trained detector; before the first model exists, by OCR, template and accessibility
+   label sources and the review queue.
 2. **Element naming**: a numbered grid sheet of crops -> a name per crop ("Settings (gear)").
 3. **Grounding fallback**: "where is X" -> box, only when cheaper layers fail (never the default for unattended runs).
 4. **Step descriptions**: before/after frames + the click -> "Click the gear icon in the toolbar to open Settings" for reports and search.

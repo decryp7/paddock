@@ -1,8 +1,8 @@
 # 1. Sighter's object detector: RF-DETR (Apache sizes) on ONNX Runtime in Sighter's own sidecar
 
-Status: proposed (2026-10-29). The user decided eight points on 2026-10-29 (marked "user, 2026-10-29" below). Three
-questions remain open: Objects365 lineage, the proposal 9.1 amendment and the CUDA training licence exception.
-RT-DETRv4 stays pending until its licence review is done.
+Status: proposed (2026-10-29). The user decided every question on 2026-10-29 (marked "user, 2026-10-29" below); none
+is open. Pending: the RT-DETRv4 licence review (plan item P4) and the DirectML egress gate of the spike (decision 4).
+The ADR goes to an independent review before it is accepted.
 
 Related: [proposal](../proposal.md) sections 6, 8, 9.1, 11, 12 and 15; [design review](../review/2026-10-design-review.md);
 research notes [2026-10-29-rf-detr](../research/2026-10-29-rf-detr.md) (this ADR's evidence) and the family note
@@ -36,7 +36,7 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
 
 | Option | Licence (code / weights) | COCO AP50:95, publishers' T4 latency | For | Against |
 |---|---|---|---|---|
-| **A. RF-DETR N/S/M/L** | Apache-2.0 / Apache-2.0 (Objects365 pre-training, see open question 1) | 48.4–56.5, 2.3–6.8 ms | Best published fine-tuning transfer (RF100-VL 57.7–62.2); one architecture, size is a resolution knob; plain ONNX, no NMS; training package does COCO datasets, EMA, eval and export; measured in ONNX Runtime here | ViT backbone, heavier on CPU than a CNN; five sizes of the family are PML 1.0 and must be fenced off; fast-moving upstream |
+| **A. RF-DETR N/S/M/L** | Apache-2.0 / Apache-2.0 (Objects365 pre-training accepted, decision 1) | 48.4–56.5, 2.3–6.8 ms | Best published fine-tuning transfer (RF100-VL 57.7–62.2); one architecture, size is a resolution knob; plain ONNX, no NMS; training package does COCO datasets, EMA, eval and export; measured in ONNX Runtime here | ViT backbone, heavier on CPU than a CNN; five sizes of the family are PML 1.0 and must be fenced off; fast-moving upstream |
 | B. D-FINE, COCO-only checkpoints (with the DEIM recipe) | Apache-2.0 / Apache-2.0 | 42.8–54.0 (N–L), 2.1–8.1 ms | CNN backbone, likely cheaper on CPU; same ONNX adapter; no Objects365 lineage | Weaker transfer evidence on non-COCO domains; training code is research-grade scripts; the stronger `obj365`/`obj2coco` checkpoints carry the Objects365 caveat |
 | C. RT-DETRv4 | Apache-2.0 code / **no stated licence** for the checkpoints | 49.8–57.0, 3.7–12.9 ms | Strong numbers, CNN at inference | Trained by distillation from DINOv3 (custom, non-OSI licence); checkpoints on Google Drive with no licence: pending review |
 | D. DEIMv2 | non-commercial | 50.9–57.8 | | **Excluded** by licence |
@@ -65,7 +65,12 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
    **Fast = Nano** (CPU-only runners), **Accurate = Medium or Large**. Input sides are multiples of 32 (patch 16 × 2
    windows); frames map to tiles as in "Screen resolutions and HiDPI" below. Atto, Femto, Pico, XL and 2XL are refused:
    the model catalogue lists only the four Apache checkpoints, and model import refuses an ONNX whose metadata or card
-   names a PML size. Subject to open question 1 (Objects365 lineage).
+   names a PML size. **Objects365 lineage** (user, 2026-10-29): RF-DETR's detection heads were pre-trained on
+   Objects365, pseudo-labelled with SAM2, before COCO (paper, appendix A and section 3); Objects365 states no licence;
+   Sighter **accepts the N/S/M/L checkpoints on Roboflow's Apache-2.0 label**, because Sighter is for personal,
+   non-commercial use. Every model card records the lineage: "DINOv2 (Apache-2.0) → Objects365 pre-training (no
+   licence stated) → COCO (Roboflow checkpoint, Apache-2.0) → the user's frames". If Sighter is ever used commercially,
+   this acceptance must be revisited first.
 2. **Fallback: D-FINE-S/M, COCO-only checkpoints** (user, 2026-10-29; COCO-only per the review), with the DEIM recipe,
    through the same "ONNX DETR, fixed input, no NMS" adapter, used when the spike shows RF-DETR missing the CPU budget on
    the CI runner class or failing on an EP. The `*_obj365` and `*_obj2coco` checkpoints are not used: D-FINE's README
@@ -102,7 +107,11 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
      `Microsoft.AI.DirectML`, 18.5 MB, SHA-256-pinned) next to the sidecar (user, 2026-10-29). Its licence is
      Microsoft's proprietary DirectML terms (distribution allowed only inside an application, never stand-alone; may
      collect data; research note section 11). **The user approved it on 2026-10-29 as a named licence exception for that
-     one file** (see "Licence exceptions"). Our own DirectML build of ONNX Runtime imports it like pyke's does (verify
+     one file**, on one condition: **spike gate** — the egress test must show that `DirectML.dll` makes no outbound
+     connection (see "Licence exceptions"). If it does, Sighter does not ship it and uses only the system's
+     `DirectML.dll` (System32, Windows 10 1903 and later) or the CPU EP; that needs the DirectML import to be delay-loaded
+     (or a CPU-only build variant), so that a missing or too old system copy degrades to the CPU instead of failing the
+     start. Our own DirectML build of ONNX Runtime imports it like pyke's does (verify
      whether the import is delay-loaded): if it is not, a missing or broken `DirectML.dll` would stop even a CPU-only
      start, so the spike checks this and the self-test runs CPU first.
 5. **Not in Pitwall.** Pitwall stays optional and is the VLM layer for labelling help, naming and grounding fallback, each
@@ -110,7 +119,8 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
    user's own trained detector for that app. Pitwall's VLM is used only on a small selection the user chooses, or after a
    confirmation that states the frame count (and the expected time). Before the first model of an app exists,
    pre-labelling comes from the deterministic sources (OCR, template, accessibility `LabelSource`s) and the review queue,
-   not from the VLM per frame. This amends proposal 9.1's "label suggestions" request kind (open question 4).
+   not from the VLM per frame. This amends proposal 9.1's "label suggestions" request kind; the user approved the
+   amendment on 2026-10-29 and it is applied in the proposal.
 6. **Model distribution.** The runtime detector is always made locally and stored immutable and content-hashed in the
    project registry with its `model.json` (classes, input size, normalisation, thresholds, dataset hash, metrics, parent,
    base checkpoint file name, its licence and pre-training lineage, and the `rfdetr` version). The only downloaded models
@@ -231,14 +241,16 @@ the gate for the detector.
 
 ## Licence exceptions
 
-Sighter's code and every bundled component are permissive (Sighter `deny.toml`), with exactly one named exception:
+Sighter's code and every bundled component are permissive (Sighter `deny.toml`), with exactly two named exceptions:
 
 | File | Licence | Scope | Reason | Approved |
 |---|---|---|---|---|
-| `DirectML.dll` 1.15.4 (NuGet `Microsoft.AI.DirectML`, SHA-256-pinned) | Microsoft Software License Terms, Microsoft DirectX Machine Learning (DirectML): proprietary; distribution allowed only inside an application, for Windows and Xbox, not stand-alone; may collect data | Windows only, next to `sighter-infer.exe`; never another file of that package, never another app | DirectML is how the ONNX Runtime build reaches any DirectX 12 GPU (NVIDIA, AMD, Intel) on Windows; the build imports it, so the sidecar cannot start without it | user, 2026-10-29 |
+| `DirectML.dll` 1.15.4 (NuGet `Microsoft.AI.DirectML`, SHA-256-pinned) | Microsoft Software License Terms, Microsoft DirectX Machine Learning (DirectML): proprietary; distribution allowed only inside an application, for Windows and Xbox, not stand-alone; may collect data | Windows only, shipped next to `sighter-infer.exe`; never another file of that package, never another app. **Condition: the spike's egress test shows no outbound connection from it**; otherwise it is not shipped and Sighter uses the system `DirectML.dll` or the CPU | DirectML is how the ONNX Runtime build reaches any DirectX 12 GPU (NVIDIA, AMD, Intel) on Windows; the build imports it | user, 2026-10-29 (conditional) |
+| NVIDIA CUDA runtime libraries (CUDA runtime, cuBLAS, cuDNN and the other NVIDIA libraries the pinned PyTorch CUDA wheels depend on) | NVIDIA CUDA EULA and NVIDIA's cuDNN licence: proprietary | **Training only**: the opt-in CUDA variant of the managed Python training runtime, **downloaded on request** (never in the installer, never used by inference), with NVIDIA's terms shown before the download | PyTorch has no other accelerator for NVIDIA GPUs; without it NVIDIA laptops train on the CPU or a remote host | user, 2026-10-29 |
 
-cargo-deny checks crates, not shipped DLLs, so the exception is written in `apps/sighter/deny.toml` as a commented
-"non-crate binaries" list with this reason, and the third-party notices list it. A check over the bundle's files
+cargo-deny checks crates, not shipped DLLs or downloaded runtimes, so the exceptions are written in
+`apps/sighter/deny.toml` as a commented "non-crate binaries" list with these reasons, and the third-party notices list
+them. The CUDA runtime is also an entry in the runtime catalogue with its licence shown before download. A check over the bundle's files
 against that list comes with the notices tooling.
 
 ## Plan items
@@ -249,7 +261,8 @@ against that list comes with the notices tooling.
   source, version and upstream URLs to a release or package on dev.decryptology.net; then write the catalogue entries.
   About 1.5 GB (Nano and Small measured at 366 and 386 MB; Medium and Large estimated). **Needs the user's OK when it
   happens**: it is a large, outward-facing upload, so the agent doing it asks first and does not do it on its own.
-- **P2. Update the proposal** when this ADR is accepted (see Consequences), and close proposal section 15 question 1.
+- **P2. Update the proposal** when this ADR is accepted (sections 6 and 8, see Consequences), and close proposal section
+  15 question 1. Section 9.1 was already amended on 2026-10-29.
 - **P3. Shared single-file asset kind** in `paddock-runtime` (or a shared model catalogue), with Pacenotes' Model2Vec
   and Pitwall's model downloads as the other users (rule 42, rule of three); downloads through `paddock-net` `Egress`.
 - **P4. RT-DETRv4 licence review** (research note section 9): ask the authors for the checkpoints' licence and whether
@@ -267,6 +280,9 @@ against that list comes with the notices tooling.
   and flags per target 2–3, CI jobs, artefact publishing and caching 1–2, `ort` custom-lib wiring and the checks 1–2,
   Windows arm64 1); CI time per cold build not measured (a full ONNX Runtime build is long, so it must never run in
   an app's normal pipeline).
+- **P6. Spike gate for `DirectML.dll`**: run the egress test on Windows with our `DirectML.dll` on the DirectML EP; no
+  outbound connection keeps the exception; any connection removes the file from the bundle and switches Windows to the
+  system copy or the CPU (decision 4). Record the result in performance.md or the spike notes.
 
 ## Consequences
 
@@ -293,14 +309,14 @@ against that list comes with the notices tooling.
   model card carries the base checkpoint's licence, notice and lineage; the user's own data and model stay the user's.
 - Proposal section 6 (presets), section 8 (licence table) and 9.1 are updated when this ADR is accepted: RF-DETR becomes
   primary, DEIMv2 moves to excluded (non-commercial), RT-DETRv4 is pending, UI-DETR-1 and the "Florence-2 bootstraps
-  boxes" idea are not v1, and 9.1's label suggestions follow decision 5.
+  boxes" idea are not v1, and 9.1's label suggestions follow decision 5 (applied on 2026-10-29).
 - A new app starts with no detector: until the user has reviewed enough frames to train the first model, labelling is
   OCR, template, accessibility sources and manual review. This is the price of leaving UI-DETR-1 out of v1.
 - The mirror makes downloads independent of Roboflow's URLs (the Large checkpoint already moved once), and costs about
   1.5 GB on our Gitea. Updating a checkpoint is a new mirror entry with a new hash, never an overwrite.
 - Other execution providers (research note section 11): v1 inference stays CPU, CoreML and DirectML, which already use
   NVIDIA and Intel GPUs on Windows. OpenVINO is a candidate opt-in after the spike; CUDA/TensorRT inference is not
-  planned. CUDA training is an opt-in download that needs a licence exception (open question 5).
+  planned. CUDA training is an opt-in download, approved as a recorded licence exception (user, 2026-10-29).
 
 ## Decided questions (user, 2026-10-29)
 
@@ -318,16 +334,15 @@ against that list comes with the notices tooling.
 8. Telemetry: **ONNX Runtime is self-built with `--no_telemetry`** per platform and linked through `ort`'s custom-library
    mode, not pyke's prebuilt libraries; the runtime opt-out and the egress test stay as a second line of defence
    (decision 4, plan item P5).
+9. Objects365 lineage: **accept RF-DETR's N/S/M/L checkpoints on Roboflow's Apache-2.0 label**, because Sighter is for
+   personal, non-commercial use; the lineage is recorded in every model card (decision 1).
+10. DirectML: the redistributable exception **holds only if the spike's egress test shows `DirectML.dll` makes no
+    outbound connection**; otherwise the system `DirectML.dll` or the CPU only (decision 4, "Licence exceptions").
+11. CUDA: **an opt-in CUDA training runtime is approved as a recorded licence exception**, for training only and
+    downloaded on request ("Licence exceptions").
+12. Proposal 9.1: **the amendment is approved** and applied to the proposal (decision 5).
 
 ## Open questions for the user
 
-1. **Objects365 lineage.** RF-DETR's paper says its detection heads were pre-trained on Objects365 (pseudo-labelled
-   with SAM2) before COCO; Roboflow labels the N/S/M/L checkpoints Apache-2.0; the Objects365 website states no licence;
-   D-FINE's authors warn that Objects365-pretrained checkpoints "should not be assumed to be commercially cleared".
-   Accept RF-DETR's checkpoints on Roboflow's Apache-2.0 label (Sighter is for personal, non-commercial use today), or
-   treat Objects365 lineage like D-FINE's and fall back to COCO-only D-FINE checkpoints by default?
-2. **Proposal 9.1 amendment**: approve changing 9.1's "label suggestions" from "per distinct frame" to decision 5's rule
-   (selection or confirmation with the frame count).
-3. **CUDA training**: allow an opt-in CUDA training runtime whose PyTorch wheels pull NVIDIA's proprietary CUDA and
-   cuDNN libraries, as a recorded licence exception (research note section 11)? Without it, NVIDIA laptops train on the
-   CPU or a remote host.
+None. The only pending item is the RT-DETRv4 licence review (plan item P4); RT-DETRv4 stays out of the catalogue until
+it is done.
