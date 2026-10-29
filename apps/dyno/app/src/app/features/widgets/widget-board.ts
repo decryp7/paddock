@@ -1,4 +1,5 @@
 import { CdkDrag, CdkDragDrop, CdkDragHandle, CdkDropList } from '@angular/cdk/drag-drop';
+import { MatTooltip } from '@angular/material/tooltip';
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, linkedSignal, signal } from '@angular/core';
 import type { Widget, WidgetKind, WidgetMetric } from '../../core/api.types';
 import { Icon } from '../../shared/icon';
@@ -19,7 +20,7 @@ import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 /** The dashboard as widgets: view mode, or edit mode with a gallery, resize, drag to arrange, remove, presets and reset. */
 @Component({
   selector: 'dy-widget-board',
-  imports: [SuSegmentedControl, PdSelect, MatFormField, MatInput, MatButton, MatIconButton, WidgetView, Icon, CdkDropList, CdkDrag, CdkDragHandle],
+  imports: [MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatButton, MatIconButton, WidgetView, Icon, CdkDropList, CdkDrag, CdkDragHandle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar">
@@ -75,15 +76,15 @@ import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
           <dy-widget [widget]="w" />
           @if (store.editing()) {
             <div class="edit" [class.small]="w.size === 's'" role="toolbar" [attr.aria-label]="'Edit ' + w.id">
-              <button type="button" matIconButton class="grab" cdkDragHandle aria-label="Drag to move"><dy-icon name="more" /></button>
-              <button type="button" matIconButton aria-label="Move earlier" [disabled]="i === 0" (click)="store.move(i, i - 1)"><dy-icon name="chevron-left" /></button>
-              <button type="button" matIconButton aria-label="Move later" [disabled]="i === store.widgets().length - 1" (click)="store.move(i, i + 1)"><dy-icon name="chevron-right" /></button>
+              <button type="button" matIconButton matTooltip="Drag to move" class="grab" cdkDragHandle aria-label="Drag to move"><dy-icon name="more" /></button>
+              <button type="button" matIconButton matTooltip="Move earlier" aria-label="Move earlier" [disabled]="i === 0" (click)="store.move(i, i - 1)"><dy-icon name="chevron-left" /></button>
+              <button type="button" matIconButton matTooltip="Move later" aria-label="Move later" [disabled]="i === store.widgets().length - 1" (click)="store.move(i, i + 1)"><dy-icon name="chevron-right" /></button>
               <pd-segmented-control label="Size" [options]="sizeSegs" [value]="w.size" (valueChange)="resize(w, $event)" />
               @if (!panel(w.kind)) {
                 <pd-select [options]="metricsFor(w)" [value]="metricName(w)" [ariaLabel]="'Metric of ' + w.id" (valueChange)="metric(w, $event)" />
               }
               <span class="spacer"></span>
-              <button type="button" matIconButton class="pd-button-danger" aria-label="Remove widget" (click)="store.remove(w.id)"><dy-icon name="trash" /></button>
+              <button type="button" matIconButton matTooltip="Remove widget" class="pd-button-danger" aria-label="Remove widget" (click)="store.remove(w.id)"><dy-icon name="trash" /></button>
             </div>
           }
         </div>

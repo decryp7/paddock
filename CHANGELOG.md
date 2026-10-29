@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `providePaddockMaterial`: tooltips wait 500 ms
+- `providePaddockMaterial()` provides `MAT_TOOLTIP_DEFAULT_OPTIONS` with `showDelay: 500` (`PADDOCK_TOOLTIP_OPTIONS`), the design guide's delay for the tooltip every icon-only button carries. Every app that provides it gets the delay without setting it per tooltip.
+
+### `pd-table` uses `PdContextMenuKeys`
+- The grid's own Shift+F10 / Menu key handler is gone: pd-table's rows use the shared `isContextMenuKey` (the same keys, one definition).
+
 ### `PdContextMenuKeys`: a row's context menu from the keyboard
 - New directive `pdContextMenuKeys` (and `isContextMenuKey`) in `@decryp7/paddock-ui`: Shift+F10 or the Menu key on a focused host fires a `contextmenu` event there, for `matContextMenuTriggerFor` or any listener (macOS sends none for those keys). It works like pd-table's own row handler, which will use it in a follow-up.
 

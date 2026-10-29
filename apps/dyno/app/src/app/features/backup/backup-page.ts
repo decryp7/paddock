@@ -82,7 +82,7 @@ import { RowMenu } from '../../shared/row-menu';
                 <aside class="detail" tabindex="-1" aria-label="Backup details" >
                   <div class="dhead">
                     <strong>{{ s.name }}</strong>
-                    <button type="button" matIconButton aria-label="Close details" (click)="close()"><dy-icon name="close" /></button>
+                    <button type="button" matIconButton matTooltip="Close details" aria-label="Close details" (click)="close()"><dy-icon name="close" /></button>
                   </div>
                   <p class="state-line"><span class="dot" [attr.data-tone]="dot(s)" aria-hidden="true"></span>{{ label(s) }}</p>
                   <dl>

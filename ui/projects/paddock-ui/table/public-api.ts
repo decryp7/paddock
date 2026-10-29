@@ -15,7 +15,6 @@ export {
   fromControl,
   groupItems,
   inlineActions,
-  isMenuKey,
   menuActions,
   nextIndex,
   nextSort,

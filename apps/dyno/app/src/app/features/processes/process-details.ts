@@ -31,7 +31,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
             <span class="faint num">PID {{ pidText(x.process.pid) }} · {{ show(x.process.user, text) }}</span>
           }
         </div>
-        <button type="button" matIconButton aria-label="Close details" (click)="close()"><dy-icon name="close" /></button>
+        <button type="button" matIconButton matTooltip="Close details" aria-label="Close details" (click)="close()"><dy-icon name="close" /></button>
       </header>
       @if (store.detailsError(); as e) {
         <div class="err" role="alert">

@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
+import { booleanAttribute, ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { DateAdapter, MAT_DATE_FORMATS } from '@angular/material/core';
 import { MatTimepicker, MatTimepickerInput, MatTimepickerToggle } from '@angular/material/timepicker';
+import { MatTooltip } from '@angular/material/tooltip';
 import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
 import { dateToTime, PdKeepTimeOnEscape, TIME_PROVIDERS, TimeProblems, timeOptions, timeToDate } from '@decryp7/paddock-ui/schedule';
 
@@ -12,7 +13,7 @@ import { dateToTime, PdKeepTimeOnEscape, TIME_PROVIDERS, TimeProblems, timeOptio
 @Component({
   selector: 'dy-time-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdField, PdFieldControl, MatTimepicker, MatTimepickerInput, MatTimepickerToggle, PdKeepTimeOnEscape],
+  imports: [PdField, PdFieldControl, MatTimepicker, MatTimepickerInput, MatTimepickerToggle, MatTooltip, PdKeepTimeOnEscape],
   providers: [TIME_PROVIDERS],
   template: `
     <pd-field [label]="shown() || label()" size="short" [suffix]="toggle" [error]="problems.shown('time') ? 'Enter a time such as 22:00.' : null">
@@ -29,7 +30,7 @@ import { dateToTime, PdKeepTimeOnEscape, TIME_PROVIDERS, TimeProblems, timeOptio
         (blur)="problems.leave('time')"
       />
       <mat-timepicker #picker panelClass="pd-timepicker-panel" [options]="list" />
-      <ng-template #toggle><mat-timepicker-toggle [for]="picker" [disabled]="disabled()" /></ng-template>
+      <ng-template #toggle><mat-timepicker-toggle [for]="picker" [disabled]="disabled()" [aria-label]="'Choose a time, ' + label()" [matTooltip]="clustered() ? '' : 'Choose a time'" matTooltipPosition="left" /></ng-template>
     </pd-field>
   `,
   styles: `
@@ -42,6 +43,8 @@ export class TimeField {
   /** The visible label ("From", "Start of quiet hours"). */
   readonly label = input.required<string>();
   /** A shorter visible label for the narrow field ('From'); the accessible name stays `label`. */
+  /** The field sits in a cluster of actions that shares one tooltip (`dyActionTip`): the toggle shows none of its own. */
+  readonly clustered = input(false, { transform: booleanAttribute });
   readonly shown = input('');
   /** The time as `HH:MM`. */
   readonly value = input.required<string>();

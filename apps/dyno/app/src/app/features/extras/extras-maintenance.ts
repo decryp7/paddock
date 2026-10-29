@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import type { MaintenanceSettings, MaintenanceWindow, Weekday } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
+import { ActionTip } from '../../shared/action-tip';
 import { Icon } from '../../shared/icon';
 import { MatSlideToggle } from '@angular/material/slide-toggle';
 import { ExtrasStore } from '../../state/extras.store';
@@ -21,7 +22,6 @@ import {
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { PdDayPicker } from '@decryp7/paddock-ui/schedule';
 import { TimeField } from '../../shared/time-field';
-import { MatTooltip } from '@angular/material/tooltip';
 
 /**
  * Maintenance windows: when Dyno's own heavier background work (scans, backup checks, report building) may run. Clicks
@@ -29,7 +29,7 @@ import { MatTooltip } from '@angular/material/tooltip';
  */
 @Component({
   selector: 'dy-extras-maintenance',
-  imports: [MatTooltip, TimeField, PdDayPicker, MatButton, MatIconButton, AsyncState, Icon, MatSlideToggle],
+  imports: [ActionTip, TimeField, PdDayPicker, MatButton, MatIconButton, AsyncState, Icon, MatSlideToggle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="!!draft()" [error]="settings.error()" what="maintenance windows" [rows]="4" (retry)="settings.load()">
@@ -51,10 +51,12 @@ import { MatTooltip } from '@angular/material/tooltip';
               @for (w of d.windows; track $index; let i = $index) {
                 <li class="win" [class.off]="!d.enabled">
                   <pd-day-picker [value]="w.days" [label]="'Days of window ' + (i + 1)" (valueChange)="setDays(i, w, $event)" />
-                  <dy-time-field shown="From" [label]="'From, window ' + (i + 1)" [value]="time(w.startMinute)" (timeChange)="setTime(i, w, 'startMinute', $event)" />
-                  <dy-time-field shown="To" [label]="'To, window ' + (i + 1)" [value]="time(w.endMinute)" (timeChange)="setTime(i, w, 'endMinute', $event)" />
+                  <span class="win-end" dyActionTip>
+                  <dy-time-field shown="From" clustered [label]="'From, window ' + (i + 1)" [value]="time(w.startMinute)" (timeChange)="setTime(i, w, 'startMinute', $event)" />
+                  <dy-time-field shown="To" clustered [label]="'To, window ' + (i + 1)" [value]="time(w.endMinute)" (timeChange)="setTime(i, w, 'endMinute', $event)" />
                   <span class="sum muted">{{ summary(w) }}</span>
-                  <button type="button" matIconButton [attr.aria-label]="'Remove window ' + (i + 1)" matTooltipPosition="left" [matTooltip]="'Remove window ' + (i + 1)" (click)="remove(i)"><dy-icon name="trash" /></button>
+                  <button type="button" matIconButton [attr.aria-label]="'Remove window ' + (i + 1)" (click)="remove(i)"><dy-icon name="trash" /></button>
+                  </span>
                 </li>
               }
             </ul>
@@ -90,6 +92,7 @@ import { MatTooltip } from '@angular/material/tooltip';
       .windows { list-style: none; margin: 0; padding: 0; display: grid; }
       .win { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
       .win.off { opacity: 0.55; }
+      .win-end { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
       .sum { flex: 1 1 120px; min-width: 0; font-size: var(--fs-sm); }
       .add { display: flex; align-items: center; gap: var(--sp-3); }
       .foot { display: flex; justify-content: flex-end; gap: var(--sp-2); padding-top: var(--sp-2); border-top: 1px solid var(--border-subtle); }

@@ -1,4 +1,5 @@
 import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
+import { ActionTip } from '../../shared/action-tip';
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal, viewChild } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import type { ConnectionRow, ListenerRow, NetProto } from '../../core/api.types';
@@ -59,7 +60,7 @@ function readCollapsed(): Set<string> {
  */
 @Component({
   selector: 'dy-network-page',
-  imports: [RowMenu, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton, AsyncState, Icon, RouterLink, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf],
+  imports: [ActionTip, RowMenu, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton, AsyncState, Icon, RouterLink, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -97,7 +98,7 @@ function readCollapsed(): Set<string> {
       <dy-async [loaded]="!!store.snapshot()" [error]="store.error()" what="network" [rows]="5" (retry)="store.load()">
         @if (store.snapshot(); as s) {
           @if (s.unknownOwners > 0 && !noteDismissed()) {
-            <p class="note"><dy-icon name="info" /> <span>{{ s.unknownOwners }} {{ s.unknownOwners === 1 ? 'socket has' : 'sockets have' }} an owner the OS will not name without elevated rights.</span> <button type="button" matIconButton aria-label="Dismiss this note" (click)="noteDismissed.set(true)"><dy-icon name="close" /></button></p>
+            <p class="note"><dy-icon name="info" /> <span>{{ s.unknownOwners }} {{ s.unknownOwners === 1 ? 'socket has' : 'sockets have' }} an owner the OS will not name without elevated rights.</span> <button type="button" matIconButton matTooltip="Dismiss this note" aria-label="Dismiss this note" (click)="noteDismissed.set(true)"><dy-icon name="close" /></button></p>
           }
           @if (s.truncated > 0) {
             <p class="note"><dy-icon name="info" /> {{ s.truncated }} more rows are hidden. Narrow the search.</p>
@@ -127,7 +128,7 @@ function readCollapsed(): Set<string> {
                 <div *cdkVirtualFor="let r of rows(); trackBy: rowKey; let i = index" class="row" role="row" [class.group-row]="r.kind === 'group'" [class.selected]="selectedKey() === r.key" [attr.aria-rowindex]="i + 1" [attr.aria-expanded]="r.kind === 'group' ? r.open : null" tabindex="-1" (contextmenu)="pick(r)" (keydown.shift.f10)="pick(r)" (click)="pick(r)" (keyup.space)="pick(r)" (dblclick)="activate(r)" dyRowMenu [matContextMenuTriggerFor]="rowMenu" [matContextMenuTriggerData]="{ row: r }" [matContextMenuTriggerDisabled]="!(r.kind === 'item')">
                   @if (r.kind === 'group') {
                     <span class="gname" role="gridcell">
-                      <button type="button" matIconButton class="chev" [attr.aria-label]="(r.open ? 'Collapse ' : 'Expand ') + r.title" (click)="toggle(r.key, $event)"><dy-icon [name]="r.open ? 'chevron-down' : 'chevron-right'" /></button>
+                      <button type="button" matIconButton [matTooltip]="(r.open ? 'Collapse ' : 'Expand ') + r.title" class="chev" [attr.aria-label]="(r.open ? 'Collapse ' : 'Expand ') + r.title" (click)="toggle(r.key, $event)"><dy-icon [name]="r.open ? 'chevron-down' : 'chevron-right'" /></button>
                       @if (group() === 'process') { <span class="av" aria-hidden="true">{{ ini(r.title) }}</span> }
                       <strong class="truncate">{{ r.title }}</strong>
                       <span class="meta">{{ r.count }} {{ tab() === 'connections' ? (r.count === 1 ? 'connection' : 'connections') : (r.count === 1 ? 'port' : 'ports') }}@if (tab() === 'connections' && group() === 'process') { · {{ r.hosts }} {{ r.hosts === 1 ? 'host' : 'hosts' }} }@if (r.exposed) { · <span class="exp">{{ r.exposed }} exposed</span> }</span>
@@ -158,14 +159,14 @@ function readCollapsed(): Set<string> {
                     <span class="cell muted" role="gridcell">{{ since(l.firstSeen) }}</span>
                   }
                   @if (r.kind === 'item') {
-                  <span class="cell acts" role="gridcell">
+                  <span class="cell acts" role="gridcell" dyActionTip>
                     @if (r.kind === 'item') {
                       @if (tab() === 'connections') {
                         @let c2 = conn(r);
-                        <button type="button" matIconButton [disabled]="!!blocked(c2)" matTooltipPosition="left" [matTooltip]="'Look up IP ' + c2.remote" [attr.aria-label]="'Look up IP ' + c2.remote" (click)="lookup(c2, $event)"><dy-icon name="external" /></button>
+                        <button type="button" matIconButton [disabled]="!!blocked(c2)" [attr.aria-label]="'Look up IP ' + c2.remote" (click)="lookup(c2, $event)"><dy-icon name="external" /></button>
                         <button type="button" matIconButton [attr.aria-label]="'Copy connection to ' + c2.remote" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
                       } @else {
-                        <button type="button" matIconButton matTooltipPosition="left" [matTooltip]="'Copy listener'" aria-label="Copy listener" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
+                        <button type="button" matIconButton aria-label="Copy listener" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
                       }
                       <a matIconButton routerLink="/processes" aria-label="Show process" (click)="$event.stopPropagation()"><dy-icon name="processes" /></a>
                     }
@@ -182,7 +183,7 @@ function readCollapsed(): Set<string> {
               <aside class="detail" aria-label="Details">
                 <div class="dhead">
                   <strong>{{ detailTitle(sel) }}</strong>
-                  <button type="button" matIconButton aria-label="Close details" (click)="selectedKey.set(null)"><dy-icon name="close" /></button>
+                  <button type="button" matIconButton matTooltip="Close details" aria-label="Close details" (click)="selectedKey.set(null)"><dy-icon name="close" /></button>
                 </div>
                 <dl>
                   @for (f of detailFields(sel); track f[0]) {

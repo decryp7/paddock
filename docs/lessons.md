@@ -620,3 +620,13 @@ the same name and an ACL resolved from the app's real capability file, so a wron
 it receives, with its time, and the calls seen when it gives up. A refusal itself shows only in the webview console or as a
 `RuntimeAuthority` check, so a harness that needs to name it asks the authority, not the log. C48 checks the capability file
 of every app on the shared shell.
+
+## 2026-10-29: a row's actions must fit their own box, or the tooltip anchored to it covers them (Dyno)
+
+A row-action cluster got one tooltip on its container, placed left of the container. In the active-alarms table the cluster's
+cell was 40 px wide for three 28 px buttons that overflowed to the left, so the tooltip opened over the buttons, took the
+pointer (a `mouseleave` after 30 ms) and the second and third actions never showed one. The reverse also happened: widening
+the cell pushed the buttons past the clipped edge of the grid at 1280 px, out of reach. **Rule (guidance):** a cluster's box
+holds all its buttons (a column as wide as the actions), and the row-actions e2e (every action must show its tooltip, whose
+text is its name, and the tooltip must overlap no other action) is the check; a tooltip on an icon-only button is never left
+to a per-button `matTooltip` inside a cluster.

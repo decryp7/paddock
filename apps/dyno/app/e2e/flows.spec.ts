@@ -470,6 +470,22 @@ test.describe('issues', () => {
     await expect(menu).toHaveCount(0);
   });
 
+  test('a right-click after the pointer rested on a row action closes that tooltip, and the first Escape closes the menu', async ({ page }) => {
+    await page.goto(url('/issues'));
+    const table = page.getByRole('table', { name: 'Issues', exact: true });
+    const row = table.getByRole('row', { name: /Safari/ }).first();
+    const copy = row.getByRole('button', { name: /^Copy details of/ });
+    await copy.hover({ force: true });
+    const tip = page.locator('.mat-mdc-tooltip');
+    await expect(tip.first()).toBeVisible();
+    await copy.click({ button: 'right', force: true });
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    await expect(tip).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+  });
+
   test('a leaderboard row filters the table to one app and the chip clears it', async ({ page }) => {
     await page.goto(url('/issues'));
     await page.getByRole('row', { name: 'Show only Mail' }).click();

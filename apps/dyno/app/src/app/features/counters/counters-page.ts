@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { ActionTip } from '../../shared/action-tip';
 import { ThemeService } from '../../core/theme';
 import type { CounterHit, CounterInfo, CounterUnit, TimelineEventKind } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -28,7 +29,7 @@ import { RowMenu } from '../../shared/row-menu';
  */
 @Component({
   selector: 'dy-counters-page',
-  imports: [RowMenu, MatMenuModule, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatButton, MatIconButton, AsyncState, Icon, Chart],
+  imports: [ActionTip, RowMenu, MatMenuModule, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatButton, MatIconButton, AsyncState, Icon, Chart],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -64,8 +65,8 @@ import { RowMenu } from '../../shared/row-menu';
                   <li class="item" [class.on]="isWatched(h.path)">
                     <span class="name truncate" [matTooltip]="h.path">{{ hitName(h) }}</span>
                     <span class="meta truncate">{{ h.object }}</span>
-                    <span class="acts">
-                      <button type="button" matIconButton [attr.aria-label]="(isWatched(h.path) ? 'Stop charting ' : 'Chart ') + hitName(h)" matTooltipPosition="left" [matTooltip]="(isWatched(h.path) ? 'Stop charting ' : 'Chart ') + hitName(h)" (click)="toggle(h.path)"><dy-icon [name]="isWatched(h.path) ? 'check' : 'plus'" /></button>
+                    <span class="acts" dyActionTip>
+                      <button type="button" matIconButton [attr.aria-label]="(isWatched(h.path) ? 'Stop charting ' : 'Chart ') + hitName(h)" (click)="toggle(h.path)"><dy-icon [name]="isWatched(h.path) ? 'check' : 'plus'" /></button>
                     </span>
                   </li>
                 }
@@ -73,7 +74,7 @@ import { RowMenu } from '../../shared/row-menu';
             </dy-async>
           } @else if (store.opened(); as o) {
             <div class="card-head">
-              <button type="button" matIconButton aria-label="Back to all objects" (click)="store.closeObject()"><dy-icon name="chevron-left" /></button>
+              <button type="button" matIconButton matTooltip="Back to all objects" aria-label="Back to all objects" (click)="store.closeObject()"><dy-icon name="chevron-left" /></button>
               <h2 class="truncate" [dyFullText]="o.name">{{ o.name }}</h2>
               <span class="spacer"></span>
               <span class="sub">{{ o.counters.length }} counters</span>
@@ -89,7 +90,7 @@ import { RowMenu } from '../../shared/row-menu';
                 <li class="item" [class.on]="isWatched(pathOf(c))">
                   <span class="name truncate" [dyFullText]="c.help ?? c.name">{{ c.name }}</span>
                   <span class="meta truncate">{{ unitWord(c.unit) }}</span>
-                  <span class="acts">
+                  <span class="acts" dyActionTip>
                     <button type="button" matIconButton [attr.aria-label]="(isWatched(pathOf(c)) ? 'Stop charting ' : 'Chart ') + c.name" (click)="toggle(pathOf(c))"><dy-icon [name]="isWatched(pathOf(c)) ? 'check' : 'plus'" /></button>
                   </span>
                 </li>
@@ -182,8 +183,8 @@ import { RowMenu } from '../../shared/row-menu';
                         <span class="faint">…</span>
                       }
                     </span>
-                    <span class="cell acts" role="cell">
-                      <button type="button" matIconButton [attr.aria-label]="(store.isPinned(p) ? 'Unpin ' : 'Pin ') + title(p)" matTooltipPosition="left" [matTooltip]="(store.isPinned(p) ? 'Unpin ' : 'Pin ') + title(p)" (click)="store.togglePin(p)"><dy-icon name="pin" /></button>
+                    <span class="cell acts" role="cell" dyActionTip>
+                      <button type="button" matIconButton [attr.aria-label]="(store.isPinned(p) ? 'Unpin ' : 'Pin ') + title(p)" (click)="store.togglePin(p)"><dy-icon name="pin" /></button>
                       <button type="button" matIconButton [attr.aria-label]="'Stop charting ' + title(p)" (click)="store.unwatch(p)"><dy-icon name="close" /></button>
                       <button type="button" matIconButton [attr.aria-label]="'More actions for ' + title(p)" [matMenuTriggerFor]="rowMenu" [matMenuTriggerData]="{ path: p }"><dy-icon name="more" /></button>
                     </span>
@@ -201,8 +202,8 @@ import { RowMenu } from '../../shared/row-menu';
                   <li class="item">
                     <span class="name truncate" [matTooltip]="p">{{ title(p) }}</span>
                     <span class="meta truncate">{{ object(p) }}</span>
-                    <span class="acts">
-                      <button type="button" matIconButton [attr.aria-label]="'Chart ' + title(p)" matTooltipPosition="left" [matTooltip]="'Chart ' + title(p)" (click)="store.watch(p)"><dy-icon name="plus" /></button>
+                    <span class="acts" dyActionTip>
+                      <button type="button" matIconButton [attr.aria-label]="'Chart ' + title(p)" (click)="store.watch(p)"><dy-icon name="plus" /></button>
                       <button type="button" matIconButton [attr.aria-label]="'Unpin ' + title(p)" (click)="store.togglePin(p)"><dy-icon name="close" /></button>
                     </span>
                   </li>

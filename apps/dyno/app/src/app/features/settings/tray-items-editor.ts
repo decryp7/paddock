@@ -1,4 +1,5 @@
 import { CdkDrag, CdkDragDrop, CdkDragHandle, CdkDropList } from '@angular/cdk/drag-drop';
+import { MatTooltip } from '@angular/material/tooltip';
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { TrayItem, WidgetMetric } from '../../core/api.types';
@@ -18,7 +19,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
  */
 @Component({
   selector: 'dy-tray-items-editor',
-  imports: [PdSelect, MatLabel, MatFormField, MatInput, MatButton, MatIconButton, FormsModule, Icon, Sparkline, CdkDropList, CdkDrag, CdkDragHandle],
+  imports: [MatTooltip, PdSelect, MatLabel, MatFormField, MatInput, MatButton, MatIconButton, FormsModule, Icon, Sparkline, CdkDropList, CdkDrag, CdkDragHandle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="preview" role="img" [attr.aria-label]="previewLabel()">
@@ -55,12 +56,12 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     <ul cdkDropList (cdkDropListDropped)="drop($event)" aria-label="Menu bar items">
       @for (it of items(); track it.id; let i = $index) {
         <li cdkDrag>
-          <button type="button" matIconButton class="grab" cdkDragHandle aria-label="Drag to reorder"><dy-icon name="more" /></button>
-          <button type="button" matIconButton aria-label="Move up" [disabled]="i === 0" (click)="move(i, i - 1)"><dy-icon name="arrow-up" /></button>
-          <button type="button" matIconButton aria-label="Move down" [disabled]="i === items().length - 1" (click)="move(i, i + 1)"><dy-icon name="arrow-down" /></button>
+          <button type="button" matIconButton matTooltip="Drag to reorder" class="grab" cdkDragHandle aria-label="Drag to reorder"><dy-icon name="more" /></button>
+          <button type="button" matIconButton matTooltip="Move up" aria-label="Move up" [disabled]="i === 0" (click)="move(i, i - 1)"><dy-icon name="arrow-up" /></button>
+          <button type="button" matIconButton matTooltip="Move down" aria-label="Move down" [disabled]="i === items().length - 1" (click)="move(i, i + 1)"><dy-icon name="arrow-down" /></button>
           <pd-select [options]="metricOptions" [value]="metricName(it)" [ariaLabel]="'Metric of item ' + (i + 1)" (valueChange)="setMetric(it, $event)" />
           <pd-select [options]="styleOptions" [value]="styleId(it)" [ariaLabel]="'Style of item ' + (i + 1)" (valueChange)="setStyle(it, $event)" />
-          <button type="button" matIconButton class="pd-button-danger" aria-label="Remove item" (click)="remove(it)"><dy-icon name="trash" /></button>
+          <button type="button" matIconButton matTooltip="Remove item" class="pd-button-danger" aria-label="Remove item" (click)="remove(it)"><dy-icon name="trash" /></button>
           @if (styleId(it) === 'number') {
             <span class="num-fields">
                 <mat-form-field class="short"><mat-label>Label</mat-label><input matInput aria-label="Short label" maxlength="16" [ngModel]="numberLabel(it)" (ngModelChange)="setNumber(it, 'label', $event)" /></mat-form-field>

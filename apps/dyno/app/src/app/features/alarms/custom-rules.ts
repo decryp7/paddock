@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ActionTip } from '../../shared/action-tip';
 import type { CustomAlertRule } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { confirm } from '@decryp7/paddock-ui/shell/confirm';
@@ -23,7 +24,7 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
 /** The user's own alert rules from the settings: add, edit, enable and delete. The engine validates every save. */
 @Component({
   selector: 'dy-custom-rules',
-  imports: [RowMenu, MatMenuModule, MatDivider, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon, MatSlideToggle],
+  imports: [ActionTip, RowMenu, MatMenuModule, MatDivider, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon, MatSlideToggle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="custom-h">
@@ -46,8 +47,8 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
               <span class="cell muted" role="cell"><span class="truncate" [dyFullText]="summary(r)">{{ summary(r) }}</span></span>
               <span class="cell" role="cell"><span class="dot" [attr.data-tone]="r.severity === 'critical' ? 'bad' : r.severity === 'warning' ? 'warn' : 'info'" aria-hidden="true"></span><span [class.muted]="r.severity !== 'critical'">{{ word(r) }}</span></span>
               <span class="cell" role="cell"><mat-slide-toggle [checked]="r.enabled" [disabled]="alarms.saving()" [aria-label]="'Enable ' + r.name" (change)="toggle(r, $event.checked)" /></span>
-              <span class="cell acts" role="cell">
-                <button type="button" matIconButton [attr.aria-label]="'Edit ' + r.name" matTooltipPosition="left" [matTooltip]="'Edit ' + r.name" (click)="edit(r)"><dy-icon name="edit" /></button>
+              <span class="cell acts" role="cell" dyActionTip>
+                <button type="button" matIconButton [attr.aria-label]="'Edit ' + r.name" (click)="edit(r)"><dy-icon name="edit" /></button>
                 <button type="button" matIconButton class="more" [attr.aria-label]="'More actions for ' + r.name" [matMenuTriggerFor]="menu" [matMenuTriggerData]="{ rule: r }"><dy-icon name="more" /></button>
               </span>
             </div>

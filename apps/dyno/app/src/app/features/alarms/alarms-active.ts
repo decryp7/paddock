@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
+import { ActionTip } from '../../shared/action-tip';
 import type { Alarm, ShelveFor } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
@@ -19,7 +20,7 @@ import { RowMenu } from '../../shared/row-menu';
  */
 @Component({
   selector: 'dy-alarms-active',
-  imports: [RowMenu, MatMenuModule, MatDivider, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon, AlarmDetail],
+  imports: [ActionTip, RowMenu, MatMenuModule, MatDivider, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon, AlarmDetail],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="store.loaded()" [error]="store.error()" [empty]="store.alarms().length === 0" emptyTitle="No open alarms" emptyText="When a rule fires, its alarm waits here until you acknowledge it." emptyIcon="bell" what="alarms" [rows]="4" (retry)="store.load()">
@@ -66,8 +67,8 @@ import { RowMenu } from '../../shared/row-menu';
               <span class="cell c-first muted num" role="gridcell">{{ time(a.firstSeen) }}</span>
               <span class="cell muted num" role="gridcell">{{ time(a.lastSeen) }}</span>
               <span class="cell r muted num" role="gridcell">×{{ a.repeatCount }}</span>
-              <span class="cell acts" role="gridcell">
-                <button type="button" matIconButton [attr.aria-label]="'Acknowledge ' + a.title" matTooltipPosition="left" [matTooltip]="'Acknowledge ' + a.title" [disabled]="!ackable(a)" (click)="ack(a, $event)"><dy-icon name="check" /></button>
+              <span class="cell acts" role="gridcell" dyActionTip>
+                <button type="button" matIconButton [attr.aria-label]="'Acknowledge ' + a.title" [disabled]="!ackable(a)" (click)="ack(a, $event)"><dy-icon name="check" /></button>
                 <button type="button" matIconButton [attr.aria-label]="'Shelve ' + a.title" [matMenuTriggerFor]="shelveMenu" [matMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="clock" /></button>
                 <button type="button" matIconButton class="more" [attr.aria-label]="'More actions for ' + a.title" [matMenuTriggerFor]="menu" [matMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
               </span>
@@ -109,7 +110,7 @@ import { RowMenu } from '../../shared/row-menu';
     .section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); min-height: var(--control-h); margin-bottom: var(--sp-3); }
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 320px; }
-    .head, .row { --cols: 14px 64px minmax(280px, 2.4fr) minmax(120px, 1fr) 190px 80px 80px 52px 40px; }
+    .head, .row { --cols: 14px 64px minmax(280px, 2.4fr) minmax(120px, 1fr) 190px 80px 80px 52px 88px; }
     .row.selected { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
     .unread { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
     .title-cell { padding: 6px 0; }
@@ -118,7 +119,8 @@ import { RowMenu } from '../../shared/row-menu';
     .t { font-size: var(--fs-base); font-weight: var(--fw-medium); }
     .sfx { flex: none; color: var(--text-3); font-size: var(--fs-xs); }
     .d { color: var(--text-3); font-size: var(--fs-xs); }
-    @container (max-width: 1000px) {
+    /* Under 1160 px the columns of the first layout (1136 px at least, with room for all three actions) no longer fit. */
+    @container (max-width: 1160px) {
       .c-rule, .c-first { display: none; }
       .head, .row { --cols: 14px 84px minmax(160px, 1fr) 180px 96px 52px 88px; }
     }

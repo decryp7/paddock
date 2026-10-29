@@ -52,7 +52,7 @@ import { MatTooltip } from '@angular/material/tooltip';
                     @if (row.kind === 'group') {
                       <tr class="day">
                         <td colspan="3">
-                          <button type="button" matIconButton class="chev" [attr.aria-expanded]="row.open" [attr.aria-label]="(row.open ? 'Collapse ' : 'Expand ') + row.title" (click)="toggleGroup(row.key)"><dy-icon [name]="row.open ? 'chevron-down' : 'chevron-right'" /></button>
+                          <button type="button" matIconButton [matTooltip]="(row.open ? 'Collapse ' : 'Expand ') + row.title" class="chev" [attr.aria-expanded]="row.open" [attr.aria-label]="(row.open ? 'Collapse ' : 'Expand ') + row.title" (click)="toggleGroup(row.key)"><dy-icon [name]="row.open ? 'chevron-down' : 'chevron-right'" /></button>
                           <strong>{{ row.title }}</strong><span class="faint cnt">{{ row.detail }}</span>
                         </td>
                       </tr>

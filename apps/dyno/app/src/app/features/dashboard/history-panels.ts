@@ -36,7 +36,7 @@ const GLYPH: Record<string, string> = { triangle: '▲', rect: '■', circle: '�
         <h2><dy-icon name="trend" /> History</h2>
         <span class="spacer"></span>
         <pd-segmented-control label="Range" [options]="rangeSegs" [value]="store.range()" (valueChange)="pickRange($event)" />
-        <button type="button" matIconButton aria-label="Refresh history" (click)="store.load()"><dy-icon name="refresh" /></button>
+        <button type="button" matIconButton matTooltip="Refresh history" aria-label="Refresh history" (click)="store.load()"><dy-icon name="refresh" /></button>
       </div>
       <dy-async [loaded]="!!store.history()" [error]="store.error()" [empty]="empty()" emptyTitle="No history yet" emptyText="Dyno keeps what it measures; the chart fills in as time passes." what="history" [rows]="0" (retry)="store.load()">
         <div skeleton class="skeleton chart-skeleton"></div>

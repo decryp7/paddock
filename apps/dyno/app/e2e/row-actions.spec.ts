@@ -1,9 +1,11 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 /**
- * Row-action tooltips never cover a neighbouring action (geometry, not luck): for every icon button of a cluster that has a
- * tooltip, hover it, wait for the tooltip and check its box overlaps no other action button of the same list or table (every
- * row's, including the ones only shown on hover). Each cluster must show at least one tooltip, so the check cannot pass empty.
+ * Every icon-only action of a list or table row shows a tooltip with its name (design guide: every icon-only button has an
+ * aria-label and a tooltip), and the tooltip never covers a neighbouring action (geometry, not luck): for each icon button,
+ * hover it, wait for the tooltip, check its text is the button's aria-label and its box overlaps no other action button of the
+ * same list or table (every row's, including the ones only shown on hover). A row's actions share one tooltip, placed left of the
+ * whole cluster.
  */
 const url = (path: string) => `/?latency=0#${path}`;
 const ACTIONS = 'button.mat-mdc-icon-button:not(.chev), a.mat-mdc-icon-button';
@@ -16,19 +18,15 @@ async function checkCluster(page: Page, container: Locator, name: string): Promi
   await expect(actions.first(), `${name}: has actions`).toBeAttached();
   const count = await actions.count();
   expect(count, `${name}: has actions`).toBeGreaterThan(0);
-  let shown = 0;
   for (let i = 0; i < count; i++) {
     const button = actions.nth(i);
     await button.scrollIntoViewIfNeeded();
+    const label = (await button.getAttribute('aria-label')) ?? '';
+    expect(label, `${name}: action ${i} has an aria-label`).not.toBe('');
     await button.hover({ force: true });
     const tip = page.locator('.mat-mdc-tooltip');
-    try {
-      await tip.first().waitFor({ state: 'visible', timeout: 700 });
-    } catch {
-      await page.mouse.move(0, 0);
-      continue; // this button has no tooltip
-    }
-    shown++;
+    await expect(tip.first(), `${name}: "${label}" shows a tooltip`).toBeVisible();
+    await expect(tip.first(), `${name}: the tooltip of "${label}" is its name`).toHaveText(label);
     const tipBox = (await tip.first().boundingBox())!;
     const own = (await button.boundingBox())!;
     for (let j = 0; j < count; j++) {
@@ -39,7 +37,6 @@ async function checkCluster(page: Page, container: Locator, name: string): Promi
     await page.mouse.move(0, 0);
     await expect(tip).toHaveCount(0);
   }
-  expect(shown, `${name}: at least one action has a tooltip`).toBeGreaterThan(0);
 }
 
 test.describe('row-action tooltips', () => {

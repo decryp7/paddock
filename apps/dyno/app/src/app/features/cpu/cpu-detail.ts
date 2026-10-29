@@ -1,4 +1,5 @@
 import { showMeasured } from '../../core/measured';
+import { MatTooltip } from '@angular/material/tooltip';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ThemeService } from '../../core/theme';
@@ -18,12 +19,12 @@ import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 /** The CPU in detail: every logical core now (load and frequency, grouped by kind), the hottest apps, and a cores x time heatmap. */
 @Component({
   selector: 'dy-cpu-detail',
-  imports: [SuSegmentedControl, MatIconButton, RouterLink, Icon, Chart, AsyncState],
+  imports: [MatTooltip, SuSegmentedControl, MatIconButton, RouterLink, Icon, Chart, AsyncState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <header class="page-head">
-        <a matIconButton routerLink="/" aria-label="Back to the dashboard"><dy-icon name="chevron-left" /></a>
+        <a matIconButton matTooltip="Back to the dashboard" routerLink="/" aria-label="Back to the dashboard"><dy-icon name="chevron-left" /></a>
         <div class="titles">
           <h1>CPU</h1>
           <p class="num">{{ summary() }}</p>

@@ -119,7 +119,7 @@ import { RowMenu } from '../../shared/row-menu';
                     @if (r.kind === 'day') {
                       <tr class="day">
                         <td colspan="5">
-                          <button type="button" matIconButton class="chev" [attr.aria-expanded]="r.open" [attr.aria-label]="(r.open ? 'Collapse ' : 'Expand ') + r.label" (click)="toggleDay(r.key)"><dy-icon [name]="r.open ? 'chevron-down' : 'chevron-right'" /></button>
+                          <button type="button" matIconButton [matTooltip]="(r.open ? 'Collapse ' : 'Expand ') + r.label" class="chev" [attr.aria-expanded]="r.open" [attr.aria-label]="(r.open ? 'Collapse ' : 'Expand ') + r.label" (click)="toggleDay(r.key)"><dy-icon [name]="r.open ? 'chevron-down' : 'chevron-right'" /></button>
                           <strong>{{ r.label }}</strong><span class="faint cnt">{{ plural(r.count, 'issue') }}</span>
                         </td>
                       </tr>
@@ -142,7 +142,7 @@ import { RowMenu } from '../../shared/row-menu';
             <aside class="detail" tabindex="-1" aria-label="Issue details" (keydown.escape)="selectedId.set(null)">
               <div class="dhead">
                 <strong>{{ s.title }}</strong>
-                <button type="button" matIconButton aria-label="Close details" (click)="selectedId.set(null)"><dy-icon name="close" /></button>
+                <button type="button" matIconButton matTooltip="Close details" aria-label="Close details" (click)="selectedId.set(null)"><dy-icon name="close" /></button>
               </div>
               <dl>
                 <dt>When</dt><dd>{{ when(s) }}</dd>

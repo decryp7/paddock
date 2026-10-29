@@ -49,7 +49,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
         <div class="banner" role="alert">
           <dy-icon name="alert" />
           <span><strong>{{ e.message }}</strong> @if (hint(); as h) {<small>{{ h }}</small>}</span>
-          <button type="button" matIconButton aria-label="Dismiss" (click)="store.dismissError()"><dy-icon name="close" /></button>
+          <button type="button" matIconButton matTooltip="Dismiss" aria-label="Dismiss" (click)="store.dismissError()"><dy-icon name="close" /></button>
         </div>
       }
 
@@ -95,7 +95,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                 (dblclick)="store.toggle(r)"  dyRowMenu [matContextMenuTriggerFor]="menu" [matContextMenuTriggerData]="{ row: r }" [matContextMenuTriggerDisabled]="r.kind === 'other'">
                 <span role="gridcell" class="name" [style.padding-left.px]="8 + r.depth * 20">
                   @if (r.expandable) {
-                    <button type="button" matIconButton class="chev" [attr.aria-label]="(r.expanded ? 'Collapse ' : 'Expand ') + r.name" (click)="$event.stopPropagation(); store.toggle(r)">
+                    <button type="button" matIconButton [matTooltip]="(r.expanded ? 'Collapse ' : 'Expand ') + r.name" class="chev" [attr.aria-label]="(r.expanded ? 'Collapse ' : 'Expand ') + r.name" (click)="$event.stopPropagation(); store.toggle(r)">
                       <dy-icon [name]="r.expanded ? 'chevron-down' : 'chevron-right'" />
                     </button>
                   } @else {
@@ -134,7 +134,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                 <span role="gridcell" class="r num faint">{{ pid(r) }}</span>
                 <span role="gridcell" class="act">
                   @if (r.kind !== 'other') {
-                  <button type="button" matIconButton [attr.aria-label]="'Actions for ' + r.name" [matMenuTriggerFor]="menu" [matMenuTriggerData]="{ row: r }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
+                  <button type="button" matIconButton [matTooltip]="'Actions for ' + r.name" [attr.aria-label]="'Actions for ' + r.name" [matMenuTriggerFor]="menu" [matMenuTriggerData]="{ row: r }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
                   }
                 </span>
               </div>

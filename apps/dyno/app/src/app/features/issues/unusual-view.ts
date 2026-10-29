@@ -32,7 +32,7 @@ import { RowMenu } from '../../shared/row-menu';
         <div class="bar" role="group" aria-label="New programs">
           <span class="learn">{{ learning() }}</span>
           <span class="grow"></span>
-          <button type="button" matIconButton aria-label="More actions" [matMenuTriggerFor]="more"><dy-icon name="more" /></button>
+          <button type="button" matIconButton matTooltip="More actions" aria-label="More actions" [matMenuTriggerFor]="more"><dy-icon name="more" /></button>
         </div>
 
         @if (!o.enabled) {
@@ -70,7 +70,7 @@ import { RowMenu } from '../../shared/row-menu';
               <aside class="detail" tabindex="-1" aria-label="Program details" (keydown.escape)="selectedKey.set(null)">
                 <div class="dhead">
                   <span class="prog"><span class="av" aria-hidden="true" [style.background]="tile(s.name)">{{ ini(s.name) }}</span><strong>{{ s.name }}</strong></span>
-                  <button type="button" matIconButton aria-label="Close details" (click)="selectedKey.set(null)"><dy-icon name="close" /></button>
+                  <button type="button" matIconButton matTooltip="Close details" aria-label="Close details" (click)="selectedKey.set(null)"><dy-icon name="close" /></button>
                 </div>
                 <p class="lead">{{ why(s) }}.</p>
                 @if (s.reasons.length > 1) {

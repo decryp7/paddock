@@ -1,5 +1,6 @@
-import { Directive, ElementRef, inject } from '@angular/core';
+import { contentChildren, Directive, inject } from '@angular/core';
 import { MatContextMenuTrigger } from '@angular/material/menu';
+import { MatTooltip } from '@angular/material/tooltip';
 import { PdContextMenuKeys } from '@decryp7/paddock-ui';
 
 /**
@@ -23,17 +24,10 @@ import { PdContextMenuKeys } from '@decryp7/paddock-ui';
   ],
 })
 export class RowMenu {
+  private readonly tooltips = contentChildren(MatTooltip, { descendants: true });
+
   constructor() {
-    const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
-    // Capture phase: before the trigger opens the menu, tell the tooltips of what the pointer is over that it left.
-    host.addEventListener(
-      'contextmenu',
-      (e) => {
-        for (let el = e.target instanceof Element ? e.target : null; el; el = el === host ? null : el.parentElement) {
-          el.dispatchEvent(new MouseEvent('mouseleave', { relatedTarget: null }));
-        }
-      },
-      true,
-    );
+    // Whatever tooltip the pointer had open in the row closes at once (no delay, no animation wait), so the first Escape closes the menu.
+    inject(MatContextMenuTrigger).menuOpened.subscribe(() => this.tooltips().forEach((t) => t.hide(0)));
   }
 }

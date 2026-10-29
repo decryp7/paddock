@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, input, output, signal, viewChild } from '@angular/core';
+import { MatTooltip } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
 import type { Alarm, ShelveFor } from '../../core/api.types';
 import { formatCount } from '../../shared/format';
@@ -13,13 +14,13 @@ import { MatMenuModule } from '@angular/material/menu';
 /** The side panel of one alarm: full values, notes (add one), its change log and the way to the recorder. Esc closes it. */
 @Component({
   selector: 'dy-alarm-detail',
-  imports: [MatMenuModule, MatIconButton, MatFormField, MatInput, MatButton, Icon, RouterLink],
+  imports: [MatTooltip, MatMenuModule, MatIconButton, MatFormField, MatInput, MatButton, Icon, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <aside class="detail" tabindex="-1" aria-label="Alarm details" (keydown.escape)="closed.emit()">
       <div class="dhead">
         <strong class="ttl">{{ alarm().title }}</strong>
-        <button type="button" matIconButton aria-label="Close details" (click)="closed.emit()"><dy-icon name="close" /></button>
+        <button type="button" matIconButton matTooltip="Close details" aria-label="Close details" (click)="closed.emit()"><dy-icon name="close" /></button>
       </div>
       <p class="status"><span class="dot" [attr.data-tone]="tone()" aria-hidden="true"></span>{{ state() }}@if (suffix()) {<span class="faint"> · {{ suffix() }}</span>}</p>
       <p class="text">{{ alarm().detail }}</p>
