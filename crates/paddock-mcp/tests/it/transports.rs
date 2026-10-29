@@ -5,7 +5,7 @@ use crate::common;
 use common::*;
 use paddock_mcp::{KeyStore, Limits, client, jsonrpc, serve_loopback, serve_stdio};
 use serde_json::{Value, json};
-use std::io::{BufRead, BufReader, Cursor, Write};
+use std::io::{BufRead, BufReader, Cursor, ErrorKind, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 
@@ -143,22 +143,46 @@ struct Conn {
 impl Conn {
     fn open(addr: std::net::SocketAddr) -> Conn {
         let s = TcpStream::connect(addr).unwrap();
+        // A hang guard only: every reply and every end comes at once, so a missing one fails the test in seconds
+        // instead of stalling the runner (see `next`).
+        s.set_read_timeout(Some(HANG_GUARD)).unwrap();
         Conn {
             reader: BufReader::new(s.try_clone().unwrap()),
             writer: s,
         }
     }
 
+    /// One write for the whole line: `writeln!` writes the line and its newline separately, and the second write into a
+    /// connection the server has already closed fails with a broken pipe instead of letting the test read the reply.
     fn send(&mut self, line: &str) {
-        writeln!(self.writer, "{line}").unwrap();
+        self.writer
+            .write_all(format!("{line}\n").as_bytes())
+            .unwrap();
     }
 
-    /// The next line, or `None` at end of stream.
+    /// Closes the sending side and waits until the server has ended the connection: from then on its place is free.
+    fn leave(mut self) {
+        self.writer.shutdown(std::net::Shutdown::Write).unwrap();
+        while self.next().is_some() {}
+    }
+
+    /// The next line, or `None` once the connection has ended: at the end of the stream, and also on a read error such as
+    /// a reset, since a closed connection can end either way. Neither a line nor an end within [`HANG_GUARD`] fails.
     fn next(&mut self) -> Option<Value> {
         let mut l = String::new();
-        (self.reader.read_line(&mut l).unwrap_or(0) > 0).then(|| serde_json::from_str(&l).unwrap())
+        match self.reader.read_line(&mut l) {
+            Ok(0) => None,
+            Ok(_) => Some(serde_json::from_str(&l).unwrap()),
+            Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                panic!("neither a line nor the end of the connection within {HANG_GUARD:?}")
+            }
+            Err(_) => None,
+        }
     }
 }
+
+/// How long a test client waits for a line or the end of its connection before failing.
+const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(10);
 
 fn listener() -> TcpListener {
     TcpListener::bind("127.0.0.1:0").unwrap()
@@ -268,25 +292,56 @@ fn loopback_limits_clients_and_bounds_every_line() {
     );
     first.send(&client::ping(1));
     assert!(first.next().unwrap()["result"].is_object());
-    // When the first goes away its place is free again.
-    drop(first);
-    let mut again = None;
-    for _ in 0..10_000 {
-        let mut c = Conn::open(serving.addr());
-        c.send(&hello);
-        match c.next() {
-            Some(v) if v["ok"] == true => {
-                again = Some(c);
-                break;
-            }
-            _ => std::thread::yield_now(),
-        }
-    }
-    assert!(
-        again.is_some(),
+    // When the first goes away (and has seen its connection end) its place is free again, at once.
+    first.leave();
+    let mut again = Conn::open(serving.addr());
+    again.send(&hello);
+    assert_eq!(
+        again.next().unwrap()["ok"],
+        true,
         "a place became free after the first client left"
     );
     drop(serving); // dropping stops it too
+}
+
+/// Regression: the place of a client that left was only freed when the accept loop next found its thread finished, which
+/// ran on after the client had already seen its connection end. A client reconnecting at once was told "too many" and,
+/// writing its key into the refused connection, got a broken pipe (CI, Linux, under coverage). A client that has seen
+/// its connection end must get the free place on its very next connection, every time.
+#[test]
+fn a_client_that_saw_its_connection_end_gets_the_place_back_at_once() {
+    let r = rig();
+    let keys = Arc::new(KeyStore::new());
+    let (_, key) = keys.issue("a", 1).unwrap();
+    let serving = serve_loopback(r.server.clone(), keys, listener(), 1).unwrap();
+    let hello = json!({"key": key}).to_string();
+    for round in 0..300 {
+        let mut c = Conn::open(serving.addr());
+        c.send(&hello);
+        let reply = c.next().expect("a reply to the key");
+        assert_eq!(reply["ok"], true, "round {round}: {reply}");
+        c.leave();
+    }
+}
+
+/// Regression: on macOS `shutdown` fails (ENOTCONN) on a socket whose peer has already sent its FIN, and the server kept a
+/// second handle to every connection for `stop`, so a client that half-closed never saw its connection end.
+#[test]
+fn a_client_that_half_closes_sees_the_end_of_its_connection() {
+    let r = rig();
+    let keys = Arc::new(KeyStore::new());
+    let (_, key) = keys.issue("a", 1).unwrap();
+    let serving = serve_loopback(r.server.clone(), keys, listener(), 2).unwrap();
+    let mut c = Conn::open(serving.addr());
+    c.send(&json!({"key": key}).to_string());
+    assert_eq!(c.next().unwrap()["ok"], true);
+    c.send(&client::ping(1));
+    c.writer.shutdown(std::net::Shutdown::Write).unwrap();
+    assert!(
+        c.next().unwrap()["result"].is_object(),
+        "the request sent before the half-close is answered"
+    );
+    assert!(c.next().is_none(), "the connection ends");
 }
 
 #[test]

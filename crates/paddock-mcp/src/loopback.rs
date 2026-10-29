@@ -12,8 +12,8 @@ use crate::server::{Server, Session};
 use serde_json::{Value, json};
 use std::io::{self, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -67,7 +67,34 @@ impl Read for Watched {
     }
 }
 
-type Conns = Arc<Mutex<Vec<(TcpStream, JoinHandle<()>)>>>;
+/// The live connections, for [`Serving::stop`]. Each connection's thread owns the only strong handle to its socket, so
+/// ending the thread closes the connection: it never depends on `shutdown`, which fails (ENOTCONN on macOS) once the
+/// client has half-closed. Finished threads are pruned on the next accept.
+type Conns = Arc<Mutex<Vec<(Weak<TcpStream>, JoinHandle<()>)>>>;
+
+/// One of the `max_connections` places, held by a connection's thread and given back when it is dropped, which the thread
+/// does before it ends the connection: a client that has seen its connection end can connect again at once. (Counting
+/// finished threads instead freed the place only some time after the client saw the end, so a prompt reconnect was
+/// refused with "too many".)
+struct Place(Arc<AtomicUsize>);
+
+impl Place {
+    /// Takes a place if fewer than `max` are taken.
+    fn take(taken: &Arc<AtomicUsize>, max: usize) -> Option<Place> {
+        taken
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < max).then_some(n + 1)
+            })
+            .ok()
+            .map(|_| Place(taken.clone()))
+    }
+}
+
+impl Drop for Place {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 /// A running loopback server. Dropping it (or [`Serving::stop`]) closes the listener and every connection and joins every thread.
 pub struct Serving {
@@ -102,7 +129,11 @@ impl Serving {
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         );
         for (stream, handle) in conns {
-            let _ = stream.shutdown(Shutdown::Both);
+            // Wakes a blocked read on Linux and macOS; elsewhere the read notices `stop` within a slice. A connection whose
+            // thread has already ended has no socket left to shut down.
+            if let Some(stream) = stream.upgrade() {
+                let _ = stream.shutdown(Shutdown::Both);
+            }
             let _ = handle.join();
         }
     }
@@ -114,12 +145,12 @@ impl Drop for Serving {
     }
 }
 
-fn refuse(stream: &mut TcpStream, why: &str) {
+fn refuse(stream: &mut impl Write, why: &str) {
     let _ = writeln!(stream, "{}", json!({"ok": false, "error": why}));
 }
 
 fn handshake(
-    stream: &mut TcpStream,
+    stream: &mut impl Write,
     reader: &mut BufReader<Watched>,
     keys: &dyn KeyVerifier,
 ) -> Option<String> {
@@ -169,6 +200,7 @@ pub fn serve_loopback(
     check_loopback(&addr)?;
     let stop = Arc::new(AtomicBool::new(false));
     let conns: Conns = Arc::default();
+    let taken = Arc::new(AtomicUsize::new(0));
     let (stop2, conns2) = (stop.clone(), conns.clone());
     let accept = std::thread::spawn(move || {
         for stream in listener.incoming() {
@@ -189,24 +221,26 @@ pub fn serve_loopback(
             for (_, h) in done {
                 let _ = h.join();
             }
-            if list.len() >= max_connections {
+            let Some(place) = Place::take(&taken, max_connections) else {
                 refuse(&mut stream, "too many MCP clients are connected");
                 continue;
-            }
-            let Ok(kept) = stream.try_clone() else {
-                continue;
             };
+            let stream = Arc::new(stream);
+            let kept = Arc::downgrade(&stream);
             let (server, keys, stop) = (server.clone(), keys.clone(), stop2.clone());
             let handle = std::thread::spawn(move || {
                 if let Ok(read_half) = stream.try_clone().and_then(|s| Watched::new(s, stop)) {
                     let mut reader = BufReader::new(read_half);
-                    if let Some(client) = handshake(&mut stream, &mut reader, keys.as_ref()) {
+                    let mut writer: &TcpStream = &stream;
+                    if let Some(client) = handshake(&mut writer, &mut reader, keys.as_ref()) {
                         let _ =
-                            serve_lines(&server, &Session::new(&client), &mut reader, &mut stream);
+                            serve_lines(&server, &Session::new(&client), &mut reader, &mut writer);
                     }
                 }
-                // The accept loop keeps a second handle to the socket, so closing this one is not enough to end the connection.
-                let _ = stream.shutdown(Shutdown::Both);
+                // Give the place back before the client can see the end of its connection, then close the last handle
+                // (the read half is already closed), which ends it.
+                drop(place);
+                drop(stream);
             });
             list.push((kept, handle));
         }
