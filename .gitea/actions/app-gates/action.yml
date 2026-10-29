@@ -40,6 +40,9 @@ inputs:
   windows-clippy:
     description: "'true' also runs clippy on the Windows leg (default: skipped there, as the crates leg: one OS decides lints for all). For an app whose Windows-only code (a service) clippy must see."
     default: "false"
+  notices:
+    description: "'true' also checks the app's THIRD_PARTY_NOTICES.md is up to date (its paddock.ci.json `notices` block, scripts/notices.sh): cargo-about pinned to 0.9.2, Linux leg only."
+    default: "false"
   filter:
     description: "A nextest filterset for a pull request that reaches only part of the workspace (package(=a) | package(=b)); empty runs every test."
     default: ""
@@ -63,6 +66,21 @@ runs:
       env:
         COMMANDS: ${{ inputs.checks }}
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
+
+    # Third-party notices (Rust through cargo-about, npm through the root lock) are generated output: the committed file must equal
+    # what the dependencies produce now (a new dependency or a version bump changes it).
+    - name: Third-party notices are up to date (${{ inputs.app }})
+      if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.notices == 'true' && runner.os == 'Linux' }}
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-about@0.9.2
+
+    - name: Check the notices (${{ inputs.app }})
+      if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.notices == 'true' && runner.os == 'Linux' }}
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+      run: bash "${{ github.action_path }}/../../../scripts/notices.sh" "$APP" --check
 
     - name: Rust checks (${{ inputs.app }})
       if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.rust-checks != '' && inputs.rust == 'true' }}
