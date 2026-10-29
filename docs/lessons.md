@@ -699,3 +699,7 @@ details: [research/2026-10-29-link-time.md](research/2026-10-29-link-time.md).
   `globalThis`) are not flagged. **Follow-up branch (planned):** move the selectors into the shared
   `@decryp7/paddock-eslint` preset, add a shared-object rule (fix: `vi.spyOn(obj, name, 'get')` or `vi.stubGlobal`) and
   convert Debrief, Dyno and Pitcrew.
+  Non-dialog optional-chain actions (about 54 in Debrief specs, e.g. `buttons[1]?.click()`, `handlers[0]?.(…)`) are not
+  flagged yet; the follow-up bans `ExpressionStatement > ChainExpression` in specs, keeps cleanups such as
+  `getSelection()?.removeAllRanges()` with a disable comment, and converts the rest to `!` or `el()`. It also catches
+  `menu?.items[0]?.run()`.
