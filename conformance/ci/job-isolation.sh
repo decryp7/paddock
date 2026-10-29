@@ -22,7 +22,8 @@
 # Two kinds of state:
 # - Job-scoped (temp folders, the clean-up's temp sweep and process patterns): the runner's own per-job folder. The Gitea
 #   runner gives every job <workdir_parent>/<16 random hex>/{hostexecutor,tmp,tool_cache,act}, sets RUNNER_TEMP to its tmp,
-#   and deletes the whole folder after the job. acquire points TMPDIR (TMP and TEMP on Windows) at it.
+#   and deletes the whole folder after the job. acquire points TMPDIR (TMP and TEMP on Windows) at it, and on Unix makes a short
+#   socket folder (PADDOCK_SOCKET_BASE) that release removes, both through job-tmpdir.sh.
 # - Kept (kept-folders.txt): a stable absolute path per slot, so caches stay warm. A slot s<n> (n = 1..PADDOCK_CI_SLOTS) is
 #   an OS file lock on <ci-home>/slots/s<n>.lock, held by a detached holder process (`./dev ci slot acquire`, ADR 0022's
 #   paddock-dev) that lives until the job's RUNNER_TEMP is gone or release asks it to stop. The kernel drops the lock when
@@ -339,16 +340,10 @@ export_slot() {
   {
     echo "PADDOCK_CI_SLOT=$slot"
     echo "PADDOCK_CI_SLOT_TOKEN=$token"
-    if [ "$RUNNER_OS" = Windows ] && command -v cygpath >/dev/null 2>&1; then
-      echo "PADDOCK_JOB_TEMP=$(cygpath -m "$temp")"
-      echo "TMPDIR=$(cygpath -m "$temp")"
-      echo "TMP=$(cygpath -w "$temp")"
-      echo "TEMP=$(cygpath -w "$temp")"
-    else
-      echo "PADDOCK_JOB_TEMP=$temp"
-      echo "TMPDIR=$temp"
-    fi
   } >> "$out"
+  # The job's temp and socket folders (PADDOCK_JOB_TEMP, TMPDIR, PADDOCK_SOCKET_BASE): one implementation, shared with the
+  # job-tmpdir action. $temp is the same folder (the runner's RUNNER_TEMP).
+  GITHUB_ENV="$out" bash "$here/job-tmpdir.sh" setup
 }
 
 cmd_acquire() {
@@ -406,6 +401,8 @@ held_by_us() {
 
 cmd_release() {
   is_linux && return 0
+  # The job's socket folder goes whether or not this job got a slot (acquire made it).
+  bash "$here/job-tmpdir.sh" remove || echo "::warning::job-isolation: the job's socket folder could not be removed" >&2
   local s="${PADDOCK_CI_SLOT:-}" token="${PADDOCK_CI_SLOT_TOKEN:-}" home ok=1
   [[ "$s" =~ ^s[1-9][0-9]*$ ]] || { echo "job-isolation: this job holds no slot" >&2; return 0; }
   home="$(ci_home)" || return 0

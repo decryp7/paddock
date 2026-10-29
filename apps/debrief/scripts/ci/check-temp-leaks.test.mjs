@@ -135,3 +135,26 @@ test('--dir with --shared scans the given folder and the shared socket folders (
     shared.done();
   }
 });
+
+test('--socket-dir scans the job\'s own socket folder for endpoint-shaped names, so a host job never reads the shared /tmp', () => {
+  const temp = scratch();
+  const sockets = scratch();
+  const shared = scratch();
+  try {
+    const file = join(temp.dir, '..', `${temp.dir.split('/').pop()}-sock.json`);
+    const args = ['--dir', temp.dir, '--socket-dir', sockets.dir];
+    const never = () => [shared.dir];
+    assert.equal(main([...args, '--snapshot', file], quiet().log, never), 0);
+    // Someone else's socket folder in the shared folder (a local run on the same host) is not this job's leak.
+    mkdirSync(join(shared.dir, 'debrief-ipc-0123456789ab'));
+    assert.equal(main([...args, '--check', file], quiet().log, never), 0);
+    // The job's own socket folder is checked.
+    mkdirSync(join(sockets.dir, 'dbwAb3dEf'));
+    assert.equal(main([...args, '--check', file], quiet().log, never), 1);
+    rmSync(file, { force: true });
+  } finally {
+    temp.done();
+    sockets.done();
+    shared.done();
+  }
+});

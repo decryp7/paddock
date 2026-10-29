@@ -66,6 +66,9 @@ function host() {
   // The disk is faked too (ER-14): a df that reports 1000 GB free, and no free-disk floor, so acquire never reads or
   // depends on the real disk of the machine running the tests (a Mac with 17 GB free failed eight tests). The floor tests
   // set both explicitly.
+  // The jobs' socket folders (job-tmpdir.sh) under the fake host, never the real /tmp.
+  const sockets = join(root, 'sockets');
+  mkdirSync(sockets);
   const df = join(root, 'df-ample');
   writeFileSync(df, '#!/bin/sh\necho "Filesystem 1024-blocks Used Available Capacity Mounted"\necho "disk 1 1 $((1000 * 1048576)) 1% /"\n');
   chmodSync(df, 0o755);
@@ -75,7 +78,7 @@ function host() {
     mkdirSync(temp, { recursive: true });
     const envFile = join(root, 'work', id, 'github-env');
     writeFileSync(envFile, '');
-    const base = { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: 'macOS', RUNNER_TEMP: temp, GITHUB_ENV: envFile, GITHUB_RUN_ID: '7', GITHUB_JOB: id, PADDOCK_DEV: dev, FAKE_DEV_LOG: log, PADDOCK_SLOT_WAIT_TRIES: '0', PADDOCK_DF: df, PADDOCK_CI_MIN_FREE_GB: '0', ...extra };
+    const base = { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: 'macOS', RUNNER_TEMP: temp, GITHUB_ENV: envFile, GITHUB_RUN_ID: '7', GITHUB_JOB: id, PADDOCK_DEV: dev, FAKE_DEV_LOG: log, PADDOCK_SLOT_WAIT_TRIES: '0', PADDOCK_DF: df, PADDOCK_CI_MIN_FREE_GB: '0', PADDOCK_SOCKET_ROOT: sockets, ...extra };
     const exec = (args, more = {}) => spawnSync('bash', [SCRIPT, ...args], { env: { ...base, ...more }, encoding: 'utf8' });
     const exported = () => Object.fromEntries(read(envFile).split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
     /** Runs a command with what acquire exported, as the job's later steps see it. */
@@ -98,6 +101,9 @@ test('two jobs on one host get different slots from the OS-lock holder, and each
   assert.match(h.log(), new RegExp(`^ci slot acquire --max 4 --owner ${a.temp} --root ${h.ci}$`, 'm'), 'the holder watches the runner\'s job folder; the slots live in the CI home');
   assert.equal(a.exported().TMPDIR, a.temp, 'TMPDIR is the runner\'s per-job folder');
   assert.equal(b.exported().PADDOCK_JOB_TEMP, b.temp);
+  const sock = a.exported().PADDOCK_SOCKET_BASE;
+  assert.ok(sock && sock.startsWith(join(h.root, 'sockets', 'pd-')) && existsSync(sock), 'a short socket folder of the job (job-tmpdir.sh)');
+  assert.notEqual(sock, b.exported().PADDOCK_SOCKET_BASE, 'one per job');
   assert.notEqual(a.later(['path', 'target', 'x-app']).stdout, b.later(['path', 'target', 'x-app']).stdout, 'the same name, two folders');
   assert.equal(a.later(['path', 'target', 'x-app']).stdout.trim(), join(h.ci, 'target-x-app-s1'));
   assert.equal(b.later(['path', 'src', 'x-app-macOS']).stdout.trim(), join(h.ci, 'src', 'x-app-macOS-s2'));
@@ -105,6 +111,9 @@ test('two jobs on one host get different slots from the OS-lock holder, and each
   assert.notEqual(a.later(['path', 'npm']).stdout.trim(), b.later(['path', 'npm']).stdout.trim(), 'npm\'s cache is the slot\'s own');
   assert.equal(a.later(['acquire']).status, 0, 'a second acquire in the same job keeps its slot');
   assert.equal(a.exported().PADDOCK_CI_SLOT, 's1');
+  assert.equal(a.later(['release']).status, 0);
+  assert.ok(!existsSync(sock), 'release removes the job\'s socket folder');
+  assert.ok(existsSync(b.exported().PADDOCK_SOCKET_BASE), 'and only its own');
 });
 
 test('the slot count follows PADDOCK_CI_SLOTS (the pool maximum); a full house waits, then fails and names the holders', () => {

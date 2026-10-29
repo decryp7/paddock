@@ -3,8 +3,9 @@
 //   node scripts/ci/check-temp-leaks.mjs --snapshot leaks.json   (before the tests: records what is already there)
 //   node scripts/ci/check-temp-leaks.mjs --check leaks.json      (after the tests: exits 1 naming the new ones)
 //   node scripts/ci/check-temp-leaks.mjs                         (no baseline: every matching folder counts)
-// `--dir <path>` scans that folder instead of os.tmpdir(); with `--shared`, the shared socket folders are scanned too, as without
-// `--dir` (CI passes the job's own temp folder, .gitea/actions/job-tmpdir).
+// `--dir <path>` scans that folder instead of os.tmpdir(); `--socket-dir <path>` also scans that folder for endpoint-shaped
+// names (CI: the job's own temp folder and socket base, conformance/ci/job-tmpdir.sh); `--shared` scans the shared socket
+// folders too, as without `--dir` (only where /tmp is the job's own: a Linux container).
 
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -97,7 +98,11 @@ export function main(argv, log = console, shared = sharedDirs) {
   const dir = opt('--dir') ?? tmpdir();
   // Without `--dir`, or with `--shared`, the shared folders are scanned too, for endpoint-shaped names only (kept in the list
   // as full paths): a socket folder falls back to them when the temp folder's path is too long.
-  const extra = argv.includes('--dir') && !argv.includes('--shared') ? [] : shared(process.env, dir).filter((d) => d !== dir);
+  const socketDir = opt('--socket-dir');
+  const extra = [
+    ...(socketDir ? [socketDir] : []),
+    ...(argv.includes('--dir') && !argv.includes('--shared') ? [] : shared(process.env, dir).filter((d) => d !== dir && d !== socketDir)),
+  ];
   const current = [...listLeaks(dir), ...extra.flatMap((d) => listEndpointLeaks(d))];
   const snapshot = opt('--snapshot');
   if (snapshot) {

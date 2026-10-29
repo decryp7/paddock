@@ -3,7 +3,7 @@
 // (The scripts themselves are tested in ci-scripts.test.mjs, tools/test and the release tests.)
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, lstatSync, statSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -1116,59 +1116,101 @@ test("app-gates runs every command list through run-commands.sh, which names the
 // The Mac runner's Debrief job scanned the runner user's shared temp folder, which the agents' local test runs on the same
 // Mac use too: a local run that died made a CI job fail with leaks it did not cause, and the CI tests wrote there too.
 
-/** Runs the job-tmpdir action's step for `mode` in a fake runner folder; returns the result and what it exported. */
-function runJobTmpdir(mode, { os = 'macOS', root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-job-tmpdir-'))) } = {}) {
-  const text = read(join(ACTIONS, 'job-tmpdir', 'action.yml'));
-  const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
+/**
+ * Runs conformance/ci/job-tmpdir.sh (the one implementation: the job-tmpdir action and job-isolation's acquire and release
+ * call it) in a fake runner folder. The socket base goes under a scratch folder (PADDOCK_SOCKET_ROOT), never the real /tmp.
+ */
+function runJobTmpdir(mode, { os = 'macOS', root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-job-tmpdir-'))), extra = {} } = {}) {
   mkdirSync(join(root, 'runner-temp'), { recursive: true });
+  mkdirSync(join(root, 'sockets'), { recursive: true });
   const envFile = join(root, 'github-env');
   if (!existsSync(envFile)) writeFileSync(envFile, '');
-  const r = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', body], {
-    env: { PATH: '/usr/bin:/bin', RUNNER_OS: os, RUNNER_TEMP: join(root, 'runner-temp'), GITHUB_ENV: envFile, MODE: mode },
+  const r = spawnSync('bash', [join(PADDOCK, 'conformance', 'ci', 'job-tmpdir.sh'), mode], {
+    env: { PATH: '/usr/bin:/bin', RUNNER_OS: os, RUNNER_TEMP: join(root, 'runner-temp'), GITHUB_ENV: envFile, PADDOCK_SOCKET_ROOT: join(root, 'sockets'), ...extra },
     encoding: 'utf8',
   });
   const exported = Object.fromEntries(read(envFile).split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
   return { ...r, root, exported };
 }
 
-test('job-tmpdir gives the job a fresh temp folder of its own under RUNNER_TEMP as TMPDIR, and removes it at the end', () => {
+test('job-tmpdir: the job\'s temp folder is the runner\'s per-job folder, and its sockets get a short folder of their own', () => {
   const first = runJobTmpdir('setup');
   assert.equal(first.status, 0, first.stderr + first.stdout);
-  const dir = first.exported.PADDOCK_JOB_TMPDIR;
-  assert.ok(dir && dir.startsWith(join(first.root, 'runner-temp') + '/'), `inside the runner's per-job folder (${dir})`);
-  assert.equal(first.exported.TMPDIR, dir, 'TMPDIR: what Rust, Node and the tests use for temp folders');
+  const temp = join(first.root, 'runner-temp');
+  assert.equal(first.exported.PADDOCK_JOB_TEMP, temp, 'one name and one path: the runner deletes the folder after the job');
+  assert.equal(first.exported.TMPDIR, temp, 'what Rust, Node and the tests use for temp folders');
   assert.equal(first.exported.TMP, undefined, 'TMP and TEMP only on Windows');
-  assert.ok(existsSync(dir));
-  // A folder left by an earlier step or job of this runner folder starts empty again.
-  writeFileSync(join(dir, 'debrief-left-over'), '');
-  assert.equal(runJobTmpdir('setup', { root: first.root }).status, 0);
-  assert.ok(!existsSync(join(dir, 'debrief-left-over')));
-  const removed = runJobTmpdir('remove', { root: first.root });
-  assert.equal(removed.status, 0, removed.stderr);
-  assert.ok(!existsSync(dir), 'removed at the end of the job');
+  // Socket paths are limited to about 100 bytes; the runner's folder is long, so a short base per job, never shared /tmp.
+  const base = first.exported.PADDOCK_SOCKET_BASE;
+  assert.match(base ?? '', new RegExp(`^${join(first.root, 'sockets').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/pd-[0-9]+$`));
+  assert.ok(existsSync(base));
+  assert.equal(statSync(base).mode & 0o777, 0o700, 'private');
+  const again = runJobTmpdir('setup', { root: first.root });
+  assert.equal(again.status, 0, 'a second setup in the same job keeps the folders');
+  writeFileSync(join(base, 'left'), '');
+  assert.equal(runJobTmpdir('remove', { root: first.root }).status, 0);
+  assert.ok(!existsSync(base), 'the socket folder goes at the end of the job (the runner removes its own folder)');
   const win = runJobTmpdir('setup', { os: 'Windows' });
-  assert.equal(win.exported.TMP, win.exported.PADDOCK_JOB_TMPDIR, 'Windows reads TMP and TEMP');
-  assert.equal(win.exported.TEMP, win.exported.PADDOCK_JOB_TMPDIR);
+  assert.equal(win.exported.TMP, win.exported.PADDOCK_JOB_TEMP, 'Windows reads TMP and TEMP');
+  assert.equal(win.exported.TEMP, win.exported.PADDOCK_JOB_TEMP);
+  assert.equal(win.exported.PADDOCK_SOCKET_BASE, undefined, 'named pipes on Windows: no socket folder');
   assert.notEqual(runJobTmpdir('other').status, 0, 'an unknown mode fails');
+  assert.match(read(join(ACTIONS, 'job-tmpdir', 'action.yml')), /bash "\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\.\/conformance\/ci\/job-tmpdir\.sh" "\$MODE"/, 'the action runs the script');
+  assert.match(read(join(PADDOCK, 'conformance', 'ci', 'job-isolation.sh')), /bash "\$here\/job-tmpdir\.sh" setup/, 'acquire sets the folders through the same script');
+  assert.match(read(join(PADDOCK, 'conformance', 'ci', 'job-isolation.sh')), /bash "\$here\/job-tmpdir\.sh" remove/, 'release removes them through it');
 });
 
-test('every job that runs check-temp-leaks sets its own TMPDIR first, scans only it (and the shared socket folders), and removes it last', () => {
-  let checked = 0;
+/** The jobs of every workflow with the OS they run on: 'container' (a Linux container), 'host' (macOS or Windows) or 'none'. */
+function jobsWithHost() {
+  const out = [];
   for (const file of readdirSync(WORKFLOWS).filter((f) => f.endsWith('.yml'))) {
     for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
-      if (!job.text.includes('check-temp-leaks.mjs')) continue; // the script itself, not its own tests (check-temp-leaks.test.mjs)
-      checked += 1;
-      const where = `${file}:${job.id}`;
-      const setup = job.text.search(/- uses: \.\/\.gitea\/actions\/job-tmpdir\n(?!\s+with:\n\s+mode: remove)/);
-      assert.ok(setup >= 0, `${where}: uses ./.gitea/actions/job-tmpdir`);
-      assert.ok(setup < job.text.indexOf('check-temp-leaks.mjs'), `${where}: before its first check-temp-leaks`);
-      const runs = [...job.text.matchAll(/check-temp-leaks\.mjs([^\n]*)/g)].map((m) => m[1]);
-      for (const args of runs) assert.match(args, /--dir "\$PADDOCK_JOB_TMPDIR" --shared/, `${where}: check-temp-leaks${args} scans the job's own folder`);
-      const remove = job.text.search(/- uses: \.\/\.gitea\/actions\/job-tmpdir\n\s+if: always\(\)\n\s+with:\n\s+mode: remove/);
-      assert.ok(remove > job.text.lastIndexOf('check-temp-leaks.mjs'), `${where}: removes the folder after its last check, if: always()`);
+      const runsOn = /^ {4}runs-on: (.+)$/m.exec(job.text)?.[1] ?? '';
+      const kind = !runsOn ? 'none' : /macos|windows|matrix\.os|inputs\./.test(runsOn) ? 'host' : 'container';
+      out.push({ file, job, kind, where: `${file}:${job.id}` });
     }
   }
+  return out;
+}
+const setsJobTemp = (text) => /- uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-isolation\n(?!\s+if: always\(\)\n\s+with:\n\s+mode: release)/.test(text) || /- uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-tmpdir\n(?!\s+if: always\(\)\n\s+with:\n\s+mode: remove)/.test(text);
+
+test('every job that runs check-temp-leaks gets its temp and socket folders first, checks only them (shared /tmp only in a container), and removes them last', () => {
+  let checked = 0;
+  for (const { job, kind, where } of jobsWithHost()) {
+    if (!job.text.includes('check-temp-leaks.mjs')) continue; // the script itself, not its own tests (check-temp-leaks.test.mjs)
+    checked += 1;
+    const first = job.text.indexOf('check-temp-leaks.mjs');
+    const setup = Math.max(job.text.search(/- uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-isolation\n(?!\s+if: always)/), job.text.search(/- uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-tmpdir\n(?!\s+if: always)/));
+    assert.ok(setsJobTemp(job.text) && setup >= 0 && setup < first, `${where}: job-isolation (a host) or job-tmpdir before its first check-temp-leaks`);
+    for (const [, args] of job.text.matchAll(/check-temp-leaks\.mjs([^\n]*)/g)) {
+      assert.match(args, /--dir "\$PADDOCK_JOB_TEMP" --socket-dir "\$PADDOCK_SOCKET_BASE"/, `${where}: check-temp-leaks${args} scans the job's own folders`);
+      if (kind === 'host') assert.doesNotMatch(args, /--shared/, `${where}: on a host /tmp is shared with local runs: no --shared`);
+    }
+    const end = Math.max(job.text.search(/- uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-isolation\n\s+if: always\(\)\n\s+with:\n\s+mode: release/), job.text.search(/- uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-tmpdir\n\s+if: always\(\)\n\s+with:\n\s+mode: remove/));
+    assert.ok(end > job.text.lastIndexOf('check-temp-leaks.mjs'), `${where}: removes the folders after its last check, if: always()`);
+  }
   assert.ok(checked >= 3, `found the jobs (${checked})`);
+});
+
+test('every job on a macOS or Windows host gets the job temp folder (job-isolation acquire or job-tmpdir), and only job-tmpdir.sh sets TMPDIR', () => {
+  // Exempt, with the reason: a job that checks nothing out and writes no file.
+  const exempt = new Map([['debrief-runner-check.yml:host', 'prints the host tools\' versions; no checkout, no files']]);
+  for (const { job, kind, where } of jobsWithHost()) {
+    if (kind !== 'host' || exempt.has(where)) continue;
+    assert.ok(setsJobTemp(job.text), `${where}: runs on a host without its own TMPDIR (the runner user's temp folder is local runs' too)`);
+  }
+  for (const where of exempt.keys()) assert.ok(jobsWithHost().some((j) => j.where === where && !j.job.text.includes('actions/checkout')), `${where}: still exempt (no checkout)`);
+  // One owner (ER-22): no workflow, action or CI script writes TMPDIR, TMP or TEMP itself.
+  const files = spawnSync('git', ['ls-files', '.gitea', 'conformance/ci', 'apps/*/scripts/ci'], { cwd: PADDOCK, encoding: 'utf8' }).stdout.split('\n').filter((f) => f && !/\.test\.mjs$|\.md$/.test(f));
+  // Ways to set them for later steps or child processes: a GITHUB_ENV line, an export, a YAML env key, and the
+  // `echo "TMPDIR=..."` lines of a block redirected to GITHUB_ENV (a local shell variable such as TMP=$(mktemp -d) is fine).
+  const sets = [/\b(TMPDIR|TMP|TEMP)=[^\n]*>>\s*"?(\$\{?GITHUB_ENV|%GITHUB_ENV%)/, /\bexport\s+(TMPDIR|TMP|TEMP)=/, /^\s+(TMPDIR|TMP|TEMP):\s/m, /echo\s+"(TMPDIR|TMP|TEMP)=/];
+  const writers = files.filter((f) => {
+    if (f === 'conformance/ci/job-tmpdir.sh') return false;
+    const text = read(join(PADDOCK, f)).split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n');
+    return sets.some((re) => re.test(text));
+  });
+  assert.deepEqual(writers, [], 'only conformance/ci/job-tmpdir.sh sets the temp folder variables');
 });
 
 /** Every file that may run on a host runner and so must ask ci-home.sh for the CI home: all workflows, all shared actions, the shared

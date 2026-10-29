@@ -161,8 +161,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # A temp folder of this job's own as TMPDIR (ER-14): the tests and the leak check never touch the runner user's shared
-      # temp folder, which local runs on the same host use too. Removed by the job's last step.
+      # The job's own temp and socket folders (ER-14; on the host runners job-isolation's acquire makes the same): the tests
+      # and the leak check never touch a folder other runs use. The socket folder goes with the job's last step.
       - uses: ./.gitea/actions/job-tmpdir
 
       - uses: ./.gitea/actions/setup-rust
@@ -190,7 +190,7 @@ jobs:
           case "$out" in *CHROMIUM_TEST_PATH=*) ;; *) echo "::error::the test browser installer printed no CHROMIUM_TEST_PATH"; exit 1 ;; esac
 
       - name: Temp folders before the tests
-        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TMPDIR" --shared --snapshot "$RUNNER_TEMP/temp-leaks.json"
+        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --shared --snapshot "$RUNNER_TEMP/temp-leaks.json"
 
       # nextest runs every test in its own process, in parallel across crates, and reports every failure;
       # .config/nextest.toml serialises the tests that time real child processes. The ci profile never retries (a flaky
@@ -215,7 +215,7 @@ jobs:
       # Tests clean up after themselves (docs/testing/temp-leaks.md): a debrief-* / imt-* folder left behind fails the job.
       - name: No temp folders left behind
         if: ${{ !cancelled() }}
-        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TMPDIR" --shared --check "$RUNNER_TEMP/temp-leaks.json"
+        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --shared --check "$RUNNER_TEMP/temp-leaks.json"
 
       # The analyses' memory budget (ADR 0014) is the shipped worker's: measured on a release build, Linux only
       # (DuckDB's jemalloc is the allocator there; the test skips itself in debug builds).
@@ -295,7 +295,7 @@ jobs:
 
       - name: Temp folders before the tests
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TMPDIR" --shared --snapshot "$RUNNER_TEMP/temp-leaks.json"
+        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --snapshot "$RUNNER_TEMP/temp-leaks.json"
 
       - name: Tests (workspace)
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
@@ -309,7 +309,7 @@ jobs:
       - name: No temp folders left behind
         if: ${{ !cancelled() }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TMPDIR" --shared --check "$RUNNER_TEMP/temp-leaks.json"
+        run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --check "$RUNNER_TEMP/temp-leaks.json"
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
@@ -438,8 +438,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # A temp folder of this job's own as TMPDIR (ER-14): the tests and the leak check never touch the runner user's shared
-      # temp folder, which local runs on the same host use too. Removed by the job's last step.
+      # The job's own temp and socket folders (ER-14; on the host runners job-isolation's acquire makes the same): the tests
+      # and the leak check never touch a folder other runs use. The socket folder goes with the job's last step.
       - uses: ./.gitea/actions/job-tmpdir
 
       # npm's download cache and the Angular build cache kept on the runner's /sccache mount (Node is the image's).
@@ -487,9 +487,9 @@ jobs:
 
       - name: Frontend unit tests
         run: |
-          node ../scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TMPDIR" --shared --snapshot "$RUNNER_TEMP/temp-leaks-ui.json"
+          node ../scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --shared --snapshot "$RUNNER_TEMP/temp-leaks-ui.json"
           npx ng test --watch=false --coverage
-          node ../scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TMPDIR" --shared --check "$RUNNER_TEMP/temp-leaks-ui.json"
+          node ../scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --shared --check "$RUNNER_TEMP/temp-leaks-ui.json"
 
       - uses: ./.gitea/actions/job-tmpdir
         if: always()

@@ -1,5 +1,5 @@
 name: job-tmpdir
-description: "A temp folder of the job's own: `setup` (first) makes RUNNER_TEMP/t fresh and exports it as TMPDIR (TMP and TEMP too on Windows) and PADDOCK_JOB_TMPDIR, so tests and tools never write to the runner user's shared temp folder, which local runs on the same host also use (ER-14); `remove` (last step, `if: always()`) deletes it. check-temp-leaks scans this folder (`--dir \"$PADDOCK_JOB_TMPDIR\" --shared`)."
+description: "The job's own temp folder (the runner's $RUNNER_TEMP) as TMPDIR (TMP and TEMP on Windows) and PADDOCK_JOB_TEMP, and on Unix a short private socket folder as PADDOCK_SOCKET_BASE (conformance/ci/job-tmpdir.sh, the one implementation; job-isolation's acquire runs the same on the host runners). `setup` first, `remove` as the last step with `if: always()`. For a job without job-isolation, such as a Linux container job that checks for temp leaks."
 inputs:
   mode:
     description: "setup or remove."
@@ -7,33 +7,8 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: The job's own temp folder
+    - name: The job's own temp and socket folders
       shell: bash
       env:
         MODE: ${{ inputs.mode }}
-      run: |
-        set -euo pipefail
-        # RUNNER_TEMP is the runner's folder of this job (<work>/<job hash>/...), never shared with another job or a user.
-        # A short name: a Unix socket under it must stay within about 100 bytes (Debrief's endpoints fall back to /tmp).
-        dir="${RUNNER_TEMP:?RUNNER_TEMP is not set}/t"
-        case "$MODE" in
-          setup)
-            rm -rf "$dir" && mkdir -p "$dir"
-            native="$dir"
-            if command -v cygpath >/dev/null; then native="$(cygpath -w "$dir")"; fi
-            {
-              echo "PADDOCK_JOB_TMPDIR=$native"
-              echo "TMPDIR=$native"
-              if [ "${RUNNER_OS:-}" = Windows ]; then echo "TMP=$native"; echo "TEMP=$native"; fi
-            } >> "$GITHUB_ENV"
-            echo "job-tmpdir: this job's temp folders are in $native"
-            ;;
-          remove)
-            rm -rf "$dir"
-            echo "job-tmpdir: removed $dir"
-            ;;
-          *)
-            echo "::error::job-tmpdir: mode must be setup or remove (got '$MODE')"
-            exit 1
-            ;;
-        esac
+      run: bash "${{ github.action_path }}/../../../conformance/ci/job-tmpdir.sh" "$MODE"

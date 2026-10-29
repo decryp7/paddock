@@ -30,6 +30,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The job's own temp folder and socket folder (ER-14): nothing of the smoke lands in the runner user's temp folder.
+      - uses: ./.gitea/actions/job-tmpdir
+
       - name: Persistent build folder
         run: |
           echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/../.paddock-ci-target-shell-demo" >> "$GITHUB_ENV"
@@ -84,3 +87,8 @@ jobs:
         run: |
           left=$(tart list --quiet | grep "^$PADDOCK_VM_PREFIX" || true)
           [ -z "$left" ] || { echo "::error::leftover VMs: $left"; exit 1; }
+
+      - uses: ./.gitea/actions/job-tmpdir
+        if: always()
+        with:
+          mode: remove
