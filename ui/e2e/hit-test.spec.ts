@@ -224,6 +224,13 @@ test('(N5) a cover that is fading out when the probe starts is gone before the p
   expect(await coveredInteractive(page.locator('body'))).toEqual([]);
 });
 
+test('the resting pointer avoids anything that opens a tooltip, a title or a describedby card', async ({ page }) => {
+  // The right of the page is a hover trigger (it has a title) and its first free spot is there; the pointer must rest in the bottom-left corner instead.
+  await page.setContent(`<style>body{margin:0} #field{position:fixed;right:0;top:0;width:60%;height:100%} #field:hover ~ .tip{display:block} .tip{display:none;position:absolute;left:0;top:0;width:120px;height:60px;background:#333}
+    #safe{position:fixed;left:0;bottom:0;width:35%;height:35%}</style>${BTN}<div id="field" title="hover card"></div><div id="safe"></div><div class="tip"></div>`);
+  expect(await coveredInteractive(page.locator('#a'))).toEqual([]);
+});
+
 test('(N6) the pointer is moved off a hover trigger, so its tooltip is not probed', async ({ page }) => {
   await page.setContent(`<style>body{margin:0} #t{position:absolute;left:10px;top:60px} #t:hover + .tip{display:block} .tip{display:none;position:absolute;left:0;top:0;width:200px;height:55px;background:#333}</style>${BTN}<button id="t">Hover me</button><div class="tip"></div>`);
   await page.hover('#t');
@@ -252,6 +259,26 @@ test('a sticky header that holds the button does not excuse a panel inside it th
     <button style="position:absolute;left:10px;top:10px;width:80px;height:30px">Head</button><div class="panel" style="position:absolute;left:0;top:0;width:120px;height:50px;background:#333"></div></div><div style="height:600px"></div></div>`);
   expect(names(await coveredInteractive(page.locator('#g'), { scroll: false }))).toContain('Head');
   expect(names(await coveredInteractive(page.locator('#g')))).toContain('Head');
+});
+
+test('(S1) a 24 px icon button, 90 % covered, is caught', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0}</style><button aria-label="Close" style="position:absolute;left:10px;top:10px;width:24px;height:24px;padding:0"></button><div style="position:absolute;left:0;top:0;width:32px;height:40px;background:#333"></div>`);
+  expect(names(await coveredInteractive(page.locator('body')))).toContain('Close');
+});
+
+test('(S2) a 5 px wide annotation band, fully covered, is caught at its centre', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0}</style><button aria-label="Short band" style="position:absolute;left:10px;top:10px;width:5px;height:28px;padding:0;border:0;background:#f90"></button><div style="position:absolute;left:0;top:0;width:40px;height:60px;background:#333"></div>`);
+  expect(names(await coveredInteractive(page.locator('body')))).toContain('Short band');
+});
+
+test('(S3) a 4 px tall splitter, fully covered, is caught at its centre', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0}</style><button aria-label="Resize" style="position:absolute;left:10px;top:10px;width:200px;height:4px;padding:0;border:0;background:#888"></button><div style="position:absolute;left:0;top:0;width:300px;height:30px;background:#333"></div>`);
+  expect(names(await coveredInteractive(page.locator('body')))).toContain('Resize');
+});
+
+test('(S3b) a small button is judged at its centre only: a cover over one end of it is not reported', async ({ page }) => {
+  await page.setContent(`<style>body{margin:0}</style><button aria-label="Thin" style="position:absolute;left:10px;top:10px;width:200px;height:4px;padding:0;border:0;background:#888"></button><div class="end" style="position:absolute;left:0;top:0;width:40px;height:30px;background:#333"></div>`);
+  expect(await coveredInteractive(page.locator('body'))).toEqual([]);
 });
 
 test('a button of which only a sliver shows in its scroller is skipped', async ({ page }) => {

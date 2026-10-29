@@ -144,7 +144,7 @@ class gets its own run-time check, `expectNothingCovers` (and `coveredInteractiv
   menuitem(checkbox/radio), option, checkbox, switch and slider, other tab stops (`[tabindex>=0]`; a control or an element with an interactive role
   (option, tab, menuitem*, treeitem, gridcell, radio, checkbox, switch, button, link, slider) with a negative tabindex is still a
   candidate, a landmark or tabpanel is not), and an optional extra selector. Each is cut to the visible rect of its
-  scroll ancestors and the window (`overflow`, `contain: paint` and `clip-path` clip; fully clipped elements and slivers under 6 px are skipped). At the centre and four inset points (pushed inwards
+  scroll ancestors and the window (`overflow`, `contain: paint` and `clip-path` clip, `clip-path` as the ancestor's border box; fully clipped elements and slivers that clipping left under 6 px are skipped; an element that is small on its own, such as a 5 px band or a 4 px splitter, is judged at its centre only). At the centre and four inset points (pushed inwards
   at a rounded corner) the browser's `document.elementsFromPoint` gives the stack, topmost first; the element is covered
   when, at **any** of the points, a layer that is not allowed sits above it. Reaching the element, its content, its own
   `<label>` element or (a rounded corner) an ancestor is not a cover; an ancestor counts as reaching only when the target is not

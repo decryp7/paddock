@@ -24,6 +24,7 @@ import { expect, type Locator } from '@playwright/test';
  * - The probe runs at rest and after scrolling each scroller of the root (and the page) by a third, two thirds and to the
  *   end (the pattern of `expectHeaderOnTop`), each scroller on its own; the scroll positions are restored. Running
  *   animations are awaited and the pointer is moved away before probing.
+ * - `clip-path` is treated as a clip to the ancestor's border box (its shape is not modelled).
  * - Out of scope: elements inside shadow roots and iframes (`elementsFromPoint` of the page sees only their host).
  */
 
@@ -305,12 +306,16 @@ export async function coveredInteractive(root: Locator, opts: HitTestOptions = {
               const r = e.getBoundingClientRect();
               if (r.width <= 1 || r.height <= 1) continue; // visually hidden (a 1 px native input) or empty
               const v = visible(e);
-              // Fully clipped by a scroller or the window, or only a sliver shows (under 6 px a point lands on the neighbour's pixel).
-              if (v.w < 6 || v.h < 6) continue;
+              if (v.w < 2 || v.h < 2) continue; // fully clipped by a scroller or the window
+              // Clipping left only a sliver (under 6 px): its points land on the neighbour's pixel, so it is not probed. An element
+              // that is just small on its own (a 5 px band, a 4 px splitter) is probed at its centre only.
+              const sliver = v.w < 6 || v.h < 6;
+              const clipped = v.w < r.width - 0.5 || v.h < r.height - 0.5;
+              if (sliver && clipped) continue;
               // The centre or any other sample point under a cover that is not allowed fails the element.
               let cover: Element | null = null;
               let point = '';
-              for (const [x, y] of samplePoints(e, v)) {
+              for (const [x, y] of sliver ? [[v.l + v.w / 2, v.t + v.h / 2] as [number, number]] : samplePoints(e, v)) {
                 cover = coverAt(x, y, e);
                 if (cover) {
                   point = `${Math.round(x)},${Math.round(y)}`;
