@@ -1165,7 +1165,7 @@ test('job-tmpdir: the job\'s temp folder is the runner\'s per-job folder, and it
   assert.match(iso, /bash "\$here\/job-tmpdir\.sh" remove/, 'release removes them through it');
 });
 
-test('job-tmpdir: a socket folder that is a link, someone else\'s or outside the root is never used or removed', () => {
+test('job-tmpdir: a socket folder that is a link, has another name or is outside the root is never used or removed (another user\'s folder fails the same check, -O, which a test cannot fake without root)', () => {
   const f = runJobTmpdir('setup');
   const sockets = join(f.root, 'sockets');
   const elsewhere = join(f.root, 'elsewhere');
@@ -1241,7 +1241,9 @@ test('every job on a macOS or Windows host gets the job temp folder (job-isolati
     assert.ok(setsJobTemp(job.text), `${where}: runs on a host without its own TMPDIR (the runner user's temp folder is local runs' too)`);
   }
   for (const where of exempt.keys()) assert.ok(jobsWithHost().some((j) => j.where === where && !j.job.text.includes('actions/checkout')), `${where}: still exempt (no checkout)`);
-  // One owner (ER-22): no workflow, action or CI script writes TMPDIR, TMP or TEMP itself.
+  // One owner (ER-22): no workflow, action or CI script writes TMPDIR, TMP or TEMP itself. The check also refuses a local
+  // `TMP=` assignment and an `echo TEMP=` line, which cannot be told from a writer by text: rename the variable or reword the
+  // line, never weaken the rule (a step's `TMP=` also changes TMP for its child processes on Windows).
   const listed = spawnSync('git', ['ls-files', '.gitea', 'conformance/ci', 'apps/*/scripts/ci'], { cwd: PADDOCK, encoding: 'utf8' });
   assert.equal(listed.status, 0, listed.stderr);
   const files = listed.stdout.split('\n').filter((f) => f && !/\.test\.mjs$|\.md$/.test(f));
@@ -1369,8 +1371,33 @@ function bash32Traps(text) {
   const lines = text.split('\n');
   const found = [];
   const code = (l) => l.replace(/(^|\s)#.*$/, '');
+  // An apostrophe in the word of ${VAR:-word} (any of :? :- :+ := and their colon-less forms) inside double quotes, outside
+  // a $(...) within the word, where it is fine.
+  const apostropheInWord = (l) => {
+    let quoted = false;
+    for (let k = 0; k < l.length; k += 1) {
+      if (l[k] === '\\') {
+        k += 1;
+        continue;
+      }
+      if (l[k] === '"') quoted = !quoted;
+      if (!quoted || l[k] !== '$' || l[k + 1] !== '{') continue;
+      const m = /^\$\{([A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-]):?[-?+=]/.exec(l.slice(k));
+      if (!m) continue;
+      let depth = 0;
+      for (let j = k + m[0].length; j < l.length; j += 1) {
+        if (l[j] === '$' && l[j + 1] === '(') {
+          depth += 1;
+          j += 1;
+        } else if (depth > 0 && l[j] === ')') depth -= 1;
+        else if (depth === 0 && l[j] === '}') break;
+        else if (depth === 0 && l[j] === "'") return true;
+      }
+    }
+    return false;
+  };
   lines.forEach((l, i) => {
-    if (/"[^"]*\$\{[A-Za-z_][A-Za-z0-9_]*:[-?+=][^}]*'[^}]*\}/.test(code(l))) found.push(`${i + 1}: ${l.trim()}`);
+    if (apostropheInWord(code(l))) found.push(`${i + 1}: ${l.trim()}`);
   });
   // Inside an open $( ... ), a case whose pattern lines do not start with "(".
   let depth = 0;
@@ -1401,30 +1428,71 @@ test('the bash 3.2 check finds both traps and passes their safe forms', () => {
     [':- with an apostrophe', 'echo "${A:-it\'s}"'],
     [':+ with an apostrophe', 'echo "${A:+it\'s set}"'],
     [':= with an apostrophe', 'echo "${A:=it\'s}"'],
+    ['a positional parameter', 'echo "${1:-it\'s}"'],
+    ['without the colon', 'echo "${A-it\'s}"'],
     ['case in $(...)', 'x=$(case "$1" in\n  a) echo A ;;\n  *) echo B ;;\nesac)'],
   ]) assert.ok(bash32Traps(text).length > 0, what);
   for (const [what, text] of [
     ['no apostrophe', 'x="${A:?the folder of the runner}"'],
     ['outside double quotes', "x=${A:-'it'}"],
+    ['quotes inside a $(...) in the word', 'app="${1:-$(find "$b" -name \'*.app\' | head -1)}"'],
     ['$(...) inside a case branch', 'case "$1" in\n  a) y="$(echo B)" ;;\nesac'],
     ['parenthesised patterns in $(...)', 'x=$(case "$1" in\n  (a) echo A ;;\n  (*) echo B ;;\nesac)'],
     ['a comment', "# echo \"${A:-it's}\""],
   ]) assert.deepEqual(bash32Traps(text), [], what);
 });
 
-test('the CI scripts parse under macOS\' bash 3.2: neither trap, and /bin/bash -n where it exists', () => {
-  const listed = spawnSync('git', ['ls-files', 'conformance/ci/*.sh', 'apps/*/scripts/ci/*.sh', 'tools/*.sh'], { cwd: PADDOCK, encoding: 'utf8' });
+/** The tracked *.sh files a workflow or action runs (named in any of their texts by file name: over-selecting is safe). */
+function scriptsRunByCi() {
+  const listed = spawnSync('git', ['ls-files', '*.sh', '.gitea'], { cwd: PADDOCK, encoding: 'utf8' });
   assert.equal(listed.status, 0, listed.stderr);
   const files = listed.stdout.split('\n').filter(Boolean);
-  assert.ok(files.length > 3, `found the scripts (${files.length})`);
-  const traps = files.flatMap((f) => bash32Traps(read(join(PADDOCK, f))).map((t) => `${f}:${t}`));
-  assert.deepEqual(traps, [], 'bash 3.2 cannot parse these lines');
-  if (existsSync('/bin/bash')) {
-    for (const f of files) {
-      const r = spawnSync('/bin/bash', ['-n', join(PADDOCK, f)], { encoding: 'utf8' });
-      // Scripts that need bash 4+ say so on their first lines and are not run with /bin/bash on the Mac.
-      if (/bash 4|bash >= 4|extglob/.test(read(join(PADDOCK, f)).split('\n').slice(0, 60).join('\n'))) continue;
-      assert.equal(r.status, 0, `${f}: ${r.stderr}`);
+  const ci = files.filter((f) => /^\.gitea\/(workflows\/[^/]+\.ya?ml|actions\/[^/]+\/action\.ya?ml)$/.test(f)).map((f) => read(join(PADDOCK, f))).join('\n');
+  return files.filter((f) => f.endsWith('.sh') && new RegExp(`(^|[/\\s"'$])${posixBase(f).replace(/[.]/g, '\\.')}(?![A-Za-z0-9_.-])`).test(ci));
+}
+const posixBase = (f) => f.split('/').pop();
+
+/** The bash run blocks a macOS host runs: every bash step of a shared action, and every bash step of a job that can run on macOS. */
+function macRunBlocks() {
+  const out = [];
+  const bashSteps = (where, text) => {
+    for (const st of parseSteps(text)) {
+      if (!st.run || /^\s*shell:\s*(cmd|pwsh|powershell)\b/m.test(st.text)) continue;
+      out.push({ where: `${where} step ${st.name ?? st.line}`, run: st.run.replace(/\$\{\{[^}]*\}\}/g, 'X') });
     }
+  };
+  for (const a of readdirSync(ACTIONS)) {
+    const file = join(ACTIONS, a, 'action.yml');
+    if (existsSync(file)) bashSteps(`.gitea/actions/${a}`, read(file));
+  }
+  for (const { file, job } of jobsWithHost()) {
+    const runsOn = /^ {4}runs-on: (.+)$/m.exec(job.text)?.[1] ?? '';
+    if (/macos|matrix\.os|inputs\./.test(runsOn) && (!/matrix\.os/.test(runsOn) || /macos/.test(job.text))) bashSteps(`${file}:${job.id}`, job.text);
+  }
+  return out;
+}
+
+test('the CI scripts and macOS run blocks parse under macOS\' bash 3.2: neither trap, and /bin/bash -n -O extglob where it exists', () => {
+  const files = scriptsRunByCi();
+  for (const must of ['conformance/ci/job-isolation.sh', 'conformance/ci/job-tmpdir.sh', 'conformance/release/macos-verify-bundle.sh', 'scripts/demo/verify-macos.sh']) {
+    assert.ok(files.includes(must), `${must} is found as run by CI`);
+  }
+  const blocks = macRunBlocks();
+  assert.ok(blocks.length > 20, `found the macOS run blocks (${blocks.length})`);
+  const traps = [
+    ...files.flatMap((f) => bash32Traps(read(join(PADDOCK, f))).map((t) => `${f}:${t}`)),
+    ...blocks.flatMap((b) => bash32Traps(b.run).map((t) => `${b.where}:${t}`)),
+  ];
+  assert.deepEqual(traps, [], 'bash 3.2 cannot parse these lines');
+  if (!existsSync('/bin/bash')) return;
+  // extglob always on: job-isolation.sh turns it on before the code that needs it, and -n does not run shopt.
+  const parse = (text) => spawnSync('/bin/bash', ['-n', '-O', 'extglob'], { input: text, encoding: 'utf8' });
+  for (const f of files) {
+    const r = parse(read(join(PADDOCK, f)));
+    assert.equal(r.status, 0, `${f}: ${r.stderr}`);
+  }
+  for (const b of blocks) {
+    const r = parse(b.run);
+    assert.equal(r.status, 0, `${b.where}: ${r.stderr}`);
   }
 });
