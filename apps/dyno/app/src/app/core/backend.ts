@@ -26,7 +26,13 @@ import type {
   ProcessDetails,
   ProcessRef,
   Settings,
-  SizeNode,
+  DiskChildren,
+  DiskChildrenQuery,
+  DiskRings,
+  DiskRingsQuery,
+  DiskScanStatus,
+  DiskTarget,
+  Volume,
   SnapshotDiff,
   SnapshotInfo,
   StartupEntry,
@@ -88,6 +94,10 @@ export interface DynoBackend {
   onAgentStatus(listener: (s: AgentStatus) => void): Unsubscribe;
   /** Alarm changes pushed by the agent (new, repeated, returned, acknowledged, shelved, muted, noted). */
   onAlarm(listener: (c: AlarmChange) => void): Unsubscribe;
+  /** A disk scan's status changed (at most four a second per scan, one final); keep the highest `seq`. No polling. */
+  onDiskScan(listener: (s: DiskScanStatus) => void): Unsubscribe;
+  /** The volumes mounted now changed (one came, one went, one stopped answering); the new list. */
+  onDiskVolumes(listener: (v: Volume[]) => void): Unsubscribe;
 
   appInfo(): Promise<AppInfo>;
 
@@ -107,8 +117,27 @@ export interface DynoBackend {
 
   // Health.
   health(): Promise<HealthReport>;
-  /** The disk map: a folder's size with its biggest children (the system drive when `null`). */
-  diskUsage(path: string | null): Promise<SizeNode>;
+  // The disk map.
+  /** The volumes mounted now: internal, external and network, with capacity. */
+  diskVolumes(): Promise<Volume[]>;
+  /** Starts a scan (a job) and resolves at once with its status; the same target again returns the running scan. */
+  startDiskScan(target: DiskTarget): Promise<DiskScanStatus>;
+  /** Stops a scan and resolves at once; what was counted stays. */
+  cancelDiskScan(scan: number): Promise<void>;
+  /** The status of every kept scan (a window that opens late asks once). */
+  diskScans(): Promise<DiskScanStatus[]>;
+  /** One page of one level of a scan. */
+  diskChildren(query: DiskChildrenQuery): Promise<DiskChildren>;
+  /** Several levels under a folder in one answer (the sunburst's rings). */
+  diskRings(query: DiskRingsQuery): Promise<DiskRings>;
+  /** The full path of a node (Reveal, Copy path). */
+  diskPath(scan: number, node: number): Promise<string>;
+  /** Reads the folders a finished scan could not open once more, and only those; resolves at once with the status (the scan runs again). */
+  retryDiskScan(scan: number): Promise<DiskScanStatus>;
+  /** Opens the system's Full Disk Access pane (macOS); rejects with `unsupported` and the reason elsewhere. */
+  openFullDiskAccessSettings(): Promise<void>;
+  /** Shows a node in Finder, Explorer or the file manager. */
+  diskReveal(scan: number, node: number): Promise<void>;
 
   startupEntries(): Promise<StartupEntry[]>;
 
