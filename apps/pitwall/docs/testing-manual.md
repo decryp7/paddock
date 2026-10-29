@@ -124,6 +124,70 @@ Needs a build with caching (ADR 0019) and a small real model. Use `temperature: 
 | 42 | Install a newer build over the old one while the server is idle (and once while a request streams). | The server restarts itself onto the new program only when idle; the streaming request finishes first; `version` in `/x/v1/health` changes; models reload on demand. |
 | 43 | Uninstall the service. | The server stops; the data folder, models and keys stay. |
 
+## Update
+
+Local only: these run on the maintainer's machines and VMs and never in CI (no VM, no real service and no signing key in
+CI). Machines: a **Tart macOS** VM, a **Win11 ARM** VM in Fusion and an **OrbStack Linux** machine (Ubuntu with systemd and a
+desktop session for the AppImage). Take a snapshot of every VM before the first step and restore it between sections.
+Use a throwaway data folder only where a step says so; never real confidential content in prompts or fixtures.
+
+**Setup for the updater tests (sections B to D).** Never use the family key. Make a test key pair
+(`npx tauri signer generate -w $TMP/test-updater.key`, scratch folder, not in a repo). Build two installers of one commit
+with a build-time override: 1.1.0-rc (the "old" one) and a test 1.1.1 (bump the version only in the working copy), both with
+`createUpdaterArtifacts` and the test public key (`TAURI_UPDATER_PUBKEY` and `tauri build --config` as in
+[releasing](releasing.md)), the endpoint pointed at the VM-local feed (`--config` override of `plugins.updater.endpoints`,
+for example `http://10.0.2.2:8099/latest.json`, a build for tests only and never published). Write `latest.json` with
+`node conformance/release/latest-json.mjs` from the 1.1.1 installers and their `.sig` files, and serve the folder with
+`python3 -m http.server 8099` on the host. The committed config keeps `pubkey` empty; do not commit the overrides.
+
+### A. By hand: 1.0.3 to 1.1.0 (service kept, re-registered once)
+
+Pitwall 1.0.x updates do not look at the new feed, so this is the path every existing user takes.
+
+| # | Platform | Steps | Expected |
+|---|----------|-------|----------|
+| U1 | All | Install the published 1.0.3 build, pair an app, load a model, note `GET /x/v1/health` (`version` 1.0.3) and the models and keys listed. Leave the service installed. | Baseline recorded. |
+| U2 | macOS | Install 1.1.0 over it (drag to Applications, replace). Open the app. | The app opens; on the first start it repairs the service registration once (Settings > Background service shows "Repaired" or running); Login Items lists Pitwall; no second repair on the next start. |
+| U3 | Windows | Run the 1.1.0 `...-setup.exe` over 1.0.3 (no uninstall first). | The installer stops the `Pitwall` service, replaces the files, registers and starts the service again; `sc.exe query Pitwall` shows RUNNING. |
+| U4 | Linux | Install the 1.1.0 `.deb` over 1.0.3 (`sudo apt install ./pitwall_1.1.0_amd64.deb`); separately replace an AppImage. | `systemctl --user status pitwall.service` is active with the new binary path; the AppImage case points the unit at the stable copy. |
+| U5 | All | `GET /x/v1/health`; list models, keys and apps; send one chat request. | `version` is 1.1.0; models, keys, apps and settings are the same as in U1; the request is answered. |
+| U6 | All | Restart the OS and log in. | The service is running without opening the app, still registered exactly once (no duplicate login item, service or unit). |
+
+### B. Updater install: 1.1.0-rc to a test 1.1.1
+
+| # | Platform | Steps | Expected |
+|---|----------|-------|----------|
+| U7 | All | Install the 1.1.0-rc test build (signed with the test key, feed on the host). Settings > Updates > Check for updates. | "1.1.1 is available" with the release notes; the check made one GET of `latest.json` and nothing else (watch the host's server log). |
+| U8 | All | Choose Install, then **Cancel** while the download runs; repeat and cancel at the very start; then watch the "Installing" phase. | The download stops, the state returns to "1.1.1 is available", nothing is half-installed, the app and the server still run 1.1.0-rc; Install works again afterwards. During "Installing" Cancel is unavailable (disabled, with the reason), because an install cannot be undone half-way. |
+| U9 | All | Install, with a streaming request running through the server. | The download and the install finish; the app restarts. The server does not restart until it is idle: the stream completes first, then the server restarts once onto the new binary (no restart while requests, queued jobs or downloads are active). |
+| U10 | All | Afterwards `GET /x/v1/health`, then Settings > Updates. | `version` is 1.1.1; "You have the latest version"; models, keys and settings unchanged. |
+| U11 | All | Serve a `latest.json` whose `.sig` was made with a different key (or edit one byte of the installer). | The install is refused with a signature message; the old version keeps running. |
+| U12 | All | Stop the host feed, then check for updates. | A clear "could not check" message and a next step; no crash, no retry loop. |
+
+### C. Windows specifics
+
+| # | Steps | Expected |
+|---|-------|----------|
+| U13 | While the service runs, start the updater install (U9). Watch `sc.exe query Pitwall` during the install. | The NSIS pre-install hook stops the service (`pitwall-server.exe uninstall`), the files are replaced without a "file in use" error, the post-install hook registers and starts the service again, and the server runs in the logged-on user's session. |
+| U14 | Run the installer silently (`/S`) over a running install. | Same result; no dialog; a failed registration is silent but visible in Settings > Service. |
+
+### D. Offline mode
+
+| # | Steps | Expected |
+|---|-------|----------|
+| U15 | Turn on offline mode (Settings > Network), turn on automatic update checks, restart the app, and click Check for updates. Watch the host feed's log and the VM's network (`tcpdump` on the VM or the feed's access log). | No request reaches the feed or any other host; the check reports that offline mode is on. Turning offline mode off allows the check again. |
+| U15b | Offline mode on, then stop the Pitwall server (quit the service), and click Check for updates. Watch the feed log. | No request reaches the feed. With the server down the app cannot ask it whether offline is on, so it refuses unless it knows from a last-known value that offline is off; it says why. |
+
+### E. Uninstall leaves nothing behind
+
+| # | Platform | Steps | Expected |
+|---|----------|-------|----------|
+| U16 | macOS | Quit Pitwall, Settings > Background service > Remove service, move the app to the Trash. Check `launchctl print gui/$(id -u)/net.decryptology.pitwall.service`, Login Items, `ps aux \| grep pitwall`. | No launch agent, no Login Item, no process. The data folder (`~/Library/Application Support/Pitwall`) stays only if the user keeps it; deleting it by hand leaves nothing under `~/Library` (check `Caches`, `Preferences`, `Logs`, `Saved Application State` for `pitwall`). |
+| U17 | Windows | Uninstall from Settings > Apps. Check `sc.exe query Pitwall`, `Get-Process pitwall*`, Task Scheduler, the Run keys and `%ProgramFiles%\Pitwall`. | The service is removed, the processes are gone, no scheduled task or Run entry, the install folder is gone. `%APPDATA%\Pitwall` stays (models, keys) until deleted by hand. |
+| U18 | Linux | Remove the `.deb` (`sudo apt remove pitwall`) and delete the AppImage. Check `systemctl --user status pitwall.service`, `~/.config/systemd/user`, `~/.config/autostart`, `ps`. | No unit, no autostart entry, no process; only the data folder remains. |
+
+Record the platform, build versions and each result in the release notes' verification status ([releasing](releasing.md)).
+
 ## UI
 
 | # | Steps | Expected |

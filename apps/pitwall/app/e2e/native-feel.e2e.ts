@@ -81,7 +81,6 @@ test.describe('native feel', () => {
       const seen = await prevented(page, 'keydown');
       return seen.length >= 3 && seen.every(Boolean);
     }).toBe(true);
-    await page.waitForTimeout(400);
     expect(await page.evaluate(() => (window as unknown as { __marker?: number }).__marker)).toBe(42);
   });
 

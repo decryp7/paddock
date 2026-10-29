@@ -1,8 +1,8 @@
 # Pitwall roadmap
 
 An honest account of what works, what is partly there and what is only planned. Status words: **works** (implemented
-and covered by tests), **verified** (also run for real on a machine), **partial**, **planned**. Pitwall is
-unreleased; there are no installers yet and nothing is promised for a date.
+and covered by tests), **verified** (also run for real on a machine), **partial**, **planned**. Pitwall 1.0.x is
+released; 1.1 is the current line. Nothing is promised for a date beyond the release in progress.
 
 ## Verified on a real machine
 
@@ -53,10 +53,12 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 - Tauri shell: tray and window lifecycle, admin key in the OS credential store, service install per OS (Windows
   service, macOS launch agent via `SMAppService`, Linux systemd user service), start at login, restart after update.
   **Implemented and unit-tested**; not yet exercised on real Windows and Linux machines.
-- Installers: Windows NSIS, macOS `.dmg`, Linux `.deb` and AppImage; unsigned until the signing secrets are set
+- Installers: Windows NSIS, macOS `.dmg`, Linux `.deb` and AppImage, built by `pitwall-release.yml` from a `pitwall-v*`
+  tag; the macOS app is ad-hoc sealed and not notarised, the Windows installer is not code-signed
   ([releasing.md](releasing.md)).
-- Updater with signed `latest.json`: **planned**, needs the secrets.
-- CI on Linux, the Windows runner and the macOS host: `build.yml` (checks, installers and the gated release job) exists.
+- Updater with signed `latest.json` (the family key, the `pitwall-latest` feed): **works** in 1.1; the VM test plan is in
+  the [testing manual](testing-manual.md#update). 1.0.x copies do not look at that feed and are reinstalled once by hand.
+- CI on Linux, the Windows runner and the macOS host: Pitwall's legs of the monorepo `ci.yml` and `pitwall-release.yml`.
 
 ## Phase 3: the rest of the product brief *(planned)*
 
