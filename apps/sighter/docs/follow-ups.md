@@ -19,7 +19,8 @@ Shared code (`crates/`, `ui/`) is frozen until the Dyno and Spotter tags. After 
 4. **Fix the "rust + ui" label in the plan summary** (`scripts/affected.mjs` marks Sighter as `rust + ui` although it has no
    UI yet). Planner and its tests are shared tooling. Ends the wait: the tags, or earlier if the planner owner agrees.
 
-## ADR-dependent (2026-10-29)
+## ADR-dependent (2026-10-29; the wait on the ADR ended 2026-10-30)
 
-- Everything model-, GPU- or UI-related (ONNX Runtime, model download, capture adapters, the HUD overlay and live view) waits
-  for ADR 0001 (the object detector, on `docs/sighter-rfdetr` until accepted) to be accepted and for the shared UI.
+ADR 0001 (the object detector) was accepted by the user on 2026-10-30 and is on this branch. What remains is ordered by the
+[stage 2 plan](plans/stage-2.md): model-, GPU- or UI-related work (ONNX Runtime, model download, capture adapters, the HUD
+overlay and live view) waits only for its package's dependencies there, and for the shared UI.

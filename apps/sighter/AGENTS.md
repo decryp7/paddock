@@ -37,8 +37,9 @@ Apply these deliberately. They are not decoration:
   are allowed only to pick and follow the capture target. A user's own test-framework adapter may pass rectangles it
   already has as optional hints; hints never replace detection and are recorded as hint-sourced.
 - **Licences of models.** No AGPL, GPL or non-commercial models or weights: no Ultralytics YOLO (v5/v8/v11/v12), no
-  YOLOv9/v10, no YOLO-NAS weights, no OmniParser `icon_detect`. Prefer Apache-2.0/MIT detectors (RT-DETR, D-FINE, DEIM,
-  YOLOX, RF-DETR after verifying weights). Record every model's licence (including base weights) in the model card and
+  YOLOv9/v10, no YOLO-NAS weights, no OmniParser `icon_detect`. The detector is **RF-DETR, Apache-2.0 sizes only** (Nano, Small, Medium, Large), with D-FINE
+  (COCO-only checkpoints) as the fallback; the PML sizes, DEIMv2 and UI-DETR-1 are refused and RT-DETRv4 is pending a licence
+  review (ADR 0001 decisions 1 and 2). Record every model's licence (including base weights) in the model card and
   verify it against the official repo before adopting.
 - **Never click blindly.** Anything that acts on the UI acts on a located, scored element. Unreviewed elements block
   unattended runs; low confidence returns "needs labelling" rather than a guess.

@@ -3,9 +3,8 @@
 - Status: Plan, 2026-10-30. Nothing here is built. Docs only.
 - Starts from: the pure core on `sighter/core-wave-0` (`6a368882e`: coordinate chain, detection model, tile grid, seam
   merge, adapter hints, per-tile change detection, HUD core, benchmark harness; `sighter-core` and `sighter-bench`) and
-  [ADR 0001](../adr/0001-object-detector.md) (the object detector), **accepted by the user**. ADR 0001, its research
-  note and its performance block are still on `docs/sighter-rfdetr` (`70751e487`); package SW1 lands them, so the links to
-  them in this plan resolve once SW1 is merged.
+  [ADR 0001](../adr/0001-object-detector.md) (the object detector), **accepted by the user** on 2026-10-30. ADR 0001, its research
+  note and its performance block were landed by package SW1 (merged from `docs/sighter-rfdetr`, `70751e487`).
 - Sources read: [AGENTS.md](../../AGENTS.md), [proposal.md](../proposal.md), [follow-ups.md](../follow-ups.md),
   [performance.md](../performance.md), [design review](../review/2026-10-design-review.md) (and the user's decisions of
   2026-10-24 at its end), [poc-vm-console.md](poc-vm-console.md); ADR 0001 revision 4 on `docs/sighter-rfdetr`; the

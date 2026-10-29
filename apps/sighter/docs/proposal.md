@@ -12,7 +12,7 @@ UI automation testing needs computer vision, so a fast model like YOLO; an LLM i
 
 Refinements:
 - **Identity comes from detector + OCR + layout anchors**, not from the detector alone: the detector gives class and box, OCR gives text, layout anchors (near, inside, nth) disambiguate repeats.
-- **A permissive YOLO-style detector**: RT-DETR, D-FINE or YOLOX (Apache-2.0/MIT). Ultralytics YOLO is AGPL and is excluded (section 8).
+- **A permissive DETR-style detector**: RF-DETR (Apache-2.0 sizes only) with D-FINE as the fallback, behind one ONNX adapter ([ADR 0001](adr/0001-object-detector.md) decisions 1 and 2). Ultralytics YOLO is AGPL and is excluded (section 8).
 - **Active-learning loop on UI change**: when the UI changes, low-confidence or unknown results are flagged, the LLM/VLM (Pitwall, optional) proposes labels, a human reviews them, and the model is retrained.
 - **Training for variation**: DPI, theme and size variation (section 6) so one model survives scaling, dark/light and resized windows.
 - **Two ways to test, one engine**: engineers' own code tests through the API, and tests Sighter authors and runs itself (section 7.8), both on the same models and resolver.
@@ -65,8 +65,8 @@ watcher). Decision: **Sighter**.
 ```
  RECORD            IDENTIFY             REVIEW             TRAIN            SERVE              TEST
  recorder  ->  frames + events  ->  suggestions from  ->  human labels  ->  per-app model  ->  sighter-server  ->  engineer's
- (window/      scene-change,        OCR, template,        (queue, "same     (RT-DETRv2 /      layered resolver     scripts call
- screen/       dedup, click         detector, Pitwall     as...", track)    D-FINE/YOLOX)     /v1/locate ...       /v1/* (CI too)
+ (window/      scene-change,        OCR, template,        (queue, "same     (RF-DETR /         layered resolver     scripts call
+ screen/       dedup, click         detector, Pitwall     as...", track)    D-FINE)           /v1/locate ...       /v1/* (CI too)
  video import) boxes                VLM (names only)          |            ONNX, versioned        |
                                           ^                    |                                  v
                                           +---- flag for labelling <---- low confidence / unknown at run time
@@ -194,10 +194,9 @@ disagreement, disagreement between the last two model versions).
 
 Diffusion is at most an optional "Later" experiment.
 
-**Presets**: Fast (RT-DETR-R18-class, small GPU/CPU, minutes), Balanced (D-FINE/DEIM small/medium or RF-DETR), Accurate (D-FINE-L/X with
-the DEIM recipe; DEIMv2 if its DINOv3 weight licence is clean, verify). YOLOX-Nano for the CPU-only runner. Resume, pause, early stop,
-live loss/mAP chart, hardware estimate before start ("about 25 min on this GPU, 4 GB"). Fine-tune from COCO-pretrained Apache weights;
-1k to 5k frames per app is practical. Export ONNX (opset 17+, fixed input size per model, 640 default, 960/1280 for dense screens).
+**Presets** (ADR 0001 decision 1, user 2026-10-29): **Balanced = RF-DETR Small (default)**, **Fast = RF-DETR Nano** (CPU-only runners), **Accurate = RF-DETR Medium or Large**; the Apache-2.0 sizes only (Atto, Femto, Pico, XL and 2XL are refused). D-FINE-S/M (COCO-only checkpoints, DEIM recipe) is the fallback behind the same adapter. YOLOX, RT-DETR/RT-DETRv2 and DEIMv2 are not presets. Resume, pause, early stop,
+live loss/mAP chart, hardware estimate before start ("about 25 min on this GPU, 4 GB"). Fine-tune from the mirrored COCO checkpoints on Roboflow's Apache-2.0 label (ADR 0001 decisions 1 and 6);
+1k to 5k frames per app is practical. Export ONNX (fixed input size per model, sides multiples of 32; frames are cut into 640 tiles on the inference grid, ADR 0001 "Screen resolutions and HiDPI").
 
 **Evaluate**: mAP@0.5 and @0.5:0.95 per class, PR curves, F1-optimal threshold per class, per-class confusion matrix (click a cell for
 crops), hard-cases gallery, held-out session test (different theme/scale/OS), side-by-side version compare.
@@ -273,6 +272,12 @@ opens in the studio and exports a Debrief bundle.
 anchor under 100 ms with a region, 150 to 500 ms full screen on CPU (cache OCR by fingerprint); detector under 50 ms on a discrete/Apple
 GPU at 640 px (5 to 20 ms inference + 10 to 25 ms capture/pre-processing), "under 250 ms at 640" on an 8-core CPU for a small model
 (dense 1080p at 960 to 1280 px reaches 300 to 800 ms); VLM 1 to 5 s on GPU, 10+ s on CPU, never in those budgets.
+These are per-stage goals. The locate budgets are two tiers (ADR 0001 "Latency budgets: gate and target"; constants in
+`sighter_core::bench::budgets`, read by benchmarks only; list in [performance.md](performance.md)): the **gate**, one
+full-frame locate (capture excluded) at p95 of 500 ms on CoreML or DirectML and 2 s on the CPU at 1920 x 1200, and 1 s
+(GPU) or 4 s (CPU) at 3840 x 2160; and the **target**, end to end at 1080p, p50 80 ms and p95 250 ms on a GPU, p95 600 ms
+on an 8-core CPU. Only the gate can fail a release. At run time a locate has no budget of its own, only the caller's step
+timeout (ADR 0001 "Locate at run time").
 
 ### 7.1 Test model: the app state graph
 Screens are nodes, actions are edges, both built from recordings and run history (this is the Eggplant DAI idea, without the cloud: DAI models
@@ -716,7 +721,7 @@ A small `Target` interface: `frames()` (screenshots), `input()` (keyboard and mo
 Per request, configurable: **cache** (screen fingerprint + query + model version) -> **template** (stored crop, fingerprint matches) ->
 **OCR anchor** (query has text, or the element has a name) -> **trained detector** (class + context scored with OCR text) -> **Pitwall
 VLM grounding** (opt-in; never the default for unattended runs) -> **needs labelling** (flag, with screenshot). The detector is a
-backend behind a `Detector` trait; if a better permissive model appears, swap the ONNX. The product does not promise YOLO and uses no
+backend behind a `Detector` trait: **RF-DETR** (Apache-2.0 sizes) is primary and **D-FINE** the fallback, both through one "ONNX DETR, fixed input, no NMS" adapter in `sighter-infer`; if a better permissive model appears, swap the ONNX file and the catalogue entry. The product does not promise YOLO and uses no
 Ultralytics code or weights.
 
 **Pitwall's role**: identifies and names elements ("Settings (gear)"), resolves ambiguity ("which of these numbered crops is the Save
@@ -729,7 +734,7 @@ estimate and a hard cap per project.
 ### Evaluation of the locating approaches
 | Approach | Accuracy on GUIs | Speed CPU / GPU | Training data | Deterministic | Licence | Rust / ONNX |
 |---|---|---|---|---|---|---|
-| Trained detector (RT-DETRv2, D-FINE/DEIM, RF-DETR, YOLOX) | Per-app: mAP@0.5 of 0.8 to 0.95 on a consistent app is typical (to be measured); poor on unseen apps. COCO: RT-DETRv2-L 53.4 AP, D-FINE/DEIM-L 54.7 AP (not UI numbers) | CPU ~60 to 250 ms small model at 640 to 960 px; GPU ~5 to 20 ms | 300 to 3000 labelled frames per app/theme family | Yes | Apache-2.0 per sources (verify weights/backbones) | ONNX export routine; `ort` or `tract` |
+| Trained detector (RF-DETR primary, D-FINE fallback; RT-DETRv2, DEIM and YOLOX as general reference) | Per-app: mAP@0.5 of 0.8 to 0.95 on a consistent app is typical (to be measured); poor on unseen apps. COCO: RT-DETRv2-L 53.4 AP, D-FINE/DEIM-L 54.7 AP (not UI numbers) | CPU ~60 to 250 ms small model at 640 to 960 px; GPU ~5 to 20 ms | 300 to 3000 labelled frames per app/theme family | Yes | Apache-2.0 per sources (verify weights/backbones) | ONNX export routine; `ort` or `tract` |
 | Open-vocabulary detectors (OWLv2, Grounding DINO, Florence-2) | Natural-image training; weak on dense UIs and icons (no ScreenSpot-Pro figure found, verify) | Seconds CPU, 100 to 400 ms GPU | None to start | Mostly | Grounding DINO Apache-2.0, Florence-2 MIT, SAM 2 Apache-2.0 (per Roboflow, verify); OWLv2 unconfirmed; OmniParser icon_detect AGPL (no) | Florence-2 and OWL have ONNX exports; Grounding DINO awkward |
 | GUI-grounding VLMs (UI-TARS, ShowUI, OS-Atlas, SeeClick, Qwen-VL) | ScreenSpot-Pro: GPT-4o ~0.8%, SeeClick 1.1%, ShowUI-2B 7.7%, OS-Atlas-4B 3.7%, OS-Atlas-7B 18.9%, Qwen2.5-VL-7B 29.0% (3B 24.2, 32B 39.4, 72B 43.6), UI-TARS-72B 38.1%, UI-TARS-1.5-7B ~49.6% (blog, verify). ScreenSpot: OS-Atlas-7B 84.1, UI-TARS-7B 91.6. Good on ordinary screens, mediocre on dense pro/legacy apps | Seconds to tens of seconds CPU (3B to 7B); ~1 to 4 s consumer GPU | None | No (sampling, version drift) | UI-TARS Apache-2.0 (verify), Qwen-VL Apache-2.0 for most sizes, ShowUI MIT (verify), OS-Atlas/SeeClick (verify) | llama.cpp GGUF via Pitwall |
 | Template / feature matching (SikuliX style) | Excellent on a static UI at fixed scale/theme; fails on theme, DPI, font smoothing, language change | 1 to 30 ms (FFT NCC on a region) | One crop per element | Yes | Own code or `imageproc`/`fast_image_resize` (MIT); OpenCV avoided (heavy C++) | Pure Rust |
@@ -743,11 +748,11 @@ runner has no GPU/Pitwall, or icons have no text.
 ### Detector licence table (confirm in the repos before adoption)
 | Model | Licence | Facts | Verdict |
 |---|---|---|---|
-| **RT-DETR / RT-DETRv2** | Apache-2.0 (repo; verify weights) | v2: L 53.4 AP ~108 FPS, X 54.3 AP ~74 FPS on T4 TensorRT FP16 (arXiv 2407.17140); NMS-free, clean ONNX export | **Primary** (Fast/Balanced) |
-| **D-FINE** | Apache-2.0 code and weights | DEIM-D-FINE L 54.7 AP / 124 FPS, X 56.5 / 78 FPS on T4 (Roboflow summary); D-FINE-M 52.3 | **Accuracy tier**; better localisation for click targets |
-| **DEIM / DEIMv2** | Apache-2.0 (DEIM repo; DEIMv2 verify) | DEIMv2-S 50.9 AP, 11M params, 26 GFLOPs; X 57.8 AP (arXiv 2509.20787); DEIM is a recipe on D-FINE/RT-DETR | Use the recipe; DEIMv2 (DINOv3 backbone, own licence, verify) as Accurate if clean |
-| **RF-DETR** (Roboflow) | Apache-2.0 per Roboflow licensing page (verify backbone weights) | DINOv2 backbone, fast fine-tuning | Candidate for Balanced; no platform dependency |
-| **YOLOX** | Apache-2.0 | 2021, Nano/Tiny/S run on CPU, anchor-free, needs NMS | CPU/tiny preset; burn port target |
+| **RT-DETR / RT-DETRv2** | Apache-2.0 (repo; verify weights) | v2: L 53.4 AP ~108 FPS, X 54.3 AP ~74 FPS on T4 TensorRT FP16 (arXiv 2407.17140); NMS-free, clean ONNX export | Not in the catalogue; the same adapter would load it. **RT-DETRv4 is pending** a licence review (ADR 0001 decision 2, plan item P4) |
+| **D-FINE** | Apache-2.0 code and weights | DEIM-D-FINE L 54.7 AP / 124 FPS, X 56.5 / 78 FPS on T4 (Roboflow summary); D-FINE-M 52.3 | **Fallback** (S/M, COCO-only checkpoints; the `obj365` and `obj2coco` ones are not used), used if RF-DETR misses the CPU budget or fails on an execution provider |
+| **DEIM / DEIMv2** | DEIM: Apache-2.0; DEIMv2: non-commercial (ADR 0001 research) | DEIMv2-S 50.9 AP, 11M params, 26 GFLOPs; X 57.8 AP (arXiv 2509.20787); DEIM is a recipe on D-FINE/RT-DETR | Use the DEIM recipe for D-FINE; **DEIMv2 excluded** by licence |
+| **RF-DETR** (Roboflow) | Apache-2.0 for Nano, Small, Medium and Large; the larger PML sizes (Atto to Pico, XL, 2XL) are refused. Objects365 lineage accepted for personal use (ADR 0001 decision 1) | DINOv2 backbone, fast fine-tuning | **Primary**: Small default (Balanced), Nano (Fast), Medium or Large (Accurate); no platform dependency |
+| **YOLOX** | Apache-2.0 | 2021, Nano/Tiny/S run on CPU, anchor-free, needs NMS | Not used in v1 (needs NMS, no adapter); Nano is the CPU preset instead |
 | PP-YOLOE (PaddleDetection) | Apache-2.0; MMYOLO's port is GPL-3 | Second DL stack | Skip |
 | YOLO-NAS | Code Apache-2.0, **weights non-commercial** (Frigate docs; Roboflow page conflicts) | | **Excluded** |
 | Ultralytics YOLOv5/8/11/12, YOLOv10 (THU-MIG) | **AGPL-3.0** | | **Excluded**, also OmniParser icon_detect |
@@ -758,7 +763,7 @@ runner has no GPU/Pitwall, or icons have no text.
 |---|---|---|
 | Qwen2.5-VL (3B/7B) / Qwen3-VL (2B to 32B) | Apache-2.0 for most sizes (3B and 72B Qwen2.5-VL used a Qwen licence, verify per size) | Primary recommendation: pixel-coordinate grounding, good OCR. Check Qwen3-VL support in Pitwall's pinned llama.cpp (`capabilities.json`). |
 | UI-TARS (1.5-7B and successors) | Apache-2.0 (verify checkpoint) | Qwen2.5-VL fine-tuned for GUI grounding; best "locate" model per size; verify llama.cpp compatibility. Qwen3-VL as "describe" model. |
-| Florence-2 (0.23B/0.77B) | MIT | Tiny open-vocabulary detection/OCR; not llama.cpp, run as ONNX in Rust. CPU-only bootstrap labeller (the no-Pitwall path). |
+| Florence-2 (0.23B/0.77B) | MIT | Tiny open-vocabulary detection/OCR; not llama.cpp, run as ONNX in Rust. Not used for boxes in v1 (ADR 0001 decision 5). |
 | OmniParser v2 caption model | MIT for icon_caption; **icon_detect AGPL, never use** | Reuse the idea (detect then caption crops), not the detector. |
 | MiniCPM-V 2.6 / 4.x | Apache-2.0 code; weights under MiniCPM licence (free commercial after registration, verify) | Optional. |
 | Gemma 3 (4B/12B vision) | Gemma Terms of Use (custom, not OSI) | Optional user-installed only, not default or bundled. |
@@ -791,7 +796,7 @@ No accessibility or DOM sources (ADR 0001 decision 9); adapter hints are not a `
 
   | Pitwall-assisted feature | Non-AI path (always works) | Without Pitwall you lose |
   |---|---|---|
-  | Label suggestions (list elements on a frame) | OCR + template + detector pre-labels + click-derived boxes + optional Florence-2 ONNX on CPU (MIT) + edge/connected-component heuristics | speed on a new app |
+  | Label suggestions (list elements on a frame) | OCR + template + detector pre-labels + click-derived boxes + edge/connected-component heuristics (no Florence-2 box bootstrap in v1, ADR 0001) | speed on a new app |
   | Element naming ("Settings (gear)") | OCR text of the element or its neighbours; otherwise `icon-17` with a human name in the queue; "same as..." | automatic icon names |
   | Grounding fallback at run time | none: step fails or pauses as "needs labelling" (the safe default anyway) | recovery from unseen UI changes |
   | Step descriptions in reports | templated text from the recorded step ("Click 'Checkout' (button) on Cart") | prose descriptions |
@@ -850,7 +855,7 @@ VLM fallback, and the review queue picks up the slack (Florence-2 box bootstrapp
 - `sighter-record`: per-OS `ScreenSource` and event-capture adapters (WGC/DXGI, ScreenCaptureKit, PipeWire/XShm), out-of-process helper (no accessibility adapters).
 - `paddock-video` (shared, extracted from Debrief): ffmpeg runtime, encoders, frame extraction. `sighter-frames`: sampling, scene-change, dedup (`image`, `fast_image_resize`, perceptual hash, SSIM).
 - `sighter-model` (state graph, coverage, path generation; pure), `sighter-plan` (`.sighterplan` parser, resolution, task list, traceability; uses shared `paddock-testplan`), `sighter-report` (JUnit/TRX/Allure/JSON writers, matrices, visual-diff levels).
-- `sighter-ocr`, `sighter-infer` (`ort`/`tract`), `sighter-train` (`ManagedPython` default, `ExportOnly`, later `Burn`), `sighter-pitwall` (job queue and prompts on top of the shared `paddock-pitwall` client).
+- `sighter-ocr`, `sighter-infer` (`ort` with a self-built ONNX Runtime, in its own sidecar; ADR 0001 decision 4), `sighter-train` (`ManagedPython` default, `ExportOnly`, later `Burn`), `sighter-pitwall` (job queue and prompts on top of the shared `paddock-pitwall` client).
 - `sighter-target` (the `Target` interface of 7.15 with the Local adapter; RDP adapter on FreeRDP, VNC and IP-KVM adapters later), `sighter-mcp` (MCP server, tool definitions and the safety guard of 7.14) and `sighter-agent` (the `sighter do` loop over the shared `paddock-pitwall` chat client; v1).
 - `sighter-server` (axum-style HTTP, OpenAPI generation), `sighter-input` (optional `act`: SendInput, CGEvent, XTEST, RemoteDesktop portal/libei, scoped), `sighter` CLI (reuse `paddock-cli`).
 - `app/src-tauri` + `app/src` (Angular 22, `paddock-ui`): Home dashboard, Recordings, Label (canvas + queue), Models, Playground (drop a screenshot or capture live, type a query, see every layer's candidates and timing), Runs, Keys and permissions, Settings. Backend service by DI token with a mock for browser dev.
@@ -865,7 +870,7 @@ weight licence; optional FP16/INT8). Project = SQLite (sessions, frames, events,
 ## 12. VRAM and hardware (8 GB GPU target)
 | Workload | VRAM | Notes |
 |---|---|---|
-| Training RT-DETR-R18 / D-FINE-S / YOLOX-S at 640 px | ~3 to 7 GB, small batches (4 to 8), AMP | Fits 8 GB; 2k frames feasible on 6 GB or CPU slowly; Accurate presets (L/X, DEIMv2) want 12+ GB, so fall back to Fast (no remote host in v1) |
+| Training RF-DETR Small (Nano/Medium) or D-FINE-S at 640 px | ~3 to 7 GB, small batches (4 to 8), AMP | Fits 8 GB; 2k frames feasible on 6 GB or CPU slowly; Accurate presets (Medium/Large) want more (measure in the spike), so fall back to Fast (no remote host in v1) |
 | Inference detector (ONNX, 640 px) | under 1 GB | Also runs on CPU |
 | OCR (PaddleOCR mobile) | a few hundred MB | CPU is fine |
 | 4-bit 7B VLM (Qwen2.5-VL / UI-TARS GGUF) | ~5 to 6 GB | **Not concurrent with training**; Pitwall's memory management unloads/loads and queues jobs |
@@ -928,7 +933,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 | Label | Frame timeline, scene-change + near-duplicate removal | v1 | CVAT, Roboflow |
 | Label | Box + polygon editor, taxonomy, "same as...", keyboard review queue | v1 | Label Studio, CVAT |
 | Label | Auto-suggestions with source/confidence (OCR, template, detector, Pitwall if present) | v1 | Label Studio pre-annotation, OmniParser |
-| Label | Non-AI bootstrap (Florence-2 ONNX on CPU, OCR, click boxes) and visible "needs local AI" state | v1 | (family rule) |
+| Label | Non-AI bootstrap (OCR, templates, click boxes; no Florence-2 boxes in v1) and visible "needs local AI" state | v1 | (family rule) |
 | Label | Batch labelling via Pitwall at batch priority, only when idle (one GPU) | v1 | (family rule) |
 | Label | Box-from-click suggestions | v1 | (own idea) |
 | Label | Tracking with interpolation | v1 | CVAT |
@@ -1022,12 +1027,12 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - **8 GB ceiling**: Accurate presets and concurrent VLM + training do not fit; handled by gating and queueing (one GPU rule, section 9).
 
 ## 15. Open questions for the user (19; merged from revision 3; questions 2 and 3 narrowed by the 2026-10-23 decisions)
-1. Is a downloaded sandboxed Python/PyTorch **training runtime** an acceptable exception to "Rust + Angular only" (data, not shipped code), Burn-native later?
+1. **Decided** (user 2026-10-24, closed by ADR 0001 decision 3, 2026-10-30): a downloaded sandboxed Python/PyTorch **training runtime** (the `rfdetr` package, version-pinned, no network) is an accepted exception to "Rust + Angular only" (data, not shipped code); inference stays Rust; Burn-native later.
 2. Generated clients (C#, Java, C++, Python, TS are decided as first-class): in a separate `sighter-clients` repo as proposed, and is Robot Framework wanted in v1 or Later? Which C++ HTTP/JSON dependency is acceptable for the C++ client? (Decided 2026-10-23: one API style, locators, 7.9; raw verbs stay underneath.)
 3. Decided (2026-10-23): `/v1/act` and the flow recorder/runner are in v1, because Sighter runs its own tests (7.8); `act` stays default off and guarded. Remaining: which guard defaults for unattended CI runs?
 4. First OS pair and targets: Windows + macOS, then Linux X11, then Wayland; desktop + browsers + **remote-session client windows (Citrix/RDP/Horizon/VNC) in v1**, mobile Later?
 5. How important is unattended CI (interactive logged-in session on runners; implications for Pitcrew)? Is recording on CI runners wanted, or studio-only recording?
-6. No-Pitwall and starter models (merged 6+9): confirm the rule "Pitwall optional, non-AI path for everything" (table in section 9) and that Florence-2 ONNX + OCR + review is good enough for imported videos; and may we ever ship a starter model trained on third-party datasets, or strictly the user's own recordings?
+6. No-Pitwall and starter models (merged 6+9): confirm the rule "Pitwall optional, non-AI path for everything" (table in section 9) and that OCR + templates + review (no Florence-2 boxes in v1, ADR 0001) is good enough for imported videos; and may we ever ship a starter model trained on third-party datasets, or strictly the user's own recordings?
 7. Confidence and safety rules (merged 7+10): auto-accept 0.85 / flag below 0.6 or stricter (two agreeing sources); panic key, scope binding, overlay, deny-list; "no unattended run of flows with unreviewed dependencies or Needs-recording cases" as a hard rule?
 8. Extract Debrief's video crate into `paddock-video` now (affects Debrief mid-rename), or copy and consolidate later? Same question for the new `paddock-pitwall` client crate (extract from Pitwall's or Debrief's existing client, or write fresh).
 9. Recorder consent and storage (merged 11+12): input capture opt-in per project, key text off, redaction regions required on first run, auto-pause on password fields as best effort; PNG/WebP vs 4:4:4 video; retention and encryption defaults for recordings showing real data.
@@ -1046,7 +1051,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 19. **Agent mode in v1 or Later** (7.14): resolved (user, 2026-10-23): agent mode is in v1, with Pitwall optional.
 
 ## 16. Size (one capable agent team, rough, excluding polish and design pass)
-- Spike (2 to 3 weeks): recorder on one OS, 500 labelled frames, train RT-DETRv2 + D-FINE, ONNX in `ort`, measure mAP, wrong-click rate, latency on CPU/GPU, resolver layers on 5 legacy apps, plus one remote-session capture to measure the accuracy loss.
+- Spike (2 to 3 weeks): recorder on one OS, 500 labelled frames, train RF-DETR Small + D-FINE, ONNX in `ort` (spike items S1 to S8 of ADR 0001), measure mAP, wrong-click rate, latency on CPU/GPU, resolver layers on 5 legacy apps, plus one remote-session capture to measure the accuracy loss.
 - Recorder (capture, events, encoding, preflight, video import, remote-session windows): large, 4 to 6 weeks (three OS, Wayland hardest).
 - Studio labelling (timeline, editor, tracking, review queue, import/export): large, 6 to 8 weeks; the canvas and queue are the biggest UI.
 - Managed training runtime + evaluate + versioning: 4 to 6 weeks, mostly cross-platform packaging.

@@ -1,8 +1,8 @@
 # 1. Sighter's object detector: RF-DETR (Apache sizes) on ONNX Runtime in Sighter's own sidecar
 
-Status: proposed (2026-10-29). The user decided every question on 2026-10-29 (marked "user, 2026-10-29" below); none
-is open. Pending: the RT-DETRv4 licence review (plan item P4) and the DirectML egress gate of the spike (decision 4).
-The ADR goes to an independent review before it is accepted. Revision 4 (2026-10-29) answers the third independent
+Status: Accepted (2026-10-30, by the user) after five independent review rounds. The user decided every question on
+2026-10-29 (marked "user, 2026-10-29" below); none is open. Pending: the RT-DETRv4 licence review (plan item P4) and the
+DirectML egress gate of the spike (decision 4). Revision 4 (2026-10-29) answers the third independent
 review: gate conditions per execution provider, "Parallelism and cost" (rule 51), priority classes (ADR 0024), Patience
 instead of runtime budgets (ADR 0031), training geometry, password redaction, no remote training in v1, and the VLM's
 role; it reopens none of the user's decisions.
