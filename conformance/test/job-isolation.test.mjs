@@ -63,13 +63,19 @@ function host() {
   chmodSync(dev, 0o755);
   const log = join(root, 'dev.log');
   writeFileSync(log, '');
+  // The disk is faked too (ER-14): a df that reports 1000 GB free, and no free-disk floor, so acquire never reads or
+  // depends on the real disk of the machine running the tests (a Mac with 17 GB free failed eight tests). The floor tests
+  // set both explicitly.
+  const df = join(root, 'df-ample');
+  writeFileSync(df, '#!/bin/sh\necho "Filesystem 1024-blocks Used Available Capacity Mounted"\necho "disk 1 1 $((1000 * 1048576)) 1% /"\n');
+  chmodSync(df, 0o755);
   /** A job as the runner starts it: <work>/<16 hex>/tmp is its RUNNER_TEMP, and it has its own GITHUB_ENV. */
   const job = (id, extra = {}) => {
     const temp = join(root, 'work', id, 'tmp');
     mkdirSync(temp, { recursive: true });
     const envFile = join(root, 'work', id, 'github-env');
     writeFileSync(envFile, '');
-    const base = { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: 'macOS', RUNNER_TEMP: temp, GITHUB_ENV: envFile, GITHUB_RUN_ID: '7', GITHUB_JOB: id, PADDOCK_DEV: dev, FAKE_DEV_LOG: log, PADDOCK_SLOT_WAIT_TRIES: '0', ...extra };
+    const base = { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: 'macOS', RUNNER_TEMP: temp, GITHUB_ENV: envFile, GITHUB_RUN_ID: '7', GITHUB_JOB: id, PADDOCK_DEV: dev, FAKE_DEV_LOG: log, PADDOCK_SLOT_WAIT_TRIES: '0', PADDOCK_DF: df, PADDOCK_CI_MIN_FREE_GB: '0', ...extra };
     const exec = (args, more = {}) => spawnSync('bash', [SCRIPT, ...args], { env: { ...base, ...more }, encoding: 'utf8' });
     const exported = () => Object.fromEntries(read(envFile).split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
     /** Runs a command with what acquire exported, as the job's later steps see it. */
@@ -312,6 +318,23 @@ test('disk: below the free-disk floor acquire removes idle slots\' kept folders,
   assert.notEqual(rf.status, 0);
   assert.match(rf.stderr, /still only 10 GB free .* Free disk on the host, then re-run the job/);
   assert.match(a.exec(['status']).stdout, /s4 free/, 'the failed job gave its slot back');
+});
+
+test('disk: the floor comes from PADDOCK_CI_MIN_FREE_GB (default 30 GB) and acquire refuses below it, on a faked disk', () => {
+  const h = host();
+  // A disk that always has 20 GB free, nothing to sweep: the floor alone decides.
+  const df = join(h.root, 'df-20');
+  writeFileSync(df, '#!/bin/sh\necho "Filesystem 1024-blocks Used Available Capacity Mounted"\necho "disk 1 1 $((20 * 1048576)) 1% /"\n');
+  chmodSync(df, 0o755);
+  const run = (id, floor) => h.job(id.repeat(16), { PADDOCK_DF: df, PADDOCK_CI_MIN_FREE_GB: floor }).exec(['acquire']);
+  const unset = run('a', '');
+  assert.notEqual(unset.status, 0, 'no floor given: the default of 30 GB applies');
+  assert.match(unset.stderr, /still only 20 GB free .*\(floor 30 GB\)/);
+  const above = run('b', '21');
+  assert.notEqual(above.status, 0, 'one GB short of the floor refuses');
+  assert.match(above.stderr, /still only 20 GB free .*\(floor 21 GB\)/);
+  assert.equal(run('c', '20').status, 0, 'exactly at the floor is enough');
+  assert.equal(run('d', '0').status, 0);
 });
 
 test('the declared port blocks never overlap each other or an end-to-end port, for every slot up to the default PADDOCK_CI_SLOTS', () => {
