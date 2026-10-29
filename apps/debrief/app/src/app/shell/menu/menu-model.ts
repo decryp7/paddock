@@ -409,6 +409,7 @@ function viewMenu(state: MenuState, cmd: Cmd, sub: Sub): MenuNode[] {
   });
   return tidy([
     cmd('view.toggleSidebar', $localize`:@@shell.menu.view.explorer:Explorer`, state.sidebarOpen),
+    cmd('view.resetExplorerWidth'),
     { kind: 'item', id: MENU_IDS.fields, label: $localize`:@@shell.menu.view.fields:Fields` },
     ...[...core, ...extraCore].map(viewItem),
     cmd('timeline.new'),

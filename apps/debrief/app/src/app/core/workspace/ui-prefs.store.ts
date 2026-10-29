@@ -19,6 +19,8 @@ interface UiPrefsState {
   extraColumns: string[];
   /** The Explorer's width the user dragged it to, px (always within `EXPLORER_WIDTH`). */
   explorerWidth: number;
+  /** The user set the width (a drag or the keys, even back to the default): it wins over the other columns. False: the default width, which yields to them. */
+  explorerWidthChosen: boolean;
 }
 
 /** The Explorer's declared widths, px: `dock/dock-layout.ts` builds the Explorer's `ViewLayout` from them (ADR 0056). */
@@ -32,13 +34,15 @@ export function clampExplorerWidth(width: unknown): number {
 
 const PREFS_KEY = 'debrief.prefs.v1';
 /** The preferences kept across sessions. */
-export type Prefs = Pick<UiPrefsState, 'timezone' | 'theme' | 'scheme' | 'uiFont' | 'extraColumns' | 'alwaysShowLifecycle' | 'explorerWidth'>;
+export type Prefs = Pick<UiPrefsState, 'timezone' | 'theme' | 'scheme' | 'uiFont' | 'extraColumns' | 'alwaysShowLifecycle' | 'explorerWidth' | 'explorerWidthChosen'>;
 
-const DEFAULTS: Prefs = { timezone: 'utc', alwaysShowLifecycle: true, theme: null, scheme: 'system', uiFont: 'system', extraColumns: [], explorerWidth: EXPLORER_WIDTH.default };
+const DEFAULTS: Prefs = { timezone: 'utc', alwaysShowLifecycle: true, theme: null, scheme: 'system', uiFont: 'system', extraColumns: [], explorerWidth: EXPLORER_WIDTH.default, explorerWidthChosen: false };
 
 /** Narrows stored (untrusted) preferences: unknown or malformed values fall back to the defaults. */
 export function sanitizePrefs(raw: unknown): Prefs {
   const r = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  // A width without the flag is not a choice (prefs from before the flag): the default width.
+  const chosen = r['explorerWidthChosen'] === true;
   return {
     timezone: r['timezone'] === 'local' || r['timezone'] === 'utc' ? r['timezone'] : DEFAULTS.timezone,
     alwaysShowLifecycle: typeof r['alwaysShowLifecycle'] === 'boolean' ? r['alwaysShowLifecycle'] : DEFAULTS.alwaysShowLifecycle,
@@ -46,7 +50,8 @@ export function sanitizePrefs(raw: unknown): Prefs {
     scheme: isSchemeMode(r['scheme']) ? r['scheme'] : DEFAULTS.scheme,
     uiFont: isUiFont(r['uiFont']) ? r['uiFont'] : DEFAULTS.uiFont,
     extraColumns: Array.isArray(r['extraColumns']) ? r['extraColumns'].filter((c): c is string => typeof c === 'string') : DEFAULTS.extraColumns,
-    explorerWidth: clampExplorerWidth(r['explorerWidth']),
+    explorerWidth: chosen ? clampExplorerWidth(r['explorerWidth']) : EXPLORER_WIDTH.default,
+    explorerWidthChosen: chosen,
   };
 }
 
@@ -97,7 +102,11 @@ export const UiPrefsStore = signalStore(
     /** Replaces the extra columns (a lens switch); duplicates are dropped. */
     setColumns: (fields: readonly string[]) => patchState(store, { extraColumns: [...new Set(fields)] }),
     /** The user dragged (or keyed) the Explorer to this width; clamped to its declared limits. */
-    setExplorerWidth: (width: number) => patchState(store, { explorerWidth: clampExplorerWidth(width) }),
+    setExplorerWidth: (width: number) => patchState(store, { explorerWidth: clampExplorerWidth(width), explorerWidthChosen: true }),
+    /** Back to the default width, which yields to the other columns again ("Reset Explorer width"). */
+    resetExplorerWidth: () => patchState(store, { explorerWidth: EXPLORER_WIDTH.default, explorerWidthChosen: false }),
+    /** Pop-outs follow the main window's flag. */
+    setExplorerWidthChosen: (explorerWidthChosen: boolean) => patchState(store, { explorerWidthChosen }),
     removeColumn: (field: string) => patchState(store, { extraColumns: store.extraColumns().filter((c) => c !== field) }),
     /** The preferences to persist. */
     snapshot: (): Prefs => ({
@@ -108,6 +117,7 @@ export const UiPrefsStore = signalStore(
       extraColumns: store.extraColumns(),
       alwaysShowLifecycle: store.alwaysShowLifecycle(),
       explorerWidth: store.explorerWidth(),
+      explorerWidthChosen: store.explorerWidthChosen(),
     }),
   })),
 );

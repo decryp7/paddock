@@ -82,6 +82,14 @@ describe('NarrowWindow (the Explorer follows the layout plan)', () => {
     narrow.evaluate();
     expect(narrow.width()).toBe(500);
     expect(spy).toHaveBeenLastCalledWith(0);
+    // Dragged back to the default width it is still chosen; the reset makes it yield again.
+    TestBed.inject(UiPrefsStore).setExplorerWidth(EXPLORER_WIDTH.default);
+    narrow.evaluate();
+    expect(spy).toHaveBeenLastCalledWith(0);
+    TestBed.inject(UiPrefsStore).resetExplorerWidth();
+    narrow.evaluate();
+    narrow.evaluate();
+    expect(narrow.width()).toBe(250);
   });
 
   it('re-evaluates after every dock re-plan, and starts once', () => {

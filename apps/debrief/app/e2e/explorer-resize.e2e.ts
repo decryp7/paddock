@@ -1,5 +1,6 @@
 import { expect, Page, test } from '@playwright/test';
 import { openApp } from './app';
+import { chooseMenu } from './menu-support';
 import { MESSAGE_COLUMN_MIN } from '../src/app/grid/message-column';
 
 // The Explorer is a view of the layout plan (ADR 0056) with a declared minimum and maximum width; the user resizes it by
@@ -97,7 +98,7 @@ async function planIdle(page: Page): Promise<void> {
 }
 
 test('a stored wide Explorer in a narrow window settles at once instead of opening and closing forever', async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('debrief.prefs.v1', JSON.stringify({ explorerWidth: 640 })));
+  await page.addInitScript(() => localStorage.setItem('debrief.prefs.v1', JSON.stringify({ explorerWidth: 640, explorerWidthChosen: true })));
   // Open wide, then shrink to a window where 640 px no longer fits beside the dock: the plan must settle, not open and close forever.
   await page.setViewportSize({ width: 1440, height: 900 });
   await openApp(page);
@@ -174,6 +175,31 @@ test('at 1440 px an explicit resize wins: dragging to 500 px tabs Registry, keep
   await planIdle(page);
   await expect.poll(() => sidebarWidth(page)).toBe(500);
   expect(await registryTabbed(page)).toBe(true);
+  expect(await messageWidth(page)).toBeGreaterThanOrEqual(MESSAGE_COLUMN_MIN);
+});
+
+test('at 1440 px a width dragged back to the default stays chosen (Registry stays tabbed); "Reset Explorer width" makes it yield again', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openApp(page);
+  await planIdle(page);
+  expect(await registryTabbed(page)).toBe(false);
+  await dragEdge(page, 150);
+  await expect.poll(() => registryTabbed(page)).toBe(true);
+  // Back to exactly the default width (272 px): still the user's choice, so Registry stays tabbed and the width holds.
+  const width = await sidebarWidth(page);
+  await dragEdge(page, 272 - width);
+  await expect.poll(() => sidebarWidth(page)).toBe(272);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await planIdle(page);
+  expect(await sidebarWidth(page)).toBe(272);
+  expect(await registryTabbed(page)).toBe(true);
+  // The reset: the default width, which yields to Registry's column again.
+  await chooseMenu(page, 'View', 'Reset Explorer width');
+  await expect.poll(() => registryTabbed(page)).toBe(false);
+  await planIdle(page);
+  expect(await sidebarWidth(page)).toBeLessThan(272);
+  expect(await sidebarWidth(page)).toBeGreaterThanOrEqual(240);
   expect(await messageWidth(page)).toBeGreaterThanOrEqual(MESSAGE_COLUMN_MIN);
 });
 

@@ -225,7 +225,10 @@ export class DockLayout {
     if (!this.ctx.displaced.size || !(api.width > 0 && api.height > 0)) return [];
     const box = this.ctx.container?.getBoundingClientRect();
     if (box && (box.width <= 0 || box.height <= 0)) return [];
-    return restorable({ width: api.width + this.ctx.explorerYield, height: api.height }, this.openViews(api), [...this.ctx.displaced.keys()], GROW_BACK_MARGIN, this.hints());
+    // Where the Explorer can still give up width, the room is counted with the Explorer at its minimum, which the Explorer then really gives
+    // (it shrinks, it never grows back by itself): that room needs no hysteresis margin, so Reset Explorer width brings a tabbed column back.
+    const margin = this.ctx.explorerYield > 0 ? { ...GROW_BACK_MARGIN, width: 0 } : GROW_BACK_MARGIN;
+    return restorable({ width: api.width + this.ctx.explorerYield, height: api.height }, this.openViews(api), [...this.ctx.displaced.keys()], margin, this.hints());
   }
 
   /** The order displaced views return in: one whose slot is relative to another returning view goes after it (Home beside Registry beside the assistant). */

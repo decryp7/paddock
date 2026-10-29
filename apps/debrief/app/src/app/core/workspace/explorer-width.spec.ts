@@ -1,4 +1,5 @@
-import { clampExplorerWidth, EXPLORER_WIDTH, sanitizePrefs } from './ui-prefs.store';
+import { TestBed } from '@angular/core/testing';
+import { clampExplorerWidth, EXPLORER_WIDTH, sanitizePrefs, UiPrefsStore } from './ui-prefs.store';
 import { EXPLORER_LAYOUT } from '../../dock/dock-layout';
 
 // The Explorer's width is a declared range (ADR 0056): the Explorer's ViewLayout and the stored preference agree on it.
@@ -21,9 +22,32 @@ describe('Explorer width', () => {
   });
 
   it('is read from stored preferences once, clamped, and defaults when missing or corrupt', () => {
-    expect(sanitizePrefs({ explorerWidth: 400 }).explorerWidth).toBe(400);
-    expect(sanitizePrefs({ explorerWidth: 99999 }).explorerWidth).toBe(EXPLORER_WIDTH.max);
+    expect(sanitizePrefs({ explorerWidth: 400, explorerWidthChosen: true }).explorerWidth).toBe(400);
+    expect(sanitizePrefs({ explorerWidth: 99999, explorerWidthChosen: true }).explorerWidth).toBe(EXPLORER_WIDTH.max);
+    // A width without the flag is not a choice.
+    expect(sanitizePrefs({ explorerWidth: 400 }).explorerWidth).toBe(EXPLORER_WIDTH.default);
     expect(sanitizePrefs({}).explorerWidth).toBe(EXPLORER_WIDTH.default);
     expect(sanitizePrefs({ explorerWidth: 'x' }).explorerWidth).toBe(EXPLORER_WIDTH.default);
+  });
+
+  describe('the chosen flag', () => {
+    it('is false for stored prefs without it, and only a stored true is true', () => {
+      expect(sanitizePrefs({ explorerWidth: 400 }).explorerWidthChosen).toBe(false);
+      expect(sanitizePrefs({ explorerWidthChosen: 'yes' }).explorerWidthChosen).toBe(false);
+      expect(sanitizePrefs({ explorerWidth: 400, explorerWidthChosen: true }).explorerWidthChosen).toBe(true);
+    });
+
+    it('is set by any user resize, also back to the default width, and cleared by the reset', () => {
+      localStorage.clear();
+      const prefs = TestBed.inject(UiPrefsStore);
+      expect(prefs.explorerWidthChosen()).toBe(false);
+      prefs.setExplorerWidth(EXPLORER_WIDTH.default);
+      expect(prefs.explorerWidthChosen()).toBe(true);
+      expect(prefs.snapshot().explorerWidthChosen).toBe(true);
+      prefs.setExplorerWidth(500);
+      prefs.resetExplorerWidth();
+      expect(prefs.explorerWidth()).toBe(EXPLORER_WIDTH.default);
+      expect(prefs.explorerWidthChosen()).toBe(false);
+    });
   });
 });

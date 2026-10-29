@@ -1,4 +1,4 @@
-import { computed, DestroyRef, inject, Injectable } from '@angular/core';
+import { computed, DestroyRef, effect, inject, Injectable, untracked } from '@angular/core';
 import { ShellUiStore } from '../core/workspace/shell-ui.store';
 import { EXPLORER_WIDTH, UiPrefsStore } from '../core/workspace/ui-prefs.store';
 import { WorkspaceStore } from '../core/workspace.store';
@@ -25,6 +25,14 @@ export class NarrowWindow {
   /** The user is dragging the Explorer's sash: it is not judged until the drag ends. */
   private held = false;
 
+  /** A reset (or any change of the flag) is judged at once: the width and the dock's yield change with it, and the dock re-plans. */
+  private readonly followChosen = effect(() => {
+    this.chosen();
+    untracked(() => {
+      if (this.started) this.evaluate();
+    });
+  });
+
   /** Starts following the dock's re-plans (idempotent). */
   start(): void {
     if (this.started) return;
@@ -34,10 +42,10 @@ export class NarrowWindow {
   }
 
   /**
-   * The user has set a width of their own (anything but the default): an explicit resize wins over the other columns, which
+   * The user has set a width of their own (`UiPrefsStore.explorerWidthChosen`): an explicit resize wins over the other columns, which
    * the dock tabs; the default width yields to them instead (the Explorer shrinks so Registry or Home keep their column).
    */
-  private readonly chosen = computed(() => this.prefs.explorerWidth() !== EXPLORER_WIDTH.default);
+  private readonly chosen = this.prefs.explorerWidthChosen;
 
   /** The width the Explorer is shown at, px: the user's, within the room it has now (all the window leaves the Events view when the user chose the width, else what leaves every column its own). */
   readonly width = computed(() => Math.min(this.prefs.explorerWidth(), this.chosen() ? this.shell.explorerRoom() : this.shell.explorerColumnRoom()));
@@ -70,11 +78,13 @@ export class NarrowWindow {
     const open = this.store.sidebarOpen();
     const wish = this.prefs.explorerWidth();
     const shown = this.width();
-    const verdict = this.dock.explorerVerdict(open, open ? shown : wish);
+    // The window the plan sees is the dock plus the Explorer as it is on screen now (the width to show may differ until it renders).
+    const onScreen = open ? Math.round(document.getElementById('debrief-explorer')?.getBoundingClientRect().width || shown) : wish;
+    const verdict = this.dock.explorerVerdict(open, onScreen);
     this.dock.setExplorerYield(open && !this.chosen() ? shown - EXPLORER_WIDTH.min : 0);
     if (open) {
-      this.shell.setExplorerRoom(this.dock.explorerRoom(true, shown));
-      this.shell.setExplorerColumnRoom(this.dock.explorerColumnRoom(true, shown));
+      this.shell.setExplorerRoom(this.dock.explorerRoom(true, onScreen));
+      this.shell.setExplorerColumnRoom(this.dock.explorerColumnRoom(true, onScreen));
     }
     if (open) {
       // No room beside the message column's minimum: the Explorer is closed again, also when the user has just opened it

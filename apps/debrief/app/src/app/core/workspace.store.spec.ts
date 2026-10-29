@@ -318,7 +318,7 @@ describe('WorkspaceStore', () => {
 
   it('reads and writes preferences defensively', () => {
     localStorage.setItem('debrief.prefs.v1', JSON.stringify({ timezone: 'local', extraColumns: ['x'] }));
-    const defaults = { timezone: 'utc', alwaysShowLifecycle: true, theme: null, scheme: 'system', uiFont: 'system', extraColumns: [], explorerWidth: 272 };
+    const defaults = { timezone: 'utc', alwaysShowLifecycle: true, theme: null, scheme: 'system', uiFont: 'system', extraColumns: [], explorerWidth: 272, explorerWidthChosen: false };
     expect(loadPrefs()).toEqual({ ...defaults, timezone: 'local', extraColumns: ['x'] });
     localStorage.setItem('debrief.prefs.v1', '{not json');
     expect(loadPrefs()).toEqual(defaults);
@@ -334,7 +334,7 @@ describe('WorkspaceStore', () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('quota');
     });
-    expect(() => savePrefs({ timezone: 'utc', theme: 'calm', scheme: 'dark', uiFont: 'system', extraColumns: [], alwaysShowLifecycle: true, explorerWidth: 272 })).not.toThrow();
+    expect(() => savePrefs({ timezone: 'utc', theme: 'calm', scheme: 'dark', uiFont: 'system', extraColumns: [], alwaysShowLifecycle: true, explorerWidth: 272, explorerWidthChosen: false })).not.toThrow();
     setItem.mockRestore();
   });
 

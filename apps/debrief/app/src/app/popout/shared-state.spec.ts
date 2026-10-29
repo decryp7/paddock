@@ -106,13 +106,13 @@ describe('shared UI state of a window group', () => {
 
     it('display: only the preference stores, no workspace, cursor, follow or live tail', () => {
       const { keys, tokens } = asked('display');
-      expect(keys).toEqual(['theme', 'scheme', 'uiFont', 'timezone', 'explorerWidth', 'lifecycle', 'dateFormat', 'density', 'sourceColors']);
+      expect(keys).toEqual(['theme', 'scheme', 'uiFont', 'timezone', 'explorerWidth', 'explorerWidthChosen', 'lifecycle', 'dateFormat', 'density', 'sourceColors']);
       for (const heavy of [WorkspaceStore, TimeCursor, LiveFollow, LiveTail]) expect(tokens).not.toContain(heavy);
     });
 
     it('summary: adds the data version through the data store, still no workspace facade', () => {
       const { keys, tokens } = asked('summary');
-      expect(keys).toEqual(['theme', 'scheme', 'uiFont', 'timezone', 'explorerWidth', 'lifecycle', 'dateFormat', 'density', 'sourceColors', 'data']);
+      expect(keys).toEqual(['theme', 'scheme', 'uiFont', 'timezone', 'explorerWidth', 'explorerWidthChosen', 'lifecycle', 'dateFormat', 'density', 'sourceColors', 'data']);
       for (const heavy of [WorkspaceStore, TimeCursor, LiveFollow, LiveTail]) expect(tokens).not.toContain(heavy);
     });
 

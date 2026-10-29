@@ -61,6 +61,7 @@ function displayState(injector: Injector): SyncedValue[] {
     { key: 'timezone', read: () => prefs.timezone(), apply: (v) => ZONES.includes(v as TimeZoneMode) && prefs.setTimezone(v as TimeZoneMode) },
     // The Explorer lives in the main window only: a pop-out follows the host's width, so a pop-out that saves the preferences cannot overwrite the dragged one.
     { key: 'explorerWidth', direction: 'fromHost', read: () => prefs.explorerWidth(), apply: (v) => typeof v === 'number' && prefs.setExplorerWidth(v) },
+    { key: 'explorerWidthChosen', direction: 'fromHost', read: () => prefs.explorerWidthChosen(), apply: (v) => typeof v === 'boolean' && prefs.setExplorerWidthChosen(v) },
     { key: 'lifecycle', read: () => prefs.alwaysShowLifecycle(), apply: (v) => typeof v === 'boolean' && prefs.setAlwaysShowLifecycle(v) },
     { key: 'dateFormat', read: () => settings.dateFormat(), apply: (v) => DATE_FORMATS.includes(v as DateFormat) && settings.setDateFormat(v as DateFormat) },
     { key: 'density', read: () => settings.density(), apply: (v) => DENSITIES.includes(v as GridDensity) && settings.setDensity(v as GridDensity) },
