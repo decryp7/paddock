@@ -1,4 +1,4 @@
-import { axeEveryDialog, axeTargets, expect, test, type AxeTarget } from '@decryp7/paddock-e2e';
+import { axeEveryDialog, axeTargets, expect, pressMod, test, type AxeTarget } from '@decryp7/paddock-e2e';
 import { FIXTURES } from './dialog-fixtures';
 
 // Accessibility (C33): axe over every Dyno screen, dialog window and the tray popover, in both themes, against WCAG 2.2 AA.
@@ -38,7 +38,7 @@ const paletteTarget = (name: string, keys: string, typed: string, expected: RegE
   url: '/?latency=0#/',
   ready: async (page) => {
     await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible({ timeout: 45_000 });
-    await page.keyboard.press(keys);
+    await pressMod(page, keys);
     const input = page.getByRole('combobox', { name: /Type a command/ });
     await expect(input).toBeFocused();
     if (typed) await input.fill(typed);
@@ -47,9 +47,9 @@ const paletteTarget = (name: string, keys: string, typed: string, expected: RegE
   },
 });
 const palettes = [
-  paletteTarget('command palette: commands', 'ControlOrMeta+Shift+P', '', /./),
-  paletteTarget('command palette: go to, with a query', 'ControlOrMeta+p', 'proc', /Processes/),
-  paletteTarget('command palette: go to, nothing matches', 'ControlOrMeta+p', 'zzzzzz', null),
+  paletteTarget('command palette: commands', 'Mod+Shift+P', '', /./),
+  paletteTarget('command palette: go to, with a query', 'Mod+p', 'proc', /Processes/),
+  paletteTarget('command palette: go to, nothing matches', 'Mod+p', 'zzzzzz', null),
 ];
 
 test.describe('Dyno accessibility (axe, WCAG 2.2 AA)', () => {

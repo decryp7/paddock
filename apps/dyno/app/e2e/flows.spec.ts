@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 /** Browser flows against the mock backend (a macOS laptop; `?mock=desktop` has no battery or sensors). */
 const url = (path = '/', query = '') => `/?latency=0${query}#${path}`;
@@ -13,7 +14,7 @@ async function choose(page: Page, label: string, option: string | RegExp): Promi
 async function openSettings(page: Page): Promise<void> {
   await page.goto(url('/'));
   await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await dialog.getByText('Dyno', { exact: true }).click();
@@ -67,7 +68,7 @@ test.describe('command palette', () => {
   test('Mod+P goes to a page: type its name and press Enter, and the focus lands on the page', async ({ page }) => {
     await dashboard(page);
     const sidebarPages = await page.getByRole('navigation', { name: 'Pages' }).getByRole('link').count();
-    await page.keyboard.press('ControlOrMeta+p');
+    await pressMod(page, 'Mod+p');
     await expect(input(page)).toBeFocused();
     // Every page of the sidebar is listed, whatever their number.
     await expect(page.getByRole('option')).toHaveCount(sidebarPages);
@@ -81,7 +82,7 @@ test.describe('command palette', () => {
 
   test('going to the page that is already shown also lands the focus on the page', async ({ page }) => {
     await dashboard(page);
-    await page.keyboard.press('ControlOrMeta+p');
+    await pressMod(page, 'Mod+p');
     await input(page).fill('dashboard');
     await page.keyboard.press('Enter');
     await expect(input(page)).toBeHidden();
@@ -91,11 +92,11 @@ test.describe('command palette', () => {
   test('keys typed right after the shortcut are kept, and an early Enter runs nothing', async ({ page }) => {
     await dashboard(page);
     // The first command of a window waits for the app's context chunk; once it is loaded the palette opens at once.
-    await page.keyboard.press('ControlOrMeta+Shift+P');
+    await pressMod(page, 'Mod+Shift+P');
     await expect(input(page)).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(input(page)).toBeHidden();
-    await page.keyboard.press('ControlOrMeta+Shift+P');
+    await pressMod(page, 'Mod+Shift+P');
     // No waiting for the input: this is how fast people type.
     await page.keyboard.type('check backup');
     await page.keyboard.press('Enter');
@@ -105,7 +106,7 @@ test.describe('command palette', () => {
 
   test('Mod+Shift+P runs a command on its page, and Escape closes the palette', async ({ page }) => {
     await dashboard(page);
-    await page.keyboard.press('ControlOrMeta+Shift+P');
+    await pressMod(page, 'Mod+Shift+P');
     await expect(input(page)).toBeFocused();
     await input(page).fill('> system logs');
     await expect(page.getByRole('option')).toHaveCount(1);
@@ -115,7 +116,7 @@ test.describe('command palette', () => {
     await expect(page.getByText(/Read the system logs/)).toBeVisible();
     await expect(input(page)).toBeHidden();
 
-    await page.keyboard.press('ControlOrMeta+Shift+P');
+    await pressMod(page, 'Mod+Shift+P');
     await expect(input(page)).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(input(page)).toBeHidden();
@@ -123,7 +124,7 @@ test.describe('command palette', () => {
 
   test('a command of another page shows that page: Why slow runs again where its result appears', async ({ page }) => {
     await dashboard(page);
-    await page.keyboard.press('ControlOrMeta+Shift+P');
+    await pressMod(page, 'Mod+Shift+P');
     await input(page).fill('> why slow run again');
     await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { level: 1, name: 'Why is my PC slow?' })).toBeVisible();

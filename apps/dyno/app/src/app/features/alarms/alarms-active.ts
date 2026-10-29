@@ -1,5 +1,6 @@
 import { FullTextTip } from '../../shared/full-text-tip';
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal, viewChild } from '@angular/core';
+import { MatButton } from '@angular/material/button';
 import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import type { Alarm, ShelveFor } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -15,7 +16,7 @@ const SEVERITY_ORDER: Record<Alarm['severity'], number> = { critical: 0, warning
  */
 @Component({
   selector: 'dy-alarms-active',
-  imports: [FullTextTip, AsyncState, AlarmDetail, PdTable, PdCell],
+  imports: [MatButton, FullTextTip, AsyncState, AlarmDetail, PdTable, PdCell],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="store.loaded()" [error]="store.error()" [empty]="store.alarms().length === 0" emptyTitle="No open alarms" emptyText="When a rule fires, its alarm waits here until you acknowledge it." emptyIcon="bell" what="alarms" [rows]="4" (retry)="store.load()">
