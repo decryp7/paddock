@@ -25,6 +25,11 @@ Tests must not leave `debrief-*` or `imt-*` folders in the OS temp directory. CI
   keep the guard alive for the test, so the folder is removed on panic too. Unit tests in `debrief-core` use
   `crate::test_dirs::scratch_dir(prefix)`, which keeps the guard in a thread-local for the test's thread.
   Never build a path from `std::env::temp_dir()` and `remove_dir_all` it at the end of the test: a failing assert skips the cleanup.
+- **A removal that fails**: a fixture's `Drop` must not ignore a failed removal. `debrief-core`'s integration tests use
+  `scratch::remove_or_defer`: it says so on stderr and removes the folder again when the test process exits (CI 7108
+  left `debrief-prop-*` folders whose removal had failed silently).
+- **The temp folder is shared**: on the Mac runner, CI jobs and agents' local runs use the same user temp folder, so a
+  local run killed during a CI job leaves folders the job's check then reports.
 - **Measure locally**: run the tests with `TMPDIR` pointing at an empty folder and list it afterwards:
   `mkdir /tmp/t && TMPDIR=/tmp/t cargo test -p debrief-core; ls /tmp/t`.
 
