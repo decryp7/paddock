@@ -46,7 +46,8 @@ hot spots, docs), **2 syntax** (tree-sitter: symbols, outline, imports, approxim
 language server, run by Pacenotes as an LSP client, or SCIP indexers). Tier 3 comes from **language packs**: mostly declarative TOML (server command,
 detection or a pinned SHA-256-checked download on click, workspace and build-config discovery, LSP features used, optional SCIP command), with out-of-process
 Rust code plugins only for custom indexers, framework-aware edges (routes, DI, ORM mappings) and extra review rules. Built-in packs for v1: C, C++, C#, Java,
-TypeScript/JavaScript, Rust, Python and Go. Servers are separately installed tools and never bundled; they start only after "trust this repository" (they may run
+TypeScript/JavaScript, Rust, Python and Go, plus Kotlin at tier 2 (a grammar in v1; its language-server pack is Later;
+user decision 2026-10-29, tier-2 order Go, Java and Kotlin, C and C++). Servers are separately installed tools and never bundled; they start only after "trust this repository" (they may run
 build logic), are supervised (timeouts, limits, backoff, quarantine, idle stop) and their answers are cached in the index. Details: proposal section 20.
 
 ![Understand a new codebase: tiers and hybrid retrieval](diagrams/svg/understand-tiers-retrieval.svg)
