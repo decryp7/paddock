@@ -6,7 +6,6 @@ use crate::activity::ActivityEntry;
 use crate::alerts::Alert;
 use crate::anomaly::Anomaly;
 use crate::diagnosis::Diagnosis;
-use crate::disk::SizeNode;
 use crate::forecast::DiskTrend;
 use crate::grouping::AppGroup;
 use crate::health::HealthReport;
@@ -88,11 +87,6 @@ pub enum Request {
     Activity {
         /// At most this many.
         limit: u32,
-    },
-    /// The size tree of a folder (the system disk when absent).
-    DiskUsage {
-        /// The folder.
-        path: Option<String>,
     },
     /// The health report.
     Health,
@@ -370,6 +364,74 @@ pub enum Request {
     Backup,
     /// Checks the backups now (read-only tools with timeouts) and answers the report. Appended.
     RefreshBackup,
+
+    // ---- the disk map (ADR 0024 job: pushed `Message::DiskScan` events, no polling) ----
+    /// The volumes mounted now: internal, external and network, with capacity. Appended.
+    DiskVolumes,
+    /// Starts a scan of a volume or a folder and answers its status at once; a second start of the same target answers
+    /// the running scan. Appended.
+    StartDiskScan {
+        /// What to scan.
+        target: crate::disk::scan::DiskTarget,
+    },
+    /// Stops a scan and returns at once; what was counted stays. Appended.
+    CancelDiskScan {
+        /// The scan.
+        scan: u64,
+    },
+    /// The status of every kept scan (what a window that opens late needs). Appended.
+    DiskScans,
+    /// One page of one level of a scan: the children of a folder, biggest first, the small ones folded into "other". Appended.
+    DiskChildren {
+        /// The scan.
+        scan: u64,
+        /// The folder (the scan's root when absent).
+        node: Option<u32>,
+        /// Where the page starts.
+        offset: u32,
+        /// How many children at most (1 to 256).
+        limit: u32,
+        /// Children below this share of the folder (0 to 1) are folded into "other"; 0 shows all.
+        min_fraction: f64,
+    },
+    /// The full path of a node, for Reveal and Copy path. Appended.
+    DiskPath {
+        /// The scan.
+        scan: u64,
+        /// The node.
+        node: u32,
+    },
+    /// Several levels of a scan under a folder in one answer: the nested children down to `rings` deep (1 to 6), those with at
+    /// least `min_share` of the folder (0 to 1) shown and the rest folded into each level's "other", at most `max_nodes` nodes
+    /// (1 to 2000) in all. Appended.
+    DiskRings {
+        /// The scan.
+        scan: u64,
+        /// The centre (the scan's root when absent).
+        node: Option<u32>,
+        /// How many levels.
+        rings: u8,
+        /// The smallest share of the centre a child may have to be shown.
+        min_share: f64,
+        /// The most nodes in the answer.
+        max_nodes: u32,
+    },
+    /// Reads the folders a finished scan could not open once more, and only those; answers the scan's status at once. The
+    /// scan runs again as a job (same id, new events). Appended.
+    RetryDiskScan {
+        /// The scan.
+        scan: u64,
+    },
+    /// Opens the system's privacy pane where Full Disk Access is given (macOS; other systems answer `Unsupported` with the
+    /// reason). Appended.
+    OpenFullDiskAccessSettings,
+    /// Shows a node in Finder, Explorer or the file manager. The path comes from the scan, never from the caller. Appended.
+    DiskReveal {
+        /// The scan.
+        scan: u64,
+        /// The node.
+        node: u32,
+    },
 }
 
 /// Dyno's own cost.
@@ -544,8 +606,6 @@ pub enum Reply {
     Anomalies(Vec<Anomaly>),
     /// History.
     History(Box<History>),
-    /// A size tree.
-    SizeTree(Box<SizeNode>),
     /// The health report.
     Health(Box<HealthReport>),
     /// Startup entries.
@@ -646,6 +706,18 @@ pub enum Reply {
     Maintenance(crate::extras::maintenance::MaintenanceStatus),
     /// Backup health. Appended.
     Backup(Box<crate::backup::BackupReport>),
+    /// The volumes. Appended.
+    DiskVolumes(Vec<crate::disk::volume::Volume>),
+    /// One scan's status. Appended.
+    DiskScan(Box<crate::disk::scan::DiskScanStatus>),
+    /// Every kept scan's status. Appended.
+    DiskScans(Vec<crate::disk::scan::DiskScanStatus>),
+    /// One page of one level. Appended.
+    DiskChildren(Box<crate::disk::index::DiskChildren>),
+    /// A node's full path. Appended.
+    DiskPath(String),
+    /// Several levels of a scan.
+    DiskRings(Box<crate::disk::index::DiskRings>),
 }
 
 /// The inventory report that was written.
@@ -674,7 +746,6 @@ impl Reply {
             Reply::Diagnosis(x) => v(x),
             Reply::Anomalies(x) => v(x),
             Reply::History(x) => v(x),
-            Reply::SizeTree(x) => v(x),
             Reply::Health(x) => v(x),
             Reply::Startup(x) => v(x),
             Reply::Report(x) => v(x),
@@ -720,6 +791,12 @@ impl Reply {
             Reply::FileFinder(x) => v(x),
             Reply::Maintenance(x) => v(x),
             Reply::Backup(x) => v(x),
+            Reply::DiskVolumes(x) => v(x),
+            Reply::DiskScan(x) => v(x),
+            Reply::DiskScans(x) => v(x),
+            Reply::DiskChildren(x) => v(x),
+            Reply::DiskPath(x) => v(x),
+            Reply::DiskRings(x) => v(x),
         }
     }
 }
@@ -797,6 +874,10 @@ pub enum Message {
     Activity(ActivityEntry),
     /// Agent → app: an alarm changed (raised, acknowledged, cleared...). Appended.
     Alarm(crate::alarms::AlarmChange),
+    /// Agent → app: a disk scan's status changed (at most four per second per scan, a final one at the end). Appended.
+    DiskScan(Box<crate::disk::scan::DiskScanStatus>),
+    /// Agent → app: the volumes mounted now changed (one came, one went, one stopped answering). Appended.
+    DiskVolumes(Vec<crate::disk::volume::Volume>),
 }
 
 #[cfg(test)]
@@ -944,6 +1025,80 @@ mod tests {
         for r in all {
             assert!(r.into_json().is_ok());
         }
+    }
+
+    fn disk_status() -> crate::disk::scan::DiskScanStatus {
+        use crate::disk::scan::*;
+        DiskScanStatus {
+            scan: 1,
+            seq: 1,
+            name: "Macintosh HD".into(),
+            target: DiskTarget::Folder { path: "/x".into() },
+            volume: None,
+            state: ScanState::Running,
+            phase: ScanPhase::ReadingFolders,
+            progress: ScanProgress::default(),
+            truncated: false,
+            unreadable_first: vec![],
+            needs_full_disk_access: false,
+            items_per_second: Some(10),
+            eta_seconds: None,
+            hidden_bytes: None,
+            scanned_at: None,
+        }
+    }
+
+    #[test]
+    fn disk_map_requests_replies_and_pushes_survive_postcard_and_json() {
+        let index = crate::disk::index::DiskIndex::new("r", crate::disk::index::ScanLimits::default());
+        let page = index.children(index.root(), 0, 10, 0.0).unwrap();
+        let replies = [
+            Reply::DiskVolumes(vec![]),
+            Reply::DiskScan(Box::new(disk_status())),
+            Reply::DiskScans(vec![disk_status()]),
+            Reply::DiskChildren(Box::new(page)),
+            Reply::DiskPath("/x".into()),
+            Reply::DiskRings(Box::new(index.rings(index.root(), 2, 0.0, 10).unwrap())),
+        ];
+        for r in replies {
+            let m = Message::Reply(Box::new(Ok(r.clone())));
+            assert_eq!(round(&m), m);
+            assert!(r.into_json().is_ok());
+        }
+        let requests = [
+            Request::DiskVolumes,
+            Request::StartDiskScan {
+                target: crate::disk::scan::DiskTarget::Volume { id: "/".into() },
+            },
+            Request::CancelDiskScan { scan: 1 },
+            Request::DiskScans,
+            Request::DiskChildren {
+                scan: 1,
+                node: Some(2),
+                offset: 0,
+                limit: 48,
+                min_fraction: 0.004,
+            },
+            Request::DiskPath { scan: 1, node: 2 },
+            Request::RetryDiskScan { scan: 1 },
+            Request::DiskReveal { scan: 1, node: 2 },
+            Request::OpenFullDiskAccessSettings,
+            Request::DiskRings {
+                scan: 1,
+                node: Some(2),
+                rings: 3,
+                min_share: 0.01,
+                max_nodes: 500,
+            },
+        ];
+        for r in requests {
+            let m = Message::Request(Box::new(r));
+            assert_eq!(round(&m), m);
+        }
+        let push = Message::DiskScan(Box::new(disk_status()));
+        assert_eq!(round(&push), push);
+        let volumes = Message::DiskVolumes(vec![]);
+        assert_eq!(round(&volumes), volumes);
     }
 
     #[test]

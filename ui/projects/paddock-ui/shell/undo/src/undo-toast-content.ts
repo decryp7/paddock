@@ -54,6 +54,27 @@ export class PdUndoToastContent {
       destroyed.onDestroy(() => observer.disconnect());
     });
     destroyed.onDestroy(() => this.area.setLift(0));
+    afterNextRender(() => this.inertWhileHidden(destroyed));
+  }
+
+  /**
+   * Material parks a snack bar's content in an `aria-hidden` wrapper for a moment (`_announceDelay`) before it moves it
+   * into the live region; the Undo button inside must not be focusable meanwhile (axe `aria-hidden-focus`). The host is
+   * `inert` for as long as an ancestor says `aria-hidden`, and live again when Material takes that attribute off.
+   */
+  private inertWhileHidden(destroyed: DestroyRef): void {
+    const host = this.host.nativeElement;
+    const hidden = host.closest<HTMLElement>('[aria-hidden="true"]');
+    if (!hidden) return;
+    host.setAttribute('inert', '');
+    if (typeof MutationObserver === 'undefined') return;
+    const observer = new MutationObserver(() => {
+      if (hidden.getAttribute('aria-hidden') === 'true') return;
+      host.removeAttribute('inert');
+      observer.disconnect();
+    });
+    observer.observe(hidden, { attributes: true, attributeFilter: ['aria-hidden'] });
+    destroyed.onDestroy(() => observer.disconnect());
   }
 
   protected done(label: string): string {

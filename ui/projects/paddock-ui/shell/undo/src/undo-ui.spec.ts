@@ -73,6 +73,23 @@ describe('pd-undo-toast (a Material snack bar)', () => {
     }
   });
 
+  it('is inert (not focusable) while the snack bar holds it in its aria-hidden announce step, and live afterwards', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const t = mount();
+      announce(t.store, 'x');
+      await settle();
+      // Before the announce delay the content sits in an aria-hidden wrapper: nothing in it may be focusable (axe aria-hidden-focus).
+      expect(t.toast()?.closest('[aria-hidden="true"]')).not.toBeNull();
+      expect(t.toast()?.hasAttribute('inert')).toBe(true);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(t.toast()?.closest('[aria-hidden="true"]')).toBeNull();
+      await vi.waitFor(() => expect(t.toast()?.hasAttribute('inert')).toBe(false));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('goes by itself when the store hides it, and a newer toast replaces the older one', async () => {
     const t = mount();
     announce(t.store, 'one');
