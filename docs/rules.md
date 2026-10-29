@@ -176,7 +176,7 @@ changes here, every app's copy is updated in the same change.
     analysis behind a report, a pool an import waits on through a lock, anything a person started) uses
     `QOS_CLASS_UTILITY` on macOS, as nice 10 on Linux and below-normal on Windows: a busy machine slows it, never stops it.
     `QOS_CLASS_BACKGROUND` is only for work nobody waits on (family ADR 0020's `Idle` class), and each use says why with
-    `// conformance: background-qos — <why nobody waits on it>` (check C52). *Why:* `BACKGROUND` keeps a thread on the
+    `// conformance: background-qos — <why nobody waits on it>` (check C54). *Why:* `BACKGROUND` keeps a thread on the
     efficiency cores and behind every other thread; Debrief's mining pool was in it, so on a loaded Mac `debrief report`
     waited minutes for its analyses and timed out in CI (Debrief ADR 0052, amended 2026-10-30; lessons 2026-10-30).
 

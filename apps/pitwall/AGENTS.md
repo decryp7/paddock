@@ -205,7 +205,7 @@ Pitwall runs native engines on untrusted model files and answers requests from o
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
 - Work a person waits for never runs in macOS QoS `BACKGROUND` (rule 52): lowered work uses `QOS_CLASS_UTILITY`;
-  `BACKGROUND` only for work nobody waits on, with `// conformance: background-qos — <why>` (C52).
+  `BACKGROUND` only for work nobody waits on, with `// conformance: background-qos — <why>` (C54).
 - Research official sources before choosing libraries or relying on an engine's or API's behaviour (llama-server
   options, SDK request shapes), and record what you found and when in the ADR or doc comment.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they are available instead of

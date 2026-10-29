@@ -104,4 +104,4 @@ registered as literals (no icon fonts, no runtime URLs). Never run `prettier --w
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
 - Work a person waits for never runs in macOS QoS `BACKGROUND` (rule 52): lowered work uses `QOS_CLASS_UTILITY`;
-  `BACKGROUND` only for work nobody waits on, with `// conformance: background-qos — <why>` (C52).
+  `BACKGROUND` only for work nobody waits on, with `// conformance: background-qos — <why>` (C54).

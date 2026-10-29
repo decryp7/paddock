@@ -1,4 +1,4 @@
-// C52: work a person waits for never runs in macOS QoS BACKGROUND (rule 52). The class keeps a thread on the efficiency
+// C54: work a person waits for never runs in macOS QoS BACKGROUND (rule 52). The class keeps a thread on the efficiency
 // cores and behind every other thread, so a caller that waits for it (a report on its analysis pool, an import on a lock
 // the indexer holds) waits as long as the machine is busy: `debrief report` timed out on the shared CI Mac (Debrief ADR
 // 0052, family ADR 0020's classes). Lowered work uses `QOS_CLASS_UTILITY`. Flagged: every `QOS_CLASS_BACKGROUND` in Rust
@@ -24,7 +24,7 @@ export function backgroundQos(text) {
 }
 
 export default {
-  id: 'C52',
+  id: 'C54',
   title: 'Work a person waits for never runs in macOS QoS BACKGROUND',
   rule: 52,
   run(ctx) {
@@ -37,8 +37,8 @@ export default {
       if (!text || !text.includes('QOS_CLASS_BACKGROUND')) continue;
       for (const u of backgroundQos(text)) {
         if (u.waived === 'reason') continue;
-        if (u.waived === 'no-reason') out.push(error('C52', 52, f, u.line, 'the background-qos waiver gives no reason', 'Write `// conformance: background-qos — <why nobody waits on it>`.'));
-        else out.push(error('C52', 52, f, u.line, 'a thread in QoS BACKGROUND: a caller waiting for it waits as long as the machine is busy', fix));
+        if (u.waived === 'no-reason') out.push(error('C54', 52, f, u.line, 'the background-qos waiver gives no reason', 'Write `// conformance: background-qos — <why nobody waits on it>`.'));
+        else out.push(error('C54', 52, f, u.line, 'a thread in QoS BACKGROUND: a caller waiting for it waits as long as the machine is busy', fix));
       }
     }
     return out;
