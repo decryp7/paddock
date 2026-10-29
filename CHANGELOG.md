@@ -17,6 +17,20 @@ Conventional Commits; one semver tag for the whole repo.
 ### `@decryp7/paddock-ui/schedule` exports its time-field building blocks
 - New exports: `PdKeepTimeOnEscape` (the `pdKeepTime` directive: Escape in a closed time field keeps the time), `TIME_PROVIDERS`, `timeToDate`, `dateToTime`, `timeOptions` and `TimeProblems`, so an app can put a `mat-timepicker` in its own form with the editors' behaviour (24-hour times, the half-hour list, a problem shown once the field was left). Dyno's `dy-time-field` is the first user.
 
+### `pd-table`: rows an app orders itself, and trees of rows
+- `PdColumn.sortStart` (`asc` default, `desc` for columns of amounts) sets the direction of a header's first click. The body tracks
+  rows by key and columns, so a column change never leaves recycled row views with the old cells. `tree` implies the app's order
+  and no built-in filter, and throws in dev mode together with `groupBy`. The indent is `--pd-tree-indent` (the exported
+  `PD_TREE_INDENT` is gone). Group summaries are ellipsised and end-aligned cells clip at their end (`safe flex-end`); the
+  count says "1 row".
+- `order="source"` shows the rows in the order the app gives them (the table only shows the sort and reports it through `sort`),
+  for a list the engine or a tree orders (processes under their parent, sorted within each level).
+- `tree` (`PdRowTree`: `level`, `expanded`, optional `spans`) makes the rows a tree grid: `aria-level`, `aria-expanded`,
+  places among siblings, an indent per level on the first cell, and a spanning heading row. Right unfolds a folded row and on an
+  unfolded one moves to its first child, Left folds an unfolded row or goes up to the parent (`rowToggle` asks the app to fold; it
+  owns the fold state, so it can keep it). Space opens a row like Enter. `treePlaces`, `parentIndex` and `PD_TREE_INDENT` are
+  exported. `sortClearable="false"` keeps a header cycling between ascending and descending only. The row that has the focus keeps it
+  when the columns change (a side panel opened and the table narrowed), once the rows are drawn again.
 ### The dialog frame's filled button uses the page primary's colours
 - `.pd-frame-btn--filled` takes `--pd-accent-fill` with `--pd-on-accent`, the same as `.pd-btn--primary` and Material's filled button, so a dialog's primary and a page's primary are one colour in both schemes (`--pd-accent-control` is for toggles and checkmarks).
 

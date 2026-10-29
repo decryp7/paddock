@@ -18,6 +18,7 @@ export {
   menuActions,
   nextIndex,
   nextSort,
+  parentIndex,
   PD_HEADER_HEIGHT,
   PD_PRIMARY_MIN_PX,
   PD_ROW_HEIGHTS,
@@ -25,8 +26,10 @@ export {
   PD_FOLD_EXTRA,
   shownColumns,
   sortRows,
+  treePlaces,
   type PdColumn,
   type PdRowAction,
+  type PdRowTree,
   type PdSort,
   type PdTableItem,
 } from './src/model';

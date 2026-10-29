@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, sig
 import { TestBed } from '@angular/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PD_TABLE_VIRTUAL_FROM, PdCell, PdTable, PdTableEmpty, type PdRowActionEvent } from './table';
-import { PD_FOLD_EXTRA, type PdColumn, type PdRowAction, type PdSort } from './model';
+import { PD_FOLD_EXTRA, type PdColumn, type PdRowAction, type PdRowTree, type PdSort } from './model';
 import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 import { MatTooltip } from '@angular/material/tooltip';
 import { CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
@@ -50,6 +50,11 @@ const ACTIONS: PdRowAction[] = [
       [maxHeight]="maxHeight()"
       [state]="state()"
       [rowHeight]="rowHeight()"
+      [toolbar]="toolbar()"
+      [order]="order()"
+      [sortClearable]="clearable()"
+      [tree]="tree()"
+      (rowToggle)="toggled.push($event.id)"
       (retry)="retried = retried + 1"
       [(sort)]="sort"
       [(query)]="query"
@@ -80,6 +85,11 @@ class Host {
   readonly maxHeight = signal(480);
   readonly state = signal<'ready' | 'loading' | 'error'>('ready');
   readonly rowHeight = signal<number | null>(null);
+  readonly order = signal<'sorted' | 'source'>('sorted');
+  readonly clearable = signal(true);
+  readonly toolbar = signal(true);
+  readonly tree = signal<PdRowTree<Plugin> | null>(null);
+  readonly toggled: string[] = [];
   retried = 0;
   readonly sort = signal<PdSort | null>(null);
   readonly query = signal('');
@@ -810,6 +820,205 @@ describe('pd-table', () => {
     press(rowEls(f)[1]!, 'ArrowLeft');
     expect(document.activeElement).toBe(rowEls(f)[1]);
     expect(rowEls(f)[1]!.hasAttribute('aria-posinset')).toBe(false);
+  });
+
+  it('shows rows the app orders itself in the order it gives, with the sort marked', async () => {
+    const f = await setup();
+    f.componentInstance.order.set('source');
+    f.componentInstance.sort.set({ key: 'name', direction: 'asc' });
+    await settle(f);
+    expect(names(f)).toEqual(['Zeta', 'alpha', 'Mid']);
+    expect(el(f).querySelector('[role=columnheader][aria-sort=ascending]')?.textContent).toContain('Name');
+    f.componentInstance.order.set('sorted');
+    await settle(f);
+    expect(names(f)).toEqual(['alpha', 'Mid', 'Zeta']);
+  });
+
+  it('leaves out the toolbar of a small static table', async () => {
+    const f = await setup();
+    expect(el(f).querySelector('.pd-toolbar')).not.toBeNull();
+    f.componentInstance.toolbar.set(false);
+    await settle(f);
+    expect(el(f).querySelector('.pd-toolbar')).toBeNull();
+    expect(names(f)).toEqual(['Zeta', 'alpha', 'Mid']);
+  });
+
+  it('draws every row with the cells of the columns now shown after the columns change (no recycled row views)', async () => {
+    const f = await setup();
+    const many = Array.from({ length: PD_TABLE_VIRTUAL_FROM * 3 }, (_, i): Plugin => ({ id: `r${i}`, name: `Row ${i}`, size: i, kind: 'k', path: `/p/${i}` }));
+    f.componentInstance.rows.set(many);
+    await settle(f);
+    const cellsPerRow = () => rowEls(f).map((r) => r.querySelectorAll('[role=gridcell]').length);
+    const headers = () => el(f).querySelectorAll('.pd-head-table [role=columnheader]').length;
+    expect(new Set(cellsPerRow())).toEqual(new Set([headers()]));
+    f.componentInstance.hidden.set(['kind', 'path']);
+    await settle(f);
+    await settle(f);
+    expect(new Set(cellsPerRow())).toEqual(new Set([headers()]));
+    f.componentInstance.hidden.set(['kind']);
+    await settle(f);
+    await settle(f);
+    expect(new Set(cellsPerRow())).toEqual(new Set([headers()]));
+  });
+
+  it('starts a column\'s sort in the direction it names', async () => {
+    const f = await setup();
+    f.componentInstance.columnsOverride = COLUMNS.map((c) => (c.key === 'size' ? { ...c, sortStart: 'desc' as const } : c));
+    f.componentInstance.rows.set([...DATA]);
+    await settle(f);
+    const size = [...el(f).querySelectorAll<HTMLElement>('[role=columnheader]')].find((h) => h.textContent?.includes('Size'))!;
+    size.querySelector<HTMLElement>('.mat-sort-header-container')!.click();
+    await settle(f);
+    expect(f.componentInstance.sort()).toEqual({ key: 'size', direction: 'desc' });
+  });
+
+  it('says one row, not "1 rows", and refuses a tree together with groups', async () => {
+    const f = await setup();
+    f.componentInstance.rows.set([DATA[0]!]);
+    await settle(f);
+    expect(el(f).querySelector('[data-testid=table-count]')?.textContent).toBe('1 row');
+    f.componentInstance.rows.set([...DATA]);
+    f.componentInstance.order.set('source');
+    f.componentInstance.query.set('zzz');
+    f.componentInstance.tree.set({ level: () => 1, expanded: () => null });
+    await settle(f);
+    // A tree is the app's list: the table's own filter does not apply.
+    expect(names(f)).toEqual(['Zeta', 'alpha', 'Mid']);
+    const table = f.debugElement.query((d) => d.name === 'pd-table').componentInstance as { items(): unknown; groupBy: { set?: unknown } };
+    expect(table.items()).toHaveLength(3);
+  });
+
+  it('asks for the focused row again when the virtual table removed its element', async () => {
+    const f = await setup();
+    const table = f.debugElement.query((d) => d.name === 'pd-table').componentInstance as unknown as { pendingFocus: string | null; restoreLostFocus(): void };
+    const row = rowEls(f)[1]!;
+    row.focus();
+    // Still there: nothing to restore.
+    table.restoreLostFocus();
+    expect(table.pendingFocus).toBeNull();
+    row.remove();
+    document.body.focus();
+    table.restoreLostFocus();
+    expect(table.pendingFocus).toBe(`r:${row.dataset['key']}`);
+    // Once, and not while another row is waited for.
+    table.pendingFocus = null;
+    table.restoreLostFocus();
+    expect(table.pendingFocus).toBeNull();
+    // A focus that left for another element is forgotten.
+    const filter = el(f).querySelector<HTMLInputElement>('input[type=search]')!;
+    rowEls(f)[0]!.focus();
+    rowEls(f)[0]!.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: filter }));
+    rowEls(f)[0]!.remove();
+    document.body.focus();
+    table.restoreLostFocus();
+    expect(table.pendingFocus).toBeNull();
+  });
+
+  it('cycles a header between ascending and descending only when the sort cannot be cleared', async () => {
+    const f = await setup();
+    f.componentInstance.clearable.set(false);
+    await settle(f);
+    const header = () => el(f).querySelector<HTMLElement>('[role=columnheader]')!;
+    const click = () => header().querySelector<HTMLElement>('.mat-sort-header-container')!.click();
+    click();
+    await settle(f);
+    click();
+    await settle(f);
+    click();
+    await settle(f);
+    expect(f.componentInstance.sort()).toEqual({ key: 'name', direction: 'asc' });
+    click();
+    await settle(f);
+    expect(f.componentInstance.sort()).toEqual({ key: 'name', direction: 'desc' });
+  });
+
+  describe('a tree of rows the app orders', () => {
+    // Zeta (open, level 1) > alpha (leaf, level 2) > Mid (folded heading, level 1, spans).
+    const LEVEL: Record<string, number> = { p1: 1, p2: 2, p3: 1 };
+    const OPEN: Record<string, boolean | null> = { p1: true, p2: null, p3: false };
+    const tree: PdRowTree<Plugin> = { level: (r) => LEVEL[r.id] as number, expanded: (r) => OPEN[r.id] as boolean | null, spans: (r) => r.id === 'p3' };
+    async function treeSetup() {
+      const f = await setup();
+      f.componentInstance.order.set('source');
+      f.componentInstance.tree.set(tree);
+      await settle(f);
+      return f;
+    }
+
+    it('is a tree grid: levels, fold state, places among siblings, an indent per level and a spanning heading', async () => {
+      const f = await treeSetup();
+      expect(el(f).querySelector('.pd-grid')?.getAttribute('role')).toBe('treegrid');
+      expect(rowEls(f).map((r) => r.getAttribute('aria-level'))).toEqual(['1', '2', '1']);
+      expect(rowEls(f).map((r) => r.getAttribute('aria-expanded'))).toEqual(['true', null, 'false']);
+      expect(rowEls(f).map((r) => `${r.getAttribute('aria-posinset')}/${r.getAttribute('aria-setsize')}`)).toEqual(['1/2', '1/1', '2/2']);
+      const first = (i: number) => rowEls(f)[i]!.querySelector<HTMLElement>('.pd-first')!;
+      expect(first(0).style.getPropertyValue('--pd-tree-level')).toBe('');
+      expect(first(1).style.getPropertyValue('--pd-tree-level')).toBe('1');
+      expect(rowEls(f).map((r) => r.classList.contains('pd-span'))).toEqual([false, false, true]);
+    });
+
+    it('unfolds with Right, then enters the row; folds with Left, then goes up to the parent; a leaf\'s Right goes to its buttons', async () => {
+      const f = await treeSetup();
+      const focused = () => (document.activeElement as HTMLElement).dataset['index'];
+      rowEls(f)[2]!.focus();
+      // Right on a folded row asks the app to unfold it and keeps the focus on the row.
+      press(rowEls(f)[2]!, 'ArrowRight');
+      await settle(f);
+      expect(f.componentInstance.toggled).toEqual(['p3']);
+      expect(focused()).toBe('2');
+      // Right on an unfolded row moves to its first child (the next row, one level deeper).
+      press(rowEls(f)[0]!, 'ArrowRight');
+      expect(f.componentInstance.toggled).toEqual(['p3']);
+      await settle(f);
+      expect(focused()).toBe('1');
+      // Left on a leaf moves up to its parent; Left on an unfolded row folds it.
+      press(rowEls(f)[1]!, 'ArrowLeft');
+      await settle(f);
+      expect(focused()).toBe('0');
+      press(rowEls(f)[0]!, 'ArrowLeft');
+      await settle(f);
+      expect(f.componentInstance.toggled).toEqual(['p3', 'p1']);
+      // A top row that is not unfolded has no parent: Left does nothing.
+      press(rowEls(f)[2]!, 'ArrowLeft');
+      expect(focused()).toBe('0');
+      // Right on a leaf is not a tree key: it reaches the row's buttons, which this row has (p2 has actions).
+      rowEls(f)[1]!.focus();
+      press(rowEls(f)[1]!, 'ArrowRight');
+      expect((document.activeElement as HTMLElement).classList.contains('pd-icon-btn')).toBe(true);
+      // Right on an unfolded row whose next row is not deeper stays where it is.
+      f.componentInstance.rows.set([DATA[0]!, DATA[2]!]);
+      await settle(f);
+      OPEN['p3'] = true;
+      await settle(f);
+      press(rowEls(f)[1]!, 'ArrowRight');
+      expect(f.componentInstance.toggled).toEqual(['p3', 'p1']);
+      OPEN['p3'] = false;
+    });
+
+    it('opens a row with Space as with Enter', async () => {
+      const f = await treeSetup();
+      rowEls(f)[1]!.focus();
+      press(rowEls(f)[1]!, ' ');
+      expect(f.componentInstance.opened).toEqual(['p2']);
+      expect(f.componentInstance.selected()).toBe('p2');
+    });
+  });
+
+  it('keeps the focus on its row when the columns change and the rows are drawn again', async () => {
+    const f = await setup();
+    const row = rowEls(f)[1]!;
+    row.focus();
+    f.componentInstance.hidden.set(['kind', 'path']);
+    await settle(f);
+    await settle(f);
+    expect((document.activeElement as HTMLElement).dataset['key']).toBe(row.dataset['key']);
+    // A focus outside the rows (the filter) is left alone.
+    const filter = el(f).querySelector<HTMLInputElement>('input[type=search]')!;
+    filter.focus();
+    f.componentInstance.hidden.set(['kind']);
+    await settle(f);
+    await settle(f);
+    expect(document.activeElement).toBe(filter);
   });
 
   it('skips disabled buttons when Right moves into and along a row\'s buttons, and Up or Down on a button go to the row above or below', async () => {
