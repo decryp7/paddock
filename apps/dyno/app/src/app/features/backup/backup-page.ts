@@ -12,7 +12,7 @@ import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { MatMenuModule } from '@angular/material/menu';
-import { openContextMenu } from '../../shared/context-menu';
+import { RowMenu } from '../../shared/row-menu';
 
 /**
  * Backup health: whether the backups of the tools Dyno can read (Time Machine, Windows Backup, File History, restic, Borg,
@@ -21,7 +21,7 @@ import { openContextMenu } from '../../shared/context-menu';
  */
 @Component({
   selector: 'dy-backup-page',
-  imports: [MatMenuModule, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon],
+  imports: [RowMenu, MatMenuModule, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -63,7 +63,7 @@ import { openContextMenu } from '../../shared/context-menu';
                   </thead>
                   <tbody>
                     @for (s of store.statuses(); track s.tool) {
-                      <tr class="row" tabindex="0" [attr.data-tool]="s.tool" [class.sel]="selectedTool() === s.tool" (click)="select(s)" (keydown.enter)="select(s)" (keydown.shift.f10)="select(s)" (contextmenu)="select(s); openContextMenu($event, menuAnchor, menuTrigger, { status: s })">
+                      <tr class="row" tabindex="0" [attr.data-tool]="s.tool" [class.sel]="selectedTool() === s.tool" (click)="select(s)" (keydown.enter)="select(s)" (keydown.shift.f10)="select(s)" (contextmenu)="select(s)" dyRowMenu [matContextMenuTriggerFor]="menu" [matContextMenuTriggerData]="{ status: s }">
                         <td class="tool"><span class="tile" aria-hidden="true" [style.background]="tile(s.name)">{{ initial(s.name) }}</span><strong>{{ s.name }}</strong></td>
                         <td class="state">
                           <span class="dot" [attr.data-tone]="dot(s)" aria-hidden="true"></span>
@@ -105,7 +105,6 @@ import { openContextMenu } from '../../shared/context-menu';
       </dy-async>
     </div>
 
-    <span #menuAnchor class="dy-ctx-anchor" aria-hidden="true" #menuTrigger="matMenuTrigger" [matMenuTriggerFor]="menu"></span>
     <mat-menu #menu="matMenu" aria-label="Backup actions">
       <ng-template matMenuContent let-status="status">
         <button mat-menu-item (click)="select(status)"><dy-icon name="info" /> Details</button>
@@ -167,7 +166,6 @@ import { openContextMenu } from '../../shared/context-menu';
   `,
 })
 export class BackupPage implements OnInit {
-  protected readonly openContextMenu = openContextMenu;
   protected readonly store = inject(BackupStore);
   private readonly notifier = inject(Notifier);
   private readonly ports = inject(SHELL_PORTS);

@@ -34,7 +34,7 @@ import { MatTooltip } from '@angular/material/tooltip';
 import { SearchField } from '../../shared/search-field';
 import { MatCheckbox } from '@angular/material/checkbox';
 import { MatMenuModule } from '@angular/material/menu';
-import { openContextMenu } from '../../shared/context-menu';
+import { RowMenu } from '../../shared/row-menu';
 
 type Tab = 'connections' | 'listening';
 type Row = TableRow<ConnectionRow> | TableRow<ListenerRow>;
@@ -59,7 +59,7 @@ function readCollapsed(): Set<string> {
  */
 @Component({
   selector: 'dy-network-page',
-  imports: [MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton, AsyncState, Icon, RouterLink, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf],
+  imports: [RowMenu, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton, AsyncState, Icon, RouterLink, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -124,7 +124,7 @@ function readCollapsed(): Set<string> {
                 <span role="columnheader" class="visually-hidden">Actions</span>
               </div>
               <cdk-virtual-scroll-viewport [itemSize]="rowHeight" class="viewport" [style.height.px]="viewportHeight()">
-                <div *cdkVirtualFor="let r of rows(); trackBy: rowKey; let i = index" class="row" role="row" [class.group-row]="r.kind === 'group'" [class.selected]="selectedKey() === r.key" [attr.aria-rowindex]="i + 1" [attr.aria-expanded]="r.kind === 'group' ? r.open : null" tabindex="-1" (contextmenu)="pick(r); r.kind === 'item' ? openContextMenu($event, rowMenuAnchor, rowMenuTrigger, { row: r }) : null" (keydown.shift.f10)="pick(r)" (click)="pick(r)" (keyup.space)="pick(r)" (dblclick)="activate(r)">
+                <div *cdkVirtualFor="let r of rows(); trackBy: rowKey; let i = index" class="row" role="row" [class.group-row]="r.kind === 'group'" [class.selected]="selectedKey() === r.key" [attr.aria-rowindex]="i + 1" [attr.aria-expanded]="r.kind === 'group' ? r.open : null" tabindex="-1" (contextmenu)="pick(r)" (keydown.shift.f10)="pick(r)" (click)="pick(r)" (keyup.space)="pick(r)" (dblclick)="activate(r)" dyRowMenu [matContextMenuTriggerFor]="rowMenu" [matContextMenuTriggerData]="{ row: r }" [matContextMenuTriggerDisabled]="!(r.kind === 'item')">
                   @if (r.kind === 'group') {
                     <span class="gname" role="gridcell">
                       <button type="button" matIconButton class="chev" [attr.aria-label]="(r.open ? 'Collapse ' : 'Expand ') + r.title" (click)="toggle(r.key, $event)"><dy-icon [name]="r.open ? 'chevron-down' : 'chevron-right'" /></button>
@@ -163,11 +163,11 @@ function readCollapsed(): Set<string> {
                       @if (tab() === 'connections') {
                         @let c2 = conn(r);
                         <button type="button" matIconButton [disabled]="!!blocked(c2)" matTooltipPosition="left" [matTooltip]="'Look up IP ' + c2.remote" [attr.aria-label]="'Look up IP ' + c2.remote" (click)="lookup(c2, $event)"><dy-icon name="external" /></button>
-                        <button type="button" matIconButton matTooltipPosition="left" [matTooltip]="'Copy connection to ' + c2.remote" [attr.aria-label]="'Copy connection to ' + c2.remote" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
+                        <button type="button" matIconButton [attr.aria-label]="'Copy connection to ' + c2.remote" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
                       } @else {
                         <button type="button" matIconButton matTooltipPosition="left" [matTooltip]="'Copy listener'" aria-label="Copy listener" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
                       }
-                      <a matIconButton routerLink="/processes" matTooltipPosition="left" [matTooltip]="'Show process'" aria-label="Show process" (click)="$event.stopPropagation()"><dy-icon name="processes" /></a>
+                      <a matIconButton routerLink="/processes" aria-label="Show process" (click)="$event.stopPropagation()"><dy-icon name="processes" /></a>
                     }
                   </span>
                   }
@@ -212,7 +212,6 @@ function readCollapsed(): Set<string> {
         }
       </dy-async>
     </div>
-    <span #rowMenuAnchor class="dy-ctx-anchor" aria-hidden="true" #rowMenuTrigger="matMenuTrigger" [matMenuTriggerFor]="rowMenu"></span>
     <mat-menu #rowMenu="matMenu" aria-label="Row actions">
       <ng-template matMenuContent let-row="row">
         @if (row.kind === 'item') {
@@ -288,7 +287,6 @@ function readCollapsed(): Set<string> {
   `,
 })
 export class NetworkPage implements OnInit, OnDestroy {
-  protected readonly openContextMenu = openContextMenu;
   protected readonly store = inject(NetworkStore);
   private readonly notifier = inject(Notifier);
   protected readonly tab = signal<Tab>('connections');

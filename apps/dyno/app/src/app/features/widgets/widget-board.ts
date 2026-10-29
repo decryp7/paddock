@@ -74,7 +74,7 @@ import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
         <div class="cell" cdkDrag [cdkDragDisabled]="!store.editing()" [style.grid-column]="'span ' + span(w)" [attr.data-id]="w.id">
           <dy-widget [widget]="w" />
           @if (store.editing()) {
-            <div class="edit" role="toolbar" [attr.aria-label]="'Edit ' + w.id">
+            <div class="edit" [class.small]="w.size === 's'" role="toolbar" [attr.aria-label]="'Edit ' + w.id">
               <button type="button" matIconButton class="grab" cdkDragHandle aria-label="Drag to move"><dy-icon name="more" /></button>
               <button type="button" matIconButton aria-label="Move earlier" [disabled]="i === 0" (click)="store.move(i, i - 1)"><dy-icon name="chevron-left" /></button>
               <button type="button" matIconButton aria-label="Move later" [disabled]="i === store.widgets().length - 1" (click)="store.move(i, i + 1)"><dy-icon name="chevron-right" /></button>
@@ -108,7 +108,9 @@ import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
     .cell dy-widget { height: 100%; }
     .editing .cell dy-widget { outline: 1px dashed var(--border-strong); outline-offset: 2px; }
     .edit { display: flex; flex-wrap: nowrap; min-width: 0; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--overlay-bg); box-shadow: var(--shadow-2); }
-    .edit pd-segmented-control { margin: 0 2px; } .edit pd-select { flex: 1 1 4rem; min-width: 3.5rem; width: auto; } .edit .spacer { flex: 0 0 0; }
+    .edit pd-segmented-control { margin: 0 2px; } .edit pd-select { flex: 1 1 9rem; min-width: 9rem; width: auto; } .edit .spacer { flex: 0 0 0; }
+    /* A small widget is narrower than the whole toolbar: its metric gets a second row of its own, full width. */
+    .edit.small { flex-wrap: wrap; } .edit.small pd-select { order: 9; flex: 1 1 100%; }
     .grab { cursor: grab; }
     .cdk-drag-preview { box-shadow: var(--shadow-3); border-radius: var(--r-lg); }
     .cdk-drag-placeholder { opacity: 0.35; }

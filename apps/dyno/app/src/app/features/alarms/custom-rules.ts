@@ -15,7 +15,7 @@ import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDivider } from '@angular/material/divider';
-import { openContextMenu } from '../../shared/context-menu';
+import { RowMenu } from '../../shared/row-menu';
 
 /** The id of the rule form's window (its contract is in `src-tauri/src/dialogs.rs`). */
 const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
@@ -23,7 +23,7 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
 /** The user's own alert rules from the settings: add, edit, enable and delete. The engine validates every save. */
 @Component({
   selector: 'dy-custom-rules',
-  imports: [MatMenuModule, MatDivider, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon, MatSlideToggle],
+  imports: [RowMenu, MatMenuModule, MatDivider, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon, MatSlideToggle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="custom-h">
@@ -41,7 +41,7 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
             <span role="columnheader"><span class="visually-hidden">Actions</span></span>
           </div>
           @for (r of rules(); track r.id) {
-            <div class="row" role="row" [class.off]="!r.enabled" (contextmenu)="openContextMenu($event, menuAnchor, menuTrigger, { rule: r })">
+            <div class="row" role="row" [class.off]="!r.enabled"  dyRowMenu [matContextMenuTriggerFor]="menu" [matContextMenuTriggerData]="{ rule: r }">
               <span class="cell" role="cell"><span class="truncate" [dyFullText]="r.name">{{ r.name }}</span></span>
               <span class="cell muted" role="cell"><span class="truncate" [dyFullText]="summary(r)">{{ summary(r) }}</span></span>
               <span class="cell" role="cell"><span class="dot" [attr.data-tone]="r.severity === 'critical' ? 'bad' : r.severity === 'warning' ? 'warn' : 'info'" aria-hidden="true"></span><span [class.muted]="r.severity !== 'critical'">{{ word(r) }}</span></span>
@@ -56,7 +56,6 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
       </dy-async>
     </section>
 
-    <span #menuAnchor class="dy-ctx-anchor" aria-hidden="true" #menuTrigger="matMenuTrigger" [matMenuTriggerFor]="menu"></span>
     <mat-menu #menu="matMenu" aria-label="Actions">
       <ng-template matMenuContent let-rule="rule">
         <button mat-menu-item (click)="edit(rule)"><dy-icon name="edit" /> Edit…</button>
@@ -79,7 +78,6 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
   ],
 })
 export class CustomRules {
-  protected readonly openContextMenu = openContextMenu;
   protected readonly settings = inject(SettingsStore);
   protected readonly alarms = inject(AlarmsStore);
   private readonly dialogs = inject(DialogService);

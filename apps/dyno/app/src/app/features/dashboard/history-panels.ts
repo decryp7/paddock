@@ -10,9 +10,10 @@ import { formatBytes, formatPercent } from '../../shared/format';
 import { LiveStore } from '../../state/live.store';
 import { HistoryStore } from '../../state/history.store';
 import { EVENT_STYLE, consumersOption, diskTrendOption, eventCounts, historyOption } from './history-options';
-import { MatIconButton } from '@angular/material/button';
+import { MatButton, MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
+import { MatCheckbox } from '@angular/material/checkbox';
 
 export const RANGES: { id: HistoryRange; label: string; long: string }[] = [
   { id: 'hour', label: '1h', long: 'Last hour' },
@@ -27,7 +28,7 @@ const GLYPH: Record<string, string> = { triangle: '▲', rect: '■', circle: '�
 /** CPU and memory history with the events of the range marked on it, a range switch and a legend that filters the events. */
 @Component({
   selector: 'dy-history-panel',
-  imports: [MatTooltip, SuSegmentedControl, MatIconButton, Chart, AsyncState, Icon],
+  imports: [MatButton, MatCheckbox, MatTooltip, SuSegmentedControl, MatIconButton, Chart, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" aria-label="History">
@@ -40,15 +41,15 @@ const GLYPH: Record<string, string> = { triangle: '▲', rect: '■', circle: '�
       <dy-async [loaded]="!!store.history()" [error]="store.error()" [empty]="empty()" emptyTitle="No history yet" emptyText="Dyno keeps what it measures; the chart fills in as time passes." what="history" [rows]="0" (retry)="store.load()">
         <div skeleton class="skeleton chart-skeleton"></div>
         @if (zoomed()) {
-          <button type="button" class="chip-toggle reset" (click)="resetZoom()"><dy-icon name="undo" /> Reset zoom</button>
+          <button type="button" matButton="text" (click)="resetZoom()"><dy-icon name="undo" /> Reset zoom</button>
         }
         <dy-chart [options]="option()" [label]="chartLabel()" (zoomed)="zoomed.set(true)" style="--chart-h: 430px" />
         <div class="legend" role="group" aria-label="Events on the timeline">
           @for (e of events(); track e.kind) {
-            <button type="button" class="chip-toggle" [attr.aria-pressed]="!hidden().has(e.kind)" (click)="toggle(e.kind)" [matTooltip]="'Show or hide: ' + label(e.kind)">
+            <mat-checkbox [checked]="!hidden().has(e.kind)" (change)="toggle(e.kind)">
               <span class="glyph" [style.color]="color(e.kind)" aria-hidden="true">{{ glyph(e.kind) }}</span>
               {{ label(e.kind) }} <span class="n num">{{ e.count }}</span>
-            </button>
+            </mat-checkbox>
           } @empty {
             <span class="faint">No alerts, restarts or network changes in this range.</span>
           }
@@ -64,9 +65,6 @@ const GLYPH: Record<string, string> = { triangle: '▲', rect: '■', circle: '�
     .chart-skeleton { height: 430px; margin-top: var(--sp-2); }
     .reset { justify-self: start; margin-bottom: var(--sp-1); }
     .legend { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding-top: var(--sp-1); }
-    .chip-toggle { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--surface-inset); color: var(--text-2); font: var(--fs-xs) var(--font-sans); cursor: default; }
-    .chip-toggle[aria-pressed='false'] { opacity: 0.5; text-decoration: line-through; }
-    .chip-toggle:hover { border-color: var(--border-strong); }
     .glyph { font-size: 10px; line-height: 1; }
     .n { color: var(--text-3); }
     .faint { color: var(--text-3); font-size: var(--fs-xs); }

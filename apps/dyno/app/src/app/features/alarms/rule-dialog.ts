@@ -27,22 +27,25 @@ const MAX_HOLD_SECS = 3600;
       <pd-select class="reading" label="Reading" ariaLabel="Reading" describedBy="rule-reading-hint" [options]="metricChoices" [value]="metric()" (valueChange)="setMetric($event)" />
       <p class="hint" id="rule-reading-hint">{{ info().hint }}</p>
       <div class="two">
-        <fieldset class="group">
-          <legend>Alarm when it is</legend>
+        <div class="seg-field">
+          <span class="seg-label" aria-hidden="true">Alarm when it is</span>
           <pd-segmented-control label="Alarm when it is" [options]="opSegs" [value]="op()" (valueChange)="setOp($event)" />
-        </fieldset>
+        </div>
         <pd-field label="Limit" [suffix]="limitTools">
           <input pdFieldControl aria-label="Limit" type="text" inputmode="decimal" [value]="limit()" (input)="limit.set($any($event.target).value)" />
         </pd-field>
       </div>
       <div class="two">
-        <pd-field label="For at least" hint="0 raises the alarm right away. At most 60 min." [suffix]="holdUnit">
-          <input pdFieldControl aria-label="Duration" type="text" inputmode="numeric" [value]="hold()" (input)="hold.set($any($event.target).value)" />
-        </pd-field>
-        <fieldset class="group">
-          <legend>Severity</legend>
+        <div class="hold">
+          <pd-field label="For at least" hint="0 raises the alarm right away. At most 60 min.">
+            <input pdFieldControl aria-label="Duration" type="text" inputmode="numeric" [value]="hold()" (input)="hold.set($any($event.target).value)" />
+          </pd-field>
+          <pd-segmented-control class="unit-seg" label="Duration unit" [options]="unitSegs" [value]="unit()" (valueChange)="setUnit($event === 'min' ? 'min' : 'sec')" />
+        </div>
+        <div class="seg-field">
+          <span class="seg-label" aria-hidden="true">Severity</span>
           <pd-segmented-control label="Severity" [options]="severitySegs" [value]="severity()" (valueChange)="setSeverity($event)" />
-        </fieldset>
+        </div>
       </div>
       <mat-slide-toggle [checked]="enabled()" (change)="enabled.set($event.checked)">Enabled</mat-slide-toggle>
       @if (problem(); as p) {
@@ -55,7 +58,6 @@ const MAX_HOLD_SECS = 3600;
           <button type="button" matIconButton aria-label="Increase the limit" (click)="step(1)"><dy-icon name="plus" /></button>
         </span>
       </ng-template>
-      <ng-template #holdUnit><pd-segmented-control label="Duration unit" [options]="unitSegs" [value]="unit()" (valueChange)="setUnit($event === 'min' ? 'min' : 'sec')" /></ng-template>
   `,
   styles: `
     :host { display: grid; gap: var(--sp-3); min-width: 0; }
@@ -63,9 +65,16 @@ const MAX_HOLD_SECS = 3600;
     .reading { display: flex; width: 100%; }
     .reading :is(mat-form-field) { width: 100%; }
     .hint { margin: calc(-1 * var(--sp-2)) 0 0; padding-inline: var(--sp-4); color: var(--text-3); font-size: var(--fs-xs); }
+    .hint + .two { margin-top: var(--sp-2); }
     .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
-    .group { margin: 0; min-width: 0; padding: 0 var(--sp-3) var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-md); }
-    .group legend { padding: 0 var(--sp-1); color: var(--text-2); font-size: var(--fs-xs); }
+    /* A segmented control labelled like an outline field: the label sits on its top border, and it is as tall as a field, so a
+       row's controls share top and bottom. The label is decoration (the control carries the accessible name). */
+    .seg-field { position: relative; height: var(--pd-field-height, 28px); min-width: 0; --mat-button-toggle-height: calc(var(--pd-field-height, 28px) - 2px); }
+    .seg-field pd-segmented-control { display: block; }
+    .seg-label { position: absolute; top: -8px; left: var(--sp-3); z-index: 1; padding: 0 var(--sp-1); background: var(--pd-surface-2); color: var(--text-2); font-size: var(--fs-xs); line-height: 1; }
+    .hold { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; }
+    .hold pd-field { flex: 1; min-width: 0; }
+    .unit-seg { --mat-button-toggle-height: calc(var(--pd-field-height, 28px) - 2px); }
     .tools { display: inline-flex; align-items: center; gap: var(--sp-1); }
     .tools dy-icon { --icon-size: 14px; }
     .unit { color: var(--text-3); font-size: var(--fs-sm); }

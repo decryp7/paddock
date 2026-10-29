@@ -28,7 +28,7 @@ import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { SearchField } from '../../shared/search-field';
 import { MatMenuModule } from '@angular/material/menu';
-import { openContextMenu } from '../../shared/context-menu';
+import { RowMenu } from '../../shared/row-menu';
 
 /**
  * What the operating system recorded going wrong: a stability score for today and the last days, the apps and kinds with
@@ -37,7 +37,7 @@ import { openContextMenu } from '../../shared/context-menu';
  */
 @Component({
   selector: 'dy-issues-view',
-  imports: [MatMenuModule, MatIconButton, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, MatButton, AsyncState, Chart, Icon],
+  imports: [RowMenu, MatMenuModule, MatIconButton, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, MatButton, AsyncState, Chart, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -124,7 +124,7 @@ import { openContextMenu } from '../../shared/context-menu';
                         </td>
                       </tr>
                     } @else {
-                      <tr class="row" tabindex="0" [attr.data-id]="r.issue.id" [class.sel]="selectedId() === r.issue.id" (click)="select(r.issue)" (keydown.enter)="select(r.issue)" (keydown.shift.f10)="select(r.issue)" (contextmenu)="select(r.issue); openContextMenu($event, menuAnchor, menuTrigger, { issue: r.issue })">
+                      <tr class="row" tabindex="0" [attr.data-id]="r.issue.id" [class.sel]="selectedId() === r.issue.id" (click)="select(r.issue)" (keydown.enter)="select(r.issue)" (keydown.shift.f10)="select(r.issue)" (contextmenu)="select(r.issue)" dyRowMenu [matContextMenuTriggerFor]="menu" [matContextMenuTriggerData]="{ issue: r.issue }">
                         <td class="time num muted">{{ clock(r.issue.at) }}</td>
                         <td class="kind"><span class="dot" [attr.data-tone]="dotTone(r.issue)" aria-hidden="true"></span>{{ kindLabel(r.issue.kind) }}</td>
                         <td><span class="ell" [dyFullText]="subject(r.issue)">{{ subject(r.issue) }}</span></td>
@@ -164,7 +164,6 @@ import { openContextMenu } from '../../shared/context-menu';
       }
     </dy-async>
 
-    <span #menuAnchor class="dy-ctx-anchor" aria-hidden="true" #menuTrigger="matMenuTrigger" [matMenuTriggerFor]="menu"></span>
     <mat-menu #menu="matMenu" aria-label="Issue actions">
       <ng-template matMenuContent let-issue="issue">
         <button mat-menu-item (click)="copy(issue)"><dy-icon name="copy" /> Copy details</button>
@@ -236,7 +235,6 @@ import { openContextMenu } from '../../shared/context-menu';
   `,
 })
 export class IssuesView {
-  protected readonly openContextMenu = openContextMenu;
   protected readonly store = inject(IssuesStore);
   private readonly theme = inject(ThemeService);
   private readonly notifier = inject(Notifier);

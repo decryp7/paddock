@@ -86,4 +86,5 @@ export {
 export { PdPathText } from './lib/path-text';
 export { PdCopyMenu, PdCopyMenuHost, type PdCopyMenuState } from './lib/copy-menu';
 export { copyText } from './lib/clipboard';
+export { isContextMenuKey, PdContextMenuKeys } from './lib/context-menu-keys';
 export { PdClock, PD_CLOCK_INTERVAL, PD_CLOCK_SOURCE } from './lib/clock';

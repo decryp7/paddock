@@ -728,13 +728,6 @@ kbd,
   text-align: start;
 }
 
-/* The zero-size anchor a context menu opens from (see shared/context-menu.ts). */
-.dy-ctx-anchor {
-  position: fixed;
-  width: 0;
-  height: 0;
-  pointer-events: none;
-}
 
 /* One control height in a toolbar: buttons as tall as fields and segmented controls. */
 :root {

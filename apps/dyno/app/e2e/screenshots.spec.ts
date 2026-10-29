@@ -86,6 +86,8 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
       await page.getByRole('button', { name: /Chart Bytes Sent \(en0\)/ }).click();
       await page.getByRole('button', { name: /Chart Bytes Transferred \(disk0\)/ }).click();
       await expect(page.locator('dy-chart canvas').first()).toBeVisible();
+      // No tooltip of the last click hovering over the list in the picture.
+      await page.mouse.move(2, 2);
       await page.clock.runFor(2_500);
     },
   },
@@ -280,6 +282,9 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     ready: async (page) => {
       await page.getByRole('tab', { name: 'Rules' }).click();
       await expect(page.getByRole('button', { name: 'Add rule' })).toBeVisible();
+      // No hover or focus state left on the tab in the picture.
+      await page.mouse.move(2, 2);
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     },
   },
   { name: 'recorder', path: '/#/recorder', size: { width: 1440, height: 1100 }, ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Flight recorder' })).toBeVisible()) },

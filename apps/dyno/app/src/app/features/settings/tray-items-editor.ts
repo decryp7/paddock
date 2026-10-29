@@ -8,7 +8,7 @@ import { Sparkline } from '../../shared/sparkline';
 import { LiveStore } from '../../state/live.store';
 import { MAX_TRAY_ITEMS, METRICS, TRAY_STYLES, type TrayStyleId, metricLabel, moveWidget, newTrayItem, readMetric, seriesFor, styleFromId, trayStyleId } from '../widgets/widget-model';
 import { MatButton, MatIconButton } from '@angular/material/button';
-import { MatFormField } from '@angular/material/form-field';
+import { MatFormField, MatLabel } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 
@@ -18,7 +18,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
  */
 @Component({
   selector: 'dy-tray-items-editor',
-  imports: [PdSelect, MatFormField, MatInput, MatButton, MatIconButton, FormsModule, Icon, Sparkline, CdkDropList, CdkDrag, CdkDragHandle],
+  imports: [PdSelect, MatLabel, MatFormField, MatInput, MatButton, MatIconButton, FormsModule, Icon, Sparkline, CdkDropList, CdkDrag, CdkDragHandle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="preview" role="img" [attr.aria-label]="previewLabel()">
@@ -60,12 +60,13 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
           <button type="button" matIconButton aria-label="Move down" [disabled]="i === items().length - 1" (click)="move(i, i + 1)"><dy-icon name="arrow-down" /></button>
           <pd-select [options]="metricOptions" [value]="metricName(it)" [ariaLabel]="'Metric of item ' + (i + 1)" (valueChange)="setMetric(it, $event)" />
           <pd-select [options]="styleOptions" [value]="styleId(it)" [ariaLabel]="'Style of item ' + (i + 1)" (valueChange)="setStyle(it, $event)" />
-          @if (styleId(it) === 'number') {
-            <mat-form-field class="short"><input matInput aria-label="Short label" placeholder="Label" maxlength="16" [ngModel]="numberLabel(it)" (ngModelChange)="setNumber(it, 'label', $event)" /></mat-form-field>
-            <mat-form-field class="short"><input matInput aria-label="Unit" placeholder="Unit" maxlength="8" [ngModel]="numberUnit(it)" (ngModelChange)="setNumber(it, 'unit', $event)" /></mat-form-field>
-          }
-          <span class="spacer"></span>
           <button type="button" matIconButton class="pd-button-danger" aria-label="Remove item" (click)="remove(it)"><dy-icon name="trash" /></button>
+          @if (styleId(it) === 'number') {
+            <span class="num-fields">
+                <mat-form-field class="short"><mat-label>Label</mat-label><input matInput aria-label="Short label" maxlength="16" [ngModel]="numberLabel(it)" (ngModelChange)="setNumber(it, 'label', $event)" /></mat-form-field>
+              <mat-form-field class="short"><mat-label>Unit</mat-label><input matInput aria-label="Unit" maxlength="8" [ngModel]="numberUnit(it)" (ngModelChange)="setNumber(it, 'unit', $event)" /></mat-form-field>
+            </span>
+          }
         </li>
       }
     </ul>
@@ -88,8 +89,11 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     .faint { color: var(--text-3); font-size: var(--fs-sm); }
     ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); align-self: stretch; }
     li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: 4px var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); }
-    pd-select { width: 11rem; flex: none; }
-    .spacer { flex: 1; } .short { width: 84px; } .grab { cursor: grab; }
+    /* Metric and style share the row with the move buttons and Remove; a number style's Label and Unit get a row of their own. */
+    pd-select { flex: 1 1 8rem; min-width: 8rem; }
+    li .pd-button-danger { margin-inline-start: auto; }
+    .num-fields { flex: 1 1 100%; display: flex; gap: var(--sp-2); padding-inline-start: 4.5rem; }
+    .short { width: 7rem; flex: none; } .grab { cursor: grab; }
     .cdk-drag-preview { box-shadow: var(--shadow-3); border-radius: var(--r-md); background: var(--overlay-bg); display: flex; align-items: center; gap: var(--sp-2); padding: 4px var(--sp-2); }
     .cdk-drag-placeholder { opacity: 0.35; }
   `,

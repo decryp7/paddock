@@ -19,7 +19,7 @@ import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { SearchField } from '../../shared/search-field';
 import { MatMenuModule } from '@angular/material/menu';
-import { openContextMenu } from '../../shared/context-menu';
+import { RowMenu } from '../../shared/row-menu';
 
 /**
  * Performance counters: browse what the OS offers (objects, then counters with their instances), search by name, chart
@@ -28,7 +28,7 @@ import { openContextMenu } from '../../shared/context-menu';
  */
 @Component({
   selector: 'dy-counters-page',
-  imports: [MatMenuModule, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatButton, MatIconButton, AsyncState, Icon, Chart],
+  imports: [RowMenu, MatMenuModule, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatButton, MatIconButton, AsyncState, Icon, Chart],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -166,7 +166,7 @@ import { openContextMenu } from '../../shared/context-menu';
                   <span role="columnheader"><span class="visually-hidden">Actions</span></span>
                 </div>
                 @for (p of store.watching(); track p) {
-                  <div class="row" role="row" (contextmenu)="openContextMenu($event, rowMenuAnchor, rowMenuTrigger, { path: p })">
+                  <div class="row" role="row"  dyRowMenu [matContextMenuTriggerFor]="rowMenu" [matContextMenuTriggerData]="{ path: p }">
                     <span class="cell" role="cell">
                       <span class="swatch" [style.background]="swatch($index)" aria-hidden="true"></span>
                       <span class="truncate" [matTooltip]="p">{{ title(p) }}</span>
@@ -184,7 +184,7 @@ import { openContextMenu } from '../../shared/context-menu';
                     </span>
                     <span class="cell acts" role="cell">
                       <button type="button" matIconButton [attr.aria-label]="(store.isPinned(p) ? 'Unpin ' : 'Pin ') + title(p)" matTooltipPosition="left" [matTooltip]="(store.isPinned(p) ? 'Unpin ' : 'Pin ') + title(p)" (click)="store.togglePin(p)"><dy-icon name="pin" /></button>
-                      <button type="button" matIconButton [attr.aria-label]="'Stop charting ' + title(p)" matTooltipPosition="left" [matTooltip]="'Stop charting ' + title(p)" (click)="store.unwatch(p)"><dy-icon name="close" /></button>
+                      <button type="button" matIconButton [attr.aria-label]="'Stop charting ' + title(p)" (click)="store.unwatch(p)"><dy-icon name="close" /></button>
                       <button type="button" matIconButton [attr.aria-label]="'More actions for ' + title(p)" [matMenuTriggerFor]="rowMenu" [matMenuTriggerData]="{ path: p }"><dy-icon name="more" /></button>
                     </span>
                   </div>
@@ -203,7 +203,7 @@ import { openContextMenu } from '../../shared/context-menu';
                     <span class="meta truncate">{{ object(p) }}</span>
                     <span class="acts">
                       <button type="button" matIconButton [attr.aria-label]="'Chart ' + title(p)" matTooltipPosition="left" [matTooltip]="'Chart ' + title(p)" (click)="store.watch(p)"><dy-icon name="plus" /></button>
-                      <button type="button" matIconButton [attr.aria-label]="'Unpin ' + title(p)" matTooltipPosition="left" [matTooltip]="'Unpin ' + title(p)" (click)="store.togglePin(p)"><dy-icon name="close" /></button>
+                      <button type="button" matIconButton [attr.aria-label]="'Unpin ' + title(p)" (click)="store.togglePin(p)"><dy-icon name="close" /></button>
                     </span>
                   </li>
                 }
@@ -214,7 +214,6 @@ import { openContextMenu } from '../../shared/context-menu';
       </div>
     </div>
 
-    <span #rowMenuAnchor class="dy-ctx-anchor" aria-hidden="true" #rowMenuTrigger="matMenuTrigger" [matMenuTriggerFor]="rowMenu"></span>
     <mat-menu #rowMenu="matMenu" aria-label="Counter actions">
       <ng-template matMenuContent let-path="path">
         <button mat-menu-item (click)="store.togglePin(path)"><dy-icon name="pin" /> {{ store.isPinned(path) ? 'Unpin' : 'Pin' }}</button>
@@ -291,7 +290,6 @@ import { openContextMenu } from '../../shared/context-menu';
   `,
 })
 export class CountersPage implements OnInit {
-  protected readonly openContextMenu = openContextMenu;
   protected readonly store = inject(CountersStore);
   protected readonly settings = inject(SettingsStore);
   private readonly destroyRef = inject(DestroyRef);

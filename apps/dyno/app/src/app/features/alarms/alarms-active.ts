@@ -11,7 +11,7 @@ import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDivider } from '@angular/material/divider';
-import { openContextMenu } from '../../shared/context-menu';
+import { RowMenu } from '../../shared/row-menu';
 
 /**
  * The open alarms as one table (newest first) with a detail panel beside it. The section action acknowledges everything that is
@@ -19,7 +19,7 @@ import { openContextMenu } from '../../shared/context-menu';
  */
 @Component({
   selector: 'dy-alarms-active',
-  imports: [MatMenuModule, MatDivider, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon, AlarmDetail],
+  imports: [RowMenu, MatMenuModule, MatDivider, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon, AlarmDetail],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="store.loaded()" [error]="store.error()" [empty]="store.alarms().length === 0" emptyTitle="No open alarms" emptyText="When a rule fires, its alarm waits here until you acknowledge it." emptyIcon="bell" what="alarms" [rows]="4" (retry)="store.load()">
@@ -52,7 +52,7 @@ import { openContextMenu } from '../../shared/context-menu';
               [attr.aria-selected]="store.selectedId() === a.id"
               (click)="pick(a)"
               (keydown.enter)="pick(a)"
-              (keydown.space)="$event.preventDefault(); pick(a)" (contextmenu)="openContextMenu($event, menuAnchor, menuTrigger, { alarm: a })">
+              (keydown.space)="$event.preventDefault(); pick(a)"  dyRowMenu [matContextMenuTriggerFor]="menu" [matContextMenuTriggerData]="{ alarm: a }">
               <span class="cell" role="gridcell">@if (unread(a)) {<span class="unread" matTooltip="Not acknowledged" aria-label="Not acknowledged"></span>}</span>
               <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="a.severity === 'critical' ? 'bad' : a.severity === 'warning' ? 'warn' : 'info'" [attr.aria-label]="sev(a)" role="img"></span><span [class.muted]="a.severity === 'info'">{{ sev(a) }}</span></span>
               <span class="cell title-cell" role="gridcell">
@@ -68,7 +68,7 @@ import { openContextMenu } from '../../shared/context-menu';
               <span class="cell r muted num" role="gridcell">×{{ a.repeatCount }}</span>
               <span class="cell acts" role="gridcell">
                 <button type="button" matIconButton [attr.aria-label]="'Acknowledge ' + a.title" matTooltipPosition="left" [matTooltip]="'Acknowledge ' + a.title" [disabled]="!ackable(a)" (click)="ack(a, $event)"><dy-icon name="check" /></button>
-                <button type="button" matIconButton [attr.aria-label]="'Shelve ' + a.title" matTooltipPosition="left" [matTooltip]="'Shelve ' + a.title" [matMenuTriggerFor]="shelveMenu" [matMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="clock" /></button>
+                <button type="button" matIconButton [attr.aria-label]="'Shelve ' + a.title" [matMenuTriggerFor]="shelveMenu" [matMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="clock" /></button>
                 <button type="button" matIconButton class="more" [attr.aria-label]="'More actions for ' + a.title" [matMenuTriggerFor]="menu" [matMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
               </span>
             </div>
@@ -80,7 +80,6 @@ import { openContextMenu } from '../../shared/context-menu';
       </div>
     </dy-async>
 
-    <span #menuAnchor class="dy-ctx-anchor" aria-hidden="true" #menuTrigger="matMenuTrigger" [matMenuTriggerFor]="menu"></span>
     <mat-menu #menu="matMenu" aria-label="Actions">
       <ng-template matMenuContent let-alarm="alarm">
         <button mat-menu-item [disabled]="!ackable(alarm)" (click)="ack(alarm)"><dy-icon name="check" /> Acknowledge</button>
@@ -128,7 +127,6 @@ import { openContextMenu } from '../../shared/context-menu';
   ],
 })
 export class AlarmsActive {
-  protected readonly openContextMenu = openContextMenu;
   protected readonly store = inject(AlarmsStore);
   protected readonly now = signal(Date.now());
   protected readonly busy = signal(false);

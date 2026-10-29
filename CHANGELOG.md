@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `PdContextMenuKeys`: a row's context menu from the keyboard
+- New directive `pdContextMenuKeys` (and `isContextMenuKey`) in `@decryp7/paddock-ui`: Shift+F10 or the Menu key on a focused host fires a `contextmenu` event there, for `matContextMenuTriggerFor` or any listener (macOS sends none for those keys). It works like pd-table's own row handler, which will use it in a follow-up.
+
 ### `@decryp7/paddock-ui/schedule` exports its time-field building blocks
 - New exports: `PdKeepTimeOnEscape` (the `pdKeepTime` directive: Escape in a closed time field keeps the time), `TIME_PROVIDERS`, `timeToDate`, `dateToTime`, `timeOptions` and `TimeProblems`, so an app can put a `mat-timepicker` in its own form with the editors' behaviour (24-hour times, the half-hour list, a problem shown once the field was left). Dyno's `dy-time-field` is the first user.
 

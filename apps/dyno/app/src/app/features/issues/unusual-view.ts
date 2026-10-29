@@ -14,7 +14,7 @@ import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { MatMenuModule } from '@angular/material/menu';
-import { openContextMenu } from '../../shared/context-menu';
+import { RowMenu } from '../../shared/row-menu';
 
 /**
  * Programs that are new on this computer, and why some of them may be worth a look. A transparency tool: it lists reasons
@@ -23,7 +23,7 @@ import { openContextMenu } from '../../shared/context-menu';
  */
 @Component({
   selector: 'dy-unusual-view',
-  imports: [MatMenuModule, FullTextTip, MatTooltip, MatButton, MatIconButton, AsyncState, Icon],
+  imports: [RowMenu, MatMenuModule, FullTextTip, MatTooltip, MatButton, MatIconButton, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -50,7 +50,7 @@ import { openContextMenu } from '../../shared/context-menu';
                 <thead><tr><th>Program</th><th>Why</th><th class="when">First seen</th><th class="state">State</th></tr></thead>
                 <tbody>
                   @for (i of o.items; track i.key) {
-                    <tr class="row" tabindex="0" [class.sel]="selectedKey() === i.key" (click)="select(i)" (keydown.enter)="select(i)" (keydown.shift.f10)="select(i)" (contextmenu)="select(i); openContextMenu($event, menuAnchor, menuTrigger, { item: i })">
+                    <tr class="row" tabindex="0" [class.sel]="selectedKey() === i.key" (click)="select(i)" (keydown.enter)="select(i)" (keydown.shift.f10)="select(i)" (contextmenu)="select(i)" dyRowMenu [matContextMenuTriggerFor]="menu" [matContextMenuTriggerData]="{ item: i }">
                       <td>
                         <span class="prog">
                           <span class="av" aria-hidden="true" [style.background]="tile(i.name)">{{ ini(i.name) }}</span>
@@ -93,7 +93,6 @@ import { openContextMenu } from '../../shared/context-menu';
       }
     </dy-async>
 
-    <span #menuAnchor class="dy-ctx-anchor" aria-hidden="true" #menuTrigger="matMenuTrigger" [matMenuTriggerFor]="menu"></span>
     <mat-menu #menu="matMenu" aria-label="Program actions">
       <ng-template matMenuContent let-item="item">
         @if (item.exe) { <button mat-menu-item (click)="copy(item.exe)"><dy-icon name="copy" /> Copy path</button> }
@@ -149,7 +148,6 @@ import { openContextMenu } from '../../shared/context-menu';
   `,
 })
 export class UnusualView {
-  protected readonly openContextMenu = openContextMenu;
   protected readonly store = inject(UnusualStore);
   private readonly notifier = inject(Notifier);
   private readonly ports = inject(SHELL_PORTS);

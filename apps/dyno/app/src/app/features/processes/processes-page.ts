@@ -17,7 +17,7 @@ import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { SearchField } from '../../shared/search-field';
 import { MatMenuModule } from '@angular/material/menu';
-import { openContextMenu } from '../../shared/context-menu';
+import { RowMenu } from '../../shared/row-menu';
 
 const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
   { key: 'name', label: 'Name', align: 'l' },
@@ -31,7 +31,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
 /** The task manager: every app and process, grouped by app, as a tree or flat; sortable, searchable, with a details panel and lookups. Read-only: nothing here changes a process. */
 @Component({
   selector: 'dy-processes-page',
-  imports: [MatMenuModule, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, MatButton, MatIconButton, Icon, FormsModule, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, ProcessDetailsPanel],
+  imports: [RowMenu, MatMenuModule, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, MatButton, MatIconButton, Icon, FormsModule, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, ProcessDetailsPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap">
@@ -92,7 +92,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                 [attr.data-key]="r.key"
                 (click)="rowClick(r)"
                 (keydown.space)="$event.preventDefault(); rowClick(r)"
-                (dblclick)="store.toggle(r)" (contextmenu)="!(r.kind === 'other') ? openContextMenu($event, menuAnchor, menuTrigger, { row: r }) : null">
+                (dblclick)="store.toggle(r)"  dyRowMenu [matContextMenuTriggerFor]="menu" [matContextMenuTriggerData]="{ row: r }" [matContextMenuTriggerDisabled]="r.kind === 'other'">
                 <span role="gridcell" class="name" [style.padding-left.px]="8 + r.depth * 20">
                   @if (r.expandable) {
                     <button type="button" matIconButton class="chev" [attr.aria-label]="(r.expanded ? 'Collapse ' : 'Expand ') + r.name" (click)="$event.stopPropagation(); store.toggle(r)">
@@ -147,7 +147,6 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
       </div>
     </div>
 
-    <span #menuAnchor class="dy-ctx-anchor" aria-hidden="true" #menuTrigger="matMenuTrigger" [matMenuTriggerFor]="menu"></span>
     <mat-menu #menu="matMenu" aria-label="Actions">
       <ng-template matMenuContent let-row="row">
         @if (row.ref) {
@@ -201,7 +200,6 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
   `,
 })
 export class ProcessesPage implements OnInit, OnDestroy {
-  protected readonly openContextMenu = openContextMenu;
   protected readonly store = inject(ProcessesStore);
   private readonly dialogs = inject(DialogService);
   private readonly live = inject(LiveStore);

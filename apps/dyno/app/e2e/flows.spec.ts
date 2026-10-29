@@ -248,6 +248,16 @@ test.describe('widgets', () => {
     await expect(page.locator('dy-widget[data-kind="heatmap"]')).toHaveCount(0);
   });
 
+  test('a small widget\'s edit toolbar keeps its metric select readable on a row of its own', async ({ page }) => {
+    await page.goto(url());
+    await page.getByRole('button', { name: 'Edit dashboard' }).click();
+    const small = page.locator('.edit.small:has(pd-select)').first();
+    await expect(small).toBeVisible();
+    const select = small.locator('pd-select');
+    expect((await select.boundingBox())!.width).toBeGreaterThanOrEqual(140);
+    expect((await select.boundingBox())!.y).toBeGreaterThan((await small.getByRole('button').first().boundingBox())!.y);
+  });
+
   test('menu bar items: add several, reorder, preview follows, save', async ({ page }) => {
     await openSettings(page);
     const section = page.getByRole('region', { name: 'Menu bar items' });
@@ -438,6 +448,26 @@ test.describe('issues', () => {
     await expect(detail.getByText('What the system said')).toBeVisible();
     await expect(detail.getByText('Safari stopped responding')).toBeVisible();
     await page.keyboard.press('Escape');
+  });
+
+  test('a row\'s context menu opens with Shift+F10, reaches every action, and Escape gives the focus back to the row', async ({ page }) => {
+    await page.goto(url('/issues'));
+    const table = page.getByRole('table', { name: 'Issues', exact: true });
+    const row = table.getByRole('row', { name: /Safari/ }).first();
+    await row.focus();
+    await page.keyboard.press('Shift+F10');
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    for (const name of ['Copy details', 'Search the web…', 'Only this kind']) await expect(menu.getByRole('menuitem', { name })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(row).toBeFocused();
+    // The pointer's tooltips never keep the menu from closing on the first Escape.
+    await row.click({ button: 'right' });
+    await expect(menu).toBeVisible();
+    await expect(page.locator('.mat-mdc-tooltip')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
   });
 
   test('a leaderboard row filters the table to one app and the chip clears it', async ({ page }) => {
