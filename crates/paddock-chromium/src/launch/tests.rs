@@ -147,9 +147,30 @@ fn a_kept_profile_is_used_with_its_theme_and_survives_the_close() {
         kept.join("Default/Preferences").is_file(),
         "the frame colour is written"
     );
+    // A kept profile gets the long grace: ending Chrome by force in its shutdown can lose cookies or a sign-in.
+    assert_eq!(b.close_grace(), CLOSE_GRACE_KEPT);
     // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
     assert!(b.close_gracefully(CLOSE_GUARD));
     assert!(kept.is_dir(), "a kept profile is not removed");
+}
+
+#[test]
+fn a_throwaway_profile_keeps_the_short_grace_and_a_kept_one_gets_the_long_one() {
+    assert_eq!(
+        close_grace_for(&Profile::Throwaway("/t".into())),
+        CLOSE_GRACE
+    );
+    assert_eq!(
+        close_grace_for(&Profile::Persistent("/k".into())),
+        CLOSE_GRACE_KEPT
+    );
+    // Above the slowest exit measured on a loaded Mac (11.7 s, docs/benchmarks.md).
+    assert!(CLOSE_GRACE_KEPT > Duration::from_millis(11_700));
+    let f = Fixture::new(Mode::Obey, 1);
+    let mut b = f.launch();
+    assert_eq!(b.close_grace(), CLOSE_GRACE);
+    // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
+    assert!(b.close_gracefully(CLOSE_GUARD));
 }
 
 #[test]

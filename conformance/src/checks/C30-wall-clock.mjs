@@ -17,6 +17,11 @@ const HANG_GUARD = /conformance:\s*hang-guard/;
 /** The waiver of a sleep must say why: `// conformance: hang-guard — <reason>` (a dash, an en dash or a hyphen, then words). */
 const SLEEP_WAIVER = /conformance:\s*hang-guard\s*[—–-]+\s*(\S.{2,})/;
 const MIN_GUARD_MS = 10_000;
+/** CI's budget for one test: nextest's ci profile reports it slow after 30 s and kills it after 2 periods (60 s). A hang
+ * guard at or above it never reports: the test is killed first, without its diagnostics. */
+const CI_TEST_BUDGET_MS = 60_000;
+const OVER_BUDGET = (ms, text) => `a hang guard of ${ms / 1000} s is at or above CI's 60 s test budget (nextest kills the test first, without its message): ${text}`;
+const OVER_BUDGET_FIX = 'Lower the guard below 60 s (40 s is over three times the slowest browser exit measured under load, 11.7 s, docs/benchmarks.md).';
 // A measurement: a duration read off a real clock. A bare `Instant::now()` used as the base of a computed instant is deterministic.
 const CLOCK_READ = /\.elapsed\s*\(\)|\.duration_since\s*\(|\b(?:Instant|SystemTime)::now\s*\(\)\s*-/;
 
@@ -213,15 +218,17 @@ export default {
         for (const a of wallClockAsserts(text)) {
           if (a.guard === null) out.push(warn('C30', 40, f, a.line, `asserts on the wall clock: ${a.text}`, fix));
           else if (a.guard < MIN_GUARD_MS) out.push(warn('C30', 40, f, a.line, `a hang guard of ${a.guard} ms is too tight to be one: ${a.text}`, 'Raise the limit to at least 10 s, or replace it with a FakeClock.'));
+          else if (a.guard >= CI_TEST_BUDGET_MS) out.push(warn('C30', 40, f, a.line, OVER_BUDGET(a.guard, a.text), OVER_BUDGET_FIX));
         }
         for (const a of graceAsserts(text)) {
           if (a.waiver === 'grace-free') continue;
           if (a.waiver === 'hang-guard') {
             if (a.limitMs !== null && a.limitMs < MIN_GUARD_MS) out.push(warn('C30', 40, f, a.line, `a hang guard of ${a.limitMs} ms is too tight to be one: ${a.text}`, 'Raise the grace to at least 10 s (the exit is waited for on the condition, so a long guard costs nothing), or assert the mechanism instead.'));
+            else if (a.limitMs !== null && a.limitMs >= CI_TEST_BUDGET_MS) out.push(warn('C30', 40, f, a.line, OVER_BUDGET(a.limitMs, a.text), OVER_BUDGET_FIX));
             continue;
           }
           // An error, not a warning (ER-21): this kind failed CI again while it was only a warning (fix/flaky-browser-close).
-          out.push(error('C30', 40, f, a.line, `asserts that a call outlasted by load finished within its grace: ${a.text}`, 'Wait for the exit on the condition with a generous hang guard (`close_gracefully(Duration::from_secs(120))` with `// conformance: hang-guard`), assert the mechanism, not the budget, or, when the thing has ended already, say so with `// conformance: grace-free — <why>` (lesson "Chromium tests compared a loaded machine with a product timeout").'));
+          out.push(error('C30', 40, f, a.line, `asserts that a call outlasted by load finished within its grace: ${a.text}`, 'Wait for the exit on the condition with a hang guard (`close_gracefully(Duration::from_secs(40))` with `// conformance: hang-guard`: over three times the slowest exit measured under load, 11.7 s, and under CI\'s 60 s test kill), assert the mechanism, not the budget, or, when the thing has ended already, say so with `// conformance: grace-free — <why>` (lesson "Chromium tests compared a loaded machine with a product timeout").'));
         }
         for (const s of threadSleeps(text)) {
           if (s.waived === 'no-reason') out.push(warn('C30', 40, f, s.line, `the sleep's waiver gives no reason: ${s.text}`, 'Write `// conformance: hang-guard — <why this sleep is needed>`.'));

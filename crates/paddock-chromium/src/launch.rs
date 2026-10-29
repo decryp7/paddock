@@ -18,10 +18,21 @@ use std::time::{Duration, Instant};
 pub const START_PAGE: &str = "about:blank";
 /// How long the browser may take to start and write its DevTools port.
 pub const START_LIMIT: Duration = Duration::from_secs(20);
-/// How long a browser gets to quit by itself after `Browser.close` before its tree is ended. A loaded Mac took up to
-/// 11.7 s (p95 6.3 s) to exit after answering (docs/benchmarks.md, "paddock-chromium: Browser.close exit time"); past
-/// the grace the tree is ended, which is safe once the browser has answered.
+/// How long a browser with a throwaway profile gets to quit by itself after `Browser.close` before its tree is ended. A
+/// loaded Mac took up to 11.7 s (p95 6.3 s) to exit after answering (docs/benchmarks.md, "paddock-chromium:
+/// Browser.close exit time"); past the grace the tree is ended, which is safe for a throwaway profile (it is deleted).
 pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
+/// The grace of a kept profile ([`Profile::Persistent`]): ending Chrome by force during its shutdown can lose cookies or
+/// a sign-in it is still writing, so it gets longer than the slowest exit measured under load (11.7 s).
+pub const CLOSE_GRACE_KEPT: Duration = Duration::from_secs(20);
+
+/// The close grace for a profile kind: [`CLOSE_GRACE`] for a throwaway one, [`CLOSE_GRACE_KEPT`] for a kept one.
+pub fn close_grace_for(profile: &Profile) -> Duration {
+    match profile {
+        Profile::Throwaway(_) => CLOSE_GRACE,
+        Profile::Persistent(_) => CLOSE_GRACE_KEPT,
+    }
+}
 /// How long [`Chromium::start_page`] waits for the page the browser opens with.
 pub const START_PAGE_WAIT: Duration = Duration::from_secs(5);
 /// How often the start-up and start-page waits look again (on the browser's clock).
@@ -615,9 +626,18 @@ impl Chromium {
         self.close_answered
     }
 
-    /// [`close_gracefully`](Self::close_gracefully) with [`CLOSE_GRACE`].
+    /// The grace [`close`](Self::close) gives this browser: [`CLOSE_GRACE`], or [`CLOSE_GRACE_KEPT`] for a kept profile.
+    pub fn close_grace(&self) -> Duration {
+        if self.throwaway {
+            CLOSE_GRACE
+        } else {
+            CLOSE_GRACE_KEPT
+        }
+    }
+
+    /// [`close_gracefully`](Self::close_gracefully) with [`close_grace`](Self::close_grace).
     pub fn close(&mut self) -> bool {
-        self.close_gracefully(CLOSE_GRACE)
+        self.close_gracefully(self.close_grace())
     }
 
     /// Ends the browser tree at once.

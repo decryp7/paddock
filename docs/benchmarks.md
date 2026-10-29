@@ -190,9 +190,10 @@ Results of shared crates (rule 48: shared code records here), newest first.
 - **Memory measure:** not measured.
 - **Notes:** the browser always answered `Browser.close` and closed its DevTools connection; under load it was slow to
   exit, not deaf. Tests that asserted the exit within `CLOSE_GRACE` failed on load alone (2 of 60 runs); they now wait
-  on the exit under a 40 s hang guard. **For the product:** past the grace the tree is ended, which is safe once the
-  browser has answered, but under heavy load about one close in ten ends by force. Whether `CLOSE_GRACE` should be
-  raised (for example to 15 s) is a decision for the user; it is unchanged. Raw output: the agent's scratch folder,
+  on the exit under a 40 s hang guard. **For the product:** past the grace the tree is ended, which is safe for throwaway
+  profiles (they are deleted); under heavy load about one close in ten ends by force. A kept profile
+  (`Profile::Persistent`) gets 20 s (`CLOSE_GRACE_KEPT`), longer than the slowest exit measured, because a forced end
+  during Chrome's shutdown can lose cookies or a sign-in. Raw output: the agent's scratch folder,
   not kept in the repository.
 
 ## Other family measurements
