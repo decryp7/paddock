@@ -41,12 +41,12 @@ In the repository: `scripts/vm-win.sh` (daily use), `scripts/vm-win/prepare.sh` 
 | | Size |
 | --- | --- |
 | RAM while running | 8 GB resident, plus Fusion overhead; given back on stop. Run it only when a test needs it, and never two Windows VMs at once |
-| VM disk | grows up to 80 GB; a fresh Windows 11 install usually takes about 25 to 35 GB [unverified estimate] |
+| VM disk | grows up to 80 GB; 19 GB at `clean-baseline` (measured 2026-10-29, build 26300 en-GB) |
 | Snapshots | `clean-baseline` costs almost nothing when taken; each test run's changes grow a redo log until the next revert |
 | Windows ISO | 8.5 GB (the en-GB build 26300 image, measured 2026-10-29), plus the no-prompt clone (shares the original's blocks on APFS); both may be deleted after `baseline` |
 | Setup disc + payload | about 170 MB + 70 MB |
 
-Budget about 50 GB on d7 for a working VM with a baseline and a few test runs.
+Budget about 40 GB on d7 for a working VM with a baseline and a few test runs.
 
 ## TPM: the decision
 
@@ -126,6 +126,9 @@ El Torito EFI boot image with `efisys_noprompt.bin`. It refuses unless those byt
 images have the same size. Rebuilding the ISO with xorriso was not used: xorriso writes ISO 9660 and Joliet only and
 would drop the UDF file system that Setup reads; the in-place swap keeps the UDF tree, the volume label and every other
 byte. The original ISO is never changed.
+
+First full run, 2026-10-29: `install` took 25 minutes headless from the no-prompt ISO (option B, en-GB); `baseline`
+found the done marker over SSH and took `clean-baseline` at 18:12.
 
 ## Daily use
 
