@@ -108,6 +108,11 @@ export function formatRelative(at: number, now: number): string {
   return phrase(months, months === 1 ? 'month' : 'months');
 }
 
+/** How long ago `at` was, never in the future: a time at or after `now` (clock drift between processes) reads `just now`. */
+export function formatAgo(at: number, now: number): string {
+  return formatRelative(Math.min(at, now), now);
+}
+
 /** Clock time `14:05` (24 h, the user's locale decides only the separators via Intl). */
 export function formatClock(at: number): string {
   return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false }).format(at);

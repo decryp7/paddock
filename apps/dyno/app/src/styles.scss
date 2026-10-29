@@ -736,3 +736,9 @@ kbd,
   --mat-button-text-container-height: var(--control-h);
   --mat-button-tonal-container-height: var(--control-h);
 }
+
+/* A disk map row under the pointer marks its segment in the ring chart (pd-sunburst has no highlight input). */
+pd-sunburst path[data-linked] {
+  stroke: var(--pd-text);
+  stroke-width: 2px;
+}

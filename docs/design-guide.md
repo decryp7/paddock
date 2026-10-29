@@ -239,6 +239,8 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   metric + unit + window ("CPU, last 24 h").
 - **Empty chart**: keep axes ghosted at 40% opacity, centred message "No data for this period" + next step ("Widen to
   7 days"). **Loading**: skeleton block at final height (no layout shift). **Error**: inline message + Retry.
+- **Sunburst** (`pd-sunburst`): hierarchies only; four rings; colour by branch with `ring.ts` (five largest children, the rest neutral); hidden space is
+  hatched and not-yet-counted space is dashed, never colour alone; the consumer pairs it with a list or table that carries every value.
 - Pass tokens in; re-theme on scheme change without reloading data. Do not use `dataZoom` slider chrome by default:
   use brush on the plot and a "Reset zoom" chip.
 

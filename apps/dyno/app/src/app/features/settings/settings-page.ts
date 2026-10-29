@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { BackupSettings, BackupTool, BaselineSettings, HardwareAlarms, IpLookupSettings, Settings, TrayItem, UnusualSettings } from '../../core/api.types';
+import type { BackupSettings, BackupTool, BaselineSettings, DiskSettings, HardwareAlarms, IpLookupSettings, Settings, TrayItem, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -15,6 +15,9 @@ import { MatButton } from '@angular/material/button';
 import { MatFormField, MatSuffix } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
+
+/** What the engine uses when the disk limits are absent. */
+const DISK_DEFAULTS: Required<DiskSettings> = { scanFolders: 2_000_000, notableFileMib: 10 };
 
 /** Dyno's page of the Settings window (Appearance, Updates and About are the shell's): start-up, sampling and retention, the tray, alert thresholds, the observe-only posture and plugins. */
 @Component({
@@ -106,6 +109,19 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
                 @if (asnProblem(); as p) {
                   <small class="problem" role="alert">{{ p }}</small>
                 }
+              </div>
+            </section>
+
+            <section class="card" aria-label="Disk map" id="disk-map">
+              <h2>Disk map</h2>
+              <p class="sub">Limits of a disk map scan. A larger scan is more complete and uses more memory; a scan that reaches a limit says so.</p>
+              <div class="row">
+                <div class="lbl"><strong>Items kept per scan</strong><small>The most folders and large files one scan keeps (10,000 to 5,000,000).</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="10000" max="5000000" step="10000" aria-label="Items kept per scan" [ngModel]="disk().scanFolders" (ngModelChange)="setDisk({ scanFolders: +$event })" /><span matTextSuffix>items</span></mat-form-field>
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>Large file size</strong><small>Files at least this big get a place of their own in the map (1 to 1,024 MiB); smaller ones count toward their folder.</small></div>
+                <mat-form-field class="num-in"><input matInput type="number" min="1" max="1024" aria-label="Large file size" [ngModel]="disk().notableFileMib" (ngModelChange)="setDisk({ notableFileMib: +$event })" /><span matTextSuffix>MiB</span></mat-form-field>
               </div>
             </section>
 
@@ -250,6 +266,13 @@ export class SettingsPage implements OnInit {
   protected readonly presetId = computed(() => presetIdFor(this.ipLookup().ipTemplate));
   protected readonly ipProblem = computed(() => templateProblem(this.ipLookup().ipTemplate, 'ip'));
   protected readonly asnProblem = computed(() => templateProblem(this.ipLookup().asnTemplate, 'asn'));
+  protected readonly disk = computed<Required<DiskSettings>>(() => ({ ...DISK_DEFAULTS, ...this.draft()?.disk }));
+  /** A value outside its range (or not a whole number) is ignored, as the engine would refuse it. */
+  protected setDisk(p: DiskSettings): void {
+    const ok = (v: number | undefined, lo: number, hi: number) => v === undefined || (Number.isInteger(v) && v >= lo && v <= hi);
+    if (!ok(p.scanFolders, 10_000, 5_000_000) || !ok(p.notableFileMib, 1, 1024)) return;
+    this.draft.update((d) => (d ? { ...d, disk: { ...DISK_DEFAULTS, ...d.disk, ...p } } : d));
+  }
   protected readonly baselines = computed<BaselineSettings>(() => this.draft()?.baselines ?? { enabled: true, learningDays: 7, alarms: false });
   protected readonly hardwareAlarms = computed<HardwareAlarms>(() => this.draft()?.hardwareAlarms ?? { throttling: true, lifespan: true });
   protected readonly systemChoices = [500, 1000, 2000, 5000].map((o): PdSelectOption => ({ value: String(o), label: this.every(o) }));

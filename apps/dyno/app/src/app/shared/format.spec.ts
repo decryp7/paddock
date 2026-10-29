@@ -11,6 +11,7 @@ import {
   formatGhz,
   formatPercent,
   formatRate,
+  formatAgo,
   formatRelative,
   formatSeconds,
   formatSigned,
@@ -113,6 +114,16 @@ describe('durations', () => {
     expect(formatSeconds(null)).toBe('—');
     expect(formatSeconds(NaN)).toBe('—');
     expect(formatSeconds(undefined)).toBe('—');
+  });
+});
+
+describe('formatAgo', () => {
+  it('only looks back: a time in the future reads as just now', () => {
+    expect(formatAgo(NOW + 10_000, NOW)).toBe('just now');
+    expect(formatAgo(NOW + 3 * DAY, NOW)).toBe('just now');
+    expect(formatAgo(NOW, NOW)).toBe('just now');
+    expect(formatAgo(NOW - 5 * MIN, NOW)).toBe('5 min ago');
+    expect(formatAgo(NOW - 4 * DAY, NOW)).toBe('4 days ago');
   });
 });
 
