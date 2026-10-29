@@ -466,3 +466,103 @@ fn a_renamed_entry_is_read_again_by_its_new_name() {
     assert_eq!(debrief_core::archive::read_entry(z.clone(), "dup.zip", "a.log").unwrap(), b"one");
     assert_eq!(debrief_core::archive::read_entry(z, "dup.zip", "a (2).log").unwrap(), b"two");
 }
+
+/// Regression (review of c9f283344): entries written with a data descriptor (flag bit 3) hold no CRC-32 or size in their
+/// local header, and the repeated-path reader took the CRC from there, so the whole archive failed with "Invalid
+/// checksum". The central directory's values are the ones to use.
+#[test]
+fn repeated_paths_written_with_data_descriptors_are_all_kept() {
+    let files = [
+        ("logs/app.log".to_string(), b"first".to_vec()),
+        ("logs/app.log".to_string(), b"second one".to_vec()),
+        ("logs/app.log".to_string(), Vec::new()),
+    ];
+    let z = crate::common::stored_zip_flagged(&files, true);
+    let got: Vec<(String, Vec<u8>)> = debrief_core::archive::expand("dup.zip", z)
+        .expect("the archive expands")
+        .into_iter()
+        .map(|e| (e.name.unwrap(), e.bytes))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("logs/app.log".to_string(), b"first".to_vec()),
+            ("logs/app (2).log".to_string(), b"second one".to_vec()),
+            ("logs/app (3).log".to_string(), Vec::new())
+        ]
+    );
+}
+
+/// Regression (review of c9f283344): renaming probed `(2)`, `(3)`, ... from 2 for every copy, so n copies of one path took
+/// n squared steps (40,000 copies took a minute). The count is the assertion; the run must also end.
+#[test]
+fn many_copies_of_one_path_are_all_kept_under_distinct_names() {
+    let files: Vec<(String, Vec<u8>)> = (0..30_000u32)
+        .map(|i| ("logs/app.log".to_string(), i.to_le_bytes().to_vec()))
+        .collect();
+    let entries = debrief_core::archive::expand("dup.zip", crate::common::stored_zip(&files)).expect("the archive expands");
+    assert_eq!(entries.len(), files.len());
+    let names: std::collections::HashSet<_> = entries.iter().map(|e| e.name.clone().unwrap()).collect();
+    assert_eq!(names.len(), files.len());
+    assert_eq!(entries.iter().filter(|e| e.renamed_from.is_some()).count(), files.len() - 1);
+    assert_eq!(entries[29_999].name.as_deref(), Some("logs/app (30000).log"));
+    assert_eq!(entries[29_999].bytes, 29_999u32.to_le_bytes());
+}
+
+/// More entries than `MAX_ENTRIES` is refused with a message, on the normal path and the repeated-path one.
+#[test]
+fn an_archive_with_too_many_entries_is_refused() {
+    let n = debrief_core::archive::MAX_ENTRIES + 1;
+    let distinct: Vec<(String, Vec<u8>)> = (0..n).map(|i| (format!("f{i}.log"), Vec::new())).collect();
+    let same: Vec<(String, Vec<u8>)> = (0..n).map(|_| ("f.log".to_string(), Vec::new())).collect();
+    for files in [distinct, same] {
+        let e = debrief_core::archive::expand("big.zip", crate::common::stored_zip(&files))
+            .err()
+            .expect("refused");
+        assert!(format!("{e:#}").contains("entries"), "{e:#}");
+    }
+}
+
+/// `d/a.log` and `d\a.log` are one path once `\` is read as `/`: the second becomes `d/a (2).log` whether or not the
+/// archive repeats a raw name.
+#[test]
+fn a_backslash_twin_of_a_path_is_renamed() {
+    let got = entries_of(&[("d/a.log", b"one"), ("d\\a.log", b"two")]);
+    assert_eq!(
+        got,
+        [
+            ("d/a.log".to_string(), b"one".to_vec()),
+            ("d/a (2).log".to_string(), b"two".to_vec())
+        ]
+    );
+}
+
+/// Regression (review of c9f283344): the output name came from the local header, so a local name equal to a generated
+/// one could collide. The central directory's name is the entry's name.
+#[test]
+fn the_central_directory_name_is_the_entrys_name() {
+    let mut z = crate::common::stored_zip(&[
+        ("a.log".to_string(), b"one".to_vec()),
+        ("a.log".to_string(), b"two".to_vec()),
+        ("abcdefghi".to_string(), b"three".to_vec()),
+    ]);
+    let at = z.windows(9).position(|w| w == b"abcdefghi").expect("the local header comes first");
+    z[at..at + 9].copy_from_slice(b"a (2).log");
+    let entries = debrief_core::archive::expand("dup.zip", z).expect("the archive expands");
+    let got: Vec<(&str, &[u8])> = entries.iter().map(|e| (e.name.as_deref().unwrap(), e.bytes.as_slice())).collect();
+    assert_eq!(got, [("a.log", &b"one"[..]), ("a (2).log", b"two"), ("abcdefghi", b"three")]);
+}
+
+/// The fuzz corpus' duplicate seeds (stored, streamed deflate with data descriptors, zip64 sizes) all expand to the same
+/// two entries.
+#[test]
+fn the_fuzz_corpus_duplicate_seeds_expand_to_both_entries() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/corpus/fuzz_archive");
+    for seed in ["dup-stored.zip", "dup-bit3-deflate.zip", "dup-zip64.zip"] {
+        let bytes = std::fs::read(dir.join(seed)).unwrap_or_else(|e| panic!("{seed}: {e}"));
+        let got = debrief_core::archive::expand(seed, bytes).unwrap_or_else(|e| panic!("{seed}: {e:#}"));
+        let names: Vec<_> = got.iter().map(|e| e.name.as_deref().unwrap()).collect();
+        assert_eq!(names, ["logs/a.log", "logs/a (2).log"], "{seed}");
+        assert_eq!(got[1].bytes, b"second line\n".repeat(5), "{seed}");
+    }
+}

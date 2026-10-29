@@ -552,6 +552,32 @@ proptest! {
     }
 }
 
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(CASES))]
+
+    /// A valid zip that repeats names (with or without data descriptors): every record comes out once under a unique name,
+    /// the repeats (and only they) say which path they had, and each name reads back its own bytes.
+    #[test]
+    fn a_valid_zip_with_repeated_paths_keeps_every_entry(
+        files in prop::collection::vec(("[a-c]{1,2}(\\.log)?", prop::collection::vec(any::<u8>(), 0..64)), 1..9),
+        descriptors in any::<bool>(),
+    ) {
+        let z = crate::common::stored_zip_flagged(&files, descriptors);
+        let entries = archive::expand("dup.zip", z.clone()).expect("a valid archive expands");
+        prop_assert_eq!(entries.len(), files.len());
+        let names: std::collections::HashSet<_> = entries.iter().map(|e| e.name.clone().unwrap()).collect();
+        prop_assert_eq!(names.len(), files.len(), "names are unique");
+        let mut seen = std::collections::HashSet::new();
+        for ((own, data), entry) in files.iter().zip(&entries) {
+            let repeat = !seen.insert(own.clone());
+            prop_assert_eq!(entry.renamed_from.as_deref(), repeat.then_some(own.as_str()));
+            prop_assert_eq!(&entry.bytes, data);
+            let read = archive::read_entry(z.clone(), "dup.zip", entry.name.as_deref().unwrap()).expect("read back");
+            prop_assert_eq!(&read, data);
+        }
+    }
+}
+
 #[test]
 fn archive_roundtrip_smoke() {
     let z = zip_of(&[("a/b.log".into(), b"hello".to_vec())]);
