@@ -27,10 +27,6 @@ pub struct WeeklyReport {
     pub avg_memory: f32,
     /// Biggest consumers.
     pub top_apps: Vec<Consumer>,
-    /// Rule actions taken.
-    pub rule_actions: u32,
-    /// Bytes cleaned up.
-    pub cleaned_bytes: u64,
     /// App crashes.
     pub crashes: u32,
     /// Alerts raised.
@@ -43,17 +39,15 @@ pub struct WeeklyReport {
     pub disks: Vec<ReportDisk>,
     /// The week's alerts, newest first (at most [`MAX_LISTED`]).
     pub issues: Vec<ReportIssue>,
-    /// What changed on the machine (rule actions, cleanups, startup and tuning changes), newest first (at most [`MAX_LISTED`]).
-    pub changes: Vec<ReportChange>,
     /// Hardware notes: time throttled and disks or batteries that need attention, as plain sentences (empty when there
     /// is nothing to say).
     #[serde(default)]
     pub hardware: Vec<String>,
-    /// True when the week holds no history, issues, changes or crashes: a valid report that says so.
+    /// True when the week holds no history, issues or crashes: a valid report that says so.
     pub nothing_to_report: bool,
 }
 
-/// Most issues and changes the report lists.
+/// Most issues the report lists.
 pub const MAX_LISTED: usize = 20;
 
 /// The health score at one moment.
@@ -94,18 +88,6 @@ pub struct ReportIssue {
     pub detail: String,
 }
 
-/// Something Dyno or the user changed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReportChange {
-    /// When.
-    pub at: Timestamp,
-    /// One line.
-    pub title: String,
-    /// Why or what exactly.
-    pub detail: String,
-}
-
 /// What the report is built from.
 pub struct ReportInput<'a> {
     /// Start.
@@ -120,10 +102,6 @@ pub struct ReportInput<'a> {
     pub score: Option<u32>,
     /// Score a week ago, if recorded.
     pub score_before: Option<u32>,
-    /// Rule actions.
-    pub rule_actions: u32,
-    /// Bytes cleaned.
-    pub cleaned_bytes: u64,
     /// Crashes.
     pub crashes: u32,
     /// Alerts.
@@ -134,8 +112,6 @@ pub struct ReportInput<'a> {
     pub disks: Vec<ReportDisk>,
     /// Alerts of the week, newest first.
     pub issues: Vec<ReportIssue>,
-    /// Changes of the week, newest first.
-    pub changes: Vec<ReportChange>,
     /// Hardware notes (see [`hardware_lines`]).
     pub hardware: Vec<String>,
 }
@@ -167,16 +143,6 @@ pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
         c if c < 0 => highlights.push(format!("The health score fell by {} points to {score_now}.", -c)),
         _ => {}
     }
-    if i.rule_actions > 0 {
-        highlights.push(format!(
-            "Rules stepped in {} time{}.",
-            i.rule_actions,
-            if i.rule_actions == 1 { "" } else { "s" }
-        ));
-    }
-    if i.cleaned_bytes > 0 {
-        highlights.push(format!("Cleanup freed {}.", bytes(i.cleaned_bytes)));
-    }
     if i.crashes > 0 {
         let one = i.crashes == 1;
         highlights.push(format!(
@@ -200,17 +166,9 @@ pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
     for h in i.hardware.iter().take(3) {
         highlights.push(h.clone());
     }
-    let nothing_to_report = i.points.is_empty()
-        && i.issues.is_empty()
-        && i.changes.is_empty()
-        && i.crashes == 0
-        && i.rule_actions == 0
-        && i.cleaned_bytes == 0
-        && i.alerts == 0
-        && i.top_apps.is_empty();
-    let (mut issues, mut changes) = (i.issues, i.changes);
+    let nothing_to_report = i.points.is_empty() && i.issues.is_empty() && i.crashes == 0 && i.alerts == 0 && i.top_apps.is_empty();
+    let mut issues = i.issues;
     issues.truncate(MAX_LISTED);
-    changes.truncate(MAX_LISTED);
     WeeklyReport {
         from: i.from,
         to: i.to,
@@ -220,15 +178,12 @@ pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
         peak_cpu,
         avg_memory,
         top_apps: i.top_apps,
-        rule_actions: i.rule_actions,
-        cleaned_bytes: i.cleaned_bytes,
         crashes: i.crashes,
         alerts: i.alerts,
         highlights,
         score_trend: i.score_trend,
         disks: i.disks,
         issues,
-        changes,
         hardware: i.hardware,
         nothing_to_report,
     }
@@ -341,7 +296,7 @@ fn score_line(r: &WeeklyReport) -> String {
 pub fn to_markdown(r: &WeeklyReport) -> String {
     let mut o = format!("# Dyno weekly report\n\n{} to {} (UTC)\n\n", utc_date(r.from), utc_date(r.to));
     if r.nothing_to_report {
-        o.push_str("Nothing to report for this week: Dyno recorded no history, issues or changes.\n");
+        o.push_str("Nothing to report for this week: Dyno recorded no history or issues.\n");
         return o;
     }
     o.push_str("## Highlights\n\n");
@@ -393,15 +348,6 @@ pub fn to_markdown(r: &WeeklyReport) -> String {
             ));
         }
     }
-    o.push_str("\n## What changed\n\n");
-    o.push_str(&format!(
-        "Rules stepped in {} time(s); cleanup freed {}.\n",
-        r.rule_actions,
-        bytes(r.cleaned_bytes)
-    ));
-    for c in &r.changes {
-        o.push_str(&format!("- {} {} ({})\n", utc_time(c.at), c.title, c.detail));
-    }
     o
 }
 
@@ -441,7 +387,7 @@ pub fn to_html(r: &WeeklyReport) -> String {
         utc_date(r.to)
     ));
     if r.nothing_to_report {
-        o.push_str("<p>Nothing to report for this week: Dyno recorded no history, issues or changes.</p>\n</body>\n</html>\n");
+        o.push_str("<p>Nothing to report for this week: Dyno recorded no history or issues.</p>\n</body>\n</html>\n");
         return o;
     }
     o.push_str("<h2>Highlights</h2>\n<ul>\n");
@@ -505,20 +451,7 @@ pub fn to_html(r: &WeeklyReport) -> String {
         }
         o.push_str("</ul>\n");
     }
-    o.push_str(&format!(
-        "<h2>What changed</h2>\n<p>Rules stepped in {} time(s); cleanup freed {}.</p>\n<ul>\n",
-        r.rule_actions,
-        bytes(r.cleaned_bytes)
-    ));
-    for c in &r.changes {
-        o.push_str(&format!(
-            "<li>{} {} <span class=\"muted\">({})</span></li>\n",
-            utc_time(c.at),
-            e(&c.title),
-            e(&c.detail)
-        ));
-    }
-    o.push_str("</ul>\n</body>\n</html>\n");
+    o.push_str("</body>\n</html>\n");
     o
 }
 
@@ -569,7 +502,7 @@ pub fn validate_destination(path: &str, format: ReportFormat) -> Result<std::pat
     if !p.is_absolute() {
         return Err("Give the full path of the file to save.".into());
     }
-    if crate::cleanup::has_dot_segment(p) {
+    if crate::disk::has_dot_segment(p) {
         return Err("The save path may not contain \"..\".".into());
     }
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_ascii_lowercase();
@@ -592,14 +525,11 @@ mod tests {
             top_apps: vec![],
             score: Some(80),
             score_before: None,
-            rule_actions: 0,
-            cleaned_bytes: 0,
             crashes: 0,
             alerts: 0,
             score_trend: vec![],
             disks: vec![],
             issues: vec![],
-            changes: vec![],
             hardware: vec![],
         }
     }
@@ -660,13 +590,6 @@ mod tests {
             },
         ];
         i.issues = vec![issue(5)];
-        i.changes = vec![ReportChange {
-            at: Timestamp(3_600_000),
-            title: "Turned off <Updater> at login".into(),
-            detail: "You changed this".into(),
-        }];
-        i.rule_actions = 2;
-        i.cleaned_bytes = 1 << 30;
         weekly(i)
     }
 
@@ -685,18 +608,11 @@ mod tests {
     }
 
     #[test]
-    fn issues_and_changes_are_capped_and_disks_forecast() {
+    fn issues_are_capped_and_disks_forecast() {
         let mut i = input(&[]);
         i.issues = (0..30).map(issue).collect();
-        i.changes = (0..30)
-            .map(|n| ReportChange {
-                at: Timestamp(n),
-                title: "x".into(),
-                detail: String::new(),
-            })
-            .collect();
         let r = weekly(i);
-        assert_eq!((r.issues.len(), r.changes.len()), (MAX_LISTED, MAX_LISTED));
+        assert_eq!(r.issues.len(), MAX_LISTED);
         assert!(r.highlights.iter().any(|h| h == "30 things needed attention."));
         let r = busy_week();
         assert!(r
@@ -717,7 +633,6 @@ mod tests {
             "## Busiest apps",
             "## Disks",
             "## Issues",
-            "## What changed",
         ] {
             assert!(md.contains(h), "{h}");
         }
@@ -728,7 +643,6 @@ mod tests {
         assert!(md.contains("- C:: 20.0 GB free of 500.0 GB, full in about 12 days"));
         assert!(md.contains("not filling up") && md.contains("not enough history for a forecast"));
         assert!(md.contains("1970-01-01 05:00 UTC Warning: Issue 5 (detail)"));
-        assert!(md.contains("Rules stepped in 2 time(s); cleanup freed 1.0 GB."));
     }
 
     #[test]
@@ -736,7 +650,6 @@ mod tests {
         let html = to_html(&busy_week());
         assert!(html.starts_with("<!doctype html>"));
         assert!(html.contains("&lt;b&gt;Evil|App&lt;/b&gt;"));
-        assert!(html.contains("Turned off &lt;Updater&gt; at login"));
         assert!(!html.contains("<b>") && !html.contains("<script"));
         assert!(html.contains("<h2>Disks</h2>") && html.contains("<h2>Issues</h2>"));
         assert_eq!(escape_html("a&\"'<>"), "a&amp;&quot;&#39;&lt;&gt;");
@@ -806,22 +719,17 @@ mod tests {
             memory_avg: 0,
         }];
         i.score_before = Some(70);
-        i.rule_actions = 1;
-        i.cleaned_bytes = 3 << 30;
         i.crashes = 2;
         let r = weekly(i);
         assert_eq!((r.avg_cpu, r.peak_cpu, r.avg_memory, r.score_change), (20.0, 90.0, 50.0, 10));
-        assert_eq!(r.highlights.len(), 6);
+        assert_eq!(r.highlights.len(), 4);
         assert!(r.highlights[2].contains("rose by 10"));
-        assert!(r.highlights[3].contains("1 time."));
-        assert!(r.highlights[5].contains("2 app crashes"));
+        assert!(r.highlights[3].contains("2 app crashes"));
         let mut i = input(&pts);
         i.score_before = Some(90);
-        i.rule_actions = 3;
         i.crashes = 1;
         let r = weekly(i);
         assert!(r.highlights.iter().any(|h| h.contains("fell by 10")));
-        assert!(r.highlights.iter().any(|h| h.contains("3 times")));
         assert!(r.highlights.iter().any(|h| h.contains("1 app crash was")));
     }
 

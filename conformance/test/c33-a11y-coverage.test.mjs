@@ -51,3 +51,13 @@ test('C33 warns, not fails, when there is no keyboard flow or accent test', asyn
   assert.deepEqual(f.map((x) => x.severity), ['warn', 'warn']);
   assert.match(messages(f), /keyboard-only flow[\s\S]*accentProblems/);
 });
+
+test('C33 reads the generated dialog-contracts.ts of a dialogs! table', async () => {
+  const TS = (ids) => `export const DIALOG_CONTRACTS = {\n${ids.map((id) => `  '${id}': {\n    id: '${id}',\n  },\n`).join('')}} as const;\n`;
+  const AXE_ONE = "import { axeViolations } from '@decryp7/paddock-e2e';\ntest('a', async ({ page }) => { await page.goto('/#/dialog?id=pd.about'); expect(await axeViolations(page)).toEqual([]); });\n";
+  const f = await findingsOf('C33', makeApp({ 'app/e2e/a11y.spec.ts': AXE_ONE, 'app/src/app/generated/dialog-contracts.ts': TS(['pd.about', 'db.rename']) }));
+  assert.ok(f.some((x) => x.message.includes('db.rename is not checked')), JSON.stringify(f));
+  assert.ok(!f.some((x) => x.message.includes('pd.about is not checked')), JSON.stringify(f));
+  const broken = await findingsOf('C33', makeApp({ 'app/e2e/a11y.spec.ts': AXE_ONE, 'app/src/app/generated/dialog-contracts.ts': 'export const X = 1;' }));
+  assert.ok(broken.some((x) => x.message.includes('not readable')), JSON.stringify(broken));
+});

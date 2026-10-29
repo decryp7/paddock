@@ -8,7 +8,7 @@ const pt = (at: number, cpu: number, memory = 50): HistoryPoint => ({
 const ev = (at: number, kind: TimelineEvent['kind']): TimelineEvent => ({ at, kind, label: `${kind}@${at}` });
 const history = (over: Partial<History> = {}): History => ({
   range: 'day', from: 0, to: 300, resolutionMs: 100, points: [pt(100, 10), pt(200, 40), pt(300, 20)],
-  events: [ev(190, 'throttle'), ev(290, 'alert'), ev(100, 'throttle')], topConsumers: [], diskTrends: [], boots: [], crashes: [], corePoints: [], ...over,
+  events: [ev(190, 'boot'), ev(290, 'alert'), ev(100, 'boot')], topConsumers: [], diskTrends: [], boots: [], crashes: [], corePoints: [], ...over,
 });
 type Series = { name: string; data: unknown[]; markPoint?: { data: unknown[] }; markLine?: { data: unknown[] }; lineStyle?: { type?: string } };
 const series = (o: unknown) => (o as { series: Series[] }).series;
@@ -27,8 +27,8 @@ describe('nearestValue', () => {
 
 describe('eventCounts', () => {
   it('counts kinds in legend order and omits absent ones', () => {
-    const out = eventCounts([ev(1, 'alert'), ev(2, 'throttle'), ev(3, 'alert'), ev(4, 'throttle'), ev(5, 'throttle')]);
-    expect(out).toEqual([{ kind: 'throttle', count: 3 }, { kind: 'alert', count: 2 }]);
+    const out = eventCounts([ev(1, 'alert'), ev(2, 'boot'), ev(3, 'alert'), ev(4, 'boot'), ev(5, 'boot')]);
+    expect(out).toEqual([{ kind: 'alert', count: 2 }, { kind: 'boot', count: 3 }]);
     expect(eventCounts([])).toEqual([]);
   });
   it('gives every kind a distinct shape', () => {
@@ -49,13 +49,13 @@ describe('historyOption', () => {
     const [cpu, , lane] = series(historyOption(history(), LIGHT)) as [Series, Series, Series];
     expect(cpu.markPoint).toBeUndefined();
     expect(lane.data).toHaveLength(3);
-    expect(lane.data[0]).toMatchObject({ symbol: EVENT_STYLE.throttle.symbol, value: [190, 0.5, 'throttle'] });
+    expect(lane.data[0]).toMatchObject({ symbol: EVENT_STYLE.boot.symbol, value: [190, 0.5, 'boot'] });
     expect(lane.data[1]).toMatchObject({ symbol: 'pin' });
   });
   it('honours hidden kinds', () => {
-    const lane = series(historyOption(history(), LIGHT, new Set(['throttle'])))[2]!;
+    const lane = series(historyOption(history(), LIGHT, new Set(['boot'])))[2]!;
     expect(lane.data).toHaveLength(1);
-    expect(series(historyOption(history(), LIGHT, new Set(['throttle', 'alert'])))[2]!.data).toEqual([]);
+    expect(series(historyOption(history(), LIGHT, new Set(['boot', 'alert'])))[2]!.data).toEqual([]);
   });
   it('fixes the y axis to 0-100% with three gridlines', () => {
     const o = historyOption(history(), LIGHT) as { yAxis: { min?: number; max?: number; interval?: number }[] };

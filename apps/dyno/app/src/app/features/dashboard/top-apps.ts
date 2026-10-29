@@ -4,6 +4,7 @@ import { formatBytes, formatCount, formatPercent } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { LiveStore } from '../../state/live.store';
 import type { AppGroup } from '../../core/api.types';
+import { readValue, UNAVAILABLE } from '../../core/measured';
 
 /** The apps using the most CPU or memory right now, grouped by app ("Chrome · 38"); a click opens them in the task manager. */
 @Component({
@@ -70,10 +71,13 @@ export class TopApps {
   private readonly max = computed(() => Math.max(1, ...this.rows().map((g) => this.raw(g))));
 
   private raw(g: AppGroup): number {
-    return this.metric() === 'cpu' ? g.cpu : g.memory;
+    return readValue(this.metric() === 'cpu' ? g.cpu : g.memory) ?? 0;
   }
   protected value(g: AppGroup): string {
-    return this.metric() === 'cpu' ? formatPercent(g.cpu) : formatBytes(g.memory);
+    const m = this.metric() === 'cpu' ? g.cpu : g.memory;
+    const v = readValue(m);
+    if (v === null) return UNAVAILABLE;
+    return this.metric() === 'cpu' ? formatPercent(v) : formatBytes(v);
   }
   protected share(g: AppGroup): number {
     return (this.raw(g) / this.max()) * 100;

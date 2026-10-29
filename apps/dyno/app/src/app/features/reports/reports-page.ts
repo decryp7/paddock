@@ -52,7 +52,7 @@ import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports
         </div>
       }
 
-      <dy-async [loaded]="!!store.report()" [error]="store.error()" [empty]="!!store.report()?.nothingToReport" emptyTitle="Nothing to report" emptyText="Dyno recorded no history, issues or changes for this week." emptyIcon="reports" what="the report" [rows]="5" (retry)="store.load()">
+      <dy-async [loaded]="!!store.report()" [error]="store.error()" [empty]="!!store.report()?.nothingToReport" emptyTitle="Nothing to report" emptyText="Dyno recorded no history or issues for this week." emptyIcon="reports" what="the report" [rows]="5" (retry)="store.load()">
         <div class="stack">
         @if (store.report(); as r) {
           <p class="range num">{{ range(r) }}</p>
@@ -63,7 +63,6 @@ import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports
             <div><dt>Memory in use</dt><dd>{{ pct(r.avgMemory) }}<small>on average</small></dd></div>
             <div><dt>App crashes</dt><dd>{{ count(r.crashes) }}</dd></div>
             <div><dt>Alerts</dt><dd>{{ count(r.alerts) }}</dd></div>
-            <div><dt>Rule actions</dt><dd>{{ count(r.ruleActions) }}</dd></div>
           </dl>
 
           <section class="card" aria-label="Highlights">
@@ -135,22 +134,6 @@ import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports
             </section>
           }
 
-          <section class="card" aria-label="What changed">
-            <div class="card-head"><h2><dy-icon name="diff" /> What changed</h2></div>
-            <p class="lead">Rules stepped in {{ plural(r.ruleActions, 'time') }}; cleanup freed {{ bytes(r.cleanedBytes) }}.</p>
-            @if (r.changes.length) {
-              <ul class="events">
-                @for (c of r.changes; track c.at + c.title) {
-                  <li>
-                    <span class="t num">{{ day(c.at) }}</span>
-                    <div class="x"><strong>{{ c.title }}</strong><span>{{ c.detail }}</span></div>
-                  </li>
-                }
-              </ul>
-            } @else {
-              <p class="none">You and Dyno changed nothing else this week.</p>
-            }
-          </section>
         }
         </div>
       </dy-async>

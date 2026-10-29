@@ -7,8 +7,9 @@ import { ProcessesPage } from './processes-page';
 
 const NOW = 1_700_000_000_000;
 
-async function make() {
+async function make(tweak?: (m: MockBackend) => void) {
   const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
+  tweak?.(mock);
   TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
   const f = TestBed.createComponent(ProcessesPage);
   const store = TestBed.inject(ProcessesStore);
@@ -34,6 +35,20 @@ describe('ProcessesPage', () => {
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
     expect(el.querySelector('[aria-label="Loading processes"]')).not.toBeNull();
+    f.destroy();
+  });
+  it('shows the Other users row with a one-line note and without a row menu', async () => {
+    expect((await make()).el.querySelector('[data-testid="other-users-note"]')).toBeNull();
+    TestBed.resetTestingModule();
+    const { f, store, el } = await make((m) => {
+      const live = m.liveUpdate.bind(m);
+      m.liveUpdate = (d) => ({ ...live(d), otherUsers: { count: 4, cpu: { value: 2 }, memory: { unavailable: { reason: 'needsAdmin' } }, partial: true } });
+    });
+    store.setMode('flat');
+    f.detectChanges();
+    expect(el.querySelector('[data-testid="other-users-note"]')?.textContent).toContain('4 processes of other accounts');
+    expect(store.rows().find((r) => r.kind === 'other')?.name).toBe('Other users');
+    expect(el.querySelector('[data-key="other-users"] .act button')).toBeNull();
     f.destroy();
   });
   it('the view buttons switch the store mode', async () => {

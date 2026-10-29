@@ -42,7 +42,7 @@
             "browser": "projects/gallery/src/main.ts",
             "polyfills": ["@angular/localize/init"],
             "tsConfig": "projects/gallery/tsconfig.app.json",
-            "styles": ["projects/paddock-ui/css/paddock.css", "projects/paddock-ui/css/controls.css", "projects/gallery/src/styles.css"]
+            "styles": ["projects/paddock-ui/css/paddock.css", "projects/paddock-ui/css/controls.css", "projects/paddock-ui/css/material.css", "projects/gallery/src/styles.css"]
           },
           "configurations": {
             "production": {
@@ -76,7 +76,7 @@
             "browser": "projects/shell-demo/src/main.ts",
             "polyfills": ["@angular/localize/init"],
             "tsConfig": "projects/shell-demo/tsconfig.app.json",
-            "styles": ["projects/paddock-ui/css/paddock.css", "projects/paddock-ui/css/controls.css", "projects/shell-demo/src/styles.css"]
+            "styles": ["projects/paddock-ui/css/paddock.css", "projects/paddock-ui/css/controls.css", "projects/paddock-ui/css/material.css", "projects/shell-demo/src/styles.css"]
           },
           "configurations": {
             "production": {
@@ -111,7 +111,7 @@
             "polyfills": ["@angular/localize/init"],
             "tsConfig": "projects/workbench-demo/tsconfig.app.json",
             "assets": [{ "glob": "**/*", "input": "projects/workbench-demo/public" }],
-            "styles": ["projects/paddock-ui/css/paddock.css", "projects/paddock-ui/css/controls.css", "dockview/dist/styles/dockview.css",
+            "styles": ["projects/paddock-ui/css/paddock.css", "projects/paddock-ui/css/controls.css", "projects/paddock-ui/css/material.css", "dockview/dist/styles/dockview.css",
               "projects/workbench-demo/src/styles.css"]
           },
           "configurations": {

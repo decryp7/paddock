@@ -1,0 +1,86 @@
+### server with defaults
+serving Text("quack:127.0.0.1:20384") (start 1.0 ms)
+## h probe 20384 fd30c3c33d764f9df81ef9156c4b291b /Volumes/d7sst7/dev-targets/target/research-quack/data/probe/probe.txt (load 17.91)
+  PROBE ok   SELECT current_setting('memory_limit') -> Text("183.1 MiB")
+  PROBE ok   SET memory_limit = '2GB' -> 
+  PROBE ok   SELECT current_setting('memory_limit') -> Text("1.8 GiB")
+  PROBE ok   SELECT current_setting('enable_external_access') -> Boolean(true)
+  PROBE ok   SELECT count(*) FROM read_text('/Volumes/d7sst7/dev-targets/target/research-quack/data/probe/probe.txt') -> BigInt(1)
+  PROBE ok   COPY (SELECT 42 AS x) TO 'probe-query.csv' -> BigInt(1)
+  PROBE ok   SELECT count(*) FROM quack_active_connections() -> BigInt(1)
+  PROBE ok   SELECT extension_name FROM duckdb_extensions() WHERE loaded ORDER BY 1 -> Text("autocomplete"), Text("core_functions"), Text("httpfs"), Text("icu"), Text("json"), Text("parquet"), Text("quack")
+  PROBE ok   SELECT count(*) FROM duckdb_settings() -> BigInt(217)
+  PROBE wrong token refused: Invalid Input Error: Authentication failed
+## h probe 20384 fd30c3c33d764f9df81ef9156c4b291b /Volumes/d7sst7/dev-targets/target/research-quack/data/probe/probe.txt (load 17.91)
+  PROBE err  SELECT current_setting('memory_limit') -> INTERNAL Error: PREPARE succeeded but the prepared statement was not registered
+  PROBE err  SET memory_limit = '2GB' -> INTERNAL Error: PREPARE succeeded but the prepared statement was not registered
+  PROBE err  SELECT current_setting('memory_limit') -> INTERNAL Error: PREPARE succeeded but the prepared statement was not registered
+  PROBE err  SELECT current_setting('enable_external_access') -> INTERNAL Error: PREPARE succeeded but the prepared statement was not registered
+  PROBE err  SELECT count(*) FROM read_text('/Volumes/d7sst7/dev-targets/target/research-quack/data/probe/probe.txt') -> INTERNAL Error: PREPARE succeeded but the prepared statement was not registered
+  PROBE err  COPY (SELECT 42 AS x) TO 'probe-connect.csv' -> INTERNAL Error: PREPARE succeeded but the prepared statement was not registered
+  PROBE err  SELECT count(*) FROM quack_active_connections() -> INTERNAL Error: PREPARE succeeded but the prepared statement was not registered
+  PROBE err  SELECT extension_name FROM duckdb_extensions() WHERE loaded ORDER BY 1 -> INTERNAL Error: PREPARE succeeded but the prepared statement was not registered
+  PROBE err  SELECT count(*) FROM duckdb_settings() -> INTERNAL Error: PREPARE succeeded but the prepared statement was not registered
+  PROBE wrong token refused: Invalid Input Error: Authentication failed
+## h probe 20384 fd30c3c33d764f9df81ef9156c4b291b /Volumes/d7sst7/dev-targets/target/research-quack/data/probe/probe.txt (load 17.91)
+  PROBE ok   SELECT current_setting('memory_limit') -> Text("244.1 MiB")
+  PROBE ok   SET memory_limit = '2GB' -> 
+  PROBE ok   SELECT current_setting('memory_limit') -> Text("1.8 GiB")
+  PROBE ok   SELECT current_setting('enable_external_access') -> Boolean(true)
+  PROBE ok   SELECT count(*) FROM read_text('/Volumes/d7sst7/dev-targets/target/research-quack/data/probe/probe.txt') -> BigInt(1)
+  PROBE ok   COPY (SELECT 42 AS x) TO 'probe-attach.csv' -> BigInt(1)
+  PROBE ok   SELECT count(*) FROM quack_active_connections() -> BigInt(0)
+  PROBE ok   SELECT extension_name FROM duckdb_extensions() WHERE loaded ORDER BY 1 -> Text("autocomplete"), Text("core_functions"), Text("httpfs"), Text("icu"), Text("json"), Text("parquet"), Text("quack")
+  PROBE ok   SELECT count(*) FROM duckdb_settings() -> BigInt(217)
+  PROBE wrong token refused: Invalid Input Error: Authentication failed
+  files written by COPY: server folder: probe-connect.csv probe-query.csv ; client folder: probe-attach.csv 
+  server: STATS quack-server peak_rss_mb=60 peak_footprint_mb=23 footprint_mb=23 rss_now_mb=60 cpu_s=0.28
+### server locked (allowed_directories = segments, enable_external_access = false, lock_configuration = true)
+serving Text("quack:127.0.0.1:20384") (start 1.1 ms)
+locked
+## h probe 20384 fd30c3c33d764f9df81ef9156c4b291b /Volumes/d7sst7/dev-targets/target/research-quack/data/probe/probe.txt (load 17.91)
+  PROBE ok   SELECT current_setting('memory_limit') -> Text("183.1 MiB")
+  PROBE err  SET memory_limit = '2GB' -> Invalid Input Error: Cannot change configuration option ""memory_limit"" - the configuration has been locked
+  PROBE ok   SELECT current_setting('memory_limit') -> Text("183.1 MiB")
+  PROBE ok   SELECT current_setting('enable_external_access') -> Boolean(false)
+  PROBE err  SELECT count(*) FROM read_text('/Volumes/d7sst7/dev-targets/target/research-quack/data/probe/probe.txt') -> Permission Error: Cannot access file "/Volumes/d7sst7/dev-targets/target/research-quack/data/probe/probe.txt" - file system operations are disabled by configura
+  PROBE err  COPY (SELECT 42 AS x) TO 'probe-query.csv' -> Permission Error: Cannot access file "probe-query.csv" - file system operations are disabled by configuration
+  PROBE ok   SELECT count(*) FROM quack_active_connections() -> BigInt(1)
+  PROBE err  SELECT extension_name FROM duckdb_extensions() WHERE loaded ORDER BY 1 -> Permission Error: Cannot access directory "/Volumes/d7sst7/dev-targets/target/research-quack/data/ext/v2.0.0/osx_arm64" - file system operations are disabled by
+  PROBE ok   SELECT count(*) FROM duckdb_settings() -> BigInt(217)
+  PROBE wrong token refused: Invalid Input Error: Authentication failed
+## h probe 20384 fd30c3c33d764f9df81ef9156c4b291b /Volumes/d7sst7/dev-targets/target/research-quack/data/probe/probe.txt (load 17.91)
+  PROBE err  SELECT current_setting('memory_limit') -> INTERNAL Error: PREPARE succeeded but the prepared statement was not registered
+  PROBE err  SET memory_limit = '2GB' -> Invalid Input Error: Cannot change configuration option ""memory_limit"" - the configuration has been locked
+  PROBE err  SELECT current_setting('memory_limit') -> INTERNAL Error: PREPARE succeeded but the prepared statement was not registered
+  PROBE err  SELECT current_setting('enable_external_access') -> INTERNAL Error: PREPARE succeeded but the prepared statement was not registered
+  PROBE err  SELECT count(*) FROM read_text('/Volumes/d7sst7/dev-targets/target/research-quack/data/probe/probe.txt') -> Permission Error: Cannot access file "/Volumes/d7sst7/dev-targets/target/research-quack/data/probe/probe.txt" - file system operations are disabled by configura
+  PROBE err  COPY (SELECT 42 AS x) TO 'probe-connect.csv' -> Permission Error: Cannot access file "probe-connect.csv" - file system operations are disabled by configuration
+  PROBE err  SELECT count(*) FROM quack_active_connections() -> INTERNAL Error: PREPARE succeeded but the prepared statement was not registered
+  PROBE err  SELECT extension_name FROM duckdb_extensions() WHERE loaded ORDER BY 1 -> Permission Error: Cannot access directory "/Volumes/d7sst7/dev-targets/target/research-quack/data/ext/v2.0.0/osx_arm64" - file system operations are disabled by
+  PROBE err  SELECT count(*) FROM duckdb_settings() -> INTERNAL Error: PREPARE succeeded but the prepared statement was not registered
+  PROBE wrong token refused: Invalid Input Error: Authentication failed
+## h probe 20384 fd30c3c33d764f9df81ef9156c4b291b /Volumes/d7sst7/dev-targets/target/research-quack/data/probe/probe.txt (load 17.91)
+  PROBE ok   SELECT current_setting('memory_limit') -> Text("244.1 MiB")
+  PROBE ok   SET memory_limit = '2GB' -> 
+  PROBE ok   SELECT current_setting('memory_limit') -> Text("1.8 GiB")
+  PROBE ok   SELECT current_setting('enable_external_access') -> Boolean(true)
+  PROBE ok   SELECT count(*) FROM read_text('/Volumes/d7sst7/dev-targets/target/research-quack/data/probe/probe.txt') -> BigInt(1)
+  PROBE ok   COPY (SELECT 42 AS x) TO 'probe-attach.csv' -> BigInt(1)
+  PROBE ok   SELECT count(*) FROM quack_active_connections() -> BigInt(0)
+  PROBE ok   SELECT extension_name FROM duckdb_extensions() WHERE loaded ORDER BY 1 -> Text("autocomplete"), Text("core_functions"), Text("httpfs"), Text("icu"), Text("json"), Text("parquet"), Text("quack")
+  PROBE ok   SELECT count(*) FROM duckdb_settings() -> BigInt(217)
+  PROBE wrong token refused: Invalid Input Error: Authentication failed
+## h query-quack 20384 fd30c3c33d764f9df81ef9156c4b291b (load 17.91)
+  connect_ms=49.5
+  Q page_rows_500 rows=500 cold_ms=16.5 warm_med_ms=14.2 warm_min_ms=14.0
+  Q errors_page_ids rows=500 cold_ms=19.9 warm_med_ms=19.2 warm_min_ms=18.9
+  Q errors_total rows=1 cold_ms=4.8 warm_med_ms=4.3 warm_min_ms=4.2
+  Q facet_machine rows=50 cold_ms=108.7 warm_med_ms=110.2 warm_min_ms=109.6
+  Q histogram_1000 rows=4329 cold_ms=34.2 warm_med_ms=33.5 warm_min_ms=33.2
+  Q text_total_ilike rows=1 cold_ms=33.7 warm_med_ms=33.0 warm_min_ms=32.8
+  Q text_first_100 rows=100 cold_ms=6.2 warm_med_ms=6.1 warm_min_ms=5.8
+  Q bulk_100k_rows rows=100000 cold_ms=130.7 warm_med_ms=116.7 warm_min_ms=115.6
+  STATS query-quack-client peak_rss_mb=736 peak_footprint_mb=705 footprint_mb=705 rss_now_mb=736 cpu_s=0.93
+  files written by COPY: server folder: ; client folder: probe-attach.csv 
+  server: STATS quack-server peak_rss_mb=690 peak_footprint_mb=651 footprint_mb=651 rss_now_mb=690 cpu_s=6.25

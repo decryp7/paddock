@@ -23,8 +23,6 @@ pub struct Intervals {
 pub struct Load {
     /// A window shows live data at this detail (`None`: no window open).
     pub watching: Option<LiveDetail>,
-    /// An enabled rule needs per-app CPU.
-    pub rules_active: bool,
     /// On battery.
     pub on_battery: bool,
     /// Dyno's agent CPU over the last minute, percent of the machine.
@@ -37,14 +35,10 @@ pub fn intervals(s: Sampling, load: Load) -> Intervals {
     let mut process = s.process_interval_ms.clamp(1_000, 30_000).max(system);
     match load.watching {
         Some(_) => {}
-        // Nobody watching: history needs a point every 5 s, rules need per-app CPU every few seconds.
+        // Nobody watching: history needs a point every 5 s and the process table every 10 s.
         None => {
             system = system.max(2_000);
-            process = if load.rules_active {
-                process.max(3_000)
-            } else {
-                process.max(10_000)
-            };
+            process = process.max(10_000);
         }
     }
     if load.on_battery {
@@ -95,14 +89,6 @@ mod tests {
                 process_ms: 10_000
             }
         );
-        let rules = intervals(
-            Sampling::default(),
-            Load {
-                rules_active: true,
-                ..Default::default()
-            },
-        );
-        assert_eq!(rules.process_ms, 3_000);
         let battery = intervals(
             Sampling::default(),
             Load {

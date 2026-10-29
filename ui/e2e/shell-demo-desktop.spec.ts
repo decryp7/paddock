@@ -141,7 +141,7 @@ test('a dialog window takes its input from the plugin and answers through it', a
     replies: {
       dialog_take_input: { dialogId: 'sd.rename', title: 'Rename', kind: 'form', modality: 'modal', requiredChoice: false, input: { current: 'Greeting' } },
       dialog_close: null,
-      dialog_fit_height: null,
+      dialog_ready: null, dialog_fit: null,
     },
   });
   await app.dialogs.openWindow('sd.rename', { current: 'Greeting' });
@@ -153,7 +153,7 @@ test('a dialog window takes its input from the plugin and answers through it', a
   expect(listens.some((l) => l.target.kind === 'WebviewWindow')).toBe(true);
   await app.dialogs.shell.getByRole('textbox').fill('Hello');
   await app.dialogs.shell.getByRole('button', { name: 'Rename' }).click();
-  await expect.poll(async () => (await ipc.callsOf('dialog_close')).map((c) => c.args)).toEqual([{ result: 'Hello' }]);
+  await expect.poll(async () => (await ipc.callsOf('dialog_close')).map((c) => c.args)).toEqual([{ result: { answered: true, value: 'Hello' } }]);
   // Nothing went to the browser build's answer store.
   expect(await app.dialogs.result()).toBeNull();
 });
@@ -165,7 +165,7 @@ test('Settings > Language restarts the whole app through the shell plugin (plan 
       dialog_take_input: { dialogId: 'pd.settings', title: 'Settings', kind: 'tool', modality: 'modeless', requiredChoice: false, input: { page: 'pd.language' } },
       settings_overview: SETTINGS_OVERVIEW_FIXTURE,
       dialog_close: null,
-      dialog_fit_height: null,
+      dialog_ready: null, dialog_fit: null,
       app_relaunch: null,
     },
   });

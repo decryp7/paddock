@@ -117,6 +117,8 @@ development and UI tests only; features are not done until they work against the
 
 ## Working practices
 
+- Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
+  `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
 - Research official sources before choosing models or libraries; record what you found and when in the ADR.
 - Navigate code with Serena's symbol tools when available. Delegate mechanical work to cheaper models; keep
   architecture and review on the main model.

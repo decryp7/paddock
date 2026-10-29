@@ -14,6 +14,8 @@ tauri = ["dep:tauri", "paddock-commands/tauri", "paddock-jobs/tauri", "paddock-f
 
 [dependencies]
 paddock-commands = { workspace = true }
+# The dialog contracts of this crate (`dialogs!`, ADR 0026 §3).
+paddock-dialogs = { workspace = true }
 paddock-env = { workspace = true }
 paddock-jobs = { workspace = true }
 paddock-files = { workspace = true }

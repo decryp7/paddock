@@ -1,0 +1,23 @@
+{
+  "reasons": ["needsAdmin", "notPermitted", "notSupported", "residentMemoryOnly"],
+  "process": {
+    "pid": 2,
+    "parent": 1,
+    "name": "b.exe",
+    "exe": null,
+    "user": { "value": "me" },
+    "cpu": { "unavailable": { "reason": "needsAdmin" } },
+    "memory": { "value": 5 },
+    "diskReadBps": { "value": 0.0 },
+    "diskWriteBps": { "unavailable": { "reason": "notPermitted" } },
+    "started": { "value": 2000 },
+    "owner": "other",
+    "state": "running"
+  },
+  "otherUsers": {
+    "count": 3,
+    "cpu": { "value": 4.5 },
+    "memory": { "unavailable": { "reason": "needsAdmin" } },
+    "partial": true
+  }
+}

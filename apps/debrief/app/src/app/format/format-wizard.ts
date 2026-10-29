@@ -136,7 +136,7 @@ const PARTS: { id: FormatPart; label: string }[] = [
     .box[role=textbox] { user-select: text; cursor: text; }
     .preview { max-height: 200px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; font-size: var(--fs-sm); }
     .prow { display: grid; grid-template-columns: 220px 60px minmax(0, 1fr); gap: 8px; padding: 3px 8px; border-bottom: 1px solid var(--border); }
-    .prow.head { position: sticky; top: 0; background: var(--bg-3); color: var(--muted); font-weight: 600; }
+    .prow.head { position: sticky; top: 0; z-index: 3; background: var(--bg-3); color: var(--muted); font-weight: 600; }
     .hl[data-part=timestamp] { background: color-mix(in srgb, var(--accent) 25%, transparent); }
     .hl[data-part=level] { background: color-mix(in srgb, var(--lvl-warn) 30%, transparent); }
     .hl[data-part=message] { background: color-mix(in srgb, var(--mk-start) 25%, transparent); }

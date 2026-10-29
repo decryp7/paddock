@@ -100,9 +100,9 @@ fn reveal() -> crate::agent::Reveal {
 }
 
 /// The OS ports, and a second process source for on-demand details.
-fn platforms(dirs: &Dirs) -> (dyno_platform::Platform, Box<dyn dyno_core::ports::ProcessSource>) {
-    let platform = dyno_platform::platform_with(dirs.process_control());
-    let details = dyno_platform::platform_with(dirs.root().join("process-control-details.json")).processes;
+fn platforms() -> (dyno_platform::Platform, Box<dyn dyno_core::ports::ProcessSource>) {
+    let platform = dyno_platform::platform();
+    let details = dyno_platform::platform().processes;
     (platform, details)
 }
 
@@ -113,8 +113,8 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
     install_signal_handlers();
-    let (platform, details) = platforms(&dirs);
-    let running = Running::start(dirs, platform, details, reveal())?;
+    let (platform, details) = platforms();
+    let running = Running::start_os(dirs, platform, details, reveal())?;
     eprintln!("dyno-agent {} running (pid {})", env!("CARGO_PKG_VERSION"), running.discovery.pid);
     while !running.stopped() && !SIGNALLED.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(200));
@@ -145,7 +145,7 @@ fn stop() -> Result<(), String> {
 }
 
 fn once() -> Result<(), String> {
-    let mut p = dyno_platform::platform_with(std::env::temp_dir().join("dyno-once-state.json"));
+    let mut p = dyno_platform::platform();
     let t = crate::agent::now();
     p.sensors.sample(t);
     std::thread::sleep(Duration::from_millis(1_000));
@@ -193,8 +193,8 @@ fn bench(seconds: u64, who: &str) -> Result<(), String> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
     let tmp = tempfile_dir()?;
     let dirs = Dirs::at(tmp.join("data"));
-    let (platform, details) = platforms(&dirs);
-    let running = Running::start(dirs.clone(), platform, details, Box::new(|_| Ok(())))?;
+    let (platform, details) = platforms();
+    let running = Running::start_os(dirs.clone(), platform, details, Box::new(|_| Ok(())))?;
     let (peer, _) = connect(&dirs)?;
     let seen = Arc::new(Mutex::new((0u64, 0f32, 0u64)));
     let s = seen.clone();

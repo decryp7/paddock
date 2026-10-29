@@ -159,7 +159,7 @@ import { plural } from '../i18n/locale';
     .err { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--danger-text); background: var(--bg-3); color: var(--danger-text); font-size: var(--fs-sm); display: flex; flex-direction: column; gap: 2px; }
     .note { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--ok); background: var(--bg-3); font-size: var(--fs-sm); }
     .scroll { scroll-padding-bottom: 56px; }
-    .footer { position: sticky; bottom: 0; z-index: 1; background: var(--bg-1); padding: 8px 0; margin-top: 4px; border-top: 1px solid var(--border); align-items: center; }
+    .footer { position: sticky; bottom: 0; z-index: 3; background: var(--bg-1); padding: 8px 0; margin-top: 4px; border-top: 1px solid var(--border); align-items: center; }
   `,
 })
 export class SchedulesView implements OnInit {

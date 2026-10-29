@@ -329,7 +329,7 @@ pub fn validate_export_path(path: &str) -> Result<std::path::PathBuf, String> {
     if !p.is_absolute() {
         return Err("Give the full path of the file to save.".into());
     }
-    if crate::cleanup::has_dot_segment(p) {
+    if crate::disk::has_dot_segment(p) {
         return Err("The save path may not contain \"..\".".into());
     }
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_ascii_lowercase();

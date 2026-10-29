@@ -16,6 +16,7 @@ publish = false
 
 ### BEGIN HAKARI SECTION
 [dependencies]
+aho-corasick = { version = "1" }
 base64 = { version = "0.23" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 crc32fast = { version = "1" }
@@ -64,7 +65,7 @@ block2 = { version = "0.6" }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4", default-features = false, features = ["std", "sys_rng"] }
 libc = { version = "0.2", features = ["extra_traits"] }
 objc2 = { version = "0.6" }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAccessibilityProtocols", "NSAlert", "NSAnimation", "NSAppearance", "NSApplication", "NSAttributedString", "NSButton", "NSColor", "NSColorPanel", "NSControl", "NSController", "NSDragging", "NSEvent", "NSImage", "NSInputManager", "NSKeyValueBinding", "NSLayoutManager", "NSMenu", "NSMenuItem", "NSOpenPanel", "NSPanel", "NSPasteboard", "NSPopover", "NSPrintInfo", "NSPrintOperation", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSSpellProtocol", "NSText", "NSTextContainer", "NSTextContent", "NSTextFinder", "NSTextInputClient", "NSTextView", "NSUserInterfaceItemIdentification", "NSUserInterfaceValidation", "NSView", "NSWindow", "block2", "std"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAccessibilityProtocols", "NSAlert", "NSAnimation", "NSAppearance", "NSApplication", "NSAttributedString", "NSButton", "NSColor", "NSColorPanel", "NSControl", "NSController", "NSDragging", "NSEvent", "NSGraphics", "NSImage", "NSInputManager", "NSKeyValueBinding", "NSLayoutManager", "NSMenu", "NSMenuItem", "NSOpenPanel", "NSPanel", "NSPasteboard", "NSPopover", "NSPrintInfo", "NSPrintOperation", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSSpellProtocol", "NSText", "NSTextContainer", "NSTextContent", "NSTextFinder", "NSTextInputClient", "NSTextView", "NSUserInterfaceItemIdentification", "NSUserInterfaceValidation", "NSView", "NSWindow", "block2", "std"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["CFArray", "CFAttributedString", "CFBase", "CFCGTypes", "CFCalendar", "CFCharacterSet", "CFData", "CFDate", "CFDictionary", "CFError", "CFFileSecurity", "CFLocale", "CFMachPort", "CFMessagePort", "CFNumber", "CFPlugInCOM", "CFRunLoop", "CFSet", "CFStream", "CFString", "CFURL", "CFUUID", "CFUserNotification", "objc2", "std"] }
 objc2-foundation = { version = "0.3" }
 rustix = { version = "1", features = ["fs"] }
@@ -83,6 +84,7 @@ time = { version = "0.3", features = ["formatting", "macros", "parsing", "serde"
 [target.x86_64-unknown-linux-gnu.dependencies]
 bitflags = { version = "2", default-features = false, features = ["std"] }
 cairo-sys-rs = { version = "0.18", default-features = false, features = ["use_glib"] }
+crossbeam-utils = { version = "0.8", default-features = false, features = ["std"] }
 digest = { version = "0.11", features = ["alloc", "mac", "oid"] }
 futures-core = { version = "0.3" }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4", default-features = false, features = ["std", "sys_rng"] }

@@ -1,0 +1,1 @@
+{"name":"fixture","private":true,"workspaces":["ui","eslint","apps/x/app","apps/y/app"]}

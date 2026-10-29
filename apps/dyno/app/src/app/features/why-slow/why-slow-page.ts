@@ -1,19 +1,17 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
-import { ComingDialog } from '../../shell/coming-dialog';
-import type { Cause, Diagnosis, Suggestion } from '../../core/api.types';
+import { RouterLink } from '@angular/router';
+import type { Cause, Diagnosis } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
-import { Dialogs } from '../../shared/dialog';
 import { formatDayTime, formatFraction } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { CAUSE_ICON } from '../../shared/labels';
 import { Notifier } from '../../shared/notifier';
 import { DiagnosisStore } from '../../state/diagnosis.store';
-import { causeLinks, diagnosisText, fixPreview, historyLine, windowText } from './why-slow-model';
+import { causeLinks, diagnosisText, hintPath, historyLine, windowText } from './why-slow-model';
 
 /**
  * "Why is my PC slow?" in full: the engine's likeliest causes with what was measured, the apps behind each, pages to look
- * closer, and the fixes it proposes. Every fix asks first; nothing changes until you click it.
+ * closer, and hints in words. Dyno only looks: nothing here changes the computer.
  */
 @Component({
   selector: 'dy-why-slow-page',
@@ -24,7 +22,7 @@ import { causeLinks, diagnosisText, fixPreview, historyLine, windowText } from '
       <header class="page-head">
         <div class="titles">
           <h1>Why is my PC slow?</h1>
-          <p>Dyno weighs CPU, memory, disk, heat and background work together. It only suggests; nothing changes until you click.</p>
+          <p>Dyno weighs CPU, memory, disk, heat and background work together. It only looks; Dyno changes nothing on your computer.</p>
         </div>
         <button type="button" class="btn" [disabled]="!shown()" (click)="copy()"><dy-icon name="copy" /> Copy as text</button>
         <button type="button" class="btn primary" [disabled]="store.running()" (click)="store.run()">
@@ -89,11 +87,11 @@ import { causeLinks, diagnosisText, fixPreview, historyLine, windowText } from '
                 <a class="btn sm ghost" [routerLink]="l.path"><dy-icon [name]="l.icon" /> {{ l.label }}</a>
               }
               <span class="spacer"></span>
-              @for (s of c.suggestions; track s.label) {
-                @if (isWait(s)) {
-                  <span class="wait">{{ s.label }}: waiting is enough</span>
+              @for (h of c.hints; track h.text) {
+                @if (hintPath(h); as path) {
+                  <a class="btn sm" [routerLink]="path">{{ h.text }}</a>
                 } @else {
-                  <button type="button" class="btn sm" [class.primary]="i === 0 && isProcess(s)" (click)="take(s)">{{ s.label }}</button>
+                  <span class="wait">{{ h.text }}</span>
                 }
               }
             </div>
@@ -167,8 +165,6 @@ import { causeLinks, diagnosisText, fixPreview, historyLine, windowText } from '
 })
 export class WhySlowPage implements OnInit {
   protected readonly store = inject(DiagnosisStore);
-  private readonly router = inject(Router);
-  private readonly dialogs = inject(Dialogs);
   private readonly notifier = inject(Notifier);
 
   /** An earlier result the person picked from the history (null = the latest). */
@@ -198,13 +194,7 @@ export class WhySlowPage implements OnInit {
     this.selected.set(index === 0 ? null : d);
   }
 
-  protected isWait(s: Suggestion): boolean {
-    return s.action === 'wait';
-  }
-
-  protected isProcess(s: Suggestion): boolean {
-    return typeof s.action === 'object';
-  }
+  protected readonly hintPath = hintPath;
 
   protected async copy(): Promise<void> {
     const d = this.shown();
@@ -215,18 +205,5 @@ export class WhySlowPage implements OnInit {
     } catch {
       this.notifier.show('Dyno could not reach the clipboard. Select the text on the page instead.', 'warn');
     }
-  }
-
-  /** A fix that changes a process shows exactly what it will do and waits for a second click; the rest only navigate. */
-  protected async take(s: Suggestion): Promise<void> {
-    const a = s.action;
-    if (typeof a === 'object') {
-      const p = fixPreview(s);
-      if (p && !(await this.dialogs.confirm({ title: p.title, message: p.message, details: p.details, danger: p.danger, confirmLabel: p.confirmLabel }))) return;
-      await this.store.act(a.process.target, a.process.action);
-    } else if (a === 'openCleanup') this.dialogs.open(ComingDialog);
-    else if (a === 'openTaskManager') void this.router.navigateByUrl('/processes');
-    else if (a === 'openStartup') void this.router.navigateByUrl('/health');
-    else if (a === 'restart') this.notifier.show('Restart when it suits you. Dyno never restarts your PC for you.');
   }
 }

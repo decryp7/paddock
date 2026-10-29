@@ -14,6 +14,7 @@
 /// The sample background agent (plan X4): the `shell-demo-agent` crate.
 pub use shell_demo_agent as agent;
 pub mod commands;
+pub mod dialogs;
 pub mod engine;
 pub mod mcp;
 pub mod packs;
@@ -43,9 +44,7 @@ pub const APP_NAME: &str = "Paddock Shell Demo";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Where the releases are (About's "Release notes", Updates' "Open the releases page").
 pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/paddock/releases";
-/// The demo's generated dialog contracts and manifest, written by the UI's specs from its registry.
-pub const DIALOG_CONTRACTS: &str =
-    include_str!("../../../../ui/projects/shell-demo/dialog-contracts.json");
+/// The demo's manifest, written by the UI's specs from its registry.
 pub const MANIFEST: &str = include_str!("../../../../ui/projects/shell-demo/paddock-manifest.json");
 
 paddock_commands::command_table! {
@@ -174,7 +173,7 @@ pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Build
     let os_settings = SharedOsSettings::default();
     let mut builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))
         .app_commands(&COMMANDS)
-        .dialog_contracts(DIALOG_CONTRACTS)
+        .dialogs(&[&dialogs::DIALOGS])
         .health({
             let mut services = engine::services(tick);
             services.push(paddock_health::ServiceSpec::new(

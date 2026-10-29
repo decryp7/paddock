@@ -9,6 +9,7 @@ import {
 } from '@decryp7/paddock-ui/shell';
 import type { ProvidersLoader } from '@decryp7/paddock-ui/shell';
 import type { AboutCommand } from '../generated/about-commands';
+import { DIALOG_CONTRACTS } from '../generated/dialog-contracts';
 
 // The About part's contributions: static data and loaders only (lazy by construction, plan §9). Each dialog's component
 // and the providers its window needs are chunks of their own.
@@ -18,18 +19,10 @@ export const ABOUT_DIALOG_IDS = { about: 'pd.about', updates: 'pd.updates', what
 
 /** What each dialog's window may call (its contract; Rust's guard allows exactly these). */
 export const ABOUT_DIALOG_COMMANDS = {
-  about: ['about_info', 'about_legal'],
-  updates: [
-    'updates_status',
-    'updates_check',
-    'updates_download',
-    'updates_cancel',
-    'updates_install_on_quit',
-    'updates_restart',
-    'updates_set_preferences',
-  ],
-  whatsNew: ['about_whats_new'],
-} as const satisfies Record<keyof typeof ABOUT_DIALOG_IDS, readonly AboutCommand[]>;
+  about: DIALOG_CONTRACTS[ABOUT_DIALOG_IDS.about].commands,
+  updates: DIALOG_CONTRACTS[ABOUT_DIALOG_IDS.updates].commands,
+  whatsNew: DIALOG_CONTRACTS[ABOUT_DIALOG_IDS.whatsNew].commands,
+} as const satisfies Record<keyof typeof ABOUT_DIALOG_IDS, readonly (AboutCommand | 'files_open_url')[]>;
 
 export interface AboutDialogsOptions {
   /**
@@ -42,29 +35,18 @@ export interface AboutDialogsOptions {
 /** The three dialogs (ADR 0009 kinds): About and What's New are viewers, Updates is a tool kept open beside the work. */
 export function defineAboutDialogs(options: AboutDialogsOptions): readonly [DialogDef, DialogDef, DialogDef] {
   return [
-    defineDialog({
-      id: ABOUT_DIALOG_IDS.about,
-      kind: 'viewer',
+    defineDialog(DIALOG_CONTRACTS[ABOUT_DIALOG_IDS.about], {
       title: msg('pd.about.title', 'About'),
-      commands: ABOUT_DIALOG_COMMANDS.about,
       providers: options.providers,
       load: () => import('./about-dialog').then((m) => m.PdAboutDialog),
     }),
-    defineDialog({
-      id: ABOUT_DIALOG_IDS.updates,
-      kind: 'tool',
+    defineDialog(DIALOG_CONTRACTS[ABOUT_DIALOG_IDS.updates], {
       title: msg('pd.updates.title', 'Updates'),
-      width: 560,
-      height: 480,
-      commands: ABOUT_DIALOG_COMMANDS.updates,
       providers: options.providers,
       load: () => import('./updates-dialog').then((m) => m.PdUpdatesDialog),
     }),
-    defineDialog({
-      id: ABOUT_DIALOG_IDS.whatsNew,
-      kind: 'viewer',
+    defineDialog(DIALOG_CONTRACTS[ABOUT_DIALOG_IDS.whatsNew], {
       title: msg('pd.whats-new.title', 'What’s new'),
-      commands: ABOUT_DIALOG_COMMANDS.whatsNew,
       providers: options.providers,
       load: () => import('./whats-new-dialog').then((m) => m.PdWhatsNewDialog),
     }),

@@ -1,3 +1,4 @@
+import { answered, DISMISSED } from '@decryp7/paddock-ui/shell';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
@@ -55,11 +56,11 @@ class FakeDialogs {
     const inputs = options.inputs ?? {};
     this.opened.push({ id, inputs });
     const closed = (async () => {
-      if (id === CHANNELS_REMOVE_DIALOG_ID) return this.removeAnswer;
+      if (id === CHANNELS_REMOVE_DIALOG_ID) return this.removeAnswer === undefined ? DISMISSED : answered(this.removeAnswer);
       if (this.answer) await this.memory.setSecret(String(inputs['channelId']), 'typed-elsewhere');
-      return this.answer;
+      return this.answer === undefined ? DISMISSED : answered(this.answer);
     })();
-    return { closed, close: () => undefined };
+    return { closed, dismiss: () => undefined };
   }
 }
 
@@ -100,7 +101,8 @@ describe('the Notification channels page', () => {
     const q = (id: string): HTMLElement | null => el.querySelector(`[data-testid="${id}"]`);
     const click = async (target: string | HTMLElement | null): Promise<void> => {
       const node = typeof target === 'string' ? q(target) : target;
-      (node as HTMLElement).click();
+      // A Material toggle or checkbox is a host: the user clicks the real control inside it.
+      ((node as HTMLElement).querySelector<HTMLElement>('input, button[role="switch"]') ?? (node as HTMLElement)).click();
       await flush();
     };
     const type = async (id: string, value: string): Promise<void> => {
@@ -163,14 +165,15 @@ describe('the Notification channels page', () => {
 
   it('has one primary button, icon buttons with names and tooltips, and a labelled table', async () => {
     const p = await open();
-    expect(p.el.querySelectorAll('.pd-ch__btn--primary')).toHaveLength(1);
+    expect(p.el.querySelectorAll('button[matButton="filled"], button.mat-mdc-unelevated-button')).toHaveLength(1);
     expect(text(p.q('channel-add')!)).toBe('Add channel');
     const edit = p.rowButton('slack', 'channel-edit');
     const test = p.rowButton('slack', 'channel-test');
     const remove = p.rowButton('slack', 'channel-remove');
     expect([edit, test, remove].map((b) => b.getAttribute('aria-label'))).toEqual(['Edit Slack', 'Send a test to Slack', 'Remove Slack']);
     for (const b of [edit, test, remove]) {
-      expect(b.getAttribute('title')).toBe(b.getAttribute('aria-label'));
+      expect(b.getAttribute('aria-label')).not.toBe('');
+      expect(b.hasAttribute('title')).toBe(false);
       expect(b.querySelector('pd-glyph')).not.toBeNull();
     }
     expect(p.el.querySelector('section')?.getAttribute('aria-labelledby')).toBe('pd-ch-title');
@@ -183,7 +186,7 @@ describe('the Notification channels page', () => {
     expect(p.q('channels-empty')).not.toBeNull();
     expect(p.q('channels-table')).toBeNull();
     expect(p.q('channel-add')).toBeNull();
-    expect(p.el.querySelectorAll('.pd-ch__btn--primary')).toHaveLength(1);
+    expect(p.el.querySelectorAll('button[matButton="filled"], button.mat-mdc-unelevated-button')).toHaveLength(1);
     await p.click('channel-add-empty');
     expect(p.q('channel-editor')).not.toBeNull();
     expect(document.activeElement).toBe(p.q('channel-name'));
@@ -454,10 +457,10 @@ describe('the Notification channels page', () => {
     // Every control has a name: fields are labelled, switches say what they switch.
     await p.click('channel-add');
     for (const input of p.q('channel-editor')!.querySelectorAll('input, textarea, button')) {
-      const name = input.getAttribute('aria-label') ?? text(input.closest('label') ?? input) ?? '';
+      const name = input.getAttribute('aria-label') ?? text(input.closest('label, mat-slide-toggle') ?? input) ?? '';
       expect(name, input.outerHTML).not.toBe('');
     }
-    expect(p.q('channel-enabled')!.getAttribute('role')).toBe('switch');
+    expect(p.q('channel-enabled')!.querySelector('button')!.getAttribute('role')).toBe('switch');
   });
 
   it('keeps the page working when the editor is opened over a failed save and dismisses the old failure', async () => {

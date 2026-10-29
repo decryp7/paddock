@@ -177,7 +177,7 @@ mod tests {
         folder(
             root,
             "good",
-            "id = \"good\"\nname = \"Good\"\nversion = \"1.0\"\napi_version = 1\ncontributes = [\"sensors\", \"cleanup\"]\n",
+            "id = \"good\"\nname = \"Good\"\nversion = \"1.0\"\napi_version = 1\ncontributes = [\"sensors\"]\n",
             Some(&exe("good")),
         );
         folder(
@@ -238,7 +238,7 @@ mod tests {
         let (found, invalid) = discover(root);
         let ids: Vec<_> = found.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["good", "named"]);
-        assert_eq!(found[0].contributes, vec![Contribution::Sensors, Contribution::Cleanup]);
+        assert_eq!(found[0].contributes, vec![Contribution::Sensors]);
         assert!(found[1].executable.ends_with(exe("bin-x")));
         let why = |f: &str| invalid.iter().find(|i| i.folder == f).map(|i| i.error.clone()).unwrap();
         assert!(why("mismatch").contains("must match the folder"));

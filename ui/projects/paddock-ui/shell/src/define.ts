@@ -1,8 +1,9 @@
 import type { DialogSize } from '../generated/dialogs';
+import { DIALOG_KIND_TABLE, DIALOG_MIN_SIZE, type DialogWidthStep } from '../generated/dialog-kinds';
 import type { ShellContext } from './context';
 import type { ComponentLoader, LazyPart, ProvidersLoader } from './lazy';
 import type { Message } from './message';
-import type { IpcCommandName, TypeToken } from './types';
+import type { TypeToken } from './types';
 
 /*
  * The contribution kinds of the shell (ADR 0012 §2). Each `define*` returns a frozen value and validates nothing: every
@@ -116,76 +117,70 @@ export interface SettingsPageDef<T extends object = object> extends Omit<LazyPar
   readonly when?: Live<T, boolean>;
 }
 
-/** The dialog kinds of ADR 0009. Each fixes what the shell applies (modality, size policy, footer, keys; plan S6). */
+/** The dialog kinds of ADR 0009. Each fixes what the shell applies (modality, size policy, footer, keys; ADR 0026 §1). */
 export const DIALOG_KINDS = ['decision', 'form', 'viewer', 'tool'] as const;
 export type DialogKind = (typeof DIALOG_KINDS)[number];
 export type DialogModality = 'modal' | 'modeless';
 
-/** The modalities each kind allows: one entry means the kind decides, two means the dialog declares it. */
+/** The modalities each kind allows (from the generated kind table: Rust is the source). */
 export const KIND_MODALITIES: Readonly<Record<DialogKind, readonly DialogModality[]>> = {
-  decision: ['modal'],
-  form: ['modal', 'modeless'],
-  viewer: ['modeless'],
-  tool: ['modeless'],
+  decision: DIALOG_KIND_TABLE.decision.modalities,
+  form: DIALOG_KIND_TABLE.form.modalities,
+  viewer: DIALOG_KIND_TABLE.viewer.modalities,
+  tool: DIALOG_KIND_TABLE.tool.modalities,
 };
 
-/** What `defineDialog` takes: the whole contract of one dialog window. `C` is the content component (its `input()`s type `open`'s inputs). */
-export interface DialogSpec<Id extends string, R, Cmd extends string, C = unknown> {
+/**
+ * One dialog's contract as Rust declares it (ADR 0026 §3): an entry of an owner's generated `DIALOG_CONTRACTS`
+ * (`paddock_dialogs::dialogs!`). Kind, modality, size and commands are never written in TypeScript.
+ */
+export interface DialogContractData<Id extends string = string, Cmd extends string = string> {
   /** Stable, namespaced id: the dialog window's route, its remembered bounds' key, its test id. */
   readonly id: Id;
   readonly kind: DialogKind;
-  /** Only a `form` chooses; the other kinds decide. */
-  readonly modality?: DialogModality;
-  readonly title: Message;
-  /** Opening size in logical px; the kind supplies the rest (plan S6). */
-  readonly width?: number;
-  readonly height?: number;
-  /** Never smaller than this; must not exceed the opening size. */
-  readonly minWidth?: number;
-  readonly minHeight?: number;
+  readonly modality: DialogModality;
+  /** The width it opens at, logical px. */
+  readonly width: number;
+  /** `narrow`, `medium` or `wide`; `null` for a tool's own number. */
+  readonly widthStep: DialogWidthStep | null;
+  /** The preferred height of a viewer or a tool, logical px; `null`: measured (a decision or a form). */
+  readonly height: number | null;
   /** Each distinct input is its own window; without it, one window per id. */
-  readonly instanced?: boolean;
-  /** A modal without a Cancel: Escape and close requests leave it open. */
-  readonly requiredChoice?: boolean;
-  /** What the opener's promise resolves to. */
+  readonly instanced: boolean;
+  /** A modal without a way out: no dismiss action; Escape and close requests leave it open. */
+  readonly requiredChoice: boolean;
+  /** Every IPC command the dialog's window may call beyond the base set; a trailing `*` is a prefix. */
+  readonly commands: readonly Cmd[];
+}
+
+/** What only TypeScript knows of a dialog: its title, typed result, component and providers. `C` is the content component. */
+export interface DialogUi<R, C = unknown> {
+  readonly title: Message;
+  /** What the opener's answer carries. */
   readonly result?: TypeToken<R>;
-  /**
-   * Every IPC command the dialog's window may call beyond the kind's and the app's base set; a trailing `*` is a prefix.
-   * Rust's guard allows exactly these (from the manifest).
-   */
-  readonly commands: readonly (Cmd | `${string}*`)[];
   /** The providers the dialog's window boots besides the shell's base set (rule 34). */
   readonly providers?: ProvidersLoader;
   /** The content component, loaded in the dialog's window only. */
   readonly load: ComponentLoader<C>;
 }
 
-/** A defined dialog. `modality` is resolved from the kind when the kind decides (left as declared otherwise). */
-export interface DialogDef<Id extends string = string, R = unknown, Cmd extends string = string, C = unknown> extends DialogSpec<Id, R, Cmd, C> {
-  readonly modality: DialogModality;
-}
+/** A defined dialog: its Rust contract and its TypeScript part. */
+export interface DialogDef<Id extends string = string, R = unknown, Cmd extends string = string, C = unknown>
+  extends DialogContractData<Id, Cmd>,
+    DialogUi<R, C> {}
 
 /** The least a dialog window can be (`DIALOG_MIN` in `paddock-dialogs`). */
-export const DIALOG_MIN: Readonly<DialogSize> = Object.freeze({ width: 320, height: 200 });
-/** The viewer floor: results open at about 680x560 and only grow (`VIEWER_MIN`). */
-export const VIEWER_MIN: Readonly<DialogSize> = Object.freeze({ width: 680, height: 560 });
+export const DIALOG_MIN: Readonly<DialogSize> = Object.freeze({ ...DIALOG_MIN_SIZE });
+/** The viewer floor (`VIEWER_MIN`). */
+export const VIEWER_MIN: Readonly<DialogSize> = Object.freeze({ ...DIALOG_KIND_TABLE.viewer.minSize });
 
-/** The smallest window of each kind (the viewer floor), or none (ADR 0009 §1, `Kind::policy` in Rust). */
-export const KIND_MIN_SIZE: Readonly<Record<DialogKind, Readonly<DialogSize> | null>> = Object.freeze({ decision: null, form: null, viewer: VIEWER_MIN, tool: null });
-
-/**
- * A dialog's minimum window size as the manifest and the contract file state it: the declared minimum raised to the
- * kind's floor, a side left out taking the least a dialog can be (`DIALOG_MIN`). `null` when neither the dialog nor its
- * kind states one (Rust then applies `DIALOG_MIN`). Pure.
- */
-export function dialogMinSize(d: Pick<DialogSpec<string, unknown, string>, 'kind' | 'minWidth' | 'minHeight'>): DialogSize | null {
-  const floor = KIND_MIN_SIZE[d.kind] ?? null;
-  if (d.minWidth === undefined && d.minHeight === undefined && !floor) return null;
-  return {
-    width: Math.max(d.minWidth ?? 0, floor?.width ?? 0, DIALOG_MIN.width),
-    height: Math.max(d.minHeight ?? 0, floor?.height ?? 0, DIALOG_MIN.height),
-  };
-}
+/** The smallest window of each kind (the viewer floor), or none (from the generated kind table). */
+export const KIND_MIN_SIZE: Readonly<Record<DialogKind, Readonly<DialogSize> | null>> = Object.freeze({
+  decision: DIALOG_KIND_TABLE.decision.minSize,
+  form: DIALOG_KIND_TABLE.form.minSize,
+  viewer: VIEWER_MIN,
+  tool: DIALOG_KIND_TABLE.tool.minSize,
+});
 
 /** A service whose health the shell shows (chip, notifications; plan S4). Rust has a supervisor of the same id. */
 export interface HealthServiceDef {
@@ -235,16 +230,14 @@ export function defineSettingsPage<T extends object = object>(spec: SettingsPage
 }
 
 /**
- * Declares one dialog window. `Cmd` is the app's generated IPC command union once it is registered in `ShellTypes`
- * (`string` until then), so a contract naming a command that does not exist fails to compile.
+ * Declares one dialog window from its Rust contract (`DIALOG_CONTRACTS['<id>']`, generated from the owner's `dialogs!`
+ * table) and what only TypeScript knows: `defineDialog(DIALOG_CONTRACTS['pw.quit'], { title, result: type<QuitChoice>(), load })`.
  */
-export function defineDialog<const Id extends string, R = void, Cmd extends string = IpcCommandName, C = unknown>(
-  spec: DialogSpec<Id, R, Cmd, C>,
+export function defineDialog<const Id extends string, R = void, Cmd extends string = string, C = unknown>(
+  contract: DialogContractData<Id, Cmd>,
+  ui: DialogUi<R, C>,
 ): DialogDef<Id, R, Cmd, C> {
-  const allowed = KIND_MODALITIES[spec.kind] as readonly DialogModality[] | undefined;
-  // Only an unambiguous kind decides; a form without a modality keeps none here and the lint reports it.
-  const modality = spec.modality ?? (allowed?.length === 1 ? allowed[0] : undefined);
-  return frozen({ ...spec, modality: modality as DialogModality, commands: Object.freeze([...spec.commands]) });
+  return frozen({ ...contract, commands: Object.freeze([...contract.commands]), ...ui });
 }
 
 export function defineHealthService(spec: HealthServiceDef): HealthServiceDef {
