@@ -59,7 +59,12 @@ test.describe('pop-out windows', () => {
   test('Dock back returns the panel to where it was', async ({ page, context }) => {
     const popup = await popOut(page, context, 'Inspector');
     const closed = popup.waitForEvent('close');
-    await popup.getByRole('button', { name: 'Dock back into the main window' }).click();
+    // The click closes the window it is made in: when the window is gone before Playwright has the click's result, the click
+    // rejects with "Target page, context or browser has been closed" (seen once in CI, run 6846). That is the click working; any
+    // other failure of it, with the window still open, is real.
+    await popup.getByRole('button', { name: 'Dock back into the main window' }).click().catch((e: unknown) => {
+      if (!popup.isClosed()) throw e;
+    });
     await closed;
     await expect(tab(page, 'Inspector')).toBeVisible();
     // Back on the right of the timeline and the document beside it, as before.

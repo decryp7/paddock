@@ -32,7 +32,8 @@ test.describe('tab overflow list', () => {
     await expect(chip(page)).toHaveAttribute('title', /^\d+ more tabs$/);
     await chip(page).click();
     await expect(list(page)).toBeVisible();
-    expect(await topmostIsInside(page, '.dv-tabs-overflow-container')).toBe(true);
+    // The list is placed after it is shown (the layout settles first): wait for it to be on top, never read once.
+    await expect.poll(() => topmostIsInside(page, '.dv-tabs-overflow-container')).toBe(true);
     // Whichever tab the strip's width hides first (the width is the plan's, not this test's).
     const hidden = list(page).locator('.dv-tab').first();
     const name = ((await hidden.innerText()) ?? '').replace(/[▾×]/g, '').replace('📌', '').trim();
