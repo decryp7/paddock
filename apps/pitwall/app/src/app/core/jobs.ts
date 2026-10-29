@@ -18,7 +18,7 @@ export interface JobRow {
   cancellable: boolean;
   notCancellableReason: string | null;
   canStopWaiting: boolean;
-  /** Cancel was asked for and has not finished yet. */
+  /** Cancel was asked for and the server has not answered yet (a short local flag; the next progress event clears it). */
   cancelling: boolean;
   /** When the last event arrived (the panel's clock), for "Still working". */
   lastEventAt: number;
@@ -64,6 +64,8 @@ export function applyJobEvent(rows: readonly JobRow[], event: JobEvent, now: num
           cancellable: event.cancellable,
           notCancellableReason: event.notCancellableReason,
           canStopWaiting: event.canStopWaiting,
+          // The server answered (progress after a Cancel is its answer): the local "cancelling" flag has done its job.
+          cancelling: false,
           lastEventAt: now,
         },
       ].sort((a, b) => a.id - b.id);
@@ -72,8 +74,14 @@ export function applyJobEvent(rows: readonly JobRow[], event: JobEvent, now: num
     case 'failed':
     case 'cancelled':
       return others;
+    default:
+      // An event kind this version does not know (a newer app): keep the rows as they are.
+      return [...rows];
   }
 }
+
+/** How long the id of a finished job is remembered, so a late event of it does not bring the row back. */
+export const FINISHED_MEMORY_MS = 60_000;
 
 /** The running background jobs (model loads, benchmarks, service install and repair, app and model update checks). */
 @Injectable({ providedIn: 'root' })
@@ -81,14 +89,37 @@ export class JobsService {
   private readonly backend = inject(BACKEND);
   private readonly rows = signal<JobRow[]>([]);
   private readonly clock = signal(Date.now());
+  private readonly finished = new Map<number, number>();
+  private timer: ReturnType<typeof setInterval> | null = null;
   /** The running jobs, oldest first. */
   readonly jobs = this.rows.asReadonly();
   readonly any = computed(() => this.rows().length > 0);
 
   constructor() {
-    this.backend.jobEvents((event) => this.rows.update((r) => applyJobEvent(r, event, Date.now())));
-    const tick = setInterval(() => this.clock.set(Date.now()), 1000);
-    inject(DestroyRef).onDestroy(() => clearInterval(tick));
+    this.backend.jobEvents((event) => this.on(event));
+    inject(DestroyRef).onDestroy(() => this.stopClock());
+  }
+
+  private on(event: JobEvent): void {
+    const now = Date.now();
+    for (const [id, at] of this.finished) if (now - at > FINISHED_MEMORY_MS) this.finished.delete(id);
+    if (this.finished.has(event.jobId)) return;
+    if (event.kind === 'done' || event.kind === 'failed' || event.kind === 'cancelled') this.finished.set(event.jobId, now);
+    this.update((r) => applyJobEvent(r, event, now));
+  }
+
+  /** Applies a change to the rows; the one-second clock for "Still working" runs only while a job does. */
+  private update(change: (rows: JobRow[]) => JobRow[]): void {
+    this.rows.update(change);
+    if (this.rows().length > 0) {
+      this.timer ??= setInterval(() => this.clock.set(Date.now()), 1000);
+      this.clock.set(Date.now());
+    } else this.stopClock();
+  }
+
+  private stopClock(): void {
+    if (this.timer !== null) clearInterval(this.timer);
+    this.timer = null;
   }
 
   /** Whether `job` has been quiet long enough that the panel says "Still working". */
@@ -96,11 +127,18 @@ export class JobsService {
     return this.clock() - job.lastEventAt >= STILL_WORKING_MS;
   }
 
-  /** Asks to cancel; the job ends with its own `cancelled` event. A refusal (a step that cannot be interrupted) leaves it running. */
+  /**
+   * Asks to cancel the background job. The job ends with its own `cancelled` event; if Cancel does not take effect the next
+   * progress event says so (`canStopWaiting`) and Cancel may be pressed again. When the backend refuses a job that claims to be
+   * cancellable it does not know it (it finished, or the app restarted): the orphaned row goes.
+   */
   async cancel(id: number): Promise<void> {
-    this.rows.update((r) => r.map((j) => (j.id === id ? { ...j, cancelling: true } : j)));
+    this.update((r) => r.map((j) => (j.id === id ? { ...j, cancelling: true } : j)));
     const accepted = await this.backend.jobCancel(id).catch(() => false);
-    if (!accepted) this.rows.update((r) => r.map((j) => (j.id === id ? { ...j, cancelling: false } : j)));
+    if (accepted) return;
+    this.update((r) =>
+      r.flatMap((j) => (j.id !== id ? [j] : j.cancellable ? [] : [{ ...j, cancelling: false }])),
+    );
   }
 
   /** The user stops waiting for a job whose Cancel did not take effect. */

@@ -293,5 +293,27 @@ describe('TauriBackend', () => {
       const { bridge } = fakeBridge(() => Promise.reject({ code: 'offline', message: 'Offline mode is on.' }));
       await expect(new TauriBackend(bridge).installAppUpdate()).rejects.toEqual({ code: 'offline', message: 'Offline mode is on.' });
     });
+
+    it('drops events of an unknown shape, survives a throwing listener and ignores events of another job', async () => {
+      const { bridge, channels } = fakeBridge(() => 4);
+      const backend = new TauriBackend(bridge);
+      const seen: JobEvent[] = [];
+      backend.jobEvents(() => {
+        throw new Error('listener bug');
+      });
+      backend.jobEvents((e) => seen.push(e));
+      const pending = backend.loadModel('m1');
+      await Promise.resolve();
+      await Promise.resolve();
+      const send = channels[0]! as (m: unknown) => void;
+      send({ kind: 'paused', jobId: 4 });
+      send({ kind: 'done' });
+      send('junk');
+      send({ kind: 'done', jobId: 99, result: 'other job' });
+      expect(seen).toEqual([]);
+      send({ kind: 'done', jobId: 4, result: 'mine' });
+      await expect(pending).resolves.toBe('mine');
+      expect(seen).toHaveLength(1);
+    });
   });
 });

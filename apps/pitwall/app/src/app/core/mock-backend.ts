@@ -95,7 +95,6 @@ import {
 const DEFAULT_SLOTS = 2;
 const DEFAULT_CONTEXT = 8192;
 
-/** The calls the desktop app answers itself, without the server (they keep working when the server is down). */
 /** What each job method is called while it runs (the real titles come from the app, `app_commands.rs`). */
 const JOB_TITLES: Partial<Record<keyof PitwallBackend, string>> = {
   loadModel: 'Loading the model',
@@ -107,6 +106,7 @@ const JOB_TITLES: Partial<Record<keyof PitwallBackend, string>> = {
   installAppUpdate: 'Updating Pitwall',
 };
 
+/** The calls the desktop app answers itself, without the server (they keep working when the server is down). */
 const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
   'autostart', 'setAutostart', 'appUpdateStatus', 'checkAppUpdate', 'installAppUpdate', 'quitApp', 'takeQuitAsk',
@@ -445,7 +445,7 @@ export class MockBackend implements PitwallBackend {
   private async asJob<T>(method: keyof PitwallBackend, run: () => Promise<T>): Promise<T> {
     const jobId = ++this.jobSeq;
     this.emitJob({ kind: 'started', jobId, title: JOB_TITLES[method] ?? 'Working' });
-    this.emitJob({ kind: 'progress', jobId, phase: JOB_TITLES[method] ?? 'Working', done: 1, total: null, unit: 'items', canStopWaiting: false, elapsedSecs: 1, cancellable: true, notCancellableReason: null });
+    this.emitJob({ kind: 'progress', jobId, phase: 'Working on it', done: 1, total: null, unit: 'items', canStopWaiting: false, elapsedSecs: 1, cancellable: true, notCancellableReason: null });
     try {
       if (this.holdJobs) {
         let stopped = false;

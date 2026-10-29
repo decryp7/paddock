@@ -72,13 +72,14 @@ export interface PitwallBackend {
   /** Empties caches; resolves to the number of entries removed. */
   clearCache(scope: CacheClearScope): Promise<number>;
   applyPreset(preset: Preset): Promise<Settings>;
+  /** Cancels a queued or running inference request of the server's queue (the dashboard's queue card; string id). Not for background jobs: see {@link jobCancel}. */
   cancelJob(id: string): Promise<void>;
   /**
    * Events of every background job (ADR 0024) until the returned function is called. The methods in {@link JOB_METHODS}
    * run as jobs: they never time out in the UI (ER-19), they report phase and progress here, and Cancel works in every phase.
    */
   jobEvents(listener: (event: JobEvent) => void): Unsubscribe;
-  /** Cancels a running job; false when it is unknown, finished or in a step that cannot be interrupted. */
+  /** Cancels a background job of the app ({@link JOB_METHODS}; numeric id). Not for queue requests: see {@link cancelJob}. False when it is unknown, finished or in a step that cannot be interrupted. */
   jobCancel(jobId: number): Promise<boolean>;
   /** Stops waiting for a job whose Cancel did not take effect (the server may still be working); false when not offered. */
   jobStopWaiting(jobId: number): Promise<boolean>;

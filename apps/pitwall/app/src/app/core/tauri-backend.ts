@@ -49,6 +49,7 @@ import type {
   UpdateSchedule,
 } from './api.types';
 import type { PitwallBackend, Unsubscribe } from './backend';
+import { parseJobEvent } from './job-wire';
 import { toCommandError } from './command-error';
 
 /** The Tauri event the app forwards every live update on. */
@@ -400,8 +401,20 @@ export class TauriBackend implements PitwallBackend {
    */
   private job<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const channel = this.bridge.channel<JobEvent>((event) => {
-        for (const l of [...this.jobListeners]) l(event);
+      // The job this call started: the first event names it until `start_*` answers with its id; events of any other job are not ours.
+      let id: number | null = null;
+      const channel = this.bridge.channel<unknown>((raw) => {
+        const event = parseJobEvent(raw);
+        if (event === null) return;
+        id ??= event.jobId;
+        if (event.jobId !== id) return;
+        for (const l of [...this.jobListeners]) {
+          try {
+            l(event);
+          } catch {
+            // A broken listener must not stop the others or the job's own result.
+          }
+        }
         if (event.kind === 'done') resolve(event.result as T);
         else if (event.kind === 'failed') reject(event.error);
         else if (event.kind === 'cancelled') {
@@ -411,7 +424,9 @@ export class TauriBackend implements PitwallBackend {
           });
         }
       });
-      this.run(cmd, { ...args, onEvent: channel }).catch(reject);
+      this.run<unknown>(cmd, { ...args, onEvent: channel }).then((started) => {
+        if (typeof started === 'number') id = started;
+      }, reject);
     });
   }
 
