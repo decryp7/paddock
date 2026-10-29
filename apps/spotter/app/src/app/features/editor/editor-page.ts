@@ -22,7 +22,7 @@ import { SourceStep } from './source-step';
 const STEP_HEADING: Record<EditorStep, string> = { source: 'src-h', configure: 'cfg-h', versions: 'ver-h', notify: 'sch-h', review: 'rev-h' };
 
 /** The notification modes in words (the review shows these, not the wire ids). */
-const NOTIFY_MODE_LABEL: Record<string, string> = { 'every-new': 'Every new release', 'newer-than-installed': 'Newer than installed', off: 'Nothing' };
+const NOTIFY_MODE_LABEL: Record<NotifyMode, string> = { 'every-new': 'Every new release', 'newer-than-installed': 'Newer than installed', off: 'Nothing' };
 
 /** The add/edit wizard (a linear `mat-stepper`): source, configure (with a live test), versions, notifications and actions, review. */
 @Component({
@@ -111,7 +111,9 @@ export class EditorPage {
     return label && main ? `${label}: ${main}` : label || main;
   });
   protected readonly schemeLabel = computed(() => SCHEME_OPTIONS.find((o) => o.value === this.draft().versions)?.label ?? this.draft().versions);
-  protected readonly modeLabel = computed(() => NOTIFY_MODE_LABEL[this.draft().notify.mode] ?? this.draft().notify.mode);
+  protected readonly modeLabel = computed(() => NOTIFY_MODE_LABEL[this.draft().notify.mode]);
+  /** The notify modes in order, for the segmented buttons (the same words as the review). */
+  protected readonly notifyModes = (Object.keys(NOTIFY_MODE_LABEL) as NotifyMode[]).map((value) => ({ value, label: NOTIFY_MODE_LABEL[value] }));
 
   /** The stepper opened a step (header click or keyboard): the store follows. */
   protected onStep(index: number): void {

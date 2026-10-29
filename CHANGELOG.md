@@ -5,8 +5,8 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Material: stepper theme (shared)
-- `material.css`: `mat-stepper` follows the family tokens (`--mat-stepper-*` from `--pd-*`, one header height (24 px circle plus `--pd-space-4` above and below), tighter header
-  padding and lines, an outlined circle for steps not reached, no content inset). Spotter's add/edit watch flow is a linear
+- `material.css`: `mat-stepper` follows the family tokens (`--mat-stepper-*` from `--pd-*`, a 56 px header (24 px circle plus `--pd-space-4` above and below, Material's fixed height dropped), tighter header
+  padding and lines, an outlined circle for steps not reached, no content inset; the geometry applies to horizontal steppers only). Spotter's add/edit watch flow is a linear
   `mat-stepper` on it and no longer carries its own stepper theme.
 
 ### Jobs: quietOnSuccess (shared API)
