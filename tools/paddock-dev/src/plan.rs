@@ -24,7 +24,7 @@ fn re(pattern: &str) -> Regex {
 }
 
 /// Inputs that every project's build or tests read: a change re-runs everything. Mirrors `GLOBAL` in `scripts/affected.mjs`
-/// (its comment table says what each former global reaches). `.gitea/` and `conformance/(ci|release)/` stay global here: the
+/// (its comment table says what each former global reaches). `.gitea/` and `conformance/(ci|release|src/util)/` stay global here: the
 /// script narrows them per job from the file text at two revisions, which this port does not read, so it answers with a
 /// superset (never less than the script; `--files` mode of the script answers everything for them too unless they are dirty).
 static GLOBAL: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -36,7 +36,7 @@ static GLOBAL: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"^\.nvmrc$",
         r"^\.gitattributes$",
         r"^tsconfig/",
-        r"^conformance/(ci|release)/",
+        r"^conformance/(ci|release|src/util)/",
     ]
     .map(re)
     .into()

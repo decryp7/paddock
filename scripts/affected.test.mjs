@@ -165,6 +165,7 @@ jobs:
   crates:
     steps:
       - uses: ./.gitea/actions/build-folder
+      - uses: ./.gitea/actions/install-test-browser
 `;
 const giteaOf = (before, after, dirty = null) => {
   const trees = { before, after: { ...before, ...after } };
@@ -172,6 +173,7 @@ const giteaOf = (before, after, dirty = null) => {
     appNames: APPS,
     files: () => Object.keys(trees.after),
     dirty,
+    scripts: () => Object.keys(trees.after).filter((f) => /^conformance\/.*\.(mjs|sh)$/.test(f)),
     before: (f) => trees.before[f] ?? null,
     after: (f) => trees.after[f] ?? null,
   };
@@ -181,6 +183,14 @@ const ACTIONS = {
   '.gitea/actions/node-caches/action.yml': 'runs: x',
   '.gitea/actions/app-gates/action.yml': 'runs: y',
   '.gitea/actions/build-folder/action.yml': 'run: bash "${{ github.action_path }}/../../../conformance/ci/build-folder.sh"',
+  '.gitea/actions/install-test-browser/action.yml': 'run: node "${{ github.action_path }}/../../../conformance/ci/install-test-browser.mjs"',
+  '.gitea/actions/README.md': '- uses: decryp7/paddock/.gitea/actions/node-caches@v0.3.0 and .gitea/actions/unused',
+  '.gitea/actions/unused/action.yml': 'runs: u',
+  '.gitea/actions/only-commented/action.yml': 'runs: c',
+  'conformance/ci/install-test-browser.mjs': "import { entryFor } from './runtime-catalogue.mjs';\nimport { isMain } from '../src/util/is-main.mjs';",
+  'conformance/ci/runtime-catalogue.mjs': 'export const entryFor = 1;',
+  'conformance/src/util/is-main.mjs': 'export const isMain = 1;',
+  'conformance/ci/unrelated.mjs': 'export const x = 1;',
   '.gitea/actions/nested/action.yml': 'steps:\n  - uses: ./.paddock/.gitea/actions/build-folder',
 };
 const BASE_TREE = {
@@ -247,9 +257,12 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     assert.deepEqual([gates.all, gates.crates, gates.apps], [false, false, APPS]);
     const bf = runGitea(['.gitea/actions/build-folder/action.yml'], g);
     assert.deepEqual([bf.all, bf.crates, bf.ui, bf.apps], [false, true, false, []]);
-    // The nested action is found through build-folder's referrer (`./.paddock/` prefix), whose users are the crates job.
-    const nested = runGitea(['.gitea/actions/nested/action.yml'], g);
-    assert.deepEqual([nested.all, nested.crates], [false, false]);
+    // An action nobody uses cannot be traced (external consumers are possible): everything.
+    assert.ok(runGitea(['.gitea/actions/nested/action.yml'], g).all);
+    // A README that mentions an action is no use of it: the unused action stays unused (everything), node-caches keeps its users.
+    assert.ok(runGitea(['.gitea/actions/unused/action.yml'], g).all);
+    const nc = runGitea(['.gitea/actions/node-caches/action.yml'], g);
+    assert.deepEqual([nc.all, nc.ui], [false, true]);
     const viaPrefix = runGitea(['.gitea/actions/build-folder/action.yml'], giteaOf(BASE_TREE, {}));
     assert.ok(viaPrefix.crates);
     // An action only the nightly runs is reported as such and marks tools.
@@ -267,6 +280,33 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     assert.deepEqual(other.apps, APPS);
     // Without a reader for the .gitea files the script cannot be traced: everything.
     assert.ok(affected(['conformance/ci/build-folder.sh'], graph).all);
+  });
+
+  test('a script is traced through the scripts that import it, transitively (helpers in conformance/src/util too)', () => {
+    const g = giteaOf(BASE_TREE, {});
+    for (const f of ['conformance/ci/runtime-catalogue.mjs', 'conformance/src/util/is-main.mjs', 'conformance/ci/install-test-browser.mjs']) {
+      const r = runGitea([f], g);
+      assert.deepEqual([r.all, r.crates, r.ui], [false, true, false], f);
+    }
+    assert.deepEqual(runGitea(['conformance/ci/unrelated.mjs'], g).crates, false);
+  });
+
+  test('a mention of an action only in a comment of ci.yml is no use: everything', () => {
+    const tree = { ...BASE_TREE, '.gitea/workflows/ci.yml': `# see ./.gitea/actions/only-commented\n${CI()}  # ./.gitea/actions/only-commented\n` };
+    assert.ok(runGitea(['.gitea/actions/only-commented/action.yml'], giteaOf(tree, {})).all);
+  });
+
+  test('a reusable workflow (app-e2e.yml) that uses a changed action is followed to its callers, here an app workflow', () => {
+    const tree = {
+      ...BASE_TREE,
+      '.gitea/workflows/app-e2e.yml': 'on:\n  workflow_call:\njobs:\n  e2e:\n    steps:\n      - uses: ./.gitea/actions/unused\n',
+      '.gitea/workflows/dyno-release.yml': 'jobs:\n  e2e:\n    uses: ./.gitea/workflows/app-e2e.yml\n',
+    };
+    const r = runGitea(['.gitea/actions/unused/action.yml'], giteaOf(tree, {}));
+    assert.deepEqual([r.all, r.apps, r.crates], [false, ['dyno'], false]);
+    // The same workflow with no caller cannot be traced: everything.
+    const orphan = { ...tree, '.gitea/workflows/dyno-release.yml': 'jobs: {}\n' };
+    assert.ok(runGitea(['.gitea/actions/unused/action.yml'], giteaOf(orphan, {})).all);
   });
 
   test('in files mode a .gitea or script file that is not dirty (committed, nothing to diff) marks everything', () => {

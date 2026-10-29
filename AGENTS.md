@@ -51,9 +51,11 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   `dev` uses the script as oracle), `.cargo/` and `lint/` the Rust builds (`lint/` also conformance), a `ci.yml` change only
   the jobs whose text changed (everything if the file cannot be split into jobs, uses YAML anchors, its header changed or
   the `plan` job changed), a shared action or a script of `conformance/ci` or `conformance/release` only the jobs and
-  workflows that use it (with `--files` a committed change cannot be diffed, so it marks everything). Users that run only
+  workflows that use it, following scripts that import or name it (imports built at run time are not seen), reusable
+  workflows to their callers, and ignoring mentions in comments and README prose; an action nobody uses marks everything.
+  `--files` means working tree against HEAD: a committed change cannot be diffed, so it marks everything. Users that run only
   nightly, on a tag or manually are named as such in `--explain`; `e2e-webkit` never runs on a pull request. The Rust port
-  in `tools/paddock-dev` keeps `.gitea/` and `conformance/(ci|release)/` global (a superset of the script).
+  in `tools/paddock-dev` keeps `.gitea/` and `conformance/(ci|release|src/util)/` global (a superset of the script).
 - **Ownership.** [CODEOWNERS](CODEOWNERS) (Go regular expressions, Gitea's syntax) says who owns which paths; a brief
   names the paths its task owns. Shared integration points (`crates/*/src/lib.rs`, `crates/Cargo.toml`, `public-api.ts`,
   `_tokens.scss`, the root `package.json`, `.gitea/`, `renovate.json`, `CODEOWNERS`) are changed by the integrating agent
