@@ -26,7 +26,7 @@ import { MatContextMenuTrigger, MatMenu, MatMenuContent, MatMenuItem, MatMenuTri
 import { MatSort, MatSortHeader, type Sort } from '@angular/material/sort';
 import { MatCell, MatCellDef, MatColumnDef, MatHeaderCell, MatHeaderCellDef, MatHeaderRow, MatHeaderRowDef, MatRow, MatRowDef, MatTable } from '@angular/material/table';
 import { MatTooltip } from '@angular/material/tooltip';
-import { PdContextMenuKeys } from '@decryp7/paddock-ui';
+import { PdContextMenuKeys } from '@decryp7/paddock-ui/material';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdMiddleText } from './middle-text';
 import {

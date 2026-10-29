@@ -1,7 +1,7 @@
 import { contentChildren, Directive, inject } from '@angular/core';
 import { MatContextMenuTrigger } from '@angular/material/menu';
 import { MatTooltip } from '@angular/material/tooltip';
-import { PdContextMenuKeys } from '@decryp7/paddock-ui';
+import { PdContextMenuKeys } from '@decryp7/paddock-ui/material';
 
 /**
  * A row's context menu (rule 47: Material's `matContextMenuTriggerFor`): opens at the pointer on a right-click, and from the

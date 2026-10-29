@@ -11,7 +11,7 @@ Conventional Commits; one semver tag for the whole repo.
 - The grid's own Shift+F10 / Menu key handler is gone: pd-table's rows use the shared `isContextMenuKey` (the same keys, one definition).
 
 ### `PdContextMenuKeys`: a row's context menu from the keyboard
-- New directive `pdContextMenuKeys` (and `isContextMenuKey`) in `@decryp7/paddock-ui`: Shift+F10 or the Menu key on a focused host fires a `contextmenu` event there, for `matContextMenuTriggerFor` or any listener (macOS sends none for those keys). It works like pd-table's own row handler, which will use it in a follow-up.
+- New directive `pdContextMenuKeys` (and `isContextMenuKey`) in `@decryp7/paddock-ui/material` (with the other Material behaviour; not in the root entry): Shift+F10 or the Menu key on a focused host fires a `contextmenu` event there, for `matContextMenuTriggerFor` or any listener (macOS sends none for those keys). It works like pd-table's own row handler, which will use it in a follow-up.
 
 ### `@decryp7/paddock-ui/schedule` exports its time-field building blocks
 - New exports: `PdKeepTimeOnEscape` (the `pdKeepTime` directive: Escape in a closed time field keeps the time), `TIME_PROVIDERS`, `timeToDate`, `dateToTime`, `timeOptions` and `TimeProblems`, so an app can put a `mat-timepicker` in its own form with the editors' behaviour (24-hour times, the half-hour list, a problem shown once the field was left). Dyno's `dy-time-field` is the first user.

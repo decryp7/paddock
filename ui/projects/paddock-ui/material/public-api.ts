@@ -4,3 +4,4 @@
  * it. Needs `@angular/material` (an optional peer of the package).
  */
 export { providePaddockMaterial, PADDOCK_FORM_FIELD_OPTIONS, PADDOCK_DATE_FORMATS, PADDOCK_TOOLTIP_OPTIONS } from './src/provide';
+export { isContextMenuKey, PdContextMenuKeys } from './src/context-menu-keys';
