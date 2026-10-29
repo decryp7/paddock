@@ -238,6 +238,45 @@ describe('native feel: the installed guard', () => {
     }
   });
 
+  describe('a Copy menu asked for while a button is held', () => {
+    const select = () => {
+      const range = document.createRange();
+      range.selectNodeContents(el('p'));
+      window.getSelection()?.addRange(range);
+    };
+    beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }));
+    afterEach(() => vi.useRealTimers());
+
+    it('waits for the primary button of a Ctrl+click too (macOS, review P2-21)', () => {
+      select();
+      fire(el('p'), new MouseEvent('contextmenu', { bubbles: true, cancelable: true, ctrlKey: true, buttons: 1 }));
+      expect(copied).toEqual([]);
+      fire(el('p'), new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0, buttons: 0 }));
+      fire(el('p'), new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+      vi.runAllTimers();
+      expect(copied).toHaveLength(1);
+    });
+
+    it('opens even when an app handler stops the release from bubbling (review P2-22)', () => {
+      select();
+      el('p').addEventListener('mouseup', (e) => e.stopPropagation(), { once: true });
+      fire(el('p'), new MouseEvent('contextmenu', { bubbles: true, cancelable: true, buttons: 2 }));
+      fire(el('p'), new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 2 }));
+      vi.runAllTimers();
+      expect(copied).toHaveLength(1);
+    });
+
+    it('opens nothing once the guard is removed between the release and the menu (review P2-23)', () => {
+      select();
+      fire(el('p'), new MouseEvent('contextmenu', { bubbles: true, cancelable: true, buttons: 2 }));
+      fire(el('p'), new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 2 }));
+      remove();
+      remove = () => undefined;
+      vi.runAllTimers();
+      expect(copied).toEqual([]);
+    });
+  });
+
   it('offers Copy only when the right-click is on the selected text, not on an ancestor such as body (regression)', () => {
     const menu = (target: Element) => fire(target, new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 1, clientY: 2 }));
     const range = document.createRange();

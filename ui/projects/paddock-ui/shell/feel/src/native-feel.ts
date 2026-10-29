@@ -181,17 +181,19 @@ export function installNativeFeel(win: Window, o: FeelOptions, hooks: FeelHooks 
   const key = (e: KeyboardEvent) => {
     if (!e.defaultPrevented && shouldBlockKey(e, o)) e.preventDefault();
   };
-  // A Copy menu asked for while the right button is still held (macOS sends contextmenu on the press) opens after the
-  // release: drawn earlier, the release's own auxclick counts as a click outside the menu and closes it at once.
+  // A Copy menu asked for while a button is still held (macOS sends contextmenu on the press of the right button, and on
+  // Ctrl+click with the primary one) opens once every button is up: drawn earlier, the release's own click or auxclick
+  // counts as a click outside the menu and closes it at once.
   let pending: { x: number; y: number; text: string } | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const mouse = (e: MouseEvent) => {
     if (shouldBlockMouseButton(e.button, isEditable(elementOf(e.target)))) e.preventDefault();
     if (e.type === 'mousedown') pending = null;
-    if (e.type === 'mouseup' && e.button === 2 && pending) {
+    if (e.type === 'mouseup' && e.buttons === 0 && pending) {
       const p = pending;
       pending = null;
-      // After this release's auxclick, which the browser dispatches in the same task.
-      win.setTimeout(() => hooks.copyMenu?.(p.x, p.y, p.text), 0);
+      // After this release's click or auxclick, which the browser dispatches in the same task.
+      timer = win.setTimeout(() => hooks.copyMenu?.(p.x, p.y, p.text), 0);
     }
   };
   const wheel = (e: WheelEvent) => {
@@ -209,7 +211,7 @@ export function installNativeFeel(win: Window, o: FeelOptions, hooks: FeelHooks 
     if (action === 'block') e.preventDefault();
     if (action === 'copy' && selected !== null && hooks.copyMenu) {
       e.preventDefault();
-      if (e.buttons & 2) pending = { x: e.clientX, y: e.clientY, text: selected };
+      if (e.buttons !== 0) pending = { x: e.clientX, y: e.clientY, text: selected };
       else hooks.copyMenu(e.clientX, e.clientY, selected);
     }
   };
@@ -227,8 +229,9 @@ export function installNativeFeel(win: Window, o: FeelOptions, hooks: FeelHooks 
   const passive = { passive: false } as const;
   win.addEventListener('keydown', key);
   win.addEventListener('mousedown', mouse);
-  win.addEventListener('mouseup', mouse);
-  win.addEventListener('auxclick', mouse);
+  // Capture: an app handler that stops a release from bubbling must not keep a pending Copy menu from opening.
+  win.addEventListener('mouseup', mouse, true);
+  win.addEventListener('auxclick', mouse, true);
   win.addEventListener('wheel', wheel, passive);
   win.addEventListener('contextmenu', menu);
   win.addEventListener('dragstart', drag);
@@ -237,8 +240,10 @@ export function installNativeFeel(win: Window, o: FeelOptions, hooks: FeelHooks 
   return () => {
     win.removeEventListener('keydown', key);
     win.removeEventListener('mousedown', mouse);
-    win.removeEventListener('mouseup', mouse);
-    win.removeEventListener('auxclick', mouse);
+    win.removeEventListener('mouseup', mouse, true);
+    win.removeEventListener('auxclick', mouse, true);
+    win.clearTimeout(timer);
+    pending = null;
     win.removeEventListener('wheel', wheel);
     win.removeEventListener('contextmenu', menu);
     win.removeEventListener('dragstart', drag);
