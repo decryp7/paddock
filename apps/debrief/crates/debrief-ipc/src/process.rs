@@ -60,7 +60,7 @@ pub struct SpawnSpec {
     pub label: String,
     /// Prefix of the private address (see [`PrivateEndpoint::create_named`]).
     pub endpoint_prefix: String,
-    /// How long the child may take to connect.
+    /// How long the child may take to connect ([`UNTIL_CONNECTED`]: until it connects or exits).
     pub connect_window: Duration,
     /// Run at below-normal priority so the analysis stays responsive.
     pub below_normal_priority: bool,
@@ -76,6 +76,11 @@ pub struct SpawnSpec {
     /// macOS child's sandbox profile lets it reach.
     pub ipc_socket: Option<PathBuf>,
 }
+
+/// A connect window with no wall-clock end: the host waits until the child connects or exits. For tests, whose children
+/// start late on a loaded machine: a fixed window then stopped a child that was still starting, and every restart
+/// started late again (CI 7096). The test runner's hang detector, not a clock, ends a child that never connects.
+pub const UNTIL_CONNECTED: Duration = Duration::MAX;
 
 impl SpawnSpec {
     pub fn new(exe: impl Into<PathBuf>, label: impl Into<String>) -> SpawnSpec {

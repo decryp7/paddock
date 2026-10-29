@@ -1680,6 +1680,7 @@ dependencies = [
  "cairo-rs",
  "chromium-driver",
  "chrono",
+ "ctrlc",
  "debrief-agent",
  "debrief-ai",
  "debrief-alloc",

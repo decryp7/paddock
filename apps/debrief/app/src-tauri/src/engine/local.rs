@@ -28,10 +28,20 @@ pub(crate) fn with_plugins(plugins: Arc<Builtins>, safe_mode: bool) -> Arc<dyn S
 
 impl LocalHost {
     fn registry(&self) -> PluginRegistry {
-        match &self.plugins {
-            Some(p) => crate::plugin_config::install(p.plugins(), false, &[]).unwrap_or_else(|_| PluginRegistry::new()),
-            None => PluginRegistry::new(),
+        registry_of(self.plugins.clone())
+    }
+}
+
+/// The registry a store gets: the importers of `plugins`, with no wall-clock budgets
+/// ([`crate::test_support::patient_budgets`]).
+pub(crate) fn registry_of(plugins: Option<Arc<Builtins>>) -> PluginRegistry {
+    match plugins {
+        Some(p) => {
+            let registry = crate::plugin_config::install(p.plugins(), false, &[]).unwrap_or_else(|_| PluginRegistry::new());
+            registry.set_budgets(crate::test_support::patient_budgets());
+            registry
         }
+        None => PluginRegistry::new(),
     }
 }
 
