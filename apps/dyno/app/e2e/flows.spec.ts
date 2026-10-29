@@ -7,7 +7,7 @@ const url = (path = '/', query = '') => `/?latency=0${query}#${path}`;
 async function openSettings(page: Page): Promise<void> {
   await page.goto(url('/'));
   await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
-  await page.keyboard.press('Meta+,');
+  await page.keyboard.press('ControlOrMeta+Comma');
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await dialog.getByText('Dyno', { exact: true }).click();
