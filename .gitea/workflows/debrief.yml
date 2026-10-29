@@ -5,9 +5,10 @@
 #
 # Branch and pull request runs are the checks: Rust (Linux and macOS), plugin SDK, licences, frontend and the end-to-end
 # tests in Chromium. A full run adds the real-app smoke tests on three OS, the installers and the end-to-end tests in WebKit
-# (Paddock rule 3: WebKit and the slow legs run on the combined result). Full runs are pushes to main, debrief-v* tags
-# (which also publish the Gitea release and the moving debrief-latest release the app's updater reads), the nightly run and
-# a manual run with `bundles: true` (the plan job's `full` output).
+# (Paddock rule 3: WebKit and the slow legs run on the combined result). Full runs are debrief-v* tags (which also publish
+# the Gitea release and the moving debrief-latest release the app's updater reads), the nightly run and a manual run with
+# `bundles: true` (the plan job's `full` output). A push to main runs the checks only (user, 2026-10-29: main lands in
+# batches; installers once at the end, docs/research/2026-10-29-ci-runs.md).
 #
 # Speed (Paddock lessons, "Test and build speed"): Linux jobs run in the paddock-ci image (Rust, nextest, Tauri's libraries,
 # Node, Playwright's browsers, Chrome for Testing and libduckdb baked in); every Rust job compiles through sccache on local
@@ -60,7 +61,7 @@ jobs:
   # the change does not reach Debrief (scripts/affected.mjs, the same plan as ci.yml);
   # a push to main whose commit carries a debrief-v* tag is covered by the tag run;
   # a nightly run is skipped while main is unchanged since the last green one.
-  # And whether it is a full run (`full`): installers, real-app smoke and WebKit only for main, tags, nightly and
+  # And whether it is a full run (`full`): installers, real-app smoke and WebKit only for tags, nightly and
   # `bundles: true`, never for a branch or pull request run.
   plan:
     name: plan
@@ -72,7 +73,7 @@ jobs:
         working-directory: .
     outputs:
       run: ${{ steps.plan.outputs.run }}
-      full: ${{ github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/debrief-v') || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && (inputs.bundles == true || github.event.inputs.bundles == 'true')) }}
+      full: ${{ github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/debrief-v') || (github.event_name == 'workflow_dispatch' && (inputs.bundles == true || github.event.inputs.bundles == 'true')) }}
     steps:
       # The whole history: the plan's base can be any older commit.
       - uses: actions/checkout@v4
@@ -468,7 +469,7 @@ jobs:
 
   # Four shards that run at the same time, each with its own production build (Angular's cache kept per shard) and port.
   # Playwright's Chromium and WebKit come with the image: nothing is downloaded. Branch and pull request runs test in
-  # Chromium only; full runs (main, tags, nightly, `bundles: true`) in Chromium and WebKit (Paddock rule 3).
+  # Chromium only; full runs (tags, nightly, `bundles: true`) in Chromium and WebKit (Paddock rule 3).
   e2e:
     name: end-to-end (shard ${{ matrix.shard }}/4)
     needs: [plan]
@@ -517,7 +518,7 @@ jobs:
   # A few WebdriverIO smoke tests of the real app (engine + shell + production UI, no mock), through
   # tauri-driver: msedgedriver for WebView2 on Windows, WebKitWebDriver under Xvfb on Linux (both in place: the image's,
   # the host's). macOS has no WKWebView driver. Locally: see docs/testing-manual.md ("Smoke tests of the real app").
-  # Full runs only (main, debrief-v* tags, nightly, `bundles: true`), never on branch or pull request runs.
+  # Full runs only (debrief-v* tags, nightly, `bundles: true`), never on a push to main, a branch or a pull request run.
   tauri-smoke:
     name: real-app smoke (${{ matrix.os }})
     needs: [plan, rust-lint]
@@ -767,8 +768,8 @@ jobs:
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
-  # Installers only on full runs: debrief-v* tags, pushes to main, the nightly run and manual runs with `bundles: true`; never
-  # for branch or pull request runs. They are the slowest jobs and the Windows leg runs on a developer PC.
+  # Installers only on full runs: debrief-v* tags, the nightly run and manual runs with `bundles: true`; never for a push to main,
+  # a branch or a pull request run. They are the slowest jobs and the Windows leg runs on a developer PC.
   bundle:
     name: bundle (${{ matrix.os }})
     needs: [plan, rust-lint]

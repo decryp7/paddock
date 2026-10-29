@@ -940,7 +940,7 @@ test('Debrief\'s host legs build from a stable checkout path, after Git bash is 
   }
 });
 
-test('Debrief runs its installers and real-app smoke tests only on main, debrief-v* tags, the nightly run and bundles: true', () => {
+test('Debrief runs its installers and real-app smoke tests only on debrief-v* tags, the nightly run and bundles: true', () => {
   const yml = debriefYml();
   const on = yml.match(/^on:\n((?:[ \t]+.*\n|\n)+)/m)?.[1] ?? '';
   assert.match(on, /workflow_dispatch:\n\s+inputs:\n\s+bundles:\n(?:\s+.*\n)*?\s+type: boolean\n\s+default: false/, 'a manual run asks for them');
@@ -948,7 +948,7 @@ test('Debrief runs its installers and real-app smoke tests only on main, debrief
   assert.notEqual(full, '', 'the plan job says whether this is a full run');
   assert.match(full, /github\.event_name == 'schedule'/);
   assert.match(full, /startsWith\(github\.ref, 'refs\/tags\/debrief-v'\)/);
-  assert.match(full, /github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
+  assert.doesNotMatch(full, /refs\/heads\/main/, 'a push to main runs the checks only (main lands in batches, 2026-10-29)');
   assert.match(full, /github\.event_name == 'workflow_dispatch' && \(inputs\.bundles == true/);
   assert.doesNotMatch(full, /pull_request/);
   for (const job of ['tauri-smoke', 'bundle']) {
@@ -1096,4 +1096,54 @@ test("app-gates runs every command list through run-commands.sh, which names the
   assert.equal(good.status, 0, good.stdout);
   assert.match(good.stdout, /4361/, 'shell expansion works as in the old bash -c');
   assert.equal(run('cd nowhere').status, 1);
+});
+
+// ---- Which jobs run for an event (2026-10-29, docs/research/2026-10-29-ci-runs.md) ----
+
+/** A workflow expression (`${{ ... }}` or bare) evaluated with `github`, `needs` and `inputs`; enough for the job conditions here. */
+function evalExpr(expr, { github, needs = {}, inputs = {} }) {
+  const js = expr
+    .trim()
+    .replace(/^\$\{\{\s*/, '')
+    .replace(/\s*\}\}$/, '')
+    .replace(/([^!=<>])==(?!=)/g, '$1===')
+    .replace(/!=(?!=)/g, '!==');
+  const fn = new Function('github', 'needs', 'inputs', 'startsWith', 'cancelled', 'always', 'format', `return (${js});`);
+  return fn(github, needs, inputs, (a, b) => String(a ?? '').startsWith(b), () => false, () => true, (f, ...a) => f.replace(/\{(\d+)\}/g, (m, i) => a[i]));
+}
+
+/**
+ * The result of every job of a workflow for one event, as this Gitea decides it: a job whose `needs` include a job that did
+ * not succeed is skipped, whatever its `if` says (observed 2026-10-29: in 104 push and 6 nightly runs of every
+ * <app>-release.yml the installers were skipped after skipped gates); otherwise its job-level `if` decides. `outputs` are
+ * the plan job's outputs; `fail` names jobs that run but fail.
+ */
+function jobResults(text, { event, ref, inputs = {}, outputs = {}, fail = [] }) {
+  const github = { event_name: event, ref, event: { inputs } };
+  const result = new Map();
+  for (const job of parseJobs(text)) {
+    const needs = Object.fromEntries(job.needs.map((n) => [n, { result: result.get(n), outputs: n === 'plan' ? outputs : {} }]));
+    const cond = /^ {4}if: (.+)$/m.exec(job.text)?.[1];
+    const runs = job.needs.every((n) => result.get(n) === 'success') && (cond === undefined || evalExpr(cond, { github, needs, inputs }));
+    result.set(job.id, !runs ? 'skipped' : fail.includes(job.id) ? 'failure' : 'success');
+  }
+  return result;
+}
+
+test("debrief.yml: installers, real-app smoke and WebKit only on tags, the nightly and a manual full run; a push to main gets the gates", () => {
+  const wf = read(join(WORKFLOWS, 'debrief.yml'));
+  const full = /^ {6}full: (.+)$/m.exec(wf)?.[1];
+  assert.ok(full, 'the plan job has a full output');
+  const isFull = (github, inputs = {}) => evalExpr(full, { github: { ...github, event: { inputs } }, inputs });
+  assert.equal(isFull({ event_name: 'push', ref: 'refs/heads/main' }), false, 'a push to main runs the gates only');
+  assert.equal(isFull({ event_name: 'pull_request', ref: 'refs/pull/1/head' }), false);
+  assert.equal(isFull({ event_name: 'workflow_dispatch', ref: 'refs/heads/x' }, { bundles: 'false' }), false);
+  assert.equal(isFull({ event_name: 'push', ref: 'refs/tags/debrief-v1.2.0' }), true, 'a tag');
+  assert.equal(isFull({ event_name: 'schedule', ref: 'refs/heads/main' }), true, 'the nightly');
+  assert.equal(isFull({ event_name: 'workflow_dispatch', ref: 'refs/heads/x' }, { bundles: 'true' }), true, 'a manual full run');
+  // The full-only jobs and the WebKit project hang on that output.
+  for (const job of ['tauri-smoke', 'bundle']) {
+    assert.match(parseJobs(wf).find((j) => j.id === job).text, /^ {4}if: needs\.plan\.outputs\.run == 'true' && needs\.plan\.outputs\.full == 'true'$/m, `${job}: full runs only`);
+  }
+  assert.match(wf, /--shard=\$\{\{ matrix\.shard \}\}\/4 \$\{\{ needs\.plan\.outputs\.full != 'true' && '--project=chromium' \|\| '' \}\}/, 'WebKit only on full runs');
 });
