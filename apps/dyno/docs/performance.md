@@ -33,6 +33,31 @@ Dyno has two things called "bench":
 
 ## Results (newest first)
 
+### 2026-10-29, release identity of the rlib-only crate type (docs/link-time)
+
+- **Commit:** A/B: base cb3329e0f (template crate types) → change 451948bbb (`crate-type = ["rlib"]`); research note
+  [2026-10-29-link-time.md](../../../docs/research/2026-10-29-link-time.md#release-identity)
+- **Machine:** Mac mini M4 Pro (Mac16,11), 14 cores, 64 GB, macOS 27.2, Xcode 27.1 (`ld-27037.1`); rustc 1.99.1
+- **Load:** 1-minute load 16-43 (other agents building)
+- **Build:** release, `dist` profile (thin LTO, one codegen unit, strip); unstripped copies with `--config profile.dist.strip=false`; Apple `ld`; default features
+- **Corpus:** none (the build output is compared); synthetic
+- **Command:** `CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/Volumes/d7sst7/dev-targets/target/link-time-verify cargo build -p dyno-app --profile dist` at each commit, then `cargo clean -p dyno-app --profile dist` and the same again; `cargo test -p dyno-app --profile dist` at each commit
+- **Runs:** A, B, A after clean, B after clean (single builds); tests once per commit
+- **Numbers:**
+
+  | Measure | Base | Change | Budget | Verdict |
+  |---|---|---|---|---|
+  | `dyno-app` SHA-256 (first build / rebuild) | 27afd223... / 27afd223... | 7bce7a2e... / 7bce7a2e... | reproducible | each reproducible, A ≠ B |
+  | Size, `__text` | 11,205,808 B, 7,776,740 B | 11,205,824 B, 7,778,404 B | none | +16 B, +1,664 B |
+  | Functions with different instructions (unstripped, by demangled name) | 10,694 named | 10,692 named; 19 differ (addresses, `TypeId` constants, inlining) | — | not semantic |
+  | `cargo test -p dyno-app --profile dist` | 74 passed, 1 failed | 74 passed, 1 failed (the same test) | — | same |
+  | App unit after `cargo clean -p dyno-app` | 84 s | 70 s | none | indication only (load 16-25) |
+
+- **Memory measure:** not measured
+- **Notes:** the failing test (`native_feel::tests::debug_windows_keep_reload_and_devtools_but_never_zoom`) asserts a
+  debug build and fails in any release profile. Analysis scripts and outputs: `/Volumes/d7sst7/dev-targets/target/link-time-tools/`
+  (machine-local, `classify.py`, `disfn.sh`).
+
 ### 2026-10-29, incremental rebuild and link time (docs/link-time)
 
 - **Commit:** cae1649f9 (origin/main) plus local, uncommitted experiment edits (crate type, a dev `dylib` crate); research
@@ -57,7 +82,7 @@ Dyno has two things called "bench":
   | App library unit (`--timings`, 2 runs) | 1.37-1.54 s | 0.60-0.76 s (rlib only) | none | — |
   | App binary unit (`--timings`, 2 runs) | 0.34-0.35 s | 0.34 s (rlib only) | none | — |
   | `libdyno_app_lib.a` written per build | 364 MB | none (rlib only) | none | — |
-  | `dist` binary (`--profile dist`, 1 build each, load 8-44) | 11,205,808 B, `__text` 7,776,740 B, SHA-256 af25a650... | rlib only: 11,205,824 B, `__text` 7,778,404 B, SHA-256 13b39130...; not byte-identical | none | user decision |
+  | `dist` binary (`--profile dist`, 1 build each, load 8-44) | 11,205,808 B, `__text` 7,776,740 B, SHA-256 af25a650... | rlib only: 11,205,824 B, `__text` 7,778,404 B, SHA-256 13b39130...; not byte-identical (built with the probe edit; see the release-identity block above) | none | verified above |
 
 - **Memory measure:** not measured (build time only)
 - **Notes:** Cold build: 5 min 15 s (load 9-45, other agents building). Dist identity check of the crate-type change: see the research note. Raw CSV and link logs: `/Volumes/d7sst7/dev-targets/target/link-time-tools/` (machine-local).
