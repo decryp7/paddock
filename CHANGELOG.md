@@ -11,6 +11,8 @@ Conventional Commits; one semver tag for the whole repo.
   with code 1. `Builder::setup` no longer opens windows. New `paddock_shell::testing::start` (feature `mock-runtime`):
   the start test every app runs. The shell's plugin hooks are marked; a Dock click with no window and a file opened from
   Finder open their window after the hook.
+- `paddock-shell`: `Builder::start_log(f)`: the start's messages (no tray icon, a window that could not open) also reach
+  the app's own log.
 - `paddock-commands`: `plugin_hook` (`plugin_hook_scope`, `in_plugin_hook`, `INSIDE_PLUGIN_HOOK`).
 - `paddock-window`: `after_plugin_hook` (window work after the hook, in order), `exit_with`, `HeadlessTray`; windows and
   the tray popover refuse to be built inside a plugin hook with the new `WindowErrorCode` `insidePluginHook`.
