@@ -1142,7 +1142,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "dyno-agent"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dyno-core",
  "dyno-ipc",
@@ -1163,7 +1163,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-app"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dyno-agent",
  "dyno-core",
@@ -1202,7 +1202,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-bench"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dyno-core",
  "serde_json",
@@ -1211,7 +1211,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dyno-agent",
  "dyno-core",
@@ -1224,7 +1224,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "paddock-jobs",
  "postcard",
@@ -1236,7 +1236,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-ipc"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
@@ -1251,7 +1251,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-platform"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dns-lookup",
  "dyno-core",
@@ -1270,7 +1270,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-plugin-api"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dyno-ipc",
  "postcard",
@@ -1279,14 +1279,14 @@ dependencies = [
 
 [[package]]
 name = "dyno-plugin-example"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dyno-plugin-api",
 ]
 
 [[package]]
 name = "dyno-plugin-host"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dyno-ipc",
  "dyno-plugin-api",
