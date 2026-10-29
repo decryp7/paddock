@@ -58,3 +58,34 @@ monorepo's main checkout (about 92,000 packed objects in 3 packs, 5,203 loose ob
 The folders skipped are never opened by gix. Debrief's checkout (2 packs, 3 loose objects), full walk: 143 ms. The cost is
 dominated by loose-object files and linked worktrees; a repository with hundreds of thousands of loose objects would still
 pay one `lstat` each, bounded by the 1,000,000-entry cap.
+
+## 2026-10-30, index run: parser pool, size and mtime shortcut, `.gitignore` walk, and a per-file wait found by measuring
+
+Rule 48/51. Helpers (ignored tests, run by hand): `PN_MEASURE_REPO=<folder> cargo test --release -p pacenotes-worker --test it --
+--ignored --nocapture measure_pool_and_shortcut` and the same with `-p pacenotes-engine ... measure_ignore_walk`. Machine: the
+development Mac mini under normal load (5-minute load 15 to 22 during the runs), release build. Corpus: a Paddock worktree
+(20,596 files without ignore rules: 6,550 parsed, 14,046 listed only, 184 over the size limit; no user data). One run per row.
+
+**Bug found by this measurement.** The first pool run took 1,125 s for one worker (55 ms a file). Each parse call waited for its
+monitor thread, which sampled the worker (a `ps` process on macOS) before looking at whether the call had ended, so every file cost a
+`ps` run, and a beat (a second by default) whenever the call finished before the monitor first waited. Fixed: the monitor looks at
+`done` first, takes no sample until its first beat and does not hold the lock while sampling; regression test
+`a_call_that_finishes_does_not_wait_for_the_monitor` (a one-hour beat).
+
+| Parse workers | First run (full index) | Speed-up |
+|---|---|---|
+| 1 | 20.6 s | 1.0x |
+| 2 | 12.6 s | 1.6x |
+| 4 | 9.8 s | 2.1x |
+
+The read pass used 4 threads in all three. The gain flattens because the apply and SQLite steps are serial and the machine was
+loaded; the Auto default (cores minus one, at most 8) stays, to be re-measured on an idle machine.
+
+**The shortcut.** A second run over the unchanged tree: 0.26 to 0.29 s, with 20,596 of 20,596 files not read (all shortcut hits),
+against 9.8 to 20.6 s for the first run, so about 35x to 80x less. That is the cost of the folder watcher waking for an event that
+changed nothing (an event inside `.git`, for instance).
+
+**`.gitignore` walk** (second walk with the shared walker, `RepoFilesIgnore`; three rounds): the index's own walk without ignore
+rules 220 to 230 ms (20,780 files; the first round 790 ms, cold cache); the shared walk 83 to 115 ms; the index's walk with the
+ignore rules 120 to 128 ms (11,470 files). So honouring `.gitignore` costs about 205 ms against 225 ms without it, that is nothing
+extra, and keeps 9,310 build-output files from being read and parsed.

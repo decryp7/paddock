@@ -48,3 +48,45 @@ fn a_workspace_that_is_not_a_folder_is_an_error_that_says_so() {
         .unwrap();
     assert!(err.to_string().starts_with("could not read the ignore rules"), "{err}");
 }
+
+/// A measurement helper, not a test (rule 48): `PN_MEASURE_REPO=<a folder> cargo test --release -p pacenotes-engine --test it --
+/// --ignored --nocapture measure_ignore_walk`. Times the shared walker (the extra cost of honouring `.gitignore`) against the
+/// index's own walk.
+#[test]
+#[ignore = "a measurement, run by hand with PN_MEASURE_REPO"]
+fn measure_ignore_walk() {
+    let repo = std::path::PathBuf::from(std::env::var("PN_MEASURE_REPO").expect("PN_MEASURE_REPO names a folder"));
+    let fs = pacenotes_index::DiskFs::new(&repo).unwrap();
+    let deny = pacenotes_index::Denylist::new();
+    for round in 1..=3 {
+        let t = std::time::Instant::now();
+        let snap = pacenotes_index::snapshot(
+            &fs,
+            &deny,
+            &pacenotes_index::SnapshotLimits::default(),
+            &paddock_jobs::CancelToken::new(),
+        )
+        .unwrap();
+        let own = t.elapsed();
+        let t = std::time::Instant::now();
+        let ignore = RepoFilesIgnore::scan(&repo, WalkLimits::default()).unwrap();
+        let shared = t.elapsed();
+        let t = std::time::Instant::now();
+        let with = pacenotes_index::snapshot_with(
+            &fs,
+            &deny,
+            &ignore,
+            &pacenotes_index::SnapshotLimits::default(),
+            &paddock_jobs::CancelToken::new(),
+            &pacenotes_index::NoProgress,
+        )
+        .unwrap();
+        println!(
+            "round {round}: index walk without ignore rules {own:?} ({} files); shared walk {shared:?}; index walk with them {:?} ({} files, {} ignored)",
+            snap.files.len(),
+            t.elapsed(),
+            with.files.len(),
+            with.ignored
+        );
+    }
+}

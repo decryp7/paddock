@@ -48,9 +48,18 @@ The default list: names `.env`, `.env.*` (not `.env.example`, `.env.sample`, `.e
 `.pypirc`, `.htpasswd`, `.git-credentials`, `id_rsa`/`id_dsa`/`id_ecdsa`/`id_ed25519` (not `*.pub`), `credentials`,
 `credentials.json`, `secrets.json`/`.yml`/`.yaml`, `service-account*.json`, `terraform.tfstate*`; extensions `.pem`, `.key`,
 `.p12`, `.pfx`, `.jks`, `.keystore`, `.kdbx`, `.ppk`, `.gpg`, `.tfvars`; folders `.git`, `.ssh`, `.aws`, `.gnupg`, `.azure`.
-Matching is case-insensitive. Users extend it in Settings (a later package), never shrink it below the default.
+Matching is case-insensitive. Users extend it in Settings (a later package), never shrink it below the default: `Denylist::from_pack`
+reads a user pack in the same format and **merges it over** the default. Names, patterns, extensions, folders and redaction rules
+are added; the default always applies first, a user `allow` cannot lift what the default denies, and the default's redaction rules
+run before the user's. A pack that does not parse is refused with the message that says what to fix (and a default that does not
+parse fails closed). A `plain_globs` entry is a name pattern for names without a dot (`*deploy*key*` denies `deploy_key` and
+`github-deploy-key`, not `docs/deploy-keys.md`).
 
 ### Walking the workspace
+
+The walk takes an `Ignore` port (default `NoIgnore`): a file or folder the port hides is counted as *ignored* and not visited. The
+denylist is checked first, so ignoring never relaxes it. The engine supplies the `.gitignore` implementation from the shared
+`paddock-repo-files` walker (ER-22), see ADR 0006.
 
 `DiskFs` lists with `symlink_metadata`, never follows a link (a link is skipped and counted, whatever it points at: a file, a
 folder, `/`, or itself), skips any `.git` entry (a folder or a gitfile) and every denied name, and checks that the canonical

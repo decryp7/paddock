@@ -16,9 +16,9 @@ and watches the workspace so the index follows edits.
 
 | Crate | What it is |
 |---|---|
-| `pacenotes-parse-worker` | the worker program (`pacenotes-parse-worker`) and the wire types of its protocol. Depends on `pacenotes-parse`, `paddock-ipc`, `paddock-proc`; **not** on the index or SQLite |
-| `pacenotes-engine` | the host side: the worker pool and `WorkerSource` (the index's `SymbolSource` over the pool), the stall judge, the index job on `paddock-jobs`, the watcher on `paddock-watch` |
-| `pacenotes-index` | gains `Progress`, the pool, the size and mtime shortcut and the quarantine table; still no process, no parser |
+| `pacenotes-worker` | the worker program (`pacenotes-parse-worker`) and the wire types of its protocol, and the host side: the worker pool and `ParseWorkers` (the index's `SymbolSource` over the pool), the stall judge and the process probe. Depends on `pacenotes-parse`, `pacenotes-index`, `paddock-ipc`, `paddock-proc`; the program itself never opens SQLite |
+| `pacenotes-engine` | the edge that joins the index to the shared crates: `JobProgress` (the job reporter as the index's `Progress`), `RepoFilesIgnore` (`.gitignore` from `paddock-repo-files`), `IndexService` (the index job on `paddock-jobs`) and its folder watcher on `paddock-watch` |
+| `pacenotes-index` | gains `Progress`, `Ignore`, the pool, the size and mtime shortcut and the quarantine table; still no process, no parser |
 
 ### The worker and its protocol
 
@@ -45,20 +45,31 @@ The host never puts a deadline on a parse. Three things end a call early, none o
    worker uses CPU without progress. A stopped worker (paused by the OS), a starved one (runnable, no CPU), or one waiting on
    I/O counts nothing. Limits are Settings with defaults: 120 blocked ticks and 60 CPU-seconds. A stuck worker is killed; the
    file is quarantined as in 1.
-3. **Cancel**: the call is cancelled through the IPC cancel, and if the worker does not end the call it is killed.
+3. **Cancel**: the worker is killed. A parse call holds no state worth keeping (its result is a set of facts that nothing has
+   stored yet), so there is nothing to wind down: the pool ends the process, drops the call and starts a fresh worker for the next
+   file. The worker would also stop a call on an IPC cancel (the parser checks the call's token), but the host does not send one and
+   wait: killing is immediate and cannot hang on a worker that is stuck.
 
 The probe of a worker's state is a port (`ProcessProbe`); the adapter reads `/proc/<pid>/stat` on Linux and asks `ps` through
-`paddock_proc::run_bounded` on macOS. On Windows there is no adapter yet: a stuck worker is then ended only by Cancel or by its
-memory cap, and the Windows adapter is a listed gap (the `paddock-proc` per-pid probe of ADR 0031 section 4 will provide it).
+`paddock_proc::run_bounded` on macOS. **Windows has no adapter, and falls back on purpose.** `ProcessProbe::sample` returns `None`, which the judge reads as "no
+observation": it counts nothing, so a worker stuck in a loop on Windows is ended only by Cancel (which kills it) or by its memory
+cap, never by the stall judge. Reasons: (1) a per-process "blocked or spinning" reading on Windows needs thread-level state and
+CPU times through `NtQuerySystemInformation` or the toolhelp and `GetProcessTimes` calls, which are `unsafe` FFI that the shared
+`paddock-proc` is meant to own (ADR 0031 section 4), not this app (shared crates are frozen for this work, and Pacenotes does not
+add `unsafe`); (2) it cannot be built or tested on the machine that wrote this, and an untested process probe would be worse than
+an honest gap; (3) the loop-in-a-scanner bug it guards against has not been seen outside crafted input, and the first Windows
+release lists the gap. When `paddock-proc` gains the per-pid probe, the adapter is one new `ProcessProbe` implementation.
 Starting a worker is waited for while the process is alive (the launcher fails at once when it exits); its connect window is a
 cap of 10 minutes, not a liveness bound.
 
 ### The index job (ER-17 to ER-19)
 
-`IndexJob` runs the indexer on the shared job pool (`paddock-jobs`), so the call returns at once and progress comes as job events.
-Phases, each on its own scale, none restarting: **Finding files** (growing count, total unknown), **Reading files** (known total:
-the files to fingerprint), **Reading code** (known total: the added and modified files), **Saving the index** (an
-uncancellable step, declared, because the commit is the swap). Progress never goes backwards (a count only grows within a phase;
+`IndexService::start` runs the indexer on the shared job pool (`paddock-jobs`), so the call returns at once and progress comes as job events.
+Phases, each on its own scale, none restarting (`JobProgress` ignores a repeat of the phase it is in): **Finding files** (growing
+count, total unknown; it starts before the first file is looked at, `.gitignore` included), **Reading files** (known total: the
+files to fingerprint), **Reading code** (known total: the added and modified files), **Saving the index** (an uncancellable step,
+declared with `uncancellable` and lifted at the next phase, because the commit is the swap). A job cancelled while it is still
+queued never starts. Progress never goes backwards (a count only grows within a phase;
 a new phase is a new scale). Cancel works in every phase except the declared one and leaves the previous generation readable,
 because nothing is written before the commit. The UI never times a job out ("Still working").
 
@@ -73,11 +84,31 @@ missed). The effect is measured in `docs/performance.md`.
 
 ### The watcher
 
-`paddock-watch` supplies the pieces: a `NotifySource` (OS notifications), a `Debouncer` on an injected clock (quiet 1 s, at most
-5 s from the first event), and `spawn`. On a due event the engine starts an index run; runs never overlap (a request that arrives
-during a run is coalesced into one more). Events inside `.git`, inside denied folders and for denied names are ignored before they
-reach the debouncer. An event queue overflow or a watcher error triggers a full run, which is cheap with the shortcut. The watcher
-stops with its handle; nothing is left running.
+`IndexService::watch` joins the pieces of `paddock-watch`: a `ChangeSource` (the app passes `NotifySource`, OS notifications), a
+`Debouncer` on an injected clock (quiet 1 s, at most 5 s from the first event; `WatchTiming`) and `spawn`. When the debouncer says
+the folder is quiet, the watcher's thread starts an index run **and waits for it**, so runs never overlap; changes that arrive
+meanwhile queue on the channel and become one more run afterwards (the plan reads the folder as it is then, so none is lost). The
+watcher stops with its handle; a run in flight finishes first.
+
+Known limits, recorded rather than worked around, because the shared watcher is frozen: `ChangeSource` reports *that* something
+changed, not *what*, so events inside `.git`, inside denied folders and for ignored files all start a run; such a run is cheap
+(a walk and a `lstat` per file, no reads, thanks to the shortcut) and finds nothing to do. The shared `NotifySource` drops watcher
+errors and queue overflows instead of reporting them, so the engine cannot yet turn them into a full run; the Settings action
+"Re-index everything" and the next quiet change are the recovery. Both go away when `paddock-watch` carries paths and errors.
+
+### `.gitignore` (ER-22)
+
+The index must not read or parse build output, vendored trees or anything else the project ignores, and the rules are git's
+(nested `.gitignore` files, negations, anchoring), which `paddock-repo-files::walk` already applies through the `ignore` crate
+(also without a git repository, `.git` skipped). So Pacenotes does not copy a matcher: the index has an `Ignore` port (visible
+file, visible folder) and `RepoFilesIgnore` answers it from one `paddock_repo_files::walk` of the workspace. A file is visible when
+the shared walk lists it; a folder when a visible file lies under it, so an ignored folder is not entered by the index's own walk
+at all. Why not walk once with the shared crate and skip the index's own: the index's walk also applies the denylist, counts links
+and denied entries, bounds depth and entries and is cancellable per directory, none of which the shared walk does. The price is a
+second walk of the tree (measured in `docs/performance.md`; it is repaid by the files it keeps out). **The denylist is checked
+first and still wins**: a secret that `.gitignore` also lists is counted as withheld, never merely ignored, and an `!allow` line in
+`.gitignore` cannot make a denied file readable. The shared walk stops with an error at its file cap; the run then fails with that
+message instead of indexing a partial set.
 
 ## Parallelism and cost (rule 51)
 
@@ -90,6 +121,6 @@ worker (the file, once), and the SQLite transaction (one per run).
 ## Consequences
 
 - A quarantined file stays at tier 1 until it changes; the report names it, with the reason.
-- Windows has no stall probe yet; documented, with Cancel and the memory cap as the backstops.
+- Windows has no stall probe (see above); Cancel and the memory cap are the backstops.
 - The shortcut trusts mtime; a tool that preserves mtime while changing content defeats it (the same weakness as git's index);
   a "re-read everything" action in Settings is the answer.
