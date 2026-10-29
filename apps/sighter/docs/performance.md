@@ -30,4 +30,45 @@ measured on our data.
 
 ## Results (newest first)
 
+### 2026-10-29, HUD overhead (trace bus, overlay items, sidecar text) (sighter/core-wave-0)
+
+- **Commit:** 2b7071b5f
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 22.31 at start
+- **Build:** release; no model, no UI rendering
+- **Corpus:** synthetic: fixed-seed boxes (50 per frame, 300 per step) and 12 trace events per step
+- **Command:** `cargo run --release -p sighter-core --example bench_hud`
+- **Runs:** frame: 50 warm-up and 400 timed runs, p95; step: 6 interleaved A/B pairs of 100 timed runs after 20 warm-up, p50
+- **Numbers:**
+
+  | Measure | Value | Budget | Verdict |
+  |---|---|---|---|
+  | HUD work per frame, 50 detections, 2 viewers | 28.04 us | HUD per frame p95 <= 2.00 ms | within |
+  | Step p50, trace off | 25.33 us | none (reference) | reference |
+  | Step p50, trace on | 25.58 us (+1.0 %) | change <= 5 % | within |
+
+- **Memory measure:** not measured
+- **Notes:** Pure-core cost only: drawing, the video sidecar write and the UI are not measured. Indicative unless the load is below about 12.
+
+### 2026-10-29, sighter-core geometry, NMS and tile planning (sighter/core-wave-0)
+
+- **Commit:** 2b7071b5f
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 22.31 at start (other agents' builds running; an indication only)
+- **Build:** release; no model, no allocator override
+- **Corpus:** synthetic: 500 boxes from a fixed-seed generator in the example; a 3840 x 2160 grid
+- **Command:** `cargo run --release -p sighter-core --example bench_core`
+- **Runs:** single series, 20 warm-up and 200 timed runs; median and p95 (sorted[floor(p x (n - 1))])
+- **Numbers:**
+
+  | Measure | Value | Budget | Verdict |
+  |---|---|---|---|
+  | NMS, 500 boxes | 65.29 us | locate target CPU p95 <= 600.00 ms | within |
+  | Tile grid, 3840 x 2160 | 125 ns | HUD frame p95 <= 2.00 ms | within |
+  | Chain map, 500 boxes | 334 ns | HUD frame p95 <= 2.00 ms | within |
+
+- **Memory measure:** not measured
+- **Notes:** wall time 13.94 ms; indicative only unless the load is below about 12
+
+
 None.

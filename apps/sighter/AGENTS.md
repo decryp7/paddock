@@ -1,8 +1,8 @@
 # Sighter — engineering rules for coding agents and contributors
 
 Sighter finds UI elements by sight: a recorder, a labelling and training studio, and a local locator server that tests
-query. The stack follows the Paddock family: a Rust core, a Tauri 2 shell and an Angular UI. **No product code exists
-yet**; the design is `docs/proposal.md` (open questions pending). Read it and `docs/suite-lessons.md` before building.
+query. The stack follows the Paddock family: a Rust core, a Tauri 2 shell and an Angular UI. **Only the pure core exists
+yet** (`crates/sighter-core`: coordinate chain, detection model, tile grid, HUD core, benchmark harness; no model runtime, capture or UI); the design is `docs/proposal.md` (open questions pending). Read it and `docs/suite-lessons.md` before building.
 
 ## Paddock rules (binding)
 
