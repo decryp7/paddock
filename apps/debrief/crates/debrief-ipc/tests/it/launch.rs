@@ -69,11 +69,15 @@ fn a_child_connects_authenticates_and_answers() {
     assert!(c.exited());
 }
 
-/// The folders named `prefix-*` where private sockets are made (the runtime folder, the temp folder, `/tmp`).
+/// The folders named `prefix-*` where private sockets are made: every base `create_named` tries, from the one list it uses
+/// (the runtime folder, the temp folder, the job's socket base, `/tmp`).
 #[cfg(unix)]
 fn socket_dirs(prefix: &str) -> Vec<std::path::PathBuf> {
-    let mut bases: Vec<std::path::PathBuf> = std::env::var_os("XDG_RUNTIME_DIR").map(Into::into).into_iter().collect();
-    bases.extend([std::env::temp_dir(), "/tmp".into()]);
+    let bases = debrief_ipc::endpoint::socket_bases(
+        std::env::var_os("XDG_RUNTIME_DIR"),
+        std::env::temp_dir(),
+        std::env::var_os(debrief_ipc::endpoint::SOCKET_BASE_VAR),
+    );
     let mut found: Vec<_> = bases
         .into_iter()
         .filter_map(|b| std::fs::read_dir(b.canonicalize().unwrap_or(b)).ok())
@@ -103,11 +107,23 @@ fn the_private_socket_folder_is_gone_once_the_child_is_connected() {
     );
     // The connection works on without it.
     assert_eq!(ask(&c, "echo still").unwrap(), "still");
-    // A child that never connects leaves nothing either.
+    // A child that never connects: its folder is there while the host waits (so this test looks where the folders are
+    // made: once a long temp folder sent them to the job's socket base, which it did not look in, and it passed blind),
+    // and gone when the launch fails.
     let mut s = spec(&["--no-connect"]);
     s.spawn.endpoint_prefix = prefix.clone();
-    s.spawn.connect_window = Duration::from_millis(300);
-    assert!(launch(&s, Arc::new(NoCalls)).is_err());
+    s.spawn.connect_window = Duration::from_secs(3);
+    let waiting = std::thread::spawn(move || launch(&s, Arc::new(NoCalls)).is_err());
+    let started = Instant::now();
+    while socket_dirs(&prefix).is_empty() && started.elapsed() < Duration::from_secs(3) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        socket_dirs(&prefix).len(),
+        1,
+        "the socket folder exists while the host waits for the child"
+    );
+    assert!(waiting.join().unwrap(), "a child that never connects fails the launch");
     assert!(socket_dirs(&prefix).is_empty());
 }
 

@@ -206,6 +206,23 @@ mod tests {
         assert!(!dir.exists());
     }
 
+    /// A scratch folder short enough for an endpoint's socket, never the shared `/tmp`: the job's socket base when it is set
+    /// (in CI the temp folder is the runner's long per-job folder, where `create_in` would skip the base), else the temp
+    /// folder.
+    #[cfg(unix)]
+    fn short_scratch() -> tempfile::TempDir {
+        let candidates = [
+            std::env::var_os(SOCKET_BASE_VAR).filter(|v| !v.is_empty()).map(PathBuf::from),
+            Some(std::env::temp_dir()),
+        ];
+        let root = candidates
+            .into_iter()
+            .flatten()
+            .find(|c| c.is_dir() && fits(&c.join(".tmp0000000000"), "debrief-x"))
+            .expect("a temp folder short enough for a socket (set PADDOCK_SOCKET_BASE to a short folder)");
+        tempfile::tempdir_in(root).unwrap()
+    }
+
     /// CI (2026-10-29): a socket whose temp folder is too long fell back to the shared `/tmp`, which local runs on the same
     /// Mac use too, so a leak check there failed jobs for others' folders. A job's own short socket folder
     /// (`PADDOCK_SOCKET_BASE`, set by CI's job-tmpdir) comes before `/tmp`; unset or missing, nothing changes.
@@ -239,10 +256,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_failing_step_after_making_the_folder_removes_it_again() {
-        // A short base: in CI the temp folder is the runner's long per-job folder, where a socket path does not fit and
-        // `create_in` would skip the base instead of making the folder (the job's socket base, else /tmp).
-        let root = socket_bases(None, PathBuf::from("/tmp"), std::env::var_os(SOCKET_BASE_VAR)).remove(1);
-        let base = tempfile::tempdir_in(root).unwrap();
+        let base = short_scratch();
         let failing: fn(&std::path::Path) -> io::Result<()> = |_| Err(io::Error::other("cannot harden"));
         assert!(PrivateEndpoint::create_in(base.path(), "debrief-x", failing).is_err());
         assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0, "no folder is left behind");
