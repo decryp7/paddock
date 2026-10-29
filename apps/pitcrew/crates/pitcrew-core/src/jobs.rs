@@ -133,6 +133,8 @@ pub struct JobTracker {
     last_activity: Option<Timestamp>,
     peak_cpu: u32,
     peak_mem: u64,
+    /// The current job was seen only through its processes; no "task started" line has named it yet.
+    unnamed: bool,
 }
 
 impl JobTracker {
@@ -141,8 +143,18 @@ impl JobTracker {
         Self::default()
     }
 
-    /// The runner logged "task started". With one job at a time, a new task also ends the previous one.
+    /// The runner logged "task started". With one job at a time, a new task also ends the previous one, except a job
+    /// seen only through its processes: the runner writes the line before it starts the job's processes, but the line
+    /// can be read after a look at the processes (a loaded machine), so the line names that job and ends nothing.
     pub fn task_started(&mut self, info: JobInfo, now: Timestamp) -> Option<FinishedJob> {
+        if self.unnamed {
+            if let Some(current) = self.current.as_mut() {
+                self.unnamed = false;
+                current.info = info;
+                self.last_activity = Some(now);
+                return None;
+            }
+        }
         let previous = self.take_finished(now);
         self.current = Some(CurrentJob { info, started_at: now });
         self.last_activity = Some(now);
@@ -159,6 +171,7 @@ impl JobTracker {
                     info: JobInfo::default(),
                     started_at: now,
                 });
+                self.unnamed = true;
             }
             return None;
         }
@@ -196,6 +209,7 @@ impl JobTracker {
 
     fn take_finished(&mut self, now: Timestamp) -> Option<FinishedJob> {
         let job = self.current.take()?;
+        self.unnamed = false;
         let finished_at = self.last_activity.unwrap_or(now).max(job.started_at);
         Some(FinishedJob {
             info: job.info,
@@ -299,6 +313,24 @@ mod tests {
         let prev = tr.task_started(JobInfo::from_task_started(LINE), t(50)).unwrap();
         assert_eq!(prev.started_at, t(1));
         assert_eq!(tr.current().map(|c| c.started_at), Some(t(50)));
+    }
+
+    #[test]
+    fn a_task_line_read_after_its_processes_were_seen_names_that_job_and_ends_nothing() {
+        // On a loaded machine the look at the processes can come before the runner's "task started" line is read
+        // (CI job 21879): that is one job, not a finished nameless one followed by a new one.
+        let mut tr = JobTracker::new();
+        tr.observe_children(true, t(5));
+        assert_eq!(tr.task_started(JobInfo::from_task_started(LINE), t(6)), None, "nothing finished");
+        let cur = tr.current().unwrap();
+        assert_eq!((cur.started_at, cur.info.job.as_deref()), (t(5), Some("tauri-smoke")));
+        assert_eq!(tr.observe_children(false, t(10)), None);
+        let done = tr.observe_children(false, t(30)).unwrap();
+        assert_eq!((done.started_at, done.finished_at), (t(5), t(6)));
+        assert_eq!(done.info.repository.as_deref(), Some("owner/app"));
+        // A job named by its line is still ended by the next line.
+        tr.task_started(JobInfo::from_task_started(LINE), t(40));
+        assert!(tr.task_started(JobInfo::from_task_started(LINE), t(50)).is_some());
     }
 
     #[test]
