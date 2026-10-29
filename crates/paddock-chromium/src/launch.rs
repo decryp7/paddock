@@ -23,7 +23,9 @@ pub const START_LIMIT: Duration = Duration::from_secs(20);
 /// Browser.close exit time"); past the grace the tree is ended, which is safe for a throwaway profile (it is deleted).
 pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
 /// The grace of a kept profile ([`Profile::Persistent`]): ending Chrome by force during its shutdown can lose cookies or
-/// a sign-in it is still writing, so it gets longer than the slowest exit measured under load (11.7 s).
+/// a sign-in it is still writing, so it gets longer than the slowest exit measured under load (11.7 s). Closing or
+/// dropping a kept-profile [`Chromium`] can therefore block for up to 20 s: adopters close or drop it off the UI thread
+/// (ER-17).
 pub const CLOSE_GRACE_KEPT: Duration = Duration::from_secs(20);
 
 /// The close grace for a profile kind: [`CLOSE_GRACE`] for a throwaway one, [`CLOSE_GRACE_KEPT`] for a kept one.
