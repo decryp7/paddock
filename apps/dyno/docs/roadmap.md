@@ -433,6 +433,17 @@ Not part of 1.0.0; anything new that only watches goes here. Anything that would
 - **Multi-PC LAN view.** See several of your own PCs on one dashboard over the LAN, opt-in, read-only, over **TLS with a
   pre-shared key**. Needs its own ADR (discovery, key exchange, certificate handling) before any code; depends on WP-16 and
   WP-27.
+- **Disk map, after 1.0** (decided 2026-10-28; 1.0 has volumes, the sunburst drill-down, Retry of the incomplete folders, Reveal
+  and the Full Disk Access prompt): duplicate files, the big and old file lists, and the breakdown of hidden space (1.0 shows
+  one figure, used minus counted).
+- **Disk map on Windows, faster (open, after 1.0).** Each file is opened once (`CreateFileW`, then two queries) to get its volume
+  serial, file index, link count and allocation size. Reading ids and allocation sizes for a whole folder from one folder handle
+  (`GetFileInformationByHandleEx` with `FileIdExtdDirectoryInfo`) would cut that, but it carries no link count, so hard links
+  would need another way to be found. Measure on a real Windows disk before choosing. Follow-ups: take the folder id and the
+  allocation size from enumeration and open a handle only for files (for their link count); on Windows 11 24H2 and later,
+  `GetFileInformationByName` reads those without opening the file at all.
+- **1.0 manual check, disk map on Windows:** measure files per second on a real NTFS volume with Defender on (real-time
+  protection scans every open), and compare with the figure on macOS before the release.
 - **WP-15, 16, 17, 30 and 31** (packs, web API, Explain via Pitwall, suite tie-ins, session recording) are planned here, after 1.0.
 - Further ideas land here as they come up.
 

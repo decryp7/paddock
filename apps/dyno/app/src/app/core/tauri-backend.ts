@@ -27,7 +27,13 @@ import type {
   ProcessDetails,
   ProcessRef,
   Settings,
-  SizeNode,
+  DiskChildren,
+  DiskChildrenQuery,
+  DiskRings,
+  DiskRingsQuery,
+  DiskScanStatus,
+  DiskTarget,
+  Volume,
   SnapshotDiff,
   SnapshotInfo,
   StartupEntry,
@@ -99,6 +105,8 @@ export const EVENTS = {
   activity: 'dyno://activity',
   agent: 'dyno://agent',
   alarm: 'dyno://alarm',
+  diskScan: 'dyno://disk-scan',
+  diskVolumes: 'dyno://disk-volumes',
 } as const;
 
 /** One Tauri event shared by every UI listener: a single `listen`, fanned out, stopped with the last listener. */
@@ -140,6 +148,8 @@ export class TauriBackend implements DynoBackend {
   private readonly activityChannel: EventChannel<ActivityEntry>;
   private readonly agentChannel: EventChannel<AgentStatus>;
   private readonly alarmChannel: EventChannel<AlarmChange>;
+  private readonly diskScanChannel: EventChannel<DiskScanStatus>;
+  private readonly diskVolumesChannel: EventChannel<Volume[]>;
   /** How many live listeners want the full process list; the agent sends it only while one does. */
   private processListeners = 0;
   private liveListeners = 0;
@@ -156,6 +166,8 @@ export class TauriBackend implements DynoBackend {
     this.activityChannel = new EventChannel(listenFn, EVENTS.activity);
     this.agentChannel = new EventChannel(listenFn, EVENTS.agent);
     this.alarmChannel = new EventChannel(listenFn, EVENTS.alarm);
+    this.diskScanChannel = new EventChannel(listenFn, EVENTS.diskScan);
+    this.diskVolumesChannel = new EventChannel(listenFn, EVENTS.diskVolumes);
   }
 
   // ------------------------------------------------------------------------------------------------ live data
@@ -190,6 +202,14 @@ export class TauriBackend implements DynoBackend {
 
   onAlarm(listener: (c: AlarmChange) => void): Unsubscribe {
     return this.alarmChannel.add(listener);
+  }
+
+  onDiskScan(listener: (s: DiskScanStatus) => void): Unsubscribe {
+    return this.diskScanChannel.add(listener);
+  }
+
+  onDiskVolumes(listener: (v: Volume[]) => void): Unsubscribe {
+    return this.diskVolumesChannel.add(listener);
   }
 
   /** Tells the agent the detail level the UI needs now (only when it changed; nothing once nobody listens). */
@@ -256,8 +276,44 @@ export class TauriBackend implements DynoBackend {
     return this.request({ activity: { limit } });
   }
 
-  diskUsage(path: string | null): Promise<SizeNode> {
-    return this.request({ diskUsage: { path } });
+  diskVolumes(): Promise<Volume[]> {
+    return this.request('diskVolumes');
+  }
+
+  startDiskScan(target: DiskTarget): Promise<DiskScanStatus> {
+    return this.request({ startDiskScan: { target } });
+  }
+
+  cancelDiskScan(scan: number): Promise<void> {
+    return this.request({ cancelDiskScan: { scan } });
+  }
+
+  diskScans(): Promise<DiskScanStatus[]> {
+    return this.request('diskScans');
+  }
+
+  diskChildren(q: DiskChildrenQuery): Promise<DiskChildren> {
+    return this.request({ diskChildren: { scan: q.scan, node: q.node, offset: q.offset, limit: q.limit, minFraction: q.minFraction } });
+  }
+
+  diskRings(q: DiskRingsQuery): Promise<DiskRings> {
+    return this.request({ diskRings: { scan: q.scan, node: q.node, rings: q.rings, minShare: q.minShare, maxNodes: q.maxNodes } });
+  }
+
+  diskPath(scan: number, node: number): Promise<string> {
+    return this.request({ diskPath: { scan, node } });
+  }
+
+  retryDiskScan(scan: number): Promise<DiskScanStatus> {
+    return this.request({ retryDiskScan: { scan } });
+  }
+
+  openFullDiskAccessSettings(): Promise<void> {
+    return this.request('openFullDiskAccessSettings');
+  }
+
+  diskReveal(scan: number, node: number): Promise<void> {
+    return this.request({ diskReveal: { scan, node } });
   }
 
   // ---------------------------------------------------------------------------------------- health
