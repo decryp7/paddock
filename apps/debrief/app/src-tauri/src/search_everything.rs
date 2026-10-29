@@ -111,16 +111,17 @@ pub async fn search_everything<R: Runtime>(
     state: CurrentWindow,
     request: SearchAllRequest,
 ) -> CmdResult<Option<SearchAllReply>> {
-    search_with(app, state, request, Some(search_all::BUDGET)).await
+    search_with(app, state, request, |replaced| Control::new(search_all::BUDGET, replaced)).await
 }
 
-/// [`search_everything`] with its time `budget` (`None`: no limit, for tests, where wall clock would make the answer
-/// depend on the machine's load).
+/// [`search_everything`] with the search's [`Control`] made by `control` from the "a newer search replaced this one"
+/// check (the command gives it the time budget; tests give it no limit or a zero one, so the answer never depends on
+/// the machine's load).
 pub(crate) async fn search_with<R: Runtime>(
     app: AppHandle<R>,
     state: CurrentWindow,
     request: SearchAllRequest,
-    budget: Option<std::time::Duration>,
+    control: impl for<'a> FnOnce(&'a (dyn Fn() -> bool + Sync)) -> Control<'a> + Send + 'static,
 ) -> CmdResult<Option<SearchAllReply>> {
     let label = key(&app, state.label());
     let id = begin(&label);
@@ -130,13 +131,7 @@ pub(crate) async fn search_with<R: Runtime>(
         let label = label.clone();
         crate::sync::blocking("search everything", move || {
             let replaced = move || !is_newest(&label, id);
-            let control = match budget {
-                Some(b) => Control::new(b, &replaced),
-                #[cfg(test)]
-                None => Control::unbounded(&replaced),
-                #[cfg(not(test))]
-                None => Control::new(search_all::BUDGET, &replaced),
-            };
+            let control = control(&replaced);
             match search_all::run(store.as_ref(), &corpus, &request, &control) {
                 Ok(reply) => Ok(reply),
                 Err(SearchAllError::Cancelled) => Ok(None),
@@ -182,13 +177,13 @@ mod tests {
     use debrief_core::search_all::KindOutcome;
 
     fn search(app: &tauri::App<tauri::test::MockRuntime>, text: &str) -> CmdResult<Option<SearchAllReply>> {
-        search_in(app, text, None)
+        search_in(app, text, |c| Control::unbounded(c))
     }
 
     fn search_in(
         app: &tauri::App<tauri::test::MockRuntime>,
         text: &str,
-        budget: Option<std::time::Duration>,
+        control: impl for<'a> FnOnce(&'a (dyn Fn() -> bool + Sync)) -> Control<'a> + Send + 'static,
     ) -> CmdResult<Option<SearchAllReply>> {
         block(search_with(
             app.handle().clone(),
@@ -197,14 +192,16 @@ mod tests {
                 text: text.into(),
                 limit: 0,
             },
-            budget,
+            control,
         ))
     }
 
     #[test]
     fn a_search_out_of_budget_says_which_kinds_were_not_searched() {
         let app = test_app(None);
-        let reply = search_in(&app, "timeout", Some(std::time::Duration::ZERO)).unwrap().expect("words");
+        let reply = search_in(&app, "timeout", |c| Control::new(std::time::Duration::ZERO, c))
+            .unwrap()
+            .expect("words");
         assert_eq!(reply.notes.outcome, KindOutcome::TimedOut);
         assert_eq!(reply.notes.total, 0);
     }
