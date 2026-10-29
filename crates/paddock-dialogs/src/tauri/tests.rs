@@ -1310,3 +1310,18 @@ fn the_zoom_is_kept_on_the_entry_and_a_monitor_change_does_not_change_it() {
     assert_eq!(dialogs.zoom_for(&info.label, Some(3.0), 2.0), Some(1.5));
     assert_eq!(dialogs.zoom_for("d-main-99", Some(3.0), 2.0), None);
 }
+
+/// Inside a plugin hook (Tauri holds its plugin store there) a dialog is refused with its own code instead of
+/// deadlocking, and leaves no record.
+#[test]
+fn a_dialog_opened_inside_a_plugin_hook_is_refused() {
+    let app = app();
+    let h = app.handle().clone();
+    let scope = paddock_commands::plugin_hook::plugin_hook_scope();
+    let e = open(&h, "main", request("about")).unwrap_err();
+    assert_eq!(e.code, DialogErrorCode::InsidePluginHook, "{e}");
+    assert!(e.message.contains("tauri::Builder::setup"), "{e}");
+    assert!(state(&app).of_host("main").is_empty());
+    drop(scope);
+    assert!(open(&h, "main", request("about")).is_ok());
+}

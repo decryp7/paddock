@@ -69,8 +69,6 @@ type McpSetup<R> = Box<
 type ServiceSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<ServicePart, BoxError> + Send>;
 type AppSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<(), BoxError> + Send>;
 type TraySetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Tray<R> + Send>;
-/// The app's own log, for the start's messages (Spotter's `applog`, Dyno's `logging`).
-type StartLog = Arc<dyn Fn(&str) + Send + Sync>;
 type HealthAdjust<R> = Box<dyn FnOnce(&AppHandle<R>, HealthSetup<R>) -> HealthSetup<R> + Send>;
 
 /// The shell plugin with its parts (ADR 0012 §2: `paddock_shell::Builder::new(identity)...build()`).
@@ -99,7 +97,6 @@ pub struct Builder<R: Runtime> {
     setup: Vec<AppSetup<R>>,
     tray: Option<TraySetup<R>>,
     launch: Option<LaunchArgs>,
-    start_log: Option<StartLog>,
 }
 
 impl<R: Runtime> Builder<R> {
@@ -130,7 +127,6 @@ impl<R: Runtime> Builder<R> {
             setup: Vec::new(),
             tray: None,
             launch: None,
-            start_log: None,
         }
     }
 
@@ -369,22 +365,16 @@ impl<R: Runtime> Builder<R> {
         self
     }
 
-    /// The app's own log for the start's messages (no tray icon, a window that could not open): each line goes there
-    /// as well as to the shell's log.
-    pub fn start_log(mut self, f: impl Fn(&str) + Send + Sync + 'static) -> Self {
-        self.start_log = Some(Arc::new(f));
-        self
-    }
-
     /// Adds the shell plugin to `builder` (after the plugins already on it) and the start: the tray, then the main window,
     /// from Tauri's own `setup`, which runs after every plugin is set up (a window built inside a plugin hook deadlocks).
     /// A start that cannot open its window is logged and ends the app with code 1. This takes `builder`'s `setup`.
     pub fn add_to(mut self, builder: tauri::Builder<R>) -> tauri::Builder<R> {
         let (tray, launch) = (self.tray.take(), self.launch.take());
-        let report = StartReport::new(self.start_log.take());
         builder.plugin(self.build()).setup(move |app| {
-            let opened = open_at_start(app.handle(), &report, tray, launch.as_ref());
-            started(app.handle(), &report, opened);
+            started(
+                app.handle(),
+                open_at_start(app.handle(), tray, launch.as_ref()),
+            );
             Ok(())
         })
     }
@@ -499,15 +489,15 @@ impl<R: Runtime> Builder<R> {
         let handler = Guard::new(&COMMANDS)
             .dialog_grants(paddock_dialogs::tauri::grant_of)
             .wrap(routes.handler());
-        if self.tray.is_some() || self.launch.is_some() {
-            log::error!(
-                "The shell's tray and launch open only through Builder::add_to; this start opens neither"
-            );
-        }
+        // The tray and the launch open only through `add_to`: a shell built here with them would start without its window.
+        let unopened = self.tray.is_some() || self.launch.is_some();
         let mut parts = Some(self);
         tauri::plugin::Builder::<R>::new(PLUGIN_NAME)
             .invoke_handler(handler)
             .setup(move |app, _api| match parts.take() {
+                Some(_) if unopened => Err(
+                    "tray/launch need Builder::add_to (the shell opens them from Tauri's own setup)".into(),
+                ),
                 Some(parts) => {
                     // No window may be built while Tauri holds its plugin store (it would deadlock).
                     let _scope = paddock_window::tauri::plugin_hook_scope();
@@ -720,42 +710,16 @@ fn reopen_after_hook<R: Runtime>(app: &AppHandle<R>) {
     paddock_window::tauri::after_plugin_hook(app, paddock_window::tauri::reopen);
 }
 
-/// Where the start's messages go: the shell's log and, when the app gave one, the app's own.
-struct StartReport(Option<StartLog>);
-
-impl StartReport {
-    fn new(app_log: Option<StartLog>) -> StartReport {
-        StartReport(app_log)
-    }
-
-    fn info(&self, line: &str) {
-        log::info!("{line}");
-        self.to_app(line);
-    }
-
-    fn error(&self, line: &str) {
-        log::error!("{line}");
-        self.to_app(line);
-    }
-
-    fn to_app(&self, line: &str) {
-        if let Some(f) = &self.0 {
-            f(line);
-        }
-    }
-}
-
 /// The tray, then the main window for `launch` (none for `--hidden` with a tray). Runs in Tauri's `setup`.
 fn open_at_start<R: Runtime>(
     app: &AppHandle<R>,
-    report: &StartReport,
     tray: Option<TraySetup<R>>,
     launch: Option<&LaunchArgs>,
 ) -> Result<(), WindowError> {
     if let Some(f) = tray {
         let tray = f(app);
         if !paddock_window::tauri::create_tray(app, tray) {
-            report.info("No tray icon; closing the last window quits");
+            log::info!("No tray icon; closing the last window quits");
         }
     }
     match launch {
@@ -765,12 +729,9 @@ fn open_at_start<R: Runtime>(
 }
 
 /// A start that could not open its window is logged and ends the app (code 1) instead of a panic in the event loop.
-fn started<R: Runtime>(app: &AppHandle<R>, report: &StartReport, result: Result<(), WindowError>) {
+fn started<R: Runtime>(app: &AppHandle<R>, result: Result<(), WindowError>) {
     if let Err(e) = result {
-        report.error(&format!(
-            "The app could not open its window and stops: {}",
-            e.message
-        ));
+        log::error!(Error = e.message.as_str(); "The app could not open its window and stops");
         paddock_window::tauri::exit_with(app, 1);
     }
 }
