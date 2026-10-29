@@ -32,6 +32,7 @@ import type {
   HfModel,
   HfRepo,
   Job,
+  JobEvent,
   LiveUpdate,
   LoadedModel,
   LocalModel,
@@ -95,6 +96,17 @@ const DEFAULT_SLOTS = 2;
 const DEFAULT_CONTEXT = 8192;
 
 /** The calls the desktop app answers itself, without the server (they keep working when the server is down). */
+/** What each job method is called while it runs (the real titles come from the app, `app_commands.rs`). */
+const JOB_TITLES: Partial<Record<keyof PitwallBackend, string>> = {
+  loadModel: 'Loading the model',
+  runBenchmark: 'Running the benchmark',
+  checkUpdatesNow: 'Checking for model updates',
+  installService: 'Installing the service',
+  uninstallService: 'Removing the service',
+  repairService: 'Repairing the service',
+  installAppUpdate: 'Updating Pitwall',
+};
+
 const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
   'autostart', 'setAutostart', 'appUpdateStatus', 'checkAppUpdate', 'installAppUpdate', 'quitApp', 'takeQuitAsk',
@@ -393,7 +405,79 @@ export class MockBackend implements PitwallBackend {
     }
   }
 
-  private async reply<T>(method: keyof PitwallBackend, value: () => T): Promise<T> {
+  // ---- Jobs (the real backend runs these as background jobs, ADR 0024) -------------------------------------------
+
+  /** Tests: jobs wait until cancelled (or stopped waiting) instead of finishing. */
+  holdJobs = false;
+  /** Tests: Cancel is refused, as for a step that cannot be interrupted; the job then offers "Stop waiting". */
+  refuseCancel = false;
+  private jobSeq = 0;
+  private readonly jobListeners = new Set<(event: JobEvent) => void>();
+  private readonly held = new Map<number, { end: (stoppedWaiting: boolean) => void; canStop: () => boolean }>();
+
+  jobEvents(listener: (event: JobEvent) => void): Unsubscribe {
+    this.jobListeners.add(listener);
+    return () => void this.jobListeners.delete(listener);
+  }
+
+  jobCancel(jobId: number): Promise<boolean> {
+    const job = this.held.get(jobId);
+    if (!job) return Promise.resolve(false);
+    if (this.refuseCancel) {
+      this.emitJob({ kind: 'progress', jobId, phase: 'Cancel did not take effect', done: 1, total: null, unit: 'items', canStopWaiting: true, elapsedSecs: 1, cancellable: true, notCancellableReason: null });
+      return Promise.resolve(true);
+    }
+    job.end(false);
+    return Promise.resolve(true);
+  }
+
+  jobStopWaiting(jobId: number): Promise<boolean> {
+    const job = this.held.get(jobId);
+    if (!job?.canStop()) return Promise.resolve(false);
+    job.end(true);
+    return Promise.resolve(true);
+  }
+
+  private emitJob(event: JobEvent): void {
+    for (const l of [...this.jobListeners]) l(event);
+  }
+
+  private async asJob<T>(method: keyof PitwallBackend, run: () => Promise<T>): Promise<T> {
+    const jobId = ++this.jobSeq;
+    this.emitJob({ kind: 'started', jobId, title: JOB_TITLES[method] ?? 'Working' });
+    this.emitJob({ kind: 'progress', jobId, phase: JOB_TITLES[method] ?? 'Working', done: 1, total: null, unit: 'items', canStopWaiting: false, elapsedSecs: 1, cancellable: true, notCancellableReason: null });
+    try {
+      if (this.holdJobs) {
+        let stopped = false;
+        await new Promise<void>((resolve) => {
+          this.held.set(jobId, {
+            end: (stoppedWaiting) => {
+              stopped = stoppedWaiting;
+              resolve();
+            },
+            canStop: () => this.refuseCancel,
+          });
+        });
+        this.held.delete(jobId);
+        this.emitJob({ kind: 'cancelled', jobId, stoppedWaiting: stopped });
+        const error: CommandError = { code: 'cancelled', message: stopped ? 'Stopped waiting. The server may still be working on it.' : 'Cancelled.' };
+        throw error;
+      }
+      const value = await run();
+      this.emitJob({ kind: 'done', jobId, result: value ?? null });
+      return value;
+    } catch (e) {
+      if ((e as CommandError).code !== 'cancelled') this.emitJob({ kind: 'failed', jobId, error: e as CommandError });
+      throw e;
+    }
+  }
+
+  private reply<T>(method: keyof PitwallBackend, value: () => T): Promise<T> {
+    const run = () => this.replyNow(method, value);
+    return method in JOB_TITLES ? this.asJob(method, run) : run();
+  }
+
+  private async replyNow<T>(method: keyof PitwallBackend, value: () => T): Promise<T> {
     if (this.latency) await new Promise((r) => setTimeout(r, this.latency));
     if (this.failing.has(method) || (this.serverDown && !APP_METHODS.has(method))) {
       const error: CommandError = { code: 'serverUnavailable', message: 'The Pitwall server is not responding. It may still be starting.' };

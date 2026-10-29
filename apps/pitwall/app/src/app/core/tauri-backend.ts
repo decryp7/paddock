@@ -24,6 +24,7 @@ import type {
   PresetPreview,
   History,
   HistoryRange,
+  JobEvent,
   UsageRange,
   UsageSeries,
   HfModel,
@@ -78,6 +79,7 @@ const realBridge: TauriBridge = {
  */
 export class TauriBackend implements PitwallBackend {
   constructor(private readonly bridge: TauriBridge = realBridge) {}
+  private readonly jobListeners = new Set<(event: JobEvent) => void>();
 
   // Dashboard
   overview(): Promise<Overview> {
@@ -130,6 +132,17 @@ export class TauriBackend implements PitwallBackend {
     return this.run('cancel_job', { id });
   }
 
+  jobEvents(listener: (event: JobEvent) => void): Unsubscribe {
+    this.jobListeners.add(listener);
+    return () => void this.jobListeners.delete(listener);
+  }
+  jobCancel(jobId: number): Promise<boolean> {
+    return this.run('job_cancel', { id: jobId });
+  }
+  jobStopWaiting(jobId: number): Promise<boolean> {
+    return this.run('job_stop_waiting', { id: jobId });
+  }
+
   // Models
   localModels(): Promise<LocalModel[]> {
     return this.run('local_models');
@@ -153,7 +166,7 @@ export class TauriBackend implements PitwallBackend {
     return this.run('delete_model', { id });
   }
   loadModel(id: string): Promise<void> {
-    return this.run('load_model', { id });
+    return this.job('start_load_model', { id });
   }
   unloadModel(id: string): Promise<void> {
     return this.run('unload_model', { id });
@@ -237,7 +250,7 @@ export class TauriBackend implements PitwallBackend {
     return this.run('update_notices');
   }
   checkUpdatesNow(): Promise<UpdateCheckResult> {
-    return this.run('check_updates_now');
+    return this.job('start_check_updates');
   }
   setUpdateCheck(enabled: boolean, schedule: UpdateSchedule): Promise<UpdateCheckStatus> {
     return this.run('set_update_check', { enabled, schedule });
@@ -313,7 +326,7 @@ export class TauriBackend implements PitwallBackend {
     return this.run('benchmarks');
   }
   runBenchmark(modelId: string): Promise<BenchmarkResult> {
-    return this.run('run_benchmark', { modelId });
+    return this.job('start_benchmark', { modelId });
   }
 
   // Settings
@@ -330,7 +343,7 @@ export class TauriBackend implements PitwallBackend {
     return this.run('check_app_update');
   }
   installAppUpdate(): Promise<void> {
-    return this.run('install_app_update');
+    return this.job('start_app_update');
   }
 
   // The server as an OS service, and start at log-in
@@ -338,13 +351,13 @@ export class TauriBackend implements PitwallBackend {
     return this.run('service_state');
   }
   installService(): Promise<ServiceInstall> {
-    return this.run('install_service');
+    return this.job('start_install_service');
   }
   uninstallService(): Promise<ServiceInstall> {
-    return this.run('uninstall_service');
+    return this.job('start_uninstall_service');
   }
   repairService(): Promise<ServiceInstall> {
-    return this.run('repair_service');
+    return this.job('start_repair_service');
   }
   declineService(): Promise<void> {
     return this.run('decline_service');
@@ -378,6 +391,28 @@ export class TauriBackend implements PitwallBackend {
   }
   setAutostart(enabled: boolean): Promise<boolean> {
     return this.run('set_autostart', { enabled });
+  }
+
+  /**
+   * Starts a background job (`start_*` commands, ADR 0024) and resolves with its result when it ends. Phase and progress go
+   * to {@link jobEvents}; there is no timeout (ER-19), a failure rejects with the typed error and a cancelled job rejects
+   * with the `cancelled` code.
+   */
+  private job<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const channel = this.bridge.channel<JobEvent>((event) => {
+        for (const l of [...this.jobListeners]) l(event);
+        if (event.kind === 'done') resolve(event.result as T);
+        else if (event.kind === 'failed') reject(event.error);
+        else if (event.kind === 'cancelled') {
+          reject({
+            code: 'cancelled',
+            message: event.stoppedWaiting ? 'Stopped waiting. The server may still be working on it.' : 'Cancelled.',
+          });
+        }
+      });
+      this.run(cmd, { ...args, onEvent: channel }).catch(reject);
+    });
   }
 
   private async run<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

@@ -3,6 +3,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
 import { isTauri } from './core/backend';
+import { JobsPanel } from './features/jobs/jobs-panel';
 import { QuitPrompt } from './features/quit/quit-prompt';
 import { ServiceNotices } from './features/service/service-notices';
 import { ServiceConsentPrompt } from './features/service/service-consent';
@@ -19,7 +20,7 @@ import { ToastHost } from './shared/ui/toast-host';
  */
 @Component({
   selector: 'pw-root',
-  imports: [RouterOutlet, Sidebar, ToastHost, ServiceNotices],
+  imports: [RouterOutlet, Sidebar, ToastHost, ServiceNotices, JobsPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (tray()) {
@@ -30,6 +31,7 @@ import { ToastHost } from './shared/ui/toast-host';
         <pw-sidebar />
         <main id="main" tabindex="-1">
           <pw-service-notices class="notices" />
+          <pw-jobs-panel class="notices" />
           <router-outlet />
         </main>
       </div>

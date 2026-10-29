@@ -26,6 +26,7 @@ export class Toasts {
   }
 
   error(e: CommandError): number {
+    if (e.code === 'cancelled') return this.show(e.message);
     return this.show(e.message, 'bad', 7000);
   }
 
