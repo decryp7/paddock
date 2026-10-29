@@ -1,0 +1,171 @@
+#!/bin/sh
+# ./dev: runs paddock-dev, the Paddock developer and CI tool (ADR 0022). Works from any subfolder: it finds the repository
+# root with git and runs the tool in the folder you are in. The tool is a content-addressed binary: the hash of its inputs
+# (tools/paddock-dev/inputs.txt, from git, plus the compiler cargo will use) names it. Order: the per-user cache, the
+# prebuilt download (R0b: not wired yet), then a local build. A build also happens whenever an input has uncommitted
+# changes, because then HEAD's hash cannot describe it. `./dev --wrapper-hash` prints the hash and stops.
+# Environment: PADDOCK_DEV_TARGET_DIR (build folder, default tools/paddock-dev/target, which is ignored by git),
+# PADDOCK_DEV_HOME (cache, default ~/.paddock-dev), PADDOCK_DEV_FRESH=1 (build from source in a fresh folder without a
+# compiler wrapper, as release jobs do).
+set -eu
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "dev: run this inside the Paddock repository." >&2; exit 2; }
+tool="$root/tools/paddock-dev"
+[ -f "$tool/inputs.txt" ] || {
+  echo "dev: tools/paddock-dev is not in this checkout (a sparse checkout without it). Run: git sparse-checkout add tools" >&2
+  exit 2
+}
+inputs=$(grep -v '^[[:space:]]*#' "$tool/inputs.txt" | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+
+# runs <file>: an executable that answers --version with some text (an empty or truncated file is not a tool; sh would run an
+# empty file as an empty script and call that success).
+runs() { [ -x "$1" ] && v=$("$1" --version 2>/dev/null) && [ -n "$v" ]; }
+
+home="${PADDOCK_DEV_HOME:-${HOME:-/nonexistent}/.paddock-dev}"
+exe=
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=.exe ;; esac
+
+# The config files cargo reads for the tool, closest first, one per line: `config.toml` and `config` in every `.cargo` folder
+# from the tool's own up to the filesystem root, the other `*.toml` files of the tool's `.cargo` (what `include` pulls in, such
+# as the git-ignored ci.toml), then $CARGO_HOME's. The same list, in the same order, is built by the tool's input_hash.rs.
+config_files() {
+  d=$tool
+  while :; do
+    for f in config.toml config; do
+      if [ -f "$d/.cargo/$f" ]; then printf '%s\n' "$d/.cargo/$f"; fi
+    done
+    if [ "$d" = "$tool" ]; then
+      for f in $(cd "$d/.cargo" 2>/dev/null && LC_ALL=C ls ./*.toml 2>/dev/null); do
+        case "$f" in ./config.toml) ;; *) printf '%s\n' "$d/.cargo/${f#./}" ;; esac
+      done
+    fi
+    parent=$(dirname "$d")
+    [ "$parent" = "$d" ] && break
+    d=$parent
+  done
+  ch=${CARGO_HOME:-${HOME:-}/.cargo}
+  for f in config.toml config; do
+    if [ -f "$ch/$f" ]; then printf '%s\n' "$ch/$f"; fi
+  done
+}
+# Without duplicates (CARGO_HOME is usually also an ancestor's `.cargo`).
+configs=$(config_files | awk '!seen[$0]++')
+
+# The compiler cargo will use: RUSTC, CARGO_BUILD_RUSTC, `rustc =` under [build] (or a dotted `build.rustc =`) in a config
+# (closest first), else rustc run from the tool's folder (so a rustup override applies).
+rustc_cmd=${RUSTC:-${CARGO_BUILD_RUSTC:-}}
+if [ -z "$rustc_cmd" ] && [ -n "$configs" ]; then
+  while IFS= read -r cfg; do
+    rustc_cmd=$(awk '
+      /^[ \t]*\[/ { sec = $0; gsub(/[ \t]/, "", sec); next }
+      (sec == "[build]" && /^[ \t]*rustc[ \t]*=/) || (sec == "" && /^[ \t]*build\.rustc[ \t]*=/) {
+        v = $0; sub(/^[^=]*=[ \t]*/, "", v); sub(/^"/, "", v); sub(/"[ \t]*(#.*)?$/, "", v); print v; exit
+      }' "$cfg")
+    [ -n "$rustc_cmd" ] && break
+  done <<EOF
+$configs
+EOF
+fi
+if ! vv=$(cd "$tool" && "${rustc_cmd:-rustc}" -vV 2>/dev/null | tr -d '\r') || [ -z "$vv" ]; then
+  # Without a compiler the hash cannot be computed, but a binary built earlier still works.
+  newest=$(ls -t "$home"/bin/*/paddock-dev-*"$exe" 2>/dev/null | head -n 1)
+  if [ -n "$newest" ] && runs "$newest"; then
+    echo "dev: rustc is not available; running the newest cached tool binary ($newest)." >&2
+    exec "$newest" "$@"
+  fi
+  echo "dev: rustc was not found (${rustc_cmd:-rustc}). Install Rust with rustup (https://rustup.rs), then run ./dev again." >&2
+  exit 2
+fi
+compiler=$(printf '%s\n' "$vv" | grep -E '^(commit-hash|release):' || true)
+if ! printf '%s\n' "$compiler" | grep -q '^release:'; then
+  echo "dev: ${rustc_cmd:-rustc} -vV printed no release line, so it is not a Rust compiler this tool can identify." >&2
+  exit 2
+fi
+host=$(printf '%s\n' "$vv" | sed -n 's/^host: //p')
+
+# What else changes the compiled code: the environment variables RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_*,
+# CARGO_PROFILE_* and CARGO_TARGET_* (not the build folder, the job count or the compiler, which the `-vV` lines already name)
+# when they are not empty, sorted as lines, then one `config-file <digest>` line per config file above, the digest being git's
+# blob id of the file with carriage returns dropped. A config file can hold registry tokens, so it is streamed into git and only
+# its digest is ever held in a variable (which `sh -x` would print).
+flags=$(
+  env | grep -E '^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_[A-Za-z0-9_]*|CARGO_PROFILE_[A-Za-z0-9_]*|CARGO_TARGET_[A-Za-z0-9_]*)=' |
+    grep -v -E '^(CARGO_TARGET_DIR|CARGO_BUILD_JOBS|CARGO_BUILD_TARGET_DIR|CARGO_BUILD_RUSTC)=' | grep -v '=$' | LC_ALL=C sort || true
+  if [ -n "$configs" ]; then
+    while IFS= read -r cfg; do
+      printf 'config-file %s\n' "$(tr -d '\r' <"$cfg" | git -C "$root" hash-object --stdin)"
+    done <<EOF
+$configs
+EOF
+  fi
+)
+
+# shellcheck disable=SC2086 # inputs.txt holds paths without spaces
+hash=$({ git -C "$root" ls-tree HEAD -- $inputs; printf '%s\n%s\n' "$compiler" "$flags"; } | git -C "$root" hash-object --stdin)
+# shellcheck disable=SC2086
+dirty=$(git -C "$root" status --porcelain --untracked-files=all -- $inputs)
+
+if [ "${1:-}" = "--wrapper-hash" ]; then
+  echo "$hash"
+  [ -n "$dirty" ] && echo dirty || echo clean
+  exit 0
+fi
+
+name="paddock-dev-$host$exe"
+export PADDOCK_DEV_WRAPPER_HASH="$hash"
+
+# cargo puts a binary built for an explicit target under <target dir>/<triple>/, not release/.
+refuse_build_target() {
+  [ -z "${CARGO_BUILD_TARGET:-}" ] || {
+    echo "dev: CARGO_BUILD_TARGET is set, so cargo would put the tool outside target/release. Unset it for ./dev." >&2
+    exit 2
+  }
+}
+
+build() { # build <target dir>: the binary ends up in <target dir>/release/paddock-dev
+  refuse_build_target
+  (cd "$tool" && CARGO_TARGET_DIR="$1" PADDOCK_DEV_HASH="${2:-dirty}" cargo build --release --locked --quiet)
+  built_check "$1"
+}
+# A `build.target` in a cargo config (or --target in cargo's own settings) puts the binary under <target>/<triple>/: say so
+# instead of failing later on a missing file.
+built_check() {
+  [ -x "$1/release/paddock-dev$exe" ] || {
+    echo "dev: cargo did not leave the tool at $1/release/paddock-dev$exe. A cargo config probably sets build.target; remove it for ./dev." >&2
+    exit 2
+  }
+}
+
+if [ "${PADDOCK_DEV_FRESH:-}" = 1 ]; then
+  refuse_build_target
+  fresh=$(mktemp -d)
+  trap 'rm -rf "$fresh"' EXIT
+  (unset RUSTC_WRAPPER; cd "$tool" && CARGO_TARGET_DIR="$fresh" PADDOCK_DEV_HASH="$hash" cargo build --release --locked --quiet)
+  built_check "$fresh"
+  "$fresh/release/paddock-dev$exe" "$@"
+  exit $?
+fi
+
+if [ -n "$dirty" ]; then
+  build "${PADDOCK_DEV_TARGET_DIR:-$tool/target}" dirty
+  exec "${PADDOCK_DEV_TARGET_DIR:-$tool/target}/release/paddock-dev$exe" "$@"
+fi
+
+cache="$home/bin/$hash"
+# A cached binary must run: an empty or damaged file (a copy that was cut short) is removed and rebuilt.
+if [ -e "$cache/$name" ] && ! runs "$cache/$name"; then
+  echo "dev: the cached tool binary $cache/$name does not run; rebuilding it." >&2
+  rm -f "$cache/$name"
+fi
+if [ ! -x "$cache/$name" ]; then
+  # R0b: download the published binary for this hash (Gitea generic package `paddock-dev`, version <hash>) and check its
+  # .sha256 here. Until the publishing workflow exists, every miss builds.
+  target=${PADDOCK_DEV_TARGET_DIR:-$tool/target}
+  build "$target" "$hash"
+  mkdir -p "$cache"
+  cp "$target/release/paddock-dev$exe" "$cache/$name.$$"
+  mv -f "$cache/$name.$$" "$cache/$name"
+  # Keep the five newest cached tools; older hashes are rebuilt on demand.
+  ls -t "$home/bin" | tail -n +6 | while IFS= read -r old; do rm -rf "${home:?}/bin/$old" || true; done
+fi
+exec "$cache/$name" "$@"

@@ -1,0 +1,26 @@
+# cargo-nextest settings for paddock-dev (its own workspace). Locally: `cargo nextest run`; CI: `--profile ci`, the same
+# profile as crates/.config/nextest.toml (no retries: a flaky test is fixed, not retried; a time budget; a JUnit report).
+
+[profile.default]
+test-threads = -1
+slow-timeout = { period = "30s", terminate-after = 10 }
+
+[profile.ci]
+fail-fast = false
+retries = 0
+failure-output = "immediate-final"
+# A CI job has its runner to itself.
+test-threads = "num-cpus"
+# Reported SLOW after 30 s and stopped, failing the run, after 60 s, so a test that waits on a timeout fails CI instead of
+# slowing it down. A test that needs longer is a waiver below (an override with a `# waiver:` line saying why).
+slow-timeout = { period = "30s", terminate-after = 2 }
+
+# waiver: the golden tests run scripts/affected.mjs (Node) over the fixture repository for every recorded case and for the
+# live change sets; on a loaded Windows host runner that takes about a minute, and what it compares is the point of the tool.
+[[profile.ci.overrides]]
+filter = "test(/^golden::/)"
+slow-timeout = { period = "60s", terminate-after = 4 }
+
+[profile.ci.junit]
+# Written to <target>/nextest/ci/junit.xml.
+path = "junit.xml"
