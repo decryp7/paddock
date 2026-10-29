@@ -217,10 +217,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn remove_live_removes_the_folders_of_endpoints_still_alive() {
-        let base = tempfile::tempdir().unwrap();
-        let e = PrivateEndpoint::create_in(base.path(), "debrief-live", harden_dir)
-            .unwrap()
-            .unwrap();
+        // Made where the product makes it (`create_named` takes the first base whose socket path fits): CI's per-job temp
+        // folder is too long for a socket, so an endpoint made directly in a temp dir there does not fit.
+        let e = PrivateEndpoint::create_named("debrief-live").unwrap();
         let dir = e.dir().unwrap().to_path_buf();
         assert!(dir.is_dir());
         remove_live();
