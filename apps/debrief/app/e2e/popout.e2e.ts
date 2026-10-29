@@ -24,6 +24,17 @@ async function popOut(page: Page, context: BrowserContext, name: string): Promis
   return popup;
 }
 
+/**
+ * Runs an action that closes `popup` (or whose result depends on it): when the window is gone before Playwright has the action's
+ * result, the action rejects with "Target page, context or browser has been closed" (seen once in CI, run 6846). That is the action
+ * working; any other failure, with the window still open, is real.
+ */
+async function closingAction(popup: Page, action: () => Promise<unknown>): Promise<void> {
+  await action().catch((e: unknown) => {
+    if (!popup.isClosed()) throw e;
+  });
+}
+
 test.describe('pop-out windows', () => {
   // Pop-outs of the inspector (docked) and Metrics, which the minimal default layout does not open.
   test.beforeEach(async ({ page }) => {
@@ -59,12 +70,7 @@ test.describe('pop-out windows', () => {
   test('Dock back returns the panel to where it was', async ({ page, context }) => {
     const popup = await popOut(page, context, 'Inspector');
     const closed = popup.waitForEvent('close');
-    // The click closes the window it is made in: when the window is gone before Playwright has the click's result, the click
-    // rejects with "Target page, context or browser has been closed" (seen once in CI, run 6846). That is the click working; any
-    // other failure of it, with the window still open, is real.
-    await popup.getByRole('button', { name: 'Dock back into the main window' }).click().catch((e: unknown) => {
-      if (!popup.isClosed()) throw e;
-    });
+    await closingAction(popup, () => popup.getByRole('button', { name: 'Dock back into the main window' }).click());
     await closed;
     await expect(tab(page, 'Inspector')).toBeVisible();
     // Back on the right of the timeline and the document beside it, as before.
@@ -106,7 +112,7 @@ test.describe('pop-out windows', () => {
     const item = menuItem(await openMenu(page, 'View'), 'Inspector');
     await expect(item).toHaveAttribute('aria-checked', 'true');
     const closed = popup.waitForEvent('close');
-    await item.click();
+    await closingAction(popup, () => item.click());
     await closed;
     await expect(tab(page, 'Inspector')).toHaveCount(0);
   });
@@ -138,7 +144,7 @@ test.describe('pop-out windows', () => {
     await expect(page.locator('.debrief-guide-edges .debrief-guide-left.hot')).toBeVisible();
     await expect(page.locator('.debrief-guide-preview')).toBeVisible();
     const closed = popup.waitForEvent('close');
-    await handle.dispatchEvent('pointerup', { pointerId: 1 });
+    await closingAction(popup, () => handle.dispatchEvent('pointerup', { pointerId: 1 }));
     await closed;
     await expect(tab(page, 'Inspector')).toBeVisible();
     await expect(page.locator('.debrief-drop-guides.on')).toHaveCount(0);

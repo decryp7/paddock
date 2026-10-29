@@ -189,8 +189,9 @@ describe('displaced views and grow-back', () => {
   it('a displaced view is a grow-back candidate only once there is room plus the margin, so it cannot flap', () => {
     const layout = setup();
     const ctx = TestBed.inject(DockContext);
-    // Home tabbed into events; the dock is as wide as the threshold (1458) and then margin wider (1522).
-    for (const [width, expected] of [[1458, []], [1521, []], [1522, ['home']]] as const) {
+    // Home tabbed into events; the dock is as wide as the threshold (the Events minimum + Home 420 + the assistant 320) and then the margin wider.
+    const EDGE = EVENTS_VIEW_MIN_WIDTH + 740;
+    for (const [width, expected] of [[EDGE, []], [EDGE + GROW_BACK_MARGIN.width - 1, []], [EDGE + GROW_BACK_MARGIN.width, ['home']]] as const) {
       const { api } = fakeDock(width, 900, { 'timeline+events+home': { width: 900, height: 900 }, 'ai-chat': { width: 372, height: 900 } });
       ctx.displaced.clear();
       ctx.displaced.set('home', { id: 'home', slot: { referencePanel: null, direction: 'within' }, into: 'events' });

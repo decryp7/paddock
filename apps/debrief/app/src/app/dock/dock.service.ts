@@ -926,6 +926,11 @@ export class DockService {
     return this.layout.explorerVerdict(api, open, explorerWidth);
   }
 
+  /** How many px the Explorer can give up beside the dock (see `DockContext.explorerYield`); the next plan uses it. */
+  setExplorerYield(px: number): void {
+    this.ctx.explorerYield = Math.max(0, Math.round(px));
+  }
+
   /** The widest the Explorer may be now without being shrunk or closed by the plan (see `DockLayout.explorerRoom`). */
   explorerRoom(open: boolean, explorerWidth: number): number {
     const api = this.api;

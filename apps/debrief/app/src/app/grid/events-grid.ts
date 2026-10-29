@@ -32,7 +32,7 @@ import { SourceColors, SourceMark } from '../sources/source-colors.store';
 import { stripeBackground } from '../sources/source-colors';
 import { LiveArrival, liveMode, PagedRowsStore } from './paged-rows.store';
 import { writeEventDrag } from '../core/event-drag';
-import { MESSAGE_COLUMN_MIN } from './message-column';
+import { GRID_COLUMN_MINS, MESSAGE_COLUMN_MIN } from './message-column';
 
 export { SCROLL_IDLE_MS } from './paged-rows.store';
 
@@ -351,7 +351,7 @@ export class EventsGrid {
   protected readonly columns = computed(() => {
     // Narrow windows: the time and source columns give way before the message, which keeps its minimum (MESSAGE_COLUMN_MIN).
     const extra = this.prefs.extraColumns().map(() => 'minmax(90px, 150px)').join(' ');
-    return `16px minmax(110px, 150px) 52px minmax(96px, 240px) ${extra} minmax(${MESSAGE_COLUMN_MIN}px, 1fr)`;
+    return `${GRID_COLUMN_MINS.mark}px minmax(${GRID_COLUMN_MINS.time}px, 150px) ${GRID_COLUMN_MINS.severity}px minmax(${GRID_COLUMN_MINS.source}px, 240px) ${extra} minmax(${MESSAGE_COLUMN_MIN}px, 1fr)`;
   });
 
   protected readonly colCount = computed(() => 5 + this.prefs.extraColumns().length);

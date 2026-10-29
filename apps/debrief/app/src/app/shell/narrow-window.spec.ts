@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceStore } from '../core/workspace.store';
 import { provideTinyBackend } from '../../testing/helpers';
 import { DockService } from '../dock/dock.service';
-import { UiPrefsStore } from '../core/workspace/ui-prefs.store';
+import { EXPLORER_WIDTH, UiPrefsStore } from '../core/workspace/ui-prefs.store';
 import { NarrowWindow } from './narrow-window';
 
 type Verdict = 'hide' | 'show' | 'keep';
@@ -56,6 +56,16 @@ describe('NarrowWindow (the Explorer follows the layout plan)', () => {
     set('show');
     narrow.evaluate();
     expect(store.sidebarOpen()).toBe(true);
+  });
+
+  it('tells the dock how much the Explorer can give up (its width less its minimum, nothing when closed)', () => {
+    const { narrow, store } = setup();
+    const spy = vi.spyOn(TestBed.inject(DockService), 'setExplorerYield');
+    narrow.evaluate();
+    expect(spy).toHaveBeenLastCalledWith(narrow.width() - EXPLORER_WIDTH.min);
+    store.toggleSidebar();
+    narrow.evaluate();
+    expect(spy).toHaveBeenLastCalledWith(0);
   });
 
   it('re-evaluates after every dock re-plan, and starts once', () => {

@@ -1,6 +1,6 @@
 import { computed, DestroyRef, inject, Injectable } from '@angular/core';
 import { ShellUiStore } from '../core/workspace/shell-ui.store';
-import { UiPrefsStore } from '../core/workspace/ui-prefs.store';
+import { EXPLORER_WIDTH, UiPrefsStore } from '../core/workspace/ui-prefs.store';
 import { WorkspaceStore } from '../core/workspace.store';
 import { DockService } from '../dock/dock.service';
 
@@ -63,6 +63,7 @@ export class NarrowWindow {
     const wish = this.prefs.explorerWidth();
     const shown = this.width();
     const verdict = this.dock.explorerVerdict(open, open ? shown : wish);
+    this.dock.setExplorerYield(open ? shown - EXPLORER_WIDTH.min : 0);
     if (open) this.shell.setExplorerRoom(this.dock.explorerRoom(true, shown));
     if (open) {
       // No room beside the message column's minimum: the Explorer is closed again, also when the user has just opened it

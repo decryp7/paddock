@@ -112,7 +112,7 @@ export class DockLayout {
     // A container without a layout box (a detached or not yet laid out dock; dockview then reports its 100x100 default) is not a window.
     const box = this.ctx.container?.getBoundingClientRect();
     if (box && (box.width <= 0 || box.height <= 0)) return null;
-    return planLayout({ width: api.width, height: api.height }, this.openViews(api, [], fresh), this.hints());
+    return planLayout({ width: api.width + this.ctx.explorerYield, height: api.height }, this.openViews(api, [], fresh), this.hints());
   }
 
   /**
@@ -223,7 +223,7 @@ export class DockLayout {
     if (!this.ctx.displaced.size || !(api.width > 0 && api.height > 0)) return [];
     const box = this.ctx.container?.getBoundingClientRect();
     if (box && (box.width <= 0 || box.height <= 0)) return [];
-    return restorable({ width: api.width, height: api.height }, this.openViews(api), [...this.ctx.displaced.keys()], GROW_BACK_MARGIN, this.hints());
+    return restorable({ width: api.width + this.ctx.explorerYield, height: api.height }, this.openViews(api), [...this.ctx.displaced.keys()], GROW_BACK_MARGIN, this.hints());
   }
 
   /** The order displaced views return in: one whose slot is relative to another returning view goes after it (Home beside Registry beside the assistant). */
@@ -369,25 +369,28 @@ export class DockLayout {
     return box ? { width: Math.round(box.width), height: Math.round(box.height) } : { width: api.width, height: api.height };
   }
 
-  /** The Explorer's declaration for the user's width: it keeps its declared minimum, and the width asked for is its preference, so the plan shrinks it before it closes it. */
-  private explorerAt(width: number): ViewLayout {
-    return { ...EXPLORER_LAYOUT, pref: { ...EXPLORER_LAYOUT.pref, width: Math.max(EXPLORER_LAYOUT.min.width, width) } };
+  /**
+   * The Explorer as the plan sees it: always at its declared minimum. The Explorer gives way before any lower-priority column
+   * is tabbed (it shrinks to its minimum so Registry or Home keep their own column), and is closed only when even that does not
+   * fit. The width it is shown at is the user's, within `explorerRoom`; the plan never asks for more than the minimum.
+   */
+  private explorerView(): OpenView {
+    return { id: EXPLORER_ID, layout: EXPLORER_LAYOUT, group: EXPLORER_ID };
   }
 
   /**
-   * The widest the Explorer may be right now, px, within its declared limits: its maximum, or the window's absolute limit
-   * where the Explorer and the minimum of the dock (the room of the highest-priority column) must still fit together. The
-   * lower-priority panes yield to it as they do when the window shrinks: the dock's own plan tabs them. This is the cap of a
-   * drag, and the width the Explorer is shown at when the window cannot hold the user's width. It does not depend on the
-   * Explorer's own width (the room is the window less the dock's minimum), so it cannot flap. `explorerWidth` is the width the
+   * The widest the Explorer may be right now, px, within its declared limits: its maximum, or the window less the minimum of
+   * every column the plan keeps with the Explorer at its minimum (so no column is tabbed for the Explorer's sake). This is the cap of
+   * a drag, and the width the Explorer is shown at when the window cannot hold the user's width. It does not depend on the
+   * Explorer's own width (the room is the window less the dock's minimums), so it cannot flap. `explorerWidth` is the width the
    * Explorer has now (it is part of the window when open).
    */
   explorerRoom(api: DockviewApi, open: boolean, explorerWidth: number): number {
     const size = this.dockSize(api);
     if (!size) return EXPLORER_WIDTH.max;
     const viewport = { width: size.width + (open ? explorerWidth : 0), height: size.height };
-    const plan = planLayout(viewport, this.openViews(api), this.hints());
-    const dockMin = plan.columns.find((c) => c.anchor)?.minWidth ?? 0;
+    const plan = planLayout(viewport, this.openViews(api, [this.explorerView()]), this.hints());
+    const dockMin = plan.columns.filter((c) => !c.views.includes(EXPLORER_ID)).reduce((sum, c) => sum + c.minWidth, 0);
     return Math.max(EXPLORER_WIDTH.min, Math.min(EXPLORER_WIDTH.max, viewport.width - dockMin));
   }
 
@@ -396,8 +399,7 @@ export class DockLayout {
     const size = this.dockSize(api);
     if (!size) return 'keep';
     const viewport = { width: size.width + (open ? explorerWidth : 0), height: size.height };
-    const explorer: OpenView = { id: EXPLORER_ID, layout: this.explorerAt(explorerWidth), group: EXPLORER_ID };
-    const views = this.openViews(api, [explorer]);
+    const views = this.openViews(api, [this.explorerView()]);
     if (open) return planLayout(viewport, views, this.hints()).hidden.some((h) => h.id === EXPLORER_ID) ? 'hide' : 'keep';
     return restorable(viewport, views, [EXPLORER_ID], GROW_BACK_MARGIN, this.hints()).includes(EXPLORER_ID) ? 'show' : 'keep';
   }

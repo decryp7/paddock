@@ -27,9 +27,9 @@ test.describe('narrow window', () => {
     await expect(page.locator('debrief-status-bar .low').first()).toBeVisible();
   });
 
-  test('1024 px: the Explorer gives way to the minimum message column (the plan decides, not a width), the page does not scroll sideways', async ({ page }, testInfo) => {
+  test('1024 px: the Explorer shrinks to its minimum beside the minimum message column (the plan decides, not a width), the page does not scroll sideways', async ({ page }, testInfo) => {
     await resize(page, 1024);
-    await expect(sidebar(page)).toHaveCount(0);
+    await expect(sidebar(page)).toBeVisible();
     expect(await noHorizontalScroll(page)).toBe(true);
     await expect(page.getByRole('grid', { name: 'Events' })).toBeVisible();
     await expectNoSeriousViolations(page, testInfo, 'narrow-1024');
@@ -74,10 +74,22 @@ test.describe('narrow window', () => {
       await expect.poll(() => grid.locator('.header').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
       await expect.poll(() => grid.locator('[role=row].row').first().evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
       // The Explorer is closed where it cannot fit beside the minimum message column; where the window has room for both it stays open.
-      if (width <= 1024) await expect(sidebar(page)).toHaveCount(0);
+      if (width <= 900) await expect(sidebar(page)).toHaveCount(0);
       else await expect(sidebar(page)).toBeVisible();
     });
   }
+
+  test('1440 px: the Explorer shrinks (not below its minimum) so Registry keeps its own column, and the message column keeps its minimum', async ({ page }) => {
+    await resize(page, 1440);
+    const registry = page.locator('.dv-groupview').filter({ has: page.getByRole('tab', { name: 'Registry', exact: true }) });
+    await expect(registry).toBeVisible();
+    await expect(registry).not.toContainText('Events');
+    await expect(sidebar(page)).toBeVisible();
+    await expect.poll(async () => (await sidebar(page).boundingBox())!.width).toBeGreaterThanOrEqual(240);
+    const msg = page.locator('debrief-events-grid [role=row].row').first().locator('.msg');
+    await expect.poll(async () => (await msg.boundingBox())!.width).toBeGreaterThanOrEqual(MESSAGE_COLUMN_MIN);
+    await expect(registry).not.toContainText('Events');
+  });
 
   test('the Explorer keeps the width the user chose: it shrinks and closes when the window narrows and comes back at that width', async ({ page }) => {
     const width = async () => Math.round((await sidebar(page).boundingBox())!.width);

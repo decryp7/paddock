@@ -9,6 +9,9 @@ import { stableCenter } from '../src/app/layout-plan/layout-scenarios.playwright
 // the tab menu's "Float", the group's ⋯ panel menu or Window ▸ Float panel. Tabs are dragged
 // with pointer events.
 
+// Metrics opens beside the timeline only where the window holds the Explorer (240 px), Events (702), Registry and Metrics side by side; at 1440 px it is a tab behind the timeline.
+test.use({ viewport: { width: 1800, height: 900 } });
+
 const tab = (page: Page, name: string) => page.getByRole('tab', { name, exact: true });
 const cue = (page: Page) => page.locator('.debrief-float-cue');
 const floating = (page: Page) => page.locator('.dv-resize-container');

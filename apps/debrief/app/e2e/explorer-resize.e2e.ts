@@ -7,6 +7,9 @@ import { measureGroups } from '../src/app/layout-plan/layout-scenarios.playwrigh
 // dragging the sash at its inner edge. It was a fixed 272 px column with no sash at all (reported 2026-10-27).
 const SHOTS = process.env['EXPLORER_SHOTS'];
 
+// Registry keeps its own column and the Explorer gives way to it, so a drag has room only in a window wider than 1440 px.
+test.use({ viewport: { width: 1900, height: 900 } });
+
 const sidebarWidth = async (page: Page): Promise<number> => Math.round((await page.locator('debrief-sidebar').boundingBox())!.width);
 
 /** Drags the Explorer's inner edge by `dx` px, as a user does: press on the edge, move, release. */
@@ -136,31 +139,31 @@ test('dragging the Explorer wider than the window allows stops at the room the p
   await expect(page.locator('debrief-sidebar')).toBeVisible();
 });
 
-test('dragging the Explorer wide in a 1440 px window tabs the lower-priority panes, and the width stays after release and after a re-plan', async ({ page }) => {
+test('at 1440 px the Explorer gives way to the other columns: a drag stops at the room they leave and tabs nothing, and the width stays after a re-plan', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   await openAiApp(page);
   await openChat(page);
   await planIdle(page);
   const groups = async (): Promise<number> => (await measureGroups(page)).length;
   const before = await groups();
   const sash = page.getByRole('separator', { name: 'Resize the Explorer' });
-  const start = await sidebarWidth(page);
   const box = (await page.locator('debrief-sidebar').boundingBox())!;
   const flips = await flipsDuring(page, async () => {
     await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2);
     await page.mouse.down();
-    await page.mouse.move(box.x + box.width - 1 + (600 - start), box.y + box.height / 2, { steps: 12 });
+    await page.mouse.move(box.x + box.width - 1 + 600, box.y + box.height / 2, { steps: 12 });
     await page.mouse.up();
     await planIdle(page);
   });
-  expect(Number(await sash.getAttribute('aria-valuemax'))).toBeGreaterThanOrEqual(600);
-  await expect.poll(() => sidebarWidth(page)).toBe(600);
-  // The assistant (lower priority than the Explorer) yielded: it is auto-hidden to the side rail now, as when the window shrinks.
-  await expect.poll(groups).toBeLessThan(before);
-  // A re-plan (a small window resize and back) keeps the width, and nothing flaps.
+  const max = Number(await sash.getAttribute('aria-valuemax'));
+  expect(max).toBeGreaterThanOrEqual(Number(await sash.getAttribute('aria-valuemin')));
+  await expect.poll(() => sidebarWidth(page)).toBe(max);
+  // No other column was tabbed or auto-hidden for the Explorer's sake.
+  expect(await groups()).toBe(before);
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.setViewportSize({ width: 1440, height: 900 });
   await planIdle(page);
-  expect(await sidebarWidth(page)).toBe(600);
+  expect(await sidebarWidth(page)).toBe(max);
   expect(flips).toBe(0);
   await expect(page.locator('debrief-sidebar')).toBeVisible();
 });

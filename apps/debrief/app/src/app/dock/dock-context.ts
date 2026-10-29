@@ -42,6 +42,11 @@ export class DockContext {
   /** The side each tool window was last auto-hidden to (it goes there again). */
   /** Views the layout plan moved away for lack of room, by id (they return when there is room; persisted in the extras). */
   readonly displaced = new Map<string, DisplacedView>();
+  /**
+   * Px the Explorer can give up beside the dock (its width less its minimum, 0 when closed): the dock plans as if it had them, so a
+   * column is tabbed only when the Explorer at its minimum would not leave room (the Explorer shrinks first). Set by the narrow-window follower.
+   */
+  explorerYield = 0;
   /** The sizes the user dragged views to (persisted in the extras). */
   userSizes: UserSizes = {};
   readonly autoHideSides = signal<Readonly<Record<string, Side>>>({});
