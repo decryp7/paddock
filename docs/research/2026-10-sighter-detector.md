@@ -6,6 +6,15 @@ elements, size and latency, running from Rust, rule 23, fine-tuning, and fit wit
 (sections 6, 8, 11, 12) and `apps/sighter/docs/review/2026-10-design-review.md`. Research note from published sources;
 nothing was measured on our data. Figures marked (verify) come from secondary sources.
 
+> **Correction (2026-10-29).** Superseded in part by
+> [apps/sighter/docs/research/2026-10-29-rf-detr.md](../../apps/sighter/docs/research/2026-10-29-rf-detr.md) and Sighter
+> [ADR 0001](../../apps/sighter/docs/adr/0001-object-detector.md). (1) RF-DETR N/S/M/L use patch size 16 and two
+> windows: input sides must be multiples of **32**, not "divisible by 14" (that was the old Base model); 640 and 960
+> tiles work as they are. (2) **DEIMv2 is non-commercial** under its own DEIMv2 License, not Apache-2.0 code with a
+> DINOv3 question: excluded. (3) UI-DETR-1 is not in v1 (user, 2026-10-29).
+> (4) RF-DETR's detection heads were pre-trained on Objects365 (paper, appendix A). The text below is left as
+> written on 2026-10-27.
+
 ## Answer in short
 
 - **They are not two choices at the same level.** UI-DETR-1 *is* RF-DETR: an RF-DETR-Medium fine-tuned by racine.ai on
