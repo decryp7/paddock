@@ -12,7 +12,7 @@ import { EXTRAS_TABS } from '../src/app/features/extras/extras-model';
 // Every screen of the sidebar (so a new one is measured without editing this list), and the cpu screen the sidebar does not list.
 const PAGES = [...new Set([...NAV.map((n) => n.path.replace(/^\//, '')), 'cpu'])];
 const WIDTHS = [900, 1024, 1280];
-const ROWS = 'tr, [role="row"], .row, .item, li.win';
+const ROWS = 'tr, [role="row"], .row, .item, li.win, th, [role="columnheader"]';
 
 async function clipped(page: Page): Promise<string[]> {
   return page.evaluate((selector) => {

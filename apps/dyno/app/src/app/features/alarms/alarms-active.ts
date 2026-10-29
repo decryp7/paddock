@@ -91,11 +91,11 @@ export class AlarmsActive {
   protected readonly rowKey = (a: Alarm): string => String(a.id);
   protected readonly selectedKey = computed(() => (this.store.selectedId() === null ? null : String(this.store.selectedId())));
   protected readonly columns: PdColumn<Alarm>[] = [
-    { key: 'unread', header: 'Not acknowledged', value: (a) => (needsAcknowledge(a) ? 0 : 1), text: () => '', width: '14px', headerHidden: true },
+    { key: 'unread', header: 'Not acknowledged', value: (a) => (needsAcknowledge(a) ? 0 : 1), text: () => '', width: '14px', headerHidden: true, sortable: false },
     { key: 'severity', header: 'Severity', value: (a) => SEVERITY_ORDER[a.severity], text: (a) => severityWord(a.severity), width: '92px' },
     { key: 'title', header: 'Alarm', value: (a) => a.title, required: true, width: 'minmax(0, 2fr)' },
     { key: 'detail', header: 'Detail', value: (a) => a.detail, width: 'minmax(0, 2fr)', hideBelow: 900 },
-    { key: 'rule', header: 'Rule', value: (a) => ruleLabel(a.rule), width: 'minmax(0, 1fr)', hideBelow: 1000 },
+    { key: 'rule', header: 'Rule', value: (a) => ruleLabel(a.rule), width: 'minmax(64px, 1fr)', hideBelow: 1000 },
     { key: 'state', header: 'State', value: (a) => stateWord(a.state), width: '190px' },
     { key: 'firstSeen', header: 'First seen', value: (a) => a.firstSeen, text: (a) => this.time(a.firstSeen), width: '84px', hideBelow: 1000 },
     { key: 'lastSeen', header: 'Last seen', value: (a) => a.lastSeen, text: (a) => this.time(a.lastSeen), width: '84px' },

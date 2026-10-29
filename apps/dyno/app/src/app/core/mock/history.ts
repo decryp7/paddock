@@ -67,9 +67,6 @@ function point(at: number, now: number): HistoryPoint {
 function events(from: number, to: number, now: number): TimelineEvent[] {
   const out: TimelineEvent[] = [];
   const fixed: TimelineEvent[] = [
-    { at: now - 35 * MIN, kind: 'network', label: 'Joined Wi-Fi “Studio”' },
-    { at: now - 58 * MIN, kind: 'network', label: 'VPN up (utun4)' },
-    { at: now - 3 * HOUR, kind: 'network', label: 'IP address on en0 changed: 192.168.1.23 → 192.168.1.41' },
     { at: now - 27 * HOUR, kind: 'alert', label: 'Memory pressure high' },
     { at: now - 52 * HOUR, kind: 'alert', label: 'Drive C: below 25% free' },
     { at: now - 4 * DAY, kind: 'alert', label: 'CPU reached 98 °C' },
@@ -160,7 +157,7 @@ export function mockHistory(range: HistoryRange, end: number | null, now: number
     topConsumers: [
       { app: 'Rust build (cargo)', cpuAvg: round(range === 'hour' ? 31 : 14.2, 1), memoryAvg: Math.round((range === 'hour' ? 2.4 : 1.1) * GB) },
       { app: 'Google Chrome', cpuAvg: round(6.1 * (range === 'hour' ? 1 : 0.8), 1), memoryAvg: Math.round(4.1 * GB) },
-      { app: 'Docker VM', cpuAvg: round(3.2, 1), memoryAvg: Math.round(4 * GB) },
+      { app: 'VirtualBox VM', cpuAvg: round(3.2, 1), memoryAvg: Math.round(4 * GB) },
       { app: 'Visual Studio Code', cpuAvg: round(3.0 * consumersScale + 1, 1), memoryAvg: Math.round(2.1 * GB) },
       { app: 'Microsoft Defender', cpuAvg: round(2.6, 1), memoryAvg: Math.round(370 * MB) },
       { app: 'Microsoft Teams', cpuAvg: round(1.8, 1), memoryAvg: Math.round(1.1 * GB) },

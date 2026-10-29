@@ -466,7 +466,7 @@ export class MockBackend implements DynoBackend {
               },
             },
         modules: system ? { unavailable: pr.modulesDenied } : { items: { items: pr.libs, truncated: true } },
-        startupSource: p.group === 'teams' ? 'Login item: Microsoft Teams' : p.group === 'docker' ? 'Login item: Docker Desktop' : null,
+        startupSource: p.group === 'teams' ? 'Login item: Microsoft Teams' : p.group === 'docker' ? 'Login item: VirtualBox' : null,
       };
     });
   }
@@ -1017,14 +1017,13 @@ export class MockBackend implements DynoBackend {
         crashes: 9,
         alerts: 2,
         highlights: [
-          'Your computer averaged 38% CPU and 61% memory, peaking at 94% CPU.',
-          'Docker’s backend crashed 6 times today: check its virtual machine settings.',
+          'Your computer averaged 17% CPU and 58% memory, peaking at 99% CPU.',
+          'The VirtualBox service crashed 6 times today: check its virtual machine settings.',
           'Sign-in takes 9 s longer than a month ago: 2 new startup apps.',
         ],
         scoreTrend: [66, 68, 71, 70, 72, 74].map((score, i) => ({ at: from + i * 28 * 60 * MIN, score })),
         disks: [
           { disk: this.profile.os === 'windows' ? 'C:' : '/', total: 953 * GB, free: 210 * GB, forecast: { fullInDays: 41 } },
-          { disk: this.profile.os === 'windows' ? 'D:' : '/Volumes/Data', total: 2048 * GB, free: 1500 * GB, forecast: 'notFilling' },
         ],
         issues: [
           { at: issueAt(6 * 60), severity: 'warning', title: 'Drive is getting full', detail: '210 GB free of 953 GB; at this rate it is full in about 41 days.' },
@@ -1468,7 +1467,7 @@ function publisher(p: MockProcess, fallback: string): string {
     onedrive: 'Microsoft Corporation',
     slack: 'Slack Technologies, LLC',
     spotify: 'Spotify AB',
-    docker: 'Docker Inc.',
+    docker: 'Oracle Corporation',
     node: 'OpenJS Foundation',
     terminal: 'Microsoft Corporation',
     pwsh: 'Microsoft Corporation',

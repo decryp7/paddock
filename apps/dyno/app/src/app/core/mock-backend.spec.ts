@@ -82,7 +82,7 @@ describe('OS differences', () => {
   it('disks follow the OS', async () => {
     const mounts = async (os: 'windows' | 'macos' | 'linux') => make({ os }).liveUpdate('summary').system.disks.map((d) => d.mount);
     expect(await mounts('windows')).toEqual(['C:\\', 'D:\\']);
-    expect(await mounts('macos')).toEqual(['/', '/Volumes/T7']);
+    expect(await mounts('macos')).toEqual(['/']);
     expect(await mounts('linux')).toEqual(['/', '/mnt/data']);
   });
   it('process names follow the OS', () => {

@@ -736,7 +736,7 @@ test.describe('extras', () => {
     await expect(page.getByRole('grid', { name: 'Recent wakes' })).toContainText('Lid open');
     await page.getByRole('tab', { name: 'Boot' }).click();
     await expect(page.getByRole('region', { name: 'Last start-up' })).toContainText('47.2 s');
-    await expect(page.getByRole('grid', { name: 'What slowed start-up' })).toContainText('Docker Desktop');
+    await expect(page.getByRole('grid', { name: 'What slowed start-up' })).toContainText('VirtualBox');
     await page.getByRole('tab', { name: 'Apps' }).click();
     await expect(page.getByRole('grid', { name: 'Network and energy per app' })).toContainText('Google Chrome');
     await page.getByRole('tab', { name: 'GPU' }).click();

@@ -180,7 +180,7 @@ describe('dy-extras-page', () => {
     sortBy('App');
     await settle(f);
     expect(header('App').getAttribute('aria-sort')).toBe('ascending');
-    expect(names()[0]).toBe('Docker Desktop');
+    expect(names()[0]).toBe('Dropbox');
     const real = mockUsage();
     returns(mock, { appUsage: { ...real, networkUnavailable: 'Needs nettop.', energyUnavailable: 'No energy data.' } });
     await store.reload('apps');

@@ -42,7 +42,7 @@ function appleSilicon(): SystemInventory {
     hostName: 'MacBook-Pro',
     cpu: { name: 'Apple M4 Pro', physicalCores: 14, logicalCores: 14, frequencyMhz: 4500 },
     memory: { unified: { total: 48 * GB, kind: 'lpddr5', manufacturer: 'Apple', upgradeable: false } },
-    disks: [disk('Apple SSD AP1024', 994)],
+    disks: [disk('Apple SSD AP1024', 953)],
     hints: [{ kind: 'notUpgradeable', message: 'The memory is part of the chip package and cannot be upgraded. Choose the size when buying.', slot: null }],
   };
 }
