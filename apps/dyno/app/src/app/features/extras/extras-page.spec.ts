@@ -5,7 +5,6 @@ import type { MaintenanceSettings, SleepReport } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { Chart } from '../../shared/chart';
-import { Dialogs } from '../../shared/dialog';
 import { provideIcons } from '../../shared/icons';
 import { ExtrasStore } from '../../state/extras.store';
 import { SettingsStore } from '../../state/settings.store';
@@ -65,22 +64,17 @@ describe('dy-extras-page', () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
-  it('follows the tab named in the address, ignores a name it does not know, and moves with the arrow keys', async () => {
+  it('follows the tab named in the address, ignores a name it does not know, and moves with the tab links', async () => {
     expect(tabFrom('files')).toBe('files');
     expect(tabFrom('nope')).toBe('changes');
     expect(tabFrom(null)).toBe('changes');
     const { f, el } = render('gpu');
     await settle(f);
     expect(tabBtn(el, 'GPU').getAttribute('aria-selected')).toBe('true');
-    const press = (key: string) => el.querySelector('[role="tab"][aria-selected="true"]')!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-    press('ArrowRight');
-    await settle(f);
+    await clickTab(f, el, 'Files');
     expect(tabBtn(el, 'Files').getAttribute('aria-selected')).toBe('true');
-    press('ArrowLeft');
-    press('ArrowLeft');
-    await settle(f);
+    await clickTab(f, el, 'Apps');
     expect(tabBtn(el, 'Apps').getAttribute('aria-selected')).toBe('true');
-    press('x');
     expect(TestBed.inject(Router).url).toContain('tab=apps');
   });
 
@@ -262,75 +256,27 @@ describe('dy-extras-page', () => {
     const { f, el, mock } = render('files');
     await settle(f);
     expect(el.querySelector('.none strong')!.textContent).toBe('Find big and duplicate files');
-    expect(el.querySelectorAll('.btn.primary')).toHaveLength(1);
+    expect(el.querySelectorAll('button[matButton="filled"]')).toHaveLength(1);
     btn(el, 'Choose a folder').click();
     await settle(f);
     expect(mock.pickedFolders).toBe(1);
     const table = el.querySelector('table[aria-label="Large and duplicate files"]')!;
     expect(table.querySelectorAll('thead')).toHaveLength(1);
     expect([...table.querySelectorAll('tr.day strong')].map((s) => s.textContent)).toEqual(['Large files', '3 copies of site-redesign.psd', '2 copies of resnet50.onnx']);
-    expect(table.querySelectorAll('input[type="checkbox"]').length).toBe(8 + 5);
-    expect(el.querySelector('[aria-label="Selection"] .summary')!.textContent).toBe('3 files selected · 2.3 GB'.replace('2.3 GB', el.querySelector('[aria-label="Selection"] .summary')!.textContent!.split('· ')[1]!));
+    expect(table.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    expect(table.querySelectorAll('tbody tr:not(.day)')).toHaveLength(8 + 5);
     expect(el.textContent).toContain('Copies are listed oldest first.');
     expect(btn(el, 'Choose another folder')).toBeTruthy();
   });
 
-  it('Files: keeps one copy, confirms with the count and bytes, removes and searches again', async () => {
-    const { f, el, mock } = render('files');
-    await settle(f);
-    btn(el, 'Choose a folder').click();
-    await settle(f);
-    const box = (name: string) => el.querySelector<HTMLInputElement>(`input[aria-label="Select ${name}"]`)!;
-    // selecting the oldest copy too would take every copy of the group
-    const oldest = el.querySelector<HTMLInputElement>('input[aria-label="Select site-redesign.psd"]')!;
-    const all = [...el.querySelectorAll<HTMLInputElement>('input[aria-label="Select site-redesign.psd"], input[aria-label="Select site-redesign (1).psd"]')];
-    expect(all).toHaveLength(3);
-    expect(oldest.checked).toBe(false);
-    const unchecked = all.find((c) => !c.checked)!;
-    unchecked.click();
-    await settle(f);
-    expect(el.querySelector('p.note.bad')!.textContent).toContain('Keep at least one copy of each group');
-    expect(btn(el, 'Move to Trash').disabled).toBe(true);
-    unchecked.click();
-    await settle(f);
-    expect(el.querySelector('p.note.bad')).toBeNull();
-    box('brand-video-final.mov').click();
-    await settle(f);
-    const spy = vi.spyOn(mock, 'removeFoundFiles');
-    const dialogs = TestBed.inject(Dialogs);
-    const open = vi.spyOn(dialogs, 'open');
-    btn(el, 'Quarantine').click();
-    await settle(f);
-    const data = open.mock.calls[0]![1] as { count: number; bytes: number; mode: string; rows: { name: string }[] };
-    expect(data).toMatchObject({ count: 4, mode: 'quarantine' });
-    expect(data.rows.map((r) => r.name)).toEqual(['Duplicate copies', 'Large files']);
-    expect(document.querySelector('.dy-dialog-panel')!.textContent).toContain('4 items');
-    [...document.querySelectorAll<HTMLButtonElement>('.dy-dialog-panel button')].find((b) => b.textContent!.includes('Move to quarantine'))!.click();
-    await settle(f);
-    expect(spy).toHaveBeenCalledWith('scan-1', expect.arrayContaining(['l1', 'd1b']), 'quarantine');
-    expect(el.querySelectorAll('input[aria-label="Select brand-video-final.mov"]')).toHaveLength(0);
-  });
-
-  it('Files: cancelling the confirmation moves nothing; filters, collapse, clear and the empty result work', async () => {
+  it('Files: filters, collapse and the empty result work', async () => {
     const { f, el, mock, store } = render('files');
     await settle(f);
     btn(el, 'Choose a folder').click();
     await settle(f);
-    const spy = vi.spyOn(mock, 'removeFoundFiles');
-    btn(el, 'Move to Trash').click();
-    await settle(f);
-    [...document.querySelectorAll<HTMLButtonElement>('.dy-dialog-panel button')].find((b) => b.textContent === 'Cancel')!.click();
-    await settle(f);
-    expect(spy).not.toHaveBeenCalled();
-    btn(el, 'Clear').click();
-    await settle(f);
-    expect(btn(el, 'Move to Trash').disabled).toBe(true);
-    btn(el, 'Reselect copies').click();
-    await settle(f);
-    expect(store.selected()).toHaveLength(3);
     (el.querySelector('[aria-label="Collapse Large files"]') as HTMLElement).click();
     await settle(f);
-    expect(el.querySelectorAll('table[aria-label="Large and duplicate files"] tbody input').length).toBe(5);
+    expect(el.querySelectorAll('table[aria-label="Large and duplicate files"] tbody tr:not(.day)').length).toBe(5);
     btn(el, 'Duplicates').click();
     await settle(f);
     expect(store.mode()).toBe('duplicates');
@@ -351,19 +297,6 @@ describe('dy-extras-page', () => {
     expect(el.querySelector('[role="alert"]')!.textContent).toContain('Choose a folder with a full path.');
   });
 
-  it('Files: the engine refusal to remove is shown next to the list', async () => {
-    const { f, el, mock } = render('files');
-    await settle(f);
-    btn(el, 'Choose a folder').click();
-    await settle(f);
-    vi.spyOn(mock, 'removeFoundFiles').mockRejectedValue({ code: 'badRequest', message: 'This search is too old.' });
-    btn(el, 'Move to Trash').click();
-    await settle(f);
-    [...document.querySelectorAll<HTMLButtonElement>('.dy-dialog-panel button')].find((b) => b.textContent!.includes('Move to Recycle Bin'))!.click();
-    await settle(f);
-    expect(el.querySelector('p.note.bad')!.textContent).toContain('This search is too old.');
-  });
-
   describe('Maintenance', () => {
     it('explains what it limits, shows the status and the windows', async () => {
       const { f, el } = render('maintenance');
@@ -371,29 +304,29 @@ describe('dy-extras-page', () => {
       expect(el.textContent).toContain('never limits anything you click');
       expect(el.querySelector('.status')!.textContent).toContain('Closed now. Next window opens');
       expect(el.querySelectorAll('li.win')).toHaveLength(2);
-      expect(el.querySelector<HTMLInputElement>('input[aria-label="Window 1 starts"]')!.value).toBe('22:00');
-      expect(el.querySelector<HTMLInputElement>('input[aria-label="Window 1 ends"]')!.value).toBe('02:00');
+      expect(el.querySelector<HTMLInputElement>('input[aria-label="From, window 1"]')!.value).toBe('22:00');
+      expect(el.querySelector<HTMLInputElement>('input[aria-label="To, window 1"]')!.value).toBe('02:00');
       expect(el.textContent).toContain('Mon to Fri, 22:00 to 02:00 the next day');
-      expect(el.querySelectorAll('.btn.primary')).toHaveLength(1);
+      expect(el.querySelectorAll('button[matButton="filled"]')).toHaveLength(1);
       expect(btn(el, 'Save windows').disabled).toBe(true);
     });
 
     it('edits days, times and windows, validates early, and saves through the settings', async () => {
       const { f, el, mock, store } = render('maintenance');
       await settle(f);
-      const day = (w: number, name: string) => el.querySelectorAll('li.win')[w]!.querySelector<HTMLButtonElement>(`[aria-label="${name}"]`)!;
-      day(0, 'Saturday').click();
+      const day = (w: number, name: string) => [...el.querySelectorAll('li.win')[w]!.querySelectorAll<HTMLButtonElement>('mat-button-toggle button')].find((b) => b.textContent?.trim() === name)!;
+      day(0, 'Sat').click();
       await settle(f);
-      expect(day(0, 'Saturday').getAttribute('aria-pressed')).toBe('true');
+      expect(day(0, 'Sat').getAttribute('aria-pressed')).toBe('true');
       expect(btn(el, 'Save windows').disabled).toBe(false);
-      const start = el.querySelector<HTMLInputElement>('input[aria-label="Window 1 starts"]')!;
+      const start = el.querySelector<HTMLInputElement>('input[aria-label="From, window 1"]')!;
       start.value = '21:30';
       start.dispatchEvent(new Event('input'));
       start.value = 'bad';
       start.dispatchEvent(new Event('input'));
       await settle(f);
       expect(el.textContent).toContain('21:30 to 02:00');
-      const end = el.querySelector<HTMLInputElement>('input[aria-label="Window 1 ends"]')!;
+      const end = el.querySelector<HTMLInputElement>('input[aria-label="To, window 1"]')!;
       end.value = '21:30';
       end.dispatchEvent(new Event('input'));
       await settle(f);

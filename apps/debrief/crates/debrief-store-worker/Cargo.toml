@@ -28,6 +28,7 @@ serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order", "float_roundtrip"] }
 
 [dev-dependencies]
+debrief-ipc = { path = "../debrief-ipc", features = ["test-support"] }
 getrandom.workspace = true
 chrono.workspace = true
 debrief-plugin-api = { path = "../debrief-plugin-api" }

@@ -8,12 +8,12 @@ describe('heat', () => {
     expect(heat(5, 0)).toBeNull();
   });
   it('is faint for small values and strongest at full scale', () => {
-    expect(heat(10, 10)).toBe('rgb(var(--heat) / 0.3)');
-    expect(heat(100, 10)).toBe('rgb(var(--heat) / 0.3)');
-    expect(heat(2.5, 10)).toBe('rgb(var(--heat) / 0.17)');
+    expect(heat(10, 10)).toBe('color-mix(in srgb, var(--pd-accent) 30%, transparent)');
+    expect(heat(100, 10)).toBe('color-mix(in srgb, var(--pd-accent) 30%, transparent)');
+    expect(heat(2.5, 10)).toBe('color-mix(in srgb, var(--pd-accent) 17%, transparent)');
   });
   it('grows monotonically', () => {
-    const alpha = (v: number) => Number(/\/ ([\d.]+)\)/.exec(heat(v, 100)!)![1]);
+    const alpha = (v: number) => Number(/ (\d+)%/.exec(heat(v, 100)!)![1]);
     expect(alpha(1)).toBeLessThan(alpha(10));
     expect(alpha(10)).toBeLessThan(alpha(50));
   });
@@ -30,6 +30,6 @@ describe('bar', () => {
   });
   it('is grey unless the column is the sort column', () => {
     expect(bar(5, 10)).toContain('var(--text-3)');
-    expect(bar(5, 10, true)).toContain('var(--heat)');
+    expect(bar(5, 10, true)).toContain('var(--pd-accent)');
   });
 });

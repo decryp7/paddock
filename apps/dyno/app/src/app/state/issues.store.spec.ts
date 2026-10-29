@@ -51,7 +51,7 @@ describe('IssuesStore', () => {
     await Promise.all([issues.rescan(), issues.rescan()]);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(issues.rescanning()).toBe(false);
-    expect(notifier.toasts().at(-1)?.text).toContain('Read the system logs');
+    expect(notifier.recent().at(-1)?.text).toContain('Read the system logs');
     spy.mockRejectedValueOnce({ code: 'timeout', message: 'slow' });
     await issues.rescan();
     expect(issues.error()?.message).toBe('slow');
@@ -62,7 +62,7 @@ describe('IssuesStore', () => {
     const { issues, mock, notifier } = setup();
     await issues.exportForDebrief();
     expect(issues.saved()?.path).toMatch(/\.jsonl$/);
-    expect(notifier.toasts().at(-1)?.text).toContain('dyno-issues.jsonl');
+    expect(notifier.recent().at(-1)?.text).toContain('dyno-issues.jsonl');
     const spy = vi.spyOn(mock, 'saveIssues').mockResolvedValueOnce(null);
     const before = issues.saved();
     await issues.exportForDebrief();
@@ -75,30 +75,10 @@ describe('IssuesStore', () => {
 });
 
 describe('UnusualStore', () => {
-  it('loads, acts and reloads including hidden items on request', async () => {
-    const { unusual, notifier } = setup();
+  it('lists the new programs and reports a failure without breaking the list', async () => {
+    const { unusual, mock } = setup();
     await unusual.load();
-    const item = unusual.overview()!.items[0]!;
-    await unusual.act(item, 'ignore');
-    expect(unusual.overview()!.items.some((i) => i.key === item.key)).toBe(false);
-    expect(notifier.toasts().at(-1)?.text).toContain('hidden');
-    await unusual.setIncludeIgnored(true);
-    expect(unusual.overview()!.items.some((i) => i.key === item.key)).toBe(true);
-    await unusual.act(item, 'restore');
-    expect(notifier.toasts().at(-1)?.text).toContain('back on the list');
-    await unusual.act(item, 'protect');
-    expect(notifier.toasts().at(-1)?.text).toContain('protected');
-    expect(unusual.busy()).toBeNull();
-  });
-
-  it('reports failures without breaking the list', async () => {
-    const { unusual, mock, notifier } = setup();
-    await unusual.load();
-    const item = unusual.overview()!.items[0]!;
-    vi.spyOn(mock, 'unusualAct').mockRejectedValueOnce({ code: 'notFound', message: 'gone' });
-    await unusual.act(item, 'ignore');
-    expect(notifier.toasts().at(-1)).toMatchObject({ text: 'gone', tone: 'bad' });
-    expect(unusual.busy()).toBeNull();
+    expect(unusual.overview()!.items.length).toBeGreaterThan(0);
     vi.spyOn(mock, 'unusual').mockRejectedValueOnce({ code: 'busy', message: 'later' });
     await unusual.load();
     expect(unusual.error()?.message).toBe('later');
@@ -110,15 +90,7 @@ describe('UnusualStore', () => {
     expect(unusual.overview()).toMatchObject({ known: 0 });
     vi.spyOn(mock, 'forgetBaseline').mockRejectedValueOnce({ code: 'internal', message: 'bad' });
     await unusual.forget();
-    expect(notifier.toasts().at(-1)?.text).toBe('bad');
+    expect(notifier.recent().at(-1)?.text).toBe('bad');
   });
 
-  it('does not run two actions at once', async () => {
-    const { unusual, mock } = setup();
-    await unusual.load();
-    const item = unusual.overview()!.items[0]!;
-    const spy = vi.spyOn(mock, 'unusualAct');
-    await Promise.all([unusual.act(item, 'ignore'), unusual.act(item, 'protect')]);
-    expect(spy).toHaveBeenCalledTimes(1);
-  });
 });

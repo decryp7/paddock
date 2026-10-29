@@ -4,9 +4,11 @@ import {
   inject,
   makeEnvironmentProviders,
   provideBrowserGlobalErrorListeners,
+  provideEnvironmentInitializer,
   Provider,
 } from '@angular/core';
-import { provideShellCore, type DialogDef, type ShellPorts } from '@decryp7/paddock-ui/shell';
+import { provideShellCore, setActiveDialog, type DialogDef, type ShellPorts } from '@decryp7/paddock-ui/shell';
+import { allowedCommands } from './contracts';
 import { DialogService } from './dialog.service';
 import { DIALOG_IO, type DialogIo } from './io';
 import { DIALOG_ROUTE, parseDialogRoute, type DialogRoute } from './route';
@@ -54,6 +56,11 @@ export interface DialogWindowOptions {
   readonly io?: () => DialogIo;
   /** Defaults to the window's location. */
   readonly route?: DialogRoute | null;
+  /**
+   * The app's base commands (its dialog table's `base`, generated as `DIALOG_BASE`): with the dialog's contract, what the
+   * invoke layer lets this window send without reporting it (ADR 0026 §3).
+   */
+  readonly baseCommands?: readonly string[];
 }
 
 /**
@@ -80,6 +87,11 @@ export function dialogWindowConfig(options: DialogWindowOptions): ApplicationCon
       { provide: DIALOG_LOOKUP, useValue: (id: string) => byId.get(id) },
       // A dialog may open another dialog (its contract then lists `dialog_open`).
       provideDialogs({ io: options.io }),
+      // Every command this window sends through `shellInvoke` is recorded for its dialog (ADR 0026 §3).
+      provideEnvironmentInitializer(() => {
+        const def = route ? byId.get(route.id) : undefined;
+        setActiveDialog(route?.id ?? null, def ? allowedCommands(def, options.baseCommands) : null);
+      }),
       ...(options.providers ?? []),
     ],
   };

@@ -230,16 +230,16 @@ export type GridRowVm = RowVm | PlaceholderVm;
     .spacer { flex: 1; }
     .anchor { position: relative; }
     .cols { right: 0; top: 30px; width: 280px; display: flex; flex-direction: column; gap: 6px; }
-    .err-card { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 80%; padding: 14px 18px; border: 1px solid var(--border-3); border-radius: 8px; background: var(--bg-3); color: var(--text); text-align: center; }
+    .err-card { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 80%; padding: 14px 18px; border: 1px solid var(--border-3); border-radius: 8px; background: var(--bg-3); color: var(--text); text-align: center; }
     .col-opt { width: 100%; display: flex; align-items: center; gap: 8px; height: 24px; color: var(--text-2); font-size: var(--fs-sm); }
-    .header { position: sticky; top: 0; z-index: 2; height: ${HEADER_H}px; display: grid; align-items: center; column-gap: 10px; padding: 0 14px; font-size: var(--fs-xs); color: var(--muted); border-bottom: 1px solid var(--border); background: var(--bg-2); }
+    .header { position: sticky; top: 0; z-index: 3; height: ${HEADER_H}px; display: grid; align-items: center; column-gap: 10px; padding: 0 14px; font-size: var(--fs-xs); color: var(--muted); border-bottom: 1px solid var(--border); background: var(--bg-2); }
     .hcell { display: flex; align-items: center; gap: 4px; min-width: 0; }
     .sort { border: 0; background: transparent; color: inherit; font-size: var(--fs-xs); padding: 0; text-align: left; cursor: pointer; }
     .sort:hover { color: var(--text); }
     .x { border: 0; background: transparent; color: var(--faint); cursor: pointer; padding: 0 2px; }
     .viewport { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; position: relative; outline: none; }
     .viewport:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
-    .layer { position: sticky; top: ${HEADER_H}px; overflow: hidden; }
+    .layer { /* conformance: not-a-header */ position: sticky; top: ${HEADER_H}px; overflow: hidden; }
     .row { position: absolute; left: 0; right: 0; height: var(--row-h, 26px); display: grid; align-items: center; column-gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--grid-line); cursor: default; }
     .row:hover { background: var(--bg-hover); }
     .row.sel { background-color: var(--bg-sel); box-shadow: inset 2px 0 0 var(--accent); }

@@ -10,6 +10,8 @@ import {
 } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
+  answered,
+  DISMISSED,
   provideContributions,
   provideShellContext,
   provideShellCore,
@@ -17,6 +19,7 @@ import {
   SHELL_PORTS,
   type AppContextFactory,
   type ContributionBatch,
+  type DialogOutcome,
   type ShellNotice,
   type ShellPorts,
 } from '@decryp7/paddock-ui/shell';
@@ -46,9 +49,10 @@ export class RecordingShellPorts implements ShellPorts {
     this.pages.push(id);
   }
 
-  openDialog(id: string, inputs?: unknown): Promise<unknown> {
+  /** Resolves with the answer set in `dialogAnswers` for `id`, else dismissed. */
+  openDialog(id: string, inputs?: unknown): Promise<DialogOutcome<unknown>> {
     this.dialogs.push({ id, inputs });
-    return Promise.resolve(this.dialogAnswers.get(id));
+    return Promise.resolve(this.dialogAnswers.has(id) ? answered(this.dialogAnswers.get(id)) : DISMISSED);
   }
 
   notify(notice: ShellNotice): void {

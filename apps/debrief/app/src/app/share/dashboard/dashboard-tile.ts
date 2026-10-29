@@ -122,7 +122,7 @@ export function cellText(column: string, value: unknown, tz: 'utc' | 'local'): s
     .scroll { flex: 1; min-height: 0; overflow: auto; }
     table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
     th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
-    th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--bg-2); }
+    th { color: var(--muted); font-weight: 600; position: sticky; top: 0; z-index: 3; background: var(--bg-2); }
     .more { font-size: var(--fs-xs); padding: 4px 6px; }
     .list { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; min-height: 0; font-size: var(--fs-sm); display: flex; flex-direction: column; gap: 4px; }
     .top li { position: relative; display: flex; gap: 8px; padding: 2px 4px; }

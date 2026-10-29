@@ -10,7 +10,87 @@ use std::time::Duration;
 fn options(base: &std::path::Path) -> LaunchOptions {
     let mut o = LaunchOptions::new(Profile::Throwaway(base.to_path_buf()));
     o.window = Window::Headless;
+    o.extra_args = paddock_chromium::discover::TEST_ISOLATION_FLAGS
+        .iter()
+        .map(|f| f.to_string())
+        .collect();
     o
+}
+
+/// Answers one connection like a well-behaved server: reads the whole request head, answers with `answer(path)`, stops
+/// writing and reads until the browser closes its side (closing a socket that still holds unread bytes makes Windows send
+/// a reset instead of an orderly close, which can throw away an answer the browser has not read yet). `None` holds the
+/// connection open instead (returned so the caller keeps it).
+fn answer(
+    mut s: std::net::TcpStream,
+    reply: impl Fn(&str) -> Option<String>,
+) -> Option<std::net::TcpStream> {
+    use std::io::{Read, Write};
+    let mut head = Vec::new();
+    let mut buf = [0u8; 4096];
+    while !head.windows(4).any(|w| w == b"\r\n\r\n") && head.len() < 16 << 10 {
+        match s.read(&mut buf) {
+            Ok(0) | Err(_) => return None,
+            Ok(n) => head.extend_from_slice(&buf[..n]),
+        }
+    }
+    let req = String::from_utf8_lossy(&head).to_string();
+    let path = req.split_whitespace().nth(1).unwrap_or("/");
+    let Some(body) = reply(path) else {
+        return Some(s);
+    };
+    let _ = write!(
+        s,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = s.shutdown(std::net::Shutdown::Write);
+    let _ = s.set_read_timeout(Some(Duration::from_secs(30)));
+    while matches!(s.read(&mut buf), Ok(n) if n > 0) {}
+    None
+}
+
+fn require_browser() -> Option<paddock_chromium::discover::Browser> {
+    let exe = find_for_tests();
+    if exe.is_none() {
+        let required = std::env::var("PADDOCK_REQUIRE_TEST_BROWSER").is_ok_and(|v| !v.is_empty());
+        assert!(
+            !required,
+            "PADDOCK_REQUIRE_TEST_BROWSER is set but CHROMIUM_TEST_PATH names no Chrome for Testing"
+        );
+    }
+    exe
+}
+
+/// A new tab is loaded at once, with no wait of the caller's (the tab's own first `about:blank` navigation may still
+/// run; the page waits for it instead of having the load cancelled, Spotter's Windows CI runs 6473 and 6563).
+#[test]
+fn a_new_tab_loads_a_page_at_once() {
+    let Some(exe) = require_browser() else { return };
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for s in listener.incoming().flatten() {
+            std::thread::spawn(move || {
+                answer(s, |_| Some("<title>Tab</title><p id=p>new tab</p>".into()))
+            });
+        }
+    });
+    let base = tempfile::tempdir().unwrap();
+    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    for _ in 0..3 {
+        let page = b.new_page().unwrap();
+        page.navigate(
+            &format!("http://127.0.0.1:{port}/"),
+            Duration::from_secs(30),
+        )
+        .unwrap();
+        assert_eq!(
+            page.info().unwrap().url,
+            format!("http://127.0.0.1:{port}/")
+        );
+    }
+    assert!(b.close(), "Browser.close ends it by itself");
 }
 
 #[test]
@@ -63,16 +143,13 @@ fn a_real_browser_reads_a_page_and_closes_cleanly() {
     assert!(!page.screenshot_png().unwrap().is_empty());
     assert_eq!(b.page_count().unwrap(), 1, "the start page is the only tab");
     let dir = b.profile_dir().to_path_buf();
-    assert!(b.close(), "Browser.close ends it by itself");
-    assert!(!dir.exists());
-    assert!(!paddock_proc::is_alive(pid), "nothing is left behind");
-    // Helpers end a moment after the browser; a bounded wait, not an immediate check (rule 40).
-    let end = std::time::Instant::now() + Duration::from_secs(20);
-    while !paddock_proc::processes_mentioning(&dir.to_string_lossy()).is_empty() {
-        // conformance: hang-guard — a helper that never ends fails the test instead of hanging it
-        assert!(std::time::Instant::now() < end, "no helper is left behind");
-        std::thread::yield_now();
-    }
+    let exited = close_by_itself(&mut b);
+    assert!(
+        exited.0,
+        "Browser.close ends it by itself (waited {:?})",
+        exited.1
+    );
+    assert_nothing_left(pid, &dir);
 }
 
 /// Chrome answers `Page.navigate` with `net::ERR_ABORTED` for every load it cancels before the page commits; the driver
@@ -80,33 +157,58 @@ fn a_real_browser_reads_a_page_and_closes_cleanly() {
 /// first request is held at a local server until the second navigation starts, so the order is fixed.
 #[test]
 fn a_cancelled_load_says_whether_it_was_a_download_or_replaced() {
-    let Some(exe) = find_for_tests() else {
-        let required = std::env::var("PADDOCK_REQUIRE_TEST_BROWSER").is_ok_and(|v| !v.is_empty());
-        assert!(
-            !required,
-            "PADDOCK_REQUIRE_TEST_BROWSER is set but CHROMIUM_TEST_PATH names no Chrome for Testing"
-        );
-        return;
-    };
+    let Some(exe) = require_browser() else { return };
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let (arrived, first_request) = std::sync::mpsc::channel();
+    // What the server saw, for the failure message: each connection and the first line of its request. Chrome opens
+    // sockets that send nothing (preconnects, backup connects), so every connection has a thread of its own and one idle
+    // socket can never keep the real request from being accepted.
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let seen_by_server = seen.clone();
     // Holds `/held` (the connection stays open until the test ends) and answers everything else with a page.
     std::thread::spawn(move || {
-        let mut held = Vec::new();
-        for s in listener.incoming() {
-            let Ok(mut s) = s else { return };
-            let mut buf = [0u8; 4096];
-            let n = std::io::Read::read(&mut s, &mut buf).unwrap_or(0);
-            if String::from_utf8_lossy(&buf[..n]).starts_with("GET /held") {
-                let _ = arrived.send(());
-                held.push(s);
-            } else {
-                let _ = std::io::Write::write_all(
-                    &mut s,
-                    b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 13\r\nConnection: close\r\n\r\n<p>other</p>\n",
-                );
-            }
+        let held = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        for (n, s) in listener.incoming().map_while(Result::ok).enumerate() {
+            let (arrived, seen, held) = (arrived.clone(), seen_by_server.clone(), held.clone());
+            seen.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(format!("connection {n} opened"));
+            std::thread::spawn(move || {
+                let mut s = s;
+                // A socket that never sends gives up after a minute instead of holding its thread for the whole run.
+                let _ = s.set_read_timeout(Some(Duration::from_secs(60)));
+                let mut request = Vec::new();
+                let mut buf = [0u8; 4096];
+                while !request.contains(&b'\n') && request.len() < 16 * 1024 {
+                    match std::io::Read::read(&mut s, &mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => request.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let line = String::from_utf8_lossy(&request)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                seen.lock().unwrap_or_else(|e| e.into_inner()).push(format!(
+                    "connection {n}: {}",
+                    if line.is_empty() {
+                        "nothing sent"
+                    } else {
+                        &line
+                    }
+                ));
+                if line.starts_with("GET /held") {
+                    let _ = arrived.send(());
+                    held.lock().unwrap_or_else(|e| e.into_inner()).push(s);
+                } else if !line.is_empty() {
+                    let _ = std::io::Write::write_all(
+                        &mut s,
+                        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 13\r\nConnection: close\r\n\r\n<p>other</p>\n",
+                    );
+                }
+            });
         }
     });
     let base = tempfile::tempdir().unwrap();
@@ -127,9 +229,15 @@ fn a_cancelled_load_says_whether_it_was_a_download_or_replaced() {
                 Duration::from_secs(30),
             )
         });
-        first_request
-            .recv_timeout(Duration::from_secs(30))
-            .expect("the first load reached the server");
+        if first_request.recv_timeout(Duration::from_secs(30)).is_err() {
+            // Windows runs 6696 and 6697 never saw the request. Say what the load itself reported (its own wait ends after
+            // 30 s), so the next failure names the cause instead of only the symptom.
+            panic!(
+                "the first load did not reach the server in 30 s; the load itself ended with {:?}; the server saw {:?}",
+                first.join(),
+                seen.lock().unwrap_or_else(|e| e.into_inner())
+            );
+        }
         page.navigate(
             &format!("http://127.0.0.1:{port}/other"),
             Duration::from_secs(30),
@@ -141,5 +249,62 @@ fn a_cancelled_load_says_whether_it_was_a_download_or_replaced() {
         e.contains("replaced") && e.contains(&format!("http://127.0.0.1:{port}/other")),
         "{e}"
     );
-    assert!(b.close(), "Browser.close ends it by itself");
+    let exited = close_by_itself(&mut b);
+    assert!(
+        exited.0,
+        "Browser.close ends it by itself (waited {:?})",
+        exited.1
+    );
+}
+
+/// How long a loaded CI runner may take to let Chrome exit after `Browser.close` is a property of the machine, not of the
+/// driver (macOS 6662 and 6726 and Windows 6726 took more than `CLOSE_GRACE`, 5 s, with the test otherwise fine). The test
+/// asserts the mechanism, that the browser exits by itself and is not killed, and waits for that exit on the condition; the
+/// bound only keeps a browser that never exits from hanging the test (rule 40). Returns whether it exited and the wait.
+fn close_by_itself(b: &mut Chromium) -> (bool, Duration) {
+    const HANG_GUARD: Duration = Duration::from_secs(120);
+    let started = std::time::Instant::now();
+    let exited = b.close_gracefully(HANG_GUARD);
+    let waited = started.elapsed();
+    // Always printed (nextest shows it for a failed test): how long a runner needs is the evidence for the next change.
+    eprintln!("Browser.close: exited by itself = {exited}, waited {waited:?}");
+    (exited, waited)
+}
+
+/// The browser, its profile and its helpers are gone. Helpers end a moment after the browser, so they get a bounded wait
+/// on the condition, not an immediate check (rule 40).
+fn assert_nothing_left(pid: u32, dir: &std::path::Path) {
+    assert!(!dir.exists(), "the profile folder is removed");
+    assert!(!paddock_proc::is_alive(pid), "nothing is left behind");
+    let end = std::time::Instant::now() + Duration::from_secs(20);
+    while !paddock_proc::processes_mentioning(&dir.to_string_lossy()).is_empty() {
+        // conformance: hang-guard — a helper that never ends fails the test instead of hanging it
+        assert!(std::time::Instant::now() < end, "no helper is left behind");
+        std::thread::yield_now();
+    }
+}
+
+/// The other end of `close_by_itself`: with no grace at all the browser cannot exit by itself first, so it is ended by
+/// force, and the profile, the process and its helpers (on macOS the code-sign clone too) must be gone all the same.
+/// Together the two cover both outcomes of a close with no timing in either.
+#[test]
+fn a_browser_ended_by_force_leaves_nothing_behind() {
+    let Some(exe) = find_for_tests() else {
+        let required = std::env::var("PADDOCK_REQUIRE_TEST_BROWSER").is_ok_and(|v| !v.is_empty());
+        assert!(
+            !required,
+            "PADDOCK_REQUIRE_TEST_BROWSER is set but CHROMIUM_TEST_PATH names no Chrome for Testing"
+        );
+        return;
+    };
+    let base = tempfile::tempdir().unwrap();
+    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let pid = b.pid().unwrap();
+    b.start_page().unwrap();
+    let dir = b.profile_dir().to_path_buf();
+    assert!(
+        !b.close_gracefully(Duration::ZERO),
+        "with no grace the browser is ended by force"
+    );
+    assert_nothing_left(pid, &dir);
 }

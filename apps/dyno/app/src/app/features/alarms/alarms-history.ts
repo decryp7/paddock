@@ -4,11 +4,12 @@ import { AsyncState } from '../../shared/async-state';
 import { AlarmsStore } from '../../state/alarms.store';
 import { TABLE_CSS } from './alarms-css';
 import { changeLabel, shortTime } from './alarms-model';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /** The latest alarm changes (raised, acknowledged, shelved, ...), newest first. */
 @Component({
   selector: 'dy-alarms-history',
-  imports: [AsyncState],
+  imports: [FullTextTip, AsyncState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="store.historyLoaded()" [error]="store.historyError()" [empty]="store.history().length === 0" emptyTitle="No alarm history yet" emptyText="Every change to an alarm is listed here: raised, acknowledged, shelved and more." emptyIcon="clock" what="alarm history" [rows]="4" (retry)="store.loadHistory()">
@@ -24,8 +25,8 @@ import { changeLabel, shortTime } from './alarms-model';
           <div class="row" role="row">
             <span class="cell muted num" role="cell">{{ time(c.at) }}</span>
             <span class="cell" role="cell">{{ label(c) }}</span>
-            <span class="cell" role="cell"><span class="truncate" [title]="c.alarm.title">{{ c.alarm.title }}</span></span>
-            <span class="cell c-rule muted" role="cell"><span class="truncate id" [title]="c.alarm.rule">{{ c.alarm.rule }}</span></span>
+            <span class="cell" role="cell"><span class="truncate" [dyFullText]="c.alarm.title">{{ c.alarm.title }}</span></span>
+            <span class="cell c-rule muted" role="cell"><span class="truncate id" [dyFullText]="c.alarm.rule">{{ c.alarm.rule }}</span></span>
           </div>
         }
       </div>

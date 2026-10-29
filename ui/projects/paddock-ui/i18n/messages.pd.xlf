@@ -26,6 +26,9 @@
       <trans-unit id="pd.about.open" datatype="html">
         <source>About</source>
       </trans-unit>
+      <trans-unit id="pd.about.open-failed" datatype="html">
+        <source>The releases page could not be opened:</source>
+      </trans-unit>
       <trans-unit id="pd.about.releases" datatype="html">
         <source>Releases</source>
       </trans-unit>
@@ -34,6 +37,21 @@
       </trans-unit>
       <trans-unit id="pd.about.system" datatype="html">
         <source>System</source>
+      </trans-unit>
+      <trans-unit id="pd.about.system.64-bit" datatype="html">
+        <source>64-bit</source>
+      </trans-unit>
+      <trans-unit id="pd.about.system.apple-silicon" datatype="html">
+        <source>Apple silicon</source>
+      </trans-unit>
+      <trans-unit id="pd.about.system.arm" datatype="html">
+        <source>ARM</source>
+      </trans-unit>
+      <trans-unit id="pd.about.system.browser" datatype="html">
+        <source>Web browser</source>
+      </trans-unit>
+      <trans-unit id="pd.about.system.intel" datatype="html">
+        <source>Intel</source>
       </trans-unit>
       <trans-unit id="pd.about.title" datatype="html">
         <source>About</source>
@@ -291,7 +309,7 @@
         <source>Keep</source>
       </trans-unit>
       <trans-unit id="pd.channels.remove-question" datatype="html">
-        <source>Remove &quot;<x id="name"/>&quot;?</source>
+        <source>Remove the channel “<x id="name"/>”?</source>
       </trans-unit>
       <trans-unit id="pd.channels.remove-secret" datatype="html">
         <source>Remove secret</source>
@@ -300,7 +318,7 @@
         <source>Its stored secret is deleted too.</source>
       </trans-unit>
       <trans-unit id="pd.channels.remove-yes" datatype="html">
-        <source>Remove</source>
+        <source>Remove channel</source>
       </trans-unit>
       <trans-unit id="pd.channels.remove.title" datatype="html">
         <source>Remove channel</source>
@@ -317,11 +335,11 @@
       <trans-unit id="pd.channels.secret-missing" datatype="html">
         <source>No secret yet</source>
       </trans-unit>
+      <trans-unit id="pd.channels.secret-saving" datatype="html">
+        <source>Saving…</source>
+      </trans-unit>
       <trans-unit id="pd.channels.secret-stored" datatype="html">
         <source>Secret stored</source>
-      </trans-unit>
-      <trans-unit id="pd.channels.secret.cancel" datatype="html">
-        <source>Cancel</source>
       </trans-unit>
       <trans-unit id="pd.channels.secret.close" datatype="html">
         <source>Close</source>
@@ -336,13 +354,13 @@
         <source>Hide</source>
       </trans-unit>
       <trans-unit id="pd.channels.secret.invalid" datatype="html">
-        <source>This window was opened without a channel to set a secret for. Close it and choose Set token or Set password in the channel's editor.</source>
+        <source>This window was opened without a channel to set a secret for. Close it and choose Set token or Set password in the channel’s editor.</source>
       </trans-unit>
       <trans-unit id="pd.channels.secret.lede-password" datatype="html">
-        <source>The password for <x id="channel"/> is kept by the app's engine, not in the settings file. It is never shown again.</source>
+        <source>The password for <x id="channel"/> is kept by the app’s engine, not in the settings file. It is never shown again.</source>
       </trans-unit>
       <trans-unit id="pd.channels.secret.lede-token" datatype="html">
-        <source>The token for <x id="channel"/> is kept by the app's engine, not in the settings file. It is never shown again.</source>
+        <source>The token for <x id="channel"/> is kept by the app’s engine, not in the settings file. It is never shown again.</source>
       </trans-unit>
       <trans-unit id="pd.channels.secret.password" datatype="html">
         <source>Password</source>
@@ -439,6 +457,18 @@
       </trans-unit>
       <trans-unit id="pd.chart.retry" datatype="html">
         <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.confirm.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.confirm.close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.confirm.invalid" datatype="html">
+        <source>This window was opened without a question. Close it and try again from where you started.</source>
+      </trans-unit>
+      <trans-unit id="pd.confirm.title" datatype="html">
+        <source>Confirm</source>
       </trans-unit>
       <trans-unit id="pd.copyMenu.copy" datatype="html">
         <source>Copy</source>
@@ -569,17 +599,26 @@
       <trans-unit id="pd.diag.what" datatype="html">
         <source>What it is</source>
       </trans-unit>
+      <trans-unit id="pd.dialogs.action-failed" datatype="html">
+        <source>That didn't work. Try again, or close this window.</source>
+      </trans-unit>
       <trans-unit id="pd.dialogs.cancel" datatype="html">
         <source>Cancel</source>
       </trans-unit>
       <trans-unit id="pd.dialogs.close" datatype="html">
         <source>Close</source>
       </trans-unit>
+      <trans-unit id="pd.dialogs.finishing" datatype="html">
+        <source>Finishing…</source>
+      </trans-unit>
       <trans-unit id="pd.dialogs.loading" datatype="html">
         <source>Loading…</source>
       </trans-unit>
       <trans-unit id="pd.dialogs.open-failed" datatype="html">
         <source>This window couldn't open</source>
+      </trans-unit>
+      <trans-unit id="pd.dialogs.try-again" datatype="html">
+        <source>Try again</source>
       </trans-unit>
       <trans-unit id="pd.dialogs.unknown" datatype="html">
         <source>This dialog is not known to this version of the app: <x id="dialog"/></source>
@@ -797,6 +836,9 @@
       <trans-unit id="pd.health.state.quarantined" datatype="html">
         <source>switched off</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.reconnecting" datatype="html">
+        <source>reconnecting</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.refused" datatype="html">
         <source>refused by the system</source>
       </trans-unit>
@@ -1001,11 +1043,14 @@
       <trans-unit id="pd.mcp.dismiss" datatype="html">
         <source>Dismiss</source>
       </trans-unit>
-      <trans-unit id="pd.mcp.key.cancel" datatype="html">
-        <source>Cancel</source>
+      <trans-unit id="pd.mcp.key-creating" datatype="html">
+        <source>Creating…</source>
       </trans-unit>
       <trans-unit id="pd.mcp.key.client" datatype="html">
         <source>Client name</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.close" datatype="html">
+        <source>Close</source>
       </trans-unit>
       <trans-unit id="pd.mcp.key.copied" datatype="html">
         <source>Copied to the clipboard.</source>
@@ -1029,7 +1074,10 @@
         <source>Key</source>
       </trans-unit>
       <trans-unit id="pd.mcp.key.lede" datatype="html">
-        <source>Name the program that will connect, for example &quot;Pitwall&quot;. It gets its own key, which you can revoke at any time.</source>
+        <source>Name the program that will connect, for example “Pitwall”. It gets its own key, which you can revoke at any time.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.limit" datatype="html">
+        <source><x id="max"/> keys are in use. Revoke one you no longer need first.</source>
       </trans-unit>
       <trans-unit id="pd.mcp.key.not-copied" datatype="html">
         <source>The clipboard is not available. Select the key and copy it with the keyboard.</source>
@@ -1116,10 +1164,10 @@
         <source>Keep</source>
       </trans-unit>
       <trans-unit id="pd.mcp.revoke-question" datatype="html">
-        <source>Revoke the key of &quot;<x id="client"/>&quot;?</source>
+        <source>Revoke the key of “<x id="client"/>”?</source>
       </trans-unit>
       <trans-unit id="pd.mcp.revoke-yes" datatype="html">
-        <source>Revoke</source>
+        <source>Revoke key</source>
       </trans-unit>
       <trans-unit id="pd.mcp.revoke.title" datatype="html">
         <source>Revoke key</source>
@@ -1412,6 +1460,9 @@
       <trans-unit id="pd.schedule.addTime" datatype="html">
         <source>Add a time</source>
       </trans-unit>
+      <trans-unit id="pd.schedule.badTime" datatype="html">
+        <source>Enter a time such as 09:00.</source>
+      </trans-unit>
       <trans-unit id="pd.schedule.cron" datatype="html">
         <source>Cron expression</source>
       </trans-unit>
@@ -1640,9 +1691,6 @@
       <trans-unit id="pd.settings.check.whole" datatype="html">
         <source>Enter a whole number.</source>
       </trans-unit>
-      <trans-unit id="pd.settings.close" datatype="html">
-        <source>Close</source>
-      </trans-unit>
       <trans-unit id="pd.settings.dismiss" datatype="html">
         <source>Dismiss</source>
       </trans-unit>
@@ -1745,6 +1793,9 @@
       <trans-unit id="pd.settings.retry" datatype="html">
         <source>Retry</source>
       </trans-unit>
+      <trans-unit id="pd.settings.saved-live" datatype="html">
+        <source>Changes are saved as you make them.</source>
+      </trans-unit>
       <trans-unit id="pd.settings.search" datatype="html">
         <source>Search settings</source>
       </trans-unit>
@@ -1813,6 +1864,9 @@
       </trans-unit>
       <trans-unit id="pd.setup.failed" datatype="html">
         <source>That did not work.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.get-pitwall" datatype="html">
+        <source>Get Pitwall</source>
       </trans-unit>
       <trans-unit id="pd.setup.lede" datatype="html">
         <source>A few things the app can set up for you. Each is optional, you can skip any of them, and you can come back to this list later in Settings.</source>
@@ -2024,8 +2078,14 @@
       <trans-unit id="pd.storage.confirm-title" datatype="html">
         <source>Clear <x id="what"/>?</source>
       </trans-unit>
+      <trans-unit id="pd.storage.confirm-title-data" datatype="html">
+        <source>Delete <x id="what"/>?</source>
+      </trans-unit>
       <trans-unit id="pd.storage.confirm-yes" datatype="html">
-        <source>Clear</source>
+        <source>Clear <x id="what"/></source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-yes-data" datatype="html">
+        <source>Delete <x id="what"/></source>
       </trans-unit>
       <trans-unit id="pd.storage.confirm.title" datatype="html">
         <source>Clear storage</source>
@@ -2176,6 +2236,9 @@
       </trans-unit>
       <trans-unit id="pd.table.sortBy" datatype="html">
         <source>Sort by <x id="PH"/></source>
+      </trans-unit>
+      <trans-unit id="pd.testing.framed" datatype="html">
+        <source>Dialog</source>
       </trans-unit>
       <trans-unit id="pd.ui.elapsed.hours" datatype="html">
         <source><x id="hours"/> h</source>
@@ -2330,6 +2393,9 @@
       <trans-unit id="pd.updates.asks" datatype="html">
         <source><x id="checked"/> · asks <x id="host"/></source>
       </trans-unit>
+      <trans-unit id="pd.updates.asks-only" datatype="html">
+        <source>Asks <x id="host"/></source>
+      </trans-unit>
       <trans-unit id="pd.updates.auto-check" datatype="html">
         <source>Check for updates automatically</source>
       </trans-unit>
@@ -2338,9 +2404,6 @@
       </trans-unit>
       <trans-unit id="pd.updates.available.sized" datatype="html">
         <source>Version <x id="version"/> is available (<x id="size"/>).</source>
-      </trans-unit>
-      <trans-unit id="pd.updates.cancel" datatype="html">
-        <source>Cancel</source>
       </trans-unit>
       <trans-unit id="pd.updates.channel" datatype="html">
         <source>Channel</source>
@@ -2381,9 +2444,6 @@
       <trans-unit id="pd.updates.last-checked" datatype="html">
         <source>Last checked <x id="when"/></source>
       </trans-unit>
-      <trans-unit id="pd.updates.never-checked" datatype="html">
-        <source>Not checked in this installation yet</source>
-      </trans-unit>
       <trans-unit id="pd.updates.no-answer" datatype="html">
         <source>The updater did not answer.</source>
       </trans-unit>
@@ -2416,6 +2476,12 @@
       </trans-unit>
       <trans-unit id="pd.updates.retry" datatype="html">
         <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.stop-checking" datatype="html">
+        <source>Stop checking</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.stop-download" datatype="html">
+        <source>Stop download</source>
       </trans-unit>
       <trans-unit id="pd.updates.title" datatype="html">
         <source>Updates</source>
@@ -3110,9 +3176,6 @@
       <trans-unit id="pd.wb.dock.layout.manage-cancel" datatype="html">
         <source>Cancel</source>
       </trans-unit>
-      <trans-unit id="pd.wb.dock.layout.manage-close" datatype="html">
-        <source>Close</source>
-      </trans-unit>
       <trans-unit id="pd.wb.dock.layout.manage-delete" datatype="html">
         <source>Delete</source>
       </trans-unit>
@@ -3123,7 +3186,10 @@
         <source>Deleted layout <x id="name"/>.</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.layout.manage-empty" datatype="html">
-        <source>No saved layouts yet. Save the current arrangement from the Window menu.</source>
+        <source>Save the current arrangement of your panels to come back to it later.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-empty-heading" datatype="html">
+        <source>No saved layouts yet</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.layout.manage-loading" datatype="html">
         <source>Loading layouts…</source>
@@ -3136,6 +3202,9 @@
       </trans-unit>
       <trans-unit id="pd.wb.dock.layout.manage-rename-label" datatype="html">
         <source>New name</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-save-current" datatype="html">
+        <source>Save current layout</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.layout.manage-title" datatype="html">
         <source>Manage layouts</source>
@@ -3151,9 +3220,6 @@
       </trans-unit>
       <trans-unit id="pd.wb.dock.layout.name-too-long" datatype="html">
         <source>Use at most <x id="max"/> characters.</source>
-      </trans-unit>
-      <trans-unit id="pd.wb.dock.layout.save-cancel" datatype="html">
-        <source>Cancel</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.layout.save-hint" datatype="html">
         <source>Saves the windows and panels as they are now.</source>

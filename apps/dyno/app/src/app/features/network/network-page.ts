@@ -1,6 +1,6 @@
 import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
+import { ActionTip } from '../../shared/action-tip';
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal, viewChild } from '@angular/core';
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem } from '@angular/cdk/menu';
 import { Router, RouterLink } from '@angular/router';
 import type { ConnectionRow, ListenerRow, NetProto } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -29,6 +29,13 @@ import {
   summarise,
   tableRows,
 } from './network-model';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { MatTooltip } from '@angular/material/tooltip';
+import { SearchField } from '../../shared/search-field';
+import { MatCheckbox } from '@angular/material/checkbox';
+import { MatMenuModule } from '@angular/material/menu';
+import { RowMenu } from '../../shared/row-menu';
 
 type Tab = 'connections' | 'listening';
 type Row = TableRow<ConnectionRow> | TableRow<ListenerRow>;
@@ -53,7 +60,7 @@ function readCollapsed(): Set<string> {
  */
 @Component({
   selector: 'dy-network-page',
-  imports: [AsyncState, Icon, RouterLink, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [ActionTip, RowMenu, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton, AsyncState, Icon, RouterLink, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -67,9 +74,9 @@ function readCollapsed(): Set<string> {
       @if (store.snapshot(); as s) {
         <p class="summary num" role="group" aria-label="Summary">
           @if (tab() === 'connections') {
-            <button type="button" class="lnk" (click)="showConnections()"><b>{{ sum().connections }}</b> connections</button><span>·</span><span><b>{{ sum().programs }}</b> programs</span><span>·</span><span><b>{{ sum().hosts }}</b> remote hosts</span>
+            <button type="button" matButton="text" class="dy-link lnk" (click)="showConnections()"><b>{{ sum().connections }}</b> connections</button><span>·</span><span><b>{{ sum().programs }}</b> programs</span><span>·</span><span><b>{{ sum().hosts }}</b> remote hosts</span>
           } @else {
-            <span><b>{{ sum().listening }}</b> listening</span><span>·</span><button type="button" class="lnk" (click)="showExposed()"><b>{{ sum().exposed }}</b> exposed</button>@if (sum().unknown > 0) {<span>·</span><span><b>{{ sum().unknown }}</b> unknown owner</span>}
+            <span><b>{{ sum().listening }}</b> listening</span><span>·</span><button type="button" matButton="text" class="dy-link lnk" (click)="showExposed()"><b>{{ sum().exposed }}</b> exposed</button>@if (sum().unknown > 0) {<span>·</span><span><b>{{ sum().unknown }}</b> unknown owner</span>}
           }
           @if (thisPc(); as ip) { <span class="this-pc">This PC {{ ip }}</span> }
         </p>
@@ -77,34 +84,21 @@ function readCollapsed(): Set<string> {
       }
 
       <div class="bar" role="group" aria-label="Filters">
-        <div class="seg" role="group" aria-label="Show">
-          <button type="button" [attr.aria-pressed]="tab() === 'connections'" (click)="setTab('connections')">Connections</button>
-          <button type="button" [attr.aria-pressed]="tab() === 'listening'" (click)="setTab('listening')">Listening</button>
-        </div>
-        <label class="search"><dy-icon name="search" /><input class="input" type="search" placeholder="Port, address or program" aria-label="Search the network table" [value]="store.query().search" (input)="search($any($event.target).value)" /></label>
-        <button type="button" class="tog" [attr.aria-pressed]="store.query().showLoopback" (click)="store.setQuery({ showLoopback: !store.query().showLoopback })"><dy-icon name="check" /> Show loopback</button>
-        <button type="button" class="tog" [attr.aria-pressed]="store.query().exposedOnly" (click)="store.setQuery({ exposedOnly: !store.query().exposedOnly })"><dy-icon name="check" /> Exposed only</button>
-        <div class="seg" role="group" aria-label="Protocol">
-          <button type="button" [attr.aria-pressed]="!store.query().proto" (click)="proto('')">All</button>
-          <button type="button" [attr.aria-pressed]="store.query().proto === 'tcp'" (click)="proto('tcp')">TCP</button>
-          <button type="button" [attr.aria-pressed]="store.query().proto === 'udp'" (click)="proto('udp')">UDP</button>
-        </div>
-        <div class="seg" role="group" aria-label="Group by">
-          <button type="button" [attr.aria-pressed]="group() === 'none'" (click)="setGroup('none')">None</button>
-          <button type="button" [attr.aria-pressed]="group() === 'process'" (click)="setGroup('process')">Program</button>
-          @if (tab() === 'connections') {
-            <button type="button" [attr.aria-pressed]="group() === 'host'" (click)="setGroup('host')">Remote host</button>
-          }
-        </div>
+        <pd-segmented-control label="Show" [options]="tabSegs" [value]="tab()" (valueChange)="setTab($event === 'listening' ? 'listening' : 'connections')" />
+        <dy-search-field label="Search the network table" placeholder="Port, address or program" [value]="store.query().search" (valueChange)="search($event)" />
+        <mat-checkbox [checked]="store.query().showLoopback" (change)="store.setQuery({ showLoopback: !store.query().showLoopback })">Show loopback</mat-checkbox>
+        <mat-checkbox [checked]="store.query().exposedOnly" (change)="store.setQuery({ exposedOnly: !store.query().exposedOnly })">Exposed only</mat-checkbox>
+        <pd-segmented-control label="Protocol" [options]="protoSegs" [value]="store.query().proto ?? ''" (valueChange)="proto($event)" />
+        <pd-segmented-control label="Group by" [options]="groupSegs()" [value]="group()" (valueChange)="setGroup($event)" />
         @if (tab() === 'connections') {
-          <button type="button" class="tog" [attr.aria-pressed]="store.resolveNames()" title="Look up host names through your DNS resolver. Off by default: each address is sent to it." (click)="store.setResolveNames(!store.resolveNames())"><dy-icon name="check" /> Host names</button>
+          <mat-checkbox [checked]="store.resolveNames()" (change)="store.setResolveNames(!store.resolveNames())" matTooltip="Look up host names through your DNS resolver. Off by default: each address is sent to it.">Host names</mat-checkbox>
         }
       </div>
 
       <dy-async [loaded]="!!store.snapshot()" [error]="store.error()" what="network" [rows]="5" (retry)="store.load()">
         @if (store.snapshot(); as s) {
           @if (s.unknownOwners > 0 && !noteDismissed()) {
-            <p class="note"><dy-icon name="info" /> <span>{{ s.unknownOwners }} {{ s.unknownOwners === 1 ? 'socket has' : 'sockets have' }} an owner the OS will not name without elevated rights.</span> <button type="button" class="ib" aria-label="Dismiss this note" (click)="noteDismissed.set(true)"><dy-icon name="close" /></button></p>
+            <p class="note"><dy-icon name="info" /> <span>{{ s.unknownOwners }} {{ s.unknownOwners === 1 ? 'socket has' : 'sockets have' }} an owner the OS will not name without elevated rights.</span> <button type="button" matIconButton matTooltip="Dismiss this note" aria-label="Dismiss this note" (click)="noteDismissed.set(true)"><dy-icon name="close" /></button></p>
           }
           @if (s.truncated > 0) {
             <p class="note"><dy-icon name="info" /> {{ s.truncated }} more rows are hidden. Narrow the search.</p>
@@ -131,23 +125,23 @@ function readCollapsed(): Set<string> {
                 <span role="columnheader" class="visually-hidden">Actions</span>
               </div>
               <cdk-virtual-scroll-viewport [itemSize]="rowHeight" class="viewport" [style.height.px]="viewportHeight()">
-                <div *cdkVirtualFor="let r of rows(); trackBy: rowKey; let i = index" class="row" role="row" [class.group-row]="r.kind === 'group'" [class.selected]="selectedKey() === r.key" [attr.aria-rowindex]="i + 1" [attr.aria-expanded]="r.kind === 'group' ? r.open : null" tabindex="-1" [cdkContextMenuTriggerFor]="r.kind === 'item' ? rowMenu : null" [cdkContextMenuTriggerData]="{ row: r }" (contextmenu)="pick(r)" (keydown.shift.f10)="pick(r)" (click)="pick(r)" (keyup.space)="pick(r)" (dblclick)="activate(r)">
+                <div *cdkVirtualFor="let r of rows(); trackBy: rowKey; let i = index" class="row" role="row" [class.group-row]="r.kind === 'group'" [class.selected]="selectedKey() === r.key" [attr.aria-rowindex]="i + 1" [attr.aria-expanded]="r.kind === 'group' ? r.open : null" tabindex="-1" (contextmenu)="pick(r)" (keydown.shift.f10)="pick(r)" (click)="pick(r)" (keyup.space)="pick(r)" (dblclick)="activate(r)" dyRowMenu [matContextMenuTriggerFor]="rowMenu" [matContextMenuTriggerData]="{ row: r }" [matContextMenuTriggerDisabled]="!(r.kind === 'item')">
                   @if (r.kind === 'group') {
                     <span class="gname" role="gridcell">
-                      <button type="button" class="chev" [attr.aria-label]="(r.open ? 'Collapse ' : 'Expand ') + r.title" (click)="toggle(r.key, $event)"><dy-icon [name]="r.open ? 'chevron-down' : 'chevron-right'" /></button>
+                      <button type="button" matIconButton [matTooltip]="(r.open ? 'Collapse ' : 'Expand ') + r.title" class="chev" [attr.aria-label]="(r.open ? 'Collapse ' : 'Expand ') + r.title" (click)="toggle(r.key, $event)"><dy-icon [name]="r.open ? 'chevron-down' : 'chevron-right'" /></button>
                       @if (group() === 'process') { <span class="av" aria-hidden="true">{{ ini(r.title) }}</span> }
                       <strong class="truncate">{{ r.title }}</strong>
                       <span class="meta">{{ r.count }} {{ tab() === 'connections' ? (r.count === 1 ? 'connection' : 'connections') : (r.count === 1 ? 'port' : 'ports') }}@if (tab() === 'connections' && group() === 'process') { · {{ r.hosts }} {{ r.hosts === 1 ? 'host' : 'hosts' }} }@if (r.exposed) { · <span class="exp">{{ r.exposed }} exposed</span> }</span>
-                      @if (tab() === 'connections' && group() === 'process' && trafficOf(r.title); as tr) { <span class="traffic num" title="Bytes per second over the last few seconds">↓ {{ rate(tr.rxBps) }} · ↑ {{ rate(tr.txBps) }}</span> }
+                      @if (tab() === 'connections' && group() === 'process' && trafficOf(r.title); as tr) { <span class="traffic num" matTooltip="Bytes per second over the last few seconds">↓ {{ rate(tr.rxBps) }} · ↑ {{ rate(tr.txBps) }}</span> }
                     </span>
                   } @else if (tab() === 'connections') {
                     @let c = conn(r);
                     @if (group() !== 'process') {
-                      <span class="cell prog" role="gridcell"><span class="av" aria-hidden="true">{{ ini(name(c.owner)) }}</span><span class="truncate" [title]="reason(c.owner) ?? ''">{{ name(c.owner) }}</span></span>
+                      <span class="cell prog" role="gridcell"><span class="av" aria-hidden="true">{{ ini(name(c.owner)) }}</span><span class="truncate" [matTooltip]="reason(c.owner) ?? ''">{{ name(c.owner) }}</span></span>
                     }
-                    <span class="cell remote" role="gridcell" [class.indent]="group() === 'process'"><span class="truncate" [title]="c.remote">{{ short(c.remote) }}</span><span class="addr">:{{ c.remotePort }}</span></span>
+                    <span class="cell remote" role="gridcell" [class.indent]="group() === 'process'"><span class="truncate" [matTooltip]="c.remote">{{ short(c.remote) }}</span><span class="addr">:{{ c.remotePort }}</span></span>
                     @if (store.resolveNames()) {
-                      <span class="cell muted" role="gridcell"><span class="truncate" [title]="hostName(c) ?? ''">{{ hostName(c) ?? (c.lookupOk ? '—' : 'Private address') }}</span></span>
+                      <span class="cell muted" role="gridcell"><span class="truncate" [matTooltip]="hostName(c) ?? ''">{{ hostName(c) ?? (c.lookupOk ? '—' : 'Private address') }}</span></span>
                     }
                     <span class="cell" role="gridcell">{{ service(c.remotePort) }}</span>
                     <span class="cell muted" role="gridcell">{{ protoText(c.proto, c.ipv6) }}</span>
@@ -157,24 +151,24 @@ function readCollapsed(): Set<string> {
                   } @else {
                     @let l = lis(r);
                     @if (group() !== 'process') {
-                      <span class="cell prog" role="gridcell"><span class="av" aria-hidden="true">{{ ini(name(l.owner)) }}</span><span class="truncate" [title]="reason(l.owner) ?? ''">{{ name(l.owner) }}</span></span>
+                      <span class="cell prog" role="gridcell"><span class="av" aria-hidden="true">{{ ini(name(l.owner)) }}</span><span class="truncate" [matTooltip]="reason(l.owner) ?? ''">{{ name(l.owner) }}</span></span>
                     }
                     <span class="cell" role="gridcell" [class.indent]="group() === 'process'">{{ service(l.port) }}</span>
-                    <span class="cell" role="gridcell"><span class="addr">{{ l.local }}</span> <span class="reach" [attr.data-tone]="reachTone(l)" [title]="badge(l).hint"><dy-icon [name]="l.exposure === 'allInterfaces' ? 'globe' : l.exposure === 'loopback' ? 'lock' : 'network'" /> {{ badge(l).label }}</span></span>
+                    <span class="cell" role="gridcell"><span class="addr">{{ l.local }}</span> <span class="reach" [attr.data-tone]="reachTone(l)" [matTooltip]="badge(l).hint"><dy-icon [name]="l.exposure === 'allInterfaces' ? 'globe' : l.exposure === 'loopback' ? 'lock' : 'network'" /> {{ badge(l).label }}</span></span>
                     <span class="cell muted" role="gridcell">{{ protoText(l.proto, l.ipv6) }}</span>
                     <span class="cell muted" role="gridcell">{{ since(l.firstSeen) }}</span>
                   }
                   @if (r.kind === 'item') {
-                  <span class="cell acts" role="gridcell">
+                  <span class="cell acts" role="gridcell" dyActionTip>
                     @if (r.kind === 'item') {
                       @if (tab() === 'connections') {
                         @let c2 = conn(r);
-                        <button type="button" class="ib" [disabled]="!!blocked(c2)" [attr.title]="blocked(c2) ?? 'Look up this address in your browser'" [attr.aria-label]="'Look up IP ' + c2.remote" (click)="lookup(c2, $event)"><dy-icon name="external" /></button>
-                        <button type="button" class="ib" title="Copy the connection" [attr.aria-label]="'Copy connection to ' + c2.remote" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
+                        <button type="button" matIconButton [disabled]="!!blocked(c2)" [attr.aria-label]="'Look up IP ' + c2.remote" (click)="lookup(c2, $event)"><dy-icon name="external" /></button>
+                        <button type="button" matIconButton [attr.aria-label]="'Copy connection to ' + c2.remote" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
                       } @else {
-                        <button type="button" class="ib" title="Copy the listener" aria-label="Copy listener" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
+                        <button type="button" matIconButton aria-label="Copy listener" (click)="copyRow(r, $event)"><dy-icon name="copy" /></button>
                       }
-                      <a class="ib" routerLink="/processes" title="Show the program in the task manager" aria-label="Show process" (click)="$event.stopPropagation()"><dy-icon name="processes" /></a>
+                      <a matIconButton routerLink="/processes" aria-label="Show process" (click)="$event.stopPropagation()"><dy-icon name="processes" /></a>
                     }
                   </span>
                   }
@@ -189,7 +183,7 @@ function readCollapsed(): Set<string> {
               <aside class="detail" aria-label="Details">
                 <div class="dhead">
                   <strong>{{ detailTitle(sel) }}</strong>
-                  <button type="button" class="ib" aria-label="Close details" (click)="selectedKey.set(null)"><dy-icon name="close" /></button>
+                  <button type="button" matIconButton matTooltip="Close details" aria-label="Close details" (click)="selectedKey.set(null)"><dy-icon name="close" /></button>
                 </div>
                 <dl>
                   @for (f of detailFields(sel); track f[0]) {
@@ -200,18 +194,18 @@ function readCollapsed(): Set<string> {
                 @if (isConn(sel)) {
                   @let c3 = asConn(sel);
                   <div class="dacts">
-                    <button type="button" class="btn sm" [disabled]="!!blocked(c3)" [attr.title]="blocked(c3) ?? null" (click)="lookup(c3)"><dy-icon name="external" /> Look up IP</button>
-                    <button type="button" class="btn sm" (click)="copyText(connectionLine(c3))"><dy-icon name="copy" /> Copy</button>
+                    <button type="button" matButton="outlined" [disabled]="!!blocked(c3)" [matTooltip]="blocked(c3) ?? null" (click)="lookup(c3)"><dy-icon name="external" /> Look up IP</button>
+                    <button type="button" matButton="outlined" (click)="copyText(connectionLine(c3))"><dy-icon name="copy" /> Copy</button>
                   </div>
                   @if (blocked(c3); as why) { <p class="hint">{{ why }}</p> }
                   <div class="dacts">
-                    <button type="button" class="btn sm" [disabled]="!c3.lookupOk" (click)="store.resolveOne(c3.remote)"><dy-icon name="globe" /> Resolve name</button>
+                    <button type="button" matButton="outlined" [disabled]="!c3.lookupOk" (click)="store.resolveOne(c3.remote)"><dy-icon name="globe" /> Resolve name</button>
                   </div>
                   @if (hostName(c3); as hn) { <p class="hint sel">Host name: {{ hn }}</p> }
                 } @else {
                   @let l3 = asListener(sel);
                   <p class="hint">{{ badge(l3).hint }}</p>
-                  <div class="dacts"><button type="button" class="btn sm" (click)="copyText(listenerLine(l3))"><dy-icon name="copy" /> Copy</button></div>
+                  <div class="dacts"><button type="button" matButton="outlined" (click)="copyText(listenerLine(l3))"><dy-icon name="copy" /> Copy</button></div>
                 }
               </aside>
             }
@@ -219,57 +213,49 @@ function readCollapsed(): Set<string> {
         }
       </dy-async>
     </div>
-    <ng-template #rowMenu let-row="row">
-      <div class="menu" cdkMenu aria-label="Row actions">
+    <mat-menu #rowMenu="matMenu" aria-label="Row actions">
+      <ng-template matMenuContent let-row="row">
         @if (row.kind === 'item') {
           @if (isConn(row.item)) {
-            <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!!blocked(asConn(row.item))" (cdkMenuItemTriggered)="lookup(asConn(row.item))"><dy-icon name="external" /> Look up IP</button>
-            <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!asConn(row.item).lookupOk" (cdkMenuItemTriggered)="store.resolveOne(asConn(row.item).remote)"><dy-icon name="globe" /> Resolve host name</button>
-            <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copyText(asConn(row.item).remote)"><dy-icon name="copy" /> Copy address</button>
-            <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.setQuery({ search: asConn(row.item).remote })"><dy-icon name="filter" /> Filter to this host</button>
+            <button mat-menu-item [disabled]="!!blocked(asConn(row.item))" (click)="lookup(asConn(row.item))"><dy-icon name="external" /> Look up IP</button>
+            <button mat-menu-item [disabled]="!asConn(row.item).lookupOk" (click)="store.resolveOne(asConn(row.item).remote)"><dy-icon name="globe" /> Resolve host name</button>
+            <button mat-menu-item (click)="copyText(asConn(row.item).remote)"><dy-icon name="copy" /> Copy address</button>
+            <button mat-menu-item (click)="store.setQuery({ search: asConn(row.item).remote })"><dy-icon name="filter" /> Filter to this host</button>
           } @else {
-            <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copyText(listenerLine(asListener(row.item)))"><dy-icon name="copy" /> Copy listener</button>
+            <button mat-menu-item (click)="copyText(listenerLine(asListener(row.item)))"><dy-icon name="copy" /> Copy listener</button>
           }
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copyRow(row)"><dy-icon name="copy" /> Copy as text</button>
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="showProcess()"><dy-icon name="processes" /> Show process</button>
+          <button mat-menu-item (click)="copyRow(row)"><dy-icon name="copy" /> Copy as text</button>
+          <button mat-menu-item (click)="showProcess()"><dy-icon name="processes" /> Show process</button>
           @if (row.item.owner.kind === 'process') {
-            <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchWeb(row.item.owner.name)"><dy-icon name="search" /> Search the web…</button>
+            <button mat-menu-item (click)="searchWeb(row.item.owner.name)"><dy-icon name="search" /> Search the web…</button>
             @if (row.item.owner.path) {
-              <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchHash(row.item.owner.path, row.item.owner.name)"><dy-icon name="shield" /> Search file hash on VirusTotal…</button>
+              <button mat-menu-item (click)="searchHash(row.item.owner.path, row.item.owner.name)"><dy-icon name="shield" /> Search file hash on VirusTotal…</button>
             }
           }
         }
-      </div>
-    </ng-template>
+      </ng-template>
+    </mat-menu>
   `,
   styles: `
     :host { display: block; }
+    .chev { width: 22px; height: 22px; padding: 0; flex: none; --icon-size: 14px; }
     .page { display: grid; gap: var(--sp-3); align-content: start; }
     dy-async { display: grid; gap: var(--sp-3); }
     .summary { margin: 0; display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; color: var(--text-2); font-size: var(--fs-sm); }
     .summary b { color: var(--text-1); font-weight: var(--fw-semibold); }
-    .summary .lnk { all: unset; cursor: pointer; }
-    .summary .lnk:hover { text-decoration: underline; }
     .summary .this-pc { margin-left: auto; color: var(--text-3); }
     .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; }
-    .tog { display: inline-flex; align-items: center; gap: 4px; height: var(--control-h); padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-pill); background: var(--surface-2); color: var(--text-2); font: var(--fw-medium) var(--fs-sm) / 1 var(--font-sans); cursor: pointer; }
-    .tog dy-icon { --icon-size: 13px; display: none; }
-    .tog[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
-    .tog[aria-pressed='true'] dy-icon { display: inline-block; }
     .traffic { margin-left: auto; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
     .reach { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; }
     .reach dy-icon { --icon-size: 13px; }
     .reach[data-tone='warn'] { color: var(--warn); }
-    .search { position: relative; display: block; flex: 1 1 200px; min-width: 160px; max-width: 320px; }
-    .search dy-icon { position: absolute; left: 8px; top: 7px; --icon-size: 15px; color: var(--text-3); }
-    .search input { padding-left: 30px; width: 100%; }
     .chk { display: inline-flex; gap: var(--sp-2); align-items: center; font-size: var(--fs-sm); color: var(--text-2); }
     .note { margin: 0; display: flex; gap: var(--sp-2); align-items: flex-start; color: var(--text-2); font-size: var(--fs-sm); }
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 320px; }
     .grid { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); overflow: hidden; outline-offset: 2px; }
     .head, .row { display: grid; grid-template-columns: var(--cols); align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); }
-    .head { height: 30px; border-bottom: 1px solid var(--border); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-xs); position: sticky; top: 0; z-index: 1; }
+    .head { height: 30px; border-bottom: 1px solid var(--border); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-xs); position: sticky; top: 0; z-index: 3; }
     .row { height: 36px; border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-sm); cursor: default; }
     .row.group-row { background: var(--surface-inset); }
     .row.group-row .gname { grid-column: 1 / -1; }
@@ -283,18 +269,12 @@ function readCollapsed(): Set<string> {
     .gname { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
     .meta { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
     .exp { color: var(--warn); }
-    .chev { display: grid; place-items: center; width: 22px; height: 22px; border: 0; background: none; color: var(--text-3); border-radius: var(--r-sm); cursor: pointer; }
-    .chev:hover { background: var(--surface-active); color: var(--text-1); }
     .av { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; background: var(--surface-active); color: var(--text-2); font: var(--fw-semibold) 11px / 1 var(--font-sans); }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border-strong); flex: none; }
     .dot[data-tone='ok'] { background: var(--ok); }
     .dot[data-tone='warn'] { background: var(--warn); }
     .acts { justify-content: flex-end; gap: 2px; opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
     .row:hover .acts, .row:focus-within .acts, .row.selected .acts { opacity: 1; }
-    .ib { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
-    .ib:hover:not(:disabled) { background: var(--surface-active); color: var(--text-1); }
-    .ib:disabled { opacity: 0.35; cursor: default; }
-    .ib dy-icon { --icon-size: 15px; }
     .empty { margin: 0; padding: var(--sp-6); text-align: center; color: var(--text-3); }
     .detail { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); padding: var(--sp-3) var(--sp-4); display: grid; gap: var(--sp-2); }
     .dhead { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
@@ -312,6 +292,9 @@ export class NetworkPage implements OnInit, OnDestroy {
   private readonly notifier = inject(Notifier);
   protected readonly tab = signal<Tab>('connections');
   protected readonly group = signal<GroupBy>('process');
+  protected readonly tabSegs: SuSegment[] = [{ value: 'connections', label: 'Connections' }, { value: 'listening', label: 'Listening' }];
+  protected readonly protoSegs: SuSegment[] = [{ value: '', label: 'All' }, { value: 'tcp', label: 'TCP' }, { value: 'udp', label: 'UDP' }];
+  protected readonly groupSegs = computed<SuSegment[]>(() => [{ value: 'none', label: 'None' }, { value: 'process', label: 'Program' }, ...(this.tab() === 'connections' ? [{ value: 'host', label: 'Remote host' }] : [])]);
   protected readonly showLocal = signal(false);
   protected readonly collapsed = signal<ReadonlySet<string>>(readCollapsed());
   protected readonly selectedKey = signal<string | null>(null);
@@ -342,7 +325,7 @@ export class NetworkPage implements OnInit, OnDestroy {
     const prog = this.group() !== 'process' ? 'minmax(130px, 1.2fr) ' : '';
     return this.tab() === 'connections'
       ? `${prog}minmax(160px, 2fr) ${this.store.resolveNames() ? 'minmax(140px, 2fr) ' : ''}minmax(90px, 1fr) 80px 110px ${this.showLocal() ? 'minmax(150px, 1.2fr) ' : ''}80px 84px`
-      : `${prog}minmax(240px, 2fr) minmax(220px, 2fr) 80px 90px 84px`;
+      : `${prog}minmax(170px, 2fr) minmax(150px, 2fr) 80px 90px 84px`;
   });
   protected readonly selectedItem = computed(() => {
     const k = this.selectedKey();

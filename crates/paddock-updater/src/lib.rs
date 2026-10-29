@@ -79,6 +79,23 @@ paddock_commands::command_table! {
     Mutation [MAIN] => tauri::about_whats_new_start,
 }
 
+paddock_dialogs::dialogs! {
+    /// About, What's new and Updates (ADR 0026 §3).
+    pub static DIALOGS;
+    // The releases link opens in the system browser through the files adapter (a webview window opens no links itself).
+    "pd.about" => Viewer { commands: &[dialog_callable::about_info, dialog_callable::about_legal, paddock_files::dialog_callable::files_open_url] },
+    "pd.whats-new" => Viewer { commands: &[dialog_callable::about_whats_new] },
+    "pd.updates" => Form(Modeless) { commands: &[
+        dialog_callable::updates_status,
+        dialog_callable::updates_check,
+        dialog_callable::updates_download,
+        dialog_callable::updates_cancel,
+        dialog_callable::updates_install_on_quit,
+        dialog_callable::updates_restart,
+        dialog_callable::updates_set_preferences,
+    ] },
+}
+
 #[cfg(feature = "tauri")]
 pub mod tauri;
 

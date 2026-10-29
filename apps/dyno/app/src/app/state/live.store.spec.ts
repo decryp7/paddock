@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../core/backend';
 import { MockBackend } from '../core/mock-backend';
 import type { LiveUpdate } from '../core/api.types';
-import { LiveStore, SPARK_CAPACITY, appendSeries, push } from './live.store';
+import { LiveStore, SPARK_CAPACITY, appendSeries, push, seriesFromHistory } from './live.store';
 
 const NOW = 1_700_000_000_000;
 const empty = () => ({ cpu: [], memory: [], diskRead: [], diskWrite: [], netRx: [], netTx: [], gpu: [] });
@@ -93,5 +93,27 @@ describe('LiveStore', () => {
     const { store } = setup();
     store.setAgent({ state: 'stopped', message: 'gone' } as never);
     expect(store.agent()).toEqual({ state: 'stopped', message: 'gone' });
+  });
+  it('seeds the sparklines from history once, and live samples that arrived first win', async () => {
+    const { store, mock } = setup();
+    const history = await mock.history('hour', null);
+    store.seed(history.points);
+    expect(store.series().cpu.length).toBeGreaterThan(1);
+    expect(store.series().cpu.length).toBeLessThanOrEqual(SPARK_CAPACITY);
+    const seeded = store.series().cpu.length;
+    store.seed(history.points.slice(0, 2));
+    expect(store.series().cpu).toHaveLength(seeded);
+    TestBed.resetTestingModule();
+    const { store: live, mock: m2 } = setup();
+    live.receive(m2.liveUpdate('summary'));
+    live.seed(history.points);
+    expect(live.series().cpu).toHaveLength(1);
+  });
+  it('turns history points into series, keeping only the last minute of them', async () => {
+    const { mock } = setup();
+    const points = (await mock.history('day', null)).points;
+    const series = seriesFromHistory(points);
+    expect(series.cpu).toEqual(points.slice(-SPARK_CAPACITY).map((p) => p.cpu));
+    expect(series.gpu.every((v) => typeof v === 'number')).toBe(true);
   });
 });

@@ -20,7 +20,7 @@ test.describe('notification channels (plan X17)', () => {
     await page.getByTestId('channel-name').fill('Build Hook');
     await page.getByTestId('channel-url').fill('https://hooks.example.com/services/abc');
     await page.getByTestId('channel-events').fill('diskLow, jobFailed');
-    await page.getByTestId('channel-auth').check();
+    await page.getByTestId('channel-auth').getByRole('checkbox').check();
     await expect(page.getByTestId('channel-secret-state')).toHaveText('No secret yet');
 
     // The token is typed in the dialog and goes to the engine; the page only learns that one is stored.
@@ -29,8 +29,12 @@ test.describe('notification channels (plan X17)', () => {
     await expect(dialog).toBeVisible();
     const input = dialog.getByTestId('channel-secret-input');
     await expect(input).toHaveAttribute('type', 'password');
-    await expect(dialog.getByTestId('channel-secret-save')).toBeDisabled();
+    await expect(dialog.getByTestId('dialog-action-save')).toBeDisabled();
     await input.fill('xoxb-secret-token');
+    // The Show button is exactly as tall as the input.
+    const [inputBox, toggleBox] = await Promise.all([input.boundingBox(), dialog.getByTestId('channel-secret-toggle').boundingBox()]);
+    expect(toggleBox!.height).toBe(inputBox!.height);
+    expect(Math.abs(toggleBox!.y - inputBox!.y)).toBeLessThanOrEqual(0.5);
     await dialog.getByTestId('channel-secret-toggle').click();
     await expect(input).toHaveAttribute('type', 'text');
     await input.press('Enter');
@@ -58,7 +62,7 @@ test.describe('notification channels (plan X17)', () => {
 
     // Remove asks in a dialog of its own: Keep is the default and Escape keeps the channel.
     await page.getByTestId('channel-row-Build-Hook').getByRole('button', { name: 'Remove Ops Hook' }).click();
-    const confirm = page.getByRole('dialog', { name: 'Remove "Ops Hook"?' });
+    const confirm = page.getByRole('alertdialog', { name: 'Remove the channel “Ops Hook”?' });
     await expect(confirm).toContainText('Its stored secret is deleted too.');
     await expect(confirm.getByRole('button', { name: 'Keep' })).toBeFocused();
     expect(await axeViolations(page)).toEqual([]);
@@ -66,7 +70,7 @@ test.describe('notification channels (plan X17)', () => {
     await expect(confirm).toHaveCount(0);
     await expect(page.getByTestId('channel-row-Build-Hook')).toBeVisible();
     await page.getByTestId('channel-row-Build-Hook').getByRole('button', { name: 'Remove Ops Hook' }).click();
-    await page.getByRole('dialog', { name: 'Remove "Ops Hook"?' }).getByRole('button', { name: 'Remove', exact: true }).click();
+    await page.getByRole('alertdialog', { name: 'Remove the channel “Ops Hook”?' }).getByRole('button', { name: 'Remove channel', exact: true }).click();
     await expect(page.locator('tbody tr')).toHaveCount(2);
     await expect(page.getByTestId('channel-row-Build-Hook')).toHaveCount(0);
     expect(pageErrors).toEqual([]);

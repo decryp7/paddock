@@ -1,15 +1,22 @@
 // C33: accessibility is checked for every window (plan X49, WCAG 2.2 AA). Static, from the app's tests:
 //   - some e2e spec runs axe (`axeViolations`, `axeInThemes`, `axeTargets`, `axeEveryDialog` of @decryp7/paddock-e2e);
-//   - every dialog in `dialog-contracts.json` is covered: either one spec calls `axeEveryDialog(` (all dialogs, both themes)
+//   - every dialog of the app's contracts is covered (the generated `dialog-contracts.ts` of its `dialogs!` table, ADR 0026;
+//     or a legacy `dialog-contracts.json` until the app moves): either one spec calls `axeEveryDialog(` (all dialogs, both themes)
 //     or each dialog id is named in a spec that runs axe; a dialog that cannot open alone is listed in "a11y.skip" with why;
 //   - warnings: no keyboard-only flow (`expectTabOrder`, `expectReachableByKeyboard`, `expectEscapeReturnsFocus`, `tabWalk`),
 //     and no unit test runs `accentProblems` on the app's accent.
-//   "a11y": { "contracts": "app/src-tauri/dialog-contracts.json", "skip": { "db.confirm-reset": "opens only after a reset" } }
+//   "a11y": { "contracts": "app/src/app/generated/dialog-contracts.ts", "skip": { "db.confirm-reset": "opens only after a reset" } }
 import { error, warn } from '../finding.mjs';
 
 const isSpec = (f) => /\.(?:spec|test)\.[mc]?[jt]sx?$/.test(f) || /(^|\/)e2e\/.*\.[mc]?[jt]sx?$/.test(f);
 const AXE = /\b(?:axeViolations|axeInThemes|axeTargets|axeEveryDialog|AxeBuilder)\b/;
 const KEYBOARD = /\b(?:expectTabOrder|expectReachableByKeyboard|unreachableByKeyboard|expectEscapeReturnsFocus|tabWalk)\b/;
+
+/** The dialog ids of a generated `dialog-contracts.ts` (`paddock_dialogs::ts::contracts_module` writes one per line). */
+function idsOfModule(text) {
+  if (!text.includes('export const DIALOG_CONTRACTS = {')) throw new Error('it is not a generated dialog-contracts.ts');
+  return [...text.matchAll(/^  '([a-z0-9.-]+)': \{$/gm)].map((m) => m[1]);
+}
 
 export default {
   id: 'C33',
@@ -24,12 +31,13 @@ export default {
       return [error('C33', 40, `${ctx.config.appDir}/e2e`, 1, 'no e2e spec runs axe: nothing checks the windows for accessibility', "Use axeViolations / axeEveryDialog of @decryp7/paddock-e2e in the app's specs, in both themes.")];
     }
     const out = [];
-    const contractsFile = ctx.config.a11y?.contracts ?? ctx.files().find((f) => f.startsWith(appDir) && f.endsWith('/dialog-contracts.json') && !f.includes('node_modules/'));
+    const own = (suffix) => ctx.files().find((f) => f.startsWith(appDir) && f.endsWith(suffix) && !f.includes('node_modules/'));
+    const contractsFile = ctx.config.a11y?.contracts ?? own('/dialog-contracts.ts') ?? own('/dialog-contracts.json');
     const contractsText = contractsFile ? ctx.read(contractsFile) : null;
     if (contractsText !== null) {
       let ids;
       try {
-        ids = Object.keys(JSON.parse(contractsText).dialogs ?? {});
+        ids = contractsFile.endsWith('.ts') ? idsOfModule(contractsText) : Object.keys(JSON.parse(contractsText).dialogs ?? {});
       } catch (e) {
         return [...out, error('C33', 40, contractsFile, 1, `${contractsFile} is not readable (${e.message})`, 'Regenerate the dialog contracts.')];
       }

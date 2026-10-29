@@ -3,11 +3,13 @@ import { AsyncState } from '../../shared/async-state';
 import { formatDuration } from '../../shared/format';
 import { AlarmsStore } from '../../state/alarms.store';
 import { TABLE_CSS } from './alarms-css';
+import { MatButton } from '@angular/material/button';
+import { FullTextTip } from '../../shared/full-text-tip';
 
-/** How the built-in alerts behave: time to acknowledge, the noisiest rules (with Mute) and the engine's tuning suggestions. */
+/** How the built-in alerts behave: time to acknowledge, the noisiest rules (with Mute) and the engine's suggestions. */
 @Component({
   selector: 'dy-alarm-stats',
-  imports: [AsyncState],
+  imports: [FullTextTip, MatButton, AsyncState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="stats-h">
@@ -28,9 +30,9 @@ import { TABLE_CSS } from './alarms-css';
                   <div class="head" role="row"><span role="columnheader">Rule</span><span role="columnheader" class="r">Fired</span><span role="columnheader"><span class="visually-hidden">Actions</span></span></div>
                   @for (n of s.noisiest; track n.rule) {
                     <div class="row" role="row">
-                      <span class="cell" role="cell"><span class="truncate id" [title]="n.rule">{{ n.rule }}</span>@if (muted(n.rule)) {<span class="faint sfx">Muted</span>}</span>
+                      <span class="cell" role="cell"><span class="truncate id" [dyFullText]="n.rule">{{ n.rule }}</span>@if (muted(n.rule)) {<span class="faint sfx">Muted</span>}</span>
                       <span class="cell r num" role="cell">×{{ n.occurrences }}</span>
-                      <span class="cell acts" role="cell"><button type="button" class="btn sm ghost text-act" [attr.aria-label]="(muted(n.rule) ? 'Unmute ' : 'Mute ') + n.rule" (click)="store.mute(n.rule, !muted(n.rule))">{{ muted(n.rule) ? 'Unmute' : 'Mute' }}</button></span>
+                      <span class="cell acts" role="cell"><button type="button" matButton="text" class="text-act" [attr.aria-label]="(muted(n.rule) ? 'Unmute ' : 'Mute ') + n.rule" (click)="store.mute(n.rule, !muted(n.rule))">{{ muted(n.rule) ? 'Unmute' : 'Mute' }}</button></span>
                     </div>
                   }
                 </div>
@@ -39,7 +41,7 @@ import { TABLE_CSS } from './alarms-css';
             <div>
               <h3>Suggestions</h3>
               @if (s.suggestions.length === 0) {
-                <p class="lead">Nothing to tune. Your alerts look healthy.</p>
+                <p class="lead">Nothing to adjust. Your alerts look healthy.</p>
               } @else {
                 <ul class="sugg">
                   @for (g of s.suggestions; track $index) {

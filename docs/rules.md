@@ -138,6 +138,39 @@ changes here, every app's copy is updated in the same change.
     `--pd-*` tokens (one shared theme), CSP-safe. *Why:* Material is widely used and tested; hand-rolled components cost
     bugs it already solves.
 
+## Benchmarks (user, 2026-10-29)
+48. **Every quoted benchmark run is recorded.** Any benchmark or performance number quoted anywhere is first recorded in
+    the owning app's `docs/performance.md` (shared code: `docs/benchmarks.md`) as a results block in the template of
+    [benchmarks.md](benchmarks.md), newest first. "Anywhere" means an ADR, research note, plan, CHANGELOG, commit message,
+    pull request or lesson. The block gives date, commit, machine, load, build, synthetic corpus and generator, the exact
+    command with env vars, the number and kind of runs, the numbers with the budget and verdict, and the memory measure
+    (physical footprint, rule 26). The quoting document links to the block. A number without a block is not evidence for a
+    decision or a budget. *Why:* results were scattered across ADRs, branches and expiring job logs, often without
+    machine, load or build, so they could not be compared or reproduced, and stale numbers kept being quoted.
+
+## CI economy (user, 2026-10-29)
+50. **CI runs only what a change needs, once.**
+    (a) At most one CI run per branch head. Before dispatching, cancel any queued run on the same branch with an older head.
+    (b) Do not dispatch while review fixes are pending. Dispatch once after the last fix, and do not re-dispatch just to
+    refresh against main; merge main right before landing.
+    (c) A branch already merged into another branch gets no CI of its own.
+    (d) Docs-only changes land after the local conformance checks, without waiting for CI.
+    (e) Branch runs use the affected plan (rule 3); the full gates run once on main or at release.
+    *Why:* CI runners are the scarcest resource, and every wasted run delays a release.
+
+## Performance analysis (user, 2026-10-29)
+51. **Slow means: more parallelism, or a cheaper operation.** When any operation is slow (import, indexing, scans, queries,
+    CI steps, tests), the analysis answers two questions with measurements:
+    (a) Can more threads or workers be assigned? Bounded by the kind of work (ER-20): CPU-bound work gets cores minus one,
+    I/O a few, memory-heavy work is limited by RAM; it runs at background priority with deterministic results.
+    (b) Can the operation be made cheaper? For example less work per item, no repeated work, a cheaper algorithm or format,
+    caching, batching, skipping.
+    Thread counts and similar tunables are Settings values with an "Auto" default, validated in the engine, not
+    constants. Every design or ADR with a long or bulk operation has a "Parallelism and cost" section. Every
+    performance review checks both questions. Results are recorded under rule 48.
+    *Why:* Debrief's import was bound by 2 Tantivy writer threads and a single-threaded catalogue, and regex was 38% of parse
+    time; these were found by accident, and should be found by design.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:

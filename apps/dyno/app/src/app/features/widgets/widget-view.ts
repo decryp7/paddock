@@ -1,3 +1,5 @@
+import type { Measured } from '../../core/api.types';
+import { showMeasured } from '../../core/measured';
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { Icon } from '../../shared/icon';
 import type { IconName } from '../../shared/icons';
@@ -18,6 +20,7 @@ import { EventsFeed } from '../dashboard/events-feed';
 import { ConsumersPanel, DiskTrendPanel, HistoryPanel } from '../dashboard/history-panels';
 import { CountersStore } from '../../state/counters.store';
 import { PANEL_KINDS, KIND_LABEL, metricLabel, readCounter, readMetric, seriesFor, thresholdTone } from './widget-model';
+import { MatTooltip } from '@angular/material/tooltip';
 
 const ICON: Record<WidgetKind, IconName> = {
   graph: 'trend',
@@ -43,7 +46,7 @@ const ICON: Record<WidgetKind, IconName> = {
  */
 @Component({
   selector: 'dy-widget',
-  imports: [Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
+  imports: [MatTooltip, Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[attr.role]': 'ownCard() ? null : "group"', '[attr.aria-label]': 'ownCard() ? null : title()', '[attr.data-kind]': 'widget().kind', '[class.own-card]': 'ownCard()' },
   template: `
@@ -92,7 +95,7 @@ const ICON: Record<WidgetKind, IconName> = {
       @case ('heatmap') {
         <div class="cells" role="img" [attr.aria-label]="'Per-core load: ' + cores().map(pct).join(', ')">
           @for (v of cores(); track $index) {
-            <span class="cell" [style.background]="cellColor(v)" [title]="'Core ' + round($index + 1) + ': ' + pct(v)"></span>
+            <span class="cell" [style.background]="cellColor(v)" [matTooltip]="'Core ' + round($index + 1) + ': ' + pct(v)"></span>
           }
         </div>
         <p class="note num">{{ round(cores().length) }} cores · busiest {{ pct(busiest()) }}</p>
@@ -218,6 +221,6 @@ export class WidgetView {
   protected readonly anomalyIcon = (k: keyof typeof ANOMALY_ICON) => ANOMALY_ICON[k];
   /** Slow-moving levels are drawn zoomed so a steady 50% still shows its line. */
   protected readonly zoomed = computed(() => ['memory', 'swap', 'gpuLoad', 'diskFree', 'battery'].includes(String(this.widget().metric)));
-  protected readonly topValue = (g: { cpu: number; memory: number }) => (this.widget().metric === 'memory' ? formatBytes(g.memory) : formatPercent(g.cpu));
+  protected readonly topValue = (g: { cpu: Measured<number>; memory: Measured<number> }) => (this.widget().metric === 'memory' ? showMeasured(g.memory, formatBytes) : showMeasured(g.cpu, formatPercent));
   protected readonly cellColor = (v: number) => `color-mix(in srgb, var(--accent) ${Math.round(Math.min(100, Math.max(0, v)) * 0.85)}%, var(--surface-active))`;
 }

@@ -1,22 +1,8 @@
-//! The wire types the UI sees: `AppInfo`, `AgentStatus` and `CommandError` of `app/src/app/core/api.types.ts`
+//! The wire types the UI sees: `AgentStatus` and `CommandError` of `app/src/app/core/api.types.ts`
 //! (camelCase JSON). Everything else the UI receives is `dyno_core`'s own JSON.
 
 use dyno_core::protocol::{AgentError, ErrorCode as AgentCode};
 use serde::Serialize;
-
-/// `AppInfo`: what the About page shows.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AppInfo {
-    /// The app's version.
-    pub version: String,
-    /// `windows`, `macos` or `linux`.
-    pub os: &'static str,
-    /// Whether this build can check for updates.
-    pub updates_available: bool,
-    /// Why not, when it cannot.
-    pub updates_reason: Option<String>,
-}
 
 /// The OS name the UI uses.
 pub const fn os_name() -> &'static str {
@@ -72,8 +58,6 @@ pub enum ErrorCode {
     AccessDenied,
     /// Not possible here (or not built yet).
     Unsupported,
-    /// A protected process.
-    Protected,
     /// Invalid request.
     BadRequest,
     /// Took too long.
@@ -130,7 +114,6 @@ impl From<AgentError> for CommandError {
             AgentCode::NotFound => ErrorCode::NotFound,
             AgentCode::AccessDenied => ErrorCode::AccessDenied,
             AgentCode::Unsupported => ErrorCode::Unsupported,
-            AgentCode::Protected => ErrorCode::Protected,
             AgentCode::BadRequest => ErrorCode::BadRequest,
             AgentCode::Timeout => ErrorCode::Timeout,
             AgentCode::Busy => ErrorCode::Busy,
@@ -147,16 +130,7 @@ mod tests {
 
     #[test]
     fn shapes_match_api_types() {
-        let info = AppInfo {
-            version: "0.1.0".into(),
-            os: os_name(),
-            updates_available: false,
-            updates_reason: Some("x".into()),
-        };
-        let v = serde_json::to_value(info).unwrap();
-        assert_eq!(v["updatesAvailable"], json!(false));
-        assert_eq!(v["updatesReason"], json!("x"));
-        assert!(["windows", "macos", "linux"].contains(&v["os"].as_str().unwrap()));
+        assert!(["windows", "macos", "linux"].contains(&os_name()));
         assert_eq!(
             serde_json::to_value(AgentStatus::new(AgentState::Restarting, None)).unwrap(),
             json!({"state": "restarting", "message": null})
@@ -174,7 +148,6 @@ mod tests {
             (AgentCode::NotFound, "notFound"),
             (AgentCode::AccessDenied, "accessDenied"),
             (AgentCode::Unsupported, "unsupported"),
-            (AgentCode::Protected, "protected"),
             (AgentCode::BadRequest, "badRequest"),
             (AgentCode::Timeout, "timeout"),
             (AgentCode::Busy, "busy"),

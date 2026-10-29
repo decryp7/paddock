@@ -9,6 +9,9 @@ import { Icon } from '../../shared/icon';
 import { ViewPrefs } from '../../core/view-prefs';
 import { coreGroups } from '../cpu/core-layout';
 import { Tile } from './tile';
+import { MatIconButton } from '@angular/material/button';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { MatTooltip } from '@angular/material/tooltip';
 
 /** The tone of a used-fraction bar (visual only: the number is always printed). */
 function usedTone(percent: number): 'ok' | 'warn' | 'bad' | null {
@@ -19,21 +22,19 @@ const combine = <T>(reading: Reading<T> | undefined) => ({ value: reading ? read
 
 /** The number and unit of a formatted value, for the hero (`<b>` number, `<small>` unit). */
 const parts = splitValue;
+const CPU_VIEWS: SuSegment[] = [{ value: 'overall', label: 'Overall' }, { value: 'cores', label: 'Per core' }];
 
 /** CPU: hero, one sparkline, caption rows; the toggle switches to one live bar per core grouped by core kind. */
 @Component({
   selector: 'dy-cpu-tile',
-  imports: [Tile, Sparkline, RouterLink, Icon],
+  imports: [MatTooltip, SuSegmentedControl, MatIconButton, Tile, Sparkline, RouterLink, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-tile title="CPU" icon="cpu" [ready]="live.connected()">
       @if (cpu()) {
         <span badge class="head">
-          <span class="seg sm" role="group" aria-label="CPU view">
-            <button type="button" [attr.aria-pressed]="prefs.cpuView() === 'overall'" (click)="prefs.setCpuView('overall')">Overall</button>
-            <button type="button" [attr.aria-pressed]="prefs.cpuView() === 'cores'" (click)="prefs.setCpuView('cores')">Per core</button>
-          </span>
-          <a class="btn ghost icon sm" routerLink="/cpu" aria-label="CPU details" title="CPU details"><dy-icon name="arrow-right" /></a>
+          <pd-segmented-control label="CPU view" [options]="cpuViews" [value]="prefs.cpuView()" (valueChange)="prefs.setCpuView($event === 'cores' ? 'cores' : 'overall')" />
+          <a matIconButton routerLink="/cpu" aria-label="CPU details" matTooltipPosition="left" [matTooltip]="'CPU details'"><dy-icon name="arrow-right" /></a>
         </span>
       }
       @if (cpu(); as c) {
@@ -42,7 +43,7 @@ const parts = splitValue;
           <dy-sparkline [values]="live.series().cpu" [max]="100" color="var(--accent)" label="CPU use over the last minute" style="--spark-h: 32px" />
           <div class="cores" role="img" [attr.aria-label]="coreLabel()">
             @for (v of c.perCore; track $index) {
-              <span class="core" [style.background]="coreColor(v)" [title]="'Core ' + count($index) + ': ' + pct(v)"></span>
+              <span class="core" [style.background]="coreColor(v)" [matTooltip]="'Core ' + count($index) + ': ' + pct(v)"></span>
             }
           </div>
           <dl class="caps">
@@ -74,7 +75,6 @@ const parts = splitValue;
     :host { display: block; min-width: 0; }
     dy-tile { height: 100%; }
     .head { display: inline-flex; align-items: center; gap: var(--sp-1); }
-    .seg.sm button { height: 20px; padding: 0 var(--sp-2); font-size: var(--fs-xs); }
     .cores { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; height: 12px; }
     .core { border-radius: 2px; background-color: var(--surface-active); }
     .groups { display: grid; gap: var(--sp-3); }
@@ -89,6 +89,7 @@ const parts = splitValue;
 export class CpuTile {
   protected readonly live = inject(LiveStore);
   protected readonly prefs = inject(ViewPrefs);
+  protected readonly cpuViews = CPU_VIEWS;
   protected readonly cpu = computed(() => this.live.system()?.cpu ?? null);
   protected readonly groups = computed(() => {
     const c = this.cpu();

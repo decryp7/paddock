@@ -1,0 +1,111 @@
+### round 1
+## h query-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/store/segments (load 29.05)
+  open_ms=17.4
+  Q page_rows_500 rows=500 cold_ms=18.7 warm_med_ms=12.8 warm_min_ms=12.5
+  Q errors_page_ids rows=500 cold_ms=43.1 warm_med_ms=18.8 warm_min_ms=18.6
+  Q errors_total rows=1 cold_ms=4.9 warm_med_ms=4.4 warm_min_ms=4.1
+  Q facet_machine rows=50 cold_ms=136.4 warm_med_ms=110.2 warm_min_ms=109.2
+  Q histogram_1000 rows=4329 cold_ms=36.4 warm_med_ms=33.6 warm_min_ms=33.6
+  Q text_total_ilike rows=1 cold_ms=46.1 warm_med_ms=32.8 warm_min_ms=32.6
+  Q text_first_100 rows=100 cold_ms=5.8 warm_med_ms=5.5 warm_min_ms=5.3
+  Q bulk_100k_rows rows=100000 cold_ms=95.7 warm_med_ms=84.1 warm_min_ms=83.8
+  STATS query-inproc peak_rss_mb=265 peak_footprint_mb=241 footprint_mb=241 rss_now_mb=265 cpu_s=5.91
+serving Text("quack:127.0.0.1:32153") (start 1.0 ms)
+## h query-quack 32153 23154571c753ee95b0e3299ded9120af (load 29.05)
+  connect_ms=50.5
+  Q page_rows_500 rows=500 cold_ms=15.9 warm_med_ms=14.8 warm_min_ms=14.0
+  Q errors_page_ids rows=500 cold_ms=19.3 warm_med_ms=19.1 warm_min_ms=18.6
+  Q errors_total rows=1 cold_ms=5.2 warm_med_ms=4.1 warm_min_ms=3.8
+  Q facet_machine rows=50 cold_ms=108.7 warm_med_ms=111.2 warm_min_ms=109.8
+  Q histogram_1000 rows=4329 cold_ms=33.9 warm_med_ms=33.2 warm_min_ms=32.9
+  Q text_total_ilike rows=1 cold_ms=33.4 warm_med_ms=32.9 warm_min_ms=32.7
+  Q text_first_100 rows=100 cold_ms=5.8 warm_med_ms=5.5 warm_min_ms=5.5
+  Q bulk_100k_rows rows=100000 cold_ms=126.4 warm_med_ms=118.1 warm_min_ms=115.5
+  STATS query-quack-client peak_rss_mb=771 peak_footprint_mb=740 footprint_mb=740 rss_now_mb=771 cpu_s=0.93
+  server: STATS quack-server peak_rss_mb=711 peak_footprint_mb=673 footprint_mb=673 rss_now_mb=711 cpu_s=6.07
+## h query-ipc /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/w.sock (load 27.77)
+  connect_ms=0.0
+  Q page_rows_500 rows=500 cold_ms=16.7 warm_med_ms=14.3 warm_min_ms=13.9
+  Q errors_page_ids rows=500 cold_ms=20.0 warm_med_ms=19.0 warm_min_ms=18.5
+  Q errors_total rows=1 cold_ms=4.9 warm_med_ms=4.5 warm_min_ms=4.2
+  Q facet_machine rows=50 cold_ms=109.6 warm_med_ms=110.8 warm_min_ms=110.3
+  Q histogram_1000 rows=4329 cold_ms=35.1 warm_med_ms=33.6 warm_min_ms=33.5
+  Q text_total_ilike rows=1 cold_ms=34.1 warm_med_ms=33.0 warm_min_ms=32.6
+  Q text_first_100 rows=100 cold_ms=5.8 warm_med_ms=5.5 warm_min_ms=5.4
+  Q bulk_100k_rows rows=100000 cold_ms=218.1 warm_med_ms=210.7 warm_min_ms=209.9
+  STATS query-ipc-client peak_rss_mb=24 peak_footprint_mb=17 footprint_mb=17 rss_now_mb=24 cpu_s=0.67
+  worker: STATS ipc-worker peak_rss_mb=339 peak_footprint_mb=314 footprint_mb=314 rss_now_mb=339 cpu_s=6.42
+### round 2
+## h query-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/store/segments (load 27.77)
+  open_ms=11.4
+  Q page_rows_500 rows=500 cold_ms=13.6 warm_med_ms=13.2 warm_min_ms=13.2
+  Q errors_page_ids rows=500 cold_ms=20.2 warm_med_ms=18.9 warm_min_ms=18.8
+  Q errors_total rows=1 cold_ms=4.8 warm_med_ms=4.9 warm_min_ms=4.6
+  Q facet_machine rows=50 cold_ms=110.0 warm_med_ms=110.3 warm_min_ms=109.9
+  Q histogram_1000 rows=4329 cold_ms=34.7 warm_med_ms=34.8 warm_min_ms=33.5
+  Q text_total_ilike rows=1 cold_ms=33.2 warm_med_ms=32.9 warm_min_ms=32.6
+  Q text_first_100 rows=100 cold_ms=6.1 warm_med_ms=6.0 warm_min_ms=5.8
+  Q bulk_100k_rows rows=100000 cold_ms=89.7 warm_med_ms=85.3 warm_min_ms=83.4
+  STATS query-inproc peak_rss_mb=275 peak_footprint_mb=251 footprint_mb=251 rss_now_mb=275 cpu_s=5.88
+serving Text("quack:127.0.0.1:32153") (start 1.0 ms)
+## h query-quack 32153 23154571c753ee95b0e3299ded9120af (load 26.99)
+  connect_ms=50.8
+  Q page_rows_500 rows=500 cold_ms=15.5 warm_med_ms=14.1 warm_min_ms=13.9
+  Q errors_page_ids rows=500 cold_ms=19.7 warm_med_ms=19.0 warm_min_ms=18.8
+  Q errors_total rows=1 cold_ms=4.6 warm_med_ms=4.0 warm_min_ms=3.9
+  Q facet_machine rows=50 cold_ms=108.8 warm_med_ms=109.5 warm_min_ms=108.7
+  Q histogram_1000 rows=4329 cold_ms=33.5 warm_med_ms=32.7 warm_min_ms=32.5
+  Q text_total_ilike rows=1 cold_ms=33.4 warm_med_ms=33.0 warm_min_ms=32.5
+  Q text_first_100 rows=100 cold_ms=6.0 warm_med_ms=6.1 warm_min_ms=5.9
+  Q bulk_100k_rows rows=100000 cold_ms=128.4 warm_med_ms=117.6 warm_min_ms=115.1
+  STATS query-quack-client peak_rss_mb=807 peak_footprint_mb=776 footprint_mb=776 rss_now_mb=807 cpu_s=0.96
+  server: STATS quack-server peak_rss_mb=691 peak_footprint_mb=653 footprint_mb=653 rss_now_mb=691 cpu_s=6.02
+## h query-ipc /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/w.sock (load 26.99)
+  connect_ms=0.0
+  Q page_rows_500 rows=500 cold_ms=16.0 warm_med_ms=14.1 warm_min_ms=13.8
+  Q errors_page_ids rows=500 cold_ms=20.4 warm_med_ms=19.0 warm_min_ms=18.7
+  Q errors_total rows=1 cold_ms=5.0 warm_med_ms=4.2 warm_min_ms=3.9
+  Q facet_machine rows=50 cold_ms=109.4 warm_med_ms=110.3 warm_min_ms=110.0
+  Q histogram_1000 rows=4329 cold_ms=34.4 warm_med_ms=34.0 warm_min_ms=33.7
+  Q text_total_ilike rows=1 cold_ms=33.1 warm_med_ms=32.8 warm_min_ms=32.5
+  Q text_first_100 rows=100 cold_ms=5.9 warm_med_ms=6.2 warm_min_ms=5.7
+  Q bulk_100k_rows rows=100000 cold_ms=222.5 warm_med_ms=214.4 warm_min_ms=210.6
+  STATS query-ipc-client peak_rss_mb=26 peak_footprint_mb=19 footprint_mb=19 rss_now_mb=26 cpu_s=0.67
+  worker: STATS ipc-worker peak_rss_mb=336 peak_footprint_mb=312 footprint_mb=312 rss_now_mb=336 cpu_s=6.41
+### round 3
+## h query-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/store/segments (load 25.95)
+  open_ms=11.3
+  Q page_rows_500 rows=500 cold_ms=13.6 warm_med_ms=12.7 warm_min_ms=12.6
+  Q errors_page_ids rows=500 cold_ms=20.0 warm_med_ms=19.2 warm_min_ms=18.6
+  Q errors_total rows=1 cold_ms=4.7 warm_med_ms=4.2 warm_min_ms=4.1
+  Q facet_machine rows=50 cold_ms=109.8 warm_med_ms=110.6 warm_min_ms=110.4
+  Q histogram_1000 rows=4329 cold_ms=34.3 warm_med_ms=33.9 warm_min_ms=33.6
+  Q text_total_ilike rows=1 cold_ms=33.0 warm_med_ms=33.6 warm_min_ms=32.8
+  Q text_first_100 rows=100 cold_ms=6.1 warm_med_ms=5.5 warm_min_ms=5.4
+  Q bulk_100k_rows rows=100000 cold_ms=94.1 warm_med_ms=87.5 warm_min_ms=85.6
+  STATS query-inproc peak_rss_mb=261 peak_footprint_mb=237 footprint_mb=237 rss_now_mb=261 cpu_s=5.95
+serving Text("quack:127.0.0.1:32153") (start 1.0 ms)
+## h query-quack 32153 23154571c753ee95b0e3299ded9120af (load 25.95)
+  connect_ms=53.7
+  Q page_rows_500 rows=500 cold_ms=15.3 warm_med_ms=14.1 warm_min_ms=14.0
+  Q errors_page_ids rows=500 cold_ms=21.3 warm_med_ms=19.3 warm_min_ms=18.9
+  Q errors_total rows=1 cold_ms=4.4 warm_med_ms=4.1 warm_min_ms=3.8
+  Q facet_machine rows=50 cold_ms=109.8 warm_med_ms=110.4 warm_min_ms=109.2
+  Q histogram_1000 rows=4329 cold_ms=33.9 warm_med_ms=33.1 warm_min_ms=33.1
+  Q text_total_ilike rows=1 cold_ms=33.5 warm_med_ms=32.8 warm_min_ms=32.5
+  Q text_first_100 rows=100 cold_ms=6.7 warm_med_ms=6.4 warm_min_ms=5.9
+  Q bulk_100k_rows rows=100000 cold_ms=129.0 warm_med_ms=116.7 warm_min_ms=115.9
+  STATS query-quack-client peak_rss_mb=712 peak_footprint_mb=681 footprint_mb=681 rss_now_mb=712 cpu_s=0.97
+  server: STATS quack-server peak_rss_mb=695 peak_footprint_mb=657 footprint_mb=657 rss_now_mb=695 cpu_s=6.08
+## h query-ipc /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/w.sock (load 25.63)
+  connect_ms=0.0
+  Q page_rows_500 rows=500 cold_ms=16.9 warm_med_ms=14.2 warm_min_ms=13.9
+  Q errors_page_ids rows=500 cold_ms=20.2 warm_med_ms=18.7 warm_min_ms=18.4
+  Q errors_total rows=1 cold_ms=4.4 warm_med_ms=4.0 warm_min_ms=3.9
+  Q facet_machine rows=50 cold_ms=111.8 warm_med_ms=110.2 warm_min_ms=109.3
+  Q histogram_1000 rows=4329 cold_ms=40.5 warm_med_ms=34.0 warm_min_ms=33.6
+  Q text_total_ilike rows=1 cold_ms=33.0 warm_med_ms=33.3 warm_min_ms=32.7
+  Q text_first_100 rows=100 cold_ms=6.0 warm_med_ms=5.5 warm_min_ms=5.5
+  Q bulk_100k_rows rows=100000 cold_ms=219.9 warm_med_ms=213.1 warm_min_ms=209.2
+  STATS query-ipc-client peak_rss_mb=26 peak_footprint_mb=19 footprint_mb=19 rss_now_mb=26 cpu_s=0.67
+  worker: STATS ipc-worker peak_rss_mb=338 peak_footprint_mb=314 footprint_mb=314 rss_now_mb=338 cpu_s=6.39

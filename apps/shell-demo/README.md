@@ -68,8 +68,8 @@ Then, in the new app:
    `ONLY=<id>`, check the CVD numbers (`node icons/tools/cvd.mjs`), copy `icons/<id>/tauri` to `app/src-tauri/icons`
    and the tray images to `icons/tray` with the names `src/tray.rs` uses.
 3. Replace the samples one at a time: the pages, services, jobs, settings and dialogs keep the demo's `sd.` ids until
-   then. After each change: `PADDOCK_WRITE_TS=1 cargo test --test app` (the UI's command names) and the UI's specs
-   (`dialog-contracts.json` and `paddock-manifest.json` are written from the registry). `paddock-check-dialog-commands`
-   is not set up in the copy: it walks the shell's TypeScript sources, which the npm package does not ship yet.
+   then. Dialogs are declared in `src-tauri/src/dialogs.rs` (`paddock_dialogs::dialogs!`, ADR 0026). After each change:
+   `PADDOCK_WRITE_TS=1 cargo test --test app` (the UI's command names and dialog contracts) and the UI's specs
+   (`paddock-manifest.json` is written from the registry).
 4. CI and releases: copy `.gitea/workflows/shell-demo-release.yml` from here and rename the tag prefix, and add a row to `APPS` in
    `scripts/demo-release.mjs` (`scripts/demo/` takes the app as its first argument), or follow an app that already releases (Pitwall).

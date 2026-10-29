@@ -54,7 +54,7 @@ describe('dy-recorder-page', () => {
     expect(rows(el)[1]!.textContent).toContain('Manual');
     expect(el.querySelector('dy-chart')?.getAttribute('aria-label')).toContain('one-second samples');
     expect(el.querySelectorAll('[aria-label="Who was busiest"] tbody tr').length).toBe(3);
-    expect(el.querySelectorAll('.btn.primary')).toHaveLength(1);
+    expect(el.querySelectorAll('button[matButton="filled"]')).toHaveLength(1);
   });
 
   it('selects a row by click and by arrow keys', async () => {
@@ -98,7 +98,7 @@ describe('dy-recorder-page', () => {
   it('captures on the one primary button', async () => {
     const { f, el } = render();
     await settle(f);
-    (el.querySelector('.btn.primary') as HTMLButtonElement).click();
+    (el.querySelector('button[matButton="filled"]') as HTMLButtonElement).click();
     await settle(f);
     expect(rows(el)).toHaveLength(4);
     expect(rows(el)[0]!.getAttribute('aria-selected')).toBe('true');

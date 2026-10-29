@@ -86,7 +86,7 @@ impl SpawnSpec {
             keep_env: KEPT_ENV,
             current_dir: None,
             label: label.into(),
-            endpoint_prefix: "debrief-ipc".into(),
+            endpoint_prefix: crate::endpoint::prefix::DEFAULT.into(),
             connect_window: Duration::from_secs(15),
             below_normal_priority: true,
             log: None,

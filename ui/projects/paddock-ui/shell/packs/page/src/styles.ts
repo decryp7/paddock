@@ -21,10 +21,7 @@ export const PACKS_STYLES = `
   .pd-packs__note { display: flex; gap: var(--pd-space-2); align-items: flex-start; min-width: 0; color: var(--pd-text-muted); }
   .pd-packs__notice { display: flex; flex-direction: column; gap: var(--pd-space-1); padding: var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); min-width: 0; }
   .pd-packs__title { font-weight: var(--pd-weight-medium); }
-  .pd-packs__btn { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
-  .pd-packs__btn--primary { background: var(--pd-accent-fill); border-color: var(--pd-accent-fill); color: var(--pd-on-accent); }
-  .pd-packs__btn:disabled { opacity: 0.6; cursor: default; }
-  .pd-packs__btn:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
-  progress { width: 100%; }
-  @container (max-width: 420px) { .pd-packs__head .pd-packs__btn { flex: 1 1 100%; justify-content: center; } }
+  mat-progress-bar { width: 100%; }
+  .pd-packs__head button pd-glyph { margin-inline-end: var(--pd-space-1); }
+  @container (max-width: 420px) { .pd-packs__head button { flex: 1 1 100%; justify-content: center; } }
 `;

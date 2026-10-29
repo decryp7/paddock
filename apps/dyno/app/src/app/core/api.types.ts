@@ -110,39 +110,54 @@ export interface SystemSample {
 
 export type RunState = 'running' | 'sleeping' | 'suspended' | 'other';
 
+/** Why a per-process value was not read. */
+export type UnavailableReason = 'needsAdmin' | 'notPermitted' | 'notSupported' | 'residentMemoryOnly';
+
+/** A value that was read, or why it was not. A value that was not read is never `0`. */
+export type Measured<T> = { value: T } | { unavailable: { reason: UnavailableReason } };
+
+/** A sum over per-process values: only the readable ones are added up. */
+export interface PartialSum<T> {
+  sum: Measured<T>;
+  partial: boolean;
+}
+
+/** Whose process it is, relative to the account Dyno runs as. */
+export type Owner = 'own' | 'system' | 'other' | 'unknown';
+
+/** Other users' processes folded into one row by the engine. */
+export interface OtherUsers {
+  count: number;
+  cpu: Measured<number>;
+  memory: Measured<number>;
+  /** Some processes' CPU or memory could not be read, so the sums are lower than the real totals. */
+  partial: boolean;
+}
+
 export interface ProcessSample {
   pid: number;
   parent: number | null;
   name: string;
   exe: string | null;
-  user: string | null;
+  user: Measured<string>;
   /** Percent of the whole machine, 0–100. */
-  cpu: number;
-  memory: number;
-  diskReadBps: number;
-  diskWriteBps: number;
-  started: Timestamp;
+  cpu: Measured<number>;
+  memory: Measured<number>;
+  diskReadBps: Measured<number>;
+  diskWriteBps: Measured<number>;
+  started: Measured<Timestamp>;
+  owner: Owner;
   state: RunState;
-  /** Why Dyno never touches this process (built-in system list or the user's protected list); `null` when it may act. */
-  protectedReason: string | null;
 }
 
 /** A pid plus its start time: actions never hit a reused pid. */
 export interface ProcessRef {
   pid: number;
-  started: Timestamp;
+  /** Absent when the OS did not give the start time; the pid alone identifies the process then. */
+  started: Timestamp | null;
 }
 
 export type Priority = 'idle' | 'belowNormal' | 'normal' | 'aboveNormal' | 'high';
-
-export type ProcessAction =
-  | 'end'
-  | 'suspend'
-  | 'resume'
-  | { setPriority: Priority }
-  | { setAffinity: number }
-  | { setEfficiencyMode: boolean }
-  | { setCpuCap: number | null };
 
 export interface ParentLink {
   pid: number;
@@ -189,9 +204,11 @@ export interface AppGroup {
   name: string;
   exe: string | null;
   pids: number[];
-  cpu: number;
-  memory: number;
-  diskBps: number;
+  cpu: Measured<number>;
+  memory: Measured<number>;
+  diskBps: Measured<number>;
+  /** Some member's value could not be read, so the sums are lower than the real totals. */
+  partial: boolean;
 }
 
 export interface SnapshotInfo {
@@ -205,8 +222,8 @@ export interface ProcessSummary {
   pid: number;
   name: string;
   exe: string | null;
-  cpu: number;
-  memory: number;
+  cpu: Measured<number>;
+  memory: Measured<number>;
 }
 
 export interface ProcessChange {
@@ -238,8 +255,6 @@ export interface Overhead {
   processIntervalMs: number;
 }
 
-export type ProfileId = 'normal' | 'gaming' | 'meeting' | 'onBattery' | 'buildingCode';
-
 /** Pushed every tick on the `dyno://live` event. */
 export interface LiveUpdate {
   system: SystemSample;
@@ -248,12 +263,11 @@ export interface LiveUpdate {
   topCpu: AppGroup[];
   topMemory: AppGroup[];
   overhead: Overhead;
-  profile: ProfileId;
-  rulesPaused: boolean;
-  activeActions: ActiveAction[];
   /** Every process and group: only while a view subscribed to processes (the task manager). */
   processes: ProcessSample[] | null;
   groups: AppGroup[] | null;
+  /** Other users' processes, folded into one row (`processes` and `groups` leave them out); null when there are none. */
+  otherUsers: OtherUsers | null;
 }
 
 export type LiveDetail = 'summary' | 'processes';
@@ -277,17 +291,13 @@ export interface Evidence {
   value: string;
 }
 
-export type SuggestedAction =
-  | { process: { target: ProcessRef; name: string; action: ProcessAction } }
-  | 'openCleanup'
-  | 'openTaskManager'
-  | 'openStartup'
-  | 'restart'
-  | 'wait';
+/** A page that shows more about a hint. */
+export type HintLink = 'taskManager' | 'startup';
 
-export interface Suggestion {
-  label: string;
-  action: SuggestedAction;
+/** Something worth knowing about a cause, in words, with a page to look closer at where one helps (never an action). */
+export interface CauseHint {
+  text: string;
+  link: HintLink | null;
 }
 
 export interface Cause {
@@ -297,7 +307,7 @@ export interface Cause {
   /** 0–1. */
   confidence: number;
   evidence: Evidence[];
-  suggestions: Suggestion[];
+  hints: CauseHint[];
   /** The busiest apps behind the cause (empty when it is not an app). */
   involved: Involved[];
 }
@@ -349,7 +359,7 @@ export interface HistoryPoint {
   temperature: number | null;
 }
 
-export type TimelineEventKind = 'throttle' | 'cap' | 'release' | 'cleanup' | 'tuning' | 'alert' | 'boot' | 'network';
+export type TimelineEventKind = 'alert' | 'boot' | 'network';
 
 export interface TimelineEvent {
   at: Timestamp;
@@ -421,74 +431,7 @@ export interface History {
 
 // --------------------------------------------------------------------------------------------------------- rules
 
-export type RuleContext = 'userActive' | 'userIdle' | 'onBattery' | 'onAc';
-
-export type RuleTarget = 'anyApp' | { apps: string[] };
-
-export interface RuleCondition {
-  target: RuleTarget;
-  /** Percent of the machine. */
-  cpuAbove: number;
-  forSecs: number;
-  when: RuleContext[];
-}
-
-export type StepAction = 'lowerPriority' | 'efficiencyMode' | { cpuCap: number } | 'notify';
-
-export interface RuleStep {
-  action: StepAction;
-  /** Seconds after the previous step (or after the condition started holding) before this one is taken. */
-  afterSecs: number;
-}
-
-export interface Rule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  condition: RuleCondition;
-  ladder: RuleStep[];
-  /** Seconds below the threshold before Dyno undoes what it did. */
-  releaseAfterSecs: number;
-  /** Profiles the rule is active in; empty = every profile. */
-  profiles: ProfileId[];
-  /** A temporary rule: when this moment passes (ms since the epoch) the rule gives everything back and switches itself off; null = until turned off. */
-  expiresAt: Timestamp | null;
-}
-
-export interface Profile {
-  id: ProfileId;
-  name: string;
-  description: string;
-}
-
-export interface RuleSet {
-  rules: Rule[];
-  /** Executable names the user protected (never touched); the built-in system list is in `builtInProtected`. */
-  protected: string[];
-  builtInProtected: string[];
-  profile: ProfileId;
-  profiles: Profile[];
-  paused: boolean;
-}
-
-export interface ActiveAction {
-  target: ProcessRef;
-  app: string;
-  ruleId: string;
-  ruleName: string;
-  /** Index into the rule's ladder of the last step taken. */
-  step: number;
-  description: string;
-  since: Timestamp;
-  /** The app's CPU (percent of the machine) when the rule started acting. */
-  cpuBefore: number;
-  /** The app's CPU measured about 20 s after the latest step took effect; null until it has been measured. */
-  cpuAfter: number | null;
-}
-
-export type ActivityKind = 'rule' | 'release' | 'manual' | 'cleanup' | 'tuning' | 'startup' | 'alert' | 'system';
-
-export type UndoState = 'notUndoable' | 'available' | 'undone' | 'expired';
+export type ActivityKind = 'alert' | 'system';
 
 export interface ActivityEntry {
   id: string;
@@ -496,100 +439,181 @@ export interface ActivityEntry {
   kind: ActivityKind;
   title: string;
   detail: string;
-  undo: UndoState;
-  /** Bytes freed, for cleanups. */
-  bytes: number | null;
 }
 
-// ------------------------------------------------------------------------------------------------------- cleanup
+// ----------------------------------------------------------------------------------------------------- disk map
 
-export type CleanupGroup = 'system' | 'browser' | 'developer' | 'downloads' | 'docker' | 'plugin';
-export type CleanupRisk = 'safe' | 'review' | 'personal';
+/** `Settings.disk`: every key optional. */
+export interface DiskSettings {
+  /** The most nodes one scan keeps (10,000 to 5,000,000). */
+  scanFolders?: number;
+  /** Files of at least this many MiB get a node of their own (1 to 1,024). */
+  notableFileMib?: number;
+}
 
-export interface CleanupCategory {
+/** The protocol of a network volume. */
+export type NetworkProtocol = 'smb' | 'nfs' | 'afp' | 'webDav' | 'sshfs' | 'other';
+
+/** Where a volume lives (externally tagged: a unit variant is a string). */
+export type VolumeLocation = 'internal' | { external: { bus: string | null } } | { network: { protocol: NetworkProtocol; host: string } };
+
+/** A volume the disk map can scan. */
+export interface Volume {
+  /** Stable id: the mount point. */
   id: string;
   name: string;
-  description: string;
-  group: CleanupGroup;
-  risk: CleanupRisk;
-  /** Whether scheduled runs include it (the user enabled it). */
-  scheduled: boolean;
+  mount: string;
+  /** File system ("apfs", "ntfs", "smbfs"). */
+  fs: string;
+  location: VolumeLocation;
+  /** Bytes; `null` when the volume cannot say. */
+  capacity: number | null;
+  free: number | null;
+  /** A spinning disk; `null` when unknown. */
+  rotational: boolean | null;
+  readOnly: boolean;
+  /** False when a network volume did not answer ("Not answering"). */
+  reachable: boolean;
+  /** Whether used space is a fixed scale for a scan; false for a network share (scanned like a folder). */
+  wholeVolume: boolean;
 }
 
-export interface CleanupItem {
-  id: string;
-  path: string;
+/** What a scan covers. */
+export type DiskTarget = { volume: { id: string } } | { folder: { path: string } };
+
+export type ScanPhase = 'readingVolumeFacts' | 'readingFolders';
+
+export type ScanFailure = { volumeUnreachable: { detail: string } } | { cannotStart: { reason: string } } | { internal: { detail: string } };
+
+export type ScanState = 'running' | 'done' | 'cancelled' | { failed: { failure: ScanFailure } };
+
+/** Live numbers of a scan; every one only grows. */
+export interface ScanProgress {
   bytes: number;
-  modified: Timestamp;
-  folder: boolean;
-  reason: string;
-  /** Pre-selected in the preview (never for `personal` categories). */
-  selected: boolean;
+  items: number;
+  folders: number;
+  /** The bytes expected (a whole volume's used space), or `null`: the total is unknown and the count just grows. */
+  totalBytes: number | null;
+  /** Folders the OS refused to open (counted, not fatal). */
+  unreadable: number;
 }
 
-export interface CategoryResult {
-  category: string;
-  bytes: number;
-  itemCount: number;
-  items: CleanupItem[];
+/** One scan's status: the reply to starting it and the pushed event while it runs (keep the highest `seq`). */
+export interface DiskScanStatus {
+  scan: number;
+  seq: number;
+  name: string;
+  target: DiskTarget;
+  volume: Volume | null;
+  state: ScanState;
+  phase: ScanPhase;
+  progress: ScanProgress;
+  /** A limit left folders out. */
   truncated: boolean;
-  /** Why the category could not be scanned fully, e.g. "Docker is not running". */
-  note: string | null;
+  /** The first folders that could not be read. */
+  unreadableFirst: string[];
+  /** Folders were refused and this Mac has not given Dyno Full Disk Access, the likely reason (macOS only). */
+  needsFullDiskAccess: boolean;
+  /** Files and folders counted per second while running; `null` until it can be known (never a made-up number). */
+  itemsPerSecond: number | null;
+  /** Seconds left in the first pass over a whole volume; `null` when it cannot be known. */
+  etaSeconds: number | null;
+  /** Used space the scan did not count (used minus counted), for a whole-volume scan that is done; `null` otherwise. */
+  hiddenBytes: number | null;
+  /** When the latest pass ended; `null` while the first pass runs. */
+  scannedAt: Timestamp | null;
 }
 
-export interface CleanupScan {
-  id: string;
-  at: Timestamp;
-  results: CategoryResult[];
-  totalBytes: number;
-}
+export type NodeKind = 'folder' | 'file' | 'mountPoint' | 'unreadable';
 
-export type DeleteMode = 'recycleBin' | 'quarantine';
-
-export interface FailedItem {
-  path: string;
-  reason: string;
-}
-
-export interface CleanupOutcome {
-  /** Bytes moved out of the scanned folders; the space is released when the quarantine ends or the Recycle Bin is emptied. */
-  freedBytes: number;
-  deleted: number;
-  failed: FailedItem[];
-  quarantineId: string | null;
-}
-
-export interface QuarantineEntry {
-  id: string;
-  at: Timestamp;
-  bytes: number;
-  itemCount: number;
-  expires: Timestamp;
-}
-
-export interface SizeNode {
+/** A node of a scan. */
+export interface DiskNode {
+  id: number;
   name: string;
-  path: string;
+  kind: NodeKind;
+  /** Bytes on the volume, children included. */
   bytes: number;
-  children: SizeNode[];
+  /** Bytes of content, children included (what the files add up to when read). */
+  logicalBytes: number;
+  /** Files and folders inside, recursively. */
+  items: number;
+  newestChange: Timestamp;
+  /** Everything inside has been read. */
+  complete: boolean;
+  hasChildren: boolean;
 }
 
-// ------------------------------------------------------------------------------------------- health and tuning
+/** A sum of folded things. */
+export interface Folded {
+  count: number;
+  /** Bytes on the volume. */
+  bytes: number;
+  /** Bytes of content. */
+  logicalBytes: number;
+  items: number;
+}
+
+/** One page of one level: the children of a folder, biggest first. children + other + loose = the folder's bytes. */
+export interface DiskChildren {
+  node: DiskNode;
+  children: DiskNode[];
+  /** Children below the minimum share, folded into one bucket (all pages). */
+  other: Folded;
+  /** Small files directly inside the folder that have no node of their own. */
+  loose: Folded;
+  /** How many children are shown across all pages. */
+  shown: number;
+  offset: number;
+  /** The offset of the next page, `null` on the last. */
+  nextOffset: number | null;
+}
+
+/** A folder or file with what is shown inside it, nested. */
+export interface RingNode {
+  node: DiskNode;
+  /** Shown children, biggest first. */
+  children: RingNode[];
+  /** Children not shown: below the minimum share, or past the node cap. */
+  other: Folded;
+  /** Small files directly inside that have no node of their own. */
+  loose: Folded;
+}
+
+/** Several levels of a scan under a folder, in one answer. */
+export interface DiskRings {
+  root: RingNode;
+  /** Nodes in the answer, the centre included. */
+  count: number;
+  /** The node cap left out children that were big enough to show. */
+  capped: boolean;
+}
+
+/** What to read: `rings` 1 to 6, `minShare` 0 to 1 of the centre, `maxNodes` 1 to 2000. */
+export interface DiskRingsQuery {
+  scan: number;
+  /** The centre; `null` for the scan's root. */
+  node: number | null;
+  rings: number;
+  minShare: number;
+  maxNodes: number;
+}
+
+/** Which page of which level. */
+export interface DiskChildrenQuery {
+  scan: number;
+  /** The folder; `null` for the scan's root. */
+  node: number | null;
+  offset: number;
+  /** 1 to 256. */
+  limit: number;
+  /** Children below this share (0 to 1) of the folder are folded into `other`; 0 shows all. */
+  minFraction: number;
+}
+
+// ------------------------------------------------------------------------------------------- health
 
 export type Grade = 'good' | 'fair' | 'poor';
 export type Severity = 'info' | 'warning' | 'critical';
-
-export type FixKind = { tuning: string } | 'openCleanup' | 'openStartup' | 'restart' | 'openTaskManager' | 'openLifespan';
-
-export interface Fix {
-  label: string;
-  explanation: string;
-  /** What will change, one line each. */
-  preview: string[];
-  needsAdmin: boolean;
-  undoable: boolean;
-  kind: FixKind;
-}
 
 export interface HealthReason {
   id: string;
@@ -598,7 +622,6 @@ export interface HealthReason {
   /** Points this costs the score. */
   impact: number;
   severity: Severity;
-  fix: Fix | null;
 }
 
 export interface HealthReport {
@@ -606,55 +629,6 @@ export interface HealthReport {
   score: number;
   grade: Grade;
   reasons: HealthReason[];
-}
-
-export type TuningCategory = 'power' | 'sleep' | 'battery' | 'developer' | 'appearance';
-
-export interface TuningSuggestion {
-  id: string;
-  title: string;
-  explanation: string;
-  current: string;
-  proposed: string;
-  needsAdmin: boolean;
-  applied: boolean;
-  category: TuningCategory;
-  /** The exact change, one line each, shown before anything is applied. */
-  preview: string[];
-  /** The exact inverse, one line each: what Revert does. */
-  undoPreview: string[];
-  /** Why it cannot be applied now (for example it needs administrator rights), or null. */
-  blocked: string | null;
-  /** Applied by Dyno, but something else changed the setting since: Revert asks before overwriting. */
-  changedOutside: boolean;
-}
-
-/** How the privileged helper stands (ADR 0016). */
-export type HelperState = 'unsupported' | 'notInstalled' | 'ready' | 'outdated' | 'unreachable' | 'installing';
-
-/** One line of the helper's own audit log. */
-export interface HelperAuditEntry {
-  at: number;
-  peer: number | null;
-  what: string;
-  verdict: 'started' | 'applied' | 'refused' | 'failed' | 'interrupted';
-  before: string | null;
-  after: string | null;
-  detail: string;
-}
-
-/** The privileged helper for Settings and the "install the helper" dialog. */
-export interface HelperStatus {
-  state: HelperState;
-  /** One sentence saying what it means and what to do next. */
-  message: string;
-  version: string | null;
-  /** What the operating system will ask for when installing, in words. */
-  prompt: string;
-  /** The last entries of the helper's audit log, newest first. */
-  recent: HelperAuditEntry[];
-  /** Why the last install, update or removal did not work, until the next attempt. */
-  error: string | null;
 }
 
 export type StartupLocation =
@@ -667,7 +641,7 @@ export type StartupLocation =
   | 'systemLaunchAgent'
   | 'loginItem';
 
-export type StartupState = 'enabled' | 'disabled' | { delayed: number };
+export type StartupState = 'enabled' | 'disabled';
 
 export type ImpactRating = 'notMeasured' | 'low' | 'medium' | 'high';
 
@@ -686,8 +660,6 @@ export interface StartupEntry {
   state: StartupState;
   publisher: string | null;
   impact: StartupImpact;
-  /** Changing it goes through the privileged helper (machine-wide locations). */
-  needsAdmin: boolean;
 }
 
 // -------------------------------------------------------------------------------------------- alerts and reports
@@ -713,8 +685,6 @@ export interface WeeklyReport {
   peakCpu: number;
   avgMemory: number;
   topApps: Consumer[];
-  ruleActions: number;
-  cleanedBytes: number;
   crashes: number;
   alerts: number;
   highlights: string[];
@@ -722,8 +692,6 @@ export interface WeeklyReport {
   disks: ReportDisk[];
   /** The week's alerts, newest first (at most 20). */
   issues: ReportIssue[];
-  /** What changed on the machine, newest first (at most 20). */
-  changes: ReportChange[];
   /** Hardware sentences: time throttled, disks and batteries that need attention (empty when there is nothing to say). */
   hardware: string[];
   /** True when the week holds nothing: a valid report that says so. */
@@ -749,12 +717,6 @@ export interface ReportIssue {
   detail: string;
 }
 
-export interface ReportChange {
-  at: Timestamp;
-  title: string;
-  detail: string;
-}
-
 export type ReportFormat = 'markdown' | 'html';
 
 export interface SavedReport {
@@ -766,12 +728,8 @@ export interface SavedReport {
 
 export type TrayMetric = 'cpu' | 'memory' | 'disk' | 'network' | 'gpu';
 export type TrayStyle = 'bars' | 'graph';
-export type Theme = 'system' | 'dark' | 'light';
-export type CleanupSchedule = 'off' | 'daily' | 'weekly';
-
 export interface Settings {
   version: number;
-  theme: Theme;
   launchAtLogin: boolean;
   sampling: { intervalMs: number; processIntervalMs: number };
   retention: { rawHours: number; minuteDays: number; quarterHourDays: number; hourDays: number };
@@ -782,7 +740,6 @@ export interface Settings {
     overheatCelsius: number;
     longHighCpuMinutes: number;
   };
-  cleanup: { schedule: CleanupSchedule; categories: string[]; mode: DeleteMode; devProjectAgeDays: number };
   webApi: { enabled: boolean; port: number; lan: boolean };
   /** The customisable dashboard (the engine fills the default Overview when absent). */
   dashboard?: DashboardLayout;
@@ -808,6 +765,8 @@ export interface Settings {
   hardwareAlarms?: HardwareAlarms;
   /** New and unusual programs: the baseline and its learning period (the engine fills the default when absent). */
   unusual?: UnusualSettings;
+  /** The disk map's limits (the engine fills the defaults when absent). */
+  disk?: DiskSettings;
   /** Maintenance windows: when Dyno's own heavier background work may run. */
   maintenance: MaintenanceSettings;
   /** Backup health checks. */
@@ -844,7 +803,6 @@ export type ErrorCode =
   | 'notFound'
   | 'accessDenied'
   | 'unsupported'
-  | 'protected'
   | 'badRequest'
   | 'timeout'
   | 'busy'
@@ -886,8 +844,6 @@ export interface MemoryArray {
 
 export interface InventoryUnavailable {
   reason: string;
-  /** Reading it needs the privileged helper (a later work package). */
-  needsHelper: boolean;
 }
 
 /** Externally tagged, like Rust's serde default. */
@@ -1006,13 +962,10 @@ export type TrayItemStyle =
   | 'graphAndNumber'
   | { number: { unit: string; label: string } };
 
-export type TrayOpens = 'ownPopover' | 'mainPopover';
-
 export interface TrayItem {
   id: string;
   metric: WidgetMetric;
   style: TrayItemStyle;
-  opens: TrayOpens;
 }
 
 /** At most 4 items, reorderable (array order = left to right). */
@@ -1705,9 +1658,7 @@ export interface SavedIssues {
 // Mirrors `dyno_core::unusual` (WP-07). A transparency tool: reasons, never verdicts.
 
 export type UnusualLevel = 'new' | 'unusual';
-export type UnusualStatus = 'new' | 'known' | 'ignored' | 'protected';
-export type UnusualAction = 'ignore' | 'protect' | 'restore';
-
+export type UnusualStatus = 'new' | 'known';
 export interface UnusualItem {
   /** What an action refers to. */
   key: string;
@@ -1732,7 +1683,6 @@ export interface UnusualOverview {
   learning: { active: boolean; until: Timestamp | null };
   learningDays: number;
   known: number;
-  ignored: number;
   items: UnusualItem[];
 }
 
@@ -1780,107 +1730,7 @@ export interface StartupOverview {
   signedCount: number;
 }
 
-// ------------------------------------------------------------------------------------------------------ watched folders
-// Mirrors `dyno_core::watch` (WP-10, ADR 0019). Files move only to the 7-day quarantine, only in folders the person chose.
-
-export interface WatchFilter {
-  /** Without the dot, lower case. Empty lists (both) match every file. */
-  extensions: string[];
-  nameStarts: string[];
-}
-
-export interface SweepSummary {
-  at: Timestamp;
-  moved: number;
-  bytes: number;
-  failed: number;
-  firstFailure: string | null;
-  /** The quarantine holding them; Activity can undo the sweep. */
-  quarantineId: string | null;
-}
-
-export interface WatchedFolder {
-  id: string;
-  path: string;
-  /** 600 to 864 000 seconds. */
-  keepForSecs: number;
-  filter: WatchFilter;
-  recursive: boolean;
-  enabled: boolean;
-  /** The preview of the current settings was shown; a folder cannot be turned on before that. */
-  previewed: boolean;
-  template: string | null;
-  added: Timestamp;
-  lastSweep: SweepSummary | null;
-}
-
-export interface WatchedFolderView {
-  folder: WatchedFolder;
-  exists: boolean;
-  filterText: string;
-  nextSweep: Timestamp | null;
-}
-
-export interface WatchTemplateInfo {
-  id: string;
-  name: string;
-  about: string;
-  keepForSecs: number;
-  recursive: boolean;
-  filterText: string;
-}
-
-export interface WatchOverview {
-  folders: WatchedFolderView[];
-  templates: WatchTemplateInfo[];
-}
-
-export interface DueFile {
-  path: string;
-  bytes: number;
-  arrived: Timestamp;
-  modified: Timestamp;
-}
-
-export interface SweepPlan {
-  /** Oldest first; the preview lists at most 200, the totals are complete. */
-  due: DueFile[];
-  dueTotal: number;
-  dueBytes: number;
-  /** Matching files that have not yet stayed long enough. */
-  waiting: number;
-  /** Files the filter does not match. */
-  other: number;
-  links: number;
-  refused: number;
-  truncated: boolean;
-}
-
-export interface WatchPreview {
-  id: string;
-  plan: SweepPlan;
-}
-
-/** What to change about a watched folder; absent fields stay as they are. */
-export interface WatchChange {
-  keepForSecs?: number;
-  enabled?: boolean;
-  recursive?: boolean;
-}
-
-/** The settings chosen in "Add folder" before the OS folder dialog opens (the folder itself is only ever chosen there). */
-export interface AddWatchedFolder {
-  template: string | null;
-  keepForSecs: number;
-  recursive: boolean;
-// ------------------------------------------------------------------------------------------------------- extras
-// Mirrors `dyno_core::extras` (WP-13): read-only views of what changed, sleep blockers, boot, per-app use, GPU,
-// installed software, large and duplicate files, and the maintenance windows. Dyno only reads; removal goes through
-// the cleanup policy.
-
-}
-
-export type ChangeKind = 'installed' | 'updated' | 'removed' | 'startupAdded' | 'startupRemoved' | 'setting' | 'cleanup';
+export type ChangeKind = 'installed' | 'updated' | 'removed' | 'startupAdded' | 'startupRemoved';
 
 export interface Change {
   at: Timestamp;

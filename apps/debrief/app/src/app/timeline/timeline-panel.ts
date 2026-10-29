@@ -35,6 +35,8 @@ import { HIST_VB, histogramPaths } from './histogram';
 import { LanesEmpty, MarkerHover, MarkerMenu, TimelineLanes } from './timeline-lanes';
 import { TimelineHeader } from './timeline-header';
 import { TimelineLegend } from './timeline-legend';
+import { TimelineChipStrip } from './timeline-chip-strip';
+import { TimelineChips } from './timeline-chips';
 import { TimelineMinimap } from './timeline-minimap';
 import { TimelineTooltips } from './timeline-tooltips';
 import { TimelineInteraction } from './timeline-interaction';
@@ -52,10 +54,10 @@ function timelineSource(): TimelineSource {
 @Component({
   selector: 'debrief-timeline-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RovingTabindex, TimeCursorLine, AnnotationTrack, ProfileSpanTrack, DumpMarkerTrack, NoteTimelineTrack, TimelineHeader, TimelineLegend, TimelineMinimap, TimelineLanes, TimelineTooltips, TimelineInteraction, ErrorDetails],
+  imports: [RovingTabindex, TimeCursorLine, AnnotationTrack, ProfileSpanTrack, DumpMarkerTrack, NoteTimelineTrack, TimelineChipStrip, TimelineHeader, TimelineLegend, TimelineMinimap, TimelineLanes, TimelineTooltips, TimelineInteraction, ErrorDetails],
   // One store per panel: an additional timeline gets its own `TimelineInstanceStore` (created only when used).
-  providers: [TimelineInstanceStore, { provide: TIMELINE_SOURCE, useFactory: timelineSource }],
-  host: { '[class.instance]': '!src.main' },
+  providers: [TimelineInstanceStore, TimelineChips, { provide: TIMELINE_SOURCE, useFactory: timelineSource }],
+  host: { '[class.instance]': '!src.main', '[class.has-chips]': 'chips.all().length > 0' },
   template: `
     <debrief-timeline-header />
     <debrief-timeline-legend [inView]="annInView()" />
@@ -92,6 +94,12 @@ function timelineSource(): TimelineSource {
               </svg>
             </div>
           </div>
+          @if (chips.all().length > 0) {
+            <div class="row chips-row">
+              <div class="label"></div>
+              <div class="plot"><debrief-timeline-chip-strip [width]="plotWidth()" /></div>
+            </div>
+          }
           <div class="row axis-row">
             <div class="label"></div>
             <div class="plot axis" #axis (contextmenu)="axisMenu($event)" title="Right-click to analyse a moment" i18n-title="@@timeline.panel.axisTitle">
@@ -156,12 +164,14 @@ function timelineSource(): TimelineSource {
     <debrief-timeline-tooltips [marker]="hover()" [run]="runHover()" [annotation]="annHover()" />
   `,
   styles: `
-    :host { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--bg-1); overflow: hidden; position: relative; }
-    .err-card { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 80%; padding: 14px 18px; border: 1px solid var(--border-3); border-radius: 8px; background: var(--bg-3); color: var(--text); text-align: center; }
+    /* The panel's layers (ADR 0027: the sticky header is at 3): the overlay with the span chips, notes and dump markers sits just above it. */
+    :host { --tl-z-header: 3; --tl-z-overlay: calc(var(--tl-z-header) + 1); --tl-mini-h: 27px /* the minimap strip (26px) and its border; the minimap reads it */; --tl-strip-h: 0px; --tl-strip-top: calc(var(--tl-mini-h) + var(--hist-h)); flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--bg-1); overflow: hidden; position: relative; }
+    .err-card { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 80%; padding: 14px 18px; border: 1px solid var(--border-3); border-radius: 8px; background: var(--bg-3); color: var(--text); text-align: center; }
     .wrap { position: relative; flex: 1; min-height: 0; user-select: none; }
     .wrap.panning { cursor: grabbing; }
     .scroller { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; padding-bottom: 8px; }
-    .sticky { position: sticky; top: 0; z-index: 2; background: var(--bg-1); }
+    :host(.has-chips) { --tl-strip-h: 40px; }
+    .sticky { position: sticky; top: 0; z-index: 3; /* = --tl-z-header; C43 reads the number */ background: var(--bg-1); }
     .row { display: flex; align-items: stretch; }
     .label { width: var(--tl-label-w); flex: none; }
     .plot { flex: 1; min-width: 0; position: relative; margin-right: var(--s-5); }
@@ -170,28 +180,30 @@ function timelineSource(): TimelineSource {
     .scale { font-size: var(--fs-2xs); color: var(--muted); }
     .hist { display: block; width: 100%; height: var(--hist-h); }
     .axis { height: 22px; border-bottom: 1px solid var(--border); }
-    .tick { position: absolute; top: 5px; transform: translateX(-50%); font-size: var(--fs-2xs); color: var(--muted); white-space: nowrap; }
+    .tick { position: absolute; top: 5px; transform: translateX(-50%); font-size: var(--fs-2xs); color: var(--muted); white-space: nowrap; pointer-events: none; }
     .tick::before { content: ''; position: absolute; left: 50%; top: -5px; height: 2px; border-left: 1px solid var(--border-3); }
     .tick.major { color: var(--text-2); font-weight: 500; }
     .tick.major::before { height: 4px; }
-    .overlay { position: absolute; top: 0; bottom: 0; pointer-events: none; }
+    .overlay { position: absolute; top: 0; bottom: 0; pointer-events: none; z-index: var(--tl-z-overlay); }
     .brush { position: absolute; top: 0; bottom: 0; background: var(--brush-fill); border-left: 1px solid var(--brush-edge); border-right: 1px solid var(--brush-edge); }
-    .handle { position: absolute; top: calc(var(--hist-h) / 2 - 9px); width: 6px; height: 18px; margin-left: -3px; border-radius: 3px; background: var(--bg-1); border: 1px solid var(--brush-edge); box-shadow: var(--shadow-1); }
+    .handle { position: absolute; top: calc(var(--tl-mini-h) + var(--hist-h) / 2 - 9px); width: 6px; height: 18px; margin-left: -3px; border-radius: 3px; background: var(--bg-1); border: 1px solid var(--brush-edge); box-shadow: var(--shadow-1); }
     .handle.l { left: 0; }
     .handle.r { left: 100%; }
     .brush-pill { display: none; position: absolute; top: 6px; transform: translateX(-50%); padding: 3px 10px; border-radius: 999px; background: var(--tooltip-bg); border: 1px solid var(--border-3); box-shadow: var(--shadow-pop); color: var(--text); font-size: var(--fs-xs); white-space: nowrap; z-index: 3; }
     :host-context([data-brush-pill='on']) .brush-pill { display: block; }
-    .fatal-line { position: absolute; top: var(--hist-h); bottom: 0; width: 0; border-left: 1px dashed var(--mk-fatal); opacity: 0.45; }
+    .fatal-line { position: absolute; top: calc(var(--tl-strip-top) + var(--tl-strip-h)); bottom: 0; width: 0; border-left: 1px dashed var(--mk-fatal); opacity: 0.45; }
     .crash-band { display: none; position: absolute; top: 0; bottom: 0; width: 34px; margin-left: -17px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--mk-fatal) 16%, transparent), transparent); }
     :host-context([data-crash-band='on']) .crash-band { display: block; }
     :host-context([data-crash-band='on']) .fatal-line { border-left-style: solid; opacity: 0.35; }
     .cursor { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--crosshair); }
-    .cursor-label { position: absolute; top: calc(var(--hist-h) + 3px); left: 4px; font-size: var(--fs-2xs); padding: 1px 5px; border-radius: var(--r-1); background: var(--readout-bg); color: var(--readout-text); white-space: nowrap; }
+    .cursor-label { position: absolute; top: calc(var(--tl-strip-top) + var(--tl-strip-h) + 3px); left: 4px; font-size: var(--fs-2xs); padding: 1px 5px; border-radius: var(--r-1); background: var(--readout-bg); color: var(--readout-text); white-space: nowrap; z-index: 3; }
   `,
 })
 export class TimelinePanel {
   /** Source / instance colour dots of the lane labels (View › Source colours). */
   private readonly sourceColors = inject(SourceColors);
+  /** The chips of the capture, dump and note tracks, laid out together in the sticky header. */
+  protected readonly chips = inject(TimelineChips);
   protected readonly data = inject(WorkspaceDataStore);
   protected readonly selection = inject(SelectionStore);
   private readonly prefs = inject(UiPrefsStore);

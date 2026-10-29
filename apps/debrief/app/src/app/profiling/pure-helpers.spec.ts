@@ -19,7 +19,7 @@ describe('layoutSpans / labelWidth', () => {
 
   it('places spans as percentages of the visible range, unclipped when fully inside', () => {
     const a = at(layoutSpans([span(1, 250, 750)], { from: 0, to: 1000 }), 0);
-    expect(a).toMatchObject({ left: 25, width: 50, range: null, row: 0 });
+    expect(a).toMatchObject({ left: 25, width: 50, range: null });
   });
 
   it('drops spans outside the range but keeps ones touching its edges', () => {
@@ -46,28 +46,15 @@ describe('layoutSpans / labelWidth', () => {
     expect(h2.range).toBeNull();
   });
 
-  it('orders by start then id and stacks overlapping labels on new rows', () => {
+  it('orders by start then id', () => {
     const out = layoutSpans([span(3, 10, 20), span(2, 0, 100), span(1, 0, 100), span(4, 900, 950)], { from: 0, to: 1000 });
     expect(out.map((v) => v.span.id)).toEqual([1, 2, 3, 4]);
-    // 1 and 2 start at x=0, 3 at x=10: all overlap on labels; 4 starts far right and reuses row 0
-    expect(out.map((v) => v.row)).toEqual([0, 1, 2, 0]);
-  });
-
-  it('reuses a row once the previous label has ended', () => {
-    const out = layoutSpans([span(1, 0, 10), span(2, 500, 510)], { from: 0, to: 1000 });
-    expect(out.map((v) => v.row)).toEqual([0, 0]);
   });
 
   it('handles an empty or degenerate view without dividing by zero', () => {
     expect(layoutSpans([], { from: 0, to: 10 })).toEqual([]);
     const v = at(layoutSpans([span(1, 5, 5)], { from: 5, to: 5 }), 0);
     expect(Number.isFinite(v.left) && Number.isFinite(v.width)).toBe(true);
-  });
-
-  it('respects the plot width when stacking labels', () => {
-    const out = layoutSpans([span(1, 0, 10), span(2, 100, 110)], { from: 0, to: 1000 }, 100);
-    // x = 10px for the second; first label ends at 0 + labelWidth + 4 > 10
-    expect(out.map((v) => v.row)).toEqual([0, 1]);
   });
 });
 

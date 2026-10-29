@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, inject, Injectable } from '@angular/core';
+import { fakeDialogContract } from './fake-contract';
+import { ChangeDetectionStrategy, Component, inject, Injectable, signal } from '@angular/core';
 import { defineDialog, msg, type DialogDef } from '@decryp7/paddock-ui/shell';
-import { DIALOG_REF } from '@decryp7/paddock-ui/shell/dialogs';
+import { DIALOG_REF, type DialogAction } from '@decryp7/paddock-ui/shell/dialogs';
 import { assertDialogBoots, bootDialog, bootEveryDialog, dialogsOf, dialogTableProblems } from './dialog-harness';
 import { ANY_ANSWER, recordIpc } from './ipc-recorder';
 
@@ -13,10 +14,11 @@ const invoke = (cmd: string) => (globalThis as { __TAURI_INTERNALS__?: { invoke(
 @Component({
   selector: 'pd-test-ok',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `<p>Ready</p><button type="button" (click)="ref.close()">Cancel</button><button type="button" class="primary" (click)="ref.close(1)">OK</button>`,
+  template: `<p>Ready</p>`,
 })
 class OkContent {
   protected readonly ref = inject(DIALOG_REF);
+  readonly dialogActions = signal<readonly DialogAction[]>([{ kind: 'answer', id: 'ok', label: 'OK', role: 'primary', answer: () => 1 }]);
   constructor() {
     void invoke('app_status');
   }
@@ -35,8 +37,23 @@ class UndeclaredCommandContent {
   }
 }
 
-@Component({ selector: 'pd-test-choice', changeDetection: ChangeDetectionStrategy.OnPush, template: `<p>Pick</p><button type="button" class="primary">A</button>` })
-class ChoiceContent {}
+@Component({ selector: 'pd-test-choice', changeDetection: ChangeDetectionStrategy.OnPush, template: `<p>Pick</p>` })
+class ChoiceContent {
+  readonly dialogActions = signal<readonly DialogAction[]>([{ kind: 'answer', id: 'a', label: 'A', role: 'primary', answer: () => 'a' }]);
+}
+
+/** Two primaries: an invalid declaration the frame replaces by one Close. */
+@Component({ selector: 'pd-test-two-primaries', changeDetection: ChangeDetectionStrategy.OnPush, template: `<p>Pick</p>` })
+class TwoPrimariesContent {
+  readonly dialogActions = signal<readonly DialogAction[]>([
+    { kind: 'answer', id: 'a', label: 'A', role: 'primary', answer: () => 'a' },
+    { kind: 'answer', id: 'b', label: 'B', role: 'primary', answer: () => 'b' },
+  ]);
+}
+
+/** Today's shape of a content that predates the frame: its own actions row with Cancel. */
+@Component({ selector: 'pd-test-footer', changeDetection: ChangeDetectionStrategy.OnPush, template: `<p>Remove?</p><div class="pd-rm__actions"><button type="button">Cancel</button></div>` })
+class OwnFooterContent {}
 
 @Component({ selector: 'pd-test-empty', changeDetection: ChangeDetectionStrategy.OnPush, template: `` })
 class EmptyContent {}
@@ -50,33 +67,27 @@ class LogsContent {
   }
 }
 
-const dialog = (id: string, kind: DialogDef['kind'], load: () => Promise<unknown>, extra: Partial<DialogDef> = {}): DialogDef =>
-  defineDialog({
-    id,
-    kind,
-    modality: kind === 'form' ? 'modal' : undefined,
-    title: msg(`t.${id}`, id),
-    commands: ['app_status'],
-    load: load as DialogDef['load'],
-    ...extra,
-  }) as DialogDef;
+const dialog = (id: string, kind: DialogDef['kind'], load: () => Promise<unknown>, extra: { readonly requiredChoice?: boolean; readonly commands?: readonly string[] } = {}): DialogDef =>
+  defineDialog(fakeDialogContract({ id, kind, modality: kind === 'form' ? 'modal' : undefined, commands: ['app_status'], ...extra }), { title: msg(`t.${id}`, id), load: load as DialogDef['load'] }) as DialogDef;
 
-const OK = dialog('t.ok', 'decision', () => Promise.resolve(OkContent), { width: 400 });
+const OK = dialog('t.ok', 'decision', () => Promise.resolve(OkContent));
 const OK_TOOL = dialog('t.tool', 'tool', () => Promise.resolve(OkContent));
 const MISSING = dialog('t.missing', 'viewer', () => Promise.resolve(MissingProviderContent));
 const SNEAKY = dialog('t.sneaky', 'viewer', () => Promise.resolve(UndeclaredCommandContent));
 const CHOICE = dialog('t.choice', 'decision', () => Promise.resolve(ChoiceContent), { requiredChoice: true });
 const EMPTY = dialog('t.empty', 'form', () => Promise.resolve(EmptyContent));
 const LOGS = dialog('t.logs', 'viewer', () => Promise.resolve(LogsContent));
-const ALL = [OK, OK_TOOL, MISSING, SNEAKY, CHOICE, EMPTY, LOGS];
+const FOOTER = dialog('t.footer', 'decision', () => Promise.resolve(OwnFooterContent));
+const TWO = dialog('t.two', 'decision', () => Promise.resolve(TwoPrimariesContent));
+const ALL = [OK, OK_TOOL, MISSING, SNEAKY, CHOICE, EMPTY, LOGS, FOOTER, TWO];
 
 describe('the boot-every-dialog harness', () => {
   it('passes a dialog that boots, sends only declared commands, has a Cancel and closes on Escape', async () => {
     const report = await assertDialogBoots(OK, { dialogs: ALL });
     expect(report.sent).toEqual(['app_status']);
-    expect(report.fitted.length).toBeGreaterThan(0);
+    expect(report.fitted).toHaveLength(1);
     const tool = await assertDialogBoots(OK_TOOL, { dialogs: ALL });
-    expect(tool.fitted).toEqual([]);
+    expect(tool.fitted).toHaveLength(1);
   });
 
   it('fails on a planted missing provider (the blank window)', async () => {
@@ -95,6 +106,16 @@ describe('the boot-every-dialog harness', () => {
 
   it('keeps a required choice open on Escape and needs no Cancel', async () => {
     expect((await bootDialog(CHOICE, { dialogs: ALL })).problems).toEqual([]);
+  });
+
+  it('fails a content that draws its own footer (ADR 0026 §2)', async () => {
+    const report = await bootDialog(FOOTER, { dialogs: ALL });
+    expect(report.problems).toEqual(['draws its own footer: .pd-rm__actions', 'draws its own footer: a "Cancel" button']);
+  });
+
+  it('fails a declaration the frame cannot lay out', async () => {
+    const report = await bootDialog(TWO, { dialogs: ALL, ignoreErrors: [/declares invalid actions/] });
+    expect(report.problems).toEqual(['declares invalid actions: 2 primary actions (at most one)']);
   });
 
   it('fails an empty body', async () => {
@@ -136,7 +157,7 @@ describe('the boot-every-dialog harness', () => {
   it('reports what it could not check as a problem instead of throwing', async () => {
     const report = await bootDialog(OK, { dialogs: ALL, providers: [{ provide: 'x', useFactory: () => { throw new Error('boom'); } }], inputs: { 't.ok': { a: 1 } } });
     expect(report.problems).toEqual([]);
-    const broken = await bootDialog({ ...OK, kind: 'nonsense' } as unknown as DialogDef, { dialogs: ALL });
+    const broken = await bootDialog(OK, { dialogs: [null as unknown as DialogDef] });
     expect(broken.problems.some((p) => p.startsWith('the harness could not boot it'))).toBe(true);
   });
 

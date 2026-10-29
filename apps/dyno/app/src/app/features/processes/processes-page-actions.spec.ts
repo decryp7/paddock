@@ -1,14 +1,11 @@
 import { TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
-import { Dialogs } from '../../shared/dialog';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { provideIcons } from '../../shared/icons';
 import { LiveStore } from '../../state/live.store';
 import { Lookups } from '../lookup/lookups';
 import { ProcessesStore } from '../../state/processes.store';
-import { AffinityDialog, CapDialog, LockersDialog } from './process-dialogs';
-import type { Row } from './process-rows';
 import { ProcessesPage } from './processes-page';
 
 const NOW = 1_700_000_000_000;
@@ -25,13 +22,12 @@ async function make(os: 'windows' | 'macos' = 'windows', fail?: Set<string>) {
   f.detectChanges();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const c = f.componentInstance as any;
-  const dialogs = TestBed.inject(Dialogs);
-  const act = vi.spyOn(store, 'act');
+  const dialogs = TestBed.inject(DialogService);
   const processRow = () => {
     store.setMode('flat');
-    return store.rows().find((r) => r.kind === 'process' && r.protectedReason === null)!;
+    return store.rows().find((r) => r.kind === 'process')!;
   };
-  return { f, store, mock, c, dialogs, act, el: f.nativeElement as HTMLElement, processRow };
+  return { f, store, mock, c, dialogs, el: f.nativeElement as HTMLElement, processRow };
 }
 
 describe('ProcessesPage actions', () => {
@@ -44,63 +40,13 @@ describe('ProcessesPage actions', () => {
     expect(c.ariaSort('cpu')).toBe('ascending');
     expect(c.pid({ pid: null })).toBe('');
     expect(c.pid({ pid: 7 })).toBe('7');
-    expect(c.prioLabel('normal')).toBeTruthy();
-  });
-
-  it('end confirms with the right wording and acts only when confirmed', async () => {
-    const { c, dialogs, act, store } = await make();
-    const confirm = vi.spyOn(dialogs, 'confirm');
-    store.setMode('flat');
-    const proc = store.rows().find((r) => r.kind === 'process')!;
-    confirm.mockResolvedValueOnce(false);
-    await c.end(proc);
-    expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ title: `End ${proc.name}?`, confirmLabel: 'End', danger: true }));
-    expect(act).not.toHaveBeenCalled();
-    confirm.mockResolvedValueOnce(true);
-    await c.end(proc);
-    expect(act).toHaveBeenCalledWith(proc, 'end');
-    store.setMode('groups');
-    const group = store.rows().find((r) => r.kind === 'group')!;
-    confirm.mockResolvedValueOnce(false);
-    await c.end(group);
-    expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ title: `End all of ${group.name}?`, confirmLabel: 'End all' }));
-    expect(confirm.mock.calls.at(-1)![0].message).toContain('This ends');
-  });
-
-  it('affinity opens the dialog with the cores and applies the chosen mask', async () => {
-    const { c, dialogs, act, processRow } = await make();
-    const open = vi.spyOn(dialogs, 'open').mockReturnValue({ closed: of(0b11) } as never);
-    const row: Row = processRow();
-    await c.affinity(row);
-    expect(open).toHaveBeenCalledWith(AffinityDialog, { name: row.name, cores: expect.any(Number), mask: null });
-    expect(act).toHaveBeenCalledWith(row, { setAffinity: 3 });
-  });
-  it('affinity passes the known mask of the selected process and ignores a cancelled dialog', async () => {
-    const { c, dialogs, act, processRow, store } = await make();
-    const row = processRow();
-    await store.select(row.ref!);
-    const open = vi.spyOn(dialogs, 'open').mockReturnValue({ closed: of(undefined) } as never);
-    await c.affinity(row);
-    expect(open.mock.calls[0]![1]).toMatchObject({ mask: store.details()!.affinity });
-    expect(act).not.toHaveBeenCalled();
-  });
-
-  it('cap opens the dialog with the name and applies the percentage', async () => {
-    const { c, dialogs, act, processRow } = await make();
-    const row = processRow();
-    const open = vi.spyOn(dialogs, 'open').mockReturnValueOnce({ closed: of(40) } as never).mockReturnValueOnce({ closed: of(undefined) } as never);
-    await c.cap(row);
-    expect(open).toHaveBeenCalledWith(CapDialog, row.name);
-    expect(act).toHaveBeenCalledWith(row, { setCpuCap: 40 });
-    await c.cap(row);
-    expect(act).toHaveBeenCalledTimes(1);
   });
 
   it('lockers opens the lockers dialog; details selects a process; groups are ignored', async () => {
     const { c, dialogs, store, processRow } = await make();
-    const open = vi.spyOn(dialogs, 'open').mockReturnValue({ closed: of(undefined) } as never);
+    const open = vi.spyOn(dialogs, 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'dismissed' }), dismiss() {} } as never);
     c.lockers();
-    expect(open).toHaveBeenCalledWith(LockersDialog);
+    expect(open).toHaveBeenCalledWith('dy.lockers');
     const select = vi.spyOn(store, 'select');
     const row = processRow();
     c.details(row);
@@ -121,17 +67,6 @@ describe('ProcessesPage actions', () => {
     const group = store.rows().find((r) => r.kind === 'group' && r.expandable)!;
     c.rowClick(group);
     expect(toggle).toHaveBeenCalledWith(group);
-  });
-
-  it('shows a failed action inline and Dismiss clears it', async () => {
-    const { f, el, store, c, processRow } = await make('windows', new Set(['act']));
-    await c.store.act(processRow(), 'suspend');
-    f.detectChanges();
-    expect(el.querySelector('.banner[role=alert]')).not.toBeNull();
-    el.querySelector<HTMLButtonElement>('.banner [aria-label=Dismiss]')!.click();
-    f.detectChanges();
-    expect(store.actionError()).toBeNull();
-    expect(el.querySelector('.banner')).toBeNull();
   });
 
   it('opens the details panel when a row is selected', async () => {
@@ -227,23 +162,17 @@ describe('ProcessesPage actions', () => {
       press(c, el, 'ArrowRight');
       expect(toggle).toHaveBeenCalledTimes(2);
     });
-    it('Enter shows details; Delete ends unless protected', async () => {
-      const { c, store, dialogs } = await make();
-      const confirm = vi.spyOn(dialogs, 'confirm').mockResolvedValue(false);
+    it('Enter shows details; Delete does nothing', async () => {
+      const { c, store } = await make();
       store.setMode('flat');
-      const proc = store.rows().find((r) => r.kind === 'process' && !r.protectedReason)!;
-      const prot = store.rows().find((r) => r.protectedReason)!;
+      const proc = store.rows().find((r) => r.kind === 'process')!;
       const el = document.createElement('div');
       el.setAttribute('role', 'row');
       el.dataset['key'] = proc.key;
       const select = vi.spyOn(store, 'select');
       expect(press(c, el, 'Enter').defaultPrevented).toBe(true);
       expect(select).toHaveBeenCalled();
-      press(c, el, 'Delete');
-      expect(confirm).toHaveBeenCalledTimes(1);
-      el.dataset['key'] = prot.key;
-      press(c, el, 'Delete');
-      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(press(c, el, 'Delete').defaultPrevented).toBe(false);
       press(c, el, 'x');
     });
   });

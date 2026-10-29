@@ -1,6 +1,10 @@
 //! Tauri's build step, plus the Windows application manifest for every binary of this crate.
 
 fn main() {
+    // The shell plugin's permission files (its `links` metadata), so the tests resolve the capabilities through Tauri's ACL.
+    if let Ok(list) = std::env::var("DEP_PADDOCK_SHELL_PERMISSION_FILES_PATH") {
+        println!("cargo:rustc-env=PADDOCK_SHELL_PERMISSION_FILES={list}");
+    }
     // Tauri embeds its app manifest into the app binary only; test binaries then fail to load on Windows
     // (STATUS_ENTRYPOINT_NOT_FOUND, Common Controls v6 missing). Embed the same manifest into every binary
     // this crate links (`rustc-link-arg` covers tests too) and tell tauri-build not to add its own.
@@ -15,13 +19,13 @@ fn main() {
         windows = tauri_build::WindowsAttributes::new_without_app_manifest();
     }
     println!("cargo:rerun-if-env-changed=TAURI_UPDATER_PUBKEY");
-    // tauri-build requires the sidecars (bundle.externalBin: the agent, the privileged helper and the dyno command) to exist even for `cargo check` and tests. Bundles
+    // tauri-build requires the sidecars (bundle.externalBin: the agent and the dyno command) to exist even for `cargo check` and tests. Bundles
     // always build the real one first (scripts/sidecar.mjs in beforeBuildCommand); elsewhere an empty placeholder stands
     // in, which the app treats as "missing" (it then looks for a dyno-agent next to itself, or DYNO_AGENT_BIN).
     if let Ok(target) = std::env::var("TARGET") {
         let ext = if target.contains("windows") { ".exe" } else { "" };
         let dir = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default()).join("binaries");
-        for name in ["dyno-agent", "dyno-helper", "dyno"] {
+        for name in ["dyno-agent", "dyno"] {
             let sidecar = dir.join(format!("{name}-{target}{ext}"));
             if !sidecar.exists() {
                 let _ = std::fs::create_dir_all(&dir);

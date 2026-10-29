@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { provideRouter } from '@angular/router';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
@@ -25,7 +26,7 @@ const text = (el: Element) => (el.textContent ?? '').replace(/\s+/g, ' ').trim()
 const button = (root: ParentNode, label: string | RegExp) =>
   [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => (typeof label === 'string' ? text(b) === label || b.getAttribute('aria-label') === label : label.test(text(b)) || label.test(b.getAttribute('aria-label') ?? '')));
 const menuItem = (label: string | RegExp) =>
-  [...document.querySelectorAll<HTMLElement>('[cdkMenuItem], .menu-item')].find((b) => (typeof label === 'string' ? text(b) === label : label.test(text(b))));
+  [...document.querySelectorAll<HTMLElement>('[mat-menu-item]')].find((b) => (typeof label === 'string' ? text(b) === label : label.test(text(b))));
 const tab = async (f: Parameters<typeof settle>[0], el: HTMLElement, name: string) => {
   button(el, name)!.click();
   await settle(f);
@@ -39,7 +40,7 @@ afterEach(() => {
 });
 
 describe('dy-alarms-page, Active', () => {
-  it('lists the open alarms newest first with calm severity and the state as dot and word', async () => {
+  it('lists the open alarms newest first with the severity and the state as dot and word', async () => {
     const { f, el } = render();
     await settle(f);
     expect(el.querySelector('h1')?.textContent).toBe('Alarms');
@@ -47,7 +48,7 @@ describe('dy-alarms-page, Active', () => {
     expect(list).toHaveLength(5);
     expect(text(list[0]!)).toContain('GPU limit is past its limit');
     expect(text(list[0]!)).toContain('Active');
-    expect(text(list[0]!)).not.toContain('Warning');
+    expect(text(list[0]!)).toContain('Warning');
     expect(el.textContent).toContain('Returned, not acknowledged');
     expect(el.textContent).toContain('Acknowledged');
     expect(list.filter((r) => text(r).includes('Critical'))).toHaveLength(1);
@@ -58,7 +59,7 @@ describe('dy-alarms-page, Active', () => {
   it('shows shelved alarms with one muted suffix instead of a pill', async () => {
     const { f, el } = render();
     await settle(f);
-    const shelved = rows(el).find((r) => text(r).includes('Tame long CPU hogs'))!;
+    const shelved = rows(el).find((r) => text(r).includes('rustc has used'))!;
     expect(shelved.querySelector('.sfx')?.textContent).toMatch(/^Shelved until \d\d:\d\d$/);
     expect(el.querySelectorAll('.badge, .pill')).toHaveLength(0);
   });
@@ -66,12 +67,12 @@ describe('dy-alarms-page, Active', () => {
   it('acknowledges everything that waits with the section action, the only primary button', async () => {
     const { f, el } = render();
     await settle(f);
-    const primaries = [...el.querySelectorAll('button.primary')];
+    const primaries = [...el.querySelectorAll('button[matButton="filled"]')];
     expect(primaries).toHaveLength(1);
     expect(text(primaries[0]!)).toBe('Acknowledge all (4)');
     (primaries[0] as HTMLButtonElement).click();
     await settle(f);
-    expect(el.querySelector('button.primary')).toBeNull();
+    expect(el.querySelector('button[matButton="filled"]')).toBeNull();
     expect(el.querySelectorAll('.unread')).toHaveLength(0);
     expect(text(el)).toContain('0 not acknowledged');
   });
@@ -115,12 +116,12 @@ describe('dy-alarms-page, Active', () => {
   it('offers Unshelve only for a shelved alarm and applies it', async () => {
     const { f, el } = render();
     await settle(f);
-    const row = rows(el).find((r) => text(r).includes('Tame long'))!;
+    const row = rows(el).find((r) => text(r).includes('rustc has used'))!;
     button(row, /^More actions/)!.click();
     await settle(f);
     menuItem('Unshelve')!.click();
     await settle(f);
-    expect(text(rows(el).find((r) => text(r).includes('Tame long'))!)).not.toContain('Shelved');
+    expect(text(rows(el).find((r) => text(r).includes('rustc has used'))!)).not.toContain('Shelved');
   });
 
   it('opens the detail panel with full values, notes and history, and closes it with Esc', async () => {
@@ -216,7 +217,7 @@ describe('dy-alarms-page, Active', () => {
     const { f, el } = render();
     await settle(f);
     expect(el.textContent).toContain('No open alarms');
-    expect(el.querySelector('button.primary')).toBeNull();
+    expect(el.querySelector('button[matButton="filled"]')).toBeNull();
   });
 
   it('shows an inline error with Retry when the alarms cannot be read', async () => {
@@ -301,13 +302,13 @@ describe('dy-alarms-page, Rules', () => {
     expect(el.querySelector('dy-alarm-stats [role="alert"]')).toBeTruthy();
   });
 
-  it('says so when no rule fired and nothing needs tuning', async () => {
+  it('says so when no rule fired and nothing needs adjusting', async () => {
     const { f, el, mock } = render();
     await settle(f);
     vi.spyOn(mock, 'alarmStats').mockResolvedValue({ open: 0, unacknowledged: 0, chattering: [], noisiest: [], meanTimeToAcknowledgeMs: null, medianTimeToAcknowledgeMs: null, suggestions: [] });
     await tab(f, el, 'Rules');
     expect(text(el)).toContain('No rule has fired yet.');
-    expect(text(el)).toContain('Nothing to tune.');
+    expect(text(el)).toContain('Nothing to adjust.');
     expect(text(el)).toContain('—');
   });
 
@@ -327,135 +328,46 @@ describe('dy-alarms-page, Rules', () => {
     const { f, el, mock } = render();
     await settle(f);
     await tab(f, el, 'Rules');
-    vi.spyOn(mock, 'saveSettings').mockRejectedValueOnce({ code: 'badRequest', message: 'No way.' });
+    vi.spyOn(mock, 'upsertAlertRule').mockRejectedValueOnce({ code: 'badRequest', message: 'No way.' });
     (rows(el).find((r) => text(r).includes('GPU limit'))!.querySelector('button[role="switch"]') as HTMLButtonElement).click();
     await settle(f);
     expect(TestBed.inject(SettingsStore).settings()?.customAlerts?.[0]?.enabled).toBe(true);
   });
 
-  it('adds a rule with a generated unique id', async () => {
-    const { f, el } = render();
-    await settle(f);
-    await tab(f, el, 'Rules');
-    button(el, /Add rule/)!.click();
-    await settle(f);
-    const dialog = document.querySelector('dy-rule-dialog')!;
-    const name = dialog.querySelector<HTMLInputElement>('#rule-name')!;
-    name.value = 'GPU limit';
-    name.dispatchEvent(new Event('input'));
-    button(dialog, 'Critical')!.click();
-    button(dialog, 'Below')!.click();
-    button(dialog, 'Increase the limit')!.click();
-    button(dialog, 'min')!.click();
-    await settle(f);
-    button(dialog, 'Add rule')!.click();
-    await settle(f);
-    const rules = TestBed.inject(SettingsStore).settings()!.customAlerts!;
-    expect(rules).toHaveLength(2);
-    expect(rules[1]).toMatchObject({ id: 'gpu-limit-2', name: 'GPU limit', op: 'below', severity: 'critical', limit: 95, forSecs: 120 });
-  });
-
-  it('validates the form first and shows the engine error inline without closing', async () => {
+  it('opens the rule window for a new rule and for an edit, and reads the settings again once a rule was stored', async () => {
     const { f, el, mock } = render();
     await settle(f);
     await tab(f, el, 'Rules');
+    const dialogs = TestBed.inject(DialogService);
+    const opened = vi.spyOn(dialogs, 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'dismissed' }), dismiss() {} } as never);
     button(el, /Add rule/)!.click();
     await settle(f);
-    const dialog = document.querySelector('dy-rule-dialog')!;
-    button(dialog, 'Add rule')!.click();
-    await settle(f);
-    expect(text(dialog)).toContain('Give the rule a name.');
-    const set = (sel: string, v: string) => {
-      const i = dialog.querySelector<HTMLInputElement>(sel)!;
-      i.value = v;
-      i.dispatchEvent(new Event('input'));
-    };
-    set('#rule-name', 'Hot');
-    set('[aria-label="Limit"]', 'abc');
-    await settle(f);
-    expect(text(dialog)).toContain('The limit must be a number.');
-    set('[aria-label="Limit"]', '85');
-    set('[aria-label="Duration"]', '2.5');
-    await settle(f);
-    expect(text(dialog)).toContain('whole number');
-    set('[aria-label="Duration"]', '10');
-    vi.spyOn(mock, 'saveSettings').mockRejectedValueOnce({ code: 'badRequest', message: 'Limit must be 0 to 100.' });
-    await settle(f);
-    button(dialog, 'Add rule')!.click();
-    await settle(f);
-    expect(text(document.querySelector('dy-rule-dialog')!)).toContain('Limit must be 0 to 100.');
-    button(document.querySelector('dy-rule-dialog')!, 'Add rule')!.click();
-    await settle(f);
-    expect(document.querySelector('dy-rule-dialog')).toBeNull();
-    expect(TestBed.inject(SettingsStore).settings()!.customAlerts).toHaveLength(2);
-  });
-
-  it('edits a rule keeping its id, showing minutes when divisible, and converts units', async () => {
-    const { f, el } = render();
-    await settle(f);
-    await tab(f, el, 'Rules');
+    expect(opened.mock.calls[0]![0]).toBe('dy.alert-rule');
+    expect(opened.mock.calls[0]![1]).toMatchObject({ inputs: { rule: null, takenIds: ['gpu-limit'] }, title: 'Add alert rule' });
+    const load = vi.spyOn(mock, 'settings');
+    opened.mockReturnValue({ closed: Promise.resolve({ kind: 'answered', value: true }), dismiss() {} } as never);
     button(el, 'Edit GPU limit')!.click();
     await settle(f);
-    const dialog = document.querySelector('dy-rule-dialog')!;
-    expect(dialog.querySelector<HTMLInputElement>('[aria-label="Duration"]')!.value).toBe('2');
-    button(dialog, 'sec')!.click();
-    await settle(f);
-    expect(dialog.querySelector<HTMLInputElement>('[aria-label="Duration"]')!.value).toBe('120');
-    button(dialog, 'sec')!.click();
-    button(dialog, 'Decrease the limit')!.click();
-    const name = dialog.querySelector<HTMLInputElement>('#rule-name')!;
-    name.value = 'GPU hot';
-    name.dispatchEvent(new Event('input'));
-    await settle(f);
-    button(dialog, 'Save')!.click();
-    await settle(f);
-    expect(TestBed.inject(SettingsStore).settings()!.customAlerts![0]).toMatchObject({ id: 'gpu-limit', name: 'GPU hot', limit: 85, forSecs: 120 });
+    expect(opened.mock.calls[1]![1]).toMatchObject({ inputs: { rule: expect.objectContaining({ id: 'gpu-limit' }) }, title: 'Edit alert rule' });
+    expect(load).toHaveBeenCalled();
   });
 
-  it('picks another metric with its unit and steps temperatures by one degree within bounds', async () => {
+  it('deletes a rule only after the shared confirmation that names it', async () => {
     const { f, el } = render();
     await settle(f);
     await tab(f, el, 'Rules');
-    button(el, /Add rule/)!.click();
-    await settle(f);
-    const dialog = document.querySelector('dy-rule-dialog')!;
-    button(dialog, /^CPU/)!.click();
-    await settle(f);
-    expect(document.querySelectorAll('.menu-item.two-line')).toHaveLength(8);
-    menuItem(/^Temperature/)!.click();
-    await settle(f);
-    expect(text(dialog.querySelector('.stepper')!)).toContain('°C');
-    const limit = dialog.querySelector<HTMLInputElement>('[aria-label="Limit"]')!;
-    limit.value = '150';
-    limit.dispatchEvent(new Event('input'));
-    button(dialog, 'Increase the limit')!.click();
-    await settle(f);
-    expect(limit.value).toBe('150');
-    limit.value = 'x';
-    limit.dispatchEvent(new Event('input'));
-    button(dialog, 'Decrease the limit')!.click();
-    await settle(f);
-    expect(limit.value).toBe('-1');
-  });
-
-  it('deletes a rule only after a confirmation that names it', async () => {
-    const { f, el } = render();
-    await settle(f);
-    await tab(f, el, 'Rules');
+    const opened = vi.spyOn(TestBed.inject(DialogService), 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'dismissed' }), dismiss() {} } as never);
     button(el, /^More actions for GPU limit/)!.click();
     await settle(f);
     menuItem('Delete…')!.click();
     await settle(f);
-    const confirm = document.querySelector('dy-confirm-dialog')!;
-    expect(text(confirm)).toContain('Delete “GPU limit”?');
-    button(confirm, 'Cancel')!.click();
-    await settle(f);
+    expect(opened.mock.calls[0]![0]).toBe('pd.confirm');
+    expect(opened.mock.calls[0]![1]).toMatchObject({ inputs: { heading: 'Delete “GPU limit”?', confirm: { label: 'Delete rule', destructive: true } } });
     expect(TestBed.inject(SettingsStore).settings()!.customAlerts).toHaveLength(1);
+    opened.mockReturnValue({ closed: Promise.resolve({ kind: 'answered', value: true }), dismiss() {} } as never);
     button(el, /^More actions for GPU limit/)!.click();
     await settle(f);
     menuItem('Delete…')!.click();
-    await settle(f);
-    button(document.querySelector('dy-confirm-dialog')!, 'Delete rule')!.click();
     await settle(f);
     expect(TestBed.inject(SettingsStore).settings()!.customAlerts).toHaveLength(0);
     expect(text(el)).toContain('No custom rules');
@@ -472,16 +384,15 @@ describe('dy-alarms-page, Rules', () => {
     expect(TestBed.inject(SettingsStore).settings()!.customAlerts![0]!.enabled).toBe(false);
   });
 
-  it('shows a toast when deleting fails', async () => {
+  it('says so when deleting fails', async () => {
     const { f, el, mock } = render();
     await settle(f);
     await tab(f, el, 'Rules');
+    vi.spyOn(TestBed.inject(DialogService), 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'answered', value: true }), dismiss() {} } as never);
+    vi.spyOn(mock, 'deleteAlertRule').mockRejectedValueOnce({ code: 'internal', message: 'Disk full.' });
     button(el, /^More actions for GPU limit/)!.click();
     await settle(f);
     menuItem('Delete…')!.click();
-    await settle(f);
-    vi.spyOn(mock, 'saveSettings').mockRejectedValueOnce({ code: 'internal', message: 'Disk full.' });
-    button(document.querySelector('dy-confirm-dialog')!, 'Delete rule')!.click();
     await settle(f);
     expect(TestBed.inject(SettingsStore).settings()!.customAlerts).toHaveLength(1);
   });
@@ -510,21 +421,21 @@ describe('dy-alarms-page, Rules', () => {
     sw('Desktop notifications').click();
     await settle(f);
     expect(settings.settings()!.notifications).toBe(!before);
-    const start = el.querySelector<HTMLInputElement>('[aria-label="Quiet hours start"]')!;
+    const start = el.querySelector<HTMLInputElement>('[aria-label="Start of quiet hours"]')!;
     expect(start.disabled).toBe(true);
     sw('Quiet hours').click();
     await settle(f);
     expect(settings.settings()!.alarms!.quiet.enabled).toBe(true);
     start.value = '23:15';
-    start.dispatchEvent(new Event('change'));
+    start.dispatchEvent(new Event('input'));
     await settle(f);
-    const end = el.querySelector<HTMLInputElement>('[aria-label="Quiet hours end"]')!;
+    const end = el.querySelector<HTMLInputElement>('[aria-label="End of quiet hours"]')!;
     end.value = '06:30';
-    end.dispatchEvent(new Event('change'));
+    end.dispatchEvent(new Event('input'));
     await settle(f);
     expect(settings.settings()!.alarms!.quiet).toMatchObject({ startMinute: 23 * 60 + 15, endMinute: 6 * 60 + 30 });
     end.value = '';
-    end.dispatchEvent(new Event('change'));
+    end.dispatchEvent(new Event('input'));
     await settle(f);
     expect(settings.settings()!.alarms!.quiet.endMinute).toBe(6 * 60 + 30);
     sw('Critical alarms still notify').click();
@@ -543,7 +454,7 @@ describe('dy-alarms-page, Rules', () => {
     await settle(f);
     await tab(f, el, 'Rules');
     expect(text(el)).toContain('No custom rules');
-    expect(el.querySelector<HTMLInputElement>('[aria-label="Quiet hours start"]')!.value).toBe('22:00');
+    expect(el.querySelector<HTMLInputElement>('[aria-label="Start of quiet hours"]')!.value).toBe('22:00');
     expect(el.querySelector('button[role="switch"][aria-label="Desktop notifications"]')!.getAttribute('aria-checked')).toBe('false');
   });
 

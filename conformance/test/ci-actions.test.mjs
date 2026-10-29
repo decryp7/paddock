@@ -264,7 +264,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
     }
     return found;
   };
-  const rustJobs = ['crates', 'crate', 'app'];
+  const rustJobs = ['crates', 'crate', 'app', 'paddock-dev'];
   assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
   assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
@@ -565,7 +565,7 @@ test('stable-workspace leaves Linux containers alone and never fails a job it ca
 test('CI moves the checkout to a stable path on the host runners only, after Git bash is on PATH on Windows', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const jobs = parseJobs(ci).filter((j) => j.text.includes('uses: ./.gitea/actions/stable-workspace'));
-  assert.deepEqual(jobs.map((j) => j.id), ['crate', 'app'], 'the crate job and the apps\' host legs');
+  assert.deepEqual(jobs.map((j) => j.id), ['crate', 'app', 'paddock-dev'], 'the crate job, the apps\' host legs and the developer tool');
   for (const job of jobs) {
     const at = job.text.indexOf('uses: ./.gitea/actions/stable-workspace');
     assert.match(job.text.slice(at, at + 160), /\n\s+if: runner\.os != 'Linux'/, `${job.id}: host runners only; on Windows \`shell: bash\` before Git bash is on PATH resolves to WSL`);
@@ -615,6 +615,21 @@ test('the nextest ci profile fails a test over its time budget, and every longer
     assert.ok(j >= 0 && /^# waiver: \S/.test(lines[j]), `the override at line ${at + 1} of nextest.toml has no "# waiver:" reason`);
     const body = lines.slice(at + 1, lines.findIndex((l, k) => k > at && l.startsWith('['))).join('\n');
     assert.match(body, /^filter = "/m, `the override at line ${at + 1} names its tests`);
+  }
+});
+
+test('paddock-dev has the same nextest ci profile as the crates, and its longer budgets are waivers with a reason', () => {
+  const text = read(join(PADDOCK, 'tools', 'paddock-dev', '.config', 'nextest.toml'));
+  const ci = text.slice(text.indexOf('[profile.ci]\n') + '[profile.ci]\n'.length);
+  const own = ci.slice(0, ci.search(/^\[/m));
+  assert.match(own, /^slow-timeout = \{ period = "\d+s", terminate-after = \d+ \}$/m);
+  assert.match(own, /^retries = 0$/m, 'a flaky test is fixed, not retried');
+  assert.match(text, /\[profile\.ci\.junit\]/);
+  const lines = text.split('\n');
+  for (const at of lines.flatMap((l, i) => (l.trim() === '[[profile.ci.overrides]]' ? [i] : []))) {
+    let j = at - 1;
+    while (j >= 0 && lines[j].startsWith('#') && !lines[j].startsWith('# waiver:')) j -= 1;
+    assert.ok(j >= 0 && /^# waiver: \S/.test(lines[j]), `the override at line ${at + 1} has no "# waiver:" reason`);
   }
 });
 
@@ -805,7 +820,9 @@ test('a kit app lists the OS legs its old workflow had, keeps its build folder o
     assert.doesNotMatch(wf, /TRANSITION_SIGNING_KEY|OLD_REPO|--newest/, `${app}: one key for the family, no bridge release in the old repo`);
     assert.match(wf, /Existing installs/, `${app}: the First launch notes say to reinstall once`);
     const conf = JSON.parse(read(join(PADDOCK, 'apps', app, 'app', 'src-tauri', 'tauri.conf.json')));
-    assert.deepEqual(conf.plugins.updater.endpoints, [`https://dev.decryptology.net/decryp7/paddock/releases/download/${app}-latest/latest.json`], `${app}: the updater reads only Paddock's ${app}-latest`);
+    // An app on the shared shell reads its feed from the `UPDATE_FEED` constant of its Rust updater (paddock-updater), not from the plugin config.
+    const feeds = conf.plugins?.updater?.endpoints ?? [/pub const UPDATE_FEED: &str = "([^"]+)";/.exec(read(join(PADDOCK, 'apps', app, 'app', 'src-tauri', 'src', 'lib.rs')))?.[1]];
+    assert.deepEqual(feeds, [`https://dev.decryptology.net/decryp7/paddock/releases/download/${app}-latest/latest.json`], `${app}: the updater reads only Paddock's ${app}-latest`);
   }
 });
 

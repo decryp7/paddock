@@ -1,41 +1,38 @@
-import { DOCUMENT } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject } from '@angular/core';
+import { showMeasured } from '../../core/measured';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, OnInit, afterNextRender, computed, inject } from '@angular/core';
 import { MatTooltip } from '@angular/material/tooltip';
+import { SuTrayPopover, type SuTrayPlatform } from '@decryp7/paddock-ui';
 import { BACKEND } from '../../core/backend';
-import { toCommandError } from '../../core/command-error';
 import { formatBytes, formatPercent, formatRate } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { GRADE_LABEL, GRADE_TONE } from '../../shared/labels';
-import { Notifier, Toasts } from '../../shared/notifier';
-import { Popover } from '../../shared/popover';
+import { observeHeight } from '../../shared/observe-height';
+import { PlatformService } from '../../core/platform';
 import { Sparkline } from '../../shared/sparkline';
-import { ProfileSwitcher } from '../../shell/profile-switcher';
 import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
-import { RulesStore } from '../../state/rules.store';
-import { SettingsStore } from '../../state/settings.store';
+import { MatButton, MatIconButton } from '@angular/material/button';
 
 /**
  * The tray dropdown (360 x 520, frameless): a compact dashboard with the health score when the engine has one, four
- * live sparklines, the top five apps, the profile and the three buttons. The tray / menu-bar icon itself is drawn by the shell.
+ * live sparklines, the top five apps, and the buttons. The tray / menu-bar icon itself is drawn by the shell.
  */
 @Component({
   selector: 'dy-tray',
-  imports: [Icon, Sparkline, Popover, ProfileSwitcher, Toasts, MatTooltip],
+  imports: [MatButton, MatIconButton, Icon, Sparkline, SuTrayPopover, MatTooltip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <dy-popover [maxHeight]="560">
-      <main class="tray">
-        <header>
-          <img src="brand/dyno-16.svg" alt="" width="16" height="16" />
-          <strong>Dyno</strong>
-          <span class="spacer"></span>
-          @if (health.report(); as r) {
-            <span class="grade-pill" [attr.data-tone]="tone()" [matTooltip]="'Health score ' + score(r.score) + ' of 100'"><strong class="num">{{ score(r.score) }}</strong> {{ grade() }}</span>
-          }
-          <span class="agent" [attr.data-state]="live.agent().state" role="status"><span class="pulse"></span>{{ agentText() }}</span>
-        </header>
-
+    <pd-tray-popover label="Dyno" [platform]="platform" (dismissed)="close()">
+      <div slot="header" class="head">
+        <img src="brand/dyno-16.svg" alt="" width="16" height="16" />
+        <strong>Dyno</strong>
+        <span class="spacer"></span>
+        @if (health.report(); as r) {
+          <span class="grade-pill" [attr.data-tone]="tone()" [matTooltip]="'Health score ' + score(r.score) + ' of 100'"><strong class="num">{{ score(r.score) }}</strong> {{ grade() }}</span>
+        }
+        <span class="agent" [attr.data-state]="live.agent().state" role="status"><span class="pulse"></span>{{ agentText() }}</span>
+      </div>
+      <main class="tray" #body>
         <section class="metrics" aria-label="Live">
           <div class="cell">
             <span class="k"><dy-icon name="cpu" /> CPU</span>
@@ -63,29 +60,25 @@ import { SettingsStore } from '../../state/settings.store';
           <span class="eyebrow">Top apps by CPU</span>
           <ol>
             @for (g of top(); track g.id) {
-              <li><span class="truncate">{{ g.name }}</span><span class="num">{{ pct(g.cpu) }}</span><span class="num faint">{{ bytes(g.memory) }}</span></li>
+              <li><span class="truncate">{{ g.name }}</span><span class="num">{{ show(g.cpu, pct) }}</span><span class="num faint">{{ show(g.memory, bytes) }}</span></li>
             } @empty {
               <li class="faint">Waiting for the first reading…</li>
             }
           </ol>
         </section>
-
-        <footer>
-          <dy-profile-switcher [compact]="true" />
-          <button type="button" class="btn sm icon ghost" [disabled]="!rules.loaded() || rules.saving()" (click)="rules.pause(!rules.paused())" [attr.aria-label]="rules.paused() ? 'Resume rules' : 'Pause rules'" [matTooltip]="rules.paused() ? 'Resume rules' : 'Pause all rules'"><dy-icon [name]="rules.paused() ? 'play' : 'pause'" /></button>
-          <span class="spacer"></span>
-          <button type="button" class="btn sm primary" (click)="openMain()"><dy-icon name="arrow-right" /> Open Dyno</button>
-          <button type="button" class="btn sm icon ghost" (click)="quit()" aria-label="Quit Dyno" matTooltip="Quit the Dyno app (the background agent keeps measuring)"><dy-icon name="power" /></button>
-        </footer>
       </main>
-    </dy-popover>
-    <dy-toasts />
+      <div slot="footer" class="foot">
+        <span class="spacer"></span>
+        <button type="button" matButton="filled" (click)="openMain()"><dy-icon name="arrow-right" /> Open Dyno</button>
+        <button type="button" matIconButton (click)="quit()" aria-label="Quit Dyno" matTooltipPosition="left" [matTooltip]="'Quit Dyno'"><dy-icon name="power" /></button>
+      </div>
+    </pd-tray-popover>
   `,
   styles: `
     :host { display: block; }
-    .tray { display: grid; gap: var(--sp-3); padding: var(--sp-3) var(--sp-3) var(--sp-2); }
-    header { display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-1); }
-    header strong:first-of-type { font-weight: var(--fw-semibold); }
+    .tray { display: grid; gap: var(--sp-3); }
+    .head { display: flex; align-items: center; gap: var(--sp-2); flex: 1; }
+    .head strong:first-of-type { font-weight: var(--fw-semibold); }
     .spacer { flex: 1; }
     .agent { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: var(--fs-xs); }
     .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
@@ -95,7 +88,7 @@ import { SettingsStore } from '../../state/settings.store';
     .grade-pill[data-tone='warn'] { background: var(--warn-soft); color: var(--warn); }
     .grade-pill[data-tone='bad'] { background: var(--bad-soft); color: var(--bad); }
     .metrics { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: var(--sp-2); }
-    .cell { display: grid; grid-template-columns: max-content minmax(24px, 1fr); grid-template-rows: auto 28px; align-items: center; gap: 4px var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--popover-border); border-radius: var(--r-lg); background: color-mix(in srgb, var(--surface-2) 55%, transparent); min-width: 0; }
+    .cell { display: grid; grid-template-columns: max-content minmax(24px, 1fr); grid-template-rows: auto 28px; align-items: center; gap: 4px var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--pd-hairline); border-radius: var(--r-lg); background: color-mix(in srgb, var(--surface-2) 55%, transparent); min-width: 0; }
     .cell .k { grid-column: 1 / -1; }
     .k { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; color: var(--text-2); font-size: var(--fs-xs); }
     .k dy-icon { flex: none; }
@@ -109,21 +102,20 @@ import { SettingsStore } from '../../state/settings.store';
     li .num { text-align: right; }
     li .num:nth-of-type(1) { font-weight: var(--fw-medium); }
     .faint { color: var(--text-3); }
-    footer { display: flex; align-items: center; gap: var(--sp-1); padding-top: var(--sp-2); border-top: 1px solid var(--popover-border); }
-    footer .btn { height: 28px; }
-    footer .btn.icon { width: 28px; }
+    .foot { display: flex; align-items: center; gap: var(--sp-1); flex: 1; }
   `,
 })
-export class Tray implements OnInit, OnDestroy {
+export class Tray implements OnInit {
   protected readonly live = inject(LiveStore);
-  protected readonly rules = inject(RulesStore);
   protected readonly health = inject(HealthStore);
-  private readonly settings = inject(SettingsStore);
   private readonly backend = inject(BACKEND);
-  private readonly notifier = inject(Notifier);
-  private readonly root = inject(DOCUMENT).documentElement;
+  private readonly host = inject(ElementRef<HTMLElement>);
+  private readonly destroy = inject(DestroyRef);
+  private readonly platformService = inject(PlatformService);
 
+  protected readonly platform: SuTrayPlatform = this.platformService.platform === 'browser' ? 'macos' : this.platformService.platform;
   protected readonly pct = formatPercent;
+  protected readonly show = showMeasured;
   protected readonly rate = formatRate;
   protected readonly bytes = formatBytes;
   protected readonly score = (v: number) => Math.round(v).toString();
@@ -139,33 +131,30 @@ export class Tray implements OnInit, OnDestroy {
   protected readonly tone = computed(() => (this.health.report() ? GRADE_TONE[this.health.report()!.grade] : 'accent'));
   protected readonly agentText = computed(() => (this.live.agent().state === 'running' ? 'Monitoring' : this.live.agent().state === 'failed' ? 'Agent stopped' : 'Connecting…'));
 
+  constructor() {
+    // The popover is as tall as its content: the shell fits the window to the height the page reports.
+    afterNextRender(() => {
+      const popup = (this.host.nativeElement as HTMLElement).querySelector('pd-tray-popover');
+      if (popup) this.destroy.onDestroy(observeHeight(popup, (h) => void this.backend.fitTray(h).catch(() => undefined)));
+    });
+  }
+
   ngOnInit(): void {
-    // The popover page is transparent: the shell supplies the material behind it.
-    this.root.dataset['surface'] = 'popover';
-    // Theme first, then the rest; nothing here blocks the first paint.
-    void this.settings.load();
-    void this.rules.ensure();
     // A score the engine does not provide yet is simply left out (the card only renders with a report).
     void this.health.loadReport();
+    // A popover opens in a fresh webview: its graphs start from the engine's recent history, not empty, then follow live.
+    void this.backend.history('hour', null).then((h) => this.live.seed(h.points)).catch(() => undefined);
   }
 
-  ngOnDestroy(): void {
-    delete this.root.dataset['surface'];
+  protected close(): void {
+    void this.backend.hideTray().catch(() => undefined);
   }
 
-  protected async openMain(): Promise<void> {
-    try {
-      await this.backend.trayOpenMain();
-    } catch (e) {
-      this.notifier.error(toCommandError(e));
-    }
+  protected openMain(): void {
+    void this.backend.showMainWindow().catch(() => undefined);
   }
 
-  protected async quit(): Promise<void> {
-    try {
-      await this.backend.trayQuit();
-    } catch (e) {
-      this.notifier.error(toCommandError(e));
-    }
+  protected quit(): void {
+    void this.backend.quitApp().catch(() => undefined);
   }
 }

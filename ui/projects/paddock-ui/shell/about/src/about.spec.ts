@@ -1,10 +1,11 @@
 import { Injector, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideContributions, SHELL_IDLE, SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
-import { assertContributionsValid } from '@decryp7/paddock-ui/shell/testing';
+import { DISMISSED, provideContributions, SHELL_IDLE, SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
+import { assertContributionsValid, createFramed } from '@decryp7/paddock-ui/shell/testing';
 import { MemoryJobsBackend, provideShellJobs } from '@decryp7/paddock-ui/shell/jobs';
 import type { AboutInfo, UpdateStatus, WhatsNew } from '../generated/about';
 import { ABOUT_COMMANDS } from '../generated/about-commands';
+import { FILES_COMMANDS } from '../../files/generated/files-commands';
 import {
   MemoryAboutBackend,
   MemoryUpdatesBackend,
@@ -16,7 +17,8 @@ import {
 } from './backend';
 import { ABOUT_DIALOG_COMMANDS, ABOUT_DIALOG_IDS, aboutContributions, defineAboutDialogs } from './about.contributions';
 import { PdAboutDialog } from './about-dialog';
-import { formatBytes } from './format';
+import { formatBytes, systemText } from './format';
+import { ABOUT_STYLES } from './styles';
 import { provideShellAbout } from './provide-about';
 import { PdUpdatesDialog } from './updates-dialog';
 import { UPDATES_CONFIG, UpdatesStore } from './updates.store';
@@ -59,7 +61,7 @@ function bed(server: MemoryUpdatesOptions['server'], extra: unknown[] = [], main
   TestBed.configureTestingModule({
     providers: [
       provideZonelessChangeDetection(),
-      { provide: SHELL_PORTS, useValue: { showPage: () => undefined, openDialog: (id: string) => (opened.push(id), Promise.resolve(undefined)), notify: (n: ShellNotice) => notices.push(n) } },
+      { provide: SHELL_PORTS, useValue: { showPage: () => undefined, openDialog: (id: string) => (opened.push(id), Promise.resolve(DISMISSED)), notify: (n: ShellNotice) => notices.push(n) } },
       { provide: SHELL_IDLE, useValue: (work: () => void) => work() },
       provideShellAbout({ about: () => about, updates: () => updates, main }),
       ...(extra as never[]),
@@ -143,6 +145,8 @@ describe('the wire', () => {
     expect(await about.legal('mit')).toBe('MIT License');
     expect(await about.whatsNew()).toBe(NOTES);
     expect(await about.whatsNewOnStart()).toBe('show');
+    await about.openUrl('https://updates.example/releases');
+    expect(calls.at(-1)).toEqual(['files_open_url', { url: 'https://updates.example/releases' }]);
     const updates = new TauriUpdatesBackend(ipc);
     for (const run of [
       () => updates.status(),
@@ -161,7 +165,7 @@ describe('the wire', () => {
     handler?.({ nonsense: true });
     expect(seen).toEqual([status]);
     const names = calls.map(([c]) => c);
-    expect(names.every((n) => n in ABOUT_COMMANDS)).toBe(true);
+    expect(names.every((n) => n in ABOUT_COMMANDS || n in FILES_COMMANDS)).toBe(true);
     expect(calls).toContainEqual(['about_legal', { id: 'mit' }]);
     expect(calls).toContainEqual(['updates_install_on_quit', { enabled: true }]);
     expect(calls).toContainEqual(['updates_set_preferences', { preferences: { autoCheck: true, channel: 'beta' } }]);
@@ -176,7 +180,9 @@ describe('the wire', () => {
   });
 
   it('every dialog contract names only commands of the generated table', () => {
-    for (const list of Object.values(ABOUT_DIALOG_COMMANDS)) for (const c of list) expect(c in ABOUT_COMMANDS).toBe(true);
+    // The one foreign command: About's releases link opens through the files adapter.
+    for (const list of Object.values(ABOUT_DIALOG_COMMANDS)) for (const c of list) expect(c in ABOUT_COMMANDS || c === 'files_open_url', c).toBe(true);
+    expect(FILES_COMMANDS.files_open_url.windows).toContain('dialog');
     expect(ABOUT_COMMANDS.about_whats_new_start.windows).toEqual(['main']);
   });
 });
@@ -188,6 +194,14 @@ describe('the fake update server', () => {
     await b.listen((s) => kinds.push(s.phase.kind));
     return { b, kinds };
   }
+
+  it('names the server host and the releases page it was given, and a placeholder otherwise', async () => {
+    const given = new MemoryUpdatesBackend({ currentVersion: '1.0.0', server: 'release', release: RELEASE, host: 'dev.decryptology.net', releasesPage: 'https://dev.decryptology.net/releases' });
+    const status = await given.status();
+    expect([status.endpointHost, status.releasesPage]).toEqual(['dev.decryptology.net', 'https://dev.decryptology.net/releases']);
+    const plain = await new MemoryUpdatesBackend({ currentVersion: '1.0.0', server: 'release', release: RELEASE }).status();
+    expect([plain.endpointHost, plain.releasesPage]).toEqual(['updates.example', 'https://updates.example/releases']);
+  });
 
   it('plays check, download, install on quit, restart and cancel like the engine', async () => {
     const { b, kinds } = await steps('release');
@@ -377,6 +391,58 @@ describe('the dialogs', () => {
     expect(el.querySelector('[data-testid="about-legal"]')).toBeNull();
   });
 
+  it('About says the system in words, links the releases page and styles every class it uses', async () => {
+    bed('none');
+    const fixture = TestBed.createComponent(PdAboutDialog);
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    const facts = [...el.querySelectorAll('dl.pd-facts dt')].map((dt) => [text(dt as HTMLElement), text(dt.nextElementSibling as HTMLElement)]);
+    expect(facts).toContainEqual(['System', 'macOS (Apple silicon)']);
+    expect(text(el)).not.toContain('aarch64');
+    const link = el.querySelector<HTMLAnchorElement>('[data-testid="about-releases"]')!;
+    expect(link.tagName).toBe('A');
+    expect(link.getAttribute('href')).toBe('https://updates.example/releases');
+    expect(link.rel).toContain('noopener');
+    // A webview window opens no links itself: the click asks the engine to open the page in the system browser.
+    const opened: string[] = [];
+    vi.spyOn(MemoryAboutBackend.prototype, 'openUrl').mockImplementation((url: string) => (opened.push(url), Promise.resolve()));
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(opened).toEqual(['https://updates.example/releases']);
+    // The stale-selector class of bug: a class the template uses but the stylesheet does not define.
+    const used = new Set([...el.querySelectorAll('[class]')].flatMap((n) => [...n.classList].filter((c) => c.startsWith('pd-'))));
+    for (const c of used) expect(ABOUT_STYLES, c).toContain(`.${c}`);
+  });
+
+  it('About says why the releases page did not open, and the memory backend records what it opened', async () => {
+    const { about } = bed('none');
+    expect(about.openedUrls).toEqual([]);
+    const fixture = TestBed.createComponent(PdAboutDialog);
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    el.querySelector<HTMLAnchorElement>('[data-testid="about-releases"]')!.click();
+    await fixture.whenStable();
+    expect(about.openedUrls).toEqual(['https://updates.example/releases']);
+    expect(el.querySelector('[data-testid="about-open-failed"]')).toBeNull();
+    vi.spyOn(about, 'openUrl').mockRejectedValue(new Error('only http, https and mailto addresses open'));
+    el.querySelector<HTMLAnchorElement>('[data-testid="about-releases"]')!.click();
+    await fixture.whenStable();
+    const failed = el.querySelector('[data-testid="about-open-failed"]');
+    expect(failed?.getAttribute('role')).toBe('alert');
+    expect(text(failed as HTMLElement)).toContain('The releases page could not be opened');
+    expect(text(failed as HTMLElement)).toContain('only http, https and mailto addresses open');
+  });
+
+  it('says the operating system and architecture in words', () => {
+    expect(systemText('macos', 'x86_64')).toBe('macOS (Intel)');
+    expect(systemText('windows', 'x86_64')).toBe('Windows (64-bit)');
+    expect(systemText('windows', 'aarch64')).toBe('Windows (ARM)');
+    expect(systemText('linux', 'x86_64')).toBe('Linux (64-bit)');
+    expect(systemText('browser', 'web')).toBe('Web browser');
+    expect(systemText('haiku', 'riscv')).toBe('haiku (riscv)');
+  });
+
   it('About in a build without updates and with a missing text says so', async () => {
     const about = new MemoryAboutBackend({ ...INFO, updatesAvailable: false, commit: null, built: null, releasesPage: null, legal: [{ id: 'gone', title: 'Gone' }] });
     TestBed.configureTestingModule({
@@ -414,12 +480,20 @@ describe('the dialogs', () => {
   it('Updates walks through check, download (with the job’s progress), restart and the preferences', async () => {
     const jobs = new MemoryJobsBackend();
     const { updates } = bed('release', [provideShellJobs({ backend: () => jobs })]);
-    const fixture = TestBed.createComponent(PdUpdatesDialog);
+    const fixture = createFramed(PdUpdatesDialog);
     await settle();
     await fixture.whenStable();
     const el: HTMLElement = fixture.nativeElement;
     expect(el.querySelector('[data-testid="updates-current"]')?.textContent).toBe(`You have version ${INFO.version}.`);
     expect(text(el)).toContain('Not checked yet.');
+    // Said once (the phase line), not again in the footer; the auto-check box and the channel are separate rows.
+    expect(text(el).match(/Not checked/g)).toHaveLength(1);
+    const prefs = el.querySelector('[data-testid="updates-prefs"]')!;
+    const auto = prefs.querySelector('[data-testid="updates-auto"]')!;
+    const channel = prefs.querySelector('[data-testid="updates-channel"]')!;
+    expect(auto.contains(channel) || channel.contains(auto)).toBe(false);
+    expect(text(auto as HTMLElement)).toBe('Check for updates automatically');
+    expect(text(channel as HTMLElement)).toContain('Channel');
     button(el, 'Check now').click();
     await settle();
     await fixture.whenStable();
@@ -436,16 +510,27 @@ describe('the dialogs', () => {
     await settle();
     await fixture.whenStable();
     expect(text(el)).toContain('Downloading: 20 MB of 39 MB');
-    expect(el.querySelector('progress')?.getAttribute('value')).toBe('0.5');
+    const bar = el.querySelector('mat-progress-bar')!;
+    expect(bar.getAttribute('role')).toBe('progressbar');
+    expect(bar.getAttribute('aria-valuenow')).toBe('50');
+    expect(bar.getAttribute('aria-label')).toBe('Downloading: 20 MB of 39 MB');
+    expect(el.querySelector('progress')).toBeNull();
+    // A phase without a total is an indeterminate bar, not a static 0 (rule 18).
+    jobs.emit({ id: id ?? -1, kind: 'update-download', title: 'Downloading the update', subject: '1.5.0', seq: 2, elapsedMs: 0, etaMs: null, cancellable: true, notCancellableReason: null, state: 'running', phase: { id: 'download', label: 'Downloading', unit: 'bytes', total: null, done: 1000 } });
+    await settle();
+    await fixture.whenStable();
+    expect(el.querySelector('mat-progress-bar')?.getAttribute('mode')).toBe('indeterminate');
+    expect(el.querySelector('mat-progress-bar')?.hasAttribute('aria-valuenow')).toBe(false);
     hold.forEach((s) => s());
     await settle();
     await fixture.whenStable();
     expect(text(el)).toContain('downloaded and its signature verified');
-    el.querySelector<HTMLInputElement>('label.pd-check input[type="checkbox"]')?.click();
+    expect(el.querySelector('label.pd-check input[type="checkbox"]')).toBeNull();
+    el.querySelector<HTMLInputElement>('mat-checkbox input[type="checkbox"]')?.click();
     await settle();
     expect((await updates.status()).autoCheck).toBe(true);
     expect(el.querySelector('select')).toBeNull();
-    el.querySelector<HTMLButtonElement>('pd-select button')!.click();
+    el.querySelector<HTMLButtonElement>('pd-select mat-select')!.click();
     await settle();
     await fixture.whenStable();
     [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=option]')].find((o) => o.textContent?.includes('Beta'))!.click();
@@ -457,7 +542,7 @@ describe('the dialogs', () => {
 
   it('Updates shows a refused signature with its next step, and nothing to press without a key', async () => {
     bed('bad-signature');
-    const fixture = TestBed.createComponent(PdUpdatesDialog);
+    const fixture = createFramed(PdUpdatesDialog);
     await settle();
     await fixture.whenStable();
     const el: HTMLElement = fixture.nativeElement;
@@ -474,19 +559,20 @@ describe('the dialogs', () => {
     expect(button(el, 'Check again')).toBeTruthy();
     TestBed.resetTestingModule();
     bed('unavailable');
-    const off = TestBed.createComponent(PdUpdatesDialog);
+    const off = createFramed(PdUpdatesDialog);
     await settle();
     await off.whenStable();
     const o: HTMLElement = off.nativeElement;
     expect(text(o)).toContain('Updates are not available in this build.');
     expect(text(o)).toContain('without an update signing key');
-    expect(o.querySelectorAll('button')).toHaveLength(0);
+    // Nothing to press but the frame's Close.
+    expect([...o.querySelectorAll('button')].map((b) => text(b))).toEqual(['Close']);
   });
 
-  it('Updates offers Cancel while checking and a Retry when the updater does not answer', async () => {
+  it('Updates offers Stop checking while checking and a Retry when the updater does not answer', async () => {
     const { updates } = bed('release');
     (updates as unknown as { schedule: (s: () => void) => void }).schedule = () => undefined;
-    const fixture = TestBed.createComponent(PdUpdatesDialog);
+    const fixture = createFramed(PdUpdatesDialog);
     await settle();
     await fixture.whenStable();
     const el: HTMLElement = fixture.nativeElement;
@@ -494,7 +580,7 @@ describe('the dialogs', () => {
     await settle();
     await fixture.whenStable();
     expect(text(el)).toContain('Checking for updates…');
-    button(el, 'Cancel').click();
+    button(el, 'Stop checking').click();
     await settle();
     await fixture.whenStable();
     expect(text(el)).toContain('Not checked yet.');
@@ -508,7 +594,7 @@ describe('the contributions', () => {
     assertContributionsValid(TestBed.inject(Injector));
     expect(dialogs.map((d) => [d.id, d.kind, d.modality])).toEqual([
       ['pd.about', 'viewer', 'modeless'],
-      ['pd.updates', 'tool', 'modeless'],
+      ['pd.updates', 'form', 'modeless'],
       ['pd.whats-new', 'viewer', 'modeless'],
     ]);
   });
@@ -517,7 +603,7 @@ describe('the contributions', () => {
     const dialogs = defineAboutDialogs({ providers: () => Promise.resolve([]) });
     const batch = aboutContributions(dialogs);
     const opened: string[] = [];
-    const ctx = { openDialog: (id: string) => (opened.push(id), Promise.resolve(undefined)) } as never;
+    const ctx = { openDialog: (id: string) => (opened.push(id), Promise.resolve(DISMISSED)) } as never;
     for (const c of batch.commands ?? []) await c.run(ctx);
     expect(opened).toEqual(['pd.about', 'pd.updates', 'pd.whats-new']);
     const loaded = await Promise.all(dialogs.map((d) => d.load()));
@@ -557,7 +643,7 @@ describe('the edges', () => {
 
   it('Updates: up to date, offline, and install when the app quits', async () => {
     bed('none');
-    let f = TestBed.createComponent(PdUpdatesDialog);
+    let f = createFramed(PdUpdatesDialog);
     await settle();
     await f.whenStable();
     let el: HTMLElement = f.nativeElement;
@@ -568,7 +654,7 @@ describe('the edges', () => {
     expect(button(el, 'Check now')).toBeTruthy();
     TestBed.resetTestingModule();
     bed('offline');
-    f = TestBed.createComponent(PdUpdatesDialog);
+    f = createFramed(PdUpdatesDialog);
     await settle();
     await f.whenStable();
     el = f.nativeElement;
@@ -579,7 +665,7 @@ describe('the edges', () => {
     expect(button(el, 'Check again')).toBeTruthy();
     TestBed.resetTestingModule();
     const { updates } = bed('release');
-    f = TestBed.createComponent(PdUpdatesDialog);
+    f = createFramed(PdUpdatesDialog);
     await settle();
     await f.whenStable();
     el = f.nativeElement;
@@ -589,7 +675,7 @@ describe('the edges', () => {
     button(el, 'Download').click();
     await settle();
     await f.whenStable();
-    const quit = [...el.querySelectorAll('label.pd-check')].find((l) => text(l as HTMLElement).includes('Install when the app quits'));
+    const quit = [...el.querySelectorAll('mat-checkbox')].find((l) => text(l as HTMLElement).includes('Install when the app quits'));
     quit?.querySelector('input')?.click();
     await settle();
     expect((await updates.status()).phase).toMatchObject({ kind: 'ready', installOnQuit: true });
@@ -610,7 +696,7 @@ describe('the main window’s start-up work', () => {
       providers: [
         provideZonelessChangeDetection(),
         { provide: SHELL_IDLE, useValue: (work: () => void) => work() },
-        { provide: SHELL_PORTS, useValue: { showPage: () => undefined, openDialog: (id: string) => (opened.push(id), Promise.resolve(undefined)), notify: () => undefined } },
+        { provide: SHELL_PORTS, useValue: { showPage: () => undefined, openDialog: (id: string) => (opened.push(id), Promise.resolve(DISMISSED)), notify: () => undefined } },
         provideShellAbout({ about: () => about, updates: () => new MemoryUpdatesBackend({ currentVersion: '1', server: 'none' }), main: true, ready: () => ready }),
       ],
     });

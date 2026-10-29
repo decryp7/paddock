@@ -1,5 +1,5 @@
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
+import { ActionTip } from '../../shared/action-tip';
 import type { Alarm, ShelveFor } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
@@ -7,6 +7,12 @@ import { AlarmsStore } from '../../state/alarms.store';
 import { alarmSuffix, isShelved, needsAcknowledge, severityWord, shortTime, stateTone, stateWord } from './alarms-model';
 import { TABLE_CSS } from './alarms-css';
 import { AlarmDetail } from './alarm-detail';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
+import { MatMenuModule } from '@angular/material/menu';
+import { MatDivider } from '@angular/material/divider';
+import { RowMenu } from '../../shared/row-menu';
 
 /**
  * The open alarms as one table (newest first) with a detail panel beside it. The section action acknowledges everything that is
@@ -14,14 +20,14 @@ import { AlarmDetail } from './alarm-detail';
  */
 @Component({
   selector: 'dy-alarms-active',
-  imports: [AsyncState, Icon, AlarmDetail, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
+  imports: [ActionTip, RowMenu, MatMenuModule, MatDivider, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon, AlarmDetail],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="store.loaded()" [error]="store.error()" [empty]="store.alarms().length === 0" emptyTitle="No open alarms" emptyText="When a rule fires, its alarm waits here until you acknowledge it." emptyIcon="bell" what="alarms" [rows]="4" (retry)="store.load()">
       <div class="section-head">
         <p class="lead num">{{ store.alarms().length }} open · {{ store.unacknowledged().length }} not acknowledged</p>
         @if (store.unacknowledged().length > 0) {
-          <button type="button" class="btn primary" [disabled]="busy()" (click)="ackAll()">Acknowledge all ({{ store.unacknowledged().length }})</button>
+          <button type="button" matButton="filled" [disabled]="busy()" (click)="ackAll()">Acknowledge all ({{ store.unacknowledged().length }})</button>
         }
       </div>
       <div class="layout" [class.with-detail]="!!store.selected()">
@@ -33,7 +39,7 @@ import { AlarmDetail } from './alarm-detail';
             <span role="columnheader" class="c-rule">Rule</span>
             <span role="columnheader">State</span>
             <span role="columnheader" class="c-first">First seen</span>
-            <span role="columnheader">Last seen</span>
+            <span role="columnheader" class="c-last">Last seen</span>
             <span role="columnheader" class="r">Count</span>
             <span role="columnheader"><span class="visually-hidden">Actions</span></span>
           </div>
@@ -45,29 +51,26 @@ import { AlarmDetail } from './alarm-detail';
               [attr.data-id]="a.id"
               [class.selected]="store.selectedId() === a.id"
               [attr.aria-selected]="store.selectedId() === a.id"
-              [cdkContextMenuTriggerFor]="menu"
-              [cdkContextMenuTriggerData]="{ alarm: a }"
               (click)="pick(a)"
               (keydown.enter)="pick(a)"
-              (keydown.space)="$event.preventDefault(); pick(a)"
-            >
-              <span class="cell" role="gridcell">@if (unread(a)) {<span class="unread" title="Not acknowledged" aria-label="Not acknowledged"></span>}</span>
-              <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="a.severity === 'critical' ? 'bad' : a.severity === 'warning' ? 'warn' : 'info'" [attr.aria-label]="sev(a)" role="img"></span>@if (a.severity === 'critical') {<span>Critical</span>}</span>
+              (keydown.space)="$event.preventDefault(); pick(a)"  dyRowMenu [matContextMenuTriggerFor]="menu" [matContextMenuTriggerData]="{ alarm: a }">
+              <span class="cell" role="gridcell">@if (unread(a)) {<span class="unread" matTooltip="Not acknowledged" aria-label="Not acknowledged"></span>}</span>
+              <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="a.severity === 'critical' ? 'bad' : a.severity === 'warning' ? 'warn' : 'info'" [attr.aria-label]="sev(a)" role="img"></span><span [class.muted]="a.severity === 'info'">{{ sev(a) }}</span></span>
               <span class="cell title-cell" role="gridcell">
                 <span class="two">
-                  <span class="line"><span class="t truncate" [title]="a.title">{{ a.title }}</span>@if (suffix(a); as s) {<span class="sfx">{{ s }}</span>}</span>
-                  <span class="d truncate" [title]="a.detail">{{ a.detail }}</span>
+                  <span class="line"><span class="t truncate" [dyFullText]="a.title">{{ a.title }}</span>@if (suffix(a); as s) {<span class="sfx">{{ s }}</span>}</span>
+                  <span class="d truncate" [dyFullText]="a.detail">{{ a.detail }}</span>
                 </span>
               </span>
-              <span class="cell c-rule muted" role="gridcell"><span class="truncate id" [title]="a.rule">{{ a.rule }}</span></span>
+              <span class="cell c-rule muted" role="gridcell"><span class="truncate id" [dyFullText]="a.rule">{{ a.rule }}</span></span>
               <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="tone(a)" aria-hidden="true"></span><span [class.muted]="tone(a) === 'calm'">{{ state(a) }}</span></span>
               <span class="cell c-first muted num" role="gridcell">{{ time(a.firstSeen) }}</span>
-              <span class="cell muted num" role="gridcell">{{ time(a.lastSeen) }}</span>
+              <span class="cell c-last muted num" role="gridcell">{{ time(a.lastSeen) }}</span>
               <span class="cell r muted num" role="gridcell">×{{ a.repeatCount }}</span>
-              <span class="cell acts" role="gridcell">
-                <button type="button" class="ib" [attr.aria-label]="'Acknowledge ' + a.title" title="Acknowledge" [disabled]="!ackable(a)" (click)="ack(a, $event)"><dy-icon name="check" /></button>
-                <button type="button" class="ib" [attr.aria-label]="'Shelve ' + a.title" title="Shelve" [cdkMenuTriggerFor]="shelveMenu" [cdkMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="clock" /></button>
-                <button type="button" class="ib more" [attr.aria-label]="'More actions for ' + a.title" [cdkMenuTriggerFor]="menu" [cdkMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
+              <span class="cell acts" role="gridcell" dyActionTip>
+                <button type="button" matIconButton [attr.aria-label]="'Acknowledge ' + a.title" [disabled]="!ackable(a)" (click)="ack(a, $event)"><dy-icon name="check" /></button>
+                <button type="button" matIconButton [attr.aria-label]="'Shelve ' + a.title" [matMenuTriggerFor]="shelveMenu" [matMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="clock" /></button>
+                <button type="button" matIconButton class="more" [attr.aria-label]="'More actions for ' + a.title" [matMenuTriggerFor]="menu" [matMenuTriggerData]="{ alarm: a }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
               </span>
             </div>
           }
@@ -78,26 +81,26 @@ import { AlarmDetail } from './alarm-detail';
       </div>
     </dy-async>
 
-    <ng-template #menu let-alarm="alarm">
-      <div class="menu" cdkMenu [attr.aria-label]="'Actions for ' + alarm.title">
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!ackable(alarm)" (cdkMenuItemTriggered)="ack(alarm)"><dy-icon name="check" /> Acknowledge</button>
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuTriggerFor]="shelveMenu" [cdkMenuTriggerData]="{ alarm }"><dy-icon name="clock" /> Shelve… <dy-icon name="chevron-right" class="trail" /></button>
+    <mat-menu #menu="matMenu" aria-label="Actions">
+      <ng-template matMenuContent let-alarm="alarm">
+        <button mat-menu-item [disabled]="!ackable(alarm)" (click)="ack(alarm)"><dy-icon name="check" /> Acknowledge</button>
+        <button mat-menu-item [matMenuTriggerFor]="shelveMenu" [matMenuTriggerData]="{ alarm }"><dy-icon name="clock" /> Shelve…</button>
         @if (shelved(alarm)) {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.unshelve(alarm.id)"><dy-icon name="undo" /> Unshelve</button>
+          <button mat-menu-item (click)="store.unshelve(alarm.id)"><dy-icon name="undo" /> Unshelve</button>
         }
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="addNote(alarm)"><dy-icon name="edit" /> Add note…</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.mute(alarm.rule, !alarm.muted)"><dy-icon name="bell" /> {{ alarm.muted ? 'Unmute this rule' : 'Mute this rule' }}</button>
-        <div class="menu-sep"></div>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="showHistory(alarm)"><dy-icon name="list" /> Show history</button>
-      </div>
-    </ng-template>
-    <ng-template #shelveMenu let-alarm="alarm">
-      <div class="menu" cdkMenu aria-label="Shelve for">
+        <button mat-menu-item (click)="addNote(alarm)"><dy-icon name="edit" /> Add note…</button>
+        <button mat-menu-item (click)="store.mute(alarm.rule, !alarm.muted)"><dy-icon name="bell" /> {{ alarm.muted ? 'Unmute this rule' : 'Mute this rule' }}</button>
+        <mat-divider />
+        <button mat-menu-item (click)="showHistory(alarm)"><dy-icon name="list" /> Show history</button>
+      </ng-template>
+    </mat-menu>
+    <mat-menu #shelveMenu="matMenu" aria-label="Shelve for">
+      <ng-template matMenuContent let-alarm="alarm">
         @for (o of shelveOptions; track o.id) {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="shelve(alarm, o.id)">{{ o.label }}</button>
+          <button mat-menu-item (click)="shelve(alarm, o.id)">{{ o.label }}</button>
         }
-      </div>
-    </ng-template>
+      </ng-template>
+    </mat-menu>
   `,
   styles: [
     TABLE_CSS,
@@ -107,7 +110,7 @@ import { AlarmDetail } from './alarm-detail';
     .section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); min-height: var(--control-h); margin-bottom: var(--sp-3); }
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 320px; }
-    .head, .row { --cols: 14px 64px minmax(280px, 2.4fr) minmax(120px, 1fr) 190px 80px 80px 52px 40px; }
+    .head, .row { --cols: 14px 64px minmax(280px, 2.4fr) minmax(120px, 1fr) 190px 80px 80px 52px 88px; }
     .row.selected { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
     .unread { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
     .title-cell { padding: 6px 0; }
@@ -116,9 +119,15 @@ import { AlarmDetail } from './alarm-detail';
     .t { font-size: var(--fs-base); font-weight: var(--fw-medium); }
     .sfx { flex: none; color: var(--text-3); font-size: var(--fs-xs); }
     .d { color: var(--text-3); font-size: var(--fs-xs); }
-    @container (max-width: 1000px) {
+    /* Under 1160 px the columns of the first layout (1136 px at least, with room for all three actions) no longer fit. */
+    @container (max-width: 1160px) {
       .c-rule, .c-first { display: none; }
       .head, .row { --cols: 14px 84px minmax(160px, 1fr) 180px 96px 52px 88px; }
+    }
+    /* Narrow windows (the 900 px minimum leaves about 630 px): "Last seen" is in the detail panel; the actions keep their 88 px. */
+    @container (max-width: 760px) {
+      .c-last { display: none; }
+      .head, .row { --cols: 14px 76px minmax(120px, 1fr) 130px 52px 88px; }
     }
     @media (max-width: 1100px) { .layout.with-detail { grid-template-columns: minmax(0, 1fr); } }
   `,

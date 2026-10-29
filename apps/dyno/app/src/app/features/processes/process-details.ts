@@ -3,6 +3,7 @@ import { RouterLink } from '@angular/router';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import type { ListOrReason, ProcessDetails } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
+import { readValue, showMeasured } from '../../core/measured';
 import { formatAffinity, formatBytes, formatRate, formatCount, formatPercent, formatRelative } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { PRIORITY_LABEL, signatureText } from '../../shared/labels';
@@ -10,13 +11,16 @@ import { LiveStore } from '../../state/live.store';
 import { NetworkStore, type ProcessNetwork } from '../../state/network.store';
 import { ProcessesStore } from '../../state/processes.store';
 import { toCommandError } from '../../core/command-error';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatTabsModule } from '@angular/material/tabs';
+import { MatTooltip } from '@angular/material/tooltip';
 
 type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
 
 /** The side panel of one process: facts, parent chain and the lists the OS may or may not let Dyno read (with the reason when not). */
 @Component({
   selector: 'dy-process-details',
-  imports: [Icon, NgTemplateOutlet, RouterLink],
+  imports: [MatTooltip, MatTabsModule, MatButton, MatIconButton, Icon, NgTemplateOutlet, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <aside class="panel" aria-label="Process details">
@@ -24,40 +28,37 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
         <div class="titles">
           <h2 class="truncate">{{ d()?.process?.name ?? 'Process' }}</h2>
           @if (d(); as x) {
-            <span class="faint num">PID {{ pidText(x.process.pid) }} · {{ x.process.user ?? 'unknown user' }}</span>
+            <span class="faint num">PID {{ pidText(x.process.pid) }} · {{ show(x.process.user, text) }}</span>
           }
         </div>
-        <button type="button" class="btn ghost icon sm" aria-label="Close details" (click)="close()"><dy-icon name="close" /></button>
+        <button type="button" matIconButton matTooltip="Close details" aria-label="Close details" (click)="close()"><dy-icon name="close" /></button>
       </header>
       @if (store.detailsError(); as e) {
         <div class="err" role="alert">
           <dy-icon name="alert" />
           <div class="text"><strong>{{ e.message }}</strong>@if (hint(); as h) {<span>{{ h }}</span>}</div>
-          <button type="button" class="btn sm" (click)="reload()">Retry</button>
+          <button type="button" matButton="outlined" (click)="reload()">Retry</button>
         </div>
       } @else if (store.detailsLoading() || !d()) {
         <div class="skeletons" aria-busy="true"><div class="skeleton"></div><div class="skeleton" style="width: 70%"></div><div class="skeleton"></div></div>
       } @else {
         @if (d(); as x) {
-          @if (x.process.protectedReason; as why) {
-            <p class="lock"><dy-icon name="lock" /> {{ why }}. Dyno never changes it.</p>
-          }
-          <div class="tabs" role="tablist" aria-label="Details">
+          <nav mat-tab-nav-bar class="tabs" [tabPanel]="panel" aria-label="Details">
             @for (t of tabs; track t.id) {
-              <button type="button" role="tab" [attr.aria-selected]="tab() === t.id" (click)="pickTab(t.id)">{{ t.label }}</button>
+              <button type="button" mat-tab-link [active]="tab() === t.id" (click)="pickTab(t.id)">{{ t.label }}</button>
             }
-          </div>
-          <div class="content" role="tabpanel">
+          </nav>
+          <mat-tab-nav-panel #panel class="content">
             @switch (tab()) {
               @case ('overview') {
                 <dl class="dy-selectable">
                   <dt>Command line</dt>
                   <dd>
-                    <span class="mono wrap cmd" [class.open]="cmdOpen()" [title]="x.commandLine.join(' ')">{{ x.commandLine.join(' ') || 'Not available' }}</span>
+                    <span class="mono wrap cmd" [class.open]="cmdOpen()" [matTooltip]="x.commandLine.join(' ')">{{ x.commandLine.join(' ') || 'Not available' }}</span>
                     @if (x.commandLine.length) {
                       <span class="cmd-acts">
-                        @if (x.commandLine.join(' ').length > 120) { <button type="button" class="btn link" (click)="cmdOpen.set(!cmdOpen())">{{ cmdOpen() ? 'Show less' : 'Show more' }}</button> }
-                        <button type="button" class="btn link" (click)="copyCommand(x.commandLine)">Copy</button>
+                        @if (x.commandLine.join(' ').length > 120) { <button type="button" matButton="text" class="dy-link" (click)="cmdOpen.set(!cmdOpen())">{{ cmdOpen() ? 'Show less' : 'Show more' }}</button> }
+                        <button type="button" matButton="text" class="dy-link" (click)="copyCommand(x.commandLine)">Copy</button>
                       </span>
                     }
                   </dd>
@@ -66,14 +67,14 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                   <dd>
                     <span class="badge" [attr.data-tone]="sig().tone">@if (sig().verified) {<dy-icon name="shield-check" />} {{ sig().text }}</span>
                   </dd>
-                  <dt>Started</dt><dd class="num">{{ since(x.process.started) }}</dd>
+                  <dt>Started</dt><dd class="num">{{ show(x.process.started, since) }}</dd>
                   <dt>Priority</dt><dd>{{ x.priority ? priorityLabel(x.priority) : 'Not available on this PC' }}</dd>
                   <dt>Cores</dt><dd class="num">{{ x.affinity === null ? 'Not available on this PC' : affinity(x.affinity) }}</dd>
                   <dt>Efficiency mode</dt><dd>{{ x.efficiencyMode === null ? 'Not available on this PC' : x.efficiencyMode ? 'On' : 'Off' }}</dd>
                   <dt>Threads</dt><dd class="num">{{ x.threads === null ? '—' : count(x.threads) }}</dd>
                   <dt>Handles</dt><dd class="num">{{ x.handles === null ? '—' : count(x.handles) }}</dd>
                   <dt>Starts with</dt><dd>{{ x.startupSource ?? 'Not a startup item' }}</dd>
-                  <dt>Now</dt><dd class="num">{{ pct(x.process.cpu) }} CPU · {{ bytes(x.process.memory) }}</dd>
+                  <dt>Now</dt><dd class="num">{{ show(x.process.cpu, pct) }} CPU · {{ show(x.process.memory, bytes) }}</dd>
                 </dl>
               }
               @case ('parents') {
@@ -83,7 +84,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                 <ol class="chain">
                   <li class="me"><dy-icon name="processes" /> {{ x.process.name }}</li>
                   @for (p of x.parents; track p.pid) {
-                    <li><button type="button" class="btn link" (click)="open(p.pid)">{{ p.name }}</button> <span class="faint num">PID {{ pidText(p.pid) }}</span></li>
+                    <li><button type="button" matButton="text" class="dy-link" (click)="open(p.pid)">{{ p.name }}</button> <span class="faint num">PID {{ pidText(p.pid) }}</span></li>
                   }
                 </ol>
               }
@@ -118,7 +119,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                       }
                     </ul>
                   }
-                  <a class="btn link" routerLink="/network">Open the Network page</a>
+                  <a matButton="text" class="dy-link" routerLink="/network">Open the Network page</a>
                 } @else {
                   <p class="faint">Reading the network…</p>
                 }
@@ -127,7 +128,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                 <ng-container *ngTemplateOutlet="list; context: { l: x.modules, empty: 'No loaded libraries.' }" />
               }
             }
-          </div>
+          </mat-tab-nav-panel>
         }
       }
     </aside>
@@ -157,9 +158,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
     .titles { flex: 1; min-width: 0; display: grid; }
     .faint { color: var(--text-3); font-size: var(--fs-xs); }
     .lock { display: flex; gap: var(--sp-2); align-items: center; margin: 0 var(--sp-4) var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--surface-inset); color: var(--text-2); font-size: var(--fs-sm); }
-    .tabs { display: flex; gap: 2px; padding: 0 var(--sp-3); border-bottom: 1px solid var(--border); }
-    .tabs button { height: 32px; padding: 0 var(--sp-3); border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-2); font: var(--fw-medium) var(--fs-sm) var(--font-sans); cursor: default; }
-    .tabs button[aria-selected='true'] { color: var(--text-1); border-bottom-color: var(--accent); }
+    .tabs { padding: 0 var(--sp-3); }
     .content { flex: 1; overflow: auto; padding: var(--sp-3) var(--sp-4) var(--sp-4); }
     dl { margin: 0; display: grid; gap: 2px var(--sp-3); grid-template-columns: 96px minmax(0, 1fr); font-size: var(--fs-sm); }
     dt { color: var(--text-3); padding: 3px 0; }
@@ -211,6 +210,8 @@ export class ProcessDetailsPanel {
   protected readonly count = formatCount;
   protected readonly priorityLabel = (p: keyof typeof PRIORITY_LABEL) => PRIORITY_LABEL[p];
   protected readonly affinity = (mask: number) => formatAffinity(mask, this.live.system()?.cpu.perCore.length ?? 1);
+  protected readonly show = showMeasured;
+  protected readonly text = (v: string): string => v;
   protected readonly since = (at: number) => formatRelative(at, this.live.system()?.at ?? Date.now());
   protected strings(l: ListOrReason<string>) {
     return 'unavailable' in l ? { reason: l.unavailable, items: [] as string[], truncated: false } : { reason: null, items: l.items.items, truncated: l.items.truncated };
@@ -246,6 +247,6 @@ export class ProcessDetailsPanel {
   }
   protected open(pid: number): void {
     const p = this.store.processes().find((x) => x.pid === pid);
-    if (p) void this.store.select({ pid: p.pid, started: p.started });
+    if (p) void this.store.select({ pid: p.pid, started: readValue(p.started) });
   }
 }

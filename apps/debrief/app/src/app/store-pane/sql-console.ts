@@ -151,7 +151,7 @@ import { SqlExportFiles } from './sql-export-files';
     .table-wrap { overflow: auto; scroll-padding-top: 32px; max-height: 420px; border: 1px solid var(--border-2); border-radius: 6px; }
     .results { border-collapse: collapse; width: max-content; min-width: 100%; font-size: var(--fs-sm); }
     th, td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--border-2); white-space: nowrap; max-width: 480px; overflow: hidden; text-overflow: ellipsis; }
-    th { position: sticky; top: 0; background: var(--bg-2); font-weight: 600; }
+    th { position: sticky; top: 0; z-index: 3; background: var(--bg-2); font-weight: 600; }
     tr.selected td { background: var(--bg-sel); }
     td.null { color: var(--muted); font-style: italic; }
     .more { align-self: flex-start; }

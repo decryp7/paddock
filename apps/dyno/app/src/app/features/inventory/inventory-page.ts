@@ -12,6 +12,7 @@ import { MemorySlots } from './memory-slots';
 import { isAppleSilicon } from './package-geometry';
 import { toDimmSlots, toSocPackage } from './hardware-adapter';
 import { describeSlots, kindLabel, slotModel, speedLabel } from './slot-model';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 
 const HINT_ICON: Record<HintKind, IconName> = {
   mismatchedSpeed: 'alert',
@@ -39,7 +40,7 @@ const HINT_TONE: Record<HintKind, string> = {
 /** What is installed: the memory (slots drawn as sockets, or Apple silicon's unified memory) with upgrade hints from the engine. */
 @Component({
   selector: 'dy-inventory-page',
-  imports: [AsyncState, ChipPackage, DeviceArt, Icon, MemorySlots],
+  imports: [SuSegmentedControl, AsyncState, ChipPackage, DeviceArt, Icon, MemorySlots],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -57,10 +58,7 @@ const HINT_TONE: Record<HintKind, string> = {
               <h2><dy-icon name="memory" /> Memory</h2>
               <span class="spacer"></span>
               @if (slots(); as a) {
-                <div class="seg" role="group" aria-label="View">
-                  <button type="button" [attr.aria-pressed]="!table()" (click)="table.set(false)">Slots</button>
-                  <button type="button" [attr.aria-pressed]="table()" (click)="table.set(true)">Table</button>
-                </div>
+                <pd-segmented-control label="View" [options]="viewSegs" [value]="table() ? 'table' : 'slots'" (valueChange)="table.set($event === 'table')" />
               }
             </div>
 
@@ -100,7 +98,7 @@ const HINT_TONE: Record<HintKind, string> = {
             } @else if (totalOnly(); as t) {
               <div class="na">
                 <strong>{{ bytes(t.total) }} installed</strong>
-                <p>Dyno could not read the individual modules: {{ t.reason.reason }}@if (t.reason.needsHelper) { Reading them needs the Dyno helper, which asks for administrator rights the first time.}</p>
+                <p>Dyno could not read the individual modules: {{ t.reason.reason }}</p>
               </div>
             }
 
@@ -180,6 +178,7 @@ const HINT_TONE: Record<HintKind, string> = {
 })
 export class InventoryPage implements OnInit {
   protected readonly store = inject(InventoryStore);
+  protected readonly viewSegs: SuSegment[] = [{ value: 'slots', label: 'Slots' }, { value: 'table', label: 'Table' }];
   protected readonly table = signal(false);
   protected readonly ghz = formatGhz;
   protected readonly isApple = isAppleSilicon;

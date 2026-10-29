@@ -11,7 +11,6 @@ import {
   fromControl,
   groupItems,
   inlineActions,
-  isMenuKey,
   menuActions,
   nextIndex,
   nextSort,
@@ -118,10 +117,7 @@ describe('table model', () => {
     expect(nextIndex(50, 5, 'a')).toBeNull();
   });
 
-  it('knows the keyboard right-click and clicks that came from a control', () => {
-    expect(isMenuKey({ key: 'ContextMenu', shiftKey: false })).toBe(true);
-    expect(isMenuKey({ key: 'F10', shiftKey: true })).toBe(true);
-    expect(isMenuKey({ key: 'F10', shiftKey: false })).toBe(false);
+  it('knows clicks that came from a control', () => {
     const row = document.createElement('div');
     row.innerHTML = '<span>text</span><button>go</button>';
     const ev = (el: Element) => ({ target: el }) as unknown as Event;

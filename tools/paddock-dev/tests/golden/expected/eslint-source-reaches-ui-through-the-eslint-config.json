@@ -1,0 +1,47 @@
+{
+ "all": false,
+ "crates": false,
+ "ui": true,
+ "eslint": true,
+ "conformance": false,
+ "tools": false,
+ "icons": false,
+ "ciImage": false,
+ "paddockDev": false,
+ "docs": false,
+ "apps": [
+  "x",
+  "y",
+  "z"
+ ],
+ "kinds": {
+  "x": [
+   "ui"
+  ],
+  "y": [
+   "ui"
+  ],
+  "z": [
+   "rust",
+   "ui"
+  ]
+ },
+ "packages": {},
+ "why": {
+  "app:x": [
+   "npm apps/x/app"
+  ],
+  "app:y": [
+   "npm apps/y/app"
+  ],
+  "app:z": [
+   "npm apps/z/app/src-tauri"
+  ],
+  "eslint": [
+   "eslint/src/index.cjs"
+  ],
+  "ui": [
+   "npm ui"
+  ]
+ }
+}

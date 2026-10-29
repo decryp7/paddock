@@ -7,7 +7,7 @@
 //! closed: its size, and its place as an offset from its parent window (never an absolute screen position, which
 //! would pull the dialog onto whatever display the parent was on last time).
 
-use crate::contract::Kind;
+use crate::contract::{Kind, Remembers};
 use serde::{Deserialize, Serialize};
 
 /// The height (logical px) a native title bar adds to a dialog's inner size; the whole window must fit the work area.
@@ -124,6 +124,28 @@ impl Placement {
     pub fn logical_size(&self) -> (f64, f64) {
         (self.width / self.scale, self.height / self.scale)
     }
+
+    /// The inner size in whole physical px, each side rounded up once ([`physical_ceil`]), so the window is never a
+    /// fraction of a pixel smaller than the size it was placed at.
+    pub fn physical_size(&self) -> (u32, u32) {
+        (
+            physical_ceil(self.width / self.scale, self.scale),
+            physical_ceil(self.height / self.scale, self.scale),
+        )
+    }
+}
+
+/// Physical px for `logical` px at `scale`, rounded up once, so the window is never a fraction of a pixel smaller than
+/// the content it was measured for. Never zero, never above `u32::MAX`.
+pub fn physical_ceil(logical: f64, scale: f64) -> u32 {
+    let s = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    // A rounding error of the multiplication must not add a whole pixel: 400.0 * 1.25 is exactly 500.
+    let px = (logical * s - 1e-6).ceil();
+    px.clamp(1.0, f64::from(u32::MAX)) as u32
 }
 
 /// The index of the monitor a parent window is on: the one it overlaps most; when it overlaps none, the nearest one.
@@ -242,17 +264,18 @@ pub fn place(
     done(monitor.map_or(centred, |m| inside(centred, &m.work)), false)
 }
 
-/// After a re-fit to `inner_height` (logical px): the window's new outer top-left (physical px) so that it stays inside
+/// After a re-fit to an outer height of `outer_height` (logical px: the inner height plus the window's own decorations,
+/// outer minus inner): the window's new outer top-left (physical px) so that it stays inside
 /// its monitor's work area. `None` when it already does (or nothing is known).
 pub fn keep_on_monitor(
     window: Rect,
-    inner_height: f64,
+    outer_height: f64,
     monitor: Option<Monitor>,
 ) -> Option<(f64, f64)> {
     let m = monitor.filter(|m| m.work.is_usable())?;
     let s = m.scale();
     let r = Rect {
-        height: ((inner_height + TITLE_BAR) * s).min(m.work.height),
+        height: (outer_height * s).min(m.work.height),
         width: window.width.min(m.work.width),
         ..window
     };
@@ -272,23 +295,28 @@ pub fn remembered_of(dialog: Bounds, parent: (f64, f64)) -> Option<Remembered> {
     .sanitized()
 }
 
-/// What of a remembered place a dialog of `kind` keeps (the kind's size rule): a decision is exactly as big as its
-/// question and centred every time, so it keeps nothing; a fitted form (no declared height) keeps its width and offset
-/// but its height comes from the content (`default_height` until the first fit); everything else keeps it all.
+/// What of a remembered place a dialog of `kind` keeps ([`Remembers`], ADR 0026 §1), the rest coming from `default`
+/// (the contract's width and its preferred height or the unmeasured one, logical px): a decision keeps its offset only (it
+/// is exactly as big as its question), a form its width and offset (its height comes from the content), a viewer and a tool
+/// their size and offset. `place` then clamps whatever is kept to the work area and the minimum.
 pub fn memory_for(
     kind: Kind,
-    fitted: bool,
     remembered: Option<Remembered>,
-    default_height: f64,
+    default: (f64, f64),
 ) -> Option<Remembered> {
-    match kind {
-        Kind::Decision => None,
-        Kind::Form if fitted => remembered.map(|r| Remembered {
-            height: default_height,
+    let r = remembered?;
+    Some(match kind.policy().remembers {
+        Remembers::Offset => Remembered {
+            width: default.0,
+            height: default.1,
             ..r
-        }),
-        _ => remembered,
-    }
+        },
+        Remembers::WidthAndOffset => Remembered {
+            height: default.1,
+            ..r
+        },
+        Remembers::SizeAndOffset => r,
+    })
 }
 
 /// How the shell hands a placement to the window system. macOS positions windows in points (one global logical
@@ -570,15 +598,15 @@ mod tests {
     fn a_refit_that_grows_past_the_bottom_moves_the_window_up_on_its_own_monitor() {
         let m = left_retina();
         // At 2x: 400 logical inner + title bar = 864 physical; from y=1500 it would end at 2364 > 1964.
-        let at = keep_on_monitor(rect(-2000.0, 1500.0, 1200.0, 500.0), 400.0, Some(m));
+        let at = keep_on_monitor(rect(-2000.0, 1500.0, 1200.0, 500.0), 432.0, Some(m));
         assert_eq!(at, Some((-2000.0, 1964.0 - 864.0)));
         // Already inside: nothing to do.
         assert_eq!(
-            keep_on_monitor(rect(-2000.0, 100.0, 1200.0, 500.0), 400.0, Some(m)),
+            keep_on_monitor(rect(-2000.0, 100.0, 1200.0, 500.0), 432.0, Some(m)),
             None
         );
         assert_eq!(
-            keep_on_monitor(rect(-2000.0, 100.0, 1200.0, 500.0), 400.0, None),
+            keep_on_monitor(rect(-2000.0, 100.0, 1200.0, 500.0), 432.0, None),
             None
         );
     }
@@ -721,13 +749,91 @@ mod tests {
     #[test]
     fn the_kind_decides_what_of_a_remembered_place_is_kept() {
         let r = rem(10.0, 20.0, 900.0, 700.0);
-        assert_eq!(memory_for(Kind::Decision, true, r, 300.0), None);
+        let d = (400.0, 300.0);
         assert_eq!(
-            memory_for(Kind::Form, true, r, 300.0),
-            rem(10.0, 20.0, 900.0, 300.0)
+            memory_for(Kind::Decision, r, d),
+            rem(10.0, 20.0, 400.0, 300.0)
         );
-        assert_eq!(memory_for(Kind::Form, false, r, 300.0), r);
-        assert_eq!(memory_for(Kind::Viewer, true, r, 300.0), r);
-        assert_eq!(memory_for(Kind::Tool, false, None, 300.0), None);
+        assert_eq!(memory_for(Kind::Form, r, d), rem(10.0, 20.0, 900.0, 300.0));
+        assert_eq!(memory_for(Kind::Viewer, r, d), r);
+        assert_eq!(memory_for(Kind::Tool, r, d), r);
+        assert_eq!(memory_for(Kind::Tool, None, d), None);
+    }
+
+    /// The property of plan 1.1b: for every scale 1-3, work area 800x600 to 7680x4320 and remembered size (tiny, huge,
+    /// the work area's own), the placed size lies within [minimum content, work area] whenever the minimum fits the
+    /// screen, and the whole physical size converted back to logical px is never smaller than the placed one.
+    #[test]
+    fn a_placed_size_is_within_the_minimum_and_the_work_area_and_its_physical_size_never_rounds_down()
+     {
+        let works = [
+            (800.0, 600.0),
+            (1366.0, 768.0),
+            (1920.0, 1080.0),
+            (2560.0, 1415.0),
+            (3840.0, 2160.0),
+            (7680.0, 4320.0),
+        ];
+        let scales = [1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0];
+        let remembered = [
+            None,
+            rem(0.0, 0.0, 1.0, 1.0),
+            rem(5.0, 5.0, 333.3, 217.7),
+            rem(-50.0, 40.0, 700.0, 520.0),
+            rem(0.0, 0.0, 9000.0, 9000.0),
+            rem(10.0, 10.0, 4096.0, 100.0),
+        ];
+        let requests = [
+            (400.0, 520.0),
+            (560.0, 520.0),
+            (720.0, 560.0),
+            (960.0, 680.0),
+            (333.3, 211.9),
+        ];
+        let mins = [(1.0, 1.0), (320.0, 200.0), (680.0, 560.0), (300.5, 150.25)];
+        for &(ww, wh) in &works {
+            for &s in &scales {
+                let m = monitor(0.0, 0.0, ww, wh, s);
+                let parent = rect(ww / 4.0, wh / 8.0, ww / 2.0, wh / 2.0);
+                for &r in &remembered {
+                    for &size in &requests {
+                        for &min in &mins {
+                            let p = place(Some(parent), Some(m), r, size, min);
+                            let (w, h) = p.logical_size();
+                            let (aw, ah) = (ww / s, wh / s - TITLE_BAR);
+                            let why = format!("{ww}x{wh}@{s} {r:?} {size:?} {min:?} -> {w}x{h}");
+                            assert!(w <= aw + 1e-9 && h <= ah + 1e-9, "{why}");
+                            if min.0 <= aw {
+                                assert!(w >= min.0 - 1e-9, "{why}");
+                            }
+                            if min.1 <= ah {
+                                assert!(h >= min.1 - 1e-9, "{why}");
+                            }
+                            let (pw, ph) = p.physical_size();
+                            assert!(
+                                f64::from(pw) / s >= w - 1e-6 && f64::from(ph) / s >= h - 1e-6,
+                                "{why}"
+                            );
+                            assert!(
+                                f64::from(pw) / s - w < 1.0 / s + 1e-6
+                                    && f64::from(ph) / s - h < 1.0 / s + 1e-6,
+                                "{why}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn physical_sizes_round_up_once_and_are_never_zero() {
+        assert_eq!(physical_ceil(400.0, 1.25), 500);
+        assert_eq!(physical_ceil(333.3, 1.5), 500);
+        assert_eq!(physical_ceil(333.4, 1.5), 501);
+        assert_eq!(physical_ceil(0.0, 2.0), 1);
+        assert_eq!(physical_ceil(1e12, 2.0), u32::MAX);
+        assert_eq!(physical_ceil(100.0, f64::NAN), 100);
+        assert_eq!(physical_ceil(100.0, 0.0), 100);
     }
 }
