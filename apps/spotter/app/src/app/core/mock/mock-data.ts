@@ -211,7 +211,7 @@ export function makeReleases(
   const r = rng(seed);
   const out: Release[] = [];
   let [major, minor, patch] = base;
-  // One product's builds are about the same size, so a watch's release list does not jump between 25 and 190 MiB.
+  // One product's builds are about the same size, so a watch's release list does not jump between 25 and 190 MB.
   const sizeBase = 40_000_000 + (Math.abs(Math.floor(seed)) % 140) * 1_000_000;
   const gaps: number[] = [];
   for (let i = 0; i < count; i++) gaps.push(0.3 + r());

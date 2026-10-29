@@ -43,8 +43,9 @@ pub use tree::{
     Terminated, ask, descendants_of, end, is_alive, kill_tree, processes_mentioning, terminate,
 };
 pub use usage::{
-    ProcEntry, Table, descendants, parse_pss, process_memory, read_pss, snapshot, table_from,
-    tree_memory, tree_memory_with,
+    MAX_TREE, OsSource, ProcEntry, ProcessSource, Table, descendants, parse_pss, process_memory,
+    read_children, read_pss, snapshot, table_from, tree_memory, tree_memory_from, tree_memory_of,
+    tree_memory_with,
 };
 pub use watch::{
     MemoryEvent, MemoryListener, MemoryUse, MemoryWatch, REARM_PERCENT, Verdict, WARN_PERCENT,

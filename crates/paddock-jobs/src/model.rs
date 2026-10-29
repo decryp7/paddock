@@ -184,4 +184,9 @@ pub struct JobSnapshot {
     /// False while a step that cannot be interrupted runs; then `not_cancellable_reason` says why.
     pub cancellable: bool,
     pub not_cancellable_reason: Option<String>,
+    /// The job's success is not announced to the user (a source test that runs with every edit of a form, a routine check); a
+    /// failure still is. Off unless the owner asks for it ([`JobContext::quiet_on_success`](crate::JobContext::quiet_on_success)),
+    /// and left out of the wire form while off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub quiet_on_success: bool,
 }

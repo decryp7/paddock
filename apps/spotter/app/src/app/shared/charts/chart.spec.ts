@@ -1,6 +1,6 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ThemeService } from '../../core/theme.service';
+import { ChartTokens } from '../../core/chart-tokens';
 import { fakeChart, flush } from '../../../testing/test-helpers';
 import { CHART_LOADER, Chart, type ChartLoader } from './chart';
 
@@ -39,9 +39,15 @@ describe('Chart', () => {
     const charts: ReturnType<typeof fakeChart>[] = [];
     const f = setup(() => Promise.resolve(() => charts[charts.push(fakeChart()) - 1]!));
     await flush();
-    TestBed.inject(ThemeService).setPreference('dark');
-    f.detectChanges();
-    await flush();
+    // The shell's appearance store flips this attribute; the MutationObserver reports it asynchronously.
+    document.documentElement.setAttribute('data-theme', 'dark');
+    try {
+      await flush();
+      f.detectChanges();
+      await flush();
+    } finally {
+      document.documentElement.removeAttribute('data-theme');
+    }
     expect(charts).toHaveLength(2);
     expect(charts[0]!.disposed).toBe(true);
     expect(charts[1]!.options).toHaveLength(1);
@@ -99,7 +105,7 @@ describe('Chart', () => {
 describe('the real chart loader', () => {
   it('loads ECharts lazily and returns a factory without drawing anything', async () => {
     const loader = TestBed.inject(CHART_LOADER);
-    const factory = await loader(TestBed.inject(ThemeService).chartTokens());
+    const factory = await loader(TestBed.inject(ChartTokens).tokens());
     expect(typeof factory).toBe('function');
   });
 });

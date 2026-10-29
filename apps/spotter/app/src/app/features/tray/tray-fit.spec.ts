@@ -50,7 +50,7 @@ describe('the tray popup fits its content', () => {
     await flush(5);
   });
 
-  it('maps fitTray to the fit_tray command with the height', async () => {
+  it('maps fitTray to the shell tray_fit_height command with the height', async () => {
     const calls: [string, Record<string, unknown> | undefined][] = [];
     const call: CommandCall = <T>(cmd: string, args?: Record<string, unknown>) => {
       calls.push([cmd, args]);
@@ -58,7 +58,7 @@ describe('the tray popup fits its content', () => {
     };
     const listen: EventListen = () => Promise.resolve(() => undefined);
     await new TauriBackend(call, listen).fitTray(240);
-    expect(calls).toEqual([['fit_tray', { height: 240 }]]);
+    expect(calls).toEqual([['plugin:paddock-shell|tray_fit_height', { height: 240 }]]);
   });
 
   it('records the call in the mock backend', async () => {

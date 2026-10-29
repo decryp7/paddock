@@ -4,15 +4,12 @@ import type {
   MailStatus,
   AppEvent,
   AppInfo,
-  AppUpdateCheck,
-  AppUpdateStatus,
   Dashboard,
   DashboardRange,
   OpenTarget,
   PatternSelection,
   PatternTest,
   DiscoveredFeed,
-  JobEvent,
   ImportFormat,
   ImportResult,
   Preset,
@@ -51,19 +48,19 @@ export interface SpotterBackend {
   getWatch(id: string): Promise<WatchDetail>;
   sourceKinds(): Promise<SourceKind[]>;
   /**
-   * Checks a draft without saving it. `secrets` are values typed into secret fields (not stored). A job: it reports
-   * on `onJob` under `jobId` and `cancelJob` stops it; there is no time limit.
+   * Checks a draft without saving it. `secrets` are values typed into secret fields (not stored). A shell job: the
+   * Jobs list shows its phases and Cancel stops it; there is no time limit.
    */
-  testSource(draft: WatchDraft, secrets: Record<string, string>, jobId: string): Promise<SourcePreview>;
+  testSource(draft: WatchDraft, secrets: Record<string, string>): Promise<SourcePreview>;
   /** Saves a draft. `secrets`: a value stores it in the credential store, an empty string deletes it, a missing key keeps it. */
   saveWatch(draft: WatchDraft, secrets: Record<string, string>): Promise<WatchSummary>;
   deleteWatch(id: string): Promise<void>;
   setPaused(id: string, paused: boolean): Promise<void>;
   /**
    * Checks one watch now (resolves when it is done, however long that takes), or every watch when `id` is null
-   * (resolves at once; progress "n of m" and the end arrive on `onJob`). A job under `jobId`.
+   * (resolves at once; progress "n of m" is in the Jobs list). A shell job.
    */
-  checkNow(id: string | null, jobId: string): Promise<void>;
+  checkNow(id: string | null): Promise<void>;
   /** Marks a version (the latest when null) as seen. */
   acknowledge(id: string, version: string | null): Promise<void>;
   resetAcknowledgement(id: string): Promise<void>;
@@ -74,9 +71,9 @@ export interface SpotterBackend {
   openRelease(id: string, version: string, target?: ReleaseTarget): Promise<void>;
   /**
    * Downloads (or copies) a release into the downloads folder, verifying its checksum; resolves with the file path.
-   * A job under `jobId` (phases, bytes, Cancel); rejects with code `cancelled` when stopped.
+   * A shell job (phases, bytes, Cancel in the Jobs list); rejects with code `cancelled` when stopped.
    */
-  downloadRelease(id: string, version: string, jobId: string, target?: ReleaseTarget): Promise<string>;
+  downloadRelease(id: string, version: string, target?: ReleaseTarget): Promise<string>;
   /** Writes a regular expression from an example name and the parts the user selected (computed in Rust). */
   suggestPattern(example: string, selections: PatternSelection[]): Promise<string>;
   /** Tries a version scheme on one name (computed in Rust). */
@@ -108,8 +105,8 @@ export interface SpotterBackend {
   /** Finds feeds a page advertises (blog and release feeds). */
   discoverFeeds(url: string): Promise<DiscoveredFeed[]>;
   rendererStatus(): Promise<RendererStatus>;
-  /** Downloads the pinned, checksum-verified Chromium (on request only). A job under `jobId`: Downloading, Unpacking, Testing. */
-  installRenderer(jobId: string): Promise<RendererStatus>;
+  /** Downloads the pinned, checksum-verified Chromium (on request only). A shell job: Downloading, Unpacking, Testing. */
+  installRenderer(): Promise<RendererStatus>;
   /** Builds drafts from a winget export, Brewfile or OPML text. */
   importList(format: ImportFormat, text: string): Promise<ImportResult>;
 
@@ -126,16 +123,6 @@ export interface SpotterBackend {
   /** Sends a test message through the saved mail settings; rejects with what to check. */
   sendTestEmail(to: string): Promise<void>;
 
-  // Spotter's own updates
-  appUpdateStatus(): Promise<AppUpdateStatus>;
-  checkAppUpdate(): Promise<AppUpdateCheck>;
-  installAppUpdate(): Promise<void>;
-
-  /** Asks a running job to stop (a no-op when it already ended). */
-  cancelJob(jobId: string): Promise<void>;
-  /** Subscribes to the progress and the end of long operations; returns the unsubscribe function. */
-  onJob(handler: (event: JobEvent) => void): Promise<() => void>;
-
   /** Subscribes to pushed state; returns the unsubscribe function. */
   onState(handler: (push: StatePush) => void): Promise<() => void>;
 
@@ -146,6 +133,8 @@ export interface SpotterBackend {
   hideTray(): Promise<void>;
   /** Fits the tray popup's window to its content: `height` in CSS pixels as the page measured it (the shell clamps it). */
   fitTray(height: number): Promise<void>;
+  /** The page the tray or a toast asked for before this window could listen (taken once). */
+  pendingRoute(): Promise<string | null>;
   /** The main window is asked to show a route (Tauri event `spotter://navigate`, payload: the route string). */
   onNavigate(handler: (route: string) => void): Promise<() => void>;
 }

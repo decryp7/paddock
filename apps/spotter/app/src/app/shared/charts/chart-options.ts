@@ -33,16 +33,15 @@ export function releaseTotals(d: Dashboard): number[] {
 }
 
 /**
- * The ECharts option for the releases chart: one series of bars from zero in the accent colour, the unit on the axis
+ * The ECharts option for the releases chart: one series of bars from zero in the accent colour, no axis title (the section heading names the unit)
  * and the day (or week) in the tooltip. Fonts and the axis colours come from the paddock theme.
  */
 export function releasesOption(d: Dashboard, _series?: readonly ReleaseSeries[]): Record<string, unknown> {
-  const unit = d.range === '1y' ? 'week' : 'day';
   return {
     grid: { left: 36, right: 8, top: 24, bottom: 24 },
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     xAxis: { type: 'category', data: d.bucketsMs.map(bucketLabel), axisTick: { show: false } },
-    yAxis: { type: 'value', minInterval: 1, min: 0, name: `Releases per ${unit}`, nameTextStyle: { align: 'left' } },
+    yAxis: { type: 'value', minInterval: 1, min: 0 },
     series: [{ name: 'Releases', type: 'bar', data: releaseTotals(d), barMaxWidth: 18, emphasis: { focus: 'series' } }],
   };
 }
@@ -53,7 +52,8 @@ export type OutcomeColors = Pick<PaddockChartTokens, 'neutralBar' | 'accent' | '
 /** Diagonal hatching for a failure series: failures are told apart from successes by pattern as well as colour (colour-vision safe). */
 const FAILED_DECAL = { symbol: 'rect', dashArrayX: [1, 0], dashArrayY: [2, 3], rotation: Math.PI / 4, color: 'rgba(0,0,0,0.45)' };
 
-const MIB = 1024 * 1024;
+/** A megabyte, as the labels say it (decimal). */
+const MB = 1_000_000;
 
 /** Checks per bucket across every watch, split into the ones that worked and the ones that failed. */
 export function reliabilityTotals(d: Dashboard): { succeeded: number[]; failed: number[] } {
@@ -96,12 +96,12 @@ export function reliabilityOption(d: Dashboard, c: OutcomeColors): Record<string
   };
 }
 
-/** Downloads per bucket and the data they moved, in MiB. */
-export function downloadTotals(d: Dashboard): { completed: number[]; failed: number[]; mebibytes: number[] } {
+/** Downloads per bucket and the data they moved, in MB. */
+export function downloadTotals(d: Dashboard): { completed: number[]; failed: number[]; megabytes: number[] } {
   return {
     completed: d.downloads.map((b) => Math.max(0, b.count - b.failed)),
     failed: d.downloads.map((b) => b.failed),
-    mebibytes: d.downloads.map((b) => Math.round((b.bytes / MIB) * 10) / 10),
+    megabytes: d.downloads.map((b) => Math.round((b.bytes / MB) * 10) / 10),
   };
 }
 
@@ -113,13 +113,13 @@ export function downloadCounts(d: Dashboard): { total: number; failed: number } 
 /** A sentence describing the downloads chart for assistive technology. */
 export function downloadsSummary(d: Dashboard): string {
   const { total, failed } = downloadCounts(d);
-  const mib = Math.round(d.downloads.reduce((a, b) => a + b.bytes, 0) / MIB);
-  return `Downloads: ${total} in total, ${failed} failed, ${mib} MiB.`;
+  const mb = Math.round(d.downloads.reduce((a, b) => a + b.bytes, 0) / MB);
+  return `Downloads: ${total} in total, ${failed} failed, ${mb} MB.`;
 }
 
 /**
  * The downloads chart, two panels that share the time axis: the count per day as stacked bars (completed in the accent
- * colour, failed hatched in the danger colour) above, and the data downloaded in MiB as one line below.
+ * colour, failed hatched in the danger colour) above, and the data downloaded in MB as one line below.
  */
 export function downloadsOption(d: Dashboard, c: OutcomeColors): Record<string, unknown> {
   const unit = d.range === '1y' ? 'week' : 'day';
@@ -138,12 +138,12 @@ export function downloadsOption(d: Dashboard, c: OutcomeColors): Record<string, 
     ],
     yAxis: [
       { type: 'value', gridIndex: 0, minInterval: 1, min: 0, name: `Downloads per ${unit}`, nameTextStyle: { align: 'left' } },
-      { type: 'value', gridIndex: 1, min: 0, splitNumber: 2, name: 'Downloaded (MiB)', nameTextStyle: { align: 'left' } },
+      { type: 'value', gridIndex: 1, min: 0, splitNumber: 2, name: 'Downloaded (MB)', nameTextStyle: { align: 'left' } },
     ],
     series: [
       { name: 'Completed', type: 'bar', stack: 'count', xAxisIndex: 0, yAxisIndex: 0, data: t.completed, barMaxWidth: 18, itemStyle: { color: c.accent } },
       { name: 'Failed', type: 'bar', stack: 'count', xAxisIndex: 0, yAxisIndex: 0, data: t.failed, barMaxWidth: 18, itemStyle: { color: c.danger, decal: FAILED_DECAL } },
-      { name: 'Downloaded', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: t.mebibytes, lineStyle: { color: c.textMuted }, itemStyle: { color: c.textMuted }, showSymbol: false },
+      { name: 'Downloaded', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: t.megabytes, lineStyle: { color: c.textMuted }, itemStyle: { color: c.textMuted }, showSymbol: false },
     ],
   };
 }

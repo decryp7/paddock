@@ -42,20 +42,6 @@ export function formatInterval(secs: number): string {
   return `every ${spanText(secs * SECOND)}`;
 }
 
-/** Byte counts with binary units. */
-export function formatBytes(bytes: number | null | undefined): string {
-  if (bytes === null || bytes === undefined) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
-  let v = bytes / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
-}
-
 /** A date and time in the user's locale; `—` when unknown. */
 export function formatDateTime(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return '—';
@@ -92,17 +78,21 @@ export function formatShortDateTime(ms: number | null | undefined, now: number):
   return d.toLocaleString(undefined, sameYear ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } : { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-/** Bytes as a number of MiB with the unit left to the column header: `25.5`; `—` when unknown. */
-export function mebibytes(bytes: number | null | undefined): string {
-  if (bytes === null || bytes === undefined) return '—';
-  const v = bytes / 1048576;
-  return v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
-}
-
 /** A compact ago for a table cell: `20 min`, `3 h`, `2 days`; `—` when unknown. */
 export function agoShort(atMs: number | null | undefined, now: number): string {
   if (atMs === null || atMs === undefined) return '—';
   const diff = now - atMs;
   if (Math.abs(diff) < 45 * SECOND) return 'now';
   return spanText(diff);
+}
+
+/** A zero-width space: a place where a line may break and that copies as nothing visible. */
+const BREAK = '\u200b';
+
+/**
+ * A path or address that may wrap at its separators (after `/` and `\\`, before `?` and `#`), never in the middle of a name,
+ * so a long location is read whole on two lines instead of being cut in the middle.
+ */
+export function breakablePath(text: string): string {
+  return text.replace(/([/\\])(?=[^/\\])/g, `$1${BREAK}`).replace(/(?=[?#])/g, BREAK);
 }

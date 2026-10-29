@@ -150,7 +150,8 @@ pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
 
 const NONE: u8 = 0;
 const TIMED_OUT: u8 = 1;
-const OVER_MEMORY: u8 = 2;
+/// How often the supervisor looks at the browser's memory.
+const MEMORY_LOOK: Duration = Duration::from_millis(500);
 
 /// Why the watchdog ended the browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +172,8 @@ pub struct Chromium {
     dir: PathBuf,
     alive: Arc<AtomicBool>,
     ended_by: Arc<AtomicU8>,
+    /// Whether the last [`close`](Chromium::close) ended with the browser gone by itself (no termination was needed).
+    quit_by_itself: bool,
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -200,7 +203,22 @@ impl Chromium {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(stderr);
-        let mut process = match Supervised::spawn(cmd) {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(paddock_proc::CREATE_NO_WINDOW);
+        }
+        // The memory cap is watched by the shared supervisor from the process start, also while it is still starting: it
+        // reads the pids of the tree only (on Windows the members of the child's job object), never the process table.
+        let spawned = match opts.memory_cap {
+            Some(limit) => {
+                let mut cap = paddock_proc::MemoryCap::new(limit, "the browser");
+                cap.every = MEMORY_LOOK;
+                Supervised::spawn_capped(cmd, cap)
+            }
+            None => Supervised::spawn(cmd),
+        };
+        let mut process = match spawned {
             Ok(p) => p,
             Err(e) => {
                 cleanup(&dir);
@@ -210,7 +228,7 @@ impl Chromium {
         let alive = Arc::new(AtomicBool::new(true));
         let ended_by = Arc::new(AtomicU8::new(NONE));
         // The caps run from the process start, also while it is still starting.
-        watchdog(process.id(), alive.clone(), ended_by.clone(), opts.max_lifetime, opts.memory_cap);
+        watchdog(process.id(), alive.clone(), ended_by.clone(), opts.max_lifetime);
         match connect(&dir, &mut process) {
             Ok(conn) => Ok(Chromium {
                 conn: Arc::new(conn),
@@ -218,6 +236,7 @@ impl Chromium {
                 dir,
                 alive,
                 ended_by,
+                quit_by_itself: false,
             }),
             Err(e) => {
                 alive.store(false, Ordering::Release);
@@ -247,7 +266,7 @@ impl Chromium {
     pub fn ended_by(&self) -> EndedBy {
         match self.ended_by.load(Ordering::Acquire) {
             TIMED_OUT => EndedBy::TimeLimit,
-            OVER_MEMORY => EndedBy::MemoryCap,
+            _ if self.process.stopped_over_memory().is_some() => EndedBy::MemoryCap,
             _ => EndedBy::Nothing,
         }
     }
@@ -261,15 +280,27 @@ impl Chromium {
     /// end, then ends whatever is left. A browser that is killed while it still starts up can leave a copy of
     /// itself behind on macOS (the code-sign clone), so every normal end goes through here. Idempotent.
     pub fn close(&mut self) {
+        self.close_within(CLOSE_GRACE);
+    }
+
+    /// As [`close`](Self::close) with the time the browser gets to quit by itself (tests that check that it does give it
+    /// far more than the default, so a loaded machine cannot turn "slow" into "needed a kill").
+    pub fn close_within(&mut self, grace: Duration) {
         if self.alive.load(Ordering::Acquire) && self.process.is_running() && !self.conn.is_closed() {
             let _ = self.conn.call(None, "Browser.close", serde_json::json!({}), Duration::from_secs(2));
-            let end = Instant::now() + CLOSE_GRACE;
+            let end = Instant::now() + grace;
             while self.process.is_running() && Instant::now() < end {
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
+        self.quit_by_itself = !self.process.is_running();
         self.alive.store(false, Ordering::Release);
         self.process.terminate(Duration::from_millis(500));
+    }
+
+    /// Whether the last close found the browser already gone (it quit on `Browser.close`; nothing had to end it).
+    pub fn quit_by_itself(&self) -> bool {
+        self.quit_by_itself
     }
 
     /// Ends the browser at once.
@@ -286,20 +317,13 @@ impl Drop for Chromium {
     }
 }
 
-/// Ends the tree when time or memory is up, even if nobody calls anything. Stops when `alive` is cleared.
-fn watchdog(pid: Option<u32>, alive: Arc<AtomicBool>, ended_by: Arc<AtomicU8>, max: Duration, cap: Option<u64>) {
+/// Ends the tree when the time is up, even if nobody calls anything. Stops when `alive` is cleared.
+fn watchdog(pid: Option<u32>, alive: Arc<AtomicBool>, ended_by: Arc<AtomicU8>, max: Duration) {
     let Some(pid) = pid else { return };
     let end = Instant::now() + max;
     let _ = std::thread::Builder::new().name("render-watchdog".into()).spawn(move || {
-        let mut tick = 0u32;
         while alive.load(Ordering::Acquire) {
-            let reason = if Instant::now() >= end {
-                Some(TIMED_OUT)
-            } else if tick % 4 == 3 && cap.is_some_and(|c| process::current_tree_memory(pid) > c) {
-                Some(OVER_MEMORY)
-            } else {
-                None
-            };
+            let reason = if Instant::now() >= end { Some(TIMED_OUT) } else { None };
             if let Some(r) = reason {
                 // Re-check right before killing so a reused pid is never signalled after a normal end.
                 if alive.swap(false, Ordering::AcqRel) {
@@ -308,7 +332,6 @@ fn watchdog(pid: Option<u32>, alive: Arc<AtomicBool>, ended_by: Arc<AtomicU8>, m
                 }
                 return;
             }
-            tick = tick.wrapping_add(1);
             std::thread::sleep(Duration::from_millis(250));
         }
     });

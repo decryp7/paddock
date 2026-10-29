@@ -209,19 +209,6 @@ impl Watch {
     }
 }
 
-/// The colour theme.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Theme {
-    /// Follow the system.
-    #[default]
-    System,
-    /// Light.
-    Light,
-    /// Dark.
-    Dark,
-}
-
 fn yes() -> bool {
     true
 }
@@ -229,18 +216,12 @@ fn yes() -> bool {
 /// App-wide settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Settings {
-    /// Colour theme.
-    #[serde(default)]
-    pub theme: Theme,
     /// Notifications at all.
     #[serde(default = "yes")]
     pub notifications: bool,
     /// Notifications are paused until then (milliseconds since the epoch); from the dashboard's quick action.
     #[serde(default)]
     pub notifications_paused_until: Option<i64>,
-    /// Check for Spotter's own updates automatically (off by default; a manual check always works).
-    #[serde(default)]
-    pub check_app_updates: bool,
     /// Where downloads go when an action names no folder, and the dashboard's "open downloads".
     #[serde(default)]
     pub downloads_folder: Option<String>,
@@ -264,10 +245,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Settings {
         Settings {
-            theme: Theme::System,
             notifications: true,
             notifications_paused_until: None,
-            check_app_updates: false,
             downloads_folder: None,
             default_interval_secs: default_interval(),
             digest: DigestMode::Off,
@@ -404,7 +383,5 @@ pub(crate) mod tests {
             toml::from_str("digest = \"daily\"\nallow_os_webview = true\n[quiet_hours]\nstart = \"22:00\"\nend = \"07:00\"").unwrap();
         assert_eq!(digest.digest, DigestMode::Daily);
         assert!(digest.allow_os_webview && digest.quiet_hours.is_some());
-        let themed: Settings = toml::from_str("theme = \"dark\"").unwrap();
-        assert_eq!(themed.theme, Theme::Dark);
     }
 }

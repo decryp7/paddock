@@ -157,7 +157,11 @@ fn main() {
             .iter()
             .map(|k| format!("{k}={}\n", std::env::var(k).unwrap_or_default()))
             .collect();
-        let _ = std::fs::write(dir.join("env.txt"), dump);
+        // Written whole and then renamed into place: a test that waits for the file to exist never reads it half written.
+        let tmp = dir.join("env.txt.tmp");
+        if std::fs::write(&tmp, dump).is_ok() {
+            let _ = std::fs::rename(&tmp, dir.join("env.txt"));
+        }
         let _ = std::fs::remove_file(dir.join("job.started"));
     }
     let mode = s.get("mode").cloned().unwrap_or_else(|| "ok".into());

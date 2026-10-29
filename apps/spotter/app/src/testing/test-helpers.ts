@@ -1,6 +1,8 @@
 import type { EnvironmentProviders, Provider } from '@angular/core';
 import type { ComponentFixture } from '@angular/core/testing';
-import { provideRouter, withComponentInputBinding, type Routes } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter, type ParamMap, type Routes } from '@angular/router';
+import { BehaviorSubject } from 'rxjs';
+import { provideShellTesting } from '@decryp7/paddock-ui/shell/testing';
 import { BACKEND } from '../app/core/backend';
 import { MockBackend, type MockOptions } from '../app/core/mock-backend';
 import { CHART_LOADER, type ChartInstance } from '../app/shared/charts/chart';
@@ -36,7 +38,8 @@ export function appProviders(backend: MockBackend, routes: Routes = []): (Provid
     { provide: BACKEND, useValue: backend },
     { provide: CHART_LOADER, useValue: () => Promise.resolve(() => fakeChart()) },
     provideIcons(),
-    provideRouter(routes, withComponentInputBinding()),
+    ...provideShellTesting(),
+    provideRouter(routes),
   ];
 }
 
@@ -45,12 +48,21 @@ export function flush(ms = 0): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Runs change detection and waits for the mock's async work until the view stops changing. */
-export async function settle(fixture: ComponentFixture<unknown>, rounds = 4): Promise<void> {
-  for (let i = 0; i < rounds; i++) {
+/**
+ * Runs change detection and waits for the mock's async work until the view stops changing (no fixed number of rounds: a
+ * round that leaves the markup as it was ends the wait; at most `MAX_ROUNDS`, so a view that never settles fails loudly in
+ * the caller's assertion instead of hanging).
+ */
+export async function settle(fixture: ComponentFixture<unknown>): Promise<void> {
+  const MAX_ROUNDS = 40;
+  let last: string | null = null;
+  for (let i = 0; i < MAX_ROUNDS; i++) {
     fixture.detectChanges();
     await fixture.whenStable();
     await flush();
+    const now = (fixture.nativeElement as HTMLElement).innerHTML;
+    if (now === last) break;
+    last = now;
   }
   fixture.detectChanges();
 }
@@ -73,4 +85,14 @@ export function byText<T extends Element = HTMLElement>(root: ParentNode, select
 export function type(input: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string, event = 'input'): void {
   input.value = value;
   input.dispatchEvent(new Event(event, { bubbles: true }));
+}
+
+/** An `ActivatedRoute` whose parameters a test sets (and changes) by hand, as the page frame's route would. */
+export function routeStub(initial: Record<string, string> = {}): { provider: Provider; set(params: Record<string, string>): void } {
+  const params = new BehaviorSubject<ParamMap>(convertToParamMap(initial));
+  const route = { paramMap: params.asObservable(), get snapshot() { return { paramMap: params.value }; } };
+  return {
+    provider: { provide: ActivatedRoute, useValue: route },
+    set: (next) => params.next(convertToParamMap(next)),
+  };
 }

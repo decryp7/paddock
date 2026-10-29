@@ -96,6 +96,66 @@ mod unix {
         }
     }
 
+    /// The direct children of `pid` (`proc_listchildpids`: asks the kernel for that parent only, no scan of the process
+    /// list). `Some(empty)` for a process without children or one that is gone, `None` when the kernel failed to answer.
+    #[cfg(target_os = "macos")]
+    pub fn child_pids(pid: u32) -> Option<Vec<u32>> {
+        child_pids_in(pid, 1024)
+    }
+
+    /// [`child_pids`] starting with room for `room` pids (the buffer grows when it is full; tests start small).
+    #[cfg(target_os = "macos")]
+    pub fn child_pids_in(pid: u32, room: usize) -> Option<Vec<u32>> {
+        let Ok(pid) = libc::pid_t::try_from(pid) else {
+            return Some(Vec::new());
+        };
+        let mut buf = vec![0 as libc::pid_t; room];
+        loop {
+            let bytes = libc::c_int::try_from(buf.len() * std::mem::size_of::<libc::pid_t>())
+                .unwrap_or(libc::c_int::MAX);
+            // SAFETY: the kernel writes at most `bytes` bytes into `buf`, which is that large.
+            let n = unsafe { libc::proc_listchildpids(pid, buf.as_mut_ptr().cast(), bytes) };
+            match read_listing(n, buf.len()) {
+                Listing::Unknown => return None,
+                Listing::Grow => buf.resize(buf.len() * 4, 0),
+                Listing::Count(n) => {
+                    return Some(
+                        buf.iter()
+                            .take(n)
+                            .filter_map(|p| u32::try_from(*p).ok())
+                            .filter(|p| *p != 0)
+                            .collect(),
+                    );
+                }
+            }
+        }
+    }
+
+    /// What `proc_listchildpids` answered, for a buffer of `room` pids.
+    #[cfg(target_os = "macos")]
+    #[derive(Debug, PartialEq, Eq)]
+    pub(crate) enum Listing {
+        /// The kernel could not say (-1: the call failed), which is not "no children".
+        Unknown,
+        /// The buffer was full, so the list may have been cut: grow it and ask again.
+        Grow,
+        /// This many pids were written.
+        Count(usize),
+    }
+
+    /// Reads the answer `n` (a count of pids, not bytes; -1 on failure) of a call that had room for `room` pids.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn read_listing(n: libc::c_int, room: usize) -> Listing {
+        let Ok(n) = usize::try_from(n) else {
+            return Listing::Unknown;
+        };
+        if n >= room && room < (1 << 20) {
+            Listing::Grow
+        } else {
+            Listing::Count(n)
+        }
+    }
+
     /// Ignores SIGTERM in this process (tests).
     #[cfg(test)]
     pub fn ignore_sigterm() {
@@ -148,12 +208,88 @@ pub fn private_working_set(pid: u32) -> Option<u64> {
     }
 }
 
+/// `(pid, parent)` of every process, from one snapshot (`CreateToolhelp32Snapshot`: Windows has no per-parent call). The
+/// snapshot is a full list of the machine's processes and threads, but reads no memory, command lines or times, so it is
+/// lighter than a full refresh; callers take it at most once per tree walk.
+#[cfg(windows)]
+pub fn process_parents() -> Option<Vec<(u32, u32)>> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
+    // SAFETY: the snapshot handle is closed below; the entry is a zero-initialised struct whose size field is set as the API
+    // requires, and it is read only after a successful call.
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut list = Vec::new();
+        let mut ok = Process32FirstW(snap, &raw mut entry);
+        while ok != 0 {
+            list.push((entry.th32ProcessID, entry.th32ParentProcessID));
+            ok = Process32NextW(snap, &raw mut entry);
+        }
+        CloseHandle(snap);
+        Some(list)
+    }
+}
+
 #[cfg(not(unix))]
 pub fn own_group(_cmd: &mut std::process::Command) {}
 
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_failed_listing_is_unknown_not_an_empty_list() {
+        assert_eq!(
+            read_listing(-1, 1024),
+            Listing::Unknown,
+            "-1 is the call failing"
+        );
+        assert_eq!(read_listing(0, 1024), Listing::Count(0), "0 is no children");
+        assert_eq!(read_listing(3, 1024), Listing::Count(3));
+        assert_eq!(
+            read_listing(4, 4),
+            Listing::Grow,
+            "a full buffer may have cut the list"
+        );
+        assert_eq!(
+            read_listing(1 << 20, 1 << 20),
+            Listing::Count(1 << 20),
+            "the buffer's ceiling"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn children_are_listed_for_one_pid_and_the_buffer_grows() {
+        let mut kids: Vec<_> = (0..3)
+            .map(|_| {
+                std::process::Command::new("sleep")
+                    .arg("60")
+                    .spawn()
+                    .unwrap()
+            })
+            .collect();
+        let me = std::process::id();
+        for room in [1, 2, 3, 1024] {
+            let mut got = child_pids_in(me, room).unwrap();
+            got.retain(|p| kids.iter().any(|k| k.id() == *p));
+            assert_eq!(got.len(), 3, "room {room}");
+        }
+        assert_eq!(child_pids_in(u32::MAX, 4), Some(vec![]), "not a pid_t");
+        for k in &mut kids {
+            let _ = k.kill();
+            let _ = k.wait();
+        }
+    }
 
     #[test]
     fn ids_that_could_hit_the_caller_or_everything_are_refused() {

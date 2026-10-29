@@ -4,7 +4,7 @@ import { RouterLink } from '@angular/router';
 
 import type { DashboardRange } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
-import { ThemeService } from '../../core/theme.service';
+import { ChartTokens } from '../../core/chart-tokens';
 import { Chart } from '../../shared/charts/chart';
 import {
   downloadCounts,
@@ -49,7 +49,7 @@ export class DashboardPage {
   protected readonly watches = inject(WatchesStore);
   protected readonly settings = inject(SettingsStore);
   private readonly backend = inject(BACKEND);
-  private readonly theme = inject(ThemeService);
+  private readonly theme = inject(ChartTokens);
   protected readonly ranges = RANGES;
 
   protected readonly dashboard = computed(() => this.store.dashboard().value);
@@ -83,7 +83,7 @@ export class DashboardPage {
   });
   protected readonly reliabilityOption = computed(() => {
     const d = this.dashboard();
-    return d ? reliabilityOption(d, this.theme.chartTokens()) : {};
+    return d ? reliabilityOption(d, this.theme.tokens()) : {};
   });
   protected readonly reliabilityLabel = computed(() => {
     const d = this.dashboard();
@@ -95,7 +95,7 @@ export class DashboardPage {
   });
   protected readonly downloadsOption = computed(() => {
     const d = this.dashboard();
-    return d ? downloadsOption(d, this.theme.chartTokens()) : {};
+    return d ? downloadsOption(d, this.theme.tokens()) : {};
   });
   protected readonly downloadsLabel = computed(() => {
     const d = this.dashboard();
