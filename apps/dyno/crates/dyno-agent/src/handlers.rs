@@ -133,6 +133,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             core.settings = (*settings).normalised();
             let alarm_config = core.settings.alarms;
             core.alarms.set_config(alarm_config);
+            shared.disk.set_limits(core.settings.disk.limits());
             core.save_settings(&shared.dirs);
             let s = core.settings.clone();
             drop(core);
@@ -279,9 +280,16 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             Ok(Reply::Lifespan(Box::new(shared.hardware.lifespan_overview(&core.store, now()))))
         }
         Request::Baselines => Ok(Reply::Baselines(Box::new(shared.baselines.overview(shared)))),
-        Request::DiskUsage { path } => crate::disk::disk_usage(path.as_deref())
-            .map(|n| Reply::SizeTree(Box::new(n)))
-            .map_err(bad),
+        r @ (Request::DiskVolumes
+        | Request::StartDiskScan { .. }
+        | Request::CancelDiskScan { .. }
+        | Request::DiskScans
+        | Request::DiskChildren { .. }
+        | Request::DiskPath { .. }
+        | Request::RetryDiskScan { .. }
+        | Request::DiskReveal { .. }
+        | Request::DiskRings { .. }
+        | Request::OpenFullDiskAccessSettings) => crate::disk::handle(shared, r),
         r @ (Request::SearchSeed { .. }
         | Request::WebSearch { .. }
         | Request::FileHash { .. }

@@ -830,7 +830,7 @@ Licence expressions (packages):
 - @angular/core 22.2.3 — MIT [MIT-98]
 - @angular/forms 22.2.3 — MIT [MIT-98]
 - @angular/localize 22.2.3 — MIT [MIT-98]
-- @angular/material 22.2.3 — MIT [MIT-263]
+- @angular/material 22.2.4 — MIT [MIT-263]
 - @angular/platform-browser 22.2.3 — MIT [MIT-98]
 - @angular/router 22.2.3 — MIT [MIT-98]
 - @babel/code-frame 8.0.6 — MIT [MIT-177]
@@ -12756,7 +12756,7 @@ Used by (1):
 ### MIT-263
 
 Used by (2):
-  @angular/cdk 22.2.4, @angular/material 22.2.3
+  @angular/cdk 22.2.4, @angular/material 22.2.4
 
     The MIT License
 
