@@ -41,7 +41,22 @@ describe('ImportRange', () => {
         { provide: Platform, useValue: { pickPaths: async () => pick, isTauri: () => false } },
       ],
     });
-    return { backend, dialogs: TestBed.inject(DialogService), range: TestBed.inject(ImportRange), store: TestBed.inject(WorkspaceStore) };
+    const dialogs = TestBed.inject(DialogService);
+    // The dialog's chunk is lazy and arrives after an unknown number of event-loop turns (cold disk, loaded CI):
+    // model a slow one as 25 turns, so a test that waits a fixed number of turns fails every time, not now and then.
+    const openLazy = dialogs.openLazy.bind(dialogs);
+    vi.spyOn(dialogs, 'openLazy').mockImplementation(((load: () => Promise<never>, options: never) =>
+      openLazy(async () => {
+        for (let i = 0; i < 25; i++) await new Promise((r) => setTimeout(r, 0));
+        return load();
+      }, options)) as typeof dialogs.openLazy);
+    return { backend, dialogs, range: TestBed.inject(ImportRange), store: TestBed.inject(WorkspaceStore) };
+  }
+
+  /** Waits on the condition (the dialog is open), never on a number of turns: its chunk loads lazily. */
+  async function openDialog(dialogs: DialogService) {
+    await vi.waitFor(() => expect(dialogs.stack()).toHaveLength(1));
+    return dialogs.stack().at(-1)!;
   }
 
   it('opens the picked paths with the chosen range and clears the range afterwards', async () => {
@@ -53,10 +68,9 @@ describe('ImportRange', () => {
       return set(f, t);
     };
     const done = range.pickAndOpen(true);
-    await settle(undefined, 2);
-    const open = dialogs.stack().at(-1);
-    expect(open?.component).toBe(ImportRangeDialog);
-    open?.ref.close({ from: 1000, to: 2000 });
+    const open = await openDialog(dialogs);
+    expect(open.component).toBe(ImportRangeDialog);
+    open.ref.close({ from: 1000, to: 2000 });
     await done;
     await settle(undefined, 4);
     expect(windows).toEqual([[1000, 2000], [null, null]]);
@@ -71,8 +85,7 @@ describe('ImportRange', () => {
     TestBed.resetTestingModule();
     const { dialogs, range, backend } = setup(['/demo/x']);
     const done = range.pickAndOpen(false);
-    await settle(undefined, 2);
-    dialogs.stack().at(-1)?.ref.close();
+    (await openDialog(dialogs)).ref.close();
     await done;
     expect(backend.importWindow).toBeNull();
   });
@@ -80,8 +93,7 @@ describe('ImportRange', () => {
   it('shows an engine refusal of the range as the workspace error and opens nothing', async () => {
     const { dialogs, range, store, backend } = setup(['/demo/y']);
     const done = range.pickAndOpen(true);
-    await settle(undefined, 2);
-    dialogs.stack().at(-1)?.ref.close({ from: 5, to: 1 });
+    (await openDialog(dialogs)).ref.close({ from: 5, to: 1 });
     await done;
     expect(store.error()).toContain('before');
     expect(store.summary()?.sources.some((s) => s.path === '/demo/y')).toBe(false);
