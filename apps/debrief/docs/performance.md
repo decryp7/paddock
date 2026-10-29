@@ -104,9 +104,9 @@ some fields; "n/s" means the source does not state them.
   | Measure | Base 7096 | Base 7102 | Change 7107 | Budget | Verdict |
   |---|---|---|---|---|---|
   | nextest step (build + tests) | 9.3 min | 15.6 min | 8.6 min | none | faster |
-  | test phase (nextest's own clock) | 5.8 min | 14.2 min | 5.1 min (304.6 s) | none | faster |
-  | tests past 90 s (TIMEOUT) | 5 | 18 | 0 | 0 | pass |
-  | other failures | 1 (captures) | 0 | 0 | 0 | pass |
+  | test phase (nextest's own clock) | 5.8 min | 14.2 min (851.6 s) | 5.1 min (304.6 s) | none | faster |
+  | tests past 90 s (TIMEOUT) | 5 | 44 | 0 | 0 | pass |
+  | other failures | 1 (captures) | 3 | 0 | 0 | pass |
   | temp folders left | 10 | n/s | 0 | 0 | pass |
   | peak load while tests ran | about 119 (116 sampled in another run) | n/s | 90 | none | lower |
   | plugin processes at once | 84 (sampled in another run) | n/s | 49 | none | lower |
