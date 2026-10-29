@@ -183,7 +183,9 @@ These measure tooling, not a product. They are kept where they are.
 - **Corpus:** none; the Gitea Actions runs and jobs API, 596 runs and 3,772 started jobs created 2026-10-27 15:08:41 to
   2026-10-29 15:08:41 +08:00, plus the logs of 102 failed and 48 green jobs (no user data)
 - **Command:** `GITEA_TOKEN=… node docs/research/2026-10-29-ci-runs.mjs pull --end 2026-10-29T15:08:41+08:00 --hours 48 > runs.json`,
-  then `node docs/research/2026-10-29-ci-runs.mjs table runs.json --end 2026-10-29T15:08:41+08:00 --hours 48`
+  then `node docs/research/2026-10-29-ci-runs.mjs table runs.json --end 2026-10-29T15:08:41+08:00 --hours 48`; `steps`, `zombies` and
+  `logs` modes of the same script for the step split, the lost tasks and the failing tests (the note lists which command
+  gives which number)
 - **Runs:** one read; medians and p90 over the jobs of the window
 - **Numbers:**
 
@@ -194,7 +196,8 @@ These measure tooling, not a product. They are kept where they are.
   | Share of runner hours in failed / cancelled / green runs | 65 % / 15 % / 19 % | none | - |
   | Branch ci.yml dispatch, creation to last job (n = 96) | median 70 min, p90 163 min | none | - |
   | ci.yml plan job queue wait (n = 260) | median 11 min, p90 47 min | none | - |
-  | Windows `stable-workspace` step (n = 400) | median 49 s, p90 76 s | none | fixed on ci/optimise-runs |
+  | Windows `stable-workspace` step (n = 393, plus 6 under `.paddock/`) | median 49 s, p90 76 s | none | fixed on ci/optimise-runs |
+  | Kept clone after one more job, real repository, git 2.56, Mac (first fix / with the delta fetch) | 360 -> 729 MiB, fetch 4.6–5.2 s / 360 MiB, fetch 0.1–0.4 s | none | delta fetch in d7db4ba0d |
   | Main push runs cancelled by the next push (ci.yml / debrief.yml) | 43 of 55 / 41 of 55 | none | - |
   | Tasks lost to the zombie cleanup (no log, failed 10–15 min after start) | 8 | none | - |
 

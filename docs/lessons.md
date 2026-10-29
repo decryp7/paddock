@@ -718,14 +718,26 @@ replace the kept copy only once the move worked. Ask an API for exactly the list
 branch=main&event=push&status=success`) instead of paging a mixed list with a cut-off. Measure a shared action per OS:
 1 s on macOS hid 49 s on Windows. Details: [research/2026-10-29-ci-runs.md](research/2026-10-29-ci-runs.md).
 
-## 2026-10-29: Gitea skips a job whose `needs` was skipped, whatever its `if` says (release workflows)
+Two caveats the review of that fix found (2026-10-29). **A kept clone must not grow:** a one-commit-deep checkout shares
+no commit with the clone, so a plain `git fetch` from it resends the whole tree every job (366.8 -> 713.8 MiB, until a
+gc runs inside some job). Let the checkout borrow the clone's objects for the fetch (an alternate) and keep a ref on the
+clone's last commit; then only new objects travel; turn automatic gc off in the clone and bound it yourself. **A kept
+folder must not keep ignored files:** `git clean -ffd` leaves an earlier job's `dist/` (which `generate_context!` embeds),
+`binaries/` and `gen/`; use `-ffdx` where no build output lives in the folder. And a kept folder that cannot be updated
+(a lock left by a killed job) is replaced once, never left broken for every later job.
+
+## 2026-10-29: observed on Gitea 28.2.0: a job whose `needs` was skipped was skipped despite its `!cancelled()` condition (release workflows)
 
 Every `<app>-release.yml` has `release: needs: [plan, gates]` with `if: !cancelled() && ... (needs.gates.result == 'success'
 || needs.gates.result == 'skipped' && no tag)`. On this Gitea (28.2.0) the release job was skipped in all 104 push runs
 and all 6 nightly runs where `gates` was skipped, and ran only when `gates` ran. So the documented push-to-main and
 nightly installers never ran, and nothing said so. **Guidance:** on Gitea, never rely on `if` to run a job after a skipped
 need; give each path its own job whose needs all run (one release job needing `gates` for tags, one needing only `plan`
-otherwise), and check a release workflow's paths with one dispatch of each event before trusting them.
+otherwise), and check a release workflow's paths with one dispatch of each event before trusting them. Not tried: whether
+`always() && ...` instead of `!cancelled() && ...` makes this Gitea evaluate the condition after a skipped need (GitHub
+does for both); a single-job design needs no such test. The plan job's output did reach later jobs: in the dispatches
+with `gates: true` (runs 6612, 6617, 6548, 6495) `gates` ran, and its condition requires `needs.plan.outputs.run ==
+'true'`.
 
 ## 2026-10-29: a task with no log that fails after 10–15 minutes was lost between server and runner (CI)
 
