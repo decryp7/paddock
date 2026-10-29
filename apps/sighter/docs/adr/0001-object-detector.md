@@ -1041,9 +1041,9 @@ against that list comes with the notices tooling.
 
 **Amendment (user, 2026-10-30), the DirectML gate (decision 4, P6):** `DirectML.dll` registers a TraceLogging provider,
 `Microsoft.Windows.AI.MachineLearning.Dml`, in the Microsoft telemetry group
-([ORT builds note](../research/2026-10-ort-builds.md) section 5), so check (2) reads: it is bundled only if the S2 ETW
-session shows that provider writes **no events** while the DirectML EP runs; Windows' diagnostic settings then govern
-it like any OS component. It is fetched from nuget.org at build time, pinned by hash, and never mirrored. The P6 method
+([ORT builds note](../research/2026-10-ort-builds.md) section 5). It is bundled only if both checks pass:
+(1) the egress test shows **no outbound connection** while the DirectML EP runs; (2) the S2 ETW session shows that
+provider writes **no events** meanwhile. Windows' diagnostic settings then govern it like any OS component. It is fetched from nuget.org at build time, pinned by hash, and never mirrored. The P6 method
 (reading the DLL's bytes and recording its ETW events, no disassembly) is accepted under the licence's clause 3(b).
 
 ## Open questions for the user

@@ -32,19 +32,22 @@ pkg_dir="$cache/directml/$DML_VERSION"
 pkg="$pkg_dir/microsoft.ai.directml.$DML_VERSION.nupkg"
 mkdir -p "$pkg_dir"
 
-if [ ! -f "$pkg_dir/.verified" ]; then
-  command -v openssl >/dev/null 2>&1 || { echo "fetch-directml: openssl is needed to check NuGet's SHA-512" >&2; exit 1; }
+command -v openssl >/dev/null 2>&1 || { echo "fetch-directml: openssl is needed to check NuGet's SHA-512" >&2; exit 1; }
+matches() { [ "$(filesize "$1")" = "$DML_NUPKG_SIZE" ] && [ "$(openssl dgst -sha512 -binary "$1" | openssl base64 -A)" = "$DML_NUPKG_SHA512_B64" ]; }
+# A cached package (a CI cache, a kept folder) is verified on every run like a fresh download; a mismatch is fetched again.
+if [ -f "$pkg" ] && ! matches "$pkg"; then
+  echo "fetch-directml: the cached package does not match its pin; downloading it again" >&2
+  rm -f "$pkg"
+fi
+if [ ! -f "$pkg" ]; then
   tmp="$pkg.part"
   curl -fsSL --retry 3 -o "$tmp" "$DML_NUPKG_URL"
-  got_size=$(filesize "$tmp")
-  got_sha=$(openssl dgst -sha512 -binary "$tmp" | openssl base64 -A)
-  if [ "$got_size" != "$DML_NUPKG_SIZE" ] || [ "$got_sha" != "$DML_NUPKG_SHA512_B64" ]; then
+  if ! matches "$tmp"; then
     rm -f "$tmp"
-    echo "fetch-directml: the package does not match its pin (size $got_size, SHA-512 $got_sha)" >&2
+    echo "fetch-directml: the downloaded package does not match its pin (size and NuGet SHA-512)" >&2
     exit 1
   fi
   mv "$tmp" "$pkg"
-  touch "$pkg_dir/.verified"
 fi
 
 # A fresh, empty folder per architecture; only the named files are taken from the package.

@@ -1,0 +1,1 @@
+<PreprocessorDefinitions>WIN32;USE_WINDOWS_TELEMETRY;%(PreprocessorDefinitions)</PreprocessorDefinitions>

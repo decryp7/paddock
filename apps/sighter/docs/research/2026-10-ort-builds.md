@@ -27,9 +27,9 @@ forbids it): build times are projections from pyke's published CI runs.
   Abseil). Compiling it is not verified until the first Windows run.
 - **Delay-loading DirectML is the consumer's job** in a static build: ONNX Runtime applies its `/DELAYLOAD` list only to
   `onnxruntime.dll`. `sighter-infer` passes it from the archive's `link.txt`; the CPU-only variant imports no DirectML.
-- **Projected cold build times** (every run is cold: jobs use their own temporary folder): Linux x64 CPU 15–60 min
-  depending on the runner; macOS arm64 CoreML 15–35 min; on an 8-core, 16 GB Windows runner (6 compile jobs) DirectML
-  40–60 min and CPU 35–55 min, one after the other. Compile jobs are detected at run time. All unmeasured.
+- **Projected build times** (compile jobs detected at run time; all unmeasured): Linux x64 CPU 15–60 min depending on
+  the runner; macOS arm64 CoreML 15–35 min; on an 8-core, 16 GB Windows runner (5–6 compile jobs) DirectML 40–60 min
+  and CPU 35–55 min, one after the other. A published build always compiles cold; other runs may reuse ccache.
 
 ## 1. The ONNX Runtime version
 
@@ -100,8 +100,11 @@ compiled `/MT` too, or the link fails (`LNK2038` runtime mismatch: loud, at buil
 `onnxruntime_BUILD_SHARED_LIB` is on: "delay-loading is meaningless for a static lib anyway. Consumers that need
 delay-load in a static build … apply onnxruntime_DELAYLOAD_FLAGS to their own target" (verified). ADR 0001 asked whether
 our build's DirectML import is delay-loaded: **in a static build that is decided by `sighter-infer`'s own link**.
-`link.txt` of the DirectML variant lists the four DLLs and `delayimp`; `check-windows-imports.sh` fails the build job
-unless the smoke binary delay-loads `DirectML.dll` and imports none of them directly. One consequence for SW17: with a
+`link.txt` of the DirectML variant lists the four DLLs and `delayimp`. ADR 0032's checker
+(`conformance/release/windows-crt-imports.mjs`, with its `--delay-load` rule) fails the build job unless the smoke
+binary delay-loads `DirectML.dll` and `d3d12.dll` and imports none of the four directly (`--not-direct` for `dxgi.dll` and
+`dxcore.dll`, which the linker drops if nothing calls them); the CPU variant must import no `DirectML.dll`
+(`--no-import`), and neither may import WinHTTP, WinINet or Winsock (`--no-network`). One consequence for SW17: with a
 delay-loaded import a missing `DirectML.dll` raises a delay-load exception at the first DirectML call, not at start, so
 `sighter-infer` must check that `DirectML.dll` loads (`LoadLibraryExW`) before it registers the DirectML EP.
 
@@ -121,10 +124,18 @@ delay-loaded import a missing `DirectML.dll` raises a delay-load exception at th
   (`include/onnxruntime/core/platform/windows/TraceLoggingConfig.h`), so even if registered it is not in Microsoft's
   telemetry group. The ETW logging sink (`ONNXRuntimeTraceLoggingProvider`, no telemetry option) registers when the
   environment is created and only emits when a local trace session enables it.
-- `check-telemetry.sh` therefore **fails** on 1DS (plain and mangled), curl, mbedTLS, collector host names and the
-  Microsoft telemetry group GUID, and **reports** the two ONNX Runtime provider names. Checked against known samples:
-  Microsoft's Linux library fails (4 findings), pyke's macOS CoreML archive and the smoke binary linked with it pass,
-  `DirectML.dll` fails on the telemetry group unless `--allow-telemetry-group` is given.
+- Two checks follow from this, both run in every build job:
+  - `check-cmake-telemetry.sh` asserts from `CMakeCache.txt` that `onnxruntime_USE_TELEMETRY` and
+    `onnxruntime_USE_WINDOWS_TELEMETRY` are OFF. It also asserts that no compile command defines `USE_1DS_TELEMETRY` or
+    `USE_WINDOWS_TELEMETRY`. `onnxruntime_USE_1DS_TELEMETRY` is not a cache entry: CMakeLists.txt sets it only when
+    `onnxruntime_USE_TELEMETRY` is on. Both values go into `BUILD-INFO.txt`.
+  - `conformance/release/telemetry-bytes.mjs` reads the merged library and the smoke binary in chunks, in ASCII and
+    UTF-16LE. It **fails** on 1DS (plain and mangled), curl, mbedTLS, the hosts `data.microsoft.com`,
+    `aria.microsoft.com` and `telemetry.microsoft.com`, and the Microsoft telemetry group GUID. It **reports** the ONNX
+    Runtime and DirectML provider names. It is shared code because Pacenotes needs the same check (ER-22).
+- Checked against known samples: Microsoft's Linux library fails (four findings). pyke's macOS CoreML archive passes
+  (83.5 MB in 0.3 s). `DirectML.dll` fails on the telemetry group unless `--allow-telemetry-group` is given. Its
+  imports have no network API.
 
 ## 5. DirectML: source, licence, telemetry
 
@@ -157,9 +168,9 @@ carries the same provider (not checked). The user's decision is under "Decided (
 
 - `--use_coreml` (Apple only), `--osx_arch arm64` (the default on an arm64 host), `--apple_deploy_target <ver>`, which
   `build.py` passes as `CMAKE_OSX_DEPLOYMENT_TARGET` (verified in `build_args.py`/`build.py`).
-- `--apple_deploy_target 13.4` (user, 2026-10-30): the floor the family already met with pyke's archive (Pacenotes ADR 0001); CoreML's
-  `MLProgram` format needs macOS 12 or later (secondary: ONNX Runtime CoreML EP page, not re-read
-  today).
+- `--apple_deploy_target 13.4` (user, 2026-10-30): the floor the family already met with pyke's archive (Pacenotes
+  ADR 0001). CoreML's `MLProgram` format needs macOS 12 or later (secondary: the ONNX Runtime CoreML EP page, not
+  re-read today).
 - The CoreML EP cannot be used in a basic minimal build (`cmake/onnxruntime_providers_coreml.cmake`); we build full.
 - `ort-sys` adds `CoreML` and `Foundation` and `c++` for our archive; the smoke binary built on pyke's archive linked only
   system libraries (`otool -L`: libc++, Foundation, CoreML, CoreFoundation, libobjc, libSystem; verified).
@@ -167,10 +178,17 @@ carries the same provider (not checked). The user's decision is under "Decided (
 ## 7. Build times and machine needs
 
 The jobs name runner labels only (`ubuntu-latest`, `macos-latest`, `windows-latest`), never a host, and any runner of
-the right OS may take them (user, 2026-10-30). `build-ort.sh` detects the cores and memory at run time and uses cores
-minus one compile jobs, at most one per 2 GB after 4 GB for the OS and the linker. The runners we know today, for the
-estimates only: two Linux hosts (one about 1.5× slower than the other, docs/research/2026-10-ci-timings.md), a 14-core
-Apple-silicon Mac shared with agents, and an 8-core, 16 GB Windows VM (user, 2026-10-30), where the rule gives 6 jobs.
+the right OS may take them (user, 2026-10-30). `detect-jobs.sh` measures at run time:
+- **Cores:** cores minus one; in a Linux container the cgroup CPU quota counts.
+- **Memory:** at most one compile job per 2 GB of available memory, after 2 GB kept back. Linux reads MemAvailable,
+  capped by the cgroup v1 or v2 limit; Windows reads free physical memory; macOS takes total memory minus 4 GB.
+- **Override:** `ORT_BUILD_JOBS` wins.
+
+The runners we know today, for the estimates only:
+- two Linux hosts, one about 1.5× slower than the other (docs/research/2026-10-ci-timings.md);
+- a 14-core Apple-silicon Mac shared with agents;
+- an 8-core, 16 GB Windows VM (user, 2026-10-30). The rule gives 7 jobs there with 16 GB free and 5 with 12 GB free.
+
 **No ONNX Runtime build was timed here.** The only measured times are pyke's own CI runs of the
 same kind of build (GitHub-hosted runners; job times from the GitHub Actions API, run 36487195855, 2026-09-28):
 
@@ -181,16 +199,34 @@ same kind of build (GitHub-hosted runners; job times from the GitHub Actions API
 | `x86_64-pc-windows-msvc`, DirectML | windows-2022 (4 vCPU) | 66 min |
 | `aarch64-pc-windows-msvc`, DirectML (cross build) | windows-2022 (4 vCPU) | 40 min |
 
-Projections (scaled by compile jobs, unmeasured): Linux CPU **15–30 min** on the faster Linux host and **40–60 min** on
-the slower one; macOS CoreML **15–35 min** on the shared Mac (the build runs niced, so other work slows it); on the
-8-core, 16 GB Windows VM with 6 jobs, Windows DirectML **40–60 min**, Windows CPU **35–55 min** and, if enabled, the arm64
-DirectML cross build **25–40 min**. The Windows variants run one after the other, about 1.5–2.5 h in all. Six jobs,
-not seven, because 16 GB allows one MSVC compile job per 2 GB after about 4 GB for Windows and the linker (rule 51). The
-times include fetching the sources (a few hundred MB) and building the third-party libraries. Every run is cold: a job
-keeps nothing between runs. The cache is the published archive itself, rebuilt only when its key (the pins) changes. Machine needs: CMake ≥ 3.28, Python ≥ 3.10 (ONNX Runtime's `build.py` and ONNX's code generation; no Python of
-ours), Git, a C++20 compiler (Visual Studio 2022 17.x with the C++ tools on Windows; Xcode command-line tools on macOS;
-GCC 13 in the Ubuntu 24.04 image); disk about 10–15 GB per variant for sources and objects (projection); RAM: the
-script allows one compile job per 2 GB.
+Projections (scaled by compile jobs, unmeasured):
+
+| Variant | Runner | Projected time |
+| --- | --- | --- |
+| Linux CPU | faster Linux host / slower one | **15–30 min** / **40–60 min** |
+| macOS CoreML | the shared Mac (the build runs niced, so other work slows it) | **15–35 min** |
+| Windows DirectML | 8-core, 16 GB VM, 5–6 jobs | **40–60 min** |
+| Windows CPU | same VM | **35–55 min** |
+| Windows arm64 DirectML cross build, if enabled | same VM | **25–40 min** |
+
+The Windows variants run one after the other, about 1.5–2.5 h in all. The times include fetching the sources (a few
+hundred MB) and building the third-party libraries.
+
+**Caches.** Jobs keep no folders between runs. What `actions/cache` keeps:
+- the ONNX Runtime source tree (keyed on `ORT_COMMIT`, and re-verified on restore);
+- the third-party source archives CMake downloads (checked by their SHA-1 from `cmake/deps.txt` when used);
+- the DirectML package (keyed on its NuGet SHA-512, re-verified on every run);
+- ccache on Linux and macOS, for runs that do not publish only.
+
+A published archive always comes from a cold compile. Warm rebuilds are unmeasured.
+
+**Machine needs:**
+- CMake ≥ 3.28, Python ≥ 3.10 (ONNX Runtime's `build.py` and ONNX's code generation; on Windows `python3`, `python`
+  or `py -3`, whichever answers 3.10+; no Python of ours), Git, and Node for the checks;
+- a C++20 compiler: Visual Studio 2022 17.x with the C++ tools on Windows, the Xcode command-line tools on macOS,
+  GCC 13 in the Ubuntu 24.04 image;
+- on Windows, a work path of at most 40 characters: the workflow uses a folder named after the run on the system drive;
+- disk about 10–15 GB per variant for sources and objects (projection).
 
 Archive sizes, for the package store: pyke's static macOS CoreML library is 83.5 MB (measured, cached copy), its
 Windows DirectML `onnxruntime.lib` 360 MB (research note 2026-10-29 §12); compressed archives of ours will be smaller
@@ -205,15 +241,19 @@ Windows DirectML `onnxruntime.lib` 360 MB (research note 2026-10-29 §12); compr
    macOS CoreML variant from pyke's archive, which passes the telemetry check and needs no CRT change (an ADR 0001
    amendment, since decision 8 says self-built); (b) none for Windows: pyke's archives are `/MD` and Microsoft's carry
    telemetry, so a Windows build failure is fixed, not worked around.
-3. **CI**: `.gitea/workflows/sighter-ort.yml`, manual dispatch plus a monthly build-only run, never on push. Linux on
+3. **CI**: `.gitea/workflows/sighter-ort.yml`, manual dispatch only, as part of release preparation; never on push or a
+   schedule. Linux on
    any `ubuntu-latest` runner in the `paddock-ci` image, macOS on any `macos-latest` (Apple silicon) runner, Windows on
    any `windows-latest` runner, the Windows variants one after the other; labels only, own temporary folders, compile
-   jobs detected at run time (user, 2026-10-30). Each job runs the telemetry check,
-   the smoke program (CPU, plus CoreML on macOS; DirectML on Windows as an informational step) and, on Windows, the
-   import checks. Publishing only on a dispatch from `main` with `publish: true`, to the generic package
-   `sighter-onnxruntime`, version `<ORT>-p<rev>`, never overwriting.
-4. **Windows arm64 + DirectML** (plan SW5) waits: no arm64 runner, and the brief scoped it out. pyke cross-builds it on an
-   x64 Windows runner in 40 min, so it is one more job on a Windows runner when wanted (commented in the workflow) (`--arm64` in ONNX Runtime's build).
+   jobs detected at run time (user, 2026-10-30). Each job runs the CMake and byte telemetry checks, the smoke program
+   (CPU, plus CoreML on macOS; DirectML on Windows as an informational step) and, on Windows, the import checks, then
+   uploads its archive as an artifact. A separate publish job runs only on a dispatch from `main` with `publish: true`.
+   It runs no build code: it downloads the artifacts, re-checks every `.sha256` and uploads them to the generic package
+   `sighter-onnxruntime`, version `<ORT>-p<rev>`. The same file again is a success; different content under the same
+   version fails.
+4. **Windows arm64 + DirectML** (plan SW5) is deferred: there is no arm64 runner, and the brief scoped it out. pyke
+   cross-builds it on an x64 Windows runner in 40 min (`--arm64` in ONNX Runtime's build). It is one more job on a
+   Windows runner when wanted; the workflow has it as a commented, optional job.
 
 ## Decided (user, 2026-10-30)
 
@@ -229,7 +269,8 @@ Windows DirectML `onnxruntime.lib` 360 MB (research note 2026-10-29 §12); compr
 - **Runners.** The builds run on any runner of the right OS: labels only (`ubuntu-latest`, `macos-latest`,
   `windows-latest`), never a host name; each job uses its own temporary folder and detects its compile jobs at run time.
 - **macOS minimum.** 13.4 (`MACOS_DEPLOYMENT_TARGET` in `pins.env`).
-- **Windows CI VM.** 8 cores and 16 GB, so the run-time rule gives 6 compile jobs there (used for the estimates).
+- **Windows CI VM.** 8 cores and 16 GB: the run-time rule gives 5–7 compile jobs there, depending on free memory
+  (used for the estimates).
 
 ## Still open
 

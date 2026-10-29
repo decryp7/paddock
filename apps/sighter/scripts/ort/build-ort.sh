@@ -13,7 +13,11 @@
 #
 # Each runs on its own OS (no cross builds). A full build is long (docs/research/2026-10-ort-builds.md, "Build times"):
 # run it from .gitea/workflows/sighter-ort.yml, never in an app's pipeline. --dry-run prints the plan and the build
-# command without fetching or compiling anything.
+# command without fetching or compiling anything. Compile jobs: detect-jobs.sh (ORT_BUILD_JOBS or --jobs override).
+# ORT_USE_CCACHE=1 compiles through ccache (Linux and macOS, when ccache is installed; never for a published build).
+# Needs Node (the checks are conformance/release/*.mjs), Python 3.10+ for ONNX Runtime's build.py, CMake 3.28+, Git.
+# On Windows the work folder must be short (at most 40 characters): ONNX Runtime's build tree is deep and MSVC tools
+# still stop at 260-character paths.
 #
 # Output in <work-dir>/out: onnxruntime-<ver>-p<rev>-<variant>.tar.gz, its .sha256, and catalogue.txt (the catalogue lines
 # for that archive). The archive holds:
@@ -22,7 +26,8 @@
 #   link.txt                                      system libraries the consumer adds (ort-sys adds them only for pyke's
 #                                                 archives), and the DLLs to delay-load; read by sighter-infer's build.rs
 #   LICENSE, ThirdPartyNotices.txt                ONNX Runtime's (MIT) and its dependencies' notices
-#   BUILD-INFO.txt                                version, commit, flags, toolchain: the cache key
+#   BUILD-INFO.txt                                version, commit, flags, toolchain, the telemetry switches as CMake
+#                                                 recorded them: the cache key
 # DirectML.dll is not in the archive: fetch-directml.sh supplies it (pinned from NuGet), and the DirectML gate (P6) decides
 # whether it ships.
 set -euo pipefail
@@ -35,7 +40,7 @@ usage() { sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 variant=${1:-}; work=${2:-}
 [ -n "$variant" ] && [ -n "$work" ] || usage
 shift 2
-jobs=${ORT_BUILD_JOBS:-auto}
+jobs=auto
 dry=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -68,24 +73,37 @@ case "$variant" in
   *) echo "build-ort: unknown variant '$variant'" >&2; usage ;;
 esac
 
-# Parallel compile jobs (rule 51 / ER-20), detected on the runner at run time (no machine is assumed): CPU-bound, so cores
-# minus one, and at most one job per 2 GB of the memory left after 4 GB for the OS and the linker (the largest
-# translation units, MLAS and the contrib ops, need well over 1 GB each). In a container the cgroup memory limit counts.
-# Example: 8 cores and 16 GB give 6 jobs. ORT_BUILD_JOBS or --jobs override.
-if [ "$jobs" = auto ]; then
+[ "$jobs" = auto ] && jobs=$("$here/detect-jobs.sh")
+
+# Repository root (the shared checks live in conformance/release).
+root=$(cd "$here/../../../.." && pwd)
+
+# ONNX Runtime's build.py needs Python 3.10+. On Windows `python3` may be the Store's placeholder that only opens a
+# window, so each candidate must answer --version with a 3.10+ version.
+python=()
+for cand in python3 python "py -3"; do
+  # shellcheck disable=SC2086
+  if v=$($cand -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null) && [ "${v%%.*}" -eq 3 ] && [ "${v#*.}" -ge 10 ]; then
+    read -r -a python <<<"$cand"
+    break
+  fi
+done
+[ ${#python[@]} -gt 0 ] || { echo "build-ort: no Python 3.10 or later found (python3, python, py -3)" >&2; exit 1; }
+
+case "$host" in
+  MINGW* | MSYS*)
+    if [ ${#work} -gt 40 ]; then
+      echo "build-ort: the work folder '$work' is ${#work} characters; use one of at most 40 (deep build paths fail on Windows)" >&2
+      exit 2
+    fi ;;
+esac
+
+ccache_args=()
+if [ "${ORT_USE_CCACHE:-0}" = 1 ]; then
   case "$host" in
-    Darwin-*) cores=$(sysctl -n hw.ncpu); mem_mb=$(( $(sysctl -n hw.memsize) / 1048576 )) ;;
-    Linux-*) cores=$(nproc); mem_mb=$(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1024 ))
-       limit=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo max)
-       case "$limit" in ''|max|*[!0-9]*) ;; *) [ $(( limit / 1048576 )) -lt "$mem_mb" ] && mem_mb=$(( limit / 1048576 )) ;; esac ;;
-    *) cores=${NUMBER_OF_PROCESSORS:-4}
-       mem_mb=$(( $(powershell -NoProfile -Command '(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory' | tr -d '\r') / 1048576 )) ;;
+    MINGW* | MSYS*) echo "build-ort: ccache is not used on Windows (Visual Studio generator)" ;;
+    *) if command -v ccache >/dev/null 2>&1; then ccache_args=(--use_cache); else echo "build-ort: ORT_USE_CCACHE=1 but no ccache; building without it"; fi ;;
   esac
-  jobs=$(( cores > 1 ? cores - 1 : 1 ))
-  # Installed memory reads a little under its nominal size (16 GB shows as about 15.8 GiB), so round to the nearest GiB.
-  mem_gb=$(( (mem_mb + 512) / 1024 ))
-  by_mem=$(( (mem_gb - 4) / 2 > 0 ? (mem_gb - 4) / 2 : 1 ))
-  [ "$by_mem" -lt "$jobs" ] && jobs=$by_mem
 fi
 
 pkg_version="$ORT_VERSION-p$PIPELINE_REV"
@@ -99,15 +117,15 @@ cmake_defines=(
   # Dependencies come from cmake/deps.txt (URLs pinned by SHA-1), never from whatever the runner has installed.
   FETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER
 )
-build_cmd=(python3 tools/ci_build/build.py --build_dir "$build" --config Release --update --build --parallel "$jobs"
-  --skip_tests --compile_no_warning_as_error --no_telemetry "${extra[@]}")
+build_cmd=("${python[@]}" tools/ci_build/build.py --build_dir "$build" --config Release --update --build --parallel "$jobs"
+  --skip_tests --compile_no_warning_as_error --no_telemetry ${extra[@]+"${extra[@]}"} ${ccache_args[@]+"${ccache_args[@]}"})
 
 echo "build-ort: $name, $jobs compile jobs, work folder $work"
 if [ "$dry" = 1 ]; then
   [ -n "$dml_arch" ] && echo "  fetch-directml.sh $dml_arch $work/cache  (then --dml_path <its folder>)"
   echo "  git clone --branch v$ORT_VERSION (expect $ORT_COMMIT) -> $src"
   echo "  (cd $src && ${build_cmd[*]}${dml_arch:+ --dml_path <DML_PATH>} --cmake_extra_defines ${cmake_defines[*]})"
-  echo "  merge the static libraries -> $stage/lib/$lib_name; check-telemetry.sh; pack -> $out/$name.tar.gz"
+  echo "  check CMakeCache.txt (telemetry off); merge the static libraries -> $stage/lib/$lib_name; telemetry-bytes.mjs; pack -> $out/$name.tar.gz"
   exit 0
 fi
 
@@ -115,14 +133,18 @@ sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d
 native() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s\n' "$1"; fi; }
 
 # ---- source: the pinned tag, checked against its commit; submodules at the tag's commits (fuzzing and emsdk skipped).
-if [ ! -f "$src/.pinned" ]; then
+# A source tree restored from a cache is checked the same way on every run: the pinned commit, nothing changed.
+src_ok() {
+  [ -d "$src/.git" ] && [ "$(git -C "$src" rev-parse HEAD 2>/dev/null)" = "$ORT_COMMIT" ] \
+    && git -C "$src" diff --quiet HEAD 2>/dev/null \
+    && [ "$(git -C "$src" submodule status -- cmake/external/onnx 2>/dev/null | cut -c1)" = " " ]
+}
+if ! src_ok; then
   rm -rf "$src"
   mkdir -p "$(dirname "$src")"
-  git clone --quiet --depth 1 --branch "v$ORT_VERSION" https://github.com/microsoft/onnxruntime.git "$src"
-  head=$(git -C "$src" rev-parse HEAD)
-  [ "$head" = "$ORT_COMMIT" ] || { echo "build-ort: v$ORT_VERSION is $head, pinned $ORT_COMMIT" >&2; exit 1; }
-  git -C "$src" submodule update --quiet --init --depth 1 -- cmake/external/onnx
-  touch "$src/.pinned"
+  git -c core.longpaths=true clone --quiet --depth 1 --branch "v$ORT_VERSION" https://github.com/microsoft/onnxruntime.git "$src"
+  git -C "$src" -c core.longpaths=true submodule update --quiet --init --depth 1 -- cmake/external/onnx
+  src_ok || { echo "build-ort: v$ORT_VERSION is $(git -C "$src" rev-parse HEAD), pinned $ORT_COMMIT (or its onnx submodule differs)" >&2; exit 1; }
 fi
 
 # ---- DirectML for the DirectML variant: our pinned copy, so ORT's CMake does not restore it with an unpinned nuget.exe.
@@ -135,8 +157,11 @@ fi
 
 # ---- build, at background priority so a shared runner stays responsive.
 started=$(date +%s)
-(cd "$src" && nice -n 10 "${build_cmd[@]}" "${dml_args[@]}" --cmake_extra_defines "${cmake_defines[@]}")
+(cd "$src" && nice -n 10 "${build_cmd[@]}" ${dml_args[@]+"${dml_args[@]}"} --cmake_extra_defines "${cmake_defines[@]}")
 build_secs=$(( $(date +%s) - started ))
+
+# ---- the telemetry switches as CMake recorded them (check-cmake-telemetry.sh), kept for BUILD-INFO.txt.
+telemetry_record=$("$here/check-cmake-telemetry.sh" "$build/Release")
 
 # ---- bundle: every static library of the build except tests, mocks, protoc and import libraries, merged into one.
 rel="$build/Release"
@@ -181,7 +206,7 @@ case "$variant" in
 esac
 
 # ---- check: no telemetry backend in what we ship.
-"$here/check-telemetry.sh" "$stage/lib/$lib_name"
+node "$root/conformance/release/telemetry-bytes.mjs" "$stage/lib/$lib_name"
 
 # ---- record and pack.
 case "$variant" in
@@ -194,12 +219,14 @@ esac
   echo "package: $ORT_PACKAGE $pkg_version"
   echo "variant: $variant"
   echo "onnxruntime: $ORT_VERSION ($ORT_COMMIT)"
-  echo "build.py flags: --config Release --skip_tests --compile_no_warning_as_error --no_telemetry ${extra[*]}${dml_arch:+ --dml_path (DirectML $DML_VERSION)}"
+  echo "build.py flags: --config Release --skip_tests --compile_no_warning_as_error --no_telemetry ${extra[*]-}${dml_arch:+ --dml_path (DirectML $DML_VERSION)}"
   echo "cmake defines: ${cmake_defines[*]}"
+  echo "telemetry (CMakeCache.txt): $telemetry_record"
+  echo "ccache: ${ccache_args[*]:-no}"
   echo "host: $host"
   echo "compiler: $compiler"
   echo "cmake: $(cmake --version | head -n 1)"
-  echo "python: $(python3 --version)"
+  echo "python: $("${python[@]}" --version 2>&1)"
   echo "build seconds: $build_secs ($jobs jobs)"
   echo "library sha256: $(sha256 "$stage/lib/$lib_name")"
 } >"$stage/BUILD-INFO.txt"
