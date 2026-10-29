@@ -155,7 +155,9 @@ One line each. The dated records are in the app files.
   a 200 MB peak. BM25 plus potion-code meets the quality bar (0.750 / +28%).
 - **Pitcrew** (branch `docs/pitcrew-autoscale`, simulation): auto-scaling 1–4 runners cuts the mean wait from 171 to
   9.7 min with no contention.
-- **Pitwall, Spotter, Sighter, demos:** no recorded results beyond bundle budgets.
+- **Pitwall, Spotter, demos:** no recorded results beyond bundle budgets.
+- **Sighter:** no code yet; one indicative upstream measurement (RF-DETR Nano/Small ONNX on CPU and CoreML,
+  2026-10-29) in [apps/sighter/docs/performance.md](../apps/sighter/docs/performance.md), for its ADR 0001.
 
 ## Other family measurements
 
