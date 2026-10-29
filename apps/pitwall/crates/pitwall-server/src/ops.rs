@@ -54,6 +54,9 @@ impl Ops {
     /// Cancels `op`: wakes it when it runs, otherwise keeps a permit until `now + ORPHAN_TTL_MS`.
     pub fn cancel(&mut self, op: &str, now: u64) {
         if let Some(e) = self.0.get(op) {
+            // Every operation sharing the id stops: `notify_waiters` wakes those already waiting, the permit catches one that
+            // has not started waiting yet.
+            e.wake.notify_waiters();
             e.wake.notify_one();
             return;
         }
@@ -93,6 +96,23 @@ impl Ops {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn one_cancel_stops_every_operation_sharing_the_id() {
+        let mut ops = Ops::default();
+        let a = ops.begin("same", 0);
+        let b = ops.begin("same", 0);
+        let (wa, wb) = (a.clone(), b.clone());
+        let ta = tokio::spawn(async move { wa.notified().await });
+        let tb = tokio::spawn(async move { wb.notified().await });
+        // Both are waiting before the cancel is sent.
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+        }
+        ops.cancel("same", 1);
+        let both = tokio::time::timeout(std::time::Duration::from_secs(30), async { (ta.await, tb.await) }).await;
+        assert!(both.is_ok(), "both operations were woken by one cancel");
+    }
 
     async fn woken(n: &Notify) -> bool {
         tokio::time::timeout(std::time::Duration::from_millis(0), n.notified())
