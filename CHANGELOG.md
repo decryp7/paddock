@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-proc`: processes by identity (ADR 0033)
+- New `ProcessId` (pid plus `StartTime`), `Holder`, `Ending`, `holder`, `usage::Row` and `usage::identity`. `kill_tree`, `end`, `ask` and `terminate` take a `ProcessId` and end a process only if its pid still belongs to it (on Windows the check and `TerminateProcess` use one handle); a skipped kill logs a warning. `end` returns an `Ending`; `processes_mentioning` and `descendants_of` return `ProcessId`s; `usage::descendants` takes and returns them and counts a process as a child only if it started no earlier than its parent. `Table` rows are `Row { parent, rss, started }`. `ProcessId::of_recorded(pid, written_ms)` is for a pid read from a file. `Supervised::process()` is new.
+- Windows: `Supervised::kill` ends the child's kill-on-close job (`TerminateJobObject`) first; nothing runs `taskkill /T` any more, and `ask` sends its close request to the one process.
+- `paddock-chromium` ends leftover helpers by identity; `paddock-ipc`'s client ends a companion of another build only if it started before its discovery file was written.
+- New conformance check C53: nothing is ended by a bare pid.
+
 ### `paddock-chromium`: an unexplained abort names the network service
 - `Page::navigate`'s error for an unexplained `net::ERR_ABORTED` (not a download, not replaced) says whether the browser's network service restarted, stayed unchanged or could not be asked. New `Page::network_service_pid` (`Result<Option<u32>>`; `SystemInfo` is an experimental DevTools domain). ADR 0030 (proposed).
 

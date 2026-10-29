@@ -758,3 +758,14 @@ navigation, and a restart of the browser's network service. Fixing them one gues
 CI. Ending the network service locally reproduced the Windows trace exactly. **Rule:** a driver error that can have
 several causes says which ones it ruled out (the trace, the network service's process), and a real-browser test drives
 each named cause on purpose (ADR 0030). Diagnostics land before a fix that would hide the cause.
+
+## A pid is not a process: one test's close killed another test's browser (2026-10-30)
+`paddock_proc::kill_tree` read the process table, ran `taskkill /T /F`, then killed every pid from that table again. By then
+those pids were free, and Windows hands a freed pid on at once: with four real-browser tests in parallel, the next owner was
+likely another test's Chrome helper, and killing its network service gives exactly ADR 0030's `ERR_ABORTED` trace. The sweep
+found the same mistake in four shapes across the family: a snapshot killed later, a tree built from parent pids (which outlive
+their processes on Windows), a `killpg(child.id())` after `try_wait` had reaped the child, and a pid trusted from a file.
+**Rule (ADR 0033):** a process is a `paddock_proc::ProcessId` (pid plus start time), checked before every kill (one handle on
+Windows); a child counts as a child only if it started after its parent; supervised Windows trees end through their job
+object; check C53 fails any other kill by pid. **Also:** when a flaky test fails right after another test in the same binary
+ended something, suspect the ending before the failing test.
