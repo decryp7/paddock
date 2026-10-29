@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { clickShape, expect, hoverShape, test } from '@decryp7/paddock-e2e';
 
 /** The disk map against the mock backend: scan, drill, up, table view (chromium only). */
 const url = (query = '') => `/?latency=0${query}#/disk-map`;
@@ -40,14 +40,13 @@ test.describe('disk map', () => {
     await expect(page.getByRole('button', { name: 'Rescan Macintosh HD' })).toBeVisible();
     const ring = page.getByRole('tree', { name: 'Disk usage of Macintosh HD' });
     await expect(ring.getByRole('treeitem', { name: /^Hidden space/ })).toBeVisible();
-    // The middle of a ring segment's box is not on the segment, so the click is sent to the segment itself.
-    await ring.getByRole('treeitem', { name: /^Users,/ }).dispatchEvent('click');
+    await clickShape(page, ring.getByRole('treeitem', { name: /^Users,/ }));
     await expect(page.locator('.crumb.current')).toHaveText('Users');
     await expect(page.getByRole('region', { name: 'In this folder' }).or(page.locator('section.list')).getByRole('button', { name: /^Open alex/ })).toBeVisible();
     await page.getByRole('button', { name: 'Up to Macintosh HD', exact: true }).click();
     await expect(page.locator('.crumb.current')).toHaveText('Macintosh HD');
-    await ring.getByRole('treeitem', { name: /^Users,/ }).dispatchEvent('mouseenter');
-    await expect(page.locator('section.list .item.linked')).toContainText('Users');
+    await hoverShape(page, ring.getByRole('treeitem', { name: /^Users,/ }));
+    await expect(ring.getByRole('treeitem', { name: /^Users,/ })).toHaveClass(/pd-arc--active/);
   });
 
   test('a scan shows its job and Cancel keeps a usable partial result', async ({ page }) => {
@@ -81,25 +80,51 @@ test.describe('disk map', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Disk map' })).toBeVisible();
   });
 
+  test('the volume picker is a Material menu with a surface behind it', async ({ page }) => {
+    await page.goto(url());
+    await page.getByRole('button', { name: 'Choose a volume' }).click();
+    const panel = page.locator('.mat-mdc-menu-panel');
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole('menuitem', { name: /Choose a folder/ })).toBeVisible();
+    const alpha = await panel.evaluate((el) => {
+      const c = getComputedStyle(el).backgroundColor;
+      const m = /rgba?\(([^)]+)\)/.exec(c);
+      const parts = m?.[1]?.split(/[ ,/]+/).filter(Boolean) ?? [];
+      return parts.length >= 4 ? Number(parts[3]) : 1;
+    });
+    expect(alpha).toBeGreaterThan(0.9);
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+  });
+
   for (const width of [900, 1024, 1280]) {
     test(`nothing clips at ${width} px, in the chart view and in the table`, async ({ page }, info) => {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(url());
       await page.getByRole('button', { name: 'Scan Macintosh HD' }).click();
       await expect(page.getByRole('button', { name: 'Rescan Macintosh HD' })).toBeVisible();
+      // Every row (list rows, table rows), the toolbar, the capacity strip and the job clip nothing, and the row actions sit inside their row.
       const clipped = () =>
-        page.evaluate(() =>
-          Array.from(document.querySelectorAll<HTMLElement>('tr, .item, .toolbar, .capacity, .job'))
-            .filter((el) => el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1)
-            .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).trim()}: needs ${el.scrollWidth}px, has ${el.clientWidth}px`),
-        );
+        page.evaluate(() => {
+          const out: string[] = [];
+          for (const el of Array.from(document.querySelectorAll<HTMLElement>('tr, .item, .toolbar, .capacity, .job'))) {
+            if (el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1) out.push(`${el.tagName.toLowerCase()}.${String(el.className).trim()}: needs ${el.scrollWidth}px, has ${el.clientWidth}px`);
+          }
+          for (const acts of Array.from(document.querySelectorAll<HTMLElement>('.acts-row, td.row-acts'))) {
+            const row = acts.closest<HTMLElement>('.item, tr');
+            const a = acts.getBoundingClientRect();
+            const r = row?.getBoundingClientRect();
+            if (r && a.width > 0 && (a.right > r.right + 1 || a.left < r.left - 1)) out.push(`row actions leave their row: ${Math.round(a.right)} > ${Math.round(r.right)}`);
+          }
+          if (document.documentElement.scrollWidth > window.innerWidth) out.push(`the page scrolls sideways: ${document.documentElement.scrollWidth} > ${window.innerWidth}`);
+          return out;
+        });
       expect(await clipped()).toEqual([]);
-      if (width === 900) await page.screenshot({ path: process.env['DISK_MAP_SHOTS'] ? `${process.env['DISK_MAP_SHOTS']}/disk-map-chart-900.png` : info.outputPath('chart-900.png') });
+      if (width === 900 || width === 1280) await page.screenshot({ path: process.env['DISK_MAP_SHOTS'] ? `${process.env['DISK_MAP_SHOTS']}/disk-map-chart-${width}.png` : info.outputPath(`chart-${width}.png`) });
       await page.getByRole('radio', { name: 'Table' }).click();
       await expect(page.getByRole('table', { name: /Contents of/ })).toBeVisible();
       expect(await clipped()).toEqual([]);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      if (width === 900) await page.screenshot({ path: process.env['DISK_MAP_SHOTS'] ? `${process.env['DISK_MAP_SHOTS']}/disk-map-table-900.png` : info.outputPath('table-900.png') });
+      if (width === 900 || width === 1280) await page.screenshot({ path: process.env['DISK_MAP_SHOTS'] ? `${process.env['DISK_MAP_SHOTS']}/disk-map-table-${width}.png` : info.outputPath(`table-${width}.png`) });
     });
   }
 });

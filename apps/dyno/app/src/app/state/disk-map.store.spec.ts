@@ -282,6 +282,29 @@ describe('DiskMapStore', () => {
     expect(store.startError()?.message).toBe('Nothing to read again.');
   });
 
+  it('coalesces the reads a running scan asks for: one in flight and one waiting, however many statuses arrive', async () => {
+    const { store, mock } = setup();
+    await store.loadVolumes();
+    await store.scan({ volume: { id: '/' } });
+    await advance();
+    const running = { ...store.status()!, state: 'running' as const };
+    const gates: (() => void)[] = [];
+    const real = mock.diskChildren.bind(mock);
+    const spy = vi.spyOn(mock, 'diskChildren').mockImplementation(async (q) => {
+      await new Promise<void>((resolve) => gates.push(resolve));
+      return real(q);
+    });
+    for (let i = 1; i <= 6; i++) store.receive({ ...running, seq: running.seq + i });
+    expect(spy).toHaveBeenCalledTimes(1);
+    gates.shift()!();
+    await advance();
+    expect(spy).toHaveBeenCalledTimes(2);
+    gates.shift()!();
+    await advance();
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(gates).toHaveLength(0);
+  });
+
   it('reads the rings under the centre in one request, and nothing else for the chart', async () => {
     const { store, mock } = setup();
     await store.loadVolumes();

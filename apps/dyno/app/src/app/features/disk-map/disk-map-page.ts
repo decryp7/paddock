@@ -1,17 +1,20 @@
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
-import { ChangeDetectionStrategy, Component, ElementRef, OnInit, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, ElementRef, OnInit, computed, inject, signal, viewChild } from '@angular/core';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatCell, MatCellDef, MatColumnDef, MatHeaderCell, MatHeaderCellDef, MatHeaderRow, MatHeaderRowDef, MatNoDataRow, MatRow, MatRowDef, MatTable } from '@angular/material/table';
+import { MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
+import { MatProgressBar } from '@angular/material/progress-bar';
 import { MatSort, MatSortHeader, type Sort } from '@angular/material/sort';
 import { MatTooltip } from '@angular/material/tooltip';
-import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
-import { PdSunburst, type PdSunburstPoint } from '@decryp7/paddock-ui/chart';
+import { SuSegmentedControl, readPaddockTokens, type SuSegment } from '@decryp7/paddock-ui';
+import { PdSunburst, branchSlots, slotColour, type PdSunburstPoint } from '@decryp7/paddock-ui/chart';
 import type { DiskNode, Volume } from '../../core/api.types';
 import { PlatformService } from '../../core/platform';
+import { UNAVAILABLE, reasonText } from '../../core/measured';
 import { AsyncState } from '../../shared/async-state';
 import { formatBytes, formatCount, formatAgo, formatDate, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
+import { RowMenu } from '../../shared/row-menu';
 import { SearchField } from '../../shared/search-field';
 import { injectNow } from '../../shared/now';
 import { DiskMapStore } from '../../state/disk-map.store';
@@ -47,7 +50,7 @@ import {
 @Component({
   selector: 'dy-disk-map-page',
   imports: [
-    AsyncState, Icon, PdSunburst, CdkMenuTrigger, CdkMenu, CdkMenuItem, CdkContextMenuTrigger, SearchField, SuSegmentedControl, MatButton, MatIconButton, MatTooltip,
+    AsyncState, Icon, PdSunburst, MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger, MatProgressBar, RowMenu, SearchField, SuSegmentedControl, MatButton, MatIconButton, MatTooltip,
     MatTable, MatColumnDef, MatHeaderCellDef, MatHeaderCell, MatCellDef, MatCell, MatHeaderRowDef, MatHeaderRow, MatRowDef, MatRow, MatNoDataRow, MatSort, MatSortHeader,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -59,16 +62,14 @@ import {
           <h1>Disk map</h1>
           <p>{{ subtitle() }}</p>
         </div>
-        @if (store.outcome() === 'done' || store.outcome() === 'cancelled') {
+        @if ((store.outcome() === 'done' || store.outcome() === 'cancelled') && !noAccess()) {
           <button type="button" matButton="filled" [disabled]="store.starting()" (click)="store.rescan()"><dy-icon name="refresh" /> Rescan {{ store.status()?.name }}</button>
-        } @else if (store.outcome() === 'failed') {
-          <button type="button" matButton="filled" [disabled]="store.starting()" (click)="store.rescan()"><dy-icon name="refresh" /> Retry scan</button>
         }
       </header>
 
       <dy-async [loaded]="store.volumesLoaded()" [error]="store.volumesError()" what="volumes" [rows]="4" (retry)="load()">
-        <div class="toolbar" role="toolbar" aria-label="Disk map">
-          <button type="button" matButton="outlined" class="picker" [cdkMenuTriggerFor]="pickerMenu" aria-label="Choose a volume" [disabled]="store.outcome() === 'running'">
+        <div class="toolbar">
+          <button type="button" matButton="outlined" class="picker" [matMenuTriggerFor]="pickerMenu" aria-label="Choose a volume" [disabled]="store.outcome() === 'running'">
             <dy-icon [name]="pickerIcon()" /> <span class="picker-name">{{ store.volume()?.name ?? pickerFallback() }}</span> <span class="chev" aria-hidden="true">▾</span>
           </button>
           <span class="divider" aria-hidden="true"></span>
@@ -141,9 +142,11 @@ import {
                 <div class="job-title"><strong>Scanning {{ s.name }}</strong><span class="muted">{{ phase() }}</span></div>
                 <button type="button" matButton="outlined" (click)="store.cancel()">Cancel scan</button>
               </div>
-              <div class="progress" role="progressbar" [attr.aria-label]="'Scan of ' + s.name" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="fraction() === null ? null : percent()" [attr.aria-valuetext]="count()" [class.indeterminate]="fraction() === null">
-                <span [style.width.%]="fraction() === null ? 40 : percent()"></span>
-              </div>
+              @if (fraction() !== null) {
+                <mat-progress-bar mode="determinate" [value]="percent()" [attr.aria-label]="'Scan of ' + s.name" [attr.aria-valuetext]="count()" />
+              } @else if (!reducedMotion) {
+                <mat-progress-bar mode="indeterminate" [attr.aria-label]="'Scan of ' + s.name" [attr.aria-valuetext]="count()" />
+              }
               <p class="job-count" aria-live="off">{{ count() }}@if (rate(); as r) { · {{ r }} }</p>
             </section>
           } @else if (store.outcome() === 'cancelled') {
@@ -229,14 +232,11 @@ import {
               <dy-icon name="folder" />
               <h2>This folder is empty</h2>
               <p>{{ store.centre()?.name }} has nothing in it that Dyno could count.</p>
-              @if (canGoUp()) {
-                <button type="button" matButton="outlined" (click)="store.up()">Go up</button>
-              }
             </section>
           } @else if (store.view() === 'chart') {
             <div class="main">
               <section class="card centre" aria-label="This folder">
-                <div class="chart-slot" [cdkContextMenuTriggerFor]="rowMenu" [cdkContextMenuDisabled]="true">
+                <div class="chart-slot">
                   @if (chartRoot() || store.ringsError()) {
                     <pd-sunburst
                       [label]="'Disk usage of ' + store.status()!.name"
@@ -247,6 +247,7 @@ import {
                       [centre]="chartCentre()"
                       [format]="bytes"
                       [rings]="4"
+                      [highlight]="rowHover()"
                       [live]="store.outcome() === 'running'"
                       (centreChange)="onCentre($event)"
                       (loadChildren)="onLoad($event)"
@@ -256,16 +257,11 @@ import {
                     />
                   }
                 </div>
-                <h2>{{ level.node.name }}</h2>
-                <p class="big">{{ bytes(level.node.bytes) }}</p>
                 <p class="muted">{{ plural(level.node.items, 'item') }}@if (level.node.newestChange) { · newest change {{ date(level.node.newestChange) }} }</p>
                 @if (!level.node.complete) {
                   <p class="tag warn"><dy-icon name="alert" /> Incomplete: part of this folder was not read</p>
                 }
                 <div class="acts">
-                  @if (canGoUp()) {
-                    <button type="button" matButton="outlined" [attr.aria-label]="upLabel()" (click)="store.up()">Go up</button>
-                  }
                   <button type="button" matButton="outlined" (click)="store.reveal(level.node.id)"><dy-icon name="folder" /> {{ revealText }}</button>
                   <button type="button" matButton="outlined" (click)="copyPath(level.node.id)"><dy-icon name="copy" /> Copy path</button>
                 </div>
@@ -274,25 +270,30 @@ import {
                 <div class="card-head"><h2 id="in-folder">In this folder ({{ formatCount(level.shown) }})</h2></div>
                 <ul class="rows">
                   @for (r of store.rows(); track r.node.id) {
-                    <li class="item" [class.linked]="hoveredId() === chartIdOf(r.node.id)" [cdkContextMenuTriggerFor]="rowMenu" [cdkContextMenuTriggerData]="{ row: r }" (mouseenter)="rowHover.set(chartIdOf(r.node.id))" (mouseleave)="rowHover.set(null)">
-                      <span class="swatch" [attr.data-slot]="r.slot" aria-hidden="true"></span>
+                    <li class="item" [class.linked]="hoveredId() === chartIdOf(r.node.id)" dyRowMenu [matContextMenuTriggerFor]="rowMenu" [matContextMenuTriggerData]="{ row: r }" (mouseenter)="rowHover.set(chartIdOf(r.node.id))" (mouseleave)="rowHover.set(null)">
+                      <span class="swatch" [style.background]="colour(r.rank)" aria-hidden="true"></span>
                       @if (r.drillable) {
-                        <button type="button" class="name link" [attr.aria-label]="'Open ' + r.node.name + ', ' + bytes(r.node.bytes) + ', ' + r.share + ' of this folder'" (click)="store.open(r.node)"><dy-icon name="folder" />{{ r.node.name }}</button>
+                        <button type="button" class="name link" [attr.aria-label]="'Open ' + r.node.name + ', ' + bytes(r.node.bytes) + ', ' + r.share + ' of this folder'" (click)="store.open(r.node)"><dy-icon name="folder" /><span class="txt">{{ r.node.name }}</span></button>
                       } @else {
-                        <span class="name" tabindex="0" [attr.aria-label]="r.node.name + ', ' + bytes(r.node.bytes) + ', ' + r.share + ' of this folder'"><dy-icon [name]="r.node.kind === 'unreadable' ? 'lock' : 'file'" />{{ r.node.name }}</span>
+                        <span class="name"><dy-icon [name]="r.node.kind === 'unreadable' ? 'lock' : 'file'" /><span class="txt">{{ r.node.name }}</span></span>
                       }
                       @if (!r.node.complete) {
-                        <span class="tag warn">{{ r.node.kind === 'unreadable' ? 'unreadable' : 'incomplete' }}</span>
+                        <span class="tag warn">{{ r.node.kind === 'unreadable' ? 'Unreadable' : 'Incomplete' }}</span>
                       }
-                      <span class="size num">{{ bytes(r.node.bytes) }}</span>
-                      <span class="pct num muted">{{ r.share }}</span>
+                      @if (r.node.kind === 'unreadable') {
+                        <span class="size num muted" [matTooltip]="unavailableWhy">{{ unavailable }}</span>
+                        <span class="pct num muted" aria-hidden="true">–</span>
+                      } @else {
+                        <span class="size num">{{ bytes(r.node.bytes) }}</span>
+                        <span class="pct num muted">{{ r.share }}</span>
+                      }
                       <span class="acts-row"><button type="button" matIconButton [matTooltip]="revealText" [attr.aria-label]="revealText + ': ' + r.node.name" (click)="store.reveal(r.node.id)"><dy-icon name="folder" /></button><button type="button" matIconButton matTooltip="Copy path" [attr.aria-label]="'Copy path of ' + r.node.name" (click)="copyPath(r.node.id)"><dy-icon name="copy" /></button></span>
                     </li>
                   }
                   @if (level.other.count > 0 && level.other.bytes > 0) {
                     <li class="item other">
-                      <span class="swatch" data-slot="8" aria-hidden="true"></span>
-                      <span class="name"><dy-icon name="layers" />{{ plural(level.other.count, 'smaller item') }}</span>
+                      <span class="swatch" aria-hidden="true"></span>
+                      <span class="name"><dy-icon name="layers" /><span class="txt">{{ plural(level.other.count, 'smaller item') }}</span></span>
                       <span class="size num">{{ bytes(level.other.bytes) }}</span>
                       <span class="pct num muted">{{ share(level.other.bytes, level.node.bytes) }}</span>
                       <span class="acts-row"><button type="button" matButton="text" (click)="store.setView('table')">Show in table</button></span>
@@ -300,8 +301,8 @@ import {
                   }
                   @if (level.loose.bytes > 0) {
                     <li class="item other">
-                      <span class="swatch" data-slot="8" aria-hidden="true"></span>
-                      <span class="name"><dy-icon name="file" />Files directly in this folder</span>
+                      <span class="swatch" aria-hidden="true"></span>
+                      <span class="name"><dy-icon name="file" /><span class="txt">Files directly in this folder</span></span>
                       <span class="size num">{{ bytes(level.loose.bytes) }}</span>
                       <span class="pct num muted">{{ share(level.loose.bytes, level.node.bytes) }}</span>
                       <span class="acts-row"></span>
@@ -327,24 +328,30 @@ import {
                   <ng-container matColumnDef="name">
                     <th mat-header-cell *matHeaderCellDef mat-sort-header="name">Name</th>
                     <td mat-cell *matCellDef="let r" class="nm">
-                      <span class="swatch" [attr.data-slot]="r.slot" aria-hidden="true"></span>
+                      <span class="swatch" [style.background]="colour(r.rank)" aria-hidden="true"></span>
                       @if (r.drillable) {
                         <button type="button" matButton="text" class="name" (click)="store.open(r.node)"><dy-icon name="folder" />{{ r.node.name }}</button>
                       } @else {
                         <span class="name"><dy-icon [name]="r.node.kind === 'unreadable' ? 'lock' : 'file'" />{{ r.node.name }}</span>
                       }
                       @if (!r.node.complete) {
-                        <span class="tag warn">{{ r.node.kind === 'unreadable' ? 'unreadable' : 'incomplete' }}</span>
+                        <span class="tag warn">{{ r.node.kind === 'unreadable' ? 'Unreadable' : 'Incomplete' }}</span>
                       }
                     </td>
                   </ng-container>
                   <ng-container matColumnDef="bytes">
                     <th mat-header-cell *matHeaderCellDef mat-sort-header="bytes" class="num">Size</th>
-                    <td mat-cell *matCellDef="let r" class="num">{{ bytes(r.node.bytes) }}</td>
+                    <td mat-cell *matCellDef="let r" class="num">
+                      @if (r.node.kind === 'unreadable') {
+                        <span class="muted" [matTooltip]="unavailableWhy">{{ unavailable }}</span>
+                      } @else {
+                        {{ bytes(r.node.bytes) }}
+                      }
+                    </td>
                   </ng-container>
                   <ng-container matColumnDef="items">
                     <th mat-header-cell *matHeaderCellDef mat-sort-header="items" class="num">Items</th>
-                    <td mat-cell *matCellDef="let r" class="num">{{ formatCount(r.node.items) }}</td>
+                    <td mat-cell *matCellDef="let r" class="num">{{ r.node.kind === 'unreadable' ? '–' : formatCount(r.node.items) }}</td>
                   </ng-container>
                   <ng-container matColumnDef="newestChange">
                     <th mat-header-cell *matHeaderCellDef mat-sort-header="newestChange" class="num">Newest change</th>
@@ -352,14 +359,20 @@ import {
                   </ng-container>
                   <ng-container matColumnDef="share">
                     <th mat-header-cell *matHeaderCellDef class="share-col">Share</th>
-                    <td mat-cell *matCellDef="let r" class="share-col"><span class="minibar" aria-hidden="true"><span [style.width.%]="r.percent"></span></span><span class="num">{{ r.share }}</span></td>
+                    <td mat-cell *matCellDef="let r" class="share-col">
+                      @if (r.node.kind === 'unreadable') {
+                        <span class="muted" aria-hidden="true">–</span>
+                      } @else {
+                        <span class="minibar" aria-hidden="true"><span [style.width.%]="r.percent"></span></span><span class="num">{{ r.share }}</span>
+                      }
+                    </td>
                   </ng-container>
                   <ng-container matColumnDef="actions">
                     <th mat-header-cell *matHeaderCellDef class="row-acts"><span class="visually-hidden">Actions</span></th>
                     <td mat-cell *matCellDef="let r" class="row-acts"><button type="button" matIconButton [matTooltip]="revealText" [attr.aria-label]="revealText + ': ' + r.node.name" (click)="store.reveal(r.node.id)"><dy-icon name="folder" /></button><button type="button" matIconButton matTooltip="Copy path" [attr.aria-label]="'Copy path of ' + r.node.name" (click)="copyPath(r.node.id)"><dy-icon name="copy" /></button></td>
                   </ng-container>
                   <tr mat-header-row *matHeaderRowDef="tableColumns"></tr>
-                  <tr mat-row *matRowDef="let r; columns: tableColumns" [cdkContextMenuTriggerFor]="rowMenu" [cdkContextMenuTriggerData]="{ row: r }"></tr>
+                  <tr mat-row *matRowDef="let r; columns: tableColumns" dyRowMenu [matContextMenuTriggerFor]="rowMenu" [matContextMenuTriggerData]="{ row: r }"></tr>
                   <tr class="mat-row" *matNoDataRow><td class="muted none" [attr.colspan]="tableColumns.length">No row matches "{{ filter() }}".</td></tr>
                 </table>
               </div>
@@ -375,37 +388,36 @@ import {
       </dy-async>
     </div>
 
-    <ng-template #pickerMenu>
-      <div class="menu wide" cdkMenu aria-label="Volumes">
-        @for (g of groups; track g.id) {
-          @if (volumesOf(g.id).length > 0) {
-            <div class="menu-label" role="presentation">{{ g.label }}@if (g.hint) { <span class="muted"> · {{ g.hint }}</span> }</div>
-            @for (v of volumesOf(g.id); track v.id) {
-              <button type="button" class="menu-item two-line" cdkMenuItem (cdkMenuItemTriggered)="store.selectVolume(v.id)">
-                <dy-icon [name]="g.id === 'network' ? 'network' : g.id === 'external' ? 'external' : 'disk'" />
-                <span class="vol">
-                  <strong>{{ v.name }}</strong>
-                  <span class="muted">{{ meta(v) }} · @if (v.reachable) { {{ free(v) }} } @else { <span class="warn-text"><dy-icon name="alert" /> Not answering</span> }</span>
-                </span>
-              </button>
-            }
+    <mat-menu #pickerMenu="matMenu" class="vol-menu" aria-label="Volumes">
+      @for (g of groups; track g.id) {
+        @if (volumesOf(g.id).length > 0) {
+          <div class="menu-label" role="presentation">{{ g.label }}@if (g.hint) { <span class="muted"> · {{ g.hint }}</span> }</div>
+          @for (v of volumesOf(g.id); track v.id) {
+            <button type="button" mat-menu-item (click)="store.selectVolume(v.id)">
+              <dy-icon [name]="g.id === 'network' ? 'network' : g.id === 'external' ? 'external' : 'disk'" />
+              <span class="vol">
+                <strong>{{ v.name }}</strong>
+                <span class="muted">{{ meta(v) }} · @if (v.reachable) { {{ free(v) }} } @else { <span class="warn-text"><dy-icon name="alert" /> Not answering</span> }</span>
+              </span>
+            </button>
           }
         }
-        <div class="menu-sep" role="separator"></div>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.chooseFolder()"><dy-icon name="folder" /> Choose a folder…</button>
-      </div>
-    </ng-template>
+      }
+      <button type="button" mat-menu-item (click)="store.chooseFolder()"><dy-icon name="folder" /> Choose a folder…</button>
+    </mat-menu>
 
-    <ng-template #rowMenu let-row="row">
-      <div class="menu" cdkMenu aria-label="Folder actions">
+    <mat-menu #rowMenu="matMenu" aria-label="Folder actions">
+      <ng-template matMenuContent let-row="row">
         @if (row.drillable) {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.open(row.node)"><dy-icon name="folder" /> Open</button>
+          <button type="button" mat-menu-item (click)="store.open(row.node)"><dy-icon name="folder" /> Open</button>
         }
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.reveal(row.node.id)"><dy-icon name="folder" /> {{ revealText }}</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copyPath(row.node.id)"><dy-icon name="copy" /> Copy path</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copySize(row.node)"><dy-icon name="copy" /> Copy size</button>
-      </div>
-    </ng-template>
+        <button type="button" mat-menu-item (click)="store.reveal(row.node.id)"><dy-icon name="folder" /> {{ revealText }}</button>
+        <button type="button" mat-menu-item (click)="copyPath(row.node.id)"><dy-icon name="copy" /> Copy path</button>
+        <button type="button" mat-menu-item (click)="copySize(row.node)"><dy-icon name="copy" /> Copy size</button>
+      </ng-template>
+    </mat-menu>
+
+    <span #chartMenuAnchor class="menu-anchor" aria-hidden="true" [matMenuTriggerFor]="rowMenu" [style.left.px]="menuAt().x" [style.top.px]="menuAt().y"></span>
   `,
   styles: `
     :host { display: block; }
@@ -455,11 +467,6 @@ import {
     .job-top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
     .job-title { display: grid; gap: 2px; }
     .job-count { margin: 0; color: var(--text-2); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
-    .progress { height: 6px; border-radius: 3px; background: var(--surface-inset); overflow: hidden; }
-    .progress span { display: block; height: 100%; background: var(--accent); }
-    .progress.indeterminate span { animation: dy-slide 1.4s var(--ease-out) infinite; }
-    @keyframes dy-slide { from { margin-left: -40%; } to { margin-left: 100%; } }
-    @media (prefers-reduced-motion: reduce) { .progress.indeterminate span { animation: none; margin-left: 30%; } }
     .state { display: grid; justify-items: center; gap: var(--sp-3); padding: var(--sp-10) var(--sp-4); text-align: center; }
     .state dy-icon { --icon-size: 32px; color: var(--text-3); }
     .state dy-icon.bad { color: var(--bad); }
@@ -477,7 +484,6 @@ import {
     .centre { display: grid; gap: var(--sp-2); padding: var(--sp-5); justify-items: start; }
     .centre h2 { margin: 0; font-size: var(--fs-lg); overflow-wrap: anywhere; }
     .centre p { margin: 0; }
-    .centre .big { font-size: 28px; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
     .chart-slot { width: 100%; max-width: 560px; margin: 0 auto; }
     .chart-slot:empty { display: none; }
     .item.linked { background: var(--surface-3); }
@@ -489,22 +495,17 @@ import {
     .item:hover, .item:focus-within { background: var(--surface-3); }
     .item .name { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); text-align: left; }
     .item .name dy-icon, td .name dy-icon { --icon-size: 15px; color: var(--text-3); flex: none; }
+    .item .name .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .item .name:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
     .item .tag { grid-column: 2; justify-self: start; }
     .num { font-variant-numeric: tabular-nums; text-align: right; }
     .swatch { width: 12px; height: 12px; border-radius: 3px; background: var(--chart-8); border: 1px solid var(--border-strong); }
-    .swatch[data-slot='1'] { background: var(--chart-1); }
-    .swatch[data-slot='2'] { background: var(--chart-2); }
-    .swatch[data-slot='3'] { background: var(--chart-3); }
-    .swatch[data-slot='4'] { background: var(--chart-4); }
-    .swatch[data-slot='5'] { background: var(--chart-5); }
     .tag { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-xs); font-weight: var(--fw-medium); }
     .tag.warn { color: var(--warn); }
     .tag dy-icon { --icon-size: 13px; }
     .more { padding: var(--sp-3) var(--sp-4); }
     .table-card { overflow: hidden; }
     .table-tools { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); }
-    .filter input { height: var(--control-h); min-width: 240px; padding: 0 var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface-inset); color: var(--text-1); font: inherit; }
     .tablewrap { overflow: auto; }
     .share-col { white-space: nowrap; }
     table { width: 100%; table-layout: fixed; }
@@ -518,7 +519,7 @@ import {
     td.num, td.share-col { overflow: visible; text-overflow: clip; }
     td.nm { overflow: hidden; text-overflow: ellipsis; }
     td.nm button.name { padding: 0 var(--sp-1); min-width: 0; max-width: calc(100% - 28px); vertical-align: middle; }
-    td.nm button.name ::ng-deep .mdc-button__label { overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: var(--sp-2); }    td.nm .name { display: inline-flex; align-items: center; gap: var(--sp-2); vertical-align: middle; }
+    td.nm .name { display: inline-flex; align-items: center; gap: var(--sp-2); vertical-align: middle; }
     td.nm .swatch { display: inline-block; margin-right: var(--sp-2); vertical-align: middle; }
     td.nm .tag { margin-left: var(--sp-2); }
     th.num, td.num { text-align: right; }
@@ -531,6 +532,9 @@ import {
     .minibar span { display: block; height: 100%; background: var(--chart-8); }
     .none { text-align: center; padding: var(--sp-6); }
     .table-foot { display: flex; align-items: center; justify-content: space-between; padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--border-subtle); }
+    .menu-anchor { position: fixed; width: 0; height: 0; pointer-events: none; }
+    .menu-label { padding: var(--sp-2) var(--sp-4) var(--sp-1); font-size: var(--fs-xs); font-weight: var(--fw-medium); color: var(--text-3); }
+    .unavail { color: var(--text-3); }
     .vol { display: grid; text-align: left; }
     .vol .muted { font-size: var(--fs-sm); }
     .warn-text { color: var(--warn); }
@@ -560,8 +564,20 @@ export class DiskMapPage implements OnInit {
   /** The segment under the pointer or focus in the chart, and the row under the pointer: each highlights the other. */
   protected readonly hoveredId = signal<string | null>(null);
   protected readonly rowHover = signal<string | null>(null);
-  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
-  private readonly menuTrigger = viewChild(CdkContextMenuTrigger);
+  private readonly cdr = inject(ChangeDetectorRef);
+  private readonly chartMenu = viewChild.required('chartMenuAnchor', { read: MatMenuTrigger });
+  /** Where the chart's own context menu opens (the pointer, or the focused segment). */
+  protected readonly menuAt = signal({ x: 0, y: 0 });
+  protected readonly reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  protected readonly unavailable = UNAVAILABLE;
+  protected readonly unavailableWhy = `${UNAVAILABLE}: ${reasonText('needsAdmin')}`;
+  /** Bumped when the theme or accent changes: the ring order of the colours depends on the resolved palette. */
+  private readonly appearance = signal(0);
+  private readonly slots = computed(() => {
+    this.appearance();
+    return branchSlots(readPaddockTokens(this.hostEl).palette);
+  });
+  private readonly hostEl = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   protected readonly chartRoot = computed(() => {
     const rings = this.store.rings();
     const c = this.store.capacity();
@@ -614,12 +630,14 @@ export class DiskMapPage implements OnInit {
   protected readonly share = shareText;
 
   constructor() {
-    // The chart owns its segments, so a hovered row marks its segment through an attribute the global styles draw.
-    effect(() => {
-      const id = this.rowHover();
-      this.host.querySelectorAll('pd-sunburst [data-linked]').forEach((e) => e.removeAttribute('data-linked'));
-      if (id) this.host.querySelector(`pd-sunburst [data-id="${id}"]`)?.setAttribute('data-linked', '');
-    });
+    const observer = new MutationObserver(() => this.appearance.update((n) => n + 1));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-accent', 'class'] });
+    inject(DestroyRef).onDestroy(() => observer.disconnect());
+  }
+
+  /** The list swatch's colour: the ring's, by rank (the five largest, then neutral). */
+  protected colour(rank: number): string {
+    return slotColour(rank < 5 ? (this.slots()[rank] ?? rank) : -1);
   }
 
   ngOnInit(): void {
@@ -688,16 +706,15 @@ export class DiskMapPage implements OnInit {
   /** The chart's right-click or Shift+F10: the same menu as a row's, for the folder or file under it. */
   protected onChartMenu(e: { point: PdSunburstPoint; x: number; y: number }): void {
     const n = nodeOfChartId(e.point.node.id);
-    const trigger = this.menuTrigger();
-    if (n === null || !trigger) return;
+    if (n === null) return;
     const rings = this.store.rings();
     const node = rings ? findRingNode(rings, n) : null;
     if (!node) return;
+    const trigger = this.chartMenu();
+    this.menuAt.set({ x: e.x, y: e.y });
+    this.cdr.detectChanges();
     trigger.menuData = { row: { node, drillable: node.hasChildren && node.kind === 'folder' } };
-    // The trigger stays disabled for the browser's own right-click (the chart reports it itself); open() needs it enabled.
-    trigger.disabled = false;
-    trigger.open({ x: e.x, y: e.y });
-    trigger.disabled = true;
+    trigger.openMenu();
   }
 
   protected async copyPath(node: number): Promise<void> {

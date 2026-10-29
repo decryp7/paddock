@@ -125,6 +125,25 @@ export const DiskMapStore = signalStore(
       }
     };
 
+    /** A pushed status during a scan asks for a fresh read: at most one read in flight and one waiting, however fast the scan reports. */
+    let reading = false;
+    let pending = false;
+    const refreshSoon = async (): Promise<void> => {
+      if (reading) {
+        pending = true;
+        return;
+      }
+      reading = true;
+      try {
+        do {
+          pending = false;
+          await refresh();
+        } while (pending);
+      } finally {
+        reading = false;
+      }
+    };
+
     const show = (status: DiskScanStatus | null) => {
       token++;
       patchState(store, { status, trail: status ? [{ node: null, name: status.name, bytes: 0 }] : [], level: null, rings: null, ringsError: null, rootId: null, levelError: null, levelLoading: false });
@@ -233,7 +252,7 @@ export const DiskMapStore = signalStore(
         const shown = store.status();
         if (!shown || shown.scan !== status.scan) return;
         patchState(store, { status });
-        void refresh();
+        void refreshSoon();
       },
       refresh,
       async setView(view: DiskView): Promise<void> {

@@ -189,7 +189,7 @@ describe('SettingsPage', () => {
     expect(sent.baselines).toEqual({ enabled: true, learningDays: 14, alarms: true });
     expect(sent.hardwareAlarms).toEqual({ throttling: false, lifespan: false });
   });
-  it('shows the disk map limits with the engine defaults, saves a change and ignores a value out of range', async () => {
+  it('shows the disk map limits with the engine defaults, saves a change and says what is wrong with a value out of range', async () => {
     const { f, mock, el, saveButton } = await make();
     const section = el.querySelector('section[aria-label="Disk map"]')!;
     const items = section.querySelector<HTMLInputElement>('input[aria-label="Items kept per scan"]')!;
@@ -202,7 +202,8 @@ describe('SettingsPage', () => {
     };
     for (const bad of ['9999', '5000001', '1.5', '']) type(items, bad);
     for (const bad of ['0', '1025']) type(size, bad);
-    expect(saveButton()).toBeUndefined();
+    expect(section.querySelector('mat-error')?.textContent).toContain('whole number from 10,000 to 5,000,000');
+    expect(saveButton()!.disabled).toBe(true);
     type(items, '500000');
     type(size, '64');
     const spy = vi.spyOn(mock, 'saveSettings');

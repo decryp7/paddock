@@ -13,7 +13,6 @@ import {
   outcome,
   sharePercent,
   shareText,
-  slotOf,
   sortRows,
   stoppedAt,
   chainTo,
@@ -147,16 +146,12 @@ describe('capacity strip', () => {
 });
 
 describe('level rows', () => {
-  it('colours the five largest and then goes neutral', () => {
-    expect([0, 1, 4, 5, 9].map(slotOf)).toEqual([1, 2, 5, 8, 8]);
-  });
-
   it('makes a row per child with its share and whether it opens', () => {
     const rows = levelRows(level());
-    expect(rows.map((r) => [r.node.name, r.share, r.drillable, r.slot])).toEqual([
-      ['b', '60%', true, 1],
-      ['a', '30%', false, 2],
-      ['c', '5%', true, 3],
+    expect(rows.map((r) => [r.node.name, r.share, r.drillable, r.rank])).toEqual([
+      ['b', '60%', true, 0],
+      ['a', '30%', false, 1],
+      ['c', '5%', true, 2],
     ]);
   });
 

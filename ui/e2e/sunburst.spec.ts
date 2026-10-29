@@ -7,13 +7,33 @@ import { mkdirSync } from 'node:fs';
 
 const THEMES = ['dark', 'light'] as const;
 
+/** Resolves once the sunburst section has kept the same top for five frames (the charts above it have finished drawing). */
+async function layoutStable(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const el = document.querySelector('section[data-testid="sunburst"]');
+        let last = Number.NaN;
+        let same = 0;
+        const tick = () => {
+          const top = el ? el.getBoundingClientRect().top : Number.NaN;
+          same = top === last ? same + 1 : 0;
+          last = top;
+          if (same >= 5) resolve(true);
+          else requestAnimationFrame(tick);
+        };
+        tick();
+      }),
+  );
+}
+
 async function open(page: Page, theme: string): Promise<void> {
   await page.setViewportSize({ width: 1280, height: 1000 });
   await page.goto(`/?theme=${theme}&accent=debrief`);
   // The charts above the section draw late and move it: wait for them, so a point measured on a segment is still there when the mouse goes.
   await page.locator('section[data-testid="chart"] canvas').first().waitFor();
   await page.locator('section[data-testid="sunburst"] [role=tree]').first().waitFor();
-  await page.waitForTimeout(400);
+  await layoutStable(page);
 }
 
 const box = (page: Page) => page.locator('[data-testid="sunburst-box"]');
@@ -87,11 +107,11 @@ if (shots) {
       mkdirSync(shots, { recursive: true });
       await open(page, theme);
       await page.setViewportSize({ width: 1280, height: 1500 });
-      await page.waitForTimeout(400);
+      await layoutStable(page);
       await page.locator('section[data-testid="sunburst"]').screenshot({ path: `${shots}/pd-sunburst-${theme}.png`, animations: 'disabled' });
       await clickShape(page, item(page, 'users'));
       await hoverShape(page, item(page, 'alex'));
-      await page.waitForTimeout(400);
+      await expect(item(page, 'alex')).toHaveClass(/pd-arc--active/);
       await page.locator('section[data-testid="sunburst"]').screenshot({ path: `${shots}/pd-sunburst-${theme}-drilled-hover.png`, animations: 'disabled' });
       await page.locator('[data-testid="sunburst-narrow-box"]').screenshot({ path: `${shots}/pd-sunburst-${theme}-narrow.png`, animations: 'disabled' });
     });

@@ -154,11 +154,6 @@ export function capacityStrip(volume: Volume | null, progress: ScanProgress, sta
   };
 }
 
-/** Chart slot (1 to 5, then the neutral 8) of the n-th largest child; the list swatch matches the ring's colour. */
-export function slotOf(index: number): number {
-  return index < 5 ? index + 1 : 8;
-}
-
 export interface Crumb {
   node: number | null;
   name: string;
@@ -169,7 +164,8 @@ export interface Crumb {
 /** A child's row in the list and the table. */
 export interface LevelRow {
   node: DiskNode;
-  slot: number;
+  /** Position among the children by size (0 is the largest): the ring colours the first five by it, the list swatch follows. */
+  rank: number;
   percent: number;
   share: string;
   drillable: boolean;
@@ -178,7 +174,7 @@ export interface LevelRow {
 export function levelRows(level: DiskChildren): LevelRow[] {
   return level.children.map((node, i) => ({
     node,
-    slot: slotOf(i),
+    rank: i,
     percent: sharePercent(node.bytes, level.node.bytes),
     share: shareText(node.bytes, level.node.bytes),
     drillable: node.hasChildren && node.kind === 'folder',

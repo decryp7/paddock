@@ -40,7 +40,11 @@ async function scanned(options: ConstructorParameters<typeof MockBackend>[0] = {
 
 describe('dy-disk-map-page', () => {
   // The mock's scan steps are timers; faking them lets a test decide when the scan moves (no sleeps).
-  beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['setTimeout', 'clearTimeout', 'Date'] }));
+  beforeEach(() => {
+    vi.useFakeTimers({ now: NOW, toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    // jsdom has no layout: the chart only needs the observer to exist.
+    vi.stubGlobal('ResizeObserver', class { observe(): void {} unobserve(): void {} disconnect(): void {} });
+  });
   afterEach(() => vi.useRealTimers());
 
   it('offers to scan the internal volume when nothing was scanned, with one primary and no header action', async () => {
@@ -89,7 +93,7 @@ describe('dy-disk-map-page', () => {
     const job = el.querySelector('.job')!;
     expect(job.getAttribute('aria-label')).toBe('Scan progress');
     expect(text(el, '.job-title')).toContain('Reading volume facts');
-    expect(el.querySelector('.progress')!.getAttribute('role')).toBe('progressbar');
+    expect(el.querySelector('mat-progress-bar')!.getAttribute('role')).toBe('progressbar');
     expect(btn(el, 'Cancel scan')).toBeDefined();
     expect(btn(el, 'Rescan')).toBeUndefined();
     expect(el.querySelector('.picker')!.hasAttribute('disabled')).toBe(true);
@@ -118,7 +122,8 @@ describe('dy-disk-map-page', () => {
     open('Users');
     await settle(f);
     expect(text(el, '.crumb.current')).toBe('Users');
-    expect(text(el, '.centre h2')).toBe('Users');
+    expect(el.querySelector('.centre h2')).toBeNull();
+    expect(el.querySelectorAll('button[aria-label^="Go up"]')).toHaveLength(1);
     expect(btn(el, 'Go up')!.getAttribute('aria-label')).toBe('Go up to Macintosh HD');
     open('alex');
     await settle(f);
@@ -213,7 +218,7 @@ describe('dy-disk-map-page', () => {
     expect(callout.textContent).toContain('Scan stopped: nas.local stopped answering');
     expect(callout.textContent).toContain('What was counted is kept');
     expect(r.el.querySelector('.rows')).not.toBeNull();
-    expect(r.el.querySelector('.page-head button.mdc-button--unelevated')!.textContent).toContain('Retry scan');
+    expect(r.el.querySelector('.page-head button.mdc-button--unelevated')).toBeNull();
     expect(text(r.el, '.capacity')).toContain('server volume');
     btn(callout as HTMLElement, 'Retry scan')!.click();
     await settle(r.f);
@@ -308,7 +313,8 @@ describe('dy-disk-map-page', () => {
     [...r.el.querySelectorAll<HTMLButtonElement>('.rows .name.link')].find((b) => b.textContent?.includes('Users'))!.click();
     await settle(r.f);
     expect(text(r.el, '[aria-label="Empty folder"] h2')).toBe('This folder is empty');
-    btn(r.el.querySelector('[aria-label="Empty folder"]') as HTMLElement, 'Go up')!.click();
+    expect(btn(r.el.querySelector('[aria-label="Empty folder"]') as HTMLElement, 'Go up')).toBeUndefined();
+    r.el.querySelector<HTMLButtonElement>('.toolbar button[aria-label^="Go up"]')!.click();
     await settle(r.f);
     expect(r.el.querySelector('[aria-label="Empty folder"]')).toBeNull();
     expect(text(r.el, '.crumb.current')).toBe('Macintosh HD');
@@ -423,13 +429,44 @@ describe('dy-disk-map-page', () => {
     const row = [...r.el.querySelectorAll<HTMLElement>('.rows .item')].find((i) => i.textContent?.includes('Users'))!;
     row.dispatchEvent(new MouseEvent('mouseenter'));
     await settle(r.f);
-    expect(arc(r.el, users).hasAttribute('data-linked')).toBe(true);
+    expect(arc(r.el, users).classList.contains('pd-arc--active')).toBe(true);
     row.dispatchEvent(new MouseEvent('mouseleave'));
     await settle(r.f);
-    expect(arc(r.el, users).hasAttribute('data-linked')).toBe(false);
+    expect(arc(r.el, users).classList.contains('pd-arc--active')).toBe(false);
     arc(r.el, users).dispatchEvent(new MouseEvent('mouseenter'));
     await settle(r.f);
     expect(row.classList.contains('linked')).toBe(true);
+  });
+
+  it('shows an unreadable folder as Unavailable with its reason, never as a number', async () => {
+    const r = await scanned();
+    const real = r.mock.diskChildren.bind(r.mock);
+    vi.spyOn(r.mock, 'diskChildren').mockImplementation(async (q) => {
+      const page = await real(q);
+      const [first, ...rest] = page.children;
+      return first ? { ...page, children: [{ ...first, kind: 'unreadable' as const, bytes: 0, items: 0, complete: false, hasChildren: false }, ...rest] } : page;
+    });
+    await r.store.refresh();
+    await settle(r.f);
+    const row = r.el.querySelector<HTMLElement>('.rows .item')!;
+    expect(row.textContent).toContain('Unavailable');
+    expect(row.textContent).toContain('Unreadable');
+    expect(row.textContent).not.toMatch(/\b0 B\b/);
+    btn(r.el, 'Table')!.click();
+    await settle(r.f);
+    const cells = [...r.el.querySelectorAll('tbody tr')].find((tr) => tr.textContent?.includes('Unreadable'))!.textContent;
+    expect(cells).toContain('Unavailable');
+    expect(cells).not.toMatch(/\b0 B\b/);
+  });
+
+  it('opens a list row\'s menu from the keyboard (Shift+F10) as a Material menu', async () => {
+    const r = await scanned();
+    const row = r.el.querySelector<HTMLElement>('.rows .item')!;
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
+    await settle(r.f);
+    const menu = document.querySelector('.mat-mdc-menu-panel [aria-label="Folder actions"], [aria-label="Folder actions"]');
+    expect(menu).not.toBeNull();
+    expect(document.querySelectorAll('.mat-mdc-menu-item').length).toBeGreaterThanOrEqual(3);
   });
 
   it('opens the table on just the small items when a folded segment is clicked', async () => {
