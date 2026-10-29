@@ -18,7 +18,7 @@ describe('ThemeService', () => {
     vi.restoreAllMocks();
     localStorage.clear();
     document.documentElement.removeAttribute('data-theme');
-    document.documentElement.classList.remove('mac', 'translucent');
+    document.documentElement.classList.remove('mac');
   });
 
   it('follows the system by default and leaves data-theme off', () => {
@@ -94,11 +94,12 @@ describe('ThemeService', () => {
     mockMedia(false);
     const t = TestBed.inject(ThemeService);
     const cl = document.documentElement.classList;
-    t.applyPlatform({ mac: true, translucent: true });
-    expect(cl.contains('mac') && cl.contains('translucent')).toBe(true);
-    t.applyPlatform({ mac: false, translucent: true });
+    t.applyPlatform({ mac: true });
+    expect(cl.contains('mac')).toBe(true);
+    t.applyPlatform({ mac: false });
     expect(cl.contains('mac')).toBe(false);
-    expect(cl.contains('translucent')).toBe(true);
+    // The window is opaque: nothing marks it translucent.
+    expect(cl.contains('translucent')).toBe(false);
   });
 });
 

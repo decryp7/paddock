@@ -2,22 +2,13 @@
    and the Material theme are @decryp7/paddock-ui's (paddock.css, controls.css and material.css, loaded by angular.json):
    components use the shared --pd-* tokens only. <html data-accent="pitwall"> picks Pitwall's violet (index.html).
 
-   Pitwall's own properties are layout values the family has no token for, defined here once (--pw-*):
-   - the window, sidebar and content backgrounds: the shared background, or see-through over the OS material when the
-     window is translucent (html.translucent: Windows Mica / macOS vibrancy; cards stay opaque);
-   - html.mac: a 28 px title region reserved for the inset traffic lights. */
+   The window is opaque, like every family window (user, 2026-10-30): no Mica or vibrancy behind it.
+
+   Pitwall's one own property is a layout value the family has no token for (--pw-*): html.mac reserves a 28 px title
+   region for the inset traffic lights. */
 
 :root {
   --pw-titlebar-h: 0px;
-  --pw-window-bg: var(--pd-bg);
-  --pw-sidebar-bg: var(--pd-bg);
-  --pw-content-bg: var(--pd-bg);
-}
-
-html.translucent {
-  --pw-window-bg: transparent;
-  --pw-sidebar-bg: color-mix(in srgb, var(--pd-bg) 55%, transparent);
-  --pw-content-bg: color-mix(in srgb, var(--pd-bg) 72%, transparent);
 }
 
 html.mac {
@@ -34,7 +25,7 @@ html,
 body {
   margin: 0;
   height: 100%;
-  background: var(--pw-window-bg);
+  background: var(--pd-bg);
   color: var(--pd-text);
   font-family: var(--pd-font-sans);
   font-size: var(--pd-text-body);
@@ -805,7 +796,7 @@ mat-icon.mat-icon {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: var(--pw-content-bg, Canvas);
+  background: var(--pd-bg, Canvas);
   color: var(--pd-text-subtle, GrayText);
   font: 13px system-ui, sans-serif;
   opacity: 0;

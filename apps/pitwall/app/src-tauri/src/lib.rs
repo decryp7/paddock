@@ -374,6 +374,24 @@ mod capability_tests {
             .any(|k| k == "Library/LaunchAgents/net.decryptology.pitwall.service.plist"));
     }
 
+    /// The main window is opaque on every OS, like every family window (user, 2026-10-30): no transparent window and
+    /// no Mica or vibrancy behind it.
+    #[test]
+    fn the_main_window_is_opaque_on_every_os() {
+        for (os, src) in [
+            ("shared", include_str!("../tauri.conf.json")),
+            ("macos", include_str!("../tauri.macos.conf.json")),
+            ("windows", include_str!("../tauri.windows.conf.json")),
+            ("linux", include_str!("../tauri.linux.conf.json")),
+        ] {
+            let v: serde_json::Value = serde_json::from_str(src).unwrap();
+            for w in v["app"]["windows"].as_array().into_iter().flatten() {
+                assert_ne!(w["transparent"], true, "{os}: {w}");
+                assert!(w.get("windowEffects").is_none(), "{os}: {w}");
+            }
+        }
+    }
+
     /// The launch agent restarts the server (KeepAlive), runs the bundled program and marks it supervised.
     #[test]
     fn the_launch_agent_plist_keeps_the_bundled_server_alive() {
