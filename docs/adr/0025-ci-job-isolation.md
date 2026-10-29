@@ -172,11 +172,17 @@ Two kinds of per-host state, one mechanism, declared lists:
 - Runner facts above (Mac config and job folders; Windows layout from its log; Linux per-job networks from its log;
   sccache's docs).
 
+- CI on the real host runners (ci.yml run 6856 on b92ab37b0, 2026-10-29): all 17 macOS and Windows jobs green (crate,
+  paddock-dev, and the Dyno, Pitcrew, Pitwall and Spotter app legs on both systems), each taking a slot through the Rust
+  holder and releasing it with its token; "holder ended before the job did" appears in no log, so the Windows runner does
+  not end the detached holder with the job's processes. Earlier runs found and fixed: bash 5.2's `${v//p/r}` and `-e`
+  differences, a stderr message captured as a path (`2>&1` in stable-workspace), stale app lockfiles, an unpinned
+  cargo-about. One Windows job (15657, run 6731) was dropped by its runner mid-test (the next job started 16 s later;
+  Gitea failed it 10 minutes on): no step of ours ran or hung; its slot was free again within a minute.
+
 ## Still open (blocks adding runners)
 
-- CI on Windows and macOS hosts: the dispatched runs of `ci.yml` and `debrief.yml` on `ci/job-isolation` must pass
-  (results in the hand-off), above all the Windows release step, which reports a holder ended by the runner's job object.
-  If it does, the Windows holder must be started outside the job (for example by a scheduled task or a service) before
-  Windows gets more runners.
+- Concurrency itself: every run so far had one runner per host. The first runs with two or three runners on a host
+  (Pitcrew pool) are the real test; watch `job-isolation.sh status` and the release step.
 - The Windows runner's `runner.timeout` (a job longer than it is killed; the holder then ends with the job folder).
 - Linux stays one job per host until containers take slots (decision 8).
