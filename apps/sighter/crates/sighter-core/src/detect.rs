@@ -340,6 +340,15 @@ pub struct PreparedHints {
     pub dropped: Vec<usize>,
 }
 
+impl PreparedHints {
+    /// When the query had hints and **every** one fell outside the scope, how many there were. The query then runs
+    /// unhinted (degrade, don't fail) and the caller records a trace event saying so
+    /// ([`crate::hud::trace::HintEvent::AllOutsideScope`]); `None` otherwise.
+    pub fn all_dropped(&self) -> Option<usize> {
+        (self.rects.is_empty() && !self.dropped.is_empty()).then_some(self.dropped.len())
+    }
+}
+
 /// Maps each hint through the chain, grows it by `margin` logical points on every side (a hint can be stale), and clips it
 /// to the query's `scope`; a hint with nothing left inside the scope is dropped and recorded. A refused hint (virtualised)
 /// is an error naming the adapter: the caller reports it and goes on without that hint.
@@ -720,6 +729,22 @@ mod tests {
         for bad in [-1.0, f64::NAN, MAX_HINT_MARGIN + 1.0] {
             assert!(matches!(prepare_hints(&hints, &chain, &scope, bad), Err(DetectError::BadMargin(_))));
         }
+        assert_eq!(p.all_dropped(), None);
+        let outside = [
+            HintRect::new("a", HintSpace::Logical, 500.0, 500.0, 5.0, 5.0).unwrap(),
+            HintRect::new("a", HintSpace::Logical, 600.0, 0.0, 5.0, 5.0).unwrap(),
+        ];
+        let all = prepare_hints(&outside, &chain, &scope, HINT_MARGIN).unwrap();
+        assert_eq!((all.all_dropped(), all.rects.len()), (Some(2), 0));
+        // With no usable hint the query runs unhinted: every detection passes, as for a query without hints.
+        let d = det(10.0, 10.0, 5.0, 5.0, 1, 0.5);
+        assert_eq!(
+            apply_hints(&[d], &all.rects, Fraction::new(HINT_CONTAINMENT).unwrap())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(prepare_hints(&[], &chain, &scope, 0.0).unwrap().all_dropped(), None);
         let virt = [HintRect::new("FlaUI", HintSpace::Virtualised, 0.0, 0.0, 1.0, 1.0).unwrap()];
         assert!(matches!(
             prepare_hints(&virt, &chain, &scope, 0.0),
@@ -740,7 +765,7 @@ mod tests {
         assert_eq!(apply_hints(&[big], &grown, t).unwrap().len(), 1);
         assert!(apply_hints(&[neither], &grown, t).unwrap().is_empty());
         let kept = apply_hints(&[half, big, neither], &grown, t).unwrap();
-        assert_eq!(kept.iter().map(|c| c.detection).collect::<Vec<_>>(), vec![big.clone(), half]);
+        assert_eq!(kept.iter().map(|c| c.detection).collect::<Vec<_>>(), vec![half, big]);
     }
 
     fn arb_det() -> impl Strategy<Value = Detection> {

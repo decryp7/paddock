@@ -152,6 +152,28 @@ pub struct DetectionEvent {
     pub chosen: bool,
 }
 
+/// What happened to a query's hints.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "stage", rename_all = "snake_case")]
+pub enum HintEvent {
+    /// Every hint fell outside the scope, so the query ran unhinted.
+    AllOutsideScope {
+        /// The locate request.
+        locate: u64,
+        /// How many hints there were.
+        count: u32,
+    },
+}
+
+impl HintEvent {
+    /// The sentence the HUD and the "Explain this locate" view show.
+    pub fn explain(&self) -> String {
+        match self {
+            Self::AllOutsideScope { count, .. } => format!("all {count} hints were outside the scope; the query ran without hints"),
+        }
+    }
+}
+
 /// The kinds of trace event.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
@@ -162,6 +184,8 @@ pub enum TraceKind {
     Step(StepEvent),
     /// A detection.
     Detection(DetectionEvent),
+    /// What happened to the query's hints.
+    Hint(HintEvent),
 }
 
 /// A numbered, timed event.
@@ -416,6 +440,17 @@ mod tests {
         b.unsubscribe(slow).unwrap();
         assert_eq!(b.drain(slow), Err(TraceError::UnknownSubscriber(slow.0)));
         assert_eq!(b.unsubscribe(slow), Err(TraceError::UnknownSubscriber(slow.0)));
+    }
+
+    #[test]
+    fn the_all_hints_dropped_event_explains_itself_and_round_trips() {
+        let e = HintEvent::AllOutsideScope { locate: 4, count: 3 };
+        assert_eq!(e.explain(), "all 3 hints were outside the scope; the query ran without hints");
+        let kind = TraceKind::Hint(e);
+        let json = serde_json::to_string(&kind).unwrap();
+        assert_eq!(serde_json::from_str::<TraceKind>(&json).unwrap(), kind);
+        let mut b = TraceBus::new(4, true).unwrap();
+        assert_eq!(b.publish(Micros(0), kind), Some(0));
     }
 
     #[test]
