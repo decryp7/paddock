@@ -165,7 +165,7 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>) -> Builder<R> {
         Place::Test { dir } => Some(dir.clone()),
     };
     let updates_dir = test_dir.clone();
-    builder = builder.updater(move |_| updater(updates_dir));
+    builder = builder.updater(move |app| updater(updates_dir, app));
     builder = builder.windows(move |app| windows(app, test_dir.is_none()));
     match place {
         Place::Installed => builder,
@@ -250,10 +250,15 @@ fn net(place: &Place) -> Net {
 
 /// Updates, About and What's New. Without the CI's updater key the build cannot update itself and says so ("Updates
 /// are not available in this build").
-fn updater(test_dir: Option<std::path::PathBuf>) -> UpdatesBuilder {
+///
+/// The installer is `tauri-plugin-updater` (registered in [`run`]) with the same key the updater verifies with: without
+/// it an update is found but never installed.
+fn updater<R: Runtime>(test_dir: Option<std::path::PathBuf>, app: &tauri::AppHandle<R>) -> UpdatesBuilder {
+    let key = option_env!("TAURI_UPDATER_PUBKEY");
     let b = UpdatesBuilder::new(APP_NAME)
         .channel("stable", "Stable", UPDATE_FEED)
-        .public_key(option_env!("TAURI_UPDATER_PUBKEY"))
+        .public_key(key)
+        .installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(app.clone(), key.unwrap_or_default())))
         .releases_page(RELEASES_PAGE)
         .homepage("https://dev.decryptology.net/decryp7/paddock")
         .changelog(include_str!("../../../CHANGELOG.md"))
@@ -313,6 +318,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
@@ -326,6 +332,17 @@ pub fn run() {
     if let Err(e) = result {
         applog::write(&format!("Spotter could not start: {e}"));
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod updater_tests {
+    use super::*;
+
+    #[test]
+    fn the_built_app_has_an_installer_so_a_found_update_can_be_installed() {
+        let app = tauri::test::mock_app();
+        assert!(updater(None, app.handle()).has_installer());
     }
 }
 

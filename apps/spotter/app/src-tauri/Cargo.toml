@@ -26,7 +26,7 @@ spotter-render.workspace = true
 spotter-sources.workspace = true
 # The Paddock app shell (ADR 0012): the plugin and the crates whose types the app names itself (path dependencies inside the
 # monorepo; an app outside it names them from the `decryp7` registry, crates/README.md "Consuming the crates").
-paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray"] }
+paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray", "install"] }
 paddock-commands = { path = "../../../../crates/paddock-commands", features = ["tauri"] }
 paddock-dialogs = { path = "../../../../crates/paddock-dialogs", features = ["tauri"] }
 paddock-health = { path = "../../../../crates/paddock-health", features = ["tauri"] }
@@ -34,7 +34,7 @@ paddock-jobs = { path = "../../../../crates/paddock-jobs", features = ["tauri"] 
 paddock-download = { path = "../../../../crates/paddock-download", features = ["tauri"] }
 paddock-settings = { path = "../../../../crates/paddock-settings", features = ["tauri"] }
 paddock-startup = { path = "../../../../crates/paddock-startup", features = ["tauri"] }
-paddock-updater = { path = "../../../../crates/paddock-updater", features = ["tauri"] }
+paddock-updater = { path = "../../../../crates/paddock-updater", features = ["tauri", "install"] }
 paddock-window = { path = "../../../../crates/paddock-window", features = ["tauri", "tray", "wry"] }
 log = { version = "0.4", features = ["kv"] }
 iana-time-zone = "0.1"
@@ -51,6 +51,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
+# The installer behind the shell's updater (`PluginInstaller`): verifies the package signature again and installs it.
+tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls"] }
 # Tokens, passwords and site cookies live in the OS credential store: Windows Credential Manager, macOS Keychain
 # (Secret Service on Linux).
 keyring = "4.2"
