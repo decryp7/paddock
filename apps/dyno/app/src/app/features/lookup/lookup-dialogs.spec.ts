@@ -97,6 +97,32 @@ describe('HashSearchDialog', () => {
     expect(d.outcome()).toBeNull();
   });
 
+  it('a large file shows its bytes so far with Cancel; Cancel stops it and Open VirusTotal reads again', async () => {
+    const backend = mock();
+    backend.jobPolls = 40;
+    const cancel = vi.spyOn(backend, 'cancelJob');
+    const d = await open(HashSearchDialog, inputs, backend, 'viewer');
+    for (let i = 0; i < 5 && !d.el.querySelector('pd-job'); i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      await settle(d);
+    }
+    const card = d.el.querySelector('pd-job')!;
+    expect(card.textContent).toContain('Hashing a file');
+    expect(card.textContent).toContain('Reading the file');
+    expect(d.el.querySelector('code')).toBeNull();
+    [...card.querySelectorAll('button')].find((b) => b.textContent?.includes('Cancel'))!.click();
+    for (let i = 0; i < 40 && d.el.querySelector('pd-job'); i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      await settle(d);
+    }
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(d.el.querySelector('[role=alert]')?.textContent).toContain('stopped');
+    backend.jobPolls = 1;
+    await d.press('open');
+    await settle(d);
+    expect(backend.opened).toHaveLength(1);
+  });
+
   it('an unreadable file shows the reason; pressing Open VirusTotal reads again and the frame offers Try again', async () => {
     const d = await open(HashSearchDialog, { source: { path: 'relative' }, name: 'x' }, mock(), 'viewer');
     await settle(d);

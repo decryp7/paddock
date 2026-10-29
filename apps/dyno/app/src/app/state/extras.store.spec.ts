@@ -1,5 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../core/backend';
+import { JOB_POLL_MS } from '../core/job-runner';
+import { freezeJobs } from '../../testing/job-test-support';
 import { MockBackend } from '../core/mock-backend';
 import { Notifier } from '../shared/notifier';
 import { ExtrasStore } from './extras.store';
@@ -102,7 +104,7 @@ describe('ExtrasStore: file finder', () => {
   it('searches again for a new mode or size, and not for the same one', async () => {
     const { store, mock } = setup();
     await store.chooseFolder();
-    const spy = vi.spyOn(mock, 'findFiles');
+    const spy = vi.spyOn(mock, 'startJob');
     await store.setMode('both');
     await store.setMinMib(100);
     expect(spy).not.toHaveBeenCalled();
@@ -113,6 +115,106 @@ describe('ExtrasStore: file finder', () => {
     expect(store.finder().data?.duplicates.map((g) => g.bytesEach)).toEqual([expect.any(Number)]);
   });
 
+});
+
+describe('ExtrasStore: the file finder as a job', () => {
+  afterEach(() => vi.useRealTimers());
+
+  async function choose(mock: MockBackend, store: InstanceType<typeof ExtrasStore>, polls: number) {
+    mock.jobPolls = polls;
+    const picking = store.chooseFolder();
+    await vi.advanceTimersByTimeAsync(0);
+    return picking;
+  }
+
+  it('shows the walk and then each phase with its own count, from the first moment, and never goes backwards', async () => {
+    vi.useFakeTimers();
+    const { store, mock } = setup();
+    mock.jobPolls = 5;
+    const counts: number[] = [];
+    const picking = store.chooseFolder();
+    for (let i = 0; i < 8; i++) {
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      const s = store.finderJob()?.snapshot;
+      if (s?.state === 'running') expect(s.title).toBe('Finding files');
+      if (s?.state === 'running' && s.phase) counts.push(s.phase.done);
+    }
+    await picking;
+    expect(counts.length).toBeGreaterThanOrEqual(3);
+    expect(counts.every((c, i) => i === 0 || c >= counts[i - 1]!)).toBe(true);
+    expect(store.finder().loading).toBe(false);
+    expect(store.finderJob()).toBeNull();
+    expect(store.finder().data?.large).toHaveLength(8);
+  });
+
+  it('shows "still working" and keeps going far past the old 160 s limit, with no error', async () => {
+    vi.useFakeTimers();
+    const { store, mock } = setup();
+    const picking = choose(mock, store, 6);
+    await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+    freezeJobs(mock);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(store.finder().error).toBeNull();
+    expect(store.finder().loading).toBe(true);
+    expect(store.finderJob()?.stalled).toBe(true);
+    void picking;
+  });
+
+  it('Cancel tells the engine to stop, keeps the earlier result and offers Search again', async () => {
+    vi.useFakeTimers();
+    const { store, mock } = setup();
+    await choose(mock, store, 1);
+    await vi.advanceTimersByTimeAsync(JOB_POLL_MS * 2);
+    const earlier = store.finder().data;
+    expect(earlier).not.toBeNull();
+    mock.jobPolls = 10;
+    const cancel = vi.spyOn(mock, 'cancelJob');
+    const searching = store.setMode('large');
+    await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+    await store.cancelSearch();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+    await searching;
+    expect(store.finderCancelled()).toBe(true);
+    expect(store.finder()).toMatchObject({ loading: false, error: null, data: earlier });
+    expect(store.finderJob()).toBeNull();
+    mock.jobPolls = 1;
+    await store.search();
+    expect(store.finderCancelled()).toBe(false);
+    expect(store.finder().data).not.toBeNull();
+  });
+
+  it('a new mode or size stops the search in progress and starts the new one; only the newer answer is shown', async () => {
+    vi.useFakeTimers();
+    const { store, mock } = setup();
+    mock.jobPolls = 6;
+    const start = vi.spyOn(mock, 'startJob');
+    const cancel = vi.spyOn(mock, 'cancelJob');
+    void store.chooseFolder();
+    await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+    mock.jobPolls = 1;
+    const second = store.setMode('duplicates');
+    await vi.advanceTimersByTimeAsync(JOB_POLL_MS * 4);
+    await second;
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(store.finder().data?.large).toEqual([]);
+    expect(store.finder().data?.duplicates.length).toBeGreaterThan(0);
+    expect(store.finderCancelled()).toBe(false);
+  });
+
+  it('shows the engine message when the job fails, and the limit sentence comes with the result', async () => {
+    const { store, mock } = setup();
+    await store.chooseFolder();
+    vi.spyOn(mock, 'pickFolder').mockResolvedValueOnce('relative/path');
+    await store.chooseFolder();
+    expect(store.finder().error?.message).toBe('Give the full path of the folder.');
+    expect(store.finderJob()).toBeNull();
+    vi.spyOn(mock, 'jobResult').mockResolvedValueOnce({ finder: { ...store.finder().data!, limit: { limit: 'files', message: 'Stopped after 500000 files and folders. Choose a smaller folder to see everything in it.' } } });
+    vi.spyOn(mock, 'pickFolder').mockResolvedValueOnce('/Users/sam/Projects');
+    await store.chooseFolder();
+    expect(store.finder().data?.limit?.message).toContain('Choose a smaller folder');
+  });
 });
 
 describe('ExtrasStore: inventory report and maintenance', () => {

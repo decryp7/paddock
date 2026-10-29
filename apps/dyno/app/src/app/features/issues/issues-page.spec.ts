@@ -122,6 +122,32 @@ describe('dy-issues-page', () => {
     expect(el.querySelector('[aria-label="Stability"]')).not.toBeNull();
   });
 
+  it('a rescan shows the read as a job with Cancel, and Cancel leaves the page as it was', async () => {
+    const { f, el, mock } = render();
+    await settle(f);
+    const before = el.querySelector('[aria-label="Stability"]')?.textContent;
+    mock.jobPolls = 40;
+    const cancel = vi.spyOn(mock, 'cancelJob');
+    (el.querySelector('[aria-label="Read the system logs now"]') as HTMLElement).click();
+    for (let i = 0; i < 5 && !el.querySelector('pd-job'); i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      await settle(f);
+    }
+    const card = el.querySelector('pd-job')!;
+    expect(card.textContent).toContain('Reading system logs');
+    expect((el.querySelector('[aria-label="Read the system logs now"]') as HTMLButtonElement).disabled).toBe(true);
+    btn(card as HTMLElement, 'Cancel').click();
+    for (let i = 0; i < 40 && el.querySelector('pd-job'); i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      await settle(f);
+    }
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(el.querySelector('pd-job')).toBeNull();
+    expect(el.querySelector('[role=alert]')).toBeNull();
+    expect(el.querySelector('[aria-label="Stability"]')?.textContent).toBe(before);
+    expect((el.querySelector('[aria-label="Read the system logs now"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('new and unusual: lists the reasons and offers no action on a program', async () => {
     const { f, el } = render();
     await settle(f);

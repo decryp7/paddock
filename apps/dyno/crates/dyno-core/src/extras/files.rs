@@ -13,6 +13,57 @@ pub const MAX_LISTED: usize = 200;
 pub const MAX_GROUPS: usize = 100;
 /// Most files one scan looks at before it stops and says so.
 pub const MAX_SCANNED: usize = 500_000;
+/// Deepest folder level the scan enters (the chosen folder is level 0).
+pub const MAX_DEPTH: u32 = 48;
+/// Most bytes the scan reads while comparing the content of files that could be duplicates.
+pub const MAX_HASH_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+
+/// Which limit stopped a scan early. The scan still answers with what it found so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FinderLimit {
+    /// [`MAX_SCANNED`] files and folders were looked at.
+    Files,
+    /// Folders deeper than [`MAX_DEPTH`] levels were left out.
+    Depth,
+    /// [`MAX_HASH_BYTES`] were read comparing contents; some duplicates may be missing.
+    HashBytes,
+}
+
+/// The limit that stopped a scan, with the sentence the person reads (the engine words it; the UI only shows it).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitHit {
+    /// Which limit.
+    pub limit: FinderLimit,
+    /// What happened and what to do about it.
+    pub message: String,
+}
+
+impl From<FinderLimit> for LimitHit {
+    fn from(limit: FinderLimit) -> LimitHit {
+        LimitHit {
+            message: limit.message(),
+            limit,
+        }
+    }
+}
+
+impl FinderLimit {
+    /// What to tell the person, ending with what to do.
+    pub fn message(self) -> String {
+        match self {
+            FinderLimit::Files => format!(
+                "Stopped after {MAX_SCANNED} files and folders. Choose a smaller folder to see everything in it."
+            ),
+            FinderLimit::Depth => format!("Folders more than {MAX_DEPTH} levels down were left out. Choose a folder nearer to them."),
+            FinderLimit::HashBytes => format!(
+                "Stopped comparing contents after {} GiB. Some duplicates may be missing; choose a smaller folder or a larger minimum size.",
+                MAX_HASH_BYTES / (1024 * 1024 * 1024)
+            ),
+        }
+    }
+}
 
 /// What to look for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -91,8 +142,8 @@ pub struct FinderResult {
     pub duplicates: Vec<DuplicateGroup>,
     /// Files looked at.
     pub scanned: u32,
-    /// The scan stopped early (file limit or time limit); more exists.
-    pub truncated: bool,
+    /// The limit that stopped the scan early, when one did; more exists.
+    pub limit: Option<LimitHit>,
     /// Total wasted by the listed duplicate groups.
     pub wasted_bytes: u64,
 }

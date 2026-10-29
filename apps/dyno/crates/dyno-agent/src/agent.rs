@@ -234,6 +234,8 @@ pub struct Shared {
     pub bench: crate::bench::BenchCentre,
     /// Network change events on the timeline (WP-35).
     pub netwatch: crate::netwatch::NetWatchCentre,
+    /// Long operations (find files, read the OS logs, check backups, hash a file) as jobs with progress and Cancel.
+    pub jobs: crate::jobs::JobCentre,
     /// SHA-256 of program files for the VirusTotal search (WP-33); nothing is uploaded.
     pub hasher: crate::filehash::FileHasher,
     /// Throttling and hardware life: the OS's speed limit, SSD wear and battery capacity (observe-only).
@@ -343,6 +345,7 @@ impl Shared {
             reveal,
             bench,
             netwatch: crate::netwatch::NetWatchCentre::new(),
+            jobs: crate::jobs::JobCentre::new(),
             hasher: crate::filehash::FileHasher::new(),
             counters: crate::counters::CounterCentre::new(Arc::new(dyno_platform::counters::OsCounters)),
             issues: crate::issues::IssueCentre::new(issues),

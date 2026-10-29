@@ -59,8 +59,6 @@ import type {
   BootReport,
   ChangeTimeline,
   ChangesQuery,
-  FinderQuery,
-  FinderResult,
   GpuReport,
   InventoryFormat,
   MaintenanceStatus,
@@ -70,10 +68,11 @@ import type {
   UsageReport,
   IssuesOverview,
   IssuesQuery,
+  JobOutput,
+  JobSpec,
+  JobStatus,
   SavedIssues,
   UnusualOverview,
-  FileHashInfo,
-  HashSource,
   SearchSeed,
   StartupFilter,
   StartupOverview,
@@ -89,14 +88,15 @@ export type ListenFn = <T>(event: string, handler: (event: { payload: T }) => vo
 /** The externally tagged Rust `Request` enum: a unit variant is a string, a data variant `{ variant: fields }`. */
 export type DynoRequest = string | Record<string, Record<string, unknown>>;
 
-/** Every command fails with a `timeout` error after this long, so a panel shows an inline error with Retry, not a skeleton forever. */
+/**
+ * Every command fails with a `timeout` error after this long, so a panel shows an inline error with Retry, not a skeleton forever.
+ * Only requests that answer at once may use it. The long operations (find files, read the system logs, check the backups, hash a
+ * file) are jobs: starting one answers at once, `jobs()` is polled and `cancelJob` stops it, so no UI timeout can abandon them
+ * (ER-19). The one longer wait left is a command that waits for the person at an OS dialog (`DIALOG_TIMEOUT_MS`).
+ */
 export const REQUEST_TIMEOUT_MS = 15_000;
 /** A command that waits for the person at an OS dialog may take as long as they do (within reason). */
 export const DIALOG_TIMEOUT_MS = 10 * 60_000;
-/** Hashing a large program may take longer than an ordinary request. */
-export const HASH_TIMEOUT_MS = 60_000;
-/** Reading the system logs can take a minute or two on a busy PC (the shell waits 150 s for the agent). */
-export const LOG_READ_TIMEOUT_MS = 160_000;
 
 /** The push events of the shell. */
 export const EVENTS = {
@@ -440,9 +440,6 @@ export class TauriBackend implements DynoBackend {
     return this.request({ webSearch: { query } });
   }
 
-  fileHash(source: HashSource): Promise<FileHashInfo> {
-    return this.request({ fileHash: { source } }, HASH_TIMEOUT_MS);
-  }
 
   openVirusTotal(sha256: string): Promise<void> {
     return this.request({ virusTotalUrl: { sha256 } });
@@ -484,11 +481,6 @@ export class TauriBackend implements DynoBackend {
 
   issues(query: IssuesQuery): Promise<IssuesOverview> {
     return this.request({ issues: { query } });
-  }
-
-  rescanIssues(query: IssuesQuery): Promise<IssuesOverview> {
-    // Reading a day of system log can take a minute on a busy PC.
-    return this.request({ rescanIssues: { query } }, LOG_READ_TIMEOUT_MS);
   }
 
   saveIssues(days: number): Promise<SavedIssues | null> {
@@ -583,11 +575,6 @@ export class TauriBackend implements DynoBackend {
     return this.command<string | null>('pick_folder', undefined, DIALOG_TIMEOUT_MS);
   }
 
-  findFiles(query: FinderQuery): Promise<FinderResult> {
-    // Walking and hashing a big folder takes a while.
-    return this.request({ findFiles: { query } }, LOG_READ_TIMEOUT_MS);
-  }
-
   maintenance(): Promise<MaintenanceStatus> {
     return this.request('maintenance');
   }
@@ -596,8 +583,22 @@ export class TauriBackend implements DynoBackend {
     return this.request('backup');
   }
 
-  refreshBackup(): Promise<BackupReport> {
-    return this.request('refreshBackup', LOG_READ_TIMEOUT_MS);
+  // ------------------------------------------------------------------------------------------------------ jobs
+
+  startJob(spec: JobSpec): Promise<JobStatus> {
+    return this.request({ startJob: { spec } });
+  }
+
+  jobs(): Promise<JobStatus[]> {
+    return this.request('jobs');
+  }
+
+  cancelJob(id: number): Promise<void> {
+    return this.request({ cancelJob: { id } });
+  }
+
+  jobResult(id: number): Promise<JobOutput> {
+    return this.request({ jobResult: { id } });
   }
 
   // --------------------------------------------------------------------------------------------------- plumbing

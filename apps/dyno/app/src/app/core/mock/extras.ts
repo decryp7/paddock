@@ -216,7 +216,7 @@ export function mockFinder(query: FinderQuery, now: number): FinderResult {
     large: wantLarge ? large.filter(keep) : [],
     duplicates: dups,
     scanned: 18_342,
-    truncated: false,
+    limit: null,
     wastedBytes: dups.reduce((a, g) => a + g.wastedBytes, 0),
   };
 }

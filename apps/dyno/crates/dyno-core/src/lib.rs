@@ -27,6 +27,7 @@ pub mod history;
 pub mod inventory;
 pub mod ip_lookup;
 pub mod issues;
+pub mod jobs;
 pub mod lifespan;
 pub mod metrics;
 pub mod netchange;

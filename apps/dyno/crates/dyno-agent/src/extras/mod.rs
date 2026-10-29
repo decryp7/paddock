@@ -8,7 +8,6 @@ pub mod finder;
 use crate::agent::{lock, now, Shared};
 use dyno_core::extras::boot::{self, BootReport, BootRow, SettleTracker};
 use dyno_core::extras::changes::{diff_software, diff_startup, timeline, Change, ChangesQuery};
-use dyno_core::extras::files::{FinderQuery, FinderResult};
 use dyno_core::extras::gpu::GpuReport;
 use dyno_core::extras::software::{render_report, validate_destination, InventoryFormat, SoftwareInventory, SoftwareItem};
 use dyno_core::extras::usage::{self, UsageReport};
@@ -90,6 +89,11 @@ impl ExtrasCentre {
         *lock(&self.backup_tools) = Some(tools);
     }
 
+    /// The backup report as it stands, without starting a check (tests).
+    pub fn backup_report(&self) -> dyno_core::backup::BackupReport {
+        backup_check::peek(self)
+    }
+
     /// Tests: pretend to be another OS (`macos`, `windows`, `linux`).
     pub fn use_os(&self, os: &'static str) {
         *lock(&self.os) = os;
@@ -103,7 +107,8 @@ impl ExtrasCentre {
         *lock(&self.os)
     }
 
-    fn next_id(&self, t: Timestamp) -> String {
+    /// An id for one finder result.
+    pub fn next_scan_id(&self, t: Timestamp) -> String {
         format!("f{}-{}", t.millis(), self.counter.fetch_add(1, Ordering::Relaxed))
     }
 }
@@ -122,14 +127,12 @@ pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentErro
         Request::GpuProcesses => Ok(Reply::Gpu(Box::new(gpu(shared)))),
         Request::SoftwareInventory => Ok(Reply::Software(Box::new(software(shared)))),
         Request::SaveInventoryReport { path, format } => save_inventory(shared, &path, format).map(Reply::InventorySaved),
-        Request::FindFiles { query } => find_files(shared, &query).map(|r| Reply::FileFinder(Box::new(r))),
         Request::Maintenance => {
             let core = lock(&shared.core);
             let off = core.settings.alarms.utc_offset_minutes;
             Ok(Reply::Maintenance(core.settings.maintenance.status(now(), off)))
         }
-        Request::Backup => Ok(Reply::Backup(Box::new(backup_check::report(shared, false)))),
-        Request::RefreshBackup => Ok(Reply::Backup(Box::new(backup_check::report(shared, true)))),
+        Request::Backup => Ok(Reply::Backup(Box::new(backup_check::report(shared)))),
         other => Err(bad(format!("{other:?} is not an extras request."))),
     }
 }
@@ -295,13 +298,6 @@ fn save_inventory(shared: &Shared, path: &str, format: InventoryFormat) -> Resul
         path: dest.to_string_lossy().into_owned(),
         bytes: text.len() as u64,
     })
-}
-
-fn find_files(shared: &Shared, query: &FinderQuery) -> Result<FinderResult, AgentError> {
-    let x = &shared.extras;
-    let t = now();
-    let id = x.next_id(t);
-    finder::run(query, &id).map_err(bad)
 }
 
 /// Records this boot (once) and finds when the desktop settled after login, so Boot analysis has a history. Runs once at

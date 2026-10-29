@@ -1,5 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../core/backend';
+import { JOB_POLL_MS } from '../core/job-runner';
+import { freezeJobs } from '../../testing/job-test-support';
 import { MockBackend } from '../core/mock-backend';
 import { Notifier } from '../shared/notifier';
 import { IssuesStore } from './issues.store';
@@ -45,17 +47,64 @@ describe('IssuesStore', () => {
     expect(issues.overview()?.days).toBe(30);
   });
 
-  it('rescans once at a time and tells the person', async () => {
-    const { issues, mock, notifier } = setup();
-    const spy = vi.spyOn(mock, 'rescanIssues');
-    await Promise.all([issues.rescan(), issues.rescan()]);
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(issues.rescanning()).toBe(false);
-    expect(notifier.recent().at(-1)?.text).toContain('Read the system logs');
-    spy.mockRejectedValueOnce({ code: 'timeout', message: 'slow' });
-    await issues.rescan();
-    expect(issues.error()?.message).toBe('slow');
-    expect(issues.rescanning()).toBe(false);
+  describe('rescan as a job', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('rescans once at a time and tells the person', async () => {
+      const { issues, mock, notifier } = setup();
+      const spy = vi.spyOn(mock, 'startJob');
+      await Promise.all([issues.rescan(), issues.rescan()]);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(issues.rescanning()).toBe(false);
+      expect(issues.rescanJob()).toBeNull();
+      expect(notifier.recent().at(-1)?.text).toContain('Read the system logs');
+      spy.mockRejectedValueOnce({ code: 'busy', message: 'Reading system logs is already running; wait for it or cancel it.' });
+      await issues.rescan();
+      expect(issues.error()?.message).toContain('already running');
+      expect(issues.rescanning()).toBe(false);
+    });
+
+    it('shows the progress, never a timeout error, and keeps the page while it reads', async () => {
+      vi.useFakeTimers();
+      const { issues, mock } = setup();
+      await issues.load();
+      mock.jobPolls = 4;
+      const before = issues.overview();
+      const done = issues.rescan();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(issues.rescanning()).toBe(true);
+      expect(issues.rescanJob()?.snapshot).toMatchObject({ title: 'Reading system logs', state: 'running' });
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      expect(issues.rescanJob()?.snapshot).toMatchObject({ state: 'running', phase: { id: 'read', total: 4 } });
+      expect(issues.overview()).toBe(before);
+      // Far longer than the old 160 s limit: still working, no error.
+      freezeJobs(mock);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(issues.error()).toBeNull();
+      expect(issues.rescanning()).toBe(true);
+      expect(issues.rescanJob()?.stalled).toBe(true);
+      void done;
+    });
+
+    it('Cancel stops the read at the engine, keeps what the page had and says so', async () => {
+      vi.useFakeTimers();
+      const { issues, mock, notifier } = setup();
+      await issues.load();
+      mock.jobPolls = 10;
+      const before = issues.overview();
+      const cancel = vi.spyOn(mock, 'cancelJob');
+      const done = issues.rescan();
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      await issues.cancelRescan();
+      expect(cancel).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      await done;
+      expect(issues.rescanning()).toBe(false);
+      expect(issues.rescanJob()).toBeNull();
+      expect(issues.overview()).toBe(before);
+      expect(issues.error()).toBeNull();
+      expect(notifier.recent().at(-1)?.text).toBe('Stopped reading the system logs');
+    });
   });
 
   it('exports for Debrief, and a cancelled or failed dialog is handled', async () => {

@@ -65,7 +65,6 @@ import type {
   ChangeTimeline,
   ChangesQuery,
   FinderQuery,
-  FinderResult,
   GpuReport,
   InventoryFormat,
   MaintenanceStatus,
@@ -75,10 +74,14 @@ import type {
   UsageReport,
   IssuesOverview,
   IssuesQuery,
+  JobKind,
+  JobOutput,
+  JobPhase,
+  JobSpec,
+  JobStatus,
   SavedIssues,
   UnusualItem,
   UnusualOverview,
-  FileHashInfo,
   HashSource,
   SearchSeed,
   StartupFilter,
@@ -897,14 +900,6 @@ export class MockBackend implements DynoBackend {
     });
   }
 
-  fileHash(source: HashSource): Promise<FileHashInfo> {
-    return this.reply('fileHash', () => {
-      const path = 'path' in source ? source.path : (this.find(source.process).exe ?? '');
-      if (!path.startsWith('/') && !/^[A-Za-z]:\\/.test(path)) throw err('notFound', 'That is not a full path to a file.');
-      return { path, bytes: 48_231_424, sha256: mockHash(path) };
-    });
-  }
-
   openVirusTotal(sha256: string): Promise<void> {
     return this.reply('openVirusTotal', () => {
       if (!/^[0-9a-f]{64}$/i.test(sha256)) throw err('badRequest', 'A SHA-256 hash has 64 hexadecimal digits.');
@@ -1045,10 +1040,6 @@ export class MockBackend implements DynoBackend {
     return this.reply('issues', () => mockIssuesOverview(query, this.now(), mockSources(this.now())));
   }
 
-  rescanIssues(query: IssuesQuery): Promise<IssuesOverview> {
-    return this.reply('rescanIssues', () => mockIssuesOverview(query, this.now(), mockSources(this.now())));
-  }
-
   saveIssues(days: number): Promise<SavedIssues | null> {
     return this.reply('saveIssues', () => {
       this.savedIssues.push(days);
@@ -1177,13 +1168,6 @@ export class MockBackend implements DynoBackend {
     });
   }
 
-  findFiles(query: FinderQuery): Promise<FinderResult> {
-    return this.reply('findFiles', () => {
-      if (!query.folder.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(query.folder)) throw err('badRequest', 'Choose a folder with a full path.');
-      return mockFinder({ ...query, minBytes: Math.max(query.minBytes, MB) }, this.now());
-    });
-  }
-
   maintenance(): Promise<MaintenanceStatus> {
     return this.reply('maintenance', () => mockMaintenanceStatus(this.settingsValue.maintenance, this.now()));
   }
@@ -1192,11 +1176,118 @@ export class MockBackend implements DynoBackend {
     return this.reply('backup', () => mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt));
   }
 
-  refreshBackup(): Promise<BackupReport> {
-    return this.reply('refreshBackup', () => {
-      this.backupCheckedAt = this.now();
-      return mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt);
-    }, 400);
+  // ----------------------------------------------------------------------------------------------- jobs
+
+  /**
+   * How many times `jobs()` is read before a job the mock started is done (1: the first read already finds it done; tests
+   * raise it to watch the progress and Cancel). Each read advances every running job by one step.
+   */
+  jobPolls = 1;
+  private readonly jobBook: MockJob[] = [];
+
+  startJob(spec: JobSpec): Promise<JobStatus> {
+    return this.reply('startJob', () => {
+      const kind = jobKind(spec);
+      const live = this.jobBook.filter((j) => isRunning(j.status));
+      const same = live.find((j) => JSON.stringify(j.spec) === JSON.stringify(spec));
+      if (same) return same.status;
+      if (kind !== 'fileHash' && live.some((j) => j.status.kind === kind)) throw err('busy', `${JOB_TITLES[kind]} is already running; wait for it or cancel it.`);
+      if ('findFiles' in objectOf(spec) && !(objectOf(spec) as { findFiles: { query: FinderQuery } }).findFiles.query.folder.trim()) {
+        throw err('badRequest', 'Choose a folder to look in.');
+      }
+      const job: MockJob = { spec, pollsLeft: Math.max(1, this.jobPolls), polls: 0, status: this.freshStatus(kind, spec) };
+      this.jobBook.push(job);
+      while (this.jobBook.length > 16) this.jobBook.shift();
+      return job.status;
+    });
+  }
+
+  jobs(): Promise<JobStatus[]> {
+    return this.reply('jobs', () => {
+      for (const j of this.jobBook) if (isRunning(j.status)) this.advance(j);
+      return this.jobBook.map((j) => j.status);
+    });
+  }
+
+  cancelJob(id: number): Promise<void> {
+    return this.reply('cancelJob', () => {
+      const j = this.jobBook.find((x) => x.status.id === id);
+      if (j && isRunning(j.status)) j.status = { ...j.status, state: 'cancelled', seq: j.status.seq + 1, cancellable: false };
+    });
+  }
+
+  jobResult(id: number): Promise<JobOutput> {
+    return this.reply('jobResult', () => {
+      const j = this.jobBook.find((x) => x.status.id === id);
+      if (!j || j.status.state !== 'done') throw err('notFound', 'That job has no result: it is still running, was cancelled or failed, or is too old to be kept.');
+      return this.outputOf(j.spec);
+    });
+  }
+
+  private nextJobId = 1;
+
+  private freshStatus(kind: JobKind, spec: JobSpec): JobStatus {
+    return {
+      id: this.nextJobId++,
+      kind,
+      title: JOB_TITLES[kind],
+      subject: jobSubject(spec),
+      state: { running: { phase: null } },
+      seq: 1,
+      elapsedMs: 0,
+      etaMs: null,
+      cancellable: true,
+      notCancellableReason: null,
+    };
+  }
+
+  /** One step of a job: a phase whose count grows, then the end (failed when the engine would refuse the work). */
+  private advance(j: MockJob): void {
+    j.polls++;
+    j.pollsLeft--;
+    const kind = j.status.kind;
+    const elapsedMs = j.polls * 500;
+    if (j.pollsLeft > 0) {
+      const phase = mockPhase(kind, j.polls, j.polls + j.pollsLeft - 1);
+      j.status = { ...j.status, state: { running: { phase } }, seq: j.status.seq + 1, elapsedMs };
+      return;
+    }
+    const problem = this.problemWith(j.spec);
+    j.status = { ...j.status, state: problem ? { failed: { message: problem } } : 'done', seq: j.status.seq + 1, elapsedMs, cancellable: false };
+    if (!problem && kind === 'refreshBackup') this.backupCheckedAt = this.now();
+  }
+
+  /** What makes the work fail once it runs: the same messages the engine gives. */
+  private problemWith(spec: JobSpec): string | null {
+    const o = objectOf(spec);
+    if ('findFiles' in o) {
+      const folder = (o as { findFiles: { query: FinderQuery } }).findFiles.query.folder;
+      return folder.startsWith('/') || /^[A-Za-z]:[\\/]/.test(folder) ? null : 'Give the full path of the folder.';
+    }
+    if ('fileHash' in o) {
+      const source = (o as { fileHash: { source: HashSource } }).fileHash.source;
+      const path = 'path' in source ? source.path : (this.find(source.process).exe ?? '');
+      return path.startsWith('/') || /^[A-Za-z]:\\/.test(path) ? null : 'That is not a full path to a file.';
+    }
+    return null;
+  }
+
+  private outputOf(spec: JobSpec): JobOutput {
+    const o = objectOf(spec);
+    if ('findFiles' in o) {
+      const query = (o as { findFiles: { query: FinderQuery } }).findFiles.query;
+      return { finder: mockFinder({ ...query, minBytes: Math.max(query.minBytes, MB) }, this.now()) };
+    }
+    if ('rescanIssues' in o) {
+      const query = (o as { rescanIssues: { query: IssuesQuery } }).rescanIssues.query;
+      return { issues: mockIssuesOverview(query, this.now(), mockSources(this.now())) };
+    }
+    if ('fileHash' in o) {
+      const source = (o as { fileHash: { source: HashSource } }).fileHash.source;
+      const path = 'path' in source ? source.path : (this.find(source.process).exe ?? '');
+      return { fileHash: { path, bytes: 48_231_424, sha256: mockHash(path) } };
+    }
+    return { backup: mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt) };
   }
 
   // ---------------------------------------------------------------------------------------------- plumbing
@@ -1270,6 +1361,59 @@ export class MockBackend implements DynoBackend {
       if (delay === 0) queueMicrotask(run);
       else setTimeout(run, delay);
     });
+  }
+}
+
+interface MockJob {
+  spec: JobSpec;
+  status: JobStatus;
+  polls: number;
+  pollsLeft: number;
+}
+
+const JOB_TITLES: Record<JobKind, string> = {
+  findFiles: 'Finding files',
+  rescanIssues: 'Reading system logs',
+  refreshBackup: 'Checking backups',
+  fileHash: 'Hashing a file',
+};
+
+/** The variant of a job spec as an object (a unit variant is a string on the wire). */
+function objectOf(spec: JobSpec): Record<string, unknown> {
+  return typeof spec === 'string' ? { [spec]: null } : spec;
+}
+
+function jobKind(spec: JobSpec): JobKind {
+  return Object.keys(objectOf(spec))[0] as JobKind;
+}
+
+function jobSubject(spec: JobSpec): string | null {
+  const o = objectOf(spec);
+  if ('findFiles' in o) return (o as { findFiles: { query: FinderQuery } }).findFiles.query.folder;
+  if ('rescanIssues' in o) return `last ${(o as { rescanIssues: { query: IssuesQuery } }).rescanIssues.query.days} days`;
+  if ('fileHash' in o) {
+    const source = (o as { fileHash: { source: HashSource } }).fileHash.source;
+    return 'path' in source ? source.path : null;
+  }
+  return null;
+}
+
+function isRunning(s: JobStatus): boolean {
+  return s.state === 'queued' || (typeof s.state === 'object' && 'running' in s.state);
+}
+
+/** The phase of a mock job at step `step` of `last`: counts that only grow, each kind on its own scale. */
+function mockPhase(kind: JobKind, step: number, last: number): JobPhase {
+  const part = step / Math.max(1, last);
+  switch (kind) {
+    case 'findFiles':
+      return { id: 'walk', label: 'Listing files', unit: 'items', done: step * 1_200, total: null };
+    case 'rescanIssues':
+      return { id: 'read', label: 'Reading system logs', unit: 'items', done: Math.min(3, Math.floor(part * 4)), total: 4 };
+    case 'refreshBackup':
+      return { id: 'tools', label: 'Checking backup tools', unit: 'items', done: Math.min(2, Math.floor(part * 3)), total: 3 };
+    case 'fileHash':
+      return { id: 'hash', label: 'Reading the file', unit: 'bytes', done: Math.floor(part * 48_231_424), total: 48_231_424 };
   }
 }
 

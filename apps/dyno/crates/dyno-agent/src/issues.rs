@@ -11,6 +11,7 @@ use dyno_core::issues::{
 };
 use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_core::time::{Timestamp, DAY, HOUR};
+use paddock_jobs::{JobContext, JobError, Phase};
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -59,22 +60,48 @@ impl IssueCentre {
     }
 
     /// Reads every source now, stores what is new and raises alarms. Returns false when another read is already running.
-    pub fn scan(&self, shared: &Shared) -> bool {
+    /// With a `job`, reports the sources read so far and stops between two sources when it is cancelled: what was found
+    /// is then dropped, the sources' last statuses and the time of the last read stay as they were, and nothing is stored.
+    pub fn scan(&self, shared: &Shared, job: Option<&JobContext>) -> Result<bool, JobError> {
         let since = {
             let mut st = lock(&self.state);
             if st.scanning {
-                return false;
+                return Ok(false);
             }
             st.scanning = true;
             let t = now();
             st.last_scan.map_or(t.minus(FIRST_DAYS * DAY), |l| l.minus(OVERLAP_MS))
         };
         let until = now();
+        // Whatever happens below (a cancel included), the flag must come down.
+        let read = self.read_all(job, since, until);
+        let mut st = lock(&self.state);
+        st.scanning = false;
+        let (statuses, found) = read?;
+        drop(st);
+        let found = collapse_across_sources(found);
+        record(shared, &found, until);
+        let mut st = lock(&self.state);
+        st.statuses = statuses;
+        st.last_scan = Some(until);
+        Ok(true)
+    }
+
+    /// Reads the sources one after the other into a result of its own: nothing is shared until the caller keeps it.
+    fn read_all(&self, job: Option<&JobContext>, since: Timestamp, until: Timestamp) -> Result<(Vec<SourceStatus>, Vec<Issue>), JobError> {
+        let sources = lock(&self.sources);
+        if let Some(j) = job {
+            j.phase(Phase::items("read", "Reading system logs", sources.len() as u64));
+        }
         let mut statuses = Vec::new();
         let mut found: Vec<Issue> = Vec::new();
-        for source in lock(&self.sources).iter() {
+        for source in sources.iter() {
+            if let Some(j) = job {
+                j.check()?;
+            }
             let id = source.id();
-            // One misbehaving reader must not take the others (or the agent) down.
+            // One misbehaving reader must not take the others (or the agent) down. One read cannot be interrupted.
+            let _step = job.map(|j| j.uncancellable("A system log is being read; Cancel takes effect when it has been read."));
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| source.read(since, until))).unwrap_or_else(|_| {
                 Err(dyno_core::ports::PlatformError::Failed(
                     "This log reader stopped unexpectedly.".into(),
@@ -84,14 +111,14 @@ impl IssueCentre {
             if let Ok(list) = result {
                 found.extend(list);
             }
+            if let Some(j) = job {
+                j.add(1);
+            }
         }
-        let found = collapse_across_sources(found);
-        record(shared, &found, until);
-        let mut st = lock(&self.state);
-        st.statuses = statuses;
-        st.last_scan = Some(until);
-        st.scanning = false;
-        true
+        if let Some(j) = job {
+            j.check()?;
+        }
+        Ok((statuses, found))
     }
 
     fn snapshot(&self) -> (Vec<SourceStatus>, Option<Timestamp>) {
@@ -184,7 +211,8 @@ pub fn run(shared: &Shared) {
     while !shared.stopped() {
         // Reading the OS logs is heavier work: only inside the maintenance windows, when the user set any.
         if crate::extras::maintenance_open(shared) {
-            shared.issues.scan(shared);
+            // Nobody can cancel the scheduled read, so it cannot end early.
+            let _ = shared.issues.scan(shared, None);
             wait(SCAN_EVERY);
         } else {
             wait(std::time::Duration::from_secs(5 * 60));

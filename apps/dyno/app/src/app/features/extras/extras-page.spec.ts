@@ -286,15 +286,49 @@ describe('dy-extras-page', () => {
     await settle(f);
     expect(store.minMib()).toBe(1024);
     expect(el.querySelector('.none strong')).toBeNull();
-    vi.spyOn(mock, 'findFiles').mockResolvedValue({ scanId: 's', folder: '/x', large: [], duplicates: [], scanned: 10, truncated: true, wastedBytes: 0 });
+    const limit = { limit: 'files' as const, message: 'Stopped after 500000 files and folders. Choose a smaller folder to see everything in it.' };
+    vi.spyOn(mock, 'jobResult').mockResolvedValue({ finder: { scanId: 's', folder: '/x', large: [], duplicates: [], scanned: 10, limit, wastedBytes: 0 } });
     await store.search();
     await settle(f);
     expect(el.querySelector('.none strong')!.textContent).toBe('Nothing found in this folder');
-    expect(el.textContent).toContain('before the limit');
-    vi.spyOn(mock, 'findFiles').mockRejectedValue({ code: 'badRequest', message: 'Choose a folder with a full path.' });
+    expect(el.textContent).toContain('before a limit. Stopped after 500000 files and folders. Choose a smaller folder');
+    vi.spyOn(mock, 'startJob').mockRejectedValue({ code: 'badRequest', message: 'Choose a folder with a full path.' });
     await store.search();
     await settle(f);
     expect(el.querySelector('[role="alert"]')!.textContent).toContain('Choose a folder with a full path.');
+  });
+
+  it('Files: shows the search as a job with its count and Cancel, then the stopped note with Search again', async () => {
+    const { f, el, mock, store } = render('files');
+    await settle(f);
+    mock.jobPolls = 40;
+    btn(el, 'Choose a folder').click();
+    for (let i = 0; i < 5 && !el.querySelector('pd-job'); i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      await settle(f);
+    }
+    const card = el.querySelector('pd-job')!;
+    expect(card.textContent).toContain('Finding files');
+    expect(card.textContent).toContain('/Users/sam/Projects');
+    expect(card.textContent).toMatch(/Listing files/);
+    expect(el.querySelector('.skeleton-wrap')).toBeNull();
+    expect(btn(el, 'Choose another folder')?.disabled ?? true).toBe(true);
+    btn(card as HTMLElement, 'Cancel').click();
+    for (let i = 0; i < 40 && store.finder().loading; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      await settle(f);
+    }
+    expect(store.finderCancelled()).toBe(true);
+    expect(el.querySelector('pd-job')).toBeNull();
+    expect(el.textContent).toContain('Search stopped.');
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+    mock.jobPolls = 1;
+    btn(el, 'Search again').click();
+    await settle(f);
+    await new Promise((r) => setTimeout(r, 20));
+    await settle(f);
+    expect(el.querySelector('table[aria-label="Large and duplicate files"]')).not.toBeNull();
+    expect(el.textContent).not.toContain('Search stopped.');
   });
 
   describe('Maintenance', () => {

@@ -1,5 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../core/backend';
+import { JOB_POLL_MS } from '../core/job-runner';
+import { freezeJobs } from '../../testing/job-test-support';
 import { MockBackend } from '../core/mock-backend';
 import { LookupStore } from './lookup.store';
 
@@ -44,9 +46,60 @@ describe('LookupStore', () => {
     expect(store.hash()).not.toBeNull();
     await store.loadHash({ path: 'relative' });
     expect(store.hash()).toBeNull();
-    expect(store.error()?.code).toBe('notFound');
+    expect(store.error()?.message).toBe('That is not a full path to a file.');
     store.reset();
     expect(store.error()).toBeNull();
     expect(store.seed()).toBeNull();
+  });
+
+  describe('reading a file as a job', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('shows the bytes read so far and never a timeout while the file is big', async () => {
+      vi.useFakeTimers();
+      const { store, mock } = setup();
+      mock.jobPolls = 4;
+      const done = store.loadHash({ path: '/a/big.bin' });
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      expect(store.busy()).toBe(true);
+      expect(store.hashJob()?.snapshot).toMatchObject({ title: 'Hashing a file', state: 'running', phase: { id: 'hash', unit: 'bytes' } });
+      freezeJobs(mock);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(store.error()).toBeNull();
+      expect(store.hashJob()?.stalled).toBe(true);
+      void done;
+    });
+
+    it('Cancel stops the read at the engine and leaves a message the dialog can retry from', async () => {
+      vi.useFakeTimers();
+      const { store, mock } = setup();
+      mock.jobPolls = 10;
+      const cancel = vi.spyOn(mock, 'cancelJob');
+      const done = store.loadHash({ path: '/a/big.bin' });
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      await store.cancelHash();
+      expect(cancel).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      await done;
+      expect(store.hash()).toBeNull();
+      expect(store.busy()).toBe(false);
+      expect(store.hashJob()).toBeNull();
+      expect(store.error()?.message).toContain('stopped');
+    });
+
+    it('closing the dialog (reset) stops a read in progress and the late answer is ignored', async () => {
+      vi.useFakeTimers();
+      const { store, mock } = setup();
+      mock.jobPolls = 10;
+      const cancel = vi.spyOn(mock, 'cancelJob');
+      const done = store.loadHash({ path: '/a/big.bin' });
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      store.reset();
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS * 2);
+      await done;
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(store.error()).toBeNull();
+      expect(store.hash()).toBeNull();
+    });
   });
 });

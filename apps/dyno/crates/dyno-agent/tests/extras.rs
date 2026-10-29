@@ -3,12 +3,13 @@
 //! The extras (WP-13), backup health (WP-14) end to end over the fake platform: scripted tools
 //! (no real `tmutil`, `pmset` or `restic` is run), a real IPC connection and a SQLite file in a temp folder.
 
-use dyno_agent::cli::{ask, ask_within, connect};
+use dyno_agent::cli::{ask, ask_within, connect, run_job};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_core::backup::{BackupState, BackupTool};
 use dyno_core::extras::changes::{ChangeKind, ChangesQuery};
-use dyno_core::extras::files::{FinderMode, FinderQuery};
+use dyno_core::extras::files::{FinderMode, FinderQuery, FinderResult};
+use dyno_core::jobs::{JobOutput, JobSpec};
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{Message, Reply, Request};
 use dyno_core::time::{Timestamp, HOUR};
@@ -189,6 +190,14 @@ fn write(dir: &std::path::Path, name: &str, byte: u8, len: usize) -> std::path::
     p
 }
 
+/// Runs the finder as a job and waits for its result.
+fn find(peer: &Peer<Message>, query: FinderQuery) -> Result<FinderResult, String> {
+    match run_job(peer, JobSpec::FindFiles { query }, Duration::from_secs(60))? {
+        JobOutput::Finder(r) => Ok(*r),
+        other => panic!("{other:?}"),
+    }
+}
+
 #[test]
 fn the_finder_lists_large_files_and_duplicates_and_moves_nothing() {
     let h = Harness::start();
@@ -204,9 +213,7 @@ fn the_finder_lists_large_files_and_duplicates_and_moves_nothing() {
         mode: FinderMode::Both,
         min_bytes: 0,
     };
-    let Reply::FileFinder(r) = ask_within(&peer, Request::FindFiles { query }, Duration::from_secs(60)).unwrap() else {
-        panic!("finder")
-    };
+    let r = find(&peer, query).unwrap();
     assert_eq!(r.large[0].bytes, 4 * MB as u64);
     assert_eq!(r.duplicates.len(), 1);
     assert_eq!(r.duplicates[0].files.len(), 2);
@@ -223,14 +230,17 @@ fn the_finder_refuses_a_folder_that_is_not_there() {
         mode: FinderMode::Both,
         min_bytes: 0,
     };
-    assert!(ask(&peer, Request::FindFiles { query: q })
-        .unwrap_err()
-        .contains("cannot be opened"));
+    assert!(find(&peer, q).unwrap_err().contains("cannot be opened"));
 }
 
 fn backup_report(peer: &Peer<Message>, refresh: bool) -> dyno_core::backup::BackupReport {
-    let req = if refresh { Request::RefreshBackup } else { Request::Backup };
-    let Reply::Backup(mut r) = ask(peer, req).unwrap() else {
+    if refresh {
+        let JobOutput::Backup(r) = run_job(peer, JobSpec::RefreshBackup, Duration::from_secs(30)).unwrap() else {
+            panic!("backup")
+        };
+        return *r;
+    }
+    let Reply::Backup(mut r) = ask(peer, Request::Backup).unwrap() else {
         panic!("backup")
     };
     for _ in 0..200 {

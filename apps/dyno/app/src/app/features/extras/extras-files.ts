@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { AsyncState } from '../../shared/async-state';
 import { formatBytes, formatDate, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
+import { JobProgressCard } from '../../shared/job-progress';
 import { ExtrasStore } from '../../state/extras.store';
 import { MIN_SIZES, MODES, type FileRow, baseName, dirName, fileRows, middleEllipsis, scanSentence } from './files-model';
 import { EXTRAS_STYLES } from './extras-styles';
@@ -15,7 +16,7 @@ import { MatTooltip } from '@angular/material/tooltip';
  */
 @Component({
   selector: 'dy-extras-files',
-  imports: [MatIconButton, MatTooltip, SuSegmentedControl, MatButton, AsyncState, Icon],
+  imports: [MatIconButton, MatTooltip, SuSegmentedControl, MatButton, AsyncState, Icon, JobProgressCard],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar" role="group" aria-label="Search">
@@ -35,6 +36,16 @@ import { MatTooltip } from '@angular/material/tooltip';
         <span>Choose a folder and Dyno lists its biggest files and files with identical content. It only reads and never moves or removes a file.</span>
       </div>
     } @else {
+      @if (store.finderJob(); as job) {
+        <dy-job-progress [progress]="job" (cancel)="store.cancelSearch()" />
+      }
+      @if (store.finderCancelled()) {
+        <p class="note faint" role="status">
+          Search stopped. @if (result()) { The earlier result is shown. }
+          <button type="button" matButton="text" (click)="store.search()">Search again</button>
+        </p>
+      }
+      @if (result() || (!store.finderJob() && !store.finderCancelled())) {
       <dy-async [loaded]="!!result()" [error]="store.finder().error" what="the folder" [rows]="6" (retry)="store.search()">
         @if (result(); as r) {
           @if (rows().length === 0) {
@@ -73,6 +84,7 @@ import { MatTooltip } from '@angular/material/tooltip';
           }
         }
       </dy-async>
+      }
     }
   `,
   styles: [

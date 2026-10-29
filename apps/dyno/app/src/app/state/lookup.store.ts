@@ -3,6 +3,7 @@ import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
 import type { CommandError, FileHashInfo, HashSource, SearchSeed } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
+import { JobRunner, type JobProgress, type JobRun } from '../core/job-runner';
 
 interface LookupState {
   seed: SearchSeed | null;
@@ -10,9 +11,11 @@ interface LookupState {
   /** A request is in flight (reading the seed or the file, or opening the browser). */
   busy: boolean;
   error: CommandError | null;
+  /** Reading the file runs as a job (a program can be large): its phase, its bytes so far, and whether it has stood still for a while. */
+  hashJob: JobProgress | null;
 }
 
-const initial: LookupState = { seed: null, hash: null, busy: false, error: null };
+const initial: LookupState = { seed: null, hash: null, busy: false, error: null, hashJob: null };
 
 /**
  * The state of the two "look it up" dialogs: the redacted search text, and a file's SHA-256. The engine builds both and the
@@ -21,7 +24,8 @@ const initial: LookupState = { seed: null, hash: null, busy: false, error: null 
 export const LookupStore = signalStore(
   { providedIn: 'root' },
   withState(initial),
-  withMethods((store, backend = inject(BACKEND)) => {
+  withMethods((store, backend = inject(BACKEND), jobs = inject(JobRunner)) => {
+    let hashing: JobRun | null = null;
     const run = async <T>(body: () => Promise<T>): Promise<T | null> => {
       patchState(store, { busy: true, error: null });
       try {
@@ -35,6 +39,10 @@ export const LookupStore = signalStore(
     };
     return {
       reset(): void {
+        // A file still being read is dropped with the dialog: the engine stops reading it.
+        const reading = hashing;
+        hashing = null;
+        void reading?.cancel().catch(() => undefined);
         patchState(store, initial);
       },
       /** Reads the redacted starting text for a search about `text`. */
@@ -47,11 +55,33 @@ export const LookupStore = signalStore(
       async search(query: string): Promise<boolean> {
         return (await run(() => backend.webSearch(query).then(() => true))) === true;
       },
-      /** Computes the SHA-256 of the file (nothing is uploaded). */
+      /** Computes the SHA-256 of the file (nothing is uploaded) as a job; a cancelled read leaves no hash and no error. */
       async loadHash(source: HashSource): Promise<void> {
-        patchState(store, { hash: null });
-        const hash = await run(() => backend.fileHash(source));
+        patchState(store, { hash: null, hashJob: null });
+        const hash = await run(async () => {
+          const job = (hashing = jobs.run({ fileHash: { source } }, (hashJob) => patchState(store, { hashJob })));
+          try {
+            const out = await job.result;
+            // The dialog was closed or reopened meanwhile: this answer belongs to nobody.
+            if (hashing !== job) return null;
+            if (out === null) throw { code: 'internal', message: 'Reading the file was stopped. Open VirusTotal reads it again.' } satisfies CommandError;
+            return 'fileHash' in out ? out.fileHash : null;
+          } finally {
+            if (hashing === job) {
+              hashing = null;
+              patchState(store, { hashJob: null });
+            }
+          }
+        });
         if (hash) patchState(store, { hash });
+      },
+      /** Stops reading the file. */
+      async cancelHash(): Promise<void> {
+        try {
+          await hashing?.cancel();
+        } catch (e) {
+          patchState(store, { error: toCommandError(e) });
+        }
       },
       /** Opens the VirusTotal page of the hash in the browser; true when it opened. */
       async openVirusTotal(sha256: string): Promise<boolean> {

@@ -21,7 +21,7 @@ use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any incompatible change.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// How much a live subscriber wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -281,11 +281,6 @@ pub enum Request {
         /// The window.
         query: crate::issues::IssuesQuery,
     },
-    /// Reads the OS logs now (instead of waiting for the next scheduled read) and answers the Issues page. Appended.
-    RescanIssues {
-        /// The window.
-        query: crate::issues::IssuesQuery,
-    },
     /// Writes the issues of the last `days` as JSON lines (for Debrief) to a path the user picked in the OS save dialog;
     /// answers `IssuesSaved`. Appended.
     SaveIssues {
@@ -311,12 +306,6 @@ pub enum Request {
     WebSearch {
         /// The text the person confirmed.
         query: String,
-    },
-    /// The SHA-256 of a program's file, computed here (cached by path, size and modification time). Nothing is uploaded.
-    /// Appended.
-    FileHash {
-        /// Which file.
-        source: crate::weblinks::HashSource,
     },
     /// The VirusTotal page of a hash (answers `Url`; the shell opens it in the default browser). Appended.
     VirusTotalUrl {
@@ -352,18 +341,31 @@ pub enum Request {
         /// The file format.
         format: crate::extras::software::InventoryFormat,
     },
-    /// Looks for large and duplicate files in a folder the user chose. Deletes nothing. Appended.
-    FindFiles {
-        /// What and where.
-        query: crate::extras::files::FinderQuery,
-    },
     /// The maintenance windows' state now. A query. Appended.
     Maintenance,
     /// Backup health (Time Machine, Windows Backup, File History, restic, Borg, Duplicati): the last check, without
     /// running one unless there is none. Appended.
     Backup,
-    /// Checks the backups now (read-only tools with timeouts) and answers the report. Appended.
-    RefreshBackup,
+
+    // ---- long operations as jobs (ER-17, ER-18, ER-19): every request below answers at once ----
+    /// Starts a long read-only operation (find files, read the OS logs, check the backups, hash a file) in the
+    /// background and answers its status at once. A second start of a kind that is running answers the running job.
+    StartJob {
+        /// What to run.
+        spec: crate::jobs::JobSpec,
+    },
+    /// The status of every running job and of the last few that ended (what a window that opens late needs). A query.
+    Jobs,
+    /// Asks a job to stop and returns at once; what it was building is dropped and nothing else changes.
+    CancelJob {
+        /// The job.
+        id: u64,
+    },
+    /// What a done job produced; `NotFound` when the job is unknown, not done, or too old to be kept.
+    JobResult {
+        /// The job.
+        id: u64,
+    },
 
     // ---- the disk map (ADR 0024 job: pushed `Message::DiskScan` events, no polling) ----
     /// The volumes mounted now: internal, external and network, with capacity. Appended.
@@ -692,8 +694,6 @@ pub enum Reply {
     // ---- right-click search, hash search, startup filter, watched folders ----
     /// The starting text of a search. Appended.
     SearchSeed(crate::weblinks::SearchSeed),
-    /// A file's hash. Appended.
-    FileHash(crate::weblinks::FileHashInfo),
     /// The filtered startup list. Appended.
     StartupOverview(Box<crate::startup::StartupOverview>),
     // ---- extras, backup health and taming proof (WP-13, WP-14, WP-36) ----
@@ -711,8 +711,6 @@ pub enum Reply {
     Software(Box<crate::extras::software::SoftwareInventory>),
     /// The inventory report was written. Appended.
     InventorySaved(SavedInventory),
-    /// Large and duplicate files. Appended.
-    FileFinder(Box<crate::extras::files::FinderResult>),
     /// The maintenance windows' state. Appended.
     Maintenance(crate::extras::maintenance::MaintenanceStatus),
     /// Backup health. Appended.
@@ -729,6 +727,14 @@ pub enum Reply {
     DiskPath(String),
     /// Several levels of a scan.
     DiskRings(Box<crate::disk::index::DiskRings>),
+
+    // ---- jobs ----
+    /// A job's status (the answer to starting one).
+    Job(Box<crate::jobs::JobStatus>),
+    /// Every running job and the last few that ended.
+    Jobs(Vec<crate::jobs::JobStatus>),
+    /// What a done job produced.
+    JobOutput(Box<crate::jobs::JobOutput>),
 }
 
 /// The inventory report that was written.
@@ -790,7 +796,6 @@ impl Reply {
             Reply::IssuesSaved(x) => v(x),
             Reply::Unusual(x) => v(x),
             Reply::SearchSeed(x) => v(x),
-            Reply::FileHash(x) => v(x),
             Reply::StartupOverview(x) => v(x),
             Reply::Changes(x) => v(x),
             Reply::Sleep(x) => v(x),
@@ -799,7 +804,6 @@ impl Reply {
             Reply::Gpu(x) => v(x),
             Reply::Software(x) => v(x),
             Reply::InventorySaved(x) => v(x),
-            Reply::FileFinder(x) => v(x),
             Reply::Maintenance(x) => v(x),
             Reply::Backup(x) => v(x),
             Reply::DiskVolumes(x) => v(x),
@@ -808,6 +812,9 @@ impl Reply {
             Reply::DiskChildren(x) => v(x),
             Reply::DiskPath(x) => v(x),
             Reply::DiskRings(x) => v(x),
+            Reply::Job(x) => v(x),
+            Reply::Jobs(x) => v(x),
+            Reply::JobOutput(x) => v(x),
         }
     }
 }
@@ -998,7 +1005,6 @@ mod tests {
                 path: "/x.md".into(),
                 bytes: 1,
             }),
-            Reply::FileFinder(Box::default()),
             Reply::Maintenance(crate::extras::maintenance::MaintenanceSettings::default().status(Timestamp(0), 0)),
             Reply::Backup(Box::default()),
             Reply::CounterObjects(Box::default()),
@@ -1070,6 +1076,8 @@ mod tests {
             Reply::DiskChildren(Box::new(page)),
             Reply::DiskPath("/x".into()),
             Reply::DiskRings(Box::new(index.rings(index.root(), 2, 0.0, 10).unwrap())),
+            Reply::Jobs(vec![]),
+            Reply::JobOutput(Box::new(crate::jobs::JobOutput::Backup(Box::default()))),
         ];
         for r in replies {
             let m = Message::Reply(Box::new(Ok(r.clone())));
@@ -1142,7 +1150,7 @@ mod tests {
             ("softwareInventory", Request::SoftwareInventory),
             ("maintenance", Request::Maintenance),
             ("backup", Request::Backup),
-            ("refreshBackup", Request::RefreshBackup),
+            ("jobs", Request::Jobs),
         ] {
             assert_eq!(serde_json::to_value(&r).unwrap(), name);
             assert_eq!(serde_json::from_value::<Request>(serde_json::json!(name)).unwrap(), r);
@@ -1151,8 +1159,9 @@ mod tests {
         assert!(matches!(r, Request::Changes { query } if query.hours == 6));
         let r: Request = serde_json::from_value(serde_json::json!({"changes": {"query": {}}})).unwrap();
         assert!(matches!(r, Request::Changes { query } if query.around.is_none()));
-        let r: Request = serde_json::from_value(serde_json::json!({"findFiles": {"query": {"folder": "/x", "minBytes": 5}}})).unwrap();
-        assert!(matches!(r, Request::FindFiles { query } if query.mode == crate::extras::files::FinderMode::Both));
+        let r: Request =
+            serde_json::from_value(serde_json::json!({"startJob": {"spec": {"findFiles": {"query": {"folder": "/x", "minBytes": 5}}}}})).unwrap();
+        assert!(matches!(r, Request::StartJob { spec: crate::jobs::JobSpec::FindFiles { query } } if query.mode == crate::extras::files::FinderMode::Both));
         let r: Request =
             serde_json::from_value(serde_json::json!({"saveInventoryReport": {"path": "/r.md", "format": "markdown"}})).unwrap();
         assert!(matches!(r, Request::SaveInventoryReport { .. }));
@@ -1213,10 +1222,12 @@ mod search_watch_tests {
             serde_json::json!({"webSearch": {"query": "q"}})
         );
         assert_eq!(
-            j(Request::FileHash {
-                source: crate::weblinks::HashSource::Path("/a".into())
+            j(Request::StartJob {
+                spec: crate::jobs::JobSpec::FileHash {
+                    source: crate::weblinks::HashSource::Path("/a".into())
+                }
             }),
-            serde_json::json!({"fileHash": {"source": {"path": "/a"}}})
+            serde_json::json!({"startJob": {"spec": {"fileHash": {"source": {"path": "/a"}}}}})
         );
         assert_eq!(
             j(Request::StartupOverview {
@@ -1235,12 +1246,20 @@ mod search_watch_tests {
         let reqs = vec![
             Request::SearchSeed { text: "a".into() },
             Request::WebSearch { query: "b".into() },
-            Request::FileHash {
-                source: crate::weblinks::HashSource::Process(ProcessRef {
-                    pid: 3,
-                    started: Some(Timestamp(4)),
-                }),
+            Request::StartJob {
+                spec: crate::jobs::JobSpec::FileHash {
+                    source: crate::weblinks::HashSource::Process(ProcessRef {
+                        pid: 3,
+                        started: Some(Timestamp(4)),
+                    }),
+                },
             },
+            Request::StartJob {
+                spec: crate::jobs::JobSpec::RefreshBackup,
+            },
+            Request::Jobs,
+            Request::CancelJob { id: 9 },
+            Request::JobResult { id: 9 },
             Request::VirusTotalUrl { sha256: "0".repeat(64) },
             Request::StartupOverview {
                 filter: Default::default(),

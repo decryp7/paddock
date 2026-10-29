@@ -104,7 +104,7 @@ describe('dy-backup-page', () => {
     const { f, el, mock } = render({ latencyMs: 5 });
     await new Promise((r) => setTimeout(r, 20));
     await settle(f);
-    const spy = vi.spyOn(mock, 'refreshBackup');
+    const spy = vi.spyOn(mock, 'startJob');
     const check = btn(el, 'Check now');
     check.click();
     f.detectChanges();
@@ -116,10 +116,36 @@ describe('dy-backup-page', () => {
     expect(el.querySelector('[aria-label="Summary"] p')?.textContent).toBe('Checked just now');
   });
 
+  it('shows the check as a job with the tool count and Cancel, and Cancel keeps the earlier report', async () => {
+    const { f, el, mock } = render();
+    await settle(f);
+    mock.jobPolls = 40;
+    const cancel = vi.spyOn(mock, 'cancelJob');
+    btn(el, 'Check now').click();
+    for (let i = 0; i < 5 && !el.querySelector('pd-job'); i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      await settle(f);
+    }
+    const card = el.querySelector('pd-job')!;
+    expect(card.textContent).toContain('Checking backups');
+    expect(card.textContent).toMatch(/Checking backup tools|Starting/);
+    btn(card as HTMLElement, 'Cancel').click();
+    for (let i = 0; i < 40 && el.querySelector('pd-job'); i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      await settle(f);
+    }
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(el.querySelector('pd-job')).toBeNull();
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+    expect(el.querySelector('[aria-label="Summary"] p')?.textContent).toBe('Checked 40 min ago');
+    expect(el.querySelectorAll('tr.row')).toHaveLength(3);
+    expect(btn(el, 'Check now').disabled).toBe(false);
+  });
+
   it('shows why a check failed and keeps the table', async () => {
     const { f, el, mock } = render();
     await settle(f);
-    vi.spyOn(mock, 'refreshBackup').mockRejectedValueOnce({ code: 'timeout', message: 'The tools did not answer.' });
+    vi.spyOn(mock, 'startJob').mockRejectedValueOnce({ code: 'busy', message: 'The tools did not answer.' });
     btn(el, 'Check now').click();
     await settle(f);
     expect(el.querySelector('[role="alert"]')?.textContent).toContain('The tools did not answer.');
@@ -135,7 +161,7 @@ describe('dy-backup-page', () => {
     expect(el.textContent).toContain('never runs or manages a backup');
     expect(el.querySelector('table')).toBeNull();
     expect(el.querySelector('[role="alert"]')).toBeNull();
-    const spy = vi.spyOn(mock, 'refreshBackup');
+    const spy = vi.spyOn(mock, 'startJob');
     btn(el, 'Check again').click();
     await settle(f);
     expect(spy).toHaveBeenCalled();

@@ -142,7 +142,9 @@ pub async fn save_inventory_report(
 /// (`pick_folder`); a volume scan names a volume the agent itself listed.
 fn check_picked(picked: &PickedFolders, request: &Request) -> Result<(), CommandError> {
     let folder = match request {
-        Request::FindFiles { query } => &query.folder,
+        Request::StartJob {
+            spec: dyno_core::jobs::JobSpec::FindFiles { query },
+        } => &query.folder,
         Request::StartDiskScan {
             target: dyno_core::disk::scan::DiskTarget::Folder { path },
         } => path,
@@ -340,8 +342,13 @@ mod tests {
         assert!(parse_request(json!({"saveReport": {"path": "/tmp/x.md", "format": "markdown", "weeksAgo": 0}})).is_err());
         assert!(parse_request(json!({"saveIssues": {"path": "/tmp/x.jsonl", "days": 7}})).is_err());
         // The finder's request parses, but `dyno` refuses a folder nobody picked.
-        let r = parse_request(json!({"findFiles": {"query": {"folder": "/tmp", "minBytes": 1}}})).unwrap();
-        assert!(matches!(r, Request::FindFiles { .. }));
+        let r = parse_request(json!({"startJob": {"spec": {"findFiles": {"query": {"folder": "/tmp", "minBytes": 1}}}}})).unwrap();
+        assert!(matches!(
+            r,
+            Request::StartJob {
+                spec: dyno_core::jobs::JobSpec::FindFiles { .. }
+            }
+        ));
         let picked = PickedFolders::default();
         let dir = std::env::temp_dir();
         let dir = dir.to_string_lossy();
@@ -369,7 +376,7 @@ mod tests {
         let volume = parse_request(json!({"startDiskScan": {"target": {"volume": {"id": "/"}}}})).unwrap();
         assert!(check_picked(&PickedFolders::default(), &volume).is_ok());
         assert!(check_picked(&PickedFolders::default(), &Request::WhySlow).is_ok());
-        let finder = parse_request(json!({"findFiles": {"query": {"folder": dir, "minBytes": 1}}})).unwrap();
+        let finder = parse_request(json!({"startJob": {"spec": {"findFiles": {"query": {"folder": dir, "minBytes": 1}}}}})).unwrap();
         assert!(check_picked(&PickedFolders::default(), &finder).is_err());
     }
 
@@ -384,7 +391,7 @@ mod tests {
             "softwareInventory",
             "maintenance",
             "backup",
-            "refreshBackup",
+            "jobs",
         ] {
             assert!(parse_request(json!(name)).is_ok(), "{name}");
         }
@@ -401,18 +408,30 @@ mod tests {
             Request::Issues { query } if query.days == 14
         ));
         assert!(matches!(
-            parse_request(json!({"rescanIssues": {"query": {"days": 7}}})).unwrap(),
-            Request::RescanIssues { .. }
+            parse_request(json!({"startJob": {"spec": {"rescanIssues": {"query": {"days": 7}}}}})).unwrap(),
+            Request::StartJob {
+                spec: dyno_core::jobs::JobSpec::RescanIssues { .. }
+            }
         ));
         assert_eq!(parse_request(json!("unusual")).unwrap(), Request::Unusual);
         assert_eq!(parse_request(json!("forgetBaseline")).unwrap(), Request::ForgetBaseline);
         // The ignore and protect actions are gone.
         assert!(parse_request(json!({"unusualAct": {"key": "k", "action": "protect"}})).is_err());
         assert!(matches!(
-            parse_request(json!({"fileHash": {"source": {"path": "/a"}}})).unwrap(),
-            Request::FileHash { .. }
+            parse_request(json!({"startJob": {"spec": {"fileHash": {"source": {"path": "/a"}}}}})).unwrap(),
+            Request::StartJob {
+                spec: dyno_core::jobs::JobSpec::FileHash { .. }
+            }
         ));
-        assert!(parse_request(json!({"fileHash": {"source": {"pid": 1}}})).is_err());
+        assert!(parse_request(json!({"startJob": {"spec": {"fileHash": {"source": {"pid": 1}}}}})).is_err());
+        assert_eq!(
+            parse_request(json!({"cancelJob": {"id": 3}})).unwrap(),
+            Request::CancelJob { id: 3 }
+        );
+        assert_eq!(
+            parse_request(json!({"jobResult": {"id": 3}})).unwrap(),
+            Request::JobResult { id: 3 }
+        );
     }
 
     #[test]
