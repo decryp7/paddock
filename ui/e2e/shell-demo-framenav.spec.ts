@@ -2,7 +2,7 @@ import { axeViolations, expect, installTauriFake, test, THEMES } from '@decryp7/
 
 // Frame navigation on Angular Material and the CDK (Material migration WP-4): the sidebar's arrow keys come from the CDK
 // FocusKeyManager, the badges are matBadge, the rail and status bar tooltips are matTooltip, and the copy menu is a CDK
-// context menu. Chromium only; console errors are collected so a CSP violation fails the test.
+// context menu. Chromium and WebKit; console errors are collected so a CSP violation fails the test.
 test.use({ consoleErrors: true });
 
 for (const colorScheme of THEMES) {
@@ -101,26 +101,34 @@ for (const colorScheme of THEMES) {
 test.describe('copy menu', () => {
   test('a right click on selected text opens Copy at the pointer, focused; Escape closes it and Copy copies', async ({ app, page, pageErrors }) => {
     await installTauriFake(page, { platform: 'mac', otherwise: 'null' });
-    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    // A page-local clipboard: no browser permission (WebKit knows only clipboard-read) and never the machine's own clipboard.
+    await page.addInitScript(() => {
+      let copied = '';
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t: string) => void (copied = t), readText: async () => copied } });
+    });
     await app.frame.open();
     const text = page.getByTestId('app-context');
-    await text.evaluate((el) => {
-      el.classList.add('pd-selectable');
-      const r = document.createRange();
-      r.selectNodeContents(el);
-      getSelection()?.removeAllRanges();
-      getSelection()?.addRange(r);
-    });
+    const selectAll = () =>
+      text.evaluate((el) => {
+        el.classList.add('pd-selectable');
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        getSelection()?.removeAllRanges();
+        getSelection()?.addRange(r);
+      });
+    await selectAll();
     await text.click({ button: 'right', position: { x: 20, y: 8 } });
     const item = page.getByRole('menuitem', { name: 'Copy' });
     await expect(item).toBeVisible();
     await expect(item).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(item).toHaveCount(0);
+    // WebKit drops the selection when focus moves into the menu (Chromium keeps it); select again, as a user would.
+    await selectAll();
     await text.click({ button: 'right', position: { x: 20, y: 8 } });
     await page.getByRole('menuitem', { name: 'Copy' }).click();
     await expect(page.getByRole('menuitem', { name: 'Copy' })).toHaveCount(0);
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('App context');
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('App context');
     // The fake IPC does not answer the shell's version call; that message is the only one expected.
     expect(pageErrors.filter((e) => !/did not say its version/.test(e))).toEqual([]);
   });

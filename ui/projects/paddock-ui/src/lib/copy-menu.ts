@@ -7,6 +7,8 @@ export interface PdCopyMenuState {
   x: number;
   y: number;
   text: string;
+  /** The right click that opened it, if any: the CDK menu then ignores that click's own release (see `open`). */
+  event?: MouseEvent;
 }
 
 /**
@@ -19,9 +21,13 @@ export class PdCopyMenu {
   /** The open menu, or null. */
   readonly state = this.stateSignal.asReadonly();
 
-  /** Opens the menu at the pointer for `text`. */
-  open(x: number, y: number, text: string): void {
-    this.stateSignal.set({ x, y, text });
+  /**
+   * Opens the menu at the pointer for `text`. Pass the `contextmenu` event that asked for it: where that event comes on the
+   * button press (macOS and Linux, so WKWebView and WebKitGTK), the release follows once the menu is drawn, and its
+   * `auxclick` outside the menu would close it again at once.
+   */
+  open(x: number, y: number, text: string, event?: MouseEvent): void {
+    this.stateSignal.set(event ? { x, y, text, event } : { x, y, text });
   }
 
   /** Closes the menu. */
@@ -80,7 +86,10 @@ export class PdCopyMenuHost {
           trigger.close();
           return;
         }
-        trigger.open({ x: s.x, y: s.y });
+        // Opened with the right click itself, the CDK skips that click's own auxclick (the CDK's `_openOnContextMenu`, its
+        // public host listener); a programmatic open has none to skip.
+        if (s.event) trigger._openOnContextMenu(s.event);
+        else trigger.open({ x: s.x, y: s.y });
         afterNextRender(() => this.panel()?.focusFirstItem('program'), { injector: this.injector });
       });
     });

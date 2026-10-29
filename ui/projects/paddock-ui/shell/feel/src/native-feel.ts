@@ -172,8 +172,11 @@ function selectedTextAt(el: Element | null, selection: Selection | null, x: numb
 
 /** What the guard asks of the app. */
 export interface FeelHooks {
-  /** Opens the app's menu with Copy for `text` at the pointer. Without it, the native menu stays on selected text. */
-  copyMenu?: (x: number, y: number, text: string) => void;
+  /**
+   * Opens the app's menu with Copy for `text` at the pointer; `event` is the right click, so the menu can ignore its release.
+   * Without it, the native menu stays on selected text.
+   */
+  copyMenu?: (x: number, y: number, text: string, event: MouseEvent) => void;
 }
 
 /** Installs the guard on a window; returns the function that removes it. */
@@ -199,7 +202,7 @@ export function installNativeFeel(win: Window, o: FeelOptions, hooks: FeelHooks 
     if (action === 'block') e.preventDefault();
     if (action === 'copy' && selected !== null && hooks.copyMenu) {
       e.preventDefault();
-      hooks.copyMenu(e.clientX, e.clientY, selected);
+      hooks.copyMenu(e.clientX, e.clientY, selected, e);
     }
   };
   const files = (e: DragEvent) => {
@@ -252,7 +255,7 @@ export function provideNativeFeel(): EnvironmentProviders {
       const win = inject(DOCUMENT).defaultView;
       if (!win) return;
       const menu = inject(PdCopyMenu);
-      const remove = installNativeFeel(win, { release: !isDevMode(), mac: isMac(win.navigator.userAgent) }, { copyMenu: (x, y, text) => menu.open(x, y, text) });
+      const remove = installNativeFeel(win, { release: !isDevMode(), mac: isMac(win.navigator.userAgent) }, { copyMenu: (x, y, text, event) => menu.open(x, y, text, event) });
       inject(DestroyRef).onDestroy(remove);
     }),
   ]);

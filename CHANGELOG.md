@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `pd-copy-menu`: stays open in WebKit
+- `PdCopyMenu.open(x, y, text, event?)` takes the right click that asked for it (the native-feel guard passes it), and `<pd-copy-menu />` opens the CDK menu with that event. Where `contextmenu` comes on the button press (macOS and Linux, so WKWebView and WebKitGTK), the release's `auxclick` used to close the menu as soon as it was drawn; the CDK now skips it. `FeelHooks.copyMenu` gets the event as a fourth argument. The reference apps' WebKit specs wait for animations before axe (data), use a page-local clipboard instead of `grantPermissions` (WebKit has no `clipboard-write`) and measure the folded Problems table once the fold is in place.
+
 ### `paddock-jobs`: `WalkOptions::with_modified`
 - `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
 

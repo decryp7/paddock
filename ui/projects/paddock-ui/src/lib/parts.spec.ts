@@ -256,6 +256,24 @@ describe('pd-copy-menu', () => {
     await vi.waitFor(() => expect(menu.state()).toBeNull());
   });
 
+  it('stays open through the release of the right click that opened it (WebKit: contextmenu comes on the press)', async () => {
+    const f = TestBed.createComponent(PdCopyMenuHost);
+    const menu = TestBed.inject(PdCopyMenu);
+    f.detectChanges();
+    const press = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 60 });
+    document.body.dispatchEvent(press);
+    menu.open(40, 60, 'selected', press);
+    await vi.waitFor(() => expect(panel()).not.toBeNull());
+    // The button comes up after the menu is drawn: its auxclick lands outside the menu.
+    document.body.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 2 }));
+    await f.whenStable();
+    expect(menu.state()).not.toBeNull();
+    expect(panel()).not.toBeNull();
+    // A later click elsewhere still closes it.
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(menu.state()).toBeNull());
+  });
+
   it('closes when the service closes it, and a failing clipboard only closes the menu', async () => {
     stubClipboard(() => Promise.reject(new Error('denied')));
     const f = TestBed.createComponent(PdCopyMenuHost);

@@ -302,7 +302,7 @@ describe('provideNativeFeel', () => {
     const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 6 });
     p.dispatchEvent(e);
     expect(e.defaultPrevented).toBe(true);
-    expect(TestBed.inject(PdCopyMenu).state()).toEqual({ x: 5, y: 6, text: 'copy me' });
+    expect(TestBed.inject(PdCopyMenu).state()).toEqual({ x: 5, y: 6, text: 'copy me', event: e });
     window.getSelection()?.removeAllRanges();
     p.remove();
     env.destroy();
