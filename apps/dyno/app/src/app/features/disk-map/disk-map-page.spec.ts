@@ -487,6 +487,11 @@ describe('dy-disk-map-page', () => {
 
   it('adds the files that have no row of their own as the last row of the table, so the rows add up', async () => {
     const r = await scanned();
+    // The mock's root has no loose files; the user's folder has some.
+    for (const name of ['Users', 'alex']) {
+      [...r.el.querySelectorAll<HTMLButtonElement>('.rows .name.link')].find((b) => b.textContent?.includes(name))!.click();
+      await settle(r.f);
+    }
     const loose = r.store.level()!.loose;
     expect(loose.bytes).toBeGreaterThan(0);
     btn(r.el, 'Table')!.click();

@@ -86,7 +86,7 @@ import { MatMenuModule } from '@angular/material/menu';
     dl { margin: 0; display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 6px var(--sp-3); font-size: var(--fs-sm); }
     dt { color: var(--text-3); }
     dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
-    .id { font-size: var(--fs-sm); line-height: 1.3; }
+    .id { font-size: var(--fs-sm); line-height: inherit; }
     .acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-1); }
     h3 { margin: var(--sp-3) 0 0; font: var(--fw-semibold) var(--fs-base) / 1.3 var(--font-sans); }
     .note, .hist { margin: 0; font-size: var(--fs-sm); overflow-wrap: anywhere; }

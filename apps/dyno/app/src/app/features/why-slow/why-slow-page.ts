@@ -85,7 +85,9 @@ import { FullTextTip } from '../../shared/full-text-tip';
             </div>
 
             <div class="foot">
-              <span class="look">Look closer:</span>
+              @if (links(c).length) {
+                <span class="look">Look closer:</span>
+              }
               @for (l of links(c); track l.path) {
                 <a matButton="text" [routerLink]="l.path"><dy-icon [name]="l.icon" /> {{ l.label }}</a>
               }
@@ -183,7 +185,8 @@ export class WhySlowPage implements OnInit {
   protected readonly day = formatDayTime;
   protected readonly window = windowText;
   protected readonly line = historyLine;
-  protected readonly links = (c: Cause) => causeLinks(c.kind);
+  /** The pages worth a look for a cause, without the ones a hint button already opens. */
+  protected readonly links = (c: Cause) => causeLinks(c.kind).filter((l) => !c.hints.some((h) => hintPath(h) === l.path));
 
   ngOnInit(): void {
     void this.store.ensure();

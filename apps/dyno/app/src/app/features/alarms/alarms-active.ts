@@ -65,7 +65,7 @@ const SEVERITY_ORDER: Record<Alarm['severity'], number> = { critical: 0, warning
     .sfx { flex: none; color: var(--text-3); font-size: var(--fs-xs); }
     .muted { color: var(--text-2); }
     .ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .id { font-size: var(--fs-sm); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .id { font-size: var(--fs-sm); line-height: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-inline-end: var(--sp-2); background: var(--text-3); }
     .dot[data-tone='bad'] { background: var(--bad); }
     .dot[data-tone='warn'] { background: var(--warn); }

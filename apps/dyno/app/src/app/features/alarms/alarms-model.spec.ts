@@ -45,8 +45,8 @@ describe('rule summaries', () => {
 
 describe('uniqueRuleId', () => {
   it('slugs the name and avoids taken ids', () => {
-    expect(uniqueRuleId('GPU limit!', [])).toBe('gpu-limit');
-    expect(uniqueRuleId('GPU limit', ['gpu-limit', 'gpu-limit-2'])).toBe('gpu-limit-3');
+    expect(uniqueRuleId('GPU load!', [])).toBe('gpu-load');
+    expect(uniqueRuleId('GPU load', ['gpu-load', 'gpu-load-2'])).toBe('gpu-load-3');
     expect(uniqueRuleId('  ***  ', [])).toBe('rule');
     expect(uniqueRuleId('Ünïcode name', [])).toBe('unicode-name');
     expect(uniqueRuleId('a'.repeat(60), []).length).toBe(40);
@@ -137,7 +137,7 @@ describe('ruleLabel', () => {
   it('drops the source prefix and splits camelCase and kebab-case into words', () => {
     expect(ruleLabel('alert:lowDisk')).toBe('Low disk');
     expect(ruleLabel('network:newExposedListener')).toBe('New exposed listener');
-    expect(ruleLabel('threshold:gpu-limit')).toBe('GPU limit');
+    expect(ruleLabel('threshold:gpu-load')).toBe('GPU load');
     expect(ruleLabel('threshold:my_custom rule')).toBe('My custom rule');
   });
   it('keeps acronyms upper case, even inside camelCase', () => {

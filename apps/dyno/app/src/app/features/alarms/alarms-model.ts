@@ -34,7 +34,7 @@ export function ruleSummary(r: CustomAlertRule): string {
   return r.forSecs > 0 ? `${base} for ${formatHold(r.forSecs)}` : base;
 }
 
-/** A URL-safe id from a rule name that none of `taken` uses (`gpu-limit`, `gpu-limit-2`, ...). */
+/** A URL-safe id from a rule name that none of `taken` uses (`gpu-load`, `gpu-load-2`, ...). */
 export function uniqueRuleId(name: string, taken: readonly string[]): string {
   const slug =
     name
@@ -158,8 +158,8 @@ export function withRule(rules: readonly CustomAlertRule[], rule: CustomAlertRul
 const ACRONYMS = new Set(['cpu', 'gpu', 'ssd', 'ram', 'tcp', 'udp', 'dns']);
 
 /**
- * A rule's name for people: the engine's rule key (`alert:lowDisk`, `network:newExposedListener`, `threshold:gpu-limit`) without
- * its source prefix, split into words (`Low disk`, `New exposed listener`, `GPU limit`). The key itself stays the identity.
+ * A rule's name for people: the engine's rule key (`alert:lowDisk`, `network:newExposedListener`, `threshold:gpu-load`) without
+ * its source prefix, split into words (`Low disk`, `New exposed listener`, `GPU load`). The key itself stays the identity.
  */
 export function ruleLabel(rule: string): string {
   const id = rule.includes(':') ? rule.slice(rule.indexOf(':') + 1) : rule;

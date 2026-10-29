@@ -20,7 +20,7 @@ export function demoAlarms(now: number): Alarm[] {
   } satisfies Partial<Alarm>;
   return [
     { ...base, id: 7, rule: 'network:newExposedListener', key: 'network:newExposedListener:node:3000', severity: 'warning', state: 'active', title: 'node started listening on TCP port 3000', detail: 'On every network interface: reachable from the network unless a firewall blocks it.', firstSeen: now - 4 * MIN, lastSeen: now - 4 * MIN, repeatCount: 1 },
-    { ...base, id: 6, rule: 'threshold:gpu-limit', key: 'threshold:gpu-limit', severity: 'warning', state: 'active', title: 'GPU load is over its limit', detail: 'The value is 97.0; the limit is 90.0.', firstSeen: now - 22 * MIN, lastSeen: now - 1 * MIN, repeatCount: 14, currentValue: 97, metric: 'gpuLoad' as Alarm['metric'] },
+    { ...base, id: 6, rule: 'threshold:gpu-load', key: 'threshold:gpu-load', severity: 'warning', state: 'active', title: 'GPU load is over its limit', detail: 'The value is 97.0; the limit is 90.0.', firstSeen: now - 22 * MIN, lastSeen: now - 1 * MIN, repeatCount: 14, currentValue: 97, metric: 'gpuLoad' as Alarm['metric'] },
     { ...base, id: 5, rule: 'alert:lowDisk', key: 'alert:lowDisk:Macintosh HD', severity: 'warning', state: 'acknowledged', title: 'Macintosh HD is 78% full', detail: '210 GB free of 953 GB.', firstSeen: now - 3 * HOUR, lastSeen: now - 40 * MIN, repeatCount: 3, acknowledgedAt: now - 2 * HOUR, notes: [{ at: now - 2 * HOUR, text: 'Waiting for the Xcode caches to be cleaned.' }], metric: 'diskFree' as Alarm['metric'] },
     { ...base, id: 4, rule: 'alert:crashLoop', key: 'alert:crashLoop:VirtualBox service keeps restarting', severity: 'critical', state: 'clearedUnacknowledged', title: 'VirtualBox service keeps restarting', detail: '6 restarts in 2 hours.', firstSeen: now - 5 * HOUR, lastSeen: now - 3 * HOUR, repeatCount: 6, clearedAt: now - 3 * HOUR },
     { ...base, id: 3, rule: 'alert:longHighCpu', key: 'alert:longHighCpu:rustc', severity: 'info', state: 'active', title: 'rustc has used over 40% CPU for 12 minutes', detail: 'A long build.', firstSeen: now - 50 * MIN, lastSeen: now - 12 * MIN, repeatCount: 2, shelved: { until: now + 40 * MIN } },
@@ -51,13 +51,13 @@ export function demoStats(alarms: readonly Alarm[]): AlarmStats {
     unacknowledged: alarms.filter((a) => a.state === 'active' || a.state === 'clearedUnacknowledged').length,
     chattering: [],
     noisiest: [
-      { rule: 'threshold:gpu-limit', occurrences: 14 },
+      { rule: 'threshold:gpu-load', occurrences: 14 },
       { rule: 'alert:crashLoop', occurrences: 6 },
       { rule: 'alert:lowDisk', occurrences: 3 },
     ],
     meanTimeToAcknowledgeMs: 18 * MIN,
     medianTimeToAcknowledgeMs: 11 * MIN,
-    suggestions: [{ rule: 'threshold:gpu-limit', kind: 'tune', message: 'GPU limit fired 14 times in a day. Raise the limit or lengthen how long it must hold.' }],
+    suggestions: [{ rule: 'threshold:gpu-load', kind: 'tune', message: 'GPU load fired 14 times in a day. Raise the limit or lengthen how long it must hold.' }],
   };
 }
 

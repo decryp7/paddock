@@ -50,7 +50,9 @@ describe('dy-why-slow-page', () => {
   it('links each cause to the pages that help to look closer', async () => {
     const { el } = await open();
     const hrefs = [...el.querySelectorAll('.cause')[0]!.querySelectorAll('a[matButton="text"]')].map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual(['/processes', '/recorder']);
+    // The Processes page is the hint button's ("Open Processes"), so it is not offered a second time.
+    expect(hrefs).toEqual(['/recorder']);
+    expect([...el.querySelectorAll('.cause')[0]!.querySelectorAll('a[matButton="outlined"]')].map((a) => a.getAttribute('href'))).toContain('/processes');
   });
 
   it('runs again on the button and grows the history', async () => {

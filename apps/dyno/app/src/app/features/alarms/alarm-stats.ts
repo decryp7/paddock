@@ -62,7 +62,7 @@ interface NoisyRule {
     .cols { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: var(--sp-6); align-items: start; }
     h3 { margin: 0 0 var(--sp-2); font: var(--fw-semibold) var(--fs-base) / 1.3 var(--font-sans); }
     .sfx { margin-inline-start: var(--sp-2); font-size: var(--fs-xs); color: var(--text-3); }
-    .id { font-size: var(--fs-sm); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .id { font-size: var(--fs-sm); line-height: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sugg { margin: 0; padding-left: var(--sp-5); display: grid; gap: var(--sp-2); font-size: var(--fs-base); color: var(--text-2); }
     @media (max-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr); } }
   `,

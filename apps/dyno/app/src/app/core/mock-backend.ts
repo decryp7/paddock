@@ -620,7 +620,7 @@ export class MockBackend implements DynoBackend {
           {
             kind: 'lowDiskSpace',
             title: 'Drive C: is 78% full',
-            explanation: 'Not slowing you down yet, but Windows needs free space for updates and the page file.',
+            explanation: 'Not slowing you down yet, but Windows needs free space for updates and swap.',
             confidence: 0.22,
             evidence: [{ label: 'Free', value: '210 GB of 953 GB' }],
             hints: [],

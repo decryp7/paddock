@@ -187,7 +187,8 @@ describe('dy-alarms-page, Active', () => {
     expect(text(el.querySelector('aside')!)).toContain('Shelved until');
     button(el.querySelector('aside')!, /Unshelve/)!.click();
     await settle(f);
-    expect(text(el.querySelector('aside')!)).toContain('Shelved');
+    expect(text(el.querySelector('aside')!)).not.toContain('Shelved until');
+    expect(button(el.querySelector('aside')!, /^Shelve$/)).toBeTruthy();
   });
 
   it('moves between rows with the arrow keys, opens the menu with Shift+F10 and the panel with Enter, and Escape closes it and returns to the row', async () => {
@@ -305,8 +306,8 @@ describe('dy-alarms-page, Rules', () => {
     await tab(f, el, 'Rules');
     expect(text(el)).toContain('18 min');
     expect(text(el)).toContain('11 min');
-    expect(text(el)).toContain('GPU limit');
-    expect(text(el)).toContain('GPU limit fired 14 times in a day.');
+    expect(text(el)).toContain('GPU load');
+    expect(text(el)).toContain('GPU load fired 14 times in a day.');
   });
 
   it('mutes and unmutes a noisy rule from its row', async () => {
@@ -344,7 +345,7 @@ describe('dy-alarms-page, Rules', () => {
     const { f, el } = render();
     await settle(f);
     await tab(f, el, 'Rules');
-    const row = rows(el).find((r) => text(r).includes('GPU limit'))!;
+    const row = rows(el).find((r) => text(r).includes('GPU load'))!;
     expect(text(row)).toContain('GPU is above 90% for 2 min');
     expect(text(row)).toContain('Warning');
     (row.querySelector('button[role="switch"]') as HTMLButtonElement).click();
@@ -357,7 +358,7 @@ describe('dy-alarms-page, Rules', () => {
     await settle(f);
     await tab(f, el, 'Rules');
     vi.spyOn(mock, 'upsertAlertRule').mockRejectedValueOnce({ code: 'badRequest', message: 'No way.' });
-    (rows(el).find((r) => text(r).includes('GPU limit'))!.querySelector('button[role="switch"]') as HTMLButtonElement).click();
+    (rows(el).find((r) => text(r).includes('GPU load'))!.querySelector('button[role="switch"]') as HTMLButtonElement).click();
     await settle(f);
     expect(TestBed.inject(SettingsStore).settings()?.customAlerts?.[0]?.enabled).toBe(true);
   });
@@ -371,12 +372,12 @@ describe('dy-alarms-page, Rules', () => {
     button(el, /Add rule/)!.click();
     await settle(f);
     expect(opened.mock.calls[0]![0]).toBe('dy.alert-rule');
-    expect(opened.mock.calls[0]![1]).toMatchObject({ inputs: { rule: null, takenIds: ['gpu-limit'] }, title: 'Add alert rule' });
+    expect(opened.mock.calls[0]![1]).toMatchObject({ inputs: { rule: null, takenIds: ['gpu-load'] }, title: 'Add alert rule' });
     const load = vi.spyOn(mock, 'settings');
     opened.mockReturnValue({ closed: Promise.resolve({ kind: 'answered', value: true }), dismiss() {} } as never);
-    button(rows(el).find((r) => text(r).includes('GPU limit'))!, 'Edit…')!.click();
+    button(rows(el).find((r) => text(r).includes('GPU load'))!, 'Edit…')!.click();
     await settle(f);
-    expect(opened.mock.calls[1]![1]).toMatchObject({ inputs: { rule: expect.objectContaining({ id: 'gpu-limit' }) }, title: 'Edit alert rule' });
+    expect(opened.mock.calls[1]![1]).toMatchObject({ inputs: { rule: expect.objectContaining({ id: 'gpu-load' }) }, title: 'Edit alert rule' });
     expect(load).toHaveBeenCalled();
   });
 
@@ -385,15 +386,15 @@ describe('dy-alarms-page, Rules', () => {
     await settle(f);
     await tab(f, el, 'Rules');
     const opened = vi.spyOn(TestBed.inject(DialogService), 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'dismissed' }), dismiss() {} } as never);
-    button(rows(el).find((r) => text(r).includes('GPU limit'))!, 'More actions')!.click();
+    button(rows(el).find((r) => text(r).includes('GPU load'))!, 'More actions')!.click();
     await settle(f);
     menuItem('Delete…')!.click();
     await settle(f);
     expect(opened.mock.calls[0]![0]).toBe('pd.confirm');
-    expect(opened.mock.calls[0]![1]).toMatchObject({ inputs: { heading: 'Delete “GPU limit”?', confirm: { label: 'Delete rule', destructive: true } } });
+    expect(opened.mock.calls[0]![1]).toMatchObject({ inputs: { heading: 'Delete “GPU load”?', confirm: { label: 'Delete rule', destructive: true } } });
     expect(TestBed.inject(SettingsStore).settings()!.customAlerts).toHaveLength(1);
     opened.mockReturnValue({ closed: Promise.resolve({ kind: 'answered', value: true }), dismiss() {} } as never);
-    button(rows(el).find((r) => text(r).includes('GPU limit'))!, 'More actions')!.click();
+    button(rows(el).find((r) => text(r).includes('GPU load'))!, 'More actions')!.click();
     await settle(f);
     menuItem('Delete…')!.click();
     await settle(f);
@@ -405,7 +406,7 @@ describe('dy-alarms-page, Rules', () => {
     const { f, el } = render();
     await settle(f);
     await tab(f, el, 'Rules');
-    rows(el).find((r) => text(r).includes('GPU limit'))!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40, button: 2 }));
+    rows(el).find((r) => text(r).includes('GPU load'))!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40, button: 2 }));
     await settle(f);
     menuItem('Turn off')!.click();
     await settle(f);
@@ -418,7 +419,7 @@ describe('dy-alarms-page, Rules', () => {
     await tab(f, el, 'Rules');
     vi.spyOn(TestBed.inject(DialogService), 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'answered', value: true }), dismiss() {} } as never);
     vi.spyOn(mock, 'deleteAlertRule').mockRejectedValueOnce({ code: 'internal', message: 'Disk full.' });
-    button(rows(el).find((r) => text(r).includes('GPU limit'))!, 'More actions')!.click();
+    button(rows(el).find((r) => text(r).includes('GPU load'))!, 'More actions')!.click();
     await settle(f);
     menuItem('Delete…')!.click();
     await settle(f);

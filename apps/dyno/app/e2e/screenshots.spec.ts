@@ -17,7 +17,7 @@ const MAX_CONTENT = 1300;
  * Makes the window as tall as the page's content, so no card or row is cut in half: a short page ends where it ends; a long page ends
  * on the bottom edge of the last card that fits in MAX_CONTENT (the content is scrolled inside the window, so the window is resized).
  */
-async function fitToContent(page: Page): Promise<void> {
+async function fitToContent(page: Page, maxContent = MAX_CONTENT): Promise<void> {
   const main = page.locator('#pd-main');
   const plan = await main.evaluate((el, max) => {
     const chrome = window.innerHeight - el.clientHeight;
@@ -29,7 +29,7 @@ async function fitToContent(page: Page): Promise<void> {
     const full = el.scrollHeight;
     const content = full <= max ? full : (cards.filter((b) => b <= max).pop() ?? max);
     return { chrome, content, scrollable: full > el.clientHeight };
-  }, MAX_CONTENT);
+  }, maxContent);
   if (!plan.scrollable) return;
   await page.setViewportSize({ width: 1440, height: Math.round(plan.chrome + plan.content + 16) });
   await page.clock.runFor(300);
@@ -60,7 +60,7 @@ async function prepare(page: Page, theme: 'dark' | 'light', mock = 'macos'): Pro
   void mock;
 }
 
-const SCREENS: { name: string; path: string; mock?: string; query?: string; latency?: number; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } }[] = [
+const SCREENS: { name: string; path: string; mock?: string; query?: string; latency?: number; maxContent?: number; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } }[] = [
   {
     name: 'dashboard',
     path: '/#/',
@@ -215,6 +215,8 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
   {
     name: 'issues',
     path: '/#/issues',
+    // The whole table, so no group of rows is cut in half.
+    maxContent: 3600,
     size: { width: 1440, height: 1100 },
     ready: async (page) => {
       await expect(page.getByRole('region', { name: 'Stability' })).toBeVisible();
@@ -302,7 +304,7 @@ for (const theme of ['dark', 'light'] as const) {
       await page.clock.runFor(45_000);
       await screen.ready(page);
       if (screen.name !== 'tray') {
-        await fitToContent(page);
+        await fitToContent(page, screen.maxContent);
         await macWindowButtons(page);
       }
       if (screen.name === 'tray') {

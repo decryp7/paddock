@@ -26,7 +26,7 @@ interface HistoryRow {
   styles: `
     :host { display: block; }
     dy-async { display: grid; gap: var(--sp-3); }
-    .id { font-size: var(--fs-sm); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+    .id { font-size: var(--fs-sm); line-height: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
   `,
 })
 export class AlarmsHistory {
