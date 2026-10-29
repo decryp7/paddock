@@ -28,11 +28,10 @@ pub const MAX_CHAT_MESSAGES: usize = 512;
 /// See [`MAX_CHAT_MESSAGES`].
 pub const MAX_CHAT_BYTES: usize = 8 * 1024 * 1024;
 
-/// How long a method may take before the app answers for the server. Short for reads; long for work the server does
-/// itself (loading a big model, a benchmark); the UI shows an inline error with Retry when one fires.
+/// How long a method may take before the app answers for the server. Short for reads; longer for single calls of the server's own work
+/// (long operations are jobs and have no deadline, ADR 0024); the UI shows an inline error with Retry when one fires.
 pub fn timeout_for(method: &str) -> Duration {
     Duration::from_secs(match method {
-        "load_model" | "run_benchmark" => 600,
         "stop_serving" => 30,
         "delete_model" | "install_build" | "remove_build" | "select_build" | "rollback_build" => 120,
         "search_models" | "repo_files" | "download_model" | "release_memory" | "unload_model" => 60,
@@ -534,7 +533,11 @@ mod tests {
     #[test]
     fn every_method_has_a_timeout_and_slow_ones_get_more() {
         assert_eq!(timeout_for("overview"), Duration::from_secs(15));
-        assert!(timeout_for("load_model") >= Duration::from_secs(300));
+        assert_eq!(
+            timeout_for("load_model"),
+            Duration::from_secs(15),
+            "long work is a job and has no entry here"
+        );
         assert!(timeout_for("search_models") > timeout_for("overview"));
         assert!(timeout_for("anything_else") > Duration::ZERO);
     }

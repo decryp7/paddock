@@ -20,6 +20,8 @@ export interface JobRow {
   canStopWaiting: boolean;
   /** Cancel was asked for and the server has not answered yet (a short local flag; the next progress event clears it). */
   cancelling: boolean;
+  /** Counts the events seen for this job, so a Cancel can tell whether the server spoke since it was pressed. */
+  seq: number;
   /** When the last event arrived (the panel's clock), for "Still working". */
   lastEventAt: number;
 }
@@ -45,12 +47,13 @@ export function applyJobEvent(rows: readonly JobRow[], event: JobEvent, now: num
         notCancellableReason: null,
         canStopWaiting: false,
         cancelling: false,
+        seq: 0,
         lastEventAt: now,
       };
       return [...others, row].sort((x, y) => x.id - y.id);
     }
     case 'progress': {
-      const base = current ?? { id: event.jobId, title: 'Working', cancelling: false };
+      const base = current ?? { id: event.jobId, title: 'Working', cancelling: false, seq: 0 };
       const samePhase = current !== undefined && current.phase === event.phase && current.unit === event.unit;
       return [
         ...others,
@@ -66,6 +69,7 @@ export function applyJobEvent(rows: readonly JobRow[], event: JobEvent, now: num
           canStopWaiting: event.canStopWaiting,
           // The server answered (progress after a Cancel is its answer): the local "cancelling" flag has done its job.
           cancelling: false,
+          seq: base.seq + 1,
           lastEventAt: now,
         },
       ].sort((a, b) => a.id - b.id);
@@ -133,12 +137,12 @@ export class JobsService {
    * cancellable it does not know it (it finished, or the app restarted): the orphaned row goes.
    */
   async cancel(id: number): Promise<void> {
+    const seq = this.rows().find((j) => j.id === id)?.seq ?? 0;
     this.update((r) => r.map((j) => (j.id === id ? { ...j, cancelling: true } : j)));
     const accepted = await this.backend.jobCancel(id).catch(() => false);
     if (accepted) return;
-    this.update((r) =>
-      r.flatMap((j) => (j.id !== id ? [j] : j.cancellable ? [] : [{ ...j, cancelling: false }])),
-    );
+    // A job that spoke since the press is known to the backend (a progress event raced the refusal): keep it.
+    this.update((r) => r.flatMap((j) => (j.id !== id ? [j] : j.cancellable && j.seq === seq ? [] : [{ ...j, cancelling: false }])));
   }
 
   /** The user stops waiting for a job whose Cancel did not take effect. */
