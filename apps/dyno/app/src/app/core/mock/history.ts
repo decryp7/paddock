@@ -160,7 +160,7 @@ export function mockHistory(range: HistoryRange, end: number | null, now: number
     topConsumers: [
       { app: 'Rust build (cargo)', cpuAvg: round(range === 'hour' ? 31 : 14.2, 1), memoryAvg: Math.round((range === 'hour' ? 2.4 : 1.1) * GB) },
       { app: 'Google Chrome', cpuAvg: round(6.1 * (range === 'hour' ? 1 : 0.8), 1), memoryAvg: Math.round(4.1 * GB) },
-      { app: 'WSL / Docker VM', cpuAvg: round(3.2, 1), memoryAvg: Math.round(4 * GB) },
+      { app: 'Docker VM', cpuAvg: round(3.2, 1), memoryAvg: Math.round(4 * GB) },
       { app: 'Visual Studio Code', cpuAvg: round(3.0 * consumersScale + 1, 1), memoryAvg: Math.round(2.1 * GB) },
       { app: 'Microsoft Defender', cpuAvg: round(2.6, 1), memoryAvg: Math.round(370 * MB) },
       { app: 'Microsoft Teams', cpuAvg: round(1.8, 1), memoryAvg: Math.round(1.1 * GB) },

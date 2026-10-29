@@ -50,7 +50,7 @@ describe('ProcessDetailsPanel', () => {
     expect(el.textContent).toContain(`PID ${p.pid}`);
     expect(el.querySelector('dl')?.textContent).toContain('Command line');
     expect(el.querySelector('dl')?.textContent).toContain('Efficiency mode');
-    expect(el.querySelector('dl')?.textContent).not.toContain('Not available on this PC');
+    expect(el.querySelector('dl')?.textContent).not.toContain('Not available on this computer');
   });
 
   it('walks the tabs: parents, files, network, libraries', async () => {
@@ -104,7 +104,7 @@ describe('ProcessDetailsPanel', () => {
     await store.select({ pid: p.pid, started: readValue(p.started) });
     f.detectChanges();
     await settle();
-    expect(el.querySelector('dl')?.textContent).toContain('Not available on this PC');
+    expect(el.querySelector('dl')?.textContent).toContain('Not available on this computer');
   });
 
   it('shows the error with a hint and Retry reloads', async () => {

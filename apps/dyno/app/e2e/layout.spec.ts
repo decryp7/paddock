@@ -35,6 +35,12 @@ const EXTRAS = EXTRAS_TABS.map((t) => t.id);
 const STATES: State[] = [
   ...PAGES.map((p): State => ({ name: p || 'dashboard', path: p })),
   ...EXTRAS.map((t): State => ({ name: `extras ${t}`, path: `extras?tab=${t}` })),
+  { name: 'disk map table', path: 'disk-map', setup: async (page) => {
+      await page.getByRole('button', { name: 'Scan Macintosh HD' }).click();
+      await page.getByRole('radio', { name: 'Table' }).click();
+      await expect(page.getByRole('table', { name: /Contents of Macintosh HD/ })).toBeVisible();
+    },
+  },
   { name: 'alarms rules', path: 'alarms', setup: (page) => page.getByRole('tab', { name: 'Rules' }).click() },
   { name: 'alarms detail open', path: 'alarms', setup: async (page) => {
       await page.getByRole('grid', { name: 'Open alarms' }).getByRole('row').nth(1).click();

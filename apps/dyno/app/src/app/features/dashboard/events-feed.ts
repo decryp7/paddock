@@ -84,7 +84,7 @@ export class EventsFeed implements OnInit {
   protected readonly items = computed(() => buildFeed(this.activity.entries(), this.alerts.alerts(), 7));
   protected readonly loaded = computed(() => this.activity.loaded() || this.alerts.loaded());
   protected readonly error = computed(() => (this.activity.loaded() || this.alerts.loaded() ? null : (this.activity.error() ?? this.alerts.error())));
-  /** Relative to the engine's clock, so the feed reads right whatever the PC's clock does. */
+  /** Relative to the engine's clock, so the feed reads right whatever the computer's clock does. */
   protected readonly ago = (at: number) => formatRelative(at, this.live.system()?.at ?? Date.now());
 
   ngOnInit(): void {

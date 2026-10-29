@@ -132,7 +132,7 @@ pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
         highlights.push("Dyno has no history for this week yet.".to_string());
     } else {
         highlights.push(format!(
-            "Your PC averaged {avg_cpu:.0}% CPU and {avg_memory:.0}% memory, peaking at {peak_cpu:.0}% CPU."
+            "Your computer averaged {avg_cpu:.0}% CPU and {avg_memory:.0}% memory, peaking at {peak_cpu:.0}% CPU."
         ));
     }
     if let Some(top) = i.top_apps.first() {

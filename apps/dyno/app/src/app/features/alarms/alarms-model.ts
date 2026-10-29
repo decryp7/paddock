@@ -154,3 +154,21 @@ export function changeLabel(c: AlarmChange): string {
 export function withRule(rules: readonly CustomAlertRule[], rule: CustomAlertRule, editingId: string | null): CustomAlertRule[] {
   return editingId === null ? [...rules, rule] : rules.map((r) => (r.id === editingId ? rule : r));
 }
+
+const ACRONYMS = new Set(['cpu', 'gpu', 'ssd', 'ram', 'tcp', 'udp', 'dns']);
+
+/**
+ * A rule's name for people: the engine's rule key (`alert:lowDisk`, `network:newExposedListener`, `threshold:gpu-limit`) without
+ * its source prefix, split into words (`Low disk`, `New exposed listener`, `GPU limit`). The key itself stays the identity.
+ */
+export function ruleLabel(rule: string): string {
+  const id = rule.includes(':') ? rule.slice(rule.indexOf(':') + 1) : rule;
+  const words = id
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[-_\s]+/)
+    .filter((w) => w !== '')
+    .map((w) => (ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w.toLowerCase()));
+  if (words.length === 0) return rule;
+  const text = words.join(' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}

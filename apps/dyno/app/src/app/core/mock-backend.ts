@@ -568,7 +568,7 @@ export class MockBackend implements DynoBackend {
       const io = this.system(t, samples).diskIo;
       const queue = 'available' in io.queue ? io.queue.available : 0;
       if (rustc.length === 0 || rustcCpu < 5) {
-        return { at: now, windowSecs: 55, headline: 'Nothing is slowing your PC down right now', causes: [{ kind: 'nothingWrong', title: 'All quiet', explanation: 'CPU, memory and disk all have room to spare.', confidence: 0.9, evidence: [], hints: [], involved: [] }] };
+        return { at: now, windowSecs: 55, headline: 'Nothing is slowing your computer down right now', causes: [{ kind: 'nothingWrong', title: 'All quiet', explanation: 'CPU, memory and disk all have room to spare.', confidence: 0.9, evidence: [], hints: [], involved: [] }] };
       }
       return {
         at: now,
@@ -1017,8 +1017,8 @@ export class MockBackend implements DynoBackend {
         crashes: 9,
         alerts: 2,
         highlights: [
-          'Your PC averaged 38% CPU and 61% memory, peaking at 94% CPU.',
-          'Docker’s backend crashed 6 times today: check its WSL integration.',
+          'Your computer averaged 38% CPU and 61% memory, peaking at 94% CPU.',
+          'Docker’s backend crashed 6 times today: check its virtual machine settings.',
           'Sign-in takes 9 s longer than a month ago: 2 new startup apps.',
         ],
         scoreTrend: [66, 68, 71, 70, 72, 74].map((score, i) => ({ at: from + i * 28 * 60 * MIN, score })),

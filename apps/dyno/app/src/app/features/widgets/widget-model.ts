@@ -45,7 +45,7 @@ export const KIND_HINT: Record<WidgetKind, string> = {
   issues: 'Unusual patterns found.',
   health: 'The health score.',
   cpu: 'Load, per-core view and details.',
-  diagnosis: 'What is slowing the PC, in words.',
+  diagnosis: 'What is slowing the computer, in words.',
   events: 'Alarms and what Dyno did.',
   history: 'A chart with events marked.',
   consumers: 'Biggest consumers over a day.',

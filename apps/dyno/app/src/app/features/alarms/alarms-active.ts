@@ -4,7 +4,7 @@ import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent
 import type { Alarm, ShelveFor } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { AlarmsStore } from '../../state/alarms.store';
-import { alarmSuffix, isShelved, needsAcknowledge, severityWord, shortTime, stateTone, stateWord } from './alarms-model';
+import { alarmSuffix, isShelved, needsAcknowledge, severityWord, shortTime, stateTone, stateWord, ruleLabel } from './alarms-model';
 import { AlarmDetail } from './alarm-detail';
 
 const SEVERITY_ORDER: Record<Alarm['severity'], number> = { critical: 0, warning: 1, info: 2 };
@@ -44,7 +44,7 @@ const SEVERITY_ORDER: Record<Alarm['severity'], number> = { critical: 0, warning
           <ng-template pdCell="title" let-a>
             <span class="line"><span class="t" [dyFullText]="a.title">{{ a.title }}</span>@if (suffix(a); as s) {<span class="sfx">{{ s }}</span>}</span>
           </ng-template>
-          <ng-template pdCell="rule" let-a><span class="id muted" [dyFullText]="a.rule">{{ a.rule }}</span></ng-template>
+          <ng-template pdCell="rule" let-a><span class="id muted" [dyFullText]="ruleName(a.rule)">{{ ruleName(a.rule) }}</span></ng-template>
           <ng-template pdCell="state" let-a><span class="dot" [attr.data-tone]="tone(a)" aria-hidden="true"></span><span class="ell" [class.muted]="tone(a) === 'calm'" [dyFullText]="state(a)">{{ state(a) }}</span></ng-template>
         </pd-table>
         @if (store.selected(); as sel) {
@@ -65,7 +65,7 @@ const SEVERITY_ORDER: Record<Alarm['severity'], number> = { critical: 0, warning
     .sfx { flex: none; color: var(--text-3); font-size: var(--fs-xs); }
     .muted { color: var(--text-2); }
     .ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .id { font: var(--fw-regular) var(--fs-sm) / 1.2 var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .id { font-size: var(--fs-sm); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-inline-end: var(--sp-2); background: var(--text-3); }
     .dot[data-tone='bad'] { background: var(--bad); }
     .dot[data-tone='warn'] { background: var(--warn); }
@@ -77,6 +77,7 @@ const SEVERITY_ORDER: Record<Alarm['severity'], number> = { critical: 0, warning
 })
 export class AlarmsActive {
   protected readonly store = inject(AlarmsStore);
+  protected readonly ruleName = ruleLabel;
   private readonly grid = viewChild(PdTable);
   protected readonly now = signal(Date.now());
   protected readonly busy = signal(false);
@@ -94,7 +95,7 @@ export class AlarmsActive {
     { key: 'severity', header: 'Severity', value: (a) => SEVERITY_ORDER[a.severity], text: (a) => severityWord(a.severity), width: '92px' },
     { key: 'title', header: 'Alarm', value: (a) => a.title, required: true, width: 'minmax(0, 2fr)' },
     { key: 'detail', header: 'Detail', value: (a) => a.detail, width: 'minmax(0, 2fr)', hideBelow: 900 },
-    { key: 'rule', header: 'Rule', value: (a) => a.rule, width: 'minmax(0, 1fr)', hideBelow: 1000 },
+    { key: 'rule', header: 'Rule', value: (a) => ruleLabel(a.rule), width: 'minmax(0, 1fr)', hideBelow: 1000 },
     { key: 'state', header: 'State', value: (a) => stateWord(a.state), width: '190px' },
     { key: 'firstSeen', header: 'First seen', value: (a) => a.firstSeen, text: (a) => this.time(a.firstSeen), width: '84px', hideBelow: 1000 },
     { key: 'lastSeen', header: 'Last seen', value: (a) => a.lastSeen, text: (a) => this.time(a.lastSeen), width: '84px' },

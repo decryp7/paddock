@@ -58,7 +58,7 @@ function readCollapsed(): Set<string> {
           } @else {
             <span><b>{{ sum().listening }}</b> listening</span><span>·</span><button type="button" matButton="text" class="dy-link lnk" (click)="showExposed()"><b>{{ sum().exposed }}</b> exposed</button>@if (sum().unknown > 0) {<span>·</span><span><b>{{ sum().unknown }}</b> unknown owner</span>}
           }
-          @if (thisPc(); as ip) { <span class="this-pc">This PC {{ ip }}</span> }
+          @if (thisPc(); as ip) { <span class="this-pc">This computer {{ ip }}</span> }
         </p>
         @if (s.trafficNote; as why) { <p class="faint traffic-note">{{ why }}</p> }
       }

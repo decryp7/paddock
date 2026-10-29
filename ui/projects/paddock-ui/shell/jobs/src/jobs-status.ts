@@ -33,6 +33,7 @@ let nextId = 0;
     </button>
     @if (open()) {
       <div class="pd-popover" role="region" [attr.aria-label]="t.popover" [id]="panelId">
+        <h2 class="pd-popover-title">{{ t.popover }}</h2>
         <pd-jobs-list [flat]="true" />
       </div>
     }
@@ -55,6 +56,7 @@ let nextId = 0;
     @keyframes pd-jobs-spin { to { transform: rotate(405deg); } }
     @media (prefers-reduced-motion: reduce) { .pd-busy .pd-dot { animation: none; } }
     .pd-popover { position: absolute; right: 0; bottom: calc(100% + var(--pd-space-1)); z-index: 10; width: min(360px, calc(100vw - 32px)); max-height: min(480px, 70vh); overflow: auto; padding: var(--pd-space-2); background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); box-shadow: var(--pd-shadow-2); }
+    .pd-popover-title { margin: 0 0 var(--pd-space-1); padding: var(--pd-space-1) var(--pd-space-1) 0; font-size: var(--pd-text-caption); font-weight: 600; color: var(--pd-text-muted); }
     :host(.pd-below) .pd-popover { top: calc(100% + var(--pd-space-1)); bottom: auto; }
   `,
 })

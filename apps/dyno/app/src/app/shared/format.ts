@@ -195,5 +195,5 @@ export function formatSpan(days: number | null | undefined): string {
 /** A moment as `Oct 22, 4:20 PM` (the year only when it differs from `now`'s); short enough never to wrap. */
 export function formatStamp(at: number, now: number = at): string {
   const sameYear = new Date(at).getFullYear() === new Date(now).getFullYear();
-  return new Intl.DateTimeFormat('en-US', sameYear ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } : { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(at);
+  return new Intl.DateTimeFormat(undefined, sameYear ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } : { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(at);
 }

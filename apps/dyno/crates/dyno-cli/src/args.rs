@@ -12,7 +12,7 @@ pub enum TopBy {
 /// A command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
-    /// `dyno status`: how the PC is doing right now.
+    /// `dyno status`: how the computer is doing right now.
     Status,
     /// `dyno why-slow`: the diagnosis.
     WhySlow,
@@ -61,10 +61,10 @@ pub struct Invocation {
 }
 
 /// The usage text.
-pub const USAGE: &str = "dyno: look at how your PC is doing, from a terminal or a script\n\n\
+pub const USAGE: &str = "dyno: look at how your computer is doing, from a terminal or a script\n\n\
 usage: dyno <command> [options]\n\n\
 commands:\n  \
-status [--json]                       how the PC is doing right now\n  \
+status [--json]                       how the computer is doing right now\n  \
 why-slow [--json]                     why it feels slow, in plain words\n  \
 top [--by cpu|memory] [-n N] [--json] the busiest apps\n  \
 alarms [--all] [--json]               alarms that need attention\n  \

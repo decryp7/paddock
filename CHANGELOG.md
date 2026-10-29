@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `pd-jobs-status`: a visible heading
+- The Jobs popover has a visible heading (the popover's name, "Jobs") above the list, so a picture of it says what it is.
+
 ### `paddock-jobs`: `WalkOptions::with_modified`
 - `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
 

@@ -16,7 +16,7 @@ export function exposureBadge(e: Exposure): { label: string; tone: 'warn' | 'ok'
     case 'allInterfaces':
       return { label: 'Exposed', tone: 'warn', hint: 'Listening on every network interface: reachable from the network unless a firewall blocks it.' };
     case 'loopback':
-      return { label: 'Loopback only', tone: 'ok', hint: 'Listening on the loopback address: only programs on this PC can connect.' };
+      return { label: 'Loopback only', tone: 'ok', hint: 'Listening on the loopback address: only programs on this computer can connect.' };
     case 'interface':
       return { label: 'One interface', tone: 'info', hint: 'Listening on one network interface address.' };
   }

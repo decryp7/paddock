@@ -52,7 +52,7 @@ describe('dy-alarms-page, Active', () => {
     expect(el.querySelector('h1')?.textContent).toBe('Alarms');
     const list = arows(el);
     expect(list).toHaveLength(5);
-    expect(text(list[0]!)).toContain('GPU limit is past its limit');
+    expect(text(list[0]!)).toContain('GPU load is over its limit');
     expect(text(list[0]!)).toContain('Active');
     expect(text(list[0]!)).toContain('Warning');
     expect(el.textContent).toContain('Returned, not acknowledged');
@@ -305,7 +305,7 @@ describe('dy-alarms-page, Rules', () => {
     await tab(f, el, 'Rules');
     expect(text(el)).toContain('18 min');
     expect(text(el)).toContain('11 min');
-    expect(text(el)).toContain('threshold:gpu-limit');
+    expect(text(el)).toContain('GPU limit');
     expect(text(el)).toContain('GPU limit fired 14 times in a day.');
   });
 
@@ -313,7 +313,7 @@ describe('dy-alarms-page, Rules', () => {
     const { f, el } = render();
     await settle(f);
     await tab(f, el, 'Rules');
-    const noisy = () => [...el.querySelectorAll<HTMLElement>('dy-alarm-stats [role="row"][data-key]')].find((r) => text(r).includes('alert:lowDisk'))!;
+    const noisy = () => [...el.querySelectorAll<HTMLElement>('dy-alarm-stats [role="row"][data-key]')].find((r) => text(r).includes('Low disk'))!;
     button(noisy(), 'Mute this rule')!.click();
     await settle(f);
     expect(button(noisy(), 'Unmute this rule')).toBeTruthy();

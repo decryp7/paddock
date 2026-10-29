@@ -28,7 +28,7 @@ export function healthReasons(): HealthReason[] {
     {
       id: 'uptime',
       title: 'Not restarted for 12 days',
-      detail: 'Windows installed an update that finishes on restart, and long uptimes let memory fragment.',
+      detail: 'macOS installed an update that finishes on restart, and long uptimes let memory fragment.',
       impact: 6,
       severity: 'warning',
     },
@@ -138,7 +138,7 @@ export function demoAnomalies(now: number): Anomaly[] {
       app: 'Docker Desktop',
       since: now - 2 * HOUR,
       title: 'Docker backend restarted 6 times in 2 hours',
-      explanation: 'com.docker.backend.exe crashes and restarts. Its last crash dump points at the WSL integration.',
+      explanation: 'com.docker.backend.exe crashes and restarts. Its last crash dump points at the virtual machine it manages.',
       evidence: [
         { label: 'Restarts', value: '6 in 2 h' },
         { label: 'Last', value: '52 min ago' },

@@ -1550,7 +1550,7 @@ export type BaselineState = 'notJudged' | 'noBaseline' | 'usual' | { higher: Bas
 export interface Judgement {
   state: BaselineState;
   confidence: Confidence;
-  /** "Higher than usual for Tuesday mornings". */
+  /** "Higher than usual for Thursday afternoons". */
   phrase: string;
   explanation: string;
   /** The usual value, formatted. */

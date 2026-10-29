@@ -153,7 +153,7 @@ impl Alerts {
                 30 * MINUTE,
                 AlertKind::MemoryPressure,
                 Severity::Warning,
-                "Your PC is out of memory".into(),
+                "Your computer is out of memory".into(),
                 format!(
                     "{} of {} in use. Close apps you don't need.",
                     bytes(s.memory.used),

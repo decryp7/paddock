@@ -72,7 +72,8 @@ export function mockSleep(): SleepReport {
 export function mockBoot(now: number): BootReport {
   const secs = [47.2, 52.8, 44.1, 49.6, 71.4, 46.3, 45.9, 50.2];
   return {
-    boots: secs.map((s, i) => ({ at: now - (i * 2 + 0.4) * DAY - 6 * HOUR, bootSecs: s, readySecs: Math.round((s + 18 + (i % 3) * 4) * 10) / 10 })),
+    // The newest start-up is the one the dashboard's uptime counts from.
+    boots: secs.map((s, i) => ({ at: now - (12 * DAY + 3 * HOUR + 14 * MIN) - i * 2 * DAY, bootSecs: s, readySecs: Math.round((s + 18 + (i % 3) * 4) * 10) / 10 })),
     slowest: [
       { name: 'com.adobe.AdobeCreativeCloud', secs: 9.4 },
       { name: 'Docker Desktop (com.docker.helper)', secs: 7.9 },

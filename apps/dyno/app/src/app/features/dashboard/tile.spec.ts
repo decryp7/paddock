@@ -39,12 +39,12 @@ describe('Tile', () => {
     expect(el.querySelectorAll('.skeleton').length).toBeGreaterThan(0);
     expect(el.querySelector('.content')).toBeNull();
   });
-  it('shows "Not available on this PC" with the engine reason instead of the body', () => {
+  it('shows "Not available on this computer" with the engine reason instead of the body', () => {
     const { f, el, host } = make();
-    host.reason.set('This PC has no battery.');
+    host.reason.set('This computer has no battery.');
     f.detectChanges();
-    expect(el.querySelector('.na strong')?.textContent).toBe('Not available on this PC');
-    expect(el.querySelector('.na span')?.textContent).toBe('This PC has no battery.');
+    expect(el.querySelector('.na strong')?.textContent).toBe('Not available on this computer');
+    expect(el.querySelector('.na span')?.textContent).toBe('This computer has no battery.');
     expect(el.querySelector('.content')).toBeNull();
     // The reason wins over the loading skeleton too: nothing invented.
     host.ready.set(false);

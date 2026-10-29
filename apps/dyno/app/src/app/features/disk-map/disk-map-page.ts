@@ -269,7 +269,7 @@ import {
                 </div>
               </section>
               <section class="card list" aria-labelledby="in-folder">
-                <div class="card-head"><h2 id="in-folder">In this folder ({{ formatCount(level.shown) }})</h2></div>
+                <div class="card-head"><h2 id="in-folder">In this folder ({{ formatCount(folderCount(level)) }})</h2></div>
                 <ul class="rows">
                   @for (r of store.rows(); track r.node.id) {
                     <li class="item" [class.linked]="hoveredId() === chartIdOf(r.node.id)" dyRowMenu [matContextMenuTriggerFor]="rowMenu" [matContextMenuTriggerData]="{ row: r }" (mouseenter)="rowHover.set(chartIdOf(r.node.id))" (mouseleave)="rowHover.set(null)">
@@ -323,7 +323,7 @@ import {
             <section class="card table-card" aria-label="Folder contents">
               <div class="table-tools">
                 <dy-search-field label="Filter by name" placeholder="Filter by name" [value]="filter()" (valueChange)="filter.set($event)" />
-                <span class="muted small">{{ tableRows().length }} of {{ formatCount(level.shown) }} rows</span>
+                <span class="muted small">{{ tableRows().length + (loose() ? 1 : 0) }} of {{ formatCount(folderCount(level)) }} rows</span>
               </div>
               @if (onlyIds(); as only) {
                 <p class="only muted small" role="status">Showing {{ plural(only.size, 'smaller item') }} from the chart. <button type="button" matButton="text" (click)="onlyIds.set(null)">Show all</button></p>
@@ -525,6 +525,8 @@ import {
     .mat-column-bytes { width: 76px; }
     .mat-column-items { width: 64px; }
     .mat-column-newestChange { width: 92px; }
+    /* A header that is longer than its narrow column wraps instead of being cut off ("Newest change" with the sort arrow). */
+    th.mat-column-newestChange, th.mat-column-newestChange ::ng-deep .mat-sort-header-content { white-space: normal; line-height: 1.2; text-align: right; }
     .mat-column-share { width: 100px; }
     .mat-column-actions { width: 64px; }
     th, td { white-space: nowrap; }
@@ -563,6 +565,10 @@ export class DiskMapPage implements OnInit {
 
   protected readonly skeletonRows = [1, 2, 3, 4, 5, 6, 7, 8, 9];
   protected readonly groups = VOLUME_GROUPS;
+  /** Everything the folder holds: the rows above the fold, the folded small ones and the files that have no row of their own. */
+  protected folderCount(level: { shown: number; other: { count: number }; loose: { count: number } }): number {
+    return level.shown + level.other.count + level.loose.count;
+  }
   protected readonly tableColumns = ['name', 'bytes', 'items', 'newestChange', 'share', 'actions'];
   protected readonly viewSegs: SuSegment[] = [{ value: 'chart', label: 'Chart' }, { value: 'table', label: 'Table' }];
   protected readonly trackRow = (_: number, r: LevelRow): number => r.node.id;

@@ -278,7 +278,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
       await expect(page.getByText(/hidden by the filter/)).toBeVisible();
     },
   },
-  { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why is my PC slow?' })).toBeVisible()) },
+  { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why is my computer slow?' })).toBeVisible()) },
   {
     name: 'throttling',
     path: '/#/throttling',
@@ -310,7 +310,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
     path: '/#/',
     ready: async (page) => {
       const card = page.getByRole('region', { name: 'Is this normal?' });
-      await expect(card.getByText('Higher than usual for Tuesday mornings').first()).toBeVisible();
+      await expect(card.getByText('Higher than usual for Thursday afternoons').first()).toBeVisible();
       await card.scrollIntoViewIfNeeded();
     },
   },
@@ -373,12 +373,12 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
     name: 'jobs',
     path: '/#/backup',
     latency: 150,
-    query: '&jobsteps=40',
+    query: '&jobsteps=6',
     ready: async (page) => {
       // The Jobs list is opened first: a click made while a job runs waits for it to end, so the check is started with an event.
       await page.getByRole('button', { name: /^Jobs/ }).click();
       await page.getByRole('button', { name: 'Check now' }).dispatchEvent('click');
-      await page.clock.runFor(1_300);
+      await page.clock.runFor(1_700);
       const jobs = page.getByRole('region', { name: 'Jobs' });
       await expect(jobs.getByRole('button', { name: /Cancel/ })).toBeVisible();
       await page.mouse.move(2, 2);
@@ -404,13 +404,18 @@ for (const theme of ['dark', 'light'] as const) {
       await page.clock.runFor(45_000);
       await screen.ready(page);
       if (screen.name === 'tray') {
-        // A desktop-like backdrop (blurred wallpaper gradient and a menu bar) so the rounded, translucent popover is visible.
+        // A desktop-like backdrop (blurred wallpaper gradient and a menu bar) so the rounded, translucent popover is visible. The
+        // tray window's root is `html.pd-tray`; the shot fails if the backdrop did not apply (a renamed root would leave it plain).
         const wall = theme === 'dark' ? 'linear-gradient(160deg, #262a33 0%, #3b414d 100%)' : 'linear-gradient(160deg, #c3c7cf 0%, #e1e3e8 100%)';
         await page.addStyleTag({
-          content: `html[data-surface='popover'] { background: ${wall} !important; }
-            html[data-surface='popover'] body { padding: 34px 40px 0 !important; }
+          content: `html.pd-tray { background: ${wall} !important; }
+            html.pd-tray body { padding: 34px 40px 0 !important; }
             body::before { content: ''; position: fixed; inset: 0 0 auto 0; height: 24px; background: rgb(${theme === 'dark' ? '20 20 24 / 55%' : '255 255 255 / 55%'}); backdrop-filter: blur(20px); z-index: 0; }`,
         });
+        await expect(page.locator('body')).toHaveCSS('padding-top', '34px');
+        await expect(page.locator('html')).toHaveCSS('background-image', /linear-gradient/);
+        // The sparklines have their history before the picture is taken.
+        await page.clock.runFor(45_000);
         await page.clock.runFor(500);
       }
       if (screen.name === 'tray') {
@@ -428,10 +433,15 @@ for (const theme of ['dark', 'light'] as const) {
         await page.getByRole('group', { name: 'CPU', exact: true }).getByRole('radio', { name: 'Overall' }).click();
       }
       if (screen.name === 'dashboard') {
-        // The whole page, for the README and for review (the 1440x900 image only shows the top).
-        await page.setViewportSize({ width: 1440, height: 2300 });
-        await page.waitForTimeout(500);
-        await page.screenshot({ path: join(OUT, `dashboard-full-${theme}.png`) });
+        // The whole page, for the README and for review (the 1440x900 image only shows the top): the window is made as tall as the
+        // page (the page scrolls inside it), scrolled to the top, and the shot waits until nothing is left to scroll.
+        const main = page.locator('#pd-main');
+        const need = await main.evaluate((el) => el.scrollHeight - el.clientHeight);
+        await page.setViewportSize({ width: 1440, height: 900 + Math.max(0, need) });
+        await expect(async () => expect(await main.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(0)).toPass({ timeout: 10_000 });
+        await main.evaluate((el) => el.scrollTo(0, 0));
+        await page.clock.runFor(500);
+        await page.screenshot({ path: join(OUT, `dashboard-full-${theme}.png`), fullPage: true });
       }
     });
   }

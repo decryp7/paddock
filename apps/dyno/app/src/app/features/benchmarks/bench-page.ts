@@ -31,7 +31,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
       <header class="page-head">
         <div class="titles">
           <h1>Benchmarks</h1>
-          <p>Measure the CPU, memory and disk on request, and compare before and after a change. Nothing runs until you click, and it all stays on this PC.</p>
+          <p>Measure the CPU, memory and disk on request, and compare before and after a change. Nothing runs until you click, and it all stays on this computer.</p>
         </div>
       </header>
 
@@ -55,7 +55,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                   </li>
                 }
               </ol>
-              <p class="note">Keep the PC otherwise idle while this runs; any other work lowers the numbers.</p>
+              <p class="note">Keep the computer otherwise idle while this runs; any other work lowers the numbers.</p>
             } @else {
               <div class="kinds" role="group" aria-label="What to measure">
                 @for (k of kinds; track k.kind) {
@@ -144,7 +144,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
               } @else {
                 <div class="tablewrap">
                   <pd-table [toolbar]="false" label="Before and after" [rows]="c.deltas" [columns]="deltaColumns" [rowKey]="deltaKey" [filterable]="false" [maxHeight]="420">
-                    <ng-template pdCell="label" let-d>{{ d.label }} <span class="faint">({{ title(d.kind) }})</span></ng-template>
+                    <ng-template pdCell="label" let-d>{{ d.label }}{{ ' ' }}<span class="faint">({{ title(d.kind) }})</span></ng-template>
                     <ng-template pdCell="before" let-d><span class="num">{{ metric(d.before) }} <small>{{ d.unit }}</small></span></ng-template>
                     <ng-template pdCell="after" let-d><span class="num">{{ metric(d.after) }} <small>{{ d.unit }}</small></span></ng-template>
                     <ng-template pdCell="verdict" let-d><span class="badge" [attr.data-tone]="tone(d)">{{ word(d) }}</span></ng-template>

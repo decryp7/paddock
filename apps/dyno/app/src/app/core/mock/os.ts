@@ -168,7 +168,7 @@ export function osProfile(os: MockOs): OsProfile {
       cpuMaxMhz: 4650,
       gpuName: 'NVIDIA GeForce RTX 4070 Laptop GPU',
       disks: (days) => [
-        { id: 'nvme0n1p2', name: 'WD Blue SN570 (ext4)', mount: '/', total: Math.round(953.8 * GB), free: Math.round((210 - days * 5.1) * GB), removable: false },
+        { id: 'nvme0n1p2', name: 'WD Blue SN570 (ext4)', mount: '/', total: Math.round(953 * GB), free: Math.round((210 - days * 5.1) * GB), removable: false },
         { id: 'sda1', name: 'Seagate BarraCuda (ext4)', mount: '/mnt/data', total: Math.round(1863 * GB), free: Math.round(1204 * GB), removable: false },
       ],
       network: (w) => [
@@ -178,7 +178,7 @@ export function osProfile(os: MockOs): OsProfile {
       primaryDisk: 'Root filesystem',
       bootLabel: 'Linux started',
       cpuSensor: 'CPU package',
-      noBattery: 'This PC has no battery.',
+      noBattery: 'This computer has no battery.',
       noTemperatures: 'No hwmon temperature sensors are readable (the kernel exposes none on this machine).',
       noFans: 'No fan speeds are exposed under /sys/class/hwmon.',
       home: '/home/alex',
@@ -203,7 +203,7 @@ export function osProfile(os: MockOs): OsProfile {
     cpuMaxMhz: 4640,
     gpuName: 'NVIDIA GeForce RTX 4070 Laptop GPU',
     disks: (days) => [
-      { id: 'C', name: 'Samsung PM9A1 NVMe', mount: 'C:\\', total: Math.round(953.8 * GB), free: Math.round((210 - days * 5.1) * GB), removable: false },
+      { id: 'C', name: 'Samsung PM9A1 NVMe', mount: 'C:\\', total: Math.round(953 * GB), free: Math.round((210 - days * 5.1) * GB), removable: false },
       { id: 'D', name: 'Seagate BarraCuda HDD', mount: 'D:\\', total: Math.round(1863 * GB), free: Math.round(1204 * GB), removable: false },
     ],
     network: (w) => [
@@ -213,7 +213,7 @@ export function osProfile(os: MockOs): OsProfile {
     primaryDisk: 'Drive C:',
     bootLabel: 'Windows started',
     cpuSensor: 'CPU package',
-    noBattery: 'This PC has no battery.',
+    noBattery: 'This computer has no battery.',
     noTemperatures: 'The CPU does not report temperatures without a vendor driver (Dyno installs no drivers).',
     noFans: 'The motherboard does not expose fan speeds to Windows.',
     home: 'C:\\Users\\alex',

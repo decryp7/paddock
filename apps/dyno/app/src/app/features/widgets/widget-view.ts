@@ -45,6 +45,11 @@ const ICON: Record<WidgetKind, IconName> = {
  * issues or the health score. Neutral by default; the hero uses the accent, and a threshold colour only appears when a
  * threshold is crossed (always with the number printed). Values glide to their new reading.
  */
+/** A metric label inside a sentence: lower case, except an acronym (`CPU`) which stays as it is. */
+function sentenceCase(label: string): string {
+  return /^[A-Z]{2,}\b/.test(label) ? label : label.toLowerCase();
+}
+
 @Component({
   selector: 'dy-widget',
   imports: [FullTextTip, MatTooltip, Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
@@ -183,7 +188,7 @@ export class WidgetView {
   private readonly diagnosis = inject(DiagnosisStore);
   private readonly counters = inject(CountersStore);
 
-  protected readonly title = computed(() => (this.widget().kind === 'topProcesses' ? `Top apps by ${metricLabel(this.widget().metric).toLowerCase()}` : PANEL_KINDS.includes(this.widget().kind) ? KIND_LABEL[this.widget().kind] : metricLabel(this.widget().metric)));
+  protected readonly title = computed(() => (this.widget().kind === 'topProcesses' ? `Top apps by ${sentenceCase(metricLabel(this.widget().metric))}` : PANEL_KINDS.includes(this.widget().kind) ? KIND_LABEL[this.widget().kind] : metricLabel(this.widget().metric)));
   /** The panel kinds are cards of their own (they bring header, loading and error states). */
   protected readonly ownCard = computed(() => ['cpu', 'diagnosis', 'events', 'history', 'consumers', 'diskTrend'].includes(this.widget().kind) || (this.widget().kind === 'health' && this.widget().size !== 's'));
   protected readonly icon = computed(() => ICON[this.widget().kind]);
