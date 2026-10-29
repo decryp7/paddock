@@ -211,7 +211,7 @@ jobs:
         run: node .paddock/conformance/ci/check-tag.mjs --tag "$TAG" --prefix "$PREFIX" --conf "$CONF"
 
       # The first release's notes come from the CHANGELOG: fail here, not after the three builds, when its section is missing,
-      # still "Unreleased" or empty. Tags are fetched first (a shallow checkout holds only the tag itself).
+      # still "Unreleased" or empty.  The earlier tags are listed on the server (ls-remote), so the shallow checkout fetches nothing.
       - name: The first release's CHANGELOG section is ready
         if: startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix)) && inputs.first-release-changelog != ''
         shell: bash
@@ -220,7 +220,6 @@ jobs:
           TAG: ${{ github.ref_name }}
           PREFIX: ${{ inputs.tag-prefix }}
         run: |
-          git fetch --tags --quiet origin || true
           bash .paddock/conformance/ci/first-release-notes.sh || exit 1
 
       - uses: ./.paddock/.gitea/actions/build-env

@@ -17,7 +17,19 @@ tag=${TAG:?TAG is required}
 prefix=${PREFIX:-}
 [ -n "$changelog" ] || exit 0
 
-if [ -n "$(git tag -l "${prefix}v*" | grep -vxF "$tag" || true)" ]; then
+# Earlier tags of the app. A CI checkout is shallow and holds only its own tag, so ask the server (ls-remote downloads no
+# objects); without an origin remote (a local run) the repository's own tags are all there is. A listing that fails is an
+# error, never "no earlier tag": that would turn a later release into a first one.
+if git remote get-url origin >/dev/null 2>&1; then
+  if ! listed=$(git ls-remote --tags --refs origin "refs/tags/${prefix}v*" 2>&1); then
+    echo "::error::could not list the tags of origin: $listed"
+    exit 1
+  fi
+  earlier=$(printf '%s\n' "$listed" | sed -n 's#.*refs/tags/##p')
+else
+  earlier=$(git tag -l "${prefix}v*")
+fi
+if [ -n "$(printf '%s\n' "$earlier" | grep -vxF "$tag" | grep -v '^$' || true)" ]; then
   exit 0
 fi
 

@@ -74,6 +74,7 @@ reinstall from the releases page, and revoke the old secrets.
 
 In this order, on one commit:
 
+0. Every 1.0 branch is merged: disk-map-1.0, jobs-1.0 (with its CHANGELOG bullet folded into the `[1.0.0]` section), tables/layout and the startup fix. Nothing may land after step 1 without repeating steps 2 and 3.
 1. Bump the version in `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml` (and the lock files), and date the
    `CHANGELOG.md` section (`## [1.0.0] - <date>`, never "Unreleased"): the first release's notes are that section and the
    release run fails without it. `main` is green.

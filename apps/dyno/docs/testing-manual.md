@@ -58,22 +58,24 @@ shared folder. Test bundles are never uploaded, tagged or published (ER-15); del
 **Builds, on the host** (the same `tauri build` as CI, plus `--config` to swap the key and the feed; the committed
 `tauri.conf.json` is not edited):
 
-- `1.0.0-test` and `1.0.1-test`: the version bumped in a scratch worktree only, `createUpdaterArtifacts` on, `pubkey` = the
+- `1.0.0-test` and `1.0.1-test`: in a scratch worktree only, set the workspace `Cargo.toml` and `app/src-tauri/tauri.conf.json` to `1.0.0-test`, build, then to `1.0.1-test` and build again (and `cargo update -w` the lock). The agent, the `dyno` command and the app must all carry the version: the app replaces a running agent only when its own version differs from the agent's (`link.rs` `plan()`), so a `--config` version override, which leaves the crates at the workspace version, would give two builds with the same agent and rows 24d and 24f could not pass. `createUpdaterArtifacts` on, `pubkey` = the
   test public key, `plugins.updater.endpoints` = the local feed URL (an `http://` URL on the host needs
   `plugins.updater.dangerousInsecureTransportProtocol: true` in the same override; fine for a test build, never for a release).
-- **Windows test bundles (NSIS), built on the Mac** (tried on the Mac mini on 2026-10-29: it produced `Dyno_0.1.0_x64-setup.exe`, 9.7 MiB, unsigned; not yet
-  installed in the VM). Needs `rustup target add x86_64-pc-windows-msvc`, `cargo install cargo-xwin` (downloads the Windows SDK and
+- **Windows test bundles (NSIS), built on the Mac** (tried on the Mac mini on 2026-10-29 at the workspace version, with a `version` override: it produced `Dyno_0.1.0_x64-setup.exe`, 9.7 MiB, unsigned. The `1.0.0-test` and `1.0.1-test` builds described here, with the crate versions bumped, are **untried**, and no installer was run in the VM yet). Needs `rustup target add x86_64-pc-windows-msvc`, `cargo install cargo-xwin` (downloads the Windows SDK and
   CRT on first use), `brew install makensis llvm`, and a `mt.exe` on `PATH` (the linker asks for the manifest tool; a symlink
-  to `llvm-mt` does it: `mkdir -p <shim> && ln -s /opt/homebrew/opt/llvm/bin/llvm-mt <shim>/mt.exe`, then `export PATH=<shim>:/opt/homebrew/opt/llvm/bin:$PATH`). The plain `cargo` in
+  to `llvm-mt` does it: `mkdir -p <scratch>/shim && ln -s /opt/homebrew/opt/llvm/bin/llvm-mt <scratch>/shim/mt.exe`, a folder in your scratch area, never in the repository; put it on `PATH` only inside the subshell that builds). The plain `cargo` in
   `sidecar.mjs` cannot link for Windows, so build the sidecars with xwin and copy them, then run Tauri without that step:
 
   ```sh
+  (
+  export PATH=<scratch>/shim:/opt/homebrew/opt/llvm/bin:$PATH
   cd apps/dyno
   export CARGO_TARGET_DIR=<scratch build dir> CARGO_BUILD_JOBS=2
   cargo xwin build -p dyno-agent -p dyno-cli --profile dist --target x86_64-pc-windows-msvc
   for b in dyno-agent dyno; do cp $CARGO_TARGET_DIR/x86_64-pc-windows-msvc/dist/$b.exe app/src-tauri/binaries/$b-x86_64-pc-windows-msvc.exe; done
   cd app && npx tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis \
-    --config '{"version":"1.0.0-test","build":{"beforeBuildCommand":"npm run build"},"plugins":{"updater":{"pubkey":"<test pubkey>","endpoints":["http://<host-only IP>:8089/latest.json"],"dangerousInsecureTransportProtocol":true}},"bundle":{"createUpdaterArtifacts":true}}'
+    --config '{"build":{"beforeBuildCommand":"npm run build && node ../../../conformance/ci/check-index.mjs dist/dyno-app/browser/index.html"},"plugins":{"updater":{"pubkey":"<test pubkey>","endpoints":["http://<host-only IP>:8089/latest.json"],"dangerousInsecureTransportProtocol":true}},"bundle":{"createUpdaterArtifacts":true}}'
+  )
   ```
 
   with `TAURI_SIGNING_PRIVATE_KEY` / `_PASSWORD` set to the throwaway key (never the family key). The installer lands in
@@ -88,7 +90,7 @@ shared folder. Test bundles are never uploaded, tagged or published (ER-15); del
 - The **CI-built signed 1.0.0** (the installers of the manual `dyno-release` run with `gates: true` on the commit to be tagged) carries
   the real public key and the public feed baked in, so it cannot read a local feed or accept a test signature. It is used
   for the install rows only (24a, 24b, 24h); the update rows (24c to 24g) start from `1.0.0-test`, which is built with the
-  same flags, sidecars and bundle checks.
+  same feature flags and sidecars but not CI's bundle checks (`check-bundle.sh`, `macos-verify`), which run only in CI on the real build.
 
 | # | Steps | Expected |
 | --- | --- | --- |
