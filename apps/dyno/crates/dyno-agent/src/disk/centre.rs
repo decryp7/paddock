@@ -543,6 +543,7 @@ impl DiskCentre {
             spawn: super::engine::os_spawn,
             stat_limit: STAT_LIMIT,
             listing_progress_every: super::engine::LISTING_PROGRESS_EVERY,
+            os: dyno_core::disk::reason::Os::current(),
         };
         meta.announce(r.total_bytes);
         let walk = Walk::start(self.source.clone(), r.root.clone(), &r.name, cfg, meta.clone()).map_err(|e| {

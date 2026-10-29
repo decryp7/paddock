@@ -4,6 +4,7 @@
 //! stuck inside a call to a dead network share is abandoned, never awaited.
 
 use dyno_core::disk::index::{DiskIndex, NodeId, ScanLimits, Sizes};
+use dyno_core::disk::reason::{unreadable_reason, Os};
 use dyno_core::disk::scan::{ScanFailure, ScanProgress, UNREADABLE_LISTED};
 use dyno_core::disk::source::{DirEntryInfo, DirSource, EntryKind, ReadError};
 use dyno_core::time::Timestamp;
@@ -117,6 +118,8 @@ pub struct WalkConfig {
     pub stat_limit: std::time::Duration,
     /// A folder being listed reports its progress every this many entries (a huge folder is no longer silent).
     pub listing_progress_every: usize,
+    /// The OS whose rules say why a folder was refused ([`Os::current`]; tests choose one).
+    pub os: Os,
 }
 
 /// Entries read between two progress reports inside one folder.
@@ -397,7 +400,7 @@ impl Walk {
             let mut i = lock(&self.index);
             for (id, (_, refused)) in &left {
                 if *refused {
-                    i.mark_unreadable(*id);
+                    i.restore_unreadable(*id);
                 } else {
                     i.mark_unread(*id);
                 }
@@ -650,7 +653,7 @@ impl Walk {
             return Vec::new();
         }
         let unreadable_here = match &listed {
-            Ok(()) => false,
+            Ok(()) => None,
             Err(ReadError::Unreachable(d)) => {
                 self.pending_items.fetch_sub(seen, Ordering::Relaxed);
                 self.fail(ScanFailure::VolumeUnreachable { detail: d.clone() });
@@ -658,14 +661,14 @@ impl Walk {
             }
             // Gone since it was listed: nothing to read. On a retry the path was rebuilt from the index, so "not found" may mean
             // the path is wrong; the folder then stays refused rather than being called complete and empty.
-            Err(ReadError::NotFound) if !task.retry => false,
-            Err(_) => {
+            Err(ReadError::NotFound) if !task.retry => None,
+            Err(e) => {
                 self.note_unreadable(&task.path);
-                true
+                Some(unreadable_reason(e, self.cfg.os, &task.path))
             }
         };
         // A folder that listed but had entries the OS refused is partial: counted once, and incomplete for good.
-        let partial = entry_denied && !unreadable_here;
+        let partial = entry_denied && unreadable_here.is_none();
         if partial {
             self.note_unreadable(&task.path);
         }
@@ -727,8 +730,8 @@ impl Walk {
             if small_items > 0 {
                 i.add_folded_files(task.node, small, small_items, small_newest);
             }
-            if unreadable_here {
-                i.mark_unreadable(task.node);
+            if let Some(reason) = unreadable_here {
+                i.mark_unreadable(task.node, reason);
             }
             if partial {
                 i.mark_partial(task.node);
@@ -788,6 +791,7 @@ mod tests {
             spawn: os_spawn,
             stat_limit: std::time::Duration::from_secs(30),
             listing_progress_every: LISTING_PROGRESS_EVERY,
+            os: Os::MacOs,
         }
     }
 
@@ -959,6 +963,52 @@ mod tests {
         fs.file(&mail, "inbox", 7);
         fs.fail_open(&lib, ReadError::PermissionDenied);
         (Arc::new(fs), lib, mail)
+    }
+
+    #[test]
+    fn a_refused_folder_says_why_by_the_rules_of_the_os() {
+        use dyno_core::disk::reason::UnreadableReason::{NeedsAdmin, NeedsFullDiskAccess, Other};
+        for (os, error, want) in [
+            (Os::MacOs, ReadError::PermissionDenied, NeedsFullDiskAccess),
+            (Os::Linux, ReadError::PermissionDenied, NeedsAdmin),
+            (Os::Windows, ReadError::PermissionDenied, NeedsAdmin),
+            (Os::MacOs, ReadError::Other("input/output error".into()), Other),
+        ] {
+            let fs = FakeFs::new();
+            let r = fs.root();
+            let users = fs.dir(&r, "Users");
+            let alex = fs.dir(&users, "alex");
+            let lib = fs.dir(&alex, "Library");
+            let mail = fs.dir(&lib, "Mail");
+            fs.file(&alex, "x", 10);
+            fs.fail_open(&mail, error);
+            let mut c = cfg(2);
+            c.os = os;
+            let (w, _, end) = run(Arc::new(fs), r, c);
+            assert_eq!(end, End::Done);
+            let reason = w.with_index(|i| {
+                let mut at = i.root();
+                for name in ["Users", "alex", "Library"] {
+                    at = NodeId(
+                        i.children(at, 0, 50, 0.0)
+                            .unwrap()
+                            .children
+                            .iter()
+                            .find(|k| k.name == name)
+                            .unwrap()
+                            .id,
+                    );
+                }
+                i.children(at, 0, 50, 0.0)
+                    .unwrap()
+                    .children
+                    .iter()
+                    .find(|k| k.name == "Mail")
+                    .unwrap()
+                    .unreadable_reason
+            });
+            assert_eq!(reason, Some(want), "{os:?}");
+        }
     }
 
     #[test]

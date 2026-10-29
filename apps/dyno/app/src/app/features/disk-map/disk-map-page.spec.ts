@@ -444,13 +444,15 @@ describe('dy-disk-map-page', () => {
     vi.spyOn(r.mock, 'diskChildren').mockImplementation(async (q) => {
       const page = await real(q);
       const [first, ...rest] = page.children;
-      return first ? { ...page, children: [{ ...first, kind: 'unreadable' as const, bytes: 0, items: 0, complete: false, hasChildren: false }, ...rest] } : page;
+      return first ? { ...page, children: [{ ...first, kind: 'unreadable' as const, unreadableReason: 'needsFullDiskAccess' as const, bytes: 0, items: 0, complete: false, hasChildren: false }, ...rest] } : page;
     });
     await r.store.refresh();
     await settle(r.f);
     const row = r.el.querySelector<HTMLElement>('.rows .item')!;
     expect(row.textContent).toContain('Unavailable');
     expect(row.textContent).toContain('Unreadable');
+    const why = row.querySelector('.size')!.getAttribute('aria-describedby');
+    expect(document.getElementById(why!)?.textContent).toContain('Needs Full Disk Access');
     expect(row.textContent).not.toMatch(/\b0 B\b/);
     btn(r.el, 'Table')!.click();
     await settle(r.f);

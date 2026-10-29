@@ -9,7 +9,7 @@ import { SuSegmentedControl, readPaddockTokens, type SuSegment } from '@decryp7/
 import { PdSunburst, branchSlots, slotColour, type PdSunburstPoint } from '@decryp7/paddock-ui/chart';
 import type { DiskNode, Volume } from '../../core/api.types';
 import { PlatformService } from '../../core/platform';
-import { UNAVAILABLE, reasonText } from '../../core/measured';
+import { UNAVAILABLE, unreadableText } from '../../core/measured';
 import { AsyncState } from '../../shared/async-state';
 import { formatBytes, formatCount, formatAgo, formatDate, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -281,7 +281,7 @@ import {
                         <span class="tag warn">{{ r.node.kind === 'unreadable' ? 'Unreadable' : 'Incomplete' }}</span>
                       }
                       @if (r.node.kind === 'unreadable') {
-                        <span class="size num muted" [matTooltip]="unavailableWhy">{{ unavailable }}</span>
+                        <span class="size num muted" [matTooltip]="unavailableWhy(r.node.unreadableReason)">{{ unavailable }}</span>
                         <span class="pct num muted" aria-hidden="true">–</span>
                       } @else {
                         <span class="size num">{{ bytes(r.node.bytes) }}</span>
@@ -343,7 +343,7 @@ import {
                     <th mat-header-cell *matHeaderCellDef mat-sort-header="bytes" class="num">Size</th>
                     <td mat-cell *matCellDef="let r" class="num">
                       @if (r.node.kind === 'unreadable') {
-                        <span class="muted" [matTooltip]="unavailableWhy">{{ unavailable }}</span>
+                        <span class="muted" [matTooltip]="unavailableWhy(r.node.unreadableReason)">{{ unavailable }}</span>
                       } @else {
                         {{ bytes(r.node.bytes) }}
                       }
@@ -570,7 +570,7 @@ export class DiskMapPage implements OnInit {
   protected readonly menuAt = signal({ x: 0, y: 0 });
   protected readonly reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   protected readonly unavailable = UNAVAILABLE;
-  protected readonly unavailableWhy = `${UNAVAILABLE}: ${reasonText('needsAdmin')}`;
+  protected readonly unavailableWhy = unreadableText;
   /** Bumped when the theme or accent changes: the ring order of the colours depends on the resolved palette. */
   private readonly appearance = signal(0);
   private readonly slots = computed(() => {

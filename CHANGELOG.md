@@ -14,6 +14,7 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### Dyno: the disk map screen on the shell
 - New nav entry `Disk map` (`/disk-map`): scan a volume or folder as a job with live phase-labelled progress and Cancel, ring chart (`pd-sunburst`) beside a list or a `mat-table`, drill-down, capacity strip with hidden space, Full Disk Access and "Unavailable" states with a reason, Settings limits (items kept per scan, large file size).
+- The engine says why each unreadable folder was refused (`DiskNode.unreadableReason`: `needsFullDiskAccess` for a macOS denial under a privacy-protected location, `needsAdmin` for any other denial, `other` for other errors); the map shows it as the reason of its Unavailable mark.
 
 ### `providePaddockMaterial`: tooltips wait 500 ms
 - `providePaddockMaterial()` provides `MAT_TOOLTIP_DEFAULT_OPTIONS` with `showDelay: 500` (`PADDOCK_TOOLTIP_OPTIONS`), the design guide's delay for the tooltip every icon-only button carries. Every app that provides it gets the delay without setting it per tooltip.

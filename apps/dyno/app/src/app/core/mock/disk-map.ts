@@ -8,6 +8,7 @@ import type {
   DiskChildren,
   DiskChildrenQuery,
   DiskNode,
+  UnreadableReason,
   DiskRings,
   DiskRingsQuery,
   RingNode,
@@ -110,6 +111,9 @@ interface Built {
 }
 
 /** A size tree built from a spec; ids follow the order of the spec. */
+/** The mock's only refused folder is ~/Library/Mail, which the engine on macOS reports as behind Full Disk Access. */
+const MOCK_UNREADABLE_REASON: UnreadableReason = 'needsFullDiskAccess';
+
 export class MockTree {
   private readonly nodes: Built[] = [];
 
@@ -146,7 +150,7 @@ export class MockTree {
 
   private info(id: number): DiskNode {
     const n = this.nodes[id]!;
-    return { id, name: n.name, kind: n.kind, bytes: n.bytes, logicalBytes: n.logical, items: n.items, newestChange: n.newest, complete: n.kind !== 'unreadable', hasChildren: n.kids.length > 0 || n.loose > 0 };
+    return { id, name: n.name, kind: n.kind, bytes: n.bytes, logicalBytes: n.logical, items: n.items, newestChange: n.newest, complete: n.kind !== 'unreadable', hasChildren: n.kids.length > 0 || n.loose > 0, unreadableReason: n.kind === 'unreadable' ? MOCK_UNREADABLE_REASON : null };
   }
 
   children(q: Pick<DiskChildrenQuery, 'node' | 'offset' | 'limit' | 'minFraction'>): DiskChildren | null {
