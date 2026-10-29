@@ -70,21 +70,21 @@ switch Debrief to it, and delete Debrief's copy with the tests that duplicated s
 
 ### 2.1 Drift by date
 
-Debrief's last change to each part against when the shared copy was made (commit dates on `origin/main`). A part changed
+Debrief's last change to each part against when the shared copy was made (commit dates on `origin/main`). Hashes are the last non-merge commit (`git log -1 --no-merges`). A part changed
 in Debrief after its copy was made has drift to bring over; the in-flight branch adds to that.
 
 | Part | Debrief's last change | Shared copy made | Drift |
 |---|---|---|---|
 | Layout planner | `86d72af47`, 2026-10-24 19:29 ("short-window row share": `SHARES.rowHeight`) | `4a0760b9b`, 2026-10-24 13:26 | **yes**: the row share (Phase 3a) |
-| Dock | `c10d0e641`, 2026-10-24 22:55 | `b97898f40`, 2026-10-25 03:27 (port of the dock sources) | none expected from `main`; the branch adds `dock-layout.ts` and `dock.service.ts` changes; 1a verifies file by file |
+| Dock | `86d72af47`, 2026-10-24 19:29 (last non-merge commit) | `b97898f40`, 2026-10-25 03:27 (port of the dock sources) | none expected from `main`; the branch adds `dock-layout.ts` and `dock.service.ts` changes; 1a verifies file by file |
 | Frame, activity bar, narrow window | `bbfd4ef22`, 2026-10-24 16:30 | `448b5e627`, 2026-10-25 03:32 | none expected from `main`; the branch adds the Explorer rules (1b) |
 | Explorer | (in `shell/`) 2026-10-24 16:30 | `504b8bb25`, 2026-10-24 11:30 (scaffold), built through 2026-10-28 | to check in 1a: the copy's start predates Debrief's last change |
 | Pop-outs | `1474dca8d`, 2026-10-24 10:45 | `504b8bb25`, 2026-10-24 11:30 | none expected; the branch's `shared-state.ts` change is Debrief's own |
-| Palette | `d62350ba2`, 2026-10-23 | 2026-10-24 and later | none |
+| Palette | `6ca4b2cd0`, 2026-10-23 20:32 | 2026-10-24 and later | none |
 | Extensions and contributions | `84b22df4e`, 2026-10-24 | 2026-10-24 and later | the branch's `command-registry.ts` and `tokens.ts` |
 | Windowing | `7b2cd1c0d`, 2026-10-24 | 2026-10-24 and later | none expected |
 | Assistant pane | `f04fde46f`, 2026-10-24 | 2026-10-24, built through 2026-10-25 | none expected |
-| Menu model | 2026-10-24 (in `shell/`) | `504b8bb25`, 2026-10-24 11:30 | to check in 1a; the branch adds disabled items and Reset Explorer width |
+| Menu model | `322483998`, 2026-10-24 11:07 | `504b8bb25`, 2026-10-24 11:30 | to check in 1a; the branch adds disabled items and Reset Explorer width |
 
 ## 3. API surface, tokens and CHANGELOG
 
@@ -125,15 +125,22 @@ same for both:
   `shell/confirm/dialog`, `shell/dialogs`, `shell/i18n`, `shell/jobs`, `shell/menu`, `shell/notify`, `shell/pages`,
   `shell/settings`, `shell/settings/window`, `shell/startup` and `shell/testing`. The closure of their
   `@decryp7/paddock-ui/*` imports (static and `import()`, on each branch's own `ui/`) adds `icons`, `select`,
-  `shell/feel`, `shell/store` and `testing`. Because `paddock-shell` serves every shell page and dialog, all `shell/**`
-  entries are frozen, and their closure adds `ipc`, `states` and `table`.
-- **Paths:** `ui/projects/paddock-ui/{src,format,icons,ipc,select,states,table,testing,shell}/**`, `scss/**`,
-  `i18n/**`, `bin/**`, the package's `package.json` and `ng-package.json`; `ui/projects/paddock-e2e/src/**` (both apps'
-  e2e use it); the root `package.json` and `package-lock.json` entries they resolve.
+  `shell/feel`, `shell/store` and `testing`. Only this closure is frozen. The other shell entries (`shell/service`,
+  `shell/pitwall`, `shell/mcp`, `shell/storage`, `shell/channels`, `shell/packs`, `shell/setup`, `shell/files`,
+  `shell/diagnostics`, `shell/undo` and their pages) stay open, which Pitwall 1.1 needs for `shell/service` and
+  `shell/pitwall`; `ipc`, `states` and `table` are reached only through those and stay open too.
+- **Paths of the closure:** `ui/projects/paddock-ui/{src,format,icons,select,testing}/**` and the frozen `shell` entry
+  folders, each without its nested entries.
+- **Declared extra paths, each with its reason** (a separate list in the declaration, tested on its own):
+  `ui/projects/paddock-ui/scss/**` (compiled into the `paddock.css` both apps load from `angular.json`);
+  `ui/projects/paddock-ui/i18n/**` (merged into the apps' catalogues, C32); `ui/projects/paddock-ui/bin/**` (the
+  `paddock-i18n` build the apps run); the package's `package.json` and `ng-package.json` (they build every entry);
+  `ui/projects/paddock-e2e/src/**` (both apps' e2e import `@decryp7/paddock-e2e`); the root `package.json` and
+  `package-lock.json` entries the apps resolve.
 
 Not frozen (no release app reaches them): `chart`, `forms`, `ipc/testing`, `live`, `material`, `prefs`, `schedule`,
 `view`, `sash` (new), every `workbench/**` entry, `ui/projects/workbench-demo/**`, `apps/workbench-demo/**`,
-`ui/e2e/workbench-demo*.spec.ts`, `crates/paddock-workbench`, `crates/paddock-panels`, `crates/paddock-assistant`
+`ui/e2e/workbench-demo*.spec.ts`, the shell entries named above, `ipc`, `states`, `table`, `crates/paddock-workbench`, `crates/paddock-panels`, `crates/paddock-assistant`
 (only while `paddock-workspace-hack` stays byte-identical), and `apps/debrief/**`. Package 0a turns this list into a
 generated, checked one; until it lands, each package's brief names its allowed paths and its reviewer checks
 `git diff --name-only origin/main` against them.
@@ -153,35 +160,52 @@ ADR 0014 §10). A phase that touches the frozen set waits for both tags.
 2. Retake the W0 baseline on that merge (`npm run e2e:shell-baseline -- --update-snapshots`, every PNG reviewed, rule 22),
    because the Explorer's width and the Events grid's columns change the pixels. M5 compares against this baseline.
 3. `feat/e2e-hit-test`: after its review, before the tags (W1), with the two app specs green on the release branches.
+   **It lands before package 0a**: once 0a is active, `paddock-e2e/src` is frozen and the branch could not merge.
 4. `feat/dock-translucent-redock`: after both tags (its hack diff is not panels-only, section 1).
 5. Package 0a, the release-freeze check (W5), lands first of this plan's own packages, so every later phase is gated by it:
 
 | # | Package | Owned files | Failing test first | Days |
 |---|---|---|---|---|
-| 0a | **Release-freeze check** (conformance; rules 1 and 40). See below | `conformance/src/checks/` (new check), `conformance/test/`, `conformance/fixtures/`, `conformance/README.md` row; `paddock.conformance.json` entry and schema (integrating agent) | see below | 2 |
+| 0a | **Release-freeze check** (conformance; rules 1 and 40). See below | `conformance/src/checks/` (new check), `conformance/bin/release-freeze.mjs`, `conformance/test/`, `conformance/fixtures/`, `conformance/README.md` row; `paddock.conformance.json` entry and schema, the integrate procedure step and `lefthook.yml` line (integrating agent) | see below | 2.5 |
 
-Package 0a in detail:
+Package 0a in detail. It depends on `feat/e2e-hit-test` having landed (item 3), and builds on `fix/affected-narrow-global`.
 
 - **Declaration.** One joint freeze for the releases in flight: `releaseFreeze: { apps: ["dyno", "spotter"], branches:
-  ["dyno/shell-1.0", "spotter/shell-1.0"], until: ["dyno-v1.0.0", "spotter-v1.0.0"] }`. It ends when every tag exists.
-- **Frozen paths, derived.** Rust: every `paddock-*` package in each frozen app's own `Cargo.lock`, mapped to
-  `crates/<name>/`, plus `crates/paddock-workspace-hack/`. UI: an entry-point graph, one node per `ng-package.json`
-  entry of `paddock-ui`, edges from each entry's `@decryp7/paddock-ui/*` imports (static and `import()`), starting from
-  the app's own imports; the closure's folders are frozen, with `scss/`, `i18n/`, `bin/`, `paddock-e2e/src/` and the
-  package files. `affected.mjs` today treats all of `ui/` as one package (`scripts/affected.mjs:368`), so the entry
-  graph is new; it is written as a module that `affected.mjs` can use later. The narrowing of its global triggers is
-  being done on `fix/affected-narrow-global` by another agent; 0a builds on that branch and does not change the
-  triggers itself.
-- **Where it runs, and how it knows the source.** In the plan job of `ci.yml` on pull requests, against the merge base
-  with `main`. The source branch is the pull request's head ref (`github.head_ref` in Gitea Actions; to verify on our runner before 0a relies on it). A change under a
-  frozen path fails unless its head ref is one of the declared branches. A merge of a declared release branch is exempt
-  from the path check but must run both frozen apps' full gates (the check adds both apps to the plan instead of
-  failing). A direct push to `main` that touches a frozen path fails too.
-- **Failing tests first.** A fixture diff touching `ui/projects/paddock-ui/shell/pages/` fails while the freeze is
-  declared; the same diff from head ref `dyno/shell-1.0` passes and marks both apps' gates; after both tags it passes;
-  a diff touching only `ui/projects/paddock-ui/workbench/frame/` passes; a diff touching `ui/projects/paddock-ui/table/`
-  fails (reached only through `shell/storage/page`); a change to `crates/paddock-workspace-hack/` or `crates/paddock-proc/`
-  fails; the derived list for the two current branches equals section 4's.
+  ["dyno/shell-1.0", "spotter/shell-1.0"], until: ["dyno-v1.0.0", "spotter-v1.0.0"], extra: [{ path, reason }] }`. It
+  ends when every tag exists.
+- **Frozen paths, derived.** UI: an entry-point graph, one node per `ng-package.json` entry of `paddock-ui`, edges from
+  each entry's `@decryp7/paddock-ui/*` imports (static and `import()`), starting from the apps' own imports; only the
+  closure's folders are frozen (section 4), plus the declared `extra` list. `affected.mjs` today treats all of `ui/` as
+  one package (`scripts/affected.mjs:368`), so the graph is a new module that `affected.mjs` can use later; the narrowing
+  of its global triggers is being done on `fix/affected-narrow-global` by another agent, and 0a does not change them.
+  Rust: `crates/<name>/` for every `paddock-*` package in a frozen app's own `Cargo.lock`, plus
+  `crates/paddock-workspace-hack/`.
+- **Lockfiles.** A small lock-diff parser reads a frozen app's `Cargo.lock` at the base and at the head (TOML
+  `[[package]]` entries: name, version, source, checksum, dependencies) and fails on any added, removed or changed
+  entry, with the entry named; the same for that app's `package-lock.json` entries under its workspace.
+- **Where it blocks: locally, before the push.** Branch CI here is `workflow_dispatch` and work lands on `main` through
+  local merges that are then pushed, so a CI check can only report afterwards. The check is a CLI,
+  `node conformance/bin/release-freeze.mjs --range origin/main...HEAD --source <branch>`, run by the integrating agent as
+  a step of the integrate procedure before every push to `main` (and from `lefthook.yml`'s pre-push hook when the
+  current branch is `main`). It exits non-zero and lists the frozen paths a change touches.
+- **In CI, as a second line.** On `workflow_dispatch` and `push`, the source is `github.ref_name` and the diff is taken
+  against `git merge-base origin/main HEAD` (never the plan job's `PLAN_BASE`). On a push to `main`, each new commit is
+  checked: a merge commit is exempt when its second parent is an ancestor of a declared release branch's tip (and then
+  both apps' gates are added to the plan); any other commit touching a frozen path fails the run. A dispatch on a
+  declared release branch is exempt and adds both apps' gates.
+- **Failing tests first.**
+  - CLI: `--source feat/x` with a range touching `ui/projects/paddock-ui/shell/pages/` exits non-zero and names the path;
+    `--source dyno/shell-1.0` with the same range passes and reports both apps' gates; after both tags exist, it passes.
+  - Dispatch: `ref_name` `feat/x` touching `shell/pages/` fails; `ref_name` `spotter/shell-1.0` passes; the diff base is
+    the merge base, so a `main` that moved on does not count its own commits.
+  - Push to `main`: a merge commit whose second parent is in `dyno/shell-1.0` passes; a merge commit whose second parent
+    is not fails; a non-merge commit touching `shell/menu/` fails.
+  - Paths: `workbench/frame/` passes; `shell/service/` and `table/` pass (outside the closure); `crates/paddock-proc/` and
+    `crates/paddock-workspace-hack/` fail; a changed entry in `apps/spotter/Cargo.lock` from `feat/x` fails with the
+    entry named.
+  - The `extra` list is tested on its own: each declared path fails a fixture change and each carries a reason; a path in
+    `extra` without a reason is refused.
+  - The derived closure for the two current branches equals section 4's list.
 
 ### Phase 1: the shared copy catches up (workbench-only paths; may land before the tags)
 
@@ -260,7 +284,7 @@ Debrief's own panel commands remain. Gates: `cargo test` for Debrief's app crate
 
 | Phase | When | Agent-days | Debrief 1.2 package |
 |---|---|---|---|
-| 0 | now | baseline retake 0.5; package 0a 2 | new |
+| 0 | now | baseline retake 0.5; package 0a 2.5 | new |
 | 1 | before the tags (workbench-only) | 5.5 | new |
 | 2 | before the tags (Debrief-only) | 6.5 | 2a is the workbench half of M1 (3); 2b and 2c are new (3.5) |
 | 3 | after both tags | 3 | new |
@@ -268,10 +292,10 @@ Debrief's own panel commands remain. Gates: `cargo test` for Debrief's app crate
 | 5 | Debrief 1.2 wave 6 | 1.5 | M4 (2; the shell half stays there) |
 | 6 | Debrief 1.2 wave 9 | 2 | inside M5 (2.5) |
 
-About 28 agent-days in all (±50 %), of which about 14 can be done before the tags (W2). Against Debrief 1.2's plan:
+About 28.5 agent-days in all (±50 %), of which about 14 can be done before the tags (W2). Against Debrief 1.2's plan:
 its M1-M5 are about 21 days (M1 3, M2a 2, M2b 3.5, M2c 3, M3a 2.5, M3b 2.5, M4 2, M5 2.5), of which the workbench part
-(M1's half, M3a, M3b, the menu part of M2c, M4, M5) covers about 13.5 of this plan's days. The rest, about 14.5 days
-(0a, the baseline retake, Phase 1, 2b, 2c, Phase 3), is new, so **Debrief 1.2's total grows by about 14.5 agent-days**,
+(M1's half, M3a, M3b, the menu part of M2c, M4, M5) covers about 13.5 of this plan's days. The rest, about 15 days
+(0a, the baseline retake, Phase 1, 2b, 2c, Phase 3), is new, so **Debrief 1.2's total grows by about 15 agent-days**,
 about half of it Paddock-side work done before the tags. Phases 1 and 2 run in parallel (disjoint files:
 `ui/projects/paddock-ui/workbench/**` against `apps/debrief/**`); 1a, 1b and 2a, 2b, 2c are five agents at most, so the
 coordinator runs them within the load limit and behind the release work (rule 1).
@@ -279,8 +303,10 @@ coordinator runs them within the load limit and behind the release work (rule 1)
 ## 7. Conformance checks to add (numbers allocated at merge, C31)
 
 1. **Release freeze** (package 0a, decided W5). One joint freeze for the releases in flight; frozen paths derived from
-   the apps' own `Cargo.lock` files, `paddock-workspace-hack` and the `paddock-ui` entry-point graph; a change under a
-   frozen path fails unless its head ref is a declared release branch, whose merge runs both apps' gates. Makes rule 1's "don't change
+   the apps' own `Cargo.lock` files, `paddock-workspace-hack` and the `paddock-ui` entry-point closure, plus a declared
+   list with reasons; blocks locally before the push to `main` (`release-freeze --range origin/main...HEAD --source
+   <branch>`), and reports in CI on dispatch and push, where a merge of a declared release branch is exempt and runs
+   both apps' gates. Makes rule 1's "don't change
    shared code the release depends on" checked instead of remembered.
 2. **One dock, one planner.** `dockview` is imported only under `ui/projects/paddock-ui/workbench/dock/`, and no file
    outside `ui/projects/paddock-ui/src/lib/` defines `planLayout` or a layout-plan module; an app's copy fails (Debrief's
