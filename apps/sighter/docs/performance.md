@@ -12,7 +12,8 @@ From the [design review](review/2026-10-design-review.md) §1.7 (2026-10-24):
 | Measure | Budget |
 |---|---|
 | Frame decode | p95 ≤ 50 ms on loopback, ≤ 100 ms on a LAN |
-| Locate | p50 ≤ 80 ms and p95 ≤ 250 ms on a GPU; p95 ≤ 600 ms on a CPU |
+| Locate, **gate** (ADR 0001, user 2026-10-29) | full frame p95 ≤ 500 ms GPU and ≤ 2 s CPU at 1920 × 1200; ≤ 1 s GPU and ≤ 4 s CPU at 3840 × 2160 |
+| Locate, **target** (not a gate) | p50 ≤ 80 ms and p95 ≤ 250 ms on a GPU; p95 ≤ 600 ms on a CPU |
 | Action | p95 ≤ 400 ms |
 | HUD | ≤ 2 ms per frame, ≤ 5% |
 | 8 targets | ≤ 2 × the locate p95 |

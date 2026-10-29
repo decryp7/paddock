@@ -214,6 +214,25 @@ crops), hard-cases gallery, held-out session test (different theme/scale/OS), si
 Accelerators: CUDA (Windows/Linux), ROCm (Linux, best effort), Apple MPS (smaller models, op gaps fall back to CPU), CPU everywhere.
 Import of an externally trained ONNX model with a compatibility check (input size, output layout, class list).
 
+### 6.1 Main training path: video → auto-label → review → train (user, 2026-10-29)
+The main way an app gets its own model, decided in [ADR 0001](adr/0001-object-detector.md) ("Training from test-run
+videos", decision 10):
+1. **Import** a test-run video of the viewer window (or a local window) as a job with phases, progress and Cancel;
+   near-duplicate frames are dropped (perceptual hash plus a mean-difference threshold, robust to codec noise).
+2. **Auto-label**, started by the user after a confirmation that states the frame count and the expected time (rule 46,
+   section 9.1): boxes from computer vision only (OCR, templates, and the app's own detector once one exists); Pitwall's
+   VLM never places boxes, it names and describes the boxed regions and suggests a class.
+3. **Review queue**: uncertain labels first; quick accept or fix.
+4. **Train** RF-DETR Small as the app's own model on the GPU (MPS on Apple Silicon, opt-in CUDA on NVIDIA).
+5. **After training**, later videos are pre-labelled by the app's own model; the VLM is used only for new, unknown
+   screens.
+
+### 6.2 Augmentation and synthetic data
+Detailed in ADR 0001 ("Augmentation and synthetic data"): photometric, the remote-codec preset, geometric without flips
+or rotations, composition (copy-paste, mosaic, occlusion), text re-rendering, label economy (tracking, active learning,
+hard negatives, class balancing) and synthetic screens recorded from the app under test; every technique is kept only
+if a held-out set of real, unaugmented frames shows a gain.
+
 ## 7. The server API, clients and test layer
 
 **Process**: `sighter-server`, a background service per OS (Windows service/user task, launchd agent, systemd user unit; same pattern as
