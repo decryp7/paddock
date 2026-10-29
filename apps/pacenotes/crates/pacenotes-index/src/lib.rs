@@ -15,7 +15,7 @@ pub mod plan;
 pub mod snapshot;
 pub mod store;
 
-pub use denylist::{Denied, Denylist, redact};
+pub use denylist::{DEFAULT_PACK, Denied, Denylist, PackError, glob_match, redact};
 pub use facts::{CallFact, ChunkFact, FileFacts, ImportFact, SourceError, SymbolFact, SymbolSource};
 pub use fs::{DirEntry, DiskFs, EntryKind, FsError, WorkspaceFs};
 pub use guard::GuardedHistory;

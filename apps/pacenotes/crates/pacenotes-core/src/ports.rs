@@ -40,7 +40,8 @@ pub enum HistoryError {
     /// Cancelled by the caller.
     #[error("cancelled")]
     Cancelled,
-    /// The backend failed (for example an unreadable object store); the text names the cause, not file content.
+    /// The backend failed (for example an unreadable object store); the text names the cause, not file content. It is for logs:
+    /// no consumer serves it to a client (ADR 0004).
     #[error("history backend: {0}")]
     Backend(String),
 }

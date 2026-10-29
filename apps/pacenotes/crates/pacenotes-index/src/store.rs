@@ -374,7 +374,7 @@ impl IndexStore {
             let (a, b, c, d) = span(&i.span);
             tx.execute(
                 "INSERT INTO imports(file_id, target, start_line, start_col, end_line, end_col) VALUES (?1,?2,?3,?4,?5,?6)",
-                params![&id[..], i.target, a, b, c, d],
+                params![&id[..], crate::denylist::redact(&i.target).into_owned(), a, b, c, d],
             )
             .map_err(db)?;
         }

@@ -98,7 +98,10 @@ pub struct Indexer<'a> {
 }
 
 fn fs_error(e: FsError) -> IndexError {
-    IndexError::Fs(e.to_string())
+    match e {
+        FsError::Cancelled => IndexError::Cancelled,
+        other => IndexError::Fs(other.to_string()),
+    }
 }
 
 impl Indexer<'_> {

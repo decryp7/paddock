@@ -52,7 +52,7 @@ pub fn snapshot(fs: &dyn WorkspaceFs, denylist: &Denylist, limits: &SnapshotLimi
     let mut seen = 0usize;
     while let Some((dir, depth)) = stack.pop() {
         if cancel.is_cancelled() {
-            return Err(FsError::Io("cancelled".to_owned()));
+            return Err(FsError::Cancelled);
         }
         let entries = match fs.list(dir.as_ref()) {
             Ok(e) => e,
@@ -192,7 +192,10 @@ mod tests {
     fn a_cancelled_walk_and_an_unreadable_root_are_errors() {
         let dead = CancelToken::new();
         dead.cancel();
-        assert!(snapshot(&fake(), &Denylist::new(), &SnapshotLimits::default(), &dead).is_err());
+        assert_eq!(
+            snapshot(&fake(), &Denylist::new(), &SnapshotLimits::default(), &dead),
+            Err(FsError::Cancelled)
+        );
         let broken = Fake(BTreeMap::new());
         assert_eq!(
             snapshot(&broken, &Denylist::new(), &SnapshotLimits::default(), &CancelToken::new()),

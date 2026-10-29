@@ -63,6 +63,12 @@ with the right error; (b) with the alternates line removed, `open` succeeds and 
 (c) the sources contain no process spawning. History reads the object database as it is: keeping `.env` out of the *index* is
 the denylist's job in A3a, not the port's.
 
+### Error text is for logs
+
+`HistoryError::Backend(String)` carries gix's own error text (paths, object ids). That text is for the log and the developer;
+**no consumer serves it to a client**. The host and MCP map a backend failure to one fixed message ("the history could not be
+read") and keep the text in the log, because it can name files and folders the user did not ask about.
+
 ### What the port does not do
 
 - **It reads the object database as it is.** A blob such as `.env` that was committed is readable through `read_at`. The

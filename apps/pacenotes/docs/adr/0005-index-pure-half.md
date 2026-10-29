@@ -37,6 +37,13 @@ or the UI. It is applied at **three** doors, and one test per door:
 3. **MCP and the UI:** every text that leaves the engine for a client passes `redact`, and every file read for a client passes
    `Denylist::check` (the MCP crate calls both; `chunk_text` in this crate is the model).
 
+The rules are **data**: `crates/pacenotes-index/src/denylist.default.toml` (names, glob patterns, an allow list, key-material
+extensions with their backup suffixes, folders, and the redaction regexes), parsed by `Denylist`; a pack that fails to parse
+makes the default fail closed (everything is withheld). The format is written to be owned by a shared crate.
+**TODO (ER-22, after shared code unfreezes):** Debrief and Sighter also mask secrets; move the pack format and the matcher into
+one shared crate (`paddock-secrets` is the candidate; it is untouched here because shared crates are frozen) and make the three
+apps load the same default pack. The list that follows is a summary of the pack, which is the source of truth.
+
 The default list: names `.env`, `.env.*` (not `.env.example`, `.env.sample`, `.env.template`), `.envrc`, `.netrc`, `.npmrc`,
 `.pypirc`, `.htpasswd`, `.git-credentials`, `id_rsa`/`id_dsa`/`id_ecdsa`/`id_ed25519` (not `*.pub`), `credentials`,
 `credentials.json`, `secrets.json`/`.yml`/`.yaml`, `service-account*.json`, `terraform.tfstate*`; extensions `.pem`, `.key`,
@@ -79,7 +86,7 @@ nested gitfile are skipped).
 ## Parallelism and cost (rule 51)
 
 A3a is deliberately single-threaded and simple, and says what A3 must do to be fast. **Cost:** every run lists the workspace,
-reads and fingerprints every non-denied file (one read per file, at most 2 MiB each), and extracts only added or modified
+reads and fingerprints every non-denied file (one read per file in the walk and one more for changed files, at most 2 MiB each), and extracts only added or modified
 files; unchanged files cost a read and a hash. A3 adds the cheaper path (skip a read when size and modification time match the
 stored row, which the watcher also feeds) and the **parallel** one: fingerprinting and extraction are independent per file and
 map over a pool of cores minus one at background priority with results applied in path order (`par_map_ordered`), thread

@@ -1,0 +1,70 @@
+# The default secret denylist and redaction rules of Pacenotes (ADR 0005). Data, not code: add a line here, not a branch in Rust.
+#
+# The format is written to be owned by a shared crate later (rule 42: Debrief and Sighter mask secrets too); nothing in it is
+# specific to Pacenotes. `version` is the format version. Matching is case-insensitive.
+#
+#   [names]       exact file names, glob patterns for file names (`*` any run, `?` one character), and `allow`: names that are
+#                 not secrets although a rule above matches them (templates, public keys). `allow` wins over `exact` and `globs`.
+#   [extensions]  `list`: file extensions of key material; a file is denied when an extension of its name is in the list and is
+#                 the last one, or is followed only by `backups` suffixes (`server.pem.bak`).
+#   [folders]     folders whose whole content is withheld; an entry with a `/` is a run of consecutive folder names
+#                 (`.config/gcloud`).
+#   [[redact]]    text masking: a regex and what replaces a match (`${1}` keeps the first group).
+
+version = 1
+
+[names]
+exact = [
+  ".env", ".envrc", ".netrc", "_netrc", ".npmrc", ".pypirc", ".htpasswd", ".git-credentials", ".dockercfg",
+  ".pgpass", ".my.cnf", ".s3cfg", ".boto", ".yarnrc.yml", "auth.json", "kubeconfig",
+  "credentials", "credentials.json", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+]
+globs = [
+  "*.env", ".env.*", ".env_*", ".env-*",
+  "secrets.*", "*.tfstate*", "terraform.tfstate*",
+  "*deploy*key*", "service-account*",
+  "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*",
+]
+allow = [".env.example", ".env.sample", ".env.template", ".env.dist", "*.pub"]
+
+[extensions]
+list = ["pem", "key", "p12", "pfx", "jks", "keystore", "kdbx", "ppk", "gpg", "tfvars", "asc", "p8", "ovpn", "age"]
+backups = ["bak", "old", "orig", "backup", "save", "tmp", "swp", "copy", "1", "2", "~"]
+
+[folders]
+list = [".git", ".ssh", ".aws", ".gnupg", ".azure", ".kube", ".docker", ".config/gcloud"]
+
+[[redact]]
+name = "private key block"
+regex = '-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY( BLOCK)?-----|\z)'
+replace = "[redacted private key]"
+
+[[redact]]
+name = "credentials in a URL"
+regex = '(?i)\b([a-z][a-z0-9+.-]*://)[^\s/:@]+:[^\s/@]+@'
+replace = "${1}[redacted]@"
+
+[[redact]]
+name = "bearer token"
+regex = '(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}'
+replace = "${1}[redacted]"
+
+[[redact]]
+name = "AWS access key"
+regex = '\bAKIA[0-9A-Z]{16}\b'
+replace = "[redacted key]"
+
+[[redact]]
+name = "forge and package tokens"
+regex = '\b(?:gh[pousr]_[A-Za-z0-9]{30,}|glpat-[A-Za-z0-9_-]{15,}|npm_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{10,}|[sr]k_(?:live|test)_[A-Za-z0-9]{8,}|AIza[0-9A-Za-z_-]{30,})\b'
+replace = "[redacted token]"
+
+[[redact]]
+name = "JSON web token"
+regex = '\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b'
+replace = "[redacted token]"
+
+[[redact]]
+name = "assignment to a secret-looking name"
+regex = '''(?i)\b((?:[a-z0-9_.-]*(?:password|passwd|passphrase|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key))[\x22']?\s*[:=]\s*)(?:[\x22'][^\x22'\n]{4,}[\x22']|[^\s\x22',;]{6,})'''
+replace = "${1}[redacted]"

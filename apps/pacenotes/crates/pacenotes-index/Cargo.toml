@@ -12,11 +12,14 @@ publish = false
 pacenotes-core = { workspace = true }
 paddock-jobs = { workspace = true }
 regex = "1.12"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 thiserror = "2"
 
 [dev-dependencies]
 pacenotes-core = { workspace = true, features = ["testing"] }
+pacenotes-git = { workspace = true }
 pacenotes-parse = { workspace = true }
 pacenotes-trap = { workspace = true }
 paddock-testkit = { workspace = true }

@@ -44,6 +44,9 @@ pub enum FsError {
     /// The path is a link, or resolves outside the workspace.
     #[error("refused: {0}")]
     Refused(String),
+    /// The caller cancelled.
+    #[error("cancelled")]
+    Cancelled,
     /// Any other I/O failure.
     #[error("i/o: {0}")]
     Io(String),
