@@ -19,6 +19,7 @@ const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown>
   for (let i = 0; i < 6; i++) {
     await f.whenStable();
     await new Promise((r) => setTimeout(r));
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
     f.detectChanges();
   }
 };
@@ -32,6 +33,10 @@ const tab = async (f: Parameters<typeof settle>[0], el: HTMLElement, name: strin
   await settle(f);
 };
 const rows = (el: ParentNode) => [...el.querySelectorAll<HTMLElement>('.row')];
+/** The alarm history: the rows of the shared table. */
+const hrows = (el: ParentNode) => [...el.querySelectorAll<HTMLElement>('dy-alarms-history [role="row"][data-key]')];
+/** The open alarms: the rows of the shared table, in order. */
+const arows = (el: ParentNode) => [...el.querySelectorAll<HTMLElement>('dy-alarms-active [role="row"][data-key]')];
 
 beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(NOW));
 afterEach(() => {
@@ -44,7 +49,7 @@ describe('dy-alarms-page, Active', () => {
     const { f, el } = render();
     await settle(f);
     expect(el.querySelector('h1')?.textContent).toBe('Alarms');
-    const list = rows(el);
+    const list = arows(el);
     expect(list).toHaveLength(5);
     expect(text(list[0]!)).toContain('GPU limit is past its limit');
     expect(text(list[0]!)).toContain('Active');
@@ -59,7 +64,7 @@ describe('dy-alarms-page, Active', () => {
   it('shows shelved alarms with one muted suffix instead of a pill', async () => {
     const { f, el } = render();
     await settle(f);
-    const shelved = rows(el).find((r) => text(r).includes('rustc has used'))!;
+    const shelved = arows(el).find((r) => text(r).includes('rustc has used'))!;
     expect(shelved.querySelector('.sfx')?.textContent).toMatch(/^Shelved until \d\d:\d\d$/);
     expect(el.querySelectorAll('.badge, .pill')).toHaveLength(0);
   });
@@ -80,35 +85,38 @@ describe('dy-alarms-page, Active', () => {
   it('acknowledges one alarm from its hover button', async () => {
     const { f, el } = render();
     await settle(f);
-    button(rows(el)[1]!, /^Acknowledge node/)!.click();
+    button(arows(el)[1]!, 'Acknowledge')!.click();
     await settle(f);
-    expect(text(rows(el)[1]!)).toContain('Acknowledged');
-    expect(button(rows(el)[1]!, /^Acknowledge node/)!.disabled).toBe(true);
+    expect(text(arows(el)[1]!)).toContain('Acknowledged');
+    expect(button(arows(el)[1]!, 'Acknowledge')!.disabled).toBe(true);
   });
 
-  it('shelves from the clock button menu', async () => {
+  it('shelves for an hour from the clock button and for the other times from the menu', async () => {
     const { f, el, mock } = render();
     await settle(f);
-    button(rows(el)[1]!, /^Shelve node/)!.click();
+    button(arows(el)[1]!, 'Shelve for 1 hour')!.click();
     await settle(f);
-    expect(['1 hour', 'Until tomorrow', 'Until restart'].every((l) => menuItem(l))).toBe(true);
-    menuItem('Until restart')!.click();
+    expect(text(arows(el)[1]!)).toContain('Shelved until');
+    button(arows(el)[1]!, 'More actions')!.click();
     await settle(f);
-    expect(text(rows(el)[1]!)).toContain('Shelved until restart');
+    expect(['Shelve for 1 hour', 'Shelve until tomorrow', 'Shelve until restart'].every((l) => menuItem(l))).toBe(true);
+    menuItem('Shelve until restart')!.click();
+    await settle(f);
+    expect(text(arows(el)[1]!)).toContain('Shelved until restart');
     expect(mock.isShelved((await mock.alarms({ states: [], minSeverity: null, rule: null, includeShelved: true, limit: 10 })).find((a) => a.id === 7)!)).toBe(true);
   });
 
   it('opens the row menu on right click with every action and applies one', async () => {
     const { f, el } = render();
     await settle(f);
-    rows(el)[1]!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 50, clientY: 50, button: 2 }));
+    arows(el)[1]!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 50, clientY: 50, button: 2 }));
     await settle(f);
-    for (const l of ['Acknowledge', /^Shelve/, 'Add note…', 'Mute this rule', 'Show history']) expect(menuItem(l), String(l)).toBeTruthy();
+    for (const l of ['Acknowledge', 'Shelve for 1 hour', 'Shelve until tomorrow', 'Shelve until restart', 'Add note…', 'Mute this rule', 'Show history']) expect(menuItem(l), String(l)).toBeTruthy();
     expect(menuItem('Unshelve')).toBeUndefined();
     menuItem('Mute this rule')!.click();
     await settle(f);
-    expect(text(rows(el)[1]!)).toContain('Muted');
-    button(rows(el)[1]!, /^More actions/)!.click();
+    expect(text(arows(el)[1]!)).toContain('Muted');
+    button(arows(el)[1]!, 'More actions')!.click();
     await settle(f);
     expect(menuItem('Unmute this rule')).toBeTruthy();
   });
@@ -116,18 +124,18 @@ describe('dy-alarms-page, Active', () => {
   it('offers Unshelve only for a shelved alarm and applies it', async () => {
     const { f, el } = render();
     await settle(f);
-    const row = rows(el).find((r) => text(r).includes('rustc has used'))!;
-    button(row, /^More actions/)!.click();
+    const row = arows(el).find((r) => text(r).includes('rustc has used'))!;
+    button(row, 'More actions')!.click();
     await settle(f);
     menuItem('Unshelve')!.click();
     await settle(f);
-    expect(text(rows(el).find((r) => text(r).includes('rustc has used'))!)).not.toContain('Shelved');
+    expect(text(arows(el).find((r) => text(r).includes('rustc has used'))!)).not.toContain('Shelved');
   });
 
   it('opens the detail panel with full values, notes and history, and closes it with Esc', async () => {
     const { f, el } = render();
     await settle(f);
-    rows(el)[3]!.click();
+    arows(el)[3]!.click();
     await settle(f);
     const panel = el.querySelector('aside')!;
     expect(text(panel)).toContain('Macintosh HD is 78% full');
@@ -142,7 +150,7 @@ describe('dy-alarms-page, Active', () => {
   it('adds a note from the panel and clears the field', async () => {
     const { f, el } = render();
     await settle(f);
-    rows(el)[0]!.click();
+    arows(el)[0]!.click();
     await settle(f);
     const input = el.querySelector<HTMLInputElement>('aside input')!;
     const add = button(el.querySelector('aside')!, 'Add')!;
@@ -159,7 +167,7 @@ describe('dy-alarms-page, Active', () => {
   it('"Add note…" from the menu focuses the note field; the panel buttons act on the alarm', async () => {
     const { f, el } = render();
     await settle(f);
-    button(rows(el)[0]!, /^More actions/)!.click();
+    button(arows(el)[0]!, 'More actions')!.click();
     await settle(f);
     menuItem('Add note…')!.click();
     await settle(f);
@@ -181,26 +189,44 @@ describe('dy-alarms-page, Active', () => {
     expect(text(el.querySelector('aside')!)).not.toContain('Shelved until');
   });
 
-  it('moves between rows with the arrow keys and opens the context menu from the keyboard', async () => {
+  it('moves between rows with the arrow keys, opens the menu with Shift+F10 and the panel with Enter, and Escape closes it and returns to the row', async () => {
     const { f, el } = render();
     await settle(f);
-    const grid = el.querySelector('.grid')!;
-    rows(el)[0]!.focus();
-    grid.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-    expect(document.activeElement).toBe(rows(el)[1]);
-    grid.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
-    expect(document.activeElement).toBe(rows(el)[0]);
-    rows(el)[1]!.focus();
-    grid.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true }));
+    const key = (target: Element, k: string, shiftKey = false) => target.dispatchEvent(new KeyboardEvent('keydown', { key: k, shiftKey, bubbles: true, cancelable: true }));
+    // One tab stop for the whole grid: the active row.
+    expect(arows(el).filter((r) => r.tabIndex === 0)).toHaveLength(1);
+    arows(el)[0]!.focus();
+    key(arows(el)[0]!, 'ArrowDown');
+    await settle(f);
+    expect(document.activeElement).toBe(arows(el)[1]);
+    key(arows(el)[1]!, 'ArrowUp');
+    await settle(f);
+    expect(document.activeElement).toBe(arows(el)[0]);
+    key(arows(el)[1]!, 'F10', true);
     await settle(f);
     expect(menuItem('Acknowledge')).toBeTruthy();
-    rows(el)[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = ''));
+    arows(el)[0]!.focus();
+    key(arows(el)[0]!, 'Enter');
     await settle(f);
     expect(el.querySelector('aside')).toBeTruthy();
-    grid.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(arows(el)[0]!.getAttribute('aria-selected')).toBe('true');
+    key(arows(el)[0]!, 'Escape');
     await settle(f);
     expect(el.querySelector('aside')).toBeNull();
-    grid.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }));
+    expect(document.activeElement).toBe(arows(el)[0]);
+  });
+
+  it('sorts by a column header and says so', async () => {
+    const { f, el } = render();
+    await settle(f);
+    const header = [...el.querySelectorAll<HTMLElement>('dy-alarms-active [role="columnheader"]')].find((h) => text(h) === 'Count')!;
+    expect(header.getAttribute('aria-sort')).toBe('none');
+    (header.querySelector('.mat-sort-header-container') as HTMLElement).click();
+    await settle(f);
+    expect(header.getAttribute('aria-sort')).toBe('ascending');
+    const counts = arows(el).map((r) => Number(/×(\d+)/.exec(text(r))?.[1]));
+    expect(counts).toEqual([...counts].sort((x, y) => x - y));
   });
 
   it('shows a live change pushed by the agent', async () => {
@@ -208,7 +234,7 @@ describe('dy-alarms-page, Active', () => {
     await settle(f);
     await mock.acknowledgeAlarms([6]);
     await settle(f);
-    expect(text(rows(el)[0]!)).toContain('Acknowledged');
+    expect(text(arows(el)[0]!)).toContain('Acknowledged');
     expect(el.querySelectorAll('.unread')).toHaveLength(3);
   });
 
@@ -225,7 +251,7 @@ describe('dy-alarms-page, Active', () => {
     await settle(f);
     expect(el.querySelector('[role="alert"]')).toBeTruthy();
     expect(button(el, /Retry/)).toBeTruthy();
-    expect(rows(el)).toHaveLength(0);
+    expect(arows(el)).toHaveLength(0);
   });
 });
 
@@ -234,7 +260,7 @@ describe('dy-alarms-page, History', () => {
     const { f, el } = render();
     await settle(f);
     await tab(f, el, 'History');
-    const list = rows(el);
+    const list = hrows(el);
     expect(list.length).toBeGreaterThan(5);
     expect(list.map((r) => text(r)).join('|')).toContain('Returned to normal');
     expect(list.map((r) => text(r)).join('|')).toContain('Acknowledged');
@@ -249,7 +275,7 @@ describe('dy-alarms-page, History', () => {
     expect(text(el)).toContain('Too slow.');
     button(el, /Retry/)!.click();
     await settle(f);
-    expect(rows(el).length).toBeGreaterThan(5);
+    expect(hrows(el).length).toBeGreaterThan(5);
   });
 
   it('shows the empty state', async () => {
@@ -286,13 +312,14 @@ describe('dy-alarms-page, Rules', () => {
     const { f, el } = render();
     await settle(f);
     await tab(f, el, 'Rules');
-    button(el, 'Mute alert:lowDisk')!.click();
+    const noisy = () => [...el.querySelectorAll<HTMLElement>('dy-alarm-stats [role="row"][data-key]')].find((r) => text(r).includes('alert:lowDisk'))!;
+    button(noisy(), 'Mute this rule')!.click();
     await settle(f);
-    expect(button(el, 'Unmute alert:lowDisk')).toBeTruthy();
+    expect(button(noisy(), 'Unmute this rule')).toBeTruthy();
     expect(text(el)).toContain('Muted');
-    button(el, 'Unmute alert:lowDisk')!.click();
+    button(noisy(), 'Unmute this rule')!.click();
     await settle(f);
-    expect(button(el, 'Mute alert:lowDisk')).toBeTruthy();
+    expect(button(noisy(), 'Mute this rule')).toBeTruthy();
   });
 
   it('shows a statistics error with Retry', async () => {

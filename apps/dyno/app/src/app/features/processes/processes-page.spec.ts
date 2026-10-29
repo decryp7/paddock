@@ -3,6 +3,7 @@ import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { ProcessesStore } from '../../state/processes.store';
+import { nextFrame } from '../../testing/frame';
 import { ProcessesPage } from './processes-page';
 
 const NOW = 1_700_000_000_000;
@@ -16,6 +17,9 @@ async function make(tweak?: (m: MockBackend) => void) {
   f.detectChanges();
   await f.whenStable();
   await new Promise((r) => setTimeout(r, 5)); // the mock's first live update
+  f.detectChanges();
+  await f.whenStable();
+  await nextFrame();
   f.detectChanges();
   return { f, mock, store, el: f.nativeElement as HTMLElement };
 }
@@ -34,7 +38,7 @@ describe('ProcessesPage', () => {
     const f = TestBed.createComponent(ProcessesPage);
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('[aria-label="Loading processes"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="table-loading"]')).not.toBeNull();
     f.destroy();
   });
   it('shows the Other users row with a one-line note and without a row menu', async () => {
@@ -48,7 +52,7 @@ describe('ProcessesPage', () => {
     f.detectChanges();
     expect(el.querySelector('[data-testid="other-users-note"]')?.textContent).toContain('4 processes of other accounts');
     expect(store.rows().find((r) => r.kind === 'other')?.name).toBe('Other users');
-    expect(el.querySelector('[data-key="other-users"] .act button')).toBeNull();
+    expect(el.querySelector('[data-key="other-users"] .pd-icon-btn')).toBeNull();
     f.destroy();
   });
   it('the view buttons switch the store mode', async () => {
@@ -73,6 +77,9 @@ describe('ProcessesPage', () => {
     input.value = 'zzz-no-such-process';
     input.dispatchEvent(new Event('input'));
     f.detectChanges();
+    await f.whenStable();
+    await nextFrame();
+    f.detectChanges();
     expect(store.rows()).toEqual([]);
     expect(el.querySelector('.empty')?.textContent).toContain('No process matches');
     el.querySelector<HTMLButtonElement>('.empty button')!.click();
@@ -82,10 +89,17 @@ describe('ProcessesPage', () => {
   });
   it('clicking a column header sorts by it', async () => {
     const { f, store, el } = await make();
-    el.querySelector<HTMLButtonElement>('button[aria-label="Sort by Memory"]')!.click();
+    const header = () => [...el.querySelectorAll<HTMLElement>('[role="columnheader"]')].find((h) => h.textContent!.trim() === 'Memory')!;
+    expect(header().getAttribute('aria-sort')).toBe('none');
+    header().querySelector<HTMLElement>('.mat-sort-header-container')!.click();
     f.detectChanges();
     expect(store.sort()).toEqual({ key: 'memory', dir: 'desc' });
-    expect(el.querySelector('[aria-sort]')).not.toBeNull();
+    header().querySelector<HTMLElement>('.mat-sort-header-container')!.click();
+    f.detectChanges();
+    expect(store.sort()).toEqual({ key: 'memory', dir: 'asc' });
+    await f.whenStable();
+    f.detectChanges();
+    expect(header().getAttribute('aria-sort')).toBe('ascending');
     f.destroy();
   });
   it('renders rows from the store when the virtual viewport has a size', async () => {

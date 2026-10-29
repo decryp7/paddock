@@ -1,4 +1,5 @@
 import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import type { UnusualItem } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -14,7 +15,6 @@ import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { MatMenuModule } from '@angular/material/menu';
-import { RowMenu } from '../../shared/row-menu';
 
 /**
  * Programs that are new on this computer, and why some of them may be worth a look. A transparency tool: it lists reasons
@@ -23,9 +23,8 @@ import { RowMenu } from '../../shared/row-menu';
  */
 @Component({
   selector: 'dy-unusual-view',
-  imports: [RowMenu, MatMenuModule, FullTextTip, MatTooltip, MatButton, MatIconButton, AsyncState, Icon],
+  imports: [AsyncState, Icon, PdTable, PdCell, MatMenuModule, FullTextTip, MatTooltip, MatButton, MatIconButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(keydown)': 'key($event)' },
   template: `
     <dy-async [loaded]="!!store.overview()" [error]="store.error()" what="new programs" [rows]="4" (retry)="store.load()">
       @if (store.overview(); as o) {
@@ -45,26 +44,10 @@ import { RowMenu } from '../../shared/row-menu';
           </div>
         } @else {
           <div class="layout" [class.with-detail]="!!selected()">
-            <div class="tablewrap">
-              <table class="table progs" aria-label="New and unusual programs">
-                <thead><tr><th>Program</th><th>Why</th><th class="when">First seen</th><th class="state">State</th></tr></thead>
-                <tbody>
-                  @for (i of o.items; track i.key) {
-                    <tr class="row" tabindex="0" [class.sel]="selectedKey() === i.key" (click)="select(i)" (keydown.enter)="select(i)" (keydown.shift.f10)="select(i)" (contextmenu)="select(i)" dyRowMenu [matContextMenuTriggerFor]="menu" [matContextMenuTriggerData]="{ item: i }">
-                      <td>
-                        <span class="prog">
-                          <span class="av" aria-hidden="true" [style.background]="tile(i.name)">{{ ini(i.name) }}</span>
-                          <span class="ell" [matTooltip]="i.exe ?? i.name">{{ i.name }}</span>
-                        </span>
-                      </td>
-                      <td><span class="why"><span class="dot" [attr.data-tone]="i.level === 'unusual' ? 'warn' : null" aria-hidden="true"></span><span class="ell" [dyFullText]="why(i)">{{ why(i) }}</span></span></td>
-                      <td class="when muted">{{ since(i) }}</td>
-                      <td class="state muted">{{ i.running ? 'Running' : 'Not running' }}</td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
+            <pd-table [toolbar]="false" label="New and unusual programs" [rows]="o.items" [columns]="columns" [rowKey]="itemKey" [filterable]="false" [rowActions]="actions" [selectedKey]="selectedKey()" [maxHeight]="620" (rowActivate)="select($event)" (action)="run($event)" (keydown.escape)="selectedKey.set(null)">
+              <ng-template pdCell="name" let-i><span class="prog"><span class="av" aria-hidden="true" [style.background]="tile(i.name)">{{ ini(i.name) }}</span><span class="ell">{{ i.name }}</span></span></ng-template>
+              <ng-template pdCell="why" let-i><span class="why"><span class="dot" [attr.data-tone]="i.level === 'unusual' ? 'warn' : null" aria-hidden="true"></span><span class="ell">{{ why(i) }}</span></span></ng-template>
+            </pd-table>
 
             @if (selected(); as s) {
               <aside class="detail" tabindex="-1" aria-label="Program details" (keydown.escape)="selectedKey.set(null)">
@@ -93,13 +76,6 @@ import { RowMenu } from '../../shared/row-menu';
       }
     </dy-async>
 
-    <mat-menu #menu="matMenu" aria-label="Program actions">
-      <ng-template matMenuContent let-item="item">
-        @if (item.exe) { <button mat-menu-item (click)="copy(item.exe)"><dy-icon name="copy" /> Copy path</button> }
-        <button mat-menu-item (click)="searchWeb(item)"><dy-icon name="search" /> Search the web…</button>
-        @if (item.exe) { <button mat-menu-item (click)="searchHash(item)"><dy-icon name="shield" /> Search file hash on VirusTotal…</button> }
-      </ng-template>
-    </mat-menu>
     <mat-menu #more="matMenu" aria-label="More actions">
       <ng-template matMenuContent>
         <button mat-menu-item class="danger" (click)="forget()"><dy-icon name="trash" /> Forget the programs Dyno knows…</button>
@@ -114,21 +90,17 @@ import { RowMenu } from '../../shared/row-menu';
     .learn { color: var(--text-2); font-size: var(--fs-sm); }
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 340px; }
-    .tablewrap { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); overflow: auto; max-height: 620px; min-width: 0; }
-    .progs { table-layout: fixed; }
-    .progs th.when, .progs td.when { width: 110px; }
-    .progs th.state, .progs td.state { width: 100px; }
-    .progs td { overflow: hidden; text-overflow: ellipsis; }
-    .progs th:first-child, .progs td:first-child { width: 28%; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--border-strong); }
+    .dot[data-tone='warn'] { background: var(--warn); }
     .prog { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
     .av { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: #fff; font: var(--fw-semibold) 12px / 1 var(--font-sans); }
     .ell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .why { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
     .why .dot:not([data-tone]) { background: transparent; }
-    tr.row { cursor: default; }
-    tr.row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-    tr.row.sel td { background: var(--accent-soft); }
-    tr.row.sel td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+    .ib { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
+    .ib:hover:not(:disabled) { background: var(--surface-active); color: var(--text-1); }
+    .ib:disabled { opacity: 0.35; cursor: default; }
+    .ib dy-icon { --icon-size: 15px; }
     .none { display: grid; justify-items: center; gap: var(--sp-2); padding: var(--sp-8) var(--sp-5); text-align: center; color: var(--text-3); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); }
     .none dy-icon { --icon-size: 32px; }
     .none strong { color: var(--text-1); font-size: 15px; font-weight: var(--fw-semibold); }
@@ -191,16 +163,25 @@ export class UnusualView {
     this.selectedKey.set(i.key);
   }
 
-  /** Up and Down move between rows. */
-  protected key(e: KeyboardEvent): void {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-    const rows = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('tr.row')];
-    const at = rows.indexOf(document.activeElement as HTMLElement);
-    const next = rows[at + (e.key === 'ArrowDown' ? 1 : -1)];
-    if (next) {
-      e.preventDefault();
-      next.focus();
-    }
+  protected readonly itemKey = (i: UnusualItem): string => i.key;
+  protected readonly columns: PdColumn<UnusualItem>[] = [
+    { key: 'name', header: 'Program', value: (i) => i.name, required: true, width: 'minmax(0, 1.4fr)' },
+    { key: 'why', header: 'Why', value: (i) => whyText(i), width: 'minmax(0, 2.4fr)', hideBelow: 520 },
+    { key: 'firstSeen', header: 'First seen', value: (i) => i.firstSeen, text: (i) => this.since(i), width: '110px' },
+    { key: 'state', header: 'State', value: (i) => (i.running ? 'Running' : 'Not running'), width: '100px', hideBelow: 640 },
+  ];
+  /** The row actions: nothing here changes a program, they copy or look it up. */
+  protected readonly actions = (i: UnusualItem): PdRowAction[] => [
+    ...(i.exe ? [{ id: 'copy', label: 'Copy path', icon: 'copy' }] : []),
+    { id: 'web', label: 'Search the web…', icon: 'search' },
+    ...(i.exe ? [{ id: 'hash', label: 'Search file hash on VirusTotal…', icon: 'shield' }] : []),
+  ];
+
+  protected run({ id, row }: PdRowActionEvent<UnusualItem>): void {
+    this.select(row);
+    if (id === 'copy' && row.exe) void this.copy(row.exe);
+    else if (id === 'web') this.searchWeb(row);
+    else this.searchHash(row);
   }
 
   protected async forget(): Promise<void> {

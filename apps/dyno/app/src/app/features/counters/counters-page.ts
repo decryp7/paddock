@@ -1,3 +1,4 @@
+import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { ActionTip } from '../../shared/action-tip';
 import { ThemeService } from '../../core/theme';
@@ -20,7 +21,6 @@ import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { SearchField } from '../../shared/search-field';
 import { MatMenuModule } from '@angular/material/menu';
-import { RowMenu } from '../../shared/row-menu';
 
 /**
  * Performance counters: browse what the OS offers (objects, then counters with their instances), search by name, chart
@@ -29,7 +29,7 @@ import { RowMenu } from '../../shared/row-menu';
  */
 @Component({
   selector: 'dy-counters-page',
-  imports: [ActionTip, RowMenu, MatMenuModule, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatButton, MatIconButton, AsyncState, Icon, Chart],
+  imports: [AsyncState, Icon, Chart, PdTable, PdCell, ActionTip, MatMenuModule, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatButton, MatIconButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -159,37 +159,23 @@ import { RowMenu } from '../../shared/row-menu';
                 <button type="button" matButton="text" [disabled]="settings.saving()" (click)="startNaming()"><dy-icon name="layers" /> Save as set</button>
                 <button type="button" matButton="text" (click)="store.setWatching([])">Clear</button>
               </div>
-              <div class="grid" role="table" aria-label="Charted counters">
-                <div class="head" role="row">
-                  <span role="columnheader">Counter</span>
-                  <span role="columnheader">Object</span>
-                  <span role="columnheader" class="r">Value</span>
-                  <span role="columnheader"><span class="visually-hidden">Actions</span></span>
-                </div>
-                @for (p of store.watching(); track p) {
-                  <div class="row" role="row"  dyRowMenu [matContextMenuTriggerFor]="rowMenu" [matContextMenuTriggerData]="{ path: p }">
-                    <span class="cell" role="cell">
-                      <span class="swatch" [style.background]="swatch($index)" aria-hidden="true"></span>
-                      <span class="truncate" [matTooltip]="p">{{ title(p) }}</span>
-                      @if (store.isPinned(p)) { <dy-icon class="pinned" name="pin" aria-label="Pinned" /> }
-                    </span>
-                    <span class="cell muted truncate" role="cell" [dyFullText]="object(p)">{{ object(p) }}</span>
-                    <span class="cell r num" role="cell">
-                      @if (value(p); as v) {
-                        <b>{{ v[0] }}</b><small>{{ v[1] }}</small>
-                      } @else if (reason(p); as why) {
-                        <span class="unavail" [matTooltip]="why"><span class="dot" aria-hidden="true"></span>Unavailable</span>
-                      } @else {
-                        <span class="faint">…</span>
-                      }
-                    </span>
-                    <span class="cell acts" role="cell" dyActionTip>
-                      <button type="button" matIconButton [attr.aria-label]="(store.isPinned(p) ? 'Unpin ' : 'Pin ') + title(p)" (click)="store.togglePin(p)"><dy-icon name="pin" /></button>
-                      <button type="button" matIconButton [attr.aria-label]="'Stop charting ' + title(p)" (click)="store.unwatch(p)"><dy-icon name="close" /></button>
-                      <button type="button" matIconButton [attr.aria-label]="'More actions for ' + title(p)" [matMenuTriggerFor]="rowMenu" [matMenuTriggerData]="{ path: p }"><dy-icon name="more" /></button>
-                    </span>
-                  </div>
-                }
+              <div class="tablewrap">
+                <pd-table label="Charted counters" [rows]="store.watching()" [columns]="columns" [rowKey]="pathKey" [filterable]="false" [rowActions]="actions" [maxHeight]="480" (action)="run($event)">
+                  <ng-template pdCell="counter" let-p>
+                    <span class="swatch" [style.background]="swatch(index(p))" aria-hidden="true"></span>
+                    <span class="truncate">{{ title(p) }}</span>
+                    @if (store.isPinned(p)) { <dy-icon class="pinned" name="pin" aria-label="Pinned" /> }
+                  </ng-template>
+                  <ng-template pdCell="value" let-p>
+                    @if (value(p); as v) {
+                      <b>{{ v[0] }}</b><small>{{ v[1] }}</small>
+                    } @else if (reason(p); as why) {
+                      <span class="unavail" [matTooltip]="why"><span class="dot" aria-hidden="true"></span>Unavailable</span>
+                    } @else {
+                      <span class="faint">…</span>
+                    }
+                  </ng-template>
+                </pd-table>
               </div>
             </section>
           }
@@ -214,15 +200,6 @@ import { RowMenu } from '../../shared/row-menu';
         </div>
       </div>
     </div>
-
-    <mat-menu #rowMenu="matMenu" aria-label="Counter actions">
-      <ng-template matMenuContent let-path="path">
-        <button mat-menu-item (click)="store.togglePin(path)"><dy-icon name="pin" /> {{ store.isPinned(path) ? 'Unpin' : 'Pin' }}</button>
-        <button mat-menu-item (click)="store.addToDashboard(path)"><dy-icon name="dashboard" /> Add to the dashboard</button>
-        <button mat-menu-item (click)="copy(path)"><dy-icon name="copy" /> Copy path</button>
-        <button mat-menu-item (click)="store.unwatch(path)"><dy-icon name="close" /> Stop charting</button>
-      </ng-template>
-    </mat-menu>
 
     <mat-menu #setsMenu="matMenu" aria-label="Counter sets">
       <ng-template matMenuContent>
@@ -257,7 +234,10 @@ import { RowMenu } from '../../shared/row-menu';
     .meta { color: var(--text-3); font-size: var(--fs-xs); max-width: 110px; }
     .item dy-icon { --icon-size: 14px; color: var(--text-3); }
     .acts { display: inline-flex; justify-content: flex-end; gap: 2px; opacity: 0.4; transition: opacity var(--dur-fast) var(--ease-out); }
-    .item:hover .acts, .item:focus-within .acts, .row:hover .acts, .row:focus-within .acts, .item.on .acts { opacity: 1; }
+    .item:hover .acts, .item:focus-within .acts, .item.on .acts { opacity: 1; }
+    .ib { display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
+    .ib:hover { background: var(--surface-active); color: var(--text-1); }
+    .ib dy-icon { --icon-size: 15px; color: inherit; }
     .inst { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-3) var(--sp-2); color: var(--text-3); font-size: var(--fs-xs); }
     .inst select { flex: 1; min-width: 0; }
     .hint { margin: 0; padding: var(--sp-2) var(--sp-3); color: var(--text-3); font-size: var(--fs-xs); }
@@ -273,14 +253,9 @@ import { RowMenu } from '../../shared/row-menu';
     .glyph { font-size: 10px; line-height: 1; }
     .n { color: var(--text-3); }
     .faint { color: var(--text-3); font-size: var(--fs-xs); }
-    .grid { display: grid; }
-    .head, .row { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) 120px 92px; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); }
-    .head { height: 30px; border-block: 1px solid var(--border); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-xs); position: sticky; top: 0; z-index: 3; }
-    .row { height: 36px; border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-sm); }
-    .row:hover { background: var(--surface-hover); }
-    .cell { min-width: 0; display: flex; align-items: center; gap: var(--sp-2); white-space: nowrap; overflow: hidden; }
-    .r { justify-content: flex-end; text-align: right; font-variant-numeric: tabular-nums; }
-    .r small { color: var(--text-3); margin-left: 3px; font-size: var(--fs-xs); }
+    .tablewrap { margin: 0 var(--sp-3) var(--sp-3); }
+    .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    small { color: var(--text-3); margin-left: 3px; font-size: var(--fs-xs); }
     .muted { color: var(--text-2); }
     .swatch { width: 10px; height: 3px; border-radius: 2px; flex: none; }
     .pinned { --icon-size: 12px; color: var(--text-3); flex: none; }
@@ -361,6 +336,26 @@ export class CountersPage implements OnInit {
   }
 
   protected title = counterTitle;
+  protected readonly pathKey = (p: string): string => p;
+  protected readonly index = (p: string): number => this.store.watching().indexOf(p);
+  protected readonly columns: PdColumn<string>[] = [
+    { key: 'counter', header: 'Counter', value: (p) => counterTitle(p), required: true, sortable: false, width: 'minmax(0, 1.6fr)' },
+    { key: 'object', header: 'Object', value: (p) => pathParts(p).object, sortable: false, width: 'minmax(0, 1fr)', hideBelow: 520 },
+    { key: 'value', header: 'Value', value: (p) => this.value(p)?.join(' ') ?? '', align: 'end', sortable: false, width: '140px' },
+  ];
+  protected readonly actions = (p: string): PdRowAction[] => [
+    { id: 'pin', label: this.store.isPinned(p) ? 'Unpin' : 'Pin', icon: 'pin', inline: true },
+    { id: 'unwatch', label: 'Stop charting', icon: 'close', inline: true },
+    { id: 'dashboard', label: 'Add to the dashboard', icon: 'layers' },
+    { id: 'copy', label: 'Copy path', icon: 'copy' },
+  ];
+
+  protected run({ id, row }: PdRowActionEvent<string>): void {
+    if (id === 'pin') this.store.togglePin(row);
+    else if (id === 'unwatch') this.store.unwatch(row);
+    else if (id === 'dashboard') this.store.addToDashboard(row);
+    else this.copy(row);
+  }
   protected unitWord = (u: CounterUnit) => UNIT_WORD[u];
   protected eventLabel = (k: TimelineEventKind) => EVENT_LABEL[k];
   protected eventColor = (k: TimelineEventKind) => EVENT_STYLE[k].color(this.theme.tokens());

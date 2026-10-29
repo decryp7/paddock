@@ -1,4 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import { PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
+import type { Consumer } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatBytes, formatCount, formatDayTime, formatPercent, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -8,7 +10,6 @@ import { ReportsStore } from '../../state/reports.store';
 import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports-model';
 import { MatButton } from '@angular/material/button';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
-import { FullTextTip } from '../../shared/full-text-tip';
 
 /**
  * Reports: Dyno's weekly summary built by the engine from its own history (health trend, busiest apps, disk forecast, issues
@@ -16,7 +17,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
  */
 @Component({
   selector: 'dy-reports-page',
-  imports: [FullTextTip, PdSelect, MatButton, AsyncState, Icon, Sparkline],
+  imports: [AsyncState, Icon, Sparkline, PdTable, PdSelect, MatButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -80,15 +81,9 @@ import { FullTextTip } from '../../shared/full-text-tip';
             @if (r.topApps.length) {
               <section class="card" aria-label="Busiest apps">
                 <div class="card-head"><h2><dy-icon name="processes" /> Busiest apps</h2></div>
-                <table class="table">
-                  <caption class="visually-hidden">Busiest apps of the week</caption>
-                  <thead><tr><th>App</th><th class="r">CPU (average)</th><th class="r">Memory (average)</th></tr></thead>
-                  <tbody>
-                    @for (a of r.topApps; track a.app) {
-                      <tr><td><span class="ell" [dyFullText]="a.app">{{ a.app }}</span></td><td class="r">{{ pct(a.cpuAvg) }}</td><td class="r">{{ bytes(a.memoryAvg) }}</td></tr>
-                    }
-                  </tbody>
-                </table>
+                <div class="tablewrap">
+                  <pd-table [toolbar]="false" label="Busiest apps of the week" [rows]="r.topApps" [columns]="appColumns" [rowKey]="appKey" [filterable]="false" [maxHeight]="360" />
+                </div>
               </section>
             }
             @if (r.disks.length) {
@@ -156,7 +151,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
     .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--sp-4); align-items: start; }
     .spark { padding: var(--sp-3) var(--sp-4) var(--sp-4); --spark-h: 72px; }
     .ell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
-    .table { margin-top: var(--sp-2); }
+    .tablewrap { margin-top: var(--sp-2); }
     .rows { list-style: none; margin: 0; padding: var(--sp-2) var(--sp-4) var(--sp-3); display: grid; }
     .rows li { display: flex; gap: var(--sp-3); align-items: baseline; padding: var(--sp-2) 0; border-top: 1px solid var(--border-subtle); font-size: var(--fs-base); }
     .rows li:first-child { border-top: 0; }
@@ -181,6 +176,12 @@ export class ReportsPage implements OnInit {
   protected readonly weekValue = computed(() => String(this.store.weeksAgo()));
   protected readonly canExport = computed(() => !!this.store.report() && !this.store.exporting());
   protected readonly trend = computed(() => this.store.report()?.scoreTrend.map((p) => p.score) ?? []);
+  protected readonly appKey = (a: { app: string }): string => a.app;
+  protected readonly appColumns: PdColumn<Consumer>[] = [
+    { key: 'app', header: 'App', value: (a) => a.app, required: true, sortable: false, width: 'minmax(0, 1fr)' },
+    { key: 'cpu', header: 'CPU (average)', value: (a) => a.cpuAvg, text: (a) => formatPercent(a.cpuAvg, 0), align: 'end', sortable: false, width: '150px' },
+    { key: 'memory', header: 'Memory (average)', value: (a) => a.memoryAvg, text: (a) => formatBytes(a.memoryAvg), align: 'end', sortable: false, width: '150px' },
+  ];
   protected readonly bytes = formatBytes;
   protected readonly pct = (v: number) => formatPercent(v, 0);
   protected readonly plural = plural;

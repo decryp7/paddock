@@ -32,6 +32,7 @@ function render(setup: (m: MockBackend) => void = () => undefined) {
 const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
   for (let i = 0; i < 6; i++) {
     await f.whenStable();
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
     f.detectChanges();
   }
 };
@@ -53,7 +54,7 @@ describe('dy-recorder-page', () => {
     expect(rows(el)[0]!.getAttribute('aria-selected')).toBe('true');
     expect(rows(el)[1]!.textContent).toContain('Manual');
     expect(el.querySelector('dy-chart')?.getAttribute('aria-label')).toContain('one-second samples');
-    expect(el.querySelectorAll('[aria-label="Who was busiest"] tbody tr').length).toBe(3);
+    expect(el.querySelectorAll('[aria-label="Who was busiest"] pd-table [role="row"][data-key]').length).toBe(3);
     expect(el.querySelectorAll('button[matButton="filled"]')).toHaveLength(1);
   });
 

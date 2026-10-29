@@ -17,6 +17,7 @@ function render(fail: string[] = []) {
 const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
   for (let i = 0; i < 6; i++) {
     await f.whenStable();
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
     f.detectChanges();
   }
 };
@@ -32,7 +33,7 @@ describe('dy-reports-page', () => {
     expect(stats).toContain('+3 against the week before');
     expect(el.querySelectorAll('[aria-label="Highlights"] li').length).toBeGreaterThan(0);
     expect(el.querySelector('[aria-label="Health score trend"] dy-sparkline')).not.toBeNull();
-    expect(el.querySelectorAll('[aria-label="Busiest apps"] tbody tr')).toHaveLength(5);
+    expect(el.querySelectorAll('[aria-label="Busiest apps"] [role="row"][data-key]')).toHaveLength(5);
     expect(el.querySelector('[aria-label="Disks"]')!.textContent).toContain('Full in ~41 days');
     expect(el.querySelector('[aria-label="Issues"]')!.textContent).toContain('Drive is getting full');
     expect(el.querySelector('.range')?.textContent).toContain(' to ');

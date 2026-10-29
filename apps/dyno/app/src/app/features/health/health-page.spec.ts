@@ -16,6 +16,7 @@ function render(fail: string[] = []) {
 const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
   for (let i = 0; i < 5; i++) {
     await f.whenStable();
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
     f.detectChanges();
   }
 };
@@ -27,7 +28,7 @@ describe('dy-health-page', () => {
     expect(el.querySelector('h1')?.textContent).toBe('Health');
     expect(el.querySelector('a[href="/tuning"]')).toBeNull();
     const store = TestBed.inject(HealthStore);
-    expect(el.querySelectorAll('[aria-label="Start-up items"] tbody tr').length).toBe(store.startup().length);
+    expect(el.querySelectorAll('[aria-label="Start-up items"] [role="row"][data-key]').length).toBe(store.startup().length);
   });
 
   it('only shows start-up items: no switch, no delay, no helper prompt', async () => {
@@ -42,7 +43,7 @@ describe('dy-health-page', () => {
     await settle(f);
     const order = { notMeasured: 0, low: 1, medium: 2, high: 3 } as const;
     const store = TestBed.inject(HealthStore);
-    const names = [...el.querySelectorAll('[aria-label="Start-up items"] tbody tr td:first-child strong')].map((n) => n.textContent);
+    const names = [...el.querySelectorAll('[aria-label="Start-up items"] [role="row"][data-key] strong')].map((n) => n.textContent);
     const ranks = names.map((n) => order[store.startup().find((e) => e.name === n)!.impact.rating]);
     expect(ranks).toEqual([...ranks].sort((a, b) => b - a));
   });
@@ -75,7 +76,7 @@ describe('dy-health-page', () => {
       expect(el.querySelector('.shown')?.textContent).toContain(`${os} hidden by the filter`);
       toggles(el)[1]!.click();
       await settle(f);
-      expect(el.querySelectorAll('[aria-label="Start-up items"] tbody tr').length).toBe(total - os - signed);
+      expect(el.querySelectorAll('[aria-label="Start-up items"] [role="row"][data-key]').length).toBe(total - os - signed);
     });
 
     it('remembers the choice for the next visit', async () => {
@@ -98,7 +99,7 @@ describe('dy-health-page', () => {
       await settle(f);
       const store = TestBed.inject(HealthStore);
       if (store.startup().length === 0) expect(el.textContent).toContain('Everything is hidden by the filter');
-      else expect(el.querySelectorAll('[aria-label="Start-up items"] tbody tr').length).toBe(store.startup().length);
+      else expect(el.querySelectorAll('[aria-label="Start-up items"] [role="row"][data-key]').length).toBe(store.startup().length);
     });
   });
 });
