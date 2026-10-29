@@ -814,16 +814,33 @@ export function chooseBase({ event, ref, inputBase, baseRef, mainRef = 'refs/hea
   return { base: null, reason: `${event} ${ref}: everything` };
 }
 
-/** The newest ci.yml runs on main (Gitea API), or null with a warning when they cannot be read. */
-async function ciRuns(env, warn) {
+/**
+ * The newest green ci.yml push runs on main (Gitea API), or null with a warning when they cannot be read. The workflow's own
+ * run list (`/actions/workflows/ci.yml/runs`, green push runs of main only) comes first: in the mixed list of every workflow
+ * the last green ci.yml run can sit behind hundreds of other runs (six workflows run on each push to main; run 6941 found
+ * none in 200 and tested everything). A server without that endpoint gets the mixed list, up to 4 pages of 50.
+ * `fetchImpl` is injectable for the tests.
+ */
+export async function ciRuns(env, warn, fetchImpl = fetch) {
   const api = `${env.GITHUB_SERVER_URL ?? 'https://dev.decryptology.net'}/api/v1/repos/${env.GITHUB_REPOSITORY ?? 'decryp7/paddock'}`;
+  const get = (url) =>
+    fetchImpl(url, {
+      headers: env.PLAN_TOKEN ? { Authorization: `token ${env.PLAN_TOKEN}` } : {},
+      signal: AbortSignal.timeout(15_000),
+    });
+  try {
+    const res = await get(`${api}/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&limit=50`);
+    if (res.ok) {
+      const runs = (await res.json()).workflow_runs;
+      if (Array.isArray(runs)) return runs;
+    }
+  } catch {
+    // Fall through to the mixed list.
+  }
   const out = [];
   try {
     for (let page = 1; page <= 4; page++) {
-      const res = await fetch(`${api}/actions/runs?branch=main&event=push&limit=50&page=${page}`, {
-        headers: env.PLAN_TOKEN ? { Authorization: `token ${env.PLAN_TOKEN}` } : {},
-        signal: AbortSignal.timeout(15_000),
-      });
+      const res = await get(`${api}/actions/runs?branch=main&event=push&limit=50&page=${page}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const runs = (await res.json()).workflow_runs ?? [];
       out.push(...runs);

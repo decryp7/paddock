@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, ciRuns, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
@@ -497,6 +497,44 @@ describe('chooseBase', () => {
     assert.equal(chooseBase({ event: 'workflow_dispatch', inputBase: '', contains, mergeBase }).base, null);
     assert.equal(chooseBase({ event: 'push', ref: 'refs/tags/v0.4.0', contains, mergeBase }).base, null);
     assert.equal(chooseBase({ event: 'schedule', ref: 'refs/heads/main', contains, mergeBase }).base, null);
+  });
+});
+
+// Run 6941 (2026-10-29): the last green ci.yml push run of main (6502) was 269 runs back, behind the 4 pages of 50 runs of every
+// workflow the old lookup read (six workflows run on each push to main), so the push tested everything. The lookup asks
+// the workflow's own green runs first and reads the mixed list only when that endpoint is missing.
+describe('ciRuns (the green runs of main a push diffs from)', () => {
+  const env = { GITHUB_SERVER_URL: 'https://git.example', GITHUB_REPOSITORY: 'o/r', PLAN_TOKEN: 't' };
+  const json = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
+  const run_ = (id, over = {}) => ({ id, conclusion: 'success', event: 'push', head_branch: 'main', path: 'ci.yml@refs/heads/main', head_sha: `sha${id}`, ...over });
+
+  test('asks for ci.yml\'s own green push runs of main, so a green run far behind other workflows\' runs is still found', async () => {
+    const urls = [];
+    const fetchImpl = async (url) => {
+      urls.push(url);
+      if (url.includes('/actions/workflows/ci.yml/runs?')) return json({ workflow_runs: [run_(6502)] });
+      // The mixed list: 300 runs of the other workflows, no green ci.yml run in the first 4 pages.
+      return json({ workflow_runs: Array.from({ length: 50 }, (_, i) => run_(9000 - i, { path: 'spotter-release.yml@refs/heads/main' })) });
+    };
+    const runs = await ciRuns(env, () => {}, fetchImpl);
+    assert.match(urls[0], /\/api\/v1\/repos\/o\/r\/actions\/workflows\/ci\.yml\/runs\?/);
+    assert.match(urls[0], /branch=main/);
+    assert.match(urls[0], /event=push/);
+    assert.match(urls[0], /status=success/);
+    assert.equal(urls.length, 1, 'one request when the endpoint answers');
+    const r = chooseBase({ event: 'push', ref: 'refs/heads/main', runs, contains: () => true, mergeBase: () => null });
+    assert.equal(r.base, 'sha6502');
+  });
+
+  test('falls back to the mixed run list when the server has no per-workflow endpoint, and warns only when nothing can be read', async () => {
+    const warnings = [];
+    const fallback = async (url) => (url.includes('/actions/workflows/') ? json({ message: 'not found' }, 404) : json({ workflow_runs: [run_(7, { conclusion: 'failure' }), run_(6)] }));
+    const runs = await ciRuns(env, (w) => warnings.push(w), fallback);
+    assert.deepEqual(runs.map((r) => r.id), [7, 6]);
+    assert.deepEqual(warnings, []);
+    const down = async () => json({}, 500);
+    assert.equal(await ciRuns(env, (w) => warnings.push(w), down), null);
+    assert.match(warnings.join('\n'), /::warning::the CI runs of main could not be read/);
   });
 });
 
