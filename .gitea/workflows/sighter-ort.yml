@@ -1,0 +1,194 @@
+# DRAFT, NOT YET APPROVED: a workflow file is a shared integration point (AGENTS.md); the integrator reviews and merges it.
+#
+# Sighter's ONNX Runtime builds (stage-2 plan SW5, ADR 0001 decision 4 and P5): one job per variant builds the pinned ONNX
+# Runtime with telemetry compiled out, static, Release (apps/sighter/scripts/ort/build-ort.sh), checks it for telemetry,
+# links and runs the minimal `ort` program on it (scripts/ort/smoke), checks the Windows imports (ADR 0032), and, when
+# asked, publishes the archive as a Gitea generic package. App builds never compile ONNX Runtime: they fetch these
+# archives by the pins in apps/sighter/scripts/ort/catalogue/.
+#
+# Manual dispatch only, plus a monthly scheduled run that only builds (no publish) so a toolchain drift on a runner shows
+# before the next bump; never on push or pull request (rule 50: CI runs only what a change needs; a cold build is long).
+# A published version is never overwritten: Gitea refuses the same file twice, and a rebuild needs PIPELINE_REV + 1 in
+# apps/sighter/scripts/ort/pins.env.
+#
+# Runner labels: ubuntu-latest (the paddock-ci image), windows-latest and macos-latest (host runners). The two Windows
+# builds run one after the other on the one Windows VM. Build times: docs/research/2026-10-ort-builds.md (apps/sighter).
+#
+# Needs before the first run: ADR 0032's checker (conformance/release/windows-crt-imports.mjs, branch
+# fix/windows-static-crt) merged; the PACKAGE_TOKEN secret (write:package) for publishing; CMake >= 3.28, Python >= 3.10
+# and Git on the host runners (the Linux job installs them in the container).
+
+name: sighter-ort
+
+on:
+  workflow_dispatch:
+    inputs:
+      variants:
+        description: "Variants to build, space separated (all: every one)"
+        required: false
+        default: "all"
+      publish:
+        description: "Publish the archives to the Gitea generic package (only from main)"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 2 3 * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+  CARGO_TERM_COLOR: always
+  PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main' }}
+
+jobs:
+  linux-x64-cpu:
+    name: onnxruntime linux-x64-cpu
+    if: github.event_name == 'schedule' || inputs.variants == 'all' || contains(inputs.variants, 'linux-x64-cpu')
+    runs-on: ubuntu-latest
+    container: dev.decryptology.net/decryp7/paddock-ci:v2
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build tools
+        run: |
+          command -v cmake >/dev/null && cmake --version | head -n 1
+          if ! command -v cmake >/dev/null || ! command -v python3 >/dev/null; then
+            apt-get update && apt-get install -y --no-install-recommends cmake python3 git
+          fi
+      - name: Build ONNX Runtime
+        # 12 jobs: a share of d-gtr9 that leaves room for its other jobs (rule 51; the script's Auto would take all cores).
+        run: apps/sighter/scripts/ort/build-ort.sh linux-x64-cpu "$RUNNER_TEMP/ort" --jobs 12
+      - name: Smoke (CPU EP)
+        run: |
+          stage=$(ls -d "$RUNNER_TEMP"/ort/stage/onnxruntime-*-linux-x64-cpu)
+          cd apps/sighter/scripts/ort/smoke
+          ORT_LIB_PATH="$stage/lib" cargo build --release --locked
+          ORT_LIB_PATH="$stage/lib" target/release/sighter-ort-smoke cpu
+          ../check-telemetry.sh target/release/sighter-ort-smoke
+      - name: Publish
+        if: env.PUBLISH == 'true'
+        env:
+          PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+        run: apps/sighter/scripts/ort/publish-ort.sh "$RUNNER_TEMP/ort/out"
+      - uses: actions/upload-artifact@v3
+        with:
+          name: onnxruntime-linux-x64-cpu
+          path: ${{ runner.temp }}/ort/out/
+
+  macos-arm64-coreml:
+    name: onnxruntime macos-arm64-coreml
+    if: github.event_name == 'schedule' || inputs.variants == 'all' || contains(inputs.variants, 'macos-arm64-coreml')
+    runs-on: macos-latest
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ONNX Runtime
+        # The Mac mini is shared with agents and other jobs: 6 jobs, at background priority (the script runs it niced).
+        run: apps/sighter/scripts/ort/build-ort.sh macos-arm64-coreml "$HOME/.paddock-ci/sighter-ort" --jobs 6
+      - name: Smoke (CPU and CoreML EPs)
+        run: |
+          stage=$(ls -d "$HOME"/.paddock-ci/sighter-ort/stage/onnxruntime-*-macos-arm64-coreml)
+          cd apps/sighter/scripts/ort/smoke
+          export CARGO_TARGET_DIR="$HOME/.paddock-ci/sighter-ort/smoke-target"
+          ORT_LIB_PATH="$stage/lib" cargo build --release --locked
+          "$CARGO_TARGET_DIR/release/sighter-ort-smoke" cpu
+          "$CARGO_TARGET_DIR/release/sighter-ort-smoke" coreml
+          ../check-telemetry.sh "$CARGO_TARGET_DIR/release/sighter-ort-smoke"
+      - name: Publish
+        if: env.PUBLISH == 'true'
+        env:
+          PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+        run: apps/sighter/scripts/ort/publish-ort.sh "$HOME/.paddock-ci/sighter-ort/out" macos-arm64-coreml
+      - uses: actions/upload-artifact@v3
+        with:
+          name: onnxruntime-macos-arm64-coreml
+          path: ~/.paddock-ci/sighter-ort/out/*macos-arm64-coreml*
+
+  windows-x64-directml:
+    name: onnxruntime windows-x64-directml
+    if: github.event_name == 'schedule' || inputs.variants == 'all' || contains(inputs.variants, 'windows-x64-directml')
+    runs-on: windows-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ONNX Runtime
+        run: apps/sighter/scripts/ort/build-ort.sh windows-x64-directml "$USERPROFILE/.paddock-ci/sighter-ort"
+      - name: Smoke (CPU EP) and imports
+        run: |
+          work="$USERPROFILE/.paddock-ci/sighter-ort"
+          stage=$(ls -d "$work"/stage/onnxruntime-*-windows-x64-directml)
+          dml=$(ls "$work"/cache/directml/*/x64/bin/DirectML.dll)
+          cd apps/sighter/scripts/ort/smoke
+          export CARGO_TARGET_DIR="$work/smoke-target-directml"
+          ORT_LIB_PATH="$(cygpath -m "$stage/lib")" cargo build --release --locked
+          exe="$CARGO_TARGET_DIR/release/sighter-ort-smoke.exe"
+          ../check-windows-imports.sh windows-x64-directml "$exe" "$dml"
+          ../check-telemetry.sh "$exe"
+          ../check-telemetry.sh --allow-telemetry-group "$dml"
+          # CPU first, with no DirectML.dll beside the binary: the delay-loaded import must not stop the start.
+          "$exe" cpu
+      - name: Smoke (DirectML EP, informational)
+        # The VM may expose no DirectX 12 adapter (spike S2 records whether it does); a failure here does not fail the run.
+        continue-on-error: true
+        run: |
+          work="$USERPROFILE/.paddock-ci/sighter-ort"
+          exe="$work/smoke-target-directml/release/sighter-ort-smoke.exe"
+          cp "$(ls "$work"/cache/directml/*/x64/bin/DirectML.dll)" "$(dirname "$exe")/"
+          "$exe" directml
+          rm -f "$(dirname "$exe")/DirectML.dll"
+      - name: Publish
+        if: env.PUBLISH == 'true'
+        env:
+          PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+        run: apps/sighter/scripts/ort/publish-ort.sh "$USERPROFILE/.paddock-ci/sighter-ort/out" windows-x64-directml
+      - uses: actions/upload-artifact@v3
+        with:
+          name: onnxruntime-windows-x64-directml
+          path: ~/.paddock-ci/sighter-ort/out/*windows-x64-directml*
+
+  windows-x64-cpu:
+    name: onnxruntime windows-x64-cpu
+    # After the DirectML build, on the same VM: two ONNX Runtime builds at once would only slow both.
+    needs: [windows-x64-directml]
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.variants == 'all' || contains(inputs.variants, 'windows-x64-cpu')) }}
+    runs-on: windows-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ONNX Runtime
+        run: apps/sighter/scripts/ort/build-ort.sh windows-x64-cpu "$USERPROFILE/.paddock-ci/sighter-ort"
+      - name: Smoke (CPU EP) and imports
+        run: |
+          work="$USERPROFILE/.paddock-ci/sighter-ort"
+          stage=$(ls -d "$work"/stage/onnxruntime-*-windows-x64-cpu)
+          cd apps/sighter/scripts/ort/smoke
+          export CARGO_TARGET_DIR="$work/smoke-target-cpu"
+          ORT_LIB_PATH="$(cygpath -m "$stage/lib")" cargo build --release --locked
+          exe="$CARGO_TARGET_DIR/release/sighter-ort-smoke.exe"
+          ../check-windows-imports.sh windows-x64-cpu "$exe"
+          ../check-telemetry.sh "$exe"
+          "$exe" cpu
+      - name: Publish
+        if: env.PUBLISH == 'true'
+        env:
+          PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+        run: apps/sighter/scripts/ort/publish-ort.sh "$USERPROFILE/.paddock-ci/sighter-ort/out" windows-x64-cpu
+      - uses: actions/upload-artifact@v3
+        with:
+          name: onnxruntime-windows-x64-cpu
+          path: ~/.paddock-ci/sighter-ort/out/*windows-x64-cpu*

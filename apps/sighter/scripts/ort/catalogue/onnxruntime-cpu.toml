@@ -1,0 +1,17 @@
+# PLACEHOLDER PINS: sha256 is all zeros and size is 1 until the first run of .gitea/workflows/sighter-ort.yml publishes
+# the archive; that run prints the real lines. check-catalogue.sh fails on a placeholder.
+#
+# Sighter's CPU-only ONNX Runtime for Windows x64: no DirectML import at all, so it starts with no DirectML.dll present.
+# The fallback when the DirectML gate (P6) fails, and the build for the sidecar's CPU self-test (stage-2 plan SW5).
+format = 1
+name = "onnxruntime-cpu"
+version = "1.31.1-p1"
+source = "ONNX Runtime 1.31.1 (6af1a932e), built by Sighter's pipeline: --no_telemetry, static, CPU only"
+license = "MIT"
+
+# build-ort.sh windows-x64-cpu: static CRT (ADR 0032).
+[[platform]]
+key = "windows-x86_64"
+url = "https://dev.decryptology.net/api/packages/decryp7/generic/sighter-onnxruntime/1.31.1-p1/onnxruntime-1.31.1-p1-windows-x64-cpu.tar.gz"
+size = 1
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
