@@ -54,6 +54,7 @@ impl WorkspaceFs for RecordingFs {
 pub struct ParseSource {
     pub extracted: Mutex<Vec<String>>,
     pub fail_on: Option<&'static str>,
+    pub crash_on: Option<&'static str>,
     pub cancel_on: Option<(&'static str, CancelToken)>,
 }
 
@@ -62,6 +63,9 @@ impl SymbolSource for ParseSource {
         self.extracted.lock().unwrap().push(path.to_string());
         if self.fail_on == Some(path.as_str()) {
             return Err(SourceError::Failed("the worker crashed on this file".into()));
+        }
+        if self.crash_on == Some(path.as_str()) {
+            return Err(SourceError::Crashed("the worker hung on this file and was ended".into()));
         }
         if let Some((name, token)) = &self.cancel_on
             && path.as_str() == *name

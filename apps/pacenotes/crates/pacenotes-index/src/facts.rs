@@ -74,6 +74,10 @@ pub enum SourceError {
     /// The extractor failed on this file (a crashed worker is attributed to the file).
     #[error("the extractor failed: {0}")]
     Failed(String),
+    /// The worker died or was judged stuck on this file (ADR 0006): the file is quarantined until its content changes, and the
+    /// run goes on.
+    #[error("the worker crashed or hung on this file: {0}")]
+    Crashed(String),
     /// Cancelled by the caller.
     #[error("cancelled")]
     Cancelled,

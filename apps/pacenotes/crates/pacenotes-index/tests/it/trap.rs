@@ -1,7 +1,7 @@
 //! Audit PN1, the trap repository (plan A3a): indexing it runs nothing, leaks nothing and escapes nothing. This test was the
 //! ignored placeholder of `pacenotes-trap`; it lives here because the index cannot be a dependency of the fixture crate.
 
-use pacenotes_index::{Denylist, IndexLimits, IndexStore, Indexer};
+use pacenotes_index::{Denylist, IndexStore, Indexer};
 use pacenotes_trap::{Observations, TRAP_QUERIES, generate};
 use paddock_jobs::CancelToken;
 use paddock_testkit::Scratch;
@@ -15,12 +15,7 @@ fn indexing_the_trap_runs_nothing_leaks_nothing_and_escapes_nothing() {
     let fs = RecordingFs::new(&trap.workspace);
     let source = ParseSource::default();
     let deny = Denylist::new();
-    let ix = Indexer {
-        fs: &fs,
-        source: &source,
-        denylist: &deny,
-        limits: IndexLimits::default(),
-    };
+    let ix = Indexer::new(&fs, &source, &deny);
     let mut opened = IndexStore::open(&scratch.path("index.db")).unwrap();
     let report = ix.run(&mut opened.store, &CancelToken::new()).unwrap();
 
@@ -100,12 +95,7 @@ fn a_second_run_over_the_trap_is_stable() {
     let trap = generate(&scratch).unwrap();
     let fs = RecordingFs::new(&trap.workspace);
     let (source, deny) = (ParseSource::default(), Denylist::new());
-    let ix = Indexer {
-        fs: &fs,
-        source: &source,
-        denylist: &deny,
-        limits: IndexLimits::default(),
-    };
+    let ix = Indexer::new(&fs, &source, &deny);
     let mut opened = IndexStore::open(&scratch.path("index.db")).unwrap();
     let first = ix.run(&mut opened.store, &CancelToken::new()).unwrap();
     let second = ix.run(&mut opened.store, &CancelToken::new()).unwrap();

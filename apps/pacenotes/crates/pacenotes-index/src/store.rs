@@ -30,8 +30,15 @@ CREATE TABLE files (
     generation INTEGER NOT NULL,
     partial INTEGER NOT NULL DEFAULT 0,
     has_errors INTEGER NOT NULL DEFAULT 0,
-    module_path TEXT
+    module_path TEXT,
+    modified_ns INTEGER,
+    read_at_ns INTEGER
 );
+CREATE TABLE quarantine (
+    path TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL,
+    reason TEXT NOT NULL
+) WITHOUT ROWID;
 CREATE TABLE symbols (
     symbol_id BLOB PRIMARY KEY,
     file_id BLOB NOT NULL REFERENCES files(file_id) ON DELETE CASCADE,
@@ -128,6 +135,10 @@ pub struct Upsert {
     pub size: u64,
     /// New facts, or `None` for a file that is not parsed (tier 1).
     pub facts: Option<FileFacts>,
+    /// The file's modification time when it was read (the shortcut of ADR 0006).
+    pub modified_ns: Option<i64>,
+    /// When it was read, nanoseconds since the Unix epoch.
+    pub read_at_ns: i64,
 }
 
 /// Everything one run changes; applied in a single transaction.
@@ -141,6 +152,20 @@ pub struct Batch {
     pub upserts: Vec<Upsert>,
     /// The id counter to store (ids are never reused).
     pub next_file_sequence: u64,
+    /// Files the worker crashed or hung on: `(path, fingerprint, reason)`. They are not sent to a worker again until the
+    /// fingerprint changes.
+    pub quarantined: Vec<(RepoPath, Fingerprint, String)>,
+}
+
+/// What the store remembers about reading a file, for the shortcut of ADR 0006.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stamp {
+    /// Size in bytes when it was read.
+    pub size: u64,
+    /// Its modification time then.
+    pub modified_ns: Option<i64>,
+    /// When it was read.
+    pub read_at_ns: Option<i64>,
 }
 
 /// The index database.
@@ -300,6 +325,69 @@ impl IndexStore {
         Ok(out)
     }
 
+    /// The stamp of every file, by path.
+    pub fn stamps(&self) -> Result<std::collections::BTreeMap<RepoPath, Stamp>, IndexError> {
+        let conn = self.conn();
+        let mut statement = conn.prepare("SELECT path, size, modified_ns, read_at_ns FROM files").map_err(db)?;
+        let rows = statement
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, Option<i64>>(2)?,
+                    r.get::<_, Option<i64>>(3)?,
+                ))
+            })
+            .map_err(db)?;
+        let mut out = std::collections::BTreeMap::new();
+        for row in rows {
+            let (path, size, modified_ns, read_at_ns) = row.map_err(db)?;
+            let path = RepoPath::parse(&path).map_err(|e| IndexError::Store(e.to_string()))?;
+            out.insert(
+                path,
+                Stamp {
+                    size: u64::try_from(size).unwrap_or(0),
+                    modified_ns,
+                    read_at_ns,
+                },
+            );
+        }
+        Ok(out)
+    }
+
+    /// Files a worker crashed or hung on, with the fingerprint they had then.
+    pub fn quarantined(&self) -> Result<std::collections::BTreeMap<RepoPath, (Fingerprint, String)>, IndexError> {
+        let conn = self.conn();
+        let mut statement = conn.prepare("SELECT path, fingerprint, reason FROM quarantine").map_err(db)?;
+        let rows = statement
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))
+            .map_err(db)?;
+        let mut out = std::collections::BTreeMap::new();
+        for row in rows {
+            let (path, fingerprint, reason) = row.map_err(db)?;
+            let path = RepoPath::parse(&path).map_err(|e| IndexError::Store(e.to_string()))?;
+            let fingerprint =
+                Fingerprint::from_hex(&fingerprint).ok_or_else(|| IndexError::Store("a fingerprint is not 64 hex digits".to_owned()))?;
+            out.insert(path, (fingerprint, reason));
+        }
+        Ok(out)
+    }
+
+    /// Refreshes the stamp of files that were read again and found unchanged, so the next run can skip them. Writes no
+    /// generation: nothing the index serves changed.
+    pub fn restamp(&mut self, stamps: &[(FileId, Option<i64>, i64)]) -> Result<(), IndexError> {
+        let mut guard = self.conn();
+        let tx = guard.transaction().map_err(db)?;
+        for (id, modified_ns, read_at_ns) in stamps {
+            tx.execute(
+                "UPDATE files SET modified_ns = ?1, read_at_ns = ?2 WHERE file_id = ?3",
+                params![modified_ns, read_at_ns, &id.to_bytes()[..]],
+            )
+            .map_err(db)?;
+        }
+        tx.commit().map_err(db)
+    }
+
     /// Applies a run's changes in one transaction and returns the new generation. A failure leaves the previous generation as it
     /// was.
     pub fn commit(&mut self, batch: &Batch) -> Result<Generation, IndexError> {
@@ -320,6 +408,15 @@ impl IndexStore {
         for up in &batch.upserts {
             Self::write_file(&tx, up, generation)?;
         }
+        tx.execute("DELETE FROM quarantine WHERE path NOT IN (SELECT path FROM files)", [])
+            .map_err(db)?;
+        for (path, fingerprint, reason) in &batch.quarantined {
+            tx.execute(
+                "INSERT OR REPLACE INTO quarantine(path, fingerprint, reason) VALUES (?1, ?2, ?3)",
+                params![path.as_str(), fingerprint.to_hex(), reason],
+            )
+            .map_err(db)?;
+        }
         tx.execute("UPDATE meta SET value = ?1 WHERE key = 'generation'", [generation.to_string()])
             .map_err(db)?;
         tx.execute(
@@ -334,14 +431,17 @@ impl IndexStore {
     fn write_file(tx: &rusqlite::Transaction<'_>, up: &Upsert, generation: u64) -> Result<(), IndexError> {
         let id = up.file_id.to_bytes();
         let facts = up.facts.as_ref();
+        tx.execute("DELETE FROM quarantine WHERE path = ?1", [up.path.as_str()])
+            .map_err(db)?;
         tx.execute("DELETE FROM symbols WHERE file_id = ?1", [&id[..]]).map_err(db)?;
         tx.execute("DELETE FROM imports WHERE file_id = ?1", [&id[..]]).map_err(db)?;
         tx.execute("DELETE FROM calls WHERE file_id = ?1", [&id[..]]).map_err(db)?;
         tx.execute("DELETE FROM chunks WHERE file_id = ?1", [&id[..]]).map_err(db)?;
         tx.execute(
-            "INSERT INTO files(file_id, path, fingerprint, language, size, generation, partial, has_errors) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            "INSERT INTO files(file_id, path, fingerprint, language, size, generation, partial, has_errors, modified_ns, read_at_ns) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(file_id) DO UPDATE SET path = excluded.path, fingerprint = excluded.fingerprint, language = excluded.language,
-                 size = excluded.size, generation = excluded.generation, partial = excluded.partial, has_errors = excluded.has_errors",
+                 size = excluded.size, generation = excluded.generation, partial = excluded.partial, has_errors = excluded.has_errors,
+                 modified_ns = excluded.modified_ns, read_at_ns = excluded.read_at_ns",
             params![
                 &id[..],
                 up.path.as_str(),
@@ -350,7 +450,9 @@ impl IndexStore {
                 up.size as i64,
                 generation as i64,
                 facts.is_some_and(|f| f.partial),
-                facts.is_some_and(|f| f.has_errors)
+                facts.is_some_and(|f| f.has_errors),
+                up.modified_ns,
+                up.read_at_ns
             ],
         )
         .map_err(db)?;
@@ -478,6 +580,7 @@ impl IndexStore {
             ("imports", "target"),
             ("calls", "coalesce(caller, '') || ' ' || callee"),
             ("chunks", "coalesce(symbol, '')"),
+            ("quarantine", "path || ' ' || reason"),
         ] {
             let mut statement = conn.prepare(&format!("SELECT {columns} FROM {table}")).map_err(db)?;
             for row in statement.query_map([], |r| r.get::<_, String>(0)).map_err(db)? {

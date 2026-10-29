@@ -25,6 +25,8 @@ pub struct DirEntry {
     pub name: String,
     /// What it is.
     pub kind: EntryKind,
+    /// Last modification, nanoseconds since the Unix epoch, when the file system says (the shortcut of ADR 0006 needs it).
+    pub modified_ns: Option<i64>,
 }
 
 /// Why a file-system call failed.
@@ -62,6 +64,14 @@ pub trait WorkspaceFs: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct DiskFs {
     root: PathBuf,
+}
+
+/// Nanoseconds since the Unix epoch (negative before it), or `None` when it does not fit.
+pub fn epoch_ns(t: std::time::SystemTime) -> Option<i64> {
+    match t.duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => i64::try_from(d.as_nanos()).ok(),
+        Err(e) => i64::try_from(e.duration().as_nanos()).ok().map(|n| -n),
+    }
 }
 
 fn io(e: std::io::Error) -> FsError {
@@ -106,6 +116,7 @@ impl WorkspaceFs for DiskFs {
                 out.push(DirEntry {
                     name: entry.file_name().to_string_lossy().into_owned(),
                     kind: EntryKind::Other,
+                    modified_ns: None,
                 });
                 continue;
             };
@@ -120,7 +131,11 @@ impl WorkspaceFs for DiskFs {
             } else {
                 EntryKind::Other
             };
-            out.push(DirEntry { name, kind });
+            out.push(DirEntry {
+                name,
+                kind,
+                modified_ns: meta.modified().ok().and_then(epoch_ns),
+            });
         }
         Ok(out)
     }
@@ -176,7 +191,12 @@ mod tests {
         s.write("ws/a.txt", "hello").unwrap();
         s.write("ws/dir/b.txt", "x").unwrap();
         let fs = DiskFs::new(&s.path("ws")).unwrap();
-        let mut root: Vec<_> = fs.list(None).unwrap().into_iter().map(|e| (e.name, e.kind)).collect();
+        let listing = fs.list(None).unwrap();
+        assert!(
+            listing.iter().all(|e| e.modified_ns.is_some_and(|n| n > 0)),
+            "the modification time is reported"
+        );
+        let mut root: Vec<_> = listing.into_iter().map(|e| (e.name, e.kind)).collect();
         root.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(root, [("a.txt".to_owned(), EntryKind::File(5)), ("dir".to_owned(), EntryKind::Dir)]);
         assert_eq!(fs.list(Some(&p("dir"))).unwrap().len(), 1);
@@ -187,6 +207,14 @@ mod tests {
         assert!(matches!(fs.list(Some(&p("a.txt"))), Err(FsError::Refused(_))));
         assert_eq!(DiskFs::new(&s.path("nope")).unwrap_err(), FsError::NotFound);
         assert_eq!(fs.root(), s.path("ws").canonicalize().unwrap());
+    }
+
+    #[test]
+    fn epoch_nanoseconds_cover_both_sides_of_the_epoch() {
+        use std::time::{Duration, UNIX_EPOCH};
+        assert_eq!(epoch_ns(UNIX_EPOCH + Duration::from_nanos(5)), Some(5));
+        assert_eq!(epoch_ns(UNIX_EPOCH - Duration::from_nanos(5)), Some(-5));
+        assert_eq!(epoch_ns(UNIX_EPOCH + Duration::from_secs(u64::MAX / 2)), None);
     }
 
     #[cfg(unix)]

@@ -12,6 +12,7 @@ pub mod fs;
 pub mod guard;
 pub mod indexer;
 pub mod plan;
+pub mod progress;
 pub mod snapshot;
 pub mod store;
 
@@ -21,5 +22,6 @@ pub use fs::{DirEntry, DiskFs, EntryKind, FsError, WorkspaceFs};
 pub use guard::GuardedHistory;
 pub use indexer::{IndexError, IndexLimits, IndexReport, Indexer};
 pub use plan::{Current, Known, Plan, plan_changes};
-pub use snapshot::{Snapshot, SnapshotLimits, snapshot};
-pub use store::{Batch, ChunkRow, IndexStore, Opened, RebuildReason, SearchHit, Upsert};
+pub use progress::{EpochClock, NoProgress, Progress, SystemEpoch};
+pub use snapshot::{Snapshot, SnapshotLimits, snapshot, snapshot_with};
+pub use store::{Batch, ChunkRow, IndexStore, Opened, RebuildReason, SearchHit, Stamp, Upsert};

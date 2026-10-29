@@ -7,12 +7,7 @@ use paddock_jobs::CancelToken;
 use crate::support::{ParseSource, RecordingFs, p, workspace};
 
 fn indexer<'a>(fs: &'a RecordingFs, source: &'a ParseSource, deny: &'a Denylist) -> Indexer<'a> {
-    Indexer {
-        fs,
-        source,
-        denylist: deny,
-        limits: IndexLimits::default(),
-    }
+    Indexer::new(fs, source, deny)
 }
 
 #[test]

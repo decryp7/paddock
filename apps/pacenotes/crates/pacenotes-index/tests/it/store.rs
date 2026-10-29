@@ -2,7 +2,7 @@
 
 use pacenotes_core::contract::store_contract;
 use pacenotes_core::ports::Store;
-use pacenotes_index::{Denylist, IndexLimits, IndexStore, Indexer, RebuildReason};
+use pacenotes_index::{Denylist, IndexStore, Indexer, RebuildReason};
 use paddock_jobs::CancelToken;
 
 use crate::support::{ParseSource, RecordingFs, p, workspace};
@@ -13,14 +13,7 @@ fn indexed(ws: &paddock_testkit::Scratch, store: &mut IndexStore) {
     let fs = RecordingFs::new(&ws.path("ws"));
     let source = ParseSource::default();
     let deny = Denylist::new();
-    Indexer {
-        fs: &fs,
-        source: &source,
-        denylist: &deny,
-        limits: IndexLimits::default(),
-    }
-    .run(store, &CancelToken::new())
-    .unwrap();
+    Indexer::new(&fs, &source, &deny).run(store, &CancelToken::new()).unwrap();
 }
 
 #[test]

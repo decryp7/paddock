@@ -5,6 +5,7 @@ use paddock_jobs::CancelToken;
 
 use crate::denylist::Denylist;
 use crate::fs::{EntryKind, FsError, WorkspaceFs};
+use crate::progress::{NoProgress, Progress};
 
 /// Bounds of a walk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,8 @@ impl Default for SnapshotLimits {
 pub struct Snapshot {
     /// Regular files that may be read, sorted by path.
     pub files: Vec<(RepoPath, u64)>,
+    /// The modification time of each file in `files`, when the file system gave one (nanoseconds since the Unix epoch).
+    pub modified: std::collections::BTreeMap<RepoPath, i64>,
     /// Entries withheld by the secret denylist (including every `.git` entry).
     pub denied: u32,
     /// Links (symbolic links, junctions) skipped, whatever they point at.
@@ -47,6 +50,17 @@ pub struct Snapshot {
 
 /// Walks the workspace with `fs`, skipping denied names, links and special files. Never reads a file's content.
 pub fn snapshot(fs: &dyn WorkspaceFs, denylist: &Denylist, limits: &SnapshotLimits, cancel: &CancelToken) -> Result<Snapshot, FsError> {
+    snapshot_with(fs, denylist, limits, cancel, &NoProgress)
+}
+
+/// [`snapshot`] that reports each folder's entries to `progress` as it goes (a growing count: the total is not known yet).
+pub fn snapshot_with(
+    fs: &dyn WorkspaceFs,
+    denylist: &Denylist,
+    limits: &SnapshotLimits,
+    cancel: &CancelToken,
+    progress: &dyn Progress,
+) -> Result<Snapshot, FsError> {
     let mut out = Snapshot::default();
     let mut stack: Vec<(Option<RepoPath>, usize)> = vec![(None, 0)];
     let mut seen = 0usize;
@@ -62,6 +76,7 @@ pub fn snapshot(fs: &dyn WorkspaceFs, denylist: &Denylist, limits: &SnapshotLimi
             }
             Err(e) => return Err(e),
         };
+        progress.add(entries.len() as u64);
         for entry in entries {
             seen += 1;
             if seen > limits.max_entries {
@@ -84,7 +99,12 @@ pub fn snapshot(fs: &dyn WorkspaceFs, denylist: &Denylist, limits: &SnapshotLimi
             match entry.kind {
                 EntryKind::Link => out.links += 1,
                 EntryKind::Other => out.special += 1,
-                EntryKind::File(size) => out.files.push((path, size)),
+                EntryKind::File(size) => {
+                    if let Some(ns) = entry.modified_ns {
+                        out.modified.insert(path.clone(), ns);
+                    }
+                    out.files.push((path, size));
+                }
                 EntryKind::Dir if depth + 1 > limits.max_depth => out.too_deep += 1,
                 EntryKind::Dir => stack.push((Some(path), depth + 1)),
             }
@@ -118,6 +138,7 @@ mod tests {
         DirEntry {
             name: name.to_owned(),
             kind,
+            modified_ns: Some(7),
         }
     }
 
@@ -159,6 +180,7 @@ mod tests {
             (3, 1, 1, 1, 1, 0)
         );
         assert!(!s.truncated);
+        assert_eq!(s.modified.len(), 4, "every file carries its modification time");
     }
 
     #[test]
