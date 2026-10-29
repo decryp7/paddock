@@ -24,7 +24,7 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `setup-node` | Node from `app/.nvmrc`, npm cache | `actions/setup-node` blocks |
 | `strip-signing-keys` | whitespace out of the Tauri keys for the following steps (rule 25, C06) | inline `tr -d` |
 | `build-env` | `PADDOCK_BUILD_COMMIT` and `PADDOCK_BUILD_DATE` for the About page (`option_env!`) | nothing set them before |
-| `tauri-bundle` | `tauri build` with or without updater signing (hardened runtime on only with a real Apple identity), `npm ci` at `root`, installers in `dist/`, version check | Pitwall `scripts/ci/tauri-bundle.sh`, Pitcrew's bundle step |
+| `tauri-bundle` | `tauri build` with or without updater signing (hardened runtime on only with a real Apple identity), `npm ci` at `root`, installers in `dist/`, version check; for NSIS, no shipped .exe or .dll imports the VC++ runtime (ADR 0032) | Pitwall `scripts/ci/tauri-bundle.sh`, Pitcrew's bundle step |
 | `macos-verify` | `codesign --verify --deep --strict` on the .app and the DMG, sidecars with `--self-test` (rule 23) | `macos-verify-bundle.sh` copies |
 | `install-test-browser` | the pinned Chrome for Testing (SHA-256 checked), `<APP>_REQUIRE_TEST_BROWSER=1` | Debrief's `install-test-browser.mjs` |
 | `licences` | `cargo deny`, `npm audit`, commit messages on pull requests | the `licences` job in five workflows |

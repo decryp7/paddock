@@ -90,3 +90,52 @@ export function blockFiles(app = 'demo') {
   return files;
 }
 export const readText = (p) => readFileSync(p, 'utf8');
+
+/**
+ * A minimal PE image with one section (.idata at RVA 0x1000, file offset 0x200) holding the import and delay-import
+ * descriptors and the DLL names. `plus` selects PE32+ (x64) or PE32.
+ */
+export function pe({ imports = [], delay = [], plus = true } = {}) {
+  const optSize = plus ? 240 : 224;
+  const peOff = 0x40;
+  const secTable = peOff + 24 + optSize;
+  const raw = 0x200;
+  const va = 0x1000;
+  const sec = Buffer.alloc(0x400);
+  // Layout inside the section: import descriptors, a zero one, delay descriptors, a zero one, then the names.
+  const impAt = 0;
+  const delayAt = (imports.length + 1) * 20;
+  let nameAt = delayAt + (delay.length + 1) * 32;
+  const putName = (n) => {
+    const at = nameAt;
+    sec.write(`${n}\0`, at, 'latin1');
+    nameAt += n.length + 1;
+    return va + at;
+  };
+  imports.forEach((n, i) => sec.writeUInt32LE(putName(n), impAt + i * 20 + 12));
+  delay.forEach((n, i) => {
+    sec.writeUInt32LE(1, delayAt + i * 32);
+    sec.writeUInt32LE(putName(n), delayAt + i * 32 + 4);
+  });
+
+  const b = Buffer.alloc(raw + sec.length);
+  b.writeUInt16LE(0x5a4d, 0);
+  b.writeUInt32LE(peOff, 0x3c);
+  b.writeUInt32LE(0x00004550, peOff);
+  b.writeUInt16LE(plus ? 0x8664 : 0x14c, peOff + 4);
+  b.writeUInt16LE(1, peOff + 6);
+  b.writeUInt16LE(optSize, peOff + 20);
+  const opt = peOff + 24;
+  b.writeUInt16LE(plus ? 0x20b : 0x10b, opt);
+  const dirs = opt + (plus ? 112 : 96);
+  b.writeUInt32LE(16, opt + (plus ? 108 : 92));
+  if (imports.length) b.writeUInt32LE(va + impAt, dirs + 8);
+  if (delay.length) b.writeUInt32LE(va + delayAt, dirs + 13 * 8);
+  b.write('.idata', secTable, 'latin1');
+  b.writeUInt32LE(sec.length, secTable + 8);
+  b.writeUInt32LE(va, secTable + 12);
+  b.writeUInt32LE(sec.length, secTable + 16);
+  b.writeUInt32LE(raw, secTable + 20);
+  sec.copy(b, raw);
+  return b;
+}

@@ -74,6 +74,19 @@ if [ -n "$prepare" ]; then (cd "$root" && bash -euo pipefail -c "$prepare"); fi
   fi
 )
 
+# ADR 0032: no binary the Windows installer carries imports the VC++ runtime (a PC without the redistributable cannot start
+# it; CI runners have it, so only this check shows it). The app and its sidecars sit side by side in the profile folder;
+# src-tauri/binaries also holds the bundled libraries.
+case ",$bundles," in
+  *,nsis,* | *,msi,*)
+    shopt -s nullglob
+    win=("$dir"/dist/*.exe "$dir"/dist/*.dll)
+    shopt -u nullglob
+    if [ -d "$app_dir/src-tauri/binaries" ]; then win+=("$app_dir/src-tauri/binaries"); fi
+    node "$here/../release/windows-crt-imports.mjs" ${win[@]+"${win[@]}"}
+    ;;
+esac
+
 rm -rf dist
 mkdir -p dist
 find "$dir/dist/bundle" -type f \( -name '*-setup.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \

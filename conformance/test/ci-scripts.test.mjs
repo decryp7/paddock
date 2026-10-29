@@ -9,7 +9,7 @@ import { buildEnv } from '../ci/build-env.mjs';
 import { checkPin, executableIn, install, parseArgs, parseRustPin, platformId, urlFor } from '../ci/install-test-browser.mjs';
 import { decide, tagFor } from '../ci/plan.mjs';
 import { firstLaunch, releaseNotes } from '../ci/release-notes.mjs';
-import { makeApp, PADDOCK } from './helpers.mjs';
+import { makeApp, PADDOCK, pe } from './helpers.mjs';
 
 const CI = join(dirname(fileURLToPath(import.meta.url)), '..', 'ci');
 const node = (script, args, env = {}, cwd) => spawnSync(process.execPath, [join(CI, script), ...args], { encoding: 'utf8', cwd, env: { PATH: process.env.PATH, ...env } });
@@ -209,6 +209,30 @@ test('tauri-bundle: --root is where npm ci runs, and the build-folder action\'s 
   assert.ok(!existsSync(join(root, 'ignored')));
   assert.match(readFileSync(join(root, 'calls.log'), 'utf8'), /npm ci in ws/);
   assert.match(r.stdout + r.stderr, /No updater signing secrets/);
+});
+
+test('tauri-bundle: an NSIS build fails when the app, a sidecar or a bundled library imports the VC++ runtime (ADR 0032)', () => {
+  const nsis = (files) => {
+    const root = bundleRepo({ installers: [] });
+    for (const [p, b] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, p)), { recursive: true });
+      writeFileSync(join(root, p), b);
+    }
+    return bundle(root, ['nsis']);
+  };
+  const clean = pe({ imports: ['KERNEL32.dll', 'api-ms-win-crt-runtime-l1-1-0.dll'] });
+  const dynamic = pe({ imports: ['KERNEL32.dll', 'VCRUNTIME140.dll'] });
+  const ok = nsis({ 'target/dist/demo.exe': clean, 'target/dist/demo-agent.exe': clean, 'app/src-tauri/binaries/lib/x.dll': clean });
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.match(ok.stdout, /3 Windows binaries checked/);
+  const agent = nsis({ 'target/dist/demo.exe': clean, 'target/dist/demo-agent.exe': dynamic });
+  assert.equal(agent.status, 1);
+  assert.match(agent.stdout, /::error::.*demo-agent\.exe: imports VCRUNTIME140\.dll/);
+  const lib = nsis({ 'target/dist/demo.exe': clean, 'app/src-tauri/binaries/lib/x.dll': dynamic });
+  assert.equal(lib.status, 1);
+  assert.match(lib.stdout, /x\.dll: imports VCRUNTIME140\.dll/);
+  assert.notEqual(nsis({}).status, 0, 'an NSIS build with no Windows binaries is an error, not a pass');
+  assert.doesNotMatch(bundle(bundleRepo(), ['deb']).stdout, /Windows binaries checked/, 'other bundles are not checked');
 });
 
 test('tauri-bundle: --prepare runs in --root after npm ci and before the build; a failing one stops the build', () => {
