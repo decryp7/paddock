@@ -255,65 +255,58 @@ describe('provideLive', () => {
   it('registers the views, commands and saved state, keeps the alerts tab count', async () => {
     const backend = new MockBackend({ latency: false, dataset: tinyDataset, liveMs: 100_000 });
     const sub = vi.spyOn(backend, 'onLiveAlert');
-    const setTitle = vi.fn();
-    // Put back, not deleted: the method is the fake's own and other specs in the same bundle use it.
-    const original = FakeDock.prototype.setTitle;
-    (FakeDock.prototype as unknown as { setTitle: typeof setTitle }).setTitle = setTitle;
-    // finally: a failing expect must not leave the patched method behind for the specs that run after this one.
-    try {
-      const { dock, live } = setup(backend, [provideLive()]);
-      TestBed.inject(CommandRegistry);
-      await settle();
-      expect(sub).toHaveBeenCalled();
-      expect(LIVE_VIEWS.map((v) => v.id)).toEqual([ALERTS_VIEW, TAIL_STATUS_VIEW]);
-      for (const v of LIVE_VIEWS) expect(await v.component()).toBeTruthy();
+    // A spy, restored after the test even when an expect fails: the method is the fake's own and other specs use it.
+    const setTitle = vi.spyOn(FakeDock.prototype, 'setTitle').mockImplementation(() => undefined);
+    const { dock, live } = setup(backend, [provideLive()]);
+    TestBed.inject(CommandRegistry);
+    await settle();
+    expect(sub).toHaveBeenCalled();
+    expect(LIVE_VIEWS.map((v) => v.id)).toEqual([ALERTS_VIEW, TAIL_STATUS_VIEW]);
+    for (const v of LIVE_VIEWS) expect(await v.component()).toBeTruthy();
 
-      // The tab count follows the alerts while the panel is open.
-      const alerts = TestBed.inject(AlertsStore);
-      alerts.receive(alert());
-      await settle();
-      expect(setTitle).not.toHaveBeenCalled();
-      dock.openIds.set(new Set([ALERTS_VIEW]));
-      await settle();
-      expect(setTitle).toHaveBeenLastCalledWith(ALERTS_VIEW, 'Alerts (1)');
-      expect(alertsTitle(0)).toBe('Alerts');
-      expect(alertsTitle(5000)).toBe('Alerts (999+)');
+    // The tab count follows the alerts while the panel is open.
+    const alerts = TestBed.inject(AlertsStore);
+    alerts.receive(alert());
+    await settle();
+    expect(setTitle).not.toHaveBeenCalled();
+    dock.openIds.set(new Set([ALERTS_VIEW]));
+    await settle();
+    expect(setTitle).toHaveBeenLastCalledWith(ALERTS_VIEW, 'Alerts (1)');
+    expect(alertsTitle(0)).toBe('Alerts');
+    expect(alertsTitle(5000)).toBe('Alerts (999+)');
 
-      // Commands.
-      const commands = TestBed.inject(CommandRegistry);
-      const ids = commands.all().map((c) => c.id);
-      for (const id of ['live.toggle', 'live.open', 'live.resume', 'live.alerts', 'live.status', 'live.rules']) expect(ids).toContain(id);
-      const open = vi.spyOn(TestBed.inject(DialogService), 'open');
-      await commands.run('live.open');
-      await commands.run('live.rules');
-      expect(open).toHaveBeenCalledTimes(2);
-      await commands.run('live.toggle');
-      expect(live.enabled()).toBe(true);
-      TestBed.inject(LiveFollow).pause();
-      await commands.run('live.resume');
-      expect(TestBed.inject(LiveFollow).paused()).toBe(false);
-      await commands.run('live.alerts');
-      await commands.run('live.status');
-      expect(dock.calls).toEqual(expect.arrayContaining([`show:${ALERTS_VIEW}`, `show:${TAIL_STATUS_VIEW}`]));
+    // Commands.
+    const commands = TestBed.inject(CommandRegistry);
+    const ids = commands.all().map((c) => c.id);
+    for (const id of ['live.toggle', 'live.open', 'live.resume', 'live.alerts', 'live.status', 'live.rules']) expect(ids).toContain(id);
+    const open = vi.spyOn(TestBed.inject(DialogService), 'open');
+    await commands.run('live.open');
+    await commands.run('live.rules');
+    expect(open).toHaveBeenCalledTimes(2);
+    await commands.run('live.toggle');
+    expect(live.enabled()).toBe(true);
+    TestBed.inject(LiveFollow).pause();
+    await commands.run('live.resume');
+    expect(TestBed.inject(LiveFollow).paused()).toBe(false);
+    await commands.run('live.alerts');
+    await commands.run('live.status');
+    expect(dock.calls).toEqual(expect.arrayContaining([`show:${ALERTS_VIEW}`, `show:${TAIL_STATUS_VIEW}`]));
 
-      // Saved state: follow settings and the live options.
-      const registry = TestBed.inject(UiStateRegistry);
-      const saved = registry.serialize()['live'] as { follow: unknown; options: unknown };
-      expect(saved).toEqual({ follow: { follow: true, preset: 'all', customMinutes: 30 }, options: DEFAULT_LIVE_OPTIONS });
-      registry.restore({ live: { follow: { follow: false, preset: '5m', customMinutes: 3 }, options: { watch: 'polling', pollIntervalMs: 900 } } });
-      await settle();
-      expect(TestBed.inject(LiveFollow).preset()).toBe('5m');
-      expect(live.options()).toMatchObject({ watch: 'polling', pollIntervalMs: 900 });
-      registry.restore({});
-      await settle();
-      expect(TestBed.inject(LiveFollow).preset()).toBe('all');
-      expect(live.options()).toEqual(DEFAULT_LIVE_OPTIONS);
-      registry.restore({ live: null });
-      expect(live.options()).toEqual(DEFAULT_LIVE_OPTIONS);
-      await live.set(false);
-    } finally {
-      FakeDock.prototype.setTitle = original;
-    }
+    // Saved state: follow settings and the live options.
+    const registry = TestBed.inject(UiStateRegistry);
+    const saved = registry.serialize()['live'] as { follow: unknown; options: unknown };
+    expect(saved).toEqual({ follow: { follow: true, preset: 'all', customMinutes: 30 }, options: DEFAULT_LIVE_OPTIONS });
+    registry.restore({ live: { follow: { follow: false, preset: '5m', customMinutes: 3 }, options: { watch: 'polling', pollIntervalMs: 900 } } });
+    await settle();
+    expect(TestBed.inject(LiveFollow).preset()).toBe('5m');
+    expect(live.options()).toMatchObject({ watch: 'polling', pollIntervalMs: 900 });
+    registry.restore({});
+    await settle();
+    expect(TestBed.inject(LiveFollow).preset()).toBe('all');
+    expect(live.options()).toEqual(DEFAULT_LIVE_OPTIONS);
+    registry.restore({ live: null });
+    expect(live.options()).toEqual(DEFAULT_LIVE_OPTIONS);
+    await live.set(false);
   });
 
   it('sanitizes saved live options', () => {

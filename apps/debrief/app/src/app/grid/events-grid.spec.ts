@@ -37,18 +37,11 @@ class HugeBackend extends MockBackend {
 }
 
 describe('EventsGrid', () => {
-  let restore: PropertyDescriptor | undefined;
-  beforeAll(() => {
-    restore = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
-    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-      configurable: true,
-      get(this: HTMLElement) {
+  // Restored after each test (restoreMocks in vitest-base.config.mts).
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
         return this.classList?.contains('viewport') ? VIEWPORT_H : 0;
-      },
     });
-  });
-  afterAll(() => {
-    if (restore) Object.defineProperty(HTMLElement.prototype, 'clientHeight', restore);
   });
   beforeEach(() => localStorage.clear());
 
@@ -455,18 +448,11 @@ describe('EventsGrid', () => {
 describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   const ROW = 24;
   const BIG = 50_000_000;
-  let restore: PropertyDescriptor | undefined;
-  beforeAll(() => {
-    restore = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
-    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-      configurable: true,
-      get(this: HTMLElement) {
+  // Restored after each test (restoreMocks in vitest-base.config.mts).
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
         return this.classList?.contains('viewport') ? VIEWPORT_H + 28 : 0;
-      },
     });
-  });
-  afterAll(() => {
-    if (restore) Object.defineProperty(HTMLElement.prototype, 'clientHeight', restore);
   });
   beforeEach(() => localStorage.clear());
 

@@ -103,18 +103,11 @@ describe('Inspector context actions', () => {
 });
 
 describe('EventsGrid context menu', () => {
-  let restore: PropertyDescriptor | undefined;
-  beforeAll(() => {
-    restore = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
-    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-      configurable: true,
-      get(this: HTMLElement) {
+  // Restored after each test (restoreMocks in vitest-base.config.mts).
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
         return this.classList?.contains('viewport') ? 260 : 0;
-      },
     });
-  });
-  afterAll(() => {
-    if (restore) Object.defineProperty(HTMLElement.prototype, 'clientHeight', restore);
   });
 
   it('opens on right click and with the keyboard', async () => {

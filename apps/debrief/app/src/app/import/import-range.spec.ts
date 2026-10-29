@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { settle } from '../../testing/helpers';
+import { openDialog, settle } from '../../testing/helpers';
 import { DebriefBackend } from '../core/backend';
 import { MockBackend } from '../core/mock/mock-backend';
 import { Platform } from '../core/platform';
@@ -51,12 +51,6 @@ describe('ImportRange', () => {
         return load();
       }, options)) as typeof dialogs.openLazy);
     return { backend, dialogs, range: TestBed.inject(ImportRange), store: TestBed.inject(WorkspaceStore) };
-  }
-
-  /** Waits on the condition (the dialog is open), never on a number of turns: its chunk loads lazily. */
-  async function openDialog(dialogs: DialogService) {
-    await vi.waitFor(() => expect(dialogs.stack()).toHaveLength(1));
-    return dialogs.stack().at(-1)!;
   }
 
   it('opens the picked paths with the chosen range and clears the range afterwards', async () => {

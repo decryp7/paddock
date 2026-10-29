@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { all, buttonByText, el, provideTinyBackend, settle, text, typeInto } from '../../testing/helpers';
+import { all, buttonByText, el, openDialog, provideTinyBackend, settle, text, typeInto } from '../../testing/helpers';
 import { at } from '../../testing/must';
 import { backendCallStarted, methodKind } from '../core/activity/backend-activity';
 import { activity } from '../core/activity/runtime';
@@ -253,15 +253,15 @@ describe('NoteActions', () => {
     const edited = actions.edit(it);
     await TestBed.inject(DialogService).whenLoaded();
     expect(dialogs.stack().at(-1)?.options.title).toBe('Edit note');
-    dialogs.stack().at(-1)?.ref.close();
+    (await openDialog(dialogs)).ref.close();
     expect(await edited).toBeNull();
     // Delete asks first.
     let removed = actions.remove(it);
-    dialogs.stack().at(-1)?.ref.close();
+    (await openDialog(dialogs)).ref.close();
     expect(await removed).toBe(false);
     removed = actions.remove(it);
     expect(String(dialogs.stack().at(-1)?.options.inputs?.['message'])).toContain('window');
-    dialogs.stack().at(-1)?.ref.close(true);
+    (await openDialog(dialogs)).ref.close(true);
     expect(await removed).toBe(true);
     // Jumps.
     const setRange = vi.spyOn(ws, 'setRange');
@@ -376,9 +376,9 @@ describe('NotesPanel', () => {
     at(all<HTMLButtonElement>(f, '[data-testid=note-edit]'), 0).click();
     await TestBed.inject(DialogService).whenLoaded();
     expect(dialogs.stack().at(-1)?.options.title).toBe('Edit note');
-    dialogs.stack().at(-1)?.ref.close();
+    (await openDialog(dialogs)).ref.close();
     at(all<HTMLButtonElement>(f, '[data-testid=note-delete]'), 1).click();
-    dialogs.stack().at(-1)?.ref.close(true);
+    (await openDialog(dialogs)).ref.close(true);
     await settle(f);
     expect(all(f, '[data-testid=note-item]')).toHaveLength(1);
     el<HTMLButtonElement>(f, '[data-testid=notes-add-project]').click();

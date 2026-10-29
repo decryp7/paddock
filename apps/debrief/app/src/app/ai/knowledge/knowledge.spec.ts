@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { all, buttonByText, el, settle, text } from '../../../testing/helpers';
+import { all, buttonByText, el, openDialog, settle, text } from '../../../testing/helpers';
 import { at } from '../../../testing/must';
 import { backendCallStarted, methodKind } from '../../core/activity/backend-activity';
 import { activity } from '../../core/activity/runtime';
@@ -188,7 +188,7 @@ describe('KnowledgeSettings', () => {
     expect((await backend.listKnowledge()).global).toHaveLength(1);
     buttonByText(f, 'Remove…').click();
     await settle(f);
-    dialogs.stack().at(-1)?.ref.close(true);
+    (await openDialog(dialogs)).ref.close(true);
     await settle(f);
     expect((await backend.listKnowledge()).global).toHaveLength(0);
     el<HTMLButtonElement>(f, '[data-testid=knowledge-new-project]').click();

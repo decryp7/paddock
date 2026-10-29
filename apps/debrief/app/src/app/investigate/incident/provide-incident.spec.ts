@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
+import { openDialog } from '../../../testing/helpers';
 import { CommandContext, DEBRIEF_COMMANDS, DebriefCommand } from '../../extensions/tokens';
 import { DialogService } from '../../ui/dialog.service';
 import { provideIncident } from './provide-incident';
@@ -24,8 +25,7 @@ describe('provideIncident', () => {
     const { command, dialogs } = setup();
     const c = ctx(5);
     const run = command.run(c) as Promise<void>;
-    await vi.waitFor(() => expect(dialogs.stack()).toHaveLength(1));
-    dialogs.stack().at(0)?.ref.close('show');
+    (await openDialog(dialogs)).ref.close('show');
     await run;
     expect(c.showView).toHaveBeenCalledWith('report');
   });
@@ -34,8 +34,7 @@ describe('provideIncident', () => {
     const { command, dialogs } = setup();
     const c = ctx(5);
     const run = command.run(c) as Promise<void>;
-    await vi.waitFor(() => expect(dialogs.stack()).toHaveLength(1));
-    dialogs.stack().at(0)?.ref.close();
+    (await openDialog(dialogs)).ref.close();
     await run;
     expect(c.showView).not.toHaveBeenCalled();
   });

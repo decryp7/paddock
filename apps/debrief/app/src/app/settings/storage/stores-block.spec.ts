@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { all, el, settle, typeInto } from '../../../testing/helpers';
+import { all, el, openDialog, settle, typeInto } from '../../../testing/helpers';
 import { DialogService } from '../../ui/dialog.service';
 import { MockStorageBackend } from './mock-storage-backend';
 import { StorageBackend } from './storage-backend';
@@ -79,7 +79,7 @@ describe('StorageStores', () => {
     const { fixture, dialogs } = await setup();
     button(fixture, 'stores-clean-all').click();
     await settle(fixture);
-    dialogs.stack().at(-1)?.ref.close(true);
+    (await openDialog(dialogs)).ref.close(true);
     await vi.waitFor(() => expect(rows(fixture)).toHaveLength(3));
     expect(button(fixture, 'stores-clean-all').disabled).toBe(true);
   });
@@ -89,7 +89,7 @@ describe('StorageStores', () => {
     vi.spyOn(backend, 'clearStores').mockResolvedValue({ freedBytes: 0, removed: [], skipped: [{ id: 'store-5e60b3f8', reason: 'a window has this store open' }], cancelled: true });
     button(fixture, 'stores-clean-all').click();
     await settle(fixture);
-    dialogs.stack().at(-1)?.ref.close(true);
+    (await openDialog(dialogs)).ref.close(true);
     await vi.waitFor(() => expect(el(fixture, '[data-testid=stores-result]')).toBeTruthy());
     const t = el(fixture, '[data-testid=stores-result]').textContent ?? '';
     expect(t).toContain('Freed 0 bytes.');
@@ -102,7 +102,7 @@ describe('StorageStores', () => {
     vi.spyOn(backend, 'clearStores').mockRejectedValue('the store folder is locked');
     button(fixture, 'stores-clean-all').click();
     await settle(fixture);
-    dialogs.stack().at(-1)?.ref.close(true);
+    (await openDialog(dialogs)).ref.close(true);
     await vi.waitFor(() => expect(el(fixture, '[data-testid=stores-error]').textContent).toContain('the store folder is locked'));
   });
 

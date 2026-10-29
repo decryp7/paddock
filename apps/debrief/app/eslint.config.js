@@ -69,6 +69,23 @@ module.exports = defineConfig(
     },
   },
   {
+    // Specs share one module graph per bundle, so test state must not leak (ER-21).
+    files: ['**/*.spec.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "MemberExpression[optional=true][property.name='ref'][object.callee.property.name='at']",
+          message: 'use openDialog() so a missing dialog fails the test',
+        },
+        {
+          selector: "AssignmentExpression[left.type='MemberExpression'][left.object.property.name='prototype']",
+          message: 'use vi.spyOn so the patch is restored',
+        },
+      ],
+    },
+  },
+  {
     files: ['**/*.html'],
     extends: [angular.configs.templateRecommended, angular.configs.templateAccessibility],
     rules: {
