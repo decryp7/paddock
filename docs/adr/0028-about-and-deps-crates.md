@@ -1,7 +1,9 @@
 # 28. `paddock-about` and `paddock-deps`: About and legal texts out of the updater; one dependency inventory for notices, SBOMs and Pacenotes
 
 - Status: Proposed (2026-10-29). The user approved the direction on 2026-10-29: About becomes its own crate, and one Rust
-  dependency inventory replaces the JS notices tool, cargo-about and the two CycloneDX tools. Open questions are at the end.
+  dependency inventory replaces the JS notices tool, cargo-about and the two CycloneDX tools. Revised the same day after
+  an independent review (five P1s: What's New for existing users, Debrief not on the shell, every app green per step, a
+  fail-closed licence policy, owned paths per package). Two questions remain for the user, at the end.
 - Date: 2026-10-29
 - Start: after the Dyno 1.0 and Spotter 1.0 tags. Shared code is frozen until then (rule 1).
 - Related: rules 1, 9, 21, 39, 40, 42, 43; the licence policy (`templates/repo/deny.toml` `[licenses].allow`, root
@@ -20,18 +22,23 @@
 
 - **About lives in the updater.** `crates/paddock-updater/src/about.rs` holds `About`, `AboutInfo`, `LegalDocInfo`,
   `AboutError`, `.legal(id, title, text)` and What's New (`whats_new`, `whats_new_on_start`). What's New reads the
-  updater's `notes` module and writes `whats_new_seen` into the updater's `RecordStore` (`record.rs` line 27: "the
-  updater and About share it"). The updater's command table (`lib.rs`) serves both the update commands and the four
+  updater's `notes` module and writes `whats_new_seen` (`record.rs` line 27) into the updater's `RecordStore`, the file
+  `updates.json` in the app's config folder (line 12; line 67: "the updater and About share it"). `notes::decide`
+  (`notes.rs` lines 71–77) treats a missing `seen` as a first run: it only records the version and shows nothing. The
+  updater's command table (`lib.rs`) serves both the update commands and the four
   About commands (`about_info`, `about_legal`, `about_whats_new`, `about_whats_new_start`). The adapter
   (`src/tauri.rs`, `install`) builds About from `UpdatesBuilder::legal(...)` entries and sets
   `updates_available`. The crate's description names five jobs: update state machine, release information, signatures,
   install hand-off and service re-registration, and About and What's New.
 - **The UI side** is `ui/projects/paddock-ui/shell/about/` (About, Updates and What's New dialogs, one store, the
-  generated wire types from `paddock-updater` in `generated/`).
-- **Who registers notices.** On `main` only Debrief ships `THIRD_PARTY_NOTICES.md` (15,966 lines: 768 Rust crates, 92 npm
-  packages, 385 distinct licence texts), and it serves it through its own `apps/debrief/app/src-tauri/src/legal.rs`, not
-  through the shared About. `dyno/notices-1.0` and `spotter/notices-1.0` add notices and register them with three
-  `.legal(...)` calls on the shared About. Pitwall and Pitcrew have no notices and no legal texts at all.
+  generated files from `paddock-updater` in `generated/`: `about.ts`, `about-commands.ts` and `dialog-contracts.ts`).
+- **Who uses the shared About.** On `main`, `shell-demo` (`src-tauri/src/lib.rs` lines 301–306, two `.legal(...)`
+  calls) and `workbench-demo` use it through the shell. `dyno/shell-1.0` and `spotter/shell-1.0` move Dyno and Spotter
+  onto the shell, and `dyno/notices-1.0` and `spotter/notices-1.0` register three legal documents there.
+- **Debrief is not on the shell.** It has its own Angular About (`apps/debrief/app/src/app/about/`), its own command
+  (`apps/debrief/app/src-tauri/src/legal.rs`, `legal_text`) and the legal ids `notices`, `mit` and `apache`
+  (`legal-source.ts` line 6). It ships the only `THIRD_PARTY_NOTICES.md` on `main` (15,966 lines: 768 Rust crates, 92
+  npm packages, 385 distinct licence texts). Pitwall and Pitcrew have no notices and no legal texts at all.
 - **The notices generator.** `conformance/src/notices/` (257 lines of JS on `main`; the shared version on
   `feat/shared-notices` reads the app's `notices` block from `paddock.ci.json`) plus `scripts/notices.sh` (installs
   cargo-about 0.9.2, runs `npm ci --ignore-scripts`, then the JS). Rust licences come from `cargo about generate`; npm
@@ -86,16 +93,26 @@ everything derived from it. `paddock-dev` (ADR 0022) is the only program that ru
 - the About model (`About`, `AboutInfo`, `LegalDocInfo`, `AboutError`, `.build`, `.homepage`, `.releases_page`, `.legal`,
   `.legal_text`);
 - What's New (`notes` parsing of the app's `CHANGELOG.md`, `WhatsNew`, `WhatsNewDecision`, `whats_new_on_start`);
-- the four About commands and their generated TypeScript (`ui/projects/paddock-ui/shell/about/generated/about.ts` and
-  `about-commands.ts`), regenerated from the new crate.
+- the four About commands and the generated TypeScript in `ui/projects/paddock-ui/shell/about/generated/` that belongs
+  to them: `about.ts`, `about-commands.ts` and the About part of `dialog-contracts.ts` (the Updates dialog's contract
+  stays with the updater, so that file is split into `about-dialog-contracts.ts` and `updates-dialog-contracts.ts`),
+  regenerated from the new crate.
 
 The updater keeps the state machine, the manifest, signatures, the install hand-off and the service hooks, and its
 description shrinks to that. Its `RecordStore` loses `whats_new_seen`.
 
-**What's New gets its own small record.** `paddock-about` owns a `SeenVersion` port (read and write one version string)
-with a file adapter (`about.json` in the app's config folder, a `paddock-env` versioned file). Losing the old
-`whats_new_seen` value has no visible effect: the first start after the upgrade is a new version anyway, so What's New
-opens as it would have. No migration code (no compatibility shims before v1).
+**What's New gets its own small record, and existing users keep their place in it.** `paddock-about` owns a
+`SeenVersion` port (read and write one version string) with a file adapter (`about.json` in the app's config folder, a
+`paddock-env` versioned file). Because `notes::decide` treats a missing value as a first run (it records the version and
+shows nothing), dropping the old value would silently skip What's New for every existing user on the first version that
+ships this crate. So the file adapter reads once from the updater's file: when `about.json` is missing and
+`updates.json` in the same folder has `whats_new_seen`, that value is the seen version, and it is written to
+`about.json` on the same start. The read is a function of the folder alone (no dependency on `paddock-updater`; it
+parses only that one field, with the file size capped) and it never writes `updates.json`. This is a data migration for
+apps that are past v1, not an API shim; it can be deleted once every app has shipped a release with `paddock-about`.
+Upgrade tests (failing first): a folder with only `updates.json` (`whats_new_seen` = the previous version) and a running
+version with notes gives `Show`; with `updates.json` missing too it gives `Remember`; a corrupt or oversized
+`updates.json` gives `Remember` and a log line, never an error.
 
 **Dependencies.**
 
@@ -103,49 +120,62 @@ opens as it would have. No migration code (no compatibility shims before v1).
 paddock-about        (pure core; feature `tauri`: managed state, commands, the adapter)
    ^          ^
    |          |
-paddock-shell  (wires About and the updater; sets `updates_available` from the updater)
+   |     paddock-shell  (wires About and the updater; sets `updates_available` from the updater)
+   |          |
+   |     paddock-updater (no dependency on paddock-about)
    |
-paddock-updater (no dependency on paddock-about)
+Debrief (uses paddock-about directly, with its own dialog; it is not on the shell)
 ```
 
 `paddock-updater` does not depend on `paddock-about`. The only fact About took from the updater is "this build can
 update itself". `paddock-shell`, which already depends on the updater, gains `paddock-about` and sets it:
-`About::updates_available(updater.available())`.
-`paddock-about`'s dependencies are `paddock-commands`, `paddock-dialogs` (the About dialog contract, ADR 0026),
-`paddock-files` (the releases link, as today), `paddock-env`, `serde`, and `tauri` behind its feature.
+`About::updates_available(updater.available())`. An app without the shell (Debrief) registers `paddock-about`'s command
+table and adapter itself and sets the same flag from its own updater. `paddock-about`'s dependencies are
+`paddock-commands`, `paddock-dialogs` (the About dialog contract, ADR 0026), `paddock-files` (the releases link, as
+today), `paddock-env`, `serde`, and `tauri` behind its feature.
 
-**The notices macro.** One macro embeds the app's generated notices and nothing else is needed to register them:
+**Notices are a required argument.** `About::new` takes the notices, so an app cannot build an About without them; the
+compiler is the every-app check, and no new conformance script is written (ADR 0022 §3.7(a) allows no new JS tooling
+file):
 
 ```rust
-let about = About::new("Dyno", version, seen)
-    .legal(paddock_about::notices!())?           // resources/THIRD_PARTY_NOTICES.md of the calling crate
-    .legal(paddock_about::licence!(Mit))?        // the family's LICENSE-MIT, embedded once in paddock-about
-    .legal(paddock_about::licence!(Apache))?;
+let about = About::new("Dyno", version, seen, paddock_about::notices!())   // resources/THIRD_PARTY_NOTICES.md
+    .legal(paddock_about::licence!(Mit))?                                  // id `licence-mit`
+    .legal(paddock_about::licence!(Apache))?;                              // id `licence-apache`
 ```
 
-- `notices!()` expands to a `LegalDoc` with id `notices`, title "Third-party notices" and
+- `notices!()` expands to a `Notices` value (id `notices`, title "Third-party notices") with
   `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/resources/THIRD_PARTY_NOTICES.md"))`. A missing file fails the
   build with rustc's "couldn't read" error, naming the path. `notices!("path")` takes another path relative to the
   manifest.
 - The macro also checks the file's first line at compile time (a `const` assertion that it starts with
   `# Third-party notices`), so an empty or hand-written placeholder fails the build too.
-- `licence!(Mit | Apache)` embeds the family's licence texts once, from `paddock-about` itself. Every app's
-  `LICENSE-MIT` and `LICENSE-APACHE` are identical today (plan X27); conformance C28 (the repo baseline) keeps them
-  identical.
-- `LegalDoc` is a typed value (id newtype checked at construction, so `.legal` cannot be given a bad id from the macro).
-  `.legal(id, title, text)` with strings stays for other documents.
+- **Legal ids are fixed family-wide:** `notices`, `licence-mit`, `licence-apache`. Debrief's `mit` and `apache` change in
+  its migration (its UI's `LegalDoc` union in `legal-source.ts` with it).
+- `licence!(Mit | Apache)` embeds `paddock-about`'s own copies of `LICENSE-MIT` and `LICENSE-APACHE`. A unit test in
+  `paddock-about` compares them with the repository root's files and with every `apps/*/LICENSE-*` (the copies the apps
+  ship beside their sources, which conformance C28 already keeps equal to the template), so a difference fails in the
+  crate's own tests.
+- `LegalDoc` and `Notices` are typed values (id newtype checked at construction). `.legal(id, title, text)` with strings
+  stays for other documents.
 
-**Checks over every app (rule 40).** A conformance check fails when an app that registers About does not register
-`notices!()`, or when its `paddock.ci.json` has no `notices` block. One test covers every app, not one test per app.
+**The other every-app check** (rule 40) is in Rust: `./dev deps notices --all --check` (§4) fails when an app with a Tauri
+manifest has no `notices` block in its `paddock.ci.json` or its notices file is stale. One run covers every app.
 
-**Migration of Debrief, Dyno, Spotter, Pitwall and Pitcrew in one change.** No compatibility shim:
+**Migration, each step landing with every app green.**
 
-- Debrief deletes `legal.rs` and its `legal_text` command and uses the shared About through the shell.
-- Dyno and Spotter replace their three `.legal(...)` calls with the macros.
-- Pitwall and Pitcrew get a `notices` block, a generated `THIRD_PARTY_NOTICES.md` and the macro registration. Neither is on
-  the shell on `main` yet; see open question 3 for how they show it until they are.
-- `paddock-updater`'s `UpdatesBuilder::legal`, `.changelog` and the About half of `install` go; the shell's builder takes
-  them.
+- **AB1, one change** (not additive-then-remove, so no step leaves two Abouts): the new crate; `paddock-updater` loses
+  About, `UpdatesBuilder::legal` and `.changelog`; `paddock-shell`'s builder takes them; every app that uses the shared
+  About moves to the macros in the same change: Dyno and Spotter (on the shell after their 1.0 tags), `shell-demo` and
+  `workbench-demo`. Their legal ids become `licence-mit` and `licence-apache`.
+- **AB2, Debrief, inside Debrief 1.2.** Debrief is not on the shell and keeps its own Angular About dialog. Its engine
+  registers `paddock-about`'s command table and adapter with `notices!()`, deletes `legal.rs` and its `legal_text`
+  command, and its UI's `legal-source.ts` calls `about_legal` with the new ids. Debrief does not use the updater's About,
+  so AB1 leaves it green; AB2 is scheduled as a package of the Debrief 1.2 plan, which already changes `paddock-updater`
+  and `paddock-shell` (`docs/plans/debrief-1-2.md`).
+- **Pitwall and Pitcrew (decided).** They get a `notices` block, a generated `THIRD_PARTY_NOTICES.md` and their SBOM in
+  IN1 and IN2, and the `notices!()` registration when they adopt the shell (Pitwall in 1.1, Pitcrew when it resumes). A
+  temporary About of their own would be a copy we delete (rule 42).
 
 ### 2. `paddock-deps`
 
@@ -161,7 +191,7 @@ pub struct Package {
     pub ecosystem: Ecosystem,          // Cargo | Npm | NuGet | PyPI | Go | Maven  (one enum, extended by adding)
     pub name: String, pub version: String,
     pub source: Source,                // Registry(url) | Git { url, rev } | Path | Workspace
-    pub licence: Licence,              // Expression(spdx::Expression) | NonSpdx(String) | Unknown
+    pub licence: Licence,              // Spdx { original, expr } | NonSpdx(String) | Unknown
     pub texts: Vec<LicenceText>,       // { id: Option<LicenceId>, text, origin: File(path) | Canonical }
     pub reach: Reach,                  // Direct | Transitive
     pub scope: Scope,                  // Production | Build | Dev   (Optional for npm optional dependencies)
@@ -170,8 +200,12 @@ pub struct Package {
 }
 ```
 
-Workspace members (our own crates and packages) are `Source::Workspace`: notices skip them, as today; the SBOM lists them
-as first-party components.
+`spdx::Expression` has no serde support, so `Licence::Spdx` keeps the original string beside the parsed form;
+serialisation writes the original and deserialisation parses it again with the same `ParseMode` (a round-trip test
+covers it).
+
+Workspace members (our own crates and packages) are `Source::Workspace` and path dependencies are `Source::Path`: notices
+skip both, as today (`rustCrates` skips every crate without a `source`); the SBOM lists them as first-party components.
 
 **Ports for ecosystems.** An `EcosystemReader` trait (`fn read(&self, files: &dyn FileSource, limits: &Limits) ->
 Result<Partial, DepsError>`) per ecosystem, registered in one table. A new ecosystem is a new implementation (open/closed).
@@ -189,17 +223,20 @@ dev dependencies too for change detection). The typed lock model moves into `pad
 (`Production` or `All`); `lock_diff` uses `All`, `paddock-deps` uses `Production`. One lock parser, tested once (rule 43).
 `paddock-deps` depends on `paddock-repo-graph` with its features off. Likewise its `CargoMetadata` port is the one
 `paddock-repo-graph` already declares, widened to take the arguments (with or without `--no-deps`); there is one cargo
-adapter in the family.
+adapter in the family. `paddock-repo-graph`'s `FileSource` gains a size cap (`read_to_string(path, max_bytes)`, a
+`Limit` error past it), so no reader can be handed an unbounded file.
 
 **Licence texts** come from a `LicenceTexts` port. Its adapter (feature `licence-files`) reads candidate files from a
 package's own folder (crate sources from `cargo metadata`'s `manifest_path`, npm packages from `node_modules`). It
-detects each file's licence with the `spdx` crate's `detection` (threshold 0.8, the value cargo-about 0.9.3 uses,
-`src/licenses.rs` line 110). When a chosen licence has no matching file, it falls back to the canonical text from
+detects each file's licence with the `spdx` crate's `detection` (threshold 0.8, the value cargo-about 0.9.2 and 0.9.3
+use, `src/licenses.rs` line 110). When a chosen licence has no matching file, it falls back to the canonical text from
 `spdx`'s `text` feature, as cargo-about does (`src/generate.rs` lines 141–154). The feature carries about 6 MB of SPDX texts and a
 2 MB detection cache (measured in `spdx` 0.13.6's sources), so only `paddock-dev` enables it; apps embed only their
 generated notices.
 
-**Licence policy.** One file, `templates/repo/licences.toml`, replaces `about.toml` and `licences.mjs`:
+**Licence policy.** One file, `crates/paddock-deps/licences.toml`, replaces `templates/repo/about.toml` and
+`licences.mjs`. It lives only there: `paddock-deps` embeds it at compile time (`include_str!`), so `./dev` and Pacenotes
+evaluate the same compiled policy and no app has a copy.
 
 ```toml
 allow = ["MIT", "MIT-0", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib",
@@ -208,21 +245,46 @@ allow = ["MIT", "MIT-0", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-
 [[exception]]
 licence = "CC-BY-4.0"
 ecosystems = ["npm"]
-reason = "Build-time data (caniuse-lite); its attribution is carried by the notices."
+packages = ["caniuse-lite"]          # names (any version) or name@semver-requirement; omitted = any package
+reason = "Build-time browser data; its attribution is carried by the notices."
 approved = "2026-10-29, the user"
 ```
 
-- **Evaluation** is SPDX semantics through `spdx::Expression::evaluate`: `OR` needs one allowed branch, `AND` needs all,
-  `WITH` needs the exception named in the allow entry. The first two rows of the table above become failing tests.
-- **Parsing is lax for spellings found in the wild, strict about meaning.** `spdx::ParseMode::LAX` accepts `/` as `OR`,
-  imprecise names and deprecated identifiers. `MPL-2.0+` is "MPL-2.0 or later" and satisfies `MPL-2.0`; a deprecated
-  `GPL-2.0` is read as `GPL-2.0-only` and refused. Every normalisation is recorded on the package, so the report says
-  what was read and what it was taken to mean.
-- **Exceptions are scoped and reasoned.** Each `[[exception]]` names its licence, its ecosystems and a reason; one without
-  a reason does not load. A package accepted only through an exception says so in the report. Today's `NPM_EXTRA` entries
-  become exceptions; only CC-BY-4.0's approval is on record (open question 4).
-- **A test keeps `deny.toml`'s allow list equal to `licences.toml`'s** (cargo deny stays the gate for advisories,
-  sources and bans, and stays a second check on licences).
+**One acceptance rule, fail-closed.** A package is accepted if and only if its licence parsed as an SPDX expression and
+`spdx::Expression::evaluate` returns true, with a predicate that returns true for a licence requirement when it is in
+`allow`, or when an exception covers it for this package's ecosystem and name. `evaluate` is the only acceptance path;
+nothing else (a normalisation, a guessed id, a licence file found on disk) can accept a package.
+
+- `OR` needs one accepted branch, `AND` needs all, `WITH` needs the exact `<licence> WITH <exception>` pair in `allow`.
+- **Refused unless a package-scoped exception names them** (an exception with `packages`; an ecosystem-wide exception
+  does not cover these): a licence that is not an SPDX expression (`NonSpdx`), a missing or empty field (`Unknown`),
+  `NOASSERTION`, `UNLICENSED`, `SEE LICENSE IN <file>`, and any `LicenseRef-…`. For these the exception carries the
+  reviewed licence text's file and a reason.
+- **Parsing.** A custom `spdx::ParseMode`: `/` as `OR` allowed, `+` after GPL ids allowed, deprecated ids allowed, unknown
+  ids not allowed, and **imprecise names off** (`allow_imprecise_license_names: false`), so "Apache 2" or "BSD" never
+  become an identifier we did not read. Every lax reading (a slash, a deprecated id) is reported on the package as a
+  normalisation; a normalisation changes only how the expression is read, never whether a requirement is allowed.
+- **What `+` and deprecated ids mean.** `MPL-2.0+` is the requirement "MPL-2.0 or later"; the allowed licensee `MPL-2.0`
+  satisfies it because the ids are the same (`spdx` 0.13.6, `Licensee::satisfies`, `src/licensee.rs` lines 192–226).
+  The deprecated `GPL-2.0` parses to the deprecated identifier `GPL-2.0`; no GPL identifier is in `allow`, so it
+  evaluates false and is refused, whichever GPL variant was meant.
+- **Exceptions** name their licence, ecosystems, optional packages, reason and approval; one without a reason or approval
+  does not load. A package accepted only through an exception says so in the report.
+- **The npm-only exceptions (decided by the user, 2026-10-29):** `CC-BY-4.0`, `OFL-1.1`, `Python-2.0` and
+  `BlueOak-1.0.0`, each for npm only and scoped to the packages that need it today (DP1 lists them from the current lock;
+  fonts for OFL-1.1, for example). A new npm package under one of them needs its name added, which is a reviewed diff.
+- **cargo deny stays a second gate** for Rust (advisories, sources, bans and licences). A test in `paddock-deps` reads
+  `crates/deny.toml`, `tools/paddock-dev/deny.toml`, `templates/repo/deny.toml` and every `apps/*/deny.toml` and checks
+  that each `[licenses].allow` equals `allow`, and that each `[licenses].exceptions` entry (for example `crates/deny.toml`'s
+  `webpki-root-certs` / `CDLA-Permissive-2.0`) has a matching cargo-scoped `[[exception]]` and the other way round.
+
+DP1's failing tests are the rows of the table in Problems 2 and these: `MIT AND GPL-3.0-only` refused; `MIT OR
+GPL-3.0-only` accepted; `MPL-2.0+` accepted; `GPL-2.0` refused; `MIT/Apache-2.0` accepted with a normalisation reported;
+`Apache 2` refused (imprecise names off); `CC-BY-4.0` refused for a crate and for an npm package not named in the
+exception, accepted for `caniuse-lite`; `NOASSERTION`, `UNLICENSED`, `SEE LICENSE IN LICENSE.txt`,
+`LicenseRef-Proprietary`, `""` and a missing field refused, and accepted only through a package-scoped exception;
+`Apache-2.0 WITH LLVM-exception` accepted and `MIT WITH LLVM-exception` refused; an exception without a reason does not
+load; the deny.toml equality test fails on a planted difference.
 
 **Outputs (writers, pure functions of the inventory).**
 
@@ -233,7 +295,10 @@ approved = "2026-10-29, the user"
    the file name, and cargo-about's choice of licences for an `OR` expression (the first branch the accepted list
    satisfies: `MIT OR Apache-2.0` lists only the MIT text, as Debrief's notices show for `anyhow` and `serde`).
 2. **CycloneDX 1.6 JSON**, one file per app per release (`<app>-<version>.cdx.json`, both ecosystems in one BOM):
-   `metadata.component` is the app with its licence; components carry `purl` (`pkg:cargo/…`, `pkg:npm/…`), `bom-ref`,
+   `metadata.component` is the app with its licence. Components (decided): third-party packages; our own `paddock-*`
+   crates and app crates as first-party components without hashes; and the bundled binaries (libduckdb, FFmpeg,
+   llama.cpp and the other pins in `paddock-runtime`'s catalogues that an app ships), from those catalogues with their
+   pinned hashes. Components carry `purl` (`pkg:cargo/…`, `pkg:npm/…`), `bom-ref`,
    `scope` (`required`, or `optional` for npm optional dependencies; dev dependencies are left out), `hashes` and
    `licenses` (an `expression`, or a `license.name` for a non-SPDX string); `dependencies` carries the graph. It is
    reproducible: `serialNumber` is a UUID v5 of the app, its version and the lockfiles' hashes, and `timestamp` is the
@@ -249,9 +314,11 @@ guessed here. Errors are a typed `DepsError` (`Parse { path, reason }`, `Limit {
 `Tool { program, reason }`, `Missing { what, next_step }`). Policy failures are findings in the report, not errors.
 Parsers never panic on any bytes (a `paddock-testkit` never-panics corpus per reader; fuzz targets on `app-fuzz.yml`).
 
-**No network by default.** The core has none. Fetching a missing licence text is the feature `fetch`, off by default,
-used only by an explicit flag (`--fetch-licences`). It goes through `paddock-net`'s `Egress` with a host allow-list and
-`set_offline`, never during a release build (the release must be reproducible from the lockfiles and sources).
+**No network by default, and none in the release path.** The core has none. Fetching a licence text is the feature
+`fetch`, off by default, through `paddock-net`'s `Egress` with a host allow-list and `set_offline`. `paddock-dev` never
+enables it, so no `./dev` command (release, notices or SBOM) can fetch: the release is reproducible from the lockfiles
+and sources. This is enforced by the same `cargo tree -e features` check that guards Pacenotes (§5), applied to
+`tools/paddock-dev`. Whether Pacenotes may enable it is open question 2.
 
 ### 3. Library choices (researched 2026-10-29)
 
@@ -260,18 +327,20 @@ count.
 
 | Need | Choice | Licence | Maintenance | Why, and the rejected alternatives |
 |---|---|---|---|---|
-| SPDX expressions, evaluation, deprecated spellings, canonical texts, licence detection | **`spdx` 0.13.x** (EmbarkStudios) | Apache-2.0 (0.13.6's manifest) | 0.13.6 published 2026-10-02; ~7.0 M recent downloads; used by cargo-deny and cargo-about | It is what cargo-about and cargo-deny use, so our evaluation and detection agree with both. It has `ParseMode::LAX` (slash, imprecise names, `+` on GPL, deprecated ids; `src/lexer.rs`), the SPDX list 3.29.0, `text` and `detection` features. **Pin the minor version** to the one cargo-about uses: detection scores decide which files count, and a new store can change the notices. Writing our own: no, the SPDX grammar and the licence list are exactly what a shared crate should not re-implement. |
+| SPDX expressions, evaluation, deprecated spellings, canonical texts, licence detection | **`spdx` `=0.13.4`** (EmbarkStudios) | Apache-2.0 (0.13.6's manifest; 0.13.4's to be confirmed by `cargo deny` in DP1) | 0.13.6 published 2026-10-02; ~7.0 M recent downloads; used by cargo-deny and cargo-about | It is what cargo-about and cargo-deny use, so our evaluation and detection agree with both. It has `ParseMode::LAX` (slash, imprecise names, `+` on GPL, deprecated ids; `src/lexer.rs`), the SPDX list 3.29.0, `text` and `detection` features. **Pin it exactly to the oracle's version:** `spdx = "=0.13.4"`, the version in cargo-about 0.9.2's `Cargo.lock` (the pinned oracle in `scripts/notices.sh` and the workflows; 0.9.3 locks 0.13.6). Detection scores decide which files count, so a different store can change the notices. To move to 0.13.6, bump the oracle to cargo-about 0.9.3 first and regenerate every app's notices in that change. Writing our own: no, the SPDX grammar and the licence list are exactly what a shared crate should not re-implement. |
 | `cargo metadata` types | **Own serde structs** for the ~10 fields used | ours | – | `paddock-repo-graph` already parses this JSON with `serde_json`; ids are used as opaque keys, so the PackageId format change does not matter. Rejected: `cargo_metadata` 0.23.1 (MIT, 2025-11-12, ~65 M recent downloads, well maintained) would add `derive_builder` and `cargo-platform` and a 0.x API that breaks every few releases for a dozen fields. Fallback if the subset grows: adopt it. |
 | `Cargo.lock` without running cargo (Pacenotes) | **`cargo-lock` 11.x** (RustSec) | Apache-2.0 OR MIT | 11.1.0 published 2026-07-24; ~7.7 M recent downloads; part of the RustSec project | Parses every lockfile version, including dependency lists and checksums, without cargo. Writing our own is possible (TOML) but the format has three versions and RustSec maintains them. |
 | CycloneDX 1.6 JSON | **Own writer** (serde structs for the subset we emit) | ours; schema Apache-2.0 | – | `cyclonedx-bom` 0.8.1 (Apache-2.0, published 2026-03-19) supports spec 1.3–1.5 only (`src/models/bom.rs`, `SpecVersion`; read 2026-10-29). Support for 1.6 and 1.7 was merged upstream on 2026-10-08 (PR #872), but no release has it yet. `serde-cyclonedx` 0.10.0 (MIT, 2025-06-17) is generated from schemas and small. We emit about fifteen fields; a writer of our own with a schema test is smaller than either dependency. Revisit `cyclonedx-bom` when a release with 1.6 ships (it would also give us 1.7 and validation). |
 | Licence files and detection | **Our scan on `spdx` detection**, matching cargo-about's rules | ours | – | See "Risks": reproducing cargo-about's choices is the hard part. Rejected for production use: the `cargo_about` library (MIT OR Apache-2.0, 0.9.3 published 2026-10-26; it has a `lib` target). It links `ureq`, `rustls` and `ring` unconditionally, its library API is the binary's internals (no stability promise), and it brings `krates`. It stays the **oracle**: the golden and shadow comparisons run today's cargo-about against our output. Fallback if DP3 cannot close the differences in its budget: use `cargo_about::licenses::Gatherer` for Rust crates behind the `licence-files` feature. |
-| XML (Maven, NuGet `.csproj`) | **`roxmltree`** | MIT OR Apache-2.0 | 0.21.2 published 2026-10-24; already in the family's lockfiles (0.20.0) | Read-only, no entity expansion of external DTDs; refuse documents with a DTD (to be confirmed in PN1 by a billion-laughs test). |
-| Schema test | **`jsonschema`**, dev-dependency only, default features off | MIT | 0.60.2 published 2026-10-26; already in the family's lockfiles (0.33.0) | Validates the CycloneDX output in tests. |
+| XML (Maven, NuGet `.csproj`) | **`roxmltree`** | MIT OR Apache-2.0 | 0.21.2 published 2026-10-24; already in the family's lockfiles (0.20.0) | `ParsingOptions` defaults to `allow_dtd: false` (a document with a DTD is an error) and `nodes_limit: u32::MAX` (`src/parse.rs` lines 340–376, read 2026-10-29). We keep DTDs refused and **set `nodes_limit`** from `Limits`; PN1 tests a billion-laughs document and an over-limit one. |
+| Schema test | **`jsonschema`**, dev-dependency only, default features off | MIT | 0.60.2 published 2026-10-26; already in the family's lockfiles (0.33.0) | Validates the CycloneDX output in tests. The 1.6 schema references `spdx.schema.json` and `jsf-0.82.schema.json`; all three are vendored under `tests/fixtures/schema/` and resolved locally (no network in tests). |
+| Compile-fail tests of `notices!()` | **`trybuild`**, dev-dependency of `paddock-about` | MIT OR Apache-2.0 | dtolnay; widely used | Checks the error text of a missing and of a placeholder notices file, which a `compile_fail` doc test cannot. |
 | UUID v5 for `serialNumber` | **`uuid`** (`v5`) | Apache-2.0 OR MIT | 1.29.0 published 2026-10-23; already in the family | – |
 
-Every crate above is on the allow list. Transitive licences are checked by `cargo deny` in DP1 (one unverified item: the
-`zstd` crate behind `spdx`'s detection cache reports BSD-3-Clause for its latest version on crates.io; its bundled C
-library is dual BSD-3-Clause OR GPL-2.0, which the allow list's BSD entry satisfies; DP1 confirms with `cargo deny`).
+Every crate above is on the allow list; `cargo deny` checks the transitive ones in DP1. `spdx` depends on `zstd` 0.13
+(MIT, crates.io, 2026-10-29) only through its `detection-cache` feature (`spdx` 0.13.6 `Cargo.toml`: `zstd` is optional and
+named only by `detection-cache`); `paddock-deps` enables `detection` and the cache, so `zstd` and `zstd-sys` are in
+`paddock-dev`'s tree, not in any app's.
 
 ### 4. Integration
 
@@ -281,13 +350,20 @@ library is dual BSD-3-Clause OR GPL-2.0, which the allow list's BSD entry satisf
   0022's R6, which shrinks by it. The tool runs `cargo metadata --locked --offline`; when sources are missing it fails with
   "run `cargo fetch --locked`", and when `node_modules` is missing with "run `npm ci --ignore-scripts`".
 - **Deleted in the same change** (ADR 0022 §3.7, the baseline shrinks): `scripts/notices.sh`,
-  `conformance/src/notices/`, `conformance/bin/paddock-notices.mjs`, their tests, `templates/repo/about.toml` and the
-  cargo-about install.
+  `conformance/src/notices/`, `conformance/bin/paddock-notices.mjs`, `conformance/test/notices.test.mjs`,
+  `templates/repo/about.toml`, and every cargo-about install and call: `app-licences.yml` line 59 (`cargo-about@0.9.2`
+  in the install step; `cargo-deny` stays) and lines 80–85 (the "Third-party notices are up to date" step, replaced by
+  `./dev deps notices --check`), and `debrief.yml` lines 362–366 (the cargo-about install and its comment) with the
+  cache comment at lines 368–370 reworded (the cache stays for cargo deny). `debrief.yml` lines 1023–1029 (the SBOM
+  step) go in IN2. Line numbers are `origin/main` at
+  `b618b5c97`; the `feat/shared-notices` lines in `app-gates` go too if that branch has merged.
 - **The conformance check that notices are current stays,** as the `app-gates` step `./dev deps notices <app> --check`
-  on the Linux leg (where `feat/shared-notices` put the JS check), plus the every-app check of §1.
+  on the Linux leg (where `feat/shared-notices` put the JS check), plus `./dev deps notices --all --check` (§1).
 - **SBOMs for every app.** `app-release.yml` (Dyno, Spotter, Pitwall, Pitcrew, the demos) and `debrief.yml` run
   `./dev deps sbom` and attach `<app>-<version>.cdx.json` as a release asset. Debrief's `cargo cyclonedx` and `npx --yes
-  @cyclonedx/cyclonedx-npm` steps are removed, and with them the unpinned download.
+  @cyclonedx/cyclonedx-npm` steps are removed, and with them the unpinned download. Before they go, IN2 runs both old
+  tools and `./dev deps sbom` once on Debrief and compares the sets of `purl`s (and their versions); every difference is
+  explained in the PR (for example build dependencies that cargo-cyclonedx lists and we leave out).
 - **Shadow week** (ADR 0022 §3.6): for one week on `main`, the JS tool and `./dev deps notices` both run for every app and a
   step compares them. A difference is a warning with both outputs and is reviewed, never accepted silently.
 
@@ -315,43 +391,63 @@ Pacenotes adopts `paddock-deps` for its dependency inventory view (plan VW1b; pr
 4. **Licences without a build.** In v1 the inventory shows the licence when the lockfile carries it (npm), and "not known
    offline" otherwise, never a guess. Licence resolution (v1.1 in the proposal) reads package caches already on the
    machine, read-only and only with the user's opt-in, because they are outside the workspace allow-list: the Cargo
-   registry, the NuGet global packages folder, the Go module cache and the local Maven repository. A network lookup is a
-   separate opt-in through `Egress` (open question 5). Licence detection runs in a worker under `paddock-guard`, with the
-   limits above.
+   registry, the NuGet global packages folder, the Go module cache and the local Maven repository. It reads the
+   declared licence from each cached package's own metadata (the `license` field of the crate's `Cargo.toml`, the
+   `.nuspec`, the POM, the Python package's metadata), which needs no detection. Detecting licence files is only for
+   packages without a declared licence and for showing texts; it runs in a worker under `paddock-guard` with the limits
+   above, with `spdx`'s detection compiled into that worker only. A network lookup is a separate opt-in through `Egress`
+   (open question 2).
 5. **Export.** CycloneDX 1.6 from the same writer (v1.1), with Pacenotes' tier and confidence labels kept as CycloneDX
    properties.
 
 ## Phases and work packages
 
 Estimates are agent-days for an implementer; DP3 and PN1 start with a researcher. Every package starts with its failing
-tests, lands on its own, and passes the gates named. The common gates for crate work are `cargo fmt --check`, clippy with
-`-D warnings` (and xwin clippy, ADR 0021), nextest, `cargo llvm-cov` at 99 % lines or more for the crate, `cargo hakari
-generate --diff`/`verify`, `node scripts/publish.test.mjs` and `cargo deny check`.
+tests, lands on its own with every app green, and passes the gates named. The common gates for crate work are `cargo fmt
+--check`, clippy with `-D warnings` (and xwin clippy, ADR 0021), nextest, `cargo llvm-cov` at 99 % lines or more for the
+crate, `cargo hakari generate --diff`/`verify`, `node scripts/publish.test.mjs` and `cargo deny check`.
 
-| Phase | WP | Content | Failing tests first | Gates beyond the common ones | Days |
-|---|---|---|---|---|---|
-| **1 About** (after the Dyno 1.0 and Spotter 1.0 tags, outside the Pitwall 1.1 freeze; open question 1) | AB1 | `crates/paddock-about` (new-crate checklist): About, legal documents, What's New with `SeenVersion`, `notices!()` and `licence!()`, command table and `tauri` adapter, generated TS; `paddock-updater` loses About; `paddock-shell` wires both | a `compile_fail` doc test for a missing notices file and one for a placeholder file; `.legal` refuses a bad id; What's New never shows another version's notes (moved test); the updater's command table no longer lists About commands | the shell's and the About dialog's Playwright specs (Chromium); the generated-TS sync test | 2 |
-| | AB2 | Migrate Debrief, Dyno, Spotter, Pitwall, Pitcrew in one change; delete Debrief's `legal.rs`; notices blocks and generated notices for Pitwall and Pitcrew; the every-app conformance check | the every-app check fails on `main`'s Pitwall and Pitcrew before the change; Debrief's About test lists "Third-party notices" through the shared command | each app's affected gates (`scripts/affected.mjs`) and one real-app smoke of Debrief | 2 |
-| **2 Inventory core** (new crate only; can run beside a release once its `crates/Cargo.toml` and hakari lines land between releases) | DP1 | `crates/paddock-deps` core: `Inventory`, `Ecosystem`, `licences.toml` policy, evaluation on `spdx`, scoped exceptions with reasons, the deny-list equality test | the five rows of the table in Problems 2; `MPL-2.0+` satisfies `MPL-2.0`; `GPL-2.0` (deprecated) is refused; an exception without a reason does not load | `cargo deny` over the new dependencies | 1.5 |
-| | DP2 | npm: the typed lock model moved into `paddock-repo-graph` with `Scope`, the production closure, `license` from the lock, licence files from `node_modules` | golden: the JS tool's npm half on synthetic lock fixtures (workspaces, nested `node_modules`, links, optional peers); `lock_diff`'s existing tests stay green | `paddock-repo-graph`'s tests and coverage | 1.5 |
-| | DP3 | Cargo: the widened `CargoMetadata` port and adapter (`cargo-metadata` feature), production closure (normal dependencies, all targets, no build or dev), licence-file scan with `spdx` detection, canonical fallback, accepted-order choice; `cargo::Lockfile` on `cargo-lock` | golden: cargo-about 0.9.x JSON on synthetic crates (dual licences, a crate without a licence file, a crate with two MIT files from different holders, an `AND` expression, a `LicenseRef`); never-panics on lockfile bytes | a local comparison against today's notices of Debrief, Dyno and Spotter (no difference except reviewed ones) | 3 |
-| | DP4 | Writers: notices (byte for byte but the header), CycloneDX 1.6 (schema test, reproducible serial number and timestamp) | golden notices from the JS `render` on the DP2/DP3 fixtures; a BOM made twice from the same inputs is identical; the schema test fails on a BOM missing `specVersion` | – | 2 |
-| **3 Integration** (ADR 0022 R6, notices part) | IN1 | `./dev deps notices|sbom|inventory`; the `app-gates` step; shadow week; then delete the JS tool, `scripts/notices.sh`, `about.toml` and the cargo-about install; record the step's time before and after in `docs/benchmarks.md` (rule 48) | `--check` fails on a stale file and on a refused licence; a missing `node_modules` gives the next-step message | the shadow week ends with no unexplained difference; ADR 0022 §3.7 baseline shrinks | 1.5 |
-| | IN2 | SBOM in `app-release.yml` and `debrief.yml` as release assets; remove the cargo-cyclonedx and cyclonedx-npm steps | a `workflow_dispatch` dry run of `app-release.yml` lists `<app>-<version>.cdx.json` | dry run per app (ADR 0022 phase 2 acceptance) | 1 |
-| **4 Pacenotes** (stage 2, after Debrief 1.2) | PN1 | NuGet, PyPI, Go and Maven readers; workspace discovery through `paddock-repo-files`; the extended feature check for `apps/pacenotes/` | per reader: golden inventories on synthetic repositories; never-panics corpus; a pom with a DTD is refused; the feature check fails on a planted `cargo-metadata` | Pacenotes' F1 port checks; fuzz targets added to `app-fuzz.yml` | 4 |
-| | PN2 | Offline licence resolution from the opt-in package caches; detection in a guarded worker; CycloneDX export with Pacenotes' labels | a package with no cached sources says "not known offline"; a cache outside the opt-in is never read (fake file source records every read) | – | 2 |
-| | | **Total** | | | **about 20.5** (14.5 for releases, 6 for Pacenotes) |
+**Ownership.** The "Owns" paths of the packages are disjoint, so packages of different phases can run in parallel
+within load. The **integrating agent (the coordinator)** makes every change to the shared integration points (root
+AGENTS.md): it adds the `crates/Cargo.toml` member and `[workspace.dependencies]` lines, regenerates and commits
+`crates/Cargo.lock` and `crates/paddock-workspace-hack/` (`cargo hakari generate`), adds the `crates/README.md` rows and the
+`docs/adr/README.md` status, edits `crates/paddock-updater/src/lib.rs`, `crates/paddock-shell/src/lib.rs` and
+`crates/paddock-repo-graph/src/lib.rs` (re-exports and command tables), `tools/paddock-dev/src/cli.rs` (the subcommand
+line), and everything under `.gitea/`. A package hands it those lines in its PR description. DP1 owns the
+`paddock-deps` skeleton: `src/lib.rs` with every module declared (`policy`, `inventory`, `npm`, `cargo`, `texts`,
+`notices`, `cyclonedx`, `nuget`, `pypi`, `go`, `maven`, `caches`) as empty files, and `tests/it/main.rs` with one `mod`
+per later package, so later packages own only their module folders.
+
+**When.** Phases 1 and 2 start after the Dyno 1.0 and Spotter 1.0 tags (decided: DP1–DP4 and IN1 do not wait for
+anything else in ADR 0022; IN1 is R6's notices part). Every package that changes a crate a release depends on, the
+workspace hack or a workflow (AB1, DP1, DP2, DP3, IN1, IN2) lands **between releases**, never during a release's freeze
+(rule 1). DP4 touches only `paddock-deps`, which no release depends on until IN1.
+
+| Phase | WP | Content | Owns | Depends on | Failing tests first | Gates beyond the common ones | Days |
+|---|---|---|---|---|---|---|---|
+| **1 About** | AB1 | `paddock-about` (new-crate checklist), the What's New migration from `updates.json`, `notices!()`/`licence!()`, command table, `tauri` adapter, generated TS; `paddock-updater` loses About; `paddock-shell` wires both; Dyno, Spotter, `shell-demo` and `workbench-demo` move to it, ids `licence-mit`/`licence-apache` | `crates/paddock-about/**`; `crates/paddock-updater/src/{about.rs,notes.rs,record.rs,tauri.rs,tauri/**}`, its `tests/**` and `Cargo.toml`; `crates/paddock-shell/src/` except `lib.rs`, its `Cargo.toml`; `ui/projects/paddock-ui/shell/about/**`; the About wiring in `apps/{dyno,spotter}/app/src-tauri/src/lib.rs` and `apps/{shell-demo,workbench-demo}/src-tauri/src/lib.rs` | the Dyno 1.0 and Spotter 1.0 tags (both apps on the shell); open question 1 | `trybuild`: a missing and a placeholder notices file fail with the path in the error; the three upgrade tests of §1; `About::new` without notices does not compile; the licence copies equal every app's; the updater's command table has no About command; What's New never shows another version's notes (moved) | the shell's About, Updates and What's New Playwright specs (Chromium); the generated-TS sync tests; the affected gates of Dyno, Spotter and both demos | 3.5 |
+| | AB2 | Debrief on `paddock-about` with its own dialog: register the command table and adapter with `notices!()`, delete `legal.rs` and `legal_text`, `legal-source.ts` on `about_legal` with the new ids | `apps/debrief/app/src-tauri/src/legal.rs` (deleted), the About lines of `apps/debrief/app/src-tauri/src/lib.rs` and its `Cargo.toml`, `apps/debrief/app/src/app/about/**` | AB1; scheduled as a package of the Debrief 1.2 plan | Debrief's About lists the three ids from the engine; asking for `mit` is refused | Debrief's affected gates; one real-app smoke | 1 |
+| **2 Inventory core** | DP1 | `paddock-deps` skeleton and policy: `Inventory`, `Licence` with serde round trip, the custom `ParseMode`, `licences.toml`, `evaluate` as the only acceptance path, scoped exceptions, the deny.toml equality test and the cargo exceptions mirrored | `crates/paddock-deps/{Cargo.toml,licences.toml,src/lib.rs,src/policy/**,src/inventory/**,src/*/mod.rs stubs,tests/it/main.rs,tests/it/policy.rs}`; the `[licenses]` sections of `crates/deny.toml`, `tools/paddock-dev/deny.toml`, `templates/repo/deny.toml`, `apps/*/deny.toml` | phase 1's window (not AB1 itself) | the cases listed under "One acceptance rule" | `cargo deny` over the new dependencies | 2 |
+| | DP2 | npm: the typed lock model in `paddock-repo-graph` with `Scope`; `FileSource` size cap; the production closure; `license` from the lock; licence files from `node_modules` | `crates/paddock-repo-graph/src/{lock.rs,source.rs,npm.rs}` and their tests; `crates/paddock-deps/src/npm/**`, `tests/it/npm.rs`, `tests/fixtures/npm/**` | DP1 | golden: the JS tool's npm half on synthetic locks (workspaces, nested `node_modules`, links, optional peers); a file over the cap is a `Limit` error; `lock_diff`'s tests stay green | `paddock-repo-graph`'s tests and coverage | 1.5 |
+| | DP3 | Cargo: the widened `CargoMetadata` port and adapter, production closure (normal dependencies, all targets), `Source::Path` and `Workspace` skipped in notices, licence-file scan with `spdx` `=0.13.4` detection, canonical fallback, accepted-order choice; `cargo::Lockfile` on `cargo-lock` | `crates/paddock-repo-graph/src/cargo.rs` and its tests; `crates/paddock-deps/src/{cargo,texts}/**`, `tests/it/cargo.rs`, `tests/fixtures/cargo/**` | DP1 | golden: cargo-about 0.9.2 JSON on synthetic crates (dual licences, no licence file, two MIT files from different holders, an `AND` expression, a `LicenseRef`, a path dependency); never-panics on lockfile bytes | a local comparison with today's notices of Debrief, Dyno and Spotter (only reviewed differences) | 3 |
+| | DP4 | Writers: notices (byte for byte but the header) and CycloneDX 1.6 (vendored schemas, reproducible serial and timestamp, first-party and bundled-binary components) | `crates/paddock-deps/src/{notices,cyclonedx}/**`, `tests/it/{notices,cyclonedx}.rs`, `tests/fixtures/{notices,schema}/**` | DP1 (fixtures from DP2 and DP3 when they land; synthetic inventories until then) | golden notices from the JS `render`; a BOM made twice is identical; the schema test fails on a BOM without `specVersion` | – | 2 |
+| **3 Integration** | IN1 | `./dev deps notices|sbom|inventory`, `--all --check`; shadow week; notices blocks and generated notices for Pitwall and Pitcrew; then the deletions of §4; the step's time before and after in `docs/benchmarks.md` (rule 48) | `tools/paddock-dev/src/deps/**` and its tests, `tools/paddock-dev/{Cargo.toml,Cargo.lock}`; `apps/{pitwall,pitcrew}/paddock.ci.json` notices blocks and their generated `THIRD_PARTY_NOTICES.md`; the deleted files of §4 outside `.gitea/` | DP2, DP3, DP4 | `--check` fails on a stale file and on a refused licence; `--all --check` fails for an app without a `notices` block; a missing `node_modules` gives the next-step message; the feature check fails when `tools/paddock-dev` enables `fetch` | shadow week with no unexplained difference; ADR 0022 §3.7 baseline shrinks | 1.5 |
+| | IN2 | SBOMs in `app-release.yml` and `debrief.yml` as release assets; the one-time `purl` comparison; remove the cargo-cyclonedx and cyclonedx-npm steps and the cargo-about lines of §4 | done by the integrating agent (all of it is `.gitea/`) | IN1 | a `workflow_dispatch` dry run of `app-release.yml` lists `<app>-<version>.cdx.json` | dry run per app (ADR 0022 phase 2 acceptance) | 1 |
+| **4 Pacenotes** (stage 2, after Debrief 1.2) | PN1 | NuGet, PyPI, Go and Maven readers; workspace discovery through `paddock-repo-files`; `roxmltree` with `nodes_limit`; the feature check extended to `apps/pacenotes/` | `crates/paddock-deps/src/{nuget,pypi,go,maven}/**`, `tests/it/{nuget,pypi,go,maven}.rs`, `tests/fixtures/{nuget,pypi,go,maven}/**`; the fuzz targets under `crates/paddock-deps/fuzz/` | DP1; Pacenotes stage 2 | per reader: golden inventories on synthetic repositories; never-panics corpus; a POM with a DTD and one over the node limit refused; the feature check fails on a planted `cargo-metadata` | Pacenotes' F1 port checks; fuzz targets on `app-fuzz.yml` | 4 |
+| | PN2 | Licences from the opt-in package caches (declared `license` fields first), detection in a guarded worker, CycloneDX export with Pacenotes' labels | `crates/paddock-deps/src/caches/**`, `tests/it/caches.rs`; Pacenotes' adoption under `apps/pacenotes/crates/` | PN1, DP3, DP4 | a package without cached sources says "not known offline"; a cache outside the opt-in is never read (a fake file source records every read) | – | 2 |
+| | | **Total** | | | | | **about 21.5** (15.5 for releases, 6 for Pacenotes) |
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| Our licence-file choices differ from cargo-about's, so the notices are not byte for byte the same | cargo-about stays the oracle in DP3's golden tests and in the shadow week; `spdx` is pinned to cargo-about's minor version and the threshold to 0.8; fallback: the `cargo_about` library behind `licence-files` (§3) |
-| A new `spdx` release changes detection and so the notices | pinned minor; Renovate's update of `spdx` regenerates every app's notices in the same PR, reviewed as a diff |
-| Phase 1 changes `paddock-updater` and `paddock-shell`, which Pitwall 1.1 and Debrief 1.2 also change | land AB1–AB2 in the window after the Dyno and Spotter tags and before Pitwall 1.1's freeze, or after its tag (open question 1); rule 1 keeps tags serialised |
-| A new crate's hakari line changes feature unification for every crate | land the `crates/Cargo.toml` member and hakari change between releases, as their own small PR |
-| Pitwall and Pitcrew are not on the shell, so they have no About to register notices in | open question 3 |
-| The SBOM omits something a consumer expects (build tools, the WebView runtime, bundled binaries such as libduckdb) | the BOM documents what it covers in `metadata.properties`; bundled binaries are added from `paddock-runtime`'s pin catalogues in a later WP (open question 6) |
+| Our licence-file choices differ from cargo-about's, so the notices are not byte for byte the same | cargo-about 0.9.2 stays the oracle in DP3's golden tests and in the shadow week; `spdx` is pinned to `=0.13.4` (the oracle's) and the threshold to 0.8; fallback: the `cargo_about` library behind `licence-files` (§3) |
+| A new `spdx` release changes detection and so the notices | exact pin; an update is a deliberate change that bumps the oracle and regenerates every app's notices in the same PR, reviewed as a diff (Renovate is told to leave `spdx` alone) |
+| Existing users miss What's New for the version that ships `paddock-about` | the one-time read of `whats_new_seen` from `updates.json` and its three upgrade tests (§1) |
+| The fail-closed policy refuses packages the JS tool let through, blocking a release | DP1 runs the policy over every app's current inventory first; each refusal becomes a package-scoped exception with a reason for the user to approve, or a dependency change, before IN1 switches the check |
+| Phase 1 changes `paddock-updater` and `paddock-shell`, which Pitwall 1.1 and Debrief 1.2 also change | AB1 lands between releases (open question 1); AB2 is part of the Debrief 1.2 plan; rule 1 keeps tags serialised |
+| A new crate's hakari line changes feature unification for every crate | the integrating agent lands the member and hakari change between releases, as its own small PR |
+| The SBOM omits something a consumer expects (build tools, the WebView runtime) | bundled binaries and first-party crates are components (§2); the BOM states what it covers in `metadata.properties` |
 | Hostile manifests in Pacenotes (huge files, deep nesting, XML entities) | limits on every input, never-panics corpora, fuzzing, DTDs refused, readers run in a guarded worker |
 | Licence text fetching leaks dependency names | off by default, explicit flag or click, through `Egress`; never in release builds |
 
@@ -361,29 +457,31 @@ generate --diff`/`verify`, `node scripts/publish.test.mjs` and `cargo deny check
 - One mechanism registers notices, and a missing or placeholder file fails the build.
 - One Rust implementation answers "what do we ship and under which licence" for notices, SBOMs and Pacenotes. The JS tool,
   `scripts/notices.sh`, `about.toml`, cargo-about, cargo-cyclonedx and cyclonedx-npm leave the release path.
-- The licence check gets correct `AND` semantics and scoped, reasoned exceptions; two expressions the JS check accepts
-  today will be refused.
+- The licence check is fail-closed: one evaluation path, correct `AND` semantics, and scoped, reasoned exceptions.
+  Expressions the JS check accepts today (`MIT AND GPL-3.0-only`, unknown and non-SPDX licences) will be refused.
 - Every app release carries a reproducible CycloneDX 1.6 SBOM.
 - Pacenotes starts its inventory on a tested core and adds only readers.
 
+## Decided while writing (2026-10-29)
+
+- **Phase 2's start:** DP1–DP4 start after the Dyno and Spotter tags, each landing between releases; IN1 is ADR 0022 R6's
+  notices part and R6 shrinks by it.
+- **Pitwall and Pitcrew:** notices file, SBOM and the `--all --check` now (IN1, IN2); `notices!()` when they adopt the
+  shell. No temporary About.
+- **npm-only exceptions** (the user): `CC-BY-4.0`, `OFL-1.1`, `Python-2.0` and `BlueOak-1.0.0`, for npm only, scoped per
+  package where the current lock allows.
+- **CycloneDX:** 1.6 (1.7 exists, but no Rust library releases 1.6 yet), one combined BOM per app, dev dependencies left
+  out, first-party crates and bundled binaries included.
+- **Debrief** uses `paddock-about` directly with its own dialog, as a package of Debrief 1.2.
+
 ## Open questions for the user
 
-1. **When does phase 1 land?** It changes `paddock-updater` and `paddock-shell`, which Pitwall 1.1 and Debrief 1.2 depend
-   on. Proposal: right after the Dyno and Spotter tags, before Pitwall 1.1's freeze, so Pitwall 1.1 ships on it.
-   Otherwise after the Pitwall 1.1 tag.
-2. **Phase 2 before or with ADR 0022's R6?** Proposal: DP1–DP4 as soon as the crate's member line can land between
-   releases; IN1 replaces R6's notices part.
-3. **Pitwall and Pitcrew before they move to the shell.** Proposal: they get the notices file, the generated SBOM and the
-   conformance check now, and register `notices!()` when they adopt the shell (Pitwall in 1.1, Pitcrew when it resumes).
-   The alternative is a small About of their own until then, which is a copy we would delete.
-4. **The other npm-only exceptions.** CC-BY-4.0 (npm only) is approved. `OFL-1.1` (fonts), `Python-2.0` and
-   `BlueOak-1.0.0` are in `NPM_EXTRA` today without a recorded approval. Keep them as npm-only exceptions with these
-   reasons?
-5. **Network licence lookups in Pacenotes.** Allow an opt-in lookup (for example crates.io, the npm registry, NuGet,
-   deps.dev) through `Egress`, or stay strictly offline with only the opt-in local caches?
-6. **CycloneDX version and scope.** 1.6 as briefed (1.7 exists, but no Rust library releases 1.6 yet), one combined BOM per
-   app, dev dependencies left out. Should bundled binaries (libduckdb, FFmpeg, llama.cpp from `paddock-runtime` pins)
-   and the first-party `paddock-*` crates be components too? Proposal: yes for both, first-party ones without hashes.
+1. **When does AB1 land?** It changes `paddock-updater` and `paddock-shell`, which Pitwall 1.1 and Debrief 1.2 depend on.
+   Proposal: right after the Dyno and Spotter tags and before Pitwall 1.1's freeze, so Pitwall 1.1 ships on it. Otherwise
+   after the Pitwall 1.1 tag.
+2. **Network licence lookups in Pacenotes.** Allow an opt-in lookup (for example crates.io, the npm registry, NuGet,
+   deps.dev) through `Egress`, which tells those hosts the names of the analysed repository's dependencies, or stay
+   strictly offline with only the opt-in local caches? `paddock-dev` never fetches either way.
 
 ## Sources
 
