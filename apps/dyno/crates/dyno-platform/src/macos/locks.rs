@@ -55,6 +55,20 @@ mod tests {
         }
     }
 
+    /// `lsof` can run into its own 15 s limit on a loaded machine: only that (a `Timeout`) is asked again, a few times; any other
+    /// error fails at once, and when the retries run out the last timeout is the failure message.
+    fn lockers_retrying(path: &Path) -> Vec<Locker> {
+        let mut last = None;
+        for _ in 0..4 {
+            match LsofLocks.lockers(path) {
+                Ok(found) => return found,
+                Err(e @ PlatformError::Timeout(_)) => last = Some(e),
+                Err(e) => panic!("lsof for {}: {e:?}", path.display()),
+            }
+        }
+        panic!("lsof for {} timed out 4 times, last: {last:?}", path.display());
+    }
+
     #[test]
     fn finds_a_dummy_that_holds_a_temp_file_and_nobody_for_a_free_one() {
         let dir = tempfile::tempdir().unwrap();
@@ -73,12 +87,11 @@ mod tests {
         let mut ready = String::new();
         BufReader::new(dummy.0.stdout.take().unwrap()).read_line(&mut ready).unwrap();
         assert_eq!(ready.trim(), "ready");
-        // `lsof` can time out on a loaded machine (its own limit is 15 s): ask again, a few times, instead of failing on the first.
-        let found = (0..4).find_map(|_| LsofLocks.lockers(&held).ok()).expect("lsof answered");
+        let found = lockers_retrying(&held);
         assert!(found.iter().any(|l| l.process.pid == dummy.0.id() && l.name == "tail"), "{found:?}");
         let free = dir.path().join("free.txt");
         std::fs::write(&free, b"y").unwrap();
-        assert!(LsofLocks.lockers(&free).unwrap().is_empty());
+        assert!(lockers_retrying(&free).is_empty());
         assert!(matches!(
             LsofLocks.lockers(&dir.path().join("missing")),
             Err(PlatformError::NotFound(_))

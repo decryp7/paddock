@@ -160,7 +160,15 @@ test.describe('native feel', () => {
     });
     expect(prevented).toBe(true);
 
-    await page.evaluate(() => ((window as unknown as { __alive: boolean }).__alive = true));
+    // Listeners first: the window's bubble listener runs after the app's, so it sees whether the app took the key.
+    await page.evaluate(() => {
+      const w = window as unknown as { __alive: boolean; __keys: Record<string, boolean>; __wheel: boolean[] };
+      w.__alive = true;
+      w.__keys = {};
+      w.__wheel = [];
+      window.addEventListener('keydown', (e) => (w.__keys[`${e.ctrlKey ? 'Control+' : ''}${e.key}`] = e.defaultPrevented));
+      window.addEventListener('wheel', (e) => w.__wheel.push(e.defaultPrevented), { passive: true });
+    });
     for (const key of ['F5', 'Control+r', 'Control+=', 'Control+-', 'Control+0', 'Control+p']) await page.keyboard.press(key);
     await page.mouse.move(400, 400);
     await page.keyboard.down('Control');
@@ -169,6 +177,17 @@ test.describe('native feel', () => {
     // Two frames: any zoom or navigation the keys and the wheel caused has been applied by then.
     await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
     expect(await page.evaluate(() => (window as unknown as { __alive?: boolean }).__alive)).toBe(true);
+    const seen = await page.evaluate(() => {
+      const w = window as unknown as { __keys: Record<string, boolean>; __wheel: boolean[] };
+      return { __keys: w.__keys, __wheel: w.__wheel };
+    });
+    // WebKit leaves some of these keys unprevented in the page (its own shortcuts act in the shell, not the page), so the
+    // per-key check is Chromium's; both engines must still show the page alive, at scale 1.
+    for (const key of test.info().project.name === 'chromium' ? ['F5', 'Control+r', 'Control+=', 'Control+-', 'Control+0', 'Control+p'] : []) {
+      expect(seen.__keys[key], `${key} reached the page and was taken by it`).toBe(true);
+    }
+    expect(seen.__wheel.length, 'the Ctrl+wheel reached the page').toBeGreaterThan(0);
+    expect(seen.__wheel.every(Boolean), 'the Ctrl+wheel was taken by the page').toBe(true);
     expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
 
     // A dropped file never navigates the window.
@@ -195,20 +214,23 @@ test.describe('native feel', () => {
       getSelection()?.addRange(r);
     });
     const box = (await dd.boundingBox())!;
-    const probe = (x: number, y: number) =>
+    const menuitem = page.locator('.cdk-overlay-container [role=menuitem]');
+    const rightClick = (x: number, y: number) =>
       page.evaluate(
-        async ([px, py]) => {
+        ([px, py]) => {
           const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: px, clientY: py });
           (document.elementFromPoint(px!, py!) ?? document.body).dispatchEvent(e);
-          // Two frames: the menu, if the event opens one, is in the overlay by then.
-          await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-          return !!document.querySelector('.cdk-overlay-container [role=menuitem]');
         },
         [x, y],
       );
-    expect(await probe(box.x + 12, box.y + 6)).toBe(true);
+    await rightClick(box.x + 12, box.y + 6);
+    await expect(menuitem.first()).toBeVisible();
     await page.keyboard.press('Escape');
-    expect(await probe(box.x + box.width + 150, box.y + box.height + 150)).toBe(false);
+    await expect(menuitem).toHaveCount(0);
+    await rightClick(box.x + box.width + 150, box.y + box.height + 150);
+    // Nothing to wait for: two frames after the event, a menu that was going to open has opened.
+    await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+    await expect(menuitem).toHaveCount(0);
   });
 });
 

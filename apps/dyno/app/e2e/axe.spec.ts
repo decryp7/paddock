@@ -12,12 +12,18 @@ const target = (p: string): AxeTarget => ({
   url: `/?latency=0#/${p}`,
   ready: async (page) => {
     await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible({ timeout: 45_000 });
-    // Settled: nothing is loading and every finite animation (fades, chart entry) has finished, so axe sees final colours.
+    // Settled: nothing is loading and every finite CSS/Web animation (fades, skeleton to content) has finished, so axe sees
+    // final colours. getAnimations() cannot see ECharts, which animates on canvas; the charts' own entry is short and the
+    // chart text is not what axe measures there.
     await page.waitForFunction(
       () =>
         !document.querySelector('[aria-busy="true"]') &&
         document.getAnimations().every((a) => a.playState === 'finished' || a.effect?.getTiming().iterations === Infinity),
-    );
+      undefined,
+      { timeout: 30_000 },
+    ).catch((e: unknown) => {
+      throw new Error(`${p || 'dashboard'} never settled (still aria-busy or animating after 30 s): ${String(e)}`);
+    });
   },
 });
 // The network page's rows are the one grid still made of div rows with aria-rowindex (axe: aria-conditional-attr). Rebuilding it

@@ -11,11 +11,15 @@ const NOW = 1_700_000_000_000;
 /** Renders, then lets the mock's promises and timers run and renders again (signals set after awaits). */
 async function settle(f: ComponentFixture<unknown>) {
   f.detectChanges();
-  // Event-loop turns, not time: the mock answers through microtasks and zero-delay timers scheduled earlier.
-  for (let i = 0; i < 3; i++) {
-    await new Promise((r) => setTimeout(r));
-    f.detectChanges();
-  }
+  // Until the store has its answer (the settings, or the error the page shows) and the plugins list was asked for.
+  const store = TestBed.inject(SettingsStore);
+  await vi.waitFor(() => {
+    expect(store.settings() !== null || store.error() !== null).toBe(true);
+    expect(store.pluginsLoaded() || store.pluginsError() !== null).toBe(true);
+  });
+  f.detectChanges();
+  await f.whenStable();
+  f.detectChanges();
 }
 
 async function make() {

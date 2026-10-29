@@ -210,6 +210,19 @@ jobs:
           CONF: ${{ inputs.app-dir }}/src-tauri/tauri.conf.json
         run: node .paddock/conformance/ci/check-tag.mjs --tag "$TAG" --prefix "$PREFIX" --conf "$CONF"
 
+      # The first release's notes come from the CHANGELOG: fail here, not after the three builds, when its section is missing,
+      # still "Unreleased" or empty. Tags are fetched first (a shallow checkout holds only the tag itself).
+      - name: The first release's CHANGELOG section is ready
+        if: startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix)) && inputs.first-release-changelog != ''
+        shell: bash
+        env:
+          FIRST_CHANGELOG: ${{ inputs.first-release-changelog }}
+          TAG: ${{ github.ref_name }}
+          PREFIX: ${{ inputs.tag-prefix }}
+        run: |
+          git fetch --tags --quiet origin || true
+          bash .paddock/conformance/ci/first-release-notes.sh || exit 1
+
       - uses: ./.paddock/.gitea/actions/build-env
 
       - uses: ./.paddock/.gitea/actions/tauri-bundle
@@ -305,12 +318,8 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           # The first release of an app has no earlier tag: its notes are the CHANGELOG section of that version.
-          if [ -n "$FIRST_CHANGELOG" ] && [ -z "$(git tag -l "${PREFIX}v*" | grep -vxF "$TAG")" ]; then
-            version="${TAG#"${PREFIX}v"}"
-            awk -v v="$version" 'index($0, "## [" v "]") == 1 {on=1; next} on && /^## / {exit} on' "$FIRST_CHANGELOG" > release/CHANGELOG-latest.md
-            if [ ! -s release/CHANGELOG-latest.md ]; then echo "::error::$FIRST_CHANGELOG has no non-empty section for $version"; exit 1; fi
-            exit 0
-          fi
+          OUT=release/CHANGELOG-latest.md bash .paddock/conformance/ci/first-release-notes.sh || exit 1
+          if [ -s release/CHANGELOG-latest.md ]; then exit 0; fi
           command -v git-cliff >/dev/null || cargo install git-cliff --locked
           args=(--latest --strip header -o release/CHANGELOG-latest.md)
           if [ -n "$CONFIG" ]; then args+=(--config "$CONFIG"); fi

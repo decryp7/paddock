@@ -173,10 +173,9 @@ fn a_slow_push_listener_drops_pushes_instead_of_blocking() {
     for _ in 0..10 {
         child.push("p".to_string()).unwrap();
     }
-    let deadline = Instant::now() + LONG;
-    while host.dropped_pushes() == 0 && Instant::now() < deadline {
-        std::thread::yield_now();
-    }
+    // The host's reader handles frames in the order they were sent: when this call (which the host, without a handler,
+    // refuses) has its answer, all ten pushes before it were queued or dropped. No waiting for a time.
+    assert!(matches!(child.call("after".to_string(), LONG), Err(IpcError::Remote(e)) if e.code == codes::UNSUPPORTED));
     assert!(host.dropped_pushes() > 0);
     drop(release);
 }
