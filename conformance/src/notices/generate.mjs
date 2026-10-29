@@ -3,8 +3,8 @@
 // deterministic (sorted, no paths, no dates), so the output can be compared in CI (`--check`).
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { PERMISSIVE } from './licences.mjs';
+import { dirname, join, relative, sep } from 'node:path';
+import { allowedFor, EXCEPTIONS } from './licences.mjs';
 
 const LICENCE_FILE = /^(licen[cs]e|licen[cs]ing|copying|notice|unlicense)([-_.].*)?$/i;
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -25,31 +25,90 @@ export function spdxIds(expr) {
   return expr.replace(/[()]/g, ' ').split(/\s+(?:OR|AND)\s+/i).map((s) => s.trim()).filter(Boolean);
 }
 
+/**
+ * The licence expression a package.json or lock entry declares: a string, `{ type }`, or the legacy `licenses: [{ type }]`
+ * list (several entries are alternatives, so OR). Null when nothing usable is declared.
+ */
+export function declaredLicense(v) {
+  if (typeof v === 'string') return v.trim() || null;
+  if (Array.isArray(v)) {
+    const all = v.map(declaredLicense).filter(Boolean);
+    return all.length ? all.join(' OR ') : null;
+  }
+  if (v && typeof v === 'object') return declaredLicense(v.type);
+  return null;
+}
+
 /** Entries of a package-lock that ship in production (not dev-only). */
 export function lockProduction(lock) {
   return Object.entries(lock.packages ?? {})
     .filter(([path, p]) => path.includes('node_modules/') && !p.dev && !p.devOptional)
-    .map(([path, p]) => ({ path, name: path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length), version: p.version, license: p.license ?? null }));
+    .map(([path, p]) => ({ path, name: path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length), version: p.version, license: declaredLicense(p.license ?? p.licenses) }));
 }
 
-/** The production npm packages of an app folder with their licence texts: { packages, warnings }. Needs `npm ci --omit=dev` first for the texts. */
+/**
+ * The production closure of one workspace of a root npm workspace lock (Paddock's monorepo, ADR 0014 §1): its dependencies,
+ * optional and peer dependencies and theirs, resolved in node's lookup order (nested first, then up to the root's
+ * node_modules). The root lock's dev flags describe all workspaces together, so they cannot be used here.
+ */
+export function workspaceProduction(lock, ws) {
+  const pk = lock.packages ?? {};
+  const entry = pk[ws];
+  if (!entry) throw new Error(`the lock has no workspace ${ws}`);
+  const resolveFrom = (at, name) => {
+    for (let base = at; ; base = base.includes('/node_modules/') ? base.slice(0, base.lastIndexOf('/node_modules/')) : '') {
+      const cand = base ? `${base}/node_modules/${name}` : `node_modules/${name}`;
+      if (pk[cand]) return pk[cand].link ? null : cand;
+      if (!base) return null;
+    }
+  };
+  // A peer the workspace itself declares only as a devDependency (e.g. @angular/compiler-cli, a peer of @angular/localize) is a
+  // build tool here, not shipped.
+  const devOnly = new Set(Object.keys(entry.devDependencies ?? {}).filter((n) => !(n in (entry.dependencies ?? {})) && !(n in (entry.optionalDependencies ?? {}))));
+  const deps = (e) => [
+    ...Object.keys(e.dependencies ?? {}),
+    ...Object.keys(e.optionalDependencies ?? {}),
+    ...Object.keys(e.peerDependencies ?? {}).filter((n) => !e.peerDependenciesMeta?.[n]?.optional && !devOnly.has(n)),
+  ];
+  const seen = new Set();
+  const todo = deps(entry).map((n) => resolveFrom(ws, n));
+  while (todo.length) {
+    const at = todo.pop();
+    if (!at || seen.has(at)) continue;
+    seen.add(at);
+    for (const n of deps(pk[at])) todo.push(resolveFrom(at, n));
+  }
+  return [...seen].sort().map((path) => ({ path, name: path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length), version: pk[path].version, license: pk[path].license ?? null }));
+}
+
+/** The folder with the package-lock.json that covers `dir`: `dir` itself, or the npm workspace root above it; null if none. */
+function lockRoot(dir) {
+  for (let d = dir; ; d = dirname(d)) {
+    if (existsSync(join(d, 'package-lock.json'))) return d;
+    if (dirname(d) === d) return null;
+  }
+}
+
+/** The production npm packages of an app folder (itself an npm root, or a workspace of the lock above it) with their licence texts: { packages, warnings }. Needs `npm ci --omit=dev` (or a full `npm ci`) first for the texts. */
 export function npmPackages(appDir) {
-  const lockFile = join(appDir, 'package-lock.json');
-  if (!existsSync(lockFile)) throw new Error(`${lockFile} not found: run the notices from the app's folder or pass --npm <dir>`);
-  const lock = JSON.parse(readFileSync(lockFile, 'utf8'));
+  const root = lockRoot(appDir);
+  if (!root) throw new Error(`${join(appDir, 'package-lock.json')} not found: run the notices from the app's folder or pass --npm <dir>`);
+  const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
+  const ws = relative(root, appDir).split(sep).join('/');
+  const list = ws ? workspaceProduction(lock, ws) : lockProduction(lock);
   const warnings = [];
   const seen = new Set();
-  const packages = lockProduction(lock)
+  const packages = list
     .filter((p) => !seen.has(`${p.name}@${p.version}`) && seen.add(`${p.name}@${p.version}`))
     .map((p) => {
-      const dir = join(appDir, p.path);
+      const dir = join(root, p.path);
       let pkgJson = {};
       try {
         pkgJson = existsSync(join(dir, 'package.json')) ? JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) : {};
       } catch {
         warnings.push(`npm ${p.name}@${p.version}: package.json is not valid JSON`);
       }
-      const license = p.license ?? (typeof pkgJson.license === 'string' ? pkgJson.license : pkgJson.license?.type) ?? 'UNKNOWN';
+      const license = p.license ?? declaredLicense(pkgJson.license ?? pkgJson.licenses) ?? 'UNKNOWN';
       const files = existsSync(dir) ? readdirSync(dir).filter((f) => LICENCE_FILE.test(f) && !/\.(js|ts|json|css)$/.test(f)).sort() : [];
       const texts = files
         .map((f) => ({ id: /apache/i.test(f) ? 'Apache-2.0' : /mit/i.test(f) ? 'MIT' : /^notice/i.test(f) ? 'NOTICE' : null, text: normalise(readFileSync(join(dir, f), 'utf8')) }))
@@ -139,7 +198,63 @@ export function render(rust, npm, appName = 'This application') {
   return { markdown: `${out.join('\n').replace(/\n+$/, '')}\n`, counts: { rust: rust.length, npm: npm.length, texts: texts.length, tally } };
 }
 
-/** Packages none of whose licence options is permissive: ["rust x@1: GPL-3.0-only"]. */
+/**
+ * Whether an SPDX expression is acceptable under `allowed`: AND needs every term, OR at least one (AND binds tighter),
+ * parentheses group, `X WITH exception` is allowed only when the whole phrase is listed, as cargo-deny does (an unknown
+ * exception id is refused, whatever X is). A trailing `+` (the deprecated "or later" spelling) is dropped. An expression that does not parse is refused.
+ */
+export function expressionAllowed(expr, allowed) {
+  const tokens = expr.replace(/\(/g, ' ( ').replace(/\)/g, ' ) ').split(/\s+/).filter(Boolean);
+  let i = 0;
+  const peek = () => tokens[i];
+  const isOp = (t, op) => t !== undefined && t.toUpperCase() === op;
+  const id = (t) => allowed.has(t.replace(/\+$/, ''));
+  function term() {
+    const t = tokens[i++];
+    if (t === undefined || t === ')' || isOp(t, 'AND') || isOp(t, 'OR') || isOp(t, 'WITH')) throw new Error('bad expression');
+    if (t === '(') {
+      const v = or();
+      if (tokens[i++] !== ')') throw new Error('unbalanced');
+      return v;
+    }
+    if (isOp(peek(), 'WITH')) {
+      i++;
+      const exc = tokens[i++];
+      if (exc === undefined || exc === '(' || exc === ')') throw new Error('bad exception');
+      return allowed.has(`${t} WITH ${exc}`);
+    }
+    return id(t);
+  }
+  function and() {
+    let v = term();
+    while (isOp(peek(), 'AND')) { i++; const r = term(); v = v && r; }
+    return v;
+  }
+  function or() {
+    let v = and();
+    while (isOp(peek(), 'OR')) { i++; const r = and(); v = v || r; }
+    return v;
+  }
+  try {
+    const v = or();
+    return i === tokens.length && v;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Packages whose licence is not acceptable for their ecosystem ("rust x@1: GPL-3.0-only"). Fail-closed: a package is
+ * accepted only when its parsed expression evaluates true (so a missing or empty licence, NOASSERTION, UNLICENSED,
+ * `SEE LICENSE IN ...`, `LicenseRef-*` and imprecise names such as "BSD" are refused) or when a package-scoped exception names
+ * the package and its whole declared expression.
+ */
 export function nonPermissive(pkgs) {
-  return pkgs.filter((p) => p.spdx.length && !p.spdx.some((id) => PERMISSIVE.has(id))).map((p) => `${p.kind} ${p.name}@${p.version}: ${p.license}`);
+  return pkgs
+    .filter((p) => {
+      const expr = typeof p.license === 'string' ? p.license.trim() : '';
+      if (EXCEPTIONS.some((e) => e.kind === p.kind && e.packages.includes(p.name) && e.license === expr)) return false;
+      return !(expr && expressionAllowed(expr, allowedFor(p.kind, p.name)));
+    })
+    .map((p) => `${p.kind} ${p.name}@${p.version}: ${p.license || '(no licence declared)'}`);
 }
