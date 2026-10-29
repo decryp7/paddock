@@ -4,6 +4,93 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-jobs`: `WalkOptions::with_modified`
+- `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
+
+### `paddock-jobs`: the `wire` module
+- New `paddock_jobs::wire` (`WireSnapshot`, `WireState`, `WirePhase`): the postcard-safe form of a `JobSnapshot` for apps whose jobs run in an agent process and are relayed to the UI as `paddock://jobs` events (Dyno is the first). It converts both ways without loss.
+### `pd-sunburst` in `@decryp7/paddock-ui/chart` (docs/plans/pd-sunburst.md)
+- New `PdSunburst` (`pd-sunburst`) and `PdSunburstCentre`, a drillable ring chart for hierarchies (first consumer: Dyno's disk map) and the pure
+  `sunburstLayout`: SVG with tree semantics (`treeitem`, `aria-level`, `aria-setsize`, `aria-posinset`, `aria-expanded`), colour by branch over
+  the ring-ordered chart tokens, hatched hidden space and a dashed "not counted yet" ghost, folding by angle and count with a segment cap,
+  a live mode that coalesces updates to four per second, the tree keyboard model, and loading, empty and error states. Exports are one
+  declared line each in `chart/public-api.ts`; a gallery section shows every state. Also exported: `branchSlots`, `slotColour` and `PdArc` (a list beside the chart uses the chart's own colours), and `pd-sunburst` has a `highlight` input. `@decryp7/paddock-e2e` gains `clickShape`, `hoverShape` and `pointInShape` (real pointer events on a point inside an SVG shape). The tween between centres is a 100 to 180 ms cross-fade
+  (`tweenLayouts` is not built yet); `pd-table` tree rows (spec section 7) are a separate change.
+
+### Dyno: the disk map screen on the shell
+- New nav entry `Disk map` (`/disk-map`): scan a volume or folder as a job with live phase-labelled progress and Cancel, ring chart (`pd-sunburst`) beside a list or a `mat-table`, drill-down, capacity strip with hidden space, Full Disk Access and "Unavailable" states with a reason, Settings limits (items kept per scan, large file size).
+- The engine says why each unreadable folder was refused (`DiskNode.unreadableReason`). On macOS "operation not permitted" (EPERM) is `needsFullDiskAccess` while Full Disk Access is missing and `protected` ("macOS protects this folder") when it is already granted; "permission denied" (EACCES) is `needsAdmin`, except a privacy-protected folder of the user's own home while Full Disk Access is missing (a path hint). Windows and Linux: either refusal is `needsAdmin`; any other error is `other`. The Full Disk Access button shows only when a refused folder has that reason. `PROTOCOL_VERSION` is 2 for the new field (jobs-1.0 bumps to 2 as well: one bump covers both while unreleased).
+
+### `providePagesPalette`: the command palette on the pages frame
+- `ShellPages.go(id)` is new: like `show` but resolves once the navigation is done. The pages frame treats focus inside the command palette as "move to the page" after a navigation.
+- `<pd-command-palette />` keeps the keys typed between the shortcut and the input getting the focus (printable keys and Backspace edit the query, Escape closes, Enter waits for the input and then accepts the row of what was typed), and draws the listbox only while it has options (the empty text is said in the live status).
+- New `providePagesPalette(options?)` (with `goToPages?: false | { prefix }`), `PagesPaletteOptions` and `GO_TO_PAGE_PROVIDER` in `@decryp7/paddock-ui/workbench/palette`: the shared palette (`PaletteStore`, `<pd-command-palette />`, Mod+Shift+P for the commands, Mod+P for "Go to…") for a window on the pages frame, which has no workbench ports. It routes `openPalette` to the store and contributes a plain-text provider that lists the pages the window offers now (`ShellPages.visible`, sidebar order, ranked by the typed text) and shows the one accepted, then moves the focus to the page (`#pd-main`). Put `<pd-command-palette />` beside `<pd-shell-frame />`.
+- Dyno uses it: Mod+P goes to any page of the sidebar; Mod+Shift+P lists the shell's commands and Dyno's own (the pages' buttons: Refresh history, Read the system logs now, Export for Debrief, Check now, Run again, Export Markdown, Save bundle, Add rule, and Capture the last ten minutes). A command shows its page first, then runs.
+
+### `@decryp7/paddock-e2e`: a truncation must say its full text
+- `isSilentlyClipped` now fails an ellipsis unless the element says its full text (`isAcceptedEllipsis`: a non-empty `data-full-text`, title, aria-label or Material tooltip message) and is not in a button, link, tab or `.num`. New exports: `isAcceptedEllipsis`, `unacceptedTextClips`, `textCutOffWithoutTooltip`, `ELLIPSIS_NEVER_WITHIN`, `ELLIPSIS_NEVER_SELF`; the checks read facts in the page and decide in Node, with no `new Function`.
+- `pd-table`'s truncating text cell sets `data-full-text`.
+
+### Tab nav bars: links size to their label
+- `@decryp7/paddock-ui` scss (`_material.scss`): `mat-tab-link` in a `mat-tab-nav-bar` has no 160 px minimum and `--pd-space-3` side padding, so eight tabs fit a 900 px window. Tab rows in apps that used the minimum get narrower tabs.
+### `pd-table`: one tooltip for a row's actions (`PdActionTip`), and the focus follows a reordered row
+- `PdActionTip` (`pdActionTip`, from `@decryp7/paddock-ui/table`; moved from Dyno's `dyActionTip`) puts one tooltip left of a cluster of icon buttons, named after the button the pointer or the keyboard is on. pd-table's row actions use it, so a tooltip never covers the next row's actions.
+- A focused row keeps the focus when the app puts the rows in another order (live values): the table asks for the row again by its key once the browser dropped the focus, whether or not the element is still there. A click outside the grid forgets the row.
+
+### `@decryp7/paddock-e2e`: `expectNoSilentClipping`
+- `textClippedWithoutEllipsis(page)`, `expectNoSilentClipping(page)` and the pure `isSilentlyClipped(probe)`: fail when an element cuts its own text (hidden overflow, narrower than the text) without `text-overflow: ellipsis`.
+
+### Dyno: pages no longer clip at 900 and 1024 px
+- Network's Listening table keeps the exposure badge whole at 900 px; truncated names in the dashboard feed, widgets and the Network service column show their full text in a tooltip. The layout e2e now also measures every state (detail panels, tabs, second views), every Settings page (with the advanced fields) and every dialog, and accepts an ellipsis only on the clipping element when it has a tooltip or a label and is not a control, a tab or a number.
+- Benchmarks, Health, Extras (tabs and Maintenance) and Network wrap or shrink to the page instead of being cut by `.pd-page`'s `overflow-x: hidden`; the primary "Run benchmarks" button is always whole. `e2e/layout.spec.ts` now fails on any page content wider than the page, and on text cut without an ellipsis, at 900, 1024 and 1280 px, for every page and every Settings page.
+
+
+### `providePaddockMaterial`: tooltips wait 500 ms
+- `providePaddockMaterial()` provides `MAT_TOOLTIP_DEFAULT_OPTIONS` with `showDelay: 500` (`PADDOCK_TOOLTIP_OPTIONS`), the design guide's delay for the tooltip every icon-only button carries. Every app that provides it gets the delay without setting it per tooltip.
+
+### `pd-table` uses `PdContextMenuKeys`
+- The grid's own Shift+F10 / Menu key handler is gone: pd-table's rows use the shared `isContextMenuKey` (the same keys, one definition).
+- Removed: `isMenuKey` from `@decryp7/paddock-ui/table`; use `isContextMenuKey` from `@decryp7/paddock-ui/material`.
+
+### `PdContextMenuKeys`: a row's context menu from the keyboard
+- New directive `pdContextMenuKeys` (and `isContextMenuKey`) in `@decryp7/paddock-ui/material` (with the other Material behaviour; not in the root entry): Shift+F10 or the Menu key on a focused host fires a `contextmenu` event there, for `matContextMenuTriggerFor` or any listener (macOS sends none for those keys). It works like pd-table's own row handler, which will use it in a follow-up.
+
+### `@decryp7/paddock-ui/schedule` exports its time-field building blocks
+- New exports: `PdKeepTimeOnEscape` (the `pdKeepTime` directive: Escape in a closed time field keeps the time), `TIME_PROVIDERS`, `timeToDate`, `dateToTime`, `timeOptions` and `TimeProblems`, so an app can put a `mat-timepicker` in its own form with the editors' behaviour (24-hour times, the half-hour list, a problem shown once the field was left). Dyno's `dy-time-field` is the first user.
+### The shell owns the start (ADR 0029; shared API, breaking)
+- `paddock-shell`: `Builder::tray(f)`, `Builder::launch(LaunchArgs)` and `Builder::add_to(tauri::Builder)` open the tray
+  and the main window from Tauri's own `setup`, after every plugin is set up (a window built inside a plugin hook
+  deadlocked the main thread: Spotter started with no window). A start that cannot open its window is logged and exits
+  with code 1. `Builder::setup` no longer opens windows. New `paddock_shell::testing::start` (feature `mock-runtime`):
+  the start test every app runs. The shell's plugin hooks are marked; a Dock click with no window and a file opened from
+  Finder open their window after the hook.
+- `paddock-shell`: `logging::install` (and `install_in`): the app's `paddock-log` in its folders with the level from
+  Settings; every app on the shell calls it first in `run`. A shell built with `build()` that has a tray or a launch
+  fails the start ("tray/launch need Builder::add_to"); `testing::start` names a start that panicked.
+- `paddock-commands`: `plugin_hook` (`plugin_hook_scope`, `in_plugin_hook`, `INSIDE_PLUGIN_HOOK`).
+- `paddock-window`: `after_plugin_hook` (window work after the hook, in order), `exit_with`, `HeadlessTray`; windows and
+  the tray popover refuse to be built inside a plugin hook with the new `WindowErrorCode` `insidePluginHook`.
+- `paddock-dialogs`, `paddock-panels`: dialogs, pop-outs and the drag ghost refuse to be built inside a plugin hook, with
+  the new `DialogErrorCode` / `PanelErrorCode` `insidePluginHook`.
+- `paddock-workbench`: its plugin hooks are marked.
+- Spotter, the shell demo and the workbench demo use the new start; conformance C50 checks every app on the shell.
+
+### `pd-table`: rows an app orders itself, and trees of rows
+- `PdTable.focusRow(key)` focuses a row once it is drawn (after an app closed a panel opened from it). `PdColumn.sortStart` (`asc` default, `desc` for columns of amounts) sets the direction of a header's first click. The body tracks
+  rows by key and columns, so a column change never leaves recycled row views with the old cells. `tree` implies the app's order
+  and no filter field, and is reported with `console.error` in dev mode together with `groupBy`. The indent is `--pd-tree-indent`. Group summaries are ellipsised and end-aligned cells clip at their end (`safe flex-end`); the
+  count says "1 row".
+- `order="source"` shows the rows in the order the app gives them (the table only shows the sort and reports it through `sort`),
+  for a list the engine or a tree orders (processes under their parent, sorted within each level).
+- `tree` (`PdRowTree`: `level`, `expanded`, optional `spans`) makes the rows a tree grid: `aria-level`, `aria-expanded`,
+  places among siblings, an indent per level on the first cell, and a spanning heading row. Right unfolds a folded row and on an
+  unfolded one moves to its first child, Left folds an unfolded row or goes up to the parent (`rowToggle` asks the app to fold; it
+  owns the fold state, so it can keep it). Space opens a row like Enter. `treePlaces` and `parentIndex` are exported. `sortClearable="false"` keeps a header cycling between ascending and descending only. The row that has the focus keeps it
+  when the columns change (a side panel opened and the table narrowed), once the rows are drawn again.
+
+### The dialog frame's filled button uses the page primary's colours
+- `.pd-frame-btn--filled` takes `--pd-accent-fill` with `--pd-on-accent`, the same as `.pd-btn--primary` and Material's filled button, so a dialog's primary and a page's primary are one colour in both schemes (`--pd-accent-control` is for toggles and checkmarks).
+
 ### Rust developer and CI tool, phase R0 (ADR 0022)
 - New shared crates `paddock-slots` (numbered job slots over OS file locks, with a holder that always ends: job folder gone,
   release, or `--max-hold-secs`), `paddock-repo-files` (the walk, its caps and a bounded-thread file hash) and
@@ -330,7 +417,6 @@ Conventional Commits; one semver tag for the whole repo.
   sizes are rounded up once. A decision keeps its offset only, a form its width and offset, a viewer and a tool their size.
 - A modal's parent is disabled when the dialog is shown, not when it is created; opening a dialog that is still pending
   creates no window and does not show it early. A scale-factor change refits the window from its last measure.
-
 
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,

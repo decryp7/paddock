@@ -1,3 +1,4 @@
+import { FullTextTip } from '../../shared/full-text-tip';
 import type { Measured } from '../../core/api.types';
 import { showMeasured } from '../../core/measured';
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
@@ -20,6 +21,7 @@ import { EventsFeed } from '../dashboard/events-feed';
 import { ConsumersPanel, DiskTrendPanel, HistoryPanel } from '../dashboard/history-panels';
 import { CountersStore } from '../../state/counters.store';
 import { PANEL_KINDS, KIND_LABEL, metricLabel, readCounter, readMetric, seriesFor, thresholdTone } from './widget-model';
+import { MatTooltip } from '@angular/material/tooltip';
 
 const ICON: Record<WidgetKind, IconName> = {
   graph: 'trend',
@@ -45,7 +47,7 @@ const ICON: Record<WidgetKind, IconName> = {
  */
 @Component({
   selector: 'dy-widget',
-  imports: [Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
+  imports: [FullTextTip, MatTooltip, Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[attr.role]': 'ownCard() ? null : "group"', '[attr.aria-label]': 'ownCard() ? null : title()', '[attr.data-kind]': 'widget().kind', '[class.own-card]': 'ownCard()' },
   template: `
@@ -94,7 +96,7 @@ const ICON: Record<WidgetKind, IconName> = {
       @case ('heatmap') {
         <div class="cells" role="img" [attr.aria-label]="'Per-core load: ' + cores().map(pct).join(', ')">
           @for (v of cores(); track $index) {
-            <span class="cell" [style.background]="cellColor(v)" [title]="'Core ' + round($index + 1) + ': ' + pct(v)"></span>
+            <span class="cell" [style.background]="cellColor(v)" [matTooltip]="'Core ' + round($index + 1) + ': ' + pct(v)"></span>
           }
         </div>
         <p class="note num">{{ round(cores().length) }} cores · busiest {{ pct(busiest()) }}</p>
@@ -116,7 +118,7 @@ const ICON: Record<WidgetKind, IconName> = {
           @for (a of anomalies(); track a.id) {
             <li>
               <span class="ic" aria-hidden="true"><dy-icon [name]="anomalyIcon(a.kind)" /></span>
-              <span class="tx"><strong class="truncate">{{ a.title }}</strong><small class="truncate">{{ label(a.kind) }} · {{ a.app }}</small></span>
+              <span class="tx"><strong class="truncate" [dyFullText]="a.title">{{ a.title }}</strong><small class="truncate" [dyFullText]="label(a.kind) + ' · ' + a.app">{{ label(a.kind) }} · {{ a.app }}</small></span>
             </li>
           }
         </ul>

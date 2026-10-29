@@ -39,7 +39,7 @@ describe('DiagnosticsStore', () => {
     expect(mock.savedBundles).toHaveLength(1);
     expect(store.saved()?.path).toBe(mock.savedBundles[0]!.path);
     expect(store.saving()).toBe(false);
-    expect(notifier.toasts()[0]!.text).toMatch(/^Saved dyno-diagnostics\.zip \(11 files, [\d.]+ KB\)$/);
+    expect(notifier.recent()[0]!.text).toMatch(/^Saved dyno-diagnostics\.zip \(11 files, [\d.]+ KB\)$/);
   });
 
   it('shows nothing when the save dialog is cancelled', async () => {
@@ -49,7 +49,7 @@ describe('DiagnosticsStore', () => {
     expect(store.saved()).toBeNull();
     expect(store.saving()).toBe(false);
     expect(store.saveError()).toBeNull();
-    expect(notifier.toasts()).toEqual([]);
+    expect(notifier.recent()).toEqual([]);
   });
 
   it('reports a failed save inline and clears it on the next try', async () => {

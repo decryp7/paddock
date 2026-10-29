@@ -6,6 +6,7 @@
 use paddock_commands::WindowClass;
 use paddock_shell::{AppIdentity, Builder, COMMANDS, PLUGIN_NAME, VERSION};
 use paddock_updater::tauri::UpdatesBuilder;
+use paddock_window::launch::LaunchArgs;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -925,4 +926,76 @@ fn dialogs_are_shown_at_the_start_up_configs_deadline() {
         dialogs.show_deadline(),
         std::time::Duration::from_millis(1500)
     );
+}
+
+/// The shell opens the start itself, after every plugin is set up: the tray, then the main window.
+#[cfg(feature = "mock-runtime")]
+#[test]
+fn the_shell_opens_the_tray_then_the_main_window_after_every_plugin() {
+    let started = paddock_shell::testing::start(|| started_app(LaunchArgs::default()));
+    assert_eq!(
+        started,
+        Ok(paddock_shell::testing::Started {
+            main_window: true,
+            tray: true
+        })
+    );
+}
+
+/// Started at log-in (`--hidden`) with a tray: no window.
+#[cfg(feature = "mock-runtime")]
+#[test]
+fn a_hidden_start_with_a_tray_opens_no_window() {
+    let started = paddock_shell::testing::start(|| {
+        started_app(LaunchArgs {
+            hidden: true,
+            ..LaunchArgs::default()
+        })
+    });
+    assert_eq!(
+        started,
+        Ok(paddock_shell::testing::Started {
+            main_window: false,
+            tray: true
+        })
+    );
+}
+
+/// The start test names a start that fails instead of passing or hanging (here the old wiring: a window opened from the
+/// shell's own `setup`).
+#[cfg(feature = "mock-runtime")]
+#[test]
+fn the_start_test_names_a_failed_start() {
+    use paddock_window::tauri::{WindowConfig, Windows};
+    let started = paddock_shell::testing::start(|| {
+        mock_builder().plugin(
+            Builder::new(identity())
+                .in_memory()
+                .native_menu(false)
+                .windows(|_| Windows::builder(WindowConfig::new("Shell Demo")).build())
+                .setup(|app| {
+                    paddock_window::tauri::start(app, &LaunchArgs::default())?;
+                    Ok(())
+                })
+                .build(),
+        )
+    });
+    let e = started.unwrap_err();
+    assert!(e.contains("tauri::Builder::setup"), "{e}");
+}
+
+#[cfg(feature = "mock-runtime")]
+fn started_app(launch: LaunchArgs) -> tauri::Builder<MockRuntime> {
+    use paddock_window::tauri::{HeadlessTray, Tray, WindowConfig, Windows};
+    Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .windows(|_| Windows::builder(WindowConfig::new("Shell Demo")).build())
+        .tray(|_| {
+            Tray::new(HeadlessTray, |_| {
+                paddock_window::tray::TrayView::new("Shell Demo", vec![], "normal")
+            })
+        })
+        .launch(launch)
+        .add_to(mock_builder())
 }

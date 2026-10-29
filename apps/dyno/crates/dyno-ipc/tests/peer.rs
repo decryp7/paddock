@@ -4,9 +4,9 @@
 use dyno_ipc::frame::FrameLimit;
 use dyno_ipc::wire::codes;
 use dyno_ipc::{Client, Connection, Host, IpcError, Peer, PeerOptions, RemoteError};
-use std::io::Write;
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::io::{Read, Write};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 
 const LONG: Duration = Duration::from_secs(10);
 
@@ -22,17 +22,36 @@ fn connect() -> (Connection, Connection) {
     connect_with(FrameLimit::default())
 }
 
-/// A handler: "boom" panics, "fail" fails, "sleep" sleeps 300 ms, anything else is echoed upper-cased.
+/// A handler: "boom" panics, "fail" fails, anything else is echoed upper-cased.
 fn handler(body: String) -> Result<String, RemoteError> {
     match body.as_str() {
         "boom" => panic!("boom"),
         "fail" => Err(RemoteError::new("nope", "it failed")),
-        "sleep" => {
-            std::thread::sleep(Duration::from_millis(300));
-            Ok("slept".into())
-        }
         other => Ok(other.to_uppercase()),
     }
+}
+
+/// A handler whose "hold" call tells the test it started (`entered`) and then waits until the test releases it, so no
+/// test needs a sleep to have a call in flight; every other body goes to [`handler`].
+struct Hold {
+    entered: mpsc::Receiver<()>,
+    release: mpsc::Sender<()>,
+}
+
+fn holding() -> (Hold, impl Fn(String) -> Result<String, RemoteError> + Send + Sync + 'static) {
+    let (entered_tx, entered) = mpsc::channel();
+    let (release, release_rx) = mpsc::channel();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    let serve = move |body: String| {
+        if body == "hold" {
+            let _ = entered_tx.send(());
+            // Bounded, so a test that fails early never leaves the thread behind for long.
+            let _ = release_rx.lock().unwrap().recv_timeout(LONG);
+            return Ok("held".into());
+        }
+        handler(body)
+    };
+    (Hold { entered, release }, serve)
 }
 
 #[test]
@@ -75,31 +94,33 @@ fn many_calls_at_once_are_matched_to_their_callers() {
 #[test]
 fn a_call_times_out_and_the_connection_keeps_working() {
     let (s, c) = connect();
+    let (hold, serve) = holding();
     let host = Peer::start(s, PeerOptions::new()).unwrap();
-    let _child = Peer::start(c, PeerOptions::new().serve(handler)).unwrap();
-    let t = Instant::now();
+    let _child = Peer::start(c, PeerOptions::new().serve(serve)).unwrap();
     assert_eq!(
-        host.call("sleep".to_string(), Duration::from_millis(50)),
+        host.call("hold".to_string(), Duration::from_millis(50)),
         Err(IpcError::Timeout(Duration::from_millis(50)))
     );
-    assert!(t.elapsed() < Duration::from_millis(280));
+    // The handler was reached and is still holding: the caller gave up without waiting for it.
+    hold.entered.recv_timeout(LONG).unwrap();
+    hold.release.send(()).unwrap();
     // The late reply is dropped; the next call gets its own answer.
-    std::thread::sleep(Duration::from_millis(350));
     assert_eq!(host.call("ok".to_string(), LONG).unwrap(), "OK");
 }
 
 #[test]
 fn the_peer_closing_mid_call_is_closed() {
     let (s, c) = connect();
+    let (hold, serve) = holding();
     let host = Peer::start(s, PeerOptions::new()).unwrap();
-    let child = Peer::start(c, PeerOptions::new().serve(handler)).unwrap();
+    let child = Peer::start(c, PeerOptions::new().serve(serve)).unwrap();
     let closer = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(100));
+        // Close only once the call is inside the handler.
+        hold.entered.recv_timeout(LONG).unwrap();
         drop(child);
+        hold.release.send(()).unwrap();
     });
-    let t = Instant::now();
-    assert_eq!(host.call("sleep".to_string(), LONG), Err(IpcError::Closed));
-    assert!(t.elapsed() < Duration::from_secs(5));
+    assert_eq!(host.call("hold".to_string(), LONG), Err(IpcError::Closed));
     closer.join().unwrap();
     assert!(host.wait_closed(Some(LONG)));
     assert_eq!(host.call("late".to_string(), LONG), Err(IpcError::Closed));
@@ -138,22 +159,25 @@ fn pushes_arrive_and_a_side_without_a_handler_refuses_calls() {
 #[test]
 fn a_slow_push_listener_drops_pushes_instead_of_blocking() {
     let (s, c) = connect();
+    let (release, release_rx) = mpsc::channel::<()>();
+    let release_rx = Mutex::new(release_rx);
     let host = Peer::start(
         s,
-        PeerOptions::new()
-            .queue(1)
-            .on_push(|_: String| std::thread::sleep(Duration::from_millis(200))),
+        PeerOptions::new().queue(1).on_push(move |_: String| {
+            // The listener is stuck until the test lets it go (bounded).
+            let _ = release_rx.lock().unwrap().recv_timeout(LONG);
+        }),
     )
     .unwrap();
     let child = Peer::start(c, PeerOptions::<String>::new().serve(handler)).unwrap();
     for _ in 0..10 {
         child.push("p".to_string()).unwrap();
     }
-    let deadline = Instant::now() + LONG;
-    while host.dropped_pushes() == 0 && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    // The host's reader handles frames in the order they were sent: when this call (which the host, without a handler,
+    // refuses) has its answer, all ten pushes before it were queued or dropped. No waiting for a time.
+    assert!(matches!(child.call("after".to_string(), LONG), Err(IpcError::Remote(e)) if e.code == codes::UNSUPPORTED));
     assert!(host.dropped_pushes() > 0);
+    drop(release);
 }
 
 #[test]
@@ -174,7 +198,11 @@ fn garbage_after_the_handshake_is_a_protocol_error_for_waiting_callers() {
     let (s, mut c) = connect();
     let host = Peer::start(s, PeerOptions::<String>::new()).unwrap();
     let caller = std::thread::spawn(move || host.call("x".to_string(), LONG));
-    std::thread::sleep(Duration::from_millis(50));
+    // Read the call off the wire: it is registered and waiting before the garbage follows.
+    let mut len = [0u8; 4];
+    c.stream_mut().read_exact(&mut len).unwrap();
+    let mut call = vec![0u8; u32::from_le_bytes(len) as usize];
+    c.stream_mut().read_exact(&mut call).unwrap();
     // A length of 1 byte, then a byte that is no frame variant.
     c.stream_mut().write_all(&[1, 0, 0, 0, 0xee]).unwrap();
     assert!(matches!(caller.join().unwrap(), Err(IpcError::Protocol(_))));

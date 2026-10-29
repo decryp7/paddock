@@ -447,6 +447,13 @@ Not part of 1.0.0; anything new that only watches goes here. Anything that would
 - **WP-15, 16, 17, 30 and 31** (packs, web API, Explain via Pitwall, suite tie-ins, session recording) are planned here, after 1.0.
 - Further ideas land here as they come up.
 
+## Known gaps in the jobs (2026-10-29)
+
+- **Windows Event Log streaming.** `wevtutil` is read in one step (output parsed after it ends), so Cancel of a Windows log read
+  takes effect when the tool has answered and the phase has no record count. macOS streams `log show` and kills it at once;
+  the same for `wevtutil qe` is the next step (`IssueSource::read_controlled` and `ToolRunner::run_lines` are the seam).
+- **Jobs at once** is read at start: resizing the pool while jobs run is not built.
+
 ## Screenshot checklist
 
 The UI agent produces `docs/screenshots/<screen>-<dark|light>.png` (`npm run screenshots` in `app/`, against the mock). Each

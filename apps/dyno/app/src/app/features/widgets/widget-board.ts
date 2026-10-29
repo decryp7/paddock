@@ -1,5 +1,6 @@
 import { CdkDrag, CdkDragDrop, CdkDragHandle, CdkDropList } from '@angular/cdk/drag-drop';
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
+import { MatTooltip } from '@angular/material/tooltip';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, linkedSignal, signal } from '@angular/core';
 import type { Widget, WidgetKind, WidgetMetric } from '../../core/api.types';
 import { Icon } from '../../shared/icon';
 import { CountersStore } from '../../state/counters.store';
@@ -10,39 +11,39 @@ import { SettingsStore } from '../../state/settings.store';
 import { widgetCounterPaths } from '../counters/counters-model';
 import { WidgetView } from './widget-view';
 import { PANEL_KINDS, KINDS, KIND_HINT, KIND_LABEL, METRICS, SIZES, SIZE_COLUMNS, SIZE_LABEL, accepts, defaultMetric, metricLabel } from './widget-model';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatFormField } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 
 /** The dashboard as widgets: view mode, or edit mode with a gallery, resize, drag to arrange, remove, presets and reset. */
 @Component({
   selector: 'dy-widget-board',
-  imports: [WidgetView, Icon, CdkDropList, CdkDrag, CdkDragHandle],
+  imports: [MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatButton, MatIconButton, WidgetView, Icon, CdkDropList, CdkDrag, CdkDragHandle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar">
       @if (!store.editing()) {
         <span class="faint">{{ widgetCount() }}</span>
         <span class="spacer"></span>
-        <button type="button" class="btn" (click)="store.startEdit()"><dy-icon name="settings" /> Edit dashboard</button>
+        <button type="button" matButton="outlined" (click)="store.startEdit()"><dy-icon name="settings" /> Edit dashboard</button>
       } @else {
-        <label class="field inline">
+        <div class="field inline">
           <span class="visually-hidden">Preset</span>
-          <select class="select sm" aria-label="Preset" (change)="usePreset($event)">
-            <option value="" selected disabled>Preset…</option>
-            @for (p of store.presets(); track p.id) {
-              <option [value]="p.id">{{ p.name }}</option>
-            }
-          </select>
-        </label>
-        <button type="button" class="btn sm" [attr.aria-expanded]="gallery()" [disabled]="!store.canAdd()" (click)="gallery.set(!gallery())"><dy-icon name="plus" /> Add widget</button>
-        <button type="button" class="btn sm ghost" (click)="store.reset()"><dy-icon name="restore" /> Reset to default</button>
+          <pd-select [options]="presetOptions()" [value]="presetPick()" placeholder="Preset…" ariaLabel="Preset" (valueChange)="usePreset($event)" />
+        </div>
+        <button type="button" matButton="outlined" [attr.aria-expanded]="gallery()" [disabled]="!store.canAdd()" (click)="gallery.set(!gallery())"><dy-icon name="plus" /> Add widget</button>
+        <button type="button" matButton="text" (click)="store.reset()"><dy-icon name="restore" /> Reset to default</button>
         @if (naming()) {
-          <input class="input sm" type="text" maxlength="64" aria-label="Preset name" placeholder="Preset name" [value]="presetName()" (input)="presetName.set($any($event.target).value)" (keydown.enter)="savePreset()" />
-          <button type="button" class="btn sm" [disabled]="!presetName().trim() || settings.saving()" (click)="savePreset()">Save preset</button>
+          <mat-form-field><input matInput type="text" maxlength="64" aria-label="Preset name" placeholder="Preset name" [value]="presetName()" (input)="presetName.set($any($event.target).value)" (keydown.enter)="savePreset()" /></mat-form-field>
+          <button type="button" matButton="outlined" [disabled]="!presetName().trim() || settings.saving()" (click)="savePreset()">Save preset</button>
         } @else {
-          <button type="button" class="btn sm ghost" (click)="naming.set(true)"><dy-icon name="plus" /> Save as preset</button>
+          <button type="button" matButton="text" (click)="naming.set(true)"><dy-icon name="plus" /> Save as preset</button>
         }
         <span class="spacer"></span>
-        <button type="button" class="btn sm" (click)="store.cancel()">Cancel</button>
-        <button type="button" class="btn sm primary" [disabled]="!store.dirty() || settings.saving()" (click)="store.save()">Save dashboard</button>
+        <button type="button" matButton="outlined" (click)="store.cancel()">Cancel</button>
+        <button type="button" matButton="filled" [disabled]="!store.dirty() || settings.saving()" (click)="store.save()">Save dashboard</button>
       }
     </div>
 
@@ -74,24 +75,16 @@ import { PANEL_KINDS, KINDS, KIND_HINT, KIND_LABEL, METRICS, SIZES, SIZE_COLUMNS
         <div class="cell" cdkDrag [cdkDragDisabled]="!store.editing()" [style.grid-column]="'span ' + span(w)" [attr.data-id]="w.id">
           <dy-widget [widget]="w" />
           @if (store.editing()) {
-            <div class="edit" role="toolbar" [attr.aria-label]="'Edit ' + w.id">
-              <button type="button" class="btn ghost icon sm grab" cdkDragHandle aria-label="Drag to move"><dy-icon name="more" /></button>
-              <button type="button" class="btn ghost icon sm" aria-label="Move earlier" [disabled]="i === 0" (click)="store.move(i, i - 1)"><dy-icon name="chevron-left" /></button>
-              <button type="button" class="btn ghost icon sm" aria-label="Move later" [disabled]="i === store.widgets().length - 1" (click)="store.move(i, i + 1)"><dy-icon name="chevron-right" /></button>
-              <span class="seg sm" role="group" aria-label="Size">
-                @for (s of sizes; track s) {
-                  <button type="button" [attr.aria-pressed]="w.size === s" [title]="sizeLabel(s)" (click)="store.resize(w.id, s)">{{ s.toUpperCase() }}</button>
-                }
-              </span>
+            <div class="edit" [class.small]="w.size === 's'" role="toolbar" [attr.aria-label]="'Edit ' + w.id">
+              <button type="button" matIconButton matTooltip="Drag to move" class="grab" cdkDragHandle aria-label="Drag to move"><dy-icon name="more" /></button>
+              <button type="button" matIconButton matTooltip="Move earlier" aria-label="Move earlier" [disabled]="i === 0" (click)="store.move(i, i - 1)"><dy-icon name="chevron-left" /></button>
+              <button type="button" matIconButton matTooltip="Move later" aria-label="Move later" [disabled]="i === store.widgets().length - 1" (click)="store.move(i, i + 1)"><dy-icon name="chevron-right" /></button>
+              <pd-segmented-control label="Size" [options]="sizeSegs" [value]="w.size" (valueChange)="resize(w, $event)" />
               @if (!panel(w.kind)) {
-                <select class="select sm" [attr.aria-label]="'Metric of ' + w.id" (change)="metric(w, $event)">
-                  @for (m of metricsFor(w); track m.label) {
-                    <option [value]="m.value" [selected]="m.label === metricName(w)">{{ m.label }}</option>
-                  }
-                </select>
+                <pd-select [options]="metricsFor(w)" [value]="metricName(w)" [ariaLabel]="'Metric of ' + w.id" (valueChange)="metric(w, $event)" />
               }
               <span class="spacer"></span>
-              <button type="button" class="btn ghost icon sm danger" aria-label="Remove widget" (click)="store.remove(w.id)"><dy-icon name="trash" /></button>
+              <button type="button" matIconButton matTooltip="Remove widget" class="pd-button-danger" aria-label="Remove widget" (click)="store.remove(w.id)"><dy-icon name="trash" /></button>
             </div>
           }
         </div>
@@ -115,8 +108,10 @@ import { PANEL_KINDS, KINDS, KIND_HINT, KIND_LABEL, METRICS, SIZES, SIZE_COLUMNS
     .cell { position: relative; min-width: 0; display: grid; grid-template-rows: 1fr auto; gap: var(--sp-1); }
     .cell dy-widget { height: 100%; }
     .editing .cell dy-widget { outline: 1px dashed var(--border-strong); outline-offset: 2px; }
-    .edit { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--overlay-bg); box-shadow: var(--shadow-2); }
-    .edit .seg { margin: 0 2px; } .edit .select { width: 120px; max-width: 100%; }
+    .edit { display: flex; flex-wrap: nowrap; min-width: 0; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--overlay-bg); box-shadow: var(--shadow-2); }
+    .edit pd-segmented-control { margin: 0 2px; } .edit pd-select { flex: 1 1 9rem; min-width: 9rem; width: auto; } .edit .spacer { flex: 0 0 0; }
+    /* A small widget is narrower than the whole toolbar: its metric gets a second row of its own, full width. */
+    .edit.small { flex-wrap: wrap; } .edit.small pd-select { order: 9; flex: 1 1 100%; }
     .grab { cursor: grab; }
     .cdk-drag-preview { box-shadow: var(--shadow-3); border-radius: var(--r-lg); }
     .cdk-drag-placeholder { opacity: 0.35; }
@@ -134,6 +129,11 @@ export class WidgetBoard {
   protected readonly kinds = KINDS;
   protected readonly panel = (k: WidgetKind) => PANEL_KINDS.includes(k);
   protected readonly sizes = SIZES;
+  protected readonly sizeSegs: SuSegment[] = SIZES.map((s) => ({ value: s, label: s.toUpperCase() }));
+  protected resize(w: Widget, value: string): void {
+    const size = SIZES.find((s) => s === value);
+    if (size) this.store.resize(w.id, size);
+  }
   protected readonly widgetCount = computed(() => `${this.store.widgets().length.toString()} widgets`);
   protected readonly kindLabel = (k: WidgetKind) => KIND_LABEL[k];
   protected readonly hint = (k: WidgetKind) => KIND_HINT[k];
@@ -142,7 +142,10 @@ export class WidgetBoard {
   protected readonly icon = (k: WidgetKind) => ICONS[k];
 
   protected readonly metricName = (w: Widget) => metricLabel(w.metric);
-  protected readonly metricsFor = (w: Widget) => METRICS.filter((m) => accepts(w.kind, m.metric)).map((m) => ({ value: m.metric as string, label: m.label }));
+  protected readonly metricsFor = (w: Widget): PdSelectOption[] => METRICS.filter((m) => accepts(w.kind, m.metric)).map((m) => ({ value: m.label, label: m.label }));
+  protected readonly presetOptions = computed<PdSelectOption[]>(() => this.store.presets().map((p) => ({ value: p.id, label: p.name })));
+  /** The preset just applied, shown until the layout changes again; then the box is back to its prompt. */
+  protected readonly presetPick = linkedSignal({ source: () => this.store.widgets(), computation: () => '' });
 
   constructor() {
     // The cards below read these; load them once when the board opens.
@@ -175,13 +178,14 @@ export class WidgetBoard {
   protected drop(e: CdkDragDrop<unknown>): void {
     this.store.move(e.previousIndex, e.currentIndex);
   }
-  protected usePreset(e: Event): void {
-    const el = e.target as HTMLSelectElement;
-    this.store.usePreset(el.value);
-    el.value = '';
+  protected usePreset(id: string): void {
+    if (!id) return;
+    this.presetPick.set(id);
+    this.store.usePreset(id);
   }
-  protected metric(w: Widget, e: Event): void {
-    this.store.setMetric(w.id, (e.target as HTMLSelectElement).value as WidgetMetric);
+  protected metric(w: Widget, label: string): void {
+    const metric = METRICS.find((m) => m.label === label)?.metric;
+    if (metric) this.store.setMetric(w.id, metric as WidgetMetric);
   }
 }
 

@@ -31,26 +31,29 @@ describe('LockersDialog', () => {
     await typePath(f, el, '/work/target/debug');
     el.querySelector('form')!.dispatchEvent(new Event('submit'));
     await f.whenStable();
-    await new Promise((r) => setTimeout(r, 5));
-    f.detectChanges();
-    expect(el.querySelectorAll('li').length).toBeGreaterThan(0);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(el.querySelectorAll('li').length).toBeGreaterThan(0);
+    });
     expect(el.textContent).toContain('Writes build output');
   });
   it('says so when nothing has the path open', async () => {
     const { f, el } = setup(LockersDialog, undefined);
     await typePath(f, el, '/nothing/here.txt');
     el.querySelector('form')!.dispatchEvent(new Event('submit'));
-    await new Promise((r) => setTimeout(r, 5));
-    f.detectChanges();
-    expect(el.textContent).toContain('Nothing has it open right now.');
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(el.textContent).toContain('Nothing has it open right now.');
+    });
   });
   it('shows an error when the lookup fails', async () => {
     const backend = new MockBackend({ latencyMs: 0, fail: new Set(['lockers']) });
     const { f, el } = setup(LockersDialog, undefined, backend);
     await typePath(f, el, '/x');
     el.querySelector('form')!.dispatchEvent(new Event('submit'));
-    await new Promise((r) => setTimeout(r, 5));
-    f.detectChanges();
-    expect(el.querySelector('[role=alert]')).not.toBeNull();
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(el.querySelector('[role=alert]')).not.toBeNull();
+    });
   });
 });

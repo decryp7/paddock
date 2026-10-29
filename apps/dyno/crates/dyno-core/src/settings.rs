@@ -9,19 +9,6 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// The largest settings file Dyno reads.
 pub const MAX_SETTINGS_BYTES: usize = 256 * 1024;
 
-/// Colour theme.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum Theme {
-    /// Follow the OS.
-    #[default]
-    System,
-    /// Dark.
-    Dark,
-    /// Light.
-    Light,
-}
-
 /// A metric the tray icon can show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,8 +102,6 @@ impl Default for WebApi {
 pub struct Settings {
     /// Schema version.
     pub version: u32,
-    /// Theme.
-    pub theme: Theme,
     /// Start Dyno at login.
     pub launch_at_login: bool,
     /// Sampling.
@@ -155,6 +140,8 @@ pub struct Settings {
     pub unusual: crate::unusual::UnusualSettings,
     /// The disk map's limits.
     pub disk: crate::disk::settings::DiskSettings,
+    /// Long operations run as jobs: how many at once.
+    pub jobs: crate::jobs::JobSettings,
     /// Maintenance windows: when Dyno's heavier background work may run (off: any time).
     pub maintenance: crate::extras::maintenance::MaintenanceSettings,
     /// Backup health checks: how stale is too stale, and where to find the tools.
@@ -184,7 +171,6 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             version: SCHEMA_VERSION,
-            theme: Theme::System,
             launch_at_login: false,
             sampling: Sampling::default(),
             retention: Retention::default(),
@@ -204,6 +190,7 @@ impl Default for Settings {
             hardware_alarms: Default::default(),
             unusual: Default::default(),
             disk: Default::default(),
+            jobs: Default::default(),
             maintenance: Default::default(),
             backup: Default::default(),
         }
@@ -237,6 +224,7 @@ impl Settings {
         self.counters = self.counters.normalised();
         self.unusual = self.unusual.clamped();
         self.disk = self.disk.clamped();
+        self.jobs = self.jobs.clamped();
         // A damaged value falls back to its default rather than blocking the whole file.
         self.maintenance.windows.truncate(crate::extras::maintenance::MAX_WINDOWS);
         if self.maintenance.validate().is_err() {
@@ -287,9 +275,9 @@ mod tests {
 
     #[test]
     fn missing_keys_take_defaults() {
-        let (s, w) = parse(r#"{"theme":"dark","sampling":{"intervalMs":2000},"futureKey":1}"#);
+        let (s, w) = parse(r#"{"launchAtLogin":true,"sampling":{"intervalMs":2000},"futureKey":1}"#);
         assert!(w.is_none());
-        assert_eq!(s.theme, Theme::Dark);
+        assert!(s.launch_at_login);
         assert_eq!(s.sampling.interval_ms, 2_000);
         assert_eq!(s.sampling.process_interval_ms, 2_000);
         assert_eq!(s.retention, Retention::default());
@@ -336,7 +324,7 @@ mod tests {
     #[test]
     fn dashboard_and_tray_items_are_normalised_and_optional() {
         // Old files without the new keys still load with the defaults.
-        let (s, w) = parse(r#"{"theme":"dark"}"#);
+        let (s, w) = parse(r#"{"launchAtLogin":true}"#);
         assert!(w.is_none());
         assert_eq!(s.dashboard, crate::widgets::DashboardLayout::default());
         assert_eq!(s.tray_items, crate::widgets::TrayItems::default());
@@ -359,12 +347,41 @@ mod tests {
         let (s, _) = parse(r#"{"disk":{"scanFolders":1,"notableFileMib":2}}"#);
         assert_eq!((s.disk.scan_folders, s.disk.notable_file_mib), (10_000, 2));
         let j = serde_json::to_value(Settings::default()).unwrap();
-        assert_eq!(j["disk"], serde_json::json!({"scanFolders": 2_000_000, "notableFileMib": 10}));
+        // The schema of the two parallelism and cost sections (rule 51): these keys, these defaults, these shapes.
+        assert_eq!(
+            j["disk"],
+            serde_json::json!({
+                "scanFolders": 2_000_000,
+                "notableFileMib": 10,
+                "readThreads": "auto",
+                "finderFiles": 500_000,
+                "finderDepth": 48,
+                "finderHashGib": 64
+            })
+        );
+        assert_eq!(j["jobs"], serde_json::json!({"workers": "auto"}));
+        let (s, _) = parse(
+            r#"{"disk":{"readThreads":{"fixed":99},"finderFiles":1,"finderDepth":0,"finderHashGib":0},"jobs":{"workers":{"fixed":0}}}"#,
+        );
+        assert_eq!(
+            (
+                s.disk.read_threads,
+                s.disk.finder_files,
+                s.disk.finder_depth,
+                s.disk.finder_hash_gib,
+                s.jobs.workers
+            ),
+            (crate::threads::Threads::Fixed(16), 1_000, 1, 1, crate::threads::Threads::Fixed(1)),
+            "the engine validates what the UI sends"
+        );
+        // A damaged value falls back to the defaults with a warning rather than failing the whole file.
+        let (s, w) = parse(r#"{"disk":{"readThreads":"many"}}"#);
+        assert!(w.is_some() || s.disk.read_threads == crate::threads::Threads::Auto);
     }
 
     #[test]
     fn unusual_settings_are_optional_and_clamped() {
-        let (s, w) = parse(r#"{"theme":"dark"}"#);
+        let (s, w) = parse(r#"{"launchAtLogin":true}"#);
         assert!(w.is_none());
         assert_eq!(s.unusual, crate::unusual::UnusualSettings::default());
         let (s, _) = parse(r#"{"unusual":{"learningDays":500}}"#);
@@ -376,7 +393,7 @@ mod tests {
 
     #[test]
     fn extras_settings_are_optional_validated_and_reset_when_damaged() {
-        let (s, w) = parse(r#"{"theme":"dark"}"#);
+        let (s, w) = parse(r#"{"launchAtLogin":true}"#);
         assert!(w.is_none());
         assert!(!s.maintenance.enabled && s.backup.alert_when_stale && s.backup.stale_after_hours == 48);
         let (s, _) = parse(r#"{"maintenance":{"enabled":true,"windows":[]},"backup":{"staleAfterHours":0}}"#);

@@ -310,6 +310,9 @@ fn open_on<R: Runtime>(
     };
     if let Err(e) = build_window(app, &spec, &place, (min_w, min_h), &parent) {
         dialogs.remove(&label);
+        if e.code == DialogErrorCode::InsidePluginHook {
+            return Err(e);
+        }
         return Err(DialogError::new(
             DialogErrorCode::Failed,
             format!("could not open the dialog window: {e}"),
@@ -362,6 +365,16 @@ fn build_window<R: Runtime>(
     min: (f64, f64),
     parent: &WebviewWindow<R>,
 ) -> Result<(), DialogError> {
+    if paddock_commands::plugin_hook::in_plugin_hook() {
+        return Err(DialogError::new(
+            DialogErrorCode::InsidePluginHook,
+            format!(
+                "the dialog \"{}\" {}",
+                spec.label,
+                paddock_commands::plugin_hook::INSIDE_PLUGIN_HOOK
+            ),
+        ));
+    }
     let at = placement::screen_position(place, spec.os);
     let c = window_config(spec, &at, place, min);
     let (r, g, b) = c.background;

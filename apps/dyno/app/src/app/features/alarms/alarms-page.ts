@@ -3,31 +3,32 @@ import { AlarmsStore } from '../../state/alarms.store';
 import { AlarmsActive } from './alarms-active';
 import { AlarmsHistory } from './alarms-history';
 import { AlarmsRules } from './alarms-rules';
+import { MatTabsModule } from '@angular/material/tabs';
 
 type Tab = 'active' | 'history' | 'rules';
 
 /** Alarms: what needs attention now (Active), what changed (History) and how alarms are raised and delivered (Rules). */
 @Component({
   selector: 'dy-alarms-page',
-  imports: [AlarmsActive, AlarmsHistory, AlarmsRules],
+  imports: [MatTabsModule, AlarmsActive, AlarmsHistory, AlarmsRules],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <header class="page-head">
         <div class="titles"><h1>Alarms</h1><p>Problems Dyno found, until you acknowledge them.</p></div>
-        <div class="seg" role="tablist" aria-label="Alarms">
+        <nav mat-tab-nav-bar [tabPanel]="panel" aria-label="Alarms">
           @for (t of tabs; track t.id) {
-            <button type="button" role="tab" [id]="'alarm-tab-' + t.id" [attr.aria-selected]="tab() === t.id" [attr.aria-controls]="'alarm-panel'" (click)="tab.set(t.id)">{{ t.label }}</button>
+            <button type="button" mat-tab-link [active]="tab() === t.id" (click)="tab.set(t.id)">{{ t.label }}</button>
           }
-        </div>
+        </nav>
       </header>
-      <div id="alarm-panel" role="tabpanel" [attr.aria-labelledby]="'alarm-tab-' + tab()">
+      <mat-tab-nav-panel #panel>
         @switch (tab()) {
           @case ('active') { <dy-alarms-active /> }
           @case ('history') { <dy-alarms-history /> }
           @case ('rules') { <dy-alarms-rules /> }
         }
-      </div>
+      </mat-tab-nav-panel>
     </div>
   `,
   styles: `:host { display: block; }`,

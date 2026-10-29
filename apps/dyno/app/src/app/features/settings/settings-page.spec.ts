@@ -11,10 +11,15 @@ const NOW = 1_700_000_000_000;
 /** Renders, then lets the mock's promises and timers run and renders again (signals set after awaits). */
 async function settle(f: ComponentFixture<unknown>) {
   f.detectChanges();
-  for (let i = 0; i < 3; i++) {
-    await new Promise((r) => setTimeout(r, 2));
-    f.detectChanges();
-  }
+  // Until the store has its answer (the settings, or the error the page shows) and the plugins list was asked for.
+  const store = TestBed.inject(SettingsStore);
+  await vi.waitFor(() => {
+    expect(store.settings() !== null || store.error() !== null).toBe(true);
+    expect(store.pluginsLoaded() || store.pluginsError() !== null).toBe(true);
+  });
+  f.detectChanges();
+  await f.whenStable();
+  f.detectChanges();
 }
 
 async function make() {
@@ -32,16 +37,17 @@ const toggle = (el: HTMLElement, label: string) => el.querySelector<HTMLButtonEl
 describe('SettingsPage', () => {
   it('renders the sections once loaded and shows no save bar while clean', async () => {
     const { el, saveButton, store } = await make();
-    expect(el.querySelector('h1')?.textContent).toBe('Settings');
-    for (const name of ['Appearance', 'Measuring', 'Menu bar items', 'Alerts', 'Plugins', 'About']) expect(el.querySelector(`section[aria-label="${name}"]`)).not.toBeNull();
+    expect(el.querySelector('h2.pd-title')?.textContent).toBe('Dyno');
+    // Appearance, Updates and About are the shell's pages of the Settings window, not Dyno's.
+    for (const name of ['Start-up', 'Measuring', 'Menu bar items', 'Alerts', 'Plugins']) expect(el.querySelector(`section[aria-label="${name}"]`)).not.toBeNull();
     expect(saveButton()).toBeUndefined();
     expect(store.settings()).not.toBeNull();
   });
-  it('shows plugins and About details from the engine', async () => {
+  it('shows the plugins from the engine and no appearance or About of its own', async () => {
     const { el } = await make();
     expect(el.querySelectorAll('.plugins li').length).toBeGreaterThan(0);
-    expect(el.querySelector('.about')!.textContent).toContain('0.1.0');
-    expect(el.querySelector('.about')!.textContent).toContain('macOS');
+    expect(el.querySelector('section[aria-label="Appearance"]')).toBeNull();
+    expect(el.querySelector('section[aria-label="About"]')).toBeNull();
   });
   it('a change brings up the save bar; Save sends the whole draft and the bar goes away', async () => {
     const { f, mock, el, saveButton, store } = await make();
@@ -56,7 +62,7 @@ describe('SettingsPage', () => {
     expect(spy.mock.calls[0]![0]).toEqual({ ...before, launchAtLogin: !before.launchAtLogin });
     expect(store.settings()!.launchAtLogin).toBe(!before.launchAtLogin);
     expect(saveButton()).toBeUndefined();
-    expect(TestBed.inject(Notifier).toasts().at(-1)?.text).toBe('Settings saved');
+    expect(TestBed.inject(Notifier).recent().at(-1)?.text).toBe('Settings saved');
   });
   it('Discard restores the saved values', async () => {
     const { f, mock, el, saveButton, discardButton, store } = await make();
@@ -69,17 +75,6 @@ describe('SettingsPage', () => {
     expect(saveButton()).toBeUndefined();
     expect(spy).not.toHaveBeenCalled();
     expect(toggle(el, 'Alerts').getAttribute('aria-checked')).toBe(String(store.settings()!.alerts.enabled));
-  });
-  it('choosing a theme previews it immediately and counts as a change', async () => {
-    const { f, el, saveButton, store } = await make();
-    const target = store.settings()!.theme === 'dark' ? 'Light' : 'Dark';
-    const radio = [...el.querySelectorAll<HTMLButtonElement>('[aria-label="Theme"] button')].find((b) => b.textContent?.includes(target))!;
-    radio.click();
-    f.detectChanges();
-    expect(radio.getAttribute('aria-checked')).toBe('true');
-    expect(document.documentElement.dataset['theme']).toBe(target.toLowerCase());
-    expect(saveButton()).toBeDefined();
-    document.documentElement.removeAttribute('data-theme');
   });
   it('menu bar items: adding one makes the page dirty and Save stores trayItems', async () => {
     const { f, el, saveButton, mock } = await make();
@@ -100,7 +95,7 @@ describe('SettingsPage', () => {
     saveButton()!.click();
     await settle(f);
     expect(saveButton()).toBeDefined();
-    expect(TestBed.inject(Notifier).toasts().at(-1)).toMatchObject({ tone: 'bad', text: 'Nope.' });
+    expect(TestBed.inject(Notifier).recent().at(-1)).toMatchObject({ tone: 'bad', text: 'Nope.' });
   });
   it('shows an inline error with Retry when settings cannot load', async () => {
     const mock = new MockBackend({ latencyMs: 0, now: () => NOW, fail: new Set(['settings']) });
@@ -114,16 +109,18 @@ describe('SettingsPage', () => {
   });
 
   it('has a Backup health section: switch, hours and folders for the tools found by name', async () => {
-    const { el, saveButton, store } = await make();
+    const { f, el, saveButton, store } = await make();
     const section = el.querySelector('section[aria-label="Backup health"]')!;
     expect(section).not.toBeNull();
     expect(section.textContent).toContain('never runs or manages a backup');
     expect(section.querySelectorAll('textarea')).toHaveLength(3);
     expect(section.textContent).toContain('Where restic is installed');
     toggle(el, 'Tell me when a backup is out of date').click();
-    await new Promise((r) => setTimeout(r, 2));
-    expect(saveButton()).toBeDefined();
-    expect(store.settings()!.backup.alertWhenStale).toBe(true);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(store.settings()!.backup.alertWhenStale).toBe(true);
+      expect(saveButton()).toBeDefined();
+    });
   });
 
   it('keeps what is typed in a folder box, validates it like the engine and saves it', async () => {
@@ -198,6 +195,60 @@ describe('SettingsPage', () => {
     const sent = spy.mock.calls[0]![0];
     expect(sent.baselines).toEqual({ enabled: true, learningDays: 14, alarms: true });
     expect(sent.hardwareAlarms).toEqual({ throttling: false, lifespan: false });
+  });
+  it('shows the disk map limits with the engine defaults, saves a change and says what is wrong with a value out of range', async () => {
+    const { f, mock, el, saveButton } = await make();
+    const section = el.querySelector('section[aria-label="Disk map"]')!;
+    const items = section.querySelector<HTMLInputElement>('input[aria-label="Items kept per scan"]')!;
+    const size = section.querySelector<HTMLInputElement>('input[aria-label="Large file size"]')!;
+    expect([items.value, size.value]).toEqual(['2000000', '10']);
+    const type = (i: HTMLInputElement, v: string) => {
+      i.value = v;
+      i.dispatchEvent(new Event('input'));
+      f.detectChanges();
+    };
+    for (const bad of ['9999', '5000001', '1.5', '']) type(items, bad);
+    for (const bad of ['0', '1025']) type(size, bad);
+    expect(section.querySelector('mat-error')?.textContent).toContain('whole number from 10,000 to 5,000,000');
+    expect(saveButton()!.disabled).toBe(true);
+    type(items, '500000');
+    type(size, '64');
+    const spy = vi.spyOn(mock, 'saveSettings');
+    saveButton()!.click();
+    await settle(f);
+    expect(spy.mock.calls[0]![0].disk).toMatchObject({ scanFolders: 500_000, notableFileMib: 64 });
+  });
+  it('shows Parallelism and cost with the engine defaults (Auto, 500,000 files, 48 levels, 64 GiB), says what is wrong and saves a change', async () => {
+    const { f, mock, el, saveButton } = await make();
+    const section = el.querySelector('section[aria-label="Parallelism and cost"]')!;
+    const field = (label: string) => section.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+    expect(['File finder: files looked at', 'File finder: folder depth', 'File finder: content compared'].map((l) => field(l).value)).toEqual(['500000', '48', '64']);
+    expect(section.querySelector('pd-select[ariaLabel="Threads reading folders"], [aria-label="Threads reading folders"]')).not.toBeNull();
+    expect(section.querySelector('[aria-label="Jobs at once"]')).not.toBeNull();
+    expect(section.textContent).toContain('Takes effect the next time Dyno starts');
+    const type = (i: HTMLInputElement, v: string) => {
+      i.value = v;
+      i.dispatchEvent(new Event('input'));
+      f.detectChanges();
+    };
+    type(field('File finder: folder depth'), '0');
+    type(field('File finder: files looked at'), '999');
+    type(field('File finder: content compared'), '5000');
+    expect(section.querySelectorAll('mat-error').length).toBe(3);
+    expect(saveButton()!.disabled).toBe(true);
+    type(field('File finder: folder depth'), '20');
+    type(field('File finder: files looked at'), '100000');
+    type(field('File finder: content compared'), '8');
+    const page = f.componentInstance as unknown as { setDisk(p: object): void; setJobs(p: object): void };
+    page.setDisk({ readThreads: { fixed: 6 } });
+    page.setJobs({ workers: { fixed: 2 } });
+    f.detectChanges();
+    const spy = vi.spyOn(mock, 'saveSettings');
+    saveButton()!.click();
+    await settle(f);
+    const sent = spy.mock.calls[0]![0];
+    expect(sent.disk).toMatchObject({ readThreads: { fixed: 6 }, finderFiles: 100_000, finderDepth: 20, finderHashGib: 8 });
+    expect(sent.jobs).toEqual({ workers: { fixed: 2 } });
   });
   it('ignores a learning period outside 1 to 30 and dims its rows when learning is off', async () => {
     const { f, el, saveButton } = await make();

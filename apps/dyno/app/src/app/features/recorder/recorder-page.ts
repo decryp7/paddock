@@ -1,16 +1,17 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
-import { Switch } from '../../shared/switch';
+import { MatSlideToggle } from '@angular/material/slide-toggle';
 import { RecorderStore } from '../../state/recorder.store';
 import { SettingsStore } from '../../state/settings.store';
 import { SnapshotList } from './snapshot-list';
 import { TimelinePanel } from './timeline-panel';
+import { MatButton } from '@angular/material/button';
 
 /** The flight recorder: saved snapshots of the last ten minutes and a shared-axis timeline of the selected one. */
 @Component({
   selector: 'dy-recorder-page',
-  imports: [AsyncState, Icon, Switch, SnapshotList, TimelinePanel],
+  imports: [MatButton, AsyncState, Icon, MatSlideToggle, SnapshotList, TimelinePanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -21,10 +22,10 @@ import { TimelinePanel } from './timeline-panel';
         </div>
         <div class="actions">
           <div class="rec">
-            <dy-switch [checked]="recording()" [disabled]="settings.settings() === null || settings.saving()" label="Record continuously" (changed)="setRecording($event)" />
+            <mat-slide-toggle [checked]="recording()" [disabled]="settings.settings() === null || settings.saving()" aria-label="Record continuously" (change)="setRecording($event.checked)" />
             <span aria-hidden="true">Record continuously</span>
           </div>
-          <button type="button" class="btn primary" [disabled]="store.capturing()" (click)="store.capture()"><dy-icon name="camera" /> Capture now</button>
+          <button type="button" matButton="filled" [disabled]="store.capturing()" (click)="store.capture()"><dy-icon name="camera" /> Capture now</button>
         </div>
       </header>
 

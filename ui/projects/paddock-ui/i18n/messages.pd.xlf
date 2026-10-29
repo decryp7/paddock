@@ -836,6 +836,9 @@
       <trans-unit id="pd.health.state.quarantined" datatype="html">
         <source>switched off</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.reconnecting" datatype="html">
+        <source>reconnecting</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.refused" datatype="html">
         <source>refused by the system</source>
       </trans-unit>
@@ -1366,6 +1369,12 @@
       </trans-unit>
       <trans-unit id="pd.pages.nav" datatype="html">
         <source>Pages</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.palette.go-to" datatype="html">
+        <source>Pages</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.palette.go-to.placeholder" datatype="html">
+        <source>Go to a page…</source>
       </trans-unit>
       <trans-unit id="pd.pages.sidebar.collapse" datatype="html">
         <source>Collapse sidebar</source>
@@ -2204,8 +2213,14 @@
       <trans-unit id="pd.table.count" datatype="html">
         <source><x id="PH"/> rows</source>
       </trans-unit>
+      <trans-unit id="pd.table.count1" datatype="html">
+        <source>1 row</source>
+      </trans-unit>
       <trans-unit id="pd.table.countOf" datatype="html">
         <source><x id="PH"/> of <x id="PH_1"/> rows</source>
+      </trans-unit>
+      <trans-unit id="pd.table.countOf1" datatype="html">
+        <source><x id="PH"/> of 1 row</source>
       </trans-unit>
       <trans-unit id="pd.table.empty" datatype="html">
         <source>Nothing to show yet.</source>
@@ -2324,6 +2339,9 @@
       <trans-unit id="pd.ui.job.waiting" datatype="html">
         <source>Waiting</source>
       </trans-unit>
+      <trans-unit id="pd.ui.loading" datatype="html">
+        <source>Loading</source>
+      </trans-unit>
       <trans-unit id="pd.ui.metric.down" datatype="html">
         <source>Down</source>
       </trans-unit>
@@ -2338,6 +2356,21 @@
       </trans-unit>
       <trans-unit id="pd.ui.sparkline" datatype="html">
         <source>Trend</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.sunburst.error" datatype="html">
+        <source>Could not draw the chart</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.sunburst.share" datatype="html">
+        <source><x id="percent"/> of <x id="parent"/></source>
+      </trans-unit>
+      <trans-unit id="pd.ui.sunburst.smaller-many" datatype="html">
+        <source><x id="count"/> smaller items</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.sunburst.smaller-one" datatype="html">
+        <source>1 smaller item</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.sunburst.up" datatype="html">
+        <source>Up to <x id="parent"/></source>
       </trans-unit>
       <trans-unit id="pd.undo.actionFailed" datatype="html">
         <source><x id="label"/> failed: <x id="cause"/></source>

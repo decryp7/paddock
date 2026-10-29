@@ -1,4 +1,4 @@
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
+import { PdActionTip, PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { ThemeService } from '../../core/theme';
 import type { CounterHit, CounterInfo, CounterUnit, TimelineEventKind } from '../../core/api.types';
@@ -11,6 +11,15 @@ import { SettingsStore } from '../../state/settings.store';
 import { EVENT_STYLE, eventCounts } from '../dashboard/history-options';
 import { EVENT_LABEL } from '../../shared/labels';
 import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCounter, pathParts, readingNumber, readingReason, UNIT_WORD } from './counters-model';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatFormField } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
+import { SearchField } from '../../shared/search-field';
+import { MatMenuModule } from '@angular/material/menu';
 
 /**
  * Performance counters: browse what the OS offers (objects, then counters with their instances), search by name, chart
@@ -19,7 +28,7 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
  */
 @Component({
   selector: 'dy-counters-page',
-  imports: [AsyncState, Icon, Chart, CdkMenu, CdkMenuItem, CdkMenuTrigger, CdkContextMenuTrigger],
+  imports: [AsyncState, Icon, Chart, PdTable, PdCell, PdActionTip, MatMenuModule, SearchField, FullTextTip, MatTooltip, SuSegmentedControl, PdSelect, MatFormField, MatInput, MatButton, MatIconButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -31,21 +40,17 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
       </header>
 
       <div class="bar" role="group" aria-label="Counters toolbar">
-        <label class="search"><dy-icon name="search" /><input class="input" type="search" placeholder="Search counters, for example disk queue" aria-label="Search counters" [value]="store.query()" (input)="onSearch($any($event.target).value)" /></label>
+        <dy-search-field label="Search counters" placeholder="Search counters, for example disk queue" [value]="store.query()" (valueChange)="onSearch($event)" />
         <span class="spacer"></span>
-        <button type="button" class="btn sm" [cdkMenuTriggerFor]="setsMenu"><dy-icon name="layers" /> Sets @if (store.sets().length) { <span class="count num">{{ store.sets().length }}</span> }</button>
-        <div class="seg" role="group" aria-label="Range">
-          @for (r of ranges; track r.minutes) {
-            <button type="button" [attr.aria-pressed]="store.minutes() === r.minutes" (click)="store.setMinutes(r.minutes)">{{ r.label }}</button>
-          }
-        </div>
+        <button type="button" matButton="outlined" [matMenuTriggerFor]="setsMenu"><dy-icon name="layers" /> Sets @if (store.sets().length) { <span class="count num">{{ store.sets().length }}</span> }</button>
+        <pd-segmented-control label="Range" [options]="rangeSegs" [value]="store.minutes() + ''" (valueChange)="store.setMinutes(+$event)" />
       </div>
 
       @if (naming()) {
         <div class="namebar" role="group" aria-label="Save a set">
-          <input class="input sm" type="text" [attr.maxlength]="maxName" aria-label="Set name" placeholder="Name this set" [value]="setName()" (input)="setName.set($any($event.target).value)" (keydown.enter)="saveSet()" (keydown.escape)="naming.set(false)" />
-          <button type="button" class="btn sm primary" [disabled]="!setName().trim()" (click)="saveSet()">Save set</button>
-          <button type="button" class="btn sm ghost" (click)="naming.set(false)">Cancel</button>
+          <mat-form-field><input matInput type="text" [attr.maxlength]="maxName" aria-label="Set name" placeholder="Name this set" [value]="setName()" (input)="setName.set($any($event.target).value)" (keydown.enter)="saveSet()" (keydown.escape)="naming.set(false)" /></mat-form-field>
+          <button type="button" matButton="filled" [disabled]="!setName().trim()" (click)="saveSet()">Save set</button>
+          <button type="button" matButton="text" (click)="naming.set(false)">Cancel</button>
         </div>
       }
 
@@ -57,10 +62,10 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
               <ul class="list" role="list" aria-label="Search results">
                 @for (h of store.hits(); track h.path) {
                   <li class="item" [class.on]="isWatched(h.path)">
-                    <span class="name truncate" [title]="h.path">{{ hitName(h) }}</span>
+                    <span class="name truncate" [matTooltip]="h.path">{{ hitName(h) }}</span>
                     <span class="meta truncate">{{ h.object }}</span>
-                    <span class="acts">
-                      <button type="button" class="ib" [attr.aria-label]="(isWatched(h.path) ? 'Stop charting ' : 'Chart ') + hitName(h)" [title]="isWatched(h.path) ? 'Stop charting' : 'Chart this counter'" (click)="toggle(h.path)"><dy-icon [name]="isWatched(h.path) ? 'check' : 'plus'" /></button>
+                    <span class="acts" pdActionTip>
+                      <button type="button" matIconButton [attr.aria-label]="(isWatched(h.path) ? 'Stop charting ' : 'Chart ') + hitName(h)" (click)="toggle(h.path)"><dy-icon [name]="isWatched(h.path) ? 'check' : 'plus'" /></button>
                     </span>
                   </li>
                 }
@@ -68,19 +73,13 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
             </dy-async>
           } @else if (store.opened(); as o) {
             <div class="card-head">
-              <button type="button" class="btn ghost icon sm" aria-label="Back to all objects" (click)="store.closeObject()"><dy-icon name="chevron-left" /></button>
-              <h2 class="truncate" [title]="o.name">{{ o.name }}</h2>
+              <button type="button" matIconButton matTooltip="Back to all objects" aria-label="Back to all objects" (click)="store.closeObject()"><dy-icon name="chevron-left" /></button>
+              <h2 class="truncate" [dyFullText]="o.name">{{ o.name }}</h2>
               <span class="spacer"></span>
               <span class="sub">{{ o.counters.length }} counters</span>
             </div>
             @if (o.instances.length) {
-              <label class="inst"><span>Instance</span>
-                <select class="select sm" aria-label="Instance" (change)="instance.set($any($event.target).value)">
-                  @for (i of o.instances; track i) {
-                    <option [value]="i" [selected]="i === currentInstance()">{{ i }}</option>
-                  }
-                </select>
-              </label>
+              <span class="inst"><span>Instance</span><pd-select [options]="instanceOptions(o.instances)" [value]="currentInstance() ?? ''" ariaLabel="Instance" (valueChange)="instance.set($event)" /></span>
               @if (o.instancesTotal > o.instances.length) {
                 <p class="hint">Showing {{ o.instances.length }} of {{ o.instancesTotal }} instances. Search by name to find the rest.</p>
               }
@@ -88,10 +87,10 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
             <ul class="list" role="list" aria-label="Counters of {{ o.name }}">
               @for (c of o.counters; track c.name) {
                 <li class="item" [class.on]="isWatched(pathOf(c))">
-                  <span class="name truncate" [title]="c.help ?? c.name">{{ c.name }}</span>
+                  <span class="name truncate" [dyFullText]="c.help ?? c.name">{{ c.name }}</span>
                   <span class="meta truncate">{{ unitWord(c.unit) }}</span>
-                  <span class="acts">
-                    <button type="button" class="ib" [attr.aria-label]="(isWatched(pathOf(c)) ? 'Stop charting ' : 'Chart ') + c.name" (click)="toggle(pathOf(c))"><dy-icon [name]="isWatched(pathOf(c)) ? 'check' : 'plus'" /></button>
+                  <span class="acts" pdActionTip>
+                    <button type="button" matIconButton [attr.aria-label]="(isWatched(pathOf(c)) ? 'Stop charting ' : 'Chart ') + c.name" (click)="toggle(pathOf(c))"><dy-icon [name]="isWatched(pathOf(c)) ? 'check' : 'plus'" /></button>
                   </span>
                 </li>
               }
@@ -108,7 +107,7 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
                 @for (o of store.objects()?.objects; track o.name) {
                   <li>
                     <button type="button" class="item obj" (click)="store.open(o.name)">
-                      <span class="name truncate" [title]="o.name">{{ o.name }}</span>
+                      <span class="name truncate" [dyFullText]="o.name">{{ o.name }}</span>
                       <span class="meta num">{{ o.counters }}</span>
                       <dy-icon name="chevron-right" />
                     </button>
@@ -130,7 +129,7 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
               </div>
             } @else {
               @if (store.pollError(); as e) {
-                <div class="error" role="alert"><dy-icon name="alert" /><span class="truncate">{{ e.message }}</span><button type="button" class="btn sm ghost" (click)="store.tick()">Retry</button></div>
+                <div class="error" role="alert"><dy-icon name="alert" /><span class="truncate">{{ e.message }}</span><button type="button" matButton="text" (click)="store.tick()">Retry</button></div>
               }
               @if (chart(); as c) {
                 <dy-chart [options]="c.option" [label]="chartLabel()" style="--chart-h: 300px" />
@@ -156,40 +155,26 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
                 <h2>Charted</h2>
                 <span class="spacer"></span>
                 <span class="sub">{{ store.watching().length }} of {{ maxWatched }}</span>
-                <button type="button" class="btn sm ghost" [disabled]="settings.saving()" (click)="startNaming()"><dy-icon name="layers" /> Save as set</button>
-                <button type="button" class="btn sm ghost" (click)="store.setWatching([])">Clear</button>
+                <button type="button" matButton="text" [disabled]="settings.saving()" (click)="startNaming()"><dy-icon name="layers" /> Save as set</button>
+                <button type="button" matButton="text" (click)="store.setWatching([])">Clear</button>
               </div>
-              <div class="grid" role="table" aria-label="Charted counters">
-                <div class="head" role="row">
-                  <span role="columnheader">Counter</span>
-                  <span role="columnheader">Object</span>
-                  <span role="columnheader" class="r">Value</span>
-                  <span role="columnheader"><span class="visually-hidden">Actions</span></span>
-                </div>
-                @for (p of store.watching(); track p) {
-                  <div class="row" role="row" [cdkContextMenuTriggerFor]="rowMenu" [cdkContextMenuTriggerData]="{ path: p }">
-                    <span class="cell" role="cell">
-                      <span class="swatch" [style.background]="swatch($index)" aria-hidden="true"></span>
-                      <span class="truncate" [title]="p">{{ title(p) }}</span>
-                      @if (store.isPinned(p)) { <dy-icon class="pinned" name="pin" aria-label="Pinned" /> }
-                    </span>
-                    <span class="cell muted truncate" role="cell" [title]="object(p)">{{ object(p) }}</span>
-                    <span class="cell r num" role="cell">
-                      @if (value(p); as v) {
-                        <b>{{ v[0] }}</b><small>{{ v[1] }}</small>
-                      } @else if (reason(p); as why) {
-                        <span class="unavail" [title]="why"><span class="dot" aria-hidden="true"></span>Unavailable</span>
-                      } @else {
-                        <span class="faint">…</span>
-                      }
-                    </span>
-                    <span class="cell acts" role="cell">
-                      <button type="button" class="ib" [attr.aria-label]="(store.isPinned(p) ? 'Unpin ' : 'Pin ') + title(p)" [title]="store.isPinned(p) ? 'Unpin' : 'Pin to keep it on the dashboard list'" (click)="store.togglePin(p)"><dy-icon name="pin" /></button>
-                      <button type="button" class="ib" [attr.aria-label]="'Stop charting ' + title(p)" title="Stop charting" (click)="store.unwatch(p)"><dy-icon name="close" /></button>
-                      <button type="button" class="ib" [attr.aria-label]="'More actions for ' + title(p)" [cdkMenuTriggerFor]="rowMenu" [cdkMenuTriggerData]="{ path: p }"><dy-icon name="more" /></button>
-                    </span>
-                  </div>
-                }
+              <div class="tablewrap">
+                <pd-table label="Charted counters" [rows]="store.watching()" [columns]="columns" [rowKey]="pathKey" [filterable]="false" [rowActions]="actions" [maxHeight]="480" (action)="run($event)">
+                  <ng-template pdCell="counter" let-p>
+                    <span class="swatch" [style.background]="swatch(index(p))" aria-hidden="true"></span>
+                    <span class="truncate" [dyFullText]="title(p)">{{ title(p) }}</span>
+                    @if (store.isPinned(p)) { <dy-icon class="pinned" name="pin" aria-label="Pinned" /> }
+                  </ng-template>
+                  <ng-template pdCell="value" let-p>
+                    @if (value(p); as v) {
+                      <b>{{ v[0] }}</b><small>{{ v[1] }}</small>
+                    } @else if (reason(p); as why) {
+                      <span class="unavail" [matTooltip]="why"><span class="dot" aria-hidden="true"></span>Unavailable</span>
+                    } @else {
+                      <span class="faint">…</span>
+                    }
+                  </ng-template>
+                </pd-table>
               </div>
             </section>
           }
@@ -200,11 +185,11 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
               <ul class="list" role="list" aria-label="Pinned counters">
                 @for (p of pinnedOutside(); track p) {
                   <li class="item">
-                    <span class="name truncate" [title]="p">{{ title(p) }}</span>
+                    <span class="name truncate" [matTooltip]="p">{{ title(p) }}</span>
                     <span class="meta truncate">{{ object(p) }}</span>
-                    <span class="acts">
-                      <button type="button" class="ib" [attr.aria-label]="'Chart ' + title(p)" title="Chart this counter" (click)="store.watch(p)"><dy-icon name="plus" /></button>
-                      <button type="button" class="ib" [attr.aria-label]="'Unpin ' + title(p)" title="Unpin" (click)="store.togglePin(p)"><dy-icon name="close" /></button>
+                    <span class="acts" pdActionTip>
+                      <button type="button" matIconButton [attr.aria-label]="'Chart ' + title(p)" (click)="store.watch(p)"><dy-icon name="plus" /></button>
+                      <button type="button" matIconButton [attr.aria-label]="'Unpin ' + title(p)" (click)="store.togglePin(p)"><dy-icon name="close" /></button>
                     </span>
                   </li>
                 }
@@ -215,36 +200,24 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
       </div>
     </div>
 
-    <ng-template #rowMenu let-path="path">
-      <div class="menu" cdkMenu aria-label="Counter actions">
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.togglePin(path)"><dy-icon name="pin" /> {{ store.isPinned(path) ? 'Unpin' : 'Pin' }}</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.addToDashboard(path)"><dy-icon name="dashboard" /> Add to the dashboard</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copy(path)"><dy-icon name="copy" /> Copy path</button>
-        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.unwatch(path)"><dy-icon name="close" /> Stop charting</button>
-      </div>
-    </ng-template>
-
-    <ng-template #setsMenu>
-      <div class="menu" cdkMenu aria-label="Counter sets">
+    <mat-menu #setsMenu="matMenu" aria-label="Counter sets">
+      <ng-template matMenuContent>
         @for (s of store.sets(); track s.name) {
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.applySet(s.name)"><dy-icon name="layers" /> {{ s.name }} <span class="n num">{{ s.paths.length }}</span></button>
+          <button mat-menu-item (click)="store.applySet(s.name)"><dy-icon name="layers" /> {{ s.name }} <span class="n num">{{ s.paths.length }}</span></button>
         } @empty {
-          <span class="menu-item muted-item">No saved sets yet</span>
+          <button mat-menu-item disabled>No saved sets yet</button>
         }
-        <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!store.charted()" (cdkMenuItemTriggered)="startNaming()"><dy-icon name="plus" /> Save charted counters as a set…</button>
+        <button mat-menu-item [disabled]="!store.charted()" (click)="startNaming()"><dy-icon name="plus" /> Save charted counters as a set…</button>
         @for (s of store.sets(); track s.name) {
-          <button type="button" class="menu-item danger" cdkMenuItem (cdkMenuItemTriggered)="store.deleteSet(s.name)"><dy-icon name="trash" /> Delete “{{ s.name }}”</button>
+          <button mat-menu-item class="danger" (click)="store.deleteSet(s.name)"><dy-icon name="trash" /> Delete “{{ s.name }}”</button>
         }
-      </div>
-    </ng-template>
+      </ng-template>
+    </mat-menu>
   `,
   styles: `
     :host { display: block; }
     .page { display: grid; gap: var(--sp-3); align-content: start; }
     .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; min-height: 44px; }
-    .search { position: relative; display: block; flex: 1 1 260px; min-width: 200px; max-width: 420px; }
-    .search dy-icon { position: absolute; left: 8px; top: 7px; --icon-size: 15px; color: var(--text-3); }
-    .search input { padding-left: 30px; width: 100%; }
     .count { margin-left: 4px; padding: 0 6px; border-radius: var(--r-pill); background: var(--surface-active); color: var(--text-2); font-size: var(--fs-xs); }
     .namebar { display: flex; gap: var(--sp-2); align-items: center; }
     .cols { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
@@ -260,7 +233,7 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
     .meta { color: var(--text-3); font-size: var(--fs-xs); max-width: 110px; }
     .item dy-icon { --icon-size: 14px; color: var(--text-3); }
     .acts { display: inline-flex; justify-content: flex-end; gap: 2px; opacity: 0.4; transition: opacity var(--dur-fast) var(--ease-out); }
-    .item:hover .acts, .item:focus-within .acts, .row:hover .acts, .row:focus-within .acts, .item.on .acts { opacity: 1; }
+    .item:hover .acts, .item:focus-within .acts, .item.on .acts { opacity: 1; }
     .ib { display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
     .ib:hover { background: var(--surface-active); color: var(--text-1); }
     .ib dy-icon { --icon-size: 15px; color: inherit; }
@@ -279,22 +252,15 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
     .glyph { font-size: 10px; line-height: 1; }
     .n { color: var(--text-3); }
     .faint { color: var(--text-3); font-size: var(--fs-xs); }
-    .grid { display: grid; }
-    .head, .row { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) 120px 92px; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); }
-    .head { height: 30px; border-block: 1px solid var(--border); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-xs); position: sticky; top: 0; z-index: 3; }
-    .row { height: 36px; border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-sm); }
-    .row:hover { background: var(--surface-hover); }
-    .cell { min-width: 0; display: flex; align-items: center; gap: var(--sp-2); white-space: nowrap; overflow: hidden; }
-    .r { justify-content: flex-end; text-align: right; font-variant-numeric: tabular-nums; }
-    .r small { color: var(--text-3); margin-left: 3px; font-size: var(--fs-xs); }
+    .tablewrap { margin: 0 var(--sp-3) var(--sp-3); }
+    .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    small { color: var(--text-3); margin-left: 3px; font-size: var(--fs-xs); }
     .muted { color: var(--text-2); }
     .swatch { width: 10px; height: 3px; border-radius: 2px; flex: none; }
     .pinned { --icon-size: 12px; color: var(--text-3); flex: none; }
     .unavail { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
-    .muted-item { color: var(--text-3); }
-    .menu-item.danger { color: var(--bad); }
-    .menu-item .n { margin-left: auto; padding-left: var(--sp-3); }
+    .n { margin-left: auto; padding-left: var(--sp-3); }
     @media (max-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr); } }
   `,
 })
@@ -305,6 +271,8 @@ export class CountersPage implements OnInit {
   private readonly theme = inject(ThemeService);
   private readonly notifier = inject(Notifier);
   protected readonly ranges = RANGES;
+  protected readonly rangeSegs: SuSegment[] = RANGES.map((r) => ({ value: String(r.minutes), label: r.label }));
+  protected readonly instanceOptions = (list: readonly string[]): PdSelectOption[] => list.map((i) => ({ value: i, label: i }));
   protected readonly maxName = MAX_SET_NAME;
   protected readonly maxWatched = MAX_WATCHED;
   protected readonly naming = signal(false);
@@ -367,6 +335,26 @@ export class CountersPage implements OnInit {
   }
 
   protected title = counterTitle;
+  protected readonly pathKey = (p: string): string => p;
+  protected readonly index = (p: string): number => this.store.watching().indexOf(p);
+  protected readonly columns: PdColumn<string>[] = [
+    { key: 'counter', header: 'Counter', value: (p) => counterTitle(p), required: true, sortable: false, width: 'minmax(0, 1.6fr)' },
+    { key: 'object', header: 'Object', value: (p) => pathParts(p).object, sortable: false, width: 'minmax(0, 1fr)', hideBelow: 520 },
+    { key: 'value', header: 'Value', value: (p) => this.value(p)?.join(' ') ?? '', align: 'end', sortable: false, width: '140px' },
+  ];
+  protected readonly actions = (p: string): PdRowAction[] => [
+    { id: 'pin', label: this.store.isPinned(p) ? 'Unpin' : 'Pin', icon: 'pin', inline: true },
+    { id: 'unwatch', label: 'Stop charting', icon: 'close', inline: true },
+    { id: 'dashboard', label: 'Add to the dashboard', icon: 'layers' },
+    { id: 'copy', label: 'Copy path', icon: 'copy' },
+  ];
+
+  protected run({ id, row }: PdRowActionEvent<string>): void {
+    if (id === 'pin') this.store.togglePin(row);
+    else if (id === 'unwatch') this.store.unwatch(row);
+    else if (id === 'dashboard') this.store.addToDashboard(row);
+    else this.copy(row);
+  }
   protected unitWord = (u: CounterUnit) => UNIT_WORD[u];
   protected eventLabel = (k: TimelineEventKind) => EVENT_LABEL[k];
   protected eventColor = (k: TimelineEventKind) => EVENT_STYLE[k].color(this.theme.tokens());

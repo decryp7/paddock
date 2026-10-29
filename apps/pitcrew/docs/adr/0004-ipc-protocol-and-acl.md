@@ -1,6 +1,7 @@
 # 4. App ↔ service IPC: framed JSON over a local stream, ACL'd, with pushed events
 
 - Status: accepted (2026-10-22)
+- Amended by [ADR 0022](0022-host-environment-and-shared-folders.md) (accepted 2026-10-29): environment, secret, clean and reachability requests are authorised from the caller's token (Windows) or peer uid, not by the ACL alone.
 - Related: ADR 0001 (architecture), ADR 0003 (service model); code: `pitcrew_core::protocol`, `pitcrew_service::ipc`,
   `app/src-tauri/src/{service_client,events}.rs`
 

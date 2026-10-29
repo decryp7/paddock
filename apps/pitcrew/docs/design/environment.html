@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en" data-accent="pitcrew" data-density="standard">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pitcrew environment mock-up</title>
+<!-- Mock-up for Pitcrew ADR 0022 (proposed). Static, invented data. Every colour, size and radius is a --pd-* token;
+     tokens.generated.css is not in the repository: render.mjs compiles it from the family SCSS next to a copy of this page
+     (node apps/pitcrew/docs/design/render.mjs, or --open to view it). Material controls are drawn the way the family theme
+     renders them (outline fields with the label in the notch, matButton variants, mat-table rows); the implementation
+     uses the real components. ?theme=dark|light. -->
+<link rel="stylesheet" href="tokens.generated.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--pd-bg); color: var(--pd-text); font-family: var(--pd-font-sans);
+    font-size: var(--pd-text-body); line-height: var(--pd-lh-body); -webkit-font-smoothing: antialiased; }
+  .sheet { padding: var(--pd-space-8); display: flex; flex-direction: column; gap: var(--pd-space-12); align-items: flex-start; }
+  .sheet > header h1 { font-size: var(--pd-text-title); line-height: var(--pd-lh-title); font-weight: var(--pd-weight-semibold); margin: 0; }
+  .sheet > header p { color: var(--pd-text-muted); margin: var(--pd-space-1) 0 0; max-width: 80ch; }
+  figure { margin: 0; display: inline-flex; flex-direction: column; gap: var(--pd-space-3); padding: var(--pd-space-4); }
+  figcaption { color: var(--pd-text-muted); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); max-width: 820px; }
+  figcaption strong { color: var(--pd-text); font-weight: var(--pd-weight-semibold); }
+  .var { font-family: var(--pd-font-mono); font-size: 12px; font-weight: var(--pd-weight-regular); }
+  .muted { color: var(--pd-text-muted); }
+  .subtle { color: var(--pd-text-subtle); }
+  .num { font-variant-numeric: var(--pd-numeric); text-align: right; white-space: nowrap; }
+  svg.i { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  svg.i.s12 { width: 12px; height: 12px; }
+  svg.dots { fill: currentColor; stroke: none; }
+  .row-gap { display: flex; gap: var(--pd-space-8); align-items: flex-start; flex-wrap: wrap; }
+
+  /* Window chrome */
+  .win { display: grid; grid-template-rows: 40px 1fr var(--pd-statusbar-height); grid-template-columns: var(--pd-sidebar-width) 1fr;
+    border: 1px solid var(--pd-border-strong); border-radius: var(--pd-radius-card); overflow: hidden; background: var(--pd-bg); box-shadow: var(--pd-shadow-2); }
+  .w1280 { width: 1280px; height: 1060px; }
+  .w900 { width: 900px; height: 1180px; grid-template-columns: var(--pd-sidebar-collapsed) 1fr; }
+  .w1280.short { height: 800px; } .w900.short { height: 800px; }
+  .titlebar { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--pd-space-2); padding-left: 78px; position: relative;
+    background: var(--pd-surface-2); border-bottom: 1px solid var(--pd-hairline); font-weight: var(--pd-weight-semibold); }
+  .lights { position: absolute; left: 14px; display: flex; gap: 8px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; background: var(--pd-border-strong); display: block; }
+  .side { background: var(--pd-surface-2); border-right: 1px solid var(--pd-hairline); padding: var(--pd-space-3) var(--pd-space-2); display: flex; flex-direction: column; gap: 2px; }
+  .nav { display: flex; align-items: center; gap: var(--pd-space-3); height: 32px; padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); color: var(--pd-text-muted); position: relative; }
+  .nav.on { background: var(--pd-accent-tint); color: var(--pd-text); font-weight: var(--pd-weight-semibold); }
+  .nav.on svg { color: var(--pd-accent); }
+  .nav.on::before { content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 2px; background: var(--pd-accent); }
+  .w900 .nav span { display: none; } .w900 .nav { justify-content: center; padding: 0; }
+  .status { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--pd-space-2); padding: 0 var(--pd-space-3); background: var(--pd-surface-2);
+    border-top: 1px solid var(--pd-hairline); color: var(--pd-text-muted); font-size: var(--pd-text-label); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pd-success); display: inline-block; }
+  .content { container-type: inline-size; overflow: hidden; }
+  .page { padding: var(--pd-space-6); display: flex; flex-direction: column; gap: var(--pd-space-4); max-width: var(--pd-content-max); }
+
+  /* Header, buttons */
+  .head { display: flex; align-items: flex-start; gap: var(--pd-space-4); }
+  .head h1 { margin: 0; font-size: var(--pd-text-title); line-height: var(--pd-lh-title); font-weight: var(--pd-weight-semibold); }
+  .head p { margin: 2px 0 0; color: var(--pd-text-muted); }
+  .grow { flex: 1; min-width: 0; }
+  .btns { display: flex; gap: var(--pd-space-2); align-items: center; flex: none; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control);
+    border: 1px solid transparent; background: transparent; color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); white-space: nowrap; }
+  .btn.outlined { background: var(--pd-surface-2); border-color: var(--pd-border-strong); }
+  .btn.filled { background: var(--pd-accent-fill); color: var(--pd-on-accent); }
+  .btn.danger { background: var(--pd-danger-fill); color: var(--pd-on-danger); }
+  .btn.small { height: var(--pd-control-height); padding: 0 var(--pd-space-2); }
+  .btn.icon { width: var(--pd-control-height); height: var(--pd-control-height); padding: 0; justify-content: center; color: var(--pd-row-action-rest); }
+  .btn[disabled] { opacity: .45; }
+  .why { font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+
+  /* Callouts, badges */
+  .callout { display: flex; gap: var(--pd-space-3); align-items: flex-start; padding: var(--pd-space-3) var(--pd-space-4); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-hairline); }
+  .callout.info { background: var(--pd-info-tint); } .callout.info > svg { color: var(--pd-info); }
+  .callout.warn { background: var(--pd-warning-tint); } .callout.warn > svg { color: var(--pd-warning); }
+  .callout.err { background: var(--pd-danger-tint); } .callout.err > svg { color: var(--pd-danger); }
+  .callout.neutral { background: var(--pd-surface-2); } .callout.neutral > svg { color: var(--pd-text-muted); }
+  .callout > svg { margin-top: 2px; }
+  .callout strong { font-weight: var(--pd-weight-semibold); }
+  .badge { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: var(--pd-radius-pill); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); white-space: nowrap; }
+  .badge.ok { background: var(--pd-success-tint); color: var(--pd-success); }
+  .badge.warn { background: var(--pd-warning-tint); color: var(--pd-warning); }
+  .badge.err { background: var(--pd-danger-tint); color: var(--pd-danger); }
+  .badge.info { background: var(--pd-info-tint); color: var(--pd-info); }
+  .badge span { color: var(--pd-text); }
+  .src { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--pd-radius-tag); border: 1px solid var(--pd-hairline);
+    background: var(--pd-surface-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); white-space: nowrap; }
+
+  /* Panels and tables (mat-table geometry) */
+  .panel { background: var(--pd-surface-1); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); overflow: hidden; }
+  .panel > .ph { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4) var(--pd-space-2); }
+  .panel > .ph h2 { margin: 0; font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); }
+  .panel > .ph .meta { color: var(--pd-text-muted); font-size: var(--pd-text-label); }
+  .panel > .pf { padding: var(--pd-space-2) var(--pd-space-4) var(--pd-space-3); color: var(--pd-text-muted); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
+  .pbody { padding: var(--pd-space-2) var(--pd-space-4) var(--pd-space-1); }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th { height: 28px; text-align: left; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); padding: 0 var(--pd-space-2);
+    border-bottom: 1px solid var(--pd-hairline); white-space: nowrap; }
+  td { height: var(--pd-row-height); padding: 0 var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+  th:first-child, td:first-child { padding-left: var(--pd-space-4); }
+  tr:last-child td { border-bottom: 0; }
+  td.act { text-align: right; text-overflow: clip; padding-right: var(--pd-space-2); }
+  tr.hover td { background: var(--pd-hover); } tr.hover .btn.icon { color: var(--pd-text); }
+  td.name { font-weight: var(--pd-weight-medium); }
+  .fold { display: none; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); font-weight: var(--pd-weight-regular); overflow: hidden; text-overflow: ellipsis; }
+  .line2 { display: block; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); overflow: hidden; text-overflow: ellipsis; }
+  tr.two td { height: 44px; }
+  .lock { display: inline-flex; align-items: center; gap: 6px; color: var(--pd-text-muted); }
+  .child td { background: var(--pd-surface-2); height: 28px; font-size: var(--pd-text-label); }
+  .shadowed { text-decoration: line-through; color: var(--pd-text-subtle); }
+  .grip { color: var(--pd-row-action-rest); }
+  col.c-name { width: auto; } col.c-act { width: 44px; }
+  .t-folders col.c-var { width: 17%; } .t-folders col.c-path { width: 20%; } .t-folders col.c-applies { width: 11%; }
+  .t-folders col.c-size, .t-folders col.c-free { width: 8%; } .t-folders col.c-note { width: 14%; }
+  .t-vars col.c-value { width: 30%; } .t-vars col.c-applies { width: 14%; } .t-vars col.c-over { width: 12%; } .t-vars col.c-note { width: 16%; }
+  .t-path col.c-grip { width: 40px; } .t-path col.c-pos { width: 12%; } .t-path col.c-applies { width: 14%; } .t-path col.c-note { width: 15%; } .t-path col.c-move { width: 72px; }
+  .t-eff col.c-exp { width: 40px; } .t-eff col.c-name { width: 26%; } .t-eff col.c-value { width: auto; } .t-eff col.c-src { width: 24%; } .t-eff col.c-note { width: 13%; }
+
+  /* Column priority by container query (rule 18): below 900 px of content the Variable, Applies to, Free and Overridden
+     columns fold into the row's second line instead of disappearing. */
+  @container (max-width: 900px) {
+    .c-var, .c-applies, .c-free, .c-over { display: none; }
+    .t-folders col.c-path { width: 32%; } .t-folders col.c-size { width: 11%; } .t-folders col.c-note { width: 20%; }
+    .t-vars col.c-value { width: 36%; } .t-vars col.c-note { width: 20%; }
+    .fold { display: block; }
+    tr.fr td { height: 44px; }
+    .head p { display: none; }
+    .t-eff col.c-src { width: 28%; } .t-eff col.c-note { width: 15%; }
+  }
+
+  /* Tabs, segmented, fields */
+  .crumbs { display: flex; align-items: center; gap: 4px; color: var(--pd-text-muted); }
+  .crumbs a { color: var(--pd-accent); text-decoration: none; }
+  .tabs { display: flex; gap: var(--pd-space-1); border-bottom: 1px solid var(--pd-hairline); }
+  .tab { padding: 0 var(--pd-space-3); height: 36px; display: inline-flex; align-items: center; gap: 6px; color: var(--pd-text-muted); position: relative; }
+  .tab.on { color: var(--pd-text); font-weight: var(--pd-weight-semibold); }
+  .tab.on::after { content: ''; position: absolute; left: var(--pd-space-2); right: var(--pd-space-2); bottom: -1px; height: 2px; background: var(--pd-accent); border-radius: 2px; }
+  .count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--pd-radius-pill); background: var(--pd-surface-3); font-size: 11px; display: inline-flex; align-items: center; justify-content: center; color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); }
+  .seg { display: inline-flex; border: 1px solid var(--pd-border-strong); border-radius: var(--pd-radius-control); overflow: hidden; height: var(--pd-control-height); }
+  .seg span { padding: 0 var(--pd-space-3); display: inline-flex; align-items: center; color: var(--pd-text-muted); border-right: 1px solid var(--pd-border-strong); }
+  .seg span:last-child { border-right: 0; }
+  .seg span.on { background: var(--pd-accent-tint); color: var(--pd-text); font-weight: var(--pd-weight-medium); }
+  .field { position: relative; display: flex; align-items: center; gap: var(--pd-space-2); min-height: 36px; border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-input); padding: 0 var(--pd-space-3); background: var(--pd-surface-1); }
+  .field > label { position: absolute; top: -8px; left: 8px; padding: 0 4px; background: var(--pd-surface-1); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
+  .field.invalid { border-color: var(--pd-danger); } .field.invalid > label { color: var(--pd-danger); }
+  .field .val { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .field .ph { color: var(--pd-text-subtle); }
+  .helper { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); margin-top: 4px; padding-left: var(--pd-space-3); }
+  .helper.err { color: var(--pd-danger); display: flex; gap: 6px; align-items: flex-start; }
+  .frow { display: flex; gap: var(--pd-space-3); align-items: center; } .frow > .field { flex: 1; }
+  .tools { display: flex; gap: var(--pd-space-3); align-items: center; }
+  .tools .field { width: 240px; flex: none; min-height: var(--pd-button-height); }
+  .badges { display: flex; gap: var(--pd-space-2); flex-wrap: wrap; padding: var(--pd-space-2) var(--pd-space-4) 0; }
+
+  /* Dialog windows */
+  .dlg { width: 560px; border: 1px solid var(--pd-border-strong); border-radius: var(--pd-radius-dialog); overflow: hidden; background: var(--pd-surface-1); box-shadow: var(--pd-shadow-3); display: flex; flex-direction: column; }
+  .dlg .titlebar { height: 40px; background: var(--pd-surface-1); border-bottom: 0; padding-left: 0; }
+  .dlg .body { padding: var(--pd-space-2) var(--pd-space-6) var(--pd-space-4); display: flex; flex-direction: column; gap: var(--pd-space-4); }
+  .dlg h2 { margin: 0; font-size: var(--pd-text-title); line-height: var(--pd-lh-title); font-weight: var(--pd-weight-semibold); }
+  .dlg p { margin: 0; }
+  .dlg .foot { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-6) var(--pd-space-4); }
+  .dlg .foot .grow { color: var(--pd-text-muted); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); }
+  .glabel { font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
+  .stack { display: flex; flex-direction: column; gap: 6px; }
+  .check, .radio { display: inline-flex; align-items: center; gap: var(--pd-space-2); }
+  .box { width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--pd-border-control); display: inline-flex; align-items: center; justify-content: center; }
+  .box.on { background: var(--pd-accent-fill); border-color: var(--pd-accent-fill); color: var(--pd-on-accent); }
+  .rad { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--pd-border-control); display: inline-flex; align-items: center; justify-content: center; }
+  .rad.on { border-color: var(--pd-accent-fill); } .rad.on::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--pd-accent-fill); }
+  .list { list-style: none; margin: 0; padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); display: flex; flex-direction: column; gap: 4px; }
+  .list li { display: flex; gap: var(--pd-space-2); align-items: flex-start; }
+  .list li svg { margin-top: 2px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px var(--pd-space-4); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); }
+  .ok { color: var(--pd-success); } .warnc { color: var(--pd-warning); } .errc { color: var(--pd-danger); } .infoc { color: var(--pd-info); }
+  .phases { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--pd-space-3); }
+  .phases li { display: grid; grid-template-columns: 20px 1fr auto; gap: 4px var(--pd-space-2); align-items: start; }
+  .phases li.todo { color: var(--pd-text-muted); }
+  .bar { grid-column: 2 / 4; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--pd-border-control) 80%, var(--pd-surface-1)); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--pd-accent-fill); border-radius: 2px; }
+  .bar i.half { width: 50%; }
+  .ring { width: 14px; height: 14px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--pd-border-control) 80%, var(--pd-surface-1)); border-top-color: var(--pd-accent); margin-top: 3px; }
+  .hollow { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--pd-text-subtle); margin: 4px 0 0 1px; }
+
+  /* States */
+  .skel { height: 12px; border-radius: 4px; display: block; background: var(--pd-skeleton); }
+  .loading-line { padding: 0 var(--pd-space-4) var(--pd-space-3); color: var(--pd-text-muted); font-size: var(--pd-text-label); }
+  .empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: var(--pd-space-2); padding: var(--pd-space-8) var(--pd-space-6); }
+  .empty svg.big { width: 32px; height: 32px; color: var(--pd-text-subtle); }
+  .empty h3 { margin: 0; font-size: var(--pd-text-subtitle); line-height: var(--pd-lh-subtitle); font-weight: var(--pd-weight-semibold); }
+  .empty p { margin: 0; color: var(--pd-text-muted); max-width: 52ch; }
+  .frame { width: 844px; display: flex; flex-direction: column; gap: var(--pd-space-4); container-type: inline-size; }
+  .tag { font-size: var(--pd-text-caption); line-height: var(--pd-lh-caption); color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); letter-spacing: .04em; text-transform: uppercase; margin-bottom: calc(-1 * var(--pd-space-2)); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-check" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3"/><path d="M5.3 8.2l1.8 1.8 3.6-3.8"/></symbol>
+  <symbol id="i-tick" viewBox="0 0 16 16"><path d="M3.5 8.4l3 3 6-6.6" stroke-width="2"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 2.2l6.2 11H1.8z"/><path d="M8 6.5v3"/><path d="M8 11.4v.1"/></symbol>
+  <symbol id="i-x" viewBox="0 0 16 16"><path d="M5.5 1.8h5l3.7 3.7v5l-3.7 3.7h-5l-3.7-3.7v-5z"/><path d="M6 6l4 4M10 6l-4 4"/></symbol>
+  <symbol id="i-info" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3"/><path d="M8 7.3v3.8"/><path d="M8 5v.1"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 16 16"><rect x="3.2" y="7" width="9.6" height="6.8" rx="1.5"/><path d="M5.3 7V5.2a2.7 2.7 0 015.4 0V7"/></symbol>
+  <symbol id="i-more" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="12.5" cy="8" r="1.5"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 16 16"><circle cx="6" cy="4" r="1.2"/><circle cx="10" cy="4" r="1.2"/><circle cx="6" cy="8" r="1.2"/><circle cx="10" cy="8" r="1.2"/><circle cx="6" cy="12" r="1.2"/><circle cx="10" cy="12" r="1.2"/></symbol>
+  <symbol id="i-up" viewBox="0 0 16 16"><path d="M8 12.5V3.5M4.5 7L8 3.5 11.5 7"/></symbol>
+  <symbol id="i-down" viewBox="0 0 16 16"><path d="M8 3.5v9M4.5 9L8 12.5 11.5 9"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 16 16"><path d="M6.5 4l4 4-4 4"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 16 16"><path d="M4 6.5l4 4 4-4"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.8 4.2a1 1 0 011-1h3.4l1.5 1.6h5.5a1 1 0 011 1v6.5a1 1 0 01-1 1H2.8a1 1 0 01-1-1z"/></symbol>
+  <symbol id="i-ruler" viewBox="0 0 16 16"><rect x="1.8" y="5" width="12.4" height="6" rx="1"/><path d="M4.5 5v2.2M7 5v1.5M9.5 5v2.2M12 5v1.5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13 8a5 5 0 11-1.5-3.6"/><path d="M13 2.8v2.6h-2.6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.3"/><path d="M10.2 10.2l3.3 3.3"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 16 16"><path d="M5.5 1.8v3M10.5 1.8v3M3.8 4.8h8.4v2.4a4.2 4.2 0 01-8.4 0z"/><path d="M8 11.4v2.8"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 16 16"><path d="M10.5 2.2a3.3 3.3 0 00-3.2 4.3L2.4 11.4a1.4 1.4 0 002 2l4.9-4.9a3.3 3.3 0 004.3-3.2l-2 2-1.9-.4-.4-1.9z"/></symbol>
+  <symbol id="i-box" viewBox="0 0 16 16"><path d="M2.3 4.8L8 2l5.7 2.8v6.4L8 14l-5.7-2.8z"/><path d="M2.3 4.8L8 7.6l5.7-2.8M8 7.6V14"/></symbol>
+  <symbol id="n-dash" viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="6" rx="1"/><rect x="9" y="2" width="5" height="4" rx="1"/><rect x="2" y="10" width="5" height="4" rx="1"/><rect x="9" y="8" width="5" height="6" rx="1"/></symbol>
+  <symbol id="n-run" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3"/><path d="M6.6 5.6l3.6 2.4-3.6 2.4z"/></symbol>
+  <symbol id="n-act" viewBox="0 0 16 16"><path d="M1.8 8.5h3l1.8-4.5 2.8 8 1.8-3.5h3"/></symbol>
+  <symbol id="n-ins" viewBox="0 0 16 16"><path d="M2.5 13.5h11M4.5 11V7M7.5 11V4M10.5 11V8M13 11V5.5"/></symbol>
+  <symbol id="n-sto" viewBox="0 0 16 16"><ellipse cx="8" cy="4" rx="5.3" ry="2"/><path d="M2.7 4v8c0 1.1 2.4 2 5.3 2s5.3-.9 5.3-2V4M2.7 8c0 1.1 2.4 2 5.3 2s5.3-.9 5.3-2"/></symbol>
+  <symbol id="n-env" viewBox="0 0 16 16"><path d="M2.5 4.5h4M9.5 4.5h4M2.5 11.5h7M12.5 11.5h1"/><circle cx="8" cy="4.5" r="1.5"/><circle cx="11" cy="11.5" r="1.5"/></symbol>
+  <symbol id="n-log" viewBox="0 0 16 16"><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.5"/><path d="M4.5 6.5l2 1.5-2 1.5M8 10h3.5"/></symbol>
+  <symbol id="n-upd" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3"/><path d="M8 11V5M5.5 7.5L8 5l2.5 2.5"/></symbol>
+</svg>
+
+<template id="sidebar">
+  <div class="nav"><svg class="i"><use href="#n-dash"/></svg><span>Dashboard</span></div>
+  <div class="nav"><svg class="i"><use href="#n-run"/></svg><span>Runners</span></div>
+  <div class="nav"><svg class="i"><use href="#n-act"/></svg><span>Activity</span></div>
+  <div class="nav"><svg class="i"><use href="#n-ins"/></svg><span>Insights</span></div>
+  <div class="nav"><svg class="i"><use href="#n-sto"/></svg><span>Storage</span></div>
+  <div class="nav"><svg class="i"><use href="#n-env"/></svg><span>Environment</span></div>
+  <div class="nav"><svg class="i"><use href="#n-log"/></svg><span>Logs</span></div>
+  <div class="nav"><svg class="i"><use href="#n-upd"/></svg><span>Updates</span></div>
+</template>
+
+<template id="more"><button class="btn icon" aria-label="Row actions"><svg class="i dots"><use href="#i-more"/></svg></button></template>
+
+<template id="envpage">
+  <div class="page">
+    <div class="head">
+      <div class="grow"><h1>Environment</h1><p>Shared folders, variables and PATH that every runner on this Mac starts with.</p></div>
+      <div class="btns">
+        <button class="btn"><svg class="i"><use href="#i-ruler"/></svg>Measure sizes</button>
+        <button class="btn filled"><svg class="i"><use href="#i-plus"/></svg>Add<svg class="i s12"><use href="#i-chev-d"/></svg></button>
+      </div>
+    </div>
+    <div class="callout info" role="status"><svg class="i"><use href="#i-info"/></svg>
+      <div class="grow"><strong>2 runners restart after their current job</strong> <span class="muted">to start with your changes: mac-a, mac-b.</span></div></div>
+
+    <section class="panel" aria-labelledby="h-folders">
+      <div class="ph"><h2 id="h-folders">Shared folders</h2><span class="count">5</span><span class="grow"></span><span class="meta num">30.5 GB · measured 12 min ago</span></div>
+      <table class="t-folders">
+        <colgroup><col class="c-name"><col class="c-var"><col class="c-path"><col class="c-applies"><col class="c-size"><col class="c-free"><col class="c-note"><col class="c-act"></colgroup>
+        <thead><tr><th>Name</th><th class="c-var">Variable</th><th>Folder</th><th class="c-applies">Applies to</th><th class="num">Size</th><th class="c-free num">Free</th><th>Note</th><th class="act"><span hidden>Actions</span></th></tr></thead>
+        <tbody>
+          <tr class="fr"><td class="name">sccache<span class="fold"><span class="var">SCCACHE_DIR</span> · 412 GB free · all runners</span></td><td class="c-var var">SCCACHE_DIR</td><td title="/Volumes/build/sccache/{runner}">/Volumes/build/…/{runner}</td><td class="c-applies">All runners (3)</td><td class="num">18.2 GB</td><td class="c-free num">412 GB</td><td></td><td class="act" data-more></td></tr>
+          <tr class="fr hover"><td class="name">npm cache<span class="fold"><span class="var">npm_config_cache</span> · 412 GB free · all runners</span></td><td class="c-var var">npm_config_cache</td><td title="/Volumes/build/npm/{runner}">/Volumes/build/npm/{runner}</td><td class="c-applies">All runners (3)</td><td class="num">4.1 GB</td><td class="c-free num">412 GB</td><td></td><td class="act" data-more></td></tr>
+          <tr class="fr"><td class="name">Playwright browsers<span class="fold"><span class="var">PLAYWRIGHT_BROWSERS_PATH</span> · 412 GB free · mac-a, mac-b</span></td><td class="c-var var" title="PLAYWRIGHT_BROWSERS_PATH">PLAYWRIGHT_BROWSERS_PATH</td><td title="/Volumes/build/ms-playwright">/Volumes/build/ms-playwright</td><td class="c-applies">mac-a, mac-b</td><td class="num">1.9 GB</td><td class="c-free num">412 GB</td><td></td><td class="act" data-more></td></tr>
+          <tr class="fr"><td class="name">Cargo home<span class="fold"><span class="var">CARGO_HOME</span> · 412 GB free · all runners</span></td><td class="c-var var">CARGO_HOME</td><td title="/Volumes/build/cargo">/Volumes/build/cargo</td><td class="c-applies">All runners (3)</td><td class="num">6.3 GB</td><td class="c-free num">412 GB</td><td><span class="badge info"><svg class="i s12"><use href="#i-refresh"/></svg><span>Restart pending</span></span></td><td class="act" data-more></td></tr>
+          <tr class="two fr"><td class="name">Cargo target root<span class="fold"><span class="var">CARGO_TARGET_DIR</span> · all runners</span></td><td class="c-var var">CARGO_TARGET_DIR</td><td title="/Volumes/scratch/ci/targets/{runner}">/Volumes/scratch/…/{runner}</td><td class="c-applies">All runners (3)</td><td class="num subtle">—</td><td class="c-free num subtle">—</td><td><span class="badge warn"><svg class="i s12"><use href="#i-alert"/></svg><span>Disk not mounted</span></span><span class="line2">Its runners are held</span></td><td class="act" data-more></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel" aria-labelledby="h-vars">
+      <div class="ph"><h2 id="h-vars">Variables</h2><span class="count">5</span></div>
+      <table class="t-vars">
+        <colgroup><col class="c-name"><col class="c-value"><col class="c-applies"><col class="c-over"><col class="c-note"><col class="c-act"></colgroup>
+        <thead><tr><th>Name</th><th>Value</th><th class="c-applies">Applies to</th><th class="c-over">Overridden on</th><th>Note</th><th class="act"><span hidden>Actions</span></th></tr></thead>
+        <tbody>
+          <tr class="fr"><td><span class="var">RUSTC_WRAPPER</span><span class="fold">all runners</span></td><td>sccache</td><td class="c-applies">All runners (3)</td><td class="c-over subtle">—</td><td></td><td class="act" data-more></td></tr>
+          <tr class="fr"><td><span class="var">SCCACHE_CACHE_SIZE</span><span class="fold">all runners · overridden on mac-b</span></td><td>20G</td><td class="c-applies">All runners (3)</td><td class="c-over">mac-b</td><td></td><td class="act" data-more></td></tr>
+          <tr class="fr"><td><span class="var">SCCACHE_SERVER_PORT</span><span class="fold">all runners</span></td><td>4260 + runner number <span class="muted">(4261–4263)</span></td><td class="c-applies">All runners (3)</td><td class="c-over subtle">—</td><td></td><td class="act" data-more></td></tr>
+          <tr class="fr"><td><span class="var" title="CARGO_REGISTRIES_DECRYP7_TOKEN">CARGO_REGISTRIES_DECRYP7_TOKEN</span><span class="fold">all runners</span></td><td><span class="lock"><svg class="i"><use href="#i-lock"/></svg>Hidden, stored by Pitcrew</span></td><td class="c-applies">All runners (3)</td><td class="c-over subtle">—</td><td></td><td class="act" data-more></td></tr>
+          <tr class="two fr"><td><span class="var">NPM_TOKEN</span><span class="fold">mac-c</span></td><td><span class="lock"><svg class="i"><use href="#i-lock"/></svg>Not set</span></td><td class="c-applies">mac-c</td><td class="c-over subtle">—</td><td><span class="badge err"><svg class="i s12"><use href="#i-x"/></svg><span>Missing</span></span><span class="line2">mac-c is held</span></td><td class="act" data-more></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel" aria-labelledby="h-path">
+      <div class="ph"><h2 id="h-path">PATH additions</h2><span class="count">2</span><span class="grow"></span><span class="meta">Before entries, then the login shell's PATH, then After entries</span></div>
+      <table class="t-path">
+        <colgroup><col class="c-grip"><col class="c-name"><col class="c-pos"><col class="c-applies"><col class="c-note"><col class="c-move"><col class="c-act"></colgroup>
+        <thead><tr><th><span hidden>Drag to reorder</span></th><th>Folder</th><th>Position</th><th class="c-applies">Applies to</th><th>Note</th><th><span hidden>Move</span></th><th class="act"><span hidden>Actions</span></th></tr></thead>
+        <tbody>
+          <tr><td><svg class="i grip dots"><use href="#i-grip"/></svg></td><td title="{home}/.cargo/bin">{home}/.cargo/bin</td><td>Before</td><td class="c-applies">All runners (3)</td><td></td><td><button class="btn icon" aria-label="Move up" disabled><svg class="i"><use href="#i-up"/></svg></button><button class="btn icon" aria-label="Move down"><svg class="i"><use href="#i-down"/></svg></button></td><td class="act" data-more></td></tr>
+          <tr><td><svg class="i grip dots"><use href="#i-grip"/></svg></td><td title="/opt/homebrew/opt/llvm/bin">/opt/homebrew/opt/llvm/bin</td><td>After</td><td class="c-applies">All runners (3)</td><td><span class="badge warn"><svg class="i s12"><use href="#i-alert"/></svg><span>Not found</span></span></td><td><button class="btn icon" aria-label="Move up"><svg class="i"><use href="#i-up"/></svg></button><button class="btn icon" aria-label="Move down" disabled><svg class="i"><use href="#i-down"/></svg></button></td><td class="act" data-more></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel" aria-labelledby="h-cache">
+      <div class="ph"><h2 id="h-cache">Actions cache server</h2></div>
+      <div class="pbody"><div class="frow">
+        <div class="field"><label>Server URL</label><span class="val">http://cache.lan:8089</span></div>
+        <button class="btn outlined"><svg class="i"><use href="#i-plug"/></svg>Check connection</button>
+        <button class="btn outlined">Apply to runners…</button>
+      </div></div>
+      <div class="badges">
+        <span class="badge ok"><svg class="i s12"><use href="#i-check"/></svg><span>Port open, just now</span></span>
+        <span class="badge warn"><svg class="i s12"><use href="#i-alert"/></svg><span>Differs on mac-c</span></span>
+      </div>
+      <div class="pf">Written to each runner's config.yaml as <span class="var">cache.external_server</span>. Pitcrew connects only when you press Check connection; an open port does not prove the cache works.</div>
+    </section>
+  </div>
+</template>
+
+<template id="runnertab">
+  <div class="page">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="#">Runners</a><svg class="i s12"><use href="#i-chev-r"/></svg><span aria-current="page">mac-a</span></nav>
+    <div class="head">
+      <div class="grow" style="display:flex;align-items:center;gap:12px"><h1>mac-a</h1><span class="muted" style="display:inline-flex;align-items:center;gap:6px"><span class="dot"></span>Running a job</span><span class="subtle">gitea-runner 5.2.0</span></div>
+      <div class="btns"><button class="btn outlined"><svg class="i"><use href="#i-refresh"/></svg>Restart</button><button class="btn outlined" aria-label="More actions" style="width:32px;padding:0;justify-content:center"><svg class="i dots"><use href="#i-more"/></svg></button></div>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Runner sections"><span class="tab">Overview</span><span class="tab">Updates</span><span class="tab">Processes</span><span class="tab">Configuration</span><span class="tab on">Environment</span><span class="tab">Disk &amp; cleanup</span></div>
+    <div class="callout info" role="status"><svg class="i"><use href="#i-info"/></svg><div class="grow"><strong>Restarts after the current job</strong> <span class="muted">It started before CARGO_HOME changed.</span></div></div>
+    <div class="tools">
+      <div class="field"><svg class="i subtle"><use href="#i-search"/></svg><span class="val ph">Filter variables</span></div>
+      <div class="seg" role="group" aria-label="Source"><span class="on">All</span><span>Set by Pitcrew</span><span>Inherited</span></div>
+      <span class="grow"></span>
+      <button class="btn filled"><svg class="i"><use href="#i-plus"/></svg>Add override</button>
+    </div>
+    <section class="panel" aria-label="Effective environment">
+      <table class="t-eff">
+        <colgroup><col class="c-exp"><col class="c-name"><col class="c-value"><col class="c-src"><col class="c-note"><col class="c-act"></colgroup>
+        <thead><tr><th><span hidden>Expand</span></th><th>Name</th><th>Value</th><th>Source</th><th>Note</th><th class="act"><span hidden>Actions</span></th></tr></thead>
+        <tbody>
+          <tr><td><button class="btn icon" aria-label="Collapse PATH" aria-expanded="true"><svg class="i"><use href="#i-chev-d"/></svg></button></td><td><span class="var">PATH</span></td><td title="/Users/ci/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/opt/llvm/bin">/Users/ci/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:…</td><td><span class="src">Host and login shell</span></td><td></td><td class="act" data-more></td></tr>
+          <tr class="child"><td></td><td class="muted">1</td><td>/Users/ci/.cargo/bin</td><td>Host, before</td><td></td><td></td></tr>
+          <tr class="child"><td></td><td class="muted">2–5</td><td>/opt/homebrew/bin, /usr/local/bin, /usr/bin, /bin</td><td>Login shell</td><td></td><td></td></tr>
+          <tr class="child"><td></td><td class="muted">6</td><td>/opt/homebrew/opt/llvm/bin</td><td>Host, after</td><td><span class="badge warn"><svg class="i s12"><use href="#i-alert"/></svg><span>Not found</span></span></td><td></td></tr>
+          <tr><td></td><td><span class="var">SCCACHE_DIR</span></td><td>/Volumes/build/sccache/mac-a</td><td><span class="src">Host: sccache</span></td><td></td><td class="act" data-more></td></tr>
+          <tr><td></td><td><span class="var">SCCACHE_SERVER_PORT</span></td><td>4261</td><td><span class="src">Host: sccache</span></td><td></td><td class="act" data-more></td></tr>
+          <tr class="hover"><td><button class="btn icon" aria-label="Collapse SCCACHE_CACHE_SIZE" aria-expanded="true"><svg class="i"><use href="#i-chev-d"/></svg></button></td><td><span class="var">SCCACHE_CACHE_SIZE</span></td><td>10G</td><td><span class="src">Runner override</span></td><td></td><td class="act" data-more></td></tr>
+          <tr class="child"><td></td><td class="muted">shadows</td><td class="shadowed">20G</td><td>Host</td><td></td><td></td></tr>
+          <tr><td></td><td><span class="var">CARGO_HOME</span></td><td>/Volumes/build/cargo</td><td><span class="src">Host: Cargo home</span></td><td><span class="badge info"><svg class="i s12"><use href="#i-refresh"/></svg><span>Pending</span></span></td><td class="act" data-more></td></tr>
+          <tr><td></td><td><span class="var" title="CARGO_REGISTRIES_DECRYP7_TOKEN">CARGO_REGISTRIES_DECRYP7_TOKEN</span></td><td><span class="lock"><svg class="i"><use href="#i-lock"/></svg>Hidden</span></td><td><span class="src">Host, secret</span></td><td></td><td class="act" data-more></td></tr>
+          <tr><td></td><td><span class="var">NODE_ENV</span></td><td>ci</td><td><span class="src">config.yaml, jobs only</span></td><td></td><td class="act" data-more></td></tr>
+          <tr><td></td><td><span class="var">LANG</span></td><td>en_US.UTF-8</td><td><span class="src">Inherited from the service</span></td><td></td><td class="act" data-more></td></tr>
+        </tbody>
+      </table>
+      <div class="pf">Inside a job, the workflow's own env wins over all of these, and act always sets RUNNER_OS, RUNNER_ARCH, RUNNER_TEMP and RUNNER_TOOL_CACHE itself.</div>
+    </section>
+  </div>
+</template>
+
+<div class="sheet">
+  <header>
+    <h1>Pitcrew: Environment (ADR 0022 mock-up, revision 2)</h1>
+    <p>The host-wide Environment page, a runner's effective environment, the dialog windows and the states, at 1280 and 900 px
+      windows. The 900 px frames use the collapsed sidebar; columns fold into a second line by container query. Static
+      mock-up with invented data.</p>
+  </header>
+
+  <figure id="f-page-1280">
+    <figcaption><strong>Environment page, 1280 wide</strong> (drawn 1060 tall to show the whole page; at 800 it scrolls). One primary (Add). Rows without a problem carry no badge. The npm row shows hover; row actions rest at the row-action token.</figcaption>
+    <div class="win w1280" data-fill="envpage" data-nav="5"></div>
+  </figure>
+
+  <figure id="f-page-900">
+    <figcaption><strong>Environment page, 900 wide</strong> (drawn 1180 tall). Variable, Applies to and Free fold into each row's second line.</figcaption>
+    <div class="win w900" data-fill="envpage" data-nav="5"></div>
+  </figure>
+
+  <figure id="f-tab-1280">
+    <figcaption><strong>Runner ▸ Environment tab, 1280 × 800.</strong> What the runner starts with and where each value comes from; rows expand into the values they shadow; secrets are never shown. Row actions: Override for this runner, Stop using on this runner, Copy name.</figcaption>
+    <div class="win w1280 short" data-fill="runnertab" data-nav="1"></div>
+  </figure>
+
+  <figure id="f-tab-900">
+    <figcaption><strong>Runner ▸ Environment tab, 900 × 800.</strong></figcaption>
+    <div class="win w900 short" data-fill="runnertab" data-nav="1"></div>
+  </figure>
+
+  <div class="row-gap">
+    <figure id="f-dialog">
+      <figcaption><strong>Add shared folder</strong>: a modal form window, 560 wide, fitted height. The preset's other variables are listed with their per-runner values; the checks come from the engine's preview.</figcaption>
+      <div class="dlg" role="dialog" aria-labelledby="d1">
+        <div class="titlebar"><span class="lights"><i></i><i></i><i></i></span></div>
+        <div class="body">
+          <h2 id="d1">Add shared folder</h2>
+          <div class="field"><label>Preset</label><span class="val">sccache (local folder)</span><svg class="i subtle"><use href="#i-chev-d"/></svg></div>
+          <div><div class="frow"><div class="field"><label>Folder</label><span class="val">/Volumes/build/sccache/{runner}</span></div><button class="btn outlined"><svg class="i"><use href="#i-folder"/></svg>Choose…</button></div>
+            <div class="helper">Sets <span class="var">SCCACHE_DIR</span>. {runner} gives each runner its own folder: one sccache server per folder.</div></div>
+          <div class="stack"><span class="glabel">This preset also sets</span>
+            <div class="kv"><span class="var">SCCACHE_SERVER_PORT</span><span>4260 + runner number: mac-a 4261, mac-b 4262, mac-c 4263</span>
+              <span class="var">SCCACHE_CACHE_SIZE</span><span>20G</span>
+              <span class="var">RUSTC_WRAPPER</span><span>sccache</span></div></div>
+          <span class="check"><span class="box on"><svg class="i s12"><use href="#i-tick"/></svg></span>Create the folder if it is missing</span>
+          <div class="stack"><span class="glabel">Applies to</span><div style="display:flex;gap:24px"><span class="radio"><span class="rad on"></span>All runners</span><span class="radio"><span class="rad"></span>Selected runners</span></div></div>
+          <div class="stack"><span class="glabel">Checks</span>
+            <ul class="list">
+              <li><svg class="i ok"><use href="#i-check"/></svg><span>Can be created on the disk “build”, 412 GB free</span></li>
+              <li><svg class="i ok"><use href="#i-check"/></svg><span>Writable by ci, outside every runner's folder</span></li>
+              <li><svg class="i infoc"><use href="#i-info"/></svg><span>“build” is an external disk: while it is not mounted, its runners are held and nothing is written to the boot disk</span></li>
+            </ul></div>
+        </div>
+        <div class="foot"><span class="grow">Saving restarts 3 runners after their current job.</span><button class="btn outlined">Cancel</button><button class="btn filled">Add folder</button></div>
+      </div>
+    </figure>
+
+    <figure id="f-dialog-error">
+      <figcaption><strong>Add shared folder with an error.</strong> The engine refuses a per-runner folder without {runner} on three runners; the fix is offered.</figcaption>
+      <div class="dlg" role="dialog" aria-labelledby="d4">
+        <div class="titlebar"><span class="lights"><i></i><i></i><i></i></span></div>
+        <div class="body">
+          <h2 id="d4">Add shared folder</h2>
+          <div class="field"><label>Preset</label><span class="val">Cargo target root</span><svg class="i subtle"><use href="#i-chev-d"/></svg></div>
+          <div><div class="frow"><div class="field invalid"><label>Folder</label><span class="val">/Volumes/scratch/targets</span></div><button class="btn outlined"><svg class="i"><use href="#i-folder"/></svg>Choose…</button></div>
+            <div class="helper err"><svg class="i s12" style="margin-top:2px"><use href="#i-x"/></svg><span>3 runners would share one target folder and wait on each other's build lock. Add {runner} to the path.</span></div></div>
+          <div><button class="btn outlined small">Use /Volumes/scratch/targets/{runner}</button></div>
+          <div class="stack"><span class="glabel">Applies to</span><div style="display:flex;gap:24px"><span class="radio"><span class="rad on"></span>All runners</span><span class="radio"><span class="rad"></span>Selected runners</span></div></div>
+        </div>
+        <div class="foot"><span class="grow">Fix the folder to add it.</span><button class="btn outlined">Cancel</button><button class="btn filled" disabled>Add folder</button></div>
+      </div>
+    </figure>
+  </div>
+
+  <div class="row-gap">
+    <figure id="f-clean-confirm">
+      <figcaption><strong>Clean: the decision window</strong> (modal, 560). It names what goes and the consequence; the danger fill appears only here.</figcaption>
+      <div class="dlg" role="dialog" aria-labelledby="d3">
+        <div class="titlebar"><span class="lights"><i></i><i></i><i></i></span></div>
+        <div class="body">
+          <h2 id="d3">Clean sccache?</h2>
+          <p>Removes <strong class="num">18.2 GB</strong> in <span class="num">41,230</span> files from the folders of mac-a, mac-b and mac-c under /Volumes/build/sccache. Builds are slower until the cache fills again.</p>
+          <ul class="list">
+            <li><svg class="i infoc"><use href="#i-info"/></svg><span>One runner at a time: it finishes its current job, its sccache server stops, its folder is emptied, then it takes jobs again.</span></li>
+            <li><svg class="i infoc"><use href="#i-info"/></svg><span>While a runner is being cleaned, Resume is not available for it.</span></li>
+          </ul>
+        </div>
+        <div class="foot"><span class="grow"></span><button class="btn outlined">Cancel</button><button class="btn danger">Clean when idle</button></div>
+      </div>
+    </figure>
+
+    <figure id="f-clean">
+      <figcaption><strong>Clean: the job's phases</strong>, counting up, each on its own scale. Cancel works in every phase; the job is also in the Jobs list.</figcaption>
+      <div class="dlg" role="dialog" aria-labelledby="d2">
+        <div class="titlebar"><span class="lights"><i></i><i></i><i></i></span></div>
+        <div class="body">
+          <h2 id="d2">Cleaning sccache: mac-b, 2 of 3</h2>
+          <ul class="phases">
+            <li><svg class="i ok"><use href="#i-check"/></svg><span>Waiting for the job to finish</span><span class="muted num">1 of 1 finished</span></li>
+            <li><svg class="i ok"><use href="#i-check"/></svg><span>Stopping sccache on port 4262</span><span class="muted num">stopped</span></li>
+            <li><span class="ring" aria-hidden="true"></span><span>Checking items against the preview</span><span class="muted num">3,120 of 6,240</span><span class="bar" role="progressbar" aria-label="Items checked" aria-valuemin="0" aria-valuemax="6240" aria-valuenow="3120"><i class="half"></i></span></li>
+            <li class="todo"><span class="hollow"></span><span>Removing</span><span class="num">0 of 6.1 GB</span></li>
+            <li class="todo"><span class="hollow"></span><span>Releasing mac-b</span><span></span></li>
+          </ul>
+          <p class="muted">mac-a is done (6.0 GB removed); mac-c is next.</p>
+        </div>
+        <div class="foot"><span class="grow">Runs in the background; you can close this window.</span><button class="btn outlined">Cancel clean</button><button class="btn filled">Hide</button></div>
+      </div>
+    </figure>
+  </div>
+
+  <figure id="f-states-page">
+    <figcaption><strong>Page states at the 900 px content width</strong>: loading (the family skeleton token, decorative; the section is <code>aria-busy</code> and a status line is its text equivalent), empty, service not answering, read-only, secret store unavailable.</figcaption>
+    <div class="frame">
+      <div class="tag">Loading</div>
+      <section class="panel" aria-label="Shared folders" aria-busy="true">
+        <div class="ph"><h2>Shared folders</h2></div>
+        <table aria-hidden="true"><tbody>
+          <tr><td><span class="skel" style="width:70%"></span></td><td><span class="skel" style="width:85%"></span></td><td><span class="skel" style="width:40%"></span></td><td><span class="skel" style="width:55%"></span></td></tr>
+          <tr><td><span class="skel" style="width:55%"></span></td><td><span class="skel" style="width:70%"></span></td><td><span class="skel" style="width:40%"></span></td><td><span class="skel" style="width:55%"></span></td></tr>
+          <tr><td><span class="skel" style="width:62%"></span></td><td><span class="skel" style="width:78%"></span></td><td><span class="skel" style="width:40%"></span></td><td><span class="skel" style="width:55%"></span></td></tr>
+        </tbody></table>
+        <div class="loading-line" role="status">Loading the environment…</div>
+      </section>
+      <div class="tag">Empty</div>
+      <section class="panel"><div class="empty">
+        <svg class="i big"><use href="#n-env"/></svg>
+        <h3>Give every runner the same caches and tools</h3>
+        <p>Shared folders, variables and PATH entries set here reach every runner on this Mac, each with its own folder where a tool needs one. Presets fill in sccache, Cargo, npm and Playwright.</p>
+        <div class="btns" style="margin-top:8px"><button class="btn filled"><svg class="i"><use href="#i-plus"/></svg>Add shared folder</button></div>
+      </div></section>
+      <div class="tag">Service not answering</div>
+      <div class="callout err" role="alert"><svg class="i"><use href="#i-x"/></svg>
+        <div class="grow"><strong>Couldn't read the environment</strong><br><span class="muted">The Pitcrew service didn't answer. It may be restarting after an update, or it is not running.</span></div>
+        <div class="btns"><button class="btn outlined small">Open logs</button><button class="btn outlined small"><svg class="i"><use href="#i-wrench"/></svg>Repair service</button><button class="btn outlined small"><svg class="i"><use href="#i-refresh"/></svg>Retry</button></div></div>
+      <div class="tag">Read-only</div>
+      <div class="callout warn" role="status"><svg class="i"><use href="#i-alert"/></svg>
+        <div class="grow"><strong>Changes can't be saved</strong><br><span class="muted">The configuration was written by a newer Pitcrew. Update Pitcrew to change the environment; runners keep what they have.</span></div>
+        <div class="btns"><button class="btn outlined small">Open Updates</button></div></div>
+      <div class="head" style="align-items:center"><span class="grow"></span><span class="why">Add is not available: the configuration is read-only.</span><button class="btn filled" disabled><svg class="i"><use href="#i-plus"/></svg>Add</button></div>
+      <div class="tag">Secret store unavailable</div>
+      <div class="callout err" role="alert"><svg class="i"><use href="#i-lock"/></svg>
+        <div class="grow"><strong>Pitcrew can't read its stored secrets</strong><br><span class="muted">2 runners that use secrets are held until they can be read. Set the secrets again to replace the damaged store.</span></div>
+        <div class="btns"><button class="btn outlined small">Open logs</button><button class="btn outlined small">Set secrets again…</button></div></div>
+    </div>
+  </figure>
+
+  <figure id="f-states-rows">
+    <figcaption><strong>Row and section states at the 900 px content width</strong>: measuring, estimated, not measured; Check connection in Offline mode.</figcaption>
+    <div class="frame">
+      <section class="panel" aria-label="Shared folders">
+        <div class="ph"><h2>Shared folders</h2><span class="grow"></span><span class="meta">Measuring 1 of 3 folders</span></div>
+        <table class="t-folders">
+          <colgroup><col class="c-name"><col class="c-var"><col class="c-path"><col class="c-applies"><col class="c-size"><col class="c-free"><col class="c-note"><col class="c-act"></colgroup>
+          <thead><tr><th>Name</th><th class="c-var">Variable</th><th>Folder</th><th class="c-applies">Applies to</th><th class="num">Size</th><th class="c-free num">Free</th><th>Note</th><th class="act"><span hidden>Actions</span></th></tr></thead>
+          <tbody>
+            <tr class="two fr"><td class="name">sccache<span class="fold"><span class="var">SCCACHE_DIR</span> · 412 GB free · all runners</span></td><td class="c-var var">SCCACHE_DIR</td><td>/Volumes/build/…/{runner}</td><td class="c-applies">All runners (3)</td><td class="num">≥ 9.4 GB</td><td class="c-free num">412 GB</td><td><span class="badge info"><span class="ring" style="width:10px;height:10px;margin:0;border-width:1.5px"></span><span>Measuring</span></span><span class="line2 num" style="text-align:left">21,480 files so far</span></td><td class="act" data-more></td></tr>
+            <tr class="two fr"><td class="name">npm cache<span class="fold"><span class="var">npm_config_cache</span> · 412 GB free · all runners</span></td><td class="c-var var">npm_config_cache</td><td>/Volumes/build/npm/{runner}</td><td class="c-applies">All runners (3)</td><td class="num">≈ 4.1 GB</td><td class="c-free num">412 GB</td><td><span class="line2" title="Estimated from changed folders only. Measure again from scratch in the row menu.">Estimated</span><span class="line2">changed folders only</span></td><td class="act" data-more></td></tr>
+            <tr class="fr"><td class="name">Playwright browsers<span class="fold"><span class="var">PLAYWRIGHT_BROWSERS_PATH</span> · 412 GB free · mac-a, mac-b</span></td><td class="c-var var">PLAYWRIGHT_BROWSERS_PATH</td><td>/Volumes/build/ms-playwright</td><td class="c-applies">mac-a, mac-b</td><td class="num subtle">—</td><td class="c-free num">412 GB</td><td class="muted">Not measured</td><td class="act" data-more></td></tr>
+          </tbody>
+        </table>
+      </section>
+      <section class="panel" aria-label="Actions cache server, offline">
+        <div class="ph"><h2>Actions cache server</h2></div>
+        <div class="pbody"><div class="frow">
+          <div class="field"><label>Server URL</label><span class="val">http://cache.lan:8089</span></div>
+          <button class="btn outlined" disabled><svg class="i"><use href="#i-plug"/></svg>Check connection</button>
+          <button class="btn outlined">Apply to runners…</button>
+        </div></div>
+        <div class="pf">Check connection is off while Pitcrew is in Offline mode (Settings ▸ General). Nothing else on this page uses the network.</div>
+      </section>
+    </div>
+  </figure>
+
+  <figure id="f-states-tab">
+    <figcaption><strong>Runner tab notes at the 900 px content width</strong>: Windows interactive runner before WP-8, and a runner with container labels.</figcaption>
+    <div class="frame">
+      <div class="tag">Windows, interactive runner (until WP-8)</div>
+      <div class="callout warn" role="status"><svg class="i"><use href="#i-alert"/></svg>
+        <div class="grow"><strong>Not applied to this runner yet</strong><br><span class="muted">build-win runs in your Windows session, where Pitcrew can't pass variables yet. It starts with your own environment; the values below are what it will get once supported.</span></div></div>
+      <div class="tag">Container labels</div>
+      <div class="callout neutral" role="note"><svg class="i"><use href="#i-box"/></svg>
+        <div class="grow"><strong>Jobs in containers don't see these</strong><br><span class="muted">docker-lab runs its jobs in containers. Host variables reach the runner and its host jobs only; for container jobs use the job variables and volumes in Configuration.</span></div>
+        <div class="btns"><button class="btn outlined small">Open Configuration</button></div></div>
+    </div>
+  </figure>
+</div>
+
+<script>
+  // Theme from ?theme=, then fill each window from its template (one source for the 1280 and 900 frames) and every
+  // [data-more] cell with the row-action button.
+  const t = new URLSearchParams(location.search).get('theme');
+  if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+  const side = document.getElementById('sidebar');
+  for (const win of document.querySelectorAll('.win')) {
+    const bar = document.createElement('div'); bar.className = 'titlebar';
+    bar.innerHTML = '<span class="lights"><i></i><i></i><i></i></span>Pitcrew';
+    const nav = document.createElement('nav'); nav.className = 'side'; nav.setAttribute('aria-label', 'Pages');
+    nav.append(side.content.cloneNode(true));
+    nav.querySelectorAll('.nav')[Number(win.dataset.nav)].classList.add('on');
+    const main = document.createElement('main'); main.className = 'content';
+    main.append(document.getElementById(win.dataset.fill).content.cloneNode(true));
+    const st = document.createElement('div'); st.className = 'status';
+    st.innerHTML = '<span class="dot"></span>Service 0.1.0 · connected';
+    win.append(bar, nav, main, st);
+  }
+  const more = document.getElementById('more');
+  for (const cell of document.querySelectorAll('[data-more]')) cell.append(more.content.cloneNode(true));
+</script>
+</body>
+</html>

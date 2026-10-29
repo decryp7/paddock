@@ -19,22 +19,16 @@ use std::time::{Duration, Instant};
 
 /// Every request fails after this long.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
-/// How long a request that reads the system logs may take (the unified log of a busy Mac takes a minute or two).
-pub const LOG_READ_TIMEOUT: Duration = Duration::from_secs(150);
-
-/// How long the extras that run slow OS tools or walk a folder may take (`pmset -g log`, `system_profiler`, a file scan).
+/// How long the one remaining slow request may take: saving the inventory report (it reads the software list, which runs the
+/// package tools). Everything else that can run long (finding files, reading the system logs, checking the backups, hashing a
+/// file, the sleep, boot, app-usage and software reads) is a job: starting it answers at once and it reports progress and
+/// accepts Cancel, so no request waits for it.
 pub const EXTRAS_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// How long to wait for the agent's answer to `request`.
 pub fn timeout_for(request: &Request) -> Duration {
     match request {
-        Request::RescanIssues { .. } => LOG_READ_TIMEOUT,
-        Request::SleepBlockers
-        | Request::BootAnalysis
-        | Request::AppUsage
-        | Request::SoftwareInventory
-        | Request::SaveInventoryReport { .. }
-        | Request::FindFiles { .. } => EXTRAS_TIMEOUT,
+        Request::SaveInventoryReport { .. } => EXTRAS_TIMEOUT,
         _ => REQUEST_TIMEOUT,
     }
 }
@@ -60,6 +54,8 @@ pub trait Sink: Send + Sync {
     fn disk_scan(&self, _status: dyno_core::disk::scan::DiskScanStatus) {}
     /// The volumes mounted now changed.
     fn disk_volumes(&self, _volumes: Vec<dyno_core::disk::volume::Volume>) {}
+    /// A job's status changed (the newest of each job; a final state always arrives). The shell relays it as `paddock://jobs`.
+    fn job(&self, _status: paddock_jobs::wire::WireSnapshot) {}
     /// The connection state changed.
     fn agent(&self, status: AgentStatus);
     /// A connection was made: the shell reads what it needs from the agent (settings, for the tray).
@@ -375,6 +371,7 @@ impl AgentLink {
             Message::Activity(a) => sink.activity(a),
             Message::Alarm(c) => sink.alarm(c),
             Message::DiskScan(s) => sink.disk_scan(*s),
+            Message::Job(j) => sink.job(*j),
             Message::DiskVolumes(v) => sink.disk_volumes(v),
             _ => {}
         });
@@ -549,31 +546,32 @@ mod tests {
     use std::sync::mpsc::{channel, Receiver, Sender};
 
     #[test]
-    fn only_reading_the_system_logs_may_take_minutes() {
+    fn only_saving_the_inventory_waits_minutes_and_every_job_request_is_quick() {
         use dyno_core::issues::IssuesQuery;
-        assert_eq!(
-            timeout_for(&Request::RescanIssues {
-                query: IssuesQuery::default()
-            }),
-            LOG_READ_TIMEOUT
-        );
-        assert_eq!(
-            timeout_for(&Request::Issues {
-                query: IssuesQuery::default()
-            }),
-            REQUEST_TIMEOUT
-        );
-        assert_eq!(timeout_for(&Request::Settings), REQUEST_TIMEOUT);
-        for slow in [
-            Request::SleepBlockers,
-            Request::BootAnalysis,
-            Request::AppUsage,
-            Request::SoftwareInventory,
+        use dyno_core::jobs::JobSpec;
+        for job in [
+            Request::StartJob {
+                spec: JobSpec::RescanIssues {
+                    query: IssuesQuery::default(),
+                },
+            },
+            Request::StartJob {
+                spec: JobSpec::RefreshBackup,
+            },
+            Request::Jobs,
+            Request::CancelJob { id: 1 },
+            Request::JobResult { id: 1 },
         ] {
-            assert_eq!(timeout_for(&slow), EXTRAS_TIMEOUT);
+            assert_eq!(timeout_for(&job), REQUEST_TIMEOUT, "{job:?}");
         }
-        // Backup checks run in the background and are polled, so their requests stay quick.
-        assert_eq!(timeout_for(&Request::RefreshBackup), REQUEST_TIMEOUT);
+        assert_eq!(timeout_for(&Request::Settings), REQUEST_TIMEOUT);
+        assert_eq!(
+            timeout_for(&Request::SaveInventoryReport {
+                path: "/x.md".into(),
+                format: dyno_core::extras::software::InventoryFormat::Markdown
+            }),
+            EXTRAS_TIMEOUT
+        );
     }
 
     fn disc(version: &str, protocol: u32) -> Discovery {

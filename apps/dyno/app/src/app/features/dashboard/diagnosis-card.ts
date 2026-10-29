@@ -7,11 +7,13 @@ import { CAUSE_ICON } from '../../shared/labels';
 import { DiagnosisStore } from '../../state/diagnosis.store';
 import { LiveStore } from '../../state/live.store';
 import { hintPath } from '../why-slow/why-slow-model';
+import { MatButton } from '@angular/material/button';
+import { FullTextTip } from '../../shared/full-text-tip';
 
 /** "Why is my PC slow?": one button, and the engine's latest answer (headline, top cause, evidence, what to do). */
 @Component({
   selector: 'dy-diagnosis-card',
-  imports: [Icon, RouterLink],
+  imports: [FullTextTip, MatButton, Icon, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" aria-label="Why is my PC slow?">
@@ -19,9 +21,9 @@ import { hintPath } from '../why-slow/why-slow-model';
         <h2><dy-icon name="why" /> Why is my PC slow?</h2>
         <span class="spacer"></span>
         @if (store.diagnosis()) {
-          <a class="btn sm ghost" routerLink="/why-slow">See the evidence</a>
+          <a matButton="text" routerLink="/why-slow">See the evidence</a>
         }
-        <button type="button" class="btn sm primary" [disabled]="store.running()" (click)="store.run()">
+        <button type="button" matButton="filled" [disabled]="store.running()" (click)="store.run()">
           <dy-icon name="why" /> {{ store.diagnosis() ? 'Check again' : 'Check now' }}
         </button>
       </div>
@@ -30,7 +32,7 @@ import { hintPath } from '../why-slow/why-slow-model';
           <div class="err" role="alert">
             <dy-icon name="alert" />
             <div class="text"><strong>{{ e.message }}</strong>@if (hint(); as h) {<span>{{ h }}</span>}</div>
-            <button type="button" class="btn sm" (click)="store.run()">Retry</button>
+            <button type="button" matButton="outlined" (click)="store.run()">Retry</button>
           </div>
         } @else if (store.running() && !store.diagnosis()) {
           <div class="skeleton" style="width: 70%"></div>
@@ -50,7 +52,7 @@ import { hintPath } from '../why-slow/why-slow-model';
               <div class="actions">
                 @for (h of c.hints; track h.text) {
                   @if (hintPath(h); as path) {
-                    <a class="btn sm" [routerLink]="path">{{ h.text }}</a>
+                    <a matButton="outlined" [routerLink]="path">{{ h.text }}</a>
                   } @else {
                     <span class="hint">{{ h.text }}</span>
                   }
@@ -59,7 +61,7 @@ import { hintPath } from '../why-slow/why-slow-model';
             }
           }
           @if (others().length) {
-            <button type="button" class="btn link more" [attr.aria-expanded]="showOthers()" (click)="showOthers.set(!showOthers())">
+            <button type="button" matButton="text" class="more dy-link" [attr.aria-expanded]="showOthers()" (click)="showOthers.set(!showOthers())">
               {{ showOthers() ? 'Hide' : 'Show' }} {{ others().length === 1 ? '1 other possible cause' : count(others().length) + ' other possible causes' }}
             </button>
             @if (showOthers()) {
@@ -77,7 +79,7 @@ import { hintPath } from '../why-slow/why-slow-model';
       @if (stats(); as st) {
         <dl class="stats num" aria-label="Right now">
           @for (x of st; track x.k) {
-            <div><dt>{{ x.k }}</dt><dd [title]="x.v">{{ x.v }}</dd></div>
+            <div><dt>{{ x.k }}</dt><dd [dyFullText]="x.v">{{ x.v }}</dd></div>
           }
         </dl>
       }

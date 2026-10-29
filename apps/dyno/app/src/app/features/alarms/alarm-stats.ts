@@ -1,13 +1,18 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { PdCell, PdTable, type PdColumn, type PdRowAction } from '@decryp7/paddock-ui/table';
 import { AsyncState } from '../../shared/async-state';
 import { formatDuration } from '../../shared/format';
 import { AlarmsStore } from '../../state/alarms.store';
-import { TABLE_CSS } from './alarms-css';
+
+interface NoisyRule {
+  readonly rule: string;
+  readonly occurrences: number;
+}
 
 /** How the built-in alerts behave: time to acknowledge, the noisiest rules (with Mute) and the engine's suggestions. */
 @Component({
   selector: 'dy-alarm-stats',
-  imports: [AsyncState],
+  imports: [AsyncState, PdTable, PdCell],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="stats-h">
@@ -24,16 +29,9 @@ import { TABLE_CSS } from './alarms-css';
               @if (s.noisiest.length === 0) {
                 <p class="lead">No rule has fired yet.</p>
               } @else {
-                <div class="grid" role="table" aria-label="Noisiest rules">
-                  <div class="head" role="row"><span role="columnheader">Rule</span><span role="columnheader" class="r">Fired</span><span role="columnheader"><span class="visually-hidden">Actions</span></span></div>
-                  @for (n of s.noisiest; track n.rule) {
-                    <div class="row" role="row">
-                      <span class="cell" role="cell"><span class="truncate id" [title]="n.rule">{{ n.rule }}</span>@if (muted(n.rule)) {<span class="faint sfx">Muted</span>}</span>
-                      <span class="cell r num" role="cell">×{{ n.occurrences }}</span>
-                      <span class="cell acts" role="cell"><button type="button" class="btn sm ghost text-act" [attr.aria-label]="(muted(n.rule) ? 'Unmute ' : 'Mute ') + n.rule" (click)="store.mute(n.rule, !muted(n.rule))">{{ muted(n.rule) ? 'Unmute' : 'Mute' }}</button></span>
-                    </div>
-                  }
-                </div>
+                <pd-table [toolbar]="false" label="Noisiest rules" [rows]="s.noisiest" [columns]="columns" [rowKey]="ruleKey" [filterable]="false" [rowActions]="actions" [maxHeight]="360" (action)="mute($event.row)">
+                  <ng-template pdCell="rule" let-n><span class="id">{{ n.rule }}</span>@if (muted(n.rule)) {<span class="faint sfx">Muted</span>}</ng-template>
+                </pd-table>
               }
             </div>
             <div>
@@ -53,9 +51,7 @@ import { TABLE_CSS } from './alarms-css';
       </dy-async>
     </section>
   `,
-  styles: [
-    TABLE_CSS,
-    `
+  styles: `
     :host { display: block; }
     .sec-head { display: grid; gap: 2px; margin-bottom: var(--sp-3); }
     .heroes { display: flex; gap: var(--sp-8); margin-bottom: var(--sp-4); }
@@ -64,18 +60,23 @@ import { TABLE_CSS } from './alarms-css';
     .cap { color: var(--text-3); font-size: var(--fs-sm); }
     .cols { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: var(--sp-6); align-items: start; }
     h3 { margin: 0 0 var(--sp-2); font: var(--fw-semibold) var(--fs-base) / 1.3 var(--font-sans); }
-    .head, .row { --cols: minmax(0, 1fr) 60px 70px; }
-    .row { min-height: 36px; }
-    .sfx { font-size: var(--fs-xs); }
-    .text-act { opacity: 0; }
-    .row:hover .text-act, .row:focus-within .text-act { opacity: 1; }
+    .sfx { margin-inline-start: var(--sp-2); font-size: var(--fs-xs); color: var(--text-3); }
+    .id { font: var(--fw-regular) var(--fs-sm) / 1.2 var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sugg { margin: 0; padding-left: var(--sp-5); display: grid; gap: var(--sp-2); font-size: var(--fs-base); color: var(--text-2); }
     @media (max-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr); } }
   `,
-  ],
 })
 export class AlarmStats {
   protected readonly store = inject(AlarmsStore);
   protected readonly dur = (ms: number | null) => formatDuration(ms === null ? null : ms / 1000);
+  protected readonly ruleKey = (n: NoisyRule): string => n.rule;
+  protected readonly columns: PdColumn<NoisyRule>[] = [
+    { key: 'rule', header: 'Rule', value: (n) => n.rule, required: true, sortable: false, width: 'minmax(0, 1fr)' },
+    { key: 'fired', header: 'Fired', value: (n) => n.occurrences, text: (n) => `×${String(n.occurrences)}`, align: 'end', sortable: false, width: '70px' },
+  ];
+  protected readonly actions = (n: NoisyRule): PdRowAction[] => [{ id: 'mute', label: this.muted(n.rule) ? 'Unmute this rule' : 'Mute this rule', icon: 'bell', inline: true }];
+  protected mute(n: NoisyRule): void {
+    void this.store.mute(n.rule, !this.muted(n.rule));
+  }
   protected readonly muted = (rule: string) => this.store.mutedRules().has(rule);
 }

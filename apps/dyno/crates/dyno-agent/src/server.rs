@@ -16,7 +16,7 @@
 //! newer than the CLI knows. The optional local web API (`Settings.webApi`) is a separate, opt-in adapter that maps
 //! HTTP onto these same requests; it is not a second protocol.
 
-use crate::agent::{lock, ScanSlot, Shared, Sub, VolumesSlot};
+use crate::agent::{lock, JobSlot, ScanSlot, Shared, Sub, VolumesSlot};
 use crate::discovery::Discovery;
 use crate::handlers::{handle, Conn};
 use dyno_core::protocol::{AgentError, ErrorCode, Message, PROTOCOL_VERSION};
@@ -92,12 +92,14 @@ fn connect(shared: &Arc<Shared>, conn: dyno_ipc::Connection) -> Result<(u64, Arc
     let peer = Arc::new(Peer::start(conn, PeerOptions::new().serve(handler).workers(4))?);
     let scans = Arc::new(ScanSlot::default());
     let volumes = Arc::new(VolumesSlot::default());
+    let jobs = Arc::new(JobSlot::default());
     lock(&shared.subs).push(Sub {
         id,
         detail,
         tx,
         scans: scans.clone(),
         volumes: volumes.clone(),
+        jobs: jobs.clone(),
     });
     // One thread per connection drains its queue; it ends when the app goes away or the Sub is dropped.
     let p = peer.clone();
@@ -105,28 +107,48 @@ fn connect(shared: &Arc<Shared>, conn: dyno_ipc::Connection) -> Result<(u64, Arc
     std::thread::Builder::new()
         .name(format!("dyno-push-{id}"))
         .spawn(move || {
-            pump(&rx, &scans, &volumes, |m| p.push(m).is_ok());
+            pump(
+                &rx,
+                &Slots {
+                    scans: &scans,
+                    volumes: &volumes,
+                    jobs: &jobs,
+                },
+                |m| p.push(m).is_ok(),
+            );
             lock(&s.subs).retain(|x| x.id != id);
         })
         .map_err(|e| IpcError::io(e.kind(), format!("could not start the push thread: {e}")))?;
     Ok((id, peer))
 }
 
-/// Sends a connection's frames until the app goes away (`send` returns false) or the queue is closed. Disk scan statuses do
-/// not travel through the queue: a `DiskScan` message there only wakes this loop, and after every message the newest status
-/// of each scan is taken from the slot and sent.
-pub(crate) fn pump(rx: &Receiver<Message>, scans: &ScanSlot, volumes: &VolumesSlot, mut send: impl FnMut(Message) -> bool) {
+/// What waits for one connection outside its queue.
+pub(crate) struct Slots<'a> {
+    pub scans: &'a ScanSlot,
+    pub volumes: &'a VolumesSlot,
+    pub jobs: &'a JobSlot,
+}
+
+/// Sends a connection's frames until the app goes away (`send` returns false) or the queue is closed. Disk scan statuses, the
+/// volume list and job statuses do not travel through the queue: their messages there only wake this loop, and after every
+/// message the newest of each is taken from its slot and sent.
+pub(crate) fn pump(rx: &Receiver<Message>, slots: &Slots<'_>, mut send: impl FnMut(Message) -> bool) {
     while let Ok(m) = rx.recv() {
-        if !matches!(m, Message::DiskScan(_) | Message::DiskVolumes(_)) && !send(m) {
+        if !matches!(m, Message::DiskScan(_) | Message::DiskVolumes(_) | Message::Job(_)) && !send(m) {
             return;
         }
-        if let Some(v) = volumes.take() {
+        if let Some(v) = slots.volumes.take() {
             if !send(Message::DiskVolumes(v)) {
                 return;
             }
         }
-        for status in scans.take() {
+        for status in slots.scans.take() {
             if !send(Message::DiskScan(Box::new(status))) {
+                return;
+            }
+        }
+        for status in slots.jobs.take() {
+            if !send(Message::Job(Box::new(status))) {
                 return;
             }
         }
@@ -188,10 +210,18 @@ mod tests {
         slot.put(status(7, 2, ScanState::Running)); // an older event arriving late changes nothing
         drop(tx);
         let mut got = Vec::new();
-        pump(&rx, &slot, &VolumesSlot::default(), |m| {
-            got.push(m);
-            true
-        });
+        pump(
+            &rx,
+            &Slots {
+                scans: &slot,
+                volumes: &VolumesSlot::default(),
+                jobs: &JobSlot::default(),
+            },
+            |m| {
+                got.push(m);
+                true
+            },
+        );
         let scans: Vec<_> = got
             .iter()
             .filter_map(|m| {
@@ -224,15 +254,31 @@ mod tests {
         tx.try_send(Message::DiskScan(Box::new(status(1, 1, ScanState::Done)))).unwrap();
         tx.try_send(Message::Request(Box::new(dyno_core::protocol::Request::Health)))
             .unwrap();
-        pump(&rx, &slot, &VolumesSlot::default(), |_| false);
+        pump(
+            &rx,
+            &Slots {
+                scans: &slot,
+                volumes: &VolumesSlot::default(),
+                jobs: &JobSlot::default(),
+            },
+            |_| false,
+        );
         slot.put(status(2, 1, ScanState::Done));
         tx.try_send(Message::Request(Box::new(dyno_core::protocol::Request::Health)))
             .unwrap();
         let mut sent = 0;
-        pump(&rx, &slot, &VolumesSlot::default(), |_| {
-            sent += 1;
-            false
-        });
+        pump(
+            &rx,
+            &Slots {
+                scans: &slot,
+                volumes: &VolumesSlot::default(),
+                jobs: &JobSlot::default(),
+            },
+            |_| {
+                sent += 1;
+                false
+            },
+        );
         assert_eq!(sent, 1);
     }
 
@@ -265,10 +311,18 @@ mod tests {
         );
         drop(tx);
         let mut got = Vec::new();
-        pump(&rx, &scans, &volumes, |m| {
-            got.push(m);
-            true
-        });
+        pump(
+            &rx,
+            &Slots {
+                scans: &scans,
+                volumes: &volumes,
+                jobs: &JobSlot::default(),
+            },
+            |m| {
+                got.push(m);
+                true
+            },
+        );
         let lists: Vec<Vec<String>> = got
             .iter()
             .filter_map(|m| {
@@ -280,5 +334,66 @@ mod tests {
             })
             .collect();
         assert_eq!(lists, vec![vec!["new".to_string()]], "once, the newest listing's");
+    }
+
+    #[test]
+    fn the_newest_status_of_each_job_survives_a_full_queue_and_a_final_state_is_never_dropped() {
+        use paddock_jobs::wire::{WireSnapshot, WireState};
+        let job = |id: u64, seq: u64, state: WireState| WireSnapshot {
+            id,
+            kind: "find-files".into(),
+            title: "Finding files".into(),
+            subject: None,
+            state,
+            seq,
+            elapsed_ms: 0,
+            eta_ms: None,
+            cancellable: true,
+            not_cancellable_reason: None,
+        };
+        let (tx, rx) = sync_channel::<Message>(QUEUE);
+        for _ in 0..QUEUE {
+            tx.try_send(Message::Request(Box::new(dyno_core::protocol::Request::Health)))
+                .unwrap();
+        }
+        let jobs = JobSlot::default();
+        for (seq, state) in [(1, WireState::Queued), (2, WireState::Running(None)), (3, WireState::Done)] {
+            jobs.put(job(7, seq, state.clone()));
+            assert!(
+                tx.try_send(Message::Job(Box::new(job(7, seq, state)))).is_err(),
+                "the queue is full"
+            );
+        }
+        jobs.put(job(7, 2, WireState::Running(None))); // an older event arriving late changes nothing
+        jobs.put(job(8, 1, WireState::Cancelled(paddock_jobs::CancelReason::User)));
+        drop(tx);
+        let mut got = Vec::new();
+        pump(
+            &rx,
+            &Slots {
+                scans: &ScanSlot::default(),
+                volumes: &VolumesSlot::default(),
+                jobs: &jobs,
+            },
+            |m| {
+                got.push(m);
+                true
+            },
+        );
+        let seen: Vec<_> = got
+            .iter()
+            .filter_map(|m| {
+                if let Message::Job(j) = m {
+                    Some((j.id, j.seq, j.is_terminal()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(
+            seen,
+            vec![(7, 3, true), (8, 1, true)],
+            "the newest of each job, once, and the end of each"
+        );
     }
 }

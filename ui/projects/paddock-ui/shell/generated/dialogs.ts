@@ -71,7 +71,7 @@ export type DialogClosed = { label: string, dialogId: string,
  */
 remembered: DialogRemembered | null, };
 
-export type DialogErrorCode = "invalid" | "unknown" | "limit" | "notADialog" | "closed" | "notReady" | "failed";
+export type DialogErrorCode = "invalid" | "unknown" | "limit" | "notADialog" | "closed" | "notReady" | "failed" | "insidePluginHook";
 
 export type DialogError = { code: DialogErrorCode, 
 /**

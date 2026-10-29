@@ -658,6 +658,16 @@ it receives, with its time, and the calls seen when it gives up. A refusal itsel
 `RuntimeAuthority` check, so a harness that needs to name it asks the authority, not the log. C48 checks the capability file
 of every app on the shared shell.
 
+## 2026-10-29: a row's actions must fit their own box, or the tooltip anchored to it covers them (Dyno)
+
+A row-action cluster got one tooltip on its container, placed left of the container. In the active-alarms table the cluster's
+cell was 40 px wide for three 28 px buttons that overflowed to the left, so the tooltip opened over the buttons, took the
+pointer (a `mouseleave` after 30 ms) and the second and third actions never showed one. The reverse also happened: widening
+the cell pushed the buttons past the clipped edge of the grid at 1280 px, out of reach. **Rule (guidance):** a cluster's box
+holds all its buttons (a column as wide as the actions), and the row-actions e2e (every action must show its tooltip, whose
+text is its name, and the tooltip must overlap no other action) is the check; a tooltip on an icon-only button is never left
+to a per-button `matTooltip` inside a cluster.
+
 ## Chromium tests compared a loaded machine with a product timeout (2026-10-28, paddock-chromium)
 
 Three `paddock-chromium` tests failed on CI runs of several branches and never on a quiet machine: (1) `a_real_browser_reads_a_page_and_closes_cleanly` and `a_cancelled_load_says_whether_it_was_a_download_or_replaced` asserted `Browser.close()`, whose 5 s grace (`CLOSE_GRACE`, the product's bound before it kills the tree) is a fine product choice but a time budget as a test assertion: a loaded runner let Chrome take longer (macOS 6662, Windows 6726, 13 s test); (2) `a_page_is_read_snapshot_by_snapshot` pushed a 16 MiB page (`MAX_HTML` + 1) through the fake browser in a debug build to see the size cap refuse it, which outlasted the 10 s call timeout on a macOS runner and gave `Timeout` instead of "larger". **Rule:** a test asserts the mechanism (the browser exits by itself and is not killed; the cap refuses a page one byte over it), never that it happened within a product timeout; give the code under test the cap as a parameter so a few bytes prove it; wait on the condition (`close_gracefully` returns the moment Chrome exits) with a hang guard that only stops a browser that never exits. A failing wait names what the thing it waited for reported (the load's own result), so the next failure carries its cause.
@@ -705,3 +715,39 @@ One day of CI went on runs for superseded branch heads, the same head dispatched
 into another branch, and global triggers in the affected planner that made every run build everything (fixed in
 b618b5c97). **Rule:** cancel older queued runs before dispatching, dispatch once after the last review fix, give merged
 branches and docs-only changes no CI, and keep branch runs on the affected plan (rule 50).
+
+## Slow imports hid cheap wins in threads and per-item cost (2026-10-29)
+Debrief's import was bound by 2 Tantivy writer threads and a single-threaded catalogue, and regex was 38% of parse time.
+Nobody asked whether more workers or a cheaper operation would help until the numbers were read by accident. **Rule:** for
+any slow operation, measure both: can more threads or workers run it (bounded by the kind of work), and can each item cost
+less? Make thread counts Settings with an "Auto" default, and give long or bulk designs a "Parallelism and cost" section
+(rule 51).
+
+## Long work in an agent needs the shell's job mechanism, not a poll of our own (2026-10-29, Dyno)
+Dyno's first jobs (6c73efd75) polled the agent for their status with a runner of their own: the shell's Jobs view stayed empty,
+the pages had two mechanisms, every UI request still had a 15 s timer, and a log read could be cancelled only between logs.
+**Rule:** work that runs in another process pushes its `paddock_jobs::wire::WireSnapshot`s, the shell relays them as
+`paddock://jobs`, and the pages follow with `JobsStore` and `JobFollow`; the UI has no timer at all (the shared
+`uiTimeoutProblems` check runs over the app's sources as a test). A tool that streams its output is read line by line with
+`OnCancel` killing the child, so Cancel does not wait for the next line, and the reading happens on a thread of its own: a
+killed shell's own children keep its pipe open. Anything that waits for another read waits on a `Condvar` that Cancel also wakes.
+**Also:** a store that every dialog window shares must not ask for the shell's jobs store at construction (it sends a request the
+dialog's contract may not declare); resolve it when a job starts.
+
+## 2026-10-29: a window built inside a plugin hook deadlocks the main thread (Spotter, Dyno, Pitcrew, the demos)
+
+Spotter 1.0's release build never opened a window: the process kept running, `sample` showed the main thread waiting
+on a mutex and nothing reached the log. Symbolised (a debug build in a throwaway Tart VM), the main thread was in
+`tauri::Builder::build` → `AppManager::initialize_plugins` → the shell plugin's `setup` → the app's set-up closure →
+`paddock_window::tauri::start` → `create_main` → `WebviewManager::prepare_pending_webview` →
+`Mutex<PluginStore>::lock`. Tauri 2 holds its plugin store while it runs every plugin's `setup`, `on_event`,
+`on_page_load`, `on_window_ready` and `on_webview_ready`, and building a webview locks that store again on the same
+thread. Not VM-specific: the same deadlock reproduces on Tauri's mock runtime. Five apps had the same mistake (Spotter,
+Dyno, Pitcrew's shell branch and both demos) and the shell's run-event hook a sixth (Dock click, Finder "Open with").
+**Rule (ADR 0029):** the shell opens the start (`Builder::tray`, `Builder::launch`, `Builder::add_to`); apps never call
+`paddock_window::tauri::start`; window work a hook triggers runs after it (`after_plugin_hook`); every shared plugin
+marks its hooks with `plugin_hook_scope`, and Paddock's window builders refuse to build inside one. Each app tests its
+composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor Dyno installed a backend for the `log`
+crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
+(`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
+not by guessing at the VM.

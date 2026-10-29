@@ -3,12 +3,13 @@
 //! The extras (WP-13), backup health (WP-14) end to end over the fake platform: scripted tools
 //! (no real `tmutil`, `pmset` or `restic` is run), a real IPC connection and a SQLite file in a temp folder.
 
-use dyno_agent::cli::{ask, ask_within, connect};
+use dyno_agent::cli::{ask, ask_within, connect, run_job};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_core::backup::{BackupState, BackupTool};
 use dyno_core::extras::changes::{ChangeKind, ChangesQuery};
-use dyno_core::extras::files::{FinderMode, FinderQuery};
+use dyno_core::extras::files::{FinderMode, FinderQuery, FinderResult};
+use dyno_core::jobs::{JobOutput, JobSpec};
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{Message, Reply, Request};
 use dyno_core::time::{Timestamp, HOUR};
@@ -124,13 +125,13 @@ fn sleep_blockers_come_from_the_scripted_tool_and_a_refusal_is_a_sentence() {
             "WHO UID USER PID COMM WHAT WHY MODE\nFirefox 1000 sam 2210 firefox sleep Playing audio block\n",
         )],
     )]));
-    let Reply::Sleep(s) = ask(&h.client(), Request::SleepBlockers).unwrap() else {
+    let JobOutput::Sleep(s) = run_job(&h.client(), JobSpec::SleepBlockers, Duration::from_secs(30)).unwrap() else {
         panic!("sleep")
     };
     assert_eq!(s.blockers[0].name, "Firefox");
     assert!(s.wakes_unavailable.is_some());
     x.use_tools(Tools::with(vec![]));
-    let Reply::Sleep(s) = ask(&h.client(), Request::SleepBlockers).unwrap() else {
+    let JobOutput::Sleep(s) = run_job(&h.client(), JobSpec::SleepBlockers, Duration::from_secs(30)).unwrap() else {
         panic!("sleep")
     };
     assert!(s.blockers.is_empty() && s.blockers_unavailable.unwrap().contains("not available"));
@@ -189,6 +190,14 @@ fn write(dir: &std::path::Path, name: &str, byte: u8, len: usize) -> std::path::
     p
 }
 
+/// Runs the finder as a job and waits for its result.
+fn find(peer: &Peer<Message>, query: FinderQuery) -> Result<FinderResult, String> {
+    match run_job(peer, JobSpec::FindFiles { query }, Duration::from_secs(60))? {
+        JobOutput::Finder(r) => Ok(*r),
+        other => panic!("{other:?}"),
+    }
+}
+
 #[test]
 fn the_finder_lists_large_files_and_duplicates_and_moves_nothing() {
     let h = Harness::start();
@@ -204,9 +213,7 @@ fn the_finder_lists_large_files_and_duplicates_and_moves_nothing() {
         mode: FinderMode::Both,
         min_bytes: 0,
     };
-    let Reply::FileFinder(r) = ask_within(&peer, Request::FindFiles { query }, Duration::from_secs(60)).unwrap() else {
-        panic!("finder")
-    };
+    let r = find(&peer, query).unwrap();
     assert_eq!(r.large[0].bytes, 4 * MB as u64);
     assert_eq!(r.duplicates.len(), 1);
     assert_eq!(r.duplicates[0].files.len(), 2);
@@ -223,14 +230,17 @@ fn the_finder_refuses_a_folder_that_is_not_there() {
         mode: FinderMode::Both,
         min_bytes: 0,
     };
-    assert!(ask(&peer, Request::FindFiles { query: q })
-        .unwrap_err()
-        .contains("cannot be opened"));
+    assert!(find(&peer, q).unwrap_err().contains("cannot be opened"));
 }
 
 fn backup_report(peer: &Peer<Message>, refresh: bool) -> dyno_core::backup::BackupReport {
-    let req = if refresh { Request::RefreshBackup } else { Request::Backup };
-    let Reply::Backup(mut r) = ask(peer, req).unwrap() else {
+    if refresh {
+        let JobOutput::Backup(r) = run_job(peer, JobSpec::RefreshBackup, Duration::from_secs(30)).unwrap() else {
+            panic!("backup")
+        };
+        return *r;
+    }
+    let Reply::Backup(mut r) = ask(peer, Request::Backup).unwrap() else {
         panic!("backup")
     };
     for _ in 0..200 {
@@ -377,7 +387,7 @@ fn boot_analysis_uses_the_stored_boots_and_says_what_it_cannot_know() {
     for (i, secs) in [40.0f32, 42.0, 41.0, 90.0].iter().enumerate() {
         lock_put_boot(&s, t.minus((10 - i as i64) * 24 * HOUR), *secs);
     }
-    let Reply::Boot(b) = ask(&h.client(), Request::BootAnalysis).unwrap() else {
+    let JobOutput::Boot(b) = run_job(&h.client(), JobSpec::BootAnalysis, Duration::from_secs(30)).unwrap() else {
         panic!("boot")
     };
     assert_eq!(b.boots.len(), 4);
@@ -405,7 +415,7 @@ fn the_inventory_report_is_written_only_to_a_valid_path() {
     s.extras
         .use_tools(Tools::with(vec![("dpkg-query -W", vec![ok("bash\t5.2\ncurl\t8.4\n")])]));
     let peer = h.client();
-    let Reply::Software(sw) = ask(&peer, Request::SoftwareInventory).unwrap() else {
+    let JobOutput::Software(sw) = run_job(&peer, JobSpec::SoftwareInventory, Duration::from_secs(30)).unwrap() else {
         panic!("software")
     };
     assert_eq!(sw.items.len(), 2);
@@ -436,7 +446,7 @@ fn gpu_and_usage_degrade_to_a_reason() {
         panic!("gpu")
     };
     assert!(g.processes.is_empty() && g.unavailable.is_some());
-    let Reply::AppUsage(u) = ask(&peer, Request::AppUsage).unwrap() else {
+    let JobOutput::AppUsage(u) = run_job(&peer, JobSpec::AppUsage, Duration::from_secs(30)).unwrap() else {
         panic!("usage")
     };
     assert!(u.energy_unavailable.is_some());

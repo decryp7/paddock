@@ -40,6 +40,7 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 | C39 | tests never free a port they probe (ADR 0023): a port read off a listener that is then dropped (`bind(..).unwrap().local_addr()`, a block or fn that returns `l.local_addr()..` of its own listener, `drop(l)` before the port is used) is an error, in any Rust file; hold it with `paddock_testkit::net::HeldPort` or inject a refusing connector. A justified case carries `// conformance: freed-port — <reason>` | |
 | C45 | `__command(` and `__prefix(`, the hidden constructors behind the `dialog_callable` markers (ADR 0026 §3), are called nowhere outside `crates/paddock-commands`, except in `#[cfg(test)]` code, `tests/` and doctests: a contract names a command by its marker, never by a string | |
 | C48 | an app on the shared shell (a `src-tauri/Cargo.toml` with a `paddock-shell` dependency) grants its dialog windows the shell's dialog set: `src-tauri/capabilities/dialog.json` names `d-*` and grants `paddock-shell:dialog` (and `paddock-workbench:dialog` when it depends on `paddock-workbench`); without it Tauri refuses every dialog command (ADR 0026 §3) | |
+| C50 | every app on the shared shell lets the shell open its start and tests it (ADR 0029, rule 43): it neither opens its main window itself (`paddock_window::tauri::start` or `create_main`, by path or `use`) nor gives `tauri::Builder` a `setup` of its own (it replaces the shell's; also after `add_to(…)` or `app(…)`, or on a binding of either), it installs `paddock_log`, and a Rust test runs the composed start through `paddock_shell::testing::start` and checks `main_window` |
 | C43 | a sticky table header stays above its rows: a header or footer row (`position: sticky` with `top`, `bottom`, `inset-block-*` or an `inset` shorthand) sets a z-index of at least 3 (`--pd-z-table-header`), a sticky column's header cell at least 4 (`--pd-z-table-corner`), and a sticky column in the same app sits below the lowest header (`--pd-z-table-sticky-column` 2); a sticky element that is not a table row says `/* conformance: not-a-header */` (ADR 0027) | |
 | C32 | the translation catalogs are current: `paddock-i18n build --check --no-extract` over the app's `paddock-i18n.json` (every catalog equals its sources, every runtime JSON equals its catalog); a missing config warns | `npm ci` (the app's installed `@decryp7/paddock-ui`) |
 | C33 | every window is checked with axe: an e2e spec runs axe, and every dialog of `dialog-contracts.json` is covered (`axeEveryDialog`, or the id in a spec that runs axe; `a11y.skip` names the exceptions with a reason). Warns when no spec walks a keyboard-only flow or tests the app's accent with `accentProblems` | |
@@ -67,7 +68,13 @@ Writes `THIRD_PARTY_NOTICES.md` (Rust licences from `cargo about generate` with 
 dependencies from `package-lock.json` and `node_modules`), deterministic. `--check` fails when the committed file is stale;
 a package none of whose licence options is permissive fails both modes. The allowed licences are one list
 (`src/notices/licences.mjs`), equal to `templates/repo/deny.toml` and `about.toml` (a test keeps them equal). Install first:
-`cargo install cargo-about --locked --features cli`, `npm ci --omit=dev --ignore-scripts`.
+`cargo install cargo-about --version 0.9.2 --locked --features cli`, `npm ci --omit=dev --ignore-scripts`.
+
+In the monorepo an app states its facts once, in the `notices` block of `apps/<app>/paddock.ci.json`
+(`{ "name", "manifests": [...], "npm": "app", "out": ["app/src-tauri/resources"] }`, paths relative to the app), and runs
+`scripts/notices.sh <app> [--check]` (`paddock-notices --config ...`). `npm` may be a workspace of the root lock: only its
+production closure is listed. Without an `about.toml` of its own an app uses `templates/repo/about.toml`. CI (`app-gates`) runs
+the `--check` on the Linux leg of every app with the block.
 
 ## Configuration
 

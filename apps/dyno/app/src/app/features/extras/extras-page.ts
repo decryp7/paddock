@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { ExtrasApps } from './extras-apps';
 import { ExtrasBoot } from './extras-boot';
@@ -9,6 +9,9 @@ import { ExtrasInventory } from './extras-inventory';
 import { ExtrasMaintenance } from './extras-maintenance';
 import { EXTRAS_TABS, type ExtrasTab } from './extras-model';
 import { ExtrasSleep } from './extras-sleep';
+import { MatTabsModule } from '@angular/material/tabs';
+import { JobProgressCard } from '../../shared/job-progress';
+import { ExtrasStore } from '../../state/extras.store';
 
 /**
  * Extras: small read-only views of the computer that have no page of their own: what changed, why it will not sleep, how it
@@ -17,24 +20,28 @@ import { ExtrasSleep } from './extras-sleep';
  */
 @Component({
   selector: 'dy-extras-page',
-  imports: [ExtrasChanges, ExtrasSleep, ExtrasBoot, ExtrasApps, ExtrasGpu, ExtrasFiles, ExtrasInventory, ExtrasMaintenance],
+  imports: [MatTabsModule, JobProgressCard, ExtrasChanges, ExtrasSleep, ExtrasBoot, ExtrasApps, ExtrasGpu, ExtrasFiles, ExtrasInventory, ExtrasMaintenance],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <header class="page-head">
         <div class="titles">
           <h1>Extras</h1>
-          <p>More ways to look at this computer. Dyno only reads; files move only when you pick them and confirm.</p>
+          <p>More ways to look at this computer. Dyno only reads; it changes nothing.</p>
         </div>
       </header>
 
-      <div class="seg tabs" role="tablist" aria-label="Extras">
+      <nav mat-tab-nav-bar [tabPanel]="panel" aria-label="Extras">
         @for (t of tabs; track t.id) {
-          <button type="button" role="tab" [id]="'extras-tab-' + t.id" [attr.aria-selected]="tab() === t.id" [attr.aria-controls]="'extras-panel'" [attr.tabindex]="tab() === t.id ? 0 : -1" (click)="open(t.id)" (keydown)="key($event)">{{ t.label }}</button>
+          <button type="button" mat-tab-link [active]="tab() === t.id" (click)="open(t.id)">{{ t.label }}</button>
         }
-      </div>
+      </nav>
 
-      <section id="extras-panel" role="tabpanel" [attr.aria-labelledby]="'extras-tab-' + tab()">
+      @if (readJob(); as job) {
+        <dy-job-progress [progress]="job" (cancel)="cancelRead()" />
+      }
+
+      <mat-tab-nav-panel #panel>
         @switch (tab()) {
           @case ('changes') { <dy-extras-changes /> }
           @case ('sleep') { <dy-extras-sleep /> }
@@ -45,40 +52,44 @@ import { ExtrasSleep } from './extras-sleep';
           @case ('inventory') { <dy-extras-inventory /> }
           @case ('maintenance') { <dy-extras-maintenance /> }
         }
-      </section>
+      </mat-tab-nav-panel>
     </div>
   `,
   styles: `
     :host { display: block; }
-    .page { display: grid; gap: var(--sp-3); align-content: start; max-width: 1440px; }
+    .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-content: start; max-width: 1440px; }
     .page-head { margin-bottom: 0; }
-    .tabs { justify-self: start; flex-wrap: wrap; }
   `,
 })
 export class ExtrasPage {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
+  private readonly store = inject(ExtrasStore);
   protected readonly tabs = EXTRAS_TABS;
   /** The tab in the address (`#/extras?tab=boot`), so a view can be linked to and reopened. */
   protected readonly tab = signal<ExtrasTab>(tabFrom(this.route.snapshot.queryParamMap.get('tab')));
+
+  /** The tabs that run OS tools read through a job; the others have nothing to follow. */
+  private readonly readKey = computed<'sleep' | 'boot' | 'apps' | 'software' | undefined>(() => READ_TABS[this.tab()]);
+  /** The running read of the open tab, with its phase and Cancel. */
+  protected readonly readJob = computed(() => {
+    const key = this.readKey();
+    return key ? this.store.readJob()(key) : null;
+  });
+
+  protected cancelRead(): void {
+    const key = this.readKey();
+    if (key) void this.store.cancelRead(key);
+  }
 
   protected open(tab: ExtrasTab): void {
     if (tab === this.tab()) return;
     this.tab.set(tab);
     void this.router.navigate([], { relativeTo: this.route, queryParams: { tab }, replaceUrl: true });
   }
-
-  /** Left and Right move between tabs. */
-  protected key(e: KeyboardEvent): void {
-    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-    const i = this.tabs.findIndex((t) => t.id === this.tab());
-    const next = this.tabs[(i + (e.key === 'ArrowRight' ? 1 : this.tabs.length - 1)) % this.tabs.length]!;
-    e.preventDefault();
-    const list = (e.currentTarget as HTMLElement).parentElement!;
-    this.open(next.id);
-    queueMicrotask(() => list.querySelector<HTMLElement>(`#extras-tab-${next.id}`)?.focus());
-  }
 }
+
+const READ_TABS: Partial<Record<ExtrasTab, 'sleep' | 'boot' | 'apps' | 'software'>> = { sleep: 'sleep', boot: 'boot', apps: 'apps', inventory: 'software' };
 
 /** The tab named in the address, or the first when it names none we have. */
 export function tabFrom(value: string | null): ExtrasTab {

@@ -2,6 +2,7 @@
 //! check that a folder path names no `.` or `..` segment.
 
 pub mod index;
+pub mod reason;
 pub mod scan;
 pub mod settings;
 pub mod source;

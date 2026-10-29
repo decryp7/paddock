@@ -17,6 +17,8 @@ dyno-core.workspace = true
 dyno-platform.workspace = true
 dyno-ipc.workspace = true
 dyno-plugin-host.workspace = true
+# The family's job mechanism (phases, throttled progress, cancel tokens, hashing copy): the long operations run on it.
+paddock-jobs = { path = "../../../../crates/paddock-jobs" }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde.workspace = true
 serde_json.workspace = true

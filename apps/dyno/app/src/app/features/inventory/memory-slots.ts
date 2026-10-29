@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { MatTooltip } from '@angular/material/tooltip';
 import { type ModuleGeometry, facePath, moduleGeometry, speedText, techLabel } from './dimm-geometry';
 import { HW_TOKENS } from './hardware-tokens';
 import type { DimmSlotModel } from './hardware-models';
@@ -19,16 +20,19 @@ interface RowArt {
   width: number;
   speed: string | null;
   aria: string;
+  /** The detail shown in the slot's tooltip: one fact per line. */
+  tip: string;
 }
 
 /**
  * The memory slots drawn as a board section: real DIMM sockets with latches and a key rib, seen from the front, grouped by
  * channel. A filled socket holds a module drawn from its data (SO-DIMM or full size, the key notch of its generation, DRAM
  * packages, SPD, and the PMIC on DDR5); an empty one is calm, with a faint outline where a module would go. Size, type and
- * speed are printed beside the drawing, never on it, and maker and part number are in the popover. Colour is never the only signal.
+ * speed are printed beside the drawing, never on it, and maker and part number are in the tooltip. Colour is never the only signal.
  */
 @Component({
   selector: 'dy-memory-slots',
+  imports: [MatTooltip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <figure class="bank" [style.--art-w.px]="artWidth()">
@@ -60,7 +64,7 @@ interface RowArt {
             <h3 class="channel"><span>Channel {{ g.channel }}</span></h3>
           }
           @for (r of g.rows; track r.index) {
-            <div class="slot" tabindex="0" role="group" [class.free]="!r.slot.module" [class.flagged]="r.slot.tags.length > 0" [attr.aria-label]="r.aria" [attr.aria-describedby]="id + '-pop-' + r.index">
+            <div class="slot" tabindex="0" role="group" [class.free]="!r.slot.module" [class.flagged]="r.slot.tags.length > 0" [attr.aria-label]="r.aria" [matTooltip]="r.tip" matTooltipClass="dy-slot-tip" matTooltipPosition="below">
               <svg class="art" [attr.viewBox]="'0 0 ' + r.width + ' ' + rowH" aria-hidden="true" focusable="false">
                 @for (side of sides; track side) {
                   <g class="latch" [class.open]="!r.slot.module" [attr.transform]="latchTransform(r, side, !r.slot.module)">
@@ -122,25 +126,6 @@ interface RowArt {
                   }
                 </span>
               </div>
-
-              <div class="pop" role="tooltip" [attr.id]="id + '-pop-' + r.index">
-                <strong>{{ r.slot.name }}</strong>
-                @if (r.slot.module; as m) {
-                  <dl>
-                    <dt>Size</dt><dd>{{ m.sizeLabel }}</dd>
-                    <dt>Type</dt><dd>{{ tech(m.tech) }} {{ m.form === 'soDimm' ? 'SO-DIMM' : 'DIMM' }}</dd>
-                    <dt>Rated speed</dt><dd>{{ m.ratedMts ? m.ratedMts + ' MT/s' : 'Unknown' }}</dd>
-                    <dt>Running at</dt><dd>{{ m.runningMts ? m.runningMts + ' MT/s' : 'Unknown' }}</dd>
-                    <dt>Maker</dt><dd>{{ m.maker ?? 'Unknown' }}</dd>
-                    <dt>Part number</dt><dd class="mono">{{ m.part ?? 'Unknown' }}</dd>
-                  </dl>
-                } @else {
-                  <p>Nothing is installed in this slot.</p>
-                }
-                @if (r.slot.note) {
-                  <p class="hint">{{ r.slot.note }}</p>
-                }
-              </div>
             </div>
           }
         </section>
@@ -197,7 +182,6 @@ interface RowArt {
     .ghost .plus path { fill: none; stroke: var(--hw-ghost); stroke-width: 1.5; stroke-linecap: round; }
     @media (prefers-reduced-motion: no-preference) {
       .latch { transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-      .pop { transition: opacity 140ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1); }
     }
 
     .info { display: grid; gap: 2px; justify-items: start; min-width: 0; }
@@ -215,14 +199,6 @@ interface RowArt {
     .tag[data-tone='ok'] { background: var(--hw-tone-ok-bg); color: var(--hw-tone-ok); }
     .tag[data-tone='info'] { background: var(--hw-tone-info-bg); color: var(--hw-tone-info); }
 
-    .pop { position: absolute; z-index: 10; left: 8px; top: calc(100% - 10px); width: max-content; max-width: min(320px, calc(100% - 16px)); padding: 12px; border-radius: 10px; background: var(--hw-popover-bg); box-shadow: var(--hw-popover-shadow); color: var(--hw-text); font-size: 12px; line-height: 18px; opacity: 0; visibility: hidden; transform: translateY(-2px); pointer-events: none; }
-    .pop dl { margin: 8px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; }
-    .pop dt { color: var(--hw-text-subtle); }
-    .pop dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-    .pop .mono { font-family: var(--hw-font-mono, ui-monospace, monospace); font-size: 11px; }
-    .pop p { margin: 8px 0 0; color: var(--hw-text-muted); }
-    .pop .hint { padding-top: 8px; border-top: 1px solid var(--hw-hairline); }
-    .slot:hover .pop, .slot:focus-visible .pop { opacity: 1; visibility: visible; transform: none; }
 
     @container bank (max-width: 640px) {
       .bank { padding-inline: 20px; }
@@ -251,7 +227,7 @@ export class MemorySlots {
     list.forEach((slot, index) => {
       const m = slot.module ?? ref;
       const geo = moduleGeometry(m?.tech ?? 'ddr4', m?.form ?? 'dimm', slot.module?.capacityBytes ?? 0);
-      const row: RowArt = { slot, index, geo, face: facePath(geo), width: geo.width + LATCH * 2, speed: slot.module ? speedText(slot.module.ratedMts, slot.module.runningMts) : null, aria: this.aria(slot) };
+      const row: RowArt = { slot, index, geo, face: facePath(geo), width: geo.width + LATCH * 2, speed: slot.module ? speedText(slot.module.ratedMts, slot.module.runningMts) : null, aria: this.aria(slot), tip: this.tip(slot) };
       const last = out[out.length - 1];
       if (last && last.channel === slot.channel) last.rows.push(row);
       else out.push({ channel: slot.channel, rows: [row] });
@@ -270,6 +246,24 @@ export class MemorySlots {
     const x = side === 'left' ? LATCH - 9 : r.width - LATCH + 9;
     const angle = open ? (side === 'left' ? -20 : 20) : 0;
     return `translate(${x.toString()} ${base.toString()}) rotate(${angle.toString()})`;
+  }
+
+  /** The tooltip: the slot's facts, one per line, plus the note. */
+  private tip(s: DimmSlotModel): string {
+    const m = s.module;
+    const lines: string[] = [s.name];
+    if (m) {
+      lines.push(
+        `Size: ${m.sizeLabel}`,
+        `Type: ${techLabel(m.tech)} ${m.form === 'soDimm' ? 'SO-DIMM' : 'DIMM'}`,
+        `Rated speed: ${m.ratedMts ? `${m.ratedMts} MT/s` : 'Unknown'}`,
+        `Running at: ${m.runningMts ? `${m.runningMts} MT/s` : 'Unknown'}`,
+        `Maker: ${m.maker ?? 'Unknown'}`,
+        `Part number: ${m.part ?? 'Unknown'}`,
+      );
+    } else lines.push('Nothing is installed in this slot.');
+    if (s.note) lines.push(s.note);
+    return lines.join('\n');
   }
 
   private aria(s: DimmSlotModel): string {

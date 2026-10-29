@@ -288,8 +288,25 @@ pub trait BackupEnv {
     fn runner(&self, tool: BackupTool) -> Box<dyn ToolRunner + '_>;
 }
 
-/// Checks every backup tool that exists on this OS and is installed. Tools that are not installed produce nothing: "no
-/// backup tool found" is a normal state. One tool failing never affects the others.
+/// The backup tools that exist on this OS and are installed, in the order they are checked. Tools that are not installed
+/// are left out: "no backup tool found" is a normal state.
+pub fn backup_tools_present(env: &dyn BackupEnv, os: &str) -> Vec<BackupTool> {
+    BackupTool::ALL.into_iter().filter(|t| t.on_os(os) && env.available(*t)).collect()
+}
+
+/// Checks one backup tool (read-only tools with timeouts). One tool failing never affects the others.
+pub fn backup_status_of(
+    env: &dyn BackupEnv,
+    tool: BackupTool,
+    now: Timestamp,
+    utc_offset_minutes: i32,
+    stale_after_hours: u32,
+) -> BackupStatus {
+    let runner = env.runner(tool);
+    check_one(runner.as_ref(), tool, now, utc_offset_minutes, stale_after_hours)
+}
+
+/// Checks every backup tool that exists on this OS and is installed.
 pub fn backup_statuses(
     env: &dyn BackupEnv,
     os: &str,
@@ -297,13 +314,9 @@ pub fn backup_statuses(
     utc_offset_minutes: i32,
     stale_after_hours: u32,
 ) -> Vec<BackupStatus> {
-    BackupTool::ALL
+    backup_tools_present(env, os)
         .into_iter()
-        .filter(|t| t.on_os(os) && env.available(*t))
-        .map(|tool| {
-            let runner = env.runner(tool);
-            check_one(runner.as_ref(), tool, now, utc_offset_minutes, stale_after_hours)
-        })
+        .map(|tool| backup_status_of(env, tool, now, utc_offset_minutes, stale_after_hours))
         .collect()
 }
 

@@ -49,7 +49,8 @@ export function healthReasons(): HealthReason[] {
   ];
 }
 
-export function demoStartup(): StartupEntry[] {
+/** The startup items of the pretend machine: Windows ones (registry Run keys, startup folders, tasks) only on Windows. */
+export function demoStartup(os: 'windows' | 'macos' | 'linux' = 'windows'): StartupEntry[] {
   const e = (
     id: string,
     name: string,
@@ -70,6 +71,22 @@ export function demoStartup(): StartupEntry[] {
     publisher,
     impact: { cpuSecs, diskBytes: diskMb * MB, rating },
   });
+  if (os !== 'windows') {
+    const mac = os === 'macos';
+    const agent = mac ? 'userLaunchAgent' : 'userStartupFolder';
+    const home = mac ? '/Users/alex' : '/home/alex';
+    return [
+      e('teams', 'Microsoft Teams', mac ? '/Applications/Microsoft Teams.app/Contents/MacOS/MSTeams --background' : '/opt/teams/teams --background', mac ? 'loginItem' : agent, 'Microsoft Corporation', 9.8, 310, 'high'),
+      e('docker', 'Docker Desktop', mac ? '/Applications/Docker.app/Contents/MacOS/Docker Desktop --autostart' : '/opt/docker-desktop/bin/docker-desktop --autostart', mac ? 'loginItem' : agent, 'Docker Inc.', 14.2, 520, 'high'),
+      e('spotify', 'Spotify', mac ? '/Applications/Spotify.app/Contents/MacOS/Spotify --minimized' : '/usr/bin/spotify --minimized', mac ? 'loginItem' : agent, 'Spotify AB', 4.1, 180, 'medium'),
+      e('onedrive', 'Microsoft OneDrive', mac ? '/Applications/OneDrive.app/Contents/MacOS/OneDrive --background' : '/usr/bin/onedrive --monitor', mac ? 'userLaunchAgent' : agent, 'Microsoft Corporation', 3.2, 140, 'medium'),
+      e('slack', 'Slack', mac ? '/Applications/Slack.app/Contents/MacOS/Slack --startup' : '/usr/bin/slack --startup', mac ? 'loginItem' : agent, 'Slack Technologies, LLC', 2.6, 96, 'low'),
+      e('logi', 'Logi Options+', mac ? '/Library/Application Support/Logitech.localized/LogiOptionsPlus/logioptionsplus_agent' : `${home}/.local/bin/logiops`, mac ? 'systemLaunchAgent' : agent, 'Logitech Inc', 1.9, 60, 'low'),
+      e('steam', 'Steam', mac ? '/Applications/Steam.app/Contents/MacOS/steam_osx -silent' : '/usr/bin/steam -silent', mac ? 'loginItem' : agent, 'Valve Corp.', 0, 0, 'notMeasured', 'disabled'),
+      e('system', mac ? 'Background Task Management' : 'Desktop services', mac ? '/System/Library/CoreServices/backgroundtaskmanagementagent' : '/usr/libexec/gvfsd', mac ? 'systemLaunchAgent' : agent, mac ? 'Apple Inc.' : null, 0.3, 4, 'low'),
+      e('dyno', 'Dyno', mac ? '/Applications/Dyno.app/Contents/MacOS/dyno-app --hidden' : '/usr/bin/dyno-app --hidden', mac ? 'loginItem' : agent, 'Dyno contributors', 0.4, 12, 'low'),
+    ];
+  }
   return [
     e('teams', 'Microsoft Teams', '"C:\\Program Files\\WindowsApps\\MSTeams\\ms-teams.exe" --process-start-reason=StartupTask', 'userRunKey', 'Microsoft Corporation', 9.8, 310, 'high'),
     e('docker', 'Docker Desktop', '"C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe" -Autostart', 'userRunKey', 'Docker Inc.', 14.2, 520, 'high'),
@@ -161,12 +178,14 @@ export function demoPlugins(): PluginInfo[] {
 export function demoSettings(): Settings {
   return {
     version: 1,
-    theme: 'system',
     launchAtLogin: true,
     sampling: { intervalMs: 1000, processIntervalMs: 2000 },
     retention: { rawHours: 24, minuteDays: 14, quarterHourDays: 90, hourDays: 730 },
     tray: { metrics: ['cpu', 'memory', 'disk'], style: 'graph' },
     alerts: { enabled: true, lowDiskPercent: 10, overheatCelsius: 95, longHighCpuMinutes: 10 },
+    // What the engine's DiskSettings::default() gives (crates/dyno-core/src/disk/settings.rs).
+    disk: { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64 },
+    jobs: { workers: 'auto' },
     webApi: { enabled: false, port: 7878, lan: false },
     dashboard: layoutFromPreset('overview'),
     ipLookup: { ipTemplate: 'https://ipinfo.io/{ip}', asnTemplate: '' },

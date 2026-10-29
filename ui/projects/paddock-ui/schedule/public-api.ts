@@ -7,6 +7,8 @@
 export { PdScheduleEditor, presetLabel } from './src/schedule-editor';
 export { PdPauseEditor } from './src/pause-editor';
 export { PdDayPicker, dayLabel } from './src/day-picker';
+export { PdKeepTimeOnEscape } from './src/keep-time';
+export { dateToTime, TIME_PROVIDERS, TimeProblems, timeOptions, timeToDate } from './src/time-value';
 export {
   addTime,
   EVERY_PRESETS,

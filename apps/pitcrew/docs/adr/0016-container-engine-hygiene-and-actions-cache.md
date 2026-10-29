@@ -1,6 +1,7 @@
 # 16. Container engine hygiene and the Actions cache
 
 - Status: accepted (2026-10-23)
+- Amended by [ADR 0022](0022-host-environment-and-shared-folders.md) (accepted 2026-10-29): cache trimming takes the maintenance lock and runs "when idle" instead of refusing while a job runs.
 - Related: ADR 0006 (housekeeping); code: `pitcrew_core::hygiene`, `pitcrew_service::{hygiene, supervisor::ops}`,
   `app/src/app/features/storage/`
 

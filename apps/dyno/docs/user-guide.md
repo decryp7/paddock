@@ -26,7 +26,7 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
    fans. A tile that cannot be read says why (for example "no battery") instead of showing zero.
 2. Press **Check now** to get the diagnosis: the likeliest cause of slowness, with evidence and suggestions in words.
 3. Look at **Processes** to see which applications use the most.
-4. In **Settings**, choose the theme, what the tray icon shows and how long history is kept.
+4. In **Settings**, choose what the tray icon shows and how long history is kept.
 
 ## Everyday use
 
@@ -35,7 +35,6 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
 - **Processes.** Applications are grouped; expand one to see its processes. Select a row for details (command line, working
   directory, modules, connections, signer), what is locking a file, and **Open location**. Take a snapshot and compare it with a
   later one. Dyno cannot end, suspend or change a process; use your system's own task manager for that.
-- **Command palette.** Ctrl or Cmd + K jumps to a screen or action.
 - **Tray.** The icon shows the metric you chose; its dropdown is a compact dashboard. Closing the window keeps Dyno in the
   tray and the agent measuring; **Quit** closes the app (the agent keeps measuring until you stop it).
 - **Why slow** explains the likeliest cause of a slow PC: what was measured, which apps are behind it, where to look closer.

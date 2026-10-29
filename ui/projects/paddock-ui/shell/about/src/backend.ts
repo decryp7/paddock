@@ -194,6 +194,9 @@ export interface MemoryUpdatesOptions {
   /** The newer release (`release`, `bad-signature`). */
   readonly release?: Omit<UpdateInfo, 'currentVersion'>;
   readonly channels?: readonly ChannelInfo[];
+  /** The update server's host and releases page the Updates window shows (default: a placeholder host). */
+  readonly host?: string;
+  readonly releasesPage?: string;
   /** Runs each simulated step of the engine's work (default: the next microtask). */
   readonly schedule?: (step: () => void) => void;
 }
@@ -239,8 +242,8 @@ export class MemoryUpdatesBackend extends UpdatesBackend {
       autoCheck: false,
       channel: channels[0]?.id ?? '',
       channels: [...channels],
-      endpointHost: unavailable ? null : 'updates.example',
-      releasesPage: 'https://updates.example/releases',
+      endpointHost: unavailable ? null : (options.host ?? 'updates.example'),
+      releasesPage: options.releasesPage ?? 'https://updates.example/releases',
     };
   }
 
