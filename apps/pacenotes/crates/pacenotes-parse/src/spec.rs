@@ -75,34 +75,54 @@ pub struct LangSpec {
     pub calls: &'static [CallRule],
 }
 
-const fn rule(kind: &'static str, symbol: SymbolKind, container: bool, names: Names) -> SymbolRule {
-    SymbolRule {
-        kind,
-        symbol: Some(symbol),
-        refine: None,
-        container,
-        skip_in_callable: false,
-        needs_field: None,
-        names,
-    }
+macro_rules! rule {
+    ($kind:expr, $symbol:expr, $container:expr, $names:expr) => {
+        SymbolRule {
+            kind: $kind,
+            symbol: Some($symbol),
+            refine: None,
+            container: $container,
+            skip_in_callable: false,
+            needs_field: None,
+            names: $names,
+        }
+    };
 }
 
-const fn local(mut r: SymbolRule) -> SymbolRule {
-    r.skip_in_callable = true;
-    r
+macro_rules! local {
+    ($rule:expr) => {
+        SymbolRule {
+            skip_in_callable: true,
+            ..$rule
+        }
+    };
 }
 
-const fn with_body(mut r: SymbolRule) -> SymbolRule {
-    r.needs_field = Some("body");
-    r
+macro_rules! with_body {
+    ($rule:expr) => {
+        SymbolRule {
+            needs_field: Some("body"),
+            ..$rule
+        }
+    };
 }
 
-const fn imp(kind: &'static str, field: Option<&'static str>) -> ImportRule {
-    ImportRule { kind, field }
+macro_rules! imp {
+    ($kind:expr, $field:expr) => {
+        ImportRule {
+            kind: $kind,
+            field: $field,
+        }
+    };
 }
 
-const fn call(kind: &'static str, callee: &'static str) -> CallRule {
-    CallRule { kind, callee }
+macro_rules! call {
+    ($kind:expr, $callee:expr) => {
+        CallRule {
+            kind: $kind,
+            callee: $callee,
+        }
+    };
 }
 
 use SymbolKind::{
@@ -119,36 +139,36 @@ fn go_type_kind(node: Node<'_>) -> SymbolKind {
 
 const GO: LangSpec = LangSpec {
     symbols: &[
-        rule("function_declaration", Function, false, Names::Field("name")),
-        rule("method_declaration", Method, false, Names::GoMethod),
+        rule!("function_declaration", Function, false, Names::Field("name")),
+        rule!("method_declaration", Method, false, Names::GoMethod),
         SymbolRule {
             refine: Some(go_type_kind),
             container: true,
-            ..rule("type_spec", TypeAlias, true, Names::Field("name"))
+            ..rule!("type_spec", TypeAlias, true, Names::Field("name"))
         },
-        rule("method_elem", Method, false, Names::Field("name")),
-        rule("field_declaration", Field, false, Names::AllFields("name")),
-        local(rule("const_spec", Constant, false, Names::AllFields("name"))),
-        local(rule("var_spec", Variable, false, Names::AllFields("name"))),
+        rule!("method_elem", Method, false, Names::Field("name")),
+        rule!("field_declaration", Field, false, Names::AllFields("name")),
+        local!(rule!("const_spec", Constant, false, Names::AllFields("name"))),
+        local!(rule!("var_spec", Variable, false, Names::AllFields("name"))),
     ],
-    imports: &[imp("import_spec", Some("path"))],
-    calls: &[call("call_expression", "function")],
+    imports: &[imp!("import_spec", Some("path"))],
+    calls: &[call!("call_expression", "function")],
 };
 
 const JAVA: LangSpec = LangSpec {
     symbols: &[
-        rule("class_declaration", Class, true, Names::Field("name")),
-        rule("interface_declaration", Interface, true, Names::Field("name")),
-        rule("enum_declaration", Enum, true, Names::Field("name")),
-        rule("record_declaration", Struct, true, Names::Field("name")),
-        rule("annotation_type_declaration", Interface, true, Names::Field("name")),
-        rule("method_declaration", Method, false, Names::Field("name")),
-        rule("constructor_declaration", Constructor, false, Names::Field("name")),
-        local(rule("field_declaration", Field, false, Names::Declarator)),
-        rule("enum_constant", Constant, false, Names::Field("name")),
+        rule!("class_declaration", Class, true, Names::Field("name")),
+        rule!("interface_declaration", Interface, true, Names::Field("name")),
+        rule!("enum_declaration", Enum, true, Names::Field("name")),
+        rule!("record_declaration", Struct, true, Names::Field("name")),
+        rule!("annotation_type_declaration", Interface, true, Names::Field("name")),
+        rule!("method_declaration", Method, false, Names::Field("name")),
+        rule!("constructor_declaration", Constructor, false, Names::Field("name")),
+        local!(rule!("field_declaration", Field, false, Names::Declarator)),
+        rule!("enum_constant", Constant, false, Names::Field("name")),
     ],
-    imports: &[imp("import_declaration", None)],
-    calls: &[call("method_invocation", "name"), call("object_creation_expression", "type")],
+    imports: &[imp!("import_declaration", None)],
+    calls: &[call!("method_invocation", "name"), call!("object_creation_expression", "type")],
 };
 
 fn kotlin_class_kind(node: Node<'_>) -> SymbolKind {
@@ -171,87 +191,87 @@ const KOTLIN: LangSpec = LangSpec {
     symbols: &[
         SymbolRule {
             refine: Some(kotlin_class_kind),
-            ..rule("class_declaration", Class, true, Names::Field("name"))
+            ..rule!("class_declaration", Class, true, Names::Field("name"))
         },
-        rule("object_declaration", Class, true, Names::Field("name")),
-        rule("function_declaration", Function, false, Names::Field("name")),
-        rule("secondary_constructor", Constructor, false, Names::Literal("constructor")),
-        local(rule("property_declaration", Property, false, Names::Declarator)),
-        rule("enum_entry", Constant, false, Names::Field("name")),
-        rule("type_alias", TypeAlias, false, Names::Field("type")),
+        rule!("object_declaration", Class, true, Names::Field("name")),
+        rule!("function_declaration", Function, false, Names::Field("name")),
+        rule!("secondary_constructor", Constructor, false, Names::Literal("constructor")),
+        local!(rule!("property_declaration", Property, false, Names::Declarator)),
+        rule!("enum_entry", Constant, false, Names::Field("name")),
+        rule!("type_alias", TypeAlias, false, Names::Field("type")),
     ],
-    imports: &[imp("import", None)],
-    calls: &[call("call_expression", "")],
+    imports: &[imp!("import", None)],
+    calls: &[call!("call_expression", "")],
 };
 
 const C: LangSpec = LangSpec {
     symbols: &[
-        rule("function_definition", Function, false, Names::CDeclarator),
-        with_body(rule("struct_specifier", Struct, true, Names::Field("name"))),
-        with_body(rule("union_specifier", Struct, true, Names::Field("name"))),
-        with_body(rule("enum_specifier", Enum, true, Names::Field("name"))),
-        rule("type_definition", TypeAlias, false, Names::TypedefDeclarator),
-        rule("preproc_def", Macro, false, Names::Field("name")),
-        rule("preproc_function_def", Macro, false, Names::Field("name")),
+        rule!("function_definition", Function, false, Names::CDeclarator),
+        with_body!(rule!("struct_specifier", Struct, true, Names::Field("name"))),
+        with_body!(rule!("union_specifier", Struct, true, Names::Field("name"))),
+        with_body!(rule!("enum_specifier", Enum, true, Names::Field("name"))),
+        rule!("type_definition", TypeAlias, false, Names::TypedefDeclarator),
+        rule!("preproc_def", Macro, false, Names::Field("name")),
+        rule!("preproc_function_def", Macro, false, Names::Field("name")),
     ],
-    imports: &[imp("preproc_include", Some("path"))],
-    calls: &[call("call_expression", "function")],
+    imports: &[imp!("preproc_include", Some("path"))],
+    calls: &[call!("call_expression", "function")],
 };
 
 const CPP: LangSpec = LangSpec {
     symbols: &[
-        rule("function_definition", Function, false, Names::CDeclarator),
-        rule("namespace_definition", Module, true, Names::Field("name")),
-        with_body(rule("class_specifier", Class, true, Names::Field("name"))),
-        with_body(rule("struct_specifier", Struct, true, Names::Field("name"))),
-        with_body(rule("union_specifier", Struct, true, Names::Field("name"))),
-        with_body(rule("enum_specifier", Enum, true, Names::Field("name"))),
-        rule("type_definition", TypeAlias, false, Names::TypedefDeclarator),
-        rule("alias_declaration", TypeAlias, false, Names::Field("name")),
-        rule("preproc_def", Macro, false, Names::Field("name")),
-        rule("preproc_function_def", Macro, false, Names::Field("name")),
+        rule!("function_definition", Function, false, Names::CDeclarator),
+        rule!("namespace_definition", Module, true, Names::Field("name")),
+        with_body!(rule!("class_specifier", Class, true, Names::Field("name"))),
+        with_body!(rule!("struct_specifier", Struct, true, Names::Field("name"))),
+        with_body!(rule!("union_specifier", Struct, true, Names::Field("name"))),
+        with_body!(rule!("enum_specifier", Enum, true, Names::Field("name"))),
+        rule!("type_definition", TypeAlias, false, Names::TypedefDeclarator),
+        rule!("alias_declaration", TypeAlias, false, Names::Field("name")),
+        rule!("preproc_def", Macro, false, Names::Field("name")),
+        rule!("preproc_function_def", Macro, false, Names::Field("name")),
     ],
-    imports: &[imp("preproc_include", Some("path"))],
-    calls: &[call("call_expression", "function")],
+    imports: &[imp!("preproc_include", Some("path"))],
+    calls: &[call!("call_expression", "function")],
 };
 
 const CSHARP: LangSpec = LangSpec {
     symbols: &[
-        rule("namespace_declaration", Module, true, Names::Field("name")),
-        rule("file_scoped_namespace_declaration", Module, true, Names::Field("name")),
-        rule("class_declaration", Class, true, Names::Field("name")),
-        rule("struct_declaration", Struct, true, Names::Field("name")),
-        rule("interface_declaration", Interface, true, Names::Field("name")),
-        rule("enum_declaration", Enum, true, Names::Field("name")),
-        rule("record_declaration", Struct, true, Names::Field("name")),
-        rule("method_declaration", Method, false, Names::Field("name")),
-        rule("constructor_declaration", Constructor, false, Names::Field("name")),
-        rule("property_declaration", Property, false, Names::Field("name")),
-        local(rule("field_declaration", Field, false, Names::Declarator)),
-        rule("enum_member_declaration", Constant, false, Names::Field("name")),
+        rule!("namespace_declaration", Module, true, Names::Field("name")),
+        rule!("file_scoped_namespace_declaration", Module, true, Names::Field("name")),
+        rule!("class_declaration", Class, true, Names::Field("name")),
+        rule!("struct_declaration", Struct, true, Names::Field("name")),
+        rule!("interface_declaration", Interface, true, Names::Field("name")),
+        rule!("enum_declaration", Enum, true, Names::Field("name")),
+        rule!("record_declaration", Struct, true, Names::Field("name")),
+        rule!("method_declaration", Method, false, Names::Field("name")),
+        rule!("constructor_declaration", Constructor, false, Names::Field("name")),
+        rule!("property_declaration", Property, false, Names::Field("name")),
+        local!(rule!("field_declaration", Field, false, Names::Declarator)),
+        rule!("enum_member_declaration", Constant, false, Names::Field("name")),
     ],
-    imports: &[imp("using_directive", None)],
-    calls: &[call("invocation_expression", "function")],
+    imports: &[imp!("using_directive", None)],
+    calls: &[call!("invocation_expression", "function")],
 };
 
 const TS_SYMBOLS: &[SymbolRule] = &[
-    rule("function_declaration", Function, false, Names::Field("name")),
-    rule("generator_function_declaration", Function, false, Names::Field("name")),
-    rule("class_declaration", Class, true, Names::Field("name")),
-    rule("abstract_class_declaration", Class, true, Names::Field("name")),
-    rule("method_definition", Method, false, Names::Field("name")),
-    rule("interface_declaration", Interface, true, Names::Field("name")),
-    rule("type_alias_declaration", TypeAlias, false, Names::Field("name")),
-    local(rule("method_signature", Method, false, Names::Field("name"))),
-    local(rule("property_signature", Field, false, Names::Field("name"))),
-    rule("enum_declaration", Enum, true, Names::Field("name")),
-    rule("internal_module", Module, true, Names::Field("name")),
-    rule("public_field_definition", Field, false, Names::Field("name")),
-    local(rule("variable_declarator", Variable, false, Names::Declarator)),
+    rule!("function_declaration", Function, false, Names::Field("name")),
+    rule!("generator_function_declaration", Function, false, Names::Field("name")),
+    rule!("class_declaration", Class, true, Names::Field("name")),
+    rule!("abstract_class_declaration", Class, true, Names::Field("name")),
+    rule!("method_definition", Method, false, Names::Field("name")),
+    rule!("interface_declaration", Interface, true, Names::Field("name")),
+    rule!("type_alias_declaration", TypeAlias, false, Names::Field("name")),
+    local!(rule!("method_signature", Method, false, Names::Field("name"))),
+    local!(rule!("property_signature", Field, false, Names::Field("name"))),
+    rule!("enum_declaration", Enum, true, Names::Field("name")),
+    rule!("internal_module", Module, true, Names::Field("name")),
+    rule!("public_field_definition", Field, false, Names::Field("name")),
+    local!(rule!("variable_declarator", Variable, false, Names::Declarator)),
 ];
 
-const TS_IMPORTS: &[ImportRule] = &[imp("import_statement", Some("source"))];
-const TS_CALLS: &[CallRule] = &[call("call_expression", "function"), call("new_expression", "constructor")];
+const TS_IMPORTS: &[ImportRule] = &[imp!("import_statement", Some("source"))];
+const TS_CALLS: &[CallRule] = &[call!("call_expression", "function"), call!("new_expression", "constructor")];
 
 const TYPESCRIPT: LangSpec = LangSpec {
     symbols: TS_SYMBOLS,
@@ -261,12 +281,12 @@ const TYPESCRIPT: LangSpec = LangSpec {
 
 const JAVASCRIPT: LangSpec = LangSpec {
     symbols: &[
-        rule("function_declaration", Function, false, Names::Field("name")),
-        rule("generator_function_declaration", Function, false, Names::Field("name")),
-        rule("class_declaration", Class, true, Names::Field("name")),
-        rule("method_definition", Method, false, Names::Field("name")),
-        rule("field_definition", Field, false, Names::Field("property")),
-        local(rule("variable_declarator", Variable, false, Names::Declarator)),
+        rule!("function_declaration", Function, false, Names::Field("name")),
+        rule!("generator_function_declaration", Function, false, Names::Field("name")),
+        rule!("class_declaration", Class, true, Names::Field("name")),
+        rule!("method_definition", Method, false, Names::Field("name")),
+        rule!("field_definition", Field, false, Names::Field("property")),
+        local!(rule!("variable_declarator", Variable, false, Names::Declarator)),
     ],
     imports: TS_IMPORTS,
     calls: TS_CALLS,
@@ -274,38 +294,38 @@ const JAVASCRIPT: LangSpec = LangSpec {
 
 const RUST: LangSpec = LangSpec {
     symbols: &[
-        rule("function_item", Function, false, Names::Field("name")),
-        rule("function_signature_item", Function, false, Names::Field("name")),
-        rule("struct_item", Struct, true, Names::Field("name")),
-        rule("enum_item", Enum, true, Names::Field("name")),
-        rule("union_item", Struct, true, Names::Field("name")),
-        rule("trait_item", Trait, true, Names::Field("name")),
+        rule!("function_item", Function, false, Names::Field("name")),
+        rule!("function_signature_item", Function, false, Names::Field("name")),
+        rule!("struct_item", Struct, true, Names::Field("name")),
+        rule!("enum_item", Enum, true, Names::Field("name")),
+        rule!("union_item", Struct, true, Names::Field("name")),
+        rule!("trait_item", Trait, true, Names::Field("name")),
         SymbolRule {
             symbol: None,
-            ..rule("impl_item", Struct, true, Names::ImplType)
+            ..rule!("impl_item", Struct, true, Names::ImplType)
         },
-        rule("mod_item", Module, true, Names::Field("name")),
-        rule("const_item", Constant, false, Names::Field("name")),
-        rule("static_item", Constant, false, Names::Field("name")),
-        rule("type_item", TypeAlias, false, Names::Field("name")),
-        rule("macro_definition", Macro, false, Names::Field("name")),
-        rule("field_declaration", Field, false, Names::Field("name")),
-        rule("enum_variant", Constant, false, Names::Field("name")),
+        rule!("mod_item", Module, true, Names::Field("name")),
+        rule!("const_item", Constant, false, Names::Field("name")),
+        rule!("static_item", Constant, false, Names::Field("name")),
+        rule!("type_item", TypeAlias, false, Names::Field("name")),
+        rule!("macro_definition", Macro, false, Names::Field("name")),
+        rule!("field_declaration", Field, false, Names::Field("name")),
+        rule!("enum_variant", Constant, false, Names::Field("name")),
     ],
     imports: &[
-        imp("use_declaration", Some("argument")),
-        imp("extern_crate_declaration", Some("name")),
+        imp!("use_declaration", Some("argument")),
+        imp!("extern_crate_declaration", Some("name")),
     ],
-    calls: &[call("call_expression", "function"), call("macro_invocation", "macro")],
+    calls: &[call!("call_expression", "function"), call!("macro_invocation", "macro")],
 };
 
 const PYTHON: LangSpec = LangSpec {
     symbols: &[
-        rule("function_definition", Function, false, Names::Field("name")),
-        rule("class_definition", Class, true, Names::Field("name")),
+        rule!("function_definition", Function, false, Names::Field("name")),
+        rule!("class_definition", Class, true, Names::Field("name")),
     ],
-    imports: &[imp("import_statement", None), imp("import_from_statement", Some("module_name"))],
-    calls: &[call("call", "function")],
+    imports: &[imp!("import_statement", None), imp!("import_from_statement", Some("module_name"))],
+    calls: &[call!("call", "function")],
 };
 
 /// The tables of a language.

@@ -171,6 +171,36 @@ mod tests {
         assert_eq!(ParseLanguage::from_path(&p("a.unknown")), None);
         assert_eq!(ParseLanguage::from_known(KnownLanguage::Rust), Some(ParseLanguage::Rust));
         assert_eq!(ParseLanguage::from_known(KnownLanguage::Json), None);
+        for known in KnownLanguage::ALL {
+            let expected = !matches!(
+                known,
+                KnownLanguage::Json
+                    | KnownLanguage::Yaml
+                    | KnownLanguage::Toml
+                    | KnownLanguage::Xml
+                    | KnownLanguage::Ini
+                    | KnownLanguage::Sql
+                    | KnownLanguage::Markdown
+            );
+            assert_eq!(ParseLanguage::from_known(known).is_some(), expected, "{}", known.id());
+        }
+        for (file, language) in [
+            ("A.java", ParseLanguage::Java),
+            ("a.kts", ParseLanguage::Kotlin),
+            ("a.c", ParseLanguage::C),
+            ("a.cc", ParseLanguage::Cpp),
+            ("a.cpp", ParseLanguage::Cpp),
+            ("a.cs", ParseLanguage::CSharp),
+            ("a.ts", ParseLanguage::TypeScript),
+            ("a.mts", ParseLanguage::TypeScript),
+            ("a.js", ParseLanguage::JavaScript),
+            ("a.mjs", ParseLanguage::JavaScript),
+            ("a.rs", ParseLanguage::Rust),
+            ("a.py", ParseLanguage::Python),
+            ("a.pyi", ParseLanguage::Python),
+        ] {
+            assert_eq!(ParseLanguage::from_path(&p(file)), Some(language), "{file}");
+        }
         assert_eq!(ParseLanguage::Rust.separator(), "::");
         assert_eq!(ParseLanguage::Go.separator(), ".");
         let ids: std::collections::BTreeSet<_> = ParseLanguage::ALL.iter().map(|l| l.id()).collect();

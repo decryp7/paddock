@@ -137,11 +137,7 @@ fn impl_type(node: Node<'_>, bytes: &[u8]) -> Option<String> {
     } else {
         ty
     };
-    let mut s = name_text(inner, bytes)?;
-    if let Some(i) = s.find('<') {
-        s.truncate(i);
-    }
-    Some(s)
+    name_text(inner, bytes)
 }
 
 /// `(qualifier, name)` of each symbol a node declares.
