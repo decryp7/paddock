@@ -59,9 +59,8 @@ const CAUSE_WORDS: Readonly<Record<string, () => string>> = {
   'sp.sources.unreachable': () => $localize`:@@pd.health.state.unavailable:not available`,
   'sp.sources.proxy': () => $localize`:@@pd.health.state.limited:limited`,
   'sp.renderer.missing': () => $localize`:@@pd.health.state.not-installed:not installed`,
-  'sp.renderer.not-found': () => $localize`:@@pd.health.state.stopped:stopped`,
-  'sp.renderer.cancelled': () => $localize`:@@pd.health.state.stopped:stopped`,
-  'sp.renderer.install': () => $localize`:@@pd.health.state.stopped:stopped`,
+  'sp.renderer.not-found': () => $localize`:@@pd.health.state.failed:failed`,
+  'sp.renderer.install': () => $localize`:@@pd.health.state.failed:failed`,
   'sp.scheduler.stopped': () => $localize`:@@pd.health.state.stopped:stopped`,
 };
 

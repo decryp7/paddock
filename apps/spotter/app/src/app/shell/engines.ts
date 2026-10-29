@@ -13,7 +13,7 @@ import { MemorySettingsBackend, SETTINGS_OVERVIEW_FIXTURE, TauriSettingsBackend,
 import { MockJobs } from '../core/mock/mock-jobs';
 import { tauriIpc } from './ipc';
 
-const cause = (message: string, hint: string, detail: string): Cause => ({ message, hint, detail, code: null, raiseCap: null, settings: null });
+const cause = (message: string, hint: string, detail: string, code: string | null = null): Cause => ({ message, hint, detail, code, raiseCap: null, settings: null });
 
 /**
  * The browser build's stand-ins for the shell's Rust parts (the browser has no Rust): service health with Spotter's
@@ -45,7 +45,7 @@ export class BrowserEngines {
 
   /** The scenario "Break the connection" of the browser build (`?health=sources`): every watch unreachable. */
   breakSources(): void {
-    this.health.fail('sp.sources', cause('Spotter cannot reach any of the places it watches.', 'Check the network connection, then check again.', 'dns error'), 'retry');
+    this.health.fail('sp.sources', cause('Spotter cannot reach any of the places it watches.', 'Check the network connection, then check again.', 'dns error', 'sp.sources.unreachable'), 'retry');
   }
 }
 
