@@ -751,3 +751,18 @@ composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor D
 crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
 (`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
 not by guessing at the VM.
+
+## A launchd `Background` job is DARWIN_BG as a whole: thread QoS cannot lift it (2026-10-30, Dyno)
+After Debrief's report waited on `QOS_CLASS_BACKGROUND` pool threads (100 s instead of 3 s on a loaded Mac), Dyno's disk scan
+had the same class, and the agent itself ran as a launch agent with `ProcessType Background`. launchd spawns such a job as
+`POSIX_SPAWN_PROC_TYPE_DAEMON_BACKGROUND`; xnu makes that task DARWIN_BG "always, no exceptions" and clamps every thread of it
+to the `BACKGROUND` band (`osfmk/kern/task_policy.c`, `thread_policy.c`; `ps -M` shows priority 4 on every thread of such an
+agent). Every request of Dyno's app is answered inside the agent, so the whole UI waited on starvable threads, and a thread set
+to `UTILITY` there stays clamped.
+**Rule:** a process that answers requests somebody waits for is never a launchd `Background` (or `Adaptive` without XPC) job;
+use `Standard` and lower individual threads instead, at the gentle levels of rule 52 (`QOS_CLASS_UTILITY`, nice 10,
+`THREAD_PRIORITY_BELOW_NORMAL`). Tests read the class back (`pthread_get_qos_class_np`) and the plist's `ProcessType`.
+On Linux the same goes for the idle I/O class: Dyno's systemd unit now says `IOSchedulingClass=best-effort` with
+`IOSchedulingPriority=7`. **Follow-up (ADR 0020):** Dyno's `dyno_platform::priority::lower_current_thread` copies Debrief's
+`debrief_core::threads::lower_priority`; both go once the shared `paddock_jobs::exec::priority::apply_current(Class)` exists,
+and the shared `paddock-service` renderer's `low_priority()` systemd text (`IOSchedulingClass=idle`) moves to best effort then.

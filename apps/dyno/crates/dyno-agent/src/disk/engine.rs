@@ -1,7 +1,7 @@
 //! The walk of the disk scan: worker threads read folders through the [`DirSource`] port and commit each folder's totals
-//! into the shared [`DiskIndex`] in one step, so the index adds up at every moment. Bounded parallelism, background
-//! priority, no sleeps: workers wait on a condition for work, Cancel sets a flag and returns at once, and a worker that is
-//! stuck inside a call to a dead network share is abandoned, never awaited.
+//! into the shared [`DiskIndex`] in one step, so the index adds up at every moment. Bounded parallelism, lowered priority
+//! (never starved: the person watches the scan), no sleeps: workers wait on a condition for work, Cancel sets a flag and
+//! returns at once, and a worker that is stuck inside a call to a dead network share is abandoned, never awaited.
 
 use dyno_core::disk::index::{DiskIndex, NodeId, ScanLimits, Sizes};
 use dyno_core::disk::reason::{unreadable_reason, ReasonContext};
@@ -201,7 +201,7 @@ pub struct Snapshot {
 }
 
 impl Walk {
-    /// Starts walking `root`. Returns at once; the walk runs on its own threads at background priority.
+    /// Starts walking `root`. Returns at once; the walk runs on its own threads at lowered priority.
     pub fn start(
         source: Arc<dyn DirSource>,
         root: PathBuf,
@@ -282,7 +282,7 @@ impl Walk {
             let spawned = (self.cfg.spawn)(
                 format!("dyno-disk-scan-{n}"),
                 Box::new(move || {
-                    dyno_platform::priority::background_current_thread();
+                    dyno_platform::priority::lower_current_thread();
                     // A bug in one reader ends the scan with a message; it never takes the agent down.
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| w.worker(epoch))).is_err() {
                         w.fail(ScanFailure::Internal {

@@ -17,9 +17,11 @@ choice on Windows (a service) is the wrong one for Dyno.
      `Contents/Library/LaunchAgents/net.decryptology.dyno.agent.plist`, and the shell registers it with
      `SMAppService` (macOS 13+; approval in System Settings > Login Items when the OS asks). The plist runs
      `dyno-agent run` at login (`RunAtLoad`, `KeepAlive`, `ThrottleInterval` 10 s, `LimitLoadToSessionType Aqua`,
-     `ProcessType Background`). The bundle is ad-hoc signed (`signingIdentity "-"`) because `SMAppService` and launch
-     agents refuse a linker-signed bundle (-67056). After an app update launchd may keep the old code requirement and
-     refuse the new binary ("needs LWCR update", spawn failed, exit 78); registering over the live job changes nothing.
+     `ProcessType Standard`; amended 2026-10-30: launchd runs a `Background` job as a DARWIN_BG process with every
+     thread clamped to the `BACKGROUND` QoS band, and the agent answers every request of the app). The bundle is ad-hoc
+     signed (`signingIdentity "-"`) because `SMAppService` and launch agents refuse a linker-signed bundle (-67056).
+     After an app update launchd may keep the old code requirement and refuse the new binary ("needs LWCR update",
+     spawn failed, exit 78); registering over the live job changes nothing.
      The shell therefore replaces the registration (unregister, `launchctl bootout`, wait until the job is gone,
      register, bounded retries) once per version change (the version is recorded in `service-registered-version` in
      the data folder) and whenever `launchctl print` reports it stale while the agent is silent

@@ -56,7 +56,7 @@ fn dyno() -> ServiceSpec {
         .bundle_id("net.decryptology.dyno")
         .display_name("Dyno agent (measures and keeps your PC's history)")
         .args(["run"])
-        .process_type(ProcessType::Background)
+        .process_type(ProcessType::Standard)
         .low_priority()
         .memory_high_mb(256)
         .restart(Restart::Always)
