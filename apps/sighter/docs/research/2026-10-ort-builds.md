@@ -21,7 +21,7 @@ forbids it): build times are projections from pyke's published CI runs.
 - **Take `DirectML.dll` from nuget.org, pinned** (NuGet's SHA-512 plus our SHA-256 of the DLL), not mirrored. It needs
   no VC++ redistributable (measured). **But it registers a TraceLogging provider in the Microsoft telemetry group**
   (byte search of the DLL, below), so the DirectML gate's check (2), "no provider, or shown inert", will not pass on
-  "no provider". That is a decision for the user before P6 is run (see "Decisions for the user").
+  "no provider". The user decided: ship it only if the ETW session shows that provider writes no events ("Decided").
 - **Static CRT with DirectML is accepted by ONNX Runtime's build** (`--enable_msvc_static_runtime` with `--use_dml`
   parses; it sets `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded` and the static-runtime switches of ONNX, protobuf and
   Abseil). Compiling it is not verified until the first Windows run.
@@ -151,7 +151,7 @@ provider, or the provider is shown to be inert". The first is already answered: 
 telemetry-group provider's events are collected by Windows' own diagnostic pipeline according to the PC's diagnostic data
 setting, not by our process, so "inert" cannot be shown in general; at best an ETW session on the two S2 PCs shows which
 events are written while the EP runs. The system copy (`System32\DirectML.dll`) is a Windows component and very likely
-carries the same provider (not checked). The options are in "Decisions for the user".
+carries the same provider (not checked). The user's decision is under "Decided (user, 2026-10-30)".
 
 ## 6. CoreML build flags
 
@@ -209,17 +209,20 @@ Windows DirectML `onnxruntime.lib` 360 MB (research note 2026-10-29 §12); compr
 4. **Windows arm64 + DirectML** (plan SW5) waits: no arm64 runner, and the brief scoped it out. pyke cross-builds it on an
    x64 Windows runner in 40 min, so it is one more job on the VM when wanted (`--arm64` in ONNX Runtime's build).
 
-## Decisions for the user
+## Decided (user, 2026-10-30)
 
-- **U-L (DirectML telemetry provider).** `DirectML.dll` 1.15.4 registers a TraceLogging provider in the Microsoft
-  telemetry group, so P6's check (2) cannot pass as "no provider". Choose one: (a) ship it if the S2/P6 ETW session shows
-  no events from that provider while the EP runs, accepting that Windows' diagnostic settings govern it; (b) never ship
-  it and use the system `DirectML.dll` (also Microsoft's, governed the same way, and possibly older); (c) Windows ships
-  CPU-only (the `onnxruntime-cpu` variant). The pipeline builds both Windows variants either way.
-- **U-L (mirror or fetch).** Keep fetching `DirectML.dll` from nuget.org at build time (current scripts), or mirror it on
-  the Gitea package registry (a reading of "not stand-alone"; then a catalogue entry is possible).
-- **U-L (P6 method vs. licence 3b).** The ETW check reads the DLL's bytes and records its events; it does not
-  disassemble. Confirm that this reading of the no-reverse-engineering clause is acceptable.
+- **DirectML telemetry provider: ship only if silent.** `DirectML.dll` is bundled only if the S2 ETW session shows that
+  the `Microsoft.Windows.AI.MachineLearning.Dml` provider writes no events while the DirectML EP runs; Windows'
+  diagnostic settings then govern it like any OS component. If it writes events, the file is not shipped (the system
+  copy through the delay-loaded import, or the `onnxruntime-cpu` variant). P6's check (2) is read that way.
+- **DirectML source: fetch, never mirror.** `fetch-directml.sh` keeps fetching `Microsoft.AI.DirectML` from nuget.org at
+  build time, pinned by NuGet's SHA-512 and the DLL's SHA-256; nothing is put on our package registry, so the
+  `paddock-runtime` catalogues have no DirectML entry.
+- **P6 method accepted.** Reading the DLL's bytes (import table, strings, provider traits) and recording its ETW events
+  is treated as acceptable under the licence's no-reverse-engineering clause (3b); no disassembly.
+
+## Still open
+
 - **Hardware.** Only S2's two Windows PCs (already U-H1). Tell us the Windows VM's cores and memory, or accept that the
   first run measures them.
 - **Runner label.** Whether the Linux job may be pinned to d-gtr9 (a label change on the runner).

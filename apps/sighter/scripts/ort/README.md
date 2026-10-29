@@ -11,7 +11,7 @@ custom-library mode (`ORT_LIB_PATH`, no `download-binaries`, no `load-dynamic`, 
 | --- | --- |
 | `pins.env` | The one place for every pin: ORT tag and commit, pipeline revision, macOS floor, DirectML package and DLL hashes, package URL |
 | `build-ort.sh <variant> <work> [--jobs N] [--dry-run]` | Clones the pinned tag, builds with `--no_telemetry`, static, Release, no tests; merges the static libraries into one; writes `link.txt`, `BUILD-INFO.txt`; runs the telemetry check; packs a `.tar.gz` and its catalogue lines |
-| `fetch-directml.sh <x64\|arm64> <cache>` | Gets `Microsoft.AI.DirectML` 1.15.4 from nuget.org, checks NuGet's SHA-512 and the DLL's SHA-256, lays it out for `--dml_path` |
+| `fetch-directml.sh <x64\|arm64> <cache>` | Gets (never mirrors; user, 2026-10-30) `Microsoft.AI.DirectML` 1.15.4 from nuget.org, checks NuGet's SHA-512 and the DLL's SHA-256, lays it out for `--dml_path` |
 | `check-telemetry.sh` | Byte search for 1DS, curl, mbedTLS, collector hosts and TraceLogging providers in the Microsoft telemetry group |
 | `check-windows-imports.sh` | ADR 0032's VC++ runtime check on the binary and `DirectML.dll`; the CPU variant must not import `DirectML.dll`, the DirectML variant must delay-load it |
 | `check-catalogue.sh` | Fails while a catalogue still has placeholder pins |
@@ -27,7 +27,7 @@ custom-library mode (`ORT_LIB_PATH`, no `download-binaries`, no `load-dynamic`, 
 | `windows-x64-directml` | `windows-latest` (VM) | `onnxruntime`, `windows-x86_64` | `/MT` (ADR 0032); DirectML from `fetch-directml.sh`, delay-loaded by the consumer |
 | `windows-x64-cpu` | `windows-latest` (VM) | `onnxruntime-cpu`, `windows-x86_64` | `/MT`; no DirectML import: starts with no `DirectML.dll` present |
 | `linux-x64-cpu` | `ubuntu-latest` (`paddock-ci` image) | `onnxruntime`, `linux-x86_64` | CI and tests only |
-| `windows-arm64-directml` | not built yet | | Plan SW5 lists it; needs an arm64 runner or a cross build on the x64 VM |
+| `windows-arm64-directml` | not built yet | | Plan SW5 lists it; a commented, optional cross-build job on the x64 VM is in the workflow (needs the variant in `build-ort.sh`) |
 
 ## The Windows import check for what ships
 

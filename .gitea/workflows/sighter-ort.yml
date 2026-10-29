@@ -192,3 +192,41 @@ jobs:
         with:
           name: onnxruntime-windows-x64-cpu
           path: ~/.paddock-ci/sighter-ort/out/*windows-x64-cpu*
+
+  # OPTIONAL, NOT ENABLED: Windows arm64 with DirectML (stage-2 plan SW5), cross-built on the x64 VM (ONNX Runtime's
+  # `--arm64`; pyke's equivalent job takes 40 min on a 4-vCPU runner). To enable it: add a `windows-arm64-directml` variant
+  # to build-ort.sh (host Windows x64, `--use_dml --enable_msvc_static_runtime --arm64`, `fetch-directml.sh arm64`,
+  # catalogue key windows-aarch64, lib.exe from Hostx64/arm64), uncomment this job, and add the entry to
+  # catalogue/onnxruntime.toml. The smoke program cannot run on the x64 VM: it is only built (target
+  # aarch64-pc-windows-msvc) and its imports checked; running it needs an arm64 Windows PC.
+  #
+  # windows-arm64-directml:
+  #   name: onnxruntime windows-arm64-directml
+  #   needs: [windows-x64-cpu]
+  #   if: ${{ !cancelled() && contains(inputs.variants, 'windows-arm64-directml') }}
+  #   runs-on: windows-latest
+  #   timeout-minutes: 300
+  #   defaults:
+  #     run:
+  #       shell: bash
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Build ONNX Runtime (cross, arm64)
+  #       run: apps/sighter/scripts/ort/build-ort.sh windows-arm64-directml "$USERPROFILE/.paddock-ci/sighter-ort"
+  #     - name: Build the smoke program and check its imports
+  #       run: |
+  #         work="$USERPROFILE/.paddock-ci/sighter-ort"
+  #         stage=$(ls -d "$work"/stage/onnxruntime-*-windows-arm64-directml)
+  #         dml=$(ls "$work"/cache/directml/*/arm64/bin/DirectML.dll)
+  #         rustup target add aarch64-pc-windows-msvc
+  #         cd apps/sighter/scripts/ort/smoke
+  #         export CARGO_TARGET_DIR="$work/smoke-target-arm64"
+  #         ORT_LIB_PATH="$(cygpath -m "$stage/lib")" cargo build --release --locked --target aarch64-pc-windows-msvc
+  #         exe="$CARGO_TARGET_DIR/aarch64-pc-windows-msvc/release/sighter-ort-smoke.exe"
+  #         ../check-windows-imports.sh windows-x64-directml "$exe" "$dml"
+  #         ../check-telemetry.sh "$exe"
+  #     - name: Publish
+  #       if: env.PUBLISH == 'true'
+  #       env:
+  #         PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+  #       run: apps/sighter/scripts/ort/publish-ort.sh "$USERPROFILE/.paddock-ci/sighter-ort/out" windows-arm64-directml
