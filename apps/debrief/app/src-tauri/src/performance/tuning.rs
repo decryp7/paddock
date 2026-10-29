@@ -64,6 +64,7 @@ pub fn store_tuning(s: &PerformanceSettings, cores: u32) -> StoreTuning {
         parse_threads: Some(parse_threads(s, cores) as usize),
         duck_threads: Some(s.query_threads.min(usable).max(1) as usize),
         memory_limit_mb: Some(u64::from(duck_memory_mb(s))),
+        import_memory_limit_mb: Some(u64::from(s.import_budget_mb.max(duck_memory_mb(s)))),
         index_heap_mb: Some(u64::from(index_heap_mb(s, cores))),
         index_threads: Some(index_threads(s, cores) as usize),
         spill_dir: (!spill.is_empty()).then(|| PathBuf::from(spill)),
@@ -117,6 +118,13 @@ mod tests {
         // debrief_store_duck's defaults: default_threads() on 8 cores (7), DUCK_THREADS, MEMORY_LIMIT, the index writer.
         assert_eq!(t.parse_threads, Some(7));
         assert_eq!((t.duck_threads, t.memory_limit_mb), (Some(4), Some(192)));
+        // The import's compaction and time ordering get the import memory, never less than the query limit.
+        assert_eq!(t.import_memory_limit_mb, Some(768));
+        let small_import = PerformanceSettings {
+            import_budget_mb: 128,
+            ..d.clone()
+        };
+        assert_eq!(store_tuning(&small_import, 8).import_memory_limit_mb, Some(192));
         assert_eq!((t.index_heap_mb, t.index_threads), (Some(448), Some(7)));
         assert_eq!((t.allocator_flush_mb, t.allocator_background_threads), (Some(32), Some(true)));
         assert_eq!((t.spill_dir, t.max_spill_mb, t.plugin_cpu_percent), (None, None, None));

@@ -214,3 +214,44 @@ fn segments_written_by_arrow_58_and_60_read_and_compact_together() {
     assert_eq!((total(&conn), with_extra(&conn)), (before, extra_before));
     assert_eq!(store.positioned().unwrap(), before as u64);
 }
+
+#[test]
+fn a_failed_time_ordering_is_reported_kept_and_done_again_when_the_store_opens() {
+    let dir = Dir::new("ordering-fails");
+    let store = DuckStore::create(&dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
+    store.open(&samples()).unwrap().wait().unwrap();
+    let events = store.summary().unwrap().total as u64;
+    assert_eq!(store.positioned().unwrap(), events);
+    {
+        let conn = store.inner.conn().unwrap();
+        // Every attempt to write the positions fails (as a rebuild that runs out of memory does).
+        conn.execute_batch("DROP TABLE ord").unwrap();
+        let notices = store.inner.maintain(&conn, Some(&ImportProgress::default()));
+        assert!(
+            notices.iter().any(|n| n.contains("time order") && n.contains("again")),
+            "the import says so: {notices:?}"
+        );
+        assert_eq!(crate::writer::meta_u64(&conn, pos::STALE), 1, "and the store remembers it");
+    }
+    drop(store);
+    let store = DuckStore::open(&dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
+    assert_eq!(store.positioned().unwrap(), events, "ordered again when the store opened");
+    assert_eq!(crate::writer::meta_u64(&store.inner.conn().unwrap(), pos::STALE), 0);
+}
+
+#[test]
+fn maintenance_runs_with_the_import_memory_and_gives_it_back() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("SET memory_limit = '64MB'").unwrap();
+    let limit = |c: &Connection| {
+        c.query_row("SELECT current_setting('memory_limit')", [], |r| r.get::<_, String>(0))
+            .unwrap()
+    };
+    let normal = limit(&conn);
+    let inside = with_memory(&conn, "512MB", "64MB", |c| Ok::<_, duckdb::Error>(limit(c))).unwrap();
+    assert_ne!(inside, normal, "raised while it runs");
+    assert_eq!(limit(&conn), normal, "given back");
+    let failed = with_memory(&conn, "512MB", "64MB", |c| c.execute_batch("SELECT * FROM no_such_table"));
+    assert!(failed.is_err());
+    assert_eq!(limit(&conn), normal, "given back after a failure too");
+}

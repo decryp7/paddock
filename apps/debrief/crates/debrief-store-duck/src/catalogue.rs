@@ -57,7 +57,7 @@ fn pending(conn: &Connection) -> Result<Vec<u32>> {
 }
 
 /// Reads one source into a tally: entities of the text of its events, then the values of its low-cardinality fields.
-fn build(conn: &Connection, source: u32) -> Result<(Vec<Entry>, u64, u64)> {
+fn build(conn: &Connection, source: u32, heavy: &Mutex<()>) -> Result<(Vec<Entry>, u64, u64)> {
     let mut tally = Tally::default();
     {
         use duckdb::arrow::array::{Array, AsArray};
@@ -89,6 +89,9 @@ r AS (SELECT g.k, g.v, g.n, row_number() OVER (PARTITION BY g.k ORDER BY g.n DES
 SELECT k, v, n FROM r WHERE rk <= {MAX_VALUES_PER_FIELD} ORDER BY k, rk",
         debrief_core::entities::MAX_NAME_CHARS
     );
+    // The aggregate holds a hash table of the source's fields: one at a time across workers, never beside an import's
+    // ordering (the store's `heavy` lock), so the workers cannot starve it or a query of the memory limit.
+    let _heavy = lock(heavy);
     let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query(params![source])?;
     while let Some(r) = rows.next()? {
@@ -163,6 +166,8 @@ struct Shared {
     claimed: Mutex<HashSet<u32>>,
     /// Tidying and committing, one worker at a time (their deletes would conflict).
     writing: Mutex<()>,
+    /// The store's lock of heavy DuckDB work (`Inner::heavy`).
+    heavy: Arc<Mutex<()>>,
 }
 
 /// Catalogue workers by default: one source each at a time, at background priority (ER-20: CPU-bound, cores minus
@@ -179,7 +184,7 @@ pub(crate) struct CatalogueService {
 
 impl CatalogueService {
     /// Starts `workers` threads (at least one), each with its own connection.
-    pub(crate) fn start(conn: Connection, gate: Gate, workers: usize) -> Result<CatalogueService> {
+    pub(crate) fn start(conn: Connection, gate: Gate, heavy: Arc<Mutex<()>>, workers: usize) -> Result<CatalogueService> {
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
             wake: (Mutex::new(true), Condvar::new()),
@@ -187,6 +192,7 @@ impl CatalogueService {
             failed: Mutex::new(HashSet::new()),
             claimed: Mutex::new(HashSet::new()),
             writing: Mutex::new(()),
+            heavy,
         });
         let mut conns = Vec::new();
         for _ in 1..workers.max(1) {
@@ -244,7 +250,7 @@ fn step(s: &Shared, conn: &Connection, gate: &Gate) -> Result<bool> {
     // The first source no other worker is building.
     let Some(claim) = Claim::first(s, &todo) else { return Ok(false) };
     let source = claim.0;
-    let built = match build(conn, source) {
+    let built = match build(conn, source, &s.heavy) {
         Ok(b) => b,
         Err(e) => {
             // A source whose events cannot be read now (compaction swapped its files) is tried again later.
