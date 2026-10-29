@@ -13,6 +13,7 @@
 //!   remove and refresh. A source built with another [`VERSION`] is built again.
 //! - Bounds: see [`debrief_core::catalogue`]; one thread, one source in memory at a time.
 
+use crate::gate::Gate;
 use crate::{engine, lock};
 use anyhow::Result;
 use debrief_core::catalogue::*;
@@ -160,7 +161,7 @@ pub(crate) struct CatalogueService {
 }
 
 impl CatalogueService {
-    pub(crate) fn start(conn: Connection, write_lock: Arc<Mutex<()>>) -> Result<CatalogueService> {
+    pub(crate) fn start(conn: Connection, gate: Gate) -> Result<CatalogueService> {
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
             wake: (Mutex::new(true), Condvar::new()),
@@ -170,7 +171,7 @@ impl CatalogueService {
         let s = shared.clone();
         let handle = std::thread::Builder::new()
             .name("debrief-catalogue".into())
-            .spawn(move || run(&s, &conn, &write_lock))?;
+            .spawn(move || run(&s, &conn, &gate))?;
         Ok(CatalogueService {
             shared,
             handle: Some(handle),
@@ -194,9 +195,9 @@ impl Drop for CatalogueService {
 }
 
 /// One turn: tidy, then build the next source. True when a source was built (go on at once).
-fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
+fn step(s: &Shared, conn: &Connection, gate: &Gate) -> Result<bool> {
     let todo = {
-        let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
+        let Some(_pass) = gate.try_enter() else { return Ok(false) };
         conn.execute_batch(
             "DELETE FROM catalogue WHERE source NOT IN (SELECT id FROM sources);
              DELETE FROM catalogue_trigrams WHERE source NOT IN (SELECT id FROM sources);
@@ -218,15 +219,15 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
     };
     let (entries, dropped, guids) = built;
     // The write lock is taken without waiting for an import: the next turn tries again.
-    let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
+    let Some(_pass) = gate.try_enter() else { return Ok(false) };
     commit(conn, source, &entries, dropped, guids)?;
     s.pending.store(todo.len() as u64 - 1, Ordering::SeqCst);
     Ok(true)
 }
 
-fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
+fn run(s: &Shared, conn: &Connection, gate: &Gate) {
     while !s.stop.load(Ordering::SeqCst) {
-        match step(s, conn, write_lock) {
+        match step(s, conn, gate) {
             Ok(true) => continue,
             Ok(false) => {}
             Err(e) => log::warn!("catalogue: {e:#}"),

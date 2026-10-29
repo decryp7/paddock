@@ -15,6 +15,7 @@
 //! - The commit payload names the catalog's `fts_epoch`; an index that is missing, damaged or from another
 //!   epoch is recreated and every segment indexed again.
 
+use crate::gate::Gate;
 use crate::segments::SEGMENTS_DIR;
 use crate::writer::{meta_u64, set_meta};
 use anyhow::{Context, Result};
@@ -528,7 +529,7 @@ pub struct FtsService {
 
 impl FtsService {
     /// Opens (or recreates) the index of the store in `dir` and starts indexing what is missing.
-    pub fn start(dir: &Path, conn: Connection, write_lock: Arc<Mutex<()>>, budget: WriterBudget) -> Result<FtsService> {
+    pub(crate) fn start(dir: &Path, conn: Connection, gate: Gate, budget: WriterBudget) -> Result<FtsService> {
         let epoch = match meta_u64(&conn, "fts_epoch") {
             0 => {
                 set_meta(&conn, "fts_epoch", 1)?;
@@ -552,7 +553,7 @@ impl FtsService {
         let store_dir = dir.to_path_buf();
         let handle = std::thread::Builder::new()
             .name("debrief-fts".into())
-            .spawn(move || run(&s, &store_dir, &conn, &write_lock, epoch))?;
+            .spawn(move || run(&s, &store_dir, &conn, &gate, epoch))?;
         Ok(FtsService {
             shared,
             epoch,
@@ -617,9 +618,16 @@ impl Drop for FtsService {
     }
 }
 
-/// Segments to index and the ready sources, read under the write lock.
-fn todo(conn: &Connection) -> Result<(Vec<String>, HashSet<u32>)> {
-    let mut stmt = conn.prepare("SELECT file FROM segments WHERE NOT indexed ORDER BY first_id")?;
+/// Segments to index and the ready sources, read under the step's pass. While an import appends, only segments whose
+/// sources are all ready (a segment's rows of a source still being read would otherwise never be indexed).
+fn todo(conn: &Connection, appending: bool) -> Result<(Vec<String>, HashSet<u32>)> {
+    let sql = if appending {
+        "SELECT file FROM segments s WHERE NOT indexed AND NOT EXISTS (SELECT 1 FROM histogram h WHERE h.file = s.file \
+         AND h.source NOT IN (SELECT id FROM sources WHERE ready)) ORDER BY first_id"
+    } else {
+        "SELECT file FROM segments WHERE NOT indexed ORDER BY first_id"
+    };
+    let mut stmt = conn.prepare(sql)?;
     let files = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<duckdb::Result<Vec<_>>>()?;
     let mut stmt = conn.prepare("SELECT id FROM sources WHERE ready")?;
     let ready = stmt
@@ -653,10 +661,16 @@ fn stages(cancel: &AtomicBool) -> Stages<'_> {
 
 /// Indexes the next segments (up to [`SEGMENTS_PER_STEP`]) in one commit, if the write lock is free and there are
 /// some; true when it did.
-fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epoch: u64) -> Result<bool> {
-    let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
-    let (files, ready) = todo(conn)?;
-    s.pending.store(files.len() as u64, Ordering::SeqCst);
+fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, gate: &Gate, epoch: u64) -> Result<bool> {
+    let Some(pass) = gate.try_enter() else { return Ok(false) };
+    let (files, ready) = todo(conn, pass.appending())?;
+    // While an import appends, the segments still waiting for their sources count too: the writer stays.
+    let waiting: u64 = if pass.appending() {
+        conn.query_row("SELECT count(*) FROM segments WHERE NOT indexed", [], |r| r.get(0))?
+    } else {
+        files.len() as u64
+    };
+    s.pending.store(waiting, Ordering::SeqCst);
     if files.is_empty() {
         return Ok(false);
     }
@@ -666,7 +680,7 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
         Some(w) => w,
         None => slot.insert(s.fts.writer()?),
     };
-    let total = files.len() as u64;
+    let total = waiting;
     let result = s.fts.index_files(w, seg_dir, batch, &ready, &stages(&s.stop), |n| {
         s.pending.store(total - n as u64, Ordering::SeqCst)
     });
@@ -695,11 +709,11 @@ fn failing_segment<'a>(e: &anyhow::Error, batch: &'a [String]) -> Option<&'a Str
     batch.iter().find(|f| text.contains(f.as_str()))
 }
 
-fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epoch: u64) {
+fn run(s: &FtsShared, dir: &Path, conn: &Connection, gate: &Gate, epoch: u64) {
     let seg_dir = dir.join(SEGMENTS_DIR);
     while !s.stop.load(Ordering::SeqCst) {
         // One segment per turn, under the write lock (imports and compaction wait for at most one).
-        match step(s, &seg_dir, conn, write_lock, epoch) {
+        match step(s, &seg_dir, conn, gate, epoch) {
             Ok(true) => continue,
             Ok(false) => {}
             Err(e) => {
@@ -761,5 +775,29 @@ mod tests {
             ]
         );
         assert!(!WordsTokenizer.token_stream("").advance());
+    }
+
+    #[test]
+    fn while_an_import_appends_only_segments_of_ready_sources_are_indexed() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&crate::schema::ddl(&debrief_core::batch::EventSchema::plain()))
+            .unwrap();
+        // a: rows of ready source 1; b: rows of source 1 and of source 2, which is still being read; c: indexed.
+        conn.execute_batch(
+            "INSERT INTO segments (file, first_id, end_id, rows, live, indexed) VALUES
+               ('a', 0, 10, 10, 10, FALSE), ('b', 10, 20, 10, 10, FALSE), ('c', 20, 30, 10, 10, TRUE);
+             INSERT INTO histogram VALUES ('a', 1, 2, 1, 10), ('b', 1, 2, 1, 5), ('b', 1, 2, 2, 5), ('c', 1, 2, 1, 10);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sources (id, path, name, events, ready) VALUES (1, 'p', 'n', 25, TRUE)",
+            [],
+        )
+        .unwrap();
+        let (files, ready) = todo(&conn, true).unwrap();
+        assert_eq!(files, ["a"], "b waits for source 2");
+        assert_eq!(ready, HashSet::from([1]));
+        let (files, _) = todo(&conn, false).unwrap();
+        assert_eq!(files, ["a", "b"], "after the import every unindexed segment is taken");
     }
 }

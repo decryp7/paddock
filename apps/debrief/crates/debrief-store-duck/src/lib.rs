@@ -14,6 +14,7 @@ mod context;
 mod diag;
 mod encodings;
 mod fts;
+mod gate;
 mod hits;
 mod inspect;
 mod lanes;
@@ -228,6 +229,8 @@ pub(crate) struct Inner {
     pub(crate) import_window: RwLock<debrief_core::ingest::ImportWindow>,
     /// Held by whatever rewrites the catalog (an import, compaction, positions, removal).
     pub(crate) write_lock: Arc<Mutex<()>>,
+    /// The write lock and an import's append window, for the indexer and the catalogue ([`gate`]).
+    gate: gate::Gate,
     /// The full-text index and its indexing thread (`None` when the index cannot be opened: search then
     /// fails with the reason, everything else works).
     fts: Option<fts::FtsService>,
@@ -578,6 +581,8 @@ impl Inner {
         )
         .map_err(|e| engine(format!("{e:#}")))?;
         sink.keep_ids(keep);
+        // Until the last segment is listed the import only appends: the index and the catalogue build beside it.
+        let window = self.gate.open_window();
         let t0 = std::time::Instant::now();
         let spec = StreamSpec {
             paths,
@@ -591,6 +596,8 @@ impl Inner {
         progress.set_stage(Some("Writing the last segments"));
         let fingerprints = sink.take_fingerprints();
         sink.finish().map_err(|e| engine(format!("{e:#}")))?;
+        // Compaction and positions rewrite the catalog: the background steps wait for the write lock again.
+        drop(window);
         // Each source recorded its parser; the catalog keeps a copy of every parser's TOML (ADR 0026).
         parsers::record(&conn, &parser_set).map_err(engine)?;
         record_fingerprints(&conn, &fingerprints);
@@ -816,10 +823,11 @@ impl DuckStore {
         };
         let parsers = Arc::new(parsers);
         let write_lock = Arc::new(Mutex::new(()));
+        let gate = gate::Gate::new(write_lock.clone());
         let started = conn
             .try_clone()
             .map_err(anyhow::Error::from)
-            .and_then(|c| fts::FtsService::start(dir, c, write_lock.clone(), opts.index));
+            .and_then(|c| fts::FtsService::start(dir, c, gate.clone(), opts.index));
         let (fts, fts_error) = match started {
             Ok(f) => (Some(f), None),
             Err(e) => {
@@ -830,7 +838,7 @@ impl DuckStore {
         let catalogue = conn
             .try_clone()
             .map_err(anyhow::Error::from)
-            .and_then(|c| catalogue::CatalogueService::start(c, write_lock.clone()))
+            .and_then(|c| catalogue::CatalogueService::start(c, gate.clone()))
             .map_err(|e| log::warn!("the catalogue is unavailable: {e:#}"))
             .ok();
         DuckStore {
@@ -851,6 +859,7 @@ impl DuckStore {
                 importing: AtomicBool::new(false),
                 import_window: RwLock::new(Default::default()),
                 write_lock,
+                gate,
                 fts,
                 catalogue,
                 fts_error,
