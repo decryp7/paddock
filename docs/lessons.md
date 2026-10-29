@@ -703,3 +703,22 @@ details: [research/2026-10-29-link-time.md](research/2026-10-29-link-time.md).
   flagged yet; the follow-up bans `ExpressionStatement > ChainExpression` in specs, keeps cleanups such as
   `getSelection()?.removeAllRanges()` with a disable comment, and converts the rest to `!` or `el()`. It also catches
   `menu?.items[0]?.run()`.
+
+## 2026-10-29: a "global" input must mean every build, or the branch runs everything (affected planner)
+
+`scripts/affected.mjs` treated the whole of `.gitea/`, the planner's own files, `.cargo/`, `lint/` and `conformance/(ci|release)/`
+as global, so a branch that added one id to the conformance `--only` list in `ci.yml` (feat/icons-mat-registry) or one line
+to `affected.test.mjs` (dyno/shell-1.0) ran every app, crate and UI job, against the rule that branches get affected runs
+and the full gates run once on main. **Guidance:** a file is global only when every build reads it (`rust-toolchain`, the
+root `package.json`, `.npmrc`, `.nvmrc`, `tsconfig/`). Narrow the rest to what it reaches and write the reasoning as a table
+next to `GLOBAL`: the planner's files mark tools, ui and paddock-dev (the `plan` and `tools` jobs run `affected.test.mjs`), `ci.yml` marks the jobs whose text changed (line-based split; everything when it cannot
+be split or the header changed), a shared action marks the jobs and workflows that use it, `.cargo/` and `lint/` the Rust
+builds. Anything that cannot be narrowed still fails safe to everything.
+
+Review found six places where the first narrowing selected too little: a second implementation of the same rules (the Rust
+port in `tools/paddock-dev`, compared by a golden test) kept the old list; `--files` mode diffed HEAD with a working tree that
+equals it, so a committed change looked unchanged; the shared scripts under `conformance/` reach the crate job through the
+actions that run them; the `plan` job wires every other job; a line-based YAML split is only safe if it refuses anything it
+does not understand (comments on keys, flow mappings, anchors); and mutants survived because tests asserted `every(...)` over
+possibly empty lists. **Guidance:** when narrowing a trigger, grep for every consumer of the old list, make a narrowing fail
+safe to everything on any input it cannot model, and assert exact lists in tests, never `every` on a list that may be empty.

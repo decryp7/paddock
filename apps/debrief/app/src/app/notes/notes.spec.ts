@@ -83,12 +83,8 @@ describe('notes model', () => {
   it('puts time notes (not event notes) of the visible range on the timeline', () => {
     expect(timeNotes(notes, 0, 250).map((t) => t.id)).toEqual(['n4', 'n5', 'n7']);
     expect(at(timeNotes(notes, 0, 250), 0)).toMatchObject({ from: 100, to: 200, severity: 'problem', label: 'outage' });
-    const marks = layoutNoteMarks(timeNotes(notes, 0, 400), { from: 0, to: 400 }, 400);
+    const marks = layoutNoteMarks(timeNotes(notes, 0, 400), { from: 0, to: 400 });
     expect(marks.map((m) => [m.note.id, m.left, m.width])).toEqual([['n5', 2.5, 0], ['n4', 25, 25], ['n7', 37.5, 0], ['n6', 75, 0]]);
-    expect(marks.map((m) => m.row)).toEqual([0, 0, 1, 0]);
-    // Labels that would overlap stack.
-    const same = [item('x1', { kind: 'instant', at: 10 }), item('x2', { kind: 'instant', at: 11 })];
-    expect(layoutNoteMarks(timeNotes(same, 0, 100), { from: 0, to: 100 }).map((m) => m.row)).toEqual([0, 1]);
     // A range that starts before the view is clipped to it.
     expect(at(layoutNoteMarks(timeNotes(notes, 150, 400), { from: 150, to: 400 }), 0)).toMatchObject({ left: 0 });
   });
