@@ -77,6 +77,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 
 ## Testing and quality gates
 
+- **E2E and screenshots run on fresh code (guidance; a binding rule is proposed).** A running dev server is reused only with `PW_REUSE_SERVER=1`; default ports derive from the worktree path (`e2ePort` in `@decryp7/paddock-e2e`); a config that consumes `ui/dist` or the css fails at load with "rebuild ui: npm run build -w ui" when they were built from older sources (`build-guard.ts`, content stamps; lessons.md). New Playwright configs use these.
 - Every change ships with tests; every bug fix starts with a failing test. A colour change keeps `npm run test:tokens`
   green (WCAG AA/AAA pairs, CVD separation); change the tokens, not the test.
 - Before committing, the gates of the affected projects, for example:
