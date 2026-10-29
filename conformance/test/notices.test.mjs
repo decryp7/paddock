@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { ALLOWED } from '../src/notices/licences.mjs';
 import { cargoAbout, main, parseArgs } from '../src/notices/cli.mjs';
-import { lf, lockProduction, nonPermissive, normalise, npmPackages, render, rustCrates, spdxIds } from '../src/notices/generate.mjs';
+import { lf, lockProduction, nonPermissive, normalise, npmPackages, render, rustCrates, spdxIds, workspaceProduction } from '../src/notices/generate.mjs';
 import { makeApp, PADDOCK, readText } from './helpers.mjs';
 
 const aboutJson = (crates) => ({
@@ -125,7 +125,7 @@ test('cargo about is run per manifest with the about.toml, and its failures are 
   };
   const docs = cargoAbout({ manifests: ['/m/a/Cargo.toml', '/m/b/Cargo.toml'], aboutToml: '/r/about.toml', root, exec });
   assert.equal(docs.length, 2);
-  assert.deepEqual(calls[0].slice(0, 6), ['cargo', 'about', 'generate', '-c', '/r/about.toml', '--format']);
+  assert.deepEqual(calls[0].slice(0, 6), ['cargo', 'about', 'generate', '--locked', '-c', '/r/about.toml']);
   assert.ok(calls[1].includes('/m/b/Cargo.toml'));
   const failing = (e) => () => cargoAbout({ manifests: ['/m/Cargo.toml'], aboutToml: 'x', root, exec: () => { throw Object.assign(new Error('boom'), e); } });
   assert.throws(failing({ code: 'ENOENT' }), /cargo is not installed/);
@@ -256,4 +256,42 @@ test('declared npm licences: the legacy `licenses: [{type}]` form and object for
   });
   const by = Object.fromEntries(npmPackages(root).packages.map((p) => [p.name, p.license]));
   assert.deepEqual(by, { old: 'MIT OR Apache-2.0', obj: 'ISC', none: 'UNKNOWN' });
+});
+
+test('WITH: only listed `X WITH Y` phrases are accepted, as cargo-deny does', () => {
+  const bad = (license) => nonPermissive([{ kind: 'rust', name: 'x', version: '1', license, spdx: spdxIds(license) }]).length === 1;
+  assert.ok(bad('Apache-2.0 WITH Made-Up-exception'));
+  assert.ok(bad('MIT WITH LLVM-exception'));
+  assert.ok(!bad('Apache-2.0 WITH LLVM-exception'));
+});
+
+test('an empty npm licence is UNKNOWN and refused', () => {
+  const root = makeApp({
+    'package-lock.json': JSON.stringify({ packages: { '': {}, 'node_modules/e': { version: '1.0.0' } } }),
+    'node_modules/e/package.json': JSON.stringify({ license: '' }),
+  });
+  const { packages } = npmPackages(root);
+  assert.equal(packages[0].license, 'UNKNOWN');
+  assert.equal(nonPermissive(packages).length, 1);
+});
+
+test('peer dependencies the workspace itself declares as devDependencies are not shipped', () => {
+  const lock = {
+    packages: {
+      '': {},
+      'apps/x/app': { dependencies: { loc: '1' }, devDependencies: { tool: '1' } },
+      'node_modules/loc': { version: '1.0.0', peerDependencies: { tool: '1', real: '1' } },
+      'node_modules/tool': { version: '1.0.0', dependencies: { toolchild: '1' } },
+      'node_modules/toolchild': { version: '1.0.0' },
+      'node_modules/real': { version: '1.0.0' },
+    },
+  };
+  assert.deepEqual(workspaceProduction(lock, 'apps/x/app').map((p) => p.name), ['loc', 'real']);
+});
+
+test('cargo about runs with --locked', () => {
+  const root = makeApp({ 'Cargo.toml': '' });
+  let args;
+  cargoAbout({ manifests: ['/m/Cargo.toml'], aboutToml: 'a.toml', root, exec: (c, a) => { args = a; writeFileSync(a[a.indexOf('-o') + 1], '{"crates":[],"licenses":[]}'); } });
+  assert.ok(args.includes('--locked'));
 });

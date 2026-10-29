@@ -8,10 +8,12 @@ app=${1:?usage: scripts/notices.sh <app> [--check]}
 shift
 cd "$(dirname "$0")/.."
 
-# Pinned: the committed notices are cargo-about's output and a new release can find more licence texts.
-if ! command -v cargo-about >/dev/null; then
-  echo "installing cargo-about 0.9.2..." >&2
-  cargo install cargo-about --version 0.9.2 --locked --features cli
+# Pinned: the committed notices are cargo-about's output and a new release can find more licence texts. Any other installed
+# version is replaced, so every machine and CI produce the same file.
+want=0.9.2
+if [ "$(cargo about --version 2>/dev/null | awk '{print $2}')" != "$want" ]; then
+  echo "installing cargo-about $want..." >&2
+  cargo install cargo-about --version "$want" --locked --force --features cli
 fi
 # One npm workspace for the monorepo (ADR 0014 §1): the root lock and node_modules hold every app's packages.
 if [ ! -d node_modules ]; then
