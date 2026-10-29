@@ -1,3 +1,4 @@
+import { FullTextTip } from '../../shared/full-text-tip';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import type { ActivityEntry, Alert } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -35,7 +36,7 @@ export function buildFeed(activity: readonly ActivityEntry[], alerts: readonly A
 /** What Dyno noticed and what it warned about, newest first. */
 @Component({
   selector: 'dy-events-feed',
-  imports: [AsyncState, Icon],
+  imports: [FullTextTip, AsyncState, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" aria-label="Activity and alerts">
@@ -48,8 +49,8 @@ export function buildFeed(activity: readonly ActivityEntry[], alerts: readonly A
             <li>
               <span class="ic" [attr.data-tone]="i.tone"><dy-icon [name]="i.icon" /></span>
               <div class="txt">
-                <span class="title">{{ i.title }}</span>
-                <span class="detail truncate">{{ i.detail }}</span>
+                <span class="title" [dyFullText]="i.title">{{ i.title }}</span>
+                <span class="detail truncate" [dyFullText]="i.detail">{{ i.detail }}</span>
               </div>
               <span class="when num">{{ ago(i.at) }}</span>
             </li>

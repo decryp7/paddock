@@ -58,6 +58,11 @@ product-reference points come from established knowledge (marked "[k]" in Source
   Subtitle 15/22/600; Title 18/26/600 (page title); Display 28/32/600 tabular (tile hero); Hero 40/44/600 (tray/health
   score only). Weights used: 400, 500, 600. No 700, no italics for emphasis.
 - Max line length 80 characters in prose; truncate with ellipsis plus tooltip, never wrap table cells to 3 lines.
+- A truncation is a decision that says so: `text-overflow: ellipsis` and the full text in a tooltip, title or aria-label (the app's
+  `dyFullText` sets `data-full-text`). Controls, tabs, links and numbers are never truncated: they wrap, or the layout gives them room.
+- Tab nav bars: a link is as wide as its label (`--pd-space-3` side padding, no 160 px minimum), so eight tabs fit a 900 px window; a
+  narrower page paginates. `mat-tab-group` (content tabs, a few of them) keeps Material's own sizing: it paginates by itself and no app
+  has a row of tabs that needs the rule.
 - Sentence case everywhere. Units are a smaller sibling of the number (`17.1` 28 px + `GB` 13 px muted).
 
 ## 4. Colour

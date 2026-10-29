@@ -45,8 +45,8 @@ import { MatMenuModule } from '@angular/material/menu';
         } @else {
           <div class="layout" [class.with-detail]="!!selected()">
             <pd-table [toolbar]="false" label="New and unusual programs" [rows]="o.items" [columns]="columns" [rowKey]="itemKey" [filterable]="false" [rowActions]="actions" [selectedKey]="selectedKey()" [maxHeight]="620" (rowActivate)="select($event)" (action)="run($event)" (keydown.escape)="selectedKey.set(null)">
-              <ng-template pdCell="name" let-i><span class="prog"><span class="av" aria-hidden="true" [style.background]="tile(i.name)">{{ ini(i.name) }}</span><span class="ell">{{ i.name }}</span></span></ng-template>
-              <ng-template pdCell="why" let-i><span class="why"><span class="dot" [attr.data-tone]="i.level === 'unusual' ? 'warn' : null" aria-hidden="true"></span><span class="ell">{{ why(i) }}</span></span></ng-template>
+              <ng-template pdCell="name" let-i><span class="prog"><span class="av" aria-hidden="true" [style.background]="tile(i.name)">{{ ini(i.name) }}</span><span class="ell" [dyFullText]="i.name">{{ i.name }}</span></span></ng-template>
+              <ng-template pdCell="why" let-i><span class="why"><span class="dot" [attr.data-tone]="i.level === 'unusual' ? 'warn' : null" aria-hidden="true"></span><span class="ell" [dyFullText]="why(i)">{{ why(i) }}</span></span></ng-template>
             </pd-table>
 
             @if (selected(); as s) {

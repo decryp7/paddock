@@ -1,12 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
-import { dialogContracts, dialogWindowUrl, textClippedWithoutEllipsis } from '@decryp7/paddock-e2e';
+import { dialogContracts, dialogWindowUrl, textClippedWithoutEllipsis, textCutOffWithoutTooltip } from '@decryp7/paddock-e2e';
+import { FIXTURES } from './dialog-fixtures';
+import { NAV } from '../src/app/shell/nav';
+import { EXTRAS_TABS } from '../src/app/features/extras/extras-model';
 
 /**
  * No table row of any Dyno page clips its own content at the window sizes the app supports (900 px is the window minimum in
  * tauri.conf.json): a row whose columns need more room than it has (`scrollWidth > clientWidth`) hides what overflows, such as the
  * row actions, under the table's `overflow: clip`. Every page, every row of every table and list, three widths.
  */
-const PAGES = ['', 'processes', 'why-slow', 'throttling', 'issues', 'inventory', 'network', 'counters', 'benchmarks', 'alarms', 'reports', 'recorder', 'health', 'backup', 'extras', 'lifespan', 'diagnostics', 'cpu'];
+// Every screen of the sidebar (so a new one is measured without editing this list), and the cpu screen the sidebar does not list.
+const PAGES = [...new Set([...NAV.map((n) => n.path.replace(/^\//, '')), 'cpu'])];
 const WIDTHS = [900, 1024, 1280];
 const ROWS = 'tr, [role="row"], .row, .item, li.win';
 
@@ -26,7 +30,7 @@ async function clipped(page: Page): Promise<string[]> {
 
 /** A state of the app to measure: a page, or a page with its detail panel open, a second view or a tab. */
 type State = { name: string; path: string; setup?: (page: Page) => Promise<void> };
-const EXTRAS = ['changes', 'sleep', 'boot', 'apps', 'gpu', 'files', 'inventory', 'maintenance'];
+const EXTRAS = EXTRAS_TABS.map((t) => t.id);
 
 const STATES: State[] = [
   ...PAGES.map((p): State => ({ name: p || 'dashboard', path: p })),
@@ -60,7 +64,28 @@ const STATES: State[] = [
     },
   },
   { name: 'network listening', path: 'network', setup: (page) => page.getByRole('radio', { name: 'Listening' }).click() },
+  {
+    name: 'network listening, ungrouped',
+    path: 'network',
+    setup: async (page) => {
+      await page.getByRole('radio', { name: 'Listening' }).click();
+      await page.getByRole('radio', { name: 'None' }).click();
+      await expect(page.getByRole('columnheader', { name: 'Program' })).toBeVisible();
+    },
+  },
 ];
+
+/** Opens a state and waits until it is drawn: its heading is there and no skeleton or indeterminate progress bar is left. */
+async function openState(page: Page, state: State): Promise<void> {
+  await page.goto(`/?latency=0#/${state.path}`);
+  await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible({ timeout: 45_000 });
+  await expect(page.locator('[aria-busy="true"], .mdc-linear-progress--indeterminate')).toHaveCount(0);
+  if (state.setup) {
+    await state.setup(page);
+    await page.mouse.move(0, 0);
+  }
+  await page.evaluate(() => document.fonts.ready);
+}
 
 test.describe('rows never clip their content, and text that is cut says so with an ellipsis', () => {
   test.setTimeout(300_000);
@@ -69,13 +94,7 @@ test.describe('rows never clip their content, and text that is cut says so with 
       await page.setViewportSize({ width, height: 800 });
       const problems: Record<string, string[]> = {};
       for (const state of STATES) {
-        await page.goto(`/?latency=0#/${state.path}`);
-        await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible({ timeout: 45_000 });
-        await page.locator('.mat-mdc-progress-bar, [aria-busy="true"]').first().waitFor({ state: 'detached', timeout: 5000 }).catch(() => undefined);
-        if (state.setup) {
-          await state.setup(page);
-          await page.mouse.move(0, 0);
-        }
+        await openState(page, state);
         const found = [...new Set([...(await clipped(page)), ...(await textClippedWithoutEllipsis(page))])];
         if (found.length) problems[state.name] = found;
       }
@@ -99,91 +118,75 @@ const UI = '../../../ui/projects/paddock-ui/shell';
 const CONTRACTS = dialogContracts('src/app/generated/dialog-contracts.ts', ...['about', 'confirm'].map((p) => `${UI}/${p}/generated/dialog-contracts.ts`));
 
 async function cutOff(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
+  const wide = await page.evaluate(() => {
     const out: string[] = [];
     const vw = document.documentElement.clientWidth;
-    const name = (el: Element) => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}.${String((el as HTMLElement).className?.toString?.() ?? '').trim().split(/\s+/).slice(0, 3).join('.')}`;
     if (document.documentElement.scrollWidth > vw + 1) out.push(`document scrolls sideways: ${document.documentElement.scrollWidth} > ${vw}`);
     for (const el of Array.from(document.querySelectorAll<HTMLElement>('.pd-page'))) {
-      if (el.scrollWidth > el.clientWidth + 1) out.push(`${name(el)} content ${el.scrollWidth}px wider than the page ${el.clientWidth}px`);
-    }
-    const seen = new Set<string>();
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      const text = (n.textContent ?? '').trim();
-      const parent = n.parentElement;
-      if (!text || !parent) continue;
-      const ps = getComputedStyle(parent);
-      if (ps.visibility === 'hidden' || ps.display === 'none') continue;
-      const r = document.createRange();
-      r.selectNodeContents(n);
-      const tr = r.getBoundingClientRect();
-      if (tr.width === 0 || tr.height === 0) continue;
-      // Truncation with an ellipsis is a decision; only text that is neither cut short nor wrapped is a problem.
-      let ellipsised = false;
-      for (let e: Element | null = parent; e && e !== document.body; e = e.parentElement) {
-        if (getComputedStyle(e).textOverflow === 'ellipsis') { ellipsised = true; break; }
-      }
-      if (!ellipsised && tr.right > vw + 1 && tr.left < vw) {
-        const k = `edge:${name(parent)}`;
-        if (!seen.has(k)) { seen.add(k); out.push(`text past the window edge (${Math.round(tr.right)} > ${vw}): "${text.slice(0, 50)}" in ${name(parent)}`); }
-      }
-      for (let a: Element | null = parent; a && a !== document.body; a = a.parentElement) {
-        const s = getComputedStyle(a);
-        if (s.overflowX === 'visible') continue;
-        const ar = a.getBoundingClientRect();
-        if (ar.width <= 2 || ar.height <= 2) break; // visually hidden text
-        if (tr.right > ar.right + 1 || tr.left < ar.left - 1) {
-          let ellipsis = false;
-          for (let e: Element | null = parent; e; e = e.parentElement) {
-            if (getComputedStyle(e).textOverflow === 'ellipsis') { ellipsis = true; break; }
-            if (e === a) break;
-          }
-          if (!ellipsis) {
-            const k = `cut:${name(parent)}`;
-            if (!seen.has(k)) { seen.add(k); out.push(`cut without ellipsis: "${text.slice(0, 50)}" in ${name(parent)} (by ${name(a)})`); }
-          }
-        }
-        break;
-      }
+      if (el.scrollWidth > el.clientWidth + 1) out.push(`${el.tagName.toLowerCase()}.pd-page content ${el.scrollWidth}px wider than the page ${el.clientWidth}px`);
     }
     return out;
   });
+  // The shared rule (paddock-e2e): text beyond its box or the window, or cut by its own box, unless an accepted ellipsis.
+  return [...wide, ...(await textCutOffWithoutTooltip(page)), ...(await textClippedWithoutEllipsis(page))];
 }
 
 test.describe('nothing is cut off', () => {
   test.setTimeout(300_000);
   for (const { width, height } of SIZES) {
-    test(`pages at ${width}x${height}`, async ({ page }) => {
+    test(`pages and their other states at ${width}x${height}`, async ({ page }) => {
       await page.setViewportSize({ width, height });
       const problems: Record<string, string[]> = {};
-      for (const state of STATES.filter((s) => !s.setup)) {
-        await page.goto(`/?latency=0#/${state.path}`);
-        await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible({ timeout: 45_000 });
-        await page.locator('.mat-mdc-progress-bar, [aria-busy="true"]').first().waitFor({ state: 'detached', timeout: 5000 }).catch(() => undefined);
-        await page.evaluate(() => document.fonts.ready);
+      const plain: State[] = PAGES.map((p) => ({ name: p || 'dashboard', path: p }));
+      for (const state of [...plain, ...STATES.filter((s) => s.setup || s.path.includes('?'))]) {
+        await openState(page, state);
         const found = await cutOff(page);
         if (found.length) problems[state.name] = found;
       }
       expect(problems).toEqual({});
     });
 
-    test(`settings pages at ${width}x${height}`, async ({ browser, baseURL }) => {
-      const ctx = await browser.newContext({ baseURL, viewport: { width: Math.max(width, CONTRACTS['pd.settings'].width), height } });
-      const page = await ctx.newPage();
-      await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings' }));
-      await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
-      const items = page.locator('nav.pd-nav a, nav.pd-nav button');
-      const labels = await items.allInnerTexts();
-      expect(labels.length, 'the settings pages are listed').toBeGreaterThan(0);
+    for (const advanced of [false, true]) {
+      test(`settings pages at ${width}x${height}${advanced ? ' with the advanced fields' : ''}`, async ({ browser, baseURL }) => {
+        const ctx = await browser.newContext({ baseURL, viewport: { width: Math.max(width, CONTRACTS['pd.settings'].width), height } });
+        const page = await ctx.newPage();
+        await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings' }));
+        await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
+        if (advanced) {
+          const toggle = page.getByRole('switch', { name: 'Show advanced' });
+          await toggle.click();
+          await expect(toggle).toHaveAttribute('aria-checked', 'true');
+        }
+        const items = page.locator('nav.pd-nav a, nav.pd-nav button');
+        const labels = (await items.allInnerTexts()).map((l) => l.trim());
+        expect(labels.length, 'the settings pages are listed').toBeGreaterThan(0);
+        const problems: Record<string, string[]> = {};
+        for (let i = 0; i < labels.length; i++) {
+          await items.nth(i).click();
+          await expect(items.nth(i)).toHaveAttribute('aria-current', 'page');
+          await expect(page.getByRole('heading', { name: labels[i], exact: true }).first()).toBeVisible();
+          await page.evaluate(() => document.fonts.ready);
+          const found = await cutOff(page);
+          if (found.length) problems[labels[i]] = found;
+        }
+        await ctx.close();
+        expect(problems).toEqual({});
+      });
+    }
+
+    test(`dialog windows at their contract width, window ${width}x${height}`, async ({ browser, baseURL }) => {
       const problems: Record<string, string[]> = {};
-      for (let i = 0; i < labels.length; i++) {
-        await items.nth(i).click();
-        await page.evaluate(() => document.fonts.ready);
-        const found = await cutOff(page);
-        if (found.length) problems[labels[i].trim()] = found;
+      for (const [id, c] of Object.entries(CONTRACTS)) {
+        for (const [n, input] of (FIXTURES[id] ?? [{}]).entries()) {
+          const ctx = await browser.newContext({ baseURL, viewport: { width: c.width, height: (c as { height?: number }).height ?? height } });
+          const page = await ctx.newPage();
+          await page.goto(dialogWindowUrl(id, input, { title: id }));
+          await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
+          const found = await cutOff(page);
+          if (found.length) problems[`${id} #${n + 1} (${c.width}px)`] = found;
+          await ctx.close();
+        }
       }
-      await ctx.close();
       expect(problems).toEqual({});
     });
   }

@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject } from '@angular/core';
 import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { ImpactRating, StartupEntry } from '../../core/api.types';
+import { FullTextTip } from '../../shared/full-text-tip';
 import { AsyncState } from '../../shared/async-state';
 import { formatBytes, formatSeconds } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -19,7 +20,7 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
 /** Health: the score and its reasons, and what starts at sign-in. Dyno only shows these; it changes nothing. */
 @Component({
   selector: 'dy-health-page',
-  imports: [MatTooltip, MatCheckbox, AsyncState, HealthHero, Icon, PdTable, PdCell],
+  imports: [FullTextTip, MatTooltip, MatCheckbox, AsyncState, HealthHero, Icon, PdTable, PdCell],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -44,7 +45,7 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
         <dy-async [loaded]="store.startupLoaded()" [error]="store.startupError()" [empty]="store.startup().length === 0" [emptyTitle]="emptyTitle()" [emptyText]="emptyText()" what="startup items" [rows]="4" (retry)="reload()">
           <div class="tablewrap">
             <pd-table [toolbar]="false" label="Programs that start at sign-in" [rows]="sorted()" [columns]="columns" [rowKey]="rowKey" [filterable]="false" [rowHeight]="36" [maxHeight]="480">
-              <ng-template pdCell="name" let-e><span class="two"><strong class="nm">{{ e.name }}</strong><small class="faint">{{ e.publisher ?? 'Unknown publisher' }}</small></span></ng-template>
+              <ng-template pdCell="name" let-e><span class="two"><strong class="nm" [dyFullText]="e.name">{{ e.name }}</strong><small class="faint">{{ e.publisher ?? 'Unknown publisher' }}</small></span></ng-template>
               <ng-template pdCell="impact" let-e><span class="impact" [matTooltip]="impactFull(e)"><span class="dot" [attr.data-tone]="tone(e)" aria-hidden="true"></span><span class="lbl">{{ impact(e) }}</span>@if (e.impact.rating !== 'notMeasured') { <small class="faint num ell">{{ secs(e.impact.cpuSecs) }} CPU · {{ bytes(e.impact.diskBytes) }}</small> }</span></ng-template>
             </pd-table>
           </div>
@@ -61,7 +62,8 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
     .two > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .two small { font-size: var(--fs-xs); }
     /* The measured numbers ellipsise (the whole text is the tooltip); the rating and its dot never shrink. */
-    .impact { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+    .impact { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--sp-1); min-width: 0; line-height: 1.25; }
+    .impact small { flex-basis: 100%; }
     .lbl { flex: none; }
     .ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .nowrap { white-space: nowrap; }
@@ -93,7 +95,7 @@ export class HealthPage implements OnInit {
   protected readonly rowKey = (e: StartupEntry): string => e.id;
   protected readonly columns: PdColumn<StartupEntry>[] = [
     { key: 'name', header: 'Program', value: (e) => e.name, required: true, width: 'minmax(0, 2fr)' },
-    { key: 'impact', header: 'Impact', value: (e) => IMPACT_ORDER[e.impact.rating], text: (e) => IMPACT_LABEL[e.impact.rating], width: 'minmax(0, 1.5fr)' },
+    { key: 'impact', header: 'Impact', value: (e) => IMPACT_ORDER[e.impact.rating], text: (e) => IMPACT_LABEL[e.impact.rating], width: 'minmax(150px, 1.5fr)' },
     { key: 'where', header: 'Where', value: (e) => LOCATION_LABEL[e.location], width: 'minmax(0, 1fr)' },
     { key: 'state', header: 'At sign-in', value: (e) => startupStateText(e.state), width: '120px' },
   ];

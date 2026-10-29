@@ -5,6 +5,7 @@ import { Router } from '@angular/router';
 import type { ConnectionRow, ListenerRow, NetProto } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatRate, formatRelative } from '../../shared/format';
+import { FullTextTip } from '../../shared/full-text-tip';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
 import { NetworkStore } from '../../state/network.store';
@@ -39,7 +40,7 @@ function readCollapsed(): Set<string> {
  */
 @Component({
   selector: 'dy-network-page',
-  imports: [AsyncState, Icon, NgTemplateOutlet, PdTable, PdCell, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton],
+  imports: [AsyncState, FullTextTip, Icon, NgTemplateOutlet, PdTable, PdCell, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -106,7 +107,7 @@ function readCollapsed(): Set<string> {
                 @if (r.kind === 'group') {
                   <ng-container *ngTemplateOutlet="groupCell; context: { $implicit: r }" />
                 } @else {
-                  <span class="av" aria-hidden="true">{{ ini(name(r.item.owner)) }}</span><span class="truncate" [title]="reason(r.item.owner) ?? ''">{{ name(r.item.owner) }}</span>
+                  <span class="av" aria-hidden="true" [attr.title]="reason(r.item.owner)">{{ ini(name(r.item.owner)) }}</span><span class="truncate" [dyFullText]="name(r.item.owner)">{{ name(r.item.owner) }}</span>
                 }
               </ng-template>
               <ng-template pdCell="remote" let-r>
@@ -120,7 +121,7 @@ function readCollapsed(): Set<string> {
                 @if (r.kind === 'group') {
                   <ng-container *ngTemplateOutlet="groupCell; context: { $implicit: r }" />
                 } @else {
-                  {{ service(tab() === 'connections' ? r.item.remotePort : r.item.port) }}
+                  <span class="truncate" [dyFullText]="service(tab() === 'connections' ? r.item.remotePort : r.item.port)">{{ service(tab() === 'connections' ? r.item.remotePort : r.item.port) }}</span>
                 }
               </ng-template>
               <ng-template pdCell="host" let-r>@if (r.kind === 'item') {<span class="truncate" [title]="hostName(r.item) ?? ''">{{ hostName(r.item) ?? (r.item.lookupOk ? '—' : 'Private address') }}</span>}</ng-template>
@@ -139,7 +140,7 @@ function readCollapsed(): Set<string> {
                 @if (group() === 'process') { <span class="av" aria-hidden="true">{{ ini(r.title) }}</span> }
                 <strong class="truncate">{{ r.title }}</strong>
                 <span class="meta">{{ r.count }} {{ tab() === 'connections' ? (r.count === 1 ? 'connection' : 'connections') : (r.count === 1 ? 'port' : 'ports') }}@if (tab() === 'connections' && group() === 'process') { · {{ r.hosts }} {{ r.hosts === 1 ? 'host' : 'hosts' }} }@if (r.exposed) { · <span class="exp">{{ r.exposed }} exposed</span> }</span>
-                @if (tab() === 'connections' && group() === 'process' && trafficOf(r.title); as tr) { <span class="traffic num" title="Bytes per second over the last few seconds">↓ {{ rate(tr.rxBps) }} · ↑ {{ rate(tr.txBps) }}</span> }
+                @if (tab() === 'connections' && group() === 'process' && trafficOf(r.title); as tr) { <span class="traffic num" [title]="'Receiving ' + rate(tr.rxBps) + ', sending ' + rate(tr.txBps) + ' (bytes per second over the last few seconds)'">↓ {{ rate(tr.rxBps) }} · ↑ {{ rate(tr.txBps) }}</span> }
               </span>
             </ng-template>
 
@@ -187,7 +188,7 @@ function readCollapsed(): Set<string> {
     .summary b { color: var(--text-1); font-weight: var(--fw-semibold); }
     .summary .this-pc { margin-left: auto; color: var(--text-3); }
     .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; }
-    .traffic { margin-left: auto; min-width: 0; flex: 0 8 auto; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
+    .traffic { margin-left: auto; flex: none; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
     .reach { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; }
     .reach dy-icon { --icon-size: 13px; }
     .reach[data-tone='warn'] { color: var(--warn); }
@@ -199,7 +200,7 @@ function readCollapsed(): Set<string> {
     .truncate { overflow: hidden; text-overflow: ellipsis; }
     .addr { font: var(--fw-regular) var(--fs-xs) / 1 var(--font-mono); color: var(--text-3); }
     .gname { display: flex; flex: 1; align-items: center; gap: var(--sp-2); min-width: 0; }
-    .meta { min-width: 0; flex: 0 4 auto; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
+    .meta { flex: none; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
     .exp { color: var(--warn); }
     .av { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; background: var(--surface-active); color: var(--text-2); font: var(--fw-semibold) 11px / 1 var(--font-sans); }
     .remote { display: flex; align-items: baseline; min-width: 0; gap: 1px; }
@@ -255,7 +256,9 @@ export class NetworkPage implements OnInit, OnDestroy {
   });
   /** The columns follow the tab, the grouping and the options; a group's heading spans the row, from the first column. */
   protected readonly columns = computed<PdColumn<Row>[]>(() => {
-    const prog: PdColumn<Row>[] = this.group() !== 'process' ? [{ key: 'prog', header: 'Program', value: (r) => this.itemOwner(r), width: 'minmax(90px, 1.2fr)', sortable: false }] : [];
+    // A program name needs room to be read: the Listening table gives it more, taken from Service (the badge and 0.0.0.0 need about 150 px).
+    const progWidth = this.tab() === 'connections' ? 'minmax(90px, 1.2fr)' : 'minmax(110px, 1.4fr)';
+    const prog: PdColumn<Row>[] = this.group() !== 'process' ? [{ key: 'prog', header: 'Program', value: (r) => this.itemOwner(r), width: progWidth, sortable: false }] : [];
     if (this.tab() === 'connections') {
       return [
         ...prog,
@@ -270,8 +273,8 @@ export class NetworkPage implements OnInit, OnDestroy {
     }
     return [
       ...prog,
-      { key: 'service', header: 'Service', value: (r) => this.itemService(r), required: true, width: 'minmax(90px, 2fr)', sortable: false },
-      { key: 'address', header: 'Address', value: (r) => (r.kind === 'item' ? (r.item as ListenerRow).local : ''), width: 'minmax(100px, 2fr)', sortable: false },
+      { key: 'service', header: 'Service', value: (r) => this.itemService(r), required: true, width: 'minmax(70px, 1fr)', sortable: false },
+      { key: 'address', header: 'Address', value: (r) => (r.kind === 'item' ? (r.item as ListenerRow).local : ''), width: 'minmax(200px, 1.4fr)', sortable: false },
       { key: 'proto', header: 'Protocol', value: (r) => (r.kind === 'item' ? protoText((r.item as ListenerRow).proto, (r.item as ListenerRow).ipv6) : ''), width: '68px', sortable: false },
       { key: 'since', header: 'Since', value: (r) => this.itemSince(r), text: (r) => (r.kind === 'item' ? this.since(this.itemSince(r)) : ''), width: '80px', sortable: false },
     ];

@@ -162,7 +162,7 @@ import { MatMenuModule } from '@angular/material/menu';
                 <pd-table label="Charted counters" [rows]="store.watching()" [columns]="columns" [rowKey]="pathKey" [filterable]="false" [rowActions]="actions" [maxHeight]="480" (action)="run($event)">
                   <ng-template pdCell="counter" let-p>
                     <span class="swatch" [style.background]="swatch(index(p))" aria-hidden="true"></span>
-                    <span class="truncate">{{ title(p) }}</span>
+                    <span class="truncate" [dyFullText]="title(p)">{{ title(p) }}</span>
                     @if (store.isPinned(p)) { <dy-icon class="pinned" name="pin" aria-label="Pinned" /> }
                   </ng-template>
                   <ng-template pdCell="value" let-p>

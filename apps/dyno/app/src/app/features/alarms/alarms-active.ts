@@ -2,6 +2,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal, viewChild } from '@angular/core';
 import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import type { Alarm, ShelveFor } from '../../core/api.types';
+import { FullTextTip } from '../../shared/full-text-tip';
 import { AsyncState } from '../../shared/async-state';
 import { AlarmsStore } from '../../state/alarms.store';
 import { alarmSuffix, isShelved, needsAcknowledge, severityWord, shortTime, stateTone, stateWord } from './alarms-model';

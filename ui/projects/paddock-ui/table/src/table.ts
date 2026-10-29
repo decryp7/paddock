@@ -244,7 +244,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
                     } @else if (c.truncate === 'middle') {
                       <pd-middle-text [value]="text(c, line.row)" />
                     } @else {
-                      <span class="pd-text" [matTooltip]="text(c, line.row)" [matTooltipDisabled]="true" matTooltipShowDelay="500" #tip="matTooltip" (mouseenter)="tip.disabled = !isTruncated($event)" (mouseleave)="tip.disabled = true">{{ text(c, line.row) }}</span>
+                      <span class="pd-text" [attr.data-full-text]="text(c, line.row)" [matTooltip]="text(c, line.row)" [matTooltipDisabled]="true" matTooltipShowDelay="500" #tip="matTooltip" (mouseenter)="tip.disabled = !isTruncated($event)" (mouseleave)="tip.disabled = true">{{ text(c, line.row) }}</span>
                     }
                   }
                 }
