@@ -45,7 +45,7 @@ fn systemd_quote(s: &str) -> String {
 /// The systemd user unit: restarted whenever it exits, low priority, started with the user's manager.
 pub fn systemd_unit(exe: &Path) -> String {
     format!(
-        "[Unit]\nDescription=Dyno agent (measures and keeps your PC's history)\nDocumentation=https://dev.decryptology.net/decryp7/dyno\n\n\
+        "[Unit]\nDescription=Dyno agent (measures and keeps your computer's history)\nDocumentation=https://dev.decryptology.net/decryp7/dyno\n\n\
 [Service]\nType=simple\nExecStart={exe} run\nRestart=always\nRestartSec=5\nNice=10\nCPUWeight=20\nIOSchedulingClass=idle\nMemoryHigh=256M\n\n\
 [Install]\nWantedBy=default.target\n",
         exe = systemd_quote(&exe.to_string_lossy())

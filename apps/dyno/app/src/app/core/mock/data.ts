@@ -28,14 +28,14 @@ export function healthReasons(): HealthReason[] {
     {
       id: 'uptime',
       title: 'Not restarted for 12 days',
-      detail: 'Windows installed an update that finishes on restart, and long uptimes let memory fragment.',
+      detail: 'macOS installed an update that finishes on restart, and long uptimes let memory fragment.',
       impact: 6,
       severity: 'warning',
     },
     {
       id: 'startup-apps',
       title: '9 apps start at sign-in',
-      detail: 'Teams, Docker Desktop and Spotify have high impact: the desktop takes 48 s to settle after sign-in.',
+      detail: 'Teams, VirtualBox and Spotify have high impact: the desktop takes 48 s to settle after sign-in.',
       impact: 4,
       severity: 'info',
     },
@@ -77,7 +77,7 @@ export function demoStartup(os: 'windows' | 'macos' | 'linux' = 'windows'): Star
     const home = mac ? '/Users/alex' : '/home/alex';
     return [
       e('teams', 'Microsoft Teams', mac ? '/Applications/Microsoft Teams.app/Contents/MacOS/MSTeams --background' : '/opt/teams/teams --background', mac ? 'loginItem' : agent, 'Microsoft Corporation', 9.8, 310, 'high'),
-      e('docker', 'Docker Desktop', mac ? '/Applications/Docker.app/Contents/MacOS/Docker Desktop --autostart' : '/opt/docker-desktop/bin/docker-desktop --autostart', mac ? 'loginItem' : agent, 'Docker Inc.', 14.2, 520, 'high'),
+      e('docker', 'VirtualBox', mac ? '/Applications/VirtualBox.app/Contents/MacOS/VirtualBox --autostart' : '/opt/VirtualBox/VirtualBox --autostart', mac ? 'loginItem' : agent, 'Oracle Corporation', 14.2, 520, 'high'),
       e('spotify', 'Spotify', mac ? '/Applications/Spotify.app/Contents/MacOS/Spotify --minimized' : '/usr/bin/spotify --minimized', mac ? 'loginItem' : agent, 'Spotify AB', 4.1, 180, 'medium'),
       e('onedrive', 'Microsoft OneDrive', mac ? '/Applications/OneDrive.app/Contents/MacOS/OneDrive --background' : '/usr/bin/onedrive --monitor', mac ? 'userLaunchAgent' : agent, 'Microsoft Corporation', 3.2, 140, 'medium'),
       e('slack', 'Slack', mac ? '/Applications/Slack.app/Contents/MacOS/Slack --startup' : '/usr/bin/slack --startup', mac ? 'loginItem' : agent, 'Slack Technologies, LLC', 2.6, 96, 'low'),
@@ -89,7 +89,7 @@ export function demoStartup(os: 'windows' | 'macos' | 'linux' = 'windows'): Star
   }
   return [
     e('teams', 'Microsoft Teams', '"C:\\Program Files\\WindowsApps\\MSTeams\\ms-teams.exe" --process-start-reason=StartupTask', 'userRunKey', 'Microsoft Corporation', 9.8, 310, 'high'),
-    e('docker', 'Docker Desktop', '"C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe" -Autostart', 'userRunKey', 'Docker Inc.', 14.2, 520, 'high'),
+    e('docker', 'VirtualBox', '"C:\\Program Files\\Oracle\\VirtualBox\\VirtualBox.exe" -Autostart', 'userRunKey', 'Oracle Corporation', 14.2, 520, 'high'),
     e('spotify', 'Spotify', '"C:\\Users\\alex\\AppData\\Roaming\\Spotify\\Spotify.exe" --autostart --minimized', 'userRunKey', 'Spotify AB', 4.1, 180, 'medium'),
     e('onedrive', 'Microsoft OneDrive', '"C:\\Program Files\\Microsoft OneDrive\\OneDrive.exe" /background', 'userRunKey', 'Microsoft Corporation', 3.2, 140, 'medium'),
     e('slack', 'Slack', '"C:\\Users\\alex\\AppData\\Local\\slack\\slack.exe" --startup', 'userRunKey', 'Slack Technologies, LLC', 2.6, 96, 'low', 'enabled'),
@@ -135,10 +135,10 @@ export function demoAnomalies(now: number): Anomaly[] {
     {
       id: 'docker-restarts',
       kind: 'restartLoop',
-      app: 'Docker Desktop',
+      app: 'VirtualBox',
       since: now - 2 * HOUR,
-      title: 'Docker backend restarted 6 times in 2 hours',
-      explanation: 'com.docker.backend.exe crashes and restarts. Its last crash dump points at the WSL integration.',
+      title: 'VirtualBox service restarted 6 times in 2 hours',
+      explanation: 'VBoxSVC.exe crashes and restarts. Its last crash dump points at the virtual machine it manages.',
       evidence: [
         { label: 'Restarts', value: '6 in 2 h' },
         { label: 'Last', value: '52 min ago' },
@@ -150,9 +150,9 @@ export function demoAnomalies(now: number): Anomaly[] {
 
 export function demoAlerts(now: number): Alert[] {
   return [
-    { id: 'al-6', at: now - 52 * MIN, kind: 'crashLoop', severity: 'warning', title: 'Docker backend keeps restarting', detail: '6 restarts in 2 hours.' },
+    { id: 'al-6', at: now - 52 * MIN, kind: 'crashLoop', severity: 'warning', title: 'VirtualBox service keeps restarting', detail: '6 restarts in 2 hours.' },
     { id: 'al-5', at: now - 3 * HOUR, kind: 'longHighCpu', severity: 'info', title: 'rustc.exe used over 50% CPU for 12 minutes', detail: 'It stayed busy for a long time.' },
-    { id: 'al-4', at: now - 27 * HOUR, kind: 'memoryPressure', severity: 'warning', title: 'Memory pressure high', detail: 'Commit reached 92% of the limit while Docker and two browsers were open.' },
+    { id: 'al-4', at: now - 27 * HOUR, kind: 'memoryPressure', severity: 'warning', title: 'Memory pressure high', detail: 'Commit reached 92% of the limit while VirtualBox and two browsers were open.' },
     { id: 'al-3', at: now - 2 * DAY - 4 * HOUR, kind: 'lowDisk', severity: 'warning', title: 'Drive C: below 25% free', detail: '210 GB free of 953 GB.' },
     { id: 'al-2', at: now - 4 * DAY, kind: 'overheating', severity: 'critical', title: 'CPU reached 98 °C', detail: 'Thermal throttling for 3 minutes during a build with the lid closed.' },
     { id: 'al-1', at: now - 6 * DAY, kind: 'longHighCpu', severity: 'info', title: 'MsMpEng.exe used 25% CPU for 9 minutes', detail: 'A scheduled Defender scan.' },
@@ -163,7 +163,7 @@ export function demoActivity(now: number): ActivityEntry[] {
   const a = (id: string, ago: number, kind: ActivityEntry['kind'], title: string, detail: string): ActivityEntry => ({ id, at: now - ago, kind, title, detail });
   return [
     a('act-4', 26 * HOUR, 'alert', 'Memory pressure high', 'Commit reached 92% of the limit'),
-    a('act-2', 3 * DAY, 'alert', 'Docker backend keeps restarting', '6 restarts in 2 hours.'),
+    a('act-2', 3 * DAY, 'alert', 'VirtualBox service keeps restarting', '6 restarts in 2 hours.'),
     a('act-1', 12 * DAY, 'system', 'Dyno started', 'Sampling every 1 s, processes every 2 s'),
   ];
 }

@@ -13,7 +13,7 @@ import { MatTooltip } from '@angular/material/tooltip';
 import { FullTextTip } from '../../shared/full-text-tip';
 
 /**
- * "Why is my PC slow?" in full: the engine's likeliest causes with what was measured, the apps behind each, pages to look
+ * "Why is my computer slow?" in full: the engine's likeliest causes with what was measured, the apps behind each, pages to look
  * closer, and hints in words. Dyno only looks: nothing here changes the computer.
  */
 @Component({
@@ -24,7 +24,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
     <div class="page">
       <header class="page-head">
         <div class="titles">
-          <h1>Why is my PC slow?</h1>
+          <h1>Why is my computer slow?</h1>
           <p>Dyno weighs CPU, memory, disk, heat and background work together. It only looks; Dyno changes nothing on your computer.</p>
         </div>
         <button type="button" matButton="outlined" [disabled]="!shown()" (click)="copy()"><dy-icon name="copy" /> Copy as text</button>

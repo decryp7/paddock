@@ -8,7 +8,7 @@ import { LiveStore } from '../../state/live.store';
 import { MatButton } from '@angular/material/button';
 
 /**
- * The home screen, made of widgets: the default layout shows how the PC is doing right now, what is using it, how it
+ * The home screen, made of widgets: the default layout shows how the computer is doing right now, what is using it, how it
  * got here and what Dyno noticed; the user edits, saves and resets it. Every widget owns its loading, empty and error
  * state, so one failed request never blanks the page.
  */
@@ -23,7 +23,7 @@ import { MatButton } from '@angular/material/button';
           <h1>Dashboard</h1>
           <p class="num">{{ subtitle() }}</p>
         </div>
-        <a matButton="outlined" routerLink="/processes"><dy-icon name="processes" /> Open task manager</a>
+        <a matButton="outlined" routerLink="/processes"><dy-icon name="processes" /> Open Processes</a>
       </header>
 
       <dy-normal-card />

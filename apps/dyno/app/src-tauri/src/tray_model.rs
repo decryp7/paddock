@@ -308,7 +308,7 @@ impl TrayItems {
         let Some(m) = self.measure(u, &spec.metric) else {
             return Frame {
                 icon: tray::render_meter(0.0, size, dark),
-                tooltip: format!("Dyno — {name} is not available on this PC"),
+                tooltip: format!("Dyno — {name} is not available on this computer"),
             };
         };
         let history = &mut self.state[i].history;

@@ -29,7 +29,7 @@ const NEVER = [
           <p>A zip for a bug report. Made only when you ask, saved where you choose, never sent anywhere.</p>
         </div>
         <button type="button" matButton="filled" [disabled]="store.saving() || !store.preview()" (click)="store.save()">
-          <dy-icon name="file" />{{ store.saving() ? 'Saving…' : 'Save bundle...' }}
+          <dy-icon name="file" />{{ store.saving() ? 'Saving…' : 'Save bundle…' }}
         </button>
       </header>
 

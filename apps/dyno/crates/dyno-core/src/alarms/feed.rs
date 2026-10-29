@@ -73,7 +73,7 @@ pub struct Observation {
 impl Observation {
     /// The same observation with the person's own name for the rule in its title.
     pub fn titled(mut self, name: &str) -> Observation {
-        self.title = format!("{name} is past its limit");
+        self.title = format!("{name} is over its limit");
         self
     }
 
@@ -154,7 +154,7 @@ pub fn from_threshold(name: &str, metric: Metric, severity: Severity, value: f64
         name: name.into(),
         subject: String::new(),
         severity,
-        title: format!("{name} is past its limit"),
+        title: format!("{name} is over its limit"),
         detail: format!("The value is {value:.1}; the limit is {limit:.1}."),
         value: Some(value),
         metric: Some(metric),

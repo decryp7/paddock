@@ -20,9 +20,9 @@ export function demoAlarms(now: number): Alarm[] {
   } satisfies Partial<Alarm>;
   return [
     { ...base, id: 7, rule: 'network:newExposedListener', key: 'network:newExposedListener:node:3000', severity: 'warning', state: 'active', title: 'node started listening on TCP port 3000', detail: 'On every network interface: reachable from the network unless a firewall blocks it.', firstSeen: now - 4 * MIN, lastSeen: now - 4 * MIN, repeatCount: 1 },
-    { ...base, id: 6, rule: 'threshold:gpu-limit', key: 'threshold:gpu-limit', severity: 'warning', state: 'active', title: 'GPU limit is past its limit', detail: 'The value is 97.0; the limit is 90.0.', firstSeen: now - 22 * MIN, lastSeen: now - 1 * MIN, repeatCount: 14, currentValue: 97, metric: 'gpuLoad' as Alarm['metric'] },
+    { ...base, id: 6, rule: 'threshold:gpu-limit', key: 'threshold:gpu-limit', severity: 'warning', state: 'active', title: 'GPU load is over its limit', detail: 'The value is 97.0; the limit is 90.0.', firstSeen: now - 22 * MIN, lastSeen: now - 1 * MIN, repeatCount: 14, currentValue: 97, metric: 'gpuLoad' as Alarm['metric'] },
     { ...base, id: 5, rule: 'alert:lowDisk', key: 'alert:lowDisk:Macintosh HD', severity: 'warning', state: 'acknowledged', title: 'Macintosh HD is 78% full', detail: '210 GB free of 953 GB.', firstSeen: now - 3 * HOUR, lastSeen: now - 40 * MIN, repeatCount: 3, acknowledgedAt: now - 2 * HOUR, notes: [{ at: now - 2 * HOUR, text: 'Waiting for the Xcode caches to be cleaned.' }], metric: 'diskFree' as Alarm['metric'] },
-    { ...base, id: 4, rule: 'alert:crashLoop', key: 'alert:crashLoop:Docker backend keeps restarting', severity: 'critical', state: 'clearedUnacknowledged', title: 'Docker backend keeps restarting', detail: '6 restarts in 2 hours.', firstSeen: now - 5 * HOUR, lastSeen: now - 3 * HOUR, repeatCount: 6, clearedAt: now - 3 * HOUR },
+    { ...base, id: 4, rule: 'alert:crashLoop', key: 'alert:crashLoop:VirtualBox service keeps restarting', severity: 'critical', state: 'clearedUnacknowledged', title: 'VirtualBox service keeps restarting', detail: '6 restarts in 2 hours.', firstSeen: now - 5 * HOUR, lastSeen: now - 3 * HOUR, repeatCount: 6, clearedAt: now - 3 * HOUR },
     { ...base, id: 3, rule: 'alert:longHighCpu', key: 'alert:longHighCpu:rustc', severity: 'info', state: 'active', title: 'rustc has used over 40% CPU for 12 minutes', detail: 'A long build.', firstSeen: now - 50 * MIN, lastSeen: now - 12 * MIN, repeatCount: 2, shelved: { until: now + 40 * MIN } },
     { ...base, id: 2, rule: 'alert:overheating', key: 'alert:overheating:CPU', severity: 'critical', state: 'cleared', title: 'CPU reached 98 °C', detail: 'Thermal throttling for 3 minutes during a build with the lid closed.', firstSeen: now - 26 * HOUR, lastSeen: now - 26 * HOUR, repeatCount: 1, acknowledgedAt: now - 25 * HOUR, clearedAt: now - 25.5 * HOUR },
   ];
@@ -74,7 +74,7 @@ export function demoHistory(alarms: readonly Alarm[]): AlarmChange[] {
 /** Ten minutes of one-second samples ending at `at`, with a CPU burst in the middle (a build) so a capture has a story. */
 export function recorderSamples(at: number, seconds = 600): RecorderSample[] {
   const out: RecorderSample[] = [];
-  const total = 24 * GB;
+  const total = 48 * GB;
   for (let i = 0; i < seconds; i++) {
     const t = (at / 1000) - (seconds - i);
     const burst = i > seconds * 0.45 && i < seconds * 0.8 ? 1 : 0;
@@ -101,7 +101,7 @@ export function recorderSamples(at: number, seconds = 600): RecorderSample[] {
 
 export function demoSnapshotInfos(now: number): RecorderSnapshotInfo[] {
   return [
-    { id: 3, at: now - 22 * MIN, reason: { alarm: { alarmId: 6, title: 'GPU limit is past its limit' } }, bytes: 412_000, samples: 600 },
+    { id: 3, at: now - 22 * MIN, reason: { alarm: { alarmId: 6, title: 'GPU load is over its limit' } }, bytes: 412_000, samples: 600 },
     { id: 2, at: now - 3 * HOUR, reason: 'manual', bytes: 398_000, samples: 600 },
     { id: 1, at: now - 26 * HOUR, reason: { alarm: { alarmId: 2, title: 'CPU reached 98 °C' } }, bytes: 405_000, samples: 600 },
   ];

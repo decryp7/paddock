@@ -127,7 +127,7 @@ test.describe('command palette', () => {
     await pressMod(page, 'Mod+Shift+P');
     await input(page).fill('> why slow run again');
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('heading', { level: 1, name: 'Why is my PC slow?' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Why is my computer slow?' })).toBeVisible();
     await expect(page.locator('#pd-main')).toBeFocused();
   });
 });
@@ -513,14 +513,14 @@ test.describe('network', () => {
   test('dashboard: "Is this normal?" lists only what is unusual, with the current and the usual value', async ({ page }) => {
     await page.goto(url('/'));
     const card = page.getByRole('region', { name: 'Is this normal?' });
-    await expect(card.getByText('Higher than usual for Tuesday mornings').first()).toBeVisible();
+    await expect(card.getByText('Higher than usual for Thursday afternoons').first()).toBeVisible();
     await expect(card.getByText('71% now · usually 14%')).toBeVisible();
     await expect(card.getByText(/^Usual for/)).toHaveCount(0);
   });
 
   test('dashboard: ?hw=learning shows one quiet line while Dyno learns', async ({ page }) => {
     await page.goto(url('/', '&hw=learning'));
-    await expect(page.getByText('Learning what is normal for this PC: day 3 of 7')).toBeVisible();
+    await expect(page.getByText('Learning what is normal for this computer: day 3 of 7')).toBeVisible();
     await expect(page.getByRole('region', { name: 'Is this normal?' }).getByRole('listitem')).toHaveCount(0);
   });
 
@@ -737,7 +737,7 @@ test.describe('extras', () => {
     await expect(page.getByRole('grid', { name: 'Recent wakes' })).toContainText('Lid open');
     await page.getByRole('tab', { name: 'Boot' }).click();
     await expect(page.getByRole('region', { name: 'Last start-up' })).toContainText('47.2 s');
-    await expect(page.getByRole('grid', { name: 'What slowed start-up' })).toContainText('Docker Desktop');
+    await expect(page.getByRole('grid', { name: 'What slowed start-up' })).toContainText('VirtualBox');
     await page.getByRole('tab', { name: 'Apps' }).click();
     await expect(page.getByRole('grid', { name: 'Network and energy per app' })).toContainText('Google Chrome');
     await page.getByRole('tab', { name: 'GPU' }).click();
@@ -753,7 +753,7 @@ test.describe('extras', () => {
     await page.goto(url('/extras', '').replace('#/extras', '#/extras?tab=inventory'));
     await page.getByRole('button', { name: /Export report/ }).click();
     await page.getByRole('menuitem', { name: /Markdown/ }).click();
-    await expect(page.getByText('/Users/sam/Documents/dyno-inventory.md')).toBeVisible();
+    await expect(page.getByText('/Users/alex/Documents/dyno-inventory.md')).toBeVisible();
   });
 
   test('Maintenance windows can be edited and saved', async ({ page }) => {

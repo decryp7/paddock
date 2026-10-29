@@ -20,7 +20,7 @@ import { DiagnosisCard } from '../dashboard/diagnosis-card';
 import { EventsFeed } from '../dashboard/events-feed';
 import { ConsumersPanel, DiskTrendPanel, HistoryPanel } from '../dashboard/history-panels';
 import { CountersStore } from '../../state/counters.store';
-import { PANEL_KINDS, KIND_LABEL, metricLabel, readCounter, readMetric, seriesFor, thresholdTone } from './widget-model';
+import { PANEL_KINDS, KIND_LABEL, metricLabel, readCounter, sentenceCase, readMetric, seriesFor, thresholdTone } from './widget-model';
 import { MatTooltip } from '@angular/material/tooltip';
 
 const ICON: Record<WidgetKind, IconName> = {
@@ -183,7 +183,7 @@ export class WidgetView {
   private readonly diagnosis = inject(DiagnosisStore);
   private readonly counters = inject(CountersStore);
 
-  protected readonly title = computed(() => (this.widget().kind === 'topProcesses' ? `Top apps by ${metricLabel(this.widget().metric).toLowerCase()}` : PANEL_KINDS.includes(this.widget().kind) ? KIND_LABEL[this.widget().kind] : metricLabel(this.widget().metric)));
+  protected readonly title = computed(() => (this.widget().kind === 'topProcesses' ? `Top apps by ${sentenceCase(metricLabel(this.widget().metric))}` : PANEL_KINDS.includes(this.widget().kind) ? KIND_LABEL[this.widget().kind] : metricLabel(this.widget().metric)));
   /** The panel kinds are cards of their own (they bring header, loading and error states). */
   protected readonly ownCard = computed(() => ['cpu', 'diagnosis', 'events', 'history', 'consumers', 'diskTrend'].includes(this.widget().kind) || (this.widget().kind === 'health' && this.widget().size !== 's'));
   protected readonly icon = computed(() => ICON[this.widget().kind]);

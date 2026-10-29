@@ -8,22 +8,49 @@ import { join } from 'node:path';
  * Deterministic: the clock is frozen, the mock is a macOS laptop, the timezone and locale are fixed and motion is reduced.
  */
 // Playwright runs from the app folder; the images live in the repository's docs.
-/** Picks an option of a Material select (the list opens in an overlay on the page). */
-async function choose(page: Page, label: string, option: string | RegExp): Promise<void> {
-  await page.getByRole('combobox', { name: label }).click();
-  await page.getByRole('option', { name: option, exact: typeof option === 'string' }).click();
-}
-
-/** Opens the shell's Settings window (Mod+, on the mock's macOS) and shows Dyno's page of it. */
-async function openSettings(page: Page): Promise<void> {
-  await pressMod(page, 'Mod+Comma');
-  const dialog = page.getByRole('dialog');
-  await expect(dialog).toBeVisible();
-  await dialog.getByText('Dyno', { exact: true }).click();
-}
-
 const OUT = process.env['SCREENSHOT_DIR'] ?? join(process.cwd(), '..', 'docs', 'screenshots');
 const FROZEN = Date.UTC(2026, 9, 22, 14, 30, 0);
+
+/** The tallest a page picture gets (CSS px of content); a taller page ends on the last card that fits. */
+const MAX_CONTENT = 1300;
+
+/**
+ * Makes the window as tall as the page's content, so no card or row is cut in half: a short page ends where it ends; a long page ends
+ * on the bottom edge of the last card that fits in MAX_CONTENT (the content is scrolled inside the window, so the window is resized).
+ */
+async function fitToContent(page: Page): Promise<void> {
+  const main = page.locator('#pd-main');
+  const plan = await main.evaluate((el, max) => {
+    const chrome = window.innerHeight - el.clientHeight;
+    const top = el.getBoundingClientRect().top - el.scrollTop;
+    const cards = Array.from(el.querySelectorAll<HTMLElement>('.card, dy-tile, dy-widget, section, [class~="panel"]'))
+      .filter((c) => c.offsetParent !== null && !c.closest('mat-sidenav, [role="complementary"], .mat-mdc-select-panel'))
+      .map((c) => Math.round(c.getBoundingClientRect().bottom - top))
+      .sort((a, b) => a - b);
+    const full = el.scrollHeight;
+    const content = full <= max ? full : (cards.filter((b) => b <= max).pop() ?? max);
+    return { chrome, content, scrollable: full > el.clientHeight };
+  }, MAX_CONTENT);
+  if (!plan.scrollable) return;
+  await page.setViewportSize({ width: 1440, height: Math.round(plan.chrome + plan.content + 16) });
+  await page.clock.runFor(300);
+  await main.evaluate((el) => el.scrollTo(0, 0));
+}
+
+/** The macOS window buttons, over the top-left of the window as the native title bar draws them (the shell leaves room for them). */
+async function macWindowButtons(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const bar = document.createElement('div');
+    bar.setAttribute('aria-hidden', 'true');
+    bar.style.cssText = 'position:fixed;left:14px;top:14px;z-index:2147483647;display:flex;gap:8px;pointer-events:none';
+    for (const colour of ['#ff5f57', '#febc2e', '#28c840']) {
+      const dot = document.createElement('span');
+      dot.style.cssText = `width:12px;height:12px;border-radius:50%;background:${colour};box-shadow:inset 0 0 0 0.5px rgba(0,0,0,.25)`;
+      bar.append(dot);
+    }
+    document.body.append(bar);
+  });
+}
 
 test.use({ timezoneId: 'UTC', locale: 'en-GB', reducedMotion: 'reduce', colorScheme: 'light' });
 
@@ -34,7 +61,7 @@ async function prepare(page: Page, theme: 'dark' | 'light', mock = 'macos'): Pro
   void mock;
 }
 
-const SCREENS: { name: string; path: string; mock?: string; query?: string; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } }[] = [
+const SCREENS: { name: string; path: string; mock?: string; query?: string; latency?: number; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } }[] = [
   {
     name: 'dashboard',
     path: '/#/',
@@ -77,34 +104,10 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     },
   },
   {
-    name: 'counters-search',
-    path: '/#/counters',
-    ready: async (page) => {
-      await page.getByRole('searchbox', { name: 'Search counters' }).fill('bytes');
-      await page.clock.runFor(300);
-      await expect(page.getByRole('list', { name: 'Search results' })).toBeVisible();
-      await page.getByRole('button', { name: /Chart Bytes Received \(en0\)/ }).click();
-      await page.getByRole('button', { name: /Chart Bytes Sent \(en0\)/ }).click();
-      await page.getByRole('button', { name: /Chart Bytes Transferred \(disk0\)/ }).click();
-      await expect(page.locator('dy-chart canvas').first()).toBeVisible();
-      // No tooltip of the last click hovering over the list in the picture.
-      await page.mouse.move(2, 2);
-      await page.clock.runFor(2_500);
-    },
-  },
-  {
-    name: 'network',
-    path: '/#/network',
-    ready: async (page) => {
-      await page.getByRole('radio', { name: 'Listening' }).click();
-      await expect(page.getByRole('grid', { name: 'Listening ports' })).toBeVisible();
-    },
-  },
-  {
     name: 'network-connections',
     path: '/#/network',
     ready: async (page) => {
-      await expect(page.getByRole('grid', { name: 'Connections' })).toBeVisible();
+      await expect(page.getByRole('treegrid', { name: 'Connections' })).toBeVisible();
       await page.getByRole('row', { name: /142.250.74.46/ }).click();
       await expect(page.getByRole('complementary', { name: 'Details' })).toBeVisible();
     },
@@ -115,47 +118,9 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     ready: async (page) => void (await expect(page.getByRole('region', { name: 'Latest result' })).toBeVisible()),
   },
   {
-    name: 'benchmarks-running',
-    path: '/#/benchmarks',
-    ready: async (page) => {
-      await page.getByRole('button', { name: 'Run benchmarks' }).click();
-      await expect(page.getByRole('list', { name: 'Progress' })).toBeVisible();
-      await page.clock.runFor(1_000);
-    },
-  },
-  {
-    name: 'benchmarks-compare',
-    path: '/#/benchmarks',
-    size: { width: 1440, height: 1500 },
-    ready: async (page) => {
-      await page.getByRole('checkbox', { name: 'Select Power mode: High performance (before)' }).check();
-      await page.getByRole('checkbox', { name: 'Select Power mode: High performance (after)' }).check();
-      await page.getByRole('button', { name: 'Compare selected' }).click();
-      await expect(page.getByRole('region', { name: 'Comparison' })).toBeVisible();
-    },
-  },
-  {
     name: 'inventory',
     path: '/#/inventory',
-    mock: 'windows',
-    ready: async (page) => void (await expect(page.getByRole('img', { name: /memory slots filled/ })).toBeVisible()),
-  },
-  {
-    name: 'inventory-apple',
-    path: '/#/inventory',
     ready: async (page) => void (await expect(page.getByRole('img', { name: /Unified memory/ })).toBeVisible()),
-  },
-  { name: 'inventory-ddr5', path: '/#/inventory', mock: 'windows&inv=ddr5', ready: async (page) => void (await expect(page.getByRole('img', { name: /memory slots filled/ })).toBeVisible()) },
-  { name: 'inventory-laptop', path: '/#/inventory', mock: 'linux', ready: async (page) => void (await expect(page.getByRole('img', { name: /1 of 2 memory slots filled/ })).toBeVisible()) },
-  { name: 'inventory-soldered', path: '/#/inventory', mock: 'windows&inv=soldered', ready: async (page) => void (await expect(page.getByRole('img', { name: /Soldered memory/ })).toBeVisible()) },
-  { name: 'inventory-generic', path: '/#/inventory', mock: 'windows&inv=generic', ready: async (page) => void (await expect(page.getByRole('img', { name: /memory slots filled/ })).toBeVisible()) },
-  {
-    name: 'widgets-overview',
-    path: '/#/',
-    ready: async (page) => {
-      await expect(page.locator('dy-widget').first()).toBeVisible();
-      await page.clock.runFor(2_000);
-    },
   },
   {
     name: 'widgets-edit',
@@ -164,55 +129,6 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
       await page.getByRole('button', { name: 'Edit dashboard' }).click();
       await page.getByRole('button', { name: 'Add widget' }).click();
       await expect(page.getByRole('region', { name: 'Widget gallery' })).toBeVisible();
-      await page.clock.runFor(2_000);
-    },
-  },
-  {
-    name: 'widgets-developer',
-    path: '/#/',
-    ready: async (page) => {
-      await page.getByRole('button', { name: 'Edit dashboard' }).click();
-      await choose(page, 'Preset', 'Developer');
-      await page.clock.runFor(2_000);
-    },
-  },
-  {
-    name: 'widgets-battery',
-    path: '/#/',
-    ready: async (page) => {
-      await page.getByRole('button', { name: 'Edit dashboard' }).click();
-      await choose(page, 'Preset', 'Battery');
-      await page.clock.runFor(2_000);
-    },
-  },
-  {
-    name: 'widgets-gaming',
-    path: '/#/',
-    ready: async (page) => {
-      await page.getByRole('button', { name: 'Edit dashboard' }).click();
-      await choose(page, 'Preset', 'Gaming');
-      await page.clock.runFor(2_000);
-    },
-  },
-  {
-    name: 'settings-menu-bar',
-    path: '/#/',
-    size: { width: 1440, height: 1900 },
-    ready: async (page) => {
-      await openSettings(page);
-      const section = page.getByRole('region', { name: 'Menu bar items' });
-      await section.getByRole('button', { name: 'Add item' }).click();
-      await expect(section.getByRole('listitem')).toHaveCount(3);
-      await section.getByRole('button', { name: 'Add item' }).click();
-      await expect(section.getByRole('listitem')).toHaveCount(4);
-      await choose(page, 'Style of item 1', 'Graph and number');
-      await choose(page, 'Metric of item 2', 'Memory');
-      await choose(page, 'Style of item 2', 'Ring');
-      await choose(page, 'Metric of item 3', 'Network down');
-      await choose(page, 'Style of item 3', 'Line graph');
-      await choose(page, 'Metric of item 4', 'Temperature');
-      await choose(page, 'Style of item 4', 'Number');
-      await section.scrollIntoViewIfNeeded();
       await page.clock.runFor(2_000);
     },
   },
@@ -232,11 +148,6 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     ready: async (page) => void (await expect(page.getByRole('treegrid', { name: 'What changed' })).toBeVisible()),
   },
   {
-    name: 'extras-sleep',
-    path: '/#/extras?tab=sleep',
-    ready: async (page) => void (await expect(page.getByRole('grid', { name: 'Recent wakes' })).toBeVisible()),
-  },
-  {
     name: 'extras-boot',
     path: '/#/extras?tab=boot',
     ready: async (page) => {
@@ -251,11 +162,6 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     ready: async (page) => void (await expect(page.getByRole('grid', { name: 'Network and energy per app' })).toBeVisible()),
   },
   {
-    name: 'extras-gpu',
-    path: '/#/extras?tab=gpu',
-    ready: async (page) => void (await expect(page.getByRole('grid', { name: 'GPU use per process' })).toBeVisible()),
-  },
-  {
     name: 'extras-files',
     path: '/#/extras?tab=files',
     size: { width: 1440, height: 1320 },
@@ -264,17 +170,6 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
       await expect(page.getByRole('treegrid', { name: 'Large and duplicate files' })).toBeVisible();
     },
   },
-  {
-    name: 'extras-inventory',
-    path: '/#/extras?tab=inventory',
-    ready: async (page) => void (await expect(page.getByRole('grid', { name: 'Installed software' })).toBeVisible()),
-  },
-  {
-    name: 'extras-maintenance',
-    path: '/#/extras?tab=maintenance',
-    ready: async (page) => void (await expect(page.getByRole('region', { name: 'Maintenance windows' })).toContainText('Mon to Fri')),
-  },
-  { name: 'settings', path: '/#/', size: { width: 1440, height: 1500 }, ready: async (page) => openSettings(page) },
   { name: 'alarms', path: '/#/alarms', ready: async (page) => void (await expect(page.getByRole('button', { name: /Acknowledge all/ })).toBeVisible()) },
   {
     name: 'alarms-rules',
@@ -288,38 +183,20 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     },
   },
+  {
+    name: 'alarms-history',
+    path: '/#/alarms',
+    ready: async (page) => {
+      await page.getByRole('tab', { name: 'History' }).click();
+      await expect(page.getByRole('tab', { name: 'History', selected: true })).toBeVisible();
+      await page.mouse.move(2, 2);
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.clock.runFor(1_000);
+    },
+  },
   { name: 'recorder', path: '/#/recorder', size: { width: 1440, height: 1100 }, ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Flight recorder' })).toBeVisible()) },
   { name: 'diagnostics', path: '/#/diagnostics', ready: async (page) => void (await expect(page.getByRole('button', { name: /Save bundle/ })).toBeVisible()) },
-  {
-    name: 'web-search',
-    path: '/#/issues',
-    ready: async (page) => {
-      await page.getByRole('treegrid', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click({ button: 'right' });
-      await page.getByRole('menuitem', { name: 'Search the web…' }).click();
-      await expect(page.getByRole('dialog', { name: 'Search the web' }).getByText(/Removed from the text/)).toBeVisible();
-    },
-  },
-  {
-    name: 'hash-search',
-    path: '/#/processes',
-    ready: async (page) => {
-      await page.getByRole('radio', { name: 'All', exact: true }).click();
-      await page.getByLabel('Filter processes').fill('rustc');
-      await page.locator('[role=row][data-key^="p"]').first().click({ button: 'right' });
-      await page.getByRole('menuitem', { name: 'Search file hash on VirusTotal…' }).click();
-      await expect(page.getByRole('dialog', { name: /VirusTotal/ }).getByLabel('SHA-256 hash')).toBeVisible();
-    },
-  },
-  {
-    name: 'health-startup-filter',
-    path: '/#/health',
-    size: { width: 1440, height: 1100 },
-    ready: async (page) => {
-      await page.getByRole('checkbox', { name: /Hide system entries/ }).click();
-      await expect(page.getByText(/hidden by the filter/)).toBeVisible();
-    },
-  },
-  { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why is my PC slow?' })).toBeVisible()) },
+  { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why is my computer slow?' })).toBeVisible()) },
   {
     name: 'throttling',
     path: '/#/throttling',
@@ -329,30 +206,11 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     },
   },
   {
-    name: 'throttling-hot',
-    path: '/#/throttling',
-    query: '&hw=hot',
-    ready: async (page) => {
-      await expect(page.getByRole('heading', { name: 'Slowed down by heat: 44% slower' })).toBeVisible();
-      await expect(page.getByRole('grid').first()).toBeVisible();
-    },
-  },
-  {
     name: 'forecasts',
     path: '/#/lifespan',
     ready: async (page) => {
       await expect(page.getByText('Replace in about 23 months (17 to 31 months)')).toBeVisible();
       await expect(page.getByRole('img', { name: /Soonest/ }).first()).toBeVisible();
-    },
-  },
-  {
-    // The "Is this normal?" card sits at the top of the dashboard, so the 1440x900 view shows it whole.
-    name: 'baselines',
-    path: '/#/',
-    ready: async (page) => {
-      const card = page.getByRole('region', { name: 'Is this normal?' });
-      await expect(card.getByText('Higher than usual for Tuesday mornings').first()).toBeVisible();
-      await card.scrollIntoViewIfNeeded();
     },
   },
   {
@@ -378,6 +236,54 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
   },
   { name: 'reports', path: '/#/reports', size: { width: 1440, height: 1100 }, ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Reports', exact: true })).toBeVisible()) },
   {
+    name: 'disk-map',
+    path: '/#/disk-map',
+    ready: async (page) => {
+      await page.getByRole('button', { name: 'Scan Macintosh HD' }).click();
+      await expect(page.getByRole('button', { name: 'Rescan Macintosh HD' })).toBeVisible();
+      await expect(page.getByRole('tree', { name: 'Disk usage of Macintosh HD' })).toBeVisible();
+      await page.mouse.move(2, 2);
+      await page.clock.runFor(1_000);
+    },
+  },
+  {
+    name: 'disk-map-table',
+    path: '/#/disk-map',
+    ready: async (page) => {
+      await page.getByRole('button', { name: 'Scan Macintosh HD' }).click();
+      await expect(page.getByRole('button', { name: 'Rescan Macintosh HD' })).toBeVisible();
+      await page.getByRole('radio', { name: 'Table' }).click();
+      await expect(page.getByRole('table', { name: /Contents of Macintosh HD/ })).toBeVisible();
+      await page.mouse.move(2, 2);
+      await page.clock.runFor(1_000);
+    },
+  },
+  {
+    name: 'command-palette',
+    path: '/#/',
+    ready: async (page) => {
+      await pressMod(page, 'Mod+p');
+      await expect(page.getByRole('combobox', { name: /Type a command/ })).toBeFocused();
+      await page.clock.runFor(500);
+      await expect(page.getByRole('option').first()).toBeVisible();
+    },
+  },
+  {
+    name: 'jobs',
+    path: '/#/backup',
+    latency: 150,
+    query: '&jobsteps=6',
+    ready: async (page) => {
+      // The Jobs list is opened first: a click made while a job runs waits for it to end, so the check is started with an event.
+      await page.getByRole('button', { name: /^Jobs/ }).click();
+      await page.getByRole('button', { name: 'Check now' }).dispatchEvent('click');
+      await page.clock.runFor(1_700);
+      const jobs = page.getByRole('region', { name: 'Jobs' });
+      await expect(jobs.getByRole('button', { name: /Cancel/ })).toBeVisible();
+      await page.mouse.move(2, 2);
+    },
+  },
+  {
     name: 'tray',
     path: '/#/tray',
     size: { width: 440, height: 660 },
@@ -392,18 +298,35 @@ for (const theme of ['dark', 'light'] as const) {
     test(`${screen.name} (${theme})`, async ({ page }) => {
       if (screen.size) await page.setViewportSize(screen.size);
       await prepare(page, theme);
-      await page.goto(`${screen.path.replace('/#/', `/?latency=0&chrome=macos${screen.mock ? `&mock=${screen.mock}` : ''}${screen.query ?? ''}#/`)}`);
+      await page.goto(`${screen.path.replace('/#/', `/?latency=${screen.latency ?? 0}&chrome=macos&menu=native${screen.mock ? `&mock=${screen.mock}` : ''}${screen.query ?? ''}#/`)}`);
       await expect(page.locator('pd-shell-frame, dy-tray').first()).toBeVisible();
       await page.clock.runFor(45_000);
       await screen.ready(page);
+      if (screen.name !== 'tray') {
+        await fitToContent(page);
+        await macWindowButtons(page);
+      }
       if (screen.name === 'tray') {
-        // A desktop-like backdrop (blurred wallpaper gradient and a menu bar) so the rounded, translucent popover is visible.
+        // A desktop-like backdrop (blurred wallpaper gradient and a menu bar) so the rounded, translucent popover is visible. The
+        // tray window's root is `html.pd-tray`; the shot fails if the backdrop did not apply (a renamed root would leave it plain).
         const wall = theme === 'dark' ? 'linear-gradient(160deg, #262a33 0%, #3b414d 100%)' : 'linear-gradient(160deg, #c3c7cf 0%, #e1e3e8 100%)';
         await page.addStyleTag({
-          content: `html[data-surface='popover'] { background: ${wall} !important; }
-            html[data-surface='popover'] body { padding: 34px 40px 0 !important; }
-            body::before { content: ''; position: fixed; inset: 0 0 auto 0; height: 24px; background: rgb(${theme === 'dark' ? '20 20 24 / 55%' : '255 255 255 / 55%'}); backdrop-filter: blur(20px); z-index: 0; }`,
+          content: `html.pd-tray { background: ${wall} !important; }
+            html.pd-tray body { padding: 34px 40px 0 !important; }
+            #mac-menubar { position: fixed; inset: 0 0 auto 0; height: 24px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font: 13px -apple-system, 'Helvetica Neue', Arial, sans-serif; color: ${theme === 'dark' ? '#f2f2f5' : '#1d1d1f'}; background: rgb(${theme === 'dark' ? '20 20 24 / 55%' : '255 255 255 / 55%'}); backdrop-filter: blur(20px); z-index: 0; }
+            #mac-menubar span { margin-right: 14px; } #mac-menubar b { margin-right: 14px; } #mac-menubar .right { display: flex; align-items: center; } #mac-menubar .right span { margin: 0 0 0 14px; }`,
         });
+        await page.evaluate(() => {
+          const bar = document.createElement('div');
+          bar.id = 'mac-menubar';
+          bar.innerHTML = '<div><b>Dyno</b><span>File</span><span>View</span><span>Window</span><span>Help</span></div>'
+            + '<div class="right"><span title="Dyno" style="display:inline-flex;align-items:center;gap:4px"><svg width="26" height="12" viewBox="0 0 26 12"><polyline points="0,9 4,6 8,7 12,3 16,5 20,2 25,4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>76</span><span>Thu 22 Oct  14:30</span></div>';
+          document.body.append(bar);
+        });
+        await expect(page.locator('body')).toHaveCSS('padding-top', '34px');
+        await expect(page.locator('html')).toHaveCSS('background-image', /linear-gradient/);
+        // The sparklines have their history before the picture is taken.
+        await page.clock.runFor(45_000);
         await page.clock.runFor(500);
       }
       if (screen.name === 'tray') {
@@ -415,16 +338,15 @@ for (const theme of ['dark', 'light'] as const) {
         await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`) });
       }
       if (screen.name === 'dashboard') {
-        await page.getByRole('group', { name: 'CPU', exact: true }).getByRole('radio', { name: 'Per core' }).click();
-        await page.clock.runFor(1_000);
-        await page.getByRole('group', { name: 'CPU', exact: true }).screenshot({ path: join(OUT, `cpu-per-core-tile-${theme}.png`) });
-        await page.getByRole('group', { name: 'CPU', exact: true }).getByRole('radio', { name: 'Overall' }).click();
-      }
-      if (screen.name === 'dashboard') {
-        // The whole page, for the README and for review (the 1440x900 image only shows the top).
-        await page.setViewportSize({ width: 1440, height: 2300 });
-        await page.waitForTimeout(500);
-        await page.screenshot({ path: join(OUT, `dashboard-full-${theme}.png`) });
+        // The whole page, for the README and for review (the 1440x900 image only shows the top): the window is made as tall as the
+        // page (the page scrolls inside it), scrolled to the top, and the shot waits until nothing is left to scroll.
+        const main = page.locator('#pd-main');
+        const total = await main.evaluate((el) => window.innerHeight - el.clientHeight + el.scrollHeight);
+        await page.setViewportSize({ width: 1440, height: total });
+        await expect(async () => expect(await main.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(0)).toPass({ timeout: 10_000 });
+        await main.evaluate((el) => el.scrollTo(0, 0));
+        await page.clock.runFor(500);
+        await page.screenshot({ path: join(OUT, `dashboard-full-${theme}.png`), fullPage: true });
       }
     });
   }

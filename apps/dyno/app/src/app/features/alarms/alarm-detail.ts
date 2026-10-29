@@ -5,7 +5,7 @@ import type { Alarm, ShelveFor } from '../../core/api.types';
 import { formatCount } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { AlarmsStore } from '../../state/alarms.store';
-import { alarmSuffix, changeLabel, isShelved, needsAcknowledge, severityWord, shortTime, stateTone, stateWord } from './alarms-model';
+import { alarmSuffix, changeLabel, isShelved, needsAcknowledge, severityWord, shortTime, stateTone, stateWord, ruleLabel } from './alarms-model';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatFormField } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
@@ -26,7 +26,7 @@ import { MatMenuModule } from '@angular/material/menu';
       <p class="text">{{ alarm().detail }}</p>
       <dl>
         <dt>Severity</dt><dd>{{ severity() }}</dd>
-        <dt>Rule</dt><dd class="id">{{ alarm().rule }}</dd>
+        <dt>Rule</dt><dd class="id" [attr.title]="alarm().rule">{{ ruleName(alarm().rule) }}</dd>
         <dt>First seen</dt><dd class="num">{{ time(alarm().firstSeen) }}</dd>
         <dt>Last seen</dt><dd class="num">{{ time(alarm().lastSeen) }}</dd>
         <dt>Occurrences</dt><dd class="num">{{ count(alarm().repeatCount) }}</dd>
@@ -86,7 +86,7 @@ import { MatMenuModule } from '@angular/material/menu';
     dl { margin: 0; display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 6px var(--sp-3); font-size: var(--fs-sm); }
     dt { color: var(--text-3); }
     dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
-    .id { font: var(--fw-regular) var(--fs-sm) / 1.3 var(--font-mono); }
+    .id { font-size: var(--fs-sm); line-height: 1.3; }
     .acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-1); }
     h3 { margin: var(--sp-3) 0 0; font: var(--fw-semibold) var(--fs-base) / 1.3 var(--font-sans); }
     .note, .hist { margin: 0; font-size: var(--fs-sm); overflow-wrap: anywhere; }
@@ -100,6 +100,7 @@ import { MatMenuModule } from '@angular/material/menu';
 })
 export class AlarmDetail {
   protected readonly store = inject(AlarmsStore);
+  protected readonly ruleName = ruleLabel;
   readonly alarm = input.required<Alarm>();
   readonly now = input.required<number>();
   /** Bumped by the parent to put the cursor in the note field (from "Add note…"). */

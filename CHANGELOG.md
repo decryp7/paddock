@@ -10,6 +10,9 @@ Conventional Commits; one semver tag for the whole repo.
   WebKit on a Linux runner emulates a Mac (`devices['Desktop Safari']`), so `ControlOrMeta` pressed Ctrl where the app wanted Cmd and no
   shortcut fired (CI run 7134, Dyno's WebKit leg). `WorkbenchPalette.open` and Dyno's e2e use it.
 
+### `pd-jobs-status`: a visible heading
+- The Jobs popover has a visible heading (the popover's name, "Jobs") above the list, and the popover region is named by it (`aria-labelledby`), so a picture of it says what it is.
+
 ### `paddock-jobs`: `WalkOptions::with_modified`
 - `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
 

@@ -45,7 +45,7 @@ export const KIND_HINT: Record<WidgetKind, string> = {
   issues: 'Unusual patterns found.',
   health: 'The health score.',
   cpu: 'Load, per-core view and details.',
-  diagnosis: 'What is slowing the PC, in words.',
+  diagnosis: 'What is slowing the computer, in words.',
   events: 'Alarms and what Dyno did.',
   history: 'A chart with events marked.',
   consumers: 'Biggest consumers over a day.',
@@ -281,3 +281,8 @@ export function newTrayItem(metric: WidgetMetric, style: TrayStyleId, existing: 
 }
 
 export const bytesText = formatBytes;
+
+/** A metric label inside a sentence: lower case, except an acronym (`CPU`) which stays as it is. */
+export function sentenceCase(label: string): string {
+  return /^[A-Z]{2,}\b/.test(label) ? label : label.toLowerCase();
+}

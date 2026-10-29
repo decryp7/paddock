@@ -19,7 +19,7 @@ import { SUBJECT_ICON, SUBJECT_WORD, confidenceText, historyProgress, outcomeKin
     <div class="page">
       <header class="page-head">
         <div class="titles">
-          <h1>Disk and battery life</h1>
+          <h1>Lifespan</h1>
           <p>How long your SSD and battery are likely to last, from how they have worn so far. An estimate with a range, never a promise.</p>
         </div>
       </header>

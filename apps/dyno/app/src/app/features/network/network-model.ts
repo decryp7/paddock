@@ -16,7 +16,7 @@ export function exposureBadge(e: Exposure): { label: string; tone: 'warn' | 'ok'
     case 'allInterfaces':
       return { label: 'Exposed', tone: 'warn', hint: 'Listening on every network interface: reachable from the network unless a firewall blocks it.' };
     case 'loopback':
-      return { label: 'Loopback only', tone: 'ok', hint: 'Listening on the loopback address: only programs on this PC can connect.' };
+      return { label: 'Loopback only', tone: 'ok', hint: 'Listening on the loopback address: only programs on this computer can connect.' };
     case 'interface':
       return { label: 'One interface', tone: 'info', hint: 'Listening on one network interface address.' };
   }
@@ -55,7 +55,7 @@ const STATE_TEXT: Record<SocketState, string> = {
 
 /** Sentence-case state with a dot tone: only the meaningful ones are coloured. */
 export function stateView(s: SocketState): { text: string; tone: 'ok' | 'warn' | null } {
-  return { text: STATE_TEXT[s], tone: s === 'established' ? 'ok' : s === 'closeWait' ? 'warn' : null };
+  return { text: STATE_TEXT[s], tone: s === 'closeWait' ? 'warn' : null };
 }
 
 /** `TCP · v4`. */

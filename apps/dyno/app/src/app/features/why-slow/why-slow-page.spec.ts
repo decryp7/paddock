@@ -36,7 +36,7 @@ async function open() {
 describe('dy-why-slow-page', () => {
   it('runs the check when it opens and shows the headline, the cause, what was measured and the apps involved', async () => {
     const { el } = await open();
-    expect(el.querySelector('h1')?.textContent).toBe('Why is my PC slow?');
+    expect(el.querySelector('h1')?.textContent).toBe('Why is my computer slow?');
     expect(el.querySelector('.headline')?.textContent).toContain('Rust build');
     expect(el.querySelector('.when')?.textContent).toContain('Measured over the last 55 s');
     const cause = el.querySelector('.cause')!;
@@ -99,7 +99,7 @@ describe('dy-why-slow-page', () => {
 
   it('links the hints that open a screen and shows the others as words', async () => {
     const { el } = await open();
-    expect(el.querySelector('a[matButton="outlined"][href="/processes"]')?.textContent).toContain('Open the task manager');
+    expect(el.querySelector('a[matButton="outlined"][href="/processes"]')?.textContent).toContain('Open Processes');
     expect(el.querySelector('.wait')?.textContent).toContain('Wait for the build');
     expect(el.querySelector('a[href="/health"]')).not.toBeNull();
   });
