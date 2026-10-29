@@ -524,8 +524,11 @@ for viewer windows Sighter **ignores OS dirty rects** and uses its own **per-til
 1. Crop the viewer chrome (title bar, toolbars, scroll bars) to the content rectangle (below).
 2. Lay the tile grid on the **remote logical grid** of "Coordinates: one chain and one grid", so tiles do not shift
    when the viewer window moves.
-3. Hash a slightly quantised, downsampled copy of each tile (codec noise must not count as a change); a tile counts as
-   changed when the hash differs, confirmed by a mean-absolute-difference threshold.
+3. Hash a slightly quantised, downsampled copy of each tile (codec noise must not count as a change). A tile counts as
+   changed when its hash differs, confirmed when the largest absolute difference of any single cell of the downsampled
+   tile reaches a threshold; a mean over the whole tile must not be used, because it averages a small local change (a
+   16-point checkbox in a 640 tile moves it by about 0.14 luma units) away to nothing. The cell size (the downsample
+   grid) is chosen so that one cell is about the size of the smallest element to notice.
 4. A changed tile is re-run only after it is stable for N frames (proposal 7.6's "stable frames"), so progressive
    refinement does not trigger repeated runs.
 
@@ -587,7 +590,7 @@ The main way an app gets its model (user, 2026-10-29; proposal section 6.1):
    `Background`, built as the rule-14 pipeline of "Parallelism and cost": **decode → de-duplicate → redact → infer →
    store**, each a stage with its own progress on its own scale and Cancel (ER-17 to ER-19). Frames come through
    `paddock-video` (the shared FFmpeg runtime). **Near-duplicate frames are dropped**: a perceptual hash per frame plus
-   a mean-absolute-difference threshold, both tolerant of codec noise (the same quantised hashing as the viewer-window
+   a largest-cell-difference threshold (never a whole-frame mean), both tolerant of codec noise (the same quantised hashing as the viewer-window
    tiles). **Redaction runs before the store stage** ("Password fields and secrets, from pixels"): only redacted frames
    are written, and **the user's source video is never copied into the project**; the project keeps its path, size and
    SHA-256 (to find it again and to detect a changed file), and the frames. The infer stage runs only when the user
