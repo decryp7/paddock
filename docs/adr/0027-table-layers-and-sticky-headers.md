@@ -132,3 +132,27 @@ above are fixed wherever they occur.
   covered; such an app should give the table a `maxHeight` that fits.
 - Material's sort arrow and menu items replace the family's own chevron glyphs and CDK menus in `pd-table`; a sortable
   header's accessible name is its label (the button inside the column header), with "Sort by …" as its description.
+
+## Run-time check: expectNothingCovers
+
+The covering bug came back a third time after `expectHeaderOnTop` (grid cells over a header, a timeline tick over chips, row
+tooltips over buttons): C43 and `expectHeaderOnTop` guard one kind of cover (a sticky header), not the class. Per ER-21 the
+class gets its own run-time check, `expectNothingCovers` (and `coveredInteractive`, which returns the findings) in
+`@decryp7/paddock-e2e` (`hit-test.ts`), the run-time counterpart of C43:
+
+- **What is probed.** Every interactive element under a root: buttons, links, inputs, selects, textareas, `role` button, tab,
+  menuitem(checkbox/radio), option, checkbox, switch and slider, `[tabindex>=0]`, and an optional extra selector. Each is cut to
+  the visible rect of its scroll ancestors and the window (fully clipped elements are skipped) and asked
+  `document.elementFromPoint` at the centre and four inset points; it passes when any point reaches the element or a
+  descendant (or the label of a control). A sticky element of a scroller that has scrolled, which does not contain the
+  element, is a designed header over scrolled rows and is skipped; at rest it still counts.
+- **Inert covers.** While probing, `* { pointer-events: auto !important }` is injected (and removed in a `finally`), so a cover
+  that is painted but inert (a tooltip layer, a scrim, a pseudo-element) is caught: the user sees the control covered even if
+  the click would fall through. Material's own ripple, state layer, focus overlay and form-field outline are inert on purpose
+  and are listed in `DESIGNED_OVERLAYS`.
+- **Designed overlaps** are declared, never skipped silently: `allow: [[coverSelector, targetSelector], ...]`. A known bug
+  gets a temporary `allow` with a TODO naming the finding, removed by its fix.
+- **Where it runs.** Over every gallery section (every paddock-ui component) in both themes, Chromium and WebKit
+  (`ui/e2e/hit-test.spec.ts`, with fixture pages for an inert cover, a covered button, a sticky header over scrolled rows and an
+  allow-listed overlap); once per app main view; and in place of the ad-hoc `elementFromPoint` checks where one fits (the
+  dialog footer, the tab overflow list, the welcome screen).
