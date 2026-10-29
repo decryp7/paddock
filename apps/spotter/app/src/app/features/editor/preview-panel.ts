@@ -9,15 +9,17 @@ import { Version } from '../../shared/ui/version';
 import { Panel } from '../../shared/ui/panel';
 import { ExtractionPanel } from './extraction-panel';
 
+let nextId = 0;
+
 /** "Test this source": what the draft would find right now, with the reasons for everything it left out. */
 @Component({
   selector: 'sp-preview-panel',
   imports: [SuStatusPill, Panel, ExtractionPanel, Version],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="surface" aria-labelledby="pv-h" aria-live="polite">
+    <section class="surface" [attr.aria-labelledby]="headingId" aria-live="polite">
       <div class="head">
-        <h2 id="pv-h">Test this source</h2>
+        <h2 [id]="headingId">Test this source</h2>
         <button type="button" class="btn ghost sm" (click)="rerun.emit()" [disabled]="state().loading || !ready()">Test again</button>
       </div>
       @if (!ready()) {
@@ -123,6 +125,8 @@ import { ExtractionPanel } from './extraction-panel';
   `,
 })
 export class PreviewPanel {
+  /** One heading id per panel: the editor can hold the panel of two steps at once. */
+  protected readonly headingId = `pv-h-${nextId++}`;
   readonly state = input.required<Loadable<SourcePreview>>();
   /** The required fields are filled in. */
   readonly ready = input(true);
