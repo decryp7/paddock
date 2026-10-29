@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, e2eConsumers, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
@@ -40,11 +40,38 @@ describe('the graph of this tree', () => {
     assert.deepEqual(r.packages['apps/shell-demo/src-tauri'], ['paddock-shell-demo', 'shell-demo-agent']);
   });
 
-  test('the e2e port and build guard (imported by relative path by every app config) mark the UI half of every app', () => {
-    for (const f of ['ui/projects/paddock-e2e/src/env.ts', 'ui/projects/paddock-e2e/src/build-guard.ts']) {
+  test('a paddock-e2e module that apps import by relative path marks the UI half of exactly those apps', () => {
+    const consumers = e2eConsumers(tracked);
+    // Derived, not listed: every app config imports env.ts and build-guard.ts, and the hit-test helper is imported by the specs.
+    for (const f of ['ui/projects/paddock-e2e/src/env.ts', 'ui/projects/paddock-e2e/src/build-guard.ts', 'ui/projects/paddock-e2e/src/hit-test.ts']) {
+      const expected = consumers.get(f);
+      assert.ok(expected && expected.size > 0, `${f} has consumers`);
       const r = run(f);
-      for (const a of APPS) assert.ok(r.apps.includes(a), `${f} reaches ${a}`);
+      for (const a of expected) {
+        assert.ok(r.apps.includes(a), `${f} reaches ${a}`);
+        assert.ok(r.kinds[a].includes('ui'), `${f} reaches the UI half of ${a}`);
+      }
     }
+    for (const a of ['debrief', 'dyno', 'pitcrew', 'pitwall', 'spotter']) assert.ok(consumers.get('ui/projects/paddock-e2e/src/env.ts').has(a), `${a} imports env.ts`);
+    assert.ok(consumers.get('ui/projects/paddock-e2e/src/hit-test.ts').has('debrief'));
+  });
+
+  test('e2eConsumers reads the imports (a module, its importers, a quoted path) and ignores tests and other files', () => {
+    const files = {
+      'apps/a/app/playwright.config.ts': "import { x } from '../../../ui/projects/paddock-e2e/src/env.ts';",
+      'apps/a/app/e2e/one.spec.ts': 'import { y } from "../../../../ui/projects/paddock-e2e/src/hit-test";',
+      'apps/b/app/src/main.ts': "import '../../../ui/projects/paddock-e2e/src/env.ts';", // not e2e or config
+      'apps/b/app/e2e/two.spec.ts': "import { z } from '../../../../ui/projects/paddock-e2e/src/config.ts';",
+      'ui/projects/paddock-e2e/src/config.ts': "import { e } from './env.ts';",
+      'ui/projects/paddock-e2e/src/env.ts': '',
+      'ui/projects/paddock-e2e/src/hit-test.ts': '',
+      'ui/projects/paddock-e2e/src/hit-test.test.ts': "import './env.ts';",
+    };
+    const m = e2eConsumers(Object.keys(files), (f) => files[f]);
+    assert.deepEqual([...m.get('ui/projects/paddock-e2e/src/hit-test.ts')], ['a']);
+    assert.deepEqual([...m.get('ui/projects/paddock-e2e/src/env.ts')].sort(), ['a', 'b']);
+    assert.deepEqual([...m.get('ui/projects/paddock-e2e/src/config.ts')], ['b']);
+    assert.ok(!m.has('ui/projects/paddock-e2e/src/hit-test.test.ts'));
   });
 
   // Paddock 234f6911: a ui/ shell change broke the shell demo job, which has no npm or Cargo edge to ui/ (spike §2).

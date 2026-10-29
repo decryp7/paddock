@@ -75,10 +75,58 @@ export function appOfWorkflow(path, appNames) {
 }
 
 /**
- * Files every app's playwright.config.ts imports by relative path (the e2e port and build guard of @decryp7/paddock-e2e): no
- * npm or tsconfig edge says so, so a change to one re-runs the UI half of every app.
+ * The apps whose e2e specs or playwright config import each source file of @decryp7/paddock-e2e by relative path
+ * (`../../../ui/projects/paddock-e2e/src/<module>.ts`): no npm or tsconfig edge says so, so a change to the module (or to a
+ * module it imports) re-runs the UI half of those apps. Derived by reading the apps' e2e and config files, never a fixed list.
+ * Returns a Map from the source path (`ui/projects/paddock-e2e/src/hit-test.ts`) to the set of app names.
  */
-export const E2E_GUARD_INPUTS = /^ui\/projects\/paddock-e2e\/src\/(env|build-guard)\.ts$/;
+export function e2eConsumers(tracked, read = (f) => readFileSync(join(ROOT, f), 'utf8')) {
+  const SRC = 'ui/projects/paddock-e2e/src/';
+  const srcFiles = tracked.filter((f) => f.startsWith(SRC) && /\.(ts|mjs|js)$/.test(f) && !/\.test\.[tj]s$/.test(f));
+  const direct = new Map(); // source path -> apps importing it
+  for (const f of tracked) {
+    const m = /^apps\/([^/]+)\/(.+)$/.exec(f);
+    if (!m || !/\.(ts|mjs|js)$/.test(f) || !(/(^|\/)e2e\//.test(m[2]) || /(^|\/)playwright\.config\.[cm]?[jt]s$/.test(m[2]))) continue;
+    let text;
+    try {
+      text = read(f);
+    } catch {
+      continue;
+    }
+    for (const hit of text.matchAll(/paddock-e2e\/src\/([\w.-]+?)(?:\.(?:ts|js|mjs))?['"]/g)) {
+      const src = srcFiles.find((s) => s.slice(SRC.length).replace(/\.(ts|mjs|js)$/, '') === hit[1]);
+      if (src) direct.set(src, (direct.get(src) ?? new Set()).add(m[1]));
+    }
+  }
+  // A module imported by a module an app imports is reached through it (`./env.ts` from `./config.ts`).
+  const importers = new Map();
+  for (const f of srcFiles) {
+    let text;
+    try {
+      text = read(f);
+    } catch {
+      continue;
+    }
+    for (const hit of text.matchAll(/from '\.\/([\w.-]+?)(?:\.(?:ts|js|mjs))?'/g)) {
+      const src = srcFiles.find((s) => s.slice(SRC.length).replace(/\.(ts|mjs|js)$/, '') === hit[1]);
+      if (src) importers.set(src, (importers.get(src) ?? new Set()).add(f));
+    }
+  }
+  const out = new Map();
+  for (const f of srcFiles) {
+    const apps = new Set();
+    const seen = new Set();
+    const walk = (x) => {
+      if (seen.has(x)) return;
+      seen.add(x);
+      for (const a of direct.get(x) ?? []) apps.add(a);
+      for (const up of importers.get(x) ?? []) walk(up);
+    };
+    walk(f);
+    if (apps.size) out.set(f, apps);
+  }
+  return out;
+}
 
 /** Editor and VCS metadata: marks nothing. */
 export const META = [/(^|\/)\.gitignore$/, /^\.editorconfig$/, /(^|\/)\.DS_Store$/, /^lefthook\.yml$/];
@@ -288,7 +336,7 @@ const PROJECTS = ['crates', 'ui', 'eslint', 'conformance', 'tools', 'icons', 'ci
  * Result: { all, crates, ui, eslint, conformance, tools, icons, ciImage, paddockDev, docs, apps: [name], kinds: { app: ['rust','ui'] },
  * packages: { workspace: [crate] } } and `why` with `explain`.
  */
-export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockAfter = null, all = false, explain = false } = {}) {
+export function affected(files, { cargo, npm, apps, e2e }, { lockBefore = null, lockAfter = null, all = false, explain = false } = {}) {
   const why = new Map();
   const kinds = new Map();
   const appProjects = [...apps.keys()].map((a) => `app:${a}`);
@@ -307,6 +355,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
       kind(p, 'all');
     }
   };
+  let e2eMap = null;
   if (all) markAll('everything (no base)');
 
   for (const f of all ? [] : files) {
@@ -321,11 +370,9 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
       markAll(`global ${f}`);
       continue;
     }
-    if (E2E_GUARD_INPUTS.test(f)) {
-      for (const name of apps.keys()) {
-        mark(`app:${name}`, `e2e guard ${f}`);
-        kind(`app:${name}`, 'ui');
-      }
+    for (const name of (e2eMap ??= e2e ?? e2eConsumers(trackedFiles())).get(f) ?? []) {
+      mark(`app:${name}`, `e2e helper ${f}`);
+      kind(`app:${name}`, 'ui');
     }
     if (f === 'package-lock.json') {
       for (const ws of lockDiff(lockBefore, lockAfter)) {
@@ -587,7 +634,7 @@ async function ciRuns(env, warn) {
 /** The plan between two commits (or for a file list) of the working tree. */
 export function planFor({ base = null, head = 'HEAD', files = null, all = false, explain = false, root = ROOT }) {
   const tracked = trackedFiles(root);
-  const graph = { cargo: cargoGraph(tracked, root), npm: npmGraph(tracked, root), apps: readApps(tracked, root) };
+  const graph = { cargo: cargoGraph(tracked, root), npm: npmGraph(tracked, root), apps: readApps(tracked, root), e2e: e2eConsumers(tracked, (f) => readFileSync(join(root, f), 'utf8')) };
   let changed = files ?? [];
   let lockBefore = null;
   let lockAfter = null;
