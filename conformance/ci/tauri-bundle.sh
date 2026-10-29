@@ -74,6 +74,18 @@ if [ -n "$prepare" ]; then (cd "$root" && bash -euo pipefail -c "$prepare"); fi
   fi
 )
 
+# ADR 0032: no binary the Windows installer carries imports the VC++ runtime (a PC without the redistributable cannot start
+# it; CI runners have it, so only this check shows it). The list comes from the Tauri configuration (the app, its
+# externalBin sidecars, the .exe and .dll resources), never from the build folder, which a host runner keeps between runs.
+case ",$bundles," in
+  *,nsis,* | *,msi,*)
+    # Node on Windows reads C:/... paths, not Git Bash's /c/...
+    bin_dir="$dir/dist"
+    if command -v cygpath >/dev/null; then bin_dir="$(cygpath -m "$bin_dir")"; fi
+    node "$here/../release/windows-crt-imports.mjs" --src-tauri "$app_dir/src-tauri" --bin-dir "$bin_dir"
+    ;;
+esac
+
 rm -rf dist
 mkdir -p dist
 find "$dir/dist/bundle" -type f \( -name '*-setup.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \

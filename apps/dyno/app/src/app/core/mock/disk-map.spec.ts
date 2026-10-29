@@ -300,3 +300,44 @@ describe('the mock disk map', () => {
     expect(t.path(5, '/')).toBeNull();
   });
 });
+
+describe('the mock disk map while a scan runs', () => {
+  beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['setTimeout', 'clearTimeout', 'Date'] }));
+  afterEach(() => vi.useRealTimers());
+
+  it('never shows a level larger than what was counted, and the figures stay consistent to the end', async () => {
+    const b = make();
+    const events: DiskScanStatus[] = [];
+    b.onDiskScan((s) => events.push(s));
+    const first = await b.startDiskScan({ volume: { id: '/' } });
+    const [vol] = await b.diskVolumes();
+    const used = vol!.capacity! - vol!.free!;
+    const root = () => b.diskChildren({ scan: first.scan, node: null, offset: 0, limit: 10, minFraction: 0 });
+    let last = 0;
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersToNextTimerAsync();
+      const status = events.at(-1)!;
+      const level = await root();
+      expect(level.node.bytes).toBeLessThanOrEqual(status.progress.bytes + 5);
+      const rings = await b.diskRings({ scan: first.scan, node: null, rings: 4, minShare: 0.005, maxNodes: 1500 });
+      expect(rings.root.node.bytes).toBe(level.node.bytes);
+      expect(level.node.bytes).toBeLessThan(used);
+      expect(level.node.bytes).toBeGreaterThanOrEqual(last);
+      last = level.node.bytes;
+    }
+    const done = events.at(-1)!;
+    expect(done.state).toBe('done');
+    expect(done.progress.bytes + done.hiddenBytes!).toBe(used);
+  });
+
+  it('keeps what was counted when stopped at once, so the partial result is never empty', async () => {
+    const b = make();
+    const first = await b.startDiskScan({ volume: { id: '/' } });
+    await b.cancelDiskScan(first.scan);
+    const [status] = await b.diskScans();
+    expect(status!.progress.bytes).toBeGreaterThan(0);
+    const level = await b.diskChildren({ scan: first.scan, node: null, offset: 0, limit: 10, minFraction: 0 });
+    expect(level.children.length).toBeGreaterThan(0);
+    expect(level.node.bytes).toBeLessThanOrEqual(status!.progress.bytes + 5);
+  });
+});

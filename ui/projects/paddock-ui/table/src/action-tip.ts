@@ -6,15 +6,17 @@ const ACTION = 'button, a';
 /**
  * One tooltip for a row's cluster of icon buttons (design guide: every icon-only button has an aria-label and a tooltip). The
  * tooltip sits to the left of the whole cluster, in its own row, so it never covers an action, and its message is the
- * `aria-label` of the button the pointer is over or the keyboard is on (the same pattern as `dyFullText`). The buttons inside
+ * `aria-label` of the button the pointer is over or the keyboard is on (the same pattern as a cell's full-text tooltip). The buttons inside
  * carry no `matTooltip` of their own.
  *
+ * Part of `pd-table`: the row action cell of every table is one cluster with one tooltip.
+ *
  * ```html
- * <span class="acts" dyActionTip> <button matIconButton aria-label="Edit rule">…</button> … </span>
+ * <span class="acts" pdActionTip> <button matIconButton aria-label="Edit rule">…</button> … </span>
  * ```
  */
-@Directive({ selector: '[dyActionTip]', hostDirectives: [MatTooltip] })
-export class ActionTip {
+@Directive({ selector: '[pdActionTip]', hostDirectives: [MatTooltip] })
+export class PdActionTip {
   private readonly el = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly tip = inject(MatTooltip);
 

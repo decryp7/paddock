@@ -4,6 +4,7 @@
   "version": "1.0.2",
   "identifier": "net.decryptology.pitcrew",
   "build": {
+    "windows": { "staticVCRuntime": false },
     "frontendDist": "../dist/app/browser",
     "devUrl": "http://localhost:4200",
     "beforeDevCommand": "node ../scripts/sidecar.mjs --dev && npm run start",

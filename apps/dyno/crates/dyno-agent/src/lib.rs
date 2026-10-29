@@ -19,6 +19,7 @@ pub mod handlers_search;
 pub mod hardware;
 pub mod inventory;
 pub mod issues;
+pub mod jobs;
 pub mod netwatch;
 pub mod network;
 pub mod paths;

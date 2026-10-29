@@ -722,3 +722,44 @@ Nobody asked whether more workers or a cheaper operation would help until the nu
 any slow operation, measure both: can more threads or workers run it (bounded by the kind of work), and can each item cost
 less? Make thread counts Settings with an "Auto" default, and give long or bulk designs a "Parallelism and cost" section
 (rule 51).
+
+## Long work in an agent needs the shell's job mechanism, not a poll of our own (2026-10-29, Dyno)
+Dyno's first jobs (6c73efd75) polled the agent for their status with a runner of their own: the shell's Jobs view stayed empty,
+the pages had two mechanisms, every UI request still had a 15 s timer, and a log read could be cancelled only between logs.
+**Rule:** work that runs in another process pushes its `paddock_jobs::wire::WireSnapshot`s, the shell relays them as
+`paddock://jobs`, and the pages follow with `JobsStore` and `JobFollow`; the UI has no timer at all (the shared
+`uiTimeoutProblems` check runs over the app's sources as a test). A tool that streams its output is read line by line with
+`OnCancel` killing the child, so Cancel does not wait for the next line, and the reading happens on a thread of its own: a
+killed shell's own children keep its pipe open. Anything that waits for another read waits on a `Condvar` that Cancel also wakes.
+**Also:** a store that every dialog window shares must not ask for the shell's jobs store at construction (it sends a request the
+dialog's contract may not declare); resolve it when a job starts.
+
+## 2026-10-29: a window built inside a plugin hook deadlocks the main thread (Spotter, Dyno, Pitcrew, the demos)
+
+Spotter 1.0's release build never opened a window: the process kept running, `sample` showed the main thread waiting
+on a mutex and nothing reached the log. Symbolised (a debug build in a throwaway Tart VM), the main thread was in
+`tauri::Builder::build` → `AppManager::initialize_plugins` → the shell plugin's `setup` → the app's set-up closure →
+`paddock_window::tauri::start` → `create_main` → `WebviewManager::prepare_pending_webview` →
+`Mutex<PluginStore>::lock`. Tauri 2 holds its plugin store while it runs every plugin's `setup`, `on_event`,
+`on_page_load`, `on_window_ready` and `on_webview_ready`, and building a webview locks that store again on the same
+thread. Not VM-specific: the same deadlock reproduces on Tauri's mock runtime. Five apps had the same mistake (Spotter,
+Dyno, Pitcrew's shell branch and both demos) and the shell's run-event hook a sixth (Dock click, Finder "Open with").
+**Rule (ADR 0029):** the shell opens the start (`Builder::tray`, `Builder::launch`, `Builder::add_to`); apps never call
+`paddock_window::tauri::start`; window work a hook triggers runs after it (`after_plugin_hook`); every shared plugin
+marks its hooks with `plugin_hook_scope`, and Paddock's window builders refuse to build inside one. Each app tests its
+composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor Dyno installed a backend for the `log`
+crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
+(`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
+not by guessing at the VM.
+
+## 2026-10-30: CI runners have the VC++ runtime, so only a clean PC or an import check shows a missing one (Dyno, all apps)
+
+On a clean Windows 11 VM, Dyno 1.0's `dyno-agent.exe` exited with 0xC0000135 (`STATUS_DLL_NOT_FOUND`) until Microsoft's
+VC++ redistributable was installed: it imported `VCRUNTIME140.dll`. Every app with a sidecar shipped the same import.
+Tauri's `staticVCRuntime` covers only the main binary, and each sidecar is a crate of its own. No CI job could see it:
+the Windows runners have Visual Studio's build tools and therefore the redistributable, so every build, test, smoke
+run and installer test passed. **Rule (ADR 0032):** every Windows binary links the C runtime statically (`+crt-static`
+in the root `.cargo/config.toml`; every app sets Tauri's `staticVCRuntime` to false, because the two together do not
+link), and every Windows installer build runs `conformance/release/windows-crt-imports.mjs` over the files it ships. More
+generally, a dependency that the build machine has and a user's PC may lack (a runtime, a framework, a font, a driver)
+is checked on the artifact, with an import or bundle check, or on a clean machine, never inferred from a green CI.

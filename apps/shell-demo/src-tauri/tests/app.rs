@@ -755,3 +755,55 @@ fn the_agent_carries_the_apps_version_and_is_bundled_next_to_it() {
             .contains("sidecar.mjs")
     );
 }
+
+/// The demo's start as `run` composes it (rule 43), on the mock runtime with a headless tray: the tray and the main window
+/// open, after every plugin is set up (a window built inside a plugin hook deadlocks the start).
+#[test]
+fn the_start_opens_the_tray_and_the_main_window() {
+    use paddock_shell::testing::{Started, start};
+    let dir = tempfile::tempdir().unwrap();
+    let place = Place::Test {
+        dir: dir.path().to_path_buf(),
+    };
+    let started = start(move || composed(place, paddock_window::launch::LaunchArgs::default()));
+    assert_eq!(
+        started,
+        Ok(Started {
+            main_window: true,
+            tray: true
+        })
+    );
+}
+
+/// Started at log-in (`--hidden`) with a tray: no window.
+#[test]
+fn a_hidden_start_stays_in_the_tray() {
+    use paddock_shell::testing::{Started, start};
+    let dir = tempfile::tempdir().unwrap();
+    let place = Place::Test {
+        dir: dir.path().to_path_buf(),
+    };
+    let launch = paddock_window::launch::LaunchArgs {
+        hidden: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        start(move || composed(place, launch)),
+        Ok(Started {
+            main_window: false,
+            tray: true
+        })
+    );
+}
+
+fn composed(
+    place: Place,
+    launch: paddock_window::launch::LaunchArgs,
+) -> tauri::Builder<MockRuntime> {
+    paddock_shell_demo::app(
+        mock_builder(),
+        shell(place),
+        launch,
+        paddock_window::tauri::HeadlessTray,
+    )
+}

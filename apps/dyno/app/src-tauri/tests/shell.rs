@@ -14,6 +14,7 @@ fn builder() -> paddock_shell::Builder<tauri::test::MockRuntime> {
             dir: dir.path().to_path_buf(),
         },
         &Hub::default(),
+        std::sync::Arc::new(dyno_app_lib::shell::NoPixels),
     )
 }
 
@@ -217,4 +218,51 @@ fn the_update_feed_is_the_release_the_workflow_publishes_latest_json_on() {
         dyno_app_lib::UPDATE_FEED,
         format!("https://dev.decryptology.net/decryp7/paddock/releases/download/{tag}/latest.json")
     );
+}
+
+/// Dyno's start as `run` composes it (rule 43), on the mock runtime with a headless tray: the tray and the main window
+/// open, after every plugin is set up (a window built inside a plugin hook deadlocked Dyno's start).
+#[test]
+fn the_start_opens_the_tray_and_the_main_window() {
+    use paddock_shell::testing::{start, Started};
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().to_path_buf();
+    assert_eq!(
+        start(move || composed(&data, paddock_window::launch::LaunchArgs::default())),
+        Ok(Started {
+            main_window: true,
+            tray: true
+        })
+    );
+    assert!(dir.path().join("data").is_dir(), "the agent link started, in the test's folder");
+}
+
+/// Started at log-in (`--hidden`) with a tray: Dyno stays in the tray without a window.
+#[test]
+fn a_hidden_start_stays_in_the_tray() {
+    use paddock_shell::testing::{start, Started};
+    let launch = paddock_window::launch::LaunchArgs {
+        hidden: true,
+        ..Default::default()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().to_path_buf();
+    assert_eq!(
+        start(move || composed(&data, launch)),
+        Ok(Started {
+            main_window: false,
+            tray: true
+        })
+    );
+}
+
+/// Dyno as `run` composes it, the agent link included (its files in `dir`, no agent process, no tray icons), without the
+/// OS plugins.
+fn composed(dir: &std::path::Path, launch: paddock_window::launch::LaunchArgs) -> tauri::Builder<tauri::test::MockRuntime> {
+    let shell = shell(
+        Place::Test { dir: dir.to_path_buf() },
+        &Hub::default(),
+        std::sync::Arc::new(dyno_app_lib::shell::NoPixels),
+    );
+    dyno_app_lib::app(tauri::test::mock_builder(), shell, launch, paddock_window::tauri::HeadlessTray)
 }

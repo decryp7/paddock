@@ -276,3 +276,75 @@ fn a_bad_first_run_step_fails_the_start_naming_the_checklist() {
     };
     assert!(err.contains("set-up checklist"), "{err}");
 }
+
+/// Waits until the work deferred so far has run (the deferred work runs in order, so a marker queued last arrives
+/// after it; a hang guard only lost work reaches), then checks the main window exists.
+#[cfg(target_os = "macos")]
+fn wait_for_main(app: &tauri::App<MockRuntime>) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    paddock_window::tauri::after_plugin_hook(app.handle(), move |_| {
+        let _ = tx.send(());
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the deferred work ran");
+    assert!(
+        app.get_webview_window("main").is_some(),
+        "the main window opened"
+    );
+}
+
+/// A start that cannot open its window ends the app through the window layer's exit (code 1), never a panic; a start
+/// that worked ends nothing.
+#[test]
+fn a_start_that_cannot_open_its_window_exits_with_code_1() {
+    let exits = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = exits.clone();
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .windows(move |_| {
+            Windows::builder(WindowConfig::new("Shell Demo"))
+                .exit_app(move |_, code| seen.lock().unwrap().push(code))
+                .build()
+        }));
+    started(app.handle(), Ok(()));
+    assert!(exits.lock().unwrap().is_empty());
+    started(
+        app.handle(),
+        Err(WindowError::new(
+            paddock_window::WindowErrorCode::Failed,
+            "no screen",
+        )),
+    );
+    assert_eq!(*exits.lock().unwrap(), [1]);
+}
+
+/// A Dock click with no window open (macOS) opens the main window after the run-event hook, not inside it (Tauri holds
+/// its plugin store there).
+#[cfg(target_os = "macos")]
+#[test]
+fn a_dock_click_with_no_window_opens_the_main_window_after_the_hook() {
+    // `RunEvent::Reopen` cannot be built outside Tauri (non-exhaustive): its branch calls this.
+    let app = app(shell());
+    let _scope = paddock_window::tauri::plugin_hook_scope();
+    reopen_after_hook(app.handle());
+    wait_for_main(&app);
+}
+
+/// A file opened from Finder with no window open (macOS) is handed to the window layer after the hook.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_file_opened_from_finder_opens_the_main_window_after_the_hook() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("a.log");
+    std::fs::write(&file, "x").unwrap();
+    let app = app(shell());
+    let _scope = paddock_window::tauri::plugin_hook_scope();
+    on_run_event(
+        app.handle(),
+        &RunEvent::Opened {
+            urls: vec![tauri::Url::from_file_path(&file).unwrap()],
+        },
+    );
+    wait_for_main(&app);
+}

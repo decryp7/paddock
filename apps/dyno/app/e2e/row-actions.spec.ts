@@ -48,34 +48,34 @@ test.describe('row-action tooltips', () => {
     await checkCluster(page, results, 'counters search results');
     for (const n of [/^Chart Bytes Received \(en0\)/, /^Chart Bytes Sent \(en0\)/]) await results.getByRole('button', { name: n }).click();
     await page.mouse.move(0, 0);
-    await checkCluster(page, page.getByRole('table', { name: 'Charted counters' }), 'counters charted table');
+    await checkCluster(page, page.getByRole('grid', { name: 'Charted counters' }), 'counters charted table');
     await checkCluster(page, page.getByRole('list', { name: 'Pinned counters' }), 'counters pinned list');
   });
 
   test('alarms: active rows and custom rules', async ({ page }) => {
     await page.goto(url('/alarms'));
     await expect(page.getByRole('button', { name: /Acknowledge all/ })).toBeVisible();
-    await checkCluster(page, page.locator('.grid').first(), 'alarms active');
+    await checkCluster(page, page.getByRole('grid', { name: 'Open alarms' }), 'alarms active');
     await page.getByRole('tab', { name: 'Rules' }).click();
-    await checkCluster(page, page.getByRole('table', { name: 'Custom alert rules' }), 'custom rules');
+    await checkCluster(page, page.getByRole('grid', { name: 'Custom alert rules' }), 'custom rules');
   });
 
   test('network: connections and listeners', async ({ page }) => {
     await page.goto(url('/network'));
-    const grid = page.getByRole('grid', { name: 'Connections' });
+    const grid = page.getByRole('treegrid', { name: 'Connections' });
     await expect(grid.getByRole('row', { name: /Google Chrome/ }).first()).toBeVisible();
     await checkCluster(page, grid, 'network connections');
     await page.getByRole('radio', { name: 'Listening' }).click();
-    await checkCluster(page, page.getByRole('grid', { name: 'Listening ports' }), 'network listeners');
+    await checkCluster(page, page.getByRole('treegrid', { name: 'Listening ports' }), 'network listeners');
   });
 
   test('issues, backup health and maintenance windows', async ({ page }) => {
     await page.goto(url('/issues'));
-    const issues = page.getByRole('table', { name: 'Issues', exact: true });
+    const issues = page.getByRole('treegrid', { name: 'Issues', exact: true });
     await issues.getByRole('row', { name: /Safari/ }).first().click();
     await checkCluster(page, issues, 'issues');
     await page.goto(url('/backup'));
-    await checkCluster(page, page.getByRole('table', { name: 'Backup tools' }), 'backup health');
+    await checkCluster(page, page.getByRole('grid', { name: 'Backup tools' }), 'backup health');
     await page.goto(url('/extras?tab=maintenance'));
     await checkCluster(page, page.getByRole('list', { name: 'Windows' }), 'maintenance windows');
   });

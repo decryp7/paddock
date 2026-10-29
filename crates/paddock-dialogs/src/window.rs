@@ -152,6 +152,9 @@ pub enum DialogErrorCode {
     NotReady,
     /// The window system refused (creating, sizing or closing the window).
     Failed,
+    /// Asked for inside a Tauri plugin hook, where building a webview would deadlock (a wiring bug: open dialogs from
+    /// commands, events or after the hook).
+    InsidePluginHook,
 }
 
 /// A failed dialog command: what the UI receives as the command's error (`code`, `message`, `retryable`).

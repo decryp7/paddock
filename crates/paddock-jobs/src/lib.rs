@@ -10,6 +10,7 @@
 //! * [`journal`] is the activity journal (a bounded, persisted log of what the app did, with undo states).
 //! * [`schedule`] is the family's schedules (every N, times of day, cron; zones, DST, catch-up) and pause windows.
 //! * [`time`] is the family's clock port ([`Clock`], [`SystemClock`], [`FakeClock`]), deadlines and restart back-off.
+//! * [`wire`] is the postcard-safe form of a snapshot, for apps whose jobs run in an agent process and are relayed to the UI.
 //! * [`CancelToken`] is checked cooperatively; [`par_walk`], [`par_map_ordered`], [`pipeline_ordered`] and [`HashingWriter`] honour it
 //!   within [`CANCEL_CHECK_ITEMS`] items or [`CHUNK`] bytes.
 
@@ -31,6 +32,7 @@ pub mod tauri;
 pub mod tauri_activity;
 pub mod time;
 mod walk;
+pub mod wire;
 mod workers;
 
 pub use cancel::{CancelReason, CancelToken, Cancelled, OnCancel};

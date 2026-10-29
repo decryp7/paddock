@@ -655,6 +655,44 @@ describe('contracts', () => {
     assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /"\$RUNNER_OS" != Windows \] \|\| \[ "\$WINDOWS_CLIPPY" = true \]; then step cargo clippy/);
   });
 
+  test('notices: an app with a `notices` block checks its THIRD_PARTY_NOTICES.md on the Linux leg that runs Rust or UI, and only there', () => {
+    for (const [name, app] of graph.apps) {
+      if (!app.notices) continue;
+      assert.ok(app.notices.name && Array.isArray(app.notices.manifests), `${name}: notices needs a name and its Cargo manifests`);
+    }
+    const pitwall = graph.apps.get('pitwall');
+    const legsOf = () => matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph).filter((l) => l.app === 'pitwall');
+    assert.ok(legsOf().every((l) => l.notices === 'false'), 'no block, no check');
+    pitwall.notices = { name: 'Pitwall', manifests: [] };
+    try {
+      const legs = legsOf();
+      assert.ok(legs.length > 1, 'Pitwall has host legs too');
+      for (const l of legs) assert.equal(l.notices, l.os === LINUX ? 'true' : 'false', l.os);
+    } finally {
+      delete pitwall.notices;
+    }
+    assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /scripts\/notices\.sh" "\$APP" --check/, 'app-gates runs the shared check');
+  });
+
+  test('notices: the check runs on exactly one leg of an app, not on its e2e shards or the WebKit leg; the tool and its config are inputs', () => {
+    const dyno = graph.apps.get('dyno');
+    const had = dyno.notices;
+    dyno.notices = { name: 'Dyno', manifests: [] };
+    try {
+      const legs = matrix(run('apps/dyno/app/src/app/shell/about.providers.ts'), graph, { webkit: true }).filter((l) => l.app === 'dyno');
+      assert.ok(legs.length > 2, 'the UI change gives the main leg, the e2e shards and more');
+      assert.equal(legs.filter((l) => l.notices === 'true').length, 1);
+      assert.ok(legs.filter((l) => l.e2e_leg).every((l) => l.notices === 'false'));
+      for (const f of ['scripts/notices.sh', 'templates/repo/about.toml', 'conformance/src/notices/generate.mjs']) {
+        const hit = matrix(run(f), graph).filter((l) => l.app === 'dyno' && l.notices === 'true');
+        assert.equal(hit.length, 1, `${f} re-checks the notices of an app with the block`);
+      }
+    } finally {
+      if (had) dyno.notices = had;
+      else delete dyno.notices;
+    }
+  });
+
   test("an app's last packages reach every leg, so a host leg and the Linux leg agree on what is tested apart", () => {
     const legs = matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph);
     assert.deepEqual([...new Set(legs.map((l) => l.last_packages))], ['pitwall-app'], 'Pitwall tests its Tauri shell after the rest');

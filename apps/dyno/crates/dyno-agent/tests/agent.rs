@@ -621,7 +621,12 @@ fn the_counters_browser_lists_searches_reads_and_charts_this_machines_counters()
             panic!("values")
         };
         assert_eq!(values[0].path, path);
-        std::thread::sleep(Duration::from_millis(1100));
+        // The counter history keeps only readings that are strictly later than the last one (and a running total needs a
+        // later reading to become a rate): wait until the agent's clock has moved on, not for a fixed time.
+        let read_at = dyno_agent::agent::now();
+        while dyno_agent::agent::now() <= read_at {
+            std::thread::yield_now();
+        }
     }
     let Reply::CounterHistory(history) = ask_slow(Request::CounterHistory {
         paths: vec![path.clone()],
