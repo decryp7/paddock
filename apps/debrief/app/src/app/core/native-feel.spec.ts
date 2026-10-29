@@ -306,7 +306,7 @@ describe('provideNativeFeel', () => {
     expect(e.defaultPrevented).toBe(true);
     expect(menu?.items.map((i) => i.label)).toEqual(['Copy']);
     expect([menu?.x, menu?.y]).toEqual([5, 6]);
-    menu?.items[0]?.run();
+    menu!.items[0]!.run();
     expect(writeText).toHaveBeenCalledWith('copy me');
     window.getSelection()?.removeAllRanges();
     p.remove();

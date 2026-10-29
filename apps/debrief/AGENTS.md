@@ -140,6 +140,9 @@ The app reads untrusted, possibly huge files and renders their content:
 
 ## Testing and quality gates
 
+- Specs follow rule 49 (test isolation): `openDialog()` from `src/testing/helpers.ts` for dialogs (they load lazily), `vi.spyOn`
+  for any patch, no optional-chain actions; ESLint enforces it.
+
 - Every change ships with tests. Every bug fix starts with a failing regression test.
 - Coverage targets: `debrief-core` ≥ 99% lines (`cargo llvm-cov -p debrief-core --summary-only`),
   Angular ≥ 80% lines overall and near 100% for stores, services and pure utilities.

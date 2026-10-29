@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AiStatusStore } from '../../ai/ai-status.store';
 import { Report } from '../../core/api.types';
 import { DIALOG_REF, DialogService } from '../../ui/dialog.service';
-import { provideTinyBackend } from '../../../testing/helpers';
+import { openDialog, provideTinyBackend } from '../../../testing/helpers';
 import { IncidentBackend } from '../investigate-backend';
 import { IncidentSummaryDialog, openIncidentSummary } from './incident-summary-dialog';
 
@@ -115,9 +115,9 @@ describe('IncidentSummaryDialog', () => {
     TestBed.configureTestingModule({});
     const dialogs = TestBed.inject(DialogService);
     const p = openIncidentSummary(dialogs);
-    const open = dialogs.stack().at(0);
-    expect(open?.options.title).toBe('Incident summary');
-    open?.ref.close('show');
+    const open = await openDialog(dialogs);
+    expect(open.options.title).toBe('Incident summary');
+    open.ref.close('show');
     expect(await p).toBe('show');
   });
 });

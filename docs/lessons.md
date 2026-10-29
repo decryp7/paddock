@@ -680,3 +680,17 @@ Results: [Debrief](../apps/debrief/docs/performance.md#2026-10-29-incremental-re
 [Dyno](../apps/dyno/docs/performance.md#2026-10-29-incremental-rebuild-and-link-time-docslink-time),
 [Dyno release identity](../apps/dyno/docs/performance.md#2026-10-29-release-identity-of-the-rlib-only-crate-type-docslink-time);
 details: [research/2026-10-29-link-time.md](research/2026-10-29-link-time.md).
+
+## Test isolation (Debrief, 2026-10-29)
+- `import-range.spec.ts` failed now and then ("expected undefined to be ImportRangeDialog") in full `ng test` runs only.
+  `ImportRange` opens its dialog through `openLazy`, whose chunk arrives after an unknown number of event-loop turns; the
+  spec waited `settle(undefined, 2)`. On a loaded machine the dialog was not open yet. A day earlier `live/components.spec`
+  had patched `FakeDock.prototype.setTitle` and restored it only on the last line, so a failing `expect` leaked the patch.
+- **Wait on the condition, never on a count of event-loop turns.** `openDialog(dialogs)` (`testing/helpers.ts`) waits with
+  `vi.waitFor` and fails when no dialog opens. To prove a fix, model the slow case (a chunk that takes 25 turns) so the
+  old wait fails every time, not now and then.
+- **An optional chain never performs a test's action.** `dialogs.stack().at(-1)?.ref.close()` does nothing when the
+  dialog is missing, so the test passes or hangs on the next `await`.
+- **A prototype patch is always a `vi.spyOn` under `restoreMocks`,** also restored after each test by a global
+  `afterEach(vi.restoreAllMocks)` in `test-setup.ts` (specs share a page, `isolate: false`). Assigning to a prototype, or
+  `Object.defineProperty`/`assign` on one, is banned in specs by ESLint (rule 49, ER-21).

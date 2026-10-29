@@ -148,6 +148,16 @@ changes here, every app's copy is updated in the same change.
     decision or a budget. *Why:* results were scattered across ADRs, branches and expiring job logs, often without
     machine, load or build, so they could not be compared or reproduced, and stale numbers kept being quoted.
 
+## Test isolation (2026-10-29)
+49. **Specs share one page, so a test never leaves state behind and never waits on a count of turns.** (a) A dialog that
+    loads lazily is awaited with the condition (`openDialog()` in `testing/helpers.ts`, `vi.waitFor`), never with a fixed
+    number of `settle()` turns. (b) An optional chain never performs a test's action: no `stack().at(-1)?.ref.close()`; a
+    missing dialog must fail the test. (c) A patch on a prototype or a shared object is a `vi.spyOn`, restored by
+    `restoreMocks`; never an assignment, `Object.defineProperty` or `Object.assign` on a prototype. Debrief's ESLint
+    (`no-restricted-syntax` for specs) enforces (b) and (c). *Why:* the Angular builder runs Vitest with `isolate: false`;
+    a fixed wait and a leaked patch each made a spec fail now and then, only in the full run
+    ([lessons.md](lessons.md#test-isolation-debrief-2026-10-29)).
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:

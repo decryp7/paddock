@@ -49,13 +49,12 @@ describe('StorageStores', () => {
     await settle(fixture);
     expect(button(fixture, 'stores-clean-selected').disabled).toBe(false);
     button(fixture, 'stores-clean-selected').click();
-    await settle(fixture);
-    const dlg = dialogs.stack().at(-1);
-    expect(dlg?.options.title).toBe('Clean up project stores?');
-    expect(String(dlg?.options.inputs?.['message'])).toContain('1 orphaned store (96 MB)');
-    expect(String(dlg?.options.inputs?.['message'])).toContain('cannot be recovered');
+    const dlg = await openDialog(dialogs);
+    expect(dlg.options.title).toBe('Clean up project stores?');
+    expect(String(dlg.options.inputs?.['message'])).toContain('1 orphaned store (96 MB)');
+    expect(String(dlg.options.inputs?.['message'])).toContain('cannot be recovered');
     expect(clear).not.toHaveBeenCalled();
-    dlg?.ref.close(true);
+    dlg.ref.close(true);
     await vi.waitFor(() => expect(clear).toHaveBeenCalledWith(['store-5e60b3f8']));
     await settle(fixture);
     expect(el(fixture, '[data-testid=stores-result]').textContent).toContain('Freed 96 MB.');
@@ -66,10 +65,9 @@ describe('StorageStores', () => {
     const { fixture, backend, dialogs } = await setup();
     const clear = vi.spyOn(backend, 'clearStores');
     button(fixture, 'stores-clean-all').click();
-    await settle(fixture);
-    const dlg = dialogs.stack().at(-1);
-    expect(String(dlg?.options.inputs?.['message'])).toContain('2 orphaned stores (1.9 GB)');
-    dlg?.ref.close();
+    const dlg = await openDialog(dialogs);
+    expect(String(dlg.options.inputs?.['message'])).toContain('2 orphaned stores (1.9 GB)');
+    dlg.ref.close();
     await settle(fixture);
     expect(clear).not.toHaveBeenCalled();
     expect(rows(fixture)).toHaveLength(5);
@@ -78,7 +76,6 @@ describe('StorageStores', () => {
   it('"Clean up all orphaned" removes both orphaned stores', async () => {
     const { fixture, dialogs } = await setup();
     button(fixture, 'stores-clean-all').click();
-    await settle(fixture);
     (await openDialog(dialogs)).ref.close(true);
     await vi.waitFor(() => expect(rows(fixture)).toHaveLength(3));
     expect(button(fixture, 'stores-clean-all').disabled).toBe(true);
@@ -88,7 +85,6 @@ describe('StorageStores', () => {
     const { fixture, backend, dialogs } = await setup();
     vi.spyOn(backend, 'clearStores').mockResolvedValue({ freedBytes: 0, removed: [], skipped: [{ id: 'store-5e60b3f8', reason: 'a window has this store open' }], cancelled: true });
     button(fixture, 'stores-clean-all').click();
-    await settle(fixture);
     (await openDialog(dialogs)).ref.close(true);
     await vi.waitFor(() => expect(el(fixture, '[data-testid=stores-result]')).toBeTruthy());
     const t = el(fixture, '[data-testid=stores-result]').textContent ?? '';
@@ -101,7 +97,6 @@ describe('StorageStores', () => {
     const { fixture, backend, dialogs } = await setup();
     vi.spyOn(backend, 'clearStores').mockRejectedValue('the store folder is locked');
     button(fixture, 'stores-clean-all').click();
-    await settle(fixture);
     (await openDialog(dialogs)).ref.close(true);
     await vi.waitFor(() => expect(el(fixture, '[data-testid=stores-error]').textContent).toContain('the store folder is locked'));
   });

@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { all, el, provideTinyBackend, settle, text } from '../../../testing/helpers';
+import { all, el, openDialog, provideTinyBackend, settle, text } from '../../../testing/helpers';
 import { at } from '../../../testing/must';
 import { Platform } from '../../core/platform';
 import { COMMAND_CONTEXT } from '../../extensions/command-registry';
@@ -97,10 +97,10 @@ describe('NoteImageView', () => {
     const dialogs = TestBed.inject(DialogService);
     el<HTMLButtonElement>(f, '[data-testid=note-image-add]').click();
     await TestBed.inject(DialogService).whenLoaded();
-    const dlg = dialogs.stack().at(-1);
-    expect(dlg?.options.inputs?.['anchor']).toMatchObject({ kind: 'image', image: { name: 'screen.png', width: 800, height: 450 }, regions: [{ x: 20, y: 20, w: 100, h: 50 }] });
-    const n = await TestBed.inject(NotesStore).add({ anchor: dlg?.options.inputs?.['anchor'] as never, text: 'red banner' });
-    dlg?.ref.close(n!.id);
+    const dlg = await openDialog(dialogs);
+    expect(dlg.options.inputs?.['anchor']).toMatchObject({ kind: 'image', image: { name: 'screen.png', width: 800, height: 450 }, regions: [{ x: 20, y: 20, w: 100, h: 50 }] });
+    const n = await TestBed.inject(NotesStore).add({ anchor: dlg.options.inputs?.['anchor'] as never, text: 'red banner' });
+    dlg.ref.close(n!.id);
     await settle(f);
     expect(all(f, '[data-testid=note-region-pending]')).toHaveLength(0);
     const region = at(all<HTMLButtonElement>(f, '[data-testid=note-region]'), 0);

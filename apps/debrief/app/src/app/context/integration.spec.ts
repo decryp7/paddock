@@ -103,7 +103,7 @@ describe('Inspector context actions', () => {
 });
 
 describe('EventsGrid context menu', () => {
-  // Restored after each test (restoreMocks in vitest-base.config.mts).
+  // A spy: put back after each test by the global afterEach(vi.restoreAllMocks) in test-setup.ts.
   beforeEach(() => {
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
         return this.classList?.contains('viewport') ? 260 : 0;

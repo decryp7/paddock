@@ -85,20 +85,18 @@ describe('source colour markers in the views', () => {
 
   it('the grid draws a stripe per row with a legend, and none when off', async () => {
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400);
-    {
-      const { settings } = await setup();
-      const fixture = TestBed.createComponent(EventsGrid);
-      await settle(fixture);
-      await settle(fixture);
-      const stripes = all(fixture, '[data-testid=source-stripe]');
-      expect(stripes.length).toBeGreaterThan(0);
-      expect(stripes.map((s) => s.getAttribute('aria-label'))).toEqual(expect.arrayContaining(['File: app.clef', 'File: app.log']));
-      expect(all(fixture, '.row.marked').length).toBe(stripes.length);
-      settings.setSourceColors('off');
-      await settle(fixture);
-      expect(all(fixture, '[data-testid=source-stripe]')).toHaveLength(0);
-      expect(all(fixture, '.row.marked')).toHaveLength(0);
-    }
+    const { settings } = await setup();
+    const fixture = TestBed.createComponent(EventsGrid);
+    await settle(fixture);
+    await settle(fixture);
+    const stripes = all(fixture, '[data-testid=source-stripe]');
+    expect(stripes.length).toBeGreaterThan(0);
+    expect(stripes.map((s) => s.getAttribute('aria-label'))).toEqual(expect.arrayContaining(['File: app.clef', 'File: app.log']));
+    expect(all(fixture, '.row.marked').length).toBe(stripes.length);
+    settings.setSourceColors('off');
+    await settle(fixture);
+    expect(all(fixture, '[data-testid=source-stripe]')).toHaveLength(0);
+    expect(all(fixture, '.row.marked')).toHaveLength(0);
   });
 
   it('the Explorer, the inspector and the timeline lanes show matching dots', async () => {

@@ -27,6 +27,10 @@ beforeEach(() => {
 // starts with an empty body.
 beforeEach(() => document.body.replaceChildren());
 
+// Spies are put back after every test: spec files share a page (`isolate: false`), and `restoreMocks` alone restores
+// only before the next test, so the last spy of a file would still be installed while the next file's modules load.
+afterEach(() => vi.restoreAllMocks());
+
 class ResizeObserverStub {
   constructor(private readonly cb: ResizeObserverCallback) {}
   observe(target: Element): void {

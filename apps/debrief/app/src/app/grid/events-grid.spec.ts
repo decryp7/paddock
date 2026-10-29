@@ -37,7 +37,7 @@ class HugeBackend extends MockBackend {
 }
 
 describe('EventsGrid', () => {
-  // Restored after each test (restoreMocks in vitest-base.config.mts).
+  // A spy: put back after each test by the global afterEach(vi.restoreAllMocks) in test-setup.ts.
   beforeEach(() => {
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
         return this.classList?.contains('viewport') ? VIEWPORT_H : 0;
@@ -448,7 +448,7 @@ describe('EventsGrid', () => {
 describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   const ROW = 24;
   const BIG = 50_000_000;
-  // Restored after each test (restoreMocks in vitest-base.config.mts).
+  // A spy: put back after each test by the global afterEach(vi.restoreAllMocks) in test-setup.ts.
   beforeEach(() => {
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
         return this.classList?.contains('viewport') ? VIEWPORT_H + 28 : 0;

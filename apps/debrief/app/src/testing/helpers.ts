@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { Component, EnvironmentProviders, Provider, signal } from '@angular/core';
+import { Component, EnvironmentProviders, Provider, signal, Type } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MarkerKind, PluginInfo, Query } from '../app/core/api.types';
 import { DebriefBackend } from '../app/core/backend';
@@ -186,16 +186,32 @@ export async function settle<T>(fixture?: ComponentFixture<T>, rounds = 4): Prom
   }
 }
 
+/** What `openDialog` waits for: the dialog must be one opened after `after` others, and/or be this component. */
+export interface OpenDialogOptions {
+  /** Number of dialogs already open that this call must not return (default 0): wait for the next one on top. */
+  after?: number;
+  /** The component the dialog must show. */
+  component?: Type<unknown>;
+  /** Hang guard in ms (default 10 s); the wait is on the condition, not a delay. */
+  timeout?: number;
+}
+
 /**
  * Waits until an in-page dialog is open and returns the topmost one. Dialogs load lazily (`openLazy`), so a test must wait
- * on the condition, never on a number of event-loop turns; it fails (the wait times out) when no dialog opens, where
- * `stack().at(-1)?.ref` would silently do nothing.
+ * on the condition, never on a number of event-loop turns (rule 49). It fails when no matching dialog opens, where
+ * `stack().at(-1)?.ref` would silently do nothing. When one dialog is already open, pass `after` (how many) or `component`.
  */
-export async function openDialog(dialogs: DialogService): Promise<OpenDialog> {
+export async function openDialog(dialogs: DialogService, options: OpenDialogOptions = {}): Promise<OpenDialog> {
+  const { after = 0, component, timeout = 10_000 } = options;
+  const found = (): OpenDialog | undefined => {
+    const stack = dialogs.stack();
+    const top = stack.at(-1);
+    return stack.length > after && top && (!component || top.component === component) ? top : undefined;
+  };
   await vi.waitFor(() => {
-    if (dialogs.stack().length === 0) throw new Error('No dialog is open');
-  });
-  return dialogs.stack().at(-1)!;
+    if (!found()) throw new Error(`No dialog is open${component ? ` showing ${component.name}` : ''} (after ${after})`);
+  }, { timeout });
+  return found()!;
 }
 
 export function el<T extends Element = HTMLElement>(fixture: ComponentFixture<unknown>, selector: string): T {

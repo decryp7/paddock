@@ -29,7 +29,7 @@ describe('WorkspaceSource', () => {
     store.setNotice('Saved Case 7', { label: 'Undo', run });
     const [item] = source.items();
     expect(item?.actions?.map((a) => a.label)).toEqual(['Undo']);
-    item?.actions?.[0]?.run();
+    item!.actions![0]!.run();
     expect(run).toHaveBeenCalled();
     expect(source.items()).toEqual([]);
   });

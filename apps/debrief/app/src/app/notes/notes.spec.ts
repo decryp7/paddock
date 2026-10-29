@@ -240,10 +240,10 @@ describe('NoteActions', () => {
     await settle();
     const written = actions.write(anchors.instant(5.4));
     await TestBed.inject(DialogService).whenLoaded();
-    const dlg = dialogs.stack().at(-1);
-    expect(dlg?.options.title).toBe('Add a note');
-    expect(dlg?.options.inputs).toEqual({ anchor: { kind: 'instant', at: 5 } });
-    dlg?.ref.close('n1');
+    const dlg = await openDialog(dialogs);
+    expect(dlg.options.title).toBe('Add a note');
+    expect(dlg.options.inputs).toEqual({ anchor: { kind: 'instant', at: 5 } });
+    dlg.ref.close('n1');
     expect(await written).toBe('n1');
     expect(await actions.writeOnSelected()).toBe(false);
     expect(await actions.writeOnRange()).toBe(false);
