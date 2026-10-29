@@ -589,6 +589,9 @@ html .mat-mdc-button-base .mdc-button__label {
   min-width: 0;
   padding-inline: var(--pd-space-3);
   flex-grow: 0;
+  // Never shrunk below the label: a bar that is too narrow paginates, it does not squeeze one.
+  flex-shrink: 0;
+  .mdc-tab__text-label { white-space: nowrap; }
 }
 
 // ---- Shape of the pieces the tokens cannot reach.
