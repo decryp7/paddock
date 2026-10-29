@@ -50,6 +50,11 @@ pub enum UserAction {
     /// `Page.getFrameTree` fails from now on, and the page's main frame is reported under its target id (as Chrome
     /// names a page target's main frame); otherwise the main frame is `F`, unlike any target id.
     NoFrameTree,
+    /// The network service restarts: `SystemInfo.getProcessInfo` names another process for it from now on (the fake
+    /// starts with process 100).
+    RestartNetworkService,
+    /// Every `Page.navigate` from now on is cancelled (`net::ERR_ABORTED`, not a download, nothing replaces it).
+    AbortLoads,
 }
 
 impl UserAction {
@@ -62,6 +67,8 @@ impl UserAction {
             UserAction::SlowStartPage => "slow-start-page",
             UserAction::FinishStartPage => "finish-start-page",
             UserAction::NoFrameTree => "no-frame-tree",
+            UserAction::RestartNetworkService => "restart-network-service",
+            UserAction::AbortLoads => "abort-loads",
         }
     }
 }
@@ -239,6 +246,8 @@ static LOADS_STALLED: AtomicBool = AtomicBool::new(false);
 static START_PAGE_SLOW: AtomicBool = AtomicBool::new(false);
 static START_PAGE_FINISHED: AtomicBool = AtomicBool::new(false);
 static NO_FRAME_TREE: AtomicBool = AtomicBool::new(false);
+static NETWORK_SERVICE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(100);
+static LOADS_ABORTED: AtomicBool = AtomicBool::new(false);
 /// The number of the last page opened over DevTools (its target id is `T<n>`).
 static LAST_TARGET: AtomicUsize = AtomicUsize::new(0);
 
@@ -278,6 +287,17 @@ fn apply_control() {
     };
     let words = std::fs::read_to_string(ctl).unwrap_or_default();
     let start = *CONTROL_START.get_or_init(|| words.len());
+    // Each restart written so far is one more process (the file is read again before every answer, so it is a count).
+    let restarts = words
+        .get(start..)
+        .unwrap_or("")
+        .lines()
+        .filter(|w| w.trim() == "restart-network-service")
+        .count();
+    NETWORK_SERVICE.store(
+        100 + u32::try_from(restarts).unwrap_or(u32::MAX - 100),
+        Ordering::SeqCst,
+    );
     for w in words.get(start..).unwrap_or("").lines() {
         match w.trim() {
             "close-window" => WINDOW_CLOSED.store(true, Ordering::SeqCst),
@@ -286,6 +306,7 @@ fn apply_control() {
             "slow-start-page" => START_PAGE_SLOW.store(true, Ordering::SeqCst),
             "finish-start-page" => START_PAGE_FINISHED.store(true, Ordering::SeqCst),
             "no-frame-tree" => NO_FRAME_TREE.store(true, Ordering::SeqCst),
+            "abort-loads" => LOADS_ABORTED.store(true, Ordering::SeqCst),
             "quit" => std::process::exit(0),
             _ => {}
         }
@@ -435,7 +456,11 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
                 "Page.getNavigationHistory" => {
                     json!({"currentIndex": 1, "entries": [{"id": 1}, {"id": 2}]})
                 }
-                "Page.navigate" if starting => {
+                "SystemInfo.getProcessInfo" => json!({"processInfo": [
+                    {"type": "browser", "id": 1},
+                    {"type": "network.mojom.NetworkService", "id": NETWORK_SERVICE.load(Ordering::SeqCst)},
+                ]}),
+                "Page.navigate" if starting || LOADS_ABORTED.load(Ordering::SeqCst) => {
                     json!({"frameId": main_frame(), "loaderId": "L1", "errorText": "net::ERR_ABORTED", "isDownload": false})
                 }
                 "Page.navigate"
@@ -462,7 +487,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
             return;
         }
         let loads = matches!(method, "Page.navigate" | "Page.navigateToHistoryEntry")
-            && !(starting && method == "Page.navigate");
+            && !((starting || LOADS_ABORTED.load(Ordering::SeqCst)) && method == "Page.navigate");
         if loads && !closed && !LOADS_STALLED.load(Ordering::SeqCst) {
             let ev = json!({"method": "Page.loadEventFired", "sessionId": "S1", "params": {}});
             let _ = ws.send(Message::text(ev.to_string()));

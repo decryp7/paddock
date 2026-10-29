@@ -466,7 +466,17 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
+          # Chrome's verbose log of each real-browser test on Windows, kept below when the job fails (ADR 0030: why the
+          # network service went away is only in there).
+          PADDOCK_TEST_BROWSER_LOG: ${{ runner.os == 'Windows' && format('{0}/chrome-logs', runner.temp) || '' }}
         run: cargo nextest run --workspace --all-features --profile ci
+
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        if: failure() && runner.os == 'Windows'
+        with:
+          name: chrome-logs-${{ runner.os }}
+          path: ${{ runner.temp }}/chrome-logs
+          if-no-files-found: ignore
 
       # The crates whose code changes with an optional feature off (cfg(not(feature)) paths, a default feature that can be
       # turned off) also run without it. Cargo unifies features across the packages of one run, so a crate that another

@@ -722,3 +722,10 @@ Nobody asked whether more workers or a cheaper operation would help until the nu
 any slow operation, measure both: can more threads or workers run it (bounded by the kind of work), and can each item cost
 less? Make thread counts Settings with an "Auto" default, and give long or bulk designs a "Parallelism and cost" section
 (rule 51).
+
+## An unexplained browser abort needs its cause in the message (2026-10-29)
+`net::ERR_ABORTED` covers every load Chrome cancels before commit: a download, a replacing navigation, the tab's own first
+navigation, and a restart of the browser's network service. Fixing them one guess at a time cost three rounds of Windows
+CI. Ending the network service locally reproduced the Windows trace exactly. **Rule:** a driver error that can have
+several causes says which ones it ruled out (the trace, the network service's process), and a real-browser test drives
+each named cause on purpose (ADR 0030). Diagnostics land before a fix that would hide the cause.
