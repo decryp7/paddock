@@ -1284,6 +1284,13 @@ mod tests {
         rx.recv().unwrap();
         let cancelling = w2.clone();
         let c = std::thread::spawn(move || cancelling.cancel());
+        // Let the retry go on only once the cancel has begun (it flags the stop, then waits for the gate the held retry owns): a cancel
+        // that arrives after the pass ended is rightly a no-op, which is not what this test is about.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !w2.stopped.load(Ordering::SeqCst) {
+            assert!(std::time::Instant::now() < deadline, "the cancel never began");
+            std::thread::yield_now();
+        }
         hold2.open();
         t.join().unwrap().unwrap();
         c.join().unwrap();
