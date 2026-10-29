@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal, type OnInit } from '@angular/core';
+import { MatTooltip } from '@angular/material/tooltip';
 import { DialogActionError, type DialogAction, type DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import type { CustomAlertRule, CustomMetric, CustomOp, Severity } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
@@ -17,7 +18,7 @@ const MAX_HOLD_SECS = 3600;
 /** Add or edit a custom alert rule: a metric, above or below a limit, held for a while, with a severity. */
 @Component({
   selector: 'dy-rule-dialog',
-  imports: [MatIconButton, PdField, PdFieldControl, PdSelect, SuSegmentedControl, Icon, MatSlideToggle],
+  imports: [MatTooltip, MatIconButton, PdField, PdFieldControl, PdSelect, SuSegmentedControl, Icon, MatSlideToggle],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
       <p class="lead">Raises an alarm when a reading stays past a limit.</p>
@@ -54,8 +55,8 @@ const MAX_HOLD_SECS = 3600;
       <ng-template #limitTools>
         <span class="tools">
           <span class="unit">{{ info().unit }}</span>
-          <button type="button" matIconButton aria-label="Decrease the limit" (click)="step(-1)"><dy-icon name="minus" /></button>
-          <button type="button" matIconButton aria-label="Increase the limit" (click)="step(1)"><dy-icon name="plus" /></button>
+          <button type="button" matIconButton matTooltip="Decrease the limit" aria-label="Decrease the limit" (click)="step(-1)"><dy-icon name="minus" /></button>
+          <button type="button" matIconButton matTooltip="Increase the limit" aria-label="Increase the limit" (click)="step(1)"><dy-icon name="plus" /></button>
         </span>
       </ng-template>
   `,
@@ -71,9 +72,13 @@ const MAX_HOLD_SECS = 3600;
        row's controls share top and bottom. The label is decoration (the control carries the accessible name). */
     .seg-field { position: relative; height: var(--pd-field-height, 28px); min-width: 0; --mat-button-toggle-height: calc(var(--pd-field-height, 28px) - 2px); }
     .seg-field pd-segmented-control { display: block; }
-    .seg-label { position: absolute; top: -8px; left: var(--sp-3); z-index: 1; padding: 0 var(--sp-1); background: var(--pd-surface-2); color: var(--text-2); font-size: var(--fs-xs); line-height: 1; }
+    .seg-label { position: absolute; top: -9px; left: var(--sp-3); z-index: 1; padding: 0 var(--sp-1); background: var(--pd-surface-2); color: var(--text-2); font-size: var(--fs-xs); line-height: 10px; height: 10px; }
     .hold { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; }
     .hold pd-field { flex: 1; min-width: 0; }
+    /* The hint is one line that may run on under the unit toggle (the row's width), not a column of wrapped words. */
+    .hold pd-field ::ng-deep .mat-mdc-form-field-subscript-wrapper { overflow: visible; }
+    .hold pd-field ::ng-deep .mat-mdc-form-field-hint-wrapper { overflow: visible; }
+    .hold pd-field ::ng-deep .pd-field__hint { white-space: nowrap; }
     .unit-seg { --mat-button-toggle-height: calc(var(--pd-field-height, 28px) - 2px); }
     .tools { display: inline-flex; align-items: center; gap: var(--sp-1); }
     .tools dy-icon { --icon-size: 14px; }

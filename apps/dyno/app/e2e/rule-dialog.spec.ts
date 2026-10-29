@@ -24,3 +24,22 @@ test('the alert-rule dialog lays its controls out on one grid, each row aligned 
   expect(Math.abs(unit.y + unit.height / 2 - (hold.y + hold.height / 2)), 'unit toggle centred on the duration field').toBeLessThanOrEqual(3);
   expect(unit.x).toBeGreaterThan(hold.x + hold.width - 1);
 });
+
+/** The hint under "For at least" is one line across the dialog, not a column of wrapped words. */
+test('the alert-rule dialog\'s duration hint spans the row on one line', async ({ page }) => {
+  await page.setViewportSize({ width: 560, height: 700 });
+  await page.goto(dialogWindowUrl('dy.alert-rule', { rule: null, takenIds: [] }, { title: 'Add rule' }));
+  await page.locator('html[data-dialog-ready]').waitFor();
+  const hint = page.locator('pd-field:has(input[aria-label="Duration"]) .pd-field__hint');
+  const lines = await hint.evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
+  });
+  expect(lines, 'the hint is one line').toBe(1);
+  await expect(page.getByRole('textbox', { name: 'Duration' })).toHaveAccessibleDescription(/right away/);
+  const row = (await page.locator('.hold').boundingBox())!;
+  const box = (await hint.boundingBox())!;
+  expect(box.x + box.width, 'the hint stays inside the dialog').toBeLessThanOrEqual(560);
+  expect(row.width).toBeGreaterThan(0);
+});
