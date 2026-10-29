@@ -42,4 +42,55 @@ describe('the Copy menu', () => {
     (fixture.nativeElement.querySelector('button') as HTMLButtonElement).dispatchEvent(new Event('blur'));
     expect(menu.state()).toBeNull();
   });
+  it('a press on Copy keeps the focus where it is, so WebKit does not blur the item and close the menu before the click', async () => {
+    const fixture = TestBed.createComponent(CopyMenuHost);
+    const menu = TestBed.inject(CopyMenu);
+    fixture.detectChanges();
+    menu.open(1, 2, 'x');
+    await fixture.whenStable();
+    const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+    const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    button.dispatchEvent(press);
+    expect(press.defaultPrevented).toBe(true);
+    menu.close();
+  });
+
+  it('gives back the selection it opened on when it closes, as a native menu keeps it (WebKit drops it on focus)', async () => {
+    const fixture = TestBed.createComponent(CopyMenuHost);
+    const menu = TestBed.inject(CopyMenu);
+    fixture.detectChanges();
+    const p = document.createElement('p');
+    p.textContent = 'keep me selected';
+    const other = document.createElement('p');
+    other.textContent = 'something else';
+    document.body.append(p, other);
+    const select = (el: Element) => {
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(r);
+    };
+    try {
+      select(p);
+      menu.open(1, 2, 'keep me selected');
+      await fixture.whenStable();
+      expect(fixture.nativeElement.querySelector('button')).not.toBeNull();
+      getSelection()!.removeAllRanges(); // what WebKit does when the menu takes the focus
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      await fixture.whenStable();
+      expect(getSelection()!.toString()).toBe('keep me selected');
+
+      // A selection the user made while it was open is theirs: it stays.
+      menu.open(1, 2, 'keep me selected');
+      await fixture.whenStable();
+      select(other);
+      menu.close();
+      await fixture.whenStable();
+      expect(getSelection()!.toString()).toBe('something else');
+    } finally {
+      getSelection()!.removeAllRanges();
+      p.remove();
+      other.remove();
+    }
+  });
 });

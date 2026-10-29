@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, ElementRef, Injectable, effect, inject, signal, viewChild } from '@angular/core';
+import { DOCUMENT } from '@angular/common';
+import { ChangeDetectionStrategy, Component, ElementRef, Injectable, Injector, afterNextRender, effect, inject, signal, untracked, viewChild } from '@angular/core';
 
 /** The open Copy menu: where, and what it copies. */
 export interface CopyMenuState {
@@ -33,7 +34,11 @@ export class CopyMenu {
   }
 }
 
-/** Renders the Copy menu at the pointer; Escape, a click elsewhere or losing focus closes it. */
+/**
+ * Renders the Copy menu at the pointer; Escape, a click elsewhere or losing focus closes it. Closed, it gives back the text
+ * selection it opened on, as a native menu keeps it: WebKit (WKWebView) drops the selection when focus moves into the menu.
+ * A selection the user made meanwhile stays.
+ */
 @Component({
   selector: 'sp-copy-menu',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -41,7 +46,8 @@ export class CopyMenu {
   template: `
     @if (menu.state(); as s) {
       <div class="menu" role="menu" [style.left.px]="s.x" [style.top.px]="s.y">
-        <button #item type="button" role="menuitem" (click)="menu.copy()" (blur)="menu.close()">Copy</button>
+        <!-- WebKit does not focus a pressed button but blurs the focused one: the press keeps the focus, or the blur would close the menu first. -->
+        <button #item type="button" role="menuitem" (mousedown)="$event.preventDefault()" (click)="menu.copy()" (blur)="menu.close()">Copy</button>
       </div>
     }
   `,
@@ -76,9 +82,42 @@ export class CopyMenu {
 export class CopyMenuHost {
   protected readonly menu = inject(CopyMenu);
   private readonly item = viewChild<ElementRef<HTMLButtonElement>>('item');
+  private readonly document = inject(DOCUMENT);
+  private readonly injector = inject(Injector);
+  /** The selection when the menu opened (copies of its ranges), given back when it closes; null while closed. */
+  private saved: Range[] | null = null;
 
   constructor() {
+    // Before the focus moves into the menu (the item renders after this runs): save the selection; on close, give it back.
+    effect(() => {
+      const open = this.menu.state() !== null;
+      untracked(() => {
+        if (open) {
+          this.saved ??= this.saveSelection();
+          return;
+        }
+        const saved = this.saved;
+        this.saved = null;
+        if (saved) afterNextRender(() => this.restoreSelection(saved), { injector: this.injector });
+      });
+    });
     effect(() => this.item()?.nativeElement.focus());
+  }
+
+  private saveSelection(): Range[] {
+    const sel = this.document.getSelection();
+    if (!sel) return [];
+    return Array.from({ length: sel.rangeCount }, (_, i) => sel.getRangeAt(i).cloneRange());
+  }
+
+  /** Puts the saved ranges back unless the user selected something else meanwhile (a selection that is not just a caret). */
+  private restoreSelection(saved: readonly Range[]): void {
+    const sel = this.document.getSelection();
+    if (!sel || saved.length === 0 || (sel.rangeCount > 0 && !sel.isCollapsed)) return;
+    const live = saved.filter((r) => r.startContainer.isConnected && r.endContainer.isConnected);
+    if (live.length === 0) return;
+    sel.removeAllRanges();
+    for (const r of live) sel.addRange(r);
   }
 
   protected outside(e: MouseEvent): void {
