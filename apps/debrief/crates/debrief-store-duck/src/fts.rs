@@ -200,11 +200,12 @@ fn schema() -> (Schema, Fields) {
     let source = b.add_u64_field("source", INDEXED);
     let seg = b.add_u64_field("seg", INDEXED);
     b.add_i64_field("ts", FAST);
-    // Words and their counts, no positions (half the size): phrases are checked on the rows.
+    // Words only, no counts or positions: hits are ordered by time and never scored, and phrases are checked on the
+    // rows. (An index made with counts keeps them; it answers the same.)
     let words = TextOptions::default().set_indexing_options(
         TextFieldIndexing::default()
             .set_tokenizer(TOKENIZER)
-            .set_index_option(IndexRecordOption::WithFreqs),
+            .set_index_option(IndexRecordOption::Basic),
     );
     let text = b.add_text_field("text", words);
     (b.build(), Fields { id, source, seg, text })
@@ -783,6 +784,18 @@ mod tests {
             ]
         );
         assert!(!WordsTokenizer.token_stream("").advance());
+    }
+
+    #[test]
+    fn words_are_indexed_without_frequencies_or_positions() {
+        // Searches order hits by time and never score them: the postings only need the documents.
+        let (schema, f) = schema();
+        let tantivy::schema::FieldType::Str(options) = schema.get_field_entry(f.text).field_type() else {
+            panic!("text is a text field")
+        };
+        let indexing = options.get_indexing_options().expect("indexed");
+        assert_eq!(indexing.index_option(), IndexRecordOption::Basic);
+        assert!(!schema.fields().any(|(_, e)| e.is_stored()), "nothing is stored: DuckDB has the rows");
     }
 
     #[test]
