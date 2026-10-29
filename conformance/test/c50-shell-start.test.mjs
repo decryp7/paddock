@@ -39,6 +39,14 @@ test('startProblems: the app opens its own window, also through a use import or 
 test('startProblems: a Tauri setup of its own overwrites the shell start', () => {
   const own = `fn run() {\n  let b = tauri::Builder::default()\n    .plugin(x)\n    .setup(|app| Ok(()));\n}\n${LOG}`;
   assert.match(ok({ sources: [own] })[0], /tauri::Builder.*setup/);
+  const afterAddTo = `fn run() {\n  let b = shell.launch(l).add_to(tauri::Builder::default())\n    .setup(|app| Ok(()));\n}\n${LOG}`;
+  assert.match(ok({ sources: [afterAddTo] })[0], /tauri::Builder.*setup/, 'after add_to');
+  const afterApp = `fn run() {\n  let b = app(builder, shell, launch, tray::native());\n  let b = b.setup(|app| Ok(()));\n}\n${LOG}`;
+  assert.match(ok({ sources: [afterApp] })[0], /tauri::Builder.*setup/, 'after app()');
+  const bound = `fn run() {\n  let b = tauri::Builder::default().plugin(x);\n  let c = b.setup(|app| Ok(()));\n}\n${LOG}`;
+  assert.match(ok({ sources: [bound] })[0], /tauri::Builder.*setup/, 'on a binding of a tauri::Builder');
+  const otherFn = `fn run() {\n  let builder = tauri::Builder::default().plugin(x);\n}\nfn shell() {\n  let builder = Builder::new(id);\n  builder.setup(|app| Ok(()))\n}\n${LOG}`;
+  assert.deepEqual(ok({ sources: [otherFn] }), [], 'the same name in another function is another binding');
   const shellSetup = `fn shell() { Builder::new(id).setup(move |app| Ok(())) }\nfn run() { let b = tauri::Builder::default().plugin(x); }\n${LOG}`;
   assert.deepEqual(ok({ sources: [shellSetup] }), [], "the shell's setup is fine");
 });
