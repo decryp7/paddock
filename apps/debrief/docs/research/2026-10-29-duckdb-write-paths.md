@@ -8,8 +8,9 @@ Appender, several Appenders, one Parquet writer, many Parquet writers, and the Q
 the database the normal way, is writing separate Parquet files faster, and does DuckDB 2.0 bring a faster file format?
 
 **Answer: keep ADR 0014's fan-out.** Writing into a native table with `INSERT` or the Appender is the normal way and the
-right one for data that is edited, but in our runs a second Appender added nothing, because the native write path spends
-its time compressing the long `raw` strings. For bulk, append-only events, each parse thread writes its own zstd Parquet
+right one for data that is edited, but Appenders scale poorly: our two benches disagree on how much (1.0× for a second
+Appender on the writer bench, 1.8× for four in the Quack harness at about twice the memory), and the native write path
+spends its time compressing the long `raw` strings. For bulk, append-only events, each parse thread writes its own zstd Parquet
 file and the `.duckdb` catalog keeps a `VIEW` over `read_parquet([...], union_by_name = true)`: 1.3–1.55M events/s in a
 real import on a quiet Mac, against about 387k events/s for one Appender on the writer bench. DuckDB 2.0 brings storage
 format v2.0.0 for the native file, not a new exchange format; Parquet is still the format for writing in parallel.
@@ -38,7 +39,7 @@ server process.](img/duckdb-write-architectures.svg)
 - **B, fan-out** (teal): one Parquet file per thread and a view over them, Debrief's import today (ADR 0014). No shared
   lock while writing. Segments are written by the `parquet` crate's `ArrowWriter` (arrow-rs), not by DuckDB, to a
   temporary name and renamed when complete (`crates/debrief-store-duck/src/segments.rs`).
-- **C, server mode** (red): clients send rows over the Quack protocol to a server process; a network hop and a copy per
+- **C, server mode** (blue): clients send rows over the Quack protocol to a server process; a network hop and a copy per
   client. Evaluated 2026-10-28 and rejected (ADR 0010 amendment, not yet merged).
 
 ## Test setup
@@ -136,7 +137,7 @@ For the two import bars, the solid end marks the measured range and the outline 
 |---|---|---|---|---|---|---|---|
 | `INSERT` row by row | 1 | not measured | | | | | |
 | Appender, 1 long-lived | 1 | ≈387k | +526 MB peak | writer bench | 2026-10-28/29 | Mac mini, load 33–65 | results block pending |
-| Appender, 2 | 2 | no faster than 1 | not recorded | writer bench | 2026-10-28/29 | Mac mini, load 33–65 | results block pending |
+| Appender, 2 | 2 | 1.0× of 1 Appender | not recorded | writer bench | 2026-10-28/29 | Mac mini, load 33–65 | results block pending |
 | Appender, native table | 1 | 36.5k (60k with `raw` NULL) | +429 MB | R2b bake-off | 2026-10-20 | Windows VM, ±30 % | ADR 0014 bake-off |
 | Appenders, native table | 2/4/8 | 61–75k (no scaling) | not recorded | R2b bake-off | 2026-10-20 | Windows VM, ±30 % | ADR 0014 bake-off |
 | Appender, in process | 1 / 4 | 200k / 355k (medians) | 845–892 / 1,828–1,852 MB footprint | Quack harness | 2026-10-28 | Mac mini, load < 40 | server-mode note §3.1 |
@@ -159,7 +160,7 @@ In the Quack runs `memory_limit` covers only DuckDB's buffer manager, so the pro
 | Method | Writers that help | Updates and deletes | Use it for |
 |---|---|---|---|
 | `INSERT` row by row | 1 | easy, transactional | settings, small edits, user notes |
-| Appender into a native table | 1 (a 2nd added nothing on the writer bench) | easy, transactional | moderate volumes that will be edited |
+| Appender into a native table | 1; the benches disagree: 1.0× for a 2nd (writer bench), 1.8× for 4 at about 2× memory (Quack harness) | easy, transactional | moderate volumes that will be edited |
 | One Parquet writer | 1 | rewrite the file | exports, one-off loads |
 | Parquet per thread + view | `min(cores − 1, 8)` | by a deletion list, then compaction | **bulk append-only events (Debrief)** |
 | Quack server | 4 help, at a large memory cost | easy, transactional | remote clients; not for Debrief |
@@ -171,9 +172,9 @@ Measured so far:
 
 - **Parquet writers scale close to linearly up to 8 on the writer bench**: 725k events/s with 1 writer, 5.1M with 8,
   about 7×. On the Quack harness, 12 writers gave no more than 8 (4.41M against 4.38M).
-- **Appenders do not scale on the writer bench**: a second Appender added nothing. R2b saw the same (2/4/8 appenders
-  61–75k events/s). The Quack harness's in-process appenders went from 200k to 355k with 4, at about twice the memory
-  (1.83 GB footprint at a 192 MB limit), which is not linear either.
+- **Appenders scale poorly, and the two benches disagree on how much.** Writer bench: 1.0× for a second Appender. Quack
+  harness: 1.8× for four (200k to 355k events/s) at about twice the memory (1.83 GB footprint at a 192 MB limit). R2b on
+  the Windows VM: 2/4/8 appenders 61–75k events/s, with no gain from 2 to 8. None of these is linear.
 - **The real import is bounded by parsing**, not by the writers: 1.3–1.55M events/s quiet against 5.1M for the writers
   alone.
 - **Data size**: no measured curve yet. R2b's 10M-event run (ADR 0014 "Measured (R2b, release, the same VM)") gives one
@@ -221,8 +222,8 @@ The R2b figures in brackets are Windows VM, older code and data, and not like-fo
 
 Why fan-out wins for appends:
 
-- **Nothing shared while writing.** DuckDB allows parallel appends, but in our runs extra Appenders did not scale; R2b
-  traced the limit to string compression on the native write path. Separate files share nothing until the view reads
+- **Nothing shared while writing.** DuckDB allows parallel appends, but in our runs extra Appenders scaled poorly (1.0× for
+  a 2nd on the writer bench, 1.8× for 4 at about 2× memory in the Quack harness); R2b traced the limit to string compression on the native write path. Separate files share nothing until the view reads
   them.
 - **Compression runs in every thread.** The segments are written by the Rust `parquet` crate, not by DuckDB, so DuckDB's
   memory limit does not apply to them. Each writer encodes and zstd-compresses its own row groups, so compression scales
