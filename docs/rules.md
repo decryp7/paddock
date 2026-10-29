@@ -173,17 +173,18 @@ changes here, every app's copy is updated in the same change.
 
 ## Thread priority (user, 2026-10-30)
 52. **Work a person waits for never runs at an OS's starvable background level.** The starvable levels are macOS QoS
-    `BACKGROUND`; on Windows `THREAD_MODE_BACKGROUND_BEGIN`, `PROCESS_MODE_BACKGROUND_BEGIN`, `IDLE_PRIORITY_CLASS`,
-    `THREAD_PRIORITY_IDLE` and `THREAD_PRIORITY_LOWEST` (the background modes also drop I/O and memory priority to the
-    lowest); on Linux `SCHED_IDLE` and the idle I/O class (`ioprio` `IOPRIO_CLASS_IDLE`). Lowered work that a caller may
-    wait for (an analysis behind a report, a pool an import waits on through a lock, a download, anything a person
-    started) uses the gentle level instead: `QOS_CLASS_UTILITY` on macOS, nice 10 on Linux, `THREAD_PRIORITY_BELOW_NORMAL`
-    on Windows (Debrief's `debrief_core::threads::lower_priority`). A busy machine slows such work, never stops it. A
-    starvable level is only for work nobody waits on (family ADR 0020's `Idle` class), and each use says why with
-    `// conformance: background-qos — <why nobody waits on it>` (check C54). *Why:* these levels run a thread only when
-    the machine has nothing else to do (macOS `BACKGROUND` also keeps it on the efficiency cores); Debrief's mining pool
-    was in it, so on a loaded Mac `debrief report` waited minutes for its analyses and timed out in CI (Debrief ADR 0052,
-    amended 2026-10-30; lessons 2026-10-30).
+    `BACKGROUND` and process background (`PRIO_DARWIN_BG`, `taskpolicy -b`); on Windows `THREAD_MODE_BACKGROUND_BEGIN`,
+    `PROCESS_MODE_BACKGROUND_BEGIN`, `IDLE_PRIORITY_CLASS`, `THREAD_PRIORITY_IDLE` and `THREAD_PRIORITY_LOWEST` (the
+    background modes also drop I/O and memory priority to the lowest); on Linux `SCHED_IDLE` and the idle I/O class
+    (`ioprio` `IOPRIO_CLASS_IDLE`). Lowered work that a caller may wait for (an analysis behind a report, a pool an
+    import waits on through a lock, a download, anything a person started) uses the gentle level instead:
+    `QOS_CLASS_UTILITY` on macOS, nice 10 on Linux, `THREAD_PRIORITY_BELOW_NORMAL` on Windows (Debrief's
+    `debrief_core::threads::lower_priority`). A busy machine slows such work, never stops it. A starvable level is only
+    for work nobody waits on (family ADR 0020's `Idle` class, ADR 0024's `Background` child processes), and each use
+    says why with `// conformance: background-qos — <why nobody waits on it>` (check C54). *Why:* these levels run a
+    thread only when the machine has nothing else to do (macOS `BACKGROUND` also keeps it on the efficiency cores);
+    Debrief's mining pool was in it, so on a loaded Mac `debrief report` waited minutes for its analyses and timed out
+    in CI (Debrief ADR 0052, amended 2026-10-30; lessons 2026-10-30).
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:

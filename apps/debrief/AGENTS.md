@@ -198,10 +198,10 @@ The app reads untrusted, possibly huge files and renders their content:
 - Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
-- Work a person waits for never runs at an OS's starvable background level (rule 52: macOS QoS `BACKGROUND`, Windows
-  background modes and idle/lowest priorities, Linux `SCHED_IDLE` and idle I/O): lowered work uses `QOS_CLASS_UTILITY`,
-  nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`; a starvable level only for work nobody waits on, with
-  `// conformance: background-qos — <why>` (C54).
+- Work a person waits for never runs at an OS's starvable background level (rule 52: macOS QoS `BACKGROUND` and
+  `PRIO_DARWIN_BG`, Windows background modes and idle/lowest priorities, Linux `SCHED_IDLE` and idle I/O): lowered work
+  uses `QOS_CLASS_UTILITY`, nice 10 or `THREAD_PRIORITY_BELOW_NORMAL`; a starvable level only for work nobody waits on,
+  with `// conformance: background-qos — <why>` (C54).
 - Research before choosing libraries or patterns when unsure, and prefer
   well-maintained, permissively licensed (MIT/Apache-2.0) dependencies.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they
