@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { groupLeaks, leakPattern, listLeaks, main, newLeaks } from './check-temp-leaks.mjs';
+import { ENDPOINT_PATTERN, groupLeaks, leakPattern, listEndpointLeaks, listLeaks, main, newLeaks, sharedDirs } from './check-temp-leaks.mjs';
 
 const quiet = () => {
   const out = [];
@@ -91,4 +91,27 @@ test('the offenders are listed with their counts, most first', () => {
   } finally {
     s.done();
   }
+});
+
+test('the shared folders are scanned for endpoint-shaped names only, never for other files', () => {
+  assert.ok(ENDPOINT_PATTERN.test('debrief-plugin-372eb9bd2f3d'));
+  assert.ok(ENDPOINT_PATTERN.test('debrief-ipc-0123456789ab'));
+  assert.ok(ENDPOINT_PATTERN.test('dbwAb3dEf'));
+  for (const other of ['debrief-plugin-372eb9bd2f3', 'debrief-plugin-372eb9bd2f3dd', 'debrief-parity-x-1-ab', 'debrief', 'systemd-private-0123456789ab', 'dbw', 'dbwAb3dEf9', 'plugin-372eb9bd2f3d']) {
+    assert.ok(!ENDPOINT_PATTERN.test(other), other);
+  }
+  const s = scratch();
+  try {
+    for (const n of ['debrief-plugin-372eb9bd2f3d', 'dbwAb3dEf', 'debrief-parity-x-1-ab', 'unrelated', 'user-0123456789ab']) mkdirSync(join(s.dir, n));
+    assert.deepEqual(listEndpointLeaks(s.dir), [`${s.dir}/dbwAb3dEf`, `${s.dir}/debrief-plugin-372eb9bd2f3d`]);
+    assert.deepEqual(listEndpointLeaks(join(s.dir, 'missing')), []);
+  } finally {
+    s.done();
+  }
+});
+
+test('sharedDirs names /tmp and the runtime folder, once each, and not the temp folder itself', () => {
+  assert.deepEqual(sharedDirs({ XDG_RUNTIME_DIR: '/run/user/1' }, '/var/tmp'), ['/tmp', '/run/user/1']);
+  assert.deepEqual(sharedDirs({ XDG_RUNTIME_DIR: '/tmp' }, '/var/tmp'), ['/tmp']);
+  assert.deepEqual(sharedDirs({}, '/tmp'), []);
 });
