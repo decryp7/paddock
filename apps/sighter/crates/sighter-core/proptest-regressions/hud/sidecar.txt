@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b870e10aae06e0215df50c5e6fa4f1d38a81969bedf9a0e1befa87033fb8e0f8 # shrinks to kinds = [Detection(DetectionEvent { locate: 0, rect: Rect { x: 0.0, y: 0.0, w: 0.0, h: 426.78077247337643 }, class: ClassId(0), score: Score(0.0), chosen: false })], gaps = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]

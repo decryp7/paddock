@@ -36,11 +36,12 @@ describe('the graph of this tree', () => {
   test('a shared crate marks crates and every app whose Cargo graph reaches it, Rust half only', () => {
     const r = run('crates/paddock-jobs/src/lib.rs');
     assert.ok(r.crates && !r.ui);
-    // Debrief's store worker depends on paddock-proc by path (the macOS memory footprint), so the shared crates reach Debrief too; Dyno takes the shell crates by path.
-    assert.deepEqual(r.apps, ['debrief', 'dyno', 'shell-demo', 'workbench-demo']);
+    // Debrief's store worker depends on paddock-proc by path (the macOS memory footprint), so the shared crates reach Debrief too; Dyno takes the shell crates by path, and Sighter's sighter-bench takes paddock-bench and paddock-proc (sighter-core stays free of shared crates).
+    assert.deepEqual(r.apps, ['debrief', 'dyno', 'shell-demo', 'sighter', 'workbench-demo']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust']);
     assert.deepEqual(r.kinds.debrief, ['rust']);
     assert.ok(r.packages.crates.includes('paddock-jobs'));
+    assert.deepEqual(r.packages['apps/sighter'], ['sighter-bench'], 'a shared crate reaches only the benchmark programs, not sighter-core');
     assert.ok(r.packages['apps/shell-demo/src-tauri'].includes('paddock-shell-demo'));
   });
 
@@ -911,13 +912,22 @@ describe('contracts', () => {
     assert.deepEqual(run('apps/debrief/docs/adr/0001-x.md').apps, []);
   });
 
-  test('a docs-only app (Pacenotes, Sighter) is no leg, and its docs mark only the link check', () => {
-    for (const a of ['pacenotes', 'sighter']) {
-      assert.ok(graph.apps.has(a), `${a} has its paddock.ci.json`);
-      assert.ok(!matrix(affected([], graph, { all: true }), graph).some((l) => l.app === a));
-      const d = run(`apps/${a}/docs/x.md`);
-      assert.deepEqual([d.apps, d.docs], [[], true]);
-    }
+  test('a docs-only app (Pacenotes) is no leg, and its docs mark only the link check', () => {
+    assert.ok(graph.apps.has('pacenotes'), 'pacenotes has its paddock.ci.json');
+    assert.ok(!matrix(affected([], graph, { all: true }), graph).some((l) => l.app === 'pacenotes'));
+    const d = run('apps/pacenotes/docs/x.md');
+    assert.deepEqual([d.apps, d.docs], [[], true]);
+  });
+
+  test('Sighter is a Linux leg of ci.yml for its pure core; its docs mark only the link check', () => {
+    assert.ok(graph.apps.has('sighter') && LEGS.includes('sighter'), 'sighter has a Cargo workspace and is no workflow of its own');
+    const legs = matrix(affected([], graph, { all: true }), graph).filter((l) => l.app === 'sighter');
+    assert.ok(legs.length > 0 && legs.every((l) => l.os === 'ubuntu-latest'), 'only Linux legs until it has OS-specific code');
+    const core = run('apps/sighter/crates/sighter-core/src/lib.rs');
+    assert.deepEqual([core.apps, core.kinds.sighter, core.crates], [['sighter'], ['rust'], false]);
+    assert.ok(core.packages['apps/sighter'].includes('sighter-core'));
+    const d = run('apps/sighter/docs/x.md');
+    assert.deepEqual([d.apps, d.docs], [[], true]);
   });
 });
 

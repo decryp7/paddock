@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 55f744fe1b6b8e023e0767478950ea4c795266f0fc674f0f5cde723f214f889c # shrinks to dets = [Detection { rect: Rect { x: 45.179869190714854, y: 548.1356501382833, w: 141.38371114783655, h: 97.27000083177336 }, class: ClassId(1), score: Score(0.0) }, Detection { rect: Rect { x: 134.74613610502135, y: 638.7437845563894, w: 64.8859145096589, h: 0.0 }, class: ClassId(1), score: Score(0.0) }], gap = 0.0
