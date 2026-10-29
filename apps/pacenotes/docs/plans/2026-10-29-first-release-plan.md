@@ -432,6 +432,9 @@ F1 in detail:
   its last host call, stop neither the writer actor's next commits nor a WAL checkpoint (`PRAGMA wal_checkpoint(TRUNCATE)`
   succeeds and the WAL stays under a bounded size while the function is still blocked); opening a second write
   connection outside the actor fails (a test over the crate's public API).
+- A second `cargo tree` check: only `pacenotes-index` depends on `rusqlite` or `libsqlite3-sys`, directly or
+  transitively, in the Pacenotes workspace; any other crate that reaches either fails the gate, so no other code can
+  open a database connection at all.
 - Not in v1: hang and memory containment tests (they need a separate process; the packaging work after v1).
 
 ### 4.10 Wave 7b: headless, admin, the other views, Debrief's side of the bridge (about 21 agent-days; about seven days at four agents: stream A 7, B 5, C 4, D 5)

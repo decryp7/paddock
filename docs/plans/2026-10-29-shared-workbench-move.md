@@ -185,10 +185,12 @@ Package 0a in detail. It depends on `feat/e2e-hit-test` having landed (item 3), 
   entry, with the entry named; the same for that app's `package-lock.json` entries under its workspace.
 - **Where it blocks: locally, before the push.** Branch CI here is `workflow_dispatch` and work lands on `main` through
   local merges that are then pushed, so a CI check can only report afterwards. The check is a CLI,
-  `node conformance/bin/release-freeze.mjs --range origin/main...HEAD`, run by the integrating agent as a step of the
+  `node conformance/bin/release-freeze.mjs --range origin/main..HEAD` (two dots), run by the integrating agent as a step of the
   integrate procedure before every push to `main`; that step is the real gate. The CLI derives the source itself and
-  takes no `--source` to trust: for each commit in the range, a merge commit is exempt when its second parent (`<commit>^2`)
-  is an ancestor of a declared release branch's tip; any other commit touching a frozen path fails. It exits non-zero
+  takes no `--source` to trust. It walks the range with `git rev-list origin/main..HEAD` and skips every commit that is
+  an ancestor of a declared release branch's tip (the release branch's own commits, which the range includes when that
+  branch is merged); a merge commit is exempt when its second parent (`<commit>^2`) is such an ancestor; any other
+  commit touching a frozen path fails. It exits non-zero
   and lists the commits and frozen paths. A `lefthook.yml` pre-push entry runs the same CLI when a pushed remote ref
   read from stdin is `refs/heads/main` (not when the current branch is `main`). Agents never install lefthook; only
   the user runs `npx lefthook install`.
@@ -199,8 +201,10 @@ Package 0a in detail. It depends on `feat/e2e-hit-test` having landed (item 3), 
   declared release branch is exempt and adds both apps' gates.
 - **Failing tests first.**
   - CLI: a range whose non-merge commit touches `ui/projects/paddock-ui/shell/pages/` exits non-zero and names the commit
-    and path; a range whose merge commit has its second parent in `dyno/shell-1.0`'s history passes and reports both apps' gates;
-    after both tags exist, both pass.
+    and path; a range that merges `dyno/shell-1.0` passes and reports both apps' gates, and its fixture includes the
+    release branch's own commits touching frozen paths (they are skipped as ancestors of the tip, not counted against
+    the merge); the same fixture with one extra non-merge commit on top touching `shell/menu/` fails on that commit
+    only; after both tags exist, all pass.
   - Hook: stdin naming `refs/heads/main` runs the CLI; stdin naming only `refs/heads/feat/x` does not.
   - Lockfiles: the frozen set comes from the branch tips; a fixture where `main`'s `apps/dyno/Cargo.lock` differs from
     the tip's uses the tip's.
@@ -312,7 +316,7 @@ coordinator runs them within the load limit and behind the release work (rule 1)
 
 1. **Release freeze** (package 0a, decided W5). One joint freeze for the releases in flight; frozen paths derived from
    the apps' own `Cargo.lock` files, `paddock-workspace-hack` and the `paddock-ui` entry-point closure, plus a declared
-   list with reasons; blocks locally before the push to `main` (`release-freeze --range origin/main...HEAD`, which derives the source from
+   list with reasons; blocks locally before the push to `main` (`release-freeze --range origin/main..HEAD`, which derives the source from
    merge ancestry), and reports in CI on dispatch and push, where a merge of a declared release branch is exempt and runs
    both apps' gates. Makes rule 1's "don't change
    shared code the release depends on" checked instead of remembered.
