@@ -87,8 +87,18 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
 4. **Inference: `ort` with statically linked ONNX Runtime**, in Sighter's `sighter-infer` sidecar (started through
    `paddock-ipc`, supervised by `paddock-proc` with a memory cap measured as footprint per rule 26, `--self-test` per
    rule 23), shared with OCR.
-   - **EPs**: CPU everywhere (the reference and determinism baseline), CoreML with `MLProgram` on macOS, DirectML on
-     Windows; `error_on_failure` for the chosen EP; every response records EP, ONNX Runtime version and model hash.
+   - **GPU by default** (user, 2026-10-29): CoreML with `MLProgram` on macOS; DirectML on Windows, on Intel integrated
+     or NVIDIA discrete GPUs, through our `DirectML.dll` or, if the gate below removes it, the system's. The CPU EP is
+     the fallback, the reference and the determinism baseline. `error_on_failure` is set for the GPU EP so a failed
+     registration is seen, never a silent CPU run.
+   - **Start-up check**: when the sidecar starts (and after a driver or model change) it runs a quick GPU self-test: the
+     EP loads, and the bundled self-test model's boxes match the stored CPU answer within tolerance. If either fails
+     (for example a VM or Remote Desktop session with no GPU, an old driver, or the DirectML gate failing), Sighter
+     **falls back automatically to the CPU with the Nano preset** and tells the user why in plain words ("The graphics
+     card could not run the detector (driver too old), so Sighter uses the processor with the Fast model. Locating is
+     slower."). Settings has an "Inference device" choice: Automatic (default), GPU, CPU.
+   - **Device on every result**: each locate response, pre-labelling job and evaluation records the device used (EP,
+     GPU name, fallback reason if any) with the ONNX Runtime version and model hash, for diagnostics.
    - **Telemetry off, by construction** (user, 2026-10-29; Sighter AGENTS.md: no telemetry). ONNX Runtime 1.31.0 made
      1DS telemetry the default for its native builds, and pyke's Windows library carries the TraceLogging provider
      (research note section 12). So Sighter does **not** use pyke's prebuilt libraries: it **builds ONNX Runtime from
@@ -341,6 +351,9 @@ against that list comes with the notices tooling.
 11. CUDA: **an opt-in CUDA training runtime is approved as a recorded licence exception**, for training only and
     downloaded on request ("Licence exceptions").
 12. Proposal 9.1: **the amendment is approved** and applied to the proposal (decision 5).
+13. Device: **GPU by default** (CoreML; DirectML on Intel integrated or NVIDIA discrete GPUs, including the system
+    DirectML), with a start-up self-test and an automatic fall-back to the CPU with the Nano preset, explained to the
+    user and selectable in Settings; the device is recorded on every result and job (decision 4).
 
 ## Open questions for the user
 
