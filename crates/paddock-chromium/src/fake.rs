@@ -292,9 +292,18 @@ fn apply_control() {
     }
 }
 
+/// The fake's side of the WebSocket upgrade, then the connection's tick: the read timeout is set only after the
+/// handshake. A tick during the handshake gave up on a client whose upgrade request came later than one tick (a loaded
+/// runner) and dropped the connection (Spotter's copy of this fake, Windows CI runs 19116 and 19657, os error 10053;
+/// Debrief's driver had the same, "Handshake not finished").
+fn handshake(stream: std::net::TcpStream) -> Option<tungstenite::WebSocket<std::net::TcpStream>> {
+    let ws = tungstenite::accept(stream).ok()?;
+    let _ = ws.get_ref().set_read_timeout(Some(TICK));
+    Some(ws)
+}
+
 fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: &str) {
-    let _ = stream.set_read_timeout(Some(TICK));
-    let Ok(mut ws) = tungstenite::accept(stream) else {
+    let Some(mut ws) = handshake(stream) else {
         return;
     };
     // What a real browser may also send: a ping, and a text the client does not understand.
@@ -477,6 +486,35 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: a client that sends its upgrade request many ticks after connecting still gets its connection. The
+    /// quiet spell makes the old failure certain (the fake gave up after one tick and closed the connection); the
+    /// client's read timeout only ends the quiet spell, it is not a wait for the server.
+    #[test]
+    fn the_fake_waits_for_a_late_handshake_and_then_ticks() {
+        use std::io::Read;
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let mut raw = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let (server, _) = l.accept().unwrap();
+        let served = std::thread::spawn(move || {
+            handshake(server).map(|ws| ws.get_ref().read_timeout().ok().flatten())
+        });
+        raw.set_read_timeout(Some(TICK * 50)).unwrap();
+        let quiet = raw.read(&mut [0u8; 1]);
+        assert!(
+            matches!(&quiet, Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)),
+            "the fake ended the connection before the client's handshake: {quiet:?}"
+        );
+        raw.set_read_timeout(None).unwrap();
+        let url = format!("ws://127.0.0.1:{port}/devtools/browser/fake");
+        tungstenite::client(url.as_str(), raw).expect("the late handshake completes");
+        assert_eq!(
+            served.join().unwrap(),
+            Some(Some(TICK)),
+            "the connection ticks once the handshake is done"
+        );
+    }
 
     /// Regression (macOS CI, nextest): the test binary finds its native libraries through `DYLD_FALLBACK_LIBRARY_PATH`,
     /// which the shell running the fake dropped, so every fake browser exited at once.
