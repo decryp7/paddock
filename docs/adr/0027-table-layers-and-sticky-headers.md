@@ -141,18 +141,34 @@ class gets its own run-time check, `expectNothingCovers` (and `coveredInteractiv
 `@decryp7/paddock-e2e` (`hit-test.ts`), the run-time counterpart of C43:
 
 - **What is probed.** Every interactive element under a root: buttons, links, inputs, selects, textareas, `role` button, tab,
-  menuitem(checkbox/radio), option, checkbox, switch and slider, `[tabindex>=0]`, and an optional extra selector. Each is cut to
-  the visible rect of its scroll ancestors and the window (fully clipped elements are skipped) and asked
-  `document.elementFromPoint` at the centre and four inset points; it passes when any point reaches the element or a
-  descendant (or the label of a control). A sticky element of a scroller that has scrolled, which does not contain the
-  element, is a designed header over scrolled rows and is skipped; at rest it still counts.
-- **Inert covers.** While probing, `* { pointer-events: auto !important }` is injected (and removed in a `finally`), so a cover
-  that is painted but inert (a tooltip layer, a scrim, a pseudo-element) is caught: the user sees the control covered even if
-  the click would fall through. Material's own ripple, state layer, focus overlay and form-field outline are inert on purpose
-  and are listed in `DESIGNED_OVERLAYS`.
-- **Designed overlaps** are declared, never skipped silently: `allow: [[coverSelector, targetSelector], ...]`. A known bug
-  gets a temporary `allow` with a TODO naming the finding, removed by its fix.
+  menuitem(checkbox/radio), option, checkbox, switch and slider, other tab stops (`[tabindex>=0]`; a control or role element
+  with a negative tabindex is still a candidate), and an optional extra selector. Each is cut to the visible rect of its
+  scroll ancestors and the window (fully clipped elements are skipped). At the centre and four inset points (pushed inwards
+  at a rounded corner) the browser's `document.elementsFromPoint` gives the stack, topmost first; the element is covered
+  when, at **any** of the points, a layer that is not allowed sits above it. Reaching the element, its content, its own
+  `<label>` element or (a rounded corner) an ancestor is not a cover. A 2 px tick through a chip and a tooltip over three
+  quarters of a button are covers.
+- **Inert covers.** While probing, `*, *::before, *::after { pointer-events: auto !important }` is injected (and removed in a
+  `finally`), so a cover that is painted but inert (a tooltip layer, a scrim, a pseudo-element) is caught: the user sees the
+  control covered even if the click would fall through. A layer that was inert before the forcing and paints nothing of its
+  own (no background, border, shadow, outline, filter, text, replaced content or drawn pseudo-element) is an empty host
+  (dockview's floating host, an overlay container) and covers nothing. A layer that took the click (a transparent but active
+  div) is a cover.
+- **Sticky.** A cover is skipped only when it sits in a sticky element of a scroller that has scrolled, the target scrolls in
+  that scroller (is neither fixed nor itself sticky there) and the sticky element does not contain it: a sticky header over
+  scrolled rows. A sticky column over a sticky header, or a sticky banner over a fixed button, is a cover.
+- **Material.** The ripple, state layer, focus overlay and form-field outline are inert on purpose; they are allowed only over
+  the control that owns them (`DESIGNED_OVERLAYS`, `OVERLAY_OWNERS`): Material button B painted over button A is a cover.
+- **Scrolling.** Probed at rest and after scrolling each scroller (and the page) to a third, two thirds and the end, one scroller
+  at a time, positions restored; running animations are awaited and the pointer is moved away first.
+- **Designed overlaps** are declared, never skipped silently: `allow: [[coverSelector, targetSelector], ...]`. A known bug gets a
+  temporary `allow` with a TODO naming the finding, removed by its fix.
+- **Out of scope.** Elements inside shadow roots and iframes (the page's `elementsFromPoint` sees only their host).
 - **Where it runs.** Over every gallery section (every paddock-ui component) in both themes, Chromium and WebKit
-  (`ui/e2e/hit-test.spec.ts`, with fixture pages for an inert cover, a covered button, a sticky header over scrolled rows and an
-  allow-listed overlap); once per app main view; and in place of the ad-hoc `elementFromPoint` checks where one fits (the
-  dialog footer, the tab overflow list, the welcome screen).
+  (`ui/e2e/hit-test.spec.ts`, whose fixture pages are the must-fail cases: inert, partial, look-alike and sticky-ladder covers,
+  and the must-pass ones: empty inert layer, sticky header over scrolled rows, allow-listed overlap); on the main views that
+  have a call (Debrief's timeline panel and events grid, Dyno's ten main pages, Pitwall's model library, Spotter's dashboard,
+  watches and settings, Pitcrew's dashboard, runners, updates and logs, and the shell frame); and in place of the ad-hoc
+  `elementFromPoint` checks where one fits (the dialog footer, the tab overflow list, the welcome screen).
+- **Consumers.** `scripts/affected.mjs` derives which apps import each `paddock-e2e` module by relative path (their e2e specs
+  and configs) and re-runs those apps' UI half when the module changes.

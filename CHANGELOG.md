@@ -5,11 +5,15 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### `expectNothingCovers` in `@decryp7/paddock-e2e` (ADR 0027, run-time check)
-- New `coveredInteractive` / `expectNothingCovers` (`hit-test.ts`): fails when something sits on top of a button, link, input,
-  tab, menu item, option, checkbox, switch, slider or tab stop, probed at five points of the part a scroller shows, at rest and
-  after scrolling, with painted but inert covers caught and designed overlaps declared in `allow`. Runs over every gallery
-  section in both themes (Chromium and WebKit), once per app main view and in the shell frame; the ad-hoc `elementFromPoint`
-  checks for the dialog footer and the tab overflow list use it.
+- New `coveredInteractive` / `expectNothingCovers` (`hit-test.ts`): fails when, at the centre or any of four inset points,
+  something that is not allowed sits above a button, link, input, tab, menu item, option, checkbox, switch, slider or tab stop,
+  at rest and after scrolling each scroller. Painted but inert covers are caught (`pointer-events` is forced on while
+  probing; empty inert hosts are skipped), Material's ripple layers are allowed only over their own control, a sticky header
+  over scrolled rows is skipped, designed overlaps are declared in `allow`. Shadow DOM and iframes are out of scope.
+  Runs over every gallery section in both themes (Chromium and WebKit), on the main views of Debrief (timeline panel, events
+  grid), Dyno, Pitwall (model library), Spotter, Pitcrew and the shell frame; the ad-hoc `elementFromPoint` checks for the
+  dialog footer and the tab overflow list use it.
+- `scripts/affected.mjs` derives the apps that import each `paddock-e2e` module from their e2e and config files instead of a fixed pattern.
 
 ### Rust developer and CI tool, phase R0 (ADR 0022)
 - New shared crates `paddock-slots` (numbered job slots over OS file locks, with a holder that always ends: job folder gone,
