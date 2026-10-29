@@ -107,23 +107,18 @@ fn the_private_socket_folder_is_gone_once_the_child_is_connected() {
     );
     // The connection works on without it.
     assert_eq!(ask(&c, "echo still").unwrap(), "still");
-    // A child that never connects: its folder is there while the host waits (so this test looks where the folders are
-    // made: once a long temp folder sent them to the job's socket base, which it did not look in, and it passed blind),
-    // and gone when the launch fails.
+    // socket_dirs looks where endpoint folders are made (once a long temp folder sent them to the job's socket base, which
+    // it did not look in, and this test passed blind): one made here is found, and gone once dropped. No clock involved.
+    let endpoint = debrief_ipc::endpoint::PrivateEndpoint::create_named(&prefix).unwrap();
+    let made = endpoint.dir().unwrap().to_path_buf();
+    assert_eq!(socket_dirs(&prefix), vec![made.canonicalize().unwrap_or(made)]);
+    drop(endpoint);
+    assert!(socket_dirs(&prefix).is_empty());
+    // A child that never connects leaves nothing either.
     let mut s = spec(&["--no-connect"]);
     s.spawn.endpoint_prefix = prefix.clone();
-    s.spawn.connect_window = Duration::from_secs(3);
-    let waiting = std::thread::spawn(move || launch(&s, Arc::new(NoCalls)).is_err());
-    let started = Instant::now();
-    while socket_dirs(&prefix).is_empty() && started.elapsed() < Duration::from_secs(3) {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert_eq!(
-        socket_dirs(&prefix).len(),
-        1,
-        "the socket folder exists while the host waits for the child"
-    );
-    assert!(waiting.join().unwrap(), "a child that never connects fails the launch");
+    s.spawn.connect_window = Duration::from_millis(300);
+    assert!(launch(&s, Arc::new(NoCalls)).is_err());
     assert!(socket_dirs(&prefix).is_empty());
 }
 
