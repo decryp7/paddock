@@ -8,4 +8,5 @@ pub mod bench;
 pub mod chain;
 pub mod detect;
 pub mod geometry;
+pub mod hud;
 pub mod tiling;
