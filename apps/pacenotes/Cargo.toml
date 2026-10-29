@@ -1,0 +1,31 @@
+# Pacenotes' own Cargo workspace (ADR 0014: no root workspace; shared crates are path dependencies). Stage 1 of the first
+# release plan holds pure crates only under crates/ (no Tauri, no UI, no process spawning); the app comes in stage 2.
+[workspace]
+members = ["tests/trap"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.88"
+repository = "https://dev.decryptology.net/decryp7/paddock"
+version = "0.1.0"
+
+# Versions of the dependencies that two or more members use, so they stay on one version.
+[workspace.dependencies]
+paddock-testkit = { path = "../../crates/paddock-testkit" }
+
+# Dependencies are optimised even in debug builds; workspace crates stay at opt-level 0 for fast rebuilds.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+debug = "line-tables-only"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

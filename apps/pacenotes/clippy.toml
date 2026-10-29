@@ -1,0 +1,5 @@
+# Pacenotes never executes code of the repositories it reads (AGENTS.md "Safety"): any child process goes through one
+# reviewed helper. Tests may allow this.
+disallowed-methods = [
+    { path = "std::process::Command::new", reason = "Pacenotes never runs repository code; child processes go through the supervised helper (stage 2)" },
+]
