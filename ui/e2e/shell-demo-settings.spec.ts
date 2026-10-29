@@ -168,6 +168,8 @@ test.describe('settings (plan S10)', () => {
     await trigger.click();
     const list = page.locator('.mat-mdc-select-panel');
     await expect(list).toBeVisible();
+    // measure at rest: the panel scales in, so its box is only final once its own open animations have finished
+    await list.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)).then(() => undefined));
     // the list lines up with the field's outline, of which the trigger text is inset
     const [t, l] = [(await app.settings.field('style').locator('.mat-mdc-text-field-wrapper').boundingBox())!, (await list.boundingBox())!];
     expect(Math.abs(l.x - t.x)).toBeLessThanOrEqual(1);
