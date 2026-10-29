@@ -19,7 +19,9 @@ test.describe('Spotter against the mock backend', () => {
     await page.getByRole('button', { name: 'Next' }).click();
     await page.getByRole('button', { name: 'Next' }).click();
     await page.getByRole('button', { name: 'Next' }).click();
-    await page.getByLabel('Name').fill('Node runtime');
+    // Material keeps the steps already opened in the page (inert); the open one is the Review panel.
+    const review = page.getByRole('tabpanel', { name: 'Review' });
+    await review.getByLabel('Name').fill('Node runtime');
     await page.getByRole('button', { name: 'Add watch' }).click();
     await expect(page.getByRole('heading', { name: 'Node runtime', level: 1 })).toBeVisible();
     await page.getByRole('link', { name: 'All watches' }).click();
@@ -147,7 +149,7 @@ test.describe('Check schedule', () => {
     await expect(page.getByRole('alert')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Next' }).click();
-    await expect(page.getByText('Cron 0 9 * * 1-5')).toBeVisible();
+    await expect(page.getByRole('tabpanel', { name: 'Review' }).getByText('Cron 0 9 * * 1-5')).toBeVisible();
   });
 });
 

@@ -18,6 +18,9 @@ const routes = [
 const pressed = (f: F) =>
   Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('sp-schedule-editor [aria-pressed="true"]')).map((b) => text(b));
 
+/** The stepper's headers (role tab). */
+const headers = (f: F) => Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('mat-stepper .mat-step-header'));
+
 type F = Awaited<ReturnType<typeof make>>['f'];
 
 async function make(id?: string, backend = makeMock()) {
@@ -56,14 +59,36 @@ const goNext = async (f: F, times = 1) => {
 describe('EditorPage: adding a watch', () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it('moves focus to the new step heading on every step change', async () => {
+    const { f } = await make();
+    await startGithub(f);
+    await flush(2);
+    expect(document.activeElement).toBe(q(f, '#cfg-h'));
+    await goNext(f);
+    await flush(2);
+    expect(document.activeElement).toBe(q(f, '#ver-h'));
+    await click(f, button(f, 'Back'));
+    await flush(2);
+    expect(document.activeElement).toBe(q(f, '#cfg-h'));
+  });
+
+  it('gives the source step a heading and the stepper an accessible name', async () => {
+    const { f } = await make();
+    expect(text(q(f, '#src-h'))).toBe('Choose a source');
+    expect(q(f, 'mat-stepper').getAttribute('aria-label')).toBe('Watch setup steps');
+  });
+
   it('starts on the source step with presets, no Next button and later steps disabled', async () => {
     const { f } = await make();
     expect(text(q(f, 'h1'))).toBe('Add a watch');
     expect(card(f, 'Node.js')).toBeDefined();
     expect(button(f, 'Next')).toBeNull();
-    const steps = Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('ol.steps button'));
-    expect(steps.map((s) => s.disabled)).toEqual([false, true, true, true, true]);
-    expect(steps[0]!.getAttribute('aria-current')).toBe('step');
+    expect(q(f, 'mat-stepper')).not.toBeNull();
+    expect(headers(f).map((h) => h.getAttribute('aria-selected'))).toEqual(['true', 'false', 'false', 'false', 'false']);
+    expect(headers(f).map((h) => text(h.querySelector('.mat-step-text-label')))).toEqual(['Source', 'Configure', 'Versions', 'Notify', 'Review']);
+    // Linear: no later step can be opened before a source is chosen.
+    await click(f, headers(f)[2]!);
+    expect(q(f, 'sp-source-step')).not.toBeNull();
   });
 
   it('picks a preset, keeping the user default interval, and lands on the configure step', async () => {
@@ -157,24 +182,38 @@ describe('EditorPage: adding a watch', () => {
     await goNext(f);
     await click(f, button(f, 'Custom pattern'));
     expect(button(f, 'Next').disabled).toBe(true);
+    // The stepper is linear: the incomplete step also keeps the later headers shut.
+    await click(f, headers(f)[3]!);
+    expect(q(f, '#ver-h')).not.toBeNull();
     await fill(f, '#pattern', '^v(?P<major>\\d+)');
     expect(button(f, 'Next').disabled).toBe(false);
+    await goNext(f);
+    expect(q(f, '#sch-h')).not.toBeNull();
+  });
+
+  it('keeps every later step shut while a required field is missing', async () => {
+    const { f } = await make();
+    await click(f, byText(f.nativeElement, '.ways button', 'Source kinds'));
+    await click(f, card(f, 'GitHub'));
+    await click(f, headers(f)[2]!);
+    expect(q(f, '#cfg-h')).not.toBeNull();
+    expect(headers(f).map((h) => h.getAttribute('aria-selected'))).toEqual(['false', 'true', 'false', 'false', 'false']);
   });
 
   it('lets the user go back and revisit visited steps only', async () => {
     const { f } = await make();
     await startGithub(f);
     await goNext(f, 2);
-    const steps = () => Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('ol.steps button'));
-    expect(steps().map((s) => s.disabled)).toEqual([false, false, false, false, true]);
-    await click(f, steps()[1]!);
+    expect(headers(f).map((h) => h.getAttribute('aria-selected'))).toEqual(['false', 'false', 'false', 'true', 'false']);
+    await click(f, headers(f)[1]!);
     expect(q(f, '#cfg-h')).not.toBeNull();
     await click(f, button(f, 'Back'));
     expect(q(f, 'sp-source-step')).not.toBeNull();
     expect(button(f, 'Back')).toBeNull();
-    f.componentInstance['go']('review', 4); // not reachable
-    await settle(f);
-    expect(q(f, '#rev-h')).toBeNull();
+    // Linear: the configure step is complete, so the steps after it open one by one; the review step needs the ones before it.
+    await click(f, headers(f)[4]!);
+    expect(q(f, '#rev-h')).not.toBeNull();
+    expect((q(f, '#name') as HTMLInputElement).value).toBe('tool');
   });
 
   it('manages notification channels, quiet hours and actions', async () => {
@@ -271,8 +310,8 @@ describe('EditorPage: editing a watch', () => {
     expect(text(q(f, '#cfg-h'))).toBe('GitHub');
     expect((q(f, '#f-repo') as HTMLInputElement).value).toBe('lumen-labs/lumen');
     expect(button(f, 'Back')).toBeNull();
-    const first = (f.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('ol.steps button')!;
-    await click(f, first);
+    // The source step is done and not editable when editing: its header does not open it.
+    await click(f, headers(f)[0]!);
     expect(q(f, '#cfg-h')).not.toBeNull();
     await fill(f, '#f-repo', 'lumen-labs/lumen2');
     await goNext(f, 3);

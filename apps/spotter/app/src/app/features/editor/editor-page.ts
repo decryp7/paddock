@@ -1,6 +1,7 @@
 import { routeParam } from '../../core/route-param';
-import { ChangeDetectionStrategy, Component, computed, effect, inject, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, Injector, afterNextRender, computed, effect, inject, linkedSignal, untracked } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
+import { MatStep, MatStepContent, MatStepper, MatStepperIcon } from '@angular/material/stepper';
 import { Router, RouterLink } from '@angular/router';
 import { BACKEND } from '../../core/backend';
 import type { ChannelKind, LatestBy, NotifyMode, VersionSchemeId, WatchAction } from '../../core/api.types';
@@ -17,10 +18,13 @@ import { PreviewPanel } from './preview-panel';
 import { ScheduleEditor } from './schedule-editor';
 import { SourceStep } from './source-step';
 
-/** The add/edit wizard: source, configure (with a live test), versions, notifications and actions, review. */
+/** The heading each step moves focus to when it opens (the first heading of the step's content). */
+const STEP_HEADING: Record<EditorStep, string> = { source: 'src-h', configure: 'cfg-h', versions: 'ver-h', notify: 'sch-h', review: 'rev-h' };
+
+/** The add/edit wizard (a linear `mat-stepper`): source, configure (with a live test), versions, notifications and actions, review. */
 @Component({
   selector: 'sp-editor-page',
-  imports: [MatIcon, RouterLink, Panel, FieldForm, PreviewPanel, SourceStep, ExtensionChips, PatternHelper, ScheduleEditor],
+  imports: [MatIcon, MatStepper, MatStep, MatStepContent, MatStepperIcon, RouterLink, Panel, FieldForm, PreviewPanel, SourceStep, ExtensionChips, PatternHelper, ScheduleEditor],
   providers: [EditorStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './editor-page.html',
@@ -35,21 +39,34 @@ export class EditorPage {
   private readonly toast = inject(Notifier);
   private readonly backend = inject(BACKEND);
 
-  protected readonly steps = STEPS;
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly injector = inject(Injector);
+
+  /** Material's slide between steps, none for people who asked for reduced motion. */
+  protected readonly motion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches ? '0ms' : '150ms';
   protected readonly schemes = SCHEME_OPTIONS;
   protected readonly draft = this.store.draft;
-  protected readonly canNext = computed(() => {
-    const s = this.store.step();
-    if (s === 'source') return false;
-    if (s === 'configure') return this.store.missing().length === 0;
-    if (s === 'versions') return this.draft().versions !== 'custom' || !!(this.draft().versionPattern ?? '').trim();
-    return true;
-  });
+  /** Whether a step's own input is complete (UI convenience only: the engine re-validates on test and save). */
+  private valid(step: EditorStep): boolean {
+    switch (step) {
+      case 'source':
+        return this.store.kind() !== null;
+      case 'configure':
+        return this.store.kind() !== null && this.store.missing().length === 0;
+      case 'versions':
+        return this.draft().versions !== 'custom' || !!(this.draft().versionPattern ?? '').trim();
+      default:
+        return true;
+    }
+  }
+
+  protected readonly canNext = computed(() => this.store.step() !== 'source' && this.valid(this.store.step()));
+  /** The furthest step reached; the stepper opens steps up to it, and the next one once the current is complete. */
+  private readonly furthest = linkedSignal<number, number>({ source: this.store.stepIndex, computation: (i, prev) => Math.max(i, prev?.value ?? 0) });
   protected readonly download = computed(() => findAction(this.draft().actions, 'download'));
   protected readonly command = computed(() => findAction(this.draft().actions, 'run-command'));
   protected readonly openLocation = computed(() => findAction(this.draft().actions, 'open-location'));
   protected readonly formState = computed<Loadable<unknown>>(() => (this.id() ? this.store.loadedDraft() : { value: true, loading: false, error: null }));
-  protected readonly reachable = computed(() => this.store.stepIndex());
 
   constructor() {
     void this.store.loadCatalog();
@@ -57,11 +74,29 @@ export class EditorPage {
       const id = this.id();
       if (id) untracked(() => void this.store.loadWatch(id));
     });
+    // Focus follows the step: the new step's heading (not on first render, so opening the page does not steal focus).
+    let first = true;
+    effect(() => {
+      const step = this.store.step();
+      if (first) {
+        first = false;
+        return;
+      }
+      untracked(() => afterNextRender(() => this.host.nativeElement.querySelector<HTMLElement>(`#${STEP_HEADING[step]}`)?.focus(), { injector: this.injector }));
+    });
   }
 
-  protected go(step: EditorStep, index: number): void {
-    // Steps already visited can be revisited; the source choice must come first.
-    if (index <= this.reachable() && (this.store.editing() ? step !== 'source' : true)) this.store.setStep(step);
+  /** A step counts as done when it was reached and its input is complete; linear mode then lets the next one open. */
+  protected done(index: number): boolean {
+    const step = STEPS[index]?.id;
+    if (!step) return false;
+    return (this.store.editing() && index === 0) || (index <= this.furthest() && this.valid(step));
+  }
+
+  /** The stepper opened a step (header click or keyboard): the store follows. */
+  protected onStep(index: number): void {
+    const to = STEPS[index]?.id;
+    if (to && to !== this.store.step()) this.store.setStep(to);
   }
 
   protected value(e: Event): string {
