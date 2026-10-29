@@ -1,4 +1,4 @@
-import { STATE_EVENT, NAVIGATE_EVENT, JOB_EVENT, TauriBackend, platformFromUserAgent, type CommandCall, type EventListen } from './tauri-backend';
+import { STATE_EVENT, NAVIGATE_EVENT, TauriBackend, platformFromUserAgent, type CommandCall, type EventListen } from './tauri-backend';
 import type { WatchDraft } from './api.types';
 
 describe('TauriBackend', () => {
@@ -21,16 +21,16 @@ describe('TauriBackend', () => {
     await backend.listWatches();
     await backend.getWatch('w1');
     await backend.sourceKinds();
-    await backend.testSource(draft, { token: 'x' }, 'job-1');
+    await backend.testSource(draft, { token: 'x' });
     await backend.saveWatch(draft, {});
     await backend.deleteWatch('w1');
     await backend.setPaused('w1', true);
-    await backend.checkNow(null, 'job-2');
+    await backend.checkNow(null);
     await backend.acknowledge('w1', '1.0');
     await backend.resetAcknowledgement('w1');
     await backend.setInstalled('w1', null);
     await backend.openRelease('w1', '1.0');
-    await backend.downloadRelease('w1', '1.0', 'job-3');
+    await backend.downloadRelease('w1', '1.0');
     await backend.dashboard('30d');
     await backend.events(20, null);
     await backend.getSettings();
@@ -44,16 +44,14 @@ describe('TauriBackend', () => {
     await backend.presets();
     await backend.discoverFeeds('https://x.test');
     await backend.rendererStatus();
-    await backend.installRenderer('job-4');
+    await backend.installRenderer();
     await backend.importList('opml', 'x');
-    await backend.appUpdateStatus();
-    await backend.checkAppUpdate();
-    await backend.installAppUpdate();
     await backend.showMainWindow('/watches');
+    await backend.pendingRoute();
     await backend.hideTray();
     await backend.acknowledgeProduct('w1', 'PRO');
     await backend.openRelease('w1', '1.0', { product: 'PRO', artifact: 'a.iso' });
-    await backend.downloadRelease('w1', '1.0', 'job-5', { artifact: 'a.iso' });
+    await backend.downloadRelease('w1', '1.0', { artifact: 'a.iso' });
     await backend.suggestPattern('app-1.2', [{ role: 'major', start: 4, end: 5 }]);
     await backend.testPattern('custom', '(?<major>\\d+)', true, 'v1');
     await backend.versionSchemes();
@@ -62,20 +60,20 @@ describe('TauriBackend', () => {
       'app_info', 'list_watches', 'get_watch', 'source_kinds', 'test_source', 'save_watch', 'delete_watch', 'set_paused', 'check_now',
       'acknowledge', 'reset_acknowledgement', 'set_installed', 'open_release', 'download_release', 'dashboard', 'events', 'get_settings',
       'save_settings', 'pause_notifications', 'get_autostart', 'set_autostart', 'open', 'choose_folder', 'choose_program', 'presets',
-      'discover_feeds', 'renderer_status', 'install_renderer', 'import_list', 'app_update_status', 'check_app_update',
-      'install_app_update', 'show_main_window', 'hide_tray', 'acknowledge_product', 'open_release', 'download_release', 'suggest_pattern',
+      'discover_feeds', 'renderer_status', 'install_renderer', 'import_list', 'show_main_window', 'pending_route',
+      'plugin:paddock-shell|tray_close', 'acknowledge_product', 'open_release', 'download_release', 'suggest_pattern',
       'test_pattern', 'version_schemes', 'preview_schedule',
     ]);
-    expect(calls[34]?.[1]).toEqual({ id: 'w1', product: 'PRO' });
-    expect(calls[35]?.[1]).toEqual({ id: 'w1', version: '1.0', product: 'PRO', artifact: 'a.iso' });
-    expect(calls[8]?.[1]).toEqual({ id: null, jobId: 'job-2' });
-    expect(calls[27]?.[1]).toEqual({ jobId: 'job-4' });
-    expect(calls[36]?.[1]).toEqual({ id: 'w1', version: '1.0', jobId: 'job-5', product: null, artifact: 'a.iso' });
-    expect(calls[38]?.[1]).toEqual({ versions: 'custom', versionPattern: '(?<major>\\d+)', missingOlder: true, text: 'v1' });
-    expect(calls[40]?.[1]).toEqual({ schedule: { mode: 'cron', expr: '0 9 * * *', zone: null }, sourceKind: 'github' });
+    expect(calls[32]?.[1]).toEqual({ id: 'w1', product: 'PRO' });
+    expect(calls[33]?.[1]).toEqual({ id: 'w1', version: '1.0', product: 'PRO', artifact: 'a.iso' });
+    expect(calls[8]?.[1]).toEqual({ id: null });
+    expect(calls[27]?.[1]).toBeUndefined();
+    expect(calls[34]?.[1]).toEqual({ id: 'w1', version: '1.0', product: null, artifact: 'a.iso' });
+    expect(calls[36]?.[1]).toEqual({ versions: 'custom', versionPattern: '(?<major>\\d+)', missingOlder: true, text: 'v1' });
+    expect(calls[38]?.[1]).toEqual({ schedule: { mode: 'cron', expr: '0 9 * * *', zone: null }, sourceKind: 'github' });
     expect(calls[12]?.[1]).toEqual({ id: 'w1', version: '1.0', product: null, artifact: null });
     expect(calls[2]?.[1]).toEqual({ id: 'w1' });
-    expect(calls[4]?.[1]).toEqual({ draft, secrets: { token: 'x' }, jobId: 'job-1' });
+    expect(calls[4]?.[1]).toEqual({ draft, secrets: { token: 'x' } });
     expect(calls[15]?.[1]).toEqual({ limit: 20, beforeMs: null });
     expect(calls[21]?.[1]).toEqual({ target: 'logs' });
   });
@@ -92,30 +90,27 @@ describe('TauriBackend', () => {
     expect(routes).toEqual(['/settings']);
   });
 
-  it('subscribes to job events and cancels a job by id', async () => {
-    const seen: unknown[] = [];
-    await backend.onJob((e) => seen.push(e));
-    handlers.get(JOB_EVENT)?.({ payload: { jobId: 'a', kind: 'download', state: 'running', progress: null } });
-    expect(seen).toEqual([{ jobId: 'a', kind: 'download', state: 'running', progress: null }]);
+  it('closes and fits the tray popover through the shell plugin, and sends no job id or UI timeout', async () => {
     calls.length = 0;
-    await backend.cancelJob('a');
-    expect(calls).toEqual([['cancel_job', { jobId: 'a' }]]);
+    await backend.fitTray(240);
+    expect(calls).toEqual([['plugin:paddock-shell|tray_fit_height', { height: 240 }]]);
   });
 
-  it('does not time out a job but still times out a plain call', async () => {
+  it('never gives up on a pending call (the engine owns job timeouts)', async () => {
     vi.useFakeTimers();
     try {
-      const never = new Promise<never>(() => undefined);
-      const slow = new TauriBackend(() => never);
-      let jobSettled = false;
-      void slow.downloadRelease('w1', '1.0', 'j').then(
-        () => (jobSettled = true),
-        () => (jobSettled = true),
+      const slow = new TauriBackend(() => new Promise<never>(() => undefined));
+      let settled = false;
+      void slow.downloadRelease('w1', '1.0').then(
+        () => (settled = true),
+        () => (settled = true),
       );
-      const plain = expect(slow.getWatch('x')).rejects.toMatchObject({ code: 'unavailable' });
+      void slow.getWatch('x').then(
+        () => (settled = true),
+        () => (settled = true),
+      );
       await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
-      await plain;
-      expect(jobSettled, 'a ten-minute download is not given up on').toBe(false);
+      expect(settled, 'no UI timeout on any call').toBe(false);
     } finally {
       vi.useRealTimers();
     }

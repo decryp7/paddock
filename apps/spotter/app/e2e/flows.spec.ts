@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from '@decryp7/paddock-e2e';
 
 test.describe('Spotter against the mock backend', () => {
   test('the first load shows content, not a blank window', async ({ page }) => {
@@ -19,7 +19,9 @@ test.describe('Spotter against the mock backend', () => {
     await page.getByRole('button', { name: 'Next' }).click();
     await page.getByRole('button', { name: 'Next' }).click();
     await page.getByRole('button', { name: 'Next' }).click();
-    await page.getByLabel('Name').fill('Node runtime');
+    // Material keeps the steps already opened in the page (inert); the open one is the Review panel.
+    const review = page.getByRole('tabpanel', { name: 'Review' });
+    await review.getByLabel('Name').fill('Node runtime');
     await page.getByRole('button', { name: 'Add watch' }).click();
     await expect(page.getByRole('heading', { name: 'Node runtime', level: 1 })).toBeVisible();
     await page.getByRole('link', { name: 'All watches' }).click();
@@ -62,15 +64,16 @@ test.describe('Spotter against the mock backend', () => {
     await expect(dots).toHaveCount(before - 1);
   });
 
-  test('a settings change applies at once and is still there after navigating', async ({ page }) => {
-    await page.goto('/#/settings');
-    await page.getByRole('radio', { name: 'Dark' }).click();
-    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-    await page.getByLabel('Show notifications').uncheck();
-    await page.getByRole('link', { name: 'Watches' }).click();
-    await page.getByRole('link', { name: 'Settings' }).click();
-    await expect(page.getByRole('radio', { name: 'Dark' })).toBeChecked();
-    await expect(page.getByLabel('Show notifications')).not.toBeChecked();
+  test('a settings change applies at once and is still there after visiting another settings page', async ({ page, app }) => {
+    await app.settings.open({ page: 'sp.general' });
+    const notify = page.getByRole('switch', { name: 'Show notifications' });
+    await expect(notify).toBeChecked();
+    await notify.click();
+    await expect(notify).not.toBeChecked();
+    // The shell's Appearance page is beside Spotter's own.
+    await app.settings.nav.getByRole('button', { name: /Appearance/ }).click();
+    await app.settings.nav.getByRole('button', { name: /Spotter/ }).click();
+    await expect(page.getByRole('switch', { name: 'Show notifications' })).not.toBeChecked();
   });
 
   test('the tray popup lists unseen releases', async ({ page }) => {
@@ -105,10 +108,10 @@ test.describe('Spotter against the mock backend', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 
-  test('a failing backend shows an inline error with Retry', async ({ page }) => {
+  test('a failing backend shows an inline error with Retry and the shell’s service chip with its repair', async ({ page, app }) => {
     await page.goto('/?mock=broken');
     await expect(page.getByRole('button', { name: 'Retry' }).first()).toBeVisible();
-    await expect(page.getByText('Spotter cannot reach its engine')).toBeVisible();
+    await expect(app.statusBar.chip).toContainText(/your sources/i);
   });
 
   test('an empty install invites you to add the first watch', async ({ page }) => {
@@ -148,6 +151,35 @@ test.describe('Check schedule', () => {
     await expect(page.getByRole('alert')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Next' }).click();
-    await expect(page.getByText('Cron 0 9 * * 1-5')).toBeVisible();
+    await expect(page.getByRole('tabpanel', { name: 'Review' }).getByText('Cron 0 9 * * 1-5')).toBeVisible();
+  });
+});
+
+test.describe('Pages the tray asks for', () => {
+  test('a route sent by the tray or a toast is shown by the main window, an unknown one is not', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
+    await page.evaluate(() => (globalThis as unknown as { __spotterMock: { navigate(r: string): void } }).__spotterMock.navigate('/watches/w-3'));
+    await expect(page).toHaveURL(/#?\/?watches\/w-3$/);
+    await page.evaluate(() => (globalThis as unknown as { __spotterMock: { navigate(r: string): void } }).__spotterMock.navigate('/settings'));
+    await expect(page).toHaveURL(/watches\/w-3$/);
+  });
+});
+
+test.describe('Native feel', () => {
+  test('right-clicking selected code opens the shell’s Copy menu, and not the browser’s', async ({ page }) => {
+    await page.goto('/');
+    // Text is selectable where it is code or a text field (the app chrome is not); a command line is the usual case.
+    await page.evaluate(() => {
+      const pre = document.createElement('pre');
+      pre.id = 'sample-command';
+      pre.textContent = 'npm install lumen@3.6.5';
+      pre.style.cssText = 'position:fixed;top:120px;left:400px;z-index:9999;background:white;color:black;padding:8px';
+      document.body.append(pre);
+    });
+    const sample = page.locator('#sample-command');
+    await sample.click({ clickCount: 3 });
+    await sample.click({ button: 'right' });
+    await expect(page.getByRole('menuitem', { name: 'Copy' })).toBeVisible();
   });
 });

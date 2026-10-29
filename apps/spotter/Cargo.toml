@@ -16,6 +16,9 @@ spotter-core = { path = "crates/spotter-core" }
 spotter-sources = { path = "crates/spotter-sources" }
 spotter-engine = { path = "crates/spotter-engine" }
 spotter-render = { path = "crates/spotter-render" }
+# Downloads and their jobs come from the shared Paddock crates (path dependencies inside the monorepo).
+paddock-download = { path = "../../crates/paddock-download" }
+paddock-jobs = { path = "../../crates/paddock-jobs" }
 croner = { version = "4", default-features = false, features = ["jiff"] }
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 quick-xml = "0.42"

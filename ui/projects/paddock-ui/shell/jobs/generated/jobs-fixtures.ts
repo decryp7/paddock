@@ -1,7 +1,7 @@
 // Generated from paddock-jobs' wire model by its tests (Rust round trip). Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-jobs --features tauri --test it tauri::generated.
 
 /** One `paddock://jobs` snapshot of every shape, as Rust serialises them: queued, discovering, determinate bytes,
- * not cancellable, done, failed, cancelled by the user and by a deadline. */
+ * not cancellable, done, failed, cancelled by the user and by a deadline, and a done one that is quiet on success. */
 export const JOB_SNAPSHOT_FIXTURES: readonly unknown[] = [
   {
     "id": 1,
@@ -122,5 +122,18 @@ export const JOB_SNAPSHOT_FIXTURES: readonly unknown[] = [
     "etaMs": null,
     "cancellable": false,
     "notCancellableReason": null
+  },
+  {
+    "id": 9,
+    "kind": "test",
+    "title": "Testing the source",
+    "subject": null,
+    "state": "done",
+    "seq": 3,
+    "elapsedMs": 0,
+    "etaMs": null,
+    "cancellable": false,
+    "notCancellableReason": null,
+    "quietOnSuccess": true
   }
 ];

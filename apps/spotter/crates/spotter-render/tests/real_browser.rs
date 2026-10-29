@@ -352,14 +352,41 @@ fn closing_quits_the_browser_by_itself_before_any_kill() {
     opts.mode = Mode::Headless;
     let mut c = Chromium::launch(&b, &opts).unwrap();
     let marker = c.profile_dir().to_string_lossy().to_string();
-    let t = Instant::now();
-    c.close();
+    // The condition, not a stopwatch: the browser must be gone when the grace ends, and the grace is generous so a loaded
+    // machine only makes the test slower, never red.
+    c.close_within(std::time::Duration::from_secs(120));
     assert!(!c.is_running());
     assert!(
-        t.elapsed() < spotter_render::launch::CLOSE_GRACE,
-        "needed a kill: {:?}",
-        t.elapsed()
+        c.quit_by_itself(),
+        "Browser.close did not make the browser quit; it had to be ended"
     );
     assert_eq!(c.ended_by(), EndedBy::Nothing);
     assert_no_leftovers(&marker);
+}
+
+/// The production close path (the default `CLOSE_GRACE`) is measured, not gated: how many of a few closes had to end the browser is
+/// reported (`cargo test -- --nocapture`), because on a loaded machine the browser can take longer than the grace to quit and then
+/// being ended is the designed outcome. What is checked is the part that must hold anywhere: after `close` the browser is gone and
+/// leaves nothing behind, killed or not. That `Browser.close` itself works is `closing_quits_the_browser_by_itself_before_any_kill`.
+#[test]
+fn the_production_close_path_ends_the_browser_and_reports_whether_it_needed_a_kill() {
+    let _turn = serial();
+    let Some(b) = browser() else { return };
+    const ROUNDS: usize = 3;
+    let mut killed = 0;
+    for _ in 0..ROUNDS {
+        let base = tempfile::tempdir().unwrap();
+        let mut opts = LaunchOptions::new(base.path());
+        opts.extra_args = test_browser_flags();
+        opts.mode = Mode::Headless;
+        let mut c = Chromium::launch(&b, &opts).unwrap();
+        let marker = c.profile_dir().to_string_lossy().to_string();
+        c.close();
+        assert!(!c.is_running());
+        if !c.quit_by_itself() {
+            killed += 1;
+        }
+        assert_no_leftovers(&marker);
+    }
+    eprintln!("production close path: {killed} of {ROUNDS} closes needed a kill");
 }

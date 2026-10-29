@@ -20,6 +20,28 @@ Conventional Commits; one semver tag for the whole repo.
 ### The dialog frame's filled button uses the page primary's colours
 - `.pd-frame-btn--filled` takes `--pd-accent-fill` with `--pd-on-accent`, the same as `.pd-btn--primary` and Material's filled button, so a dialog's primary and a page's primary are one colour in both schemes (`--pd-accent-control` is for toggles and checkmarks).
 
+### Material: stepper theme (shared)
+- `material.css`: `mat-stepper` follows the family tokens (`--mat-stepper-*` from `--pd-*`, a 56 px header (24 px circle plus `--pd-space-4` above and below, Material's fixed height dropped), tighter header
+  padding and lines, an outlined circle for steps not reached, no content inset; the geometry applies to horizontal steppers only). Spotter's add/edit watch flow is a linear
+  `mat-stepper` on it and no longer carries its own stepper theme.
+
+### Jobs: quietOnSuccess (shared API)
+- `paddock-jobs`: `JobSnapshot::quiet_on_success` (wire field `quietOnSuccess`, off by default and left out of the wire form while off),
+  set with `JobContext::quiet_on_success()` / `Reporter::set_quiet_on_success()` and carried by every later snapshot, the terminal one
+  included. `@decryp7/paddock-ui/shell/jobs`: `SuJobSnapshot.quietOnSuccess`, read by `parseJobSnapshot`, and the jobs store does not
+  announce the success of such a job (a failure still is). For work that runs again with every edit of a form or on a schedule; the
+  generated `JOB_SNAPSHOT_FIXTURES` carry a quiet job, so both sides test the same wire form. Spotter uses it for the source test and
+  the check of one watch.
+
+### Copy menu in WebKit
+- `@decryp7/paddock-ui/shell/feel`: the guard keeps the `auxclick` that WebKit sends after a context menu from reaching the app, so the
+  Copy menu it just opened is no longer closed as an outside click.
+
+### Dialog buttons
+- `@decryp7/paddock-ui/shell/dialogs`: the filled (primary) dialog button uses `--pd-accent-fill` with `--pd-on-accent` and
+  `--pd-accent-fill-hover` (it used the accent text colour, 2.18:1 with white ink in dark mode). `test:tokens` checks both pairs
+  for every accent, scheme and contrast mode.
+
 ### Rust developer and CI tool, phase R0 (ADR 0022)
 - New shared crates `paddock-slots` (numbered job slots over OS file locks, with a holder that always ends: job folder gone,
   release, or `--max-hold-secs`), `paddock-repo-files` (the walk, its caps and a bounded-thread file hash) and
@@ -361,6 +383,14 @@ Conventional Commits; one semver tag for the whole repo.
   pending task), with no turn budget: a slow first `import()` on a busy runner no longer reads as "never leaves
   Loading" (CI run 6563). `DialogHarnessOptions.maxTurns` is removed; a loader that never answers is now reported by the
   runner's test timeout.
+
+### paddock-proc: watchers read one pid, never the process table (ADR 0024 rule 4)
+- New public API: `ProcessSource` (the port: `memory`, `children`, `table`), `OsSource` (the OS as a source; make one per walk),
+  `tree_memory_from` / `tree_memory_of` (a tree or a job's member list, read pid by pid), `MAX_TREE` (the most processes a walk
+  visits) and `read_children` (`/proc/<pid>/task/*/children`). `tree_memory` and `process_memory` now read only the pids of the tree
+  (macOS `proc_listchildpids`, Linux `children` files; Windows takes one id snapshot per walk, or none for a supervised child, whose
+  kill-on-close job lists its members). One watcher over a synthetic child: 4.9% of a core before, 0.1% after (1,202 processes).
+- `Supervised` on Windows hands its job to the memory watcher. Spotter's `process` module is now a re-export of `paddock-proc`.
 
 ### Spotter on the shared CI kit (WP-C3)
 - Spotter is a leg of `ci.yml` (`apps/spotter/paddock.ci.json`) and releases through the shared `app-release.yml` from a thin

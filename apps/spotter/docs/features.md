@@ -16,8 +16,6 @@ is kept in the system credential store. "Send test" sends a message through the 
 what to check (server unreachable, secure connection refused, account not accepted, address refused, no answer in
 time). Mail is sent for new releases of watches that have the channel; failures appear in the journal as "notify" failures.
 
-![Settings: the e-mail form](screenshots/settings-email-light.png)
-
 ## Safer address checks
 A watch that is not marked local cannot reach this computer or its local link even if a name changes its answer between
 the check and the connection (DNS rebinding).
@@ -28,3 +26,28 @@ For container tags and package versions (crates.io, npm, PyPI, NuGet) each relea
 to install depends on the platform. The watch's detail page shows a Copy command button on the upgrade line.
 
 ![A package watch with the upgrade line and Copy command](screenshots/watch-detail-upgrade-light.png)
+
+## Downloads
+Spotter's downloads (a release file you download, the file an "after a new release" action fetches, the browser for
+JavaScript pages) all go through the Paddock downloader. A host that serves byte ranges is read over up to four
+connections at once (never more than four to one host, however many downloads run); one that does not is read in one
+stream. When a host answers "too many requests" Spotter waits as long as it asks and tries again with fewer connections.
+A download that is cancelled or cut keeps its partial file and the next download of the same file carries on from it.
+The checksum is computed while the file is written, so nothing is read a second time, and it is compared with the
+publisher's SHA-256 (the release's own, or the `.sha256` file next to it); a file that does not match is deleted, never
+left looking finished. Before it starts Spotter checks that the disk has room for the file. Every download is a job in the
+status bar (Connecting, Resuming, Downloading, Verifying) with Cancel at any moment; Spotter never gives up on one on its own.
+
+### Behind a proxy
+Downloads and the checks of your watches use the proxy your system names: the `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`
+variables first, then the operating system's own setting (macOS network settings; Windows Internet Options, else the
+WinHTTP setting), and the same decision for a file, its checksum and the listing it came from. Addresses on your local
+network and loopback go direct.
+
+- **An automatic configuration script (PAC) or WPAD is not supported.** If that is all your system names, Spotter connects
+  directly. Name the proxy itself (`http://host:port`) in the system's setting or the variable to use it.
+- **A SOCKS proxy is not supported.** Spotter says so in the status bar (the "your sources" chip shows the connection as
+  degraded) and connects directly, instead of failing to start.
+- **A proxy's login** (the operating system's settings carry none) can only come from the environment, and only file downloads send it; the listings and checksums that go with them do not, so a proxy that needs a login for those is not supported. An address of the form `http://user:password@host:port` in
+  the environment is a cleartext (HTTP Basic) login to the proxy: it is sent unencrypted when the proxy itself is an
+  `http://` address, so use an `https://` proxy address, or one on a network you trust.

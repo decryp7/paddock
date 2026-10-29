@@ -29,6 +29,8 @@ export type SuJobSnapshot = {
   etaMs?: number | null;
   cancellable: boolean;
   notCancellableReason?: string | null;
+  /** The job's success is not announced (a failure still is); absent means announced. */
+  quietOnSuccess?: boolean;
 } & SuJobState;
 
 export type SuJobTone = 'neutral' | 'info' | 'success' | 'danger' | 'warning';
