@@ -3,7 +3,8 @@ import { Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { BACKEND } from '../../core/backend';
-import { MockBackend } from '../../core/mock-backend';
+import type { MockBackend } from '../../core/mock-backend';
+import { jobsProviders, mockWithJobs } from '../../../testing/job-test-support';
 import { provideIcons } from '../../shared/icons';
 import { Chart } from '../../shared/chart';
 import { IssuesPage } from './issues-page';
@@ -21,9 +22,9 @@ class StubChart {
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
 function render(fail: string[] = [], prepare: (mock: MockBackend) => void = () => undefined) {
-  const mock = new MockBackend({ latencyMs: 0, now: () => NOW, fail: new Set(fail) });
+  const { mock, jobs } = mockWithJobs({ now: () => NOW, fail: new Set(fail) });
   prepare(mock);
-  TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([]), { provide: BACKEND, useValue: mock }] });
+  TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([]), jobsProviders(jobs), { provide: BACKEND, useValue: mock }] });
   TestBed.overrideComponent(IssuesView, { remove: { imports: [Chart] }, add: { imports: [StubChart] } });
   const f = TestBed.createComponent(IssuesPage);
   f.detectChanges();
@@ -32,6 +33,7 @@ function render(fail: string[] = [], prepare: (mock: MockBackend) => void = () =
 const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
   for (let i = 0; i < 6; i++) {
     await f.whenStable();
+    await new Promise((r) => setTimeout(r, 2));
     f.detectChanges();
   }
 };
@@ -120,6 +122,33 @@ describe('dy-issues-page', () => {
     (el.querySelector('[aria-label="Read the system logs now"]') as HTMLElement).click();
     await settle(f);
     expect(el.querySelector('[aria-label="Stability"]')).not.toBeNull();
+  });
+
+  it('a rescan shows the read as a job with Cancel, and Cancel leaves the page as it was', async () => {
+    const { f, el, mock } = render();
+    await settle(f);
+    const before = el.querySelector('[aria-label="Stability"]')?.textContent;
+    mock.jobSteps = 40;
+    mock.jobStepMs = 20;
+    const cancel = vi.spyOn(mock, 'cancelJob');
+    (el.querySelector('[aria-label="Read the system logs now"]') as HTMLElement).click();
+    for (let i = 0; i < 5 && !el.querySelector('pd-job'); i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      await settle(f);
+    }
+    const card = el.querySelector('pd-job')!;
+    expect(card.textContent).toContain('Reading system logs');
+    expect((el.querySelector('[aria-label="Read the system logs now"]') as HTMLButtonElement).disabled).toBe(true);
+    btn(card as HTMLElement, 'Cancel').click();
+    for (let i = 0; i < 40 && el.querySelector('pd-job'); i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      await settle(f);
+    }
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(el.querySelector('pd-job')).toBeNull();
+    expect(el.querySelector('[role=alert]')).toBeNull();
+    expect(el.querySelector('[aria-label="Stability"]')?.textContent).toBe(before);
+    expect((el.querySelector('[aria-label="Read the system logs now"]') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('new and unusual: lists the reasons and offers no action on a program', async () => {

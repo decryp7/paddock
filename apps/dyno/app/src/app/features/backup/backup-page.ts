@@ -4,6 +4,7 @@ import type { BackupStatus } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatClock, formatDate } from '../../shared/format';
 import { Icon } from '../../shared/icon';
+import { JobProgressCard } from '../../shared/job-progress';
 import { Notifier } from '../../shared/notifier';
 import { injectNow } from '../../shared/now';
 import { BackupStore } from '../../state/backup.store';
@@ -21,7 +22,7 @@ import { RowMenu } from '../../shared/row-menu';
  */
 @Component({
   selector: 'dy-backup-page',
-  imports: [RowMenu, MatMenuModule, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon],
+  imports: [RowMenu, MatMenuModule, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon, JobProgressCard],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -38,6 +39,10 @@ import { RowMenu } from '../../shared/row-menu';
 
       @if (store.checkError(); as e) {
         <div class="note bad" role="alert"><dy-icon name="alert" /><span>{{ e.message }}</span><button type="button" matButton="text" (click)="store.check()">Retry</button></div>
+      }
+
+      @if (store.checkJob(); as job) {
+        <dy-job-progress [progress]="job" (cancel)="store.cancelCheck()" />
       }
 
       <dy-async [loaded]="!!store.report()" [error]="store.error()" what="backup health" [rows]="4" (retry)="store.load()">

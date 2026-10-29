@@ -189,6 +189,60 @@ describe('SettingsPage', () => {
     expect(sent.baselines).toEqual({ enabled: true, learningDays: 14, alarms: true });
     expect(sent.hardwareAlarms).toEqual({ throttling: false, lifespan: false });
   });
+  it('shows the disk map limits with the engine defaults, saves a change and says what is wrong with a value out of range', async () => {
+    const { f, mock, el, saveButton } = await make();
+    const section = el.querySelector('section[aria-label="Disk map"]')!;
+    const items = section.querySelector<HTMLInputElement>('input[aria-label="Items kept per scan"]')!;
+    const size = section.querySelector<HTMLInputElement>('input[aria-label="Large file size"]')!;
+    expect([items.value, size.value]).toEqual(['2000000', '10']);
+    const type = (i: HTMLInputElement, v: string) => {
+      i.value = v;
+      i.dispatchEvent(new Event('input'));
+      f.detectChanges();
+    };
+    for (const bad of ['9999', '5000001', '1.5', '']) type(items, bad);
+    for (const bad of ['0', '1025']) type(size, bad);
+    expect(section.querySelector('mat-error')?.textContent).toContain('whole number from 10,000 to 5,000,000');
+    expect(saveButton()!.disabled).toBe(true);
+    type(items, '500000');
+    type(size, '64');
+    const spy = vi.spyOn(mock, 'saveSettings');
+    saveButton()!.click();
+    await settle(f);
+    expect(spy.mock.calls[0]![0].disk).toMatchObject({ scanFolders: 500_000, notableFileMib: 64 });
+  });
+  it('shows Parallelism and cost with the engine defaults (Auto, 500,000 files, 48 levels, 64 GiB), says what is wrong and saves a change', async () => {
+    const { f, mock, el, saveButton } = await make();
+    const section = el.querySelector('section[aria-label="Parallelism and cost"]')!;
+    const field = (label: string) => section.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+    expect(['File finder: files looked at', 'File finder: folder depth', 'File finder: content compared'].map((l) => field(l).value)).toEqual(['500000', '48', '64']);
+    expect(section.querySelector('pd-select[ariaLabel="Threads reading folders"], [aria-label="Threads reading folders"]')).not.toBeNull();
+    expect(section.querySelector('[aria-label="Jobs at once"]')).not.toBeNull();
+    expect(section.textContent).toContain('Takes effect the next time Dyno starts');
+    const type = (i: HTMLInputElement, v: string) => {
+      i.value = v;
+      i.dispatchEvent(new Event('input'));
+      f.detectChanges();
+    };
+    type(field('File finder: folder depth'), '0');
+    type(field('File finder: files looked at'), '999');
+    type(field('File finder: content compared'), '5000');
+    expect(section.querySelectorAll('mat-error').length).toBe(3);
+    expect(saveButton()!.disabled).toBe(true);
+    type(field('File finder: folder depth'), '20');
+    type(field('File finder: files looked at'), '100000');
+    type(field('File finder: content compared'), '8');
+    const page = f.componentInstance as unknown as { setDisk(p: object): void; setJobs(p: object): void };
+    page.setDisk({ readThreads: { fixed: 6 } });
+    page.setJobs({ workers: { fixed: 2 } });
+    f.detectChanges();
+    const spy = vi.spyOn(mock, 'saveSettings');
+    saveButton()!.click();
+    await settle(f);
+    const sent = spy.mock.calls[0]![0];
+    expect(sent.disk).toMatchObject({ readThreads: { fixed: 6 }, finderFiles: 100_000, finderDepth: 20, finderHashGib: 8 });
+    expect(sent.jobs).toEqual({ workers: { fixed: 2 } });
+  });
   it('ignores a learning period outside 1 to 30 and dims its rows when learning is off', async () => {
     const { f, el, saveButton } = await make();
     const input = el.querySelector<HTMLInputElement>('input[aria-label="Days of learning"]')!;

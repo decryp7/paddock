@@ -1,7 +1,8 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { BACKEND } from '../../core/backend';
-import { MockBackend } from '../../core/mock-backend';
+import type { MockBackend } from '../../core/mock-backend';
+import { jobsProviders, mockWithJobs } from '../../../testing/job-test-support';
 import { provideIcons } from '../../shared/icons';
 import { Notifier } from '../../shared/notifier';
 import { BackupPage } from './backup-page';
@@ -9,8 +10,8 @@ import { BackupPage } from './backup-page';
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
 function render(options: ConstructorParameters<typeof MockBackend>[0] = {}) {
-  const mock = new MockBackend({ latencyMs: 0, now: () => NOW, ...options });
-  TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([]), { provide: BACKEND, useValue: mock }] });
+  const { mock, jobs } = mockWithJobs({ now: () => NOW, ...options });
+  TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([]), jobsProviders(jobs), { provide: BACKEND, useValue: mock }] });
   const f = TestBed.createComponent(BackupPage);
   f.detectChanges();
   return { f, el: f.nativeElement as HTMLElement, mock };
@@ -18,6 +19,7 @@ function render(options: ConstructorParameters<typeof MockBackend>[0] = {}) {
 const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
   for (let i = 0; i < 6; i++) {
     await f.whenStable();
+    await new Promise((r) => setTimeout(r, 2));
     f.detectChanges();
   }
 };
@@ -104,7 +106,7 @@ describe('dy-backup-page', () => {
     const { f, el, mock } = render({ latencyMs: 5 });
     await new Promise((r) => setTimeout(r, 20));
     await settle(f);
-    const spy = vi.spyOn(mock, 'refreshBackup');
+    const spy = vi.spyOn(mock, 'startJob');
     const check = btn(el, 'Check now');
     check.click();
     f.detectChanges();
@@ -116,10 +118,37 @@ describe('dy-backup-page', () => {
     expect(el.querySelector('[aria-label="Summary"] p')?.textContent).toBe('Checked just now');
   });
 
+  it('shows the check as a job with the tool count and Cancel, and Cancel keeps the earlier report', async () => {
+    const { f, el, mock } = render();
+    await settle(f);
+    mock.jobSteps = 40;
+    mock.jobStepMs = 20;
+    const cancel = vi.spyOn(mock, 'cancelJob');
+    btn(el, 'Check now').click();
+    for (let i = 0; i < 5 && !el.querySelector('pd-job'); i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      await settle(f);
+    }
+    const card = el.querySelector('pd-job')!;
+    expect(card.textContent).toContain('Checking backups');
+    expect(card.textContent).toMatch(/Checking backup tools|Starting/);
+    btn(card as HTMLElement, 'Cancel').click();
+    for (let i = 0; i < 40 && el.querySelector('pd-job'); i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      await settle(f);
+    }
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(el.querySelector('pd-job')).toBeNull();
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+    expect(el.querySelector('[aria-label="Summary"] p')?.textContent).toBe('Checked 40 min ago');
+    expect(el.querySelectorAll('tr.row')).toHaveLength(3);
+    expect(btn(el, 'Check now').disabled).toBe(false);
+  });
+
   it('shows why a check failed and keeps the table', async () => {
     const { f, el, mock } = render();
     await settle(f);
-    vi.spyOn(mock, 'refreshBackup').mockRejectedValueOnce({ code: 'timeout', message: 'The tools did not answer.' });
+    vi.spyOn(mock, 'startJob').mockRejectedValueOnce({ code: 'busy', message: 'The tools did not answer.' });
     btn(el, 'Check now').click();
     await settle(f);
     expect(el.querySelector('[role="alert"]')?.textContent).toContain('The tools did not answer.');
@@ -135,7 +164,7 @@ describe('dy-backup-page', () => {
     expect(el.textContent).toContain('never runs or manages a backup');
     expect(el.querySelector('table')).toBeNull();
     expect(el.querySelector('[role="alert"]')).toBeNull();
-    const spy = vi.spyOn(mock, 'refreshBackup');
+    const spy = vi.spyOn(mock, 'startJob');
     btn(el, 'Check again').click();
     await settle(f);
     expect(spy).toHaveBeenCalled();

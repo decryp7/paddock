@@ -722,3 +722,14 @@ Nobody asked whether more workers or a cheaper operation would help until the nu
 any slow operation, measure both: can more threads or workers run it (bounded by the kind of work), and can each item cost
 less? Make thread counts Settings with an "Auto" default, and give long or bulk designs a "Parallelism and cost" section
 (rule 51).
+
+## Long work in an agent needs the shell's job mechanism, not a poll of our own (2026-10-29, Dyno)
+Dyno's first jobs (6c73efd75) polled the agent for their status with a runner of their own: the shell's Jobs view stayed empty,
+the pages had two mechanisms, every UI request still had a 15 s timer, and a log read could be cancelled only between logs.
+**Rule:** work that runs in another process pushes its `paddock_jobs::wire::WireSnapshot`s, the shell relays them as
+`paddock://jobs`, and the pages follow with `JobsStore` and `JobFollow`; the UI has no timer at all (the shared
+`uiTimeoutProblems` check runs over the app's sources as a test). A tool that streams its output is read line by line with
+`OnCancel` killing the child, so Cancel does not wait for the next line, and the reading happens on a thread of its own: a
+killed shell's own children keep its pipe open. Anything that waits for another read waits on a `Condvar` that Cancel also wakes.
+**Also:** a store that every dialog window shares must not ask for the shell's jobs store at construction (it sends a request the
+dialog's contract may not declare); resolve it when a job starts.

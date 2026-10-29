@@ -1,3 +1,5 @@
+import { inject } from '@angular/core';
+import { BrowserEngines } from '../shell/engines';
 import { isTauri, type DynoBackend } from './backend';
 import { MockBackend, applyMockPlatform, mockOptionsFromUrl } from './mock-backend';
 import { TauriBackend } from './tauri-backend';
@@ -14,5 +16,11 @@ let browser: DynoBackend | null = null;
 export function createBackend(): DynoBackend {
   if (isTauri()) return new TauriBackend();
   if (typeof document !== 'undefined') applyMockPlatform(OPENED_WITH, document.documentElement);
-  return (browser ??= new MockBackend(mockOptionsFromUrl(OPENED_WITH)));
+  if (browser) return browser;
+  // The mock plays the agent: its jobs reach the shell's jobs store through the in-memory jobs backend, and the Jobs view's
+  // Cancel reaches the mock.
+  const engines = inject(BrowserEngines);
+  const mock = new MockBackend({ ...mockOptionsFromUrl(OPENED_WITH), jobs: engines.jobs });
+  engines.cancelJob = (id) => void mock.cancelJob(id);
+  return (browser = mock);
 }

@@ -1,3 +1,4 @@
+import type { SuJobPhase, SuJobSnapshot, SuJobState } from '@decryp7/paddock-ui';
 import type { Measured } from './api.types';
 import { readValue } from './measured';
 import type {
@@ -61,24 +62,20 @@ import type {
   ReportFormat,
   SavedReport,
   BackupReport,
-  BootReport,
   ChangeTimeline,
   ChangesQuery,
   FinderQuery,
-  FinderResult,
   GpuReport,
   InventoryFormat,
   MaintenanceStatus,
   SavedInventory,
-  SleepReport,
-  SoftwareInventory,
-  UsageReport,
   IssuesOverview,
   IssuesQuery,
+  JobOutput,
+  JobSpec,
   SavedIssues,
   UnusualItem,
   UnusualOverview,
-  FileHashInfo,
   HashSource,
   SearchSeed,
   StartupFilter,
@@ -134,6 +131,8 @@ export interface MockOptions {
   fail?: ReadonlySet<string>;
   /** Which backup tools the mock finds (`?backup=none` finds none; default a mix). */
   backup?: MockBackupVariant;
+  /** Where the mock pushes the status of the jobs it runs (the shell's in-memory jobs backend); jobs run without one too. */
+  jobs?: MockJobSink;
 }
 
 /**
@@ -227,6 +226,8 @@ export class MockBackend implements DynoBackend {
     this.counters = new MockCounters(this.profile.os);
     this.settingsValue = { ...this.settingsValue, counters: demoCounterSettings(this.profile.os) };
     this.latencyMs = options.latencyMs ?? 0;
+    this.jobSink = options.jobs;
+    this.jobStepMs = this.latencyMs === 0 ? 0 : 400;
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
     // A scan reports a few times: one timer per step (zero delay with no latency, so a test sees the first status before the rest).
@@ -897,14 +898,6 @@ export class MockBackend implements DynoBackend {
     });
   }
 
-  fileHash(source: HashSource): Promise<FileHashInfo> {
-    return this.reply('fileHash', () => {
-      const path = 'path' in source ? source.path : (this.find(source.process).exe ?? '');
-      if (!path.startsWith('/') && !/^[A-Za-z]:\\/.test(path)) throw err('notFound', 'That is not a full path to a file.');
-      return { path, bytes: 48_231_424, sha256: mockHash(path) };
-    });
-  }
-
   openVirusTotal(sha256: string): Promise<void> {
     return this.reply('openVirusTotal', () => {
       if (!/^[0-9a-f]{64}$/i.test(sha256)) throw err('badRequest', 'A SHA-256 hash has 64 hexadecimal digits.');
@@ -1045,10 +1038,6 @@ export class MockBackend implements DynoBackend {
     return this.reply('issues', () => mockIssuesOverview(query, this.now(), mockSources(this.now())));
   }
 
-  rescanIssues(query: IssuesQuery): Promise<IssuesOverview> {
-    return this.reply('rescanIssues', () => mockIssuesOverview(query, this.now(), mockSources(this.now())));
-  }
-
   saveIssues(days: number): Promise<SavedIssues | null> {
     return this.reply('saveIssues', () => {
       this.savedIssues.push(days);
@@ -1143,24 +1132,8 @@ export class MockBackend implements DynoBackend {
     return this.reply('changes', () => mockChanges(query, this.now()));
   }
 
-  sleepBlockers(): Promise<SleepReport> {
-    return this.reply('sleepBlockers', () => mockSleep());
-  }
-
-  bootAnalysis(): Promise<BootReport> {
-    return this.reply('bootAnalysis', () => mockBoot(this.now()));
-  }
-
-  appUsage(): Promise<UsageReport> {
-    return this.reply('appUsage', () => mockUsage());
-  }
-
   gpuProcesses(): Promise<GpuReport> {
     return this.reply('gpuProcesses', () => mockGpu());
-  }
-
-  softwareInventory(): Promise<SoftwareInventory> {
-    return this.reply('softwareInventory', () => mockSoftware());
   }
 
   saveInventoryReport(format: InventoryFormat): Promise<SavedInventory | null> {
@@ -1177,13 +1150,6 @@ export class MockBackend implements DynoBackend {
     });
   }
 
-  findFiles(query: FinderQuery): Promise<FinderResult> {
-    return this.reply('findFiles', () => {
-      if (!query.folder.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(query.folder)) throw err('badRequest', 'Choose a folder with a full path.');
-      return mockFinder({ ...query, minBytes: Math.max(query.minBytes, MB) }, this.now());
-    });
-  }
-
   maintenance(): Promise<MaintenanceStatus> {
     return this.reply('maintenance', () => mockMaintenanceStatus(this.settingsValue.maintenance, this.now()));
   }
@@ -1192,11 +1158,142 @@ export class MockBackend implements DynoBackend {
     return this.reply('backup', () => mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt));
   }
 
-  refreshBackup(): Promise<BackupReport> {
-    return this.reply('refreshBackup', () => {
-      this.backupCheckedAt = this.now();
-      return mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt);
-    }, 400);
+  // ----------------------------------------------------------------------------------------------- jobs
+
+  /**
+   * How many steps a job the mock starts takes before it ends (1: it ends on the first). The mock plays the agent's part: every
+   * step is pushed to the job sink as the shell's `paddock://jobs` event would be, and the shell's jobs store follows it. A spec
+   * raises this to watch the progress and Cancel.
+   */
+  jobSteps = 1;
+  /** Milliseconds between two steps (0 with no latency; the browser build shows the progress at a visible pace). */
+  jobStepMs: number;
+  /** A job the mock starts reports its first status and then nothing more (a step that takes long): the card says "Still working". */
+  jobsStalled = false;
+  private readonly jobSink: MockJobSink | undefined;
+  private readonly jobBook = new Map<number, MockJob>();
+  private nextJobId = 1;
+
+  /** The latest status of every job the mock knows, oldest first. */
+  jobStatuses(): SuJobSnapshot[] {
+    return [...this.jobBook.values()].map((j) => j.status);
+  }
+
+  startJob(spec: JobSpec): Promise<number> {
+    return this.reply('startJob', () => {
+      const kind = jobKind(spec);
+      const live = [...this.jobBook.values()].filter((j) => isActive(j.status));
+      const same = live.find((j) => JSON.stringify(j.spec) === JSON.stringify(spec));
+      if (same) return same.status.id;
+      if (kind !== 'file-hash' && live.some((j) => j.status.kind === kind)) throw err('busy', `${JOB_TITLES[kind]} is already running; wait for it or cancel it.`);
+      const o = objectOf(spec);
+      if ('findFiles' in o && !(o as { findFiles: { query: FinderQuery } }).findFiles.query.folder.trim()) throw err('badRequest', 'Choose a folder to look in.');
+      const id = this.nextJobId++;
+      const job: MockJob = { spec, status: this.status(id, kind, spec, 1, { state: 'queued' }), step: 0, timer: undefined };
+      this.jobBook.set(id, job);
+      while (this.jobBook.size > 16) this.jobBook.delete(this.jobBook.keys().next().value as number);
+      this.publish(job);
+      this.change(job, { state: 'running', phase: null });
+      this.schedule(job);
+      return id;
+    });
+  }
+
+  /** Stops a job as the agent would (the shell's `job_cancel`); false when it is unknown or over. */
+  cancelJob(id: number): boolean {
+    const job = this.jobBook.get(id);
+    if (!job || !isActive(job.status)) return false;
+    clearTimeout(job.timer);
+    this.change(job, { state: 'cancelled', reason: 'user' });
+    return true;
+  }
+
+  jobResult(id: number): Promise<JobOutput> {
+    return this.reply('jobResult', () => {
+      const j = this.jobBook.get(id);
+      if (!j || j.status.state !== 'done') throw err('notFound', 'That job has no result: it is still running, was cancelled or failed, or is too old to be kept.');
+      return this.outputOf(j.spec);
+    });
+  }
+
+  private status(id: number, kind: JobKindSlug, spec: JobSpec, seq: number, state: JobStateFields): SuJobSnapshot {
+    return {
+      id,
+      kind,
+      title: JOB_TITLES[kind],
+      subject: jobSubject(spec),
+      seq,
+      elapsedMs: 0,
+      etaMs: null,
+      cancellable: true,
+      notCancellableReason: null,
+      ...state,
+    } as SuJobSnapshot;
+  }
+
+  private publish(job: MockJob): void {
+    this.jobSink?.emit(job.status);
+  }
+
+  /** The next status of a job: the sequence number rises, the time moves, and the sink hears of it. */
+  private change(job: MockJob, state: JobStateFields): void {
+    job.status = { ...job.status, ...state, seq: job.status.seq + 1, elapsedMs: job.step * this.jobStepMs } as SuJobSnapshot;
+    this.publish(job);
+  }
+
+  private schedule(job: MockJob): void {
+    if (this.jobsStalled) return;
+    job.timer = setTimeout(() => {
+      job.step++;
+      if (job.step < this.jobSteps) {
+        this.change(job, { state: 'running', phase: mockPhase(job.status.kind as JobKindSlug, job.step, this.jobSteps - 1) });
+        this.schedule(job);
+        return;
+      }
+      const problem = this.problemWith(job.spec);
+      if (problem) this.change(job, { state: 'failed', message: problem });
+      else {
+        if (job.status.kind === 'refresh-backup') this.backupCheckedAt = this.now();
+        this.change(job, { state: 'done' });
+      }
+    }, this.jobStepMs);
+  }
+
+  /** What makes the work fail once it runs: the same messages the engine gives. */
+  private problemWith(spec: JobSpec): string | null {
+    const o = objectOf(spec);
+    if ('findFiles' in o) {
+      const folder = (o as { findFiles: { query: FinderQuery } }).findFiles.query.folder;
+      return folder.startsWith('/') || /^[A-Za-z]:[\\/]/.test(folder) ? null : 'Give the full path of the folder.';
+    }
+    if ('fileHash' in o) {
+      const source = (o as { fileHash: { source: HashSource } }).fileHash.source;
+      const path = 'path' in source ? source.path : (this.find(source.process).exe ?? '');
+      return path.startsWith('/') || /^[A-Za-z]:\\/.test(path) ? null : 'That is not a full path to a file.';
+    }
+    return null;
+  }
+
+  private outputOf(spec: JobSpec): JobOutput {
+    const o = objectOf(spec);
+    if ('findFiles' in o) {
+      const query = (o as { findFiles: { query: FinderQuery } }).findFiles.query;
+      return { finder: mockFinder({ ...query, minBytes: Math.max(query.minBytes, MB) }, this.now()) };
+    }
+    if ('rescanIssues' in o) {
+      const query = (o as { rescanIssues: { query: IssuesQuery } }).rescanIssues.query;
+      return { issues: mockIssuesOverview(query, this.now(), mockSources(this.now())) };
+    }
+    if ('fileHash' in o) {
+      const source = (o as { fileHash: { source: HashSource } }).fileHash.source;
+      const path = 'path' in source ? source.path : (this.find(source.process).exe ?? '');
+      return { fileHash: { path, bytes: 48_231_424, sha256: mockHash(path) } };
+    }
+    if ('sleepBlockers' in o) return { sleep: mockSleep() };
+    if ('bootAnalysis' in o) return { boot: mockBoot(this.now()) };
+    if ('appUsage' in o) return { appUsage: mockUsage() };
+    if ('softwareInventory' in o) return { software: mockSoftware() };
+    return { backup: mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt) };
   }
 
   // ---------------------------------------------------------------------------------------------- plumbing
@@ -1270,6 +1367,86 @@ export class MockBackend implements DynoBackend {
       if (delay === 0) queueMicrotask(run);
       else setTimeout(run, delay);
     });
+  }
+}
+
+/** Where the mock pushes a job's status: the shell's in-memory jobs backend, standing in for the `paddock://jobs` event. */
+export interface MockJobSink {
+  emit(job: SuJobSnapshot): void;
+}
+
+interface MockJob {
+  spec: JobSpec;
+  status: SuJobSnapshot;
+  step: number;
+  timer: ReturnType<typeof setTimeout> | undefined;
+}
+
+type JobKindSlug = 'find-files' | 'rescan-issues' | 'refresh-backup' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory';
+
+/** The part of a snapshot that changes with its state (the shell's flat state tag). */
+type JobStateFields = SuJobState;
+
+const JOB_TITLES: Record<JobKindSlug, string> = {
+  'find-files': 'Finding files',
+  'rescan-issues': 'Reading system logs',
+  'refresh-backup': 'Checking backups',
+  'file-hash': 'Hashing a file',
+  'sleep-blockers': 'Reading sleep blockers',
+  'boot-analysis': 'Analysing boots',
+  'app-usage': 'Reading app usage',
+  'software-inventory': 'Listing installed software',
+};
+
+const SPEC_KIND: Record<string, JobKindSlug> = {
+  findFiles: 'find-files',
+  rescanIssues: 'rescan-issues',
+  refreshBackup: 'refresh-backup',
+  fileHash: 'file-hash',
+  sleepBlockers: 'sleep-blockers',
+  bootAnalysis: 'boot-analysis',
+  appUsage: 'app-usage',
+  softwareInventory: 'software-inventory',
+};
+
+/** The variant of a job spec as an object (a unit variant is a string on the wire). */
+function objectOf(spec: JobSpec): Record<string, unknown> {
+  return typeof spec === 'string' ? { [spec]: null } : spec;
+}
+
+function jobKind(spec: JobSpec): JobKindSlug {
+  return SPEC_KIND[Object.keys(objectOf(spec))[0] as string] as JobKindSlug;
+}
+
+function jobSubject(spec: JobSpec): string | null {
+  const o = objectOf(spec);
+  if ('findFiles' in o) return (o as { findFiles: { query: FinderQuery } }).findFiles.query.folder;
+  if ('rescanIssues' in o) return `last ${(o as { rescanIssues: { query: IssuesQuery } }).rescanIssues.query.days} days`;
+  if ('fileHash' in o) {
+    const source = (o as { fileHash: { source: HashSource } }).fileHash.source;
+    return 'path' in source ? source.path : null;
+  }
+  return null;
+}
+
+function isActive(s: SuJobSnapshot): boolean {
+  return s.state === 'queued' || s.state === 'running';
+}
+
+/** The phase of a mock job at step `step` of `last`: counts that only grow, each kind on its own scale. */
+function mockPhase(kind: JobKindSlug, step: number, last: number): SuJobPhase {
+  const part = step / Math.max(1, last);
+  switch (kind) {
+    case 'find-files':
+      return { id: 'walk', label: 'Listing files', unit: 'items', done: step * 1_200, total: null };
+    case 'rescan-issues':
+      return { id: 'source-MacLog', label: 'Reading system log', unit: 'items', done: step * 640, total: null };
+    case 'refresh-backup':
+      return { id: 'tools', label: 'Checking backup tools', unit: 'items', done: Math.min(2, Math.floor(part * 3)), total: 3 };
+    case 'file-hash':
+      return { id: 'hash', label: 'Reading the file', unit: 'bytes', done: Math.floor(part * 48_231_424), total: 48_231_424 };
+    default:
+      return { id: 'read', label: JOB_TITLES[kind], unit: 'items', done: 0, total: null };
   }
 }
 

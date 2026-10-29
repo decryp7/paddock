@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { Icon } from '../../shared/icon';
+import { JobProgressCard } from '../../shared/job-progress';
 import { fileName } from '../../state/diagnostics.store';
 import { IssuesStore } from '../../state/issues.store';
 import { UnusualStore } from '../../state/unusual.store';
@@ -18,7 +19,7 @@ type View = 'issues' | 'unusual';
  */
 @Component({
   selector: 'dy-issues-page',
-  imports: [MatTooltip, SuSegmentedControl, MatButton, MatIconButton, Icon, IssuesView, UnusualView],
+  imports: [MatTooltip, SuSegmentedControl, MatButton, MatIconButton, Icon, JobProgressCard, IssuesView, UnusualView],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -39,6 +40,9 @@ type View = 'issues' | 'unusual';
 
       <pd-segmented-control class="views" label="View" [options]="viewSegs()" [value]="view()" (valueChange)="view.set($event === 'unusual' ? 'unusual' : 'issues')" />
 
+      @if (issues.rescanJob(); as job) {
+        <dy-job-progress [progress]="job" (cancel)="issues.cancelRescan()" />
+      }
       @if (issues.saveError(); as e) {
         <div class="note bad" role="alert"><dy-icon name="alert" /><span class="msg">{{ e.message }}</span></div>
       }

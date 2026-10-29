@@ -3,7 +3,7 @@
 //! plain-text summary and never logs report contents.
 
 use super::{hours_back, parse_timestamp, timeout_for, ToolRunner};
-use dyno_core::issues::{Issue, IssueKind, IssueSource, IssueSourceId, MAX_PER_READ};
+use dyno_core::issues::{Issue, IssueKind, IssueSource, IssueSourceId, NoControl, ReadControl, MAX_PER_READ};
 use dyno_core::ports::PlatformError;
 use dyno_core::time::Timestamp;
 use std::path::{Path, PathBuf};
@@ -233,7 +233,7 @@ fn crash_evidence(body: &serde_json::Value) -> Vec<String> {
 /// services that exit abnormally; everything else in the log is none of Dyno's business.
 pub const LOG_PREDICATE: &str = "(process == \"kernel\" AND (eventMessage CONTAINS \"Previous shutdown cause\" OR eventMessage CONTAINS \"low swap: killing\" OR eventMessage CONTAINS \"VM compressor space shortage\" OR eventMessage CONTAINS \"I/O error\")) OR (process == \"launchd\" AND eventMessage CONTAINS \"Service exited with abnormal code\")";
 
-/// The unified log through `/usr/bin/log show`, niced (reading a day of log is slow and must not slow the user's work).
+/// The unified log through `/usr/bin/log show`, run at lower priority (reading a day of log is slow and must not slow the user's work).
 pub struct MacLog {
     runner: Box<dyn ToolRunner>,
 }
@@ -251,8 +251,17 @@ impl IssueSource for MacLog {
     }
 
     fn read(&self, since: Timestamp, until: Timestamp) -> Result<Vec<Issue>, PlatformError> {
+        self.read_controlled(since, until, &NoControl)
+    }
+
+    fn controllable(&self) -> bool {
+        true
+    }
+
+    /// Streams `log show`: every record parsed so far is reported, and Cancel kills the child process at once.
+    fn read_controlled(&self, since: Timestamp, until: Timestamp, control: &dyn ReadControl) -> Result<Vec<Issue>, PlatformError> {
         let hours = hours_back(since, until).min(72);
-        let args: Vec<String> = ["-n", "15", "/usr/bin/log", "show", "--last"]
+        let args: Vec<String> = ["show", "--last"]
             .iter()
             .map(|s| s.to_string())
             .chain([
@@ -263,18 +272,30 @@ impl IssueSource for MacLog {
                 LOG_PREDICATE.into(),
             ])
             .collect();
-        let text = self.runner.run("/usr/bin/nice", &args, timeout_for(hours))?;
-        let mut out: Vec<Issue> = text
-            .lines()
-            .filter_map(log_issue)
-            .filter(|i| i.at >= since && i.at <= until)
-            .collect();
+        let mut out: Vec<Issue> = Vec::new();
+        let mut records = 0u64;
+        self.runner
+            .run_lines("/usr/bin/log", &args, timeout_for(hours), control, &mut |line| {
+                records += 1;
+                if records.is_multiple_of(PROGRESS_EVERY) || records == 1 {
+                    control.parsed(records);
+                }
+                if let Some(i) = log_issue(line) {
+                    if i.at >= since && i.at <= until {
+                        out.push(i);
+                    }
+                }
+            })?;
+        control.parsed(records);
         out.sort_by(|a, b| b.at.cmp(&a.at).then(a.id.cmp(&b.id)));
         out.dedup_by(|a, b| a.id == b.id);
         out.truncate(MAX_PER_READ);
         Ok(out)
     }
 }
+
+/// How many records are parsed between two reports of progress (the owner throttles what reaches the screen).
+const PROGRESS_EVERY: u64 = 64;
 
 /// One `log show --style ndjson` line as an issue, when it is one of the events Dyno curates. Pure.
 pub fn log_issue(line: &str) -> Option<Issue> {
@@ -552,7 +573,7 @@ mod tests {
         let got = log.read(t.minus(3_600_000), t.plus(1_000)).unwrap();
         assert_eq!(got.len(), 1, "the same event twice is one issue");
         let (program, args, timeout) = calls.calls.lock().unwrap()[0].clone();
-        assert_eq!(program, "/usr/bin/nice");
+        assert_eq!(program, "/usr/bin/log", "run at lower priority by the runner, not through nice(1)");
         assert!(args.contains(&"show".to_string()) && args.contains(&"ndjson".to_string()));
         assert!(args.iter().any(|a| a == "2h"), "{args:?}");
         assert_eq!(timeout, std::time::Duration::from_secs(60));
@@ -562,5 +583,44 @@ mod tests {
         assert!(args.iter().any(|a| a == "72h"), "capped at three days: {args:?}");
         assert_eq!(timeout, std::time::Duration::from_secs(120));
         assert_eq!(log.id(), IssueSourceId::MacLog);
+    }
+
+    #[test]
+    fn the_log_reader_reports_a_growing_count_of_records_while_it_streams() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        struct Count(std::sync::Mutex<Vec<u64>>, AtomicU64);
+        impl ReadControl for Count {
+            fn cancelled(&self) -> bool {
+                false
+            }
+            fn parsed(&self, n: u64) {
+                self.0.lock().unwrap().push(n);
+                self.1.store(n, Ordering::SeqCst);
+            }
+            fn on_cancel(&self, _: Box<dyn Fn() + Send + Sync>) -> Box<dyn Send> {
+                Box::new(())
+            }
+        }
+        let t = parse_timestamp("2026-10-22T12:48:57Z").unwrap();
+        let text = (0..200)
+            .map(|i| format!("{{\"eventMessage\":\"noise {i}\"}}\n"))
+            .collect::<String>();
+        struct One(String);
+        impl ToolRunner for One {
+            fn run(&self, _: &str, _: &[String], _: std::time::Duration) -> Result<String, PlatformError> {
+                Ok(self.0.clone())
+            }
+        }
+        let control = Count(Default::default(), AtomicU64::new(0));
+        let got = MacLog::new(Box::new(One(text)))
+            .read_controlled(t.minus(3_600_000), t, &control)
+            .unwrap();
+        assert!(got.is_empty());
+        let seen = control.0.lock().unwrap().clone();
+        assert_eq!(seen.first(), Some(&1), "a count from the very first record");
+        assert!(seen.len() >= 4, "{seen:?}");
+        assert!(seen.windows(2).all(|w| w[0] <= w[1]), "never backwards: {seen:?}");
+        assert_eq!(seen.last(), Some(&200));
+        assert!(MacLog::new(Box::new(One(String::new()))).controllable());
     }
 }

@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
+import { readPaddockTokens } from '@decryp7/paddock-ui';
 import { form, FormField, maxLength, min, minLength, required, validate } from '@angular/forms/signals';
-import { PdChart, type PdChartSpec } from '@decryp7/paddock-ui/chart';
+import { branchSlots, PdChart, PdSunburst, slotColour, sunburstLayout, type PdChartSpec, type PdSunburstNode } from '@decryp7/paddock-ui/chart';
 import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
 import { PdCell, PdTable, PdTableEmpty, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdSort } from '@decryp7/paddock-ui/table';
 
@@ -47,7 +48,7 @@ const COLUMNS: PdColumn<Plugin>[] = [
 @Component({
   selector: 'gal-data',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdTable, PdCell, PdTableEmpty, PdChart, PdField, PdFieldControl, FormField],
+  imports: [PdTable, PdCell, PdTableEmpty, PdChart, PdSunburst, PdField, PdFieldControl, FormField],
   template: `
     <section class="gal-section" data-testid="table" aria-labelledby="h-table">
       <h2 id="h-table">Data table</h2>
@@ -104,6 +105,37 @@ const COLUMNS: PdColumn<Plugin>[] = [
       </div>
     </section>
 
+    <section class="gal-section" data-testid="sunburst" aria-labelledby="h-sunburst">
+      <h2 id="h-sunburst">Sunburst</h2>
+      <p>
+        A drillable ring chart for hierarchies: click or press Enter on a folder to make it the centre, the centre goes up one level. Hidden space is hatched and not yet counted space is a dashed ghost,
+        so status is never colour alone; the list beside the chart carries every value.
+      </p>
+      <div class="gal-sunburst-main">
+        <div class="gal-box gal-pad" data-testid="sunburst-box">
+          <pd-sunburst label="Disk usage of Macintosh HD" [root]="tree" [(centre)]="burstCentre" [format]="bytes" />
+        </div>
+        <div class="gal-box gal-pad">
+          <ul class="gal-key" aria-label="Folders in the centre">
+            @for (a of legend(); track a.id) {
+              <li>
+                <span class="gal-swatch" [attr.data-kind]="a.kind" [style.background]="a.kind === 'item' ? slot(a.slot) : null"></span>
+                <span>{{ a.label }}</span>
+                <span class="gal-key-value">{{ bytes(a.value) }}</span>
+              </li>
+            }
+          </ul>
+          <p data-testid="sunburst-centre">Centre: {{ burstCentre() ?? 'root' }}</p>
+        </div>
+      </div>
+      <div class="gal-sunburst">
+        <div class="gal-box gal-pad gal-narrow" data-testid="sunburst-narrow-box"><pd-sunburst label="Disk usage at a narrow width" [root]="tree" [format]="bytes" /></div>
+        <div class="gal-box gal-pad" data-testid="sunburst-loading-box"><pd-sunburst label="Disk usage, loading" [root]="null" state="loading" [format]="bytes" /></div>
+        <div class="gal-box gal-pad" data-testid="sunburst-empty-box"><pd-sunburst label="Disk usage, empty" [root]="null" [format]="bytes" emptyTitle="Nothing scanned yet" emptyText="Scan a volume to see where the space went."><button pdSunburstEmptyAction type="button" class="pd-btn pd-btn--primary">Scan this volume</button></pd-sunburst></div>
+        <div class="gal-box gal-pad" data-testid="sunburst-error-box"><pd-sunburst label="Disk usage, error" [root]="null" state="error" errorText="The scan stopped: the volume stopped answering." [format]="bytes" /></div>
+      </div>
+    </section>
+
     <section class="gal-section" data-testid="forms" aria-labelledby="h-forms">
       <h2 id="h-forms">Forms</h2>
       <p>Signal Forms with <code>pd-field</code>: the error appears after the field was left, or on submit.</p>
@@ -130,6 +162,16 @@ const COLUMNS: PdColumn<Plugin>[] = [
   `,
   styles: `
     .gal-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: var(--pd-space-3); }
+    .gal-sunburst-main { display: grid; grid-template-columns: minmax(0, 600px) minmax(16rem, 1fr); gap: var(--pd-space-3); align-items: start; margin-bottom: var(--pd-space-3); }
+    .gal-narrow { max-width: 300px; }
+    .gal-sunburst { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: var(--pd-space-3); align-items: start; }
+    .gal-key { list-style: none; margin: 0 0 var(--pd-space-3); padding: 0; display: grid; gap: var(--pd-space-2); }
+    .gal-key li { display: grid; grid-template-columns: 16px 1fr auto; gap: var(--pd-space-2); align-items: center; }
+    .gal-key-value { font-variant-numeric: tabular-nums; color: var(--pd-text-muted); }
+    .gal-swatch { width: 12px; height: 12px; border-radius: 2px; background: var(--pd-chart-8); }
+    .gal-swatch[data-kind='hidden'] { background: repeating-linear-gradient(45deg, var(--pd-text-subtle) 0 1.5px, var(--pd-surface-2) 1.5px 5px); }
+    .gal-swatch[data-kind='folded'], .gal-swatch[data-kind='other'] { background: radial-gradient(var(--pd-surface-1) 1.1px, var(--pd-chart-8) 1.2px) 0 0 / 4px 4px; }
+    .gal-swatch[data-kind='pending'] { background: var(--pd-surface-1); border: 1px dashed var(--pd-border-strong); }
     .gal-form { display: grid; gap: var(--pd-space-3); padding: var(--pd-space-4); max-width: 28rem; }
     .gal-pad { padding: var(--pd-space-3); }
     .gal-states-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 36rem), 1fr)); gap: var(--pd-space-3); }
@@ -172,6 +214,37 @@ export class GalData {
   };
   protected readonly area: PdChartSpec = { kind: 'area', x: this.hours, unit: 'ms', series: [{ name: 'p95 latency', values: [220, 240, 210, 260, 480, 420, 390, 360, 340, 300, 270, 250] }] };
   protected readonly donut: PdChartSpec = { kind: 'donut', x: ['Logs', 'Models', 'Cache', 'Other'], unit: 'GB', series: [{ name: 'Disk', values: [42, 27, 14, 5] }] };
+
+  protected readonly burstCentre = signal<string | null>(null);
+  protected readonly slot = slotColour;
+  /** The first ring around the centre, with the slots the chart itself uses: the swatches of the list match the segments. */
+  protected readonly legend = computed(() => sunburstLayout(this.tree, this.burstCentre(), { order: branchSlots(readPaddockTokens().palette) }).arcs.filter((a) => a.depth === 1));
+  protected readonly bytes = (v: number): string => `${(v / 10).toFixed(1)} GB`;
+  protected readonly tree: PdSunburstNode = {
+    id: 'vol',
+    label: 'Macintosh HD',
+    value: 1_000,
+    detail: '1,116,387 items',
+    children: [
+      { id: 'users', label: 'Users', value: 410, detail: '812,004 items', children: [
+        { id: 'alex', label: 'alex', value: 330, children: [
+          { id: 'lib', label: 'Library', value: 180, children: [{ id: 'dev', label: 'Developer', value: 95 }, { id: 'caches', label: 'Caches', value: 60 }, { id: 'mail', label: 'Mail', value: 25 }] },
+          { id: 'docs', label: 'Documents', value: 90, children: [{ id: 'proj', label: 'Projects', value: 60 }, { id: 'misc', label: 'Misc', value: 30 }] },
+          { id: 'dl', label: 'Downloads', value: 60 },
+        ] },
+        { id: 'shared', label: 'Shared', value: 80 },
+      ] },
+      { id: 'apps', label: 'Applications', value: 190, children: [{ id: 'xcode', label: 'Xcode', value: 120 }, { id: 'pro', label: 'Pro apps', value: 45 }, { id: 'small', label: 'Small apps', value: 25 }] },
+      { id: 'sys', label: 'System', value: 120, children: [{ id: 'syslib', label: 'Library', value: 80 }, { id: 'frame', label: 'Frameworks', value: 40 }] },
+      { id: 'opt', label: 'opt', value: 70 },
+      { id: 'priv', label: 'private', value: 40 },
+      { id: 'tiny1', label: 'tmp', value: 3 },
+      { id: 'tiny2', label: 'cores', value: 2 },
+      { id: 'other', label: 'Other folders', value: 15, kind: 'other' },
+      { id: 'hidden', label: 'Hidden space', value: 80, kind: 'hidden', detail: 'Snapshots and files this app cannot read' },
+      { id: 'pending', label: 'Not counted yet', value: 70, kind: 'pending' },
+    ],
+  };
 
   protected readonly model = signal({ name: '', port: 8080 });
   protected readonly f = form(this.model, (p) => {
