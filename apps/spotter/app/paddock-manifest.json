@@ -147,7 +147,8 @@
       "height": 560,
       "commands": [
         "about_info",
-        "about_legal"
+        "about_legal",
+        "files_open_url"
       ]
     },
     "pd.confirm": {
@@ -184,12 +185,12 @@
       ]
     },
     "pd.updates": {
-      "kind": "tool",
+      "kind": "form",
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
       "width": 560,
-      "height": 480,
+      "height": null,
       "commands": [
         "updates_cancel",
         "updates_check",
