@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 
-/** A viewer: modeless, opens at 680x560 and only grows. It has no button of its own: the dialog shell adds Close. */
+/** A viewer: modeless, opens at 720x560 and only grows. It declares no action: the frame adds Close. */
 @Component({
   selector: 'sd-about-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -196,6 +196,8 @@ The app reads untrusted, possibly huge files and renders their content:
 
 ## Working practices
 
+- Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
+  `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
 - Research before choosing libraries or patterns when unsure, and prefer
   well-maintained, permissively licensed (MIT/Apache-2.0) dependencies.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they

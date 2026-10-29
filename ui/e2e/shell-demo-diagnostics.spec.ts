@@ -10,7 +10,7 @@ test('Help ▸ Report a problem… shows every file with its size, follows the d
   await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
   await (await app.menus.item('Help', 'Report a problem…')).click();
   const dialog = app.dialogs.inPage('Report a problem');
-  await expect(dialog).toHaveAttribute('aria-modal', 'true');
+  await expect(dialog).toHaveAttribute('aria-modal', 'false');
   await expect(dialog).toContainText('Nothing is sent anywhere.');
   const rows = dialog.locator('[data-testid="diag-files"] tbody tr');
   await expect(rows).toHaveCount(6);
@@ -76,4 +76,19 @@ test('the Logging settings page shows the level and takes a change', async ({ ap
   await expect(app.settings.field('maxFileMb')).toContainText('Needs restart');
   await expect(app.settings.field('keepFiles')).toContainText('days');
   expect(await axeViolations(page, { idsOnly: true })).toEqual([]);
+});
+
+test('the settings footer has the status line on the left and Close on the right of one row, centred, at 880 px', async ({ app, page }) => {
+  await page.setViewportSize({ width: 880, height: 700 });
+  await app.settings.open({ page: 'pd.logging' });
+  await app.settings.choose('level', 'Detailed (for support cases)');
+  const footer = page.getByTestId('dialog-footer');
+  const status = footer.getByTestId('dialog-status');
+  await expect(status).toHaveText('Detail saved.');
+  const close = footer.getByRole('button', { name: 'Close' });
+  const [f, s, c] = await Promise.all([footer.boundingBox(), status.boundingBox(), close.boundingBox()]);
+  expect(s!.x + s!.width).toBeLessThanOrEqual(c!.x);
+  expect(s!.x - f!.x).toBeLessThan(40);
+  expect(f!.x + f!.width - (c!.x + c!.width)).toBeLessThan(40);
+  expect(Math.abs(s!.y + s!.height / 2 - (c!.y + c!.height / 2))).toBeLessThanOrEqual(1.5);
 });

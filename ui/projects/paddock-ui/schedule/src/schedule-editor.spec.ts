@@ -1,5 +1,8 @@
-import { provideZonelessChangeDetection } from '@angular/core';
+import { ApplicationRef, ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { Dialog } from '@angular/cdk/dialog';
+import { MatTimepickerInput } from '@angular/material/timepicker';
+import { By } from '@angular/platform-browser';
 import { describe, expect, it } from 'vitest';
 import { PdPauseEditor } from './pause-editor';
 import { PdScheduleEditor } from './schedule-editor';
@@ -12,6 +15,15 @@ const PREVIEW: SchedulePreview = {
   warnings: ['Clamped to once a minute.'],
   zone: 'Europe/Berlin',
 };
+
+@Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdScheduleEditor],
+  template: `<pd-schedule-editor [value]="{ mode: 'times', days: ['mon'], times: times(), zone: null }" />`,
+})
+class InDialog {
+  readonly times = signal(['09:00']);
+}
 
 async function settle(f: { whenStable(): Promise<unknown> }): Promise<void> {
   await f.whenStable();
@@ -33,23 +45,30 @@ function schedule(value: Schedule, extra: { preview?: SchedulePreview | null; pr
     input.dispatchEvent(new Event('change'));
     await settle(f);
   };
-  return { f, el, q, all, change, value: () => f.componentInstance.value() };
+  // The timepicker reads what is typed (in the locale's words) on `input`.
+  const type = async (input: HTMLInputElement, text: string) => {
+    input.value = text;
+    input.dispatchEvent(new Event('input'));
+    await settle(f);
+  };
+  return { f, el, q, all, change, type, value: () => f.componentInstance.value() };
 }
 
 describe('pd-schedule-editor', () => {
   it('switches mode and keeps a useful start for each', async () => {
     const t = schedule({ mode: 'every', secs: 900 });
     await settle(t.f);
-    const modes = t.all('button[role=radio]');
+    const radios = () => t.all('pd-segmented-control button[role=radio]');
+    const modes = radios();
     expect(modes.map((b) => b.textContent!.trim())).toEqual(['Every…', 'At times', 'Cron']);
-    expect(t.all('button[role=radio]').map((b) => b.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
+    expect(radios().map((b) => b.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
     modes[1]!.click();
     await settle(t.f);
     expect(t.value()).toEqual({ mode: 'times', days: ['mon', 'tue', 'wed', 'thu', 'fri'], times: ['09:00'], zone: null });
-    t.all('button[role=radio]')[2]!.click();
+    radios()[2]!.click();
     await settle(t.f);
     expect(t.value()).toEqual({ mode: 'cron', expr: '0 9 * * 1-5', zone: null });
-    t.all('button[role=radio]')[0]!.click();
+    radios()[0]!.click();
     await settle(t.f);
     expect(t.value()).toEqual({ mode: 'every', secs: 3600 });
   });
@@ -57,12 +76,13 @@ describe('pd-schedule-editor', () => {
   it('edits an interval by preset, amount and unit, and refuses an unusable number', async () => {
     const t = schedule({ mode: 'every', secs: 900 });
     await settle(t.f);
-    expect(t.all('.pd-preset').map((b) => b.textContent!.trim())).toEqual(['15 min', '30 min', '1 h', '3 h', '6 h', '12 h', 'Daily']);
-    expect(t.q('.pd-preset.pd-on').textContent!.trim()).toBe('15 min');
-    t.all('.pd-preset')[4]!.click();
+    const presets = () => t.all('.pd-presets button');
+    expect(presets().map((b) => b.textContent!.trim())).toEqual(['15 min', '30 min', '1 h', '3 h', '6 h', '12 h', 'Daily']);
+    expect(presets().filter((b) => b.getAttribute('aria-checked') === 'true').map((b) => b.textContent!.trim())).toEqual(['15 min']);
+    presets()[4]!.click();
     await settle(t.f);
     expect(t.value()).toEqual({ mode: 'every', secs: 21_600 });
-    const amount = t.q<HTMLInputElement>('input.pd-amount');
+    const amount = t.q<HTMLInputElement>('pd-field.pd-amount input');
     expect(amount.value).toBe('6');
     await t.change(amount, '2');
     expect(t.value()).toEqual({ mode: 'every', secs: 7200 });
@@ -70,7 +90,7 @@ describe('pd-schedule-editor', () => {
     expect(t.value()).toEqual({ mode: 'every', secs: 7200 });
     expect(amount.value).toBe('2');
     // The unit: 2 hours becomes 2 days through the select.
-    t.q<HTMLButtonElement>('pd-select button').click();
+    t.q('pd-select mat-select').click();
     await settle(t.f);
     const options = [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=option]')];
     expect(options.map((o) => o.textContent!.trim())).toEqual(['Minutes', 'Hours', 'Days']);
@@ -83,27 +103,148 @@ describe('pd-schedule-editor', () => {
   it('edits days, times and the zone of an "at times" schedule', async () => {
     const t = schedule({ mode: 'times', days: ['mon'], times: ['09:00'], zone: null });
     await settle(t.f);
-    expect(t.all('.pd-day').map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false', 'false', 'false', 'false', 'false']);
-    t.all('.pd-day')[2]!.click();
+    expect(t.all('pd-day-picker button').map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false', 'false', 'false', 'false', 'false']);
+    t.all('pd-day-picker button')[2]!.click();
     await settle(t.f);
     expect(t.value()).toMatchObject({ days: ['mon', 'wed'] });
+    // the days come back in week order whatever order they were picked in
+    t.all('pd-day-picker button')[0]!.click();
+    await settle(t.f);
+    t.all('pd-day-picker button')[0]!.click();
+    await settle(t.f);
+    expect(t.value()).toMatchObject({ days: ['mon', 'wed'] });
+    t.all('pd-day-picker button')[6]!.click();
+    t.all('pd-day-picker button')[1]!.click();
+    await settle(t.f);
+    expect(t.value()).toMatchObject({ days: ['mon', 'tue', 'wed', 'sun'] });
+    t.all('pd-day-picker button')[6]!.click();
+    t.all('pd-day-picker button')[1]!.click();
+    await settle(t.f);
     // The only time of day cannot be removed; a second one can be added, edited and removed.
-    expect(t.q<HTMLButtonElement>('.pd-times button').disabled).toBe(true);
+    expect(t.q<HTMLButtonElement>('.pd-times button[aria-label^="Remove"]').disabled).toBe(true);
     t.q('.pd-add').click();
     await settle(t.f);
     expect(t.value()).toMatchObject({ times: ['09:00', '10:00'] });
     const inputs = t.all<HTMLInputElement>('.pd-times input');
-    await t.change(inputs[1]!, '17:45');
+    expect(inputs.map((i) => i.value)).toEqual(['09:00', '10:00']);
+    expect(inputs[1]!.getAttribute('role')).toBe('combobox');
+    expect(t.all('.pd-times label').map((l) => l.textContent!.trim())).toEqual(['Time of day 1', 'Time of day 2']);
+    await t.type(inputs[1]!, '17:45');
     expect(t.value()).toMatchObject({ times: ['09:00', '17:45'] });
-    await t.change(inputs[1]!, '');
+    // Incomplete or empty text keeps the last good time and the field says it could not read it.
+    await t.type(inputs[1]!, '');
     expect(t.value()).toMatchObject({ times: ['09:00', '17:45'] });
-    t.all('.pd-times button')[0]!.click();
+    // (the error shows once the field is left, like every field's: not on each keystroke)
+    expect(t.all('.pd-times [data-testid=field-error]')).toHaveLength(0);
+    inputs[1]!.dispatchEvent(new Event('blur'));
     await settle(t.f);
-    expect(t.value()).toMatchObject({ times: ['17:45'] });
-    await t.change(t.q<HTMLInputElement>('.pd-field input'), ' Asia/Tokyo ');
+    expect(t.all('.pd-times [data-testid=field-error]').map((e) => e.textContent)).toEqual([expect.stringContaining('Enter a time such as 09:00.')]);
+    await t.type(inputs[1]!, 'soon');
+    expect(t.value()).toMatchObject({ times: ['09:00', '17:45'] });
+    expect(t.all('.pd-times [data-testid=field-error]')).toHaveLength(1);
+    await t.type(inputs[1]!, '18:00');
+    expect(t.all('.pd-times [data-testid=field-error]')).toHaveLength(0);
+    expect(t.value()).toMatchObject({ times: ['09:00', '18:00'] });
+    t.all('.pd-times button[aria-label^="Remove"]')[0]!.click();
+    await settle(t.f);
+    expect(t.value()).toMatchObject({ times: ['18:00'] });
+    await t.change(t.q<HTMLInputElement>('[data-testid=schedule-zone] input'), ' Asia/Tokyo ');
     expect(t.value()).toMatchObject({ zone: 'Asia/Tokyo' });
-    await t.change(t.q<HTMLInputElement>('.pd-field input'), '');
+    await t.change(t.q<HTMLInputElement>('[data-testid=schedule-zone] input'), '');
     expect(t.value()).toMatchObject({ zone: null });
+  });
+
+  it('hands each picker one Date per change, not a new one per check (a Date made per check never lets change detection settle)', async () => {
+    const t = schedule({ mode: 'times', days: ['mon'], times: ['09:00', '17:30'], zone: null });
+    await settle(t.f);
+    const pickers = () => t.f.debugElement.queryAll(By.directive(MatTimepickerInput)).map((d) => d.injector.get(MatTimepickerInput).value());
+    const first = pickers();
+    for (let i = 0; i < 3; i++) {
+      t.f.componentRef.setInput('disabled', i % 2 === 0);
+      await settle(t.f);
+    }
+    expect(first.map((d) => d && `${d.getHours()}:${d.getMinutes()}`)).toEqual(['9:0', '17:30']);
+    pickers().forEach((d, i) => expect(d).toBe(first[i]));
+  });
+
+  it('drops a time error once the schedule changes from outside the field (the field is rewritten with the real time)', async () => {
+    const t = schedule({ mode: 'times', days: ['mon'], times: ['09:00', '10:00'], zone: null });
+    await settle(t.f);
+    const inputs = t.all<HTMLInputElement>('.pd-times input');
+    await t.type(inputs[0]!, 'xx');
+    inputs[0]!.dispatchEvent(new Event('blur'));
+    await settle(t.f);
+    expect(t.all('.pd-times [data-testid=field-error]')).toHaveLength(1);
+    // another time is edited: the schedule changes and the first field shows its real time again, with no error
+    await t.type(inputs[1]!, '11:30');
+    expect(t.all('.pd-times [data-testid=field-error]')).toHaveLength(0);
+    expect(inputs[0]!.value).toBe('09:00');
+    expect(inputs[0]!.getAttribute('aria-invalid')).toBeNull();
+    // a day toggle does the same
+    await t.type(inputs[0]!, 'xx');
+    inputs[0]!.dispatchEvent(new Event('blur'));
+    await settle(t.f);
+    expect(t.all('.pd-times [data-testid=field-error]')).toHaveLength(1);
+    t.all('pd-day-picker button')[1]!.click();
+    await settle(t.f);
+    expect(t.all('.pd-times [data-testid=field-error]')).toHaveLength(0);
+  });
+
+  it('has a time list toggle, and Escape closes an open list without leaving the editor', async () => {
+    const t = schedule({ mode: 'times', days: ['mon'], times: ['09:00'], zone: null });
+    const seen: string[] = [];
+    t.el.addEventListener('keydown', (e) => seen.push(e.key));
+    await settle(t.f);
+    const toggle = t.q<HTMLButtonElement>('mat-timepicker-toggle button');
+    expect(toggle.getAttribute('aria-haspopup')).toBe('listbox');
+    toggle.click();
+    await settle(t.f);
+    const input = t.q<HTMLInputElement>('.pd-times input');
+    expect(input.getAttribute('aria-expanded')).toBe('true');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
+    await settle(t.f);
+    expect(input.getAttribute('aria-expanded')).toBe('false');
+    expect(seen).toEqual([]);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
+    expect(seen).toEqual(['Escape']);
+  });
+
+  it('Escape in a shut time field keeps its time and leaves the event for a dialog around the editor to close on', async () => {
+    const t = schedule({ mode: 'times', days: ['mon'], times: ['21:00'], zone: null });
+    const seen: string[] = [];
+    t.el.addEventListener('keydown', (e) => seen.push(e.key));
+    await settle(t.f);
+    const input = t.q<HTMLInputElement>('.pd-times input');
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
+    await settle(t.f);
+    expect(input.value).toBe('21:00');
+    expect(t.value()).toMatchObject({ times: ['21:00'] });
+    expect(t.all('[data-testid=field-error]')).toHaveLength(0);
+    expect(seen).toEqual(['Escape']);
+  });
+
+  it('shows the real key code (27) to everything above a shut time field, so a CDK dialog still closes on Escape', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const dialog = TestBed.inject(Dialog);
+    const ref = dialog.open(InDialog, { disableClose: false });
+    ref.componentInstance!.times.set(['21:00']);
+    await settle({ whenStable: () => TestBed.inject(ApplicationRef).whenStable() });
+    const input = document.querySelector<HTMLInputElement>('.cdk-dialog-container input[role=combobox]')!;
+    const codes: number[] = [];
+    document.addEventListener('keydown', (e) => codes.push(e.keyCode), { once: true });
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
+    expect(codes).toEqual([27]);
+    expect(input.value).toBe('21:00');
+    expect(document.querySelector('.cdk-dialog-container')).toBeNull();
+    ref.close();
+  });
+
+  it('labels the interval unit select', async () => {
+    const t = schedule({ mode: 'every', secs: 3600 });
+    await settle(t.f);
+    expect(t.q('pd-select label').textContent).toContain('Interval unit');
   });
 
   it('stops adding times at the engine limit', async () => {
@@ -132,7 +273,7 @@ describe('pd-schedule-editor', () => {
     expect(t.all('.pd-runs li').every((li) => li.textContent!.includes('09:00'))).toBe(true);
     expect(t.q('.pd-warning').textContent).toContain('Clamped');
     expect(t.q('.pd-zone').textContent).toBe('Times are in Europe/Berlin.');
-    expect(t.all('.pd-field')).toHaveLength(0);
+    expect(t.el.querySelector('[data-testid=schedule-zone]')).toBeNull();
   });
 
   it('shows problems instead of the preview, and disables every control when disabled', async () => {
@@ -172,19 +313,36 @@ describe('pd-pause-editor', () => {
     await settle(t.f);
     expect(t.value().windows).toEqual([{ days: [], start: '22:00', end: '06:00' }]);
     expect(t.el.textContent).toContain('Ends the next day.');
-    const [from, until] = t.all('input[type=time]') as HTMLInputElement[];
-    from!.value = '07:00';
-    from!.dispatchEvent(new Event('change'));
-    until!.value = '09:30';
-    until!.dispatchEvent(new Event('change'));
+    const [from, until] = t.all('input[role=combobox]') as HTMLInputElement[];
+    expect([from!.value, until!.value]).toEqual(['22:00', '06:00']);
+    from!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
     await settle(t.f);
+    expect(from!.value).toBe('22:00');
+    const type = async (input: HTMLInputElement, text: string) => {
+      input.value = text;
+      input.dispatchEvent(new Event('input'));
+      await settle(t.f);
+    };
+    await type(from!, '07:00');
+    await type(until!, '09:30');
     expect(t.value().windows[0]).toMatchObject({ start: '07:00', end: '09:30' });
     expect(t.el.textContent).not.toContain('Ends the next day.');
-    until!.value = '';
-    until!.dispatchEvent(new Event('change'));
+    // A window across midnight: 11:15 PM until 12:00 AM.
+    await type(from!, '23:15');
+    await type(until!, '00:00');
+    expect(t.value().windows[0]).toMatchObject({ start: '23:15', end: '00:00' });
+    expect(t.el.textContent).toContain('Ends the next day.');
+    await type(until!, '');
+    expect(t.value().windows[0]).toMatchObject({ end: '00:00' });
+    expect(t.all('[data-testid=field-error]')).toHaveLength(0);
+    until!.dispatchEvent(new Event('blur'));
     await settle(t.f);
-    expect(t.value().windows[0]).toMatchObject({ end: '09:30' });
-    t.all('.pd-day')[5]!.click();
+    expect(t.all('[data-testid=field-error]')).toHaveLength(1);
+    // editing the other time rewrites this one with its real value and drops the error
+    await type(from!, '22:00');
+    expect(t.all('[data-testid=field-error]')).toHaveLength(0);
+    expect(until!.value).toBe('00:00');
+    t.all('pd-day-picker button')[5]!.click();
     await settle(t.f);
     expect(t.value().windows[0]!.days).toEqual(['sat']);
     t.q('.pd-window button[aria-label="Remove window 1"]').click();
@@ -200,7 +358,7 @@ describe('pd-pause-editor', () => {
     t.q('.pd-add').click();
     expect(t.value().windows).toHaveLength(14);
     expect(t.q('.pd-problem').textContent).toContain('differs');
-    const zone = t.q('.pd-field input') as HTMLInputElement;
+    const zone = t.q('[data-testid=pause-zone] input') as HTMLInputElement;
     zone.value = 'Europe/Berlin';
     zone.dispatchEvent(new Event('change'));
     await settle(t.f);

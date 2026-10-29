@@ -54,10 +54,17 @@ pub fn apply_launch_at_login(on: bool, service: &mut dyn AgentService, autostart
     }
 }
 
-/// The agent program next to the app (or `DYNO_AGENT_BIN`).
+/// The agent program next to the app (or `DYNO_AGENT_BIN` in a development build).
 pub fn agent_program() -> Result<PathBuf, String> {
     let app = std::env::current_exe().map_err(|e| format!("the app's folder cannot be found: {e}"))?;
-    crate::link::agent_exe(&app, std::env::var_os("DYNO_AGENT_BIN").as_deref())
+    let env = std::env::var_os("DYNO_AGENT_BIN");
+    crate::link::agent_exe(&app, agent_override(cfg!(debug_assertions), env.as_deref()))
+}
+
+/// The program `DYNO_AGENT_BIN` names, only in a development build: in a release build the environment must not decide
+/// which program the app runs (any process of the user could set it).
+pub fn agent_override(debug_build: bool, value: Option<&std::ffi::OsStr>) -> Option<&std::ffi::OsStr> {
+    value.filter(|_| debug_build)
 }
 
 // ---------------------------------------------------------------------------------------------------- Linux, Windows
@@ -340,6 +347,18 @@ impl<R: tauri::Runtime> Autostart for AppAutostart<R> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_agent_override_from_the_environment_counts_only_in_a_development_build() {
+        let v = std::ffi::OsString::from("/tmp/other-agent");
+        assert_eq!(super::agent_override(true, Some(v.as_os_str())), Some(v.as_os_str()));
+        assert_eq!(
+            super::agent_override(false, Some(v.as_os_str())),
+            None,
+            "a release build ignores it"
+        );
+        assert_eq!(super::agent_override(true, None), None);
+    }
+
     use super::*;
     use std::sync::{Arc, Mutex};
 

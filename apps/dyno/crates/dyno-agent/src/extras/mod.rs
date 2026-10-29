@@ -1,16 +1,13 @@
 //! The extras (WP-13) and backup health (WP-14) on the agent side: runs the read-only OS tools behind a [`ToolRunner`],
 //! keeps the few results worth caching, records the changes the "What changed" timeline needs, and answers the requests.
-//! Everything is observe-only: the one thing that moves files is removing the finder results the user selected, and that
-//! goes through the cleanup policy's admission and the Trash or the quarantine ([`finder`]).
+//! Everything is observe-only: nothing here moves or removes a file ([`finder`] only lists).
 
 pub mod backup_check;
 pub mod finder;
 
 use crate::agent::{lock, now, Shared};
-use dyno_core::activity::{ActivityKind, UndoRecord};
-use dyno_core::cleanup::{CleanupOutcome, DeleteMode};
 use dyno_core::extras::boot::{self, BootReport, BootRow, SettleTracker};
-use dyno_core::extras::changes::{diff_software, diff_startup, from_activity, timeline, Change, ChangesQuery};
+use dyno_core::extras::changes::{diff_software, diff_startup, timeline, Change, ChangesQuery};
 use dyno_core::extras::files::{FinderQuery, FinderResult};
 use dyno_core::extras::gpu::GpuReport;
 use dyno_core::extras::software::{render_report, validate_destination, InventoryFormat, SoftwareInventory, SoftwareItem};
@@ -19,15 +16,12 @@ use dyno_core::protocol::{AgentError, BootRecord, ErrorCode, Reply, Request, Sav
 use dyno_core::time::{Timestamp, DAY, HOUR, SECOND};
 use dyno_platform::issues::{OsRunner, ToolRunner};
 use dyno_platform::toolpath::PathResolver;
-use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// How long a software list is reused (reading it takes seconds to minutes).
 const SOFTWARE_TTL: Duration = Duration::from_secs(10 * 60);
-/// Finder results kept for a removal.
-const KEEP_RESULTS: usize = 4;
 /// How often the background work runs (backup check, change recording).
 pub const BACKGROUND_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// The first background run waits this long after the agent starts.
@@ -67,7 +61,6 @@ pub struct ExtrasCentre {
     own_folder: bool,
     software: Mutex<Option<(Instant, SoftwareInventory)>>,
     pub(crate) backup: Mutex<backup_check::Slot>,
-    kept: Mutex<VecDeque<finder::Kept>>,
     counter: AtomicU64,
 }
 
@@ -82,7 +75,6 @@ impl ExtrasCentre {
             own_folder,
             software: Mutex::new(None),
             backup: Mutex::new(backup_check::Slot::default()),
-            kept: Mutex::new(VecDeque::new()),
             counter: AtomicU64::new(1),
         }
     }
@@ -131,7 +123,6 @@ pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentErro
         Request::SoftwareInventory => Ok(Reply::Software(Box::new(software(shared)))),
         Request::SaveInventoryReport { path, format } => save_inventory(shared, &path, format).map(Reply::InventorySaved),
         Request::FindFiles { query } => find_files(shared, &query).map(|r| Reply::FileFinder(Box::new(r))),
-        Request::RemoveFoundFiles { scan_id, ids, mode } => remove_found(shared, &scan_id, &ids, mode).map(Reply::Outcome),
         Request::Maintenance => {
             let core = lock(&shared.core);
             let off = core.settings.alarms.utc_offset_minutes;
@@ -162,10 +153,7 @@ fn changes(shared: &Shared, query: ChangesQuery) -> Result<dyno_core::extras::ch
     let t = now();
     let (from, to) = query.window(t);
     let core = lock(&shared.core);
-    let mut all = core.store.changes(from, to).map_err(internal)?;
-    let activity = core.store.activity(500).map_err(internal)?;
-    let entries: Vec<_> = activity.into_iter().map(|(e, _, _)| e).collect();
-    all.extend(from_activity(&entries));
+    let all = core.store.changes(from, to).map_err(internal)?;
     let since = core
         .store
         .meta(KEY_SINCE)
@@ -313,74 +301,7 @@ fn find_files(shared: &Shared, query: &FinderQuery) -> Result<FinderResult, Agen
     let x = &shared.extras;
     let t = now();
     let id = x.next_id(t);
-    let (result, root) = finder::run(query, &id).map_err(bad)?;
-    let mut kept = lock(&x.kept);
-    kept.push_back(finder::Kept {
-        result: result.clone(),
-        root,
-        at: t,
-    });
-    while kept.len() > KEEP_RESULTS {
-        kept.pop_front();
-    }
-    Ok(result)
-}
-
-fn remove_found(shared: &Arc<Shared>, scan_id: &str, ids: &[String], mode: DeleteMode) -> Result<CleanupOutcome, AgentError> {
-    if scan_id.len() > 128 {
-        return Err(bad("That request is too large."));
-    }
-    let x = &shared.extras;
-    let t = now();
-    let home = home_dir();
-    let admitted = {
-        let kept = lock(&x.kept);
-        let k = kept
-            .iter()
-            .find(|k| k.result.scan_id == scan_id)
-            .ok_or_else(|| bad("That result is no longer available; look again."))?;
-        let mut locks = lock(&shared.ports.locks);
-        let mut in_use = |p: &std::path::Path| -> Option<String> {
-            let mut names: Vec<String> = locks.lockers(p).ok()?.into_iter().map(|l| l.name).collect();
-            names.sort();
-            names.dedup();
-            (!names.is_empty()).then(|| names.join(", "))
-        };
-        finder::admit_selection(k, ids, &home, t, &mut in_use).map_err(bad)?
-    };
-    let mut outcome = shared.cleanup.dispose(&admitted.ready, mode, t);
-    outcome.failed.extend(admitted.failed);
-    if outcome.deleted > 0 {
-        let (where_to, undo) = match &outcome.quarantine_id {
-            Some(q) => (
-                "to the 7-day quarantine",
-                UndoRecord::Quarantine {
-                    id: q.clone(),
-                    expires: dyno_core::activity::quarantine_expiry(t),
-                },
-            ),
-            None => ("to the Recycle Bin / Trash", UndoRecord::None),
-        };
-        let title = format!("Removed {} file{}", outcome.deleted, if outcome.deleted == 1 { "" } else { "s" });
-        let entry = lock(&shared.core).log(
-            t,
-            ActivityKind::Cleanup,
-            title,
-            format!("Chosen in the file finder, moved {where_to}"),
-            undo,
-            Some(outcome.freed_bytes),
-        );
-        if let Some(q) = &outcome.quarantine_id {
-            shared.cleanup.link_activity(q, &entry.id);
-        }
-    }
-    Ok(outcome)
-}
-
-fn home_dir() -> std::path::PathBuf {
-    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-        .map(std::path::PathBuf::from)
-        .unwrap_or_default()
+    finder::run(query, &id).map_err(bad)
 }
 
 /// Records this boot (once) and finds when the desktop settled after login, so Boot analysis has a history. Runs once at

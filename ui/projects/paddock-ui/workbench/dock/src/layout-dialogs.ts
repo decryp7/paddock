@@ -2,6 +2,7 @@ import { defineDialog, msg, type, type DialogDef } from '@decryp7/paddock-ui/she
 import { DOCK_OPTIONS, type DockOptions } from './dock-options';
 import { DOCK_LAYOUT_STORE, InMemoryDockLayoutStore } from './dock-store';
 import type { LayoutManageResult } from './layout-manage-dialog';
+import { DIALOG_CONTRACTS } from '../generated/dialog-contracts';
 
 /** Id of the save dialog (stable: its window route, remembered bounds, test ids). */
 export const LAYOUT_SAVE_DIALOG_ID = 'pd.wb.dock.layout-save';
@@ -24,28 +25,15 @@ export function dockLayoutDialogs(options: DockOptions = {}): readonly [DialogDe
       { provide: DOCK_OPTIONS, useValue: options },
       { provide: DOCK_LAYOUT_STORE, useValue: options.store ?? new InMemoryDockLayoutStore() },
     ]);
-  const save = defineDialog<typeof LAYOUT_SAVE_DIALOG_ID, string, string>({
-    id: LAYOUT_SAVE_DIALOG_ID,
-    kind: 'form',
-    modality: 'modal',
+  const save = defineDialog(DIALOG_CONTRACTS[LAYOUT_SAVE_DIALOG_ID], {
     title: msg('pd.wb.dock.layout.save-title', 'Save layout'),
-    width: 420,
     result: type<string>(),
-    commands: [],
     providers,
     load: () => import('./layout-save-dialog').then((m) => m.PdLayoutSaveDialog),
   });
-  const manage = defineDialog<typeof LAYOUT_MANAGE_DIALOG_ID, LayoutManageResult, string>({
-    id: LAYOUT_MANAGE_DIALOG_ID,
-    kind: 'tool',
+  const manage = defineDialog(DIALOG_CONTRACTS[LAYOUT_MANAGE_DIALOG_ID], {
     title: msg('pd.wb.dock.layout.manage-title', 'Manage layouts'),
-    width: 480,
-    height: 360,
-    minWidth: 320,
-    minHeight: 240,
     result: type<LayoutManageResult>(),
-    // It reads and writes the named layouts through the window's layout store (`IpcDockLayoutStore`: the workbench plugin).
-    commands: ['layout_get', 'layout_set'],
     providers,
     load: () => import('./layout-manage-dialog').then((m) => m.PdLayoutManageDialog),
   });

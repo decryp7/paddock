@@ -1,14 +1,14 @@
 import { EnvironmentProviders, Provider, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import type { ContributionBatch, DialogDef } from '@decryp7/paddock-ui/shell';
+import { recordDialogCommand, type ContributionBatch, type DialogDef } from '@decryp7/paddock-ui/shell';
 import {
   allowedCommands,
   commandCovered,
   DIALOG_IO,
   DialogShell,
   dialogWindowConfig,
-  fitsContent,
-  hasCloseAction,
+  layoutActions,
+  type DialogContent,
 } from '@decryp7/paddock-ui/shell/dialogs';
 import { FakeDialogIo } from './fake-dialog-io';
 import { recordIpc } from './ipc-recorder';
@@ -39,6 +39,11 @@ export interface DialogHarnessOptions {
   readonly answers?: Readonly<Record<string, unknown>>;
   /** Console errors that are expected (the mock refusing a fixture path); matched against each message. */
   readonly ignoreErrors?: readonly RegExp[];
+  /**
+   * What the user does once a dialog has booted, by dialog id (follow a link, open a section), so the commands it sends
+   * are checked against its contract and recorded for the nightly "declared but never sent" check.
+   */
+  readonly interact?: Readonly<Record<string, (root: HTMLElement) => void | Promise<void>>>;
 }
 
 /** What booting one dialog found. `problems` is empty when the dialog passed every check. */
@@ -86,12 +91,17 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
   try {
     TestBed.resetTestingModule();
     const providers = typeof options.providers === 'function' ? options.providers() : options.providers;
-    const config = dialogWindowConfig({ dialogs: options.dialogs, providers, route: { id: def.id, host: 'main', label: 'd-main-1' } });
+    const config = dialogWindowConfig({ dialogs: options.dialogs, providers, route: { id: def.id, host: 'main', label: 'd-main-1' }, baseCommands: options.baseCommands });
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), ...config.providers, { provide: DIALOG_IO, useValue: io }] });
     const fixture = TestBed.createComponent(DialogShell);
     const root = fixture.nativeElement as HTMLElement;
     // The shell registers its start (and the content's resources) as pending tasks: no turn or time budget, a slow import just takes as long as it takes.
     await fixture.whenStable();
+    const interact = options.interact?.[def.id];
+    if (interact) {
+      await interact(root);
+      await fixture.whenStable();
+    }
 
     const failed = root.querySelector('[data-testid=dialog-error-reason]')?.textContent?.trim();
     if (failed) problems.push(`does not open: ${failed}`);
@@ -99,24 +109,40 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
     const logged = errors.filter((e) => !ignored.some((r) => r.test(e)));
     for (const e of logged.filter((x) => MISSING_PROVIDER.test(x))) if (!failed || !e.includes(failed)) problems.push(`logs a missing provider: ${e}`);
     if (!failed) for (const e of logged.filter((x) => !MISSING_PROVIDER.test(x))) problems.push(`logs an error: ${e}`);
-    const main = root.querySelector('main');
-    const content = main ? [...main.children].filter((c) => !c.matches('[data-testid=dialog-shell-foot], [data-testid=dialog-loading], [data-testid=dialog-denied]')) : [];
+    const box = root.querySelector('.pd-frame-content');
+    const content = box ? [...box.children].filter((c) => !c.matches('[data-testid=dialog-loading], [data-testid=dialog-error], [data-testid=dialog-denied]')) : [];
     if (!failed && !content.some((c) => (c.textContent ?? '').trim() !== '' || c.querySelector('input, button, select, textarea, canvas, svg'))) problems.push('has an empty body');
 
-    // Every command it sent is one its contract (or the base sets) allows: what Rust's guard would refuse fails here.
+    // Every command it sent is one its contract (or the base sets) allows: what Rust's guard would refuse fails here. The
+    // commands are recorded for the nightly "declared but never sent" check (ADR 0026 §3).
     const allowed = allowedCommands(def, options.baseCommands);
+    for (const c of ipc.sent) recordDialogCommand(def.id, c);
     for (const c of [...new Set(ipc.sent)].filter((x) => !commandCovered(allowed, x))) problems.push(`sends ${c}, which its contract does not declare`);
 
-    // The kind's size rules: a fitted kind asks for its height once it is drawn, a tool keeps its size.
-    if (!failed && fitsContent(def) && io.fitted.length === 0) problems.push(`is a fitted ${def.kind} that never asked to be fitted`);
-    if (!fitsContent(def) && io.fitted.length > 0) problems.push(`is a ${def.kind} with a fixed size that asked to be fitted`);
+    // The ready handshake (ADR 0026 §4.2): sent once, whatever the kind; Rust sizes the window by the kind.
+    if (io.readied === null) problems.push('never sent the ready handshake');
+    else if (io.readied.minContent.height > io.readied.content.height || io.readied.minContent.width <= 0) problems.push(`sent a ready measure whose minimum exceeds its content: ${safeJson(io.readied)}`);
+
+    // The declared actions (ADR 0026 §2): the layout's problems, and Enter never on a destructive action, on every OS.
+    const mounted = (fixture.componentInstance as unknown as { content(): DialogContent | null }).content();
+    const actions = mounted?.dialogActions?.() ?? [];
+    for (const platform of ['macos', 'windows'] as const) {
+      const layout = layoutActions(def.kind, def.modality, def.requiredChoice === true, actions, platform, { cancel: 'Cancel', close: 'Close' });
+      if (platform === 'macos') for (const p of layout.problems) problems.push(`declares invalid actions: ${p}`);
+      const enter = actions.find((a) => a.id === layout.enterTarget);
+      if (enter?.kind === 'answer' && enter.role === 'destructive') problems.push(`Enter would run the destructive action ${enter.id}`);
+    }
+
+    // The frame draws the footer from the declared actions (ADR 0026 §2): a content that draws its own is reported.
+    if (box) for (const f of ownFooter(box)) problems.push(`draws its own footer: ${f}`);
 
     // A visible way out, and Escape per kind: a modal's Cancel, a modeless window's Close; a required choice keeps both.
-    if (def.requiredChoice !== true && !hasCloseAction(root)) problems.push('has no visible Close/Cancel');
+    const wayOut = root.querySelector('[data-testid=dialog-footer] [data-role=dismiss]');
+    if ((def.requiredChoice !== true || failed) && !wayOut) problems.push('has no visible Close/Cancel');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     await fixture.whenStable();
-    const want = def.requiredChoice === true && !failed ? [] : [undefined];
-    if (io.closedWith.length !== want.length || io.closedWith.some((r) => r !== undefined)) {
+    const want = def.requiredChoice === true && !failed ? [] : [null];
+    if (io.closedWith.length !== want.length || io.closedWith.some((r) => r !== null)) {
       problems.push(want.length ? `does not close on Escape (closed with ${safeJson(io.closedWith)})` : 'is a required choice that Escape closed');
     }
     fixture.destroy();
@@ -129,6 +155,22 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
     console.error = consoleError;
   }
   return { id: def.id, kind: def.kind, problems, sent: [...ipc.sent], fitted: [...io.fitted] };
+}
+
+const FOOT_CLASS = /(^|[-_])(foot|footer|actions)$/;
+const WAY_OUT = /^(close|cancel|ok)$/i;
+
+/** What a content draws that belongs to the frame's footer: a footer, a foot or actions row, a Close/Cancel/OK button. */
+export function ownFooter(content: Element): string[] {
+  const out: string[] = [];
+  for (const el of content.querySelectorAll('*')) {
+    if (el.closest('pd-dialog-frame') !== content.closest('pd-dialog-frame')) continue;
+    if (el.tagName === 'FOOTER') out.push('<footer>');
+    const token = [...el.classList].find((c) => FOOT_CLASS.test(c));
+    if (token) out.push(`.${token}`);
+    if (el.tagName === 'BUTTON' && WAY_OUT.test((el.textContent ?? '').replace(/\s+/g, ' ').trim())) out.push(`a "${(el.textContent ?? '').trim()}" button`);
+  }
+  return out;
 }
 
 /** Boots `def` and throws one error listing every problem (for an `it` per dialog). */

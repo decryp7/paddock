@@ -5,17 +5,13 @@
 use dyno_agent::cli::{ask, ask_within, connect};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
-use dyno_core::activity::UndoState;
 use dyno_core::history::HistoryRange;
-use dyno_core::ports::{PlatformError, ProcessSource};
-use dyno_core::process::{Priority, ProcessAction};
 use dyno_core::protocol::{ErrorCode, LiveDetail, LiveUpdate, Message, Reply, Request};
 use dyno_core::time::Timestamp;
 use dyno_ipc::{Client, Peer, PeerOptions};
 use dyno_platform::fake::{process, Fake};
 use dyno_platform::Platform;
 use std::sync::mpsc::{channel, Receiver};
-use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 struct Harness {
@@ -67,67 +63,6 @@ impl Harness {
         ask(&peer, Request::Subscribe { detail }).unwrap();
         (peer, rx)
     }
-
-    /// Waits until the agent's process table holds `pid`. The sampler fills it on its own thread after the agent
-    /// starts, and the agent acts only on processes it has sampled, so a test that acts must wait for this first.
-    fn wait_for_process(&self, pid: u32) {
-        let (_peer, rx) = self.subscriber(LiveDetail::Processes);
-        loop {
-            let live = rx
-                .recv_timeout(Duration::from_secs(10))
-                .expect("a live update with the process table");
-            if live.processes.is_some_and(|ps| ps.iter().any(|p| p.pid == pid)) {
-                return;
-            }
-        }
-    }
-}
-
-/// A process table that stays unread until the test opens it: the state between the agent's start and its first
-/// process sample, held as long as the test needs it.
-#[derive(Clone, Default)]
-struct Gate(Arc<(Mutex<bool>, Condvar)>);
-
-impl Gate {
-    fn open(&self) {
-        *self.0 .0.lock().unwrap() = true;
-        self.0 .1.notify_all();
-    }
-
-    fn wait(&self) {
-        let (open, cv) = &*self.0;
-        let _open = cv.wait_while(open.lock().unwrap(), |o| !*o).unwrap();
-    }
-
-    /// Opens the gate when dropped, so a failing assertion cannot leave the sampler blocked and the agent unstoppable.
-    /// Declare it after the harness: it is dropped first.
-    fn opener(&self) -> GateOpener {
-        GateOpener(self.clone())
-    }
-}
-
-struct GateOpener(Gate);
-
-impl Drop for GateOpener {
-    fn drop(&mut self) {
-        self.0.open();
-    }
-}
-
-struct GatedProcesses {
-    gate: Gate,
-    inner: Box<dyn ProcessSource>,
-}
-
-impl ProcessSource for GatedProcesses {
-    fn processes(&mut self) -> Vec<dyno_core::process::ProcessSample> {
-        self.gate.wait();
-        self.inner.processes()
-    }
-
-    fn details(&mut self, target: dyno_core::process::ProcessRef) -> Result<dyno_core::process::ProcessDetails, PlatformError> {
-        self.inner.details(target)
-    }
 }
 
 impl Drop for Harness {
@@ -136,10 +71,6 @@ impl Drop for Harness {
             r.stop();
         }
     }
-}
-
-fn target(pid: u32) -> dyno_core::process::ProcessRef {
-    process(pid, "x", 0.0).reference()
 }
 
 #[test]
@@ -154,6 +85,31 @@ fn a_subscriber_gets_live_updates_with_processes_only_when_it_asks() {
     let s = summary.recv_timeout(Duration::from_secs(10)).expect("a summary update");
     assert!(s.processes.is_none() && s.groups.is_none());
     assert!(!s.top_cpu.is_empty());
+}
+
+#[test]
+fn other_users_processes_are_folded_into_one_row_in_the_live_update() {
+    let h = Harness::start();
+    for pid in [200, 201] {
+        let mut p = process(pid, "theirs", 3.0);
+        p.owner = dyno_core::process::Owner::Other;
+        h.fake.add_process(p);
+    }
+    let (_p, rx) = h.subscriber(LiveDetail::Processes);
+    let live = loop {
+        let l = rx.recv_timeout(Duration::from_secs(10)).expect("a live update");
+        if l.other_users.is_some() {
+            break l;
+        }
+    };
+    let other = live.other_users.unwrap();
+    assert_eq!(other.count, 2);
+    let listed = live.processes.unwrap();
+    assert!(
+        listed.iter().all(|p| p.owner != dyno_core::process::Owner::Other),
+        "folded ones are not listed"
+    );
+    assert_eq!(listed.len(), 3);
 }
 
 #[test]
@@ -172,71 +128,6 @@ fn settings_round_trip_and_survive_a_restart() {
     assert!(back.launch_at_login && back.sampling.interval_ms == 700);
     let saved = std::fs::read_to_string(h.dirs.settings()).unwrap();
     assert!(saved.contains("\"launchAtLogin\": true"));
-}
-
-#[test]
-fn a_click_acts_logs_and_undoes_and_protected_processes_are_refused() {
-    let h = Harness::start();
-    let (peer, rx) = h.subscriber(LiveDetail::Processes);
-    rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    let Reply::Activity(entry) = ask(
-        &peer,
-        Request::Act {
-            target: target(100),
-            action: ProcessAction::SetPriority(Priority::Idle),
-        },
-    )
-    .unwrap() else {
-        panic!("activity")
-    };
-    assert!(entry.title.contains("busy"));
-    assert_eq!(h.fake.actions().len(), 1);
-    let Reply::Activities(list) = ask(&peer, Request::Activity { limit: 10 }).unwrap() else {
-        panic!("list")
-    };
-    assert_eq!(list[0].id, entry.id);
-    assert_eq!(list[0].undo, UndoState::Available);
-    let Reply::Activity(undone) = ask(
-        &peer,
-        Request::Undo {
-            activity_id: entry.id.clone(),
-        },
-    )
-    .unwrap() else {
-        panic!("undo")
-    };
-    assert_eq!(undone.undo, UndoState::Undone);
-    assert_eq!(h.fake.actions().len(), 2);
-    assert!(ask(&peer, Request::Undo { activity_id: entry.id }).unwrap_err().contains("already"));
-    // launchd is on the protected list.
-    let err = ask(
-        &peer,
-        Request::Act {
-            target: target(102),
-            action: ProcessAction::End,
-        },
-    )
-    .unwrap_err();
-    assert!(err.contains("protected"), "{err}");
-    assert_eq!(h.fake.actions().len(), 2, "nothing was done to the protected process");
-    // A pid that is not in the table is not found, and an invalid action is a bad request.
-    assert!(ask(
-        &peer,
-        Request::Act {
-            target: target(999),
-            action: ProcessAction::End
-        }
-    )
-    .is_err());
-    assert!(ask(
-        &peer,
-        Request::Act {
-            target: target(100),
-            action: ProcessAction::SetCpuCap(Some(0))
-        }
-    )
-    .unwrap_err()
-    .contains("CPU cap"));
 }
 
 #[test]
@@ -603,175 +494,7 @@ fn the_diagnostics_bundle_previews_and_saves_a_redacted_zip() {
     }
 }
 
-// ------------------------------------------------------------------------------------------------------- cleanup
-
-/// An agent whose data folder holds a user pack for a folder the test creates in its own temp directory.
-fn start_with_cleanup_pack() -> (Harness, std::path::PathBuf) {
-    let tmp = tempfile::tempdir().unwrap();
-    let work = tmp.path().join("cachey");
-    std::fs::create_dir_all(&work).unwrap();
-    let dirs = Dirs::at(tmp.path().join("data"));
-    std::fs::create_dir_all(dirs.packs()).unwrap();
-    let name = tmp.path().file_name().unwrap().to_string_lossy().into_owned();
-    std::fs::write(
-        dirs.packs().join("test.toml"),
-        format!(
-            "format = 1\n[[category]]\nid = \"testcache\"\nname = \"Test cache\"\ndescription = \"A folder the test made.\"\ngroup = \"developer\"\nrisk = \"review\"\npaths = [\"{{temp}}/{name}/cachey\"]\n"
-        ),
-    )
-    .unwrap();
-    std::fs::write(dirs.packs().join("broken.toml"), "format = ").unwrap();
-    let fake = Fake::new();
-    let running = Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
-    (
-        Harness {
-            running: Some(running),
-            fake,
-            dirs,
-            _tmp: tmp,
-        },
-        work,
-    )
-}
-
-#[test]
-fn cleanup_scans_without_deleting_runs_only_what_was_chosen_and_undoes() {
-    let (h, work) = start_with_cleanup_pack();
-    let peer = h.client();
-    std::fs::write(work.join("one"), b"11").unwrap();
-    std::fs::write(work.join("two"), b"2222").unwrap();
-    let Reply::Categories(cats) = ask(&peer, Request::CleanupCategories).unwrap() else {
-        panic!("categories")
-    };
-    assert!(cats.iter().any(|c| c.id == "testcache") && cats.iter().any(|c| c.id == "userTemp"));
-    // The broken pack is reported in the activity log and ignored.
-    let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
-        panic!("log")
-    };
-    assert!(log.iter().any(|e| e.detail.contains("broken.toml")));
-    let Reply::Scan(scan) = ask(
-        &peer,
-        Request::ScanCleanup {
-            categories: vec!["testcache".into()],
-        },
-    )
-    .unwrap() else {
-        panic!("scan")
-    };
-    assert_eq!(scan.total_bytes, 6);
-    assert!(work.join("one").exists(), "a scan deletes nothing");
-    let two = scan.results[0].items.iter().find(|i| i.path.ends_with("two")).unwrap().id.clone();
-    // Errors: a made-up scan, a made-up item.
-    assert!(ask(
-        &peer,
-        Request::RunCleanup {
-            scan_id: "nope".into(),
-            item_ids: vec![two.clone()],
-            mode: dyno_core::cleanup::DeleteMode::Quarantine
-        }
-    )
-    .is_err());
-    assert!(ask(
-        &peer,
-        Request::RunCleanup {
-            scan_id: scan.id.clone(),
-            item_ids: vec!["x".into()],
-            mode: dyno_core::cleanup::DeleteMode::Quarantine
-        }
-    )
-    .unwrap_err()
-    .contains("not part"));
-    let Reply::Outcome(out) = ask(
-        &peer,
-        Request::RunCleanup {
-            scan_id: scan.id.clone(),
-            item_ids: vec![two],
-            mode: dyno_core::cleanup::DeleteMode::Quarantine,
-        },
-    )
-    .unwrap() else {
-        panic!("outcome")
-    };
-    assert_eq!((out.deleted, out.freed_bytes), (1, 4));
-    assert!(work.join("one").exists() && !work.join("two").exists());
-    let q = out.quarantine_id.unwrap();
-    let Reply::Quarantines(held) = ask(&peer, Request::Quarantine).unwrap() else {
-        panic!("quarantines")
-    };
-    assert_eq!((held[0].id.as_str(), held[0].item_count), (q.as_str(), 1));
-    let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
-        panic!("log")
-    };
-    let entry = log.iter().find(|e| e.title.starts_with("Cleaned 1 item")).unwrap();
-    assert_eq!((entry.undo, entry.bytes), (UndoState::Available, Some(4)));
-    // Undo from the activity log puts it back and marks the entry undone.
-    let Reply::Activity(undone) = ask(
-        &peer,
-        Request::Undo {
-            activity_id: entry.id.clone(),
-        },
-    )
-    .unwrap() else {
-        panic!("undo")
-    };
-    assert_eq!(undone.undo, UndoState::Undone);
-    assert_eq!(std::fs::read(work.join("two")).unwrap(), b"2222");
-    assert!(ask(&peer, Request::RestoreQuarantine { id: q }).is_err(), "nothing left to restore");
-    // The disk map validates its path.
-    assert!(ask(
-        &peer,
-        Request::DiskUsage {
-            path: Some("relative".into())
-        }
-    )
-    .is_err());
-    let Reply::SizeTree(tree) = ask(
-        &peer,
-        Request::DiskUsage {
-            path: Some(work.to_string_lossy().into_owned()),
-        },
-    )
-    .unwrap() else {
-        panic!("tree")
-    };
-    assert_eq!(tree.bytes, 6);
-}
-
-/// Regression (CI run 6489): the sampler reads the first process table on its own thread after the agent starts, so
-/// a test that acts at once races it. Held deterministically here: before the first table the target is not found;
-/// once the table holds it, the same action succeeds.
-#[test]
-fn an_action_before_the_first_process_table_is_not_found_and_succeeds_once_the_table_holds_it() {
-    let gate = Gate::default();
-    let h = Harness::start_with(|mut p| {
-        p.processes = Box::new(GatedProcesses {
-            gate: gate.clone(),
-            inner: p.processes,
-        });
-        p
-    });
-    let _opener = gate.opener();
-    let peer = h.client();
-    let act = || {
-        ask(
-            &peer,
-            Request::Act {
-                target: target(100),
-                action: ProcessAction::SetPriority(Priority::BelowNormal),
-            },
-        )
-    };
-    let err = act().unwrap_err();
-    assert!(err.contains("not in the list"), "{err}");
-    assert!(h.fake.actions().is_empty());
-    gate.open();
-    h.wait_for_process(100);
-    let Reply::Activity(entry) = act().unwrap() else {
-        panic!("activity")
-    };
-    assert!(entry.title.contains("busy"), "{}", entry.title);
-    assert_eq!(h.fake.actions().len(), 1);
-}
+// ------------------------------------------------------------------------------------------------------- disk map
 
 #[test]
 fn the_weekly_report_is_built_from_stored_data_and_exported_as_markdown_and_html() {
@@ -790,22 +513,6 @@ fn the_weekly_report_is_built_from_stored_data_and_exported_as_markdown_and_html
     assert!(ask(&peer, Request::WeeklyReport { weeks_ago: 53 })
         .unwrap_err()
         .contains("at most 52"));
-    // Something the user did shows up under "what changed" (not as a rule action).
-    h.wait_for_process(100);
-    ask(
-        &peer,
-        Request::Act {
-            target: target(100),
-            action: ProcessAction::SetPriority(Priority::BelowNormal),
-        },
-    )
-    .unwrap();
-    let Reply::Report(r) = ask(&peer, Request::WeeklyReport { weeks_ago: 0 }).unwrap() else {
-        panic!("report")
-    };
-    assert!(r.changes.iter().any(|c| c.title.contains("busy")), "{:?}", r.changes);
-    assert!(!r.nothing_to_report);
-
     let md = h._tmp.path().join("week.md");
     let Reply::ReportSaved(saved) = ask(
         &peer,

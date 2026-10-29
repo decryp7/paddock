@@ -524,6 +524,27 @@ A dead renderer is reloaded, not aborted; a closed or reset connection is `ERR_E
 browser-side call as an ordering barrier; otherwise the code), so the next failure names its cause instead of being
 retried or guessed at.
 
+**Follow-up (same day):** Windows run 6563 failed the same test with the plain code again, so the cause is neither a
+download nor a replacement the driver saw. It still does not reproduce on the Mac. Two findings while instrumenting it:
+(1) an unexplained abort now carries what the browser reported about the tab from its creation on (lifecycle steps, the
+document request's `Network.requestWillBeSent`/`responseReceived`/`loadingFailed` with `canceled` and `blockedReason`,
+requested and started navigations, crashes, detaches), and the real-browser tests write Chrome's net log
+(`--log-net-log`) and print its page-load, cancellation and error events in a failed assertion. `Network.enable` sent
+while a `Page.navigate` is unanswered gets no answer within 10 s, so it is enabled once when the tab is attached, and
+the connection keeps only documents' network events. (2) The net log showed the "hermetic" test browser talking to the
+internet: Chrome for Testing 156 with `--disable-background-networking` still connected to www.google.com,
+accounts.google.com, update.googleapis.com and clients2.google.com. **Do:** give a test browser
+`--no-proxy-server` and `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1` (the rule also
+maps IP literals, so loopback must be excluded), and assert from the net log that it connected to loopback only, so
+"no real hosts" is checked rather than assumed.
+
+**Likeliest cause, now guarded:** Chrome's `Page.enable` reports a navigation of the tab that is still running as
+`Page.frameStartedNavigating` before its reply (Chromium's PageHandler::Enable, read 2026-10-28). A new tab's own first
+navigation (`about:blank` from `Target.createTarget`) can still be running on a loaded Windows runner when the first
+`Page.navigate` is sent. **Do:** note the navigation `Page.enable` reported, and let the first load wait (within the
+caller's timeout, on events, no sleep) until that navigation committed or stopped loading. Both drivers
+(paddock-chromium and Spotter's copy) now do this; the fake browser's `SlowStartPage` reproduces the abort.
+
 ## A local model over every item turns a background task into a machine hog (2026-10-28, Debrief)
 Debrief's background "Learning human names" ran the local model over up to 2,000 names after every import. It held about
 8 GB on the Mac and made a Windows PC sluggish for the whole run, for a result that rules, a names pack and the logs' own
@@ -585,3 +606,77 @@ interactive login shell gets no `SIGTTIN` either) and `killpg`, on Windows a kil
 helpers that left the tree (`taskkill /T` misses those); otherwise `cmd /c`'s and a login shell's children outlive it
 (nextest's "leaky"). A test of a timeout gives up on a condition (the tree is complete), never on a time budget.
 Reproduce with a delay knob in the fake (`spawn_delay_ms`), not by hoping for load.
+
+## Unrecorded benchmark conditions made 182k and 1.3M events/s look like a contradiction (2026-10-29)
+Two quoted ingest numbers, about 182k and 1.3M events/s, were argued over as if one was wrong. Neither came with machine,
+load, build profile, corpus or command, so nobody could tell whether they differed by a release build, a quiet machine, a
+different corpus or a real regression, and stale figures kept being quoted from ADRs and old job logs. **Rule:** record
+every benchmark you quote as a results block (date, commit, machine, load, build, corpus and generator, exact command,
+runs, numbers with budget and verdict, physical-footprint memory) in the owning `docs/performance.md` or
+`docs/benchmarks.md`, and link it from wherever the number is quoted; a number without a block is not evidence (rule 48).
+
+## A sticky header needs a z-index above everything that scrolls under it (2026-10-28, all apps)
+"The cell covers the header when scrolling": a `position: sticky` header with `z-index: auto` paints in tree order with the
+rows, so a later cell that is positioned or makes a stacking context (opacity on muted rows or hover actions, a relative
+badge, a transform) paints over it, and a sticky column at the header's own z-index wins the tie. Fourteen tables in three
+apps and the shared shell had it (ADR 0027 lists them); none showed with the mock data, so a run-time sweep alone would not have found them.
+**Rule:** every sticky header sets a z-index from the table ladder (`--pd-z-table-header` above sticky columns above row
+actions) and an opaque background; C43 checks every instance and `expectHeaderOnTop` checks a grid at run time (ADR 0027,
+rule 40).
+
+
+## Stale servers and stale builds (e2e and screenshots, 2026-10-28)
+
+Three times in one night tests and screenshots ran against old code: (1) `reuseExistingServer: true` on fixed ports
+(4300 to 4302 and the apps' own) silently reused another worktree's or an old dev server, so the tests "passed on the old
+code"; (2) `ui/dist` and the generated, untracked `ui/projects/paddock-ui/css/*.css` were older than their sources, so
+screenshots showed old text and a reviewer reported a bug that existed only in stale CSS. **Rule:** one mechanism in `@decryp7/paddock-e2e`
+(ER-21, rule 42), not another warning. A running server is reused only with `PW_REUSE_SERVER=1` (default never, and
+never on CI; `reuseServer()`, `paddockConfig`); `e2ePort` derives the local default port from the worktree (`20000 +
+(hash(git top level) mod 160) * 100 +` the config's last two digits: disjoint blocks) and still refuses a default on CI
+(`e2ePortOrCiDefault` keeps the apps' fixed CI ports); and the config checks, at load and so before any server starts,
+that what it consumes of ui is built from the current sources. The build writes a content stamp (`css/.source-hash` by
+`npm run build:css`, `ui/dist/.source-hash` by `npm run build -w ui`); the check recomputes the hash of `scss/**` (and
+every file of the package for the dist, except tests, bin/ and the generated css) and fails with "rebuild ui: npm run build -w ui" on a mismatch, a missing stamp or
+a missing css entry. A content hash, not mtimes: unchanged rebuilds, checkouts and touches never false-fail. Which
+guard: `paddockConfig({ buildGuard: 'none' | 'ui' | 'ui-dist', uiRoot })`; an app's own config calls
+`appBuildGuard(__dirname, uiRoot)`, which picks `ui-dist` only when the app's tsconfig maps `@decryp7/paddock-ui` to
+`ui/dist` (today Spotter), else nothing. `PW_SKIP_BUILD_GUARD=1` skips it. The ui config checks the css only with `PW_REUSE_SERVER=1` (its webServers run `build:css` themselves). Dot-files (`.DS_Store`) are ignored; README and doc edits under `projects/paddock-ui` mark the dist stale on purpose (every non-test file counts). A direct `ng build paddock-ui` leaves `ui/dist` unstamped, so the guard fails: build with `npm run build -w ui`. Tests: `build-guard.test.ts`, `env.test.ts`
+(including every app config on a fresh checkout). Proposed binding rule (the user decides): every Playwright config
+uses these three, and `scripts/new-app.mjs` templates do.
+## 2026-10-29: a harness that stands in for a plugin must stand in for its routing and its ACL
+
+The ADR 0026 real-window probe ended "no report within 90s: the dialog page never became ready" on macOS, and it looked like
+a product fault (a hidden window that never readies). It was the harness: the page sends the shell's commands as
+`plugin:paddock-shell|dialog_take_input`, but the probe registered them as bare app commands and had no ACL, so Tauri
+refused every call ("paddock-shell.window_pong not allowed. Plugin not found") before the probe's handler saw it. The page
+booted fine (the DOM was there, and the ready of ADR 0026 §4.2 took about 10 ms once the calls arrived). "Refused" was told
+from "never made" only by silence in the probe's own log, and confirmed by calling a command from the webview by hand; the
+probe could not tell them apart. **Rule (guidance):** a probe or test that replaces the app's plugin registers a plugin of
+the same name and an ACL resolved from the app's real capability file, so a wrong capability fails it; it prints every call
+it receives, with its time, and the calls seen when it gives up. A refusal itself shows only in the webview console or as a
+`RuntimeAuthority` check, so a harness that needs to name it asks the authority, not the log. C48 checks the capability file
+of every app on the shared shell.
+
+## Chromium tests compared a loaded machine with a product timeout (2026-10-28, paddock-chromium)
+
+Three `paddock-chromium` tests failed on CI runs of several branches and never on a quiet machine: (1) `a_real_browser_reads_a_page_and_closes_cleanly` and `a_cancelled_load_says_whether_it_was_a_download_or_replaced` asserted `Browser.close()`, whose 5 s grace (`CLOSE_GRACE`, the product's bound before it kills the tree) is a fine product choice but a time budget as a test assertion: a loaded runner let Chrome take longer (macOS 6662, Windows 6726, 13 s test); (2) `a_page_is_read_snapshot_by_snapshot` pushed a 16 MiB page (`MAX_HTML` + 1) through the fake browser in a debug build to see the size cap refuse it, which outlasted the 10 s call timeout on a macOS runner and gave `Timeout` instead of "larger". **Rule:** a test asserts the mechanism (the browser exits by itself and is not killed; the cap refuses a page one byte over it), never that it happened within a product timeout; give the code under test the cap as a parameter so a few bytes prove it; wait on the condition (`close_gracefully` returns the moment Chrome exits) with a hang guard that only stops a browser that never exits. A failing wait names what the thing it waited for reported (the load's own result), so the next failure carries its cause.
+
+This is the same lesson as "A turn budget in a test wait is a timeout in disguise" for assertions on a product's own grace period: wait on the condition, and let a generous hang guard (never an expectation) stop only a thing that never ends. A third cause was found in the same test by review: its server took one connection at a time with a blocking read, so an idle socket Chrome opened (a preconnect or backup connect) could hide the real request; each connection now has its thread and a failed wait prints what the server saw. C30 now flags a non-negated `assert!` over a bare `.close()` or `.close_gracefully(..)` (the calls that wait out a grace). Waive `close_gracefully` with `// conformance: hang-guard` and a grace of at least 10 s, or either call with `// conformance: grace-free — <why>` when the thing had ended already; a forced end (`assert!(!b.close_gracefully(Duration::ZERO))`) is not flagged.
+
+## 2026-10-29: the Tauri template's crate types cost more than the linker (all apps)
+
+An incremental debug rebuild of Debrief spent 0.61 s linking the binary, but about 1.5 s writing a 1.0 GB static archive
+(about 1.25 s) and linking an unused cdylib (0.24 s), both from Tauri's template
+`crate-type = ["staticlib", "cdylib", "rlib"]`, which only iOS and Android use. `rlib` alone cut the rebuild by 25%
+(Debrief) and 38% (Dyno); lld was slower than ld-prime and cannot read the macOS 27 SDK. Dropping the crate types also
+changes release output, though not its behaviour (verified function by function on Dyno): cargo hashes each unit's LTO
+mode into `-C metadata`, so the dependencies are compiled bitcode-only under new hashes (other `TypeId` values, folding
+and inlining). Also: cargo fingerprints the linker, so a timing wrapper set as the linker after a build recompiles
+everything. **Guidance:** app crates build an rlib only; measure link time with a linker wrapper
+([`scripts/perf/link-time/cc-timed.sh`](../scripts/perf/link-time/cc-timed.sh)) set before the first build, and compare
+release binaries function by function ([`classify.py`](../scripts/perf/link-time/classify.py)), not by checksum.
+Results: [Debrief](../apps/debrief/docs/performance.md#2026-10-29-incremental-rebuild-and-link-time-docslink-time),
+[Dyno](../apps/dyno/docs/performance.md#2026-10-29-incremental-rebuild-and-link-time-docslink-time),
+[Dyno release identity](../apps/dyno/docs/performance.md#2026-10-29-release-identity-of-the-rlib-only-crate-type-docslink-time);
+details: [research/2026-10-29-link-time.md](research/2026-10-29-link-time.md).

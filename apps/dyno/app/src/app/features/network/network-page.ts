@@ -269,7 +269,7 @@ function readCollapsed(): Set<string> {
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 320px; }
     .grid { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); overflow: hidden; outline-offset: 2px; }
     .head, .row { display: grid; grid-template-columns: var(--cols); align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); }
-    .head { height: 30px; border-bottom: 1px solid var(--border); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-xs); position: sticky; top: 0; z-index: 1; }
+    .head { height: 30px; border-bottom: 1px solid var(--border); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-xs); position: sticky; top: 0; z-index: 3; }
     .row { height: 36px; border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-sm); cursor: default; }
     .row.group-row { background: var(--surface-inset); }
     .row.group-row .gname { grid-column: 1 / -1; }

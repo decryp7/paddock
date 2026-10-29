@@ -49,7 +49,6 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
     }
     let host = Host::listen_at(&paths.endpoint, &endpoint_access(&config.user), token, FrameLimit::default())
         .map_err(|e| format!("The helper cannot open its endpoint {}: {e}", paths.endpoint))?;
-    let tuning = dyno_platform::tuning_admin::system_admin_tuner();
     let host_kind = paths.host;
     let (remove_paths, stop_on_removal) = (paths.clone(), stop.clone());
     let dispatcher = Arc::new(Dispatcher::new(Parts {
@@ -59,7 +58,6 @@ pub fn serve(paths: &HelperPaths, stop: Arc<AtomicBool>) -> Result<(), String> {
             host: host_kind,
             agent_exe: config.agent_exe.to_string_lossy().into_owned(),
         },
-        tuning: Box::new(tuning),
         traffic: Box::new(HelperTraffic),
         audit: AuditLog::new(paths.audit.clone()),
         clock: Box::new(now),

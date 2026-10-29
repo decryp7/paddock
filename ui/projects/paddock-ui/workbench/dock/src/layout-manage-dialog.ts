@@ -1,20 +1,26 @@
-import { ChangeDetectionStrategy, Component, computed, inject, linkedSignal, resource, signal } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, ElementRef, inject, Injector, linkedSignal, resource, signal } from '@angular/core';
+import { MatButton } from '@angular/material/button';
 import { FormField } from '@angular/forms/signals';
 import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
+import { SuEmptyState } from '@decryp7/paddock-ui';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
-import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import { DIALOG_REF, type DialogAction, type DialogContent, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
 import { DOCK_OPTIONS, storagePrefix } from './dock-options';
 import { DOCK_LAYOUT_STORE } from './dock-store';
 import { layoutNameForm } from './layout-name-form';
 import { cleanLayoutName, type NamedLayout, parseNamedLayouts, removeLayout, renameLayout, serializeNamedLayouts } from './named-layouts';
 
-/** What the manage dialog resolves: the layout to apply (the dialog closes), absent when it was just closed. */
+/**
+ * What the manage dialog resolves: the layout to apply, or `save` (the user asked to save the current layout: the dock
+ * runs its Save layout flow). Both close the dialog; the result is empty when it was just closed.
+ */
 export interface LayoutManageResult {
   readonly apply?: string;
+  readonly save?: true;
 }
 
 /**
- * "Manage layouts" (a modeless tool window, ADR 0009): the named layouts with Apply, Rename and Delete. Edits are written
+ * "Manage layouts" (a modeless form window that fits its list, ADR 0009): the named layouts with Apply, Rename and Delete. Edits are written
  * to the layout store as they are made (the window may be closed any way), so the host reads the list again when the window
  * closes. Delete has no confirmation: the row goes and an Undo strip puts it back (until another change is made or the window
  * closes). Apply resolves `{ apply: name }` and closes the window. The window reads and writes the layout document of the
@@ -23,13 +29,15 @@ export interface LayoutManageResult {
 @Component({
   selector: 'pd-layout-manage-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdField, PdFieldControl, FormField, PdGlyph],
+  imports: [PdField, PdFieldControl, FormField, PdGlyph, SuEmptyState, MatButton],
   template: `
     <div class="pd-lmd">
       @if (loaded.status() === 'loading') {
         <p class="pd-lmd__note" data-testid="layout-manage-loading">{{ t.loading }}</p>
       } @else if (layouts().length === 0) {
-        <p class="pd-lmd__note" data-testid="layout-manage-empty">{{ t.empty }}</p>
+        <pd-empty-state data-testid="layout-manage-empty" icon="layers" [heading]="t.emptyHeading" [description]="t.empty">
+          <button slot="action" type="button" class="pd-lmd__btn pd-lmd__btn--primary" data-testid="layout-manage-save-empty" (click)="saveCurrent()">{{ t.saveCurrent }}</button>
+        </pd-empty-state>
       } @else {
         <ul class="pd-lmd__list" data-testid="layout-manage-list">
           @for (layout of layouts(); track layout.name) {
@@ -48,8 +56,8 @@ export interface LayoutManageResult {
                     (keydown.escape)="cancelRename($event)"
                   />
                 </pd-field>
-                <button type="button" class="pd-lmd__btn" data-testid="layout-manage-rename-ok" (click)="commitRename($event)">{{ t.rename }}</button>
-                <button type="button" class="pd-lmd__btn" data-testid="layout-manage-rename-cancel" (click)="cancelRename($event)">{{ t.cancel }}</button>
+                <button type="button" matButton="outlined" class="pd-lmd__rbtn" data-testid="layout-manage-rename-ok" (click)="commitRename($event)">{{ t.rename }}</button>
+                <button type="button" matButton="outlined" class="pd-lmd__rbtn" data-testid="layout-manage-rename-cancel" (click)="cancelRename($event)">{{ t.cancel }}</button>
               } @else {
                 <span class="pd-lmd__name" [attr.title]="layout.name">{{ layout.name }}</span>
                 <button type="button" class="pd-lmd__btn" data-testid="layout-manage-apply" [attr.aria-label]="t.applyLabel(layout.name)" (click)="apply(layout.name)">{{ t.apply }}</button>
@@ -68,9 +76,6 @@ export interface LayoutManageResult {
           <button type="button" class="pd-lmd__btn" data-testid="layout-manage-undo-button" (click)="restore()">{{ t.undo }}</button>
         </div>
       }
-      <div class="pd-lmd__actions">
-        <button type="button" class="pd-lmd__btn" data-dialog-close data-testid="layout-manage-close" (click)="ref.close()">{{ t.close }}</button>
-      </div>
     </div>
   `,
   styles: `
@@ -81,31 +86,35 @@ export interface LayoutManageResult {
     .pd-lmd__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); }
     .pd-lmd__row + .pd-lmd__row { border-top: 1px solid var(--pd-hairline); }
     .pd-lmd__name { flex: 1 1 8rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pd-lmd__row:has(.pd-lmd__rename) { align-items: flex-start; }
     .pd-lmd__rename { flex: 1 1 12rem; }
-    .pd-lmd__input { box-sizing: border-box; width: 100%; min-height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
-    .pd-lmd__input[aria-invalid='true'] { border-color: var(--pd-danger); }
+    /* The buttons are the outline's height and start at its top, so their centres are the field's. */
+    .pd-lmd__rbtn { --mat-button-outlined-container-height: var(--pd-control-height); }
     .pd-lmd__btn { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-button-height, 28px); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
+    .pd-lmd__btn--primary { background: var(--pd-accent-fill); border-color: var(--pd-accent-fill); color: var(--pd-on-accent); }
     .pd-lmd__btn--danger { color: var(--pd-danger-text, var(--pd-danger)); }
-    .pd-lmd__btn:focus-visible, .pd-lmd__input:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pd-lmd__btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-lmd__undo { display: flex; align-items: center; justify-content: space-between; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-surface-3); }
-    .pd-lmd__actions { display: flex; justify-content: flex-end; }
   `,
 })
-export class PdLayoutManageDialog {
+export class PdLayoutManageDialog implements DialogContent<LayoutManageResult> {
   protected readonly ref = inject<DialogRef<LayoutManageResult>>(DIALOG_REF);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly injector = inject(Injector);
   private readonly store = inject(DOCK_LAYOUT_STORE);
   private readonly key = `${storagePrefix(inject(DOCK_OPTIONS))}.layouts`;
 
   protected readonly t = {
     loading: $localize`:@@pd.wb.dock.layout.manage-loading:Loading layouts…`,
-    empty: $localize`:@@pd.wb.dock.layout.manage-empty:No saved layouts yet. Save the current arrangement from the Window menu.`,
+    emptyHeading: $localize`:@@pd.wb.dock.layout.manage-empty-heading:No saved layouts yet`,
+    empty: $localize`:@@pd.wb.dock.layout.manage-empty:Save the current arrangement of your panels to come back to it later.`,
+    saveCurrent: $localize`:@@pd.wb.dock.layout.manage-save-current:Save current layout`,
     apply: $localize`:@@pd.wb.dock.layout.manage-apply:Apply`,
     rename: $localize`:@@pd.wb.dock.layout.manage-rename:Rename`,
     renameLabel: $localize`:@@pd.wb.dock.layout.manage-rename-label:New name`,
     cancel: $localize`:@@pd.wb.dock.layout.manage-cancel:Cancel`,
     delete: $localize`:@@pd.wb.dock.layout.manage-delete:Delete`,
     undo: $localize`:@@pd.wb.dock.layout.manage-undo:Undo`,
-    close: $localize`:@@pd.wb.dock.layout.manage-close:Close`,
     applyLabel: (name: string) => $localize`:@@pd.wb.dock.layout.manage-apply-for:Apply layout ${name}:name:`,
     renameFor: (name: string) => $localize`:@@pd.wb.dock.layout.manage-rename-for:Rename layout ${name}:name:`,
     deleteFor: (name: string) => $localize`:@@pd.wb.dock.layout.manage-delete-for:Delete layout ${name}:name:`,
@@ -132,19 +141,43 @@ export class PdLayoutManageDialog {
     void this.store.save(this.key, serializeNamedLayouts(list)).catch(() => undefined);
   }
 
+  /** Save current layout at the leading edge once there are layouts (the empty state carries its own button); the frame adds Close. */
+  readonly dialogActions = computed<readonly DialogAction<LayoutManageResult>[]>(() =>
+    this.loaded.status() === 'loading' || this.layouts().length === 0
+      ? []
+      : [{ kind: 'answer', id: 'save', label: this.t.saveCurrent, role: 'secondary', lead: true, answer: () => ({ save: true }) }],
+  );
+
+  protected saveCurrent(): void {
+    this.ref.answer({ save: true });
+  }
+
   protected apply(name: string): void {
-    this.ref.close({ apply: name });
+    this.ref.answer({ apply: name });
   }
 
   protected startRename(name: string): void {
     this.undo.set(null);
     this.renameSubmitted.set(false);
     this.renaming.set(name);
+    afterNextRender(() => this.host.nativeElement.querySelector<HTMLInputElement>('[data-testid="layout-manage-rename"]')?.focus(), { injector: this.injector });
   }
 
   protected cancelRename(event?: Event): void {
     event?.stopPropagation();
+    this.endRename();
+  }
+
+  /** The rename field goes: focus returns to that row's Rename button (it would otherwise fall to the page). */
+  private endRename(name: string | null = this.renaming()): void {
     this.renaming.set(null);
+    afterNextRender(
+      () => {
+        const row = [...this.host.nativeElement.querySelectorAll<HTMLElement>('li[data-layout]')].find((li) => li.dataset['layout'] === name);
+        row?.querySelector<HTMLElement>('[data-testid="layout-manage-rename-start"]')?.focus();
+      },
+      { injector: this.injector },
+    );
   }
 
   protected commitRename(event?: Event): void {
@@ -156,7 +189,7 @@ export class PdLayoutManageDialog {
     if (field.invalid()) return;
     const to = cleanLayoutName(field.value());
     if (to && to !== from) this.write(renameLayout(this.layouts(), from, to));
-    this.renaming.set(null);
+    this.endRename(to && to !== from ? to : from);
   }
 
   protected remove(name: string): void {

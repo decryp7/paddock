@@ -1,0 +1,81 @@
+### round 1
+## h loop-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/store/segments /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 8 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/segB (load 9.85)
+  IMPORT inproc_parquet_8_sustained rows=54000000 secs=18.91 events_per_s=2854920
+  LOOP inproc page_rows_500 n=53 p50_ms=25.4 p95_ms=45.7 max_ms=112.1
+  LOOP inproc errors_total n=53 p50_ms=14.4 p95_ms=26.7 max_ms=72.6
+  LOOP inproc facet_machine n=53 p50_ms=194.5 p95_ms=289.8 max_ms=364.0
+  LOOP inproc duration_s=19.0
+  STATS loop-inproc peak_rss_mb=1072 peak_footprint_mb=1047 footprint_mb=932 rss_now_mb=958 cpu_s=109.74
+## h loop-ipc /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/w.sock /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 8 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/segB (load 17.58)
+  LOOP ipc page_rows_500 n=46 p50_ms=33.2 p95_ms=102.5 max_ms=133.0
+  LOOP ipc errors_total n=46 p50_ms=18.7 p95_ms=37.1 max_ms=62.7
+  LOOP ipc facet_machine n=46 p50_ms=236.4 p95_ms=330.6 max_ms=376.0
+  LOOP ipc duration_s=19.0
+  STATS loop-ipc-client peak_rss_mb=14 peak_footprint_mb=8 footprint_mb=6 rss_now_mb=14 cpu_s=0.09
+  worker: IMPORT ipc_worker_parquet_8_sustained rows=57000000 secs=18.79 events_per_s=3032964
+  worker: STATS ipc-worker peak_rss_mb=1054 peak_footprint_mb=1029 footprint_mb=910 rss_now_mb=935 cpu_s=109.42
+serving Text("quack:127.0.0.1:38440") (start 2.5 ms)
+## loop-quack + import-quack insert 1 (load 19.03)
+  server events after import: 3000000
+  IMPORT quack_insert_1 rows=3000000 secs=27.76 events_per_s=108079
+  STATS import-quack-insert-1-client peak_rss_mb=1393 peak_footprint_mb=1360 footprint_mb=308 rss_now_mb=734 cpu_s=16.90
+  LOOP quack page_rows_500 n=91 p50_ms=17.7 p95_ms=29.7 max_ms=172.2
+  LOOP quack errors_total n=91 p50_ms=6.4 p95_ms=17.4 max_ms=22.5
+  LOOP quack facet_machine n=91 p50_ms=138.4 p95_ms=228.6 max_ms=1411.2
+  LOOP quack duration_s=27.8
+  STATS loop-quack-client peak_rss_mb=70 peak_footprint_mb=37 footprint_mb=33 rss_now_mb=70 cpu_s=0.58
+  server: STATS quack-server peak_rss_mb=2085 peak_footprint_mb=2047 footprint_mb=83 rss_now_mb=595 cpu_s=75.49
+### round 2
+## h loop-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/store/segments /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 8 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/segB (load 24.65)
+  IMPORT inproc_parquet_8_sustained rows=57000000 secs=18.92 events_per_s=3013081
+  LOOP inproc page_rows_500 n=50 p50_ms=27.2 p95_ms=66.0 max_ms=81.7
+  LOOP inproc errors_total n=50 p50_ms=17.2 p95_ms=42.4 max_ms=56.7
+  LOOP inproc facet_machine n=50 p50_ms=220.2 p95_ms=286.7 max_ms=289.5
+  LOOP inproc duration_s=18.9
+  STATS loop-inproc peak_rss_mb=1069 peak_footprint_mb=1043 footprint_mb=952 rss_now_mb=977 cpu_s=108.78
+## h loop-ipc /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/w.sock /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 8 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/segB (load 39.64)
+  LOOP ipc page_rows_500 n=43 p50_ms=44.7 p95_ms=144.4 max_ms=237.5
+  LOOP ipc errors_total n=43 p50_ms=17.8 p95_ms=41.1 max_ms=55.6
+  LOOP ipc facet_machine n=43 p50_ms=269.7 p95_ms=402.2 max_ms=467.4
+  LOOP ipc duration_s=19.6
+  STATS loop-ipc-client peak_rss_mb=14 peak_footprint_mb=8 footprint_mb=8 rss_now_mb=14 cpu_s=0.09
+  worker: IMPORT ipc_worker_parquet_8_sustained rows=39000000 secs=19.31 events_per_s=2019159
+  worker: STATS ipc-worker peak_rss_mb=1021 peak_footprint_mb=996 footprint_mb=928 rss_now_mb=954 cpu_s=75.57
+serving Text("quack:127.0.0.1:38440") (start 2.0 ms)
+## loop-quack + import-quack insert 1 (load 39.78)
+  server events after import: 3000000
+  IMPORT quack_insert_1 rows=3000000 secs=27.19 events_per_s=110340
+  STATS import-quack-insert-1-client peak_rss_mb=1431 peak_footprint_mb=1397 footprint_mb=309 rss_now_mb=768 cpu_s=17.32
+  LOOP quack page_rows_500 n=77 p50_ms=24.8 p95_ms=42.1 max_ms=49.6
+  LOOP quack errors_total n=77 p50_ms=15.8 p95_ms=31.8 max_ms=47.9
+  LOOP quack facet_machine n=77 p50_ms=165.5 p95_ms=415.2 max_ms=588.2
+  LOOP quack duration_s=27.1
+  STATS loop-quack-client peak_rss_mb=73 peak_footprint_mb=41 footprint_mb=41 rss_now_mb=73 cpu_s=0.61
+  server: STATS quack-server peak_rss_mb=2125 peak_footprint_mb=2086 footprint_mb=2058 rss_now_mb=2098 cpu_s=61.17
+### round 3
+## h loop-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/store/segments /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 8 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/segB (load 37.48)
+  IMPORT inproc_parquet_8_sustained rows=33000000 secs=18.96 events_per_s=1740736
+  LOOP inproc page_rows_500 n=46 p50_ms=22.2 p95_ms=45.9 max_ms=89.7
+  LOOP inproc errors_total n=46 p50_ms=12.7 p95_ms=37.0 max_ms=70.8
+  LOOP inproc facet_machine n=46 p50_ms=230.3 p95_ms=511.0 max_ms=636.1
+  LOOP inproc duration_s=19.0
+  STATS loop-inproc peak_rss_mb=980 peak_footprint_mb=955 footprint_mb=849 rss_now_mb=874 cpu_s=69.78
+## h loop-ipc /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/w.sock /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 8 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/segB (load 36.26)
+  LOOP ipc page_rows_500 n=26 p50_ms=89.4 p95_ms=125.1 max_ms=226.3
+  LOOP ipc errors_total n=26 p50_ms=26.1 p95_ms=55.0 max_ms=95.7
+  LOOP ipc facet_machine n=26 p50_ms=553.6 p95_ms=861.5 max_ms=1177.1
+  LOOP ipc duration_s=20.2
+  STATS loop-ipc-client peak_rss_mb=14 peak_footprint_mb=7 footprint_mb=7 rss_now_mb=14 cpu_s=0.05
+  worker: IMPORT ipc_worker_parquet_8_sustained rows=33000000 secs=20.04 events_per_s=1646595
+  worker: STATS ipc-worker peak_rss_mb=1083 peak_footprint_mb=1058 footprint_mb=817 rss_now_mb=929 cpu_s=57.73
+serving Text("quack:127.0.0.1:38440") (start 42.5 ms)
+## loop-quack + import-quack insert 1 (load 39.88)
+  server events after import: 3000000
+  IMPORT quack_insert_1 rows=3000000 secs=45.75 events_per_s=65580
+  STATS import-quack-insert-1-client peak_rss_mb=1276 peak_footprint_mb=1202 footprint_mb=299 rss_now_mb=773 cpu_s=16.76
+  LOOP quack page_rows_500 n=86 p50_ms=33.7 p95_ms=69.3 max_ms=119.5
+  LOOP quack errors_total n=86 p50_ms=27.5 p95_ms=62.1 max_ms=72.3
+  LOOP quack facet_machine n=86 p50_ms=311.2 p95_ms=637.3 max_ms=878.5
+  LOOP quack duration_s=45.7
+  STATS loop-quack-client peak_rss_mb=74 peak_footprint_mb=40 footprint_mb=26 rss_now_mb=74 cpu_s=0.65
+  server: STATS quack-server peak_rss_mb=2014 peak_footprint_mb=1976 footprint_mb=1100 rss_now_mb=1456 cpu_s=64.98

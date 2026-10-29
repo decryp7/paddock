@@ -12,7 +12,7 @@ test.describe('knowledge packs (plan X15/X23)', () => {
     await expect(problem).toContainText('broken.toml');
     await expect(problem).toContainText('line 2, column 3');
     const reload = page.getByRole('button', { name: 'Reload' });
-    await expect(reload).toHaveClass(/pd-packs__btn--primary/);
+    await expect(reload).toHaveClass(/mat-mdc-unelevated-button/);
     // The icons are 16 px (shared glyphs, never smaller than 14).
     const size = await page.getByTestId('packs-kind-notes').locator('svg').first().boundingBox();
     expect(size?.width).toBeGreaterThanOrEqual(14);
@@ -22,7 +22,7 @@ test.describe('knowledge packs (plan X15/X23)', () => {
     await reload.click();
     await expect(page.getByTestId('packs-problems-notes')).toHaveCount(0);
     await expect(page.getByTestId('packs-state-notes')).toContainText('All loaded');
-    await expect(reload).not.toHaveClass(/pd-packs__btn--primary/);
+    await expect(reload).not.toHaveClass(/mat-mdc-unelevated-button/);
     expect(pageErrors).toEqual([]);
   });
 
@@ -34,7 +34,7 @@ test.describe('knowledge packs (plan X15/X23)', () => {
     await expect(rows.nth(0)).toContainText('Built in');
     await expect(rows.nth(1)).toContainText('Yours');
     // The full name is the tooltip; the shown text is shortened without a horizontal scroll.
-    await expect(rows.nth(1).getByTestId('path-text')).toHaveAttribute('title', /my-very-long-pack-file-name.*\.toml/);
+    await expect(rows.nth(1).getByTestId('path-text')).toHaveAttribute('data-full', /my-very-long-pack-file-name.*\.toml/);
     await expectNoHorizontalScroll(page);
   });
 

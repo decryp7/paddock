@@ -57,3 +57,18 @@
 .gal-sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .gal-metric { display: flex; flex-direction: column; gap: var(--pd-space-1); }
 .gal-cap { color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
+
+/* Material controls section (static copies of the overlay panels, so the page shows them at rest). */
+.gal-badge-host { display: inline-block; padding-right: var(--pd-space-4); }
+.gal-progress { width: 200px; }
+.gal-tab-body { padding: var(--pd-space-3); }
+.gal-section .gal-open-panel { position: static; width: 200px; align-self: flex-start; }
+.gal-calendar { width: 296px; }
+.gal-material-placeholder { min-height: 400px; }
+.gal-tree { background: transparent; }
+.gal-tree [role='group'] { padding-inline-start: var(--pd-space-6); }
+.gal-tree-leaf { padding-inline-start: var(--pd-space-6); }
+.gal-chevron { transition: transform var(--pd-duration-micro) var(--pd-ease-move); }
+.gal-tree .mat-nested-tree-node[aria-expanded='true'] > .mat-tree-node .gal-chevron { transform: rotate(90deg); }
+.mat-mdc-cell.gal-num-col, .mat-mdc-header-cell.gal-num-col { text-align: right; font-variant-numeric: tabular-nums; }
+.gal-num-col.mat-sort-header-sorted .mat-sort-header-container, th.gal-num-col .mat-sort-header-container { justify-content: flex-end; }

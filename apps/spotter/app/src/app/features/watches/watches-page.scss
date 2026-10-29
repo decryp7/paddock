@@ -39,7 +39,7 @@
   thead th {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: var(--pd-z-table-header);
     padding: 0 var(--pd-space-3);
     height: 36px;
     background: var(--pd-surface-1);

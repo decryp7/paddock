@@ -6,39 +6,23 @@ export type DialogModality = "modal" | "modeless";
 
 export type DialogSize = { width: number, height: number, };
 
-export type DialogContract = { kind: DialogKind, modality: DialogModality, 
+export type DialogMeasureWire = { content: DialogSize, minContent: DialogSize, 
 /**
- * A modal without a Cancel: Escape and a close request leave it open.
+ * The page's `window.innerHeight` (CSS px), when the page sends it. A webview can be shorter than the window's
+ * inner height (the 1.1-0 spike measured 32 px on a Mac whose outer and inner sizes were equal): the fit adds the
+ * difference ([`viewport_delta`]) to the content and minimum content heights so the footer is not cut off.
  */
-requiredChoice?: boolean, 
+viewportHeight?: number, 
 /**
- * One window per distinct input (the request names an instance key).
+ * The page's `window.devicePixelRatio` when it measured. A webview zoomed away from the window's scale factor
+ * (browser zoom, an OS text scale) reports CSS px that are not logical px: the fit converts with [`zoom_of`].
+ * Absent: CSS px are taken as logical.
  */
-instanced?: boolean, 
-/**
- * The smallest window of the dialog; the kind's floor applies when it is smaller or absent.
- */
-minSize?: DialogSize, 
-/**
- * The commands its window may call beyond the base ones; a trailing `*` is a prefix.
- */
-commands?: Array<string>, };
-
-export type DialogContractFile = { 
-/**
- * Always 1.
- */
-version: number, 
-/**
- * The app's commands every dialog window may call (besides [`BASE_COMMANDS`]).
- */
-base?: Array<string>, 
-/**
- * Every dialog by id.
- */
-dialogs: { [key in string]?: DialogContract }, };
+devicePixelRatio?: number, };
 
 export type DialogRemembered = { dx: number, dy: number, width: number, height: number, };
+
+export type DialogTheme = "light" | "dark";
 
 export type DialogRequest = { dialogId: string, 
 /**
@@ -48,22 +32,28 @@ instance?: string, title: string,
 /**
  * The typed input of the dialog, handed to its webview through `dialog_take_input`.
  */
-input?: unknown, width?: number, 
-/**
- * None: the window is fitted to its content (a fitted form or decision).
- */
-height?: number, minWidth?: number, minHeight?: number, 
+input?: unknown, 
 /**
  * What the UI remembered of this dialog: its size and its offset from the parent window (never an absolute
  * screen position). The shell decides where it goes ([`placement::place`]).
  */
-remembered?: DialogRemembered, };
+remembered?: DialogRemembered, 
+/**
+ * The opener's resolved theme (its `data-theme`): the window's background before the page paints is that theme's
+ * `--pd-surface-2`. Without it the parent window's OS theme is used.
+ */
+theme?: DialogTheme, };
 
 export type DialogInfo = { label: string, dialogId: string, 
 /**
- * The window existed already and was focused.
+ * The window existed already (and was focused, if it was on screen).
  */
-existing: boolean, };
+existing: boolean, 
+/**
+ * The window is not on screen yet: it is shown when its page is ready (or at the show deadline), and
+ * `paddock://dialog-shown` follows. False for an existing window that was shown already.
+ */
+pending: boolean, };
 
 export type DialogStart = { dialogId: string, title: string, kind: DialogKind, modality: DialogModality, 
 /**
@@ -72,6 +62,8 @@ export type DialogStart = { dialogId: string, title: string, kind: DialogKind, m
 requiredChoice: boolean, input: unknown, };
 
 export type DialogResult = { label: string, dialogId: string, result: unknown, };
+
+export type DialogShown = { label: string, dialogId: string, };
 
 export type DialogClosed = { label: string, dialogId: string, 
 /**
@@ -91,12 +83,13 @@ message: string,
  */
 retryable: boolean, };
 
-/** The events of the dialog layer: to the opener (`result`, `closed`) and to the dialog (`closeRequested`). */
+/** The events of the dialog layer: to the opener (`result`, `shown`, `closed`) and to the dialog (`closeRequested`). */
 export const DIALOG_EVENTS = {
   result: 'paddock://dialog-result',
+  shown: 'paddock://dialog-shown',
   closed: 'paddock://dialog-closed',
   closeRequested: 'paddock://dialog-close-requested',
 } as const;
 
 /** The commands every dialog window may call whatever its contract says. */
-export const DIALOG_BASE_COMMANDS = ['dialog_take_input', 'dialog_close', 'dialog_fit_height', 'notifications_post', 'notifications_list'] as const;
+export const DIALOG_BASE_COMMANDS = ['dialog_take_input', 'dialog_close', 'dialog_ready', 'dialog_fit', 'notifications_post', 'notifications_list'] as const;

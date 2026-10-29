@@ -1,10 +1,8 @@
 import { inject } from '@angular/core';
 import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
-import type { Anomaly, CommandError, Diagnosis, ProcessAction, ProcessRef } from '../core/api.types';
+import type { Anomaly, CommandError, Diagnosis } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
-import { Notifier } from '../shared/notifier';
-import { ActivityStore } from './activity.store';
 
 /** Most earlier diagnoses kept for the Why slow page (this session only; the engine does not store them). */
 export const MAX_DIAGNOSIS_HISTORY = 10;
@@ -24,7 +22,7 @@ interface DiagnosisState {
 export const DiagnosisStore = signalStore(
   { providedIn: 'root' },
   withState<DiagnosisState>({ diagnosis: null, history: [], running: false, error: null, anomalies: [], anomaliesLoaded: false, anomaliesError: null }),
-  withMethods((store, backend = inject(BACKEND), notifier = inject(Notifier), activity = inject(ActivityStore)) => ({
+  withMethods((store, backend = inject(BACKEND)) => ({
     async run(): Promise<void> {
       patchState(store, { running: true, error: null });
       try {
@@ -45,18 +43,6 @@ export const DiagnosisStore = signalStore(
         patchState(store, { anomalies, anomaliesLoaded: true });
       } catch (e) {
         patchState(store, { anomaliesError: toCommandError(e) });
-      }
-    },
-    /** Takes a suggested process action (e.g. lower the build's priority). */
-    async act(target: ProcessRef, action: ProcessAction): Promise<boolean> {
-      try {
-        const entry = await backend.act(target, action);
-        activity.receive(entry);
-        notifier.show(entry.title, 'ok', entry.undo === 'available' ? { label: 'Undo', run: () => void activity.undo(entry.id) } : null);
-        return true;
-      } catch (e) {
-        notifier.error(toCommandError(e));
-        return false;
       }
     },
   })),

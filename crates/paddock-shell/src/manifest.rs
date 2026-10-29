@@ -161,8 +161,9 @@ pub fn check(manifest_json: &str, expect: &Expect<'_>) -> Vec<String> {
     out
 }
 
-/// Every dialog of the manifest without a contract, and every contract without a dialog in the manifest.
-pub fn contract_drift(manifest_json: &str, contracts: &Contracts) -> Vec<String> {
+/// Every dialog of the manifest without a contract, and every contract of the app's own tables (`own`) without a dialog
+/// in the manifest (a shell table declares dialogs an app may not use).
+pub fn contract_drift(manifest_json: &str, contracts: &Contracts, own: &[&str]) -> Vec<String> {
     let Ok(m) = serde_json::from_str::<Manifest>(manifest_json) else {
         return vec!["the manifest is not readable (regenerate it)".into()];
     };
@@ -170,10 +171,10 @@ pub fn contract_drift(manifest_json: &str, contracts: &Contracts) -> Vec<String>
     let file: BTreeSet<&str> = contracts.ids().collect();
     let mut out: Vec<String> = ui
         .difference(&file)
-        .map(|id| format!("the dialog {id} has no contract (regenerate dialog-contracts.json)"))
+        .map(|id| format!("the dialog {id} has no contract (declare it in a dialogs! table)"))
         .collect();
-    out.extend(file.difference(&ui).map(|id| {
-        format!("the contract of {id} names no dialog of the manifest (regenerate both)")
+    out.extend(file.difference(&ui).filter(|id| own.contains(id)).map(|id| {
+        format!("the contract of {id} names no dialog of the manifest (register it, or remove it from the table)")
     }));
     out
 }
@@ -189,10 +190,14 @@ mod tests {
         Mutation [MAIN] => app::app_reset,
     }
 
-    paddock_commands::command_table! {
-        static CLASHING;
-        Query [MAIN] => app::health_snapshot,
+    // One leaf table per module (each emits its own `dialog_callable` markers).
+    mod clashing {
+        paddock_commands::command_table! {
+            pub(super) static CLASHING;
+            Query [MAIN] => app::health_snapshot,
+        }
     }
+    use clashing::CLASHING;
 
     fn manifest(
         dialogs: serde_json::Value,
@@ -295,9 +300,9 @@ mod tests {
                 .iter()
                 .any(|x| x.contains("version 2"))
         );
-        let c = Contracts::parse(r#"{"version":1,"base":[],"dialogs":{}}"#).unwrap();
+        let c = Contracts::empty();
         assert_eq!(
-            contract_drift("{", &c),
+            contract_drift("{", &c, &[]),
             vec!["the manifest is not readable (regenerate it)".to_string()]
         );
     }
@@ -312,10 +317,26 @@ mod tests {
                     .to_string()
             ]
         );
-        let c = Contracts::parse(
-            r#"{"version":1,"base":["window_ready","gone"],"dialogs":{"sd.a":{"kind":"tool","modality":"modeless","requiredChoice":false,"instanced":false,"commands":["app_status","settings_*"]},"sd.b":{"kind":"tool","modality":"modeless","requiredChoice":false,"instanced":false,"commands":[]}}}"#,
-        )
-        .unwrap();
+        use paddock_commands::DialogCallable;
+        const A: &[DialogCallable] = &[
+            DialogCallable::__command("app_status"),
+            DialogCallable::__prefix("settings_"),
+        ];
+        const BASE: &[DialogCallable] = &[
+            DialogCallable::__command("window_ready"),
+            DialogCallable::__command("gone"),
+        ];
+        use paddock_dialogs::{Entry, Shape};
+        let tool = |id, commands| Entry {
+            commands,
+            ..Entry::new(id, Shape::Tool)
+        };
+        let entries = [
+            tool("sd.a", A),
+            tool("sd.b", &[]),
+            tool("pd.shell-only", &[]),
+        ];
+        let c = Contracts::from_entries(&entries, BASE).unwrap();
         assert_eq!(
             contract_problems(&c, &APP),
             vec!["base declares gone, which neither the shell nor the app serves".to_string()]
@@ -327,10 +348,10 @@ mod tests {
             &[],
         );
         assert_eq!(
-            contract_drift(&m, &c),
+            contract_drift(&m, &c, &["sd.a", "sd.b"]),
             vec![
-                "the dialog sd.c has no contract (regenerate dialog-contracts.json)".to_string(),
-                "the contract of sd.b names no dialog of the manifest (regenerate both)"
+                "the dialog sd.c has no contract (declare it in a dialogs! table)".to_string(),
+                "the contract of sd.b names no dialog of the manifest (register it, or remove it from the table)"
                     .to_string(),
             ]
         );

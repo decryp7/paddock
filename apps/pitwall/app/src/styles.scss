@@ -719,7 +719,8 @@ textarea.input {
   th {
     position: sticky;
     top: 0;
-    z-index: 1;
+    /* Above sticky columns (2) and positioned cells: the family's table ladder (header 3, sticky column 2, row action 1). */
+    z-index: 3;
     height: 32px;
     padding: 0 var(--sp-3);
     font-size: var(--fs-xs);
@@ -795,6 +796,7 @@ textarea.input {
     min-width: 0;
   }
   pw-detail-panel {
+    /* conformance: not-a-header */
     position: sticky;
     top: var(--sp-6);
     max-height: calc(100vh - var(--sp-6) * 2);

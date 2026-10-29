@@ -15,7 +15,7 @@ import { PdPathText } from '@decryp7/paddock-ui';
   host: { 'data-tauri-drag-region': '' },
   template: `
     <div class="pd-lead"><ng-content select="[slot=lead]" /></div>
-    <span class="pd-name" data-tauri-drag-region data-testid="app-name" [attr.title]="appName()"><pd-path-text [value]="appName()" [plain]="true" clip="end" /></span>
+    <span class="pd-name" data-tauri-drag-region data-testid="app-name"><pd-path-text [value]="appName()" [plain]="true" clip="end" /></span>
     <div class="pd-menus"><ng-content /></div>
     <div class="pd-drag" data-tauri-drag-region></div>
     <div class="pd-end"><ng-content select="[slot=end]" /></div>

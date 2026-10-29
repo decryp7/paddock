@@ -13,12 +13,10 @@ import { PdUndoToast } from '@decryp7/paddock-ui/shell/undo';
   imports: [PdShellFrame, PdUndoToast],
   template: `
     <pd-shell-frame />
-    <div class="sd-toast"><pd-undo-toast /></div>
+    <pd-undo-toast />
   `,
   styles: `
     :host { display: block; }
-    .sd-toast { position: fixed; inset-inline: var(--pd-space-4); bottom: calc(var(--pd-space-4) + 28px); z-index: 20; display: flex; justify-content: center; pointer-events: none; }
-    .sd-toast > * { pointer-events: auto; max-width: 100%; }
   `,
 })
 export class ShellDemo {}

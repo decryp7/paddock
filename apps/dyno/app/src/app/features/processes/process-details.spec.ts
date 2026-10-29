@@ -1,3 +1,4 @@
+import { readValue } from '../../core/measured';
 import { provideRouter } from '@angular/router';
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
@@ -40,8 +41,8 @@ describe('ProcessDetailsPanel', () => {
 
   it('shows the overview of the selected process', async () => {
     const { f, el, store, settle } = await make();
-    const p = store.processes().find((x) => x.protectedReason === null)!;
-    await store.select({ pid: p.pid, started: p.started });
+    const p = store.processes().find((x) => x.name.startsWith('rustc'))!;
+    await store.select({ pid: p.pid, started: readValue(p.started) });
     f.detectChanges();
     await settle();
     expect(el.querySelector('h2')?.textContent).toBe(p.name);
@@ -53,8 +54,8 @@ describe('ProcessDetailsPanel', () => {
 
   it('walks the tabs: parents, files, network, libraries', async () => {
     const { f, el, store, settle, tab } = await make();
-    const withParent = store.processes().find((x) => x.protectedReason === null && x.parent !== null)!;
-    await store.select({ pid: withParent.pid, started: withParent.started });
+    const withParent = store.processes().find((x) => x.parent !== null && x.name.startsWith('rustc'))!;
+    await store.select({ pid: withParent.pid, started: readValue(withParent.started) });
     f.detectChanges();
     await settle();
     await tab('Parents');
@@ -64,7 +65,7 @@ describe('ProcessDetailsPanel', () => {
     el.querySelector<HTMLButtonElement>('ol.chain button')!.click();
     await settle();
     expect(store.selected()?.pid).not.toBe(withParent.pid);
-    await store.select({ pid: withParent.pid, started: withParent.started });
+    await store.select({ pid: withParent.pid, started: readValue(withParent.started) });
     await settle();
     await tab('Files');
     expect(el.querySelectorAll('ul.plain li').length).toBeGreaterThan(0);
@@ -77,7 +78,7 @@ describe('ProcessDetailsPanel', () => {
   it('lists connections for the browser', async () => {
     const { f, el, store, settle, tab, mock } = await make();
     const chrome = store.processes().find((x) => x.name === 'chrome.exe' || x.name.toLowerCase().includes('chrome'))!;
-    await store.select({ pid: chrome.pid, started: chrome.started });
+    await store.select({ pid: chrome.pid, started: readValue(chrome.started) });
     f.detectChanges();
     await settle();
     const snap = await mock.network({ showLoopback: true, proto: null, state: null, exposedOnly: false, search: '' });
@@ -96,26 +97,10 @@ describe('ProcessDetailsPanel', () => {
     expect(mock).toBeDefined();
   });
 
-  it('explains what the OS does not allow for a protected process', async () => {
-    const { f, el, store, settle, tab } = await make();
-    const sys = store.processes().find((x) => x.protectedReason !== null)!;
-    await store.select({ pid: sys.pid, started: sys.started });
-    f.detectChanges();
-    await settle();
-    expect(el.querySelector('.lock')?.textContent).toContain('Dyno never changes it');
-    await tab('Files');
-    expect(el.querySelector('.na')).not.toBeNull();
-    await tab('Network');
-    await settle();
-    expect(el.textContent).toContain('Nothing is listening');
-    await tab('Libraries');
-    expect(el.querySelector('.na')).not.toBeNull();
-  });
-
   it('shows "Not available" for cores and priority-less data on macOS', async () => {
     const { f, el, store, settle } = await make('macos');
-    const p = store.processes().find((x) => x.protectedReason === null)!;
-    await store.select({ pid: p.pid, started: p.started });
+    const p = store.processes().find((x) => x.name.startsWith('rustc'))!;
+    await store.select({ pid: p.pid, started: readValue(p.started) });
     f.detectChanges();
     await settle();
     expect(el.querySelector('dl')?.textContent).toContain('Not available on this PC');
@@ -123,8 +108,8 @@ describe('ProcessDetailsPanel', () => {
 
   it('shows the error with a hint and Retry reloads', async () => {
     const { f, el, store, settle } = await make('windows', new Set(['processDetails']));
-    const p = store.processes()[0]!;
-    await store.select({ pid: p.pid, started: p.started });
+    const p = store.processes().find((x) => x.name.startsWith('rustc'))!;
+    await store.select({ pid: p.pid, started: readValue(p.started) });
     f.detectChanges();
     await settle();
     const alert = el.querySelector('[role=alert]');
@@ -136,8 +121,8 @@ describe('ProcessDetailsPanel', () => {
 
   it('close clears the selection; reload without selection does nothing; open ignores unknown pids', async () => {
     const { f, el, store, settle } = await make();
-    const p = store.processes().find((x) => x.protectedReason === null)!;
-    await store.select({ pid: p.pid, started: p.started });
+    const p = store.processes().find((x) => x.name.startsWith('rustc'))!;
+    await store.select({ pid: p.pid, started: readValue(p.started) });
     f.detectChanges();
     await settle();
     const spy = vi.spyOn(store, 'select');

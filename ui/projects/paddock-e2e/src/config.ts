@@ -1,6 +1,9 @@
 import { defineConfig, devices, type PlaywrightTestConfig, type ReporterDescription } from '@playwright/test';
 import { assertChromeForTesting, pinnedChrome } from './browser.ts';
-import { e2ePort } from './env.ts';
+import { assertFreshBuilds, reuseServer, type BuildGuard } from './build-guard.ts';
+import { e2ePort, isOn } from './env.ts';
+
+export { isOn };
 
 /**
  * The Playwright config every Paddock app starts from (plan X39): `export default paddockConfig({ app: 'dyno', portEnv:
@@ -8,11 +11,11 @@ import { e2ePort } from './env.ts';
  *
  * - Projects `chromium` and `webkit` (rule 3: a branch runs `--project=chromium`; WebKit runs on the combined result and
  *   in CI), plus `screenshots` only when `SCREENSHOTS` is set, so a plain run never rewrites the documentation images.
- * - The port comes from the environment (one per worktree, rule 2) and is required on CI ({@link e2ePort}).
+ * - The port comes from the environment (one per worktree, rule 2); unset locally it is derived from the worktree, on CI it is required ({@link e2ePort}).
  * - The browser is Playwright's Chromium (Chrome for Testing), or the binary named in `CHROMIUM_TEST_PATH`; the installed
  *   Chrome is refused (rule 7, {@link assertChromeForTesting}).
  * - `retries: 0` (a flake is fixed, not retried, rule 5), traces kept on failure, one worker at a time, `test.only` refused on
- *   CI, and a running server is reused only locally (on CI a stale one on the port would be tested instead of the build).
+ *   CI, and a running server is reused only when `PW_REUSE_SERVER=1` is set (never on CI; a stale one on the port would be tested instead of the build).
  * - Sharding: run `playwright test --shard=i/n` with `PADDOCK_E2E_BLOB=1`; every shard writes a blob report
  *   (`blob-report/`), and the merge job runs `npx playwright merge-reports --reporter list,html blob-report`.
  */
@@ -31,6 +34,13 @@ export interface PaddockConfigOptions {
   readonly testDir?: string;
   /** Run the specs in WebKit too (default true; Pitcrew-style apps without a Safari target say false). */
   readonly webkit?: boolean;
+  /**
+   * What the config checks at load, before any server starts: `none` (default: the app builds nothing of ui), `ui` (the generated css) or
+   * `ui-dist` (css and `ui/dist`, for an app that maps @decryp7/paddock-ui to it). Anything but `none` needs `uiRoot`; `PW_SKIP_BUILD_GUARD=1` skips it.
+   */
+  readonly buildGuard?: BuildGuard;
+  /** The repo's ui/ folder (for `buildGuard`). */
+  readonly uiRoot?: string;
   /** The window size of the specs (default 1280 x 800). */
   readonly viewport?: { readonly width: number; readonly height: number };
   /** A test's time limit (default 60 s). */
@@ -52,14 +62,14 @@ const DEFAULT_VIEWPORT = { width: 1280, height: 800 } as const;
 /** The documentation screenshots' window: 1440 x 900 at twice the pixel density. */
 export const DOC_SCREEN_VIEWPORT = { width: 1440, height: 900 } as const;
 
-/** Whether a variable is switched on (set to anything but empty or `0`). */
-export function isOn(value: string | undefined): boolean {
-  return value !== undefined && value !== '' && value !== '0';
-}
-
 /** The config described at {@link PaddockConfigOptions}. */
 export function paddockConfig(options: PaddockConfigOptions): PlaywrightTestConfig {
   const env = options.env ?? process.env;
+  const guard = options.buildGuard ?? 'none';
+  if (guard !== 'none') {
+    if (!options.uiRoot) throw new Error(`buildGuard '${guard}' needs uiRoot (the repo's ui/ folder)`);
+    assertFreshBuilds(options.uiRoot, guard, env);
+  }
   const port = e2ePort(options.portEnv ?? 'PW_PORT', options.defaultPort, env);
   const viewport = options.viewport ?? DEFAULT_VIEWPORT;
   const shots = options.screenshotSpecs ?? SCREENSHOT_SPECS;
@@ -88,7 +98,7 @@ export function paddockConfig(options: PaddockConfigOptions): PlaywrightTestConf
         : []),
     ],
     ...(options.serve
-      ? { webServer: { command: options.serve(port), url: `http://localhost:${port}`, reuseExistingServer: !isOn(env['CI']), timeout: options.serveTimeoutMs ?? 180_000 } }
+      ? { webServer: { command: options.serve(port), url: `http://localhost:${port}`, reuseExistingServer: reuseServer(env), timeout: options.serveTimeoutMs ?? 180_000 } }
       : {}),
     ...options.extend,
   });

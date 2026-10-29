@@ -1,5 +1,6 @@
 import { inject } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
+import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 import { provideContributions, provideShellContext, provideShellVersionCheck } from '@decryp7/paddock-ui/shell';
 import { provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
 import { provideShellPages } from '@decryp7/paddock-ui/shell/pages';
@@ -40,6 +41,8 @@ export function bootMainWindow(): Promise<unknown> {
   const bridge = tauriBridge();
   return bootstrapApplication(ShellDemo, {
     providers: [
+      // The Material defaults every app shares (rule 47): the Undo snack bar, and the checkboxes and progress bars of Updates.
+      providePaddockMaterial(),
       // Theme and language (plan S15): the appearance store, over the Appearance settings (provideShellSettings below);
       // the language applies after a reload.
       provideDemoAppearance(),
