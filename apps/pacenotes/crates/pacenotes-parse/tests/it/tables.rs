@@ -18,6 +18,7 @@ fn kinds_and_fields(language: ParseLanguage) -> (Vec<&'static str>, Vec<&'static
             Names::CDeclarator | Names::TypedefDeclarator => fields.push("declarator"),
             Names::GoMethod => fields.extend(["name", "receiver", "type"]),
             Names::ImplType => fields.push("type"),
+            Names::KotlinFunction => fields.push("name"),
             Names::Literal(_) | Names::Declarator => {}
         }
     }
@@ -83,15 +84,22 @@ fn used_in_code(language: ParseLanguage) -> (&'static [&'static str], &'static [
 fn every_kind_and_field_in_every_table_exists_in_its_grammar() {
     for language in ParseLanguage::ALL {
         let grammar = language.grammar().unwrap();
-        let (mut kinds, mut fields) = kinds_and_fields(language);
+        let (table_kinds, mut fields) = kinds_and_fields(language);
+        let mut kinds: Vec<&str> = Vec::new();
         let (more_kinds, more_fields) = used_in_code(language);
         kinds.extend(more_kinds);
         fields.extend(more_fields);
+        // symbol, import and call kinds are named nodes; the kinds the extractor names in code may be anonymous tokens
+        for kind in table_kinds {
+            assert!(
+                grammar.id_for_node_kind(kind, true) != 0,
+                "{}: the grammar has no named node kind {kind:?}",
+                language.id()
+            );
+        }
         for kind in kinds {
-            // a named node kind has a non-zero id; the keyword `interface` of Kotlin is an anonymous token
-            let named = grammar.id_for_node_kind(kind, true) != 0;
-            let anonymous = grammar.id_for_node_kind(kind, false) != 0;
-            assert!(named || anonymous, "{}: the grammar has no node kind {kind:?}", language.id());
+            let known = grammar.id_for_node_kind(kind, true) != 0 || grammar.id_for_node_kind(kind, false) != 0;
+            assert!(known, "{}: the grammar has no node kind {kind:?}", language.id());
         }
         for field in fields {
             assert!(

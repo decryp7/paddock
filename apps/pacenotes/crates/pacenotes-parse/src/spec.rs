@@ -21,6 +21,8 @@ pub enum Names {
     GoMethod,
     /// The type of a Rust `impl` block (a container, not a symbol).
     ImplType,
+    /// A Kotlin function: its name, qualified by the receiver type of an extension function (`String.shout`).
+    KotlinFunction,
     /// The `field` child, or this fixed name when the node has none (a Kotlin `companion object` is unnamed).
     FieldOr(&'static str, &'static str),
     /// A fixed name (a Kotlin secondary constructor has none of its own).
@@ -197,7 +199,7 @@ const KOTLIN: LangSpec = LangSpec {
         },
         rule!("object_declaration", Class, true, Names::Field("name")),
         rule!("companion_object", Class, true, Names::FieldOr("name", "Companion")),
-        rule!("function_declaration", Function, false, Names::Field("name")),
+        rule!("function_declaration", Function, false, Names::KotlinFunction),
         rule!("secondary_constructor", Constructor, false, Names::Literal("constructor")),
         local!(rule!("property_declaration", Property, false, Names::Declarator)),
         rule!("enum_entry", Constant, false, Names::Field("name")),

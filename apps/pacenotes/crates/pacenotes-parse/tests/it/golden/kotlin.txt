@@ -8,7 +8,7 @@ symbol Interface Greeter 21-23
 symbol Method Greeter.greet 22-22
 symbol Enum Mode 25-25
 symbol Function topLevel 27-27
-symbol Function shout 29-29
+symbol Function String.shout 29-29
 symbol Function fetch 31-31
 symbol Class Holder 33-38
 symbol Class Holder.Companion 34-37
@@ -19,7 +19,7 @@ import kotlin.math.max
 import java.util.List
 call Account.deposit -> max
 call Registry.find -> Account
-call shout -> uppercase
+call String.shout -> uppercase
 call Holder.Companion.create -> Holder
 call page -> html
 call page -> body
@@ -30,7 +30,7 @@ chunk Registry.find 0 18-18
 chunk Greeter.greet 0 22-22
 chunk Mode 0 25-25
 chunk topLevel 0 27-27
-chunk shout 0 29-29
+chunk String.shout 0 29-29
 chunk fetch 0 31-31
 chunk Holder.Companion.create 0 36-36
 chunk page 0 40-46

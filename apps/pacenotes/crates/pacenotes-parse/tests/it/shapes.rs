@@ -126,3 +126,20 @@ fn a_name_longer_than_the_cap_is_cut_on_a_character_boundary() {
     assert_eq!(o.symbols.len(), 1);
     assert!(o.symbols[0].name.len() <= 256 && o.symbols[0].name.chars().skip(1).all(|c| c == 'é'));
 }
+
+#[test]
+fn kotlin_extension_functions_carry_their_receiver() {
+    let got = names(
+        ParseLanguage::Kotlin,
+        "fun String.shout(): String = this\nfun <T> List<T>.first2(): T = this[0]\nfun Int?.orZero() = this ?: 0\nfun plain() {}\nclass K { fun String.inside() {} }\n",
+    );
+    for want in [
+        "Function String.shout",
+        "Function List.first2",
+        "Function Int.orZero",
+        "Function plain",
+        "Method K.String.inside",
+    ] {
+        assert!(got.contains(&want.to_owned()), "{want} in {got:?}");
+    }
+}

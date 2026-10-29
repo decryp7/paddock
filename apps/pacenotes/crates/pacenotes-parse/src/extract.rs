@@ -143,6 +143,29 @@ fn go_receiver(node: Node<'_>, bytes: &[u8]) -> Option<String> {
     None
 }
 
+/// The receiver type of a Kotlin extension function: the type node that comes before the function's name (`String` in
+/// `fun String.shout()`, `List` in `fun <T> List<T>.first()`).
+fn kotlin_receiver(node: Node<'_>, bytes: &[u8]) -> Option<String> {
+    let name = node.child_by_field_name("name")?;
+    let mut cursor = node.walk();
+    let receiver = node
+        .named_children(&mut cursor)
+        .take_while(|c| c.id() != name.id())
+        .filter(|c| matches!(c.kind(), "user_type" | "nullable_type" | "parenthesized_type" | "function_type"))
+        .last()?;
+    let base = if receiver.kind() == "nullable_type" {
+        receiver.named_child(0).unwrap_or(receiver)
+    } else {
+        receiver
+    };
+    let ident = if base.kind() == "user_type" {
+        base.named_child(0).unwrap_or(base)
+    } else {
+        base
+    };
+    name_text(ident, bytes)
+}
+
 fn impl_type(node: Node<'_>, bytes: &[u8]) -> Option<String> {
     let ty = node.child_by_field_name("type")?;
     let inner = if ty.kind() == "generic_type" {
@@ -173,6 +196,12 @@ fn names(rule: &SymbolRule, node: Node<'_>, bytes: &[u8]) -> Vec<(Option<String>
         }
         Names::CDeclarator => one(c_declarator(node, bytes)),
         Names::TypedefDeclarator => one(c_declarator(node, bytes)),
+        Names::KotlinFunction => {
+            let Some(name) = node.child_by_field_name("name").and_then(|n| name_text(n, bytes)) else {
+                return Vec::new();
+            };
+            vec![(kotlin_receiver(node, bytes), name)]
+        }
         Names::GoMethod => {
             let Some(name) = node.child_by_field_name("name").and_then(|n| name_text(n, bytes)) else {
                 return Vec::new();

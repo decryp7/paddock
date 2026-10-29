@@ -91,4 +91,12 @@ used; the C2 tests use small generated repositories.
 - File names that are not valid `RepoPath`s (a backslash, a control character) are not listed, but **counted**:
   `ChangeSet::skipped_names` and `CommitChanges::skipped_names` say how many, and `truncated` says when a commit was cut.
 - Author text is cut at 128 bytes.
+- **A linked worktree is analysed through its main checkout.** A linked worktree's `.git` is a file that points at
+  `<main>/.git/worktrees/<name>`, with a `commondir` back to the main git folder, which is usually outside the workspace the
+  user picked; `open` refuses it (`OutsideWorkspace`, `gitdir`). The user opens the main checkout, or allow-lists the folder
+  that holds both. Reading a worktree's history is the same as reading the main checkout's.
+- **Hard links are not refused.** `git clone --local` hard-links pack and loose-object files between repositories, so a link
+  count above one is normal and cannot be told from a file shared with an outside repository; refusing them would reject
+  legitimate clones. The cost of a hard-linked pack is that it is the same bytes as in the other repository, which is the
+  repository's own data, not a way out of the workspace.
 - Rename detection is exact only in v1; a moved-and-edited file shows as delete plus add.
