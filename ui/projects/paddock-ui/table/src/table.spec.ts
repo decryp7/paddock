@@ -70,9 +70,15 @@ const ACTIONS: PdRowAction[] = [
 })
 class Host {
   readonly rows = signal<Plugin[]>(DATA);
-  columnsOverride: typeof COLUMNS | null = null;
+  private readonly override = signal<typeof COLUMNS | null>(null);
+  get columnsOverride(): typeof COLUMNS | null {
+    return this.override();
+  }
+  set columnsOverride(value: typeof COLUMNS | null) {
+    this.override.set(value);
+  }
   get columns() {
-    return this.columnsOverride ?? COLUMNS;
+    return this.override() ?? COLUMNS;
   }
   readonly key = (r: Plugin): string => r.id;
   actionsOverride: ((r: Plugin) => readonly PdRowAction[]) | null = null;
@@ -888,11 +894,50 @@ describe('pd-table', () => {
     expect(table.items()).toHaveLength(3);
   });
 
-  it('throws in dev mode when a table is given a tree together with groups', async () => {
+  it('reports a tree together with groups in dev mode (console.error, the table still draws)', async () => {
     const f = await setup();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     f.componentInstance.tree.set({ level: () => 1, expanded: () => null });
     f.componentInstance.groupBy.set('kind');
-    expect(() => f.detectChanges()).toThrow('use one');
+    await settle(f);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('use one'));
+    expect(rowEls(f).length).toBeGreaterThan(0);
+    error.mockRestore();
+  });
+
+  it('has no filter field for a tree (the rows are the app\'s list)', async () => {
+    const f = await setup();
+    expect(el(f).querySelector('input[type=search]')).not.toBeNull();
+    f.componentInstance.order.set('source');
+    f.componentInstance.tree.set({ level: () => 1, expanded: () => null });
+    await settle(f);
+    expect(el(f).querySelector('input[type=search]')).toBeNull();
+  });
+
+  it('draws the new cells when the app gives new column objects with the same keys', async () => {
+    const f = await setup();
+    expect(rowEls(f)[0]!.querySelector('[role=gridcell]')?.textContent).toContain('Zeta');
+    f.componentInstance.columnsOverride = COLUMNS.map((c) => (c.key === 'name' ? { ...c, value: (r: Plugin) => r.name.toUpperCase() } : { ...c }));
+    await settle(f);
+    expect(rowEls(f)[0]!.querySelector('[role=gridcell]')?.textContent).toContain('ZETA');
+  });
+
+  it('draws every row again with the new cells when the columns are swapped (the body is keyed by row and columns)', async () => {
+    const f = await setup();
+    const swapped: PdColumn<Plugin>[] = [
+      { key: 'kind', header: 'Kind', value: (r) => r.kind, required: true },
+      { key: 'name', header: 'Name', value: (r) => r.name },
+    ];
+    expect(rowEls(f)[0]!.querySelector('[role=gridcell]')?.textContent).toContain('Zeta');
+    const before = rowEls(f)[0]!;
+    f.componentInstance.columnsOverride = swapped;
+    await settle(f);
+    const first = (row: HTMLElement) => row.querySelector('[role=gridcell]')?.textContent?.trim();
+    expect(rowEls(f).map(first)).toEqual(expect.arrayContaining(['format', 'viewer']));
+    // New row views, not the old ones with their old cells (a recycled view keeps the cells of the columns it was drawn with).
+    expect(rowEls(f)[0]).not.toBe(before);
+    const headers = el(f).querySelectorAll('.pd-head-table [role=columnheader]').length;
+    expect(new Set(rowEls(f).map((r) => r.querySelectorAll('[role=gridcell]').length))).toEqual(new Set([headers]));
   });
 
   it('keeps the focus on a row whose place changed when the app reorders the rows (live updates)', async () => {

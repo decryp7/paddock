@@ -1,4 +1,5 @@
 import { PdCell, PdTable, PdTableEmpty, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdRowTree, type PdSort } from '@decryp7/paddock-ui/table';
+import { FullTextTip } from '../../shared/full-text-tip';
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, OnDestroy, OnInit, afterNextRender, computed, effect, inject, input, linkedSignal, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { CommandError } from '../../core/api.types';
@@ -25,7 +26,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
 /** The task manager: every app and process, grouped by app, as a tree or flat; sortable, searchable, with a details panel and lookups. Read-only: nothing here changes a process. */
 @Component({
   selector: 'dy-processes-page',
-  imports: [AsyncState, Icon, FormsModule, PdTable, PdCell, PdTableEmpty, ProcessDetailsPanel, MatMenuModule, SearchField, MatTooltip, SuSegmentedControl, MatButton, MatIconButton],
+  imports: [FullTextTip, AsyncState, Icon, FormsModule, PdTable, PdCell, PdTableEmpty, ProcessDetailsPanel, MatMenuModule, SearchField, MatTooltip, SuSegmentedControl, MatButton, MatIconButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap">
@@ -88,7 +89,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
                 } @else {
                   <span class="chev-space"></span>
                 }
-                <span class="nm truncate">{{ r.name }}</span>
+                <span class="nm truncate" [dyFullText]="r.name">{{ r.name }}</span>
                 @if (r.kind !== 'process' && r.count > 1) {
                   <span class="badge">{{ num(r.count) }}</span>
                 }
@@ -168,7 +169,7 @@ export class ProcessesPage implements OnInit, OnDestroy {
   private readonly dialogs = inject(DialogService);
   private readonly live = inject(LiveStore);
   private readonly lookups = inject(Lookups);
-  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+  private readonly grid = viewChild(PdTable);
   /** `?q=` filters on open (from the dashboard's top apps and the command palette). */
   readonly q = input<string>();
 
@@ -278,7 +279,7 @@ export class ProcessesPage implements OnInit, OnDestroy {
     if (!this.store.selected() || key === null) return;
     e.preventDefault();
     void this.store.select(null);
-    queueMicrotask(() => this.host.querySelector<HTMLElement>(`[role="row"][data-key="${key}"]`)?.focus());
+    this.grid()?.focusRow(key);
   }
 
   protected run({ id, row }: PdRowActionEvent<Row>): void {

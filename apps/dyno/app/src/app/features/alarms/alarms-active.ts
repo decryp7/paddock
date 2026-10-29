@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, inject, signal } from '@angular/core';
+import { FullTextTip } from '../../shared/full-text-tip';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal, viewChild } from '@angular/core';
 import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import type { Alarm, ShelveFor } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
@@ -14,7 +15,7 @@ const SEVERITY_ORDER: Record<Alarm['severity'], number> = { critical: 0, warning
  */
 @Component({
   selector: 'dy-alarms-active',
-  imports: [AsyncState, AlarmDetail, PdTable, PdCell],
+  imports: [FullTextTip, AsyncState, AlarmDetail, PdTable, PdCell],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="store.loaded()" [error]="store.error()" [empty]="store.alarms().length === 0" emptyTitle="No open alarms" emptyText="When a rule fires, its alarm waits here until you acknowledge it." emptyIcon="bell" what="alarms" [rows]="4" (retry)="store.load()">
@@ -39,12 +40,12 @@ const SEVERITY_ORDER: Record<Alarm['severity'], number> = { critical: 0, warning
           (keydown.escape)="escape($event)"
         >
           <ng-template pdCell="unread" let-a>@if (unread(a)) {<span class="unread" role="img" aria-label="Not acknowledged"></span>}</ng-template>
-          <ng-template pdCell="severity" let-a><span class="dot" [attr.data-tone]="a.severity === 'critical' ? 'bad' : a.severity === 'warning' ? 'warn' : 'info'" [attr.aria-label]="sev(a)" role="img"></span><span [class.muted]="a.severity === 'info'">{{ sev(a) }}</span></ng-template>
+          <ng-template pdCell="severity" let-a><span class="dot" [attr.data-tone]="a.severity === 'critical' ? 'bad' : a.severity === 'warning' ? 'warn' : 'info'" aria-hidden="true"></span><span [class.muted]="a.severity === 'info'">{{ sev(a) }}</span></ng-template>
           <ng-template pdCell="title" let-a>
-            <span class="line"><span class="t">{{ a.title }}</span>@if (suffix(a); as s) {<span class="sfx">{{ s }}</span>}</span>
+            <span class="line"><span class="t" [dyFullText]="a.title">{{ a.title }}</span>@if (suffix(a); as s) {<span class="sfx">{{ s }}</span>}</span>
           </ng-template>
-          <ng-template pdCell="rule" let-a><span class="id muted">{{ a.rule }}</span></ng-template>
-          <ng-template pdCell="state" let-a><span class="dot" [attr.data-tone]="tone(a)" aria-hidden="true"></span><span class="ell" [class.muted]="tone(a) === 'calm'">{{ state(a) }}</span></ng-template>
+          <ng-template pdCell="rule" let-a><span class="id muted" [dyFullText]="a.rule">{{ a.rule }}</span></ng-template>
+          <ng-template pdCell="state" let-a><span class="dot" [attr.data-tone]="tone(a)" aria-hidden="true"></span><span class="ell" [class.muted]="tone(a) === 'calm'" [dyFullText]="state(a)">{{ state(a) }}</span></ng-template>
         </pd-table>
         @if (store.selected(); as sel) {
           <dy-alarm-detail [alarm]="sel" [now]="now()" [focusNote]="focusNote()" (closed)="closeDetail()" />
@@ -76,7 +77,7 @@ const SEVERITY_ORDER: Record<Alarm['severity'], number> = { critical: 0, warning
 })
 export class AlarmsActive {
   protected readonly store = inject(AlarmsStore);
-  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+  private readonly grid = viewChild(PdTable);
   protected readonly now = signal(Date.now());
   protected readonly busy = signal(false);
   protected readonly focusNote = signal(0);
@@ -118,7 +119,7 @@ export class AlarmsActive {
   protected closeDetail(): void {
     const id = this.store.selectedId();
     void this.store.select(null);
-    queueMicrotask(() => this.host.querySelector<HTMLElement>(`[role="row"][data-key="${String(id)}"]`)?.focus());
+    if (id !== null) this.grid()?.focusRow(String(id));
   }
 
   protected async ackAll(): Promise<void> {

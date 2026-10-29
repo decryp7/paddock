@@ -1,6 +1,7 @@
 import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
-import { ChangeDetectionStrategy, Component, ElementRef, OnInit, computed, inject, signal } from '@angular/core';
+import { FullTextTip } from '../../shared/full-text-tip';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal, viewChild } from '@angular/core';
 import type { BackupStatus } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatClock, formatDate } from '../../shared/format';
@@ -20,7 +21,7 @@ import { MatMenuModule } from '@angular/material/menu';
  */
 @Component({
   selector: 'dy-backup-page',
-  imports: [AsyncState, Icon, PdTable, PdCell, MatMenuModule, MatIconButton, MatTooltip, MatButton],
+  imports: [FullTextTip, AsyncState, Icon, PdTable, PdCell, MatMenuModule, MatIconButton, MatTooltip, MatButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -55,7 +56,7 @@ import { MatMenuModule } from '@angular/material/menu';
 
             <div class="layout" [class.with-detail]="!!selected()">
               <pd-table [toolbar]="false" label="Backup tools" [rows]="store.statuses()" [columns]="columns" [rowKey]="toolKey" [filterable]="false" [rowHeight]="36" [rowActions]="actions" [selectedKey]="selectedTool()" (rowActivate)="select($event)" (action)="run($event)" (keydown.escape)="escape($event)">
-                <ng-template pdCell="tool" let-s><span class="tool"><span class="tile" aria-hidden="true" [style.background]="tile(s.name)">{{ initial(s.name) }}</span><strong>{{ s.name }}</strong></span></ng-template>
+                <ng-template pdCell="tool" let-s><span class="tool"><span class="tile" aria-hidden="true" [style.background]="tile(s.name)">{{ initial(s.name) }}</span><strong class="nm" [dyFullText]="s.name">{{ s.name }}</strong></span></ng-template>
                 <ng-template pdCell="state" let-s><span class="dot" [attr.data-tone]="dot(s)" aria-hidden="true"></span>{{ label(s) }}</ng-template>
                 <ng-template pdCell="when" let-s><span class="num muted" [attr.title]="fullDate(s)">{{ last(s) }}</span></ng-template>
               </pd-table>
@@ -139,7 +140,7 @@ export class BackupPage implements OnInit {
   private readonly notifier = inject(Notifier);
   private readonly ports = inject(SHELL_PORTS);
   private readonly now = injectNow();
-  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+  private readonly grid = viewChild(PdTable);
   protected readonly selectedTool = signal<string | null>(null);
   protected readonly initial = initial;
 
@@ -192,7 +193,7 @@ export class BackupPage implements OnInit {
     if (!tool) return;
     e.preventDefault();
     this.close();
-    queueMicrotask(() => this.host.querySelector<HTMLElement>(`[role="row"][data-key="${tool}"]`)?.focus());
+    this.grid()?.focusRow(tool);
   }
 
   protected async copy(s: BackupStatus): Promise<void> {

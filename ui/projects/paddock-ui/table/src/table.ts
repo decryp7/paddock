@@ -158,7 +158,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
   template: `
     @if (toolbar()) {
     <div class="pd-toolbar">
-      @if (filterable()) {
+      @if (filterable() && !tree()) {
         <label class="pd-filter">
           <pd-glyph name="search" [size]="14" />
           <input class="pd-filter-input" type="search" autocomplete="off" [attr.aria-label]="t.filter" [placeholder]="t.filter" [value]="query()" [disabled]="state() !== 'ready' || !rows().length" (input)="query.set($any($event.target).value)" />
@@ -576,7 +576,7 @@ export class PdTable<T> {
   /** The lines: rows, with group headings when grouped. */
   protected readonly items = computed<readonly PdTableItem<T>[]>(() => {
     const key = this.groupBy();
-    if (key && this.tree() && isDevMode()) throw new Error('pd-table: `tree` and `groupBy` are two ways to form a tree grid; use one.');
+    if (key && this.tree() && isDevMode()) console.error('pd-table: `tree` and `groupBy` are two ways to form a tree grid; use one.');
     return groupItems(this.ordered(), key ? this.columns().find((c) => c.key === key) : undefined, this.collapsed(), this.groupSummary());
   });
   /** What the table draws: the lines, five placeholders while loading, nothing on an error (the message is below the header). */
@@ -803,7 +803,9 @@ export class PdTable<T> {
 
   /**
    * The key of the row that has the focus. When the app puts the rows in another order (live values), the browser drops the focus
-   * of a row element that was moved, whether or not the element is still there; the row is then focused again by its key.
+   * of a row element that was moved, whether or not the element is still there; the row is then focused again by its key. That
+   * happens in the frame after the rows were drawn (their `data-index` is bound in the render that follows), so a key pressed in
+   * that one frame reaches the page, not the row.
    */
   private focusedRow: string | null = null;
   protected onFocusIn(e: FocusEvent): void {
@@ -1003,6 +1005,15 @@ export class PdTable<T> {
   private toggleFromKeyboard(key: string): void {
     this.toggleGroup(key);
     this.pendingFocus = `g:${key}`;
+    afterNextRender(() => this.focusPending(), { injector: this.injector });
+  }
+
+  /**
+   * Focuses the row with this key once it is drawn (an app asks after it closed a panel opened from the row, say). A no-op when
+   * there is no such row; a focus that moved to another element meanwhile is not taken back.
+   */
+  focusRow(key: string): void {
+    this.pendingFocus = `r:${key}`;
     afterNextRender(() => this.focusPending(), { injector: this.injector });
   }
 
