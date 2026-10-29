@@ -10998,56 +10998,56 @@
         <source>Widen the window to show the Explorer</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock-layout.ts</context>
-          <context context-type="linenumber">455</context>
+          <context context-type="linenumber">458</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.explorer.cannotFit.body" datatype="html">
         <source>There is no room for it beside the events grid at its minimum width.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock-layout.ts</context>
-          <context context-type="linenumber">456</context>
+          <context context-type="linenumber">459</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.layout.fit.title" datatype="html">
         <source>Some panes were tabbed to fit this window</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock-layout.ts</context>
-          <context context-type="linenumber">467</context>
+          <context context-type="linenumber">470</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.layout.fit.body" datatype="html">
         <source>Your saved layout is kept; it returns when the window is large enough.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock-layout.ts</context>
-          <context context-type="linenumber">468</context>
+          <context context-type="linenumber">471</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.layout.fit.undo" datatype="html">
         <source>Undo</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock-layout.ts</context>
-          <context context-type="linenumber">469</context>
+          <context context-type="linenumber">472</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.autoHide.toLeft" datatype="html">
         <source>Auto-hide to the left</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock.service.ts</context>
-          <context context-type="linenumber">598</context>
+          <context context-type="linenumber">603</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.autoHide.toRight" datatype="html">
         <source>Auto-hide to the right</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock.service.ts</context>
-          <context context-type="linenumber">599</context>
+          <context context-type="linenumber">604</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.autoHide.toBottom" datatype="html">
         <source>Auto-hide to the bottom</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/dock/dock.service.ts</context>
-          <context context-type="linenumber">600</context>
+          <context context-type="linenumber">605</context>
         </context-group>
       </trans-unit>
       <trans-unit id="dock.floatCue.window" datatype="html">
@@ -12904,7 +12904,7 @@
         <source><x id="title" equiv-text="command.title"/> failed: <x id="detail" equiv-text="e instanceof Error ? e.message : String(e)"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/extensions/command-registry.ts</context>
-          <context context-type="linenumber">85</context>
+          <context context-type="linenumber">94</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.part.timestamp" datatype="html">
@@ -13160,189 +13160,189 @@
         <source>Note</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">43</context>
+          <context context-type="linenumber">45</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.notesMore" datatype="html">
         <source><x id="note" equiv-text="line"/> (+<x id="more" equiv-text="notes!.length - 1"/> more)</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">44</context>
+          <context context-type="linenumber">46</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.title" datatype="html">
         <source>Events</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">117,118</context>
+          <context context-type="linenumber">119,120</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.subtitle" datatype="html">
         <source>of <x id="TOTAL" equiv-text="{{ fmt(data.summary()?.total ?? 0) //i18n(ph=&quot;total&quot;) }}"/> · sorted by time <x id="DIRECTION" equiv-text="{{ prefs.descending() ? &apos;↓&apos; : &apos;↑&apos; //i18n(ph=&quot;direction&quot;) }}"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">119,120</context>
+          <context context-type="linenumber">121,122</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.anchorMissed" datatype="html">
         <source>That event is hidden by the current filters.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">121,123</context>
+          <context context-type="linenumber">123,125</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.sortToggle" datatype="html">
         <source>Toggle sort order</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">124</context>
+          <context context-type="linenumber">126</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.columns" datatype="html">
         <source><x id="START_TAG_DEBRIEF_ICON" ctype="x-debrief_icon" equiv-text="&lt;debrief-icon name=&quot;columns&quot; [size]=&quot;14&quot; /&gt;"/><x id="CLOSE_TAG_DEBRIEF_ICON" ctype="x-debrief_icon" equiv-text="&lt;debrief-icon name=&quot;columns&quot; [size]=&quot;14&quot; /&gt;"/> Columns</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">128,129</context>
+          <context context-type="linenumber">130,131</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.filterFields.placeholder" datatype="html">
         <source>Filter fields</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">131</context>
+          <context context-type="linenumber">133</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.filterFields.aria" datatype="html">
         <source>Filter fields</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">131</context>
+          <context context-type="linenumber">133</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.columns.listLabel" datatype="html">
         <source>Columns</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">132</context>
+          <context context-type="linenumber">134</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.aria" datatype="html">
         <source>Events</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">151</context>
+          <context context-type="linenumber">153</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.header.marker" datatype="html">
         <source>Marker</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">161,162</context>
+          <context context-type="linenumber">164,165</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.header.time" datatype="html">
         <source>Time <x id="DIRECTION" equiv-text="{{ prefs.descending() ? &apos;↓&apos; : &apos;↑&apos; //i18n(ph=&quot;direction&quot;) }}"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">163,164</context>
+          <context context-type="linenumber">166,167</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.header.level" datatype="html">
         <source>Level</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">165,166</context>
+          <context context-type="linenumber">168,169</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.header.instance" datatype="html">
         <source>Instance</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">166,167</context>
+          <context context-type="linenumber">169,170</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.header.message" datatype="html">
         <source>Message</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">170,172</context>
+          <context context-type="linenumber">173,175</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.untimedTitle" datatype="html">
         <source>This event has no timestamp, so it is not on the timeline</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">201</context>
+          <context context-type="linenumber">204</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.untimed" datatype="html">
         <source>no time</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">201,202</context>
+          <context context-type="linenumber">204,205</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.partialMatchTitle" datatype="html">
         <source>Partial match: the search text appears inside a word</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">210</context>
+          <context context-type="linenumber">213</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.partialMatch" datatype="html">
         <source>partial</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">210</context>
+          <context context-type="linenumber">213</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.loading" datatype="html">
         <source>Loading</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">213</context>
+          <context context-type="linenumber">216</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.error.summary" datatype="html">
         <source>Couldn&apos;t load events.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">224</context>
+          <context context-type="linenumber">227</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.sort.newest" datatype="html">
         <source>Newest first</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">322</context>
+          <context context-type="linenumber">330</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.sort.oldest" datatype="html">
         <source>Oldest first</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">322</context>
+          <context context-type="linenumber">330</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.empty.filtered" datatype="html">
         <source>No events match the current filters.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">324</context>
+          <context context-type="linenumber">332</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.empty.noFiles" datatype="html">
         <source>No events: nothing is open yet.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">324</context>
+          <context context-type="linenumber">332</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.removeColumn" datatype="html">
         <source>Remove column <x id="column" equiv-text="column"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">328</context>
+          <context context-type="linenumber">336</context>
         </context-group>
       </trans-unit>
       <trans-unit id="health.host.region" datatype="html">
@@ -35557,28 +35557,28 @@
         <source>Profile editor</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">146</context>
+          <context context-type="linenumber">150</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.view.managePlugins" datatype="html">
         <source>Manage plugins</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">147</context>
+          <context context-type="linenumber">151</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.view.chat" datatype="html">
         <source>Chat</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">148</context>
+          <context context-type="linenumber">152</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.view.category.analysis" datatype="html">
         <source>Analysis</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">153</context>
+          <context context-type="linenumber">157</context>
         </context-group>
         <note priority="1" from="description">View submenu</note>
       </trans-unit>
@@ -35586,7 +35586,7 @@
         <source>Live</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">154</context>
+          <context context-type="linenumber">158</context>
         </context-group>
         <note priority="1" from="description">View submenu</note>
       </trans-unit>
@@ -35594,7 +35594,7 @@
         <source>Profiling</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">155</context>
+          <context context-type="linenumber">159</context>
         </context-group>
         <note priority="1" from="description">View submenu</note>
       </trans-unit>
@@ -35602,7 +35602,7 @@
         <source>Tools</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">156</context>
+          <context context-type="linenumber">160</context>
         </context-group>
         <note priority="1" from="description">View submenu</note>
       </trans-unit>
@@ -35610,7 +35610,7 @@
         <source>Sharing</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">157</context>
+          <context context-type="linenumber">161</context>
         </context-group>
         <note priority="1" from="description">View submenu</note>
       </trans-unit>
@@ -35618,7 +35618,7 @@
         <source>Diagnostics</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">158</context>
+          <context context-type="linenumber">162</context>
         </context-group>
         <note priority="1" from="description">View submenu</note>
       </trans-unit>
@@ -35626,7 +35626,7 @@
         <source>Plugins</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">159</context>
+          <context context-type="linenumber">163</context>
         </context-group>
         <note priority="1" from="description">View submenu</note>
       </trans-unit>
@@ -35634,7 +35634,7 @@
         <source>AI</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">160</context>
+          <context context-type="linenumber">164</context>
         </context-group>
         <note priority="1" from="description">View submenu</note>
       </trans-unit>
@@ -35642,89 +35642,89 @@
         <source>Open recent</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">203</context>
+          <context context-type="linenumber">207</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.file.clearRecent" datatype="html">
         <source>Clear recent</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">209</context>
+          <context context-type="linenumber">213</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.edit.undo" datatype="html">
         <source>Undo <x id="what" equiv-text="what"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">225</context>
+          <context context-type="linenumber">229</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.edit.undoNothing" datatype="html">
         <source>Undo (nothing to undo)</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">225</context>
+          <context context-type="linenumber">229</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.edit.redo" datatype="html">
         <source>Redo <x id="what" equiv-text="what"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">227</context>
+          <context context-type="linenumber">231</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.edit.redoNothing" datatype="html">
         <source>Redo (nothing to redo)</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">227</context>
+          <context context-type="linenumber">231</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.help.about" datatype="html">
         <source>About Debrief</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">236</context>
+          <context context-type="linenumber">240</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">375</context>
+          <context context-type="linenumber">379</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.help.checkForUpdates" datatype="html">
         <source>Check for updates…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">237</context>
+          <context context-type="linenumber">241</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">373</context>
+          <context context-type="linenumber">377</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.settings" datatype="html">
         <source>Settings…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">239</context>
+          <context context-type="linenumber">243</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">349</context>
+          <context context-type="linenumber">353</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.app.quit" datatype="html">
         <source>Quit Debrief</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">241</context>
+          <context context-type="linenumber">245</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.top.file" datatype="html">
         <source>File</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">248</context>
+          <context context-type="linenumber">252</context>
         </context-group>
         <note priority="1" from="description">Top-level menu</note>
       </trans-unit>
@@ -35732,7 +35732,7 @@
         <source>Edit</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">282</context>
+          <context context-type="linenumber">286</context>
         </context-group>
         <note priority="1" from="description">Top-level menu</note>
       </trans-unit>
@@ -35740,7 +35740,7 @@
         <source>View</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">285</context>
+          <context context-type="linenumber">289</context>
         </context-group>
         <note priority="1" from="description">Top-level menu</note>
       </trans-unit>
@@ -35748,7 +35748,7 @@
         <source>Analyze</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">288</context>
+          <context context-type="linenumber">292</context>
         </context-group>
         <note priority="1" from="description">Top-level menu</note>
       </trans-unit>
@@ -35756,35 +35756,35 @@
         <source>Focus query bar</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">291</context>
+          <context context-type="linenumber">295</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.analyze.markedOnly" datatype="html">
         <source>Marked events only</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">293</context>
+          <context context-type="linenumber">297</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.analyze.timeZone" datatype="html">
         <source>Time zone</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">301</context>
+          <context context-type="linenumber">305</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.analyze.utc" datatype="html">
         <source>UTC</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">302</context>
+          <context context-type="linenumber">306</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.analyze.local" datatype="html">
         <source>Local</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">303</context>
+          <context context-type="linenumber">307</context>
         </context-group>
         <note priority="1" from="description">Time zone option</note>
       </trans-unit>
@@ -35792,14 +35792,14 @@
         <source>Analyse the selected range</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">307</context>
+          <context context-type="linenumber">311</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.analyze.compare" datatype="html">
         <source>Compare time ranges</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">308</context>
+          <context context-type="linenumber">312</context>
         </context-group>
         <note priority="1" from="description">Menu</note>
       </trans-unit>
@@ -35807,112 +35807,112 @@
         <source>Current range vs previous</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">309</context>
+          <context context-type="linenumber">313</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.analyze.compare.beforeAfter" datatype="html">
         <source>Before / after selected time</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">310</context>
+          <context context-type="linenumber">314</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.analyze.ai" datatype="html">
         <source>AI</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">314</context>
+          <context context-type="linenumber">318</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.analyze.ai.query" datatype="html">
         <source>Ask AI to write a query…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">315</context>
+          <context context-type="linenumber">319</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.analyze.ai.summarize" datatype="html">
         <source>Summarize this range</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">316</context>
+          <context context-type="linenumber">320</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.analyze.ai.rootCauses" datatype="html">
         <source>Find likely root causes</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">317</context>
+          <context context-type="linenumber">321</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.analyze.addToReport" datatype="html">
         <source>Add to report</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">324</context>
+          <context context-type="linenumber">328</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.report.incident" datatype="html">
         <source>Incident summary…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">325</context>
+          <context context-type="linenumber">329</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.report.selectedEvent" datatype="html">
         <source>Selected event</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">327</context>
+          <context context-type="linenumber">331</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.report.notes" datatype="html">
         <source>Notes</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">328</context>
+          <context context-type="linenumber">332</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.report.timeline" datatype="html">
         <source>Timeline</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">329</context>
+          <context context-type="linenumber">333</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.report.annotations" datatype="html">
         <source>Annotations</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">330</context>
+          <context context-type="linenumber">334</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.report.queryResult" datatype="html">
         <source>Query result</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">331</context>
+          <context context-type="linenumber">335</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.report.findings" datatype="html">
         <source>Health-check findings</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">332</context>
+          <context context-type="linenumber">336</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.report.anomalies" datatype="html">
         <source>Anomalies as findings</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">333</context>
+          <context context-type="linenumber">337</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.top.tools" datatype="html">
         <source>Tools</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">339</context>
+          <context context-type="linenumber">343</context>
         </context-group>
         <note priority="1" from="description">Top-level menu</note>
       </trans-unit>
@@ -35920,7 +35920,7 @@
         <source>Window</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">352</context>
+          <context context-type="linenumber">356</context>
         </context-group>
         <note priority="1" from="description">Top-level menu</note>
       </trans-unit>
@@ -35928,7 +35928,7 @@
         <source>Help</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">355</context>
+          <context context-type="linenumber">359</context>
         </context-group>
         <note priority="1" from="description">Top-level menu</note>
       </trans-unit>
@@ -35936,91 +35936,91 @@
         <source>Welcome</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">357</context>
+          <context context-type="linenumber">361</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.help.documentation" datatype="html">
         <source>Documentation</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">363</context>
+          <context context-type="linenumber">367</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.help.whatsNew" datatype="html">
         <source>What&apos;s new</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">364</context>
+          <context context-type="linenumber">368</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.help.openLogs" datatype="html">
         <source>Open logs folder</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">368</context>
+          <context context-type="linenumber">372</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.help.clearCache" datatype="html">
         <source>Clear cache…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">369</context>
+          <context context-type="linenumber">373</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.help.notices" datatype="html">
         <source>Third-party notices</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">374</context>
+          <context context-type="linenumber">378</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.view.ai.setup" datatype="html">
         <source>Set up…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">404</context>
+          <context context-type="linenumber">408</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.view.ai.models" datatype="html">
         <source>Models…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">405</context>
+          <context context-type="linenumber">409</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.view.explorer" datatype="html">
         <source>Explorer</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">411</context>
+          <context context-type="linenumber">415</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.view.fields" datatype="html">
         <source>Fields</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">413</context>
+          <context context-type="linenumber">417</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.view.otherWindows" datatype="html">
         <source>Other windows…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">419</context>
+          <context context-type="linenumber">423</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.view.theme" datatype="html">
         <source>Theme</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">421</context>
+          <context context-type="linenumber">425</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.view.theme.system" datatype="html">
         <source>Follow system</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">422</context>
+          <context context-type="linenumber">426</context>
         </context-group>
         <note priority="1" from="description">Theme name</note>
       </trans-unit>
@@ -36028,7 +36028,7 @@
         <source>Calm</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">423</context>
+          <context context-type="linenumber">427</context>
         </context-group>
         <note priority="1" from="description">Theme name</note>
       </trans-unit>
@@ -36036,7 +36036,7 @@
         <source>Console</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">424</context>
+          <context context-type="linenumber">428</context>
         </context-group>
         <note priority="1" from="description">Theme name</note>
       </trans-unit>
@@ -36044,7 +36044,7 @@
         <source>Precision</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">425</context>
+          <context context-type="linenumber">429</context>
         </context-group>
         <note priority="1" from="description">Theme name</note>
       </trans-unit>
@@ -36052,7 +36052,7 @@
         <source>High contrast</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">426</context>
+          <context context-type="linenumber">430</context>
         </context-group>
         <note priority="1" from="description">Theme name</note>
       </trans-unit>
@@ -36060,7 +36060,7 @@
         <source>System</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">428</context>
+          <context context-type="linenumber">432</context>
         </context-group>
         <note priority="1" from="description">Colour scheme option</note>
       </trans-unit>
@@ -36068,7 +36068,7 @@
         <source>Dark</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">429</context>
+          <context context-type="linenumber">433</context>
         </context-group>
         <note priority="1" from="description">Colour scheme option</note>
       </trans-unit>
@@ -36076,7 +36076,7 @@
         <source>Light</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">430</context>
+          <context context-type="linenumber">434</context>
         </context-group>
         <note priority="1" from="description">Colour scheme option</note>
       </trans-unit>
@@ -36084,49 +36084,49 @@
         <source>Source colours</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">432</context>
+          <context context-type="linenumber">436</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.view.sourceColors.source" datatype="html">
         <source>By file</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">433</context>
+          <context context-type="linenumber">437</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.view.sourceColors.instance" datatype="html">
         <source>By instance</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">434</context>
+          <context context-type="linenumber">438</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.view.sourceColors.off" datatype="html">
         <source>Off</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">435</context>
+          <context context-type="linenumber">439</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.view.otherPlugins" datatype="html">
         <source>Other plugins</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">446</context>
+          <context context-type="linenumber">450</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.window.perspectives" datatype="html">
         <source>Perspectives</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">460</context>
+          <context context-type="linenumber">464</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.menu.window.windows" datatype="html">
         <source>Windows</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">477</context>
+          <context context-type="linenumber">481</context>
         </context-group>
         <note priority="1" from="description">Menu group</note>
       </trans-unit>
@@ -36134,7 +36134,7 @@
         <source>Pop-out panels</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/shell/menu/menu-model.ts</context>
-          <context context-type="linenumber">478</context>
+          <context context-type="linenumber">482</context>
         </context-group>
       </trans-unit>
       <trans-unit id="shell.regions.category" datatype="html">

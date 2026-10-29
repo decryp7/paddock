@@ -111,6 +111,13 @@ export interface DebriefCommand {
   /** The command is listed and runnable only while this returns true. */
   when?: (ctx: CommandContext) => boolean;
   /**
+   * The command stays in the menus but greyed out (and out of the palette) while this returns false; it does not run. For a
+   * command that applies now and then (Reset Explorer width), where the menu item should be seen to exist.
+   */
+  enabled?: (ctx: CommandContext) => boolean;
+  /** A held shortcut key runs it once: the repeats of the key are ignored (toggles). */
+  once?: boolean;
+  /**
    * The view this command only shows. The palette lists one command per view: this one, and not the generated
    * "Open <view>" (`view.open.<id>`) as well.
    */

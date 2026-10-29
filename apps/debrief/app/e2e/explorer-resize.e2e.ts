@@ -1,6 +1,6 @@
 import { expect, Page, test } from '@playwright/test';
 import { openApp } from './app';
-import { chooseMenu } from './menu-support';
+import { chooseMenu, menuItem, openMenu } from './menu-support';
 import { MESSAGE_COLUMN_MIN } from '../src/app/grid/message-column';
 
 // The Explorer is a view of the layout plan (ADR 0056) with a declared minimum and maximum width; the user resizes it by
@@ -183,6 +183,9 @@ test('at 1440 px a width dragged back to the default stays chosen (Registry stay
   await openApp(page);
   await planIdle(page);
   expect(await registryTabbed(page)).toBe(false);
+  // Nothing is chosen yet: the menu item is there but greyed out.
+  await expect(menuItem(await openMenu(page, 'View'), 'Reset Explorer width')).toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('Escape');
   await dragEdge(page, 150);
   await expect.poll(() => registryTabbed(page)).toBe(true);
   // Back to exactly the default width (272 px): still the user's choice, so Registry stays tabbed and the width holds.

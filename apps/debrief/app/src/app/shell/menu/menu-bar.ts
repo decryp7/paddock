@@ -65,6 +65,7 @@ import { MenuNode, TopMenu } from './menu-model';
                   cdkMenuItem
                   class="item"
                   [cdkMenuitemTypeaheadLabel]="node.label"
+                  [cdkMenuItemDisabled]="!!node.disabled"
                   [attr.aria-keyshortcuts]="keys(node.keybinding)"
                   (cdkMenuItemTriggered)="app.run(node.id)"
                 >

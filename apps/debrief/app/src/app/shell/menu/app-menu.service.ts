@@ -48,7 +48,7 @@ export class AppMenu {
   readonly menus = computed<TopMenu[]>(() => {
     const open = this.dock.openIds();
     const popped = this.panelWindows?.poppedIds() ?? new Set<string>();
-    const commands = new Map<string, MenuCommand>(this.registry.available().map((c) => [c.id, { id: c.id, title: c.title, keybinding: c.keybinding }]));
+    const commands = new Map<string, MenuCommand>(this.registry.available().map((c) => [c.id, { id: c.id, title: c.title, keybinding: c.keybinding, enabled: this.registry.isEnabled(c) }]));
     const label = this.windowing.label();
     return buildMenus({
       commands,

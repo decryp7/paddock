@@ -1,4 +1,5 @@
-import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, effect, ElementRef, inject, linkedSignal, signal, untracked, viewChild } from '@angular/core';
+import { DOCUMENT } from '@angular/common';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, linkedSignal, signal, untracked, viewChild } from '@angular/core';
 import { ErrorDetails } from '../ui/error-details';
 import { RecordView } from '../core/api.types';
 import { DebriefBackend } from '../core/backend';
@@ -32,7 +33,8 @@ import { SourceColors, SourceMark } from '../sources/source-colors.store';
 import { stripeBackground } from '../sources/source-colors';
 import { LiveArrival, liveMode, PagedRowsStore } from './paged-rows.store';
 import { writeEventDrag } from '../core/event-drag';
-import { GRID, timeFullWidth } from './message-column';
+import { GridMetrics } from './grid-metrics';
+import { GRID, timeFullWidth, timeMinWidth } from './message-column';
 
 export { SCROLL_IDLE_MS } from './paged-rows.store';
 
@@ -157,6 +159,7 @@ export type GridRowVm = RowVm | PlaceholderVm;
       (wheel)="onWheel($event)"
       (keydown)="onKey($event)"
     >
+      <span #timeProbe class="mono time probe" aria-hidden="true">0</span>
       <div class="header" role="row" aria-rowindex="1" [style.grid-template-columns]="columns()">
         <span class="hcell" role="columnheader"><span class="sr-only" i18n="@@grid.header.marker">Marker</span></span>
         <span #timeHead class="hcell" role="columnheader" [attr.aria-sort]="prefs.descending() ? 'descending' : 'ascending'">
@@ -264,6 +267,7 @@ export type GridRowVm = RowVm | PlaceholderVm;
     .mk { display: flex; justify-content: center; }
     .note-glyph { display: inline-flex; vertical-align: -2px; margin-right: 4px; color: var(--accent-text); }
     .time { font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+    .time.probe { position: absolute; visibility: hidden; pointer-events: none; }
     .time.untimed { font-style: italic; color: var(--faint); }
     .partial { font-size: var(--fs-xs); color: var(--faint); border: 1px dashed var(--border-2); border-radius: 4px; padding: 0 4px; margin-right: 6px; }
     .lvl { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-2); }
@@ -301,6 +305,10 @@ export class EventsGrid {
   /** The theme's row height for the density in effect (the virtual scroll needs it in pixels). */
   protected readonly rowH = computed(() => px(this.theme.tokens()['row-h']) || FALLBACK_ROW_H);
   private readonly viewport = viewChild<ElementRef<HTMLElement>>('viewport');
+  private readonly metrics = inject(GridMetrics);
+  private readonly injector = inject(Injector);
+  private readonly document = inject(DOCUMENT);
+  private readonly timeProbe = viewChild<ElementRef<HTMLElement>>('timeProbe');
   private readonly timeHead = viewChild<ElementRef<HTMLElement>>('timeHead');
 
   /** The rows: paging, eviction, generations and live refreshes (no DOM). */
@@ -357,14 +365,15 @@ export class EventsGrid {
     // Narrow windows: the time and source columns give way before the message, which keeps its minimum (GRID.message); the time
     // column grows to the full date and time of the date format and shows the compact time below that.
     const m = GRID.min;
+    const cw = this.metrics.charPx();
     const extra = this.prefs.extraColumns().map(() => `minmax(${m.extra}px, ${GRID.max.extra}px)`).join(' ');
-    return `${m.mark}px minmax(${m.time}px, ${timeFullWidth(this.settings.dateFormat())}px) ${m.severity}px minmax(${m.source}px, ${GRID.max.source}px) ${extra} minmax(${GRID.message}px, 1fr)`.replace(/\s+/g, ' ');
+    return `${m.mark}px minmax(${timeMinWidth(cw)}px, ${timeFullWidth(this.settings.dateFormat(), cw)}px) ${m.severity}px minmax(${m.source}px, ${GRID.max.source}px) ${extra} minmax(${GRID.message}px, 1fr)`.replace(/\s+/g, ' ');
   });
 
   /** The width of the time column now, px (measured from the header; 0 until measured). */
   private readonly timeTrack = signal(0);
   /** The time column is narrower than the full date and time: rows show the time only (the full one is in the tooltip). */
-  protected readonly compactTime = computed(() => this.timeTrack() > 0 && this.timeTrack() < timeFullWidth(this.settings.dateFormat()));
+  protected readonly compactTime = computed(() => this.timeTrack() > 0 && this.timeTrack() < timeFullWidth(this.settings.dateFormat(), this.metrics.charPx()));
 
   protected readonly colCount = computed(() => 5 + this.prefs.extraColumns().length);
 
@@ -495,7 +504,13 @@ export class EventsGrid {
     });
     destroyRef.onDestroy(() => this.published.clear());
 
+    // The time cell's font follows the theme (family, size) and the interface font: measure after the new tokens are applied, and when web fonts load.
+    effect(() => {
+      this.theme.tokens();
+      untracked(() => afterNextRender(() => this.measureTime(), { injector: this.injector }));
+    });
     afterNextRender(() => {
+      void this.document.fonts?.ready.then(() => this.measureTime());
       const el = this.viewport()!.nativeElement;
       const measure = () => this.viewportH.set(Math.max(0, el.clientHeight - HEADER_H));
       const ro = new ResizeObserver(measure);
@@ -509,6 +524,11 @@ export class EventsGrid {
       });
       measure();
     });
+  }
+
+  private measureTime(): void {
+    const probe = this.timeProbe()?.nativeElement;
+    if (probe) this.metrics.measure(probe);
   }
 
   private missingRows(): number[] {

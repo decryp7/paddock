@@ -9,6 +9,7 @@ import { AngularContentRenderer, MissingViewRenderer } from './angular-panel';
 import { AutoHideEvent, autoHideReduce, EMPTY_AUTO_HIDE } from './auto-hide';
 import { DockAutoHide } from './dock-auto-hide';
 import { UiPrefsStore } from '../core/workspace/ui-prefs.store';
+import { GridMetrics } from '../grid/grid-metrics';
 import { DockContext } from './dock-context';
 import { keepGroupsUnscrolled, labelTabOverflow, observeFloatingAria } from './dock-dom';
 import { DockSlot, isLayoutTarget, Point, Rect, resolveGuideDrop, Side } from './dock-geometry';
@@ -121,14 +122,18 @@ export class DockService {
       revealInspector: () => this.revealInspector(),
       syncConditionalViews: () => this.syncConditionalViews(),
     });
-    // The Events view's minimum width counts the grid's extra columns: a change re-plans the dock.
+    // The Events view's minimum width counts the grid's extra columns and the time cell's font: a change re-plans the dock.
     const prefs = inject(UiPrefsStore);
+    const metrics = inject(GridMetrics);
     let extraColumns = prefs.extraColumns().length;
+    let charPx = metrics.charPx();
     effect(() => {
       const count = prefs.extraColumns().length;
+      const chars = metrics.charPx();
       untracked(() => {
-        if (count === extraColumns) return;
+        if (count === extraColumns && chars === charPx) return;
         extraColumns = count;
+        charPx = chars;
         const api = this.ctx.api;
         if (api && this.ctx.apiReady()) this.fitToWindow(api, null);
       });

@@ -18,6 +18,8 @@ export interface MenuItemNode {
   /** Key binding in command syntax (e.g. "Mod+Shift+O"), shown as the shortcut hint. */
   keybinding?: string;
   checked?: boolean;
+  /** Shown greyed out; it does nothing. */
+  disabled?: boolean;
 }
 
 export interface SubmenuNode {
@@ -76,6 +78,8 @@ export interface MenuCommand {
   id: string;
   title: string;
   keybinding?: string;
+  /** False: shown greyed out, does nothing. */
+  enabled?: boolean;
 }
 
 export interface MenuView {
@@ -216,7 +220,7 @@ export function buildMenus(state: MenuState): TopMenu[] {
   const cmd = (id: string, label?: string, checked?: boolean): MenuItemNode | null => {
     const c = state.commands.get(id);
     if (!c) return null;
-    return { kind: 'item', id, label: label ?? c.title, ...(c.keybinding ? { keybinding: c.keybinding } : {}), ...(checked === undefined ? {} : { checked }) };
+    return { kind: 'item', id, label: label ?? c.title, ...(c.keybinding ? { keybinding: c.keybinding } : {}), ...(checked === undefined ? {} : { checked }), ...(c.enabled === false ? { disabled: true } : {}) };
   };
   const sub = (id: string, label: string, items: Part[]): SubmenuNode => ({ kind: 'submenu', id, label, items: tidy(items) });
   /** In the app menu in native mode, else where it is placed. */

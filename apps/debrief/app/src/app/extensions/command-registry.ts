@@ -62,8 +62,17 @@ export class CommandRegistry {
     return this.all().find((c) => c.id === id);
   }
 
+  /** Is the command enabled now (it has no `enabled` predicate, or it holds)? A disabled command is shown greyed out in menus. */
+  isEnabled(c: DebriefCommand): boolean {
+    try {
+      return c.enabled ? c.enabled(this.context) : true;
+    } catch {
+      return false;
+    }
+  }
+
   search(query: string): DebriefCommand[] {
-    return fuzzyFilter(this.available(), query, (c) => (c.category ? `${c.category}: ${c.title}` : c.title));
+    return fuzzyFilter(this.available().filter((c) => this.isEnabled(c)), query, (c) => (c.category ? `${c.category}: ${c.title}` : c.title));
   }
 
   /**
@@ -76,7 +85,7 @@ export class CommandRegistry {
     if (this.forward(id)) return true;
     const command = this.find(id);
     // A modal dialog window is open over this window: it answers first.
-    if (this.gate.blocked() || !command || !this.isAvailable(command)) return false;
+    if (this.gate.blocked() || !command || !this.isAvailable(command) || !this.isEnabled(command)) return false;
     try {
       await this.activity.track(id, trigger, { Title: command.title, Category: command.category }, () => command.run(this.context));
       return true;
@@ -93,6 +102,8 @@ export class CommandRegistry {
     const command = this.available().find((c) => c.keybinding && matchesKeybinding(c.keybinding, e));
     if (!command) return false;
     e.preventDefault();
+    // A held key repeats keydown: a toggle runs once.
+    if (e.repeat && command.once) return true;
     void this.run(command.id, 'shortcut');
     return true;
   }

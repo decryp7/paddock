@@ -45,7 +45,7 @@ describe('activity coverage guard', () => {
 
     // Run each through a registry of stubs (the guard is about the path, not about what commands do).
     const ran: string[] = [];
-    const stubs = real.map((c) => ({ ...c, when: undefined, run: () => void ran.push(c.id) }));
+    const stubs = real.map((c) => ({ ...c, when: undefined, enabled: undefined, run: () => void ran.push(c.id) }));
     const scope = Injector.create({
       providers: [{ provide: COMMAND_CONTEXT, useValue: {} as CommandContext }, { provide: DEBRIEF_COMMANDS, multi: true, useValue: stubs }, CommandRegistry],
       parent: TestBed.inject(EnvironmentInjector),

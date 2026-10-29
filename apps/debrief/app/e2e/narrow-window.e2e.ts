@@ -98,12 +98,13 @@ test.describe('narrow window', () => {
     // Choose 360 px with the keyboard on the sash (Home/End move it to its limits, arrows step it).
     const sash = page.getByRole('separator', { name: 'Resize the Explorer' });
     await sash.focus();
-    const start = await width();
-    // Eleven key presses, no reads between them (a read lags the draw); the Explorer then settles at the width they chose.
+    const start = Number(await sash.getAttribute('aria-valuenow'));
+    const max = Number(await sash.getAttribute('aria-valuemax'));
+    // Eleven key presses of 16 px each, no reads between them; the Explorer ends at the width they chose, within the sash's maximum.
     for (let i = 0; i < 11; i++) await page.keyboard.press('ArrowRight');
-    let last = -1;
-    await expect.poll(async () => { const now = await width(); const quiet = now === last; last = now; return quiet; }, { intervals: [100] }).toBe(true);
-    const chosen = last;
+    const chosen = Math.min(start + 11 * 16, max);
+    await expect(sash).toHaveAttribute('aria-valuenow', String(chosen));
+    await expect.poll(width).toBe(chosen);
     expect(chosen).toBeGreaterThan(start);
 
     // 1100 px holds the Explorer at its minimum and the message column at its minimum, but not the width chosen.
@@ -183,6 +184,21 @@ test.describe('narrow window', () => {
     // Wide enough again: Ctrl+B opens it.
     await resize(page, 1440);
     await expect(sidebar(page)).toBeVisible();
+  });
+
+  test('900 px: pressing Ctrl+B ten times, or holding it, leaves exactly one notice', async ({ page }) => {
+    await resize(page, 900);
+    await expect(sidebar(page)).toHaveCount(0);
+    for (let i = 0; i < 10; i++) await page.keyboard.press('ControlOrMeta+b');
+    const notice = page.getByText('Widen the window to show the Explorer');
+    await expect(notice).toHaveCount(1);
+    // A held key repeats keydown: the repeats do nothing.
+    await page.keyboard.down('ControlOrMeta');
+    for (let i = 0; i < 6; i++) await page.keyboard.down('b');
+    await page.keyboard.up('b');
+    await page.keyboard.up('ControlOrMeta');
+    await expect(notice).toHaveCount(1);
+    await expect(sidebar(page)).toHaveCount(0);
   });
 
   test('side docks auto-hide when the plan has no room for them and are pinned back, with a margin, when the window widens', async ({ page }) => {

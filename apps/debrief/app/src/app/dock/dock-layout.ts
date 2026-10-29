@@ -2,6 +2,7 @@ import { inject, Injectable, Injector } from '@angular/core';
 import type { DockviewApi, DockviewGroupPanel } from 'dockview';
 import { LayoutPlan, OpenView, ViewLayout, planLayout, restorable, SavedHints } from '../layout-plan/layout-plan';
 import { EXPLORER_WIDTH, UiPrefsStore } from '../core/workspace/ui-prefs.store';
+import { GridMetrics } from '../grid/grid-metrics';
 import { eventsViewMinWidth } from '../grid/message-column';
 import { NotificationsStore } from '../notifications/notifications.store';
 import { autoHideReduce } from './auto-hide';
@@ -50,6 +51,7 @@ const NO_SLOT: DockSlot = { referencePanel: null, direction: 'within' };
 export class DockLayout {
   private readonly ctx = inject(DockContext);
   private readonly prefs = inject(UiPrefsStore);
+  private readonly metrics = inject(GridMetrics);
   private readonly lazy = inject(Injector);
   /** Panels in the order they were last opened (newest first): a view opened in the background was still used just now. */
   private opened: string[] = [];
@@ -83,7 +85,7 @@ export class DockLayout {
   private declared(view: Parameters<typeof viewLayout>[0]): ViewLayout {
     const layout = viewLayout(view);
     if (view?.id !== 'events') return layout;
-    const min = Math.max(layout.min.width, eventsViewMinWidth(this.prefs.extraColumns().length));
+    const min = eventsViewMinWidth(this.prefs.extraColumns().length, this.metrics.charPx());
     return { ...layout, min: { ...layout.min, width: min }, pref: { ...layout.pref, width: Math.max(layout.pref.width, min) } };
   }
 
@@ -151,7 +153,7 @@ export class DockLayout {
       if (g.api.location.type !== 'grid') continue;
       const mins = g.panels.map((p) => {
         const view = this.ctx.views.find(p.id);
-        const l = viewLayout(view);
+        const l = this.declared(view);
         // Side and full-height columns span the whole height; only rows of the main column have a height minimum.
         const rowed = (l.area === 'document' && !view?.fullHeight) || l.area === 'analysis';
         return { width: l.min.width, height: rowed ? l.min.height : 0 };
@@ -451,6 +453,7 @@ export class DockLayout {
   /** The notice for an Explorer that stays closed because the window is too narrow. */
   notifyExplorerCannotFit(): void {
     this.lazy.get(NotificationsStore, null)?.showLocal({
+      key: 'explorer.cannot-fit',
       severity: 'info',
       title: $localize`:@@dock.explorer.cannotFit.title:Widen the window to show the Explorer`,
       body: $localize`:@@dock.explorer.cannotFit.body:There is no room for it beside the events grid at its minimum width.`,

@@ -161,8 +161,11 @@ What was built, and where it refines the decision above:
     (`EXPLORER_WIDTH`). The plan always sees it at its minimum: it is closed only when even that does not fit.
   - **Message column.** The Events view declares its minimum from the grid's geometry (`GRID` in `grid/message-column.ts`):
     the message column keeps 360 px, the other columns their minimums (the time column shows the compact time
-    `09:00:00.000` below its full width), plus the gaps, the row padding, the scroll bar and the grid's extra columns.
-    That is 680 px with no extra column; the Explorer and every other column give way before it.
+    `09:00:00.000` below the width of its full date and time), plus the gaps, the row padding, the scroll bar and the grid's
+    extra columns; the dock's group constraints use the same declaration. The time column is sized in characters of the cell's own
+    font (12, 19 or 23), measured per theme with canvas `measureText` (`GridMetrics`) and measured again when the theme or the fonts
+    change, because the themes differ in the monospace font and size (Contrast uses 13 px); the plan re-plans when the measurement
+    changes. With no extra column that is about 680 px at 12 px type; the Explorer and every other column give way before it.
   - **Chosen flag.** `explorerWidthChosen` in the preferences says the user set the width (a drag or the keys, also back to
     272 px). Prefs without it load as not chosen, with the default width. View ▸ Reset Explorer width clears it.
   - **Yield.** An unchosen width yields to the other columns: it is shown at the room that leaves every column its own

@@ -207,7 +207,7 @@ export const NotificationsStore = signalStore(
       dismissToast,
 
       /** A toast of the UI's own (not a message of the centre): e.g. "Explaining event #7 — running in Jobs". */
-      showLocal(n: Pick<Notice, 'severity' | 'title'> & { body?: string; primary?: Notice['primary']; running?: boolean }): void {
+      showLocal(n: Pick<Notice, 'severity' | 'title'> & { body?: string; primary?: Notice['primary']; running?: boolean; key?: string }): void {
         const now = Date.now();
         const id = -++localIds;
         const toast: Notice = {
@@ -225,7 +225,8 @@ export const NotificationsStore = signalStore(
           tertiary: null,
           link: { window: null, jobId: null, recordId: null, pluginId: null, path: null },
           // A "running in Jobs" toast is one per operation (its title): showing it again replaces it, the result takes its place.
-          cause: n.running ? RUNNING_CAUSE + n.title : `ui-toast:${-id}`,
+          // `key`: one toast per key, a repeat replaces it (e.g. the same hint shown again).
+          cause: n.running ? RUNNING_CAUSE + n.title : n.key ? `ui-toast:key:${n.key}` : `ui-toast:${-id}`,
           scope: 'project',
         };
         patchState(store, (s) => ({ toasts: [...s.toasts.filter((t) => t.cause !== toast.cause), toast].slice(-MAX_TOASTS) }));

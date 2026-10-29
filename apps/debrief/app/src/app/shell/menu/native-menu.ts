@@ -96,7 +96,7 @@ function entries(nodes: readonly MenuNode[]): NativeMenuEntry[] {
             label: n.label,
             keybinding: n.keybinding && !NO_NATIVE_SHORTCUT.has(n.id) ? n.keybinding : null,
             checked: n.checked ?? null,
-            enabled: true,
+            enabled: !n.disabled,
           },
         ];
     }

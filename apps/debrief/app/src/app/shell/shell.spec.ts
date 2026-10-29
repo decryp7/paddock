@@ -127,7 +127,8 @@ describe('TitleBar', () => {
     const view = document.querySelector<HTMLElement>('[role=menu][data-menu=View]')!;
     const top = [...view.children].filter((e) => e.matches('[role=menuitemcheckbox], [role=menuitem]'));
     const label = (e: Element) => (e.querySelector('.label')?.textContent ?? '').trim();
-    expect(top.map(label)).toEqual(['Explorer', 'Fields', 'Inspector', 'Timeline', 'Events', 'Metrics', 'Profile editor', 'Analysis', 'Plugins', 'Other windows…', 'Theme', 'Source colours']);
+    expect(top.map(label)).toEqual(['Explorer', 'Reset Explorer width', 'Fields', 'Inspector', 'Timeline', 'Events', 'Metrics', 'Profile editor', 'Analysis', 'Plugins', 'Other windows…', 'Theme', 'Source colours']);
+    expect(menuItem('Reset Explorer width').getAttribute('aria-disabled')).toBe('true');
     expect(menuItem('Timeline').getAttribute('aria-checked')).toBe('true');
     expect(menuItem('Events').getAttribute('aria-checked')).toBe('false');
     expect(menuItem('Plugins').getAttribute('aria-haspopup')).toBe('menu');
