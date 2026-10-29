@@ -173,6 +173,36 @@ These measure tooling, not a product. They are kept where they are.
   and scenario.
 - [Lessons](lessons.md): test-binary consolidation, 239 → 99 binaries, nextest 301 s → 196 s.
 
+### 2026-10-29, CI runs of the monorepo, 48 hours (ci/optimise-runs)
+
+- **Commit:** origin/main 6ecbfb55d at the time of reading; the runs cover every commit pushed or dispatched in the window
+- **Machine:** the CI runners, not this Mac: d-gtr9 (Linux, paddock-ci:v2 image, runner id 31), the Windows host runner (id 33),
+  the Mac mini host runner (id 34); Gitea 28.2.0 on dev.decryptology.net
+- **Load:** production load of the runners (15–20 runs queued at times); the reading Mac at load 17–27 (irrelevant: API reads only)
+- **Build:** as CI builds (debug tests, release installers)
+- **Corpus:** none; the Gitea Actions runs and jobs API, 596 runs and 3,772 started jobs created 2026-10-27 15:08:41 to
+  2026-10-29 15:08:41 +08:00, plus the logs of 102 failed and 48 green jobs (no user data)
+- **Command:** `GITEA_TOKEN=… node docs/research/2026-10-29-ci-runs.mjs pull --end 2026-10-29T15:08:41+08:00 --hours 48 > runs.json`,
+  then `node docs/research/2026-10-29-ci-runs.mjs table runs.json --end 2026-10-29T15:08:41+08:00 --hours 48`
+- **Runs:** one read; medians and p90 over the jobs of the window
+- **Numbers:**
+
+  | Measure | Value | Budget | Verdict |
+  |---|---|---|---|
+  | Runner hours, 48 h (Linux / Windows / macOS) | 188.3 (118.9 / 42.9 / 26.4) | none | - |
+  | Runner hours per day after the kit moves (from 2026-10-28 14:00) | 103 (Linux 67, Windows 22.2, macOS 14.2) | none | Windows at 92 % of one slot |
+  | Share of runner hours in failed / cancelled / green runs | 65 % / 15 % / 19 % | none | - |
+  | Branch ci.yml dispatch, creation to last job (n = 96) | median 70 min, p90 163 min | none | - |
+  | ci.yml plan job queue wait (n = 260) | median 11 min, p90 47 min | none | - |
+  | Windows `stable-workspace` step (n = 400) | median 49 s, p90 76 s | none | fixed on ci/optimise-runs |
+  | Main push runs cancelled by the next push (ci.yml / debrief.yml) | 43 of 55 / 41 of 55 | none | - |
+  | Tasks lost to the zombie cleanup (no log, failed 10–15 min after start) | 8 | none | - |
+
+- **Memory measure:** not measured (CI wall time only)
+- **Notes:** waits of host jobs are understated where jobs of one run share a slot (the plan job's wait is the queue);
+  the four old per-app workflows were deleted during the window. Analysis and proposals:
+  [research/2026-10-29-ci-runs.md](research/2026-10-29-ci-runs.md).
+
 ## Gaps
 
 These are ordered by impact.

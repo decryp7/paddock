@@ -705,3 +705,34 @@ One day of CI went on runs for superseded branch heads, the same head dispatched
 into another branch, and global triggers in the affected planner that made every run build everything (fixed in
 b618b5c97). **Rule:** cancel older queued runs before dispatching, dispatch once after the last review fix, give merged
 branches and docs-only changes no CI, and keep branch runs on the affected plan (rule 50).
+
+## 2026-10-29: a fallback that deletes before it tries, and a lookup that pages through the wrong list (CI runs)
+
+Two shared CI paths cost hours a day without failing anything. `stable-workspace` ran `rm -rf "$stable" && mv "$ws" "$stable"`:
+the move always fails on the Windows runner (act holds the work folder), but the kept clone was already gone, so its
+fallback cloned the repository and checked out all 11,000 files again in every Windows job (a median 49 s, 200 times a
+day, on the runner that is 92 % busy). The planner looked for the last green ci.yml run of main in 4 pages of 50 runs of
+*every* workflow; with six workflows per push, the green run fell out of that window after about 33 pushes and every push
+tested everything. **Guidance:** a fallback must not destroy the state it falls back to: move to a side folder first and
+replace the kept copy only once the move worked. Ask an API for exactly the list you need (`/actions/workflows/ci.yml/runs?
+branch=main&event=push&status=success`) instead of paging a mixed list with a cut-off. Measure a shared action per OS:
+1 s on macOS hid 49 s on Windows. Details: [research/2026-10-29-ci-runs.md](research/2026-10-29-ci-runs.md).
+
+## 2026-10-29: Gitea skips a job whose `needs` was skipped, whatever its `if` says (release workflows)
+
+Every `<app>-release.yml` has `release: needs: [plan, gates]` with `if: !cancelled() && ... (needs.gates.result == 'success'
+|| needs.gates.result == 'skipped' && no tag)`. On this Gitea (28.2.0) the release job was skipped in all 104 push runs
+and all 6 nightly runs where `gates` was skipped, and ran only when `gates` ran. So the documented push-to-main and
+nightly installers never ran, and nothing said so. **Guidance:** on Gitea, never rely on `if` to run a job after a skipped
+need; give each path its own job whose needs all run (one release job needing `gates` for tags, one needing only `plan`
+otherwise), and check a release workflow's paths with one dispatch of each event before trusting them.
+
+## 2026-10-29: a task with no log that fails after 10–15 minutes was lost between server and runner (CI)
+
+Eight jobs on the Linux runner in two days (mostly plan jobs) started, wrote no log line (`unable to open task logs`) and
+failed with every step stamped at the same second 10–15 min later, on a 5-minute tick. That is Gitea's
+`stop_zombie_tasks` cron (`@every 5m`) stopping a running task the runner never updated for `ZOMBIE_TASK_TIMEOUT` (10m):
+the server had assigned the task but the runner never ran it, most likely because the runner's 5 s `FetchTask` call timed
+out after the assignment while several plan jobs started at once. **Guidance:** a failed job with no log is not a test
+failure: re-run it, and look at the runner's log for that task, not the job. Fewer simultaneous job starts (one plan job
+per push, not six) and a longer runner `fetch_timeout` reduce it.
