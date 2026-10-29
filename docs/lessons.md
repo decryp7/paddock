@@ -751,3 +751,15 @@ composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor D
 crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
 (`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
 not by guessing at the VM.
+
+## 2026-10-30: a caller that waits on macOS `BACKGROUND` threads waits as long as the machine is busy (Debrief)
+
+`debrief-cli`'s `the_report_is_written_as_html_and_never_overwritten_silently` took 3 to 9 s on the Mac runner most of the
+time, 36 s, 63 s and 102 s (timed out) on busy runs, and timed out again in debrief.yml run 7150; on Linux it never passed
+10 s. The report's analyses run on Debrief's shared mining pool, whose threads `debrief_core::threads::lower_priority` put in
+macOS's QoS class `BACKGROUND`: efficiency cores only and behind every other thread, so while the shared Mac was loaded the
+CLI's foreground thread waited on workers that barely ran. Measured on the Mac mini with 14 `nice -n 20` CPU hogs (which
+yield to all normal work): the report build went from 0.1-0.2 s to 0.4-12.7 s, the import beside it did not move; with
+`UTILITY` the same build stayed at 0.09-0.33 s. **Lesson:** work that a caller waits for (a report, an analysis, an import
+blocked on a lock) is never `BACKGROUND` on macOS; "lowered" means `UTILITY` there, like nice 10 on Linux (family ADR 0020's
+class for user-started work). `BACKGROUND` is only for work nothing waits on (ADR 0020's `Idle`).
