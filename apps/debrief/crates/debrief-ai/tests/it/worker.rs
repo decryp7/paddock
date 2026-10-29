@@ -84,14 +84,6 @@ fn runtime(args: &[&str]) -> WorkerRuntime {
     WorkerRuntime::new(config(args), Box::new(big_machine))
 }
 
-/// A runtime whose worker is never taken for stalled: for tests of crashes, whose restart on a loaded machine can take
-/// longer than the short stall timeout of `config` and would turn a crash into "stopped responding".
-fn runtime_without_stalls(args: &[&str]) -> WorkerRuntime {
-    let mut c = config(args);
-    c.stall_timeout = Duration::from_secs(60);
-    WorkerRuntime::new(c, Box::new(big_machine))
-}
-
 fn ask(p: &dyn LlmProvider, text: &str) -> debrief_ai::Result<debrief_ai::llm::ChatResponse> {
     p.chat(
         &ChatRequest {
@@ -208,9 +200,22 @@ fn a_hang_times_out_and_the_worker_is_killed() {
     assert_eq!(s.status().restarts, 1);
 }
 
+/// Regression (Linux CI, `three_crashes_quarantine_the_ai_for_the_session`): a worker that has exited but whose connection
+/// is still open (a dying process finishing its core dump, here a forked child holding the socket) was reported as
+/// "stopped responding" when the stall timer ran out first. It crashed, however slow the OS is to close its sockets.
+#[cfg(unix)]
+#[test]
+fn a_worker_that_exited_before_the_stall_timer_is_a_crash_not_a_hang() {
+    let s = supervisor(&["--exit-leaving-socket"]);
+    s.load(params(0)).unwrap();
+    let err = s.chat(&chat_params("x"), None, &mut |_| {}).unwrap_err();
+    assert!(err.to_string().contains("crashed"), "{err}");
+    assert!(!err.to_string().contains("stopped responding"), "{err}");
+}
+
 #[test]
 fn three_crashes_quarantine_the_ai_for_the_session() {
-    let rt = runtime_without_stalls(&["--crash-on-chat"]);
+    let rt = runtime(&["--crash-on-chat"]);
     let loaded = rt.load(&model(GpuMode::Cpu).req).unwrap();
     for i in 1..=2 {
         let e = ask(loaded.provider.as_ref(), "x").unwrap_err();
