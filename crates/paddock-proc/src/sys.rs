@@ -97,7 +97,7 @@ mod unix {
     }
 
     /// The direct children of `pid` (`proc_listchildpids`: asks the kernel for that parent only, no scan of the process
-    /// list). `Some(empty)` for a process without children or one that is gone.
+    /// list). `Some(empty)` for a process without children or one that is gone, `None` when the kernel failed to answer.
     #[cfg(target_os = "macos")]
     pub fn child_pids(pid: u32) -> Option<Vec<u32>> {
         child_pids_in(pid, 1024)
@@ -115,19 +115,44 @@ mod unix {
                 .unwrap_or(libc::c_int::MAX);
             // SAFETY: the kernel writes at most `bytes` bytes into `buf`, which is that large.
             let n = unsafe { libc::proc_listchildpids(pid, buf.as_mut_ptr().cast(), bytes) };
-            // The answer is a count of pids (not bytes); a full buffer may have cut the list: grow and ask again.
-            let n = usize::try_from(n).unwrap_or(0);
-            if n >= buf.len() && buf.len() < (1 << 20) {
-                buf.resize(buf.len() * 4, 0);
-                continue;
+            match read_listing(n, buf.len()) {
+                Listing::Unknown => return None,
+                Listing::Grow => buf.resize(buf.len() * 4, 0),
+                Listing::Count(n) => {
+                    return Some(
+                        buf.iter()
+                            .take(n)
+                            .filter_map(|p| u32::try_from(*p).ok())
+                            .filter(|p| *p != 0)
+                            .collect(),
+                    );
+                }
             }
-            return Some(
-                buf.iter()
-                    .take(n)
-                    .filter_map(|p| u32::try_from(*p).ok())
-                    .filter(|p| *p != 0)
-                    .collect(),
-            );
+        }
+    }
+
+    /// What `proc_listchildpids` answered, for a buffer of `room` pids.
+    #[cfg(target_os = "macos")]
+    #[derive(Debug, PartialEq, Eq)]
+    pub(crate) enum Listing {
+        /// The kernel could not say (-1: the call failed), which is not "no children".
+        Unknown,
+        /// The buffer was full, so the list may have been cut: grow it and ask again.
+        Grow,
+        /// This many pids were written.
+        Count(usize),
+    }
+
+    /// Reads the answer `n` (a count of pids, not bytes; -1 on failure) of a call that had room for `room` pids.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn read_listing(n: libc::c_int, room: usize) -> Listing {
+        let Ok(n) = usize::try_from(n) else {
+            return Listing::Unknown;
+        };
+        if n >= room && room < (1 << 20) {
+            Listing::Grow
+        } else {
+            Listing::Count(n)
         }
     }
 
@@ -219,6 +244,28 @@ pub fn own_group(_cmd: &mut std::process::Command) {}
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_failed_listing_is_unknown_not_an_empty_list() {
+        assert_eq!(
+            read_listing(-1, 1024),
+            Listing::Unknown,
+            "-1 is the call failing"
+        );
+        assert_eq!(read_listing(0, 1024), Listing::Count(0), "0 is no children");
+        assert_eq!(read_listing(3, 1024), Listing::Count(3));
+        assert_eq!(
+            read_listing(4, 4),
+            Listing::Grow,
+            "a full buffer may have cut the list"
+        );
+        assert_eq!(
+            read_listing(1 << 20, 1 << 20),
+            Listing::Count(1 << 20),
+            "the buffer's ceiling"
+        );
+    }
 
     #[cfg(target_os = "macos")]
     #[test]
