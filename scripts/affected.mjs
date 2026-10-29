@@ -107,7 +107,7 @@ export function e2eConsumers(tracked, read = (f) => readFileSync(join(ROOT, f), 
     } catch {
       continue;
     }
-    for (const hit of text.matchAll(/from '\.\/([\w.-]+?)(?:\.(?:ts|js|mjs))?'/g)) {
+    for (const hit of text.matchAll(/(?:from\s*|import\s*\(?\s*)['"]\.\/([\w.-]+?)(?:\.(?:ts|js|mjs))?['"]/g)) {
       const src = srcFiles.find((s) => s.slice(SRC.length).replace(/\.(ts|mjs|js)$/, '') === hit[1]);
       if (src) importers.set(src, (importers.get(src) ?? new Set()).add(f));
     }

@@ -53,7 +53,7 @@ describe('the graph of this tree', () => {
       }
     }
     for (const a of ['debrief', 'dyno', 'pitcrew', 'pitwall', 'spotter']) assert.ok(consumers.get('ui/projects/paddock-e2e/src/env.ts').has(a), `${a} imports env.ts`);
-    assert.ok(consumers.get('ui/projects/paddock-e2e/src/hit-test.ts').has('debrief'));
+    assert.deepEqual([...consumers.get('ui/projects/paddock-e2e/src/hit-test.ts')].sort(), ['debrief', 'dyno', 'pitcrew', 'pitwall', 'spotter']);
   });
 
   test('e2eConsumers reads the imports (a module, its importers, a quoted path) and ignores tests and other files', () => {
@@ -62,9 +62,20 @@ describe('the graph of this tree', () => {
       'apps/a/app/e2e/one.spec.ts': 'import { y } from "../../../../ui/projects/paddock-e2e/src/hit-test";',
       'apps/b/app/src/main.ts': "import '../../../ui/projects/paddock-e2e/src/env.ts';", // not e2e or config
       'apps/b/app/e2e/two.spec.ts': "import { z } from '../../../../ui/projects/paddock-e2e/src/config.ts';",
+      'apps/c/app/e2e/three.spec.ts': "const m = await import('../../../../ui/projects/paddock-e2e/src/dyn.ts');",
+      'apps/d/app/e2e/four.spec.ts': "import '../../../../ui/projects/paddock-e2e/src/side.ts';",
       'ui/projects/paddock-e2e/src/config.ts': "import { e } from './env.ts';",
       'ui/projects/paddock-e2e/src/env.ts': '',
       'ui/projects/paddock-e2e/src/hit-test.ts': '',
+      'ui/projects/paddock-e2e/src/dyn.ts': '',
+      'ui/projects/paddock-e2e/src/side.ts': '',
+      'ui/projects/paddock-e2e/src/wrap-dq.ts': "import { q } from \"./dq.ts\";",
+      'ui/projects/paddock-e2e/src/wrap-side.ts': "import './sidefx';",
+      'ui/projects/paddock-e2e/src/wrap-dyn.ts': "const x = import('./dynmod.js');",
+      'ui/projects/paddock-e2e/src/dq.ts': '',
+      'ui/projects/paddock-e2e/src/sidefx.ts': '',
+      'ui/projects/paddock-e2e/src/dynmod.ts': '',
+      'apps/e/app/e2e/five.spec.ts': 'import { a, b, c } from "../../../../ui/projects/paddock-e2e/src/wrap-dq.ts"; import "../../../../ui/projects/paddock-e2e/src/wrap-side.ts"; import("../../../../ui/projects/paddock-e2e/src/wrap-dyn");',
       'ui/projects/paddock-e2e/src/hit-test.test.ts': "import './env.ts';",
     };
     const m = e2eConsumers(Object.keys(files), (f) => files[f]);
@@ -72,6 +83,10 @@ describe('the graph of this tree', () => {
     assert.deepEqual([...m.get('ui/projects/paddock-e2e/src/env.ts')].sort(), ['a', 'b']);
     assert.deepEqual([...m.get('ui/projects/paddock-e2e/src/config.ts')], ['b']);
     assert.ok(!m.has('ui/projects/paddock-e2e/src/hit-test.test.ts'));
+    // Side-effect, dynamic and double-quoted imports are read, in apps and between modules of the package.
+    assert.deepEqual([...m.get('ui/projects/paddock-e2e/src/dyn.ts')], ['c']);
+    assert.deepEqual([...m.get('ui/projects/paddock-e2e/src/side.ts')], ['d']);
+    for (const dep of ['dq', 'sidefx', 'dynmod']) assert.deepEqual([...m.get(`ui/projects/paddock-e2e/src/${dep}.ts`)], ['e'], dep);
   });
 
   // Paddock 234f6911: a ui/ shell change broke the shell demo job, which has no npm or Cargo edge to ui/ (spike §2).
