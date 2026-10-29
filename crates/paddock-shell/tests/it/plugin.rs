@@ -926,3 +926,72 @@ fn dialogs_are_shown_at_the_start_up_configs_deadline() {
         std::time::Duration::from_millis(1500)
     );
 }
+
+/// How long the start-up tests wait for `build` before calling it a deadlock: a hang guard only a deadlocked start
+/// reaches (a working build on the mock runtime takes milliseconds), never a measure of a working one.
+const DEADLOCKED_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Builds the app on its own thread; `None` when `build` never returned (the thread is left blocked).
+fn build_or_deadlock(
+    builder: impl FnOnce() -> tauri::Builder<MockRuntime> + Send + 'static,
+) -> Option<Result<(), String>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let built = builder()
+            .build(context())
+            .map(drop)
+            .map_err(|e| e.to_string());
+        let _ = tx.send(built);
+    });
+    rx.recv_timeout(DEADLOCKED_AFTER).ok()
+}
+
+/// Spotter 1.0 never opened a window: its set-up opened the main window from the shell's `setup`, which runs inside
+/// Tauri's plugin set-up while Tauri holds its plugin store, and building a webview locks that store again on the same
+/// thread (a self-deadlock on the main thread). Opening a window there fails the start with a message that names the fix.
+#[test]
+fn a_window_opened_from_the_shells_setup_fails_the_start_instead_of_deadlocking() {
+    use paddock_window::launch::LaunchArgs;
+    use paddock_window::tauri::{WindowConfig, Windows};
+    let built = build_or_deadlock(|| {
+        mock_builder().plugin(
+            Builder::new(identity())
+                .in_memory()
+                .native_menu(false)
+                .windows(|_| Windows::builder(WindowConfig::new("Shell Demo")).build())
+                .setup(|app| {
+                    paddock_window::tauri::start(app, &LaunchArgs::default())?;
+                    Ok(())
+                })
+                .build(),
+        )
+    })
+    .expect("the start deadlocked: a window was built while Tauri held its plugin store");
+    let e = built.expect_err("a window cannot be opened during the plugin's set-up");
+    assert!(e.contains("tauri::Builder::setup"), "{e}");
+}
+
+/// The same window opened from Tauri's own `setup` (after every plugin is set up) opens.
+#[test]
+fn the_main_window_opens_from_tauris_setup() {
+    use paddock_window::launch::LaunchArgs;
+    use paddock_window::tauri::{WindowConfig, Windows};
+    let mut app = mock_builder()
+        .plugin(
+            Builder::new(identity())
+                .in_memory()
+                .native_menu(false)
+                .windows(|_| Windows::builder(WindowConfig::new("Shell Demo")).build())
+                .build(),
+        )
+        .setup(|app| {
+            paddock_window::tauri::start(app.handle(), &LaunchArgs::default())?;
+            Ok(())
+        })
+        .build(context())
+        .unwrap();
+    // One iteration runs Tauri's set-up; the mock runtime has no event loop to run instead.
+    #[allow(deprecated)]
+    app.run_iteration(|_, _| {});
+    assert!(app.get_webview_window("main").is_some());
+}

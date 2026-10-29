@@ -37,6 +37,7 @@ mod manager;
 mod native;
 #[cfg(feature = "tray")]
 mod native_tray;
+mod plugin_hook;
 mod popover;
 mod tray;
 
@@ -53,6 +54,7 @@ pub use manager::{
 pub use native::on_run_event;
 #[cfg(feature = "tray")]
 pub use native_tray::NativeTray;
+pub use plugin_hook::{PluginHookScope, after_plugin_hook, in_plugin_hook, plugin_hook_scope};
 pub use popover::{PopoverSpec, Popovers, close_popover, fit_popover, toggle_popover};
 pub use tray::{
     Tray, TrayBackend, create_tray, icon_clicked, menu_chosen, refresh_tray, tray_available,

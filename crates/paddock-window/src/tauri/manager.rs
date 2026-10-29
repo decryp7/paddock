@@ -620,6 +620,7 @@ pub(crate) fn build<R: Runtime>(
     label: &str,
     builder: Builder<'_, R>,
 ) -> Result<WebviewWindow<R>, WindowError> {
+    super::plugin_hook::check_can_build(label)?;
     let windows = state(app)?;
     let feel = WebviewFeel::current();
     let config = &windows.config;

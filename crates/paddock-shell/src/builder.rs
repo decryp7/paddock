@@ -332,7 +332,9 @@ impl<R: Runtime> Builder<R> {
     }
 
     /// The app's own set-up, run after the shell's state is managed (in the order given). An error fails the app's
-    /// start with that error.
+    /// start with that error. It runs inside the plugin's set-up, where Tauri holds its plugin store: open the tray and
+    /// windows (`paddock_window::tauri::start`) from `tauri::Builder::setup` instead; a window opened here fails the start
+    /// (building its webview would wait for the store forever).
     pub fn setup(
         mut self,
         f: impl FnOnce(&AppHandle<R>) -> Result<(), BoxError> + Send + 'static,
@@ -455,7 +457,11 @@ impl<R: Runtime> Builder<R> {
         tauri::plugin::Builder::<R>::new(PLUGIN_NAME)
             .invoke_handler(handler)
             .setup(move |app, _api| match parts.take() {
-                Some(parts) => parts.install(app).map_err(|e| e as Box<dyn Error>),
+                Some(parts) => {
+                    // No window may be built while Tauri holds its plugin store (it would deadlock).
+                    let _scope = paddock_window::tauri::plugin_hook_scope();
+                    parts.install(app).map_err(|e| e as Box<dyn Error>)
+                }
                 None => Ok(()),
             })
             .on_page_load(|webview, payload| paddock_startup::tauri::on_page_load(webview, payload))
@@ -764,8 +770,25 @@ fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
 
 /// The app's run events: the window layer's exit (bounded teardown), and at exit the pending update and the messages.
 fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
+    // Tauri calls this with its plugin store held: no window may be built here (it would deadlock).
+    let _scope = paddock_window::tauri::plugin_hook_scope();
     if app.try_state::<Windows<R>>().is_some() {
-        paddock_window::tauri::on_run_event(app, event);
+        match event {
+            // A file opened from Finder or a Dock click with no window open: these build windows, after the hook.
+            #[cfg(target_os = "macos")]
+            RunEvent::Opened { urls } => {
+                let urls = urls.clone();
+                paddock_window::tauri::after_plugin_hook(app, move |app| {
+                    paddock_window::tauri::opened(app, &urls)
+                });
+            }
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            } => paddock_window::tauri::after_plugin_hook(app, paddock_window::tauri::reopen),
+            _ => paddock_window::tauri::on_run_event(app, event),
+        }
     }
     if let RunEvent::Exit = event {
         // First: the last checkpoint and the removal of the running marker are what makes this a clean exit.
