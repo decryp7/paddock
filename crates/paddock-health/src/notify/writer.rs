@@ -247,6 +247,8 @@ mod tests {
         clock.advance(Duration::from_secs(1));
         // A newer list one second in: the wait starts again from its own two seconds.
         w.schedule(list(2));
+        // The writer's restarted wait must be on the clock before time moves, or the advance can pass it by.
+        assert!(clock.wait_for_started(2, Duration::from_secs(60)));
         clock.advance(Duration::from_secs(1));
         assert!(
             rx.try_recv().is_err(),

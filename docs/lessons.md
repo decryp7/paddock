@@ -663,3 +663,20 @@ of every app on the shared shell.
 Three `paddock-chromium` tests failed on CI runs of several branches and never on a quiet machine: (1) `a_real_browser_reads_a_page_and_closes_cleanly` and `a_cancelled_load_says_whether_it_was_a_download_or_replaced` asserted `Browser.close()`, whose 5 s grace (`CLOSE_GRACE`, the product's bound before it kills the tree) is a fine product choice but a time budget as a test assertion: a loaded runner let Chrome take longer (macOS 6662, Windows 6726, 13 s test); (2) `a_page_is_read_snapshot_by_snapshot` pushed a 16 MiB page (`MAX_HTML` + 1) through the fake browser in a debug build to see the size cap refuse it, which outlasted the 10 s call timeout on a macOS runner and gave `Timeout` instead of "larger". **Rule:** a test asserts the mechanism (the browser exits by itself and is not killed; the cap refuses a page one byte over it), never that it happened within a product timeout; give the code under test the cap as a parameter so a few bytes prove it; wait on the condition (`close_gracefully` returns the moment Chrome exits) with a hang guard that only stops a browser that never exits. A failing wait names what the thing it waited for reported (the load's own result), so the next failure carries its cause.
 
 This is the same lesson as "A turn budget in a test wait is a timeout in disguise" for assertions on a product's own grace period: wait on the condition, and let a generous hang guard (never an expectation) stop only a thing that never ends. A third cause was found in the same test by review: its server took one connection at a time with a blocking read, so an idle socket Chrome opened (a preconnect or backup connect) could hide the real request; each connection now has its thread and a failed wait prints what the server saw. C30 now flags a non-negated `assert!` over a bare `.close()` or `.close_gracefully(..)` (the calls that wait out a grace). Waive `close_gracefully` with `// conformance: hang-guard` and a grace of at least 10 s, or either call with `// conformance: grace-free — <why>` when the thing had ended already; a forced end (`assert!(!b.close_gracefully(Duration::ZERO))`) is not flagged.
+
+## 2026-10-29: the Tauri template's crate types cost more than the linker (all apps)
+
+An incremental debug rebuild of Debrief spent 0.61 s linking the binary, but about 1.5 s writing a 1.0 GB static archive
+(about 1.25 s) and linking an unused cdylib (0.24 s), both from Tauri's template
+`crate-type = ["staticlib", "cdylib", "rlib"]`, which only iOS and Android use. `rlib` alone cut the rebuild by 25%
+(Debrief) and 38% (Dyno); lld was slower than ld-prime and cannot read the macOS 27 SDK. Dropping the crate types also
+changes release output, though not its behaviour (verified function by function on Dyno): cargo hashes each unit's LTO
+mode into `-C metadata`, so the dependencies are compiled bitcode-only under new hashes (other `TypeId` values, folding
+and inlining). Also: cargo fingerprints the linker, so a timing wrapper set as the linker after a build recompiles
+everything. **Guidance:** app crates build an rlib only; measure link time with a linker wrapper
+([`scripts/perf/link-time/cc-timed.sh`](../scripts/perf/link-time/cc-timed.sh)) set before the first build, and compare
+release binaries function by function ([`classify.py`](../scripts/perf/link-time/classify.py)), not by checksum.
+Results: [Debrief](../apps/debrief/docs/performance.md#2026-10-29-incremental-rebuild-and-link-time-docslink-time),
+[Dyno](../apps/dyno/docs/performance.md#2026-10-29-incremental-rebuild-and-link-time-docslink-time),
+[Dyno release identity](../apps/dyno/docs/performance.md#2026-10-29-release-identity-of-the-rlib-only-crate-type-docslink-time);
+details: [research/2026-10-29-link-time.md](research/2026-10-29-link-time.md).
