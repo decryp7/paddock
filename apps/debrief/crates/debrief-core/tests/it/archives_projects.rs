@@ -497,7 +497,7 @@ fn repeated_paths_written_with_data_descriptors_are_all_kept() {
 /// n squared steps (40,000 copies took a minute). The count is the assertion; the run must also end.
 #[test]
 fn many_copies_of_one_path_are_all_kept_under_distinct_names() {
-    let files: Vec<(String, Vec<u8>)> = (0..30_000u32)
+    let files: Vec<(String, Vec<u8>)> = (0..2_000u32)
         .map(|i| ("logs/app.log".to_string(), i.to_le_bytes().to_vec()))
         .collect();
     let entries = debrief_core::archive::expand("dup.zip", crate::common::stored_zip(&files)).expect("the archive expands");
@@ -505,8 +505,16 @@ fn many_copies_of_one_path_are_all_kept_under_distinct_names() {
     let names: std::collections::HashSet<_> = entries.iter().map(|e| e.name.clone().unwrap()).collect();
     assert_eq!(names.len(), files.len());
     assert_eq!(entries.iter().filter(|e| e.renamed_from.is_some()).count(), files.len() - 1);
-    assert_eq!(entries[29_999].name.as_deref(), Some("logs/app (30000).log"));
-    assert_eq!(entries[29_999].bytes, 29_999u32.to_le_bytes());
+    assert_eq!(entries[1_999].name.as_deref(), Some("logs/app (2000).log"));
+    assert_eq!(entries[1_999].bytes, 1_999u32.to_le_bytes());
+}
+
+/// Regression (review round 2): a repeated UTF-8 name in an archive that does not set the UTF-8 flag keeps its letters.
+#[test]
+fn a_repeated_utf8_name_without_the_flag_keeps_its_letters() {
+    let got = entries_of(&[("caf\u{e9}.log", b"one"), ("caf\u{e9}.log", b"two")]);
+    let names: Vec<&str> = got.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["caf\u{e9}.log", "caf\u{e9} (2).log"]);
 }
 
 /// More entries than `MAX_ENTRIES` is refused with a message, on the normal path and the repeated-path one.

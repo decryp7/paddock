@@ -104,7 +104,7 @@ fn expand_with(file_name: &str, bytes: Vec<u8>, limits: Limits, cancel: &AtomicB
         let zip = zip::ZipArchive::new(Cursor::new(&bytes[..])).context("invalid zip archive")?;
         too_many(zip.len(), max_entries)?;
         let records = central_records(&bytes, zip.central_directory_start(), zip.offset(), max_entries)?;
-        check_ranges(&bytes, &records)?;
+        check_ranges(&bytes, &records, zip.central_directory_start())?;
         let mut namer = Namer::new(
             records
                 .iter()
@@ -194,14 +194,18 @@ struct Record {
 const CP437_HIGH: &str =
     "ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u{a0}";
 
-/// A central directory name: UTF-8 when general purpose flag bit 11 says so, code page 437 otherwise (as zip's reader).
+/// A central directory name: UTF-8 when general purpose flag bit 11 says so or the bytes are valid UTF-8 (as the zip
+/// crate reads names), code page 437 otherwise.
 fn decode_name(raw: &[u8], flags: u64) -> String {
     if flags & 0x800 != 0 {
         return String::from_utf8_lossy(raw).into_owned();
     }
-    let high: Vec<char> = CP437_HIGH.chars().collect();
+    if let Ok(utf8) = std::str::from_utf8(raw) {
+        return utf8.to_string();
+    }
+    static HIGH: std::sync::LazyLock<Vec<char>> = std::sync::LazyLock::new(|| CP437_HIGH.chars().collect());
     raw.iter()
-        .map(|&b| if b < 0x80 { char::from(b) } else { high[usize::from(b) - 0x80] })
+        .map(|&b| if b < 0x80 { char::from(b) } else { HIGH[usize::from(b) - 0x80] })
         .collect()
 }
 
@@ -275,7 +279,7 @@ fn central_records(bytes: &[u8], start: u64, offset: u64, max: usize) -> Result<
 /// Refuses an archive in which two entries share a byte of header or data (the zip crate's `has_overlapping_entries`
 /// for records it cannot index): many central records over one local entry would be read as many entries, and the
 /// renaming and reading work grows with their number, not with the archive's size.
-fn check_ranges(bytes: &[u8], records: &[Record]) -> Result<()> {
+fn check_ranges(bytes: &[u8], records: &[Record], central_start: u64) -> Result<()> {
     const LOCAL: u32 = 0x0403_4b50;
     const FIXED: u64 = 30;
     let bad = || anyhow!("invalid zip archive: an entry's header is outside the archive");
@@ -291,7 +295,7 @@ fn check_ranges(bytes: &[u8], records: &[Record]) -> Result<()> {
             .local_header
             .checked_add(FIXED + lens)
             .and_then(|e| e.checked_add(r.compressed))
-            .filter(|&e| e <= bytes.len() as u64)
+            .filter(|&e| e <= bytes.len() as u64 && e <= central_start)
             .ok_or_else(bad)?;
         ranges.push((r.local_header, end));
     }
@@ -351,6 +355,9 @@ struct Namer {
     seen: HashSet<String>,
     /// For a path, the next number `<stem> (n)<.ext>` to try.
     next: HashMap<String, u64>,
+    /// Candidate names tried so far (tests check that renaming stays linear).
+    #[cfg(test)]
+    probes: u64,
 }
 
 impl Namer {
@@ -359,6 +366,8 @@ impl Namer {
             taken: names.into_iter().collect(),
             seen: HashSet::new(),
             next: HashMap::new(),
+            #[cfg(test)]
+            probes: 0,
         }
     }
 
@@ -378,6 +387,10 @@ impl Namer {
         loop {
             let candidate = format!("{prefix}{stem} ({n}){ext}");
             *n += 1;
+            #[cfg(test)]
+            {
+                self.probes += 1;
+            }
             if self.taken.insert(candidate.clone()) {
                 return candidate;
             }
@@ -552,6 +565,44 @@ mod tests {
         r.extend(name);
         r.extend(extra);
         r
+    }
+
+    /// Regression (review round 2): a name in UTF-8 without the UTF-8 flag was read as code page 437 (`caf├⌐.log`); the
+    /// zip crate tries UTF-8 first.
+    #[test]
+    fn a_utf8_name_without_the_flag_is_read_as_utf8() {
+        let rec = central_record("café.log".as_bytes(), 0, [1, 1], &[]);
+        assert_eq!(central_records(&rec, 0, 0, 10).unwrap()[0].name, "café.log");
+        // Not valid UTF-8 and no flag: code page 437.
+        let rec = central_record(b"caf\x82.log", 0, [1, 1], &[]);
+        assert_eq!(central_records(&rec, 0, 0, 10).unwrap()[0].name, "café.log");
+    }
+
+    #[test]
+    fn renaming_costs_one_probe_per_copy() {
+        let k = 1000u64;
+        let mut namer = Namer::new(["x.log".to_string()]);
+        for _ in 0..k {
+            namer.assign("x.log");
+        }
+        assert_eq!(namer.probes, k - 1);
+        // Real entries `x (2).log` .. `x (k).log` are skipped once each, not once per copy.
+        let real = (2..=k).map(|n| format!("x ({n}).log")).chain(["x.log".to_string()]);
+        let mut namer = Namer::new(real);
+        for _ in 0..k {
+            namer.assign("x.log");
+        }
+        assert!(namer.probes <= 2 * k, "{}", namer.probes);
+    }
+
+    #[test]
+    fn data_running_into_the_central_directory_is_refused() {
+        let z = zip_twice(b"one", b"two");
+        let zip = zip::ZipArchive::new(Cursor::new(&z[..])).unwrap();
+        let start = zip.central_directory_start();
+        let records = central_records(&z, start, zip.offset(), 10).unwrap();
+        assert!(check_ranges(&z, &records, start).is_ok());
+        assert!(check_ranges(&z, &records, start - 1).is_err());
     }
 
     #[test]
