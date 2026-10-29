@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-chromium`: an unexplained abort names the network service
+- `Page::navigate`'s error for an unexplained `net::ERR_ABORTED` (not a download, not replaced) says whether the browser's network service restarted, stayed unchanged or could not be asked. New `Page::network_service_pid` (`Result<Option<u32>>`; `SystemInfo` is an experimental DevTools domain). ADR 0030 (proposed).
+
 ### `paddock-jobs`: `WalkOptions::with_modified`
 - `WalkOptions` has a new field `with_modified` (default false) and `WalkEntry` a new field `modified: Option<SystemTime>`: the walk reads a file's modification time from the same `stat` as its size, so a caller needs no second look at each file (Dyno's file finder). Code that builds a `WalkEntry` by hand adds `modified: None`.
 

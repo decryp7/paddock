@@ -751,3 +751,10 @@ composed start with `paddock_shell::testing::start` (C50). Neither Spotter nor D
 crate, so every shared crate's line (the start's error among them) was lost: every app installs `paddock-log` first
 (`paddock_shell::logging::install`). Also: a start-up hang with an empty log is checked first with a symbolised stack,
 not by guessing at the VM.
+
+## An unexplained browser abort needs its cause in the message (2026-10-29)
+`net::ERR_ABORTED` covers every load Chrome cancels before commit: a download, a replacing navigation, the tab's own first
+navigation, and a restart of the browser's network service. Fixing them one guess at a time cost three rounds of Windows
+CI. Ending the network service locally reproduced the Windows trace exactly. **Rule:** a driver error that can have
+several causes says which ones it ruled out (the trace, the network service's process), and a real-browser test drives
+each named cause on purpose (ADR 0030). Diagnostics land before a fix that would hide the cause.
