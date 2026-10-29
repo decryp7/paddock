@@ -91,6 +91,27 @@ pub struct Seams {
     pub os_toasts: bool,
     /// Where the start-up notes go (Spotter's log when installed).
     pub note: fn(&str),
+    /// Where the watches' secrets live.
+    pub secrets: SecretsIn,
+}
+
+/// Where the watches' secrets live: the OS credential store (the installed app) or memory (a test: never the user's
+/// keychain).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretsIn {
+    /// The OS credential store.
+    Os,
+    /// Memory, for the run only.
+    Memory,
+}
+
+impl SecretsIn {
+    fn store(self) -> Arc<dyn spotter_engine::secrets::SecretStore> {
+        match self {
+            SecretsIn::Os => Arc::new(credentials::KeyringSecrets),
+            SecretsIn::Memory => Arc::new(spotter_engine::secrets::MemorySecrets::new()),
+        }
+    }
 }
 
 impl Seams {
@@ -100,15 +121,17 @@ impl Seams {
             data_dir: None,
             os_toasts: true,
             note: applog::write,
+            secrets: SecretsIn::Os,
         }
     }
 
-    /// A test's: data in `dir`, no OS toasts, notes to the `log` facade only.
+    /// A test's: data in `dir`, no OS toasts, notes to the `log` facade only, secrets in memory.
     pub fn test(dir: &std::path::Path) -> Seams {
         Seams {
             data_dir: Some(dir.join("data")),
             os_toasts: false,
             note: |m| log::info!("{m}"),
+            secrets: SecretsIn::Memory,
         }
     }
 }
@@ -167,7 +190,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>, hub: &Hub<R>, seams: &Seams) -> Resu
     }
     let clock = Arc::new(spotter_engine::clock::SystemClock::new());
     refresh_local_time(&clock);
-    let mut services = Services::new(Arc::new(credentials::KeyringSecrets));
+    let mut services = Services::new(seams.secrets.store());
     services.clock = clock.clone();
     services.notifier = Arc::new(notifier.clone());
     services.renderer = Some(Arc::new(ChromiumRenderer::new(&data_dir, data_dir.join("cache").join("render"))));
@@ -304,6 +327,16 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) {
 
 #[cfg(test)]
 mod tests {
+
+    /// A test's seams never reach the user's keychain: secrets stay in memory (rule 7); the installed app's use the OS
+    /// store.
+    #[test]
+    fn a_tests_secrets_stay_in_memory() {
+        let dir = std::path::Path::new("/nonexistent-test-dir");
+        assert_eq!(Seams::test(dir).secrets, SecretsIn::Memory);
+        assert_eq!(Seams::installed().secrets, SecretsIn::Os);
+    }
+
     use super::*;
     use spotter_engine::clock::{Clock, SystemClock};
 
