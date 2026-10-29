@@ -553,7 +553,8 @@ mod tests {
         let (_d, _fake, mut b) = launch_fake(crate::fake::Mode::Obey, 1);
         let (dir, pid) = (b.profile_dir().to_path_buf(), b.pid().unwrap());
         assert!(dir.exists());
-        assert!(b.close_gracefully(Duration::from_secs(5)), "it exited by itself");
+        // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
+        assert!(b.close_gracefully(Duration::from_secs(40)), "it exited by itself");
         assert!(!dir.exists(), "the throwaway profile is gone");
         assert!(!crate::process::process_exists(pid) || !b.is_running());
     }
@@ -623,7 +624,8 @@ mod tests {
         assert!(args.contains(&format!("--user-data-dir={}", kept.display())), "{args:?}");
         assert!(args.contains(&"--disk-cache-size=1234".to_string()), "{args:?}");
         assert_eq!(args.last().map(String::as_str), Some("about:blank"), "the start page stays last");
-        assert!(b.close_gracefully(Duration::from_secs(2)));
+        // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
+        assert!(b.close_gracefully(Duration::from_secs(40)));
         assert!(kept.is_dir(), "a kept profile is not removed");
     }
 

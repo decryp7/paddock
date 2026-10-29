@@ -9,8 +9,9 @@
 // (it asserts that a product grace period was long enough for this machine; waive `close_gracefully` with the hang-guard comment
 // and a grace of at least 10 s, or either with `// conformance: grace-free — <why>` when the thing ended already), and, in TypeScript specs, `Date.now()` /
 // `performance.now()` differences asserted with `expect` (unless the spec uses fake timers: `useFakeTimers`, `setSystemTime`,
-// `page.clock`). Warning level: existing code is listed, never blocks a build.
-import { warn } from '../finding.mjs';
+// `page.clock`). Warning level: existing code is listed, never blocks a build; except an assertion over a grace period, an
+// error since it failed CI again as a warning (ER-21).
+import { error, warn } from '../finding.mjs';
 
 const HANG_GUARD = /conformance:\s*hang-guard/;
 /** The waiver of a sleep must say why: `// conformance: hang-guard — <reason>` (a dash, an en dash or a hyphen, then words). */
@@ -219,7 +220,8 @@ export default {
             if (a.limitMs !== null && a.limitMs < MIN_GUARD_MS) out.push(warn('C30', 40, f, a.line, `a hang guard of ${a.limitMs} ms is too tight to be one: ${a.text}`, 'Raise the grace to at least 10 s (the exit is waited for on the condition, so a long guard costs nothing), or assert the mechanism instead.'));
             continue;
           }
-          out.push(warn('C30', 40, f, a.line, `asserts that a call outlasted by load finished within its grace: ${a.text}`, 'Wait for the exit on the condition with a generous hang guard (`close_gracefully(Duration::from_secs(120))` with `// conformance: hang-guard`), assert the mechanism, not the budget, or, when the thing has ended already, say so with `// conformance: grace-free — <why>` (lesson "Chromium tests compared a loaded machine with a product timeout").'));
+          // An error, not a warning (ER-21): this kind failed CI again while it was only a warning (fix/flaky-browser-close).
+          out.push(error('C30', 40, f, a.line, `asserts that a call outlasted by load finished within its grace: ${a.text}`, 'Wait for the exit on the condition with a generous hang guard (`close_gracefully(Duration::from_secs(120))` with `// conformance: hang-guard`), assert the mechanism, not the budget, or, when the thing has ended already, say so with `// conformance: grace-free — <why>` (lesson "Chromium tests compared a loaded machine with a product timeout").'));
         }
         for (const s of threadSleeps(text)) {
           if (s.waived === 'no-reason') out.push(warn('C30', 40, f, s.line, `the sleep's waiver gives no reason: ${s.text}`, 'Write `// conformance: hang-guard — <why this sleep is needed>`.'));

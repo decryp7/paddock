@@ -51,6 +51,19 @@ test('mask keeps newlines and blanks comments and strings', () => {
 
 const sleepy = (body) => `use std::{sync::*, thread, time::Duration};\n#[test]\nfn it() {\n${body}\n}\n`;
 
+test('C30 through the runner: an assertion over a product grace period is an error (ER-21); a hang guard or grace-free waiver is not', async () => {
+  const f = await findingsOf('C30', makeApp({ 'crates/a/tests/close.rs': wrap('    assert!(b.close(), "ends by itself");') }));
+  assert.equal(f.length, 1);
+  assert.equal(f[0].severity, 'error');
+  assert.match(f[0].message, /within its grace/);
+  const g = await findingsOf('C30', makeApp({ 'crates/a/tests/g.rs': wrap('    assert!(b.close_gracefully(Duration::from_secs(5)));') }));
+  assert.equal(g[0].severity, 'error');
+  const guarded = wrap('    // conformance: hang-guard — only stops a browser that never exits\n    assert!(b.close_gracefully(Duration::from_secs(120)));');
+  assert.deepEqual(await findingsOf('C30', makeApp({ 'crates/a/tests/h.rs': guarded })), []);
+  const ended = wrap('    // conformance: grace-free — it ended already\n    assert!(b.close(), "a second close");');
+  assert.deepEqual(await findingsOf('C30', makeApp({ 'crates/a/tests/e.rs': ended })), []);
+});
+
 test('C30 sleeps: a thread::sleep in a test that uses threads is flagged; alone, or waived, it is not', () => {
   assert.equal(threadSleeps(sleepy('    let h = thread::spawn(|| work());\n    thread::sleep(Duration::from_millis(50));\n    h.join().unwrap();')).length, 1);
   assert.equal(threadSleeps(sleepy('    let flag = Arc::new(AtomicBool::new(false));\n    std::thread::sleep(Duration::from_millis(5));')).length, 1);
