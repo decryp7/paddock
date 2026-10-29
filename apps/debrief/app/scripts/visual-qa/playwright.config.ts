@@ -1,11 +1,17 @@
 import { defineConfig, devices } from '@playwright/test';
+import { resolve } from 'node:path';
+import { appBuildGuard, reuseServer } from '../../../../../ui/projects/paddock-e2e/src/build-guard.ts';
+import { e2ePortOrCiDefault } from '../../../../../ui/projects/paddock-e2e/src/env.ts';
+
+// Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
+appBuildGuard(resolve(__dirname, '../../'), resolve(__dirname, '../../../../../ui'));
 
 // Visual QA sweep: screenshots every view, menu and dialog of the browser build (mock backend) in both themes and at
 // several window sizes, and reports layout problems (overlapping controls, clipped text). Not part of the e2e gate.
 // Run from app/: npx playwright test -c scripts/visual-qa/playwright.config.ts
 // Output: ../target/visual-qa (override with DEBRIEF_QA_OUT). Pick sizes/themes with DEBRIEF_QA_SIZES=1600x1000,1024x700 and
 // DEBRIEF_QA_THEMES=dark,light.
-const PORT = Number(process.env['DEBRIEF_QA_PORT'] ?? 4330);
+const PORT = e2ePortOrCiDefault('DEBRIEF_QA_PORT', 4330);
 
 export default defineConfig({
   testDir: '.',
@@ -24,7 +30,7 @@ export default defineConfig({
   webServer: {
     command: `npx ng serve --port ${PORT}`,
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: true,
+    reuseExistingServer: reuseServer(),
     timeout: 180_000,
   },
 });

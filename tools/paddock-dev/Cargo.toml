@@ -1,0 +1,50 @@
+# `paddock-dev`: the developer and CI tool (ADR 0022). Its own Cargo workspace and lockfile (ADR 0014's third kind,
+# `tools/<tool>/`): a dependency change here never touches crates/Cargo.lock, which the planner treats as an input of every
+# crate. The shared crates are path dependencies; the files that decide the binary are listed in inputs.txt.
+[workspace]
+resolver = "3"
+members = ["."]
+
+[package]
+name = "paddock-dev"
+version = "0.1.0"
+description = "Paddock's developer and CI tool: ./dev"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://dev.decryptology.net/decryp7/paddock"
+publish = false
+build = "build.rs"
+
+[[bin]]
+name = "paddock-dev"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
+# Keep the key order of the JSON the planner prints, as scripts/affected.mjs does.
+serde_json = { version = "1", features = ["preserve_order"] }
+regex = "1"
+paddock-cli = { path = "../../crates/paddock-cli" }
+paddock-proc = { path = "../../crates/paddock-proc" }
+paddock-repo-graph = { path = "../../crates/paddock-repo-graph", features = ["git-history", "cargo-metadata"] }
+paddock-slots = { path = "../../crates/paddock-slots" }
+
+[target.'cfg(unix)'.dependencies]
+# fds.rs: the holder closes the descriptors it inherited.
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# fds.rs: the standard handles are made non-inheritable before the holder starts.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+
+[dev-dependencies]
+tempfile = "3"
+paddock-testkit = { path = "../../crates/paddock-testkit" }
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

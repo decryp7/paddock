@@ -1,0 +1,24 @@
+[package]
+name = "paddock-repo-graph"
+version = "0.1.0"
+description = "The project graph of a repository: Cargo and npm projects and their edges (Tauri frontendDist, tsconfig, angular.json and ESLint config path references), the file-to-project mapping, the affected closure, lockfile differences, and a History port for tracked and changed files, file contents at a revision and the log. Adapters for git and cargo metadata sit behind features."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[features]
+# Adapters that run programs (ADR 0022 §6). Off by default: Pacenotes opens hostile repositories and must never run
+# cargo there (it reads .cargo/config.toml, which can name the compiler and wrapper programs). A conformance check that fails
+# when a manifest under apps/pacenotes/ enables `cargo-metadata` is planned (ADR 0022 §3.7), not written yet.
+cargo-metadata = ["dep:paddock-proc"]
+git-history = ["dep:paddock-proc"]
+
+[dependencies]
+serde_json = "1"
+paddock-proc = { workspace = true, optional = true }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+tempfile = "3"
+paddock-testkit = { workspace = true }
