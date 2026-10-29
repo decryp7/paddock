@@ -19,14 +19,12 @@ rm -rf "$dir/release/bundle"
 [ -d node_modules ] || npm ci
 (cd apps/$app && npx tauri build --bundles "$bundles")
 
-# ADR 0032: no binary the Windows installer carries imports the VC++ runtime.
+# ADR 0032: no binary the Windows installer carries imports the VC++ runtime (the list comes from the Tauri configuration).
 case ",$bundles," in
   *,nsis,* | *,msi,*)
-    shopt -s nullglob
-    win=("$dir"/release/*.exe "$dir"/release/*.dll)
-    shopt -u nullglob
-    if [ -d "apps/$app/src-tauri/binaries" ]; then win+=("apps/$app/src-tauri/binaries"); fi
-    node conformance/release/windows-crt-imports.mjs ${win[@]+"${win[@]}"}
+    bin_dir="$dir/release"
+    if command -v cygpath >/dev/null; then bin_dir="$(cygpath -m "$bin_dir")"; fi  # Node reads C:/..., not /c/...
+    node conformance/release/windows-crt-imports.mjs --src-tauri "apps/$app/src-tauri" --bin-dir "$bin_dir"
     ;;
 esac
 

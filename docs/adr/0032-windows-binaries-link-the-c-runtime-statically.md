@@ -84,27 +84,52 @@ separate matter, and Tauri's bootstrapper handles it.
    `tauri.conf.json`.** The two do not combine. `static_vcruntime` adds `/NODEFAULTLIB:libucrt.lib` and
    `/DEFAULTLIB:ucrt.lib` to the app binary, and cargo-xwin's `+crt-static` mode adds `-nodefaultlib:ucrt` and
    `-defaultlib:libucrt`. Together they exclude both UCRT libraries, and the link fails with undefined `strlen`, `floor`,
-   `_initialize_onexit_table` and more (measured 2026-10-30 on `dyno-app`). On a native MSVC link the pair would probably
-   resolve to a dynamic UCRT (not measured). With one mechanism every binary is built the same way, wherever it is built.
-   `scripts/new-app.mjs` copies a demo's configuration, so a new app inherits the setting; a test checks every app.
+   `_initialize_onexit_table` and more (measured 2026-10-30 on `dyno-app`). With one mechanism every binary is built the
+   same way, wherever it is built. A test checks that every app keeps the setting.
+
+   **A new app gets both halves.** `scripts/new-app.mjs` copies a demo's `tauri.conf.json` (with `staticVCRuntime`
+   false) into a repository of its own, outside this one, where the root configuration does not reach. It therefore also
+   writes the new repository's `.cargo/config.toml` with the same table, taken from this repository's root configuration
+   (one source), and fails when that table is missing. Without it, the new app's sidecars and its app binary would both
+   import `VCRUNTIME140.dll`. `scripts/new-app.test.mjs` checks both halves.
 
 2. **One check over every instance: `conformance/release/windows-crt-imports.mjs`.** It reads the PE import and
    delay-import tables (pure Node, no `dumpbin` or `objdump`, so it runs on the Windows runner as it is) and fails on
-   any DLL of the redistributable: `vcruntime*`, `msvcp*` (with its dot libraries such as `msvcp140_1`), `msvcr<n>`,
-   `concrt*`, `vccorlib*`, `vcomp*`, `vcamp*`, `mfc*` and the debug runtimes (`*d.dll`, `ucrtbased.dll`). The UCRT
-   (`ucrtbase.dll`, `api-ms-win-crt-*`) and the system's `msvcrt.dll` are allowed. It runs on the binaries an installer
-   carries, right after `tauri build` and before the installers are collected, in every path that builds a Windows
-   installer:
+   any DLL of the redistributable: a family name (`vcruntime`, `msvcp`, `msvcr`, `concrt`, `vccorlib`, `vcomp`, `vcamp`,
+   `mfc`, `mfcm`), its version and any suffix. That includes `vcruntime140_1`, `vcruntime140_threads`,
+   `msvcp140_atomic_wait`, `mfc140u` and the debug builds (`msvcp140d`, `msvcp140d_atomic_wait`, `ucrtbased`). The UCRT
+   (`ucrtbase.dll`, `api-ms-win-crt-*`) and the system's `msvcrt.dll` are allowed. A delay-load table in the old
+   VA-based format (before Visual C++ 7) is reported as a finding that names the format and says to inspect the file
+   with `dumpbin /imports`; it is never read as if it held RVAs.
+
+   **It checks what the installer ships, named by the configuration, not a folder listing.** With `--src-tauri` and
+   `--bin-dir` it merges `tauri.conf.json`, `tauri.windows.conf.json` and any `--config` file the build used (as a JSON
+   merge patch, like Tauri). It then checks:
+   - the main binary (`mainBinaryName`, else Cargo's `default-run`, else the package name);
+   - every `bundle.externalBin` sidecar, from the build folder;
+   - every `.exe` and `.dll` among `bundle.resources`.
+
+   A missing main binary or sidecar is an error. Other files in a build folder that a host runner keeps between runs are
+   never read, so a stale binary can neither fail a run nor stand in for a missing one. Reading a folder never throws:
+   an unreadable path is a finding, and symbolic links to folders are not followed. The callers pass the build folder
+   in Windows form (`cygpath -m`), since Node on Windows does not read Git Bash's `/c/...` paths. It runs right after
+   `tauri build`, before the installers are collected, in every path that builds a Windows installer:
    - `conformance/ci/tauri-bundle.sh` (the shared `tauri-bundle` action, used by `app-release.yml` for Dyno, Pitwall,
-     Pitcrew and Spotter), for an `nsis` or `msi` bundle: `<build folder>/dist/*.exe|*.dll` and `src-tauri/binaries/`;
-   - `.gitea/workflows/debrief.yml`, one step after Debrief's own build (it does not use the action);
+     Pitcrew and Spotter), for an `nsis` or `msi` bundle;
+   - `.gitea/workflows/debrief.yml`, one step after Debrief's own build (it does not use the action), with
+     `--config` for its `tauri.sidecars.conf.json`;
    - `scripts/demo/bundle.sh` (shell-demo and workbench-demo).
 
-   An NSIS build with no Windows binaries to check fails as well (exit 2), so a moved build folder cannot turn the check
-   into a silent pass. No new CI job: the check reads a few files in the job that built them, in well under a second.
-   Tests (`conformance/test/windows-crt-imports.test.mjs`, the NSIS case in `ci-scripts.test.mjs`) use synthetic PE files
-   built byte by byte. The same test file also checks that the root configuration keeps the flag and that the three
-   build paths still call the check, and that every app's `tauri.conf.json` keeps `staticVCRuntime` false.
+   No new CI job: the check reads a few files in the job that built them, in well under a second. The tests
+   (`conformance/test/windows-crt-imports.test.mjs` and the NSIS case in `ci-scripts.test.mjs`) use synthetic PE files
+   built byte by byte. The same test file also checks three things:
+   - the root configuration keeps the flag;
+   - every app's `tauri.conf.json` keeps `staticVCRuntime` false;
+   - the three build paths call the check with the shipped list.
+
+   **What an import check cannot see.** A DLL that a program loads at run time with `LoadLibrary` is in no import table.
+   Neither its own needs nor the fact that the program loads it show up. Such a DLL must be shipped as a listed
+   resource, where the check reads it like any other file, or be a Windows component.
 
 ## Alternatives considered
 
@@ -130,10 +155,30 @@ this ADR).
 - No Paddock app needs the VC++ redistributable. A clean Windows 10/11 PC is enough. The Dyno tag blocker is resolved by
   rebuilding, with no installer change: the NSIS installers and their hooks stay as they are.
 - Binaries grow a little; see the measurements. The app binaries now also link the UCRT statically, like the sidecars. Performance and memory do not change measurably for this kind of code.
-- A third-party DLL we bundle must also be free of the redistributable; the check covers `src-tauri/binaries/lib/`
-  (`duckdb.dll` today: clean). Runtimes downloaded at run time (Chromium for Spotter and Debrief's browser) are not in
+- **CRT state is per module now.** Every statically linked module (each exe, and a DLL such as `duckdb.dll`, which
+  carries its own runtime) has its own heap, `FILE` table, file descriptors, `errno` and locale. Memory, `FILE*` and
+  descriptors must never cross a DLL boundary: what `duckdb.dll` allocates is freed by DuckDB's own functions
+  (`duckdb_free`, `duckdb_destroy_*`), never by `free()` on our side, and no `FILE*` or descriptor is handed over. The
+  duckdb crate already frees DuckDB's error strings with `duckdb_free` (duckdb 1.10506.1 `src/lib.rs`, read 2026-10-30).
+  Rust's own allocations do not use the CRT heap; Rust's `System` allocator on Windows calls `HeapAlloc` (secondary, not
+  re-read). A future C API that returns memory or handles must follow the same rule.
+- A third-party DLL we bundle must also be free of the redistributable; the check covers it when it is listed in
+  `bundle.resources` (`duckdb.dll` today: clean). Runtimes downloaded at run time (Chromium for Spotter and Debrief's browser) are not in
   the installer and are not checked: they are the vendor's builds. Chrome for Testing is believed to carry its own
   runtime (unverified).
+- **Sighter (ONNX Runtime, DirectML).** The detector plan links ONNX Runtime statically through `ort` (pyke's prebuilt
+  archive, `download-binaries`) into an inference sidecar ([Sighter detector research](../research/2026-10-sighter-detector.md)).
+  That sidecar is built in this repository, so it gets `+crt-static` like every other binary. Whether pyke's Windows
+  archive was compiled for the static runtime (`/MT`) is unverified. If it was not, the link fails with a runtime
+  mismatch: loud, at build time, never on a user's PC. Then the order of preference is:
+  1. an ONNX Runtime built with the static runtime (its build option `--enable_msvc_static_runtime`; unverified,
+     check in the Sighter spike);
+  2. ONNX Runtime as a DLL that carries its own runtime, shipped as a listed resource the check reads;
+  3. only as a last resort, an amendment to this ADR for app-local VC runtime DLLs.
+
+  `DirectML.dll`, if Sighter must ship it rather than use the copy in Windows, is a listed resource and is checked
+  like `duckdb.dll`. Any DLL that ONNX Runtime opens with `LoadLibrary` (an execution provider) is invisible to the
+  import check (see Decision 2), so Sighter lists every one it ships. The Sighter spike records the measured imports.
 - Third-party plugins built with Debrief's plugin SDK outside this repo do not read this configuration. The SDK
   template should carry the same flag (follow-up).
 - A Windows build with `RUSTFLAGS` set loses the flag. The release check then fails, which is loud and early.

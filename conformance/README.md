@@ -110,8 +110,10 @@ workflow that uses the actions can drop the steps they replace, and C03, C04 and
 
 `publish.mjs`, `latest-json.mjs` (the apps' copies, unified; output equals Pitwall's), `strip-keys.mjs`
 (`eval "$(node release/strip-keys.mjs)"`), `macos-verify-bundle.sh` (captures command output before matching),
-`windows-crt-imports.mjs <file-or-folder>...` (ADR 0032: fails when a Windows .exe or .dll imports the VC++ runtime,
-VCRUNTIME140.dll, MSVCP140.dll and kin; pure Node, no dumpbin; `tauri-bundle.sh` runs it after every NSIS build).
+`windows-crt-imports.mjs --src-tauri <dir> --bin-dir <dir> [--config <file.json>]...` (ADR 0032: fails when a binary the
+Windows installer ships, named by the Tauri configuration, imports the VC++ runtime, VCRUNTIME140.dll, MSVCP140.dll and
+kin, or is missing; `<file-or-folder>...` checks given paths; pure Node, no dumpbin; `tauri-bundle.sh` runs it after
+every NSIS build).
 
 ## Sidecars (`paddock-sidecar`, plan X34)
 

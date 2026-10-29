@@ -8,10 +8,11 @@
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld.exe"
 
-# Windows: link the C runtime statically into every binary we build (ADR 0032). The dynamic default imports VCRUNTIME140.dll,
-# which is not part of Windows: a sidecar built that way exits with 0xC0000135 on a PC without the VC++ redistributable
-# (CI runners have it, so CI never showed it). Tauri's own staticVCRuntime covers only an app's main binary; this covers every
-# binary of every workspace in the repo. conformance/release/windows-crt-imports.mjs checks the built installers' binaries.
+# Windows: link the C runtime statically into every binary we build (Paddock ADR 0032). The dynamic default imports
+# VCRUNTIME140.dll, which is not part of Windows: a sidecar built that way exits with 0xC0000135 on a PC without the VC++
+# redistributable (CI runners have it, so CI never showed it). Tauri's own staticVCRuntime covered only an app's main binary and clashes with
+# this flag, so every tauri.conf.json sets build.windows.staticVCRuntime to false; this flag covers every binary below this
+# folder. Paddock's conformance/release/windows-crt-imports.mjs checks the binaries of every Windows installer build.
 [target.'cfg(all(windows, target_env = "msvc"))']
 rustflags = ["-C", "target-feature=+crt-static"]
 

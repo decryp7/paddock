@@ -93,9 +93,10 @@ export const readText = (p) => readFileSync(p, 'utf8');
 
 /**
  * A minimal PE image with one section (.idata at RVA 0x1000, file offset 0x200) holding the import and delay-import
- * descriptors and the DLL names. `plus` selects PE32+ (x64) or PE32.
+ * descriptors and the DLL names. `plus` selects PE32+ (x64) or PE32; `delayAttributes` 0 writes the old VA-based delay-load
+ * descriptors.
  */
-export function pe({ imports = [], delay = [], plus = true } = {}) {
+export function pe({ imports = [], delay = [], plus = true, delayAttributes = 1 } = {}) {
   const optSize = plus ? 240 : 224;
   const peOff = 0x40;
   const secTable = peOff + 24 + optSize;
@@ -114,7 +115,7 @@ export function pe({ imports = [], delay = [], plus = true } = {}) {
   };
   imports.forEach((n, i) => sec.writeUInt32LE(putName(n), impAt + i * 20 + 12));
   delay.forEach((n, i) => {
-    sec.writeUInt32LE(1, delayAt + i * 32);
+    sec.writeUInt32LE(delayAttributes, delayAt + i * 32);
     sec.writeUInt32LE(putName(n), delayAt + i * 32 + 4);
   });
 

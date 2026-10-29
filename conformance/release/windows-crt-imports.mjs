@@ -5,21 +5,33 @@
 // .cargo/config.toml); this check proves it on what was built. The Universal CRT (ucrtbase.dll, api-ms-win-crt-*) is part
 // of Windows 10 and later and is allowed.
 //
+//   node conformance/release/windows-crt-imports.mjs --src-tauri <dir> --bin-dir <dir> [--config <file.json>]...
 //   node conformance/release/windows-crt-imports.mjs <file-or-folder>...
 //
-// A file is read as PE whatever its name; a folder is searched recursively for *.exe and *.dll. Exit 0 when every file is
-// clean, 1 when one imports the runtime (or is not a valid PE), 2 when nothing was found to check. Pure Node: runs on the
-// Windows runner, the Linux image and a Mac alike, no dumpbin or objdump needed.
+// The first form checks exactly what the installer ships, named by the app's Tauri configuration (tauri.conf.json, then
+// tauri.windows.conf.json, then each --config in order, merged like Tauri does): the main binary (mainBinaryName, else
+// Cargo's default-run, else the package name) and every bundle.externalBin from --bin-dir, the folder `tauri build` wrote
+// (<build folder>/<profile>), and every .exe and .dll among bundle.resources (relative to --src-tauri). A missing main
+// binary or sidecar is an error; other files in the build folder (stale ones a kept runner folder still holds) are never
+// read. The second form checks the given files and, recursively, the .exe and .dll files of the given folders (symbolic
+// links to folders are not followed). Exit 0 when every file is clean, 1 on a finding (an import of the runtime, a file
+// that is missing, unreadable or not a valid PE), 2 when nothing was found to check. Pure Node: runs on the Windows
+// runner, the Linux image and a Mac alike, no dumpbin or objdump needed.
+//
+// Limits: a DLL loaded at run time with LoadLibrary is not in any import table, so this check cannot see what it needs;
+// such a DLL must be shipped and listed (bundle.resources) to be checked itself.
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { extname, join } from 'node:path';
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { basename, dirname, extname, join } from 'node:path';
 import { isMain } from '../src/util/is-main.mjs';
 
 /**
- * DLLs of the Visual C++ redistributable (and its debug builds, which are never on a user's PC). The Universal CRT
- * (ucrtbase.dll, api-ms-win-crt-*.dll) and the system msvcrt.dll are part of Windows and are not listed.
+ * DLLs of the Visual C++ redistributable: a family name, its version and any suffix (`vcruntime140_1`,
+ * `vcruntime140_threads`, `msvcp140_atomic_wait`, `mfc140u`, `mfcm140u`) and the debug builds, which are never on a
+ * user's PC (`msvcp140d`, `msvcp140d_atomic_wait`, `vcruntime140_1d`, `ucrtbased`). The Universal CRT (ucrtbase.dll,
+ * api-ms-win-crt-*.dll) and the system msvcrt.dll are part of Windows and are not listed.
  */
-export const REDIST_DLL = /^(?:vcruntime\d+(?:_\d+)?|msvcp\d+(?:_[a-z0-9_]+)?|msvcr\d+|concrt\d+|vccorlib\d+|vcomp\d+|vcamp\d+|mfc\d+[a-z]*)d?\.dll$|^ucrtbased\.dll$/i;
+export const REDIST_DLL = /^(?:(?:vcruntime|msvcp|msvcr|concrt|vccorlib|vcomp|vcamp|mfcm?)\d+[a-z0-9_]*|ucrtbased)\.dll$/i;
 
 /** Whether importing `dll` needs the VC++ redistributable. */
 export function needsRedist(dll) {
@@ -75,7 +87,7 @@ export function peImports(bytes) {
       if (end < 0 || end - o > MAX_NAME || end === o) return null;
       return b.toString('latin1', o, end);
     };
-    const walk = (entry, step, nameAt) => {
+    const walk = (entry, step, nameAt, vaBased = () => false) => {
       const out = [];
       const d = dir(entry);
       if (!d || !d.rva) return out;
@@ -84,37 +96,144 @@ export function peImports(bytes) {
       for (let n = 0; n < MAX_DESCRIPTORS; n++, o += step) {
         if (o + step > b.length) throw new Error(`directory ${entry} cut off`);
         if (b.subarray(o, o + step).every((x) => x === 0)) return out;
+        if (vaBased(o)) throw new Error('a delay-load descriptor uses virtual addresses (the format before Visual C++ 7), which this check does not read: inspect the file with dumpbin /imports');
         const dll = name(u32(o + nameAt));
         if (dll === null) throw new Error(`directory ${entry} names an unreadable DLL`);
         out.push(dll);
       }
       throw new Error(`directory ${entry} has no end`);
     };
-    return { imports: walk(1, 20, 12), delayImports: walk(13, 32, 4) };
+    // Delay-load descriptors: bit 0 of Attributes set means the fields are RVAs; clear is the old VA-based format.
+    return { imports: walk(1, 20, 12), delayImports: walk(13, 32, 4, (o) => (u32(o) & 1) === 0) };
   } catch (e) {
     return { error: e.message };
   }
 }
 
-/** Every *.exe and *.dll below `paths` (files are taken as given). */
+const isBinary = (p) => ['.exe', '.dll'].includes(extname(p).toLowerCase());
+
+/**
+ * Every *.exe and *.dll below `paths` (files are taken as given; symbolic links to folders are not followed). Never
+ * throws: a path that cannot be read becomes a problem.
+ * @returns {{ files: string[], problems: string[] }}
+ */
 export function collect(paths) {
-  const out = [];
+  const files = [];
+  const problems = [];
   const visit = (p, explicit) => {
     let st;
     try {
-      st = statSync(p);
-    } catch {
-      if (explicit) out.push(p); // reported as unreadable by check()
+      st = explicit ? statSync(p) : lstatSync(p);
+    } catch (e) {
+      problems.push(`${p}: cannot be read (${e.code ?? e.message})`);
+      return;
+    }
+    if (st.isSymbolicLink()) {
+      // Not followed when it is a folder (a loop, or a tree outside the bundle); a linked file is read like any other.
+      let target;
+      try {
+        target = statSync(p);
+      } catch (e) {
+        problems.push(`${p}: a broken symbolic link (${e.code ?? e.message})`);
+        return;
+      }
+      if (target.isFile() && isBinary(p)) files.push(p);
       return;
     }
     if (st.isDirectory()) {
-      for (const e of readdirSync(p).sort()) visit(join(p, e), false);
-    } else if (explicit || ['.exe', '.dll'].includes(extname(p).toLowerCase())) {
-      out.push(p);
+      let entries;
+      try {
+        entries = readdirSync(p).sort();
+      } catch (e) {
+        problems.push(`${p}: cannot be listed (${e.code ?? e.message})`);
+        return;
+      }
+      for (const e of entries) visit(join(p, e), false);
+    } else if (explicit || isBinary(p)) {
+      files.push(p);
     }
   };
   for (const p of paths) visit(p, true);
+  return { files, problems };
+}
+
+/** RFC 7396 JSON merge patch, the way Tauri merges a platform or --config file over tauri.conf.json. */
+export function mergePatch(target, patch) {
+  if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) return patch;
+  const out = target !== null && typeof target === 'object' && !Array.isArray(target) ? { ...target } : {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete out[k];
+    else out[k] = mergePatch(out[k], v);
+  }
   return out;
+}
+
+/** The names Cargo may give the app's binary, from its Cargo.toml: `default-run`, then the package name. */
+export function cargoBinaryNames(cargoToml) {
+  const pkg = /^\[package\]\s*\n([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(cargoToml)?.[1] ?? '';
+  const value = (key) => new RegExp(`^${key}\\s*=\\s*"([^"]+)"`, 'm').exec(pkg)?.[1];
+  return [value('default-run'), value('name')].filter(Boolean);
+}
+
+/** Paths a `bundle.resources` source names: a file, a folder (recursively), or a `*` pattern in its last segment. */
+function resourcePaths(srcTauri, source) {
+  const full = join(srcTauri, source);
+  if (!basename(source).includes('*')) return existsSync(full) ? [full] : [];
+  const re = new RegExp(`^${basename(source).split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`);
+  try {
+    return readdirSync(dirname(full)).filter((f) => re.test(f)).sort().map((f) => join(dirname(full), f));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The Windows binaries the installer of the app in `srcTauri` ships, built into `binDir`, from its Tauri configuration
+ * (`configs`: extra --config files, merged after tauri.conf.json and tauri.windows.conf.json). Never throws.
+ * @returns {{ files: string[], problems: string[] }}
+ */
+export function shippedFiles({ srcTauri, binDir, configs = [] }) {
+  const problems = [];
+  const read = (p, what) => {
+    try {
+      return readFileSync(p, 'utf8');
+    } catch (e) {
+      problems.push(`${p}: cannot read ${what} (${e.code ?? e.message})`);
+      return null;
+    }
+  };
+  let conf = {};
+  const layers = [join(srcTauri, 'tauri.conf.json'), ...(existsSync(join(srcTauri, 'tauri.windows.conf.json')) ? [join(srcTauri, 'tauri.windows.conf.json')] : []), ...configs];
+  for (const p of layers) {
+    const text = read(p, 'the Tauri configuration');
+    if (text === null) continue;
+    try {
+      conf = mergePatch(conf, JSON.parse(text));
+    } catch (e) {
+      problems.push(`${p}: not valid JSON (${e.message})`);
+    }
+  }
+  const files = [];
+  const cargo = read(join(srcTauri, 'Cargo.toml'), 'the Cargo manifest');
+  const names = [...new Set([conf.mainBinaryName, ...(cargo ? cargoBinaryNames(cargo) : [])].filter(Boolean))];
+  const main = names.map((n) => join(binDir, `${n}.exe`)).find((p) => existsSync(p));
+  if (main) files.push(main);
+  else problems.push(`the app's binary is missing: none of ${names.map((n) => `${n}.exe`).join(', ') || '(no name found)'} in ${binDir}`);
+  for (const e of conf.bundle?.externalBin ?? []) {
+    const p = join(binDir, `${basename(e)}.exe`);
+    if (existsSync(p)) files.push(p);
+    else problems.push(`the sidecar ${e} is missing: no ${basename(e)}.exe in ${binDir}`);
+  }
+  const resources = conf.bundle?.resources;
+  const sources = Array.isArray(resources) ? resources : Object.keys(resources ?? {});
+  for (const source of sources) {
+    for (const p of resourcePaths(srcTauri, source)) {
+      const found = collect([p]);
+      files.push(...found.files.filter(isBinary));
+      problems.push(...found.problems);
+    }
+  }
+  return { files, problems };
 }
 
 /**
@@ -142,19 +261,43 @@ export function check(files) {
   return findings;
 }
 
+/** Parses the command line: `{ srcTauri, binDir, configs }` or `{ paths }`; throws on a usage error. */
+export function parseArgs(argv) {
+  const opts = { srcTauri: null, binDir: null, configs: [], paths: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--src-tauri' || a === '--bin-dir' || a === '--config') {
+      const v = argv[++i];
+      if (!v) throw new Error(`${a} needs a value`);
+      if (a === '--config') opts.configs.push(v);
+      else opts[a === '--src-tauri' ? 'srcTauri' : 'binDir'] = v;
+    } else if (a.startsWith('--')) {
+      throw new Error(`unknown option ${a}`);
+    } else {
+      opts.paths.push(a);
+    }
+  }
+  if (!!opts.srcTauri !== !!opts.binDir) throw new Error('--src-tauri and --bin-dir go together');
+  if (opts.srcTauri && opts.paths.length) throw new Error('give either --src-tauri/--bin-dir or paths, not both');
+  if (!opts.srcTauri && !opts.paths.length) throw new Error('nothing to check');
+  return opts;
+}
+
 if (isMain(import.meta.url)) {
-  const args = process.argv.slice(2);
-  if (!args.length || args.includes('--help')) {
-    console.error('usage: windows-crt-imports.mjs <file-or-folder>...');
+  let opts;
+  try {
+    opts = parseArgs(process.argv.slice(2));
+  } catch (e) {
+    console.error(`${e.message}\nusage: windows-crt-imports.mjs --src-tauri <dir> --bin-dir <dir> [--config <file.json>]...\n       windows-crt-imports.mjs <file-or-folder>...`);
     process.exit(2);
   }
-  const files = collect(args);
-  if (!files.length) {
-    console.error(`::error::no .exe or .dll found in ${args.join(', ')}`);
-    process.exit(2);
-  }
-  const findings = check(files);
+  const { files, problems } = opts.srcTauri ? shippedFiles(opts) : collect(opts.paths);
+  const findings = [...problems, ...check(files)];
   for (const f of findings) console.log(`::error::${f}`);
   if (findings.length) process.exit(1);
+  if (!files.length) {
+    console.error(`::error::no .exe or .dll found to check`);
+    process.exit(2);
+  }
   console.log(`${files.length} Windows binaries checked: none needs the VC++ redistributable.`);
 }

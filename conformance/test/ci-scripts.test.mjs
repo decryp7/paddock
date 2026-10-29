@@ -212,8 +212,10 @@ test('tauri-bundle: --root is where npm ci runs, and the build-folder action\'s 
 });
 
 test('tauri-bundle: an NSIS build fails when the app, a sidecar or a bundled library imports the VC++ runtime (ADR 0032)', () => {
+  const conf = JSON.stringify({ version: '1.2.3', mainBinaryName: 'demo', bundle: { externalBin: ['binaries/demo-agent'], resources: { 'binaries/lib/': 'lib/' } } });
   const nsis = (files) => {
     const root = bundleRepo({ installers: [] });
+    writeFileSync(join(root, 'app/src-tauri/tauri.conf.json'), conf);
     for (const [p, b] of Object.entries(files)) {
       mkdirSync(dirname(join(root, p)), { recursive: true });
       writeFileSync(join(root, p), b);
@@ -222,16 +224,18 @@ test('tauri-bundle: an NSIS build fails when the app, a sidecar or a bundled lib
   };
   const clean = pe({ imports: ['KERNEL32.dll', 'api-ms-win-crt-runtime-l1-1-0.dll'] });
   const dynamic = pe({ imports: ['KERNEL32.dll', 'VCRUNTIME140.dll'] });
-  const ok = nsis({ 'target/dist/demo.exe': clean, 'target/dist/demo-agent.exe': clean, 'app/src-tauri/binaries/lib/x.dll': clean });
+  const ok = nsis({ 'target/dist/demo.exe': clean, 'target/dist/demo-agent.exe': clean, 'app/src-tauri/binaries/lib/x.dll': clean, 'target/dist/stale-old.exe': dynamic });
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
-  assert.match(ok.stdout, /3 Windows binaries checked/);
+  assert.match(ok.stdout, /3 Windows binaries checked/, 'the shipped files only: a stale exe in the kept build folder is not read');
   const agent = nsis({ 'target/dist/demo.exe': clean, 'target/dist/demo-agent.exe': dynamic });
   assert.equal(agent.status, 1);
   assert.match(agent.stdout, /::error::.*demo-agent\.exe: imports VCRUNTIME140\.dll/);
-  const lib = nsis({ 'target/dist/demo.exe': clean, 'app/src-tauri/binaries/lib/x.dll': dynamic });
+  const lib = nsis({ 'target/dist/demo.exe': clean, 'target/dist/demo-agent.exe': clean, 'app/src-tauri/binaries/lib/x.dll': dynamic });
   assert.equal(lib.status, 1);
   assert.match(lib.stdout, /x\.dll: imports VCRUNTIME140\.dll/);
-  assert.notEqual(nsis({}).status, 0, 'an NSIS build with no Windows binaries is an error, not a pass');
+  const missing = nsis({ 'target/dist/demo-agent.exe': clean, 'target/dist/other.exe': clean });
+  assert.equal(missing.status, 1, 'a missing app binary is an error, not a pass');
+  assert.match(missing.stdout, /the app's binary is missing: none of demo\.exe/);
   assert.doesNotMatch(bundle(bundleRepo(), ['deb']).stdout, /Windows binaries checked/, 'other bundles are not checked');
 });
 
