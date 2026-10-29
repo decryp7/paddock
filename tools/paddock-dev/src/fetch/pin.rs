@@ -5,7 +5,7 @@
 //! commit: nothing is downloaded at build time. Replaces `conformance/ci/pin-runtime.mjs`.
 //!
 //! **Parallelism and cost** (rule 51, ER-20). The work is the download itself: network-bound, one archive per platform (five
-//! for Chrome for Testing, about 200 MB each). Archives are measured up to `--jobs` at a time (default 3, at most 8); each
+//! for Chrome for Testing, about 200 MB each). Archives are measured up to `--jobs` at a time (default Auto, which is 3; at most 8); each
 //! download already uses up to 4 connections and the downloader caps a host at 4 across all of them, so more jobs only queue
 //! on the same host. Results are collected by platform order, so the output does not depend on which finished first. The cost
 //! is already minimal: one pass per archive with no second read (the digest is computed while writing) and no archive kept on
@@ -15,9 +15,9 @@ use super::error::FetchError;
 use super::runner::Runner;
 use paddock_download::{Fetch, Integrity, Request};
 use paddock_jobs::{JobError, Phase};
-use paddock_runtime::{Catalogue, MAX_ARCHIVE_BYTES};
+use paddock_runtime::{Catalogue, MAX_ARCHIVE_BYTES, Platform};
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use toml_edit::{DocumentMut, Item, Table, Value as TomlValue};
 
 /// Chrome for Testing's channel list with download URLs.
@@ -110,6 +110,8 @@ pub fn cft_downloads(json: &Value, channel: &str, keys: &[String]) -> Result<(St
     Ok((version.to_string(), urls))
 }
 
+// TODO: use paddock-runtime's own URL check once it is exported (its `url_ok` is private; shared crates are frozen until the
+// Dyno and Spotter tags). The re-parse as a `Catalogue` at the end of `repin` enforces the same rule before anything is written.
 /// `https://...`, or `http://` to the loopback (local test servers).
 pub fn url_ok(u: &str) -> bool {
     u.starts_with("https://")
@@ -132,7 +134,9 @@ fn read_pins(doc: &DocumentMut) -> Result<(String, Vec<(String, String)>), Fetch
     let mut out = Vec::new();
     for t in platforms {
         match (t.get("key").and_then(Item::as_str), t.get("url").and_then(Item::as_str)) {
-            (Some(k), Some(u)) => out.push((k.to_string(), u.to_string())),
+            // The key becomes part of a file name: only a real platform key (`linux-x86_64`) is accepted.
+            (Some(k), Some(u)) if Platform::parse(k).is_some() => out.push((k.to_string(), u.to_string())),
+            (Some(k), Some(_)) => return Err(FetchError::failed(format!("'{k}' is not a platform key such as linux-x86_64."))),
             _ => return Err(FetchError::failed("Every [[platform]] needs a key and a url.")),
         }
     }
@@ -194,7 +198,7 @@ fn measure_all(runner: &Runner, items: Vec<(String, String)>, work: &Path) -> Re
         let job = runner.spawn("pin", "Measuring the archive", Some(&key), move |ctx| {
             let request = Request::new(&u, &file, Integrity::Unpinned)?.max_bytes(MAX_ARCHIVE_BYTES);
             let got = downloader.download(ctx, &request);
-            let _ = std::fs::remove_file(&file);
+            super::runner::discard(&request);
             let got = got?;
             if got.bytes == 0 {
                 return Err(JobError::Failed(format!("{u} is empty.")));
@@ -258,14 +262,9 @@ pub fn repin(runner: &Runner, text: &str, target: &Target, work: &Path) -> Resul
     })
 }
 
-/// Writes `text` over `path` by writing a sibling file and renaming it.
+/// Writes `text` over `path`, atomically.
 pub fn write_atomic(path: &Path, text: &str) -> Result<(), FetchError> {
-    let tmp: PathBuf = path.with_extension("toml.new");
-    std::fs::write(&tmp, text).map_err(|e| FetchError::io(tmp.display(), &e))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        FetchError::io(path.display(), &e)
-    })
+    super::error::write_atomic(path, text.as_bytes())
 }
 
 #[cfg(test)]
@@ -369,6 +368,34 @@ mod tests {
         assert!(rewrite("version = \"1\"\n", "2", &pins).is_err());
         let no_version = rewrite("[[platform]]\nkey = \"linux-x86_64\"\nurl = \"u\"\n", "3", &pins[..1]).unwrap();
         assert!(no_version.contains("version = \"3\""));
+    }
+
+    #[test]
+    fn rewriting_the_committed_catalogue_with_its_own_pins_gives_the_same_bytes() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/paddock-chromium/src/chromium.toml");
+        let text = std::fs::read_to_string(path).unwrap();
+        let cat = Catalogue::parse(&text).unwrap();
+        let pins: Vec<PlatformPin> = cat
+            .entries()
+            .iter()
+            .map(|p| PlatformPin {
+                key: p.platform.key(),
+                url: p.url.clone(),
+                size: p.size,
+                sha256: p.sha256.to_hex(),
+            })
+            .collect();
+        assert_eq!(rewrite(&text, &cat.version, &pins).unwrap(), text);
+    }
+
+    #[test]
+    fn a_platform_key_that_is_not_a_platform_is_refused_before_it_names_a_file() {
+        let n = net();
+        let work = tempfile::tempdir().unwrap();
+        let evil = OLD.replace("key = \"linux-x86_64\"", "key = \"../../x\"");
+        let err = repin(&runner(&n, 1), &evil, &Target::Same, work.path()).unwrap_err();
+        assert!(err.to_string().contains("not a platform key"), "{err}");
+        assert!(n.seen().is_empty());
     }
 
     fn net() -> Arc<FakeNet> {
@@ -490,6 +517,7 @@ mod tests {
         let n = net();
         let work = tempfile::tempdir().unwrap();
         let r = Arc::new(runner(&n, 2));
+        let w = work.path().join("w");
         let fired = Arc::new(AtomicBool::new(false));
         let (r2, f2) = (r.clone(), fired.clone());
         n.route(
@@ -500,9 +528,13 @@ mod tests {
             })),
         );
         n.route(&mac2(), Route::Endless(Arc::new(|| {})));
-        let err = repin(&r, OLD, &Target::Version("2.0.0".into()), work.path()).unwrap_err();
+        let err = repin(&r, OLD, &Target::Version("2.0.0".into()), &w).unwrap_err();
         assert_eq!(err, FetchError::Cancelled);
         assert!(fired.load(Ordering::SeqCst));
+        assert!(
+            std::fs::read_dir(&w).unwrap().next().is_none(),
+            "throwaway partial downloads are removed too"
+        );
     }
 
     #[test]
@@ -512,11 +544,9 @@ mod tests {
         std::fs::write(&path, "old").unwrap();
         write_atomic(&path, "new").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
-        assert!(!dir.path().join("c.toml.new").exists());
-        assert!(write_atomic(&dir.path().join("missing").join("c.toml"), "x").is_err());
+        write_atomic(&dir.path().join("made").join("c.toml"), "x").unwrap();
         let target = dir.path().join("d.toml");
         std::fs::create_dir(&target).unwrap();
         assert!(write_atomic(&target, "x").is_err(), "a folder is not replaced by a file");
-        assert!(!dir.path().join("d.toml.new").exists());
     }
 }

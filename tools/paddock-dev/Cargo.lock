@@ -1271,6 +1271,7 @@ dependencies = [
  "paddock-chromium",
  "paddock-cli",
  "paddock-download",
+ "paddock-env",
  "paddock-jobs",
  "paddock-proc",
  "paddock-repo-graph",

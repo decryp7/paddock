@@ -163,7 +163,13 @@ pub fn pin(runner: &Runner, opts: &Options) -> Result<Pinned, FetchError> {
     let (manifest, notes, checks) = runner.run("pin", "Pinning FFmpeg", Some(REPO), move |ctx| {
         ctx.phase(Phase::discovering("find", "Finding the month-end build"));
         let tag = match tag {
-            Some(t) => t,
+            Some(t) => {
+                // The tag is put into a URL: only a real autobuild tag is accepted.
+                if !tag_rx().is_match(&t) {
+                    return Err(JobError::Failed(format!("{t} is not an autobuild tag.")));
+                }
+                t
+            }
             None => {
                 let mut found = None;
                 for page in 1..=MAX_PAGES {
@@ -399,6 +405,18 @@ mod tests {
         );
         net.serve(&format!("{}?per_page=100&page=1", api()), b"[]".to_vec());
         assert!(pin(&runner(&net, 1), &opts).is_err(), "an empty page ends the search");
+        let seen = net.seen().len();
+        for bad in ["latest", "../x", "autobuild-2026-09-30-13-08/../x", "a b"] {
+            let o = Options {
+                tag: Some(bad.into()),
+                ..opts.clone()
+            };
+            assert!(
+                pin(&runner(&net, 1), &o).unwrap_err().to_string().contains("not an autobuild tag"),
+                "{bad}"
+            );
+        }
+        assert_eq!(net.seen().len(), seen, "no request is made for a bad tag");
         let net = served();
         net.serve(
             "https://dl.test/ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-shared-9.0.zip",

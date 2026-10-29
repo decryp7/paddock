@@ -192,10 +192,21 @@ fn slashes(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
+/// `s` as one POSIX shell word in single quotes (a quote inside becomes `'\''`).
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// `s` as a PowerShell single-quoted string (a quote inside is doubled).
+fn ps_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
 /// The lines that point a build and the loader at the library: the two variables the `duckdb` crate reads and the loader path
 /// the executable needs (`PATH` on Windows, `LD_LIBRARY_PATH` on Linux, `DYLD_LIBRARY_PATH` on macOS).
 pub fn export_lines(shell: Shell, os: &str, dir: &Path) -> Vec<String> {
     let d = slashes(dir);
+    let (sh, ps) = (sh_quote(&d), |s: &str| ps_quote(s));
     let loader = match os {
         "windows" => Some("PATH"),
         "linux" => Some("LD_LIBRARY_PATH"),
@@ -204,14 +215,17 @@ pub fn export_lines(shell: Shell, os: &str, dir: &Path) -> Vec<String> {
     };
     match shell {
         Shell::Sh => {
-            let mut v = vec![format!("export DUCKDB_LIB_DIR='{d}' DUCKDB_INCLUDE_DIR='{d}'")];
-            v.extend(loader.map(|l| format!("export {l}='{d}':\"${{{l}:-}}\"")));
+            let mut v = vec![format!("export DUCKDB_LIB_DIR={sh} DUCKDB_INCLUDE_DIR={sh}")];
+            v.extend(loader.map(|l| format!("export {l}={sh}:\"${{{l}:-}}\"")));
             v
         }
         Shell::PowerShell => {
             let sep = if os == "windows" { ';' } else { ':' };
-            let mut v = vec![format!("$env:DUCKDB_LIB_DIR = '{d}'"), format!("$env:DUCKDB_INCLUDE_DIR = '{d}'")];
-            v.extend(loader.map(|l| format!("$env:{l} = '{d}{sep}' + $env:{l}")));
+            let mut v = vec![
+                format!("$env:DUCKDB_LIB_DIR = {}", ps(&d)),
+                format!("$env:DUCKDB_INCLUDE_DIR = {}", ps(&d)),
+            ];
+            v.extend(loader.map(|l| format!("$env:{l} = {} + $env:{l}", ps(&format!("{d}{sep}")))));
             v
         }
     }
@@ -299,7 +313,7 @@ pub fn write_cargo_config(app: &Path, fetched: &Fetched) -> Result<PathBuf, Fetc
     }
     let local = cargo_dir.join(LOCAL_CONFIG);
     let text = render_local_config(&fetched.version, &fetched.asset, &ConfigPath::new(app, &fetched.dir));
-    std::fs::write(&local, text).map_err(|e| FetchError::io(local.display(), &e))?;
+    super::error::write_atomic(&local, text.as_bytes())?;
     Ok(local)
 }
 
@@ -484,6 +498,36 @@ mod tests {
         assert_eq!(Shell::parse("powershell"), Some(Shell::PowerShell));
         assert_eq!(Shell::parse("fish"), None);
         assert_eq!(Shell::host(), if cfg!(windows) { Shell::PowerShell } else { Shell::Sh });
+    }
+
+    #[test]
+    fn quotes_in_a_path_cannot_break_out_of_the_export_lines() {
+        let d = Path::new("/tmp/it's/lib");
+        assert_eq!(
+            export_lines(Shell::Sh, "linux", d)[0],
+            "export DUCKDB_LIB_DIR='/tmp/it'\\''s/lib' DUCKDB_INCLUDE_DIR='/tmp/it'\\''s/lib'"
+        );
+        assert!(export_lines(Shell::Sh, "linux", d)[1].starts_with("export LD_LIBRARY_PATH='/tmp/it'\\''s/lib':"));
+        let ps = export_lines(Shell::PowerShell, "windows", d);
+        assert_eq!(ps[0], "$env:DUCKDB_LIB_DIR = '/tmp/it''s/lib'");
+        assert_eq!(ps[2], "$env:PATH = '/tmp/it''s/lib;' + $env:PATH");
+    }
+
+    #[test]
+    fn a_cancel_while_the_library_downloads_leaves_no_folder() {
+        let script =
+            "VERSION=1.5.6\n    ASSET=libduckdb-linux-amd64.zip; SHA=0000000000000000000000000000000000000000000000000000000000000000 ;;\n";
+        let pins = Pins::parse(script).unwrap();
+        let net = FakeNet::new();
+        let r = std::sync::Arc::new(runner(&net, 1));
+        let r2 = r.clone();
+        net.route(
+            &pins.url(&pins.assets[0]),
+            super::super::testing::Route::Endless(std::sync::Arc::new(move || r2.cancel_all())),
+        );
+        let work = tempfile::tempdir().unwrap();
+        assert_eq!(fetch(&r, &pins, "linux", "x86_64", work.path()).unwrap_err(), FetchError::Cancelled);
+        assert!(!work.path().join("1.5.6").join("libduckdb-linux-amd64").exists());
     }
 
     #[test]

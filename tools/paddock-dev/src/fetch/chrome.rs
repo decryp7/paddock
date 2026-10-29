@@ -58,6 +58,17 @@ pub fn install(runner: &Runner, catalogue: &Catalogue, platform: Platform, dir: 
             cached: true,
         });
     }
+    // The unpack swaps the folder in whole, so a folder that is not ours must never be the target.
+    let ours = dir.join(STAMP).is_file();
+    if !ours && std::fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some()) {
+        return Err(FetchError::with_hint(
+            format!(
+                "{} exists, is not empty and holds no {STAMP}, so it is not a browser install of this tool.",
+                dir.display()
+            ),
+            "Pick an empty or new folder with --dir; nothing was changed.",
+        ));
+    }
     let pinned = pinned.clone();
     let (dir, downloads) = (dir.to_path_buf(), downloads_folder(dir));
     let downloader = runner.downloader().clone();
@@ -153,6 +164,63 @@ mod tests {
         let again = install(&r, &cat, linux(), &dir).unwrap();
         assert!(again.cached);
         assert_eq!(net.seen().len(), asked, "a cached install touches no network");
+    }
+
+    #[test]
+    fn a_folder_that_is_not_an_install_is_never_replaced() {
+        let zip = archive();
+        let cat = catalogue(&zip, &sha256_hex(&zip));
+        let net = FakeNet::new();
+        net.serve(URL, zip);
+        let work = tempfile::tempdir().unwrap();
+        let dir = work.path().join("docs");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("precious.txt"), "mine").unwrap();
+        let err = install(&runner(&net, 1), &cat, linux(), &dir).unwrap_err();
+        assert!(matches!(&err, FetchError::Failed { hint: Some(_), .. }), "{err:?}");
+        assert_eq!(std::fs::read_to_string(dir.join("precious.txt")).unwrap(), "mine");
+        assert!(net.seen().is_empty());
+        // An empty folder, and one with an older stamp of this tool, are fine.
+        let empty = work.path().join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert!(install(&runner(&net, 1), &cat, linux(), &empty).is_ok());
+        std::fs::write(empty.join(STAMP), "0.0.1").unwrap();
+        assert!(
+            !install(&runner(&net, 1), &cat, linux(), &empty).unwrap().cached,
+            "stamp of another version"
+        );
+    }
+
+    #[test]
+    fn framework_style_relative_links_are_kept_inside_the_tree() {
+        let zip = crate::fetch::testing::zip_with_links(&[("chrome-linux64/chrome", b"x")], &[("chrome-linux64/Frameworks/Current", "1")]);
+        let cat = catalogue(&zip, &sha256_hex(&zip));
+        let net = FakeNet::new();
+        net.serve(URL, zip);
+        let work = tempfile::tempdir().unwrap();
+        let dir = work.path().join("b");
+        install(&runner(&net, 1), &cat, linux(), &dir).unwrap();
+        #[cfg(unix)]
+        assert_eq!(
+            std::fs::read_link(dir.join("chrome-linux64/Frameworks/Current")).unwrap(),
+            Path::new("1")
+        );
+        #[cfg(not(unix))]
+        let _ = dir;
+    }
+
+    #[test]
+    fn a_cancel_while_the_archive_downloads_leaves_no_install() {
+        let zip = archive();
+        let cat = catalogue(&zip, &sha256_hex(&zip));
+        let net = FakeNet::new();
+        let r = std::sync::Arc::new(runner(&net, 1));
+        let r2 = r.clone();
+        net.route(URL, Route::Endless(std::sync::Arc::new(move || r2.cancel_all())));
+        let work = tempfile::tempdir().unwrap();
+        let dir = work.path().join("b");
+        assert_eq!(install(&r, &cat, linux(), &dir).unwrap_err(), FetchError::Cancelled);
+        assert!(!dir.exists(), "no install folder");
     }
 
     #[test]

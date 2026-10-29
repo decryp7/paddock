@@ -74,6 +74,11 @@ impl From<FetchError> for CliError {
     }
 }
 
+/// Writes `bytes` over `path` atomically (a sibling file, then a rename; the old file stays if anything fails).
+pub fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), FetchError> {
+    paddock_env::write_atomic(path, bytes, false).map_err(|e| FetchError::failed(format!("{}: {e}", path.display())))
+}
+
 /// `text` ending in a full stop.
 pub fn sentence(text: &str) -> String {
     let t = text.trim_end();
@@ -117,6 +122,8 @@ mod tests {
         assert_eq!(FetchError::Cancelled.to_string(), "Cancelled.");
         assert_eq!(FetchError::Usage("u".into()).to_string(), "u");
         let io = std::io::Error::other("boom");
+        let dir = std::env::current_dir().unwrap();
+        assert!(write_atomic(&dir, b"x").is_err(), "a folder is not replaced by a file");
         assert_eq!(FetchError::io("x.txt", &io).to_string(), "x.txt: boom.");
     }
 }

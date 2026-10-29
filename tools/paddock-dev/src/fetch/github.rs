@@ -93,7 +93,7 @@ pub fn verify_all(runner: &Runner, checks: Vec<Check>, work: &Path) -> Result<()
         let job = runner.spawn("verify", "Verifying the asset", Some(&c.name), move |ctx| {
             let request = Request::new(&url, &file, Integrity::Sha256(digest))?.max_bytes(MAX_ASSET_BYTES);
             let got = downloader.download(ctx, &request);
-            let _ = std::fs::remove_file(&file);
+            super::runner::discard(&request);
             got.map(|_| ()).map_err(JobError::from)
         })?;
         pending.push((c.name, job));
@@ -113,17 +113,12 @@ pub fn verify_all(runner: &Runner, checks: Vec<Check>, work: &Path) -> Result<()
     first.map_or(Ok(()), Err)
 }
 
-/// Writes the manifest as pretty JSON with a final newline, over `path` by renaming a sibling file.
+/// Writes the manifest as pretty JSON with a final newline, atomically.
 pub fn write_manifest(path: &Path, manifest: &Value) -> Result<(), FetchError> {
     let mut text =
         serde_json::to_string_pretty(manifest).map_err(|e| FetchError::failed(format!("The manifest cannot be written: {e}.")))?;
     text.push('\n');
-    let tmp = path.with_extension("json.new");
-    std::fs::write(&tmp, text).map_err(|e| FetchError::io(tmp.display(), &e))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        FetchError::io(path.display(), &e)
-    })
+    super::error::write_atomic(path, text.as_bytes())
 }
 
 #[cfg(test)]
@@ -213,6 +208,20 @@ mod tests {
         assert_eq!(out.0["tag_name"], "b1");
         assert_eq!(out.1, out.0);
         assert_eq!(out.2, out.0);
+        assert!(
+            net.headers_to("https://api.test/r")
+                .contains(&("accept".into(), "application/vnd.github+json".into()))
+        );
+        let auth: Vec<_> = net
+            .headers_to("https://api.test/r")
+            .into_iter()
+            .filter(|(n, _)| n == "authorization")
+            .collect();
+        assert_eq!(
+            auth,
+            [("authorization".to_string(), "Bearer secret".to_string())],
+            "sent once, for the one call with a token"
+        );
         net.serve("https://api.test/t.txt", b"b99\n".to_vec());
         let d = r.downloader().clone();
         assert_eq!(
@@ -230,10 +239,9 @@ mod tests {
             std::fs::read_to_string(&path).unwrap(),
             "{\n  \"b\": 1,\n  \"a\": [\n    1,\n    2\n  ],\n  \"c\": []\n}\n"
         );
-        assert!(write_manifest(&dir.path().join("none").join("m.json"), &json!({})).is_err());
+        write_manifest(&dir.path().join("made").join("m.json"), &json!({})).unwrap();
         let folder = dir.path().join("f.json");
         std::fs::create_dir(&folder).unwrap();
         assert!(write_manifest(&folder, &json!({})).is_err());
-        assert!(!dir.path().join("f.json.new").exists());
     }
 }

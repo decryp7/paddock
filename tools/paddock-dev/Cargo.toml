@@ -32,6 +32,7 @@ paddock-slots = { path = "../../crates/paddock-slots" }
 paddock-archive = { path = "../../crates/paddock-archive" }
 paddock-chromium = { path = "../../crates/paddock-chromium" }
 paddock-download = { path = "../../crates/paddock-download" }
+paddock-env = { path = "../../crates/paddock-env" }
 paddock-jobs = { path = "../../crates/paddock-jobs" }
 paddock-runtime = { path = "../../crates/paddock-runtime" }
 # Catalogue pins are rewritten in place, so comments and order survive.

@@ -397,7 +397,7 @@ times the JS it replaces after duplicates collapse, shell about 2 times; tests a
 | | R1 | composite actions' logic (sccache, stable workspace, build folder and env, host tools and cleanup, node caches, sccache stats); actions become one-liners; extend the WP-C6 check (§3.7) with today's baselines; delete the three one-off scripts | 2.5 | 334 shell lines (actions 815 → about 300 YAML), 72, 491 | 900 + 800 tests |
 | | R10 | app workflows' long and OS-branching `run:` blocks into commands or `paddock.ci.json` (Debrief, Dyno, Spotter, Pitcrew, Pitwall) | 2 | about 450 inline shell lines | 500 + 400 tests |
 | **2 Release and downloads** | R2 | release, bundles, sidecars, `verify-macos` with `FakeRunner`, `self-test`, `latest-json`, notes, strip-keys, publish; Debrief `build-sidecars`, macOS dev-signing, Dyno `check-bundle`, demo release | 3 | 1,271 + about 900 test lines | 1,600 + 1,200 tests |
-| | R3 | `dev fetch` on `paddock-runtime` catalogues, `paddock-download`, `paddock-archive`: Chrome for Testing, libduckdb (from `xtask`), runtime pins; the Python updaters go | 2 | 1,017 + about 500 | 900 + 700 tests |
+| | R3 | `dev fetch` on `paddock-runtime` catalogues, `paddock-download`, `paddock-archive`: Chrome for Testing, libduckdb (from `xtask`), runtime pins; the Python updaters go. **Partial** (see below) | 2 | 1,017 + about 500 | 900 + 700 tests |
 | **3 Planner, hosts, scaffolding** | R4 | `dev plan` (explain, CI matrix, job-level last green with the replay fixtures), `ci timings`, `coverage-gate`; shadow week; update rule 3's wording in `docs/rules.md` (line 127), root `AGENTS.md` (lines 24, 42, 53, 83) and `apps/debrief/AGENTS.md` (line 13) | 2.5 | 1,003 + 341 | 1,300 + 900 tests |
 | | R5 | `dev host` (prune, container, verify-installed, vm-smoke) with per-app config instead of 24 scripts; one bootstrap per OS | 2.5 | 1,555 + 620 | 1,100 + 800 tests |
 | | R6 | notices, window weight, startup bench, plugin and font builds | 1.5 | 976 + about 400 | 900 + 500 tests |
@@ -411,6 +411,20 @@ times the JS it replaces after duplicates collapse, shell about 2 times; tests a
 | **6 Lossy categories** | R15 | UI lints into the ESLint preset (moved, not deleted); dialog command contract generated from Rust, then the TS analysis deleted | 2.5 | 633 (243 moved) | 400 + 300 tests |
 | | R16 | clean-up: allow-list down to its final form, docs, a lesson in `docs/lessons.md` | 0.5 | about 200 | 200 |
 | | | **Total** | **about 45, plus about 1.5 for the six checkpoints** | **about 23,900 source and inline shell + about 7,400 test lines** | **about 20,700 Rust + 5,000 data + 14,400 test lines** |
+
+**R3 status: partial (2026-10-30, branch `tools/dev-fetch-r3`; not done).** `dev fetch chrome|libduckdb|pin|llama|ffmpeg` exists and is
+tested, and the two Python updaters and `xtask libduckdb` are deleted, because nothing called them. The rest of R3 is owned by **R2**
+(it moves the release and CI call sites, which were frozen while the Dyno and Spotter releases were in flight):
+
+- switch the call sites to `./dev fetch`: the `install-test-browser` action (used by `ci.yml`, `app-e2e.yml` and `debrief.yml`),
+  `debrief.yml`, `debrief-bench.yml`, `app-e2e.yml`, `ci.yml`, `build-sidecars.mjs` and `scripts/ci/smoke-linux-docker.sh`;
+- then delete `install-test-browser.mjs`, `pin-runtime.mjs`, `runtime-catalogue.mjs`, `fetch-libduckdb.sh`, `libduckdb.mjs` and
+  `libduckdb-env.sh`, together with their tests (and Spotter's `pin-chromium.mjs` and `install-test-browser.mjs`);
+- move the libduckdb, ffmpeg, llama and sccache pins into `paddock-runtime` catalogues, or record a decision to keep JSON for them
+  (the tool reads libduckdb's pins from `fetch-libduckdb.sh` and writes the two JSON manifests as they are today);
+- shrink the WP-C6 allow-list and baselines (§3.7) by the deleted scripts;
+- take golden output from `install-test-browser.mjs` and `pin-runtime.mjs` before deleting them, and compare it with the tool's;
+- run the commands on all three OSes (the R3 tests ran on macOS only).
 
 The checkpoints add about 0.25 days per phase, about 1.5 in all.
 

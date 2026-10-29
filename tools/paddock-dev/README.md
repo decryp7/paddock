@@ -19,7 +19,10 @@ The developer and CI tool of ADR 0022. Run it with `./dev <command>` (`dev.cmd` 
 Pinned downloads on `paddock-runtime` catalogues, `paddock-download` and `paddock-archive`. Every command runs as one `paddock-jobs` job
 on a small pool, so progress is phase-labelled on standard error from the first moment ("Connecting", "Downloading 12.3 MB of 195 MB",
 "Verifying", "Unpacking", "Installing"), Ctrl+C cancels in every phase, and an archive is checked against its pinned size and SHA-256
-before it is unpacked or used; a failed or cancelled fetch leaves no half-written folder or file behind.
+before it is unpacked or used. A failed or cancelled fetch changes nothing that was there before: a partial download is kept as
+`<name>.part` beside its destination so a later run can resume it, but it is never used unverified and never written in place, and the
+unpack swaps a finished folder in whole. Archives that are only measured (`pin`) or verified (`llama`, `ffmpeg`) are removed, partial
+files included. `fetch chrome --dir` refuses a non-empty folder that has no `.pinned-version` stamp. A second Ctrl+C exits with 130.
 
 | Command | What it does | Replaces |
 |---|---|---|
@@ -31,7 +34,7 @@ before it is unpacked or used; a failed or cancelled fetch leaves no half-writte
 
 Online access is limited to what a command names: Chrome for Testing's storage and channel list, the DuckDB release on GitHub, the URLs of
 the catalogue being pinned and the GitHub release API of the one repository a manifest comes from (`$GITHUB_TOKEN` lifts the anonymous
-rate limit). **Parallelism and cost** (rule 51): the work is network-bound, so `--jobs` (default 3, at most 8) archives are measured or
+rate limit). **Parallelism and cost** (rule 51): the work is network-bound, so `--jobs` (default Auto, which is 3; at most 8; a fixed bound from the per-host cap, not a measurement) archives are measured or
 verified at once; each download uses up to four connections and the downloader caps a host at four across all of them, so more jobs
 would only queue. One pass per archive: the digest is computed while the bytes are written and a measured archive is deleted at once.
 Tests use a fake transport or a loopback server and never the real network.

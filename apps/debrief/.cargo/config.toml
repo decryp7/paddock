@@ -1,4 +1,4 @@
-# Machine-local settings, both git-ignored: libduckdb.toml written by `./dev fetch libduckdb --cargo-config` (DUCKDB_LIB_DIR,
+# Machine-local settings, both git-ignored: libduckdb.toml written by `./dev fetch libduckdb --cargo-config` run from the repository root (DUCKDB_LIB_DIR,
 # DUCKDB_INCLUDE_DIR), and ci.toml written by the shared build-folder action on CI's host runners (build.target-dir: the
 # job's build folder outside the checkout, as configuration because sccache hashes CARGO_TARGET_DIR).
 include = [{ path = "libduckdb.toml", optional = true }, { path = "ci.toml", optional = true }]

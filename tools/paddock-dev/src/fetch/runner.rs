@@ -7,6 +7,7 @@ use paddock_cli::{Progress, format_size};
 use paddock_download::{Downloader, Transport};
 use paddock_jobs::{EventSink, JobContext, JobError, JobId, JobPool, JobRegistry, JobSnapshot, JobState, Unit, Workers};
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -23,6 +24,7 @@ pub struct Runner {
     pool: JobPool,
     downloader: Arc<Downloader>,
     jobs: usize,
+    cancelled: Arc<AtomicBool>,
 }
 
 impl Runner {
@@ -34,6 +36,7 @@ impl Runner {
             pool: JobPool::new(Workers::new(jobs)),
             downloader: Arc::new(Downloader::new(transport)),
             jobs,
+            cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -64,6 +67,9 @@ impl Runner {
         subject: Option<&str>,
         body: impl FnOnce(&JobContext) -> Result<T, JobError> + Send + 'static,
     ) -> Result<Pending<T>, FetchError> {
+        if self.cancelled.load(Ordering::SeqCst) {
+            return Err(FetchError::Cancelled);
+        }
         let ctx = self.registry.register(kind, title, subject);
         let id = ctx.id();
         let handle = self
@@ -84,16 +90,49 @@ impl Runner {
         self.spawn(kind, title, subject, body)?.wait()
     }
 
-    /// Asks every running job to stop. Safe to call from a signal-handling thread.
+    /// Asks every job to stop and refuses new ones from now on. Safe to call from a signal-handling thread.
     pub fn cancel_all(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
         for s in self.registry.snapshots() {
             self.registry.cancel(s.id);
         }
     }
 
-    /// The registry, for the Ctrl+C handler to hold.
-    pub fn registry(&self) -> Arc<JobRegistry> {
-        self.registry.clone()
+    /// What Ctrl+C does for this runner.
+    pub fn interrupt(&self) -> Arc<Interrupt> {
+        Arc::new(Interrupt {
+            registry: self.registry.clone(),
+            cancelled: self.cancelled.clone(),
+            hits: AtomicUsize::new(0),
+        })
+    }
+}
+
+/// Ctrl+C: the first press cancels every job and refuses new ones, a second press ends the process with 130.
+pub struct Interrupt {
+    registry: Arc<JobRegistry>,
+    cancelled: Arc<AtomicBool>,
+    hits: AtomicUsize,
+}
+
+impl Interrupt {
+    /// One press. `exit` ends the process (injected so a test can watch it).
+    pub fn press(&self, exit: &dyn Fn(i32)) {
+        if self.hits.fetch_add(1, Ordering::SeqCst) == 0 {
+            self.cancelled.store(true, Ordering::SeqCst);
+            for s in self.registry.snapshots() {
+                self.registry.cancel(s.id);
+            }
+        } else {
+            exit(130);
+        }
+    }
+}
+
+/// Removes a throwaway download: the file, its `.part` and the resume record.
+pub fn discard(request: &paddock_download::Request) {
+    for p in [request.dest().to_path_buf(), request.part_path(), request.resume_path()] {
+        let _ = std::fs::remove_file(p);
     }
 }
 
@@ -184,15 +223,11 @@ pub fn describe(s: &JobSnapshot) -> Line {
     }
 }
 
-/// Makes Ctrl+C cancel every job of `runner`'s registry. Installed once per process; a second call (or a failed
-/// installation) is ignored, as a missing handler only means Ctrl+C ends the process the plain way.
+/// Installs the Ctrl+C handler of `runner`: the first press cancels, the second exits with 130. Installed once per process; a
+/// failed installation is ignored, as a missing handler only means Ctrl+C ends the process the plain way.
 pub fn cancel_on_ctrl_c(runner: &Runner) {
-    let registry = runner.registry();
-    let _ = ctrlc::set_handler(move || {
-        for s in registry.snapshots() {
-            registry.cancel(s.id);
-        }
-    });
+    let interrupt = runner.interrupt();
+    let _ = ctrlc::set_handler(move || interrupt.press(&|code| std::process::exit(code)));
 }
 
 #[cfg(test)]
@@ -254,7 +289,7 @@ mod tests {
         let pending = r.spawn("t", "Title", None, |_| Ok(7)).unwrap();
         let id = pending.id();
         assert_eq!(pending.wait().unwrap(), 7);
-        assert_eq!(r.registry().snapshots().iter().filter(|s| s.id == id).count(), 1);
+        assert_eq!(r.registry.snapshots().iter().filter(|s| s.id == id).count(), 1);
         let err = r
             .run::<()>("t", "Title", None, |_| Err(JobError::Failed("no disk".into())))
             .unwrap_err();
@@ -280,6 +315,21 @@ mod tests {
         drop(hold);
         assert_eq!(pending.wait().unwrap_err(), FetchError::Cancelled);
         assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn the_first_press_cancels_and_refuses_new_jobs_and_the_second_exits_130() {
+        let net = super::super::testing::FakeNet::new();
+        let r = super::super::testing::runner(&net, 1);
+        let interrupt = r.interrupt();
+        let exited = std::sync::Mutex::new(Vec::new());
+        let exit = |code: i32| exited.lock().unwrap().push(code);
+        interrupt.press(&exit);
+        assert!(exited.lock().unwrap().is_empty(), "the first press only cancels");
+        assert_eq!(r.spawn("t", "Title", None, |_| Ok(())).err(), Some(FetchError::Cancelled));
+        interrupt.press(&exit);
+        interrupt.press(&exit);
+        assert_eq!(*exited.lock().unwrap(), [130, 130]);
     }
 
     #[test]

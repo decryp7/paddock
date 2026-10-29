@@ -26,7 +26,7 @@ Machine setup shared by every Paddock app (tools, build cache, worktrees, test r
   needs several GB of RAM). The pins (version, assets, SHA-256) live in
   `crates/debrief-store-duck/scripts/fetch-libduckdb.sh`. Every cargo build of the workspace needs
   `DUCKDB_LIB_DIR`/`DUCKDB_INCLUDE_DIR`. Once per checkout (and again after `cargo clean` or a version bump), on any
-  OS:
+  OS, from the repository root (`./dev` is there, above `apps/`):
 
   ```sh
   ./dev fetch libduckdb --cargo-config
@@ -80,7 +80,7 @@ cargo nextest run -p debrief-core        # engine tests, including end-to-end ru
 Regenerate the samples with `cargo xtask gen-samples` (do not edit them by hand). It runs
 `samples/generate.py` (with `python3`, `python` or `py -3`, whichever works) and then the Rust generators
 of the profiler captures and the crash dump (`DEBRIEF_REGENERATE_SAMPLES=1` tests in `debrief-plugin-profiling`
-and `debrief-plugin-windows`); `./dev fetch libduckdb --cargo-config` sets up the database library (above); `cargo xtask help` lists
+and `debrief-plugin-windows`); `./dev fetch libduckdb --cargo-config` (from the repository root) sets up the database library (above); `cargo xtask help` lists
 the tasks.
 [`samples/README.md`](../samples/README.md) lists every sample, its format and the views it shows.
 

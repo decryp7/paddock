@@ -37,7 +37,7 @@ given machine never uses.
 - **Builds are downloaded like models, not bundled.** A pinned catalog
   (`crates/debrief-ai/src/runtimes/llama-runtimes.json`: release, build tag, and for every platform and
   build the asset URL, size and SHA-256) is embedded in Debrief and regenerated with
-  `./dev fetch llama`. The runtime manager (`debrief_ai::runtimes`) downloads a build with
+  `./dev fetch llama` (from the repository root). The runtime manager (`debrief_ai::runtimes`) downloads a build with
   the model downloader (free-space check, resume, retries, SHA-256 before use) from GitHub only (and
   its release CDN), unpacks it defensively (only `llama-server`, shared libraries and licences; flat
   names, no `..`, links only to siblings, caps on entries and sizes) into
@@ -75,7 +75,7 @@ given machine never uses.
 - **Supply chain.** Only assets named in the checked-in catalog are fetched, from `github.com` and
   GitHub's release CDN over https, and each is checked against its pinned SHA-256 before it is
   unpacked or run; a mismatch deletes the file. The checksums come from the GitHub release API and
-  `./dev fetch llama --verify` recomputes them by downloading; a new pin shows up as a diff of
+  `./dev fetch llama --verify` (from the repository root) recomputes them by downloading; a new pin shows up as a diff of
   URLs and hashes. We trust ggml-org's release pipeline (their releases also carry build attestations).
 - **macOS.** Debrief downloads with its own HTTP client, so files do not normally get the quarantine
   attribute; any that is present is removed only after the checksum check. Apple Silicon runs only

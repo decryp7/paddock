@@ -25,6 +25,7 @@ pub enum Route {
 pub struct FakeNet {
     routes: Mutex<HashMap<String, Route>>,
     seen: Mutex<Vec<String>>,
+    headers: Mutex<Vec<(String, String, String)>>,
 }
 
 impl FakeNet {
@@ -44,6 +45,17 @@ impl FakeNet {
     /// Every URL asked for, in order (a download probes first, so it may appear twice).
     pub fn seen(&self) -> Vec<String> {
         self.seen.lock().unwrap().clone()
+    }
+
+    /// The `(name, value)` request headers sent to `url` (names lower-case), over all requests.
+    pub fn headers_to(&self, url: &str) -> Vec<(String, String)> {
+        self.headers
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(u, _, _)| u == url)
+            .map(|(_, n, v)| (n.clone(), v.clone()))
+            .collect()
     }
 
     /// How many requests went to `url`.
@@ -80,6 +92,12 @@ fn response(status: u16, length: Option<usize>, body: impl Read + Send + 'static
 impl Transport for FakeNet {
     fn get(&self, request: &Get<'_>) -> Result<Response, TransportError> {
         self.seen.lock().unwrap().push(request.url.to_string());
+        for h in request.headers {
+            self.headers
+                .lock()
+                .unwrap()
+                .push((request.url.to_string(), h.name.to_ascii_lowercase(), h.value.clone()));
+        }
         let route = self.routes.lock().unwrap().get(request.url).cloned();
         match route {
             Some(Route::Body(b)) => Ok(response(200, Some(b.len()), Cursor::new(b))),
@@ -132,6 +150,20 @@ pub fn zip_of(entries: &[(&str, &[u8], u32)]) -> Vec<u8> {
         let opts = zip::write::SimpleFileOptions::default().unix_permissions(*mode);
         w.start_file(*name, opts).unwrap();
         w.write_all(bytes).unwrap();
+    }
+    w.finish().unwrap().into_inner()
+}
+
+/// A zip of plain files `(name, bytes)` and relative symbolic links `(name, target)`, as a macOS app bundle has.
+pub fn zip_with_links(files: &[(&str, &[u8])], links: &[(&str, &str)]) -> Vec<u8> {
+    let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let opts = zip::write::SimpleFileOptions::default().unix_permissions(0o755);
+    for (name, bytes) in files {
+        w.start_file(*name, opts).unwrap();
+        w.write_all(bytes).unwrap();
+    }
+    for (name, target) in links {
+        w.add_symlink(*name, *target, opts).unwrap();
     }
     w.finish().unwrap().into_inner()
 }

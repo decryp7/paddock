@@ -24,7 +24,7 @@ same shape of problem: pinned official builds, downloaded on demand, verified, s
 
 - **Pinned LGPL builds.** `crates/debrief-video/src/runtime/ffmpeg-runtimes.json` names one release of BtbN's
   FFmpeg-Builds (the builds FFmpeg's download page links for Windows and Linux) and for every platform its
-  `lgpl-shared` asset: URL, size and SHA-256 (from the GitHub release API's asset digest; `./dev fetch ffmpeg`
+  `lgpl-shared` asset: URL, size and SHA-256 (from the GitHub release API's asset digest; `./dev fetch ffmpeg`, run from the repository root,
   regenerates the file and `--verify` recomputes the hashes by downloading). Pinned: a month-end autobuild (those are
   kept for about two years; daily builds are deleted within weeks), release branch n9.0, for `windows-x64`,
   `windows-arm64`, `linux-x64` and `linux-arm64`. Only LGPL builds are pinned: no GPL components (x264, x265) are

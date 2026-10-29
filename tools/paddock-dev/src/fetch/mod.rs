@@ -1,6 +1,10 @@
 //! `dev fetch` (ADR 0022, R3): the pinned downloads of the repository, on the shared crates. Each command is one job on a
 //! small pool (`paddock-jobs`), so the command thread only waits, progress is phase-labelled on standard error from the first
-//! moment, Ctrl+C cancels in every phase and a cancelled or failed fetch leaves nothing half-done in place.
+//! moment and Ctrl+C cancels in every phase (a second press exits at once). A failed or cancelled fetch changes nothing that was
+//! there before: an archive is written beside its destination as `<name>.part`, which is kept so a later run can resume it, but
+//! it is never used before its size and SHA-256 were checked and never written in place; only a verified archive is unpacked,
+//! and the unpack swaps a finished folder in whole. Archives that are only measured or verified are throwaway and are removed,
+//! partial files included.
 //!
 //! - `chrome`: the Chrome for Testing build a `paddock-runtime` catalogue pins ([`chrome`]);
 //! - `libduckdb`: Debrief's prebuilt libduckdb, against its pinned SHA-256 ([`libduckdb`]);
@@ -52,8 +56,9 @@ pub struct Common {
     /// The repository root (default: the folder containing .git, found from the current folder).
     #[arg(long)]
     root: Option<PathBuf>,
-    /// How many archives to fetch at once, 1 to 8 (default 3: the archives sit on one or two hosts, each download already uses
-    /// up to four connections, and the unpack is disk-bound).
+    /// How many archives to fetch at once, 1 to 8 (default: Auto, which is 3. A fixed bound, not a measurement: the archives sit
+    /// on one or two hosts, each download already uses up to four connections and the downloader caps a host at four across
+    /// all jobs, so more jobs would only queue; the unpack is disk-bound. ER-20's network bound is "a few per host").
     #[arg(long, value_parser = clap::value_parser!(u8).range(1..=8))]
     jobs: Option<u8>,
 }
@@ -299,6 +304,13 @@ fn run_chrome(runner: &Runner, env: &Env, a: &ChromeArgs) -> Result<Report, Fetc
         .or_else(|| env.test_browser_dir.clone())
         .or_else(|| env.home.as_ref().map(|h| h.join(".cache").join("paddock-test-browser")))
         .ok_or_else(|| FetchError::Usage("No install folder: pass --dir or set PADDOCK_TEST_BROWSER_DIR.".into()))?;
+    // One line per variable: a newline or other control character in a value would inject a variable of its own. Checked before
+    // anything is downloaded.
+    if env.github_env.is_some() && dir.to_string_lossy().chars().any(char::is_control) {
+        return Err(FetchError::failed(
+            "The install folder holds a control character, so its path cannot be written to GITHUB_ENV.",
+        ));
+    }
     let installed = chrome::install(runner, &catalogue, platform, &dir)?;
     let lines = chrome::env_lines(&installed.executable, a.env_prefix.as_deref());
     if let Some(file) = &env.github_env {
@@ -488,6 +500,25 @@ mod tests {
         );
         assert_eq!(report.data["cached"], false);
         assert_eq!(std::fs::read_to_string(gh).unwrap(), format!("{}\n", report.text));
+    }
+
+    #[test]
+    fn a_control_character_in_the_path_is_never_written_to_github_env() {
+        let root = tempfile::tempdir().unwrap();
+        let zip = zip_of(&[("chrome-linux64/chrome", b"x", 0o755)]);
+        let net = FakeNet::new();
+        net.serve("https://dl.test/9.9.9/linux64/chrome-linux64.zip", zip.clone());
+        let cat = root.path().join("c.toml");
+        std::fs::write(&cat, chromium_toml(&zip)).unwrap();
+        let gh = root.path().join("gh_env");
+        let mut e = env(root.path());
+        e.github_env = Some(gh.clone());
+        let dir = root.path().join("b\nINJECTED=1");
+        let c = parse(&["chrome", "--catalogue", cat.to_str().unwrap(), "--dir", dir.to_str().unwrap()]);
+        let err = run(&runner(&net, 1), &e, c).unwrap_err();
+        assert!(err.to_string().contains("control character"), "{err}");
+        assert!(!gh.exists());
+        assert!(net.seen().is_empty(), "refused before any download");
     }
 
     #[test]
