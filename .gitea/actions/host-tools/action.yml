@@ -19,19 +19,19 @@ runs:
           tools="$(bash "${{ github.action_path }}/../../../conformance/ci/job-isolation.sh" path tools)"  # shared: installs land by rename
           DEST="$tools/cargo-nextest/$VERSION"
           if [ ! -x "$DEST/$BIN" ]; then
-            TMP=$(mktemp -d)
-            curl -fsSL --retry 3 -o "$TMP/$A" "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$VERSION/cargo-nextest-$VERSION-$A"
-            if command -v sha256sum >/dev/null 2>&1; then GOT=$(sha256sum "$TMP/$A" | cut -d' ' -f1); else GOT=$(shasum -a 256 "$TMP/$A" | cut -d' ' -f1); fi
+            dl=$(mktemp -d)
+            curl -fsSL --retry 3 -o "$dl/$A" "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$VERSION/cargo-nextest-$VERSION-$A"
+            if command -v sha256sum >/dev/null 2>&1; then GOT=$(sha256sum "$dl/$A" | cut -d' ' -f1); else GOT=$(shasum -a 256 "$dl/$A" | cut -d' ' -f1); fi
             [ "$GOT" = "$SUM" ] || { echo "::error::cargo-nextest $VERSION checksum mismatch for $A (got $GOT)"; exit 1; }
-            mkdir -p "$TMP/x"
+            mkdir -p "$dl/x"
             case "$A" in
-              *.zip) if command -v unzip >/dev/null 2>&1; then unzip -q "$TMP/$A" -d "$TMP/x"; else powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$TMP/$A")' -DestinationPath '$(cygpath -w "$TMP/x")'"; fi ;;
-              *) tar -xzf "$TMP/$A" -C "$TMP/x" ;;
+              *.zip) if command -v unzip >/dev/null 2>&1; then unzip -q "$dl/$A" -d "$dl/x"; else powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$A")' -DestinationPath '$(cygpath -w "$dl/x")'"; fi ;;
+              *) tar -xzf "$dl/$A" -C "$dl/x" ;;
             esac
             mkdir -p "$DEST"
             # A part file of this job's own: two jobs installing the same version at once each rename a whole copy into place.
-            cp "$TMP/x/$BIN" "$DEST/$BIN.part.$$" && chmod +x "$DEST/$BIN.part.$$" && mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
-            rm -rf "$TMP"
+            cp "$dl/x/$BIN" "$DEST/$BIN.part.$$" && chmod +x "$DEST/$BIN.part.$$" && mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
+            rm -rf "$dl"
             echo "cargo-nextest $VERSION installed in $DEST"
           else
             echo "cargo-nextest $VERSION kept in $DEST"

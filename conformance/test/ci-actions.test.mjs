@@ -1133,7 +1133,7 @@ function runJobTmpdir(mode, { os = 'macOS', root = realpathSync(mkdtempSync(join
   return { ...r, root, exported };
 }
 
-test('job-tmpdir: the job\'s temp folder is the runner\'s per-job folder, and its sockets get a short folder of their own', () => {
+test('job-tmpdir: the job\'s temp folder is the runner\'s per-job folder, and its sockets get a short private folder of their own', () => {
   const first = runJobTmpdir('setup');
   assert.equal(first.status, 0, first.stderr + first.stdout);
   const temp = join(first.root, 'runner-temp');
@@ -1142,22 +1142,63 @@ test('job-tmpdir: the job\'s temp folder is the runner\'s per-job folder, and it
   assert.equal(first.exported.TMP, undefined, 'TMP and TEMP only on Windows');
   // Socket paths are limited to about 100 bytes; the runner's folder is long, so a short base per job, never shared /tmp.
   const base = first.exported.PADDOCK_SOCKET_BASE;
-  assert.match(base ?? '', new RegExp(`^${join(first.root, 'sockets').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/pd-[0-9]+$`));
-  assert.ok(existsSync(base));
-  assert.equal(statSync(base).mode & 0o777, 0o700, 'private');
-  const again = runJobTmpdir('setup', { root: first.root });
-  assert.equal(again.status, 0, 'a second setup in the same job keeps the folders');
+  assert.match(base ?? '', new RegExp(`^${join(first.root, 'sockets').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/pd-[A-Za-z0-9]{8}$`), 'mktemp -d, a name nobody else holds');
+  assert.equal(statSync(base).mode & 0o777, 0o700, 'private from the moment it exists');
+  assert.equal(read(join(base, '.owner')), `${temp}\n`, 'names the job folder it belongs to');
+  // A second setup in the job (acquire after the action, or twice) keeps the same folder.
+  const again = runJobTmpdir('setup', { root: first.root, extra: { PADDOCK_SOCKET_BASE: base } });
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(read(join(first.root, 'github-env')).split('\n').filter((l) => l.startsWith('PADDOCK_SOCKET_BASE=')).at(-1), `PADDOCK_SOCKET_BASE=${base}`);
   writeFileSync(join(base, 'left'), '');
-  assert.equal(runJobTmpdir('remove', { root: first.root }).status, 0);
+  assert.equal(runJobTmpdir('remove', { root: first.root, extra: { PADDOCK_SOCKET_BASE: base } }).status, 0);
   assert.ok(!existsSync(base), 'the socket folder goes at the end of the job (the runner removes its own folder)');
+  assert.equal(runJobTmpdir('remove', { root: first.root, extra: { PADDOCK_SOCKET_BASE: base } }).status, 0, 'already gone: nothing to do');
   const win = runJobTmpdir('setup', { os: 'Windows' });
   assert.equal(win.exported.TMP, win.exported.PADDOCK_JOB_TEMP, 'Windows reads TMP and TEMP');
   assert.equal(win.exported.TEMP, win.exported.PADDOCK_JOB_TEMP);
   assert.equal(win.exported.PADDOCK_SOCKET_BASE, undefined, 'named pipes on Windows: no socket folder');
   assert.notEqual(runJobTmpdir('other').status, 0, 'an unknown mode fails');
   assert.match(read(join(ACTIONS, 'job-tmpdir', 'action.yml')), /bash "\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\.\/conformance\/ci\/job-tmpdir\.sh" "\$MODE"/, 'the action runs the script');
-  assert.match(read(join(PADDOCK, 'conformance', 'ci', 'job-isolation.sh')), /bash "\$here\/job-tmpdir\.sh" setup/, 'acquire sets the folders through the same script');
-  assert.match(read(join(PADDOCK, 'conformance', 'ci', 'job-isolation.sh')), /bash "\$here\/job-tmpdir\.sh" remove/, 'release removes them through it');
+  const iso = read(join(PADDOCK, 'conformance', 'ci', 'job-isolation.sh'));
+  assert.match(iso, /bash "\$here\/job-tmpdir\.sh" setup/, 'acquire sets the folders through the same script');
+  assert.match(iso, /bash "\$here\/job-tmpdir\.sh" sweep/, 'acquire sweeps the folders of killed jobs');
+  assert.match(iso, /bash "\$here\/job-tmpdir\.sh" remove/, 'release removes them through it');
+});
+
+test('job-tmpdir: a socket folder that is a link, someone else\'s or outside the root is never used or removed', () => {
+  const f = runJobTmpdir('setup');
+  const sockets = join(f.root, 'sockets');
+  const elsewhere = join(f.root, 'elsewhere');
+  mkdirSync(elsewhere);
+  writeFileSync(join(elsewhere, 'keep'), '');
+  symlinkSync(elsewhere, join(sockets, 'pd-linkedxx'));
+  mkdirSync(join(sockets, 'other-name'));
+  for (const bad of [join(sockets, 'pd-linkedxx'), elsewhere, join(sockets, 'other-name'), join(sockets, 'pd-missing', 'x')]) {
+    const setup = runJobTmpdir('setup', { root: f.root, extra: { PADDOCK_SOCKET_BASE: bad } });
+    const remove = runJobTmpdir('remove', { root: f.root, extra: { PADDOCK_SOCKET_BASE: bad } });
+    if (existsSync(bad)) {
+      assert.notEqual(setup.status, 0, `setup refuses ${bad}`);
+      assert.notEqual(remove.status, 0, `remove refuses ${bad}`);
+    }
+  }
+  assert.ok(existsSync(join(elsewhere, 'keep')), 'nothing behind the link was removed');
+  assert.ok(existsSync(join(sockets, 'other-name')));
+});
+
+test('job-tmpdir: sweep removes the socket folders of jobs whose folder is gone, and only those', () => {
+  const live = runJobTmpdir('setup');
+  const sockets = join(live.root, 'sockets');
+  const liveBase = live.exported.PADDOCK_SOCKET_BASE;
+  const dead = join(sockets, 'pd-deadjob1');
+  mkdirSync(dead, { mode: 0o700 });
+  writeFileSync(join(dead, '.owner'), `${join(live.root, 'work', 'gone', 'tmp')}\n`);
+  const noOwner = join(sockets, 'pd-noowner');
+  mkdirSync(noOwner, { mode: 0o700 });
+  const r = runJobTmpdir('sweep', { root: live.root });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!existsSync(dead), 'its job folder is gone: removed');
+  assert.ok(existsSync(liveBase), 'a running job\'s folder stays');
+  assert.ok(existsSync(noOwner), 'no .owner: not ours to judge, kept');
 });
 
 /** The jobs of every workflow with the OS they run on: 'container' (a Linux container), 'host' (macOS or Windows) or 'none'. */
@@ -1201,16 +1242,50 @@ test('every job on a macOS or Windows host gets the job temp folder (job-isolati
   }
   for (const where of exempt.keys()) assert.ok(jobsWithHost().some((j) => j.where === where && !j.job.text.includes('actions/checkout')), `${where}: still exempt (no checkout)`);
   // One owner (ER-22): no workflow, action or CI script writes TMPDIR, TMP or TEMP itself.
-  const files = spawnSync('git', ['ls-files', '.gitea', 'conformance/ci', 'apps/*/scripts/ci'], { cwd: PADDOCK, encoding: 'utf8' }).stdout.split('\n').filter((f) => f && !/\.test\.mjs$|\.md$/.test(f));
-  // Ways to set them for later steps or child processes: a GITHUB_ENV line, an export, a YAML env key, and the
-  // `echo "TMPDIR=..."` lines of a block redirected to GITHUB_ENV (a local shell variable such as TMP=$(mktemp -d) is fine).
-  const sets = [/\b(TMPDIR|TMP|TEMP)=[^\n]*>>\s*"?(\$\{?GITHUB_ENV|%GITHUB_ENV%)/, /\bexport\s+(TMPDIR|TMP|TEMP)=/, /^\s+(TMPDIR|TMP|TEMP):\s/m, /echo\s+"(TMPDIR|TMP|TEMP)=/];
-  const writers = files.filter((f) => {
-    if (f === 'conformance/ci/job-tmpdir.sh') return false;
-    const text = read(join(PADDOCK, f)).split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n');
-    return sets.some((re) => re.test(text));
-  });
-  assert.deepEqual(writers, [], 'only conformance/ci/job-tmpdir.sh sets the temp folder variables');
+  const listed = spawnSync('git', ['ls-files', '.gitea', 'conformance/ci', 'apps/*/scripts/ci'], { cwd: PADDOCK, encoding: 'utf8' });
+  assert.equal(listed.status, 0, listed.stderr);
+  const files = listed.stdout.split('\n').filter((f) => f && !/\.test\.mjs$|\.md$/.test(f));
+  assert.ok(files.length > 10, `the files to check were listed (${files.length})`);
+  const found = files.filter((f) => f !== 'conformance/ci/job-tmpdir.sh').flatMap((f) => tempWriterLines(read(join(PADDOCK, f))).map((l) => `${f}: ${l.trim()}`));
+  assert.deepEqual(found, [], 'only conformance/ci/job-tmpdir.sh sets the temp folder variables');
+});
+
+/**
+ * The lines of a file that set TMPDIR, TMP or TEMP for later steps or child processes (comment lines ignored): in a file that
+ * mentions GITHUB_ENV every `[echo|printf] [quote]VAR=` line (a heredoc body included), an export, a YAML env key, a line
+ * that appends VAR= to GITHUB_ENV, and the PowerShell forms ($env:VAR = ..., Add-Content/Out-File to $env:GITHUB_ENV).
+ */
+function tempWriterLines(text) {
+  const env = /GITHUB_ENV/.test(text);
+  return text.split('\n').filter((l) => !l.trimStart().startsWith('#')).filter((l) =>
+    (env && /^\s*(echo|printf)?\s*['"]?(TMPDIR|TMP|TEMP)=/.test(l)) ||
+    /\$env:(TMPDIR|TMP|TEMP)\s*=/i.test(l) ||
+    (/\b(Add-Content|Out-File)\b/i.test(l) && /\$env:GITHUB_ENV/i.test(l) && /(TMPDIR|TMP|TEMP)=/.test(l)) ||
+    /\bexport\s+(TMPDIR|TMP|TEMP)=/.test(l) ||
+    /^\s+(TMPDIR|TMP|TEMP):\s/.test(l) ||
+    /\b(TMPDIR|TMP|TEMP)=[^\n]*>>\s*"?(\$\{?GITHUB_ENV|%GITHUB_ENV%)/.test(l));
+}
+
+test('the single-writer check catches every way a step can set the temp folder, and nothing else', () => {
+  const caught = [
+    ['echo', 'run: |\n  echo "TMPDIR=$t" >> "$GITHUB_ENV"'],
+    ['echo in a block', 'run: |\n  {\n    echo "TMP=$t"\n  } >> "$GITHUB_ENV"'],
+    ['printf', "printf 'TEMP=%s\\n' \"$t\" >> \"$GITHUB_ENV\""],
+    ['cmd', 'echo TMP=C:\\t>>"%GITHUB_ENV%"'],
+    ['heredoc', 'cat >> "$GITHUB_ENV" <<EOF\nTMPDIR=/x\nEOF'],
+    ['export', 'export TMPDIR=/x'],
+    ['YAML env key', 'env:\n  TMPDIR: /x'],
+    ['PowerShell assignment', '$env:TEMP = "C:\\t"'],
+    ['PowerShell Add-Content', 'Add-Content -Path $env:GITHUB_ENV -Value "TMP=C:\\t"'],
+    ['PowerShell Out-File', '"TEMP=C:\\t" | Out-File -Append -FilePath $env:GITHUB_ENV'],
+  ];
+  for (const [what, text] of caught) assert.ok(tempWriterLines(text).length > 0, `${what}: ${text}`);
+  for (const [what, text] of [
+    ['a local variable', 'tmp=$(mktemp -d)\necho "PATH=x" >> "$GITHUB_ENV"'],
+    ['a comment', '# echo "TMPDIR=x" >> "$GITHUB_ENV"'],
+    ['reading it', 'echo "temp folder: $TMPDIR"\n>> "$GITHUB_ENV"'],
+    ['another variable', 'echo "MY_TMPDIR_HINT=x" >> "$GITHUB_ENV"'],
+  ]) assert.deepEqual(tempWriterLines(text), [], what);
 });
 
 /** Every file that may run on a host runner and so must ask ci-home.sh for the CI home: all workflows, all shared actions, the shared
@@ -1281,4 +1356,75 @@ test('ci-home: PADDOCK_CI_HOME relocates the CI home, a missing relocated home s
   assert.notEqual(bf(join(root, 'unmounted')).status, 0);
   assert.ok(!existsSync(join(root, 'unmounted')));
   assert.deepEqual(hardCodedCacheRoot(), [], 'one implementation: ask conformance/ci/ci-home.sh');
+});
+
+// ---- macOS' bash 3.2 (`shell: bash` on the Mac host runner is /bin/bash 3.2.57) ----
+
+/**
+ * The lines of a shell script that bash 3.2 cannot parse: an apostrophe inside `${VAR:?...}`, `:-`, `:+` or `:=` within
+ * double quotes (3.2 takes it as the start of a quoted word), and a `case` with unparenthesised patterns inside `$(...)`
+ * (3.2 takes the pattern's `)` as the end of the command substitution; write the patterns as `(a)`). Comments are ignored.
+ */
+function bash32Traps(text) {
+  const lines = text.split('\n');
+  const found = [];
+  const code = (l) => l.replace(/(^|\s)#.*$/, '');
+  lines.forEach((l, i) => {
+    if (/"[^"]*\$\{[A-Za-z_][A-Za-z0-9_]*:[-?+=][^}]*'[^}]*\}/.test(code(l))) found.push(`${i + 1}: ${l.trim()}`);
+  });
+  // Inside an open $( ... ), a case whose pattern lines do not start with "(".
+  let depth = 0;
+  let inCase = false;
+  lines.forEach((raw, i) => {
+    const l = code(raw);
+    if (inCase && !/^\s*esac\b/.test(l)) {
+      // A pattern line's ")" is not a closing parenthesis: no counting on it.
+      if (/^\s*[^\s(][^)]*\)(\s|$)/.test(l)) found.push(`${i + 1}: ${raw.trim()}`);
+      if (/^\s*\(?[^)]*\)(\s|$)/.test(l)) return;
+    }
+    if (inCase && /^\s*esac\b/.test(l)) inCase = false;
+    for (let k = 0; k < l.length; k += 1) {
+      if (l[k] === '$' && l[k + 1] === '(') {
+        depth += 1;
+        k += 1;
+      } else if (depth > 0 && l[k] === '(') depth += 1;
+      else if (depth > 0 && l[k] === ')') depth -= 1;
+    }
+    if (depth > 0 && /\bcase\b.*\bin\s*$/.test(l)) inCase = true;
+  });
+  return found;
+}
+
+test('the bash 3.2 check finds both traps and passes their safe forms', () => {
+  for (const [what, text] of [
+    [':? with an apostrophe', 'x="${A:?the runner\'s folder}"'],
+    [':- with an apostrophe', 'echo "${A:-it\'s}"'],
+    [':+ with an apostrophe', 'echo "${A:+it\'s set}"'],
+    [':= with an apostrophe', 'echo "${A:=it\'s}"'],
+    ['case in $(...)', 'x=$(case "$1" in\n  a) echo A ;;\n  *) echo B ;;\nesac)'],
+  ]) assert.ok(bash32Traps(text).length > 0, what);
+  for (const [what, text] of [
+    ['no apostrophe', 'x="${A:?the folder of the runner}"'],
+    ['outside double quotes', "x=${A:-'it'}"],
+    ['$(...) inside a case branch', 'case "$1" in\n  a) y="$(echo B)" ;;\nesac'],
+    ['parenthesised patterns in $(...)', 'x=$(case "$1" in\n  (a) echo A ;;\n  (*) echo B ;;\nesac)'],
+    ['a comment', "# echo \"${A:-it's}\""],
+  ]) assert.deepEqual(bash32Traps(text), [], what);
+});
+
+test('the CI scripts parse under macOS\' bash 3.2: neither trap, and /bin/bash -n where it exists', () => {
+  const listed = spawnSync('git', ['ls-files', 'conformance/ci/*.sh', 'apps/*/scripts/ci/*.sh', 'tools/*.sh'], { cwd: PADDOCK, encoding: 'utf8' });
+  assert.equal(listed.status, 0, listed.stderr);
+  const files = listed.stdout.split('\n').filter(Boolean);
+  assert.ok(files.length > 3, `found the scripts (${files.length})`);
+  const traps = files.flatMap((f) => bash32Traps(read(join(PADDOCK, f))).map((t) => `${f}:${t}`));
+  assert.deepEqual(traps, [], 'bash 3.2 cannot parse these lines');
+  if (existsSync('/bin/bash')) {
+    for (const f of files) {
+      const r = spawnSync('/bin/bash', ['-n', join(PADDOCK, f)], { encoding: 'utf8' });
+      // Scripts that need bash 4+ say so on their first lines and are not run with /bin/bash on the Mac.
+      if (/bash 4|bash >= 4|extglob/.test(read(join(PADDOCK, f)).split('\n').slice(0, 60).join('\n'))) continue;
+      assert.equal(r.status, 0, `${f}: ${r.stderr}`);
+    }
+  }
 });

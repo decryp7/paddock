@@ -343,6 +343,7 @@ export_slot() {
   } >> "$out"
   # The job's temp and socket folders (PADDOCK_JOB_TEMP, TMPDIR, PADDOCK_SOCKET_BASE): one implementation, shared with the
   # job-tmpdir action. $temp is the same folder (the runner's RUNNER_TEMP).
+  bash "$here/job-tmpdir.sh" sweep || echo "::warning::job-isolation: the socket folders of finished jobs could not be swept" >&2
   GITHUB_ENV="$out" bash "$here/job-tmpdir.sh" setup
 }
 

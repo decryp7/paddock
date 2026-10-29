@@ -346,6 +346,17 @@ test('disk: the floor comes from PADDOCK_CI_MIN_FREE_GB (default 30 GB) and acqu
   assert.equal(run('d', '0').status, 0);
 });
 
+test('acquire sweeps the socket folders of jobs that were killed before their release (under the fake host, never /tmp)', () => {
+  const h = host();
+  const dead = join(h.root, 'sockets', 'pd-killedjb');
+  mkdirSync(dead, { mode: 0o700 });
+  writeFileSync(join(dead, '.owner'), `${join(h.root, 'work', 'long-gone', 'tmp')}\n`);
+  const a = h.job('a'.repeat(16));
+  assert.equal(a.exec(['acquire']).status, 0);
+  assert.ok(!existsSync(dead), 'the killed job\'s socket folder is gone');
+  assert.ok(existsSync(a.exported().PADDOCK_SOCKET_BASE), 'this job\'s own is made');
+});
+
 test('the declared port blocks never overlap each other or an end-to-end port, for every slot up to the default PADDOCK_CI_SLOTS', () => {
   const slots = Number(/PADDOCK_CI_SLOTS:-(\d+)/.exec(read(SCRIPT))[1]);
   const blocks = read(join(PADDOCK, 'conformance', 'ci', 'ports.txt')).split('\n').filter((l) => l.trim() && !l.startsWith('#')).map((l) => l.trim().split(/\s+/));

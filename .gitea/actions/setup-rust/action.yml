@@ -81,25 +81,25 @@ runs:
         DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
         BIN=sccache; [ "$RUNNER_OS" = "Windows" ] && BIN=sccache.exe
         if [ ! -x "$DEST/$BIN" ]; then
-          TMP=$(mktemp -d)
+          dl=$(mktemp -d)
           NAME="sccache-v$VERSION-$T"
           # A failed download must not fail the job: the build runs without the cache.
-          if ! curl -fsSL --retry 3 -o "$TMP/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"; then
+          if ! curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"; then
             echo "::warning::could not download sccache $VERSION; building without the compile cache."; exit 0
           fi
-          if command -v sha256sum >/dev/null 2>&1; then GOT=$(sha256sum "$TMP/$NAME.$EXT" | cut -d' ' -f1); else GOT=$(shasum -a 256 "$TMP/$NAME.$EXT" | cut -d' ' -f1); fi
+          if command -v sha256sum >/dev/null 2>&1; then GOT=$(sha256sum "$dl/$NAME.$EXT" | cut -d' ' -f1); else GOT=$(shasum -a 256 "$dl/$NAME.$EXT" | cut -d' ' -f1); fi
           [ "$GOT" = "$SUM" ] || { echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"; exit 1; }
           if [ "$EXT" = zip ]; then
-            if command -v unzip >/dev/null 2>&1; then unzip -q "$TMP/$NAME.$EXT" -d "$TMP"; else powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$TMP/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$TMP")'"; fi
+            if command -v unzip >/dev/null 2>&1; then unzip -q "$dl/$NAME.$EXT" -d "$dl"; else powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"; fi
           else
-            tar -xzf "$TMP/$NAME.$EXT" -C "$TMP"
+            tar -xzf "$dl/$NAME.$EXT" -C "$dl"
           fi
           mkdir -p "$DEST"
           # Renamed into place whole: a runner with a shared tool cache may run two jobs that install it at once.
-          cp "$TMP/$NAME/$BIN" "$DEST/$BIN.part.$$"
+          cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
           chmod +x "$DEST/$BIN.part.$$"
           mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
-          rm -rf "$TMP"
+          rm -rf "$dl"
         fi
         echo "$DEST" >> "$GITHUB_PATH"
     - name: sccache

@@ -583,7 +583,7 @@ jobs:
         run: |
           rem Which account runs the job: WebView2 smoke tests cannot run as SYSTEM (its temp is C:\Windows\SystemTemp).
           whoami
-          echo TEMP=%TEMP%
+          echo the job temp folder is %TEMP%
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner: no bash.exe in "%ProgramFiles%\Git\bin" & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
           echo npm_config_prefer_offline=true>>"%GITHUB_ENV%"

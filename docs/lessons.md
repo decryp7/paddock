@@ -765,5 +765,7 @@ folder per job (`PADDOCK_SOCKET_BASE`, `/tmp/pd-<n>`) comes before `/tmp`; scann
 right in a Linux container, where `/tmp` is the job's. **One owner:** job-isolation's acquire already pointed `TMPDIR` at
 the runner's folder; two mechanisms would disagree, so `conformance/ci/job-tmpdir.sh` is the only code that sets
 `TMPDIR`, `TMP` or `TEMP` (a test fails on any other writer), and every host job gets it through acquire. **macOS'
-bash 3.2** (what `shell: bash` runs on the Mac host) cannot parse an apostrophe inside `${var:?message}` within double
-quotes, nor `$(...)` inside a `case` branch: test CI scripts with `/bin/bash` on a Mac, not only with a newer bash.
+bash 3.2** (what `shell: bash` runs on the Mac host) cannot parse an apostrophe inside `${var:?word}`, `${var:-word}`,
+`${var:+word}` or `${var:=word}` within double quotes, nor a `case` with unparenthesised patterns (`a)`) inside `$(...)`:
+write `(a)`. A `$(...)` inside a case branch is fine (an earlier version of this lesson said otherwise). `bash -n` does not
+always catch the second, so a conformance check greps every CI script for both and also runs `/bin/bash -n` where it exists.
