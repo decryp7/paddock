@@ -8,8 +8,9 @@ import { DockService } from '../dock/dock.service';
  * Keeps the window usable when it is narrow, by the layout plan (ADR 0056) and not by window-width constants: the
  * Explorer is a view of the plan (a left column outside the dock, priority 80), so it closes when the plan has no room
  * for it beside what is docked, and comes back, with a margin so it cannot flap, when there is. Lower-priority tool
- * windows yield first (the dock tabs or auto-hides them in the same plan). The user's choice wins: an Explorer opened
- * by hand (Ctrl+B) stays open until the plan has room again; one the user closed is never reopened.
+ * windows yield first (the dock tabs or auto-hides them in the same plan). Without room an Explorer opened by
+ * hand (Ctrl+B) closes again at once (there is no overlay mode); one the user closed is never reopened. Its width is the
+ * user's, kept while the window is narrow (it is shown within the room the plan has) and restored when it widens.
  */
 @Injectable({ providedIn: 'root' })
 export class NarrowWindow {
@@ -20,8 +21,6 @@ export class NarrowWindow {
   private readonly destroyRef = inject(DestroyRef);
   /** The sidebar was open when the window narrowed and was closed by this service. */
   private closedByNarrowing = false;
-  /** The user opened the Explorer by hand while there was no room: leave it open until it fits again. */
-  private keptByUser = false;
   private started = false;
   /** The user is dragging the Explorer's sash: it is not judged until the drag ends. */
   private held = false;
@@ -66,17 +65,12 @@ export class NarrowWindow {
     const verdict = this.dock.explorerVerdict(open, open ? shown : wish);
     if (open) this.shell.setExplorerRoom(this.dock.explorerRoom(true, shown));
     if (open) {
-      if (this.closedByNarrowing) {
-        // It was closed by this service and is open again: the user opened it.
-        this.closedByNarrowing = false;
-        this.keptByUser = verdict === 'hide';
-        return;
-      }
-      if (verdict === 'keep') this.keptByUser = false;
-      else if (verdict === 'hide' && !this.keptByUser) {
+      // No room beside the message column's minimum: the Explorer is closed again, also when the user has just opened it
+      // (there is no overlay mode); it reopens at the user's width when the window is wide enough.
+      if (verdict === 'hide') {
         this.closedByNarrowing = true;
         this.store.toggleSidebar();
-      }
+      } else this.closedByNarrowing = false;
     } else if (verdict === 'show' && this.closedByNarrowing) {
       this.closedByNarrowing = false;
       this.store.toggleSidebar();

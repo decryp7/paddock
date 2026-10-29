@@ -38,9 +38,16 @@ for (const size of SIZES) {
     test('pinning the Inspector keeps the grid rows', async ({ page }) => {
       await page.addInitScript(() => localStorage.clear());
       await openApp(page);
-      // The Explorer is beside the dock; at 1024 px a pinned Inspector (320 px) next to the grid (560 px) needs its room (ADR 0056).
-      if (size.width < 1200) await page.keyboard.press('ControlOrMeta+b');
-      await ensureInspector(page);
+      if (size.width < 1200) {
+        // The Explorer is closed here, and a pinned Inspector (320 px) beside the grid at its minimum (the message column's) has no room: the plan
+        // keeps it auto-hidden (ADR 0056), and the grid keeps its rows.
+        const tab = page.locator('.debrief-ah-tab[data-ah-id="inspector"]');
+        await tab.click();
+        await page.locator('#debrief-ah-flyout').getByRole('button', { name: 'Pin Inspector' }).click();
+        await expect(tab).toHaveCount(1);
+      } else {
+        await ensureInspector(page);
+      }
       await expect.poll(() => visibleGridRows(page)).toBeGreaterThanOrEqual(size.rows);
     });
   });

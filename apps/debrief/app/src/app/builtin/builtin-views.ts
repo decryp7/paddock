@@ -1,9 +1,10 @@
 import { DebriefView } from '../extensions/tokens';
+import { EVENTS_VIEW_MIN_WIDTH } from '../grid/message-column';
 
 /** The panels Debrief ships with. They use the same extension point as plugin views. */
 export const BUILTIN_VIEWS: DebriefView[] = [
   { id: 'timeline', category: 'core', title: $localize`:@@builtin.view.timeline:Timeline`, icon: 'timeline', defaultPosition: 'center', layout: { area: 'document', min: { width: 560, height: 120 }, pref: { width: 560, height: 300 }, priority: 90 }, instances: true, component: () => import('../timeline/timeline-panel').then((m) => m.TimelinePanel) },
-  { id: 'events', category: 'core', title: $localize`:@@builtin.view.events:Events`, icon: 'columns', defaultPosition: 'bottom', layout: { area: 'document', min: { width: 560, height: 240 }, pref: { width: 560, height: 400 }, priority: 100 }, component: () => import('../grid/events-grid').then((m) => m.EventsGrid) },
+  { id: 'events', category: 'core', title: $localize`:@@builtin.view.events:Events`, icon: 'columns', defaultPosition: 'bottom', layout: { area: 'document', min: { width: EVENTS_VIEW_MIN_WIDTH, height: 240 }, pref: { width: EVENTS_VIEW_MIN_WIDTH, height: 400 }, priority: 100 }, component: () => import('../grid/events-grid').then((m) => m.EventsGrid) },
   { id: 'inspector', category: 'core', title: $localize`:@@builtin.view.inspector:Inspector`, icon: 'panel', defaultPosition: 'right', layout: { area: 'side', min: { width: 320, height: 240 }, pref: { width: 372, height: 400 }, priority: 75 }, component: () => import('../inspector/inspector').then((m) => m.Inspector) },
   { id: 'metrics', category: 'core', title: $localize`:@@builtin.view.metrics:Metrics`, icon: 'metrics', defaultPosition: 'center', layout: { area: 'document', min: { width: 420, height: 240 }, pref: { width: 640, height: 400 }, priority: 55 }, component: () => import('../metrics/metrics-view').then((m) => m.MetricsView) },
   { id: 'profile', category: 'core', title: $localize`:@@builtin.view.profile:Profile`, icon: 'profile', defaultPosition: 'center', layout: { area: 'document', min: { width: 360, height: 240 }, pref: { width: 640, height: 400 }, priority: 55 }, component: () => import('../profile/profile-editor').then((m) => m.ProfileEditor) },

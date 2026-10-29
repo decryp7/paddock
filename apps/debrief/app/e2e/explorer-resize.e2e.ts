@@ -101,7 +101,7 @@ test('a stored wide Explorer in a narrow window settles at once instead of openi
   await openApp(page);
   await planIdle(page);
   const flips = await flipsDuring(page, async () => {
-    await page.setViewportSize({ width: 1000, height: 900 });
+    await page.setViewportSize({ width: 1100, height: 900 });
     await planIdle(page);
   });
   expect(flips).toBe(0);
@@ -109,7 +109,7 @@ test('a stored wide Explorer in a narrow window settles at once instead of openi
 });
 
 test('dragging the Explorer wider than the window allows stops at the room the plan has, and never closes it mid-drag', async ({ page }) => {
-  await page.setViewportSize({ width: 1000, height: 900 });
+  await page.setViewportSize({ width: 1100, height: 900 });
   await openApp(page);
   await planIdle(page);
   const sash = page.getByRole('separator', { name: 'Resize the Explorer' });

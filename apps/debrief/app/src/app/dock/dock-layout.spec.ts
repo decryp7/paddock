@@ -9,7 +9,8 @@ import { provideWorkspace } from '../core/workspace/provide-workspace';
 import { DebriefView } from '../extensions/tokens';
 import { defaultViewLayout } from '../layout-plan/layout-plan';
 import { DockContext } from './dock-context';
-import { DockLayout } from './dock-layout';
+import { EVENTS_VIEW_MIN_WIDTH } from '../grid/message-column';
+import { DockLayout, GROW_BACK_MARGIN } from './dock-layout';
 import { viewLayout, viewRow } from './view-layout';
 
 const AI: DebriefView = { id: 'ai-chat', title: 'AI', icon: 'puzzle', defaultPosition: 'right', layout: { area: 'side', min: { width: 320, height: 240 }, pref: { width: 372, height: 400 }, priority: 70 }, component: async () => class {} };
@@ -70,14 +71,14 @@ describe('view layouts', () => {
 });
 
 describe('DockLayout.fit', () => {
-  it('constrains every group from the views it holds (events 560, assistant 320), also without a measured size', () => {
+  it('constrains every group from the views it holds (events at its declared minimum, assistant 320), also without a measured size', () => {
     const layout = setup();
     const { api, groups } = fakeDock(0, 0, { events: { width: 0, height: 0 }, 'ai-chat': { width: 0, height: 0 } });
     expect(layout.fit(api)).toBeNull();
-    expect(groups[0]!.api.setConstraints).toHaveBeenCalledWith({ minimumWidth: 560, minimumHeight: 240 });
+    expect(groups[0]!.api.setConstraints).toHaveBeenCalledWith({ minimumWidth: EVENTS_VIEW_MIN_WIDTH, minimumHeight: 240 });
     expect(groups[1]!.api.setConstraints).toHaveBeenCalledWith({ minimumWidth: 320 });
     // The declared minimum is readable from outside (the scenario tests assert against it).
-    expect(groups[0]!.element.dataset['minWidth']).toBe('560');
+    expect(groups[0]!.element.dataset['minWidth']).toBe(String(EVENTS_VIEW_MIN_WIDTH));
     expect(groups[1]!.element.dataset['minWidth']).toBe('320');
   });
 
@@ -112,15 +113,15 @@ describe('DockLayout.fit', () => {
     expect(eventsActive.api.setActive).toHaveBeenCalled();
   });
 
-  it('gives a new Home column its preferred width at 1920 and shrinks only what the plan says at 1440', () => {
+  it('gives a new Home column its preferred width at 1920 and shrinks only what the plan says at 1600', () => {
     const layout = setup();
     const wide = fakeDock(1920, 1080, { 'timeline+events': { width: 1000, height: 1080 }, 'ai-chat': { width: 372, height: 1080 }, home: { width: 548, height: 1080 } });
     layout.fit(wide.api, { sizes: true, fresh: ['home'] });
     expect(wide.groups[2]!.api.setSize).toHaveBeenCalledWith({ width: 700 });
-    const narrow = fakeDock(1440, 900, { 'timeline+events': { width: 520, height: 900 }, 'ai-chat': { width: 372, height: 900 }, home: { width: 548, height: 900 } });
+    const narrow = fakeDock(1600, 900, { 'timeline+events': { width: 520, height: 900 }, 'ai-chat': { width: 372, height: 900 }, home: { width: 548, height: 900 } });
     const plan = layout.fit(narrow.api, { sizes: true, fresh: ['home'] })!;
     expect(plan.tabbed).toEqual([]);
-    expect(narrow.groups[2]!.api.setSize).toHaveBeenCalledWith({ width: 508 });
+    expect(narrow.groups[2]!.api.setSize).toHaveBeenCalledWith({ width: 1600 - EVENTS_VIEW_MIN_WIDTH - 372 });
   });
 
   it('auto-hides a side tool to the right edge when there is no room left even after tabbing', () => {
@@ -188,8 +189,8 @@ describe('displaced views and grow-back', () => {
   it('a displaced view is a grow-back candidate only once there is room plus the margin, so it cannot flap', () => {
     const layout = setup();
     const ctx = TestBed.inject(DockContext);
-    // Home tabbed into events; the dock is as wide as the threshold (1300) and then margin wider (1364).
-    for (const [width, expected] of [[1300, []], [1363, []], [1364, ['home']]] as const) {
+    // Home tabbed into events; the dock is as wide as the threshold (1458) and then margin wider (1522).
+    for (const [width, expected] of [[1458, []], [1521, []], [1522, ['home']]] as const) {
       const { api } = fakeDock(width, 900, { 'timeline+events+home': { width: 900, height: 900 }, 'ai-chat': { width: 372, height: 900 } });
       ctx.displaced.clear();
       ctx.displaced.set('home', { id: 'home', slot: { referencePanel: null, direction: 'within' }, into: 'events' });
@@ -244,9 +245,10 @@ describe('displaced views and grow-back', () => {
     expect(layout.explorerVerdict(narrow.api, true, 300)).toBe('hide');
     const roomy = fakeDock(1200, 900, { 'timeline+events': { width: 1200, height: 900 } });
     expect(layout.explorerVerdict(roomy.api, true, 300)).toBe('keep');
-    // Closed: the dock has the Explorer's room too; it needs its declared minimum (240) + 560 + the margin.
-    expect(layout.explorerVerdict(fakeDock(863, 900, { 'timeline+events': { width: 863, height: 900 } }).api, false, 300)).toBe('keep');
-    expect(layout.explorerVerdict(fakeDock(865, 900, { 'timeline+events': { width: 865, height: 900 } }).api, false, 300)).toBe('show');
+    const EDGE = 240 + EVENTS_VIEW_MIN_WIDTH + GROW_BACK_MARGIN.width + 1;
+    // Closed: the dock has the Explorer's room too; it needs its declared minimum (240) + the Events minimum + the margin.
+    expect(layout.explorerVerdict(fakeDock(EDGE - 2, 900, { 'timeline+events': { width: EDGE - 2, height: 900 } }).api, false, 300)).toBe('keep');
+    expect(layout.explorerVerdict(fakeDock(EDGE, 900, { 'timeline+events': { width: EDGE, height: 900 } }).api, false, 300)).toBe('show');
   });
 });
 

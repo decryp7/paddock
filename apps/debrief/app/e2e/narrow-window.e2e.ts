@@ -1,6 +1,7 @@
 import { expect, Page, test } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
+import { MESSAGE_COLUMN_MIN } from '../src/app/grid/message-column';
 
 // Narrow windows: the filter bar folds range, time zone and Clear all into a ⋯ menu (bar < 1000 px), the Explorer
 // closes by itself when the layout plan has no room for it beside the events grid (and comes back with a margin), low-priority
@@ -26,9 +27,9 @@ test.describe('narrow window', () => {
     await expect(page.locator('debrief-status-bar .low').first()).toBeVisible();
   });
 
-  test('1024 px: the Explorer still fits beside the events grid (the plan decides, not a width), the page does not scroll sideways', async ({ page }, testInfo) => {
+  test('1024 px: the Explorer gives way to the minimum message column (the plan decides, not a width), the page does not scroll sideways', async ({ page }, testInfo) => {
     await resize(page, 1024);
-    await expect(sidebar(page)).toBeVisible();
+    await expect(sidebar(page)).toHaveCount(0);
     expect(await noHorizontalScroll(page)).toBe(true);
     await expect(page.getByRole('grid', { name: 'Events' })).toBeVisible();
     await expectNoSeriousViolations(page, testInfo, 'narrow-1024');
@@ -58,15 +59,58 @@ test.describe('narrow window', () => {
     await expect(page.getByRole('toolbar', { name: 'Levels' }).getByRole('button', { name: /^ERR/ })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  test('the message column stays readable at 900 px and the grid does not overflow the window', async ({ page }) => {
-    await resize(page, 900);
+  // The Explorer gives way first (it shrinks to its minimum, then closes by itself); the message column keeps its minimum.
+  for (const width of [900, 1024, 1280]) {
+    test(`${width} px: the message column keeps its minimum and nothing overflows`, async ({ page }) => {
+      await resize(page, width);
+      const msg = page.locator('debrief-events-grid [role=row].row').first().locator('.msg');
+      await expect(msg).toBeVisible();
+      // The grid re-lays out after the window's resize: poll, never read once.
+      await expect.poll(async () => (await msg.boundingBox())!.width).toBeGreaterThanOrEqual(MESSAGE_COLUMN_MIN);
+      const eventsGroup = page.locator('.dv-groupview').filter({ has: page.getByRole('tab', { name: 'Events', exact: true }) });
+      await expect.poll(async () => { const g = (await eventsGroup.boundingBox())!; return g.x + g.width; }).toBeLessThanOrEqual(width + 1);
+      await expect.poll(() => noHorizontalScroll(page)).toBe(true);
+      const grid = page.locator('debrief-events-grid');
+      await expect.poll(() => grid.locator('.header').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      await expect.poll(() => grid.locator('[role=row].row').first().evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      // The Explorer is closed where it cannot fit beside the minimum message column; where the window has room for both it stays open.
+      if (width <= 1024) await expect(sidebar(page)).toHaveCount(0);
+      else await expect(sidebar(page)).toBeVisible();
+    });
+  }
+
+  test('the Explorer keeps the width the user chose: it shrinks and closes when the window narrows and comes back at that width', async ({ page }) => {
+    const width = async () => Math.round((await sidebar(page).boundingBox())!.width);
+    await resize(page, 1600);
+    await expect(sidebar(page)).toBeVisible();
+    // Choose 360 px with the keyboard on the sash (Home/End move it to its limits, arrows step it).
+    const sash = page.getByRole('separator', { name: 'Resize the Explorer' });
+    await sash.focus();
+    const start = await width();
+    for (let i = 0; i < 20 && (await width()) < 360; i++) await page.keyboard.press('ArrowRight');
+    const chosen = await width();
+    expect(chosen).toBeGreaterThan(start);
+
+    // 1100 px holds the Explorer at its minimum and the message column at its minimum, but not the width chosen.
+    await resize(page, 1100);
     const msg = page.locator('debrief-events-grid [role=row].row').first().locator('.msg');
-    await expect(msg).toBeVisible();
-    // The grid re-lays out after the window's resize: poll, never read once (a single read raced the layout and saw 120 px).
-    await expect.poll(async () => (await msg.boundingBox())!.width).toBeGreaterThan(200);
-    // The dock re-lays out after the window's resize event, so the group's edge settles a moment later.
-    const eventsGroup = page.locator('.dv-groupview').filter({ has: page.getByRole('tab', { name: 'Events', exact: true }) });
-    await expect.poll(async () => { const g = (await eventsGroup.boundingBox())!; return g.x + g.width; }).toBeLessThanOrEqual(900 + 1);
+    await expect.poll(async () => (await msg.boundingBox())!.width).toBeGreaterThanOrEqual(MESSAGE_COLUMN_MIN);
+    await expect(sidebar(page)).toBeVisible();
+    await expect.poll(width).toBeLessThan(chosen);
+    await resize(page, 900);
+    await expect(sidebar(page)).toHaveCount(0);
+    await resize(page, 1600);
+    await expect(sidebar(page)).toBeVisible();
+    await expect.poll(width).toBe(chosen);
+  });
+
+  test('the sash stops where the message column would drop under its minimum', async ({ page }) => {
+    await resize(page, 1100);
+    const sash = page.getByRole('separator', { name: 'Resize the Explorer' });
+    await sash.focus();
+    await page.keyboard.press('End');
+    const msg = page.locator('debrief-events-grid [role=row].row').first().locator('.msg');
+    await expect.poll(async () => (await msg.boundingBox())!.width).toBeGreaterThanOrEqual(MESSAGE_COLUMN_MIN);
   });
 
   test('600 px: still usable, no sideways scroll, accessible', async ({ page }, testInfo) => {
@@ -90,7 +134,7 @@ test.describe('narrow window', () => {
     });
   }
 
-  test('widening the window brings the Explorer back; Ctrl+B opens it at any width', async ({ page }) => {
+  test('widening the window brings the Explorer back; Ctrl+B cannot open it where the message column would be squeezed (there is no overlay)', async ({ page }) => {
     await resize(page, 900);
     await expect(sidebar(page)).toHaveCount(0);
     await resize(page, 1440);
@@ -99,6 +143,11 @@ test.describe('narrow window', () => {
     await resize(page, 900);
     await expect(sidebar(page)).toHaveCount(0);
     await page.keyboard.press('ControlOrMeta+b');
+    // Opened by hand with no room, it closes again; the message column is never squeezed under its minimum.
+    await expect(sidebar(page)).toHaveCount(0);
+    const msg = page.locator('debrief-events-grid [role=row].row').first().locator('.msg');
+    await expect.poll(async () => (await msg.boundingBox())!.width).toBeGreaterThanOrEqual(MESSAGE_COLUMN_MIN);
+    await resize(page, 1440);
     await expect(sidebar(page)).toBeVisible();
   });
 

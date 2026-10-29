@@ -28,6 +28,8 @@ async function expectFullHeight(page: Page, panel: Locator): Promise<void> {
 }
 
 test.describe('full-height documents (Home, Registry)', () => {
+  // A document column beside the events grid at its minimum (the message column's) and the Explorer needs this width.
+  test.use({ viewport: { width: 1600, height: 900 } });
   test('Registry opens as a column as tall as the dock, beside the timeline and the grid', async ({ page }) => {
     await openApp(page);
     await page.getByRole('tab', { name: 'Registry', exact: true }).click();

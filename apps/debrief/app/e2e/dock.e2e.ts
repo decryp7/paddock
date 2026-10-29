@@ -175,13 +175,14 @@ test.describe('dock layout', () => {
   });
 });
 
-test.describe('dock layout at 1440 px', () => {
+test.describe('dock layout at 1700 px', () => {
+  test.use({ viewport: { width: 1700, height: 900 } });
   test.beforeEach(async ({ page }) => {
     await openApp(page);
   });
 
   test('pinning a tool window that leaves no room for the Registry column tabs it with the events, which stay in front', async ({ page }) => {
-    // 1440 px: the timeline column cannot keep a readable width beside both the Registry column and the inspector, so
+    // 1700 px: the timeline column cannot keep a readable width beside both the Registry column and the inspector, so
     // the Registry joins the events group as a tab (ADR 0056's predecessor rule). The user asked for the inspector, not
     // the Registry: the events grid must stay visible.
     await expect(groupOf(page, 'Registry')).not.toContainText('Events');
