@@ -19,11 +19,28 @@ function opensItsOwnWindow(src) {
   return false;
 }
 
-/** Whether `src` gives a `tauri::Builder` a `setup` of its own (it would replace the one `Builder::add_to` gives it). */
+/** Whether `src` gives a `tauri::Builder` a `setup` of its own (it would replace the one `Builder::add_to` gives it): on a
+ * `tauri::Builder::default()`/`new()`, after an `add_to(...)` or `app(...)` call, or on a binding of any of those. */
 function setsUpTauri(src) {
-  for (const m of src.matchAll(/tauri::Builder::(default|new)\s*\(\s*\)/g)) {
-    const end = src.indexOf(';', m.index);
-    if (/\.setup\s*\(/.test(src.slice(m.index, end < 0 ? undefined : end))) return true;
+  const origin = /tauri::Builder::(default|new)\s*\(\s*\)|\.add_to\s*\(|(?<![\w:])(?<!fn\s)app\s*\(/g;
+  const tainted = new Set();
+  for (const statement of src.split(';')) {
+    // A binding is followed within its function only.
+    if (/\bfn\s+\w+/.test(statement)) tainted.clear();
+    let from = -1;
+    for (const m of statement.matchAll(origin)) {
+      from = m.index;
+      break;
+    }
+    for (const name of tainted) {
+      const m = new RegExp(`\\b${name}\\b(?!\\s*:)`).exec(statement);
+      if (m && (from < 0 || m.index < from)) from = m.index;
+    }
+    if (from < 0) continue;
+    if (/\.setup\s*\(/.test(statement.slice(from))) return true;
+    // The binding the builder goes into (`let b = …` before it in the statement).
+    const lets = [...statement.matchAll(/\blet\s+(?:mut\s+)?([A-Za-z_]\w*)\s*(?::[^=]+)?=/g)].filter((m) => m.index < from);
+    if (lets.length) tainted.add(lets[lets.length - 1][1]);
   }
   return false;
 }
