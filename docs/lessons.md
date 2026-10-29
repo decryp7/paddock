@@ -699,3 +699,9 @@ actions that run them; the `plan` job wires every other job; a line-based YAML s
 does not understand (comments on keys, flow mappings, anchors); and mutants survived because tests asserted `every(...)` over
 possibly empty lists. **Guidance:** when narrowing a trigger, grep for every consumer of the old list, make a narrowing fail
 safe to everything on any input it cannot model, and assert exact lists in tests, never `every` on a list that may be empty.
+
+## Stale, duplicate and global-trigger CI runs wasted the runners (2026-10-29)
+One day of CI went on runs for superseded branch heads, the same head dispatched twice, runs for branches already merged
+into another branch, and global triggers in the affected planner that made every run build everything (fixed in
+b618b5c97). **Rule:** cancel older queued runs before dispatching, dispatch once after the last review fix, give merged
+branches and docs-only changes no CI, and keep branch runs on the affected plan (rule 50).

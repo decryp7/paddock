@@ -148,6 +148,16 @@ changes here, every app's copy is updated in the same change.
     decision or a budget. *Why:* results were scattered across ADRs, branches and expiring job logs, often without
     machine, load or build, so they could not be compared or reproduced, and stale numbers kept being quoted.
 
+## CI economy (user, 2026-10-29)
+50. **CI runs only what a change needs, once.**
+    (a) At most one CI run per branch head. Before dispatching, cancel any queued run on the same branch with an older head.
+    (b) Do not dispatch while review fixes are pending. Dispatch once after the last fix, and do not re-dispatch just to
+    refresh against main; merge main right before landing.
+    (c) A branch already merged into another branch gets no CI of its own.
+    (d) Docs-only changes land after the local conformance checks, without waiting for CI.
+    (e) Branch runs use the affected plan (rule 3); the full gates run once on main or at release.
+    *Why:* CI runners are the scarcest resource, and every wasted run delays a release.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:
