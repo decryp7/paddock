@@ -225,6 +225,8 @@ pub fn run() {
             Some(vec![paddock_window::launch::HIDDEN_FLAG]),
         ));
     let items = shell::initial_items(&dyno_core::settings::Settings::default().tray_items);
+    // The start's messages (no tray icon, a window that could not open) also go to Dyno's own log.
+    let shell = shell.start_log(logging::info);
     let builder = app(builder, shell, launch, tray::DynoTray::new(items)).invoke_handler(invoke_handler());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
