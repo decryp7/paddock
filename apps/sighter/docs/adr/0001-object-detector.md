@@ -1,6 +1,7 @@
 # 1. Sighter's object detector: RF-DETR (Apache sizes) on ONNX Runtime in Sighter's own sidecar
 
-Status: proposed (2026-10-29). Needs the user's decision on the open questions at the end before Sighter code starts.
+Status: proposed (2026-10-29). Four of its six questions were decided by the user on 2026-10-29 (marked "user,
+2026-10-29" below); RT-DETRv4 and the Windows DirectML question are still open.
 
 Related: [proposal](../proposal.md) sections 6, 8, 9.1, 11 and 12; [design review](../review/2026-10-design-review.md);
 research notes [2026-10-29-rf-detr](../research/2026-10-29-rf-detr.md) (this ADR's evidence) and the family note
@@ -55,34 +56,51 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
 
 ## Decision
 
-1. **Architecture: RF-DETR, Apache-2.0 sizes only.** Presets: **Balanced = Small (default)**, **Fast = Nano** (CPU-only
+1. **Architecture: RF-DETR, Apache-2.0 sizes only** (user, 2026-10-29). Presets: **Balanced = Small (default)**, **Fast = Nano** (CPU-only
    runners), **Accurate = Medium or Large**. Input sides are multiples of 32 (patch 16 × 2 windows); tiles stay 640 and
    960 at 1:1 scale (design review). Atto, Femto, Pico, XL and 2XL are refused: the model catalogue lists only the four
    Apache checkpoints, and model import refuses an ONNX whose metadata or card names a PML size.
-2. **Fallback: D-FINE-S/M** with the DEIM recipe, through the same "ONNX DETR, fixed input, no NMS" adapter, used when
+2. **Fallback: D-FINE-S/M** (user, 2026-10-29) with the DEIM recipe, through the same "ONNX DETR, fixed input, no NMS" adapter, used when
    the spike shows RF-DETR missing the CPU budget on the CI runner class or failing on an EP. RT-DETRv4 is reconsidered
    only after the open question on DINOv3-distilled weights is answered.
 3. **Training: the `rfdetr` package** (Apache-2.0), version-pinned, inside the managed Python training runtime the user
-   accepted on 2026-10-24. Start weights: COCO checkpoints; UI-DETR-1 as an opt-in start and labeller per the spike.
+   accepted on 2026-10-24. Start weights: the Apache COCO checkpoints only. **UI-DETR-1 is not in v1** (user,
+   2026-10-29): neither as a labeller nor as start weights, because the licences of its training datasets are not
+   stated.
 4. **Inference: `ort` with statically linked ONNX Runtime**, in Sighter's `sighter-infer` sidecar (started through
    `paddock-ipc`, supervised by `paddock-proc` with a memory cap measured as footprint per rule 26, `--self-test` per
    rule 23), shared with OCR. EPs: CPU everywhere (the reference and determinism baseline), CoreML with `MLProgram` on
    macOS, DirectML on Windows; `error_on_failure` for the chosen EP, and every response records EP, ONNX Runtime version
    and model hash. The CoreML compiled-model cache is keyed by model hash and cleaned with the model registry.
 5. **Not in Pitwall.** Pitwall stays optional and is the VLM layer for labelling help, naming and grounding fallback, each
-   a bounded, user-started request (rule 46). Pre-labelling a whole recording uses the detector or UI-DETR-1, never the VLM
-   per frame.
+   a bounded, user-started request (rule 46). **Labelling** (user, 2026-10-29): whole recordings are pre-labelled by the
+   user's own trained detector for that app. Pitwall's VLM is used only on a small selection the user chooses, or after a
+   confirmation that states the frame count (and the expected time). Before the first model of an app exists,
+   pre-labelling comes from the deterministic sources (OCR, template, accessibility `LabelSource`s) and the review queue,
+   not from the VLM per frame. Proposal 9.1's "label suggestions" request kind follows this rule.
 6. **Model distribution.** The runtime detector is always made locally and stored immutable and content-hashed in the
    project registry with its `model.json` (classes, input size, normalisation, thresholds, dataset hash, metrics, parent,
-   base checkpoint file name, its licence and the `rfdetr` version). Downloaded files (COCO checkpoints, UI-DETR-1) come
-   only from a catalogue built into Sighter, one TOML entry each with URL, size, **SHA-256** and licence, parsed once
-   (the `paddock-runtime` catalogue pattern), downloaded through `paddock-download` (hash while writing, rule 15), as a
-   job. Nothing but a tiny self-test model ships in the installer.
+   base checkpoint file name, its licence and the `rfdetr` version). The only downloaded models are the four Apache
+   COCO checkpoints, **mirrored on our Gitea (dev.decryptology.net)** with the Apache-2.0 licence and notice, and pinned
+   to **our own SHA-256s** (user, 2026-10-29); upstream's MD5s are checked once, when the mirror is made. They come only
+   from a catalogue built into Sighter, one TOML entry each with the mirror URL, size, SHA-256, licence and the upstream
+   URL it was taken from, parsed once (the `paddock-runtime` catalogue pattern), downloaded through `paddock-download`
+   (hash while writing, rule 15), as a job. Nothing but a tiny self-test model ships in the installer.
 7. **Jobs.** Download, pre-labelling, evaluation, CoreML preparation and training are `paddock-jobs` jobs with
    phase-labelled progress, Cancel and background priority (ER-17 to ER-20, ADR 0024). Locate is a bounded request.
 8. **Spike before the first release**, per the research note's checklist; its numbers go into
    [performance.md](../performance.md) as results blocks (rule 48) and can move the default preset or switch the CPU
    preset to the fallback without changing this ADR.
+
+## Plan items
+
+- **P1. Mirror the COCO checkpoints** (from decision 6). Download `rf-detr-nano.pth`, `rf-detr-small.pth`,
+  `rf-detr-medium.pth` and `rf-detr-large-2026.pth` from the URLs in the pinned `rfdetr` version's `model_weights.py`,
+  check upstream's MD5s, compute SHA-256s, and upload them with `LICENSE` (Apache-2.0) and a `NOTICE` naming the
+  source, version and upstream URLs to a release or package on dev.decryptology.net; then write the catalogue entries.
+  About 1.5 GB (Nano and Small measured at 366 and 386 MB; Medium and Large estimated). **Needs the user's OK when it
+  happens**: it is a large, outward-facing upload, so the agent doing it asks first and does not do it on its own.
+- **P2. Update the proposal** when this ADR is accepted (see Consequences).
 
 ## Consequences
 
@@ -105,20 +123,25 @@ UI-DETR-1?". The research note answers with today's official sources and one ind
 - Fine-tuned models inherit Apache-2.0 from the base checkpoint; the user's own data stays the user's. The model card
   records both.
 - Proposal section 6 (presets) and section 8 (licence table) are updated when this ADR is accepted: RF-DETR becomes
-  primary, DEIMv2 moves to excluded (non-commercial), RT-DETRv4 is added as pending.
+  primary, DEIMv2 moves to excluded (non-commercial), RT-DETRv4 is added as pending, UI-DETR-1 and the "Florence-2
+  bootstraps boxes" idea are not v1, and 9.1's label suggestions follow decision 5.
+- A new app starts with no detector: until the user has reviewed enough frames to train the first model, labelling is
+  OCR, template, accessibility sources and manual review. This is the price of leaving UI-DETR-1 out of v1.
+- The mirror makes downloads independent of Roboflow's URLs (the Large checkpoint already moved once), and costs about
+  1.5 GB on our Gitea. Updating a checkpoint is a new mirror entry with a new hash, never an overwrite.
+
+## Decided questions (user, 2026-10-29)
+
+1. Default detector: **RF-DETR Small**; Nano is the CPU preset, Medium or Large the "Accurate" preset; **D-FINE** is
+   the fallback, behind the same ONNX adapter (decisions 1 and 2).
+2. Start weights: **mirror the Apache COCO checkpoints on our Gitea**, pinned to our own SHA-256s (decision 6, plan
+   item P1; the upload needs the user's OK when it happens).
+3. UI-DETR-1: **not in v1**, because its datasets' licences are not stated (decision 3).
+4. Labelling: **whole recordings are pre-labelled by the user's own detector**; Pitwall's VLM only for small,
+   user-chosen selections or after a confirmation that states the frame count (rule 46; decision 5).
 
 ## Open questions for the user
 
-1. **Accept RF-DETR-S as the default and D-FINE as the fallback?** Or keep both as equal candidates until the spike on
-   legacy-style apps decides?
-2. **Mirror the Apache COCO checkpoints** on our own Gitea release (licence and notice kept), or download from
-   `repo.roboflow.com` with our SHA-256 pins? Mirroring survives upstream URL changes; it costs about 1.5 GB of storage for
-   four checkpoints.
-3. **UI-DETR-1** as an opt-in labeller in v1, given that its training datasets' licences are not stated? (It would be
-   shown with that warning before download.)
-4. **RT-DETRv4**: worth a licence review of DINOv3-distilled weights, or exclude it like DEIMv2?
-5. **Windows**: if the system `DirectML.dll` is too old, may Sighter ship Microsoft's DirectML redistributable next to
+1. **RT-DETRv4**: worth a licence review of DINOv3-distilled weights, or exclude it like DEIMv2?
+2. **Windows**: if the system `DirectML.dll` is too old, may Sighter ship Microsoft's DirectML redistributable next to
    the sidecar, or should Windows GPU wait for Windows ML?
-6. **Pre-labelling with the VLM**: proposal 9.1 lists "label suggestions" per distinct frame through Pitwall. Under rule
-   46 that is allowed only for a user-chosen, small selection, or with a confirmation that states the frame count and
-   time. Confirm that the detector and UI-DETR-1 are the default for whole recordings.
