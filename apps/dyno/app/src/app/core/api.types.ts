@@ -449,6 +449,23 @@ export interface DiskSettings {
   scanFolders?: number;
   /** Files of at least this many MiB get a node of their own (1 to 1,024). */
   notableFileMib?: number;
+  /** Threads that read folders at once, for the disk map and the file finder: Auto (by the kind of volume) or 1 to 16. */
+  readThreads?: Threads;
+  /** The file finder stops after this many files and folders (1,000 to 5,000,000). */
+  finderFiles?: number;
+  /** The file finder does not enter folders deeper than this (1 to 256). */
+  finderDepth?: number;
+  /** The file finder stops comparing contents after reading this many GiB (1 to 4,096). */
+  finderHashGib?: number;
+}
+
+/** A thread count setting: the engine decides (`'auto'`) or exactly this many (the engine holds it to the setting's own range). */
+export type Threads = 'auto' | { fixed: number };
+
+/** `Settings.jobs`: every key optional. */
+export interface JobSettings {
+  /** How many jobs run at once: Auto (4) or 1 to 8. Read when Dyno starts. */
+  workers?: Threads;
 }
 
 /** The protocol of a network volume. */
@@ -772,6 +789,8 @@ export interface Settings {
   unusual?: UnusualSettings;
   /** The disk map's limits (the engine fills the defaults when absent). */
   disk?: DiskSettings;
+  /** Long operations as jobs: how many run at once (the engine fills the default when absent). */
+  jobs?: JobSettings;
   /** Maintenance windows: when Dyno's own heavier background work may run. */
   maintenance: MaintenanceSettings;
   /** Backup health checks. */

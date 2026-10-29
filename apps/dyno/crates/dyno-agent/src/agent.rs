@@ -314,6 +314,7 @@ impl Shared {
         notes.extend(warn);
         let settings = settings.unwrap_or_default().normalised();
         let settings_limits = settings.disk.limits();
+        let (job_workers, read_threads) = (settings.jobs.worker_count(), settings.disk.read_threads);
         let alarms = crate::alarms::AlarmCentre::load(&store, settings.alarms);
         let mut core = Core {
             store,
@@ -370,7 +371,7 @@ impl Shared {
             reveal,
             bench,
             netwatch: crate::netwatch::NetWatchCentre::new(),
-            jobs: crate::jobs::JobCentre::new(me.clone()),
+            jobs: crate::jobs::JobCentre::new(me.clone(), job_workers),
             hasher: crate::filehash::FileHasher::new(),
             counters: crate::counters::CounterCentre::new(Arc::new(dyno_platform::counters::OsCounters)),
             issues: crate::issues::IssueCentre::new(issues),
@@ -397,6 +398,7 @@ impl Shared {
             wake: (Mutex::new(false), Condvar::new()),
             next_conn: AtomicU64::new(1),
         });
+        shared.disk.set_read_threads(read_threads);
         Ok((shared, sensors, processes))
     }
 

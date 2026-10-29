@@ -209,7 +209,39 @@ describe('SettingsPage', () => {
     const spy = vi.spyOn(mock, 'saveSettings');
     saveButton()!.click();
     await settle(f);
-    expect(spy.mock.calls[0]![0].disk).toEqual({ scanFolders: 500_000, notableFileMib: 64 });
+    expect(spy.mock.calls[0]![0].disk).toMatchObject({ scanFolders: 500_000, notableFileMib: 64 });
+  });
+  it('shows Parallelism and cost with the engine defaults (Auto, 500,000 files, 48 levels, 64 GiB), says what is wrong and saves a change', async () => {
+    const { f, mock, el, saveButton } = await make();
+    const section = el.querySelector('section[aria-label="Parallelism and cost"]')!;
+    const field = (label: string) => section.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+    expect(['File finder: files looked at', 'File finder: folder depth', 'File finder: content compared'].map((l) => field(l).value)).toEqual(['500000', '48', '64']);
+    expect(section.querySelector('pd-select[ariaLabel="Threads reading folders"], [aria-label="Threads reading folders"]')).not.toBeNull();
+    expect(section.querySelector('[aria-label="Jobs at once"]')).not.toBeNull();
+    expect(section.textContent).toContain('Takes effect the next time Dyno starts');
+    const type = (i: HTMLInputElement, v: string) => {
+      i.value = v;
+      i.dispatchEvent(new Event('input'));
+      f.detectChanges();
+    };
+    type(field('File finder: folder depth'), '0');
+    type(field('File finder: files looked at'), '999');
+    type(field('File finder: content compared'), '5000');
+    expect(section.querySelectorAll('mat-error').length).toBe(3);
+    expect(saveButton()!.disabled).toBe(true);
+    type(field('File finder: folder depth'), '20');
+    type(field('File finder: files looked at'), '100000');
+    type(field('File finder: content compared'), '8');
+    const page = f.componentInstance as unknown as { setDisk(p: object): void; setJobs(p: object): void };
+    page.setDisk({ readThreads: { fixed: 6 } });
+    page.setJobs({ workers: { fixed: 2 } });
+    f.detectChanges();
+    const spy = vi.spyOn(mock, 'saveSettings');
+    saveButton()!.click();
+    await settle(f);
+    const sent = spy.mock.calls[0]![0];
+    expect(sent.disk).toMatchObject({ readThreads: { fixed: 6 }, finderFiles: 100_000, finderDepth: 20, finderHashGib: 8 });
+    expect(sent.jobs).toEqual({ workers: { fixed: 2 } });
   });
   it('ignores a learning period outside 1 to 30 and dims its rows when learning is off', async () => {
     const { f, el, saveButton } = await make();

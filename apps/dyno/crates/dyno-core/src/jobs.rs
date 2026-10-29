@@ -10,8 +10,37 @@ use crate::backup::BackupReport;
 use crate::extras::files::{FinderQuery, FinderResult};
 use crate::extras::{boot::BootReport, sleep::SleepReport, software::SoftwareInventory, usage::UsageReport};
 use crate::issues::{IssuesOverview, IssuesQuery};
+use crate::threads::Threads;
 use crate::weblinks::{FileHashInfo, HashSource};
 use serde::{Deserialize, Serialize};
+
+/// The most jobs that may run at once, whatever the setting says.
+pub const MAX_JOB_WORKERS: u8 = 8;
+
+/// `Settings.jobs`. Every key is optional and merged over the defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct JobSettings {
+    /// How many jobs run at once (the rest wait as queued): Auto (4) or 1 to [`MAX_JOB_WORKERS`]. Read when Dyno starts.
+    pub workers: Threads,
+}
+
+impl JobSettings {
+    /// The values clamped into their allowed range.
+    pub fn clamped(self) -> JobSettings {
+        JobSettings {
+            workers: self.workers.clamped(MAX_JOB_WORKERS),
+        }
+    }
+
+    /// How many jobs run at once.
+    pub fn worker_count(self) -> usize {
+        self.workers.resolve(AUTO_JOB_WORKERS, MAX_JOB_WORKERS)
+    }
+}
+
+/// The number of jobs that run at once when the setting is Auto.
+pub const AUTO_JOB_WORKERS: usize = 4;
 
 /// Finished jobs the agent remembers (their status and, for a done job, its result).
 pub const KEPT_FINISHED: usize = 16;
@@ -181,6 +210,35 @@ mod tests {
         assert_eq!(hash.kind(), JobKind::FileHash);
         let rescan: JobSpec = serde_json::from_value(serde_json::json!({"rescanIssues": {"query": {"days": 7}}})).unwrap();
         assert_eq!(rescan.kind(), JobKind::RescanIssues);
+    }
+
+    #[test]
+    fn the_job_workers_are_auto_or_a_validated_count() {
+        assert_eq!(JobSettings::default().worker_count(), 4);
+        assert_eq!(
+            JobSettings {
+                workers: Threads::Fixed(2)
+            }
+            .worker_count(),
+            2
+        );
+        assert_eq!(
+            JobSettings {
+                workers: Threads::Fixed(99)
+            }
+            .worker_count(),
+            8
+        );
+        assert_eq!(
+            JobSettings {
+                workers: Threads::Fixed(0)
+            }
+            .clamped()
+            .workers,
+            Threads::Fixed(1)
+        );
+        let s: JobSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s, JobSettings::default());
     }
 
     #[test]

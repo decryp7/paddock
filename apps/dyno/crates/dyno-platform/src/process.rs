@@ -8,7 +8,6 @@ use std::io::Read;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// Most bytes kept from each of a tool's output streams.
@@ -107,23 +106,20 @@ pub fn run_streaming(
     use std::io::BufRead;
     let program = program_name(&cmd);
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| match e.kind() {
+    // Supervised (ER-22): its own process group ended as a whole, a kill-on-close job object on Windows, so a tool's helpers end
+    // with it and nothing outlives Dyno.
+    let mut tool = paddock_proc::Supervised::spawn(cmd).map_err(|e| match e.kind() {
         std::io::ErrorKind::NotFound => PlatformError::Unsupported(format!("{program} is not available on this computer.")),
         std::io::ErrorKind::PermissionDenied => PlatformError::AccessDenied(format!("Not allowed to run {program}.")),
         _ => PlatformError::Failed(format!("Could not run {program}: {e}")),
     })?;
-    let stdout = child.stdout.take();
-    let err = drain(child.stderr.take());
-    let child = std::sync::Arc::new(Mutex::new(child));
+    let pid = tool.id().unwrap_or(0);
+    let stdout = tool.take_stdout();
+    let err = drain(tool.take_stderr());
     let timed_out = std::sync::Arc::new(AtomicBool::new(false));
-    let kill = {
-        let child = child.clone();
-        move || {
-            let _ = child.lock().unwrap_or_else(std::sync::PoisonError::into_inner).kill();
-        }
-    };
-    // Cancel kills the child at once: the read below sees the end of the stream and returns, it does not wait for a line.
-    let _on_cancel = control.on_cancel(Box::new(kill.clone()));
+    // Cancel ends the tree at once: the read below sees the end of the stream and returns, it does not wait for a line.
+    let kill = move || paddock_proc::kill_tree(pid);
+    let _on_cancel = control.on_cancel(Box::new(kill));
     // The timeout is a watcher that ends when the read does.
     let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
     let watcher = {
@@ -131,12 +127,12 @@ pub fn run_streaming(
         std::thread::spawn(move || {
             if done_rx.recv_timeout(timeout) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
                 timed_out.store(true, Ordering::SeqCst);
-                kill();
+                paddock_proc::kill_tree(pid);
             }
         })
     };
     // The lines are read on a thread of their own and handed over here, so Cancel and the timeout never wait for the next line
-    // (a child that keeps the pipe open after it was killed, as a shell's own children do, cannot hold this call).
+    // (a helper that keeps the pipe open after the tool was killed cannot hold this call).
     let (lines_tx, lines_rx) = std::sync::mpsc::channel::<String>();
     if let Some(out) = stdout {
         std::thread::spawn(move || {
@@ -170,18 +166,7 @@ pub fn run_streaming(
             }
         }
     }
-    let status = loop {
-        let waited = child.lock().unwrap_or_else(std::sync::PoisonError::into_inner).try_wait();
-        match waited {
-            Ok(Some(status)) => break status,
-            Ok(None) => std::thread::sleep(Duration::from_millis(5)),
-            Err(e) => {
-                let _ = done_tx.send(());
-                let _ = watcher.join();
-                return Err(PlatformError::Failed(format!("Waiting for {program} failed: {e}")));
-            }
-        }
-    };
+    let status = tool.wait();
     let _ = done_tx.send(());
     let _ = watcher.join();
     if timed_out.load(Ordering::SeqCst) {
@@ -193,13 +178,14 @@ pub fn run_streaming(
     if control.cancelled() {
         return Err(PlatformError::Failed(format!("{program} was stopped.")));
     }
-    if status.success() {
-        Ok(())
-    } else {
-        let stderr = err.and_then(|h| h.join().ok()).unwrap_or_default();
-        let text = String::from_utf8_lossy(&stderr);
-        let first = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("no message").trim();
-        Err(PlatformError::Failed(format!("{program} failed: {}", truncate(first, 200))))
+    match status {
+        Some(s) if s.success() => Ok(()),
+        _ => {
+            let stderr = err.and_then(|h| h.join().ok()).unwrap_or_default();
+            let text = String::from_utf8_lossy(&stderr);
+            let first = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("no message").trim();
+            Err(PlatformError::Failed(format!("{program} failed: {}", truncate(first, 200))))
+        }
     }
 }
 
@@ -225,6 +211,7 @@ pub(crate) fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     pub(crate) fn shell(script: &str) -> Command {
         if cfg!(windows) {
@@ -346,5 +333,33 @@ pub(crate) mod tests {
         let err = run_streaming(shell("sleep 30"), Duration::from_millis(300), &Hand::default(), |_| {}).unwrap_err();
         assert!(matches!(err, PlatformError::Timeout(_)), "{err:?}");
         assert!(started.elapsed() < Duration::from_secs(15));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_ends_the_whole_tree_of_a_streamed_tool_not_just_its_first_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("grandchild.pid");
+        let script = format!("sleep 30 & echo $! > '{}'; echo first; wait", pidfile.display());
+        let hand = std::sync::Arc::new(Hand::default());
+        let h = hand.clone();
+        let file = pidfile.clone();
+        let canceller = std::thread::spawn(move || {
+            while !file.exists() {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            h.cancel();
+        });
+        let err = run_streaming(shell(&script), Duration::from_secs(60), hand.as_ref(), |_| {}).unwrap_err();
+        canceller.join().unwrap();
+        assert!(matches!(&err, PlatformError::Failed(m) if m.contains("stopped")), "{err:?}");
+        let pid: u32 = std::fs::read_to_string(&pidfile).unwrap().trim().parse().unwrap();
+        for _ in 0..200 {
+            if !paddock_proc::is_alive(pid) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        panic!("the tool's helper process {pid} is still running after Cancel");
     }
 }

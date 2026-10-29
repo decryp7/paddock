@@ -6,14 +6,15 @@
 //!
 //! A folder on a dead network share can hold a `read_dir` or a `stat` inside the kernel for as long as the server is gone. The
 //! work therefore runs on a thread of its own and the job waits for it with Cancel able to wake the wait: Cancel returns at once,
-//! the thread is left to finish when the OS lets it, and a few such abandoned threads at a time are the most that may pile up
-//! (the disk map's approach, `volumes::within`).
+//! the thread is left to finish when the OS lets it, and its threads count on the host in the disk map's own per-host count
+//! (`LiveWorkers`) until the call returns, so a host with four stuck threads gets no new search or scan.
 
-use crate::disk::walk::modified;
+use crate::disk::centre::{HostThreads, MAX_ABANDONED_PER_HOST};
+use crate::disk::engine::{LiveGuard, LiveWorkers};
 use dyno_core::extras::files::{
-    duplicate_groups, largest, same_size_groups, FinderLimit, FinderMode, FinderQuery, FinderResult, LimitHit, Walked, MAX_DEPTH,
-    MAX_HASH_BYTES, MAX_SCANNED,
+    duplicate_groups, largest, same_size_groups, FinderLimit, FinderMode, FinderQuery, FinderResult, LimitHit, Walked,
 };
+use dyno_core::time::Timestamp;
 use paddock_jobs::{
     copy_hashed, par_map_ordered, par_walk, CancelReason, Decision, EntryKind, HashingWriter, JobContext, JobError, Phase, SymlinkPolicy,
     WalkOptions, Workers,
@@ -21,38 +22,16 @@ use paddock_jobs::{
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 /// The first bytes hashed to rule out most non-duplicates cheaply.
 const HEAD: u64 = 64 * 1024;
 /// How long the first look at the chosen folder may take before the search is refused (a dead share must not hold the job).
 pub const STAT_LIMIT: Duration = Duration::from_secs(5);
-/// Scans that were cancelled while the OS still held a call of theirs; a new search is refused while this many linger.
-pub const MAX_ABANDONED: usize = 4;
 
-static ABANDONED: AtomicUsize = AtomicUsize::new(0);
-
-/// What one scan may spend. The defaults are the product limits; tests pass small ones.
-#[derive(Debug, Clone, Copy)]
-pub struct Limits {
-    /// Most files and folders looked at.
-    pub files: usize,
-    /// Deepest folder level entered.
-    pub depth: u32,
-    /// Most bytes read comparing contents.
-    pub hash_bytes: u64,
-}
-
-impl Default for Limits {
-    fn default() -> Limits {
-        Limits {
-            files: MAX_SCANNED,
-            depth: MAX_DEPTH,
-            hash_bytes: MAX_HASH_BYTES,
-        }
-    }
-}
+/// What one scan may spend: the Settings `disk.finderFiles`, `finderDepth` and `finderHashGib` (their defaults when nobody changed them).
+pub use dyno_core::extras::files::FinderLimits as Limits;
 
 /// The folder as the finder will use it, or what to fix.
 pub fn resolve_root(folder: &str) -> Result<PathBuf, String> {
@@ -78,42 +57,71 @@ fn resolve_within(folder: &str, limit: Duration) -> Result<PathBuf, String> {
     })
 }
 
-/// Runs `work` on a thread of its own and waits for it; Cancel wakes the wait at once and abandons the thread (it ends when
-/// the call it is stuck in returns, and it stops at its next cancel check). At most [`MAX_ABANDONED`] may linger.
-fn abandonable<T: Send + 'static>(
-    ctx: &JobContext,
-    work: impl FnOnce(&JobContext) -> Result<T, JobError> + Send + 'static,
-) -> Result<T, JobError> {
-    abandonable_counting(ctx, &ABANDONED, MAX_ABANDONED, work)
+/// Which host a search reads and the threads of it that are stuck: a search Cancel abandoned while the OS still holds a call of
+/// its keeps its threads counted on that host (the disk map's count, `LiveWorkers`) until the calls return, and a new search of a
+/// host with [`MAX_ABANDONED_PER_HOST`] of them is refused.
+pub struct Linger {
+    host: String,
+    live: Arc<LiveWorkers>,
+    /// Stuck threads of the host when the search started.
+    stuck: usize,
+    /// The most that may be stuck before a search is refused.
+    most: usize,
+    /// How many threads this search reads with (they all count if it is abandoned: they are inside its walk).
+    weight: usize,
 }
 
-/// [`abandonable`] over its own count of abandoned threads and its own maximum (tests give theirs).
-fn abandonable_counting<T: Send + 'static>(
+impl Linger {
+    /// The host's count as the disk map keeps it, for a search that reads with `threads` threads.
+    pub fn of(host: HostThreads, threads: usize) -> Linger {
+        Linger {
+            host: host.host,
+            live: host.live,
+            stuck: host.abandoned,
+            most: MAX_ABANDONED_PER_HOST,
+            weight: threads.max(1),
+        }
+    }
+
+    /// A count of its own and its own maximum (tests).
+    pub fn counting(live: Arc<LiveWorkers>, stuck: usize, most: usize, weight: usize) -> Linger {
+        Linger {
+            host: "this computer".into(),
+            live,
+            stuck,
+            most,
+            weight,
+        }
+    }
+}
+
+/// Runs `work` on a thread of its own and waits for it; Cancel wakes the wait at once and abandons the thread (it ends when
+/// the call it is stuck in returns, and it stops at its next cancel check). While it lingers, its `weight` threads count on the
+/// host.
+fn abandonable<T: Send + 'static>(
     ctx: &JobContext,
-    lingering: &'static AtomicUsize,
-    most: usize,
+    linger: Linger,
     work: impl FnOnce(&JobContext) -> Result<T, JobError> + Send + 'static,
 ) -> Result<T, JobError> {
-    if lingering.load(Ordering::SeqCst) >= most {
-        return Err(JobError::Failed(
-            "Earlier searches are still waiting on a folder that does not answer. Wait for them, or check that the drive or share is reachable.".into(),
-        ));
+    if linger.stuck >= linger.most {
+        return Err(JobError::Failed(format!(
+            "{} still has {} reads that have not returned, so Dyno will not start another search there. Restarting Dyno clears it.",
+            linger.host, linger.stuck
+        )));
     }
     enum Wake<T> {
         Done(Result<T, JobError>),
         Cancelled,
     }
     let (tx, rx) = mpsc::channel::<Wake<T>>();
-    let finished = Arc::new(AtomicBool::new(false));
-    let abandoned = Arc::new(AtomicBool::new(false));
+    // The guards of an abandoned search: taken when Cancel gives up on the thread, dropped when the thread ends.
+    let held: Arc<Mutex<Option<Vec<LiveGuard>>>> = Arc::new(Mutex::new(Some(Vec::new())));
     let thread = {
-        let (ctx, tx, finished, abandoned) = (ctx.clone(), tx.clone(), finished.clone(), abandoned.clone());
+        let (ctx, tx, held) = (ctx.clone(), tx.clone(), held.clone());
         std::thread::Builder::new().name("dyno-finder".into()).spawn(move || {
             let result = work(&ctx);
-            finished.store(true, Ordering::SeqCst);
-            if abandoned.swap(false, Ordering::SeqCst) {
-                lingering.fetch_sub(1, Ordering::SeqCst);
-            }
+            // Over: whatever was counted for it comes off, and nothing may be counted afterwards.
+            *held.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
             let _ = tx.send(Wake::Done(result));
         })
     };
@@ -126,11 +134,8 @@ fn abandonable_counting<T: Send + 'static>(
     match rx.recv() {
         Ok(Wake::Done(result)) => result,
         Ok(Wake::Cancelled) | Err(_) => {
-            // Counted as lingering unless the worker has just ended (it takes itself off the count when it ends after this).
-            abandoned.store(true, Ordering::SeqCst);
-            lingering.fetch_add(1, Ordering::SeqCst);
-            if finished.load(Ordering::SeqCst) && abandoned.swap(false, Ordering::SeqCst) {
-                lingering.fetch_sub(1, Ordering::SeqCst);
+            if let Some(guards) = held.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut() {
+                guards.extend((0..linger.weight).map(|_| linger.live.enter()));
             }
             Err(JobError::Cancelled(ctx.cancel_token().reason().unwrap_or(CancelReason::User)))
         }
@@ -139,7 +144,7 @@ fn abandonable_counting<T: Send + 'static>(
 
 /// What the walk found.
 struct Walk {
-    files: Vec<(PathBuf, u64)>,
+    files: Vec<Walked>,
     scanned: u32,
     unreadable: u32,
     limit: Option<FinderLimit>,
@@ -167,6 +172,7 @@ fn walk(ctx: &JobContext, root: &Path, min_bytes: u64, limits: Limits, workers: 
         max_depth: Some(max_depth as usize),
         include_dirs: false,
         with_size: true,
+        with_modified: true,
         issue_cap: 0,
         ..WalkOptions::default()
     }
@@ -185,7 +191,14 @@ fn walk(ctx: &JobContext, root: &Path, min_bytes: u64, limits: Limits, workers: 
         .entries
         .into_iter()
         .filter(|e| e.kind == EntryKind::File)
-        .filter_map(|e| e.size.filter(|b| *b >= min_bytes).map(|b| (e.path, b)))
+        .filter_map(|e| {
+            let bytes = e.size.filter(|b| *b >= min_bytes)?;
+            Some(Walked {
+                path: e.path.to_string_lossy().into_owned(),
+                bytes,
+                modified: e.modified.map_or(Timestamp(0), timestamp),
+            })
+        })
         .collect();
     let limit = if too_many.load(Ordering::Relaxed) {
         Some(FinderLimit::Files)
@@ -200,6 +213,12 @@ fn walk(ctx: &JobContext, root: &Path, min_bytes: u64, limits: Limits, workers: 
         unreadable: u32::try_from(found.issues_total).unwrap_or(u32::MAX),
         limit,
     })
+}
+
+/// A modification time as a [`Timestamp`].
+fn timestamp(t: std::time::SystemTime) -> Timestamp {
+    t.duration_since(std::time::UNIX_EPOCH)
+        .map_or(Timestamp(0), |d| Timestamp(i64::try_from(d.as_millis()).unwrap_or(i64::MAX)))
 }
 
 /// The digest of the start of a file, or `None` when it cannot be read. Only a cancel is an error.
@@ -284,29 +303,23 @@ fn find_duplicates(
     Ok((digests.into_iter().filter_map(|(i, h)| h.map(|h| (i, h))).collect(), cut))
 }
 
-/// The modification time of the files that survived the size filter, on `workers` threads, in input order.
-fn with_times(ctx: &JobContext, found: Vec<(PathBuf, u64)>, workers: Workers) -> Result<Vec<Walked>, JobError> {
-    ctx.phase(Phase::items("details", "Reading file details", found.len() as u64));
-    let read = par_map_ordered(found, workers, ctx.cancel_token(), ctx, |(path, bytes)| {
-        Ok(std::fs::symlink_metadata(&path).ok().map(|m| Walked {
-            path: path.to_string_lossy().into_owned(),
-            bytes,
-            modified: modified(&m),
-        }))
-    })?;
-    Ok(read.into_iter().flatten().collect())
-}
-
 /// Runs the finder as the job `ctx` with `workers` threads reading the folder. `scan_id` names the result. A bad folder is a failed
 /// job with what to fix; a folder that does not answer within [`STAT_LIMIT`] is refused with a sentence.
-pub fn run(ctx: &JobContext, query: &FinderQuery, scan_id: &str, limits: Limits, workers: Workers) -> Result<FinderResult, JobError> {
+pub fn run(
+    ctx: &JobContext,
+    query: &FinderQuery,
+    scan_id: &str,
+    limits: Limits,
+    workers: Workers,
+    linger: Linger,
+) -> Result<FinderResult, JobError> {
     let query = query.clone().validated().map_err(JobError::Failed)?;
     let root = resolve_within(&query.folder, STAT_LIMIT).map_err(JobError::Failed)?;
     let scan_id = scan_id.to_string();
-    abandonable(ctx, move |ctx| {
+    abandonable(ctx, linger, move |ctx| {
         let walked = walk(ctx, &root, query.min_bytes, limits, workers)?;
         let mut limit = walked.limit;
-        let files = with_times(ctx, walked.files, workers)?;
+        let files = walked.files;
         let large = if query.mode == FinderMode::Duplicates {
             Vec::new()
         } else {
@@ -327,7 +340,7 @@ pub fn run(ctx: &JobContext, query: &FinderQuery, scan_id: &str, limits: Limits,
             duplicates,
             scanned: walked.scanned,
             unreadable: walked.unreadable,
-            limit: limit.map(LimitHit::from),
+            limit: limit.map(|l| LimitHit::new(l, &limits)),
             wasted_bytes,
         })
     })
@@ -340,6 +353,10 @@ mod tests {
     use paddock_jobs::JobState;
 
     const MB: usize = 1024 * 1024;
+
+    fn lg() -> Linger {
+        Linger::counting(Arc::new(LiveWorkers::default()), 0, 4, 4)
+    }
 
     /// Four threads, as on an SSD.
     fn w(n: usize) -> Workers {
@@ -374,7 +391,7 @@ mod tests {
     }
 
     fn find(root: &Path, mode: FinderMode) -> Result<FinderResult, JobError> {
-        Run::new().job(|ctx| run(ctx, &query(root, mode), "s", Limits::default(), w(4)))
+        Run::new().job(|ctx| run(ctx, &query(root, mode), "s", Limits::default(), w(4), lg()))
     }
 
     #[test]
@@ -411,7 +428,7 @@ mod tests {
             mode: FinderMode::Both,
             min_bytes: 0,
         };
-        let out = Run::new().job(|ctx| run(ctx, &blank, "s", Limits::default(), w(4)));
+        let out = Run::new().job(|ctx| run(ctx, &blank, "s", Limits::default(), w(4), lg()));
         assert!(matches!(out, Err(JobError::Failed(m)) if m.contains("Choose a folder")));
     }
 
@@ -429,12 +446,12 @@ mod tests {
     fn each_phase_counts_up_from_the_first_report_on_its_own_scale() {
         let (_t, root) = fixture();
         let job = Run::new();
-        job.job(|ctx| run(ctx, &query(&root, FinderMode::Both), "s", Limits::default(), w(4)))
+        job.job(|ctx| run(ctx, &query(&root, FinderMode::Both), "s", Limits::default(), w(4), lg()))
             .unwrap();
         let phases = job.phases();
         assert_eq!(
             phases.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
-            ["walk", "details", "heads", "contents"]
+            ["walk", "heads", "contents"]
         );
         // Queued, started, then the walk at once: a count with no total (a growing count, never a static 0).
         assert!(
@@ -443,13 +460,12 @@ mod tests {
         for p in &phases {
             assert!(p.counts.windows(2).all(|w| w[0] <= w[1]), "{} went backwards: {:?}", p.id, p.counts);
         }
-        // The walk counts every file it finds (5); the later phases know their totals: the 4 files over the floor, the 3 that
-        // share a size, and the 4 MiB of the two whose starts agree.
+        // The walk counts every file it finds (5); the later phases know their totals: the 3 that share a size, and the 4 MiB of
+        // the two whose starts agree.
         assert_eq!(phases[0].counts.last(), Some(&5));
-        assert_eq!((phases[1].total, phases[1].counts.last().copied()), (Some(4), Some(4)));
-        assert_eq!((phases[2].total, phases[2].counts.last().copied()), (Some(3), Some(3)));
+        assert_eq!((phases[1].total, phases[1].counts.last().copied()), (Some(3), Some(3)));
         assert_eq!(
-            (phases[3].total, phases[3].counts.last().copied()),
+            (phases[2].total, phases[2].counts.last().copied()),
             (Some(4 * MB as u64), Some(4 * MB as u64))
         );
         assert_eq!(job.end_state(), JobState::Done);
@@ -470,6 +486,7 @@ mod tests {
                         ..Limits::default()
                     },
                     w(4),
+                    lg(),
                 )
             })
             .unwrap();
@@ -486,6 +503,7 @@ mod tests {
                         ..Limits::default()
                     },
                     w(4),
+                    lg(),
                 )
             })
             .unwrap();
@@ -503,6 +521,7 @@ mod tests {
                         ..Limits::default()
                     },
                     w(4),
+                    lg(),
                 )
             })
             .unwrap();
@@ -510,7 +529,23 @@ mod tests {
         assert!(small.limit.unwrap().message.contains("Some duplicates may be missing"));
         assert!(small.duplicates.is_empty());
         for l in [FinderLimit::Files, FinderLimit::Depth, FinderLimit::HashBytes] {
-            assert!(l.message().to_lowercase().contains("choose"), "{}", l.message());
+            let m = l.message(&Limits {
+                files: 7,
+                depth: 3,
+                hash_bytes: 5 * 1024 * 1024 * 1024,
+            });
+            assert!(m.to_lowercase().contains("choose") && m.contains("Settings"), "{m}");
+            assert!(
+                m.contains(
+                    &["7 files", "3 levels", "5 GiB"]
+                        .iter()
+                        .find(|x| m.contains(*x))
+                        .copied()
+                        .unwrap_or("?")
+                        .to_string()
+                ),
+                "the numbers are the scan's own: {m}"
+            );
         }
     }
 
@@ -526,7 +561,7 @@ mod tests {
             }
         }
         let job = Run::new().cancel_when("walk", 100);
-        let out = job.job(|ctx| run(ctx, &query(&root, FinderMode::Both), "s", Limits::default(), w(4)));
+        let out = job.job(|ctx| run(ctx, &query(&root, FinderMode::Both), "s", Limits::default(), w(4), lg()));
         assert!(matches!(out, Err(JobError::Cancelled(_))));
         let seen = job.phases()[0].counts.last().copied().unwrap();
         assert!(
@@ -549,7 +584,7 @@ mod tests {
         }
         let by = |n| {
             Run::new()
-                .job(|ctx| run(ctx, &query(&root, FinderMode::Both), "s", Limits::default(), w(n)))
+                .job(|ctx| run(ctx, &query(&root, FinderMode::Both), "s", Limits::default(), w(n), lg()))
                 .unwrap()
         };
         let (one, many) = (by(1), by(8));
@@ -578,6 +613,7 @@ mod tests {
                         ..Limits::default()
                     },
                     w(4),
+                    lg(),
                 )
             })
             .unwrap();
@@ -605,16 +641,12 @@ mod tests {
         assert_eq!(find(&root, FinderMode::Both).unwrap().unreadable, 0);
     }
 
-    fn lingering() -> &'static AtomicUsize {
-        Box::leak(Box::new(AtomicUsize::new(0)))
-    }
-
     #[test]
-    fn cancel_returns_at_once_while_a_call_is_stuck_and_the_thread_is_given_up_on_until_it_ends() {
-        let stuck = lingering();
+    fn cancel_returns_at_once_while_a_call_is_stuck_and_its_threads_count_on_the_host_until_they_return() {
+        let live = Arc::new(LiveWorkers::default());
         let door = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
         let entered = Arc::new(AtomicBool::new(false));
-        let (d, e) = (door.clone(), entered.clone());
+        let (d, e, l) = (door.clone(), entered.clone(), live.clone());
         let started = std::time::Instant::now();
         let out = Run::new().job(|ctx| {
             let token = ctx.cancel_token().clone();
@@ -625,7 +657,7 @@ mod tests {
                 }
                 token.cancel();
             });
-            abandonable_counting(ctx, stuck, 4, move |_ctx| {
+            abandonable(ctx, Linger::counting(l, 0, 4, 3), move |_ctx| {
                 e.store(true, Ordering::SeqCst);
                 // The OS call that does not come back until the share does.
                 let mut open = d.0.lock().unwrap();
@@ -637,26 +669,45 @@ mod tests {
         });
         assert!(matches!(out, Err(JobError::Cancelled(_))), "{out:?}");
         assert!(started.elapsed() < Duration::from_secs(5), "Cancel waited for the stuck call");
-        assert_eq!(stuck.load(Ordering::SeqCst), 1, "the thread is counted while it lingers");
+        assert_eq!(
+            live.count(),
+            3,
+            "the search's walker threads are counted while they are inside the call"
+        );
         *door.0.lock().unwrap() = true;
         door.1.notify_all();
         for _ in 0..500 {
-            if stuck.load(Ordering::SeqCst) == 0 {
+            if live.count() == 0 {
                 return;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        panic!("the thread never left the count");
+        panic!("the threads never left the count");
     }
 
     #[test]
-    fn a_search_is_refused_while_too_many_cancelled_ones_still_wait_on_a_dead_folder() {
-        let stuck = lingering();
-        stuck.store(4, Ordering::SeqCst);
-        let out = Run::new().job(|ctx| abandonable_counting(ctx, stuck, 4, |_ctx| Ok(1)));
-        assert!(matches!(out, Err(JobError::Failed(m)) if m.contains("still waiting")));
-        stuck.store(3, Ordering::SeqCst);
-        assert_eq!(Run::new().job(|ctx| abandonable_counting(ctx, stuck, 4, |_ctx| Ok(1))).unwrap(), 1);
+    fn a_search_that_finishes_normally_never_counts_and_one_that_ends_just_after_cancel_does_not_leak_a_count() {
+        let live = Arc::new(LiveWorkers::default());
+        let out = Run::new().job(|ctx| abandonable(ctx, Linger::counting(live.clone(), 0, 4, 4), |_ctx| Ok(1)));
+        assert_eq!(out.unwrap(), 1);
+        assert_eq!(live.count(), 0);
+    }
+
+    #[test]
+    fn a_search_of_a_host_with_too_many_stuck_threads_is_refused_with_the_way_out() {
+        let live = Arc::new(LiveWorkers::default());
+        let out = Run::new().job(|ctx| abandonable(ctx, Linger::counting(live.clone(), 4, 4, 4), |_ctx| Ok(1)));
+        let Err(JobError::Failed(m)) = out else { panic!("{out:?}") };
+        assert!(
+            m.contains("this computer still has 4 reads") && m.contains("Restarting Dyno clears it."),
+            "{m}"
+        );
+        assert_eq!(
+            Run::new()
+                .job(|ctx| abandonable(ctx, Linger::counting(live.clone(), 3, 4, 4), |_ctx| Ok(1)))
+                .unwrap(),
+            1
+        );
     }
 
     #[test]
@@ -665,7 +716,7 @@ mod tests {
         let root = std::fs::canonicalize(t.path()).unwrap().join("dups");
         let paths: Vec<_> = (0..3).map(|i| write(&root, &format!("same{i}.bin"), 9, 6 * MB)).collect();
         let job = Run::new().cancel_when("contents", 64 * 1024);
-        let out = job.job(|ctx| run(ctx, &query(&root, FinderMode::Duplicates), "s", Limits::default(), w(4)));
+        let out = job.job(|ctx| run(ctx, &query(&root, FinderMode::Duplicates), "s", Limits::default(), w(4), lg()));
         assert!(matches!(out, Err(JobError::Cancelled(_))), "{out:?}");
         let read = job.phases().last().unwrap().counts.last().copied().unwrap();
         // Each thread reads at most one more chunk before it sees the cancel.

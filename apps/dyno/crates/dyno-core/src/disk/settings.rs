@@ -1,9 +1,15 @@
 //! The disk map's Settings (Performance > Limits): how big an index may grow and which files get a node of their own.
 
 use super::index::{ScanLimits, HARD_MAX_NODES};
+use crate::extras::files::{FinderLimits, MAX_DEPTH, MAX_HASH_BYTES, MAX_SCANNED};
+use crate::threads::Threads;
 use serde::{Deserialize, Serialize};
 
 const MIB: u64 = 1024 * 1024;
+const GIB: u64 = 1024 * MIB;
+
+/// The most threads that read folders at once, whatever the setting says.
+pub const MAX_READ_THREADS: u8 = 16;
 
 /// `Settings.disk`. Every key is optional and merged over the defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -13,6 +19,15 @@ pub struct DiskSettings {
     pub scan_folders: u32,
     /// Files of at least this many MiB get a node of their own; smaller ones are folded into their folder (1 to 1,024).
     pub notable_file_mib: u32,
+    /// How many threads read folders at once, for the disk map and the file finder: Auto (by the kind of volume: a few on an SSD, one
+    /// on a spinning disk, two per server on the network) or 1 to [`MAX_READ_THREADS`].
+    pub read_threads: Threads,
+    /// The file finder stops after this many files and folders (`disk.finderFiles`); 1,000 to 5,000,000.
+    pub finder_files: u32,
+    /// The file finder does not enter folders deeper than this (`disk.finderDepth`); 1 to 256.
+    pub finder_depth: u32,
+    /// The file finder stops comparing contents after reading this many GiB (`disk.finderHashGib`); 1 to 4,096.
+    pub finder_hash_gib: u32,
 }
 
 impl Default for DiskSettings {
@@ -21,6 +36,10 @@ impl Default for DiskSettings {
         DiskSettings {
             scan_folders: d.max_nodes,
             notable_file_mib: u32::try_from(d.notable_bytes / MIB).unwrap_or(10),
+            read_threads: Threads::Auto,
+            finder_files: u32::try_from(MAX_SCANNED).unwrap_or(500_000),
+            finder_depth: MAX_DEPTH,
+            finder_hash_gib: u32::try_from(MAX_HASH_BYTES / GIB).unwrap_or(64),
         }
     }
 }
@@ -31,7 +50,26 @@ impl DiskSettings {
         DiskSettings {
             scan_folders: self.scan_folders.clamp(10_000, HARD_MAX_NODES),
             notable_file_mib: self.notable_file_mib.clamp(1, 1024),
+            read_threads: self.read_threads.clamped(MAX_READ_THREADS),
+            finder_files: self.finder_files.clamp(1_000, 5_000_000),
+            finder_depth: self.finder_depth.clamp(1, 256),
+            finder_hash_gib: self.finder_hash_gib.clamp(1, 4_096),
         }
+    }
+
+    /// What one file finder scan may spend.
+    pub fn finder_limits(self) -> FinderLimits {
+        let s = self.clamped();
+        FinderLimits {
+            files: usize::try_from(s.finder_files).unwrap_or(usize::MAX),
+            depth: s.finder_depth,
+            hash_bytes: u64::from(s.finder_hash_gib) * GIB,
+        }
+    }
+
+    /// How many threads read folders: the setting, or `auto` (what the kind of volume allows) when it is Auto.
+    pub fn read_threads(self, auto: usize) -> usize {
+        self.read_threads.resolve(auto, MAX_READ_THREADS)
     }
 
     /// The limits a scan runs with.
@@ -59,12 +97,14 @@ mod tests {
         let low = DiskSettings {
             scan_folders: 0,
             notable_file_mib: 0,
+            ..DiskSettings::default()
         }
         .clamped();
         assert_eq!((low.scan_folders, low.notable_file_mib), (10_000, 1));
         let high = DiskSettings {
             scan_folders: u32::MAX,
             notable_file_mib: u32::MAX,
+            ..DiskSettings::default()
         }
         .limits();
         assert_eq!((high.max_nodes, high.notable_bytes), (HARD_MAX_NODES, 1024 * MIB));
@@ -74,5 +114,45 @@ mod tests {
     fn keys_are_optional() {
         let s: DiskSettings = serde_json::from_str(r#"{"scanFolders":50000}"#).unwrap();
         assert_eq!((s.scan_folders, s.notable_file_mib), (50_000, 10));
+    }
+
+    #[test]
+    fn the_defaults_are_the_products_and_every_new_key_is_optional() {
+        let d = DiskSettings::default();
+        assert_eq!(
+            (d.read_threads, d.finder_files, d.finder_depth, d.finder_hash_gib),
+            (Threads::Auto, 500_000, 48, 64)
+        );
+        assert_eq!(d.finder_limits(), FinderLimits::default());
+        let s: DiskSettings = serde_json::from_str(r#"{"readThreads":{"fixed":6},"finderDepth":10}"#).unwrap();
+        assert_eq!((s.read_threads, s.finder_depth, s.finder_files), (Threads::Fixed(6), 10, 500_000));
+    }
+
+    #[test]
+    fn thread_and_finder_values_are_validated_in_the_engine() {
+        let wild = DiskSettings {
+            read_threads: Threads::Fixed(200),
+            finder_files: 0,
+            finder_depth: 0,
+            finder_hash_gib: u32::MAX,
+            ..DiskSettings::default()
+        };
+        let c = wild.clamped();
+        assert_eq!(
+            (c.read_threads, c.finder_files, c.finder_depth, c.finder_hash_gib),
+            (Threads::Fixed(16), 1_000, 1, 4_096)
+        );
+        assert_eq!(wild.read_threads(4), 16);
+        assert_eq!(DiskSettings::default().read_threads(4), 4);
+        assert_eq!(
+            DiskSettings {
+                read_threads: Threads::Fixed(0),
+                ..DiskSettings::default()
+            }
+            .read_threads(4),
+            1
+        );
+        let l = wild.finder_limits();
+        assert_eq!((l.files, l.depth, l.hash_bytes), (1_000, 1, 4_096 * GIB));
     }
 }

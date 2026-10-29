@@ -278,7 +278,11 @@
     }
   },
   "settings": {
+    "finderDepth": 48,
+    "finderFiles": 500000,
+    "finderHashGib": 64,
     "notableFileMib": 10,
+    "readThreads": "auto",
     "scanFolders": 2000000
   },
   "statuses": [

@@ -10,7 +10,8 @@
 //! The tree is made in a temp folder: many small files in many folders (the walk) and a few hundred files over the size floor,
 //! a third of them copies (the hashing). Every run reads the same tree, so the numbers compare like for like.
 
-use dyno_agent::extras::finder::{run, Limits};
+use dyno_agent::disk::engine::LiveWorkers;
+use dyno_agent::extras::finder::{run, Limits, Linger};
 use dyno_core::extras::files::{FinderMode, FinderQuery};
 use paddock_jobs::{EventSink, JobRegistry, JobSnapshot, Workers};
 use std::sync::Arc;
@@ -69,7 +70,16 @@ fn the_finder_on_a_generated_tree() {
                 let ctx = registry.register("find-files", "Finding files", None);
                 let started = Instant::now();
                 let result = ctx
-                    .run(|ctx| run(ctx, &query, "bench", Limits::default(), Workers::new(threads)))
+                    .run(|ctx| {
+                        run(
+                            ctx,
+                            &query,
+                            "bench",
+                            Limits::default(),
+                            Workers::new(threads),
+                            Linger::counting(std::sync::Arc::new(LiveWorkers::default()), 0, 4, threads),
+                        )
+                    })
                     .unwrap();
                 assert_eq!(result.duplicates.len(), 100);
                 started.elapsed().as_secs_f32()

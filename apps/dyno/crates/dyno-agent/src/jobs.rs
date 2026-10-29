@@ -14,9 +14,6 @@ use paddock_jobs::{EventSink, JobContext, JobError, JobId, JobPool, JobRegistry,
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, Weak};
 
-/// Jobs that run at once; the rest wait their turn as `queued`.
-const WORKERS: usize = 4;
-
 #[derive(Default)]
 struct Book {
     /// Jobs that have not ended, with what they were asked to do (a second start of the same work answers the first).
@@ -61,15 +58,16 @@ pub struct JobCentre {
 }
 
 impl JobCentre {
-    /// A centre with no jobs, pushing their statuses to the apps connected to `shared`.
-    pub fn new(shared: Weak<Shared>) -> JobCentre {
+    /// A centre with no jobs, pushing their statuses to the apps connected to `shared`. `workers` jobs run at once (the Setting
+    /// `jobs.workers`, read at start); the rest wait their turn as `queued`.
+    pub fn new(shared: Weak<Shared>, workers: usize) -> JobCentre {
         let book = Arc::new(Mutex::new(Book::default()));
         JobCentre {
             registry: JobRegistry::new(Arc::new(Journal {
                 book: book.clone(),
                 shared,
             })),
-            pool: JobPool::new(Workers::new(WORKERS)),
+            pool: JobPool::new(Workers::new(workers)),
             book,
         }
     }
@@ -229,11 +227,21 @@ fn execute(shared: &Arc<Shared>, ctx: &JobContext, spec: JobSpec) -> Result<JobO
     match spec {
         JobSpec::FindFiles { query } => {
             let id = shared.extras.next_scan_id(now());
-            // How many threads may read the folder at once depends on what it lives on: more on an SSD, one on a disk that spins.
-            let (location, rotational, cores) = shared.disk.storage_of(std::path::Path::new(&query.folder));
-            let workers = Workers::new(dyno_core::extras::files::finder_threads(&location, rotational, cores));
-            crate::extras::finder::run(ctx, &query, &id, crate::extras::finder::Limits::default(), workers)
-                .map(|r| JobOutput::Finder(Box::new(r)))
+            // The Settings, read when the search starts: the limits it runs with, and how many threads read the folder (Auto is
+            // what the kind of volume allows).
+            let settings = lock(&shared.core).settings.disk;
+            let root = std::path::Path::new(&query.folder);
+            let (location, rotational, cores) = shared.disk.storage_of(root);
+            let threads = settings.read_threads(dyno_core::extras::files::auto_finder_threads(&location, rotational, cores));
+            crate::extras::finder::run(
+                ctx,
+                &query,
+                &id,
+                settings.finder_limits(),
+                Workers::new(threads),
+                crate::extras::finder::Linger::of(shared.disk.host_threads(root), threads),
+            )
+            .map(|r| JobOutput::Finder(Box::new(r)))
         }
         JobSpec::RescanIssues { query } => {
             shared.issues.scan(shared, Some(ctx))?;

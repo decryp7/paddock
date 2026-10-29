@@ -53,8 +53,11 @@ impl ToolRunner for OsRunner {
         control: &dyn ReadControl,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<(), PlatformError> {
+        // A heavy read of a log must not slow the user's work: lower priority the family's way (not through nice(1), which strips
+        // DYLD_* on macOS).
         let mut cmd = crate::process::command(program);
         cmd.args(args);
+        paddock_proc::lower_priority(&mut cmd);
         crate::process::run_streaming(cmd, timeout, control, on_line)
     }
 }

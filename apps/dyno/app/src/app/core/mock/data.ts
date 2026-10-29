@@ -184,7 +184,8 @@ export function demoSettings(): Settings {
     tray: { metrics: ['cpu', 'memory', 'disk'], style: 'graph' },
     alerts: { enabled: true, lowDiskPercent: 10, overheatCelsius: 95, longHighCpuMinutes: 10 },
     // What the engine's DiskSettings::default() gives (crates/dyno-core/src/disk/settings.rs).
-    disk: { scanFolders: 2_000_000, notableFileMib: 10 },
+    disk: { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64 },
+    jobs: { workers: 'auto' },
     webApi: { enabled: false, port: 7878, lan: false },
     dashboard: layoutFromPreset('overview'),
     ipLookup: { ipTemplate: 'https://ipinfo.io/{ip}', asnTemplate: '' },

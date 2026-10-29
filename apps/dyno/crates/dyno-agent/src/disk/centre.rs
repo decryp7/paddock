@@ -9,9 +9,11 @@ use dyno_core::disk::scan::{
     eta_seconds, hidden_bytes, per_second, walk_threads, DiskScanStatus, DiskTarget, EventGate, ScanFailure, ScanPhase, ScanProgress,
     ScanState,
 };
+use dyno_core::disk::settings::MAX_READ_THREADS;
 use dyno_core::disk::source::{DirSource, ReadError};
 use dyno_core::disk::volume::{Volume, VolumeLocation};
 use dyno_core::protocol::{AgentError, ErrorCode};
+use dyno_core::threads::Threads;
 use dyno_core::time::Timestamp;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -31,6 +33,16 @@ pub const MAX_ABANDONED_PER_HOST: usize = 4;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// A host's threads as the file finder needs them: which host, its live-thread count, and how many are stuck now.
+pub struct HostThreads {
+    /// The host as the disk map names it ("this computer", a server).
+    pub host: String,
+    /// Its live walk threads: the finder adds the threads of a cancelled search to it until they return.
+    pub live: Arc<LiveWorkers>,
+    /// Threads of it stuck in calls that never returned, at the moment of asking.
+    pub abandoned: usize,
 }
 
 /// Where status events go.
@@ -258,6 +270,8 @@ pub struct DiskCentre {
     access: Arc<dyn AccessProbe>,
     cores: usize,
     limits: Mutex<ScanLimits>,
+    /// The Setting `disk.readThreads`: Auto, or exactly this many threads read a scan.
+    read_threads: Mutex<Threads>,
     /// The volume list as last asked for.
     known: Mutex<Option<Vec<ListedVolume>>>,
     /// Scans (and retries) that have a slot but are not kept yet: counted as running, so two starts cannot both take the last slot.
@@ -294,6 +308,7 @@ impl DiskCentre {
             access,
             cores,
             limits: Mutex::new(limits),
+            read_threads: Mutex::new(Threads::Auto),
             known: Mutex::new(None),
             starting: Mutex::new(HashSet::new()),
             kept_nodes: AtomicUsize::new(MAX_KEPT_NODES),
@@ -313,6 +328,11 @@ impl DiskCentre {
 
     fn limits_now(&self) -> ScanLimits {
         (*lock(&self.limits)).validated()
+    }
+
+    /// The Setting `disk.readThreads` for the scans that start from now on (a running scan keeps its own).
+    pub fn set_read_threads(&self, threads: Threads) {
+        *lock(&self.read_threads) = threads;
     }
 
     /// New limits for the scans that start from now on (a running scan keeps its own).
@@ -495,18 +515,33 @@ impl DiskCentre {
         }
         if threads_needed {
             // Threads of this host that are alive although no running scan owns them: stuck in calls that never returned.
-            let live = lock(&self.live).entry(host.to_string()).or_default().clone();
-            let owned: usize = scans.iter().filter(|e| e.running() && e.host == host).map(|e| e.threads).sum();
-            let abandoned = live.count().saturating_sub(owned);
+            let abandoned = self.abandoned_among(&scans, host);
             if abandoned >= MAX_ABANDONED_PER_HOST {
                 return Err(err(
                     ErrorCode::Busy,
-                    format!("{host} still has {abandoned} reads that have not returned, so Dyno will not start another scan of it."),
+                    format!("{host} still has {abandoned} reads that have not returned, so Dyno will not start another scan of it. Restarting Dyno clears it."),
                 ));
             }
         }
         starting.insert(key.to_string());
         Ok(None)
+    }
+
+    /// Threads of `host` that are alive although no running scan owns them: stuck in calls that never returned (the disk map's walk
+    /// and the file finder's cancelled walks both count here).
+    fn abandoned_among(&self, scans: &[Arc<Entry>], host: &str) -> usize {
+        let live = lock(&self.live).entry(host.to_string()).or_default().clone();
+        let owned: usize = scans.iter().filter(|e| e.running() && e.host == host).map(|e| e.threads).sum();
+        live.count().saturating_sub(owned)
+    }
+
+    /// For the file finder: the host the folder lives on, that host's live-thread count (a cancelled search whose threads are
+    /// still inside a call that does not return stays in it until they do) and how many threads of it are stuck right now.
+    pub fn host_threads(&self, path: &Path) -> HostThreads {
+        let host = self.folder_host(&path.to_string_lossy());
+        let live = lock(&self.live).entry(host.clone()).or_default().clone();
+        let abandoned = self.abandoned_among(&lock(&self.scans), &host);
+        HostThreads { host, live, abandoned }
     }
 
     fn release(&self, key: &str) {
@@ -546,7 +581,7 @@ impl DiskCentre {
             sink: self.sink.clone(),
             clock: self.clock.clone(),
         });
-        let threads = walk_threads(&r.location, r.rotational, self.cores);
+        let threads = lock(&self.read_threads).resolve(walk_threads(&r.location, r.rotational, self.cores), MAX_READ_THREADS);
         let limits = *lock(&self.limits);
         let cfg = WalkConfig {
             threads,
@@ -1141,6 +1176,32 @@ mod tests {
         let e = lock(&r.centre.scans)[0].clone();
         assert_eq!(e.threads, 1, "a spinning disk is read by one thread");
         assert_eq!(e.host, "this computer");
+    }
+
+    #[test]
+    fn the_read_threads_setting_replaces_the_volume_table_and_is_validated() {
+        let t = tempfile::tempdir().unwrap();
+        let dir = std::fs::canonicalize(t.path()).unwrap();
+        let mut hdd = vol("HDD", &dir, VolumeLocation::External { bus: Some("USB".into()) });
+        hdd.volume.rotational = Some(true);
+        let r = rig(Arc::new(OsDirSource), vec![hdd]);
+        let scan = |r: &Rig| {
+            let s = r
+                .centre
+                .start(DiskTarget::Folder {
+                    path: dir.to_string_lossy().into_owned(),
+                })
+                .unwrap();
+            wait_final(r, s.scan);
+            lock(&r.centre.scans).last().unwrap().threads
+        };
+        assert_eq!(scan(&r), 1, "Auto: a spinning disk is read by one thread");
+        r.centre.set_read_threads(Threads::Fixed(3));
+        assert_eq!(scan(&r), 3, "the setting wins over the table");
+        r.centre.set_read_threads(Threads::Fixed(200));
+        assert_eq!(scan(&r), usize::from(MAX_READ_THREADS), "and is held to its own most");
+        r.centre.set_read_threads(Threads::Auto);
+        assert_eq!(scan(&r), 1);
     }
 
     #[test]

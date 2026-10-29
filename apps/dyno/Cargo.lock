@@ -1257,6 +1257,7 @@ dependencies = [
  "dyno-core",
  "libc",
  "netstat2",
+ "paddock-proc",
  "plist",
  "serde",
  "serde_json",

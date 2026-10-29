@@ -233,7 +233,7 @@ fn crash_evidence(body: &serde_json::Value) -> Vec<String> {
 /// services that exit abnormally; everything else in the log is none of Dyno's business.
 pub const LOG_PREDICATE: &str = "(process == \"kernel\" AND (eventMessage CONTAINS \"Previous shutdown cause\" OR eventMessage CONTAINS \"low swap: killing\" OR eventMessage CONTAINS \"VM compressor space shortage\" OR eventMessage CONTAINS \"I/O error\")) OR (process == \"launchd\" AND eventMessage CONTAINS \"Service exited with abnormal code\")";
 
-/// The unified log through `/usr/bin/log show`, niced (reading a day of log is slow and must not slow the user's work).
+/// The unified log through `/usr/bin/log show`, run at lower priority (reading a day of log is slow and must not slow the user's work).
 pub struct MacLog {
     runner: Box<dyn ToolRunner>,
 }
@@ -261,7 +261,7 @@ impl IssueSource for MacLog {
     /// Streams `log show`: every record parsed so far is reported, and Cancel kills the child process at once.
     fn read_controlled(&self, since: Timestamp, until: Timestamp, control: &dyn ReadControl) -> Result<Vec<Issue>, PlatformError> {
         let hours = hours_back(since, until).min(72);
-        let args: Vec<String> = ["-n", "15", "/usr/bin/log", "show", "--last"]
+        let args: Vec<String> = ["show", "--last"]
             .iter()
             .map(|s| s.to_string())
             .chain([
@@ -275,7 +275,7 @@ impl IssueSource for MacLog {
         let mut out: Vec<Issue> = Vec::new();
         let mut records = 0u64;
         self.runner
-            .run_lines("/usr/bin/nice", &args, timeout_for(hours), control, &mut |line| {
+            .run_lines("/usr/bin/log", &args, timeout_for(hours), control, &mut |line| {
                 records += 1;
                 if records.is_multiple_of(PROGRESS_EVERY) || records == 1 {
                     control.parsed(records);
@@ -573,7 +573,7 @@ mod tests {
         let got = log.read(t.minus(3_600_000), t.plus(1_000)).unwrap();
         assert_eq!(got.len(), 1, "the same event twice is one issue");
         let (program, args, timeout) = calls.calls.lock().unwrap()[0].clone();
-        assert_eq!(program, "/usr/bin/nice");
+        assert_eq!(program, "/usr/bin/log", "run at lower priority by the runner, not through nice(1)");
         assert!(args.contains(&"show".to_string()) && args.contains(&"ndjson".to_string()));
         assert!(args.iter().any(|a| a == "2h"), "{args:?}");
         assert_eq!(timeout, std::time::Duration::from_secs(60));

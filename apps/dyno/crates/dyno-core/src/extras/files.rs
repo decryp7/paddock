@@ -18,10 +18,31 @@ pub const MAX_DEPTH: u32 = 48;
 /// Most bytes the scan reads while comparing the content of files that could be duplicates.
 pub const MAX_HASH_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 
+/// What one scan may spend. The defaults are the product limits; they are Settings (`disk.finder*`), and tests pass small ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FinderLimits {
+    /// Most files and folders looked at.
+    pub files: usize,
+    /// Deepest folder level entered.
+    pub depth: u32,
+    /// Most bytes read comparing contents.
+    pub hash_bytes: u64,
+}
+
+impl Default for FinderLimits {
+    fn default() -> FinderLimits {
+        FinderLimits {
+            files: MAX_SCANNED,
+            depth: MAX_DEPTH,
+            hash_bytes: MAX_HASH_BYTES,
+        }
+    }
+}
+
 /// How many threads may read the chosen folder at once (ER-20, rule 51): 4 to 8 on an SSD (more cores, more threads, as the work
 /// is waiting for the disk), one on a spinning disk, two per server on the network. A drive whose kind is unknown is treated as
 /// an SSD.
-pub fn finder_threads(location: &crate::disk::volume::VolumeLocation, rotational: Option<bool>, cores: usize) -> usize {
+pub fn auto_finder_threads(location: &crate::disk::volume::VolumeLocation, rotational: Option<bool>, cores: usize) -> usize {
     match location {
         crate::disk::volume::VolumeLocation::Network { .. } => 2,
         _ if rotational == Some(true) => 1,
@@ -51,26 +72,31 @@ pub struct LimitHit {
     pub message: String,
 }
 
-impl From<FinderLimit> for LimitHit {
-    fn from(limit: FinderLimit) -> LimitHit {
+impl LimitHit {
+    /// The limit that was hit, worded with the numbers the scan ran with.
+    pub fn new(limit: FinderLimit, limits: &FinderLimits) -> LimitHit {
         LimitHit {
-            message: limit.message(),
+            message: limit.message(limits),
             limit,
         }
     }
 }
 
 impl FinderLimit {
-    /// What to tell the person, ending with what to do.
-    pub fn message(self) -> String {
+    /// What to tell the person, ending with what to do, with the numbers of the limits the scan ran with.
+    pub fn message(self, limits: &FinderLimits) -> String {
         match self {
             FinderLimit::Files => format!(
-                "Stopped after {MAX_SCANNED} files and folders. Choose a smaller folder to see everything in it."
+                "Stopped after {} files and folders. Choose a smaller folder to see everything in it, or raise the limit in Settings.",
+                limits.files
             ),
-            FinderLimit::Depth => format!("Folders more than {MAX_DEPTH} levels down were left out. Choose a folder nearer to them."),
+            FinderLimit::Depth => format!(
+                "Folders more than {} levels down were left out. Choose a folder nearer to them, or raise the limit in Settings.",
+                limits.depth
+            ),
             FinderLimit::HashBytes => format!(
-                "Stopped comparing contents after {} GiB. Some duplicates may be missing; choose a smaller folder or a larger minimum size.",
-                MAX_HASH_BYTES / (1024 * 1024 * 1024)
+                "Stopped comparing contents after {} GiB. Some duplicates may be missing; choose a smaller folder or a larger minimum size, or raise the limit in Settings.",
+                limits.hash_bytes / (1024 * 1024 * 1024)
             ),
         }
     }

@@ -47,6 +47,7 @@ pub mod settings;
 pub mod snapshot;
 pub mod startup;
 pub mod stats;
+pub mod threads;
 pub mod throttle;
 pub mod time;
 pub mod toolpath;

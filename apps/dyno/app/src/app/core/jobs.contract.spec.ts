@@ -1,6 +1,6 @@
 import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 import { parseJobSnapshot } from '@decryp7/paddock-ui/shell/jobs';
-import type { JobSpec } from './api.types';
+import type { DiskSettings, JobSettings, JobSpec } from './api.types';
 import wire from './jobs.wire.json';
 import { TauriBackend, type InvokeFn, type ListenFn } from './tauri-backend';
 
@@ -41,7 +41,16 @@ const specs: JobSpec[] = [
   'softwareInventory',
 ];
 
+const diskDefaults: DiskSettings = { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64 };
+const jobDefaults: JobSettings = { workers: 'auto' };
+
 describe('the jobs wire contract with the engine', () => {
+  it('the parallelism and cost settings have the keys, defaults and shapes the engine validates (rule 51)', () => {
+    expect(wire.settings.disk).toEqual(diskDefaults);
+    expect(wire.settings.diskFixed).toEqual({ ...diskDefaults, readThreads: { fixed: 6 } });
+    expect(wire.settings.jobs).toEqual(jobDefaults);
+  });
+
   it('every status the engine sends is a snapshot the shell parses, equal to the typed literal', () => {
     expect(Object.keys(wire.snapshots).sort()).toEqual(Object.keys(expected).sort());
     for (const [name, json] of Object.entries(wire.snapshots)) {

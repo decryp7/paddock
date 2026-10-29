@@ -76,6 +76,11 @@ fn sample() -> Value {
             to_value(Request::CancelJob { id: 3 }).unwrap(),
             to_value(Request::JobResult { id: 3 }).unwrap(),
         ],
+        "settings": {
+            "disk": to_value(dyno_core::disk::settings::DiskSettings::default()).unwrap(),
+            "diskFixed": to_value(dyno_core::disk::settings::DiskSettings { read_threads: dyno_core::threads::Threads::Fixed(6), ..Default::default() }).unwrap(),
+            "jobs": to_value(dyno_core::jobs::JobSettings::default()).unwrap(),
+        },
         "outputs": [
             Reply::JobOutput(Box::new(JobOutput::FileHash(FileHashInfo { path: "/a".into(), bytes: 3, sha256: "0".repeat(64) }))).into_json().unwrap(),
             Reply::JobOutput(Box::new(JobOutput::Backup(Box::default()))).into_json().unwrap(),

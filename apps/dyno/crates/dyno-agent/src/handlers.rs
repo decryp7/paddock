@@ -134,6 +134,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             let alarm_config = core.settings.alarms;
             core.alarms.set_config(alarm_config);
             shared.disk.set_limits(core.settings.disk.limits());
+            shared.disk.set_read_threads(core.settings.disk.read_threads);
             core.save_settings(&shared.dirs);
             let s = core.settings.clone();
             drop(core);
