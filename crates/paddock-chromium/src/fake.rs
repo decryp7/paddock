@@ -28,6 +28,8 @@ const EVAL_ENV: &str = "PADDOCK_FAKE_BROWSER_EVAL";
 const CALLS_ENV: &str = "PADDOCK_FAKE_BROWSER_CALLS";
 /// How often the fake looks at its control file and at its sockets.
 const TICK: Duration = Duration::from_millis(10);
+/// The longest the fake waits for a client's upgrade request.
+const HANDSHAKE: Duration = Duration::from_secs(10);
 
 /// What the user does to the fake browser ([`FakeBrowser::act`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -292,11 +294,13 @@ fn apply_control() {
     }
 }
 
-/// The fake's side of the WebSocket upgrade, then the connection's tick: the read timeout is set only after the
-/// handshake. A tick during the handshake gave up on a client whose upgrade request came later than one tick (a loaded
+/// The fake's side of the WebSocket upgrade (bounded by [`HANDSHAKE`]), then the connection's tick: the tick is set only
+/// after the handshake. A tick during the handshake gave up on a client whose upgrade request came later than one tick (a loaded
 /// runner) and dropped the connection (Spotter's copy of this fake, Windows CI runs 19116 and 19657, os error 10053;
 /// Debrief's driver had the same, "Handshake not finished").
 fn handshake(stream: std::net::TcpStream) -> Option<tungstenite::WebSocket<std::net::TcpStream>> {
+    // Bounded far above any scheduling delay, so a client that never sends its upgrade request cannot hold the thread.
+    let _ = stream.set_read_timeout(Some(HANDSHAKE));
     let ws = tungstenite::accept(stream).ok()?;
     let _ = ws.get_ref().set_read_timeout(Some(TICK));
     Some(ws)
@@ -506,7 +510,7 @@ mod tests {
             matches!(&quiet, Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)),
             "the fake ended the connection before the client's handshake: {quiet:?}"
         );
-        raw.set_read_timeout(None).unwrap();
+        raw.set_read_timeout(Some(TICK * 500)).unwrap(); // hang guard only
         let url = format!("ws://127.0.0.1:{port}/devtools/browser/fake");
         tungstenite::client(url.as_str(), raw).expect("the late handshake completes");
         assert_eq!(
