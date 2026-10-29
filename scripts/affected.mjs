@@ -828,15 +828,21 @@ export async function ciRuns(env, warn, fetchImpl = fetch) {
       headers: env.PLAN_TOKEN ? { Authorization: `token ${env.PLAN_TOKEN}` } : {},
       signal: AbortSignal.timeout(15_000),
     });
+  // The per-workflow list is used only when it answers with at least one green ci.yml push run of main; anything else (an
+  // older server, a refusal, a body that is not JSON, no green run in the list) falls back to the mixed list, with a notice.
+  let why;
   try {
     const res = await get(`${api}/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&limit=50`);
-    if (res.ok) {
+    if (!res.ok) why = `HTTP ${res.status}`;
+    else {
       const runs = (await res.json()).workflow_runs;
-      if (Array.isArray(runs)) return runs;
+      if (Array.isArray(runs) && runs.some((r) => r.conclusion === 'success' && /^ci\.ya?ml@/.test(r.path ?? ''))) return runs;
+      why = 'no green run in it';
     }
-  } catch {
-    // Fall through to the mixed list.
+  } catch (e) {
+    why = e.message;
   }
+  warn(`::notice::ci.yml's own run list was not used (${why}); reading the runs of every workflow on main`);
   const out = [];
   try {
     for (let page = 1; page <= 4; page++) {

@@ -531,10 +531,44 @@ describe('ciRuns (the green runs of main a push diffs from)', () => {
     const fallback = async (url) => (url.includes('/actions/workflows/') ? json({ message: 'not found' }, 404) : json({ workflow_runs: [run_(7, { conclusion: 'failure' }), run_(6)] }));
     const runs = await ciRuns(env, (w) => warnings.push(w), fallback);
     assert.deepEqual(runs.map((r) => r.id), [7, 6]);
-    assert.deepEqual(warnings, []);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /^::notice::.*ci\.yml's own run list.*HTTP 404/, 'says the narrower lookup was not used');
+    warnings.length = 0;
     const down = async () => json({}, 500);
     assert.equal(await ciRuns(env, (w) => warnings.push(w), down), null);
     assert.match(warnings.join('\n'), /::warning::the CI runs of main could not be read/);
+  });
+
+  test('an answer of the per-workflow endpoint without a green run, a refusal or an unreadable body falls back to the mixed list', async () => {
+    const mixed = { workflow_runs: [run_(5)] };
+    for (const [what, perWorkflow] of [
+      ['no green run', async () => json({ workflow_runs: [run_(9, { conclusion: 'failure' })] })],
+      ['an empty list', async () => json({ workflow_runs: [] })],
+      ['403', async () => json({ message: 'forbidden' }, 403)],
+      ['a body that is not JSON', async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token <'); } })],
+    ]) {
+      const notes = [];
+      const runs = await ciRuns(env, (w) => notes.push(w), (url) => (url.includes('/actions/workflows/') ? perWorkflow() : json(mixed)));
+      assert.deepEqual(runs?.map((r) => r.id), [5], what);
+      assert.match(notes.join('\n'), /::notice::/, `${what}: a notice says the per-workflow list was not used`);
+    }
+    // 403 on both: nothing can be read, the run tests everything and warns.
+    const warnings = [];
+    assert.equal(await ciRuns(env, (w) => warnings.push(w), async () => json({ message: 'forbidden' }, 403)), null);
+    assert.match(warnings.join('\n'), /::warning::the CI runs of main could not be read \(HTTP 403\)/);
+  });
+
+  test('only a green ci.yml push run of main counts, whatever stands before it in the per-workflow list', async () => {
+    const list = [
+      run_(14, { event: 'pull_request', head_branch: 'feature' }),
+      run_(13, { event: 'workflow_dispatch' }),
+      run_(12, { conclusion: 'failure' }),
+      run_(11, { path: 'nightly.yml@refs/heads/main' }),
+      run_(10),
+    ];
+    const runs = await ciRuns(env, () => {}, async (url) => (url.includes('/actions/workflows/') ? json({ workflow_runs: list }) : json({ workflow_runs: [] })));
+    const r = chooseBase({ event: 'push', ref: 'refs/heads/main', runs, contains: () => true, mergeBase: () => null });
+    assert.equal(r.base, 'sha10');
   });
 });
 
