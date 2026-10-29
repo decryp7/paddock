@@ -1,0 +1,27 @@
+{
+ "all": false,
+ "crates": false,
+ "ui": false,
+ "eslint": false,
+ "conformance": false,
+ "tools": false,
+ "icons": false,
+ "ciImage": false,
+ "paddockDev": false,
+ "docs": false,
+ "apps": [
+  "x"
+ ],
+ "kinds": {
+  "x": [
+   "rust",
+   "ui"
+  ]
+ },
+ "packages": {},
+ "why": {
+  "app:x": [
+   "its workflow .gitea/workflows/x.yml"
+  ]
+ }
+}
