@@ -70,7 +70,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
       await page.getByRole('button', { name: /Sets/ }).click();
       await page.getByRole('menuitem', { name: /^Disk and network \d/ }).click();
       await page.getByRole('list', { name: 'Objects' }).getByRole('button', { name: /^Network Interface/ }).click();
-      await expect(page.getByRole('table', { name: 'Charted counters' })).toBeVisible();
+      await expect(page.getByRole('grid', { name: 'Charted counters' })).toBeVisible();
       await expect(page.locator('dy-chart canvas').first()).toBeVisible();
       await page.clock.runFor(2_500);
     },
@@ -221,25 +221,25 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     size: { width: 1440, height: 1500 },
     ready: async (page) => {
       await expect(page.getByRole('heading', { name: 'Health', exact: true })).toBeVisible();
-      await expect(page.getByRole('region', { name: 'Start-up items' }).getByRole('table')).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Start-up items' }).getByRole('grid')).toBeVisible();
     },
   },
-  { name: 'backup', path: '/#/backup', ready: async (page) => void (await expect(page.getByRole('table', { name: 'Backup tools' })).toBeVisible()) },
+  { name: 'backup', path: '/#/backup', ready: async (page) => void (await expect(page.getByRole('grid', { name: 'Backup tools' })).toBeVisible()) },
   {
     name: 'extras-changes',
     path: '/#/extras?tab=changes',
-    ready: async (page) => void (await expect(page.getByRole('table', { name: 'What changed' })).toBeVisible()),
+    ready: async (page) => void (await expect(page.getByRole('treegrid', { name: 'What changed' })).toBeVisible()),
   },
   {
     name: 'extras-sleep',
     path: '/#/extras?tab=sleep',
-    ready: async (page) => void (await expect(page.getByRole('table', { name: 'Recent wakes' })).toBeVisible()),
+    ready: async (page) => void (await expect(page.getByRole('grid', { name: 'Recent wakes' })).toBeVisible()),
   },
   {
     name: 'extras-boot',
     path: '/#/extras?tab=boot',
     ready: async (page) => {
-      await expect(page.getByRole('table', { name: 'What slowed start-up' })).toBeVisible();
+      await expect(page.getByRole('grid', { name: 'What slowed start-up' })).toBeVisible();
       await expect(page.locator('dy-chart canvas').first()).toBeVisible();
       await page.clock.runFor(500);
     },
@@ -247,12 +247,12 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
   {
     name: 'extras-apps',
     path: '/#/extras?tab=apps',
-    ready: async (page) => void (await expect(page.getByRole('table', { name: 'Network and energy per app' })).toBeVisible()),
+    ready: async (page) => void (await expect(page.getByRole('grid', { name: 'Network and energy per app' })).toBeVisible()),
   },
   {
     name: 'extras-gpu',
     path: '/#/extras?tab=gpu',
-    ready: async (page) => void (await expect(page.getByRole('table', { name: 'GPU use per process' })).toBeVisible()),
+    ready: async (page) => void (await expect(page.getByRole('grid', { name: 'GPU use per process' })).toBeVisible()),
   },
   {
     name: 'extras-files',
@@ -260,13 +260,13 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     size: { width: 1440, height: 1320 },
     ready: async (page) => {
       await page.getByRole('button', { name: 'Choose a folder' }).click();
-      await expect(page.getByRole('table', { name: 'Large and duplicate files' })).toBeVisible();
+      await expect(page.getByRole('treegrid', { name: 'Large and duplicate files' })).toBeVisible();
     },
   },
   {
     name: 'extras-inventory',
     path: '/#/extras?tab=inventory',
-    ready: async (page) => void (await expect(page.getByRole('table', { name: 'Installed software' })).toBeVisible()),
+    ready: async (page) => void (await expect(page.getByRole('grid', { name: 'Installed software' })).toBeVisible()),
   },
   {
     name: 'extras-maintenance',
@@ -293,7 +293,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     name: 'web-search',
     path: '/#/issues',
     ready: async (page) => {
-      await page.getByRole('table', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click({ button: 'right' });
+      await page.getByRole('treegrid', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click({ button: 'right' });
       await page.getByRole('menuitem', { name: 'Search the web…' }).click();
       await expect(page.getByRole('dialog', { name: 'Search the web' }).getByText(/Removed from the text/)).toBeVisible();
     },
@@ -324,7 +324,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/throttling',
     ready: async (page) => {
       await expect(page.getByRole('heading', { name: 'Running at full speed' })).toBeVisible();
-      await expect(page.getByRole('table')).toBeVisible();
+      await expect(page.getByRole('grid').first()).toBeVisible();
     },
   },
   {
@@ -333,7 +333,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     query: '&hw=hot',
     ready: async (page) => {
       await expect(page.getByRole('heading', { name: 'Slowed down by heat: 44% slower' })).toBeVisible();
-      await expect(page.getByRole('table')).toBeVisible();
+      await expect(page.getByRole('grid').first()).toBeVisible();
     },
   },
   {
@@ -361,7 +361,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     ready: async (page) => {
       await expect(page.getByRole('region', { name: 'Stability' })).toBeVisible();
       await expect(page.locator('dy-chart canvas').first()).toBeVisible();
-      await page.getByRole('table', { name: 'Issues', exact: true }).getByRole('row', { name: /Slack/ }).first().click();
+      await page.getByRole('treegrid', { name: 'Issues', exact: true }).getByRole('row', { name: /Slack/ }).first().click();
       await expect(page.getByRole('complementary', { name: 'Issue details' })).toBeVisible();
     },
   },

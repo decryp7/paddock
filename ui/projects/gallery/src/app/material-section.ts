@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, afterNextRender, inject, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, afterNextRender, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { provideNativeDateAdapter } from '@angular/material/core';
 import { MatAutocompleteModule } from '@angular/material/autocomplete';
@@ -229,6 +229,14 @@ const RUNS: Run[] = [
           </mat-tab-group>
         </div>
         <div class="gal-box">
+          <nav mat-tab-nav-bar [tabPanel]="navPanel" aria-label="Sections">
+            @for (t of navTabs; track t) {
+              <button type="button" mat-tab-link [active]="t === navTab()" (click)="navTab.set(t)">{{ t }}</button>
+            }
+          </nav>
+          <mat-tab-nav-panel #navPanel><p class="gal-tab-body">{{ navTab() }} content</p></mat-tab-nav-panel>
+        </div>
+        <div class="gal-box">
           <mat-selection-list aria-label="Runs" [multiple]="false">
             @for (r of runs; track r.name) {
               <mat-list-option [value]="r.name" [selected]="r.name === 'Read folders'">{{ r.name }}</mat-list-option>
@@ -296,6 +304,8 @@ const RUNS: Run[] = [
   `,
 })
 export class GalMaterial {
+  protected readonly navTabs = ['What changed', 'Sleep', 'Boot', 'Apps', 'GPU', 'Files', 'Inventory', 'Maintenance'];
+  protected readonly navTab = signal('What changed');
   protected readonly runs = RUNS;
   protected readonly rows = new MatTableDataSource(RUNS);
   protected readonly columns = ['name', 'status', 'duration'];

@@ -56,24 +56,18 @@ import type {
   ReportFormat,
   SavedReport,
   BackupReport,
-  BootReport,
   ChangeTimeline,
   ChangesQuery,
-  FinderQuery,
-  FinderResult,
   GpuReport,
   InventoryFormat,
   MaintenanceStatus,
   SavedInventory,
-  SleepReport,
-  SoftwareInventory,
-  UsageReport,
   IssuesOverview,
   IssuesQuery,
+  JobOutput,
+  JobSpec,
   SavedIssues,
   UnusualOverview,
-  FileHashInfo,
-  HashSource,
   SearchSeed,
   StartupFilter,
   StartupOverview,
@@ -89,14 +83,9 @@ export type ListenFn = <T>(event: string, handler: (event: { payload: T }) => vo
 /** The externally tagged Rust `Request` enum: a unit variant is a string, a data variant `{ variant: fields }`. */
 export type DynoRequest = string | Record<string, Record<string, unknown>>;
 
-/** Every command fails with a `timeout` error after this long, so a panel shows an inline error with Retry, not a skeleton forever. */
-export const REQUEST_TIMEOUT_MS = 15_000;
-/** A command that waits for the person at an OS dialog may take as long as they do (within reason). */
-export const DIALOG_TIMEOUT_MS = 10 * 60_000;
-/** Hashing a large program may take longer than an ordinary request. */
-export const HASH_TIMEOUT_MS = 60_000;
-/** Reading the system logs can take a minute or two on a busy PC (the shell waits 150 s for the agent). */
-export const LOG_READ_TIMEOUT_MS = 160_000;
+// There is no timer here (ER-19, ADR 0008 §4): the UI never gives up on running work. A quick request is bounded where it is
+// answered (the shell's link to the agent answers an error after 15 s), a command that waits for the person at an OS dialog
+// takes as long as they do, and every long operation is a job: starting one answers at once and the shell's jobs store follows it.
 
 /** The push events of the shell. */
 export const EVENTS = {
@@ -158,8 +147,6 @@ export class TauriBackend implements DynoBackend {
   constructor(
     private readonly call: InvokeFn = invoke,
     listenFn: ListenFn = listen as ListenFn,
-    /** How long a command may take before it fails with `timeout` (the first call in a fresh window can go unanswered). */
-    private readonly timeoutMs: number = REQUEST_TIMEOUT_MS,
   ) {
     this.live = new EventChannel(listenFn, EVENTS.live);
     this.alertChannel = new EventChannel(listenFn, EVENTS.alert);
@@ -426,7 +413,7 @@ export class TauriBackend implements DynoBackend {
 
   /** The shell shows the OS save dialog (the webview never sees a path it chose itself) and asks the agent to write there. */
   saveDiagnostics(): Promise<SavedDiagnostics | null> {
-    return this.command<SavedDiagnostics | null>('save_diagnostics', undefined, DIALOG_TIMEOUT_MS);
+    return this.command<SavedDiagnostics | null>('save_diagnostics', undefined);
   }
 
   // ------------------------------------------------------------------------- search, hash search, startup filter
@@ -440,9 +427,6 @@ export class TauriBackend implements DynoBackend {
     return this.request({ webSearch: { query } });
   }
 
-  fileHash(source: HashSource): Promise<FileHashInfo> {
-    return this.request({ fileHash: { source } }, HASH_TIMEOUT_MS);
-  }
 
   openVirusTotal(sha256: string): Promise<void> {
     return this.request({ virusTotalUrl: { sha256 } });
@@ -479,20 +463,15 @@ export class TauriBackend implements DynoBackend {
   }
 
   saveReport(format: ReportFormat, weeksAgo: number): Promise<SavedReport | null> {
-    return this.command<SavedReport | null>('save_report', { format, weeksAgo }, DIALOG_TIMEOUT_MS);
+    return this.command<SavedReport | null>('save_report', { format, weeksAgo });
   }
 
   issues(query: IssuesQuery): Promise<IssuesOverview> {
     return this.request({ issues: { query } });
   }
 
-  rescanIssues(query: IssuesQuery): Promise<IssuesOverview> {
-    // Reading a day of system log can take a minute on a busy PC.
-    return this.request({ rescanIssues: { query } }, LOG_READ_TIMEOUT_MS);
-  }
-
   saveIssues(days: number): Promise<SavedIssues | null> {
-    return this.command<SavedIssues | null>('save_issues', { days }, DIALOG_TIMEOUT_MS);
+    return this.command<SavedIssues | null>('save_issues', { days });
   }
 
   unusual(): Promise<UnusualOverview> {
@@ -553,39 +532,18 @@ export class TauriBackend implements DynoBackend {
     return this.request({ changes: { query } });
   }
 
-  sleepBlockers(): Promise<SleepReport> {
-    return this.request('sleepBlockers');
-  }
-
-  bootAnalysis(): Promise<BootReport> {
-    return this.request('bootAnalysis');
-  }
-
-  appUsage(): Promise<UsageReport> {
-    return this.request('appUsage');
-  }
-
   gpuProcesses(): Promise<GpuReport> {
     return this.request('gpuProcesses');
   }
 
-  softwareInventory(): Promise<SoftwareInventory> {
-    return this.request('softwareInventory');
-  }
-
   /** The shell shows the OS save dialog and asks the agent to write the report there. */
   saveInventoryReport(format: InventoryFormat): Promise<SavedInventory | null> {
-    return this.command<SavedInventory | null>('save_inventory_report', { format }, DIALOG_TIMEOUT_MS);
+    return this.command<SavedInventory | null>('save_inventory_report', { format });
   }
 
   /** The shell shows the OS folder dialog and answers the chosen path (or null). */
   pickFolder(): Promise<string | null> {
-    return this.command<string | null>('pick_folder', undefined, DIALOG_TIMEOUT_MS);
-  }
-
-  findFiles(query: FinderQuery): Promise<FinderResult> {
-    // Walking and hashing a big folder takes a while.
-    return this.request({ findFiles: { query } }, LOG_READ_TIMEOUT_MS);
+    return this.command<string | null>('pick_folder', undefined);
   }
 
   maintenance(): Promise<MaintenanceStatus> {
@@ -596,27 +554,27 @@ export class TauriBackend implements DynoBackend {
     return this.request('backup');
   }
 
-  refreshBackup(): Promise<BackupReport> {
-    return this.request('refreshBackup', LOG_READ_TIMEOUT_MS);
+  // ------------------------------------------------------------------------------------------------------ jobs
+
+  async startJob(spec: JobSpec): Promise<number> {
+    return (await this.request<{ id: number }>({ startJob: { spec } })).id;
+  }
+
+  jobResult(id: number): Promise<JobOutput> {
+    return this.request({ jobResult: { id } });
   }
 
   // --------------------------------------------------------------------------------------------------- plumbing
 
-  private request<T>(request: DynoRequest, timeoutMs?: number): Promise<T> {
-    return this.command<T>('dyno', { request }, timeoutMs);
+  private request<T>(request: DynoRequest): Promise<T> {
+    return this.command<T>('dyno', { request });
   }
 
-  private async command<T>(cmd: string, args?: Record<string, unknown>, timeoutMs: number = this.timeoutMs): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject({ code: 'timeout', message: 'Dyno did not answer in time.' }), timeoutMs);
-    });
+  private async command<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
     try {
-      return await Promise.race([args === undefined ? this.call<T>(cmd) : this.call<T>(cmd, args), timeout]);
+      return await (args === undefined ? this.call<T>(cmd) : this.call<T>(cmd, args));
     } catch (e) {
       throw toCommandError(e);
-    } finally {
-      clearTimeout(timer);
     }
   }
 }

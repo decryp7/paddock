@@ -82,10 +82,10 @@ describe('AnimatedNumber', () => {
     f.detectChanges();
     f.componentRef.setInput('value', '30.5');
     f.detectChanges();
-    for (let i = 0; i < 60 && f.nativeElement.textContent !== '30.5'; i++) {
-      await new Promise((r) => setTimeout(r, 50));
+    await vi.waitFor(() => {
       f.detectChanges();
-    }
+      expect(f.nativeElement.textContent).toBe('30.5');
+    }, { timeout: 5_000 }); // the glide is about 300 ms; many times that on a loaded machine
     expect(f.nativeElement.textContent).toBe('30.5');
   });
 });

@@ -1,3 +1,4 @@
+import { DOCUMENT } from '@angular/common';
 import { computed, DestroyRef, effect, inject, Injectable, InjectionToken, signal, untracked } from '@angular/core';
 import { ActivatedRouteSnapshot, NavigationEnd, Router } from '@angular/router';
 import { ContributionRegistry, evaluate, ShellContextHost, type PageDef } from '@decryp7/paddock-ui/shell';
@@ -63,6 +64,7 @@ export class ShellPages {
   private readonly host = inject(ShellContextHost);
   private readonly router = inject(Router);
   private readonly config = inject(PAGES_CONFIG);
+  private readonly doc = inject(DOCUMENT);
   private readonly shownPage = signal<string | null>(null);
 
   /** Every page, in sidebar order. */
@@ -128,7 +130,29 @@ export class ShellPages {
       console.warn(`[paddock-pages] there is no page ${id}`);
       return false;
     }
-    void this.router.navigateByUrl(`/${this.path(id)}`);
+    void this.go(id);
     return true;
+  }
+
+  /** Shows a page by id and resolves once the navigation is done (false: no such page, or the navigation was refused). */
+  go(id: string): Promise<boolean> {
+    if (!this.all.some((p) => p.id === id)) {
+      console.warn(`[paddock-pages] there is no page ${id}`);
+      return Promise.resolve(false);
+    }
+    return this.router.navigateByUrl(`/${this.path(id)}`);
+  }
+
+  /**
+   * Shows a page like `go` and then puts the focus on the page region (`#pd-main`), also when that page was already
+   * shown (no navigation, so the frame's own focus move never runs; the answer is the router's, false for that page): for commands and palettes that act from a layer
+   * that closes under the focus.
+   */
+  async goAndFocus(id: string): Promise<boolean> {
+    if (!this.all.some((p) => p.id === id)) return this.go(id);
+    // The router answers false for the page that is already shown (nothing to do), which is where the focus is wanted most.
+    const shown = await this.go(id);
+    this.doc.getElementById('pd-main')?.focus({ preventScroll: true });
+    return shown;
   }
 }

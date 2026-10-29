@@ -17,6 +17,7 @@ export const NAV: NavItem[] = [
   { path: '/throttling', label: 'Throttling', icon: 'temperature', load: () => import('../features/throttling/throttling-page').then((m) => m.ThrottlingPage) },
   { path: '/issues', label: 'Issues', icon: 'alert', load: () => import('../features/issues/issues-page').then((m) => m.IssuesPage) },
   { path: '/inventory', label: 'Inventory', icon: 'memory', load: () => import('../features/inventory/inventory-page').then((m) => m.InventoryPage) },
+  { path: '/disk-map', label: 'Disk map', icon: 'disk', load: () => import('../features/disk-map/disk-map-page').then((m) => m.DiskMapPage) },
   { path: '/network', label: 'Network', icon: 'network', load: () => import('../features/network/network-page').then((m) => m.NetworkPage) },
   { path: '/counters', label: 'Counters', icon: 'trend', load: () => import('../features/counters/counters-page').then((m) => m.CountersPage) },
   { path: '/benchmarks', label: 'Benchmarks', icon: 'gauge', load: () => import('../features/benchmarks/bench-page').then((m) => m.BenchPage) },

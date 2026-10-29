@@ -1,9 +1,23 @@
 import { readValue } from './measured';
-import type { Alert, ProcessSample } from './api.types';
+import type { SuJobSnapshot } from '@decryp7/paddock-ui';
+import type { Alert, BackupReport, BootReport, FinderQuery, FinderResult, JobOutput, JobSpec, ProcessSample, SleepReport, SoftwareInventory, UsageReport } from './api.types';
 import { MockBackend, type MockOptions, applyMockPlatform, mockOptionsFromUrl } from './mock-backend';
 
 const NOW = 1_700_000_000_000;
 const make = (o: MockOptions = {}) => new MockBackend({ latencyMs: 0, now: () => NOW, ...o });
+
+/** Starts a job and plays it to its end the way the shell's jobs store sees it (every status the sink hears); a failed job rejects with its message, a cancelled one resolves `null`. */
+async function runJob(b: MockBackend, spec: JobSpec): Promise<JobOutput | null> {
+  const id = await b.startJob(spec);
+  for (let i = 0; i < 200; i++) {
+    const s = b.jobStatuses().find((j) => j.id === id)!;
+    if (s.state === 'done') return b.jobResult(id);
+    if (s.state === 'cancelled') return null;
+    if (s.state === 'failed') throw { code: 'internal', message: s.message };
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  throw new Error('the job never ended');
+}
 const proc = (b: MockBackend, name: string): ProcessSample => b.liveUpdate('processes').processes!.find((p) => p.name === name)!;
 const ref = (p: ProcessSample) => ({ pid: p.pid, started: readValue(p.started) });
 
@@ -367,7 +381,7 @@ describe('reports, settings, plugins, tray', () => {
     expect(o.issues[0]!.at).toBeGreaterThan(o.issues[1]!.at);
     expect((await b.issues({ days: 7 })).total).toBeLessThan(o.total);
     expect((await b.issues({ days: 999 })).days).toBe(90);
-    expect(await b.rescanIssues({ days: 14 })).toMatchObject({ days: 14 });
+    expect(await runJob(b, { rescanIssues: { query: { days: 14 } } })).toMatchObject({ issues: { days: 14 } });
     expect(await b.saveIssues(14)).toMatchObject({ count: 13 });
     expect(b.savedIssues).toEqual([14]);
   });
@@ -447,17 +461,17 @@ describe('mock extras and backup health', () => {
 
   it('sleep, boot, usage, GPU and software answer realistic data', async () => {
     const b = fresh();
-    const sleep = await b.sleepBlockers();
+    const { sleep } = (await runJob(b, 'sleepBlockers')) as { sleep: SleepReport };
     expect(sleep.blockers.map((x) => x.name)).toContain('coreaudiod');
     expect(sleep.wakes.length).toBeGreaterThan(2);
-    const boot = await b.bootAnalysis();
+    const { boot } = (await runJob(b, 'bootAnalysis')) as { boot: BootReport };
     expect(boot.boots).toHaveLength(8);
     expect(boot.slowest[0]!.secs).toBeGreaterThan(boot.slowest[1]!.secs);
     expect(boot.verdict).toBeTruthy();
-    const usage = await b.appUsage();
+    const { appUsage: usage } = (await runJob(b, 'appUsage')) as { appUsage: UsageReport };
     expect(usage.apps.length).toBeGreaterThan(5);
     expect((await b.gpuProcesses()).processes[0]!.gpuPercent).toBeGreaterThan(0);
-    const sw = await b.softwareInventory();
+    const { software: sw } = (await runJob(b, 'softwareInventory')) as { software: SoftwareInventory };
     expect(sw.items.length).toBeGreaterThanOrEqual(40);
   });
 
@@ -470,19 +484,99 @@ describe('mock extras and backup health', () => {
     expect(b.pickedFolders).toBe(1);
   });
 
-  it('findFiles: modes, the size floor and a folder that must be absolute', async () => {
+  it('findFiles job: modes, the size floor and a folder that must be absolute', async () => {
     const b = fresh();
-    const both = await b.findFiles({ folder: '/Users/sam/Projects/', mode: 'both', minBytes: 50 * 1024 ** 2 });
+    const find = async (query: FinderQuery) => ((await runJob(b, { findFiles: { query } })) as { finder: FinderResult }).finder;
+    const both = await find({ folder: '/Users/sam/Projects/', mode: 'both', minBytes: 50 * 1024 ** 2 });
     expect(both.folder).toBe('/Users/sam/Projects');
     expect(both.large).toHaveLength(8);
     expect(both.duplicates).toHaveLength(3);
+    expect(both.limit).toBeNull();
     expect(both.wastedBytes).toBe(both.duplicates.reduce((a, g) => a + g.wastedBytes, 0));
     expect(both.duplicates[0]!.files[0]!.modified).toBeLessThan(both.duplicates[0]!.files[1]!.modified);
-    expect((await b.findFiles({ folder: '/x', mode: 'large', minBytes: 0 })).duplicates).toEqual([]);
-    expect((await b.findFiles({ folder: '/x', mode: 'duplicates', minBytes: 0 })).large).toEqual([]);
-    const big = await b.findFiles({ folder: '/x', mode: 'both', minBytes: 1024 ** 3 });
+    expect((await find({ folder: '/x', mode: 'large', minBytes: 0 })).duplicates).toEqual([]);
+    expect((await find({ folder: '/x', mode: 'duplicates', minBytes: 0 })).large).toEqual([]);
+    const big = await find({ folder: '/x', mode: 'both', minBytes: 1024 ** 3 });
     expect(big.large.every((f) => f.bytes >= 1024 ** 3)).toBe(true);
-    await expect(b.findFiles({ folder: 'relative/path', mode: 'both', minBytes: 0 })).rejects.toMatchObject({ code: 'badRequest' });
+    // A blank folder is refused at the start; a relative one fails the job with what to fix.
+    await expect(b.startJob({ findFiles: { query: { folder: ' ', mode: 'both', minBytes: 0 } } })).rejects.toMatchObject({ code: 'badRequest' });
+    await expect(runJob(b, { findFiles: { query: { folder: 'relative/path', mode: 'both', minBytes: 0 } } })).rejects.toMatchObject({ message: 'Give the full path of the folder.' });
+  });
+
+  describe('jobs (ER-17 to ER-19)', () => {
+    const rescan: JobSpec = { rescanIssues: { query: { days: 14 } } };
+    const statusOf = (b: MockBackend, id: number) => b.jobStatuses().find((j) => j.id === id)!;
+
+    it('a start answers at once with the id of a running job; the same work answers the same job; another search is busy', async () => {
+      const b = fresh();
+      b.jobSteps = 3;
+      b.jobStepMs = 50;
+      const first = await b.startJob(rescan);
+      expect(statusOf(b, first)).toMatchObject({ state: 'running', phase: null, kind: 'rescan-issues' });
+      expect(await b.startJob(rescan)).toBe(first);
+      await expect(b.startJob({ rescanIssues: { query: { days: 7 } } })).rejects.toMatchObject({ code: 'busy' });
+      // Different kinds run side by side.
+      expect(await b.startJob('refreshBackup')).not.toBe(first);
+    });
+
+    it('pushes every status to the sink in order: queued, running, a phase whose count only grows, done', async () => {
+      const heard: SuJobSnapshot[] = [];
+      const b = fresh({ jobs: { emit: (j: SuJobSnapshot) => heard.push(j) } });
+      b.jobSteps = 4;
+      const id = await b.startJob({ fileHash: { source: { path: '/Applications/Tool.app/tool' } } });
+      await new Promise((r) => setTimeout(r, 30));
+      const mine = heard.filter((j) => j.id === id);
+      expect(mine.map((j) => j.state)).toEqual(['queued', 'running', 'running', 'running', 'running', 'done']);
+      expect(mine.every((j, i) => i === 0 || j.seq > mine[i - 1]!.seq)).toBe(true);
+      const counts = mine.flatMap((j) => (j.state === 'running' && j.phase ? [j.phase.done] : []));
+      expect(counts).toHaveLength(3);
+      expect(counts.every((c, i) => i === 0 || c >= counts[i - 1]!)).toBe(true);
+      expect(mine[2]).toMatchObject({ phase: { id: 'hash', unit: 'bytes', total: 48_231_424 } });
+      expect(await b.jobResult(id)).toMatchObject({ fileHash: { bytes: 48_231_424 } });
+    });
+
+    it('Cancel ends a job as cancelled, it has no result, and a new search can start', async () => {
+      const b = fresh();
+      b.jobSteps = 5;
+      b.jobStepMs = 50;
+      const id = await b.startJob({ findFiles: { query: { folder: '/x', mode: 'both', minBytes: 0 } } });
+      expect(b.cancelJob(id)).toBe(true);
+      expect(statusOf(b, id).state).toBe('cancelled');
+      await expect(b.jobResult(id)).rejects.toMatchObject({ code: 'notFound' });
+      expect(b.cancelJob(id)).toBe(false);
+      expect(b.cancelJob(999)).toBe(false);
+      expect(await b.startJob({ findFiles: { query: { folder: '/y', mode: 'both', minBytes: 0 } } })).not.toBe(id);
+    });
+
+    it('a stalled mock reports the first status and nothing more', async () => {
+      const b = fresh();
+      b.jobsStalled = true;
+      const id = await b.startJob('sleepBlockers');
+      await new Promise((r) => setTimeout(r, 20));
+      expect(statusOf(b, id)).toMatchObject({ state: 'running', phase: null, seq: 2 });
+    });
+
+    it('the four tool reads and the backup check hand over their reports; a check of the backups sets the time only when done', async () => {
+      const b = fresh();
+      expect(await runJob(b, 'sleepBlockers')).toMatchObject({ sleep: { blockers: expect.any(Array) } });
+      expect(await runJob(b, 'bootAnalysis')).toMatchObject({ boot: { boots: expect.any(Array) } });
+      expect(await runJob(b, 'appUsage')).toMatchObject({ appUsage: { apps: expect.any(Array) } });
+      expect(await runJob(b, 'softwareInventory')).toMatchObject({ software: { items: expect.any(Array) } });
+      b.jobSteps = 2;
+      b.jobStepMs = 5;
+      const before = (await b.backup()).checkedAt;
+      const id = await b.startJob('refreshBackup');
+      expect((await b.backup()).checkedAt).toBe(before);
+      await new Promise((r) => setTimeout(r, 40));
+      expect(statusOf(b, id).state).toBe('done');
+      expect((await b.backup()).checkedAt).toBe(NOW);
+    });
+
+    it('only the last few finished jobs are kept', async () => {
+      const b = fresh();
+      for (let i = 0; i < 20; i++) await runJob(b, { fileHash: { source: { path: `/a/${i}` } } });
+      expect(b.jobStatuses()).toHaveLength(16);
+    });
   });
 
   it('maintenance: open inside a window, closed outside, always open when off', async () => {
@@ -531,8 +625,8 @@ describe('mock extras and backup health', () => {
     expect(r.statuses[0]!.nextStep).toBeNull();
     expect(r.statuses[1]!.nextStep).toContain('never starts a backup');
     expect(r.checkedAt).toBe(NOW - 40 * 60_000);
-    const checked = await b.refreshBackup();
-    expect(checked.checkedAt).toBe(NOW);
+    const checked = (await runJob(b, 'refreshBackup')) as { backup: BackupReport };
+    expect(checked.backup.checkedAt).toBe(NOW);
     expect((await b.backup()).checkedAt).toBe(NOW);
     const none = await fresh({ backup: 'none' }).backup();
     expect(none.statuses).toEqual([]);

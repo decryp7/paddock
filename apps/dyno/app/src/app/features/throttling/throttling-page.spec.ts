@@ -20,6 +20,7 @@ function render(overview?: ThrottleOverview, fail: string[] = []) {
 const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
   for (let i = 0; i < 5; i++) {
     await f.whenStable();
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
     f.detectChanges();
   }
 };
@@ -51,24 +52,30 @@ describe('dy-throttling-page', () => {
   it('lists the last 30 days in one table, newest first, with the cause as a word, and sorts by Started', async () => {
     const { f, el } = render(scenario('calm'));
     await settle(f);
-    const rows = () => [...el.querySelectorAll('tbody tr')];
+    const rows = () => [...el.querySelectorAll('[role="row"][data-key]')];
+    const cells = (i: number) => [...rows()[i]!.querySelectorAll('[role="gridcell"]')].map((c) => c.textContent!.trim());
     expect(rows()).toHaveLength(5);
-    const heads = [...el.querySelectorAll('thead th')].map((t) => t.textContent!.replace(/\s+/g, ' ').trim());
+    const heads = [...el.querySelectorAll('[role="columnheader"]')].map((t) => t.textContent!.replace(/\s+/g, ' ').trim());
     expect(heads).toEqual(['Started', 'Duration', 'Cause', 'Speed lost, average (%)', 'Peak temperature (°C)']);
-    const cause = (i: number) => rows()[i]!.querySelectorAll('td')[2]!.textContent!.trim();
-    expect(cause(0)).toBe('Heat');
-    expect(cause(2)).toBe('Power limit');
-    expect(cause(3)).toBe('Battery saver');
-    expect(rows()[2]!.querySelectorAll('td')[4]!.textContent).toBe('—');
-    expect(rows()[0]!.querySelectorAll('td')[1]!.textContent).toBe('14 min');
+    expect(cells(0)[2]).toBe('Heat');
+    expect(cells(2)[2]).toBe('Power limit');
+    expect(cells(3)[2]).toBe('Battery saver');
+    expect(cells(2)[4]).toBe('—');
+    expect(cells(0)[1]).toBe('14 min');
     const first = rows()[0]!.textContent;
-    expect(el.querySelector('th[aria-sort]')?.getAttribute('aria-sort')).toBe('descending');
-    el.querySelector<HTMLButtonElement>('th button.sort')!.click();
-    f.detectChanges();
-    expect(el.querySelector('th[aria-sort]')?.getAttribute('aria-sort')).toBe('ascending');
+    const header = el.querySelector('[role="columnheader"][aria-sort]')!;
+    expect(header.getAttribute('aria-sort')).toBe('descending');
+    const flip = () => (header.querySelector('.mat-sort-header-container') as HTMLElement).click();
+    flip();
+    await settle(f);
+    flip();
+    await settle(f);
+    expect(header.getAttribute('aria-sort')).toBe('ascending');
     expect(rows()[4]!.textContent).toBe(first);
-    el.querySelector<HTMLButtonElement>('th button.sort')!.click();
-    f.detectChanges();
+    flip();
+    await settle(f);
+    flip();
+    await settle(f);
     expect(rows()[0]!.textContent).toBe(first);
   });
 
@@ -77,7 +84,7 @@ describe('dy-throttling-page', () => {
     await settle(f);
     expect(el.querySelector('.status h2')?.textContent).toContain('Cannot tell');
     expect(el.querySelector('.status .dot')?.getAttribute('data-tone')).toBe('muted');
-    expect(el.querySelector('table')).toBeNull();
+    expect(el.querySelector('pd-table')).toBeNull();
     expect(el.querySelector('.empty strong')?.textContent).toBe('No throttling in the last 30 days');
     // The list opens on its own when Dyno cannot tell.
     const items = [...el.querySelectorAll('.inputs li')];
@@ -105,7 +112,7 @@ describe('dy-throttling-page', () => {
     const { f, el, mock } = render(undefined, ['throttling']);
     await settle(f);
     expect(el.querySelector('[role=alert]')).not.toBeNull();
-    expect(el.querySelector('table')).toBeNull();
+    expect(el.querySelector('pd-table')).toBeNull();
     vi.spyOn(mock, 'throttling').mockResolvedValue(scenario('calm'));
     [...el.querySelectorAll<HTMLButtonElement>('[role=alert] button')].find((b) => b.textContent?.includes('Retry'))!.click();
     await settle(f);

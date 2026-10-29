@@ -7,10 +7,10 @@ import {
   type AboutBackend,
   type UpdatesBackend,
 } from '@decryp7/paddock-ui/shell/about';
-import { MemoryJobsBackend, TauriJobsBackend, type JobsBackend } from '@decryp7/paddock-ui/shell/jobs';
+import { MemoryJobsBackend, TauriJobsBackend, type JobsBackend, type JobsIpc } from '@decryp7/paddock-ui/shell/jobs';
 import { MemoryNotificationCentre, MemoryServiceHealth, TauriNotificationsBackend, TauriServiceHealthBackend } from '@decryp7/paddock-ui/shell/notify';
 import { MemorySettingsBackend, SETTINGS_OVERVIEW_FIXTURE, TauriSettingsBackend, type SettingsBackend } from '@decryp7/paddock-ui/shell/settings';
-import { tauriIpc } from './ipc';
+import { tauriIpc, type DynoIpc } from './ipc';
 
 /** The shell's service for the Dyno agent (the Rust health table registers the same id). */
 export const AGENT_SERVICE = 'dy.agent';
@@ -24,7 +24,9 @@ export const AGENT_SERVICE = 'dy.agent';
 export class BrowserEngines {
   readonly centre = new MemoryNotificationCentre();
   readonly health = new MemoryServiceHealth([{ id: AGENT_SERVICE, label: 'the Dyno agent' }], { centre: this.centre, autoSettle: true });
-  readonly jobs = new MemoryJobsBackend(() => undefined);
+  /** What the browser build's mock does when the Jobs view cancels a job (the mock registers itself here). */
+  cancelJob: (id: number) => void = () => undefined;
+  readonly jobs = new MemoryJobsBackend((id) => this.cancelJob(id));
   /** Only the shell's Appearance section: Dyno's own settings are its page in the window. */
   readonly settings = new MemorySettingsBackend({ ...SETTINGS_OVERVIEW_FIXTURE, sections: SETTINGS_OVERVIEW_FIXTURE.sections.filter((s) => s.id === 'pd.appearance') }, {});
 }
@@ -79,10 +81,25 @@ export function settingsBackend(): SettingsBackend {
   return ipc ? new TauriSettingsBackend(ipc) : inject(BrowserEngines).settings;
 }
 
-/** Jobs over Tauri in the app; in the browser the in-memory engine. */
+/**
+ * The jobs port over Dyno's agent. The jobs run in the agent, not in this process, so the shell's `jobs_snapshot` and
+ * `job_cancel` are answered by forwarding to the agent through the one `dyno` command (`jobs`, `cancelJob`); the agent's job
+ * statuses reach the window as `paddock://jobs` events, relayed by the shell from the link's push.
+ */
+export function dynoJobsIpc(ipc: Pick<DynoIpc, 'invoke' | 'listen'>): JobsIpc {
+  return {
+    invoke: <T>(command: string, args?: Record<string, unknown>): Promise<T> =>
+      command === 'jobs_snapshot'
+        ? ipc.invoke<T>('dyno', { request: 'jobs' })
+        : ipc.invoke<T>('dyno', { request: { cancelJob: { id: args?.['id'] } } }),
+    listen: (event, handler) => ipc.listen(event, handler),
+  };
+}
+
+/** Jobs over the agent in the app; in the browser the in-memory engine the mock pushes into. */
 export function jobsBackend(): JobsBackend {
   const ipc = tauriIpc();
-  return ipc ? new TauriJobsBackend(ipc) : inject(BrowserEngines).jobs;
+  return ipc ? new TauriJobsBackend(dynoJobsIpc(ipc)) : inject(BrowserEngines).jobs;
 }
 
 /** Health and notifications over Tauri in the app; in the browser the in-memory engine. */

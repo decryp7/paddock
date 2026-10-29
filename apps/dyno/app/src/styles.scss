@@ -524,46 +524,6 @@ kbd,
   font: var(--fw-medium) var(--fs-2xs) / 1 var(--font-sans);
 }
 
-/* ------------------------------------------------------------------------------------------------------ tables */
-
-.table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: var(--fs-base);
-
-  th {
-    position: sticky;
-    top: 0;
-    z-index: 3;
-    height: 32px;
-    padding: 0 var(--sp-3);
-    background: var(--surface-2);
-    border-bottom: 1px solid var(--border);
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    font-weight: var(--fw-medium);
-    text-align: left;
-    white-space: nowrap;
-  }
-
-  td {
-    height: var(--row-h);
-    padding: 0 var(--sp-3);
-    border-bottom: 1px solid var(--border-subtle);
-    white-space: nowrap;
-  }
-
-  tbody tr:hover td {
-    background: var(--surface-hover);
-  }
-
-  .r {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-}
-
 /* ------------------------------------------------------------------------------------------- tile anatomy */
 
 /* One hero per tile: 28/600 tabular with its unit as a smaller sibling; then one sparkline; then caption rows. */

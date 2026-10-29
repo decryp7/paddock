@@ -5,6 +5,7 @@ import { MockBackend } from '../core/mock-backend';
 import { provideIcons } from '../shared/icons';
 import { DIALOGS } from './contributions';
 import { DIALOG_BASE_COMMANDS, dialogBaseProviders } from './dialog-base';
+import { dialogJobsProviders } from './dialog-window';
 
 // Every Dyno dialog through the boot-every-dialog harness (ADR 0009 §4, ADR 0026 §6): it boots with only its window's
 // providers, sends only what its Rust contract declares, draws no footer of its own, reports ready and closes on Escape.
@@ -26,7 +27,7 @@ describe('Dyno dialogs boot as their windows do', () => {
     it(`${def.id} (${def.kind})`, async () => {
       await assertDialogBoots(def, {
         dialogs: ALL,
-        providers: () => [provideIcons(), { provide: BACKEND, useFactory: () => new MockBackend({ latencyMs: 0, now: () => 0 }) }, ...dialogBaseProviders()],
+        providers: () => [provideIcons(), { provide: BACKEND, useFactory: () => new MockBackend({ latencyMs: 0, now: () => 0 }) }, ...dialogJobsProviders(def.id), ...dialogBaseProviders()],
         baseCommands: DIALOG_BASE_COMMANDS,
         answers: { window_ready: { recovered: null, ui: null } },
         inputs: INPUTS,

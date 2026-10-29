@@ -403,6 +403,30 @@ describe('pd-shell-frame with provideShellPages', () => {
     expect(TestBed.inject(NotificationsStore).all().some((n) => n.title === 'hello' || n.body === 'hello')).toBe(true);
   });
 
+  it('go resolves once the page is shown, and refuses an unknown id', async () => {
+    const { router } = await boot();
+    expect(await TestBed.inject(ShellPages).go('t.about')).toBe(true);
+    expect(router.url).toBe('/about');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await TestBed.inject(ShellPages).go('t.none')).toBe(false);
+    expect(warn).toHaveBeenCalledWith('[paddock-pages] there is no page t.none');
+  });
+
+  it('goAndFocus shows the page and focuses the page region, also when the page is already shown', async () => {
+    const { router, el } = await boot();
+    document.body.append(el);
+    const pages = TestBed.inject(ShellPages);
+    expect(await pages.goAndFocus('t.about')).toBe(true);
+    expect(document.activeElement).toBe(el.querySelector('#pd-main'));
+    (document.activeElement as HTMLElement).blur();
+    // The same page again: no navigation happens, the focus still lands.
+    await pages.goAndFocus('t.about');
+    expect(router.url).toBe('/about');
+    expect(document.activeElement).toBe(el.querySelector('#pd-main'));
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await pages.goAndFocus('t.none')).toBe(false);
+  });
+
   it('the sidebar button collapses to the rail and back, and the rail names its links', async () => {
     const { el, fixture, frame } = await boot();
     const toggle = el.querySelector<HTMLButtonElement>('[data-testid="sidebar-toggle"]') as HTMLButtonElement;
@@ -477,6 +501,22 @@ describe('pd-shell-frame with provideShellPages', () => {
     await fixture.whenStable();
     expect(document.activeElement).toBe(field);
     field.remove();
+  });
+
+  it('a navigation chosen in the command palette focuses the page (the palette closes under the focus)', async () => {
+    const { el, router, fixture } = await boot();
+    document.body.append(el);
+    const palette = document.createElement('div');
+    palette.dataset['testid'] = 'palette';
+    const input = document.createElement('input');
+    palette.append(input);
+    document.body.append(palette);
+    input.focus();
+    await router.navigateByUrl('/about');
+    await settle();
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(el.querySelector('#pd-main'));
+    palette.remove();
   });
 
   it('F6 cycles the regions; a handled key is left alone; skip link focuses the page', async () => {

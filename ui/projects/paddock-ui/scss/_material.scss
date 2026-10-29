@@ -602,6 +602,17 @@ html .mat-mdc-button-base .mdc-button__label {
   --mat-button-text-state-layer-color: var(--pd-danger);
 }
 
+// Tab links of a tab nav bar size to their label (Material's own minimum is 160 px): a row of eight tabs then fits a 900 px window, and
+// a really narrow one paginates instead of cutting its last tabs.
+.mat-mdc-tab-nav-bar .mat-mdc-tab-link.mdc-tab {
+  min-width: 0;
+  padding-inline: var(--pd-space-3);
+  flex-grow: 0;
+  // Never shrunk below the label: a bar that is too narrow paginates, it does not squeeze one.
+  flex-shrink: 0;
+  .mdc-tab__text-label { white-space: nowrap; }
+}
+
 // ---- Shape of the pieces the tokens cannot reach.
 // The compact slide toggle: Material's toggle scaled as a whole (its handle geometry stays consistent).
 .mat-mdc-slide-toggle {
