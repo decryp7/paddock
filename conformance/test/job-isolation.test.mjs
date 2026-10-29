@@ -431,9 +431,50 @@ test('value commands print only their value on stdout (messages go to stderr), a
   for (const args of [['path', 'tools'], ['port', 'sccache'], ['temp'], ['slots']]) assert.equal(a.later(args).stdout.trim().split('\n').length, 1, args.join(' '));
   const rel = a.later(['release']);
   assert.equal(rel.stdout, '', `release prints messages to stderr only: ${rel.stdout}`);
+  // sweep-slot (under idle-run, which sends its stdout nowhere): the removal is reported on stderr, where the log keeps it.
+  mkdirSync(join(h.ci, 'target-x-app-s7'), { recursive: true });
+  const swept = a.exec(['sweep-slot'], { PADDOCK_CI_IDLE_SLOT: 's7' });
+  assert.equal(swept.status, 0, swept.stderr);
+  assert.equal(swept.stdout, '', `sweep-slot prints messages to stderr only: ${swept.stdout}`);
+  assert.match(swept.stderr, /job-isolation: removed target-x-app-s7 \(slot s7 is above the 4 kept slots\)/);
   const found = [];
   for (const f of spawnSync('git', ['ls-files', '.gitea/workflows/*.yml', '.gitea/actions/*/action.yml', 'conformance/ci/*.sh', 'tools/*.sh', 'apps/*/scripts/ci/*'], { cwd: PADDOCK, encoding: 'utf8' }).stdout.split('\n').filter(Boolean)) {
     for (const l of read(join(PADDOCK, f)).split('\n')) if (/\$\([^)]*job-isolation\.sh[^)]*2>&1/.test(l)) found.push(`${f}: ${l.trim()}`);
   }
   assert.deepEqual(found, [], 'never fold the script\'s stderr into a captured value');
+});
+
+// Review P2-3: the slot holder's command line names the job's temp folder (--owner) and the CI home (--root); a clean-up
+// pattern that matches it would end the holder and free the slot in the middle of the job.
+test('a process pattern that would match the slot holder is refused; the job\'s own test processes still match', () => {
+  const h = host();
+  const a = h.job('a'.repeat(16));
+  a.exec(['acquire']);
+  for (const bad of ['{tmp}', '{tmp}.*', '{tmp}( |$)']) {
+    const r = a.later(['pattern', bad]);
+    assert.notEqual(r.status, 0, `${bad} would end the holder`);
+    assert.match(r.stderr, /would also match this job's slot holder/);
+    assert.equal(r.stdout, '');
+  }
+  for (const win of [{ PADDOCK_JOB_TEMP: 'C:/w/0123456789abcdef/tmp', RUNNER_OS: 'Windows' }]) {
+    assert.notEqual(a.later(['pattern', '{tmp}'], win).status, 0, 'the Windows spelling too');
+  }
+  const ok = a.later(['pattern', '{tmp}[/\\\\]dyno-it-plugins-[A-Za-z0-9]+']);
+  assert.equal(ok.status, 0, ok.stderr);
+});
+
+// Review P2-2: a sweep with nothing due never takes a slot's lock, so a new job is never pushed to a colder slot by it.
+test('the sweep locks a slot only when something of it is due', () => {
+  const h = host();
+  mkdirSync(join(h.ci, 'target-fresh-s2'), { recursive: true });
+  mkdirSync(join(h.ci, 'target-fresh-s3'), { recursive: true });
+  const a = h.job('a'.repeat(16));
+  a.exec(['acquire']);
+  assert.doesNotMatch(h.log(), /idle-run/, 'recent folders of kept slots: nothing due, no lock taken');
+  const t = Date.now() / 1000 - 30 * 86400;
+  utimesSync(join(h.ci, 'target-fresh-s3'), t, t);
+  h.job('b'.repeat(16)).exec(['acquire']);
+  assert.match(h.log(), /^ci slot idle-run --slot s3 /m, 'an aged folder is due');
+  assert.doesNotMatch(h.log(), /idle-run --slot s2 /, 's2 still had nothing due');
+  assert.ok(!existsSync(join(h.ci, 'target-fresh-s3')) && existsSync(join(h.ci, 'target-fresh-s2')));
 });

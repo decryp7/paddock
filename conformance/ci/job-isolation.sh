@@ -148,23 +148,34 @@ max_slots() {
 # old <folder> <days>: true when the folder's time stamp is older than <days> days (path renews it on every use).
 old() { [ -n "$(find "$1" -maxdepth 0 -mtime +"$2" 2>/dev/null)" ]; }
 
-# sweep-slot [all]: the idle slot's folders above the kept slots (all of them with `all`), and its folders (plus, for s1, the
-# old layout's) that no job used for ORPHAN_DAYS. Only under `dev ci slot idle-run`, which holds the slot's lock throughout:
-# no job can take the slot while its folders go.
-cmd_sweep_slot() {
-  local s="${PADDOCK_CI_IDLE_SLOT:-}" mode="${1:-}" home n keep days f why
-  [[ "$s" =~ ^s[1-9][0-9]*$ ]] || die "sweep-slot runs only under \`dev ci slot idle-run\` (which holds the slot's lock)"
-  n="${s#s}"; home="$(ci_home)"; keep="$(keep_slots)"
+# due <home> <n> [all]: the kept folders of slot s<n> (and, for s1, the old layout's) that a sweep removes now, one per line
+# as "<folder>\t<why>": all of them with `all` (below the free-disk floor) or above the kept slots, else those no job used
+# for ORPHAN_DAYS. Read twice: before taking the slot's lock (so a slot with nothing due is never locked, and no new job is
+# pushed to a colder slot by a sweep that removes nothing) and again under the lock (the answer may have changed).
+due() {
+  local home="$1" n="$2" mode="${3:-}" keep days f
+  keep="$(keep_slots)"
   days="${PADDOCK_CI_ORPHAN_DAYS:-14}"
   case "$days" in '' | *[!0-9]*) days=14 ;; esac
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    if [ "$mode" = all ]; then why="the disk is below its free floor"
-    elif [ "$n" -gt "$keep" ]; then why="slot $s is above the $keep kept slots"
-    elif old "$f" "$days"; then why="no job used it for $days days"
-    else continue; fi
-    rm -rf "$f" && echo "job-isolation: removed $(basename " >&2$f") ($why)"
+    if [ "$mode" = all ]; then printf '%s\t%s\n' "$f" "the disk is below its free floor"
+    elif [ "$n" -gt "$keep" ]; then printf '%s\t%s\n' "$f" "slot s$n is above the $keep kept slots"
+    elif old "$f" "$days"; then printf '%s\t%s\n' "$f" "no job used it for $days days"
+    fi
   done < <(slot_folders "$home" "$n"; if [ "$n" = 1 ]; then legacy_folders "$home"; fi)
+}
+
+# sweep-slot [all]: removes what `due` lists for the idle slot. Only under `dev ci slot idle-run`, which holds the slot's lock
+# throughout: no job can take the slot while its folders go.
+cmd_sweep_slot() {
+  local s="${PADDOCK_CI_IDLE_SLOT:-}" mode="${1:-}" home f why
+  [[ "$s" =~ ^s[1-9][0-9]*$ ]] || die "sweep-slot runs only under \`dev ci slot idle-run\` (which holds the slot's lock)"
+  home="$(ci_home)"
+  while IFS=$'\t' read -r f why; do
+    [ -n "$f" ] || continue
+    rm -rf "$f" && echo "job-isolation: removed $(basename "$f") ($why)" >&2
+  done < <(due "$home" "${s#s}" "$mode")
 }
 
 # dev_tool <args>: paddock-dev (PADDOCK_DEV, else the repository's ./dev with its binary cached in the shared tools folder).
@@ -186,14 +197,15 @@ sweep() {
   local home="$1" mode="${2:-}" floor="${3:-}" max n
   max="$(max_slots)"
   for ((n = max; n >= 1; n--)); do
-    if [ -z "$(slot_folders "$home" "$n")" ] && { [ "$n" != 1 ] || [ -z "$(legacy_folders "$home")" ]; }; then continue; fi
+    # Nothing due: never take the slot's lock (an acquirer meeting it locked would move to a colder slot).
+    [ -n "$(due "$home" "$n" "$mode")" ] || continue
     dev_tool ci slot idle-run --slot "s$n" --root "$(native "$home")" -- bash "$here/job-isolation.sh" sweep-slot ${mode:+"$mode"} >/dev/null \
       || echo "::warning::job-isolation: the sweep of slot s$n failed" >&2
     if [ -n "$floor" ] && [ "$(free_gb "$home")" -ge "$floor" ]; then return 0; fi
   done
   # Slots above the limit hold no folders the loop above did not see; a held slot's folders stay with its job.
   for ((n = max + 1; n <= max + 8; n++)); do
-    [ -n "$(slot_folders "$home" "$n")" ] || continue
+    [ -n "$(due "$home" "$n" all)" ] || continue
     dev_tool ci slot idle-run --slot "s$n" --root "$(native "$home")" -- bash "$here/job-isolation.sh" sweep-slot all >/dev/null || true
   done
 }
@@ -268,7 +280,29 @@ cmd_pattern() {
     pat="$(fill "$pat" '{slot}' "$v([^0-9]|\$)")"; scoped=1 ;;
   esac
   [ "$scoped" = 1 ] || return 1
+  # Never the slot's own holder: its command line names the job's temp folder (--owner) and the CI home (--root), so a
+  # pattern such as "{tmp}" alone would end it and free the slot in the middle of the job.
+  if holder_matches "$pat"; then
+    echo "job-isolation: the pattern '$1' would also match this job's slot holder (\`ci slot hold --owner <job temp>\`)" >&2
+    return 1
+  fi
   printf '%s\n' "$pat"
+}
+
+# holder_matches <regex>: true when the regex matches the slot holder's command line as this job starts it (Unix and Windows
+# spellings of its paths).
+holder_matches() {
+  local re="$1" temp home line t h bs="\\"
+  temp="${PADDOCK_JOB_TEMP:-${RUNNER_TEMP:-/job-temp}}"
+  home="$(bash "$here/ci-home.sh")"
+  [ -n "$home" ] || home="/ci-home" # (in an `if`, so -e does not apply: no CI home leaves a stand-in)
+  for t in "$temp" "$(fill "$temp" / "$bs")"; do
+    for h in "$home" "$(fill "$home" / "$bs")"; do
+      line="$h/tools/paddock-dev/bin/0/paddock-dev ci slot hold --max 4 --owner $t --root $h --poll-ms 500 --max-hold-secs 12600"
+      if printf '%s\n' "$line" | grep -Eq -- "$re" 2>/dev/null; then return 0; fi
+    done
+  done
+  return 1
 }
 
 # slot_anchored <pattern>: {slot} occurs once, ends the pattern, and comes right after a slot kept folder's name: the

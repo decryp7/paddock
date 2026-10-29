@@ -10,7 +10,7 @@
 - Code: `conformance/ci/job-isolation.sh`, `conformance/ci/kept-folders.txt`, `conformance/ci/ports.txt`,
   `.gitea/actions/job-isolation`, `crates/paddock-slots`, `tools/paddock-dev/src/slots.rs` (`./dev ci slot`),
   `tools/host-cleanup.sh`, `tools/macos-vm-smoke.sh`; tests in `conformance/test/job-isolation.test.mjs`,
-  `crates/paddock-slots/tests/it/races.rs`, `tools/paddock-dev/tests/slots.rs`, `tools/test/*.test.mjs`
+  `crates/paddock-slots/tests/it/races.rs`, `tools/paddock-dev/tests/it/slots.rs`, `tools/test/*.test.mjs`
 
 ## Context
 
@@ -73,20 +73,23 @@ Two kinds of per-host state, one mechanism, declared lists:
    Nothing that need not outlive the job goes in the CI home.
 2. **Kept folders are per slot.** What must keep a stable absolute path to stay warm (cargo's build folder, whose
    fingerprints hold absolute paths; the stable checkout, which sccache keys on; the Angular cache; the test browser;
-   libduckdb; Debrief's Windows `node_modules`; sccache's disk cache, which takes one server) gets a slot suffix:
+   libduckdb; Debrief's Windows `node_modules`; sccache's disk cache, which takes one server; npm's cache) gets a slot suffix:
    `<layout>-s<n>`. A job holds the first free slot of `s1..s$PADDOCK_CI_SLOTS` (default 4, Pitcrew's interim pool; set it
    in every runner's `runner.envs` to the pool maximum) for its whole run and gives it back in its last step
    (`if: always()`). Ports derive from the slot too (`ports.txt`).
 3. **The slot lock is an OS file lock, in Rust.** `./dev ci slot acquire` (ADR 0022's `paddock-dev`, the crate
    `paddock-slots`) starts a detached holder that takes `flock`/`LockFileEx` on `<ci-home>/slots/s<n>.lock` and keeps it
    until the job's `RUNNER_TEMP` is gone or `release` (with the holder's token) asks it to stop. The kernel releases the
-   lock when the holder dies, so there is no stale lock, no owner liveness test, no age limit and no reclaim: two jobs
-   cannot hold one slot. The shell `mkdir` lock and its reclaim are deleted. The holder leads its own process group (the
+   lock when the holder dies, so there is no stale lock, no owner liveness test and no reclaim: two jobs cannot hold one
+   slot. One age limit remains, for a **stalled runner** that keeps a job folder after the job is gone (so the holder
+   would never see it disappear): the holder lets go after `DEFAULT_MAX_HOLD_SECS` (`tools/paddock-dev/src/slots.rs`) =
+   `RUNNER_JOB_TIMEOUT_SECS` (3 h, the runner's and Gitea's job timeout) + `HOLD_MARGIN_SECS` (30 min for the runner's own
+   clean-up), so it can never end before a live job does. A job may not run longer than that: raising `runner.timeout`
+   means raising the constant in the same change. The shell `mkdir` lock and its reclaim are deleted. The holder leads its own process group (the
    runner ends the step's group), runs from the CI home and from a binary in the shared `tools` kept folder (never inside
    a job folder, which Windows could then not delete). `release` fails the job when the holder died before the job ended.
 4. **Declared lists.** `conformance/ci/kept-folders.txt` declares every kept folder (kind, layout, `slot` or `shared`;
-   `shared` only for stores safe for concurrent writers: npm's content-addressed cache and tool installs renamed into
-   place). `conformance/ci/ports.txt` declares every port block a host job binds (sccache, WebKit), one block per slot.
+   `shared` only for stores safe for concurrent writers: tool installs renamed into place). `conformance/ci/ports.txt` declares every port block a host job binds (sccache, WebKit), one block per slot.
    Every action, workflow and CI script asks `job-isolation.sh path <kind> [<name>]` or `port <name>`; a new cache or
    port is one line.
 5. **Clean-up and prune are scoped through the same script.** `host-cleanup` patterns must name `{tmp}`, `{build}` or
@@ -96,11 +99,15 @@ Two kinds of per-host state, one mechanism, declared lists:
    only MSYS programs). Afterwards a **leak check** lists any process still matching one of the job's patterns.
    Drivers outside the job's folders (tauri-driver, safaridriver, WebKitWebDriver) are never ended by name: the suite that
    starts one stops it, on ports chosen for the run (Debrief's `wdio.conf.ts`), and a pattern can find it through an
-   argument naming the job's folder. `prune-build-folder` prunes only a folder `job-isolation.sh owns` (this slot's
+   argument naming the job's folder. A pattern that would match the slot's own holder (`ci slot hold --owner <job
+   temp> --root <ci-home>`, e.g. a bare `{tmp}`) is refused, so the clean-up can never free the slot mid-job.
+   `prune-build-folder` prunes only a folder `job-isolation.sh owns` (this slot's
    `target-*`).
 6. **Disk is bounded, and a slot's folders are deleted only under its lock.** `./dev ci slot idle-run --slot s<n> --
    <command>` runs the command only while `s<n>` is idle and holds its lock until the command ends, so no job can take the
-   slot between the check and the deletion, and a held slot is never touched (`paddock_slots::with_idle`). Through it, at
+   slot between the check and the deletion, and a held slot is never touched (`paddock_slots::with_idle`). A slot is
+   locked only when something of it is due (checked before and again under the lock), so a sweep that would remove
+   nothing never pushes a new job to a colder slot. Through it, at
    every acquire and release: the folders of idle slots above `PADDOCK_CI_KEEP_SLOTS` (default `PADDOCK_CI_SLOTS`, the pool
    maximum; jobs take the lowest free slot, so higher slots exist only after that many ran at once), and folders no job
    asked for in `PADDOCK_CI_ORPHAN_DAYS` (14; `path` renews a folder's time stamp, so folders no workflow names any more,

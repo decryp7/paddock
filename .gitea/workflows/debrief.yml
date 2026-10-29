@@ -580,11 +580,10 @@ jobs:
         working-directory: .
         run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
-      # Host runners: the same checkout path every run, so sccache hits the workspace crates (after Git bash on Windows).
       # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
       - uses: ./.gitea/actions/job-isolation
 
-      # npm's download cache on the Windows host (node-caches keeps it elsewhere): the shared kept folder.
+      # npm's download cache on the Windows host (node-caches keeps it elsewhere): the job slot's kept folder npm-s<n>.
       - name: npm cache (Windows)
         if: runner.os == 'Windows'
         working-directory: .
@@ -592,6 +591,7 @@ jobs:
           dir="$(bash conformance/ci/job-isolation.sh path npm)"
           echo "npm_config_cache=$(cygpath -w "$dir")" >> "$GITHUB_ENV"
 
+      # Host runners: the same checkout path every run, so sccache hits the workspace crates.
       - uses: ./.gitea/actions/stable-workspace
         if: runner.os != 'Linux'
         with:
@@ -845,7 +845,7 @@ jobs:
       # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
       - uses: ./.gitea/actions/job-isolation
 
-      # npm's download cache on the Windows host (node-caches keeps it elsewhere): the shared kept folder.
+      # npm's download cache on the Windows host (node-caches keeps it elsewhere): the job slot's kept folder npm-s<n>.
       - name: npm cache (Windows)
         if: runner.os == 'Windows'
         working-directory: .
@@ -853,6 +853,7 @@ jobs:
           dir="$(bash conformance/ci/job-isolation.sh path npm)"
           echo "npm_config_cache=$(cygpath -w "$dir")" >> "$GITHUB_ENV"
 
+      # Host runners: the same checkout path every run, so sccache hits the workspace crates.
       - uses: ./.gitea/actions/stable-workspace
         if: runner.os != 'Linux'
         with:

@@ -33,8 +33,14 @@ use std::time::Duration;
 /// The most slots a caller may ask for.
 pub const MAX_SLOTS: u32 = 1024;
 const DEFAULT_POLL_MS: u64 = 500;
-/// A holder lets go after this long even when its job folder still exists (a job that never ended and never released).
-pub const DEFAULT_MAX_HOLD_SECS: u64 = 6 * 60 * 60;
+/// The longest a CI job runs: the Gitea runner's default `runner.timeout` and Gitea's own job timeout, both 3 h (ADR 0025;
+/// the runners set no other value).
+pub const RUNNER_JOB_TIMEOUT_SECS: u64 = 3 * 60 * 60;
+/// What the holder waits beyond that: the runner's own clean-up after a timed-out job, so the cap never ends a live job.
+pub const HOLD_MARGIN_SECS: u64 = 30 * 60;
+/// A holder lets go after this long even when its job folder still exists: a stalled runner that kept the folder (a job that
+/// never ended and never released) frees its slot by itself.
+pub const DEFAULT_MAX_HOLD_SECS: u64 = RUNNER_JOB_TIMEOUT_SECS + HOLD_MARGIN_SECS;
 /// How long `acquire` waits for the holder's first line (its slot, or `none`) before it gives up and stops the holder.
 const DEFAULT_FIRST_LINE_SECS: u64 = 30;
 

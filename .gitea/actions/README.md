@@ -20,7 +20,7 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `stable-workspace` | host runners: moves the checkout to a fixed folder of the job's slot (`src/<name>-<slot>` in the CI home) and links the old path to it (where the folder cannot move, as under act on Windows, keeps a clone there at the same commit), and sets `PADDOCK_WORKSPACE` for the cargo steps' `working-directory`, so sccache sees the same working folder every run (the work folder is hashed per job) | new |
 | `build-folder` | a job's Rust build folder as cargo configuration: `target/` in a Linux container, the slot's kept `target-<name>-<slot>` on a host runner, written to the workspace's `.cargo/ci.toml` (included by its `.cargo/config.toml`), so every cargo command and `tauri build` use it; sets `PADDOCK_BUILD_FOLDER` | `CARGO_TARGET_DIR` in the app workflows, Debrief's `scripts/ci/build-folder.sh` |
 | `host-tools` | the pinned cargo-nextest: kept in the CI home's shared `tools` folder on the host runners (checksum-verified, downloaded only when that version is missing), the image's on Linux; fails when the runner has another version | `taiki-e/install-action` in the crate job |
-| `node-caches` | npm's download cache and the Angular build cache kept between runs (hosts: the shared `npm` and the slot's `angular/<name>-<slot>` kept folders; Linux containers: `npm/` and `angular/<job>` on the `/sccache` mount, shared by two runs of one job on a Linux host until containers get slots, ADR 0025) | nothing kept them before |
+| `node-caches` | npm's download cache and the Angular build cache kept between runs (hosts: the slot's `npm-<slot>` and `angular/<name>-<slot>` kept folders; Linux containers: `npm/` and `angular/<job>` on the `/sccache` mount, shared by two runs of one job on a Linux host until containers get slots, ADR 0025) | nothing kept them before |
 | `sccache-stats` | `sccache --show-stats` in the job log (last step, `if: always()`; composite actions have no post step) | new |
 | `setup-node` | Node from `app/.nvmrc`, npm cache | `actions/setup-node` blocks |
 | `strip-signing-keys` | whitespace out of the Tauri keys for the following steps (rule 25, C06) | inline `tr -d` |
@@ -136,8 +136,8 @@ a host job's `build-folder`, `setup-rust` and `node-caches` fail and `stable-wor
 
 **Stalled holder.** `bash conformance/ci/job-isolation.sh status` (or `./dev ci slot status --max N --root <ci-home>`)
 lists each slot, the job folder its holder watches and the holder's pid. A holder whose job folder still exists after its
-job ended (the runner did not delete it) keeps its slot: delete that job folder (the holder ends within a second) or end
-the holder's pid. Never delete `slots/*.lock` by hand while a holder runs.
+job ended (the runner did not delete it) keeps its slot until its cap (`DEFAULT_MAX_HOLD_SECS`: the 3 h job timeout plus 30
+minutes): delete that job folder (the holder ends within a second) or end the holder's pid to free it sooner. Never delete `slots/*.lock` by hand while a holder runs.
 
 **The CI home** is `ci-home.sh`'s (`PADDOCK_CI_HOME`, else `~/.paddock-ci`); a relocated home that is missing stops the job.
 Every runner of a host uses the same CI home (same user, or the same `PADDOCK_CI_HOME`).
