@@ -36,7 +36,9 @@ test.describe('keyboard on the shared grids', () => {
     const rows = grid.getByRole('row');
     const app = grid.locator('[role=row][aria-expanded]').first();
     await app.focus();
+    // The first view (Apps) draws its apps folded; the test does not depend on that, but it fails loudly if the start changes.
     const open = (await app.getAttribute('aria-expanded')) === 'true';
+    expect(open, 'the first app starts folded').toBe(false);
     await page.keyboard.press(open ? 'ArrowLeft' : 'ArrowRight');
     await expect(app).toHaveAttribute('aria-expanded', open ? 'false' : 'true');
     await expect(app).toBeFocused();
@@ -134,6 +136,8 @@ test.describe('live updates keep the keyboard where it was', () => {
 test.describe('the row menu from the keyboard', () => {
   test('processes: after switching Apps to All, Shift+F10 opens the focused row\'s menu and Escape gives the focus back', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 800 });
+    // The page's clock stands still: no live update reorders the rows between the focus and the key.
+    await page.clock.install();
     await page.goto(url('/processes'));
     const grid = page.getByRole('treegrid', { name: 'Processes' });
     await expect(grid).toBeVisible();

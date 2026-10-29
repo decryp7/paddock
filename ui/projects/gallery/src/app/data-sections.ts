@@ -1,8 +1,8 @@
-import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
 import { form, FormField, maxLength, min, minLength, required, validate } from '@angular/forms/signals';
 import { PdChart, type PdChartSpec } from '@decryp7/paddock-ui/chart';
 import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
-import { PdCell, PdTable, PdTableEmpty, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdSort } from '@decryp7/paddock-ui/table';
+import { PdCell, PdTable, PdTableEmpty, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdRowTree, type PdSort } from '@decryp7/paddock-ui/table';
 
 interface Plugin {
   id: string;
@@ -33,6 +33,25 @@ const MANY: Plugin[] = Array.from({ length: 5000 }, (_, i) => ({
   path: `/data/records/${i + 1}/entry.bin`,
   state: 'ready',
 }));
+
+/** A node of the tree grid demo: processes under their parent (the app lists the rows in display order, folded ones left out). */
+interface Node {
+  id: string;
+  name: string;
+  level: number;
+  /** Whether the node has children. */
+  parent: boolean;
+  cpu: number;
+}
+const TREE: Node[] = [
+  { id: 'a', name: 'Syslog service', level: 1, parent: true, cpu: 4.2 },
+  { id: 'a1', name: 'Collector', level: 2, parent: true, cpu: 2.1 },
+  { id: 'a1x', name: 'Parser worker', level: 3, parent: false, cpu: 1.4 },
+  { id: 'a2', name: 'Forwarder', level: 2, parent: false, cpu: 0.7 },
+  { id: 'b', name: 'Report builder', level: 1, parent: true, cpu: 9.8 },
+  { id: 'b1', name: 'Renderer', level: 2, parent: false, cpu: 8.9 },
+  { id: 'c', name: 'Updater', level: 1, parent: false, cpu: 0.1 },
+];
 
 const COLUMNS: PdColumn<Plugin>[] = [
   { key: 'name', header: 'Name', value: (p) => p.name, required: true, width: 'minmax(0, 2fr)' },
@@ -88,6 +107,10 @@ const COLUMNS: PdColumn<Plugin>[] = [
       <h3>Grouped, and 5,000 rows in a virtual viewport</h3>
       <div class="gal-box gal-pad" data-testid="table-virtual">
         <pd-table label="Records" [rows]="many" [columns]="columns" [rowKey]="key" groupBy="kind" [maxHeight]="260" [virtual]="true" />
+      </div>
+      <h3>A tree grid: levels, folding with Left and Right</h3>
+      <div class="gal-box gal-pad" data-testid="table-tree">
+        <pd-table label="Process tree" order="source" [toolbar]="false" [rows]="treeRows()" [columns]="treeColumns" [rowKey]="nodeKey" [tree]="tree" (rowToggle)="toggleNode($event)" />
       </div>
     </section>
 
@@ -145,6 +168,31 @@ export class GalData {
   protected readonly many = MANY;
   protected readonly columns = COLUMNS;
   protected readonly key = (p: Plugin): string => p.id;
+  /** The tree grid demo: the app keeps the fold state and lists the visible rows in order. */
+  private readonly folded = signal<ReadonlySet<string>>(new Set(['b']));
+  protected readonly treeRows = computed<Node[]>(() => {
+    const out: Node[] = [];
+    let hiddenBelow = Infinity;
+    for (const n of TREE) {
+      if (n.level > hiddenBelow) continue;
+      hiddenBelow = this.folded().has(n.id) ? n.level : Infinity;
+      out.push(n);
+    }
+    return out;
+  });
+  protected readonly nodeKey = (n: Node): string => n.id;
+  protected readonly tree: PdRowTree<Node> = { level: (n) => n.level, expanded: (n) => (n.parent ? !this.folded().has(n.id) : null) };
+  protected readonly treeColumns: PdColumn<Node>[] = [
+    { key: 'name', header: 'Process', value: (n) => n.name, required: true, sortable: false, width: 'minmax(0, 2fr)' },
+    { key: 'cpu', header: 'CPU (%)', value: (n) => n.cpu, align: 'end', sortable: false, width: '96px' },
+  ];
+  protected toggleNode(n: Node): void {
+    this.folded.update((f) => {
+      const next = new Set(f);
+      if (!next.delete(n.id)) next.add(n.id);
+      return next;
+    });
+  }
   protected readonly sort = signal<PdSort | null>(null);
   protected readonly selected = signal<string | null>(null);
   protected readonly opened = signal('');
