@@ -1,6 +1,6 @@
 # Plan: moving Debrief onto the shared workbench
 
-- Status: Plan, 2026-10-29. Nothing here is built. It refines the workbench part of
+- Status: Plan, 2026-10-29; the user decided W1-W5 the same day (section 9). Nothing here is built. It refines the workbench part of
   [debrief-1-2.md](debrief-1-2.md) (packages M1, M3a, M3b, M4, M5) and [workbench.md](workbench.md) §4.3, with the state of
   the code today and the in-flight branches.
 - Decision it follows: ADR [0013](../adr/0013-paddock-workbench.md) (accepted 2026-10-24; D4: Debrief adopts the shell and
@@ -37,7 +37,7 @@ switch Debrief to it, and delete Debrief's copy with the tests that duplicated s
 | Branch | What it changes in this area | Files outside Debrief | Effect on this plan |
 |---|---|---|---|
 | `fix/debrief-explorer-resize` (12 commits, last 2026-10-29) | Explorer resizable 240-640 px (default 272); the chosen-width flag `explorerWidthChosen` in Debrief's prefs and View ▸ Reset Explorer width; yield (`DockContext.explorerYield`, `explorerColumnRoom`) and room (`explorerRoom`); the open refusal decided before render (`shell/explorer-fit.ts`, pure); `NarrowWindow` changes; the Events view's minimum from `GridMetrics` and `grid/message-column.ts`; ADR 0056 amended | new entry `@decryp7/paddock-ui/sash` (`PdSash`); `workbench/frame/src/frame.ts` uses it; `ui/e2e/workbench-demo.spec.ts`; root `CHANGELOG.md`; Debrief's `tsconfig.json` maps `@decryp7/paddock-ui/*` to `ui/dist` | lands first. Its shared parts touch nothing Dyno or Spotter import (a new entry, and the workbench frame). Phase 1 ports its Explorer rules into the shared frame |
-| `feat/e2e-hit-test` (6 commits) | `expectNothingCovers` in `@decryp7/paddock-e2e`, used by every app's main view and the workbench-demo | `ui/projects/paddock-e2e/src/hit-test.ts`, `index.ts`; **`apps/dyno/app/e2e/hit-test.spec.ts` and `apps/spotter/app/e2e/hit-test.spec.ts`**; `scripts/affected.mjs`; ADR 0027 | adds a new failing-possible check to Dyno's and Spotter's gates. Land it after both tags, or without the two app specs and add those on the release branches if their owners want them (decision W1, section 8) |
+| `feat/e2e-hit-test` (6 commits) | `expectNothingCovers` in `@decryp7/paddock-e2e`, used by every app's main view and the workbench-demo | `ui/projects/paddock-e2e/src/hit-test.ts`, `index.ts`; **`apps/dyno/app/e2e/hit-test.spec.ts` and `apps/spotter/app/e2e/hit-test.spec.ts`**; `scripts/affected.mjs`; ADR 0027 | adds a new check to Dyno's and Spotter's gates. Decided (W1): it lands after its review, before the tags; its two app specs must pass on `dyno/shell-1.0` and `spotter/shell-1.0` before it merges, and a failure is fixed in that app's release branch, not waived |
 | `feat/dock-translucent-redock` (5 commits) | translucent pop-out over its window while re-docking | `crates/paddock-panels`, `paddock-workspace-hack/Cargo.toml`, `workbench/dock`, `workbench/panels`, `workbench/src/ports.ts` | workbench-only, but it changes `paddock-workspace-hack`, which every crate (Dyno's and Spotter's too) depends on; land it after both tags or show the hack's diff is only the panels feature |
 | `feat/icons-mat-registry` | icons through `MatIconRegistry`; touches `workbench/dock/src/dock-host.ts` and many `shell/*` files | yes, shell | a shell change the two releases depend on: its own timing question, not this plan's; Phase 1 rebases on it |
 
@@ -75,8 +75,8 @@ switch Debrief to it, and delete Debrief's copy with the tests that duplicated s
     `resetExplorerWidth()` on `WorkbenchFrameStore`, `explorerFits` and `explorerRoom` (the pure parts of
     `explorer-fit.ts`), a `FRAME_COMMANDS` entry for Reset Explorer width, the open-refusal notice id.
   - `workbench`: `DockPort.explorerYield` (what the Explorer can give up), the minimum width of the Explorer as the
-    frame's declared `EXPLORER_LAYOUT.min` (200 today, 240 in Debrief: the shared default follows ADR 0056's amendment
-    unless the user decides otherwise, section 8).
+    frame's declared `EXPLORER_LAYOUT.min` (200 today; decided W3: 240 px for every workbench app, as
+    ADR 0056's amendment).
   - `sash`: as on the branch.
   - Root entry (Phase 3 only): the row share rule of `planLayout` (`SHARES.rowHeight`) as an option of the plan's input,
     off by default, so the pages frame's result is unchanged.
@@ -107,7 +107,7 @@ What a phase may change before the tags: `ui/projects/paddock-ui/workbench/**`, 
 `ui/projects/workbench-demo/**`, `apps/workbench-demo/**`, `ui/e2e/workbench-demo*.spec.ts`, `crates/paddock-workbench`,
 `crates/paddock-panels` and `crates/paddock-assistant` (only if `paddock-workspace-hack` stays byte-identical), and
 `apps/debrief/**`. Each package's brief names the allowed paths, and its reviewer checks
-`git diff --name-only origin/main` against them; the release-freeze check (section 7, check 1) makes that automatic.
+`git diff --name-only origin/main` against them; the release-freeze check (package 0a, section 7 check 1) makes that automatic.
 
 Debrief 1.2 is itself an app release: the phases below are its packages, and rule 1 applies to it as well (Dyno and
 Spotter first, then Pitwall 1.1, then Debrief 1.2, by the order of 2026-10-28).
@@ -123,7 +123,14 @@ ADR 0014 §10). A phase that touches the frozen set waits for both tags.
    point (`sash`) and maps `@decryp7/paddock-ui/*` (Debrief 1.2 package 0.4 in part).
 2. Retake the W0 baseline on that merge (`npm run e2e:shell-baseline -- --update-snapshots`, every PNG reviewed, rule 22),
    because the Explorer's width and the Events grid's columns change the pixels. M5 compares against this baseline.
-3. `feat/e2e-hit-test` and `feat/dock-translucent-redock`: after both tags, or as decided in section 8.
+3. `feat/e2e-hit-test`: after its review, before the tags (W1), with the two app specs green on the release branches.
+4. `feat/dock-translucent-redock`: after both tags, unless its `paddock-workspace-hack` diff is shown to touch only the
+   panels feature.
+5. Package 0a, the release-freeze check (W5), lands first of this plan's own packages, so every later phase is gated by it:
+
+| # | Package | Owned files | Failing test first | Days |
+|---|---|---|---|---|
+| 0a | **Release-freeze check** (conformance, rule 1 and rule 40): `paddock.conformance.json` gains `releaseFreezes` (app, tag it waits for, frozen paths or a `derive` flag); the frozen set is derived from the app's imports of `@decryp7/paddock-ui` entry points, `paddock-e2e`, and its Cargo graph through `scripts/affected.mjs` (the reverse closure, plus `paddock-workspace-hack` and `crates/Cargo.lock`); a change under a frozen path fails unless it is on that app's release branch; the freeze ends when its tag exists. Declared at once for Dyno 1.0 and Spotter 1.0; README row and fixtures | `conformance/src/checks/` (new check file), `conformance/test/`, `conformance/fixtures/`, `conformance/README.md` row, `paddock.conformance.json` entry and its schema (integrating agent), `scripts/affected.mjs` export of the closure if needed | a fixture diff touching `ui/projects/paddock-ui/shell/pages/` fails while a Dyno freeze is declared; the same diff passes on `dyno/shell-1.0` and after the `dyno-v1.0.0` tag; a diff touching only `ui/projects/paddock-ui/workbench/` passes; a change to `paddock-workspace-hack` fails | 1.5 |
 
 ### Phase 1: the shared copy catches up (workbench-only paths; may land before the tags)
 
@@ -196,7 +203,7 @@ Debrief's own panel commands remain. Gates: `cargo test` for Debrief's app crate
 
 | Phase | When | Agent-days |
 |---|---|---|
-| 0 | now | review and merge; baseline retake 0.5 |
+| 0 | now | review and merge; baseline retake 0.5; package 0a 1.5 |
 | 1 | before the tags (workbench-only) | 5.5 |
 | 2 | before the tags (Debrief-only) | 6.5 |
 | 3 | after both tags | 3 |
@@ -204,13 +211,13 @@ Debrief's own panel commands remain. Gates: `cargo test` for Debrief's app crate
 | 5 | Debrief 1.2 wave 6 | 1.5 |
 | 6 | Debrief 1.2 wave 9 | 2 |
 
-About 26 agent-days for the workbench layer (±50 %), of which 12 can be done before the tags. Phases 1 and 2 run in
+About 28 agent-days for the workbench layer and the freeze check (±50 %), of which 14 can be done before the tags (W2). Phases 1 and 2 run in
 parallel (disjoint files: `ui/projects/paddock-ui/workbench/**` against `apps/debrief/**`); 1a, 1b and 2a, 2b, 2c are five
 agents at most, so the coordinator runs them within the load limit and behind the release work (rule 1).
 
 ## 7. Conformance checks to add (numbers allocated at merge, C31)
 
-1. **Release freeze.** `paddock.conformance.json` lists, per declared release freeze, the paths the releasing app depends
+1. **Release freeze** (package 0a, decided W5). `paddock.conformance.json` lists, per declared release freeze, the paths the releasing app depends
    on (section 4's set, generated from its imports and Cargo graph through `affected.mjs`); a change under a frozen path
    fails while the freeze is declared, unless the change is on that app's release branch. Makes rule 1's "don't change
    shared code the release depends on" checked instead of remembered.
@@ -233,20 +240,24 @@ agents at most, so the coordinator runs them within the load limit and behind th
 |---|---|
 | A workbench change reaches the pages frame through the root entry (`planLayout`) or the shell frame parts | those paths are frozen (section 4); Phase 3 changes them only after both tags, with the pages-frame results byte-identical |
 | A workbench crate change regenerates `paddock-workspace-hack` or `crates/Cargo.lock`, which Dyno's and Spotter's builds read | Phase 1 adds no Rust dependency; a package that would must wait for the tags; the reviewer checks the hack is unchanged |
-| `feat/e2e-hit-test` adds new checks to Dyno's and Spotter's gates days before their tags | land it after the tags, or without their specs (decision W1) |
+| `feat/e2e-hit-test` adds new checks to Dyno's and Spotter's gates days before their tags | lands after review (W1) only with its two app specs green on the release branches; a failure is fixed there, not waived |
 | The shared copy misses behaviour Debrief learned since 2026-10-25 | Phase 1a's file-by-file diff, with each Debrief spec run against the shared dock first |
 | The W0 baseline is stale after the Explorer change, so M5 would report false differences | retake it in Phase 0 |
 | Debrief's themes do not carry `--pd-*` tokens, so shared parts render with defaults | Phase 2b before Phase 4; the token test over Debrief's packs |
 | Debrief's first-paint JavaScript grows when the workbench entry points are added | lazy contributions (workbench.md §9); C29 budget in Phase 2a and 4 |
 | Two agents edit `workbench/dock` at once (Phase 1a and `feat/dock-translucent-redock`) | 1a starts after that branch lands or rebases on it; one owner for `workbench/dock/**` at a time |
-| The move slips into Pacenotes' time | Pacenotes needs only the shared workbench as it is plus Phase 1; its plan does not wait for Phases 4-6 |
+| The move slips and delays Pacenotes | Pacenotes' stage 1 is pure Rust and needs no workbench; its UI starts after Debrief 1.2 (decided 2026-10-29), so a slip in Phases 4-6 delays Debrief 1.2 and Pacenotes' stage 2 alike, and is visible in Debrief 1.2's plan |
 
-## 9. Decisions for the user
+## 9. Decisions (user, 2026-10-29)
 
-| # | Decision | Recommendation |
+| # | Question | Decided |
 |---|---|---|
-| W1 | `feat/e2e-hit-test`: land after the Dyno and Spotter tags, or now without the two app specs | **After the tags**: it adds a new failing-possible check to two release gates |
-| W2 | Phases 1 and 2 before the tags (workbench-only and Debrief-only paths), or nothing until both have shipped | **Before the tags**, within load: they touch no path the two releases use, and the release-freeze check (section 7, check 1) enforces it |
-| W3 | The shared Explorer minimum: 240 px as Debrief's amended ADR 0056, or keep 200 px for the workbench and let Debrief declare 240 | **240 px shared**: one rule for every workbench app; Pacenotes and Sighter have no reason to differ |
-| W4 | Timing of Phases 4-6: inside Debrief 1.2 as its plan says, or at Pacenotes' start as ADR 0013's D4 said | **Inside Debrief 1.2** (its plan already schedules M3a, M3b, M4, M5); Pacenotes starts on the shared workbench either way |
-| W5 | Add the release-freeze check (section 7, check 1) now, before Dyno's tag | **Yes**: a small check that turns rule 1's shared-code limit into a gate for every later release |
+| W1 | When `feat/e2e-hit-test` lands | after its review, **before** the Dyno and Spotter tags (Phase 0, item 3) |
+| W2 | Phases 1 and 2 before the tags | **yes**, within load: they touch only workbench-only and Debrief-only paths, gated by package 0a |
+| W3 | The shared Explorer minimum | **240 px** for every workbench app (Phase 1b) |
+| W4 | Timing of Phases 4-6 | **inside Debrief 1.2**, as its plan schedules M3a, M3b, M4 and M5 |
+| W5 | The release-freeze check | **add it now**, as its own work package (package 0a) |
+
+Related decision for Pacenotes (same day): its UI and its shared-code changes wait until Debrief 1.2 has shipped, so
+Pacenotes' first screens are built on the workbench after this move's Phases 4-6; see its
+[plan](../../apps/pacenotes/docs/plans/2026-10-29-first-release-plan.md) §4.1.
