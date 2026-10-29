@@ -175,17 +175,95 @@ fn racing_acquirers_never_share_a_slot() {
         results.iter().filter(|r| r.0 != 0).all(|r| r.0 == 4),
         "the others are refused, not failed"
     );
-    for n in 1..=SLOTS as u32 {
-        dev(&[
-            "ci",
-            "slot",
-            "release",
-            "--slot",
-            &format!("s{n}"),
-            "--root",
-            root.to_str().unwrap(),
-        ]);
+    for r in results.iter().filter(|r| r.0 == 0) {
+        let (slot, token) = (r.1["slot"].as_str().unwrap(), r.1["token"].as_str().unwrap());
+        assert_eq!(release(&root, slot, token).0, 0);
     }
+}
+
+/// The CI kit's acquire (job-isolation.sh) with as many jobs as slots, all at once: every job gets a slot of its own.
+#[test]
+fn eight_parallel_acquires_get_eight_distinct_slots() {
+    const N: usize = 8;
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("ci");
+    let jobs: Vec<_> = (0..N).map(|i| d.path().join(format!("job{i}"))).collect();
+    jobs.iter().for_each(|j| std::fs::create_dir(j).unwrap());
+    let start = std::sync::Barrier::new(N);
+    let results: Vec<(i32, Value, String)> = std::thread::scope(|s| {
+        let handles: Vec<_> = jobs
+            .iter()
+            .map(|job| {
+                let (root, start) = (&root, &start);
+                s.spawn(move || {
+                    start.wait();
+                    acquire(root, job, &N.to_string())
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    assert!(results.iter().all(|r| r.0 == 0), "every job gets a slot: {results:?}");
+    let mut got: Vec<String> = results.iter().map(|r| r.1["slot"].as_str().unwrap().to_string()).collect();
+    got.sort();
+    got.dedup();
+    assert_eq!(got.len(), N, "eight distinct slots: {results:?}");
+    for n in 1..=N as u32 {
+        assert!(!is_free(&root, n), "s{n} is held by its job's holder");
+    }
+    for r in &results {
+        assert_eq!(release(&root, r.1["slot"].as_str().unwrap(), r.1["token"].as_str().unwrap()).0, 0);
+    }
+    for n in 1..=N as u32 {
+        assert!(is_free(&root, n));
+    }
+}
+
+fn idle_run(root: &Path, slot: &str, command: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        .args(["ci", "slot", "idle-run", "--slot", slot, "--root", root.to_str().unwrap(), "--"])
+        .args(command)
+        .output()
+        .unwrap()
+}
+
+/// The disk sweep's guarantee: the command runs only on an idle slot and the slot stays locked until it ends, so no job can
+/// take the slot while its folders are deleted; a held slot is skipped and its folders are left alone.
+#[test]
+fn idle_run_runs_only_on_an_idle_slot_and_holds_it_until_the_command_ends() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let bin = env!("CARGO_BIN_EXE_paddock-dev");
+    let r = root.to_str().unwrap();
+    // Free: the command runs, and while it runs the slot is busy (it looks at the slot itself).
+    let out = idle_run(&root, "s1", &[bin, "ci", "slot", "status", "--max", "1", "--root", r]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{said}");
+    assert!(
+        said.contains("s1 busy\n") && said.contains("s1 idle: ran"),
+        "the command saw its slot locked: {said}"
+    );
+    assert!(is_free(&root, 1), "the lock goes with the command");
+    // Held by a job: skipped, the command never runs.
+    let (slot, token) = take(&root, &job, "1");
+    let out = idle_run(&root, "s1", &[bin, "ci", "slot", "status", "--max", "1", "--root", r]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert_eq!((out.status.code(), said.trim()), (Some(0), "s1 busy: skipped"));
+    assert_eq!(release(&root, &slot, &token).0, 0);
+    // A failing command is a failure; a bad slot, no command or a program that cannot start are reported.
+    assert_eq!(
+        idle_run(&root, "s1", &[bin, "ci", "slot", "status", "--max", "0", "--root", r])
+            .status
+            .code(),
+        Some(1)
+    );
+    assert_eq!(idle_run(&root, "s0", &[bin]).status.code(), Some(2));
+    assert_eq!(idle_run(&root, "s1", &[]).status.code(), Some(2));
+    let missing = d.path().join("no-such-program");
+    let out = idle_run(&root, "s1", &[missing.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("could not be started"));
 }
 
 /// A pipe the job's runner waits on must not be kept open by the holder (a descriptor above 2 inherited by `acquire`).

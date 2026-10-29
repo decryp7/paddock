@@ -718,7 +718,6 @@ export function matrix(plan, { cargo, apps }, { narrow = false, webkit = false }
         angular_dir: linux && app.angularDir ? posix.join(app.dir, app.angularDir) : '',
         last_packages: (app.lastPackages ?? []).join(' '),
         windows_clippy: app.windowsClippy ? 'true' : 'false',
-        processes: (app.processes ?? []).join(' '),
         process_patterns: (app.processPatterns ?? []).join('\n'),
         test_browser_prefix: app.testBrowser?.envPrefix ?? '',
         test_browser_catalogue: app.testBrowser?.catalogue ?? '',

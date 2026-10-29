@@ -1,11 +1,11 @@
 name: node-caches
-description: "Keeps npm's download cache and the Angular build cache between runs: on a host runner under ~/.paddock-ci, in a Linux container on the runner's /sccache mount (its npm/ and angular/ subfolders); a container without the mount keeps both in the job (a notice says so)."
+description: "Keeps npm's download cache and the Angular build cache between runs: on a host runner in the CI home's kept folders (job-isolation: npm shared, angular/<name>-<slot> per job slot), in a Linux container on the runner's /sccache mount (its npm/ and angular/ subfolders); a container without the mount keeps both in the job (a notice says so)."
 inputs:
   angular-dir:
     description: "The Angular workspace whose .angular/cache is kept (relative to the checkout); empty keeps only the npm cache."
     default: ui
   name:
-    description: "The Angular cache's folder: one per job (and per matrix shard), because two builds must not write one cache at once."
+    description: "The Angular cache's folder: one per job (and per matrix shard; on a host the job's slot is appended), because two builds must not write one cache at once."
     default: ${{ github.job }}
 runs:
   using: composite
@@ -17,20 +17,23 @@ runs:
         NAME: ${{ inputs.name }}
       run: |
         set -euo pipefail
+        iso="${{ github.action_path }}/../../../conformance/ci/job-isolation.sh"
+        folder=$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '_')
         if [ "$RUNNER_OS" = Linux ]; then
           mount="${PADDOCK_CI_MOUNT:-/sccache}"
           if [ -d "$mount" ] && [ -w "$mount" ]; then base="$mount"
           else echo "::notice::no /sccache mount in this container; the npm and Angular caches live and die with the job."; exit 0; fi
+          npm_cache="$base/npm"; ng_cache="$base/angular/$folder"
+          mkdir -p "$npm_cache"
         else
-          base="${PADDOCK_CI_HOME:-$HOME/.paddock-ci}"
+          # The host's kept folders (job-isolation): npm's cache and the Angular cache are the job slot's own.
+          npm_cache="$(bash "$iso" path npm)"
+          ng_cache=""
+          if [ -n "$ANGULAR_DIR" ]; then ng_cache="$(bash "$iso" path angular "$folder")"; fi
         fi
-        npm_cache="$base/npm"
-        mkdir -p "$npm_cache"
         if [ "$RUNNER_OS" = Windows ]; then echo "npm_config_cache=$(cygpath -w "$npm_cache")" >> "$GITHUB_ENV"; else echo "npm_config_cache=$npm_cache" >> "$GITHUB_ENV"; fi
         echo "node-caches: npm $npm_cache"
         [ -n "$ANGULAR_DIR" ] || exit 0
-        folder=$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '_')
-        ng_cache="$base/angular/$folder"
         mkdir -p "$ng_cache" "$GITHUB_WORKSPACE/$ANGULAR_DIR/.angular"
         # angular.json turns the cache on in CI too (cli.cache.environment "all"); its folder is a link to the kept one.
         link="$GITHUB_WORKSPACE/$ANGULAR_DIR/.angular/cache"
