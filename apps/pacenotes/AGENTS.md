@@ -119,7 +119,7 @@ development and UI tests only; features are not done until they work against the
   cargo clippy --workspace --all-targets -- -D warnings
   cargo test --workspace
   cargo llvm-cov nextest -p pacenotes-core -p pacenotes-function-api --profile ci --summary-only \
-    --ignore-filename-regex 'contract\.rs|wire_tests\.rs' --fail-under-lines 99   # product code only
+    --ignore-filename-regex 'contract\.rs|wire_tests\.rs' --fail-under-lines 99   # product code only; CI runs it on main and the nightly
   cargo deny --workspace check
   node --test scripts/release/publish.test.mjs
   (cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && npx ng test --watch=false)

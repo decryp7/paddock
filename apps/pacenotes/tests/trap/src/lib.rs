@@ -51,15 +51,18 @@ pub const TRAP_QUERIES: [&str; 6] = [
 pub enum TrapError {
     /// A scratch-folder operation failed.
     Scratch(ScratchError),
-    /// Creating a symlink failed.
+    /// Creating a symlink, a folder or a file failed.
     Link(std::io::Error),
+    /// Preparing a real repository with git failed.
+    Git(String),
 }
 
 impl fmt::Display for TrapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TrapError::Scratch(e) => write!(f, "could not write the trap repository: {e}"),
-            TrapError::Link(e) => write!(f, "could not create a symlink of the trap: {e}"),
+            TrapError::Link(e) => write!(f, "could not create a link, folder or file of the trap: {e}"),
+            TrapError::Git(why) => write!(f, "could not prepare a repository of the trap with git: {why}"),
         }
     }
 }
@@ -90,6 +93,35 @@ pub struct TrapRepo {
     /// The symlinks inside the workspace (empty where symlinks need privileges: Windows). Reading through any of them leaves
     /// the workspace or does not resolve.
     pub links: Vec<PathBuf>,
+}
+
+/// Runs git in `dir` with the user's and the machine's configuration out of the way, hooks off and signing off. Used only
+/// while no trap is planted.
+#[allow(clippy::disallowed_methods)]
+fn git(home: &Path, dir: &Path, args: &[&str]) -> Result<(), TrapError> {
+    let out = std::process::Command::new("git")
+        .current_dir(dir)
+        .args([
+            "-c",
+            "user.name=Trap",
+            "-c",
+            "user.email=trap@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+        ])
+        .args(args)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("HOME", home)
+        .output()
+        .map_err(|e| TrapError::Git(format!("git did not start: {e}")))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(TrapError::Git(String::from_utf8_lossy(&out.stderr).trim().to_owned()))
+    }
 }
 
 fn write_all(scratch: &Scratch, files: &[(&str, String)]) -> Result<(), TrapError> {
@@ -140,18 +172,8 @@ pub fn generate(scratch: &Scratch) -> Result<TrapRepo, TrapError> {
                 "trap/workspace/rust-toolchain.toml",
                 format!("[toolchain]\npath = \"{outside}/toolchain\"\n"),
             ),
-            (
-                "trap/workspace/.git/config",
-                format!(
-                    "[core]\n\trepositoryformatversion = 0\n\tfsmonitor = {touch}\n[filter \"trap\"]\n\tclean = {touch}\n\tsmudge = {touch}\n[diff \"trap\"]\n\ttextconv = {touch}\n"
-                ),
-            ),
-            ("trap/workspace/.git/HEAD", "ref: refs/heads/main\n".to_owned()),
-            ("trap/outside/gitdir/HEAD", "ref: refs/heads/main\n".to_owned()),
             ("trap/outside/toolchain/bin/rustc", format!("#!/bin/sh\necho ran > '{m}'\n")),
             ("trap/MARKER-code-ran.sh", format!("#!/bin/sh\necho ran > '{m}'\n")),
-            ("trap/workspace/.git/objects/info/alternates", format!("{outside}/objects\n")),
-            ("trap/workspace/.gitattributes", "* filter=trap diff=trap\n".to_owned()),
             (
                 "trap/workspace/macros/Cargo.toml",
                 "[package]\nname = \"trap-macros\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[lib]\nproc-macro = true\n".to_owned(),
@@ -164,23 +186,46 @@ pub fn generate(scratch: &Scratch) -> Result<TrapRepo, TrapError> {
             ),
             // leak-trap
             ("trap/workspace/.env", format!("API_TOKEN={SECRET}\n")),
-            // escape-traps: a nested checkout whose `.git` is a gitfile pointing outside
-            ("trap/workspace/sub/.git", format!("gitdir: {outside}/gitdir\n")),
             ("trap/outside/outside-secret.txt", OUTSIDE_TEXT.to_owned()),
             ("trap/outside/objects/pack/pn1.pack", format!("{OUTSIDE_TEXT}\n")),
-            ("trap/outside/gitdir/config", format!("[core]\n\tfsmonitor = {touch}\n")),
         ],
     )?;
 
-    // valid, empty repositories: git reaches their configuration
-    for dir in [
-        "trap/workspace/.git/refs/heads",
-        "trap/workspace/.git/objects/pack",
-        "trap/outside/gitdir/refs/heads",
-        "trap/outside/gitdir/objects/pack",
-    ] {
-        std::fs::create_dir_all(scratch.path(dir)).map_err(TrapError::Link)?;
-    }
+    // Real repositories with real history first. Git runs only here, in isolation, while no trap is planted; the trap
+    // configuration is written afterwards, so git never runs with it in place (git would run a filter, a diff driver or
+    // the fsmonitor command on `add`, `commit`, `status` or `diff`).
+    let home = scratch.home();
+    git(&home, &workspace, &["init", "-q", "--template=", "-b", "main"])?;
+    git(&home, &workspace, &["add", "-A"])?;
+    git(&home, &workspace, &["commit", "-q", "-m", "first"])?;
+    std::fs::write(workspace.join("src/extra.rs"), "pub fn extra() {}\n").map_err(TrapError::Link)?;
+    git(&home, &workspace, &["add", "src/extra.rs"])?;
+    git(&home, &workspace, &["commit", "-q", "-m", "second"])?;
+    let gitdir = scratch.path("trap/outside/gitdir");
+    git(
+        &home,
+        scratch.path("trap/outside").as_path(),
+        &["init", "-q", "--template=", "--bare", "-b", "main", "gitdir"],
+    )?;
+
+    // Now plant the traps.
+    let mut config = std::fs::read_to_string(workspace.join(".git/config")).map_err(TrapError::Link)?;
+    config.push_str(&format!(
+        "[core]\n\tfsmonitor = {touch}\n[filter \"trap\"]\n\tclean = {touch}\n\tsmudge = {touch}\n[diff \"trap\"]\n\ttextconv = {touch}\n"
+    ));
+    std::fs::write(workspace.join(".git/config"), config).map_err(TrapError::Link)?;
+    let mut outside_config = std::fs::read_to_string(gitdir.join("config")).map_err(TrapError::Link)?;
+    outside_config.push_str(&format!("[core]\n\tfsmonitor = {touch}\n"));
+    std::fs::write(gitdir.join("config"), outside_config).map_err(TrapError::Link)?;
+    write_all(
+        scratch,
+        &[
+            ("trap/workspace/.git/objects/info/alternates", format!("{outside}/objects\n")),
+            ("trap/workspace/.gitattributes", "* filter=trap diff=trap\n".to_owned()),
+            // escape-trap: a nested checkout whose `.git` is a gitfile pointing outside
+            ("trap/workspace/sub/.git", format!("gitdir: {outside}/gitdir\n")),
+        ],
+    )?;
     let wrapper = scratch.path("trap/MARKER-code-ran.sh");
     for script in [wrapper.clone(), scratch.path("trap/outside/toolchain/bin/rustc")] {
         make_executable(&script)?;
@@ -544,6 +589,17 @@ mod tests {
             .expect("git is installed (the CI image and developer machines have it)")
     }
 
+    #[allow(clippy::disallowed_methods)]
+    fn git_out(scratch: &Scratch, args: &[&str]) -> std::process::Output {
+        std::process::Command::new("git")
+            .args(args)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("HOME", scratch.home())
+            .output()
+            .expect("git is installed")
+    }
+
     #[test]
     fn git_accepts_each_trap_repository() {
         let (scratch, repo) = trap();
@@ -564,6 +620,28 @@ mod tests {
             resolved.ends_with("outside/gitdir"),
             "the gitfile leads out of the workspace: {resolved}"
         );
+        // The filter and diff drivers are reachable: HEAD exists and a tracked file is covered by .gitattributes. None of
+        // these commands refreshes the index or runs a driver or the fsmonitor command.
+        let head = git_out(&scratch, &["-C", &ws, "rev-parse", "HEAD"]);
+        assert!(
+            head.status.success() && head.stdout.len() >= 40,
+            "HEAD: {}",
+            String::from_utf8_lossy(&head.stderr)
+        );
+        let files = git_out(&scratch, &["-C", &ws, "ls-files"]);
+        let listing = String::from_utf8_lossy(&files.stdout).into_owned();
+        assert!(
+            listing.lines().any(|l| l == "src/lib.rs") && listing.lines().any(|l| l == "src/extra.rs"),
+            "{listing}"
+        );
+        let attr = git_out(&scratch, &["-C", &ws, "check-attr", "filter", "diff", "--", "src/lib.rs"]);
+        let attr = String::from_utf8_lossy(&attr.stdout).into_owned();
+        assert!(attr.contains("filter: trap") && attr.contains("diff: trap"), "{attr}");
+        let count = git_out(&scratch, &["-C", &ws, "rev-list", "--count", "HEAD"]);
+        assert_eq!(String::from_utf8_lossy(&count.stdout).trim(), "2");
+        let config = std::fs::read_to_string(repo.workspace.join(".git/config")).expect("git config");
+        assert!(config.contains("fsmonitor") && config.contains("[filter \"trap\"]") && config.contains("[diff \"trap\"]"));
+        assert!(repo.workspace.join(".git/objects/info/alternates").is_file());
         assert!(!repo.marker.exists(), "checking the traps ran none");
     }
 

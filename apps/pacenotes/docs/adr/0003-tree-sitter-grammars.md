@@ -13,12 +13,20 @@ against the official repository (no GPL, AGPL, LGPL or source-available code). T
 ## Decision
 
 Use the tree-sitter Rust runtime and one published grammar crate per language, pinned to the versions below in
-`Cargo.lock` (Renovate updates them through its group; the grammar and the runtime move together because each grammar crate
-depends on `tree-sitter-language`). Core grammars are compiled in; a grammar added by a pack is a later decision (proposal
+`Cargo.lock` (Renovate updates them through its group). A grammar is generated for one parser ABI version; the runtime loads
+it only if the grammar's ABI lies in the runtime's supported range (`tree-sitter` 0.27 reads ABI 13 to 15; the range is
+`TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION` to `TREE_SITTER_LANGUAGE_VERSION` in its `api.h`, 13 and 15 in 0.27.1). So the runtime and a grammar do not have to be the same
+release, but **the runtime's ABI range must cover each grammar's ABI**, and A2 checks that for every grammar it adds (a test
+loads each language and fails on a version error) before pinning. Core grammars are compiled in; a grammar added by a pack is a later decision (proposal
 7.2, wasm) and is not covered here.
 
-Checked on 2026-10-29. The licence column is the `license` field of the crates.io release **and** the first lines of the
-`LICENSE` file at the head of the repository named in the crate's `repository` field; both agree for every row.
+Checked on 2026-10-29. The licence column is the `license` field of the crates.io release, the first lines of the `LICENSE`
+file at the head of the repository named in the crate's `repository` field, **and** the published `.crate` file at the pinned
+version (downloaded and read): `Cargo.toml` says `license = "MIT"` in all eleven, and a `LICENSE` file with the MIT text is
+inside the `.crate` of `tree-sitter`, `-go`, `-c`, `-c-sharp`, `-javascript`, `-rust` and `-python`. The `.crate` files of
+`-java`, `-kotlin-ng`, `-cpp` and `-typescript` carry no `LICENSE` file (only the manifest field); their repositories do. The
+`tree-sitter` crate also bundles `src/unicode/`, ICU files under the Unicode, Inc. permissive licence; `deny.toml` allows
+`Unicode-3.0`, and A2 confirms with `cargo deny` that nothing else is needed.
 
 | Order | Language | Crate | Version | Licence | Repository (LICENSE copyright line) | Last crates.io release |
 |---|---|---|---|---|---|---|
@@ -46,6 +54,15 @@ and the newer; the older crate stays on an older tree-sitter ABI. Kotlin is tier
 later, plan 7.1 item 4). If `-ng` proves incomplete on the golden files of A2 (outline of classes, objects, extension
 functions, `suspend`, DSL lambdas), the decision is revisited with that evidence, not before.
 
+### Scanner crashes
+
+Several grammars have an external scanner written in C (`scanner.c`: TypeScript, C#, Kotlin, Python and others). A crash in
+C code (an out-of-bounds read, an abort) cannot be caught by Rust and takes the process down. Until the parser worker of A3
+isolates parsing in its own process (`paddock-ipc`, `paddock-guard`, `paddock-proc`), the library crate is documented as
+**not crash-isolated**, and nothing in the app calls it in process on a repository's files. Our own tree walk uses
+`TreeCursor` iteration with an explicit stack, never recursion, so a deeply nested file cannot overflow the Rust stack; the
+node cap bounds the walk.
+
 ### What A2 must still check when it adds each crate
 
 1. `cargo deny check` passes with the crate (its transitive tree is `tree-sitter-language`, `cc` and the runtime; any
@@ -65,7 +82,8 @@ The conformance check C36 (parser hardening) applies.
 ## Parallelism and cost (rule 51)
 
 Parsing is CPU-bound and independent per file: the index job maps files over a pool of cores minus one at background
-priority, results in input order. The cheap paths are not parsing at all: files whose `Fingerprint` is unchanged are
+priority, results in input order; the thread count is a Setting with an "Auto" default (rule 51). A watcher update of an
+open or changed file re-parses incrementally (`Tree::edit` with the old tree), the cheaper path for small edits. The cheap paths are not parsing at all: files whose `Fingerprint` is unchanged are
 skipped, and a language the repository does not contain loads no grammar (grammars are constructed on first use, and a
 parser is reused per thread). Measurements, when A2 has them, go to `docs/performance.md` (rule 48).
 
