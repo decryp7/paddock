@@ -757,4 +757,13 @@ the agents' local test runs on that Mac use. Debrief's leak check snapshotted an
 during a CI job made the job fail with leaks it did not cause, and the CI tests wrote there too. **Guidance:** every job
 on a host runner that runs tests or checks a folder gets a folder of its own first: the shared `job-tmpdir` action
 (`RUNNER_TEMP/t` as `TMPDIR`, `TMP`/`TEMP` on Windows; removed as the last step), and checks name that folder explicitly
-(`--dir "$PADDOCK_JOB_TMPDIR"`). A conformance test holds every job that runs `check-temp-leaks.mjs` to it.
+(`--dir "$PADDOCK_JOB_TEMP"`). A conformance test holds every job that runs `check-temp-leaks.mjs` to it.
+
+Review of the fix (2026-10-29): a job's own temp folder is not enough. **Sockets fall back to `/tmp`** when the temp path is
+too long (the runner's per-job folder is), so the leak check and the tests still met other runs there. A short socket
+folder per job (`PADDOCK_SOCKET_BASE`, `/tmp/pd-<n>`) comes before `/tmp`; scanning all of `/tmp` (`--shared`) is only
+right in a Linux container, where `/tmp` is the job's. **One owner:** job-isolation's acquire already pointed `TMPDIR` at
+the runner's folder; two mechanisms would disagree, so `conformance/ci/job-tmpdir.sh` is the only code that sets
+`TMPDIR`, `TMP` or `TEMP` (a test fails on any other writer), and every host job gets it through acquire. **macOS'
+bash 3.2** (what `shell: bash` runs on the Mac host) cannot parse an apostrophe inside `${var:?message}` within double
+quotes, nor `$(...)` inside a `case` branch: test CI scripts with `/bin/bash` on a Mac, not only with a newer bash.
