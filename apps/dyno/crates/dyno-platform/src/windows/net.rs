@@ -27,6 +27,9 @@ pub fn tcp_state(state: u32) -> &'static str {
         10 => "LAST_ACK",
         11 => "TIME_WAIT",
         12 => "DELETE_TCB",
+        // MIB_TCP_STATE_RESERVED: bound but not (yet) listening or connected; `netstat -q` shows it as BOUND. A listener
+        // can be listed so for a moment after `listen` returned (CI job 21972).
+        100 => "BOUND",
         _ => "UNKNOWN",
     }
 }
@@ -178,6 +181,7 @@ mod tests {
         assert_eq!(ipv4(u32::from_ne_bytes([127, 0, 0, 1])), Ipv4Addr::LOCALHOST);
         assert_eq!(tcp_state(5), "ESTABLISHED");
         assert_eq!(tcp_state(2), "LISTEN");
+        assert_eq!(tcp_state(100), "BOUND");
         assert_eq!(tcp_state(99), "UNKNOWN");
         assert_eq!(v6([0; 16], u32::from(443u16.to_be())), "[::]:443");
         let mut buf = 2u32.to_ne_bytes().to_vec();
@@ -193,13 +197,18 @@ mod tests {
         let udp = UdpSocket::bind("[::1]:0").unwrap();
         let tport = tcp.local_addr().unwrap().port();
         let uport = udp.local_addr().unwrap().port();
-        let conns = connections(std::process::id()).unwrap();
-        assert!(
-            conns
-                .iter()
-                .any(|c| c.protocol == "TCP" && c.local == format!("127.0.0.1:{tport}") && c.state == "LISTEN"),
-            "{conns:?}"
-        );
+        // Windows can list a new listener as BOUND for a moment after `listen` returned (CI job 21972): the table is
+        // read again until it shows the listener, up to a hang guard.
+        let listening = |c: &Connection| c.protocol == "TCP" && c.local == format!("127.0.0.1:{tport}") && c.state == "LISTEN";
+        let mut conns = connections(std::process::id()).unwrap();
+        for _ in 0..200 {
+            if conns.iter().any(listening) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            conns = connections(std::process::id()).unwrap();
+        }
+        assert!(conns.iter().any(listening), "{conns:?}");
         assert!(
             conns.iter().any(|c| c.protocol == "UDP6" && c.local == format!("[::1]:{uport}")),
             "{conns:?}"
