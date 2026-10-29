@@ -542,10 +542,15 @@ test('stable-workspace keeps a clone at the stable path at the checkout\'s commi
   writeFileSync(join(ws, 'Cargo.toml'), 'y');
   git(ws, 'commit', '-qam', 'two');
   writeFileSync(join(stable, 'left-over.rs'), '');
+  // The clone is kept between jobs (2026-10-29: the move was tried after deleting the stable folder, so every Windows job
+  // cloned and checked out the whole repository again, a median 49 s of the busiest runner): only the new commit is fetched.
+  writeFileSync(join(stable, '.git', 'kept-between-jobs'), '');
   assert.equal(run().status, 0);
   assert.equal(readFileSync(join(stable, 'Cargo.toml'), 'utf8'), 'y');
   assert.equal(git(stable, 'rev-parse', 'HEAD'), git(ws, 'rev-parse', 'HEAD'));
   assert.ok(!existsSync(join(stable, 'left-over.rs')));
+  assert.ok(existsSync(join(stable, '.git', 'kept-between-jobs')), 'the kept clone is reused, not deleted and cloned again');
+  assert.ok(!existsSync(`${stable}.incoming`), 'no half-moved folder is left behind');
 });
 
 test('stable-workspace leaves Linux containers alone and never fails a job it cannot help', () => {

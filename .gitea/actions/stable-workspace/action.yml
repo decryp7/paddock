@@ -27,8 +27,13 @@ runs:
           echo "PADDOCK_WORKSPACE=$p" >> "$GITHUB_ENV"
           echo "stable-workspace: building from $p"
         }
-        # An unusable move must never fail the job: it only costs the cache hits of the workspace crates.
-        if ! why=$({ mkdir -p "$root" && cd "$root" && rm -rf "$stable" && mv "$ws" "$stable"; } 2>&1); then
+        # An unusable move must never fail the job: it only costs the cache hits of the workspace crates. The checkout moves to
+        # a side folder first and replaces the stable folder only once it has moved: where it cannot move (Windows), the clone
+        # kept at the stable path survives and only this commit is fetched into it, instead of a fresh clone and a checkout
+        # of every file each job (a median 49 s of the Windows runner, 2026-10-29).
+        incoming="$stable.incoming"
+        if ! why=$({ mkdir -p "$root" && cd "$root" && rm -rf "$incoming" && mv "$ws" "$incoming"; } 2>&1) ||
+          ! why=$({ rm -rf "$stable" && mv "$incoming" "$stable"; } 2>&1 || { mv "$incoming" "$ws" 2>/dev/null; false; }); then
           # Under act on Windows the runner keeps a handle on the work folder, so it cannot move. Keep a clone at the stable
           # path instead and bring it to this commit (a local clone and fetch: hard links, no network), with every file
           # that is not git's removed; ignored files (no build output lives there: the build folder is elsewhere) stay.
