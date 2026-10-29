@@ -68,6 +68,26 @@ pub mod prefix {
     pub const STORE: &str = "debrief-store";
 }
 
+/// The private folders of the endpoints alive in this process (Unix), so a process that must end without running
+/// destructors (a child whose lifeline closed calls `process::exit`) can still remove them: [`remove_live`].
+#[cfg(unix)]
+static LIVE: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(unix)]
+fn live() -> std::sync::MutexGuard<'static, Vec<PathBuf>> {
+    LIVE.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Removes the private folder of every endpoint still alive in this process. Call it right before ending the process
+/// without unwinding (`std::process::exit`): a host that is stopped while it starts a child (the socket exists, the
+/// child has not connected yet) would otherwise leave `<prefix>-<random>` behind in the temp folder, for good.
+pub fn remove_live() {
+    #[cfg(unix)]
+    for dir in std::mem::take(&mut *live()) {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
 /// A listening address owned by the supervisor; the private directory is removed on drop.
 pub struct PrivateEndpoint {
     pub address: String,
@@ -120,6 +140,7 @@ impl PrivateEndpoint {
             return Ok(None);
         }
         std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
+        live().push(dir.clone());
         let endpoint = PrivateEndpoint {
             address: sock.to_string_lossy().into_owned(),
             dir: Some(dir.clone()),
@@ -154,6 +175,8 @@ fn harden_dir(dir: &std::path::Path) -> io::Result<()> {
 impl Drop for PrivateEndpoint {
     fn drop(&mut self) {
         if let Some(d) = self.dir.take() {
+            #[cfg(unix)]
+            live().retain(|l| *l != d);
             let _ = std::fs::remove_dir_all(d);
         }
     }
@@ -187,6 +210,22 @@ mod tests {
         assert_ne!(e.address, other.address);
         drop(e);
         assert!(!dir.exists());
+    }
+
+    /// Regression (macOS CI temp-leak check, `debrief-plugin-*`): a worker stopped through its lifeline while it started a
+    /// plugin ended with `process::exit`, which runs no destructors, so the plugin's endpoint folder stayed.
+    #[cfg(unix)]
+    #[test]
+    fn remove_live_removes_the_folders_of_endpoints_still_alive() {
+        let base = tempfile::tempdir().unwrap();
+        let e = PrivateEndpoint::create_in(base.path(), "debrief-live", harden_dir)
+            .unwrap()
+            .unwrap();
+        let dir = e.dir().unwrap().to_path_buf();
+        assert!(dir.is_dir());
+        remove_live();
+        assert!(!dir.exists(), "the folder is gone without the endpoint being dropped");
+        drop(e); // dropping afterwards is harmless
     }
 
     /// Regression: a step after `mkdir` that fails (the permission hardening) left the new folder behind, unowned.

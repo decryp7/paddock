@@ -12,6 +12,12 @@
 
 [test-groups]
 child-processes = { max-threads = 1 }
+# The shell's unit tests (debrief-app's lib): nearly every one builds a test app, which starts the plugins binary (its
+# manifests, then a process per plugin it uses) and an in-process store. Fourteen at once on the Mac runner meant 84 plugin
+# processes and a load of 116 on 14 cores (CI 7096 and the watch after it; apps/debrief/docs/performance.md). Six at a time;
+# the rest of the workspace fills the other threads. The filter is the whole binary, so a new test there joins the group
+# without a list to update (conformance/test/ci-actions.test.mjs checks it).
+app-plugin-processes = { max-threads = 6 }
 
 [profile.default]
 # One test per core but one (Paddock rule 13), so a full run leaves the machine usable.
@@ -34,6 +40,10 @@ filter = '''
 '''
 test-group = 'child-processes'
 retries = 2
+
+[[profile.default.overrides]]
+filter = 'package(debrief-app) & kind(lib)'
+test-group = 'app-plugin-processes'
 
 # CI (.gitea/workflows/debrief.yml (repo root)): every failure reported, no retries, a JUnit report.
 [profile.ci]
