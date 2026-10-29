@@ -1,5 +1,4 @@
-import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, test, type Page } from '@decryp7/paddock-e2e';
 import { PD_ICON_DOTS } from '../projects/paddock-ui/icons/src/paths';
 
 const DOTS = Object.fromEntries(Object.entries(PD_ICON_DOTS).map(([k, v]) => [k, (v ?? []).map((d) => [d[0], d[1]])]));
@@ -16,8 +15,7 @@ async function open(page: Page, theme: string, accent: string, density = 'standa
 for (const theme of THEMES) {
   test(`axe finds no violations (${theme})`, async ({ page }) => {
     await open(page, theme, 'debrief');
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
-    expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+    expect(await axeViolations(page)).toEqual([]);
   });
 }
 

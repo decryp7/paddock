@@ -86,3 +86,9 @@ export class RenameDialog {}
   assert.equal(found.filter((f) => f.endsWith('paddock/dialog-frame-footer')).length, 2, found.join('\n'));
   assert.deepEqual(await lint({ 'src/app/plain.component.ts': dialog.replace('pc-rename-dialog', 'pc-plain').replace('RenameDialog', 'Plain') }), []);
 });
+
+test('a browser spec runs axe through the kit; an axe.ts helper and unit specs outside e2e may import it', async () => {
+  const code = "import AxeBuilder from '@axe-core/playwright';\nexport const a = AxeBuilder;\n";
+  assert.deepEqual(await lint({ 'e2e/x.spec.ts': code, 'app/e2e/y.e2e.ts': code }), ['e2e/x.spec.ts: paddock/e2e-axe-through-kit', 'app/e2e/y.e2e.ts: paddock/e2e-axe-through-kit']);
+  assert.deepEqual(await lint({ 'e2e/axe.ts': code, 'src/app/z.ts': code }), []);
+});

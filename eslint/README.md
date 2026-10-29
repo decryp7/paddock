@@ -25,6 +25,7 @@ as Debrief's two accessibility rules), `storeFlagsAllowedIn` (regex of the file 
 | `paddock/store-rules` | 30, 31, 32 | no `loading`/`error` flags in `withState`; `signalStore` in `*.store.ts`, `protectedState` on; `providedIn: 'root'` needs `// app-wide:`; at most two injected stores |
 | `no-restricted-imports` (preset) | 31 | `patchState` only in `*.store.ts`, shared store features and specs |
 | `paddock/no-raw-style-values` | design guide | no hard-coded colours, font families or sizes in component `styles` and `*-styles.ts` |
+| `paddock/e2e-axe-through-kit` | ER-12 | browser specs (`e2e/`) run axe through `axeViolations` of `@decryp7/paddock-e2e`, which waits for animations; an `axe.ts` helper may import `@axe-core/playwright` |
 | `paddock/template-no-ng-class` | 33 | `[class.x]` instead of `[ngClass]` |
 | `paddock/template-no-inner-html` | security | no `[innerHTML]` / `[outerHTML]` binding |
 | angular-eslint (preset) | 33 | `prefer-inject`, `prefer-signals`, `prefer-signal-model`, `template/prefer-control-flow`, `template/prefer-class-binding` |

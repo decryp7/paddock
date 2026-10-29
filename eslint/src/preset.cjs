@@ -87,6 +87,13 @@ function preset(options) {
       },
     },
     {
+      // ER-12: browser specs run axe through the kit, which waits for animations; an app's own axe helper (`axe.ts`) may wrap it.
+      files: ['e2e/**/*.ts', '**/e2e/**/*.ts'],
+      ignores: ['**/axe.ts'],
+      plugins: { paddock: plugin },
+      rules: { 'paddock/e2e-axe-through-kit': 'error' },
+    },
+    {
       // ADR 0026 §2: a dialog content declares its actions; the frame draws the footer (inline templates of `*dialog*.ts`).
       files: ['**/*dialog*.ts/*.html', '**/*dialog*.html'],
       // The frame itself draws the footer; specs plant footers on purpose.

@@ -84,9 +84,7 @@ for (const colorScheme of THEMES) {
       // The top and the bottom group are each a list (not navigation landmarks of their own) of list items holding the links.
       await expect(page.getByRole('list').filter({ has: page.locator('a[data-page-link]') })).toHaveCount(2);
       await expect(page.getByRole('listitem').filter({ has: page.locator('a[data-page-link]') })).toHaveCount(await app.sidebar.links.count());
-      const { default: AxeBuilder } = await import('@axe-core/playwright');
-      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa', 'best-practice']).analyze();
-      expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+      expect(await axeViolations(page, { extraTags: ['best-practice'] })).toEqual([]);
     });
 
     test('the sidebar and the status bar pass axe, and show no console errors (CSP)', async ({ app, page, pageErrors }) => {

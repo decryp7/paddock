@@ -12,6 +12,8 @@ export interface AxeOptions {
   /** Only these parts of the page (CSS selectors). */
   readonly include?: readonly string[];
   readonly exclude?: readonly string[];
+  /** Tags checked besides `WCAG_TAGS` (`best-practice`, say). */
+  readonly extraTags?: readonly string[];
   /** Report rule ids only, without the nodes. */
   readonly idsOnly?: boolean;
 }
@@ -31,7 +33,7 @@ export async function settleTransitions(page: Page): Promise<void> {
 /** The page's axe violations as `rule: target, target` lines (empty: none), against `WCAG_TAGS`. */
 export async function axeViolations(page: Page, options: AxeOptions = {}): Promise<string[]> {
   await settleTransitions(page);
-  let builder = new AxeBuilder({ page }).withTags([...WCAG_TAGS]);
+  let builder = new AxeBuilder({ page }).withTags([...WCAG_TAGS, ...(options.extraTags ?? [])]);
   for (const s of options.include ?? []) builder = builder.include(s);
   for (const s of options.exclude ?? []) builder = builder.exclude(s);
   const results = await builder.analyze();
