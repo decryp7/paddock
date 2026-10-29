@@ -73,7 +73,7 @@ describe('applyJobEvent', () => {
   });
 
   it('parseJobEvent drops anything without a known kind and a numeric job id', () => {
-    for (const bad of [null, 'x', 4, {}, { kind: 'progress' }, { kind: 'paused', jobId: 1 }, { kind: 'done', jobId: '1' }, { kind: 'done', jobId: Number.NaN }]) {
+    for (const bad of [null, 'x', 4, {}, { kind: 'progress' }, { kind: 'paused', jobId: 1 }, { kind: 'done', jobId: '1' }, { kind: 'done', jobId: Number.NaN }, { kind: 'started', jobId: 1 }, { kind: 'progress', jobId: 1, phase: 'x' }, { kind: 'cancelled', jobId: 1 }, { kind: 'failed', jobId: 1, error: {} }, { kind: 'done', jobId: 1 }]) {
       expect(parseJobEvent(bad)).toBeNull();
     }
   });
@@ -152,5 +152,35 @@ describe('JobsService', () => {
     expect(jobs.jobs()[0]).toMatchObject({ id: 5, cancelling: false });
     await jobs.stopWaiting(5);
     expect(jobs.any()).toBe(true);
+  });
+
+  it('keeps a row whose progress event raced a refused Cancel, with its title', async () => {
+    const events: ((e: JobEvent) => void)[] = [];
+    const backend = {
+      jobEvents: (l: (e: JobEvent) => void) => (events.push(l), () => undefined),
+      jobCancel: () => {
+        events[0]!(progress(11));
+        return Promise.resolve(false);
+      },
+    };
+    TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: backend }] });
+    const jobs = TestBed.inject(JobsService);
+    events[0]!(started(11));
+    await jobs.cancel(11);
+    expect(jobs.jobs()[0]).toMatchObject({ id: 11, title: 'Job 11', cancelling: false });
+  });
+
+  it('runs the one-second clock only while a job runs', async () => {
+    vi.useFakeTimers();
+    TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: new MockBackend() }] });
+    const jobs = TestBed.inject(JobsService);
+    const backend = TestBed.inject(BACKEND) as MockBackend;
+    expect(vi.getTimerCount()).toBe(0);
+    backend.holdJobs = true;
+    const pending = backend.runBenchmark('qwen3.5-4b-q4_k_m').catch(() => undefined);
+    expect(vi.getTimerCount()).toBe(1);
+    await jobs.cancel(jobs.jobs()[0]!.id);
+    await pending;
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

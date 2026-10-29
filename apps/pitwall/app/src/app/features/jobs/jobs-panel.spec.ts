@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import type { JobEvent } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { JobsPanel } from './jobs-panel';
@@ -89,5 +90,20 @@ describe('JobsPanel', () => {
     expect(live!.textContent).toContain('Loading the model');
     expect(el.querySelector('button[aria-label^="Cancel"]')!.getAttribute('aria-label')).toBe('Cancel: Loading the model');
     expect(el.querySelector('mat-progress-bar')!.getAttribute('aria-label')).toBe('Loading the model: Working on it');
+  });
+
+  it('shows the backend phase, not a local label, while Cancel is pending', async () => {
+    const listeners: ((e: JobEvent) => void)[] = [];
+    const backend = { jobEvents: (l: (e: JobEvent) => void) => (listeners.push(l), () => undefined), jobCancel: () => new Promise<boolean>(() => undefined), jobStopWaiting: () => Promise.resolve(false) };
+    TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: backend }] });
+    const fixture = TestBed.createComponent(JobsPanel);
+    const el = fixture.nativeElement as HTMLElement;
+    listeners[0]!({ kind: 'started', jobId: 1, title: 'Updating Pitwall' });
+    listeners[0]!({ kind: 'progress', jobId: 1, phase: 'Writing the weights', done: 1, total: null, unit: 'items', canStopWaiting: false, elapsedSecs: 1, cancellable: true, notCancellableReason: null });
+    fixture.detectChanges();
+    el.querySelector<HTMLButtonElement>('button[aria-label^="Cancel"]')!.click();
+    fixture.detectChanges();
+    expect(el.querySelector('.phase')!.textContent).toBe('Writing the weights');
+    expect(el.querySelector<HTMLButtonElement>('button[aria-label^="Cancel"]')!.disabled).toBe(true);
   });
 });
