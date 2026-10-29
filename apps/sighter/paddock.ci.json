@@ -1,3 +1,4 @@
 {
-  "$comment": "No CI yet: this app is docs only. Its changes mark only the link check (scripts/affected.mjs); when it gets code, give it a Cargo workspace and commands here (a ci.yml leg) or a workflow of its own."
+  "$comment": "Sighter's CI contract (scripts/affected.mjs, .gitea/actions/app-gates, ADR 0014 §6; the field list is in .gitea/actions/README.md): a Linux leg of ci.yml for the pure core (crates/sighter-core): fmt, clippy, nextest, doc tests and deny. The core has no OS-specific code yet, so there are no Windows or macOS legs; the capture and input adapters add them. There is no UI, installer or release yet.",
+  "cargo": "."
 }
