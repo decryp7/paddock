@@ -175,13 +175,43 @@ fn search_finds_files_and_symbols_case_insensitively_and_treats_wildcards_as_tex
 }
 
 #[test]
-fn the_source_never_starts_a_process() {
-    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    for entry in std::fs::read_dir(src).unwrap() {
-        let path = entry.unwrap().path();
-        let text = std::fs::read_to_string(&path).unwrap();
-        for forbidden in ["Command::new", "std::process", "tokio::process"] {
-            assert!(!text.contains(forbidden), "{} mentions {forbidden}", path.display());
-        }
-    }
+fn stored_import_targets_pass_through_redaction() {
+    use pacenotes_core::{FileIdAllocator, Fingerprint, Language, Span};
+    use pacenotes_index::{Batch, FileFacts, ImportFact, Upsert};
+    let ws = workspace(&[]);
+    let mut opened = IndexStore::open(&ws.path("index.db")).unwrap();
+    let span = Span::lines(1, 1).unwrap();
+    let facts = FileFacts {
+        language: Language::parse("go").unwrap(),
+        symbols: vec![],
+        imports: vec![
+            ImportFact {
+                target: "postgres://app:hunter2pw@db.example.invalid/app".into(),
+                span,
+            },
+            ImportFact {
+                target: "fmt".into(),
+                span,
+            },
+        ],
+        calls: vec![],
+        chunks: vec![],
+        partial: false,
+        has_errors: false,
+    };
+    let batch = Batch {
+        upserts: vec![Upsert {
+            file_id: FileIdAllocator::new().issue().unwrap(),
+            path: p("main.go"),
+            fingerprint: Fingerprint::of_content(b"x"),
+            size: 1,
+            facts: Some(facts),
+        }],
+        next_file_sequence: 1,
+        ..Batch::default()
+    };
+    opened.store.commit(&batch).unwrap();
+    let dump = opened.store.dump_text().unwrap();
+    assert!(dump.contains("postgres://[redacted]@db.example.invalid/app") && dump.contains("fmt"));
+    assert!(!dump.contains("hunter2pw"));
 }

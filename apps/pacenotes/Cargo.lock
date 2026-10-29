@@ -2027,13 +2027,16 @@ name = "pacenotes-index"
 version = "0.1.0"
 dependencies = [
  "pacenotes-core",
+ "pacenotes-git",
  "pacenotes-parse",
  "pacenotes-trap",
  "paddock-jobs",
  "paddock-testkit",
  "regex",
  "rusqlite",
+ "serde",
  "thiserror",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]

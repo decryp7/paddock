@@ -51,7 +51,7 @@ fn indexing_the_trap_runs_nothing_leaks_nothing_and_escapes_nothing() {
         .collect();
 
     let seen = Observations {
-        children_started: Vec::new(), // the index has no way to start one: no process API, and the source double records none
+        children_started: Vec::new(), // see `no_crate_of_the_engine_can_start_a_process`: none of the crates can
         files_read: fs.reads(),
         indexed_files: known.iter().map(|k| k.path.to_string()).collect(),
         everything_stored_or_replied: served,
@@ -100,5 +100,65 @@ fn a_second_run_over_the_trap_is_stable() {
     let first = ix.run(&mut opened.store, &CancelToken::new()).unwrap();
     let second = ix.run(&mut opened.store, &CancelToken::new()).unwrap();
     assert_eq!((second.unchanged, second.generation), (first.added, None));
+    assert!(!trap.marker.exists());
+}
+
+/// The verdict's "runs nothing" rests on this: the crates that read a repository contain no way to start a process.
+#[test]
+fn no_crate_of_the_engine_can_start_a_process() {
+    let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    for name in ["pacenotes-core", "pacenotes-parse", "pacenotes-index", "pacenotes-git"] {
+        let src = crates.join(name).join("src");
+        let mut seen = 0;
+        for entry in std::fs::read_dir(&src).unwrap() {
+            let path = entry.unwrap().path();
+            let text = std::fs::read_to_string(&path).unwrap();
+            seen += 1;
+            for forbidden in ["Command::new", "std::process", "tokio::process", "gix::command", "gix_command"] {
+                assert!(!text.contains(forbidden), "{} mentions {forbidden}", path.display());
+            }
+        }
+        assert!(seen > 2, "{name}: the scan found {seen} files");
+    }
+}
+
+/// The history door of the same trap: the repository is opened by `pacenotes-git` (which refuses what leads out), wrapped in the
+/// guard, and the secret file in its history is withheld while the rest of the history works.
+#[test]
+fn the_guarded_history_of_the_trap_withholds_the_secret_and_serves_the_rest() {
+    use pacenotes_core::Rev;
+    use pacenotes_core::ports::{History, HistoryError};
+    use pacenotes_index::GuardedHistory;
+
+    let scratch = Scratch::new();
+    let trap = generate(&scratch).unwrap();
+    // the trap points its alternates outside the workspace: git's reader refuses the repository until that line is gone
+    assert!(pacenotes_git::open(&trap.workspace).is_err());
+    std::fs::remove_file(trap.workspace.join(".git/objects/info/alternates")).unwrap();
+    let guarded = GuardedHistory::new(pacenotes_git::open(&trap.workspace).unwrap(), Denylist::new());
+    let live = CancelToken::new();
+    let head = guarded.head(&live).unwrap();
+    assert_eq!(
+        guarded.read_at(&head, &p(".env"), 1 << 20, &live),
+        Err(HistoryError::Denied(p(".env")))
+    );
+    assert!(
+        guarded.inner().read_at(&head, &p(".env"), 1 << 20, &live).is_ok(),
+        "the bare port does serve it: the guard is the door"
+    );
+    assert!(
+        guarded
+            .read_at(&head, &p("src/lib.rs"), 1 << 20, &live)
+            .unwrap()
+            .starts_with(b"trap_macros")
+    );
+    let log = guarded.inner().log(&head, 10, &live).unwrap();
+    assert_eq!(log.len(), 2);
+    let first = Rev::Commit(log[1].commit.clone());
+    let changes = guarded.changed_between(&first, &head, 10, &live).unwrap();
+    assert_eq!(
+        changes.changes.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(),
+        ["src/extra.rs"]
+    );
     assert!(!trap.marker.exists());
 }
