@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-panels`: the mouse button comes through a `Pointer` port
+- New `paddock_panels::tauri::Pointer` and `PanelsBuilder::pointer`: the drag session's blur rule, the tracker thread and the `pointer_button_down` command read the primary button from the layer's pointer (the OS by default). Tests inject their own and never read the user's mouse; two `paddock-panels` tests failed when the user held the button during a run.
+
 ### `providePaddockMaterial`: tooltips wait 500 ms
 - `providePaddockMaterial()` provides `MAT_TOOLTIP_DEFAULT_OPTIONS` with `showDelay: 500` (`PADDOCK_TOOLTIP_OPTIONS`), the design guide's delay for the tooltip every icon-only button carries. Every app that provides it gets the delay without setting it per tooltip.
 
