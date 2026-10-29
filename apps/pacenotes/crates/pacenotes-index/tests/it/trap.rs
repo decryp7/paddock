@@ -103,22 +103,37 @@ fn a_second_run_over_the_trap_is_stable() {
     assert!(!trap.marker.exists());
 }
 
-/// The verdict's "runs nothing" rests on this: the crates that read a repository contain no way to start a process.
+/// The verdict's "runs nothing" rests on this: the crates that read a repository contain no way to start a process. The scan goes
+/// through every folder under `src`, not only the top.
 #[test]
 fn no_crate_of_the_engine_can_start_a_process() {
-    let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    for name in ["pacenotes-core", "pacenotes-parse", "pacenotes-index", "pacenotes-git"] {
-        let src = crates.join(name).join("src");
-        let mut seen = 0;
-        for entry in std::fs::read_dir(&src).unwrap() {
+    fn files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
+            if path.is_dir() {
+                files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+    let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    for name in [
+        "pacenotes-core",
+        "pacenotes-parse",
+        "pacenotes-index",
+        "pacenotes-git",
+        "pacenotes-function-api",
+    ] {
+        let mut found = Vec::new();
+        files(&crates.join(name).join("src"), &mut found);
+        assert!(found.len() > 2, "{name}: the scan found {} files", found.len());
+        for path in found {
             let text = std::fs::read_to_string(&path).unwrap();
-            seen += 1;
             for forbidden in ["Command::new", "std::process", "tokio::process", "gix::command", "gix_command"] {
                 assert!(!text.contains(forbidden), "{} mentions {forbidden}", path.display());
             }
         }
-        assert!(seen > 2, "{name}: the scan found {seen} files");
     }
 }
 

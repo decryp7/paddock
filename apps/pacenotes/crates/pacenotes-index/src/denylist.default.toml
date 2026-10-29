@@ -3,7 +3,8 @@
 # The format is written to be owned by a shared crate later (rule 42: Debrief and Sighter mask secrets too); nothing in it is
 # specific to Pacenotes. `version` is the format version. Matching is case-insensitive.
 #
-#   [names]       exact file names, glob patterns for file names (`*` any run, `?` one character), and `allow`: names that are
+#   [names]       exact file names, glob patterns for file names (`*` any run, `?` one character), `plain_globs` (the same, for
+#                 names that contain no dot), and `allow`: names that are
 #                 not secrets although a rule above matches them (templates, public keys). `allow` wins over `exact` and `globs`.
 #   [extensions]  `list`: file extensions of key material; a file is denied when an extension of its name is in the list and is
 #                 the last one, or is followed only by `backups` suffixes (`server.pem.bak`).
@@ -22,9 +23,11 @@ exact = [
 globs = [
   "*.env", ".env.*", ".env_*", ".env-*",
   "secrets.*", "*.tfstate*", "terraform.tfstate*",
-  "*deploy*key*", "service-account*",
+  "service-account*",
   "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*",
 ]
+# like `globs`, but only for names with no dot at all: `deploy_key` and `github-deploy-key` are keys, `deploy-keys.md` is a page
+plain_globs = ["*deploy*key*"]
 allow = [".env.example", ".env.sample", ".env.template", ".env.dist", "*.pub"]
 
 [extensions]

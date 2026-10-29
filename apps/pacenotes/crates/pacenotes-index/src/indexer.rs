@@ -9,6 +9,7 @@ use paddock_jobs::{CancelReason, CancelToken, Counter, JobError, Workers, par_ma
 use crate::denylist::{Denylist, redact};
 use crate::facts::{SourceError, SymbolSource};
 use crate::fs::{FsError, WorkspaceFs};
+use crate::ignore::{Ignore, NoIgnore};
 use crate::plan::{Current, plan_changes};
 use crate::progress::{EpochClock, NoProgress, Progress, SystemEpoch};
 use crate::snapshot::{SnapshotLimits, snapshot_with};
@@ -71,6 +72,8 @@ pub struct IndexReport {
     pub shortcut_hits: usize,
     /// Withheld by the secret denylist (shown to the user as "withheld").
     pub denied: u32,
+    /// Left out by the project's ignore rules.
+    pub ignored: u32,
     /// Links skipped.
     pub links: u32,
     /// Special files, bad names, folders too deep or unreadable.
@@ -113,6 +116,8 @@ pub struct Indexer<'a> {
     pub parse_workers: Workers,
     /// The clock that stamps when a file was read.
     pub clock: &'a dyn EpochClock,
+    /// The project's ignore rules (`.gitignore`); nothing is ignored by default.
+    pub ignore: &'a dyn Ignore,
 }
 
 fn fs_error(e: FsError) -> IndexError {
@@ -186,6 +191,7 @@ impl<'a> Indexer<'a> {
     pub fn new(fs: &'a dyn WorkspaceFs, source: &'a dyn SymbolSource, denylist: &'a Denylist) -> Indexer<'a> {
         static NO_PROGRESS: NoProgress = NoProgress;
         static SYSTEM: SystemEpoch = SystemEpoch;
+        static NO_IGNORE: NoIgnore = NoIgnore;
         Indexer {
             fs,
             source,
@@ -195,6 +201,7 @@ impl<'a> Indexer<'a> {
             read_workers: Workers::one(),
             parse_workers: Workers::one(),
             clock: &SYSTEM,
+            ignore: &NO_IGNORE,
         }
     }
 
@@ -203,7 +210,7 @@ impl<'a> Indexer<'a> {
     pub fn run(&self, store: &mut IndexStore, cancel: &CancelToken) -> Result<IndexReport, IndexError> {
         let mut report = IndexReport::default();
         self.progress.phase("walk", "Finding files", None);
-        let snap = snapshot_with(self.fs, self.denylist, &self.limits.snapshot, cancel, self.progress).map_err(|e| {
+        let snap = snapshot_with(self.fs, self.denylist, self.ignore, &self.limits.snapshot, cancel, self.progress).map_err(|e| {
             if cancel.is_cancelled() {
                 IndexError::Cancelled
             } else {
@@ -213,6 +220,7 @@ impl<'a> Indexer<'a> {
         self.progress.set_total(snap.files.len() as u64);
         report.denied = snap.denied;
         report.links = snap.links;
+        report.ignored = snap.ignored;
         report.skipped_other = snap.special + snap.bad_names + snap.too_deep + snap.unreadable;
         report.walk_truncated = snap.truncated;
 

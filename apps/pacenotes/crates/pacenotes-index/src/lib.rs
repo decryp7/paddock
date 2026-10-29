@@ -10,6 +10,7 @@ pub mod denylist;
 pub mod facts;
 pub mod fs;
 pub mod guard;
+pub mod ignore;
 pub mod indexer;
 pub mod plan;
 pub mod progress;
@@ -20,6 +21,7 @@ pub use denylist::{DEFAULT_PACK, Denied, Denylist, PackError, glob_match, redact
 pub use facts::{CallFact, ChunkFact, FileFacts, ImportFact, SourceError, SymbolFact, SymbolSource};
 pub use fs::{DirEntry, DiskFs, EntryKind, FsError, WorkspaceFs};
 pub use guard::GuardedHistory;
+pub use ignore::{Ignore, NoIgnore};
 pub use indexer::{IndexError, IndexLimits, IndexReport, Indexer};
 pub use plan::{Current, Known, Plan, plan_changes};
 pub use progress::{EpochClock, NoProgress, Progress, SystemEpoch};

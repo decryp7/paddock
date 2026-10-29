@@ -66,6 +66,8 @@ struct NamesFile {
     #[serde(default)]
     globs: Vec<String>,
     #[serde(default)]
+    plain_globs: Vec<String>,
+    #[serde(default)]
     allow: Vec<String>,
 }
 
@@ -98,6 +100,7 @@ struct RedactFile {
 struct Pack {
     exact: Vec<String>,
     globs: Vec<String>,
+    plain_globs: Vec<String>,
     allow: Vec<String>,
     extensions: Vec<String>,
     backups: Vec<String>,
@@ -124,6 +127,7 @@ impl Pack {
         Ok(Pack {
             exact: lower(file.names.exact),
             globs: lower(file.names.globs),
+            plain_globs: lower(file.names.plain_globs),
             allow: lower(file.names.allow),
             extensions: lower(file.extensions.list),
             backups: lower(file.extensions.backups),
@@ -141,6 +145,7 @@ impl Pack {
         Pack {
             exact: Vec::new(),
             globs: Vec::new(),
+            plain_globs: Vec::new(),
             allow: Vec::new(),
             extensions: Vec::new(),
             backups: Vec::new(),
@@ -183,7 +188,8 @@ pub fn glob_match(pattern: &str, text: &str) -> bool {
     pi == p.len()
 }
 
-/// Which paths are never read, indexed, served or searched. The default pack can be extended, never shrunk.
+/// Which paths are never read, indexed, served or searched. The default pack always applies; a user pack and the extra names
+/// are added to it, so the list can be extended and never shrunk.
 #[derive(Debug, Clone)]
 pub struct Denylist {
     pack: Option<Pack>,
@@ -207,8 +213,9 @@ impl Denylist {
         }
     }
 
-    /// A list from a pack file's text (the same format as the default). The default is not added to it: a user pack is
-    /// complete, so a project can only extend the default through [`Denylist::with_extra`].
+    /// The default pack plus a user pack in the same format. The user pack **adds** names, patterns, extensions, folders and
+    /// redaction rules; what the default denies stays denied (a user `allow` cannot lift it) and the default's redaction
+    /// rules always run first.
     pub fn from_pack(text: &str) -> Result<Denylist, PackError> {
         Ok(Denylist {
             pack: Some(Pack::parse(text)?),
@@ -227,16 +234,23 @@ impl Denylist {
         }
     }
 
-    fn pack(&self) -> &Pack {
-        self.pack.as_ref().unwrap_or_else(|| default_pack())
-    }
-
-    /// Why `path` is withheld, or `None` when it may be read.
+    /// Why `path` is withheld, or `None` when it may be read: the default pack first, then the user pack.
     pub fn check(&self, path: &RepoPath) -> Option<Denied> {
-        let pack = self.pack();
-        if pack.everything {
+        let default = default_pack();
+        if default.everything || self.pack.as_ref().is_some_and(|u| u.everything) {
             return Some(Denied::Everything);
         }
+        self.check_with(default, path)
+            .or_else(|| self.pack.as_ref().and_then(|user| self.check_with(user, path)))
+            .or_else(|| self.check_extra(path))
+    }
+
+    fn check_extra(&self, path: &RepoPath) -> Option<Denied> {
+        let name = path.as_str().rsplit('/').next().unwrap_or("").to_lowercase();
+        (self.extra_names.contains(&name) || self.extra_suffixes.iter().any(|s| name.ends_with(s.as_str()))).then_some(Denied::Extra)
+    }
+
+    fn check_with(&self, pack: &Pack, path: &RepoPath) -> Option<Denied> {
         let lower = path.as_str().to_lowercase();
         let segments: Vec<&str> = lower.split('/').collect();
         let name = segments.last().copied().unwrap_or("");
@@ -248,14 +262,15 @@ impl Denylist {
         if pack.allow.iter().any(|a| glob_match(a, name)) {
             return None;
         }
-        if pack.exact.iter().any(|e| e == name) || pack.globs.iter().any(|g| glob_match(g, name)) {
+        let plain = !name.contains('.');
+        if pack.exact.iter().any(|e| e == name)
+            || pack.globs.iter().any(|g| glob_match(g, name))
+            || (plain && pack.plain_globs.iter().any(|g| glob_match(g, name)))
+        {
             return Some(Denied::Name);
         }
         if has_key_extension(name, &pack.extensions, &pack.backups) {
             return Some(Denied::Extension);
-        }
-        if self.extra_names.iter().any(|n| n == name) || self.extra_suffixes.iter().any(|s| name.ends_with(s.as_str())) {
-            return Some(Denied::Extra);
         }
         None
     }
@@ -263,7 +278,7 @@ impl Denylist {
     /// Masks what looks like a credential in `text` with this list's redaction rules.
     pub fn redact<'a>(&self, text: &'a str) -> Cow<'a, str> {
         let mut out = Cow::Borrowed(text);
-        for (re, replacement) in &self.pack().redact {
+        for (re, replacement) in default_pack().redact.iter().chain(self.pack.iter().flat_map(|p| p.redact.iter())) {
             if re.is_match(&out) {
                 out = Cow::Owned(re.replace_all(&out, replacement.as_str()).into_owned());
             }
@@ -330,17 +345,25 @@ mod tests {
         assert!(Denylist::from_pack("not toml [").is_err());
     }
 
+    /// ADR 0005: a user pack extends the default and never shrinks it.
     #[test]
-    fn a_user_pack_replaces_the_default() {
-        let d = Denylist::from_pack("version = 1\n[names]\nexact = [\"mine.txt\"]\n[extensions]\n[folders]\nlist = [\"secret-dir\"]\n")
-            .unwrap();
-        assert_eq!(d.check(&p("a/Mine.txt")), Some(Denied::Name));
+    fn a_user_pack_merges_over_the_default_and_cannot_lift_it() {
+        let pack = "version = 1\n[names]\nexact = [\"mine.txt\"]\nallow = [\".env\", \"id_rsa\", \"*.env\", \"prod.env\"]\n[extensions]\nlist = [\"zzz\"]\n[folders]\nlist = [\"secret-dir\"]\n[[redact]]\nname = \"mine\"\nregex = \"MINE-[0-9]+\"\nreplace = \"[mine]\"\n";
+        let d = Denylist::from_pack(pack).unwrap();
+        assert_eq!(d.check(&p("a/Mine.txt")), Some(Denied::Name), "the user's name is added");
         assert_eq!(d.check(&p("secret-dir/x")), Some(Denied::Folder));
-        assert_eq!(d.check(&p(".env")), None, "a complete user pack does not inherit the default");
-        assert_eq!(
-            d.redact("password = 'abcdefgh'"),
-            "password = 'abcdefgh'",
-            "and has no redaction rules unless it lists them"
+        assert_eq!(d.check(&p("k.zzz")), Some(Denied::Extension));
+        for default_denied in [".env", "id_rsa", "prod.env", "certs/x.pem", ".ssh/known_hosts"] {
+            assert!(
+                d.check(&p(default_denied)).is_some(),
+                "{default_denied}: the default still denies it, whatever the user allows"
+            );
+        }
+        assert_eq!(d.check(&p("src/lib.rs")), None);
+        let out = d.redact("password = 'abcdefgh' and MINE-42");
+        assert!(
+            out.contains("[mine]") && !out.contains("abcdefgh"),
+            "the default rules run, then the user's: {out}"
         );
     }
 
@@ -447,6 +470,9 @@ mod tests {
             "config/gcloud/readme.md",
             "secrets_manager.rs",
             "deploy.sh",
+            "docs/deploy-keys.md",
+            "deploy-keys.txt",
+            "notes/deploy.key.md",
             "a.pem.rs",
             "kubectl.md",
             "notes.age.md",

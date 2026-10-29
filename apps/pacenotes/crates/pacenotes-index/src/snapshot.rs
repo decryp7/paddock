@@ -5,6 +5,7 @@ use paddock_jobs::CancelToken;
 
 use crate::denylist::Denylist;
 use crate::fs::{EntryKind, FsError, WorkspaceFs};
+use crate::ignore::{Ignore, NoIgnore};
 use crate::progress::{NoProgress, Progress};
 
 /// Bounds of a walk.
@@ -44,19 +45,22 @@ pub struct Snapshot {
     pub too_deep: u32,
     /// Folders that could not be listed.
     pub unreadable: u32,
+    /// Files and folders the project's ignore rules leave out.
+    pub ignored: u32,
     /// True when `max_entries` stopped the walk.
     pub truncated: bool,
 }
 
 /// Walks the workspace with `fs`, skipping denied names, links and special files. Never reads a file's content.
 pub fn snapshot(fs: &dyn WorkspaceFs, denylist: &Denylist, limits: &SnapshotLimits, cancel: &CancelToken) -> Result<Snapshot, FsError> {
-    snapshot_with(fs, denylist, limits, cancel, &NoProgress)
+    snapshot_with(fs, denylist, &NoIgnore, limits, cancel, &NoProgress)
 }
 
 /// [`snapshot`] that reports each folder's entries to `progress` as it goes (a growing count: the total is not known yet).
 pub fn snapshot_with(
     fs: &dyn WorkspaceFs,
     denylist: &Denylist,
+    ignore: &dyn Ignore,
     limits: &SnapshotLimits,
     cancel: &CancelToken,
     progress: &dyn Progress,
@@ -99,6 +103,8 @@ pub fn snapshot_with(
             match entry.kind {
                 EntryKind::Link => out.links += 1,
                 EntryKind::Other => out.special += 1,
+                EntryKind::File(_) if !ignore.visible_file(&path) => out.ignored += 1,
+                EntryKind::Dir if !ignore.visible_dir(&path) => out.ignored += 1,
                 EntryKind::File(size) => {
                     if let Some(ns) = entry.modified_ns {
                         out.modified.insert(path.clone(), ns);
@@ -181,6 +187,36 @@ mod tests {
         );
         assert!(!s.truncated);
         assert_eq!(s.modified.len(), 4, "every file carries its modification time");
+    }
+
+    /// Ignores `src/deep` and `b.rs`.
+    struct Some_;
+
+    impl Ignore for Some_ {
+        fn visible_file(&self, path: &RepoPath) -> bool {
+            path.as_str() != "b.rs"
+        }
+
+        fn visible_dir(&self, path: &RepoPath) -> bool {
+            path.as_str() != "src/deep"
+        }
+    }
+
+    #[test]
+    fn ignored_files_and_folders_are_left_out_counted_and_a_denied_name_stays_denied() {
+        let s = snapshot_with(
+            &fake(),
+            &Denylist::new(),
+            &Some_,
+            &SnapshotLimits::default(),
+            &CancelToken::new(),
+            &NoProgress,
+        )
+        .unwrap();
+        let names: Vec<_> = s.files.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(names, ["a.rs", "src/lib.rs"]);
+        assert_eq!(s.ignored, 2, "b.rs and the src/deep folder");
+        assert_eq!(s.denied, 3, "the denylist is checked before the ignore rules");
     }
 
     #[test]
