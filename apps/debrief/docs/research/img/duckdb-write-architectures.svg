@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" width="960" height="640" role="img" aria-labelledby="d1t d1d">
+    <title id="d1t">Write architectures compared</title>
+    <desc id="d1d">Single writer: parse threads queue into one Appender; DuckDB compresses the rows as it writes them to events.duckdb, and string compression limits the speed. Fan-out: each parse thread writes its own Parquet file with the Rust parquet crate; a view in catalog.duckdb reads them all. Server: clients send rows over the Quack protocol to a server process; 4 clients reach 416k ev/s but need 4.6 GB.</desc>
+    <style>
+      /* Self-contained colours (no page variables): light by default, dark under prefers-color-scheme. */
+      .bg { fill: #ffffff; }
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; fill: #1b2228; }
+      .t-mono { font-family: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace; }
+      .t-muted { fill: #5a6670; }
+      .t-head { font-weight: 600; }
+      .box { fill: #eef1f3; stroke: #b4bdc5; }
+      .edge { stroke: #5a6670; stroke-width: 1.5; fill: none; }
+      .s-single { stroke: #8a4f9e; } .f-single { fill: #8a4f9e; }
+      .s-fan { stroke: #1f7a6d; } .f-fan { fill: #1f7a6d; }
+      .s-server { stroke: #a23b3b; } .f-server { fill: #a23b3b; }
+      .grid { stroke: #b4bdc5; stroke-width: 1; }
+      .arrowhead { fill: #5a6670; }
+      .val { paint-order: stroke; stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; }
+      @media (prefers-color-scheme: dark) {
+        .bg { fill: #1a2127; }
+        text { fill: #e3e8ec; }
+        .t-muted { fill: #9aa6b0; }
+        .box { fill: #202930; stroke: #46535e; }
+        .edge { stroke: #9aa6b0; }
+        .s-single { stroke: #c08ad4; } .f-single { fill: #c08ad4; }
+        .s-fan { stroke: #4cc0ae; } .f-fan { fill: #4cc0ae; }
+        .s-server { stroke: #e07a7a; } .f-server { fill: #e07a7a; }
+        .grid { stroke: #46535e; }
+        .arrowhead { fill: #9aa6b0; }
+        .val { stroke: #1a2127; }
+      }
+    </style>
+    <rect class="bg" x="0" y="0" width="960" height="640" rx="6"/>
+    <defs>
+      <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+    </defs>
+
+    <!-- Panel 1: single writer -->
+    <rect x="10" y="10" width="940" height="196" rx="6" fill="none" class="s-single" stroke-width="1.5"/>
+    <text x="26" y="36" class="t-head" font-size="17">A · Single writer into a native table</text>
+    <text x="26" y="54" class="t-muted" font-size="12.5">INSERT or the Appender (Debrief's import before R2b, 2026-10-20)</text>
+    <g font-size="12.5">
+      <rect x="26" y="70" width="100" height="24" rx="3" class="box"/><text x="76" y="86" text-anchor="middle">parse 1</text>
+      <rect x="26" y="100" width="100" height="24" rx="3" class="box"/><text x="76" y="116" text-anchor="middle">parse 2</text>
+      <rect x="26" y="130" width="100" height="24" rx="3" class="box"/><text x="76" y="146" text-anchor="middle">parse 3</text>
+      <rect x="26" y="160" width="100" height="24" rx="3" class="box"/><text x="76" y="176" text-anchor="middle">… parse 8</text>
+      <path d="M126,82 C160,82 165,127 196,127" class="edge" marker-end="url(#ah)"/>
+      <path d="M126,112 C160,112 165,127 196,127" class="edge"/>
+      <path d="M126,142 C160,142 165,127 196,127" class="edge"/>
+      <path d="M126,172 C160,172 165,127 196,127" class="edge"/>
+      <rect x="198" y="105" width="120" height="44" rx="3" class="box"/>
+      <text x="258" y="124" text-anchor="middle">channel</text><text x="258" y="140" text-anchor="middle" class="t-muted" font-size="11.5">threads wait here</text>
+      <line x1="318" y1="127" x2="364" y2="127" class="edge" marker-end="url(#ah)"/>
+      <rect x="366" y="95" width="160" height="64" rx="3" class="box s-single" stroke-width="2"/>
+      <text x="446" y="118" text-anchor="middle" font-weight="600">1 Appender</text>
+      <text x="446" y="135" text-anchor="middle" class="t-muted" font-size="11.5">long-lived,</text>
+      <text x="446" y="149" text-anchor="middle" class="t-muted" font-size="11.5">large batches</text>
+      <line x1="526" y1="127" x2="572" y2="127" class="edge" marker-end="url(#ah)"/>
+      <rect x="574" y="90" width="150" height="74" rx="3" class="box"/>
+      <text x="649" y="114" text-anchor="middle" class="t-mono">events.duckdb</text>
+      <text x="649" y="132" text-anchor="middle" class="t-muted" font-size="11.5">compressed as written;</text>
+      <text x="649" y="148" text-anchor="middle" class="t-muted" font-size="11.5">string compression limits</text>
+      <text x="750" y="112" class="t-mono f-single" font-size="20" font-weight="600">≈387k ev/s</text>
+      <text x="750" y="134" class="t-muted" font-size="12">writer bench · +526 MB peak</text>
+      <text x="750" y="152" class="t-muted" font-size="12">2nd Appender: no faster</text>
+    </g>
+
+    <!-- Panel 2: fan-out -->
+    <rect x="10" y="222" width="940" height="236" rx="6" fill="none" class="s-fan" stroke-width="1.5"/>
+    <text x="26" y="248" class="t-head" font-size="17">B · Fan-out: one Parquet file per thread, a view over them</text>
+    <text x="26" y="266" class="t-muted" font-size="12.5">Debrief's import today (ADR 0014)</text>
+    <g font-size="12.5">
+      <rect x="26" y="282" width="100" height="24" rx="3" class="box"/><text x="76" y="298" text-anchor="middle">parse 1</text>
+      <rect x="26" y="316" width="100" height="24" rx="3" class="box"/><text x="76" y="332" text-anchor="middle">parse 2</text>
+      <rect x="26" y="350" width="100" height="24" rx="3" class="box"/><text x="76" y="366" text-anchor="middle">parse 3</text>
+      <rect x="26" y="384" width="100" height="24" rx="3" class="box"/><text x="76" y="400" text-anchor="middle">… parse 8</text>
+      <g class="edge"><line x1="126" y1="294" x2="164" y2="294" marker-end="url(#ah)"/><line x1="126" y1="328" x2="164" y2="328" marker-end="url(#ah)"/><line x1="126" y1="362" x2="164" y2="362" marker-end="url(#ah)"/><line x1="126" y1="396" x2="164" y2="396" marker-end="url(#ah)"/></g>
+      <g>
+        <rect x="166" y="282" width="140" height="24" rx="3" class="box s-fan" stroke-width="1.5"/><text x="236" y="298" text-anchor="middle">Parquet writer</text>
+        <rect x="166" y="316" width="140" height="24" rx="3" class="box s-fan" stroke-width="1.5"/><text x="236" y="332" text-anchor="middle">Parquet writer</text>
+        <rect x="166" y="350" width="140" height="24" rx="3" class="box s-fan" stroke-width="1.5"/><text x="236" y="366" text-anchor="middle">Parquet writer</text>
+        <rect x="166" y="384" width="140" height="24" rx="3" class="box s-fan" stroke-width="1.5"/><text x="236" y="400" text-anchor="middle">Parquet writer</text>
+      </g>
+      <g class="edge"><line x1="306" y1="294" x2="344" y2="294" marker-end="url(#ah)"/><line x1="306" y1="328" x2="344" y2="328" marker-end="url(#ah)"/><line x1="306" y1="362" x2="344" y2="362" marker-end="url(#ah)"/><line x1="306" y1="396" x2="344" y2="396" marker-end="url(#ah)"/></g>
+      <g class="t-mono" font-size="11.5">
+        <rect x="346" y="282" width="150" height="24" rx="3" class="box"/><text x="421" y="298" text-anchor="middle">seg-0001.parquet</text>
+        <rect x="346" y="316" width="150" height="24" rx="3" class="box"/><text x="421" y="332" text-anchor="middle">seg-0002.parquet</text>
+        <rect x="346" y="350" width="150" height="24" rx="3" class="box"/><text x="421" y="366" text-anchor="middle">seg-0003.parquet</text>
+        <rect x="346" y="384" width="150" height="24" rx="3" class="box"/><text x="421" y="400" text-anchor="middle">seg-0008.parquet</text>
+      </g>
+      <text x="421" y="428" text-anchor="middle" class="t-muted" font-size="11.5">Rust parquet crate, zstd, temp name then rename</text>
+      <g stroke-dasharray="4 3">
+      <path d="M576,345 C540,345 540,294 498,294" class="edge" marker-end="url(#ah)"/>
+      <path d="M576,345 C540,345 540,328 498,328" class="edge" marker-end="url(#ah)"/>
+      <path d="M576,345 C540,345 540,362 498,362" class="edge" marker-end="url(#ah)"/>
+      <path d="M576,345 C540,345 540,396 498,396" class="edge" marker-end="url(#ah)"/>
+      </g>
+      <text x="421" y="446" text-anchor="middle" class="t-muted" font-size="11.5">dashed: the view reads the files</text>
+      <rect x="578" y="300" width="160" height="90" rx="3" class="box"/>
+      <text x="658" y="322" text-anchor="middle" class="t-mono" font-size="11.5">catalog.duckdb</text>
+      <text x="658" y="342" text-anchor="middle" font-size="11.5">segment list +</text>
+      <text x="658" y="358" text-anchor="middle" class="t-mono" font-size="11">VIEW events AS</text>
+      <text x="658" y="374" text-anchor="middle" class="t-mono" font-size="11">read_parquet([...])</text>
+      <text x="760" y="322" class="t-mono f-fan" font-size="20" font-weight="600">1.3–1.55M ev/s</text>
+      <text x="760" y="342" class="t-muted" font-size="12">real import, quiet Mac</text>
+      <text x="760" y="362" class="t-muted" font-size="12">0.7–1.0M at load 33–65</text>
+      <text x="760" y="382" class="t-muted" font-size="12">writer bench, 8: 5.1M</text>
+    </g>
+
+    <!-- Panel 3: server -->
+    <rect x="10" y="474" width="940" height="156" rx="6" fill="none" class="s-server" stroke-width="1.5"/>
+    <text x="26" y="500" class="t-head" font-size="17">C · Server mode: clients send rows over the Quack protocol</text>
+    <text x="26" y="518" class="t-muted" font-size="12.5">Evaluated 2026-10-28 and rejected (ADR 0010 amendment, not yet merged)</text>
+    <g font-size="12.5">
+      <rect x="26" y="538" width="100" height="24" rx="3" class="box"/><text x="76" y="554" text-anchor="middle">client 1</text>
+      <rect x="26" y="572" width="100" height="24" rx="3" class="box"/><text x="76" y="588" text-anchor="middle">… client 4</text>
+      <path d="M126,550 C160,550 165,568 196,568" class="edge" marker-end="url(#ah)"/>
+      <path d="M126,584 C160,584 165,568 196,568" class="edge"/>
+      <rect x="198" y="546" width="120" height="44" rx="3" class="box"/>
+      <text x="258" y="565" text-anchor="middle">socket</text><text x="258" y="581" text-anchor="middle" class="t-muted" font-size="11">encode, copy, decode</text>
+      <line x1="318" y1="568" x2="364" y2="568" class="edge" marker-end="url(#ah)"/>
+      <rect x="366" y="536" width="160" height="64" rx="3" class="box s-server" stroke-width="2"/>
+      <text x="446" y="559" text-anchor="middle" font-weight="600">server process</text>
+      <text x="446" y="576" text-anchor="middle" class="t-muted" font-size="11.5">buffers rows</text>
+      <text x="446" y="590" text-anchor="middle" class="t-muted" font-size="11.5">for each client</text>
+      <line x1="526" y1="568" x2="572" y2="568" class="edge" marker-end="url(#ah)"/>
+      <rect x="574" y="546" width="150" height="44" rx="3" class="box"/>
+      <text x="649" y="573" text-anchor="middle" class="t-mono">events.duckdb</text>
+      <text x="750" y="556" class="t-mono f-server" font-size="20" font-weight="600">≈115k ev/s</text>
+      <text x="750" y="578" class="t-muted" font-size="12">writer bench, 1 client</text>
+      <text x="750" y="596" class="t-muted" font-size="12">4 clients: 416k, 4.6 GB RSS</text>
+      <text x="750" y="612" class="t-muted" font-size="12">4 at 192 MB: out of memory</text>
+    </g>
+  </svg>
