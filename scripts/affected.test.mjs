@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, planFor, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
@@ -291,6 +291,21 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     assert.deepEqual(runGitea(['conformance/ci/unrelated.mjs'], g).crates, false);
   });
 
+  test('importer tracing is transitive: a imports b imports c, a change to c reaches the action that runs a', () => {
+    const tree = {
+      ...BASE_TREE,
+      '.gitea/actions/chain/action.yml': 'run: node conformance/ci/chain-a.mjs',
+      '.gitea/workflows/ci.yml': CI().replace('install-test-browser', 'chain'),
+      'conformance/ci/chain-a.mjs': "import './chain-b.mjs';",
+      'conformance/ci/chain-b.mjs': "import { c } from './chain-c.mjs';",
+      'conformance/ci/chain-c.mjs': 'export const c = 1;',
+    };
+    const g = giteaOf(tree, {});
+    assert.deepEqual(scriptImporters('conformance/ci/chain-c.mjs', g).sort(), ['conformance/ci/chain-a.mjs', 'conformance/ci/chain-b.mjs', 'conformance/ci/chain-c.mjs']);
+    const r = runGitea(['conformance/ci/chain-c.mjs'], g);
+    assert.deepEqual([r.all, r.crates], [false, true]);
+  });
+
   test('a mention of an action only in a comment of ci.yml is no use: everything', () => {
     const tree = { ...BASE_TREE, '.gitea/workflows/ci.yml': `# see ./.gitea/actions/only-commented\n${CI()}  # ./.gitea/actions/only-commented\n` };
     assert.ok(runGitea(['.gitea/actions/only-commented/action.yml'], giteaOf(tree, {})).all);
@@ -368,6 +383,28 @@ describe('planFor reads the .gitea revisions from git', () => {
       sh(dir, 'commit', '-q', '-am', 'one job');
       const r = planFor({ base, head: 'HEAD', root: dir, explain: true }).plan;
       assert.deepEqual([r.all, r.conformance, r.crates, r.ui], [false, true, false, false]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('base mode: a committed change to an imported helper marks the job of the action that runs the importing script', () => {
+    const dir = scratch();
+    try {
+      const put = (f, text) => {
+        mkdirSync(join(dir, f.split('/').slice(0, -1).join('/')), { recursive: true });
+        writeFileSync(join(dir, f), text);
+      };
+      put('.gitea/actions/install-test-browser/action.yml', 'run: node "${{ github.action_path }}/../../../conformance/ci/install-test-browser.mjs"');
+      put('conformance/ci/install-test-browser.mjs', "import { entryFor } from './runtime-catalogue.mjs';");
+      put('conformance/ci/runtime-catalogue.mjs', 'export const entryFor = 1;');
+      sh(dir, 'add', '-A');
+      sh(dir, 'commit', '-q', '-m', 'script');
+      const base = sh(dir, 'rev-parse', 'HEAD').trim();
+      put('conformance/ci/runtime-catalogue.mjs', 'export const entryFor = 2;');
+      sh(dir, 'commit', '-q', '-am', 'helper');
+      const r = planFor({ base, head: 'HEAD', root: dir }).plan;
+      assert.deepEqual([r.all, r.crates, r.ui], [false, true, false]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

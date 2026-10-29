@@ -66,7 +66,9 @@ const git = (args, cwd = ROOT) => execFileSync('git', args, { cwd, encoding: 'ut
  *   conformance/src/util/            and the helpers they import                    that run the script or a script importing it
  *                                                                                   (scriptImporters + giteaUsers: build-folder reaches
  *                                                                                   crates and paddock-dev), not ui/eslint/icons;
- *                                                                                   imports built at run time are not seen
+ *                                                                                   imports built at run time are not seen; TRACED_SCRIPT
+ *                                                                                   covers only conformance/src/util, so an import from
+ *                                                                                   elsewhere in conformance/src would not reach the crate job
  *   .gitea/workflows/ci.yml          the jobs whose text changed                    workflowJobs (per-job diff; all when the
  *                                                                                   text cannot be split into jobs)
  *   .gitea/workflows/<app>*.yml      that app only                                  appOfWorkflow
