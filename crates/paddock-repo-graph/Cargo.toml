@@ -9,8 +9,9 @@ publish = ["decryp7"]
 
 [features]
 # Adapters that run programs (ADR 0022 §6). Off by default: Pacenotes opens hostile repositories and must never run
-# cargo there (it reads .cargo/config.toml, which can name the compiler and wrapper programs). A conformance check that fails
-# when a manifest under apps/pacenotes/ enables `cargo-metadata` is planned (ADR 0022 §3.7), not written yet.
+# cargo there (it reads .cargo/config.toml, which can name the compiler and wrapper programs). Two checks keep it off: Pacenotes'
+# own leg runs `cargo tree -e features --all-features -i paddock-repo-graph` (apps/pacenotes/scripts/check-no-cargo-metadata.mjs),
+# and conformance C52 fails when a manifest under apps/pacenotes/ enables it (ADR 0022 §3.7).
 cargo-metadata = ["dep:paddock-proc"]
 git-history = ["dep:paddock-proc"]
 
