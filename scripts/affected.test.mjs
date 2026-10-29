@@ -2,10 +2,11 @@
 // matrix legs) and the contracts the script relies on (doc inputs, app CI files, CODEOWNERS, Renovate).
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, planFor, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
@@ -150,8 +151,11 @@ on:
 jobs:
   plan:
     steps:
-      - uses: ./.gitea/actions/setup-node
-  conformance:
+      - uses: ./.gitea/actions/plan-only
+  ui:
+    steps:
+      - uses: ./.gitea/actions/node-caches
+  conformance: # the checks
     steps:
       - run: ${conf}
   app:
@@ -160,65 +164,185 @@ jobs:
       - uses: ./.gitea/actions/app-gates
   crates:
     steps:
-      - uses: ./.gitea/actions/setup-rust
+      - uses: ./.gitea/actions/build-folder
 `;
-const giteaOf = (before, after) => {
+const giteaOf = (before, after, dirty = null) => {
   const trees = { before, after: { ...before, ...after } };
   return {
     appNames: APPS,
     files: () => Object.keys(trees.after),
+    dirty,
     before: (f) => trees.before[f] ?? null,
     after: (f) => trees.after[f] ?? null,
   };
 };
-const ACTIONS = { '.gitea/actions/setup-rust/action.yml': 'runs: x', '.gitea/actions/app-gates/action.yml': 'runs: y', '.gitea/actions/setup-node/action.yml': 'runs: z' };
+const ACTIONS = {
+  '.gitea/actions/plan-only/action.yml': 'runs: x',
+  '.gitea/actions/node-caches/action.yml': 'runs: x',
+  '.gitea/actions/app-gates/action.yml': 'runs: y',
+  '.gitea/actions/build-folder/action.yml': 'run: bash "${{ github.action_path }}/../../../conformance/ci/build-folder.sh"',
+  '.gitea/actions/nested/action.yml': 'steps:\n  - uses: ./.paddock/.gitea/actions/build-folder',
+};
+const BASE_TREE = {
+  '.gitea/workflows/ci.yml': CI(),
+  '.gitea/workflows/dyno.yml': 'jobs:\n  gates:\n    steps:\n      - uses: ./.gitea/actions/node-caches\n',
+  '.gitea/workflows/nightly.yml': 'jobs:\n  night:\n    steps:\n      - uses: ./.gitea/actions/nightly-only\n',
+  '.gitea/actions/nightly-only/action.yml': 'runs: n',
+  ...ACTIONS,
+};
 const runGitea = (files, gitea) => affected(files, graph, { gitea });
+const CARGO_APPS = APPS.filter((a) => graph.apps.get(a).cargo);
+const CI_FILE = '.gitea/workflows/ci.yml';
 
 describe('.gitea changes are narrowed to the jobs they reach', () => {
-  test('a change to the planner and its tests marks tools and ui (the test runners), never an app', () => {
+  test('a change to the planner and its tests marks tools, ui and paddock-dev (its golden test), never an app', () => {
     for (const f of ['scripts/affected.test.mjs', 'scripts/affected.mjs']) {
       const r = run(f);
-      assert.deepEqual([r.all, r.apps, r.crates, r.tools, r.ui], [false, [], false, true, true], f);
+      assert.deepEqual([r.all, r.apps, r.crates, r.tools, r.ui, r.paddockDev], [false, [], false, true, true, true], f);
     }
   });
 
   test('a ci.yml change to one job marks that job only; a change to the app job marks the app legs', () => {
-    const before = { '.gitea/workflows/ci.yml': CI(), ...ACTIONS };
-    const r = runGitea(['.gitea/workflows/ci.yml'], giteaOf(before, { '.gitea/workflows/ci.yml': CI('node a --only C06') }));
+    const r = runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: CI('node a --only C06') }));
     assert.deepEqual([r.all, r.conformance, r.crates, r.ui, r.tools, r.apps], [false, true, false, false, false, []]);
-    const a = runGitea(['.gitea/workflows/ci.yml'], giteaOf(before, { '.gitea/workflows/ci.yml': CI('node a', 'node c') }));
+    const a = runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: CI('node a', 'node c') }));
     assert.deepEqual([a.all, a.crates, a.apps], [false, false, APPS]);
   });
 
+  test('a change to the plan job marks everything: it wires every other job', () => {
+    const r = runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: CI().replace('plan-only', 'plan-only2') }));
+    assert.ok(r.all && r.crates && r.ui);
+    assert.deepEqual(r.apps, APPS);
+  });
+
   test('a ci.yml change outside the jobs (the header), an unknown job or text that is not a workflow marks everything', () => {
-    const before = { '.gitea/workflows/ci.yml': CI(), ...ACTIONS };
     const hdr = CI().replace('  push:', '  pull_request:');
-    assert.ok(runGitea(['.gitea/workflows/ci.yml'], giteaOf(before, { '.gitea/workflows/ci.yml': hdr })).all);
-    assert.ok(runGitea(['.gitea/workflows/ci.yml'], giteaOf(before, { '.gitea/workflows/ci.yml': `${CI()}  brand-new:\n    steps: []\n` })).all);
-    assert.ok(runGitea(['.gitea/workflows/ci.yml'], giteaOf(before, { '.gitea/workflows/ci.yml': 'this: [is, not\n  a workflow' })).all);
+    assert.ok(runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: hdr })).all);
+    assert.ok(runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: `${CI()}  brand-new:\n    steps: []\n` })).all);
+    assert.ok(runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: 'this: [is, not\n  a workflow' })).all);
     // No way to read the revisions at all (no gitea reader): everything.
-    assert.ok(affected(['.gitea/workflows/ci.yml'], graph).all);
+    assert.ok(affected([CI_FILE], graph).all);
     assert.equal(changedJobs(CI(), 'jobs:\nx: 1'), null);
+    // Identical revisions (a change nobody can see): everything.
+    assert.ok(runGitea([CI_FILE], giteaOf(BASE_TREE, {})).all);
   });
 
-  test('an action change marks only the ci.yml jobs (and app workflows) that use it', () => {
-    const before = { '.gitea/workflows/ci.yml': CI(), '.gitea/workflows/dyno.yml': 'jobs:\n  gates:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n', ...ACTIONS };
-    const rust = runGitea(['.gitea/actions/setup-rust/action.yml'], giteaOf(before, {}));
-    assert.deepEqual([rust.all, rust.crates, rust.ui, rust.apps.filter((a) => a !== 'dyno')], [false, true, false, []]);
-    const gates = runGitea(['.gitea/actions/app-gates/action.yml'], giteaOf(before, {}));
+  test('a job split that could hide a job is refused: a comment after a key, odd two-space lines, anchors and aliases', () => {
+    const base = CI();
+    // The key with a trailing comment starts its own job (the edit below must not be attributed to the job before it).
+    const r = runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: base.replace('node a', 'node a2') }));
+    assert.deepEqual([r.all, r.conformance, r.ui, r.crates], [false, true, false, false]);
+    for (const bad of [`${base}  "quoted": {}\n`, `${base}  crates2: { runs-on: x }\n`, `${base}anchors:\n  x: &rs 1\n`, base.replace('node b', 'node *rs'), base.replace('steps:\n      - uses: ./.gitea/actions/build-folder', 'steps: &rs\n      - uses: ./.gitea/actions/build-folder')]) {
+      assert.equal(changedJobs(base, bad), null, bad);
+      assert.ok(runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: bad })).all, bad);
+    }
+    assert.deepEqual(changedJobs(base, base.replace('  conformance: # the checks', '  conformance: # checks')), []); // only a comment on a key line
+  });
+
+  test('an action change marks only the ci.yml jobs and app workflows that use it, through nested actions and a .paddock prefix', () => {
+    const g = giteaOf(BASE_TREE, {});
+    const ui = runGitea(['.gitea/actions/node-caches/action.yml'], g);
+    assert.deepEqual([ui.all, ui.ui, ui.crates, ui.apps], [false, true, false, ['dyno']]);
+    const gates = runGitea(['.gitea/actions/app-gates/action.yml'], g);
     assert.deepEqual([gates.all, gates.crates, gates.apps], [false, false, APPS]);
-    const node = runGitea(['.gitea/actions/setup-node/action.yml'], giteaOf(before, {}));
-    assert.deepEqual([node.all, node.tools, node.apps], [false, true, []]);
+    const bf = runGitea(['.gitea/actions/build-folder/action.yml'], g);
+    assert.deepEqual([bf.all, bf.crates, bf.ui, bf.apps], [false, true, false, []]);
+    // The nested action is found through build-folder's referrer (`./.paddock/` prefix), whose users are the crates job.
+    const nested = runGitea(['.gitea/actions/nested/action.yml'], g);
+    assert.deepEqual([nested.all, nested.crates], [false, false]);
+    const viaPrefix = runGitea(['.gitea/actions/build-folder/action.yml'], giteaOf(BASE_TREE, {}));
+    assert.ok(viaPrefix.crates);
+    // An action only the nightly runs is reported as such and marks tools.
+    const night = affected(['.gitea/actions/nightly-only/action.yml'], graph, { gitea: g, explain: true });
+    assert.deepEqual([night.all, night.tools, night.apps], [false, true, []]);
+    assert.ok(night.why.tools.some((w) => /not a pull request/.test(w)));
   });
 
-  test('the toolchain marks everything; the shared Rust inputs (.cargo, lint) only the Rust builds', () => {
+  test('a script of conformance/ci or conformance/release also marks the jobs of the actions that run it', () => {
+    const g = giteaOf(BASE_TREE, {});
+    const r = runGitea(['conformance/ci/build-folder.sh'], g);
+    assert.deepEqual([r.all, r.crates, r.conformance, r.ui, r.eslint, r.apps], [false, true, true, false, false, APPS]);
+    const other = runGitea(['conformance/release/latest-json.mjs'], g);
+    assert.deepEqual([other.all, other.crates, other.ui], [false, false, false]);
+    assert.deepEqual(other.apps, APPS);
+    // Without a reader for the .gitea files the script cannot be traced: everything.
+    assert.ok(affected(['conformance/ci/build-folder.sh'], graph).all);
+  });
+
+  test('in files mode a .gitea or script file that is not dirty (committed, nothing to diff) marks everything', () => {
+    const dirty = new Set([CI_FILE]);
+    const r = runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: CI('node a --only C06') }, (f) => dirty.has(f)));
+    assert.equal(r.all, false);
+    assert.ok(runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: CI('node a --only C06') }, () => false)).all);
+    assert.ok(runGitea(['.gitea/actions/node-caches/action.yml'], giteaOf(BASE_TREE, {}, () => false)).all);
+    assert.ok(runGitea(['conformance/ci/build-folder.sh'], giteaOf(BASE_TREE, {}, () => false)).all);
+  });
+
+  test('the toolchain marks everything; the shared Rust inputs (.cargo, lint) only the Rust builds, lint also conformance', () => {
     const t = run('rust-toolchain.toml');
     assert.ok(t.all && t.ui && t.crates);
     assert.deepEqual(t.apps, APPS);
     for (const f of ['.cargo/config.toml', 'lint/clippy.toml']) {
       const r = run(f);
-      assert.deepEqual([r.all, r.ui, r.crates, r.paddockDev], [false, false, true, true], f);
-      assert.ok(r.apps.every((a) => r.kinds[a].join() === 'rust'), f);
+      assert.deepEqual([r.all, r.ui, r.crates, r.paddockDev, r.conformance], [false, false, true, true, f.startsWith('lint/')], f);
+      assert.deepEqual(r.apps, CARGO_APPS, f);
+      assert.ok(CARGO_APPS.every((a) => r.kinds[a].join() === 'rust'), f);
+    }
+  });
+
+  test('ci.yml wires the plan job outputs: every needs.plan.outputs.X is declared, and every declared output is one --ci writes', () => {
+    const ci = readFileSync(join(ROOT, CI_FILE), 'utf8');
+    const planJob = workflowJobs(ci).jobs.get('plan');
+    const declared = [...planJob.matchAll(/^ {6}([a-z_]+): \$\{\{ steps\.plan\.outputs\.([a-z_]+) \}\}/gm)];
+    const written = Object.keys(ciOutputs({ paddockDev: false }, []));
+    for (const [, name, step] of declared) {
+      assert.equal(name, step, `output ${name} reads steps.plan.outputs.${step}`);
+      assert.ok(written.includes(step), `--ci writes ${step}`);
+    }
+    const names = declared.map((d) => d[1]);
+    for (const [, used] of ci.matchAll(/needs\.plan\.outputs\.([a-z_]+)/g)) assert.ok(names.includes(used), `ci.yml uses needs.plan.outputs.${used}, which the plan job does not declare`);
+    for (const w of written) assert.ok(names.includes(w), `--ci writes ${w}, which the plan job does not declare`);
+    assert.equal(ciOutputs({}, []).any_app, false);
+    assert.equal(ciOutputs({}, [{ app: 'x' }]).any_app, true);
+    assert.equal(ciOutputs({}, [{ app: 'x' }]).apps, '[{"app":"x"}]');
+  });
+});
+
+describe('planFor reads the .gitea revisions from git', () => {
+  const sh = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...a], { cwd, encoding: 'utf8' });
+  const scratch = () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'affected-')));
+    sh(dir, 'init', '-q', '-b', 'main');
+    mkdirSync(join(dir, '.gitea/workflows'), { recursive: true });
+    writeFileSync(join(dir, CI_FILE), CI());
+    sh(dir, 'add', '-A');
+    sh(dir, 'commit', '-q', '-m', 'base');
+    return dir;
+  };
+
+  test('base mode: a committed change to one job marks that job (before is the base, after the head)', () => {
+    const dir = scratch();
+    try {
+      const base = sh(dir, 'rev-parse', 'HEAD').trim();
+      writeFileSync(join(dir, CI_FILE), CI('node a --only C06'));
+      sh(dir, 'commit', '-q', '-am', 'one job');
+      const r = planFor({ base, head: 'HEAD', root: dir, explain: true }).plan;
+      assert.deepEqual([r.all, r.conformance, r.crates, r.ui], [false, true, false, false]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('files mode: an uncommitted change is narrowed, a committed one (HEAD equals the working tree) marks everything', () => {
+    const dir = scratch();
+    try {
+      writeFileSync(join(dir, CI_FILE), CI('node a --only C06'));
+      const dirty = planFor({ files: [CI_FILE], root: dir }).plan;
+      assert.deepEqual([dirty.all, dirty.conformance, dirty.crates], [false, true, false]);
+      sh(dir, 'commit', '-q', '-am', 'one job');
+      assert.ok(planFor({ files: [CI_FILE], root: dir }).plan.all);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

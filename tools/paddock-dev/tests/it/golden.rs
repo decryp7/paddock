@@ -74,6 +74,11 @@ const SAMPLES: &[&[&str]] = &[
     &["package-lock.json"],
     &["tools/paddock-dev/src/lib.rs", "tools/test/x.test.mjs"],
     &["totally-unknown-root-file"],
+    &["scripts/affected.mjs", "scripts/affected.test.mjs"],
+    &[".cargo/config.toml"],
+    &["lint/clippy.toml"],
+    &["rust-toolchain.toml", "tsconfig/base.json"],
+    &["conformance/ci/build-folder.sh"],
     &[".gitignore", "crates/paddock-cli/CHANGELOG.md"],
 ];
 

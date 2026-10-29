@@ -23,24 +23,30 @@ fn re(pattern: &str) -> Regex {
     Regex::new(pattern).expect("a valid pattern")
 }
 
-/// Inputs that every project's build or tests read: a change re-runs everything.
+/// Inputs that every project's build or tests read: a change re-runs everything. Mirrors `GLOBAL` in `scripts/affected.mjs`
+/// (its comment table says what each former global reaches). `.gitea/` and `conformance/(ci|release)/` stay global here: the
+/// script narrows them per job from the file text at two revisions, which this port does not read, so it answers with a
+/// superset (never less than the script; `--files` mode of the script answers everything for them too unless they are dirty).
 static GLOBAL: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
         r"^\.gitea/",
-        r"^\.cargo/",
         r"^rust-toolchain(\.toml)?$",
         r"^package\.json$",
         r"^\.npmrc$",
         r"^\.nvmrc$",
         r"^\.gitattributes$",
-        r"^scripts/affected(\.test)?\.mjs$",
-        r"^lint/",
         r"^tsconfig/",
         r"^conformance/(ci|release)/",
     ]
     .map(re)
     .into()
 });
+
+/// Inputs of the Rust builds only (cargo registry and linker config, the shared clippy and workspace lint presets).
+static RUST_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| [r"^\.cargo/", r"^lint/"].map(re).into());
+
+/// The planner and its tests: besides the scripts' owners, this tool's golden test runs them as its oracle.
+static PLANNER_FILES: LazyLock<Regex> = LazyLock::new(|| re(r"^scripts/affected(\.test)?\.mjs$"));
 
 /// Editor and VCS metadata: marks nothing.
 static META: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -213,6 +219,27 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
             continue;
         }
         if META.iter().any(|r| r.is_match(f)) {
+            continue;
+        }
+        if PLANNER_FILES.is_match(f) {
+            st.mark(
+                Some("paddock-dev".to_string()),
+                format!("its golden test compares {f} (tools/paddock-dev/tests/it/golden.rs)"),
+            );
+        }
+        if RUST_INPUTS.iter().any(|r| r.is_match(f)) {
+            for p in ["crates", "paddock-dev"] {
+                st.mark(Some(p.to_string()), format!("rust input {f}"));
+            }
+            if f.starts_with("lint/") {
+                st.mark(Some("conformance".to_string()), format!("C13 reads {f}"));
+            }
+            for a in &graph.apps {
+                if graph.cargo.iter().any(|(d, _)| d.starts_with(&format!("apps/{a}/"))) {
+                    st.mark(Some(format!("app:{a}")), format!("rust input {f}"));
+                    st.kind(Some(&format!("app:{a}")), "rust");
+                }
+            }
             continue;
         }
         if GLOBAL.iter().any(|r| r.is_match(f)) {
@@ -552,6 +579,30 @@ mod tests {
         assert_eq!(g["all"], true);
         assert_eq!(g["apps"], json!(["debrief", "dyno"]));
         assert_eq!(g["kinds"]["debrief"], json!(["rust", "ui"]));
+        assert_eq!(plan(&["rust-toolchain.toml"])["all"], true);
+    }
+
+    #[test]
+    fn the_planner_marks_scripts_tools_and_paddock_dev_but_no_app_and_rust_inputs_only_the_rust_builds() {
+        for f in ["scripts/affected.mjs", "scripts/affected.test.mjs"] {
+            let p = plan(&[f]);
+            assert_eq!((p["all"].clone(), p["apps"].clone()), (json!(false), json!([])), "{f}");
+            assert_eq!(
+                (p["tools"].clone(), p["ui"].clone(), p["paddockDev"].clone()),
+                (json!(true), json!(true), json!(true)),
+                "{f}"
+            );
+        }
+        for f in [".cargo/config.toml", "lint/clippy.toml"] {
+            let p = plan(&[f]);
+            assert_eq!(
+                (p["all"].clone(), p["ui"].clone(), p["crates"].clone(), p["paddockDev"].clone()),
+                (json!(false), json!(false), json!(true), json!(true)),
+                "{f}"
+            );
+            assert_eq!(p["conformance"], json!(f.starts_with("lint/")), "{f}");
+            assert_eq!(p["kinds"], json!({"dyno": ["rust"]}), "{f}");
+        }
     }
 
     #[test]

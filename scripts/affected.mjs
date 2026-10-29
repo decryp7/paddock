@@ -56,10 +56,14 @@ const git = (args, cwd = ROOT) => execFileSync('git', args, { cwd, encoding: 'ut
  *   rust-toolchain, .npmrc, .nvmrc,  every Rust or npm build                        GLOBAL (all)
  *   root package.json, .gitattr.
  *   tsconfig/                        every TypeScript build                         GLOBAL (all)
- *   .cargo/, lint/                   Rust builds only (registry, linker, clippy)    RUST_INPUTS: crates, paddock-dev, apps' Rust half
+ *   .cargo/, lint/                   Rust builds only (registry, linker, clippy);   RUST_INPUTS: crates, paddock-dev, apps' Rust half
+ *                                    lint/ is also read by conformance (C13)
  *   scripts/affected(.test).mjs      the plan and its tests, which the `plan` job   owners: tools + ui (the `tools` job and
- *                                    and the `tools` job run first                  `npm run test:scripts` run them), no app
- *   conformance/(ci|release)/        the shared actions' scripts in every app gate  conformance + every app (below), not crates/ui
+ *                                    and the `tools` job run first; paddock-dev's   `npm run test:scripts` run them) and paddock-dev
+ *                                    golden test runs them as its oracle            (PLANNER_FILES), no app
+ *   conformance/(ci|release)/        scripts the shared actions and workflows run   conformance, every app, and the jobs of the actions
+ *                                                                                   that run the script (giteaUsers: build-folder reaches
+ *                                                                                   crates and paddock-dev), not ui/eslint/icons
  *   .gitea/workflows/ci.yml          the jobs whose text changed                    workflowJobs (per-job diff; all when the
  *                                                                                   text cannot be split into jobs)
  *   .gitea/workflows/<app>*.yml      that app only                                  appOfWorkflow
@@ -78,44 +82,53 @@ export const GLOBAL = [
   /^tsconfig\//, // the shared TypeScript options
 ];
 
+/** The planner and its tests: besides the scripts' owners, the `dev` tool's golden test runs them as its oracle. */
+export const PLANNER_FILES = /^scripts\/affected(\.test)?\.mjs$/;
+
 /** Inputs of the Rust builds only (cargo registry and linker config, the shared clippy and workspace lint presets). */
 export const RUST_INPUTS = [/^\.cargo\//, /^lint\//];
 
 /** What each job of ci.yml runs for: the plan project(s) that make the job run (`apps` = every app leg). */
 export const CI_JOBS = {
-  plan: ['tools'], // runs on every run; its change is checked by the tools job (affected.test.mjs)
+  plan: ['everything'], // wires every other job through its outputs: a change to it can hide any job
   ui: ['ui'],
   e2e: ['ui'],
-  'e2e-webkit': ['ui'],
+  'e2e-webkit': ['ui'], // runs on push to main, tags and manual runs only, never on a pull request
   conformance: ['conformance'],
   tools: ['tools'],
   icons: ['icons'],
   'eslint-preset': ['eslint'],
   crates: ['crates'],
   crate: ['crates'],
-  commits: ['tools'],
+  commits: ['tools'], // pull requests only; the tools job checks the rest of the file's contract
   app: ['apps'],
   'paddock-dev': ['paddock-dev'],
 };
 
+/** YAML anchors, aliases and merge keys: a job may then depend on text outside its block, so the split refuses the file. */
+const YAML_REUSE = /(^|[\s:[{,-])[&*][A-Za-z0-9_-]+|<<:/m;
+
 /**
  * Split a workflow file into its header (everything before `jobs:`) and the text of each job. A line-based split, no YAML
- * library (this script has no dependencies): job keys are the two-space-indented `name:` lines under a top-level `jobs:`.
- * Returns null when that shape is not found (the caller then fails safe).
+ * library (this script has no dependencies): job keys are the two-space-indented `name:` lines (a trailing comment is
+ * allowed) under a top-level `jobs:`. Returns null, so that the caller fails safe, when that shape is not found, when a
+ * two-space line is neither a job key nor a comment, or when the file uses anchors or aliases.
  */
 export function workflowJobs(text) {
-  if (typeof text !== 'string') return null;
+  if (typeof text !== 'string' || YAML_REUSE.test(text)) return null;
   const lines = text.split('\n');
   const at = lines.findIndex((l) => /^jobs:\s*$/.test(l));
   if (at < 0) return null;
   const jobs = new Map();
   let cur = null;
   for (const l of lines.slice(at + 1)) {
-    const m = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(l);
+    const m = /^ {2}([A-Za-z0-9_-]+):\s*(#.*)?$/.exec(l);
     if (m) {
       cur = m[1];
       jobs.set(cur, []);
-    } else if (/^\S/.test(l) && !l.startsWith('#')) return null; // another top-level key after jobs: not the shape we know
+    } else if (/^ {2}\S/.test(l) && !l.startsWith('  #')) return null; // a flow mapping, a quoted key...: not the shape we know
+    else if (/^\S/.test(l) && !l.startsWith('#')) return null; // another top-level key after jobs
+    else if (/^\t/.test(l)) return null;
     else if (cur) jobs.get(cur).push(l);
     else if (l.trim() && !l.trim().startsWith('#')) return null;
   }
@@ -132,40 +145,52 @@ export function changedJobs(before, after) {
 }
 
 const GITEA_FILE = /^\.gitea\/(workflows|actions)\/.+/;
+/** The shared scripts the actions and workflows run (`action_path/../../../conformance/ci/x.sh`, `.paddock/conformance/ci/x.mjs`). */
+export const CONFORMANCE_SCRIPT = /^conformance\/(ci|release)\/.+/;
+
+const escapeRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
- * Who uses a `.gitea` file: `workflows/<x>.yml` or `actions/<name>/...` -> [{ file, jobs }] over the workflows (after
- * revision) that reference it directly or through another action. `jobs` is the list of job names of that workflow
- * (null when it is not split into jobs, as for composite actions, which are followed instead).
+ * What a changed file is called in the workflows and actions that use it: `.gitea/workflows/<x>`, `.gitea/actions/<name>`
+ * (matched with or without a `./` or `./.paddock/` prefix) or, for a shared script, its repository path.
+ */
+function refOf(path) {
+  const w = /^\.gitea\/workflows\/([^/]+)$/.exec(path);
+  if (w) return `.gitea/workflows/${w[1]}`;
+  const a = /^\.gitea\/actions\/([^/]+)\//.exec(path);
+  if (a) return `.gitea/actions/${a[1]}`;
+  return CONFORMANCE_SCRIPT.test(path) ? path : null;
+}
+
+/**
+ * Who uses a changed file (a workflow, an action, or a shared script under conformance/ci or conformance/release):
+ * [{ file, jobs }] over the workflows (after revision) that reference it directly or through an action that does. `jobs`
+ * is the names of the jobs that reference it (null when the workflow cannot be split into jobs: the caller fails safe).
  */
 export function giteaUsers(changedPath, gitea) {
-  const target = (p) => {
-    const w = /^\.gitea\/workflows\/([^/]+)$/.exec(p);
-    if (w) return `./.gitea/workflows/${w[1]}`;
-    const a = /^\.gitea\/actions\/([^/]+)\//.exec(p);
-    return a ? `./.gitea/actions/${a[1]}` : null;
-  };
   const files = gitea.files();
   const seen = new Set();
-  const out = [];
-  const queue = [target(changedPath)].filter(Boolean);
+  const refs = [];
+  const found = new Set();
+  const queue = [refOf(changedPath)].filter(Boolean);
   while (queue.length) {
     const ref = queue.shift();
     if (seen.has(ref)) continue;
     seen.add(ref);
-    const re = new RegExp(`${ref.replace(/[.]/g, '\\.')}(?![A-Za-z0-9_.-])`);
+    const re = new RegExp(`${escapeRe(ref)}(?![A-Za-z0-9_.-])`);
+    refs.push(re);
     for (const f of files) {
       if (f === changedPath) continue;
       const text = gitea.after(f);
       if (!text || !re.test(text)) continue;
-      if (/^\.gitea\/actions\//.test(f)) queue.push(target(f));
-      else {
-        const split = workflowJobs(text);
-        out.push({ file: f, jobs: split ? [...split.jobs].filter(([, t]) => re.test(t) || [...seen].some((r) => new RegExp(`${r.replace(/[.]/g, '\\.')}(?![A-Za-z0-9_.-])`).test(t))).map(([k]) => k) : null });
-      }
+      if (/^\.gitea\/actions\//.test(f)) queue.push(refOf(f));
+      else found.add(f);
     }
   }
-  return out;
+  return [...found].sort().map((file) => {
+    const split = workflowJobs(gitea.after(file));
+    return { file, jobs: split ? [...split.jobs].filter(([, t]) => refs.some((r) => r.test(t))).map(([k]) => k) : null };
+  });
 }
 
 /**
@@ -390,11 +415,15 @@ export function lockDiff(before, after) {
 const PROJECTS = ['crates', 'ui', 'eslint', 'conformance', 'tools', 'icons', 'ci-image', 'paddock-dev'];
 
 /**
- * The [project, reason] pairs a changed `.gitea` file reaches, or null when that cannot be told (fail safe: everything).
- * ci.yml: its changed jobs through CI_JOBS; other workflows and actions: their users (a ci.yml job, an app's workflow).
+ * The [project, reason] pairs a changed `.gitea` file or shared script reaches, or null when that cannot be told (fail safe:
+ * everything). ci.yml: its changed jobs through CI_JOBS; other workflows, actions and scripts: their users (a ci.yml job,
+ * an app's workflow). Users that are no pull-request gate (nightly, publish, canary) are reported as such and mark tools.
  */
 export function giteaTargets(f, gitea) {
-  if (!GITEA_FILE.test(f)) return []; // workflow-templates, READMEs: only the conformance run added by the caller
+  const isScript = CONFORMANCE_SCRIPT.test(f);
+  if (!isScript && !GITEA_FILE.test(f)) return []; // workflow-templates, READMEs: only the conformance run added by the caller
+  // Files mode compares HEAD with the working tree: a committed change shows no difference, so nothing can be narrowed.
+  if (gitea.dirty && !gitea.dirty(f)) return null;
   const out = [];
   const viaJob = (job, why) => {
     const ps = CI_JOBS[job];
@@ -403,29 +432,18 @@ export function giteaTargets(f, gitea) {
     return true;
   };
   if (f === '.gitea/workflows/ci.yml') {
-    const jobs = changedJobs(gitea.before(f), gitea.after(f));
-    return jobs && jobs.every((j) => viaJob(j, f)) ? out : null;
+    const before = gitea.before(f);
+    if (before === gitea.after(f)) return null;
+    const jobs = changedJobs(before, gitea.after(f));
+    return jobs?.length && jobs.every((j) => viaJob(j, f)) ? out : null;
   }
-  if (/^\.gitea\/workflows\//.test(f)) {
-    if (!gitea.after(f) && !gitea.before(f)) return null;
-    const users = giteaUsers(f, gitea);
-    if (!users.length) return out; // a standalone workflow (schedule, tag): conformance only
-    for (const u of users) {
-      const app = appOfWorkflow(u.file, gitea.appNames);
-      if (app) out.push([`app:${app}`, `${f} used by ${u.file}`]);
-      else if (u.file === '.gitea/workflows/ci.yml') {
-        if (!u.jobs?.length || !u.jobs.every((j) => viaJob(j, `${f} used by ci.yml`))) return null;
-      } else return null;
-    }
-    return out;
-  }
-  const users = giteaUsers(f, gitea);
-  for (const u of users) {
+  for (const u of giteaUsers(f, gitea)) {
     const app = appOfWorkflow(u.file, gitea.appNames);
     if (app) out.push([`app:${app}`, `${f} used by ${u.file}`]);
     else if (u.file === '.gitea/workflows/ci.yml') {
       if (!u.jobs?.length || !u.jobs.every((j) => viaJob(j, `${f} used by ci.yml`))) return null;
-    } else out.push(['tools', `${f} used by ${u.file}`]); // nightly, publish, canary...: not a pull-request gate, checked by conformance
+    } else if (/^\.gitea\/workflows\/(app-[a-z-]+)\.yml$/.test(u.file)) return null; // a reusable workflow: its callers are not traced
+    else out.push(['tools', `${f} used by ${u.file}, which runs only on a schedule, a tag or a manual run (not a pull request)`]);
   }
   return out;
 }
@@ -454,6 +472,20 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
       kind(p, 'all');
     }
   };
+  const markTargets = (hit) => {
+    for (const [p, reason] of hit) {
+      if (p === 'everything') markAll(reason);
+      else if (p === 'apps') {
+        for (const a of apps.keys()) {
+          mark(`app:${a}`, reason);
+          kind(`app:${a}`, 'all');
+        }
+      } else if (p.startsWith('app:')) {
+        mark(p, reason);
+        kind(p, 'all');
+      } else mark(p, reason);
+    }
+  };
   if (all) markAll('everything (no base)');
 
   for (const f of all ? [] : files) {
@@ -466,27 +498,34 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     if (META.some((r) => r.test(f))) continue;
     if (f.startsWith('.gitea/')) {
       // Anything under .gitea runs the conformance checks over workflows and actions; the rest is narrowed per job or user.
-      mark('conformance', `ci files ${f}`);
       const hit = gitea ? giteaTargets(f, gitea) : null;
       if (!hit) {
-        markAll(`global ${f} (cannot narrow)`);
+        markAll(`global ${f}`); // the reason matches tools/paddock-dev's port, which has no per-job narrowing
         continue;
       }
-      for (const [p, reason] of hit) {
-        if (p === 'apps') {
-          for (const a of apps.keys()) {
-            mark(`app:${a}`, reason);
-            kind(`app:${a}`, 'all');
-          }
-        } else if (p.startsWith('app:')) {
-          mark(p, reason);
-          kind(p, 'all');
-        } else mark(p, reason);
+      mark('conformance', `ci files ${f}`);
+      markTargets(hit);
+      continue;
+    }
+    if (CONFORMANCE_SCRIPT.test(f)) {
+      // The shared actions' scripts: conformance, every app's gates (below), and the jobs of the actions that run the script.
+      const hit = gitea ? giteaTargets(f, gitea) : null;
+      if (!hit) {
+        markAll(`global ${f}`);
+        continue;
+      }
+      markTargets(hit);
+      mark('conformance', f);
+      for (const a of apps.keys()) {
+        mark(`app:${a}`, `conformance ${f}`);
+        kind(`app:${a}`, 'all');
       }
       continue;
     }
+    if (PLANNER_FILES.test(f)) mark('paddock-dev', `its golden test compares ${f} (tools/paddock-dev/tests/it/golden.rs)`);
     if (RUST_INPUTS.some((r) => r.test(f))) {
       for (const p of ['crates', 'paddock-dev']) mark(p, `rust input ${f}`);
+      if (f.startsWith('lint/')) mark('conformance', `C13 reads ${f}`);
       for (const [name, app] of apps) {
         if (!app.cargo) continue;
         mark(`app:${name}`, `rust input ${f}`);
@@ -556,7 +595,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     // An app's Cargo dependencies and capabilities are read by conformance C48 (a shell app grants its dialog windows the
     // shell's dialog set), which runs in the conformance job.
     if (APP_CAPABILITY_INPUT.test(f)) mark('conformance', `C48 reads ${f}`);
-    // The shared actions' scripts in conformance/ run in every app's gates.
+    // The rest of conformance/ (bin, src) runs in every app's gates through the shared actions.
     if (f.startsWith('conformance/') && !/^conformance\/(test|fixtures)\//.test(f)) {
       for (const a of apps.keys()) {
         mark(`app:${a}`, `conformance ${f}`);
@@ -777,9 +816,12 @@ export function planFor({ base = null, head = 'HEAD', files = null, all = false,
   const giteaFiles = files
     ? git(['ls-files', '.gitea'], root).split('\n').filter(Boolean)
     : git(['ls-tree', '-r', '--name-only', head, '--', '.gitea'], root).split('\n').filter(Boolean);
+  const dirtyGitea = new Set(files ? git(['status', '--porcelain', '--no-renames', '--', '.gitea', 'conformance'], root).split('\n').filter(Boolean).map((l) => l.slice(3)) : []);
   const gitea = {
     appNames: [...graph.apps.keys()],
     files: () => giteaFiles,
+    // Files mode: only files that differ from HEAD can be narrowed (a committed change shows no difference).
+    dirty: files ? (f) => dirtyGitea.has(f) : null,
     before: (f) => showAt(files ? 'HEAD' : base, f),
     after: (f) => {
       if (!files) return showAt(head, f);
@@ -807,6 +849,21 @@ export function planFor({ base = null, head = 'HEAD', files = null, all = false,
     }
   }
   return { graph, changed, plan: affected(changed, graph, { lockBefore, lockAfter, all, explain, gitea }) };
+}
+
+/** The ci.yml job outputs of a plan (the plan job declares and wires exactly these names; a test checks ci.yml against them). */
+export function ciOutputs(plan, legs) {
+  return {
+    crates: plan.crates,
+    ui: plan.ui,
+    eslint: plan.eslint,
+    conformance: plan.conformance,
+    tools: plan.tools,
+    icons: plan.icons,
+    paddock_dev: plan.paddockDev,
+    apps: JSON.stringify(legs),
+    any_app: legs.length > 0,
+  };
 }
 
 /** A short Markdown summary of a plan for the job summary. */
@@ -866,17 +923,7 @@ async function ci(env, { app = null } = {}) {
     console.log(String(run));
     return;
   }
-  const outputs = {
-    crates: plan.crates,
-    ui: plan.ui,
-    eslint: plan.eslint,
-    conformance: plan.conformance,
-    tools: plan.tools,
-    icons: plan.icons,
-    paddock_dev: plan.paddockDev,
-    apps: JSON.stringify(legs),
-    any_app: legs.length > 0,
-  };
+  const outputs = ciOutputs(plan, legs);
   if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, Object.entries(outputs).map(([k, v]) => `${k}=${v}\n`).join(''));
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, summary(plan, reason, legs));
 }
