@@ -409,3 +409,168 @@ fn imports_report_progress_and_can_be_cancelled() {
     assert_eq!(ws.summary().total, 200);
     assert!(ws.summary().unrecognized.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Repeated names in a zip (the user's decision of 2026-10-29): every entry is kept; the second of a full path becomes
+// `<stem> (2)<.ext>` in the same folder, then `(3)` and so on, never the name of a real entry.
+// ---------------------------------------------------------------------------
+
+fn entries_of(files: &[(&str, &[u8])]) -> Vec<(String, Vec<u8>)> {
+    let files: Vec<(String, Vec<u8>)> = files.iter().map(|(n, b)| (n.to_string(), b.to_vec())).collect();
+    debrief_core::archive::expand("dup.zip", crate::common::stored_zip(&files))
+        .expect("the archive expands")
+        .into_iter()
+        .map(|e| (e.name.unwrap(), e.bytes))
+        .collect()
+}
+
+#[test]
+fn two_entries_with_one_path_are_both_kept_with_their_contents() {
+    let got = entries_of(&[("logs/app.log", b"first"), ("logs/app.log", b"second")]);
+    assert_eq!(
+        got,
+        [
+            ("logs/app.log".to_string(), b"first".to_vec()),
+            ("logs/app (2).log".to_string(), b"second".to_vec())
+        ]
+    );
+}
+
+#[test]
+fn a_third_entry_with_the_same_path_is_numbered_three() {
+    let got = entries_of(&[("x.log", b"1"), ("x.log", b"2"), ("x.log", b"3"), ("noext", b"a"), ("noext", b"b")]);
+    let names: Vec<&str> = got.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["x.log", "x (2).log", "x (3).log", "noext", "noext (2)"]);
+    assert_eq!(got[2].1, b"3");
+}
+
+#[test]
+fn a_generated_name_never_takes_the_name_of_a_real_entry() {
+    // The real `x (2).log` comes before or after the repeated `x.log`: either way the copy becomes `x (3).log`.
+    for files in [
+        vec![("x.log", &b"real"[..]), ("x (2).log", &b"own"[..]), ("x.log", &b"copy"[..])],
+        vec![("x.log", &b"real"[..]), ("x.log", &b"copy"[..]), ("x (2).log", &b"own"[..])],
+    ] {
+        let got = entries_of(&files);
+        let find = |n: &str| got.iter().find(|(name, _)| name == n).map(|(_, b)| b.clone());
+        assert_eq!(got.len(), 3, "{got:?}");
+        assert_eq!(find("x.log").as_deref(), Some(&b"real"[..]));
+        assert_eq!(find("x (2).log").as_deref(), Some(&b"own"[..]));
+        assert_eq!(find("x (3).log").as_deref(), Some(&b"copy"[..]));
+    }
+}
+
+#[test]
+fn a_renamed_entry_is_read_again_by_its_new_name() {
+    let z = crate::common::stored_zip(&[("a.log".into(), b"one".to_vec()), ("a.log".into(), b"two".to_vec())]);
+    assert_eq!(debrief_core::archive::read_entry(z.clone(), "dup.zip", "a.log").unwrap(), b"one");
+    assert_eq!(debrief_core::archive::read_entry(z, "dup.zip", "a (2).log").unwrap(), b"two");
+}
+
+/// Regression (review of c9f283344): entries written with a data descriptor (flag bit 3) hold no CRC-32 or size in their
+/// local header, and the repeated-path reader took the CRC from there, so the whole archive failed with "Invalid
+/// checksum". The central directory's values are the ones to use.
+#[test]
+fn repeated_paths_written_with_data_descriptors_are_all_kept() {
+    let files = [
+        ("logs/app.log".to_string(), b"first".to_vec()),
+        ("logs/app.log".to_string(), b"second one".to_vec()),
+        ("logs/app.log".to_string(), Vec::new()),
+    ];
+    let z = crate::common::stored_zip_flagged(&files, true);
+    let got: Vec<(String, Vec<u8>)> = debrief_core::archive::expand("dup.zip", z)
+        .expect("the archive expands")
+        .into_iter()
+        .map(|e| (e.name.unwrap(), e.bytes))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("logs/app.log".to_string(), b"first".to_vec()),
+            ("logs/app (2).log".to_string(), b"second one".to_vec()),
+            ("logs/app (3).log".to_string(), Vec::new())
+        ]
+    );
+}
+
+/// Regression (review of c9f283344): renaming probed `(2)`, `(3)`, ... from 2 for every copy, so n copies of one path took
+/// n squared steps (40,000 copies took a minute). The count is the assertion; the run must also end.
+#[test]
+fn many_copies_of_one_path_are_all_kept_under_distinct_names() {
+    let files: Vec<(String, Vec<u8>)> = (0..2_000u32)
+        .map(|i| ("logs/app.log".to_string(), i.to_le_bytes().to_vec()))
+        .collect();
+    let entries = debrief_core::archive::expand("dup.zip", crate::common::stored_zip(&files)).expect("the archive expands");
+    assert_eq!(entries.len(), files.len());
+    let names: std::collections::HashSet<_> = entries.iter().map(|e| e.name.clone().unwrap()).collect();
+    assert_eq!(names.len(), files.len());
+    assert_eq!(entries.iter().filter(|e| e.renamed_from.is_some()).count(), files.len() - 1);
+    assert_eq!(entries[1_999].name.as_deref(), Some("logs/app (2000).log"));
+    assert_eq!(entries[1_999].bytes, 1_999u32.to_le_bytes());
+}
+
+/// Regression (review round 2): a repeated UTF-8 name in an archive that does not set the UTF-8 flag keeps its letters.
+#[test]
+fn a_repeated_utf8_name_without_the_flag_keeps_its_letters() {
+    let got = entries_of(&[("caf\u{e9}.log", b"one"), ("caf\u{e9}.log", b"two")]);
+    let names: Vec<&str> = got.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["caf\u{e9}.log", "caf\u{e9} (2).log"]);
+}
+
+/// More entries than `MAX_ENTRIES` is refused with a message, on the normal path and the repeated-path one.
+#[test]
+fn an_archive_with_too_many_entries_is_refused() {
+    let n = debrief_core::archive::MAX_ENTRIES + 1;
+    let distinct: Vec<(String, Vec<u8>)> = (0..n).map(|i| (format!("f{i}.log"), Vec::new())).collect();
+    let same: Vec<(String, Vec<u8>)> = (0..n).map(|_| ("f.log".to_string(), Vec::new())).collect();
+    for files in [distinct, same] {
+        let e = debrief_core::archive::expand("big.zip", crate::common::stored_zip(&files))
+            .err()
+            .expect("refused");
+        assert!(format!("{e:#}").contains("entries"), "{e:#}");
+    }
+}
+
+/// `d/a.log` and `d\a.log` are one path once `\` is read as `/`: the second becomes `d/a (2).log` whether or not the
+/// archive repeats a raw name.
+#[test]
+fn a_backslash_twin_of_a_path_is_renamed() {
+    let got = entries_of(&[("d/a.log", b"one"), ("d\\a.log", b"two")]);
+    assert_eq!(
+        got,
+        [
+            ("d/a.log".to_string(), b"one".to_vec()),
+            ("d/a (2).log".to_string(), b"two".to_vec())
+        ]
+    );
+}
+
+/// Regression (review of c9f283344): the output name came from the local header, so a local name equal to a generated
+/// one could collide. The central directory's name is the entry's name.
+#[test]
+fn the_central_directory_name_is_the_entrys_name() {
+    let mut z = crate::common::stored_zip(&[
+        ("a.log".to_string(), b"one".to_vec()),
+        ("a.log".to_string(), b"two".to_vec()),
+        ("abcdefghi".to_string(), b"three".to_vec()),
+    ]);
+    let at = z.windows(9).position(|w| w == b"abcdefghi").expect("the local header comes first");
+    z[at..at + 9].copy_from_slice(b"a (2).log");
+    let entries = debrief_core::archive::expand("dup.zip", z).expect("the archive expands");
+    let got: Vec<(&str, &[u8])> = entries.iter().map(|e| (e.name.as_deref().unwrap(), e.bytes.as_slice())).collect();
+    assert_eq!(got, [("a.log", &b"one"[..]), ("a (2).log", b"two"), ("abcdefghi", b"three")]);
+}
+
+/// The fuzz corpus' duplicate seeds (stored, streamed deflate with data descriptors, zip64 sizes) all expand to the same
+/// two entries.
+#[test]
+fn the_fuzz_corpus_duplicate_seeds_expand_to_both_entries() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/corpus/fuzz_archive");
+    for seed in ["dup-stored.zip", "dup-bit3-deflate.zip", "dup-zip64.zip"] {
+        let bytes = std::fs::read(dir.join(seed)).unwrap_or_else(|e| panic!("{seed}: {e}"));
+        let got = debrief_core::archive::expand(seed, bytes).unwrap_or_else(|e| panic!("{seed}: {e:#}"));
+        let names: Vec<_> = got.iter().map(|e| e.name.as_deref().unwrap()).collect();
+        assert_eq!(names, ["logs/a.log", "logs/a (2).log"], "{seed}");
+        assert_eq!(got[1].bytes, b"second line\n".repeat(5), "{seed}");
+    }
+}
