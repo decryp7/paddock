@@ -66,6 +66,8 @@ objc2-service-management = { version = "0.3", default-features = false, features
 workspace = true
 
 [dev-dependencies]
+# A socket bound but not listening refuses connections on Linux and Windows (not macOS): "nothing listens" with the port held.
+socket2 = { version = "0.6", features = ["all"] }
 tempfile.workspace = true
 # A held loopback port for "nothing answers there" (C39).
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }

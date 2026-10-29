@@ -721,14 +721,21 @@ mod tests {
         f.job_lingers_for = u32::MAX;
         f.cancel_after_calls = Some(2);
         f.register_results = vec![Err(RegisterError::Other("busy".into()))];
-        let RepairOutcome::Failed(why) = run(&mut f).0 else { panic!("a service left removed is not a clean cancel") };
-        assert!(why.starts_with("Cancelled, but registering the service again failed: busy"), "{why}");
+        let RepairOutcome::Failed(why) = run(&mut f).0 else {
+            panic!("a service left removed is not a clean cancel")
+        };
+        assert!(
+            why.starts_with("Cancelled, but registering the service again failed: busy"),
+            "{why}"
+        );
         assert!(why.contains("Login Items"), "{why}");
         // A registration launchd still reports as stale is not a clean cancel either.
         let mut f = Fake::new(1, Some(0));
         f.job_lingers_for = u32::MAX;
         f.cancel_after_calls = Some(2);
-        let RepairOutcome::Failed(why) = run(&mut f).0 else { panic!("stale after the cancel") };
+        let RepairOutcome::Failed(why) = run(&mut f).0 else {
+            panic!("stale after the cancel")
+        };
         assert!(why.contains("Cancelled") && why.contains("stale"), "{why}");
         let t = RepairTracker::new();
         t.finish(&RepairOutcome::Failed(why), Instant::now());

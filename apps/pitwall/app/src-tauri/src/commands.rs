@@ -246,6 +246,7 @@ rpc!(
     delete_model => "delete_model", id: String = "id");
 rpc!(
     /// Loads a model now.
+    #[deprecated(note = "use the start_load_model job; the UI moves over in WP-3 of Pitwall 1.1")]
     load_model => "load_model", id: String = "id");
 rpc!(
     /// Unloads a model.
@@ -339,6 +340,7 @@ rpc!(
     benchmarks => "benchmarks");
 rpc!(
     /// Runs a benchmark.
+    #[deprecated(note = "use start_benchmark (a job with Cancel); the UI moves over in WP-3 of Pitwall 1.1")]
     run_benchmark => "run_benchmark", model_id: String = "modelId");
 rpc!(
     /// The settings.

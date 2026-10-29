@@ -1045,23 +1045,33 @@ impl Serving {
             &s.memory.policy(),
             self.inner.last_activity.load(Ordering::SeqCst),
         );
-        for a in &actions {
-            match a {
+        // What was actually done: a context that was already released (or whose model became busy) is not in the list.
+        let mut taken = Vec::new();
+        for a in actions {
+            match &a {
                 Action::Unload(m, why) => {
                     self.unload(m, *why);
+                    taken.push(a);
                 }
-                Action::ReleaseContext(m, why) => self.release_context(m, *why),
+                Action::ReleaseContext(m, why) => {
+                    if self.release_context(m, *why) {
+                        taken.push(a);
+                    }
+                }
             }
         }
-        actions
+        taken
     }
 
     /// Clears an idle model's context before its weights are released: the engine's slots are erased (KV cache and
     /// cached prompts) in the background. A model that became busy meanwhile is left alone.
-    fn release_context(&self, id: &ModelId, why: ReleaseReason) {
-        let Some(h) = lock(&self.inner.hot).get(id).cloned() else { return };
+    /// `true` when a release was started, `false` when the model is gone, busy or was released already.
+    fn release_context(&self, id: &ModelId, why: ReleaseReason) -> bool {
+        let Some(h) = lock(&self.inner.hot).get(id).cloned() else {
+            return false;
+        };
         if h.active.load(Ordering::SeqCst) > 0 || h.context_released.swap(true, Ordering::SeqCst) {
-            return;
+            return false;
         }
         let slots = h.slots.get();
         let me = self.clone();
@@ -1088,6 +1098,7 @@ impl Serving {
                 format!("Cleared the context of {} ({why:?}); its weights stay loaded.", h.id),
             );
         });
+        true
     }
 
     /// Restarts a crashed model in the background; a failed attempt is another crash (backoff, then the loop guard).
