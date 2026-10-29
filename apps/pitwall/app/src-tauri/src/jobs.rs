@@ -654,4 +654,54 @@ mod tests {
             serde_json::json!({ "kind": "progress", "jobId": 7, "phase": "x", "done": 1, "total": null, "unit": "bytes", "canStopWaiting": false, "elapsedSecs": 2, "cancellable": false, "notCancellableReason": "why" })
         );
     }
+
+    /// The wire contract (ER: one declared definition, checked on both sides): the UI's `jobs.spec.ts` parses the same file.
+    #[test]
+    fn every_event_variant_serialises_to_the_shared_fixture() {
+        let events = vec![
+            JobEvent::Started {
+                job_id: 1,
+                title: "Loading the model".into(),
+            },
+            JobEvent::Progress {
+                job_id: 1,
+                phase: "Downloading".into(),
+                done: 5,
+                total: Some(10),
+                unit: Unit::Bytes,
+                can_stop_waiting: false,
+                elapsed_secs: 2,
+                cancellable: true,
+                not_cancellable_reason: None,
+            },
+            JobEvent::Progress {
+                job_id: 1,
+                phase: "Installing".into(),
+                done: 1,
+                total: None,
+                unit: Unit::Items,
+                can_stop_waiting: true,
+                elapsed_secs: 3,
+                cancellable: false,
+                not_cancellable_reason: Some("The OS is asking.".into()),
+            },
+            JobEvent::Done {
+                job_id: 1,
+                result: serde_json::json!({ "ok": true }),
+            },
+            JobEvent::Failed {
+                job_id: 2,
+                error: CommandError {
+                    code: ErrorCode::InsufficientMemory,
+                    message: "Too big.".into(),
+                },
+            },
+            JobEvent::Cancelled {
+                job_id: 3,
+                stopped_waiting: true,
+            },
+        ];
+        let fixture: Value = serde_json::from_str(include_str!("../../src/app/core/testdata/job-events.json")).unwrap();
+        assert_eq!(serde_json::to_value(events).unwrap(), fixture);
+    }
 }

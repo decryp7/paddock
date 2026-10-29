@@ -1,6 +1,8 @@
 import { TestBed } from '@angular/core/testing';
 import type { JobEvent } from './api.types';
 import { BACKEND } from './backend';
+import fixtureJson from './testdata/job-events.json';
+import { parseJobEvent } from './job-wire';
 import { applyJobEvent, JobsService, STILL_WORKING_MS, type JobRow } from './jobs';
 import { MockBackend } from './mock-backend';
 
@@ -50,6 +52,32 @@ describe('applyJobEvent', () => {
     expect(rows.map((r) => r.id)).toEqual([3, 7]);
   });
 
+  it('ignores an event of a kind it does not know instead of crashing', () => {
+    const rows = applyJobEvent([], started(1), 0);
+    expect(applyJobEvent(rows, { kind: 'paused', jobId: 1 } as unknown as JobEvent, 1)).toEqual(rows);
+  });
+
+  it('a progress event clears the local cancelling flag, so the real phase shows again', () => {
+    let rows: JobRow[] = applyJobEvent([], started(1), 0);
+    rows = rows.map((r) => ({ ...r, cancelling: true }));
+    rows = applyJobEvent(rows, progress(1, { phase: 'Cancel did not take effect', canStopWaiting: true }), 1);
+    expect(rows[0]).toMatchObject({ cancelling: false, canStopWaiting: true });
+  });
+
+  it('parses every event of the shared wire fixture (also checked by a Rust test)', () => {
+    const fixture = fixtureJson as unknown[];
+    const parsed = fixture.map(parseJobEvent);
+    expect(parsed.every((e) => e !== null)).toBe(true);
+    expect(parsed).toEqual(fixture);
+    expect(new Set(fixture.map((e) => (e as { kind: string }).kind))).toEqual(new Set(['started', 'progress', 'done', 'failed', 'cancelled']));
+  });
+
+  it('parseJobEvent drops anything without a known kind and a numeric job id', () => {
+    for (const bad of [null, 'x', 4, {}, { kind: 'progress' }, { kind: 'paused', jobId: 1 }, { kind: 'done', jobId: '1' }, { kind: 'done', jobId: Number.NaN }]) {
+      expect(parseJobEvent(bad)).toBeNull();
+    }
+  });
+
   it.each(['done', 'failed', 'cancelled'] as const)('removes the row on %s', (kind) => {
     const rows = applyJobEvent([], started(1), 0);
     const end: JobEvent =
@@ -94,8 +122,22 @@ describe('JobsService', () => {
     const stuck = jobs.jobs()[0]!.id;
     backend.refuseCancel = true;
     await jobs.cancel(stuck);
-    expect(jobs.jobs()[0]).toMatchObject({ cancelling: true, canStopWaiting: true });
+    expect(jobs.jobs()[0]).toMatchObject({ cancelling: false, canStopWaiting: true });
     await jobs.stopWaiting(stuck);
+    expect(jobs.any()).toBe(false);
+  });
+
+  it('late events of a finished job are ignored, and a Cancel the backend does not know removes the orphaned row', async () => {
+    const events: ((e: JobEvent) => void)[] = [];
+    const backend = { jobEvents: (l: (e: JobEvent) => void) => (events.push(l), () => undefined), jobCancel: () => Promise.resolve(false), jobStopWaiting: () => Promise.resolve(false) };
+    TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: backend }] });
+    const jobs = TestBed.inject(JobsService);
+    events[0]!(started(8));
+    events[0]!({ kind: 'done', jobId: 8, result: null });
+    events[0]!(progress(8));
+    expect(jobs.any()).toBe(false);
+    events[0]!(started(9));
+    await jobs.cancel(9);
     expect(jobs.any()).toBe(false);
   });
 
@@ -105,6 +147,7 @@ describe('JobsService', () => {
     TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: backend }] });
     const jobs = TestBed.inject(JobsService);
     events[0]!(started(5));
+    events[0]!(progress(5, { cancellable: false, notCancellableReason: 'The OS is asking.' }));
     await jobs.cancel(5);
     expect(jobs.jobs()[0]).toMatchObject({ id: 5, cancelling: false });
     await jobs.stopWaiting(5);

@@ -65,7 +65,8 @@ export const ServiceStore = signalStore(
         return await run();
       } catch (e) {
         const error = toCommandError(e);
-        patchState(store, { error });
+        // A cancel the user asked for is an outcome, not a failure: no stored error.
+        if (error.code !== 'cancelled') patchState(store, { error });
         toasts.error(error);
         return null;
       } finally {

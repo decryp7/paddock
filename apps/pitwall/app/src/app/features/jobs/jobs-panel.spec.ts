@@ -60,9 +60,34 @@ describe('JobsPanel', () => {
     await Promise.resolve();
     fixture.detectChanges();
     expect(text(el)).toContain('Stop waiting');
+    expect(text(el)).toContain('Cancel did not take effect');
+    expect(el.querySelector<HTMLButtonElement>('button[aria-label^="Cancel"]')!.disabled).toBe(false);
     el.querySelector<HTMLButtonElement>('button[aria-label^="Stop waiting"]')!.click();
     expect(await pending).toMatchObject({ code: 'cancelled', message: expect.stringContaining('may still be working') });
     fixture.detectChanges();
     expect(el.querySelector('.jobs')).toBeNull();
+  });
+
+  it('disables Cancel with the reason while the backend says the job cannot be cancelled', async () => {
+    const { backend, fixture, el } = setup();
+    void backend.installService().catch(() => undefined);
+    backend['emitJob']({ kind: 'progress', jobId: 1, phase: 'Waiting for the system prompt', done: 1, total: null, unit: 'items', canStopWaiting: false, elapsedSecs: 1, cancellable: false, notCancellableReason: 'Answer the system prompt.' });
+    fixture.detectChanges();
+    const cancel = el.querySelector<HTMLButtonElement>('button[aria-label^="Cancel"]')!;
+    expect(cancel.disabled).toBe(true);
+    const reason = document.getElementById(cancel.getAttribute('aria-describedby')!)!;
+    expect(reason.textContent).toContain('Answer the system prompt.');
+  });
+
+  it('keeps one polite live region present, names Cancel by the job and the phase, and labels the bar like the visible text', () => {
+    const { backend, fixture, el } = setup();
+    const live = el.querySelector('[role="status"][aria-live="polite"]');
+    expect(live).not.toBeNull();
+    void backend.loadModel('gemma-4-12b-it-q4_k_m').catch(() => undefined);
+    fixture.detectChanges();
+    expect(el.querySelector('[role="status"][aria-live="polite"]')).toBe(live);
+    expect(live!.textContent).toContain('Loading the model');
+    expect(el.querySelector('button[aria-label^="Cancel"]')!.getAttribute('aria-label')).toBe('Cancel: Loading the model');
+    expect(el.querySelector('mat-progress-bar')!.getAttribute('aria-label')).toBe('Loading the model: Working on it');
   });
 });

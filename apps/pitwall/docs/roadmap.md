@@ -106,10 +106,14 @@ Pacenotes: toolsets `orient`, `code`, `review`, `diagrams`, `requirements` and `
   `withTimeout`, ER-19), phase-labelled progress with a growing count, Cancel in every phase, "Stop waiting" while
   `canStopWaiting` and a "Still working" note after a quiet spell (`JobsService`, `pw-jobs-panel`). A cancelled job rejects
   with the `cancelled` code, which toasts as information, not as an error.
-- **Left for 1.1.** The old blocking commands (`load_model`, `run_benchmark`, `check_updates_now`, `install_service`,
-  `uninstall_service`, `repair_service`, `install_app_update`, `request_repair`) are now unused by the UI: delete them and
-  their registration. `checkAppUpdate` and `appUpdateStatus` are quick calls and keep a 30 s timeout. The shell, Material
-  and dialog-as-window move (WP-2) is not started.
+- **Deleted.** The old blocking commands (`load_model`, `run_benchmark`, `check_updates_now`, `install_service`,
+  `uninstall_service`, `repair_service`, `install_app_update`, `request_repair`) are gone from the Tauri commands; the
+  server's own methods of the same names are only reached through the jobs. Wire contract: `core/testdata/job-events.json`
+  is checked by a Rust test (every `JobEvent` variant serialises to it) and by `jobs.spec.ts` (every entry parses).
+- **Note.** "Still working" rarely shows: a running job reports every second, so it appears only when the app stops hearing from
+  the job (a stuck step), which is what it is for.
+- **Left for 1.1.** `checkAppUpdate` and `appUpdateStatus` are quick calls and keep a 30 s timeout. The shell, Material and
+  dialog-as-window move (WP-2) is not started.
 
 ## Next (hand-off, 2026-10-22)
 

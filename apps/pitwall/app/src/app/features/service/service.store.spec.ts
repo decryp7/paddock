@@ -27,6 +27,17 @@ describe('ServiceStore', () => {
     expect(store.askConsent()).toBe(false);
   });
 
+  it('a cancelled install is an outcome: the user hears it, the store keeps no error', async () => {
+    const backend = new MockBackend();
+    backend.holdJobs = true;
+    const { store, toasts } = setup({}, backend);
+    const pending = store.install();
+    backend.jobCancel(1).catch(() => undefined);
+    expect(await pending).toBe(false);
+    expect(store.error()).toBeNull();
+    expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'info', message: 'Cancelled.' });
+  });
+
   it('asks the first-run question when the engine says the user was not asked', async () => {
     const { store } = setup({ askConsent: true });
     await store.refresh();

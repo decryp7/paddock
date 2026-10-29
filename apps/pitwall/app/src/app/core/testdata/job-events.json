@@ -1,0 +1,8 @@
+[
+  { "kind": "started", "jobId": 1, "title": "Loading the model" },
+  { "kind": "progress", "jobId": 1, "phase": "Downloading", "done": 5, "total": 10, "unit": "bytes", "canStopWaiting": false, "elapsedSecs": 2, "cancellable": true, "notCancellableReason": null },
+  { "kind": "progress", "jobId": 1, "phase": "Installing", "done": 1, "total": null, "unit": "items", "canStopWaiting": true, "elapsedSecs": 3, "cancellable": false, "notCancellableReason": "The OS is asking." },
+  { "kind": "done", "jobId": 1, "result": { "ok": true } },
+  { "kind": "failed", "jobId": 2, "error": { "code": "insufficientMemory", "message": "Too big." } },
+  { "kind": "cancelled", "jobId": 3, "stoppedWaiting": true }
+]

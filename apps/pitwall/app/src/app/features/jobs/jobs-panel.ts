@@ -14,31 +14,46 @@ import { bytes, int, percent } from '../../shared/format';
   imports: [MatButtonModule, MatProgressBarModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <div class="sr" role="status" aria-live="polite">
+      @for (job of jobs.jobs(); track job.id) {
+        {{ job.title }}: {{ job.phase }}. @if (jobs.stalled(job)) { Still working. }
+      }
+    </div>
     @if (jobs.any()) {
       <section class="jobs" aria-label="Running operations">
         @for (job of jobs.jobs(); track job.id) {
           <div class="job" [attr.data-job]="job.id">
             <div class="head">
               <strong class="title">{{ job.title }}</strong>
-              <span class="phase">{{ job.cancelling ? 'Cancelling' : job.phase }}</span>
+              <span class="phase">{{ job.phase }}</span>
               <span class="count">{{ count(job) }}</span>
             </div>
             <mat-progress-bar
               [mode]="job.total ? 'determinate' : 'indeterminate'"
               [value]="percent(job)"
               [attr.aria-label]="job.title + ': ' + job.phase"
+              [attr.aria-valuetext]="count(job)"
             />
             @if (jobs.stalled(job)) {
-              <p class="note" role="status">Still working. This can take a while; you can keep using Pitwall.</p>
+              <p class="note">Still working. This can take a while; you can keep using Pitwall.</p>
             }
             @if (!job.cancellable && job.notCancellableReason) {
-              <p class="note">{{ job.notCancellableReason }}</p>
+              <p class="note" [id]="'job-reason-' + job.id">{{ job.notCancellableReason }}</p>
             }
             <div class="actions">
-              <button type="button" mat-button [disabled]="job.cancelling" (click)="jobs.cancel(job.id)" [attr.aria-label]="'Cancel ' + job.title">Cancel</button>
+              <button
+                type="button"
+                mat-button
+                [disabled]="!job.cancellable || (job.cancelling && !job.canStopWaiting)"
+                [attr.aria-describedby]="!job.cancellable && job.notCancellableReason ? 'job-reason-' + job.id : null"
+                (click)="jobs.cancel(job.id)"
+                [attr.aria-label]="'Cancel: ' + job.title"
+              >
+                Cancel
+              </button>
               @if (job.canStopWaiting) {
-                <button type="button" mat-button (click)="jobs.stopWaiting(job.id)" [attr.aria-label]="'Stop waiting for ' + job.title">Stop waiting</button>
-                <span class="note">Cancel did not take effect; the server may still be working.</span>
+                <button type="button" mat-button (click)="jobs.stopWaiting(job.id)" [attr.aria-label]="'Stop waiting: ' + job.title">Stop waiting</button>
+                <span class="note">Cancel did not take effect; the server may still be working. You can press Cancel again.</span>
               }
             </div>
           </div>
@@ -49,6 +64,7 @@ import { bytes, int, percent } from '../../shared/format';
   styles: `
     .jobs { display: flex; flex-direction: column; gap: var(--sp-2); }
     .job { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-3); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--r-md); }
+    .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .head { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
     .title { font-weight: 600; }
     .phase, .count, .note { color: var(--text-muted); font-size: var(--fs-sm); margin: 0; }
