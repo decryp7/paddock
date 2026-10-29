@@ -323,16 +323,8 @@ pub enum Request {
         /// The window.
         query: crate::extras::changes::ChangesQuery,
     },
-    /// "Why won't it sleep / what woke it". A query that runs read-only OS tools. Appended.
-    SleepBlockers,
-    /// Boot analysis. A query. Appended.
-    BootAnalysis,
-    /// Network and energy per app. A query that runs read-only OS tools (takes a second or two). Appended.
-    AppUsage,
     /// GPU use per process. A query. Appended.
     GpuProcesses,
-    /// The installed software. A query. Appended.
-    SoftwareInventory,
     /// Writes the inventory report (hardware and software) to a path the user picked in the OS save dialog; answers
     /// `InventorySaved`. Appended.
     SaveInventoryReport {
@@ -356,7 +348,7 @@ pub enum Request {
     },
     /// The status of every running job and of the last few that ended (what a window that opens late needs). A query.
     Jobs,
-    /// Asks a job to stop and returns at once; what it was building is dropped and nothing else changes.
+    /// Asks a job to stop and returns at once (answers `JobCancelled`); what it was building is dropped and nothing else changes.
     CancelJob {
         /// The job.
         id: u64,
@@ -699,16 +691,8 @@ pub enum Reply {
     // ---- extras, backup health and taming proof (WP-13, WP-14, WP-36) ----
     /// What changed. Appended.
     Changes(Box<crate::extras::changes::ChangeTimeline>),
-    /// Sleep blockers and wakes. Appended.
-    Sleep(Box<crate::extras::sleep::SleepReport>),
-    /// Boot analysis. Appended.
-    Boot(Box<crate::extras::boot::BootReport>),
-    /// Network and energy per app. Appended.
-    AppUsage(Box<crate::extras::usage::UsageReport>),
     /// GPU per process. Appended.
     Gpu(Box<crate::extras::gpu::GpuReport>),
-    /// Installed software. Appended.
-    Software(Box<crate::extras::software::SoftwareInventory>),
     /// The inventory report was written. Appended.
     InventorySaved(SavedInventory),
     /// The maintenance windows' state. Appended.
@@ -730,9 +714,11 @@ pub enum Reply {
 
     // ---- jobs ----
     /// A job's status (the answer to starting one).
-    Job(Box<crate::jobs::JobStatus>),
+    Job(Box<paddock_jobs::wire::WireSnapshot>),
     /// Every running job and the last few that ended.
-    Jobs(Vec<crate::jobs::JobStatus>),
+    Jobs(Vec<paddock_jobs::wire::WireSnapshot>),
+    /// Whether `CancelJob` found a running job to stop (false: unknown or already over).
+    JobCancelled(bool),
     /// What a done job produced.
     JobOutput(Box<crate::jobs::JobOutput>),
 }
@@ -798,11 +784,7 @@ impl Reply {
             Reply::SearchSeed(x) => v(x),
             Reply::StartupOverview(x) => v(x),
             Reply::Changes(x) => v(x),
-            Reply::Sleep(x) => v(x),
-            Reply::Boot(x) => v(x),
-            Reply::AppUsage(x) => v(x),
             Reply::Gpu(x) => v(x),
-            Reply::Software(x) => v(x),
             Reply::InventorySaved(x) => v(x),
             Reply::Maintenance(x) => v(x),
             Reply::Backup(x) => v(x),
@@ -812,8 +794,10 @@ impl Reply {
             Reply::DiskChildren(x) => v(x),
             Reply::DiskPath(x) => v(x),
             Reply::DiskRings(x) => v(x),
-            Reply::Job(x) => v(x),
-            Reply::Jobs(x) => v(x),
+            // The UI's shape of a job (`paddock_jobs::JobSnapshot`), not the postcard-safe one.
+            Reply::Job(x) => v(paddock_jobs::JobSnapshot::from(*x)),
+            Reply::Jobs(x) => v(x.into_iter().map(paddock_jobs::JobSnapshot::from).collect::<Vec<_>>()),
+            Reply::JobCancelled(x) => v(x),
             Reply::JobOutput(x) => v(x),
         }
     }
@@ -896,6 +880,8 @@ pub enum Message {
     DiskScan(Box<crate::disk::scan::DiskScanStatus>),
     /// Agent → app: the volumes mounted now changed (one came, one went, one stopped answering). Appended.
     DiskVolumes(Vec<crate::disk::volume::Volume>),
+    /// Agent → app: a job's status changed (the newest of each job wins; a final state is never dropped). Appended.
+    Job(Box<paddock_jobs::wire::WireSnapshot>),
 }
 
 #[cfg(test)]
@@ -996,11 +982,7 @@ mod tests {
             Reply::Network(Box::default()),
             Reply::HostNames(vec![]),
             Reply::Changes(Box::default()),
-            Reply::Sleep(Box::default()),
-            Reply::Boot(Box::default()),
-            Reply::AppUsage(Box::default()),
             Reply::Gpu(Box::default()),
-            Reply::Software(Box::default()),
             Reply::InventorySaved(SavedInventory {
                 path: "/x.md".into(),
                 bytes: 1,
@@ -1077,6 +1059,7 @@ mod tests {
             Reply::DiskPath("/x".into()),
             Reply::DiskRings(Box::new(index.rings(index.root(), 2, 0.0, 10).unwrap())),
             Reply::Jobs(vec![]),
+            Reply::JobCancelled(true),
             Reply::JobOutput(Box::new(crate::jobs::JobOutput::Backup(Box::default()))),
         ];
         for r in replies {
@@ -1143,11 +1126,7 @@ mod tests {
     #[test]
     fn extras_requests_have_the_json_shape_of_api_types() {
         for (name, r) in [
-            ("sleepBlockers", Request::SleepBlockers),
-            ("bootAnalysis", Request::BootAnalysis),
-            ("appUsage", Request::AppUsage),
             ("gpuProcesses", Request::GpuProcesses),
-            ("softwareInventory", Request::SoftwareInventory),
             ("maintenance", Request::Maintenance),
             ("backup", Request::Backup),
             ("jobs", Request::Jobs),
@@ -1160,8 +1139,11 @@ mod tests {
         let r: Request = serde_json::from_value(serde_json::json!({"changes": {"query": {}}})).unwrap();
         assert!(matches!(r, Request::Changes { query } if query.around.is_none()));
         let r: Request =
-            serde_json::from_value(serde_json::json!({"startJob": {"spec": {"findFiles": {"query": {"folder": "/x", "minBytes": 5}}}}})).unwrap();
-        assert!(matches!(r, Request::StartJob { spec: crate::jobs::JobSpec::FindFiles { query } } if query.mode == crate::extras::files::FinderMode::Both));
+            serde_json::from_value(serde_json::json!({"startJob": {"spec": {"findFiles": {"query": {"folder": "/x", "minBytes": 5}}}}}))
+                .unwrap();
+        assert!(
+            matches!(r, Request::StartJob { spec: crate::jobs::JobSpec::FindFiles { query } } if query.mode == crate::extras::files::FinderMode::Both)
+        );
         let r: Request =
             serde_json::from_value(serde_json::json!({"saveInventoryReport": {"path": "/r.md", "format": "markdown"}})).unwrap();
         assert!(matches!(r, Request::SaveInventoryReport { .. }));

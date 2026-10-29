@@ -1,9 +1,11 @@
 import { Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, provideRouter, Router } from '@angular/router';
-import type { MaintenanceSettings, SleepReport } from '../../core/api.types';
+import type { JobOutput, MaintenanceSettings, SleepReport } from '../../core/api.types';
+import { mockBoot, mockSoftware, mockUsage } from '../../core/mock/extras';
 import { BACKEND } from '../../core/backend';
-import { MockBackend } from '../../core/mock-backend';
+import type { MockBackend } from '../../core/mock-backend';
+import { jobsProviders, mockWithJobs } from '../../../testing/job-test-support';
 import { Chart } from '../../shared/chart';
 import { provideIcons } from '../../shared/icons';
 import { ExtrasStore } from '../../state/extras.store';
@@ -20,10 +22,11 @@ class StubChart {
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
 function render(tab = '', options: ConstructorParameters<typeof MockBackend>[0] = {}) {
-  const mock = new MockBackend({ latencyMs: 0, now: () => NOW, ...options });
+  const { mock, jobs } = mockWithJobs({ now: () => NOW, ...options });
   TestBed.configureTestingModule({
     providers: [
       provideIcons(),
+      jobsProviders(jobs),
       provideRouter([]),
       { provide: BACKEND, useValue: mock },
       { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: new Map(tab ? [['tab', tab]] : []) } } },
@@ -37,6 +40,8 @@ function render(tab = '', options: ConstructorParameters<typeof MockBackend>[0] 
 const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
   for (let i = 0; i < 6; i++) {
     await f.whenStable();
+    // A job the mock runs steps on a timer, like the agent's pushes.
+    await new Promise((r) => setTimeout(r, 2));
     f.detectChanges();
   }
 };
@@ -48,10 +53,13 @@ const clickTab = async (f: Parameters<typeof settle>[0], el: HTMLElement, text: 
   await settle(f);
 };
 
+/** The next job's result is `output`: the mock stands in for the engine's report. */
+const returns = (mock: MockBackend, output: JobOutput) => vi.spyOn(mock, 'jobResult').mockResolvedValue(output);
+
 describe('dy-extras-page', () => {
   it('has the eight tabs in a tablist, opens What changed first, and reads each tab only when opened', async () => {
     const { f, el, mock } = render();
-    const spy = vi.spyOn(mock, 'bootAnalysis');
+    const spy = vi.spyOn(mock, 'startJob');
     await settle(f);
     expect(el.querySelector('h1')?.textContent).toBe('Extras');
     expect([...el.querySelectorAll('[role="tab"]')].map((b) => b.textContent)).toEqual(['What changed', 'Sleep', 'Boot', 'Apps', 'GPU', 'Files', 'Inventory', 'Maintenance']);
@@ -113,12 +121,12 @@ describe('dy-extras-page', () => {
     expect(el.textContent).toContain('42 min 17 s');
     expect(rowsOf(el, 'Recent wakes').length).toBe(5);
     const report: SleepReport = { blockers: [], wakes: [], blockersUnavailable: 'pmset is not available here.', wakesUnavailable: null };
-    vi.spyOn(mock, 'sleepBlockers').mockResolvedValue(report);
+    returns(mock, { sleep: report });
     await TestBed.inject(ExtrasStore).reload('sleep');
     await settle(f);
     expect(el.querySelector('.none')!.textContent).toContain('pmset is not available here.');
     expect(el.textContent).toContain('No wakes recorded');
-    vi.spyOn(mock, 'sleepBlockers').mockResolvedValue({ ...report, blockersUnavailable: null, wakesUnavailable: 'No log.' });
+    returns(mock, { sleep: { ...report, blockersUnavailable: null, wakesUnavailable: 'No log.' } });
     await TestBed.inject(ExtrasStore).reload('sleep');
     await settle(f);
     expect(el.textContent).toContain('Nothing is keeping this computer awake');
@@ -132,21 +140,21 @@ describe('dy-extras-page', () => {
     expect(el.textContent).toContain('about the same as usual');
     expect(el.querySelector('dy-chart')).not.toBeNull();
     expect(rowsOf(el, 'What slowed start-up').length).toBe(5);
-    const real = await mock.bootAnalysis();
-    vi.spyOn(mock, 'bootAnalysis').mockResolvedValue({ ...real, slowest: [], stepsUnavailable: 'Windows has no boot trace here.' });
+    const real = mockBoot(NOW);
+    returns(mock, { boot: { ...real, slowest: [], stepsUnavailable: 'Windows has no boot trace here.' } });
     await store.reload('boot');
     await settle(f);
     expect(el.querySelector('p.note')!.textContent).toContain('Windows has no boot trace here.');
-    vi.spyOn(mock, 'bootAnalysis').mockResolvedValue({ ...real, slowest: [], stepsUnavailable: null, boots: real.boots.slice(0, 1) });
+    returns(mock, { boot: { ...real, slowest: [], stepsUnavailable: null, boots: real.boots.slice(0, 1) } });
     await store.reload('boot');
     await settle(f);
     expect(el.textContent).toContain('Nothing slowed the last start-up');
     expect(el.querySelector('dy-chart')).toBeNull();
-    vi.spyOn(mock, 'bootAnalysis').mockResolvedValue({ boots: [], slowest: [], lastTotalSecs: null, verdict: null, stepsUnavailable: 'No history.' });
+    returns(mock, { boot: { boots: [], slowest: [], lastTotalSecs: null, verdict: null, stepsUnavailable: 'No history.' } });
     await store.reload('boot');
     await settle(f);
     expect(el.querySelector('.none')!.textContent).toContain('No history.');
-    vi.spyOn(mock, 'bootAnalysis').mockResolvedValue({ ...real, stepsUnavailable: 'Only the top ones.' });
+    returns(mock, { boot: { ...real, stepsUnavailable: 'Only the top ones.' } });
     await store.reload('boot');
     await settle(f);
     expect(el.textContent).toContain('Only the top ones.');
@@ -168,14 +176,14 @@ describe('dy-extras-page', () => {
     [...el.querySelectorAll<HTMLButtonElement>('.sort')].find((b) => b.textContent!.startsWith('App'))!.click();
     await settle(f);
     expect(names()[0]).toBe('Docker Desktop');
-    const real = await mock.appUsage();
-    vi.spyOn(mock, 'appUsage').mockResolvedValue({ ...real, networkUnavailable: 'Needs nettop.', energyUnavailable: 'No energy data.' });
+    const real = mockUsage();
+    returns(mock, { appUsage: { ...real, networkUnavailable: 'Needs nettop.', energyUnavailable: 'No energy data.' } });
     await store.reload('apps');
     await settle(f);
     expect(el.textContent).toContain('Needs nettop.');
     expect(el.textContent).toContain('No energy data.');
     expect(btn(el, 'Received')).toBeUndefined();
-    vi.spyOn(mock, 'appUsage').mockResolvedValue({ apps: [], networkUnavailable: null, energyUnavailable: null });
+    returns(mock, { appUsage: { apps: [], networkUnavailable: null, energyUnavailable: null } });
     await store.reload('apps');
     await settle(f);
     expect(el.textContent).toContain('No app activity to show');
@@ -221,16 +229,16 @@ describe('dy-extras-page', () => {
     await settle(f);
     expect(mock.savedInventories).toEqual(['markdown']);
     expect(el.querySelector('[role="status"]')!.textContent).toContain('dyno-inventory.md');
-    const real = await mock.softwareInventory();
-    vi.spyOn(mock, 'softwareInventory').mockResolvedValue({ ...real, items: real.items.slice(0, 2), truncated: true });
+    const real = mockSoftware();
+    returns(mock, { software: { ...real, items: real.items.slice(0, 2), truncated: true } });
     await store.reload('inventory');
     await settle(f);
     expect(el.textContent).toContain('more packages than Dyno lists');
-    vi.spyOn(mock, 'softwareInventory').mockResolvedValue({ items: [], truncated: false, unavailable: 'No package manager.' });
+    returns(mock, { software: { items: [], truncated: false, unavailable: 'No package manager.' } });
     await store.reload('inventory');
     await settle(f);
     expect(el.querySelector('.none')!.textContent).toContain('No package manager.');
-    vi.spyOn(mock, 'softwareInventory').mockResolvedValue({ items: [], truncated: false, unavailable: null });
+    returns(mock, { software: { items: [], truncated: false, unavailable: null } });
     await store.reload('inventory');
     await settle(f);
     expect(el.querySelector('.none strong')!.textContent).toBe('No software found');
@@ -241,7 +249,7 @@ describe('dy-extras-page', () => {
   });
 
   it('every tab shows an inline error with Retry', async () => {
-    const fails: [string, string][] = [['What changed', 'changes'], ['Sleep', 'sleepBlockers'], ['Boot', 'bootAnalysis'], ['Apps', 'appUsage'], ['GPU', 'gpuProcesses'], ['Inventory', 'softwareInventory']];
+    const fails: [string, string][] = [['What changed', 'changes'], ['Sleep', 'startJob'], ['Boot', 'startJob'], ['Apps', 'startJob'], ['GPU', 'gpuProcesses'], ['Inventory', 'startJob']];
     const { f, el, mock } = render('', { fail: new Set(fails.map((x) => x[1])) });
     await settle(f);
     for (const [tab] of fails) {
@@ -301,7 +309,8 @@ describe('dy-extras-page', () => {
   it('Files: shows the search as a job with its count and Cancel, then the stopped note with Search again', async () => {
     const { f, el, mock, store } = render('files');
     await settle(f);
-    mock.jobPolls = 40;
+    mock.jobSteps = 40;
+    mock.jobStepMs = 20;
     btn(el, 'Choose a folder').click();
     for (let i = 0; i < 5 && !el.querySelector('pd-job'); i++) {
       await new Promise((r) => setTimeout(r, 20));
@@ -322,7 +331,7 @@ describe('dy-extras-page', () => {
     expect(el.querySelector('pd-job')).toBeNull();
     expect(el.textContent).toContain('Search stopped.');
     expect(el.querySelector('[role="alert"]')).toBeNull();
-    mock.jobPolls = 1;
+    mock.jobSteps = 1;
     btn(el, 'Search again').click();
     await settle(f);
     await new Promise((r) => setTimeout(r, 20));

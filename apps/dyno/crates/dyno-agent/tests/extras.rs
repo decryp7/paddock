@@ -125,13 +125,13 @@ fn sleep_blockers_come_from_the_scripted_tool_and_a_refusal_is_a_sentence() {
             "WHO UID USER PID COMM WHAT WHY MODE\nFirefox 1000 sam 2210 firefox sleep Playing audio block\n",
         )],
     )]));
-    let Reply::Sleep(s) = ask(&h.client(), Request::SleepBlockers).unwrap() else {
+    let JobOutput::Sleep(s) = run_job(&h.client(), JobSpec::SleepBlockers, Duration::from_secs(30)).unwrap() else {
         panic!("sleep")
     };
     assert_eq!(s.blockers[0].name, "Firefox");
     assert!(s.wakes_unavailable.is_some());
     x.use_tools(Tools::with(vec![]));
-    let Reply::Sleep(s) = ask(&h.client(), Request::SleepBlockers).unwrap() else {
+    let JobOutput::Sleep(s) = run_job(&h.client(), JobSpec::SleepBlockers, Duration::from_secs(30)).unwrap() else {
         panic!("sleep")
     };
     assert!(s.blockers.is_empty() && s.blockers_unavailable.unwrap().contains("not available"));
@@ -387,7 +387,7 @@ fn boot_analysis_uses_the_stored_boots_and_says_what_it_cannot_know() {
     for (i, secs) in [40.0f32, 42.0, 41.0, 90.0].iter().enumerate() {
         lock_put_boot(&s, t.minus((10 - i as i64) * 24 * HOUR), *secs);
     }
-    let Reply::Boot(b) = ask(&h.client(), Request::BootAnalysis).unwrap() else {
+    let JobOutput::Boot(b) = run_job(&h.client(), JobSpec::BootAnalysis, Duration::from_secs(30)).unwrap() else {
         panic!("boot")
     };
     assert_eq!(b.boots.len(), 4);
@@ -415,7 +415,7 @@ fn the_inventory_report_is_written_only_to_a_valid_path() {
     s.extras
         .use_tools(Tools::with(vec![("dpkg-query -W", vec![ok("bash\t5.2\ncurl\t8.4\n")])]));
     let peer = h.client();
-    let Reply::Software(sw) = ask(&peer, Request::SoftwareInventory).unwrap() else {
+    let JobOutput::Software(sw) = run_job(&peer, JobSpec::SoftwareInventory, Duration::from_secs(30)).unwrap() else {
         panic!("software")
     };
     assert_eq!(sw.items.len(), 2);
@@ -446,7 +446,7 @@ fn gpu_and_usage_degrade_to_a_reason() {
         panic!("gpu")
     };
     assert!(g.processes.is_empty() && g.unavailable.is_some());
-    let Reply::AppUsage(u) = ask(&peer, Request::AppUsage).unwrap() else {
+    let JobOutput::AppUsage(u) = run_job(&peer, JobSpec::AppUsage, Duration::from_secs(30)).unwrap() else {
         panic!("usage")
     };
     assert!(u.energy_unavailable.is_some());

@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 import { SuJob } from '@decryp7/paddock-ui';
-import type { JobProgress } from '../core/job-runner';
+import type { JobProgress } from '../core/job-starter';
 
 /**
  * The progress of one of the engine's long operations (ER-18): the shared job card with the phase's own count, an ETA only when

@@ -1,15 +1,18 @@
 //! Long operations as jobs (ER-17, ER-18, ER-19), on the family's `paddock-jobs`: a request that starts one answers at
 //! once, the work runs on a small worker pool, each job reports phases with their own counts, Cancel is checked while it
-//! works, and the app polls [`Request::Jobs`](dyno_core::protocol::Request::Jobs) the way it polls the benchmarks. A job
-//! builds its result on the side and hands it over only when it ends well, so a cancelled or failed job changes nothing.
-//! Observe-only like everything else here: no job changes the machine.
+//! works, and every change of a job's status is pushed to the connected apps (`Message::Job`), which the shell relays as
+//! `paddock://jobs` events, so the shell's Jobs view shows them. A job builds its result on the side and hands it over only
+//! when it ends well, so a cancelled or failed job changes nothing. Observe-only like everything else here: no job changes
+//! the machine.
 
 use crate::agent::{lock, now, Shared};
-use dyno_core::jobs::{JobKind, JobOutput, JobPhase, JobSpec, JobState, JobStatus, JobUnit, KEPT_FINISHED};
+use dyno_core::issues::ReadControl;
+use dyno_core::jobs::{JobKind, JobOutput, JobSpec, KEPT_FINISHED};
 use dyno_core::protocol::{AgentError, ErrorCode};
-use paddock_jobs::{EventSink, JobContext, JobError, JobId, JobPool, JobRegistry, JobSnapshot, JobState as RunState, Unit, Workers};
+use paddock_jobs::wire::WireSnapshot;
+use paddock_jobs::{EventSink, JobContext, JobError, JobId, JobPool, JobRegistry, JobSnapshot, Phase, Workers};
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 /// Jobs that run at once; the rest wait their turn as `queued`.
 const WORKERS: usize = 4;
@@ -19,26 +22,33 @@ struct Book {
     /// Jobs that have not ended, with what they were asked to do (a second start of the same work answers the first).
     active: Vec<(u64, JobSpec)>,
     /// The last jobs that ended, oldest first.
-    finished: VecDeque<JobStatus>,
+    finished: VecDeque<WireSnapshot>,
     /// What the done ones among them produced.
     outputs: HashMap<u64, JobOutput>,
 }
 
-/// Remembers how jobs end. Called by the reporter with its lock held, so it only touches the book.
-struct Journal(Arc<Mutex<Book>>);
+/// Remembers how jobs end and hands every change to the connected apps. Called by the reporter with its lock held, so it only
+/// touches the book and the apps' slots and never calls back into the job.
+struct Journal {
+    book: Arc<Mutex<Book>>,
+    shared: Weak<Shared>,
+}
 
 impl EventSink for Journal {
     fn emit(&self, snapshot: &JobSnapshot) {
-        if !snapshot.state.is_terminal() {
-            return;
-        }
-        let mut book = lock(&self.0);
-        book.active.retain(|(id, _)| *id != snapshot.id.0);
-        book.finished.push_back(status_of(snapshot));
-        while book.finished.len() > KEPT_FINISHED {
-            if let Some(old) = book.finished.pop_front() {
-                book.outputs.remove(&old.id);
+        let wire = WireSnapshot::from(snapshot);
+        if wire.is_terminal() {
+            let mut book = lock(&self.book);
+            book.active.retain(|(id, _)| *id != wire.id);
+            book.finished.push_back(wire.clone());
+            while book.finished.len() > KEPT_FINISHED {
+                if let Some(old) = book.finished.pop_front() {
+                    book.outputs.remove(&old.id);
+                }
             }
+        }
+        if let Some(shared) = self.shared.upgrade() {
+            shared.broadcast_job(&wire);
         }
     }
 }
@@ -50,26 +60,24 @@ pub struct JobCentre {
     pool: JobPool,
 }
 
-impl Default for JobCentre {
-    fn default() -> Self {
-        JobCentre::new()
-    }
-}
-
 impl JobCentre {
-    /// A centre with no jobs.
-    pub fn new() -> JobCentre {
+    /// A centre with no jobs, pushing their statuses to the apps connected to `shared`.
+    pub fn new(shared: Weak<Shared>) -> JobCentre {
         let book = Arc::new(Mutex::new(Book::default()));
         JobCentre {
-            registry: JobRegistry::new(Arc::new(Journal(book.clone()))),
+            registry: JobRegistry::new(Arc::new(Journal {
+                book: book.clone(),
+                shared,
+            })),
             pool: JobPool::new(Workers::new(WORKERS)),
             book,
         }
     }
 
     /// Starts `spec` in the background and answers its status at once. Work that is already running answers the running
-    /// job; a search while another one runs is refused (`Busy`), because the person has to choose which to keep.
-    pub fn start(&self, shared: &Arc<Shared>, spec: JobSpec) -> Result<JobStatus, AgentError> {
+    /// job; a search, log read or backup check while another of its kind runs is refused (`Busy`), because the person has to
+    /// choose which to keep.
+    pub fn start(&self, shared: &Arc<Shared>, spec: JobSpec) -> Result<WireSnapshot, AgentError> {
         let spec = validated(spec)?;
         let ctx = {
             let mut book = lock(&self.book);
@@ -80,9 +88,7 @@ impl JobCentre {
                     .status(id)
                     .ok_or_else(|| AgentError::new(ErrorCode::Internal, "The job vanished."));
             }
-            if matches!(spec.kind(), JobKind::FindFiles | JobKind::RescanIssues | JobKind::RefreshBackup)
-                && book.active.iter().any(|(_, s)| s.kind() == spec.kind())
-            {
+            if spec.kind() != JobKind::FileHash && book.active.iter().any(|(_, s)| s.kind() == spec.kind()) {
                 return Err(AgentError::new(
                     ErrorCode::Busy,
                     format!("{} is already running; wait for it or cancel it.", spec.kind().title()),
@@ -90,7 +96,7 @@ impl JobCentre {
             }
             let ctx = self
                 .registry
-                .register(slug(spec.kind()), spec.kind().title(), subject(&spec).as_deref());
+                .register(spec.kind().slug(), spec.kind().title(), subject(&spec).as_deref());
             book.active.push((ctx.id().0, spec.clone()));
             ctx
         };
@@ -112,13 +118,13 @@ impl JobCentre {
     }
 
     /// Every job that has not ended and the last few that did, oldest first.
-    pub fn statuses(&self) -> Vec<JobStatus> {
-        let mut all: Vec<JobStatus> = self
+    pub fn statuses(&self) -> Vec<WireSnapshot> {
+        let mut all: Vec<WireSnapshot> = self
             .registry
             .snapshots()
             .iter()
             .filter(|s| !s.state.is_terminal())
-            .map(status_of)
+            .map(WireSnapshot::from)
             .collect();
         all.extend(lock(&self.book).finished.iter().cloned());
         all.sort_by_key(|s| s.id);
@@ -126,22 +132,27 @@ impl JobCentre {
         all
     }
 
-    fn status(&self, id: u64) -> Option<JobStatus> {
+    fn status(&self, id: u64) -> Option<WireSnapshot> {
         self.statuses().into_iter().find(|s| s.id == id)
     }
 
-    /// Asks a job to stop and returns at once. A job that is unknown or already over is left as it is. A job that is
-    /// stopping no longer counts as running work: the same work, or another search, may start while it winds down.
-    pub fn cancel(&self, id: u64) {
-        if self.registry.cancel(JobId(id)) {
+    /// Asks a job to stop and returns at once; false when it is unknown or already over. A job that is stopping no longer
+    /// counts as running work: the same work, or another search, may start while it winds down.
+    pub fn cancel(&self, id: u64) -> bool {
+        let found = self.registry.cancel(JobId(id));
+        if found {
             lock(&self.book).active.retain(|(i, _)| *i != id);
         }
+        found
     }
 
     /// What a done job produced.
     pub fn output(&self, id: u64) -> Result<JobOutput, AgentError> {
         let book = lock(&self.book);
-        let done = book.finished.iter().any(|s| s.id == id && s.state == JobState::Done);
+        let done = book
+            .finished
+            .iter()
+            .any(|s| s.id == id && matches!(s.state, paddock_jobs::wire::WireState::Done));
         match book.outputs.get(&id) {
             Some(out) if done => Ok(out.clone()),
             _ => Err(AgentError::new(
@@ -162,18 +173,6 @@ impl Drop for JobCentre {
     }
 }
 
-/// The slug each kind goes by inside the job registry.
-const KINDS: [(JobKind, &str); 4] = [
-    (JobKind::FindFiles, "find-files"),
-    (JobKind::RescanIssues, "rescan-issues"),
-    (JobKind::RefreshBackup, "refresh-backup"),
-    (JobKind::FileHash, "file-hash"),
-];
-
-fn slug(kind: JobKind) -> &'static str {
-    KINDS.iter().find(|(k, _)| *k == kind).map_or("find-files", |(_, s)| s)
-}
-
 /// The refusals that need no work: a request that cannot succeed is not worth a job.
 fn validated(spec: JobSpec) -> Result<JobSpec, AgentError> {
     match spec {
@@ -189,12 +188,40 @@ fn subject(spec: &JobSpec) -> Option<String> {
     match spec {
         JobSpec::FindFiles { query } => Some(query.folder.clone()),
         JobSpec::RescanIssues { query } => Some(format!("last {} days", query.days)),
-        JobSpec::RefreshBackup => None,
-        JobSpec::FileHash { source } => match source {
-            dyno_core::weblinks::HashSource::Path(p) => Some(p.clone()),
-            dyno_core::weblinks::HashSource::Process(_) => None,
-        },
+        JobSpec::FileHash {
+            source: dyno_core::weblinks::HashSource::Path(p),
+        } => Some(p.clone()),
+        _ => None,
     }
+}
+
+/// A job's token and counter as the control of a log read.
+pub struct JobControl<'a>(pub &'a JobContext);
+
+impl ReadControl for JobControl<'_> {
+    fn cancelled(&self) -> bool {
+        self.0.cancel_token().is_cancelled()
+    }
+
+    fn parsed(&self, records: u64) {
+        self.0.set(records);
+    }
+
+    fn on_cancel(&self, stop: Box<dyn Fn() + Send + Sync>) -> Box<dyn Send> {
+        Box::new(self.0.cancel_token().on_cancel(stop))
+    }
+}
+
+/// One read of an OS tool that cannot be interrupted: a phase that says what is being read (the card shows the running time),
+/// Cancel declared as taking effect when the tool has answered, and the answer dropped when the job was cancelled meanwhile.
+pub fn tool_step<T>(ctx: &JobContext, id: &str, label: &str, read: impl FnOnce() -> T) -> Result<T, JobError> {
+    ctx.phase(Phase::discovering(id, label));
+    ctx.check()?;
+    let step = ctx.uncancellable("A system tool is being run; Cancel takes effect when it has answered.");
+    let out = read();
+    drop(step);
+    ctx.check()?;
+    Ok(out)
 }
 
 /// Runs the work of `spec`; the output is stored only if this returns `Ok`.
@@ -221,42 +248,18 @@ fn execute(shared: &Arc<Shared>, ctx: &JobContext, spec: JobSpec) -> Result<JobO
                 crate::filehash::HashError::Failed(m) => JobError::Failed(m),
             })
         }
-    }
-}
-
-/// The wire status of a run-time snapshot.
-fn status_of(s: &JobSnapshot) -> JobStatus {
-    JobStatus {
-        id: s.id.0,
-        kind: KINDS
-            .iter()
-            .find(|(_, slug)| *slug == s.kind.0)
-            .map_or(JobKind::FindFiles, |(k, _)| *k),
-        title: s.title.clone(),
-        subject: s.subject.clone(),
-        state: match &s.state {
-            RunState::Queued => JobState::Queued,
-            RunState::Running { phase } => JobState::Running {
-                phase: phase.as_ref().map(|p| JobPhase {
-                    id: p.phase.id.clone(),
-                    label: p.phase.label.clone(),
-                    unit: match p.phase.unit {
-                        Unit::Items => JobUnit::Items,
-                        Unit::Bytes => JobUnit::Bytes,
-                    },
-                    done: p.done,
-                    total: p.phase.total,
-                }),
-            },
-            RunState::Done => JobState::Done,
-            RunState::Failed { message } => JobState::Failed { message: message.clone() },
-            RunState::Cancelled { .. } => JobState::Cancelled,
-        },
-        seq: s.seq,
-        elapsed_ms: s.elapsed_ms,
-        eta_ms: s.eta_ms,
-        cancellable: s.cancellable,
-        not_cancellable_reason: s.not_cancellable_reason.clone(),
+        JobSpec::SleepBlockers => tool_step(ctx, "sleep", "Asking the system what keeps it awake", || {
+            let x = &shared.extras;
+            dyno_platform::extras::sleep_report(x.tools().as_ref(), x.os())
+        })
+        .map(|r| JobOutput::Sleep(Box::new(r))),
+        JobSpec::BootAnalysis => tool_step(ctx, "boot", "Reading the boot history", || crate::extras::boot_report(shared))?
+            .map(|r| JobOutput::Boot(Box::new(r)))
+            .map_err(|e| JobError::Failed(e.message)),
+        JobSpec::AppUsage => tool_step(ctx, "usage", "Reading network and energy use", || crate::extras::app_usage(shared))
+            .map(|r| JobOutput::AppUsage(Box::new(r))),
+        JobSpec::SoftwareInventory => tool_step(ctx, "software", "Listing installed software", || crate::extras::software(shared))
+            .map(|r| JobOutput::Software(Box::new(r))),
     }
 }
 

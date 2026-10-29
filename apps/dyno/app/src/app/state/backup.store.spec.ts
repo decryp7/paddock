@@ -1,16 +1,15 @@
 import { TestBed } from '@angular/core/testing';
 import { BackupReport } from '../core/api.types';
 import { BACKEND } from '../core/backend';
-import { MockBackend } from '../core/mock-backend';
-import { JOB_POLL_MS } from '../core/job-runner';
-import { freezeJobs } from '../../testing/job-test-support';
+import type { MockBackend } from '../core/mock-backend';
+import { jobsProviders, mockWithJobs, pump } from '../../testing/job-test-support';
 import { BACKUP_POLL_MS, BackupStore } from './backup.store';
 
 const NOW = 1_700_000_000_000;
 
 function setup(options: ConstructorParameters<typeof MockBackend>[0] = {}) {
-  const mock = new MockBackend({ latencyMs: 0, now: () => NOW, ...options });
-  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }] });
+  const { mock, jobs } = mockWithJobs({ now: () => NOW, ...options });
+  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, jobsProviders(jobs)] });
   return { mock, store: TestBed.inject(BackupStore) };
 }
 const report = (checking: boolean): BackupReport => ({ statuses: [], checkedAt: checking ? null : NOW, checking, loginPathUsed: true });
@@ -76,12 +75,26 @@ describe('BackupStore', () => {
       vi.useFakeTimers();
       const { store, mock } = setup();
       await store.load();
-      mock.jobPolls = 4;
+      mock.jobSteps = 4;
+      mock.jobStepMs = 500;
       const done = store.check();
-      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      await pump(500);
       expect(store.checkJob()?.snapshot).toMatchObject({ title: 'Checking backups', state: 'running', phase: { id: 'tools', total: 3 } });
-      freezeJobs(mock);
-      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await pump(3000);
+      await done;
+      expect(store.checking()).toBe(false);
+      expect(store.checkJob()).toBeNull();
+    });
+
+    it('never gives up on a check that goes quiet: "still working" after the shell\'s threshold, no error', async () => {
+      vi.useFakeTimers();
+      const { store, mock } = setup();
+      await store.load();
+      mock.jobsStalled = true;
+      const done = store.check();
+      await pump(0);
+      expect(store.checkJob()?.stalled).toBe(false);
+      await pump(10 * 60_000);
       expect(store.checkError()).toBeNull();
       expect(store.checking()).toBe(true);
       expect(store.checkJob()?.stalled).toBe(true);
@@ -93,13 +106,14 @@ describe('BackupStore', () => {
       const { store, mock } = setup();
       await store.load();
       const before = store.report();
-      mock.jobPolls = 10;
+      mock.jobSteps = 10;
+      mock.jobStepMs = 500;
       const cancel = vi.spyOn(mock, 'cancelJob');
       const done = store.check();
-      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      await pump(500);
       await store.cancelCheck();
       expect(cancel).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      await pump(0);
       await done;
       expect(store.checking()).toBe(false);
       expect(store.checkError()).toBeNull();

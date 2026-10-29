@@ -1,8 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../core/backend';
-import { JOB_POLL_MS } from '../core/job-runner';
-import { freezeJobs } from '../../testing/job-test-support';
-import { MockBackend } from '../core/mock-backend';
+import { jobsProviders, mockWithJobs, pump } from '../../testing/job-test-support';
+import type { MockBackend } from '../core/mock-backend';
 import { Notifier } from '../shared/notifier';
 import { ExtrasStore } from './extras.store';
 import { SettingsStore } from './settings.store';
@@ -10,15 +9,15 @@ import { SettingsStore } from './settings.store';
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
 function setup(fail: string[] = []) {
-  const mock = new MockBackend({ latencyMs: 0, now: () => NOW, fail: new Set(fail) });
-  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }] });
+  const { mock, jobs } = mockWithJobs({ now: () => NOW, fail: new Set(fail) });
+  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, jobsProviders(jobs)] });
   return { mock, store: TestBed.inject(ExtrasStore), notifier: TestBed.inject(Notifier), settings: TestBed.inject(SettingsStore) };
 }
 
 describe('ExtrasStore: read-only tabs', () => {
   it('reads a tab the first time it opens and not again until asked', async () => {
     const { store, mock } = setup();
-    const spy = vi.spyOn(mock, 'sleepBlockers');
+    const spy = vi.spyOn(mock, 'startJob');
     await store.ensure('sleep');
     await store.ensure('sleep');
     expect(spy).toHaveBeenCalledTimes(1);
@@ -43,7 +42,7 @@ describe('ExtrasStore: read-only tabs', () => {
   it('keeps the engine message per tab, recovers on retry and leaves other tabs alone', async () => {
     const { store, mock } = setup();
     await store.ensure('gpu');
-    const spy = vi.spyOn(mock, 'bootAnalysis').mockRejectedValueOnce({ code: 'timeout', message: 'slow' });
+    const spy = vi.spyOn(mock, 'startJob').mockRejectedValueOnce({ code: 'timeout', message: 'slow' });
     await store.ensure('boot');
     expect(store.boot().error).toEqual({ code: 'timeout', message: 'slow' });
     expect(store.boot().loading).toBe(false);
@@ -75,7 +74,7 @@ describe('ExtrasStore: read-only tabs', () => {
 
   it('does not start a second read of a tab that is loading', async () => {
     const { store, mock } = setup();
-    const spy = vi.spyOn(mock, 'appUsage');
+    const spy = vi.spyOn(mock, 'startJob');
     await Promise.all([store.ensure('apps'), store.ensure('apps')]);
     expect(spy).toHaveBeenCalledTimes(1);
   });
@@ -120,21 +119,23 @@ describe('ExtrasStore: file finder', () => {
 describe('ExtrasStore: the file finder as a job', () => {
   afterEach(() => vi.useRealTimers());
 
-  async function choose(mock: MockBackend, store: InstanceType<typeof ExtrasStore>, polls: number) {
-    mock.jobPolls = polls;
+  async function choose(mock: MockBackend, store: InstanceType<typeof ExtrasStore>, steps: number) {
+    mock.jobSteps = steps;
+    mock.jobStepMs = 500;
     const picking = store.chooseFolder();
-    await vi.advanceTimersByTimeAsync(0);
+    await pump(0);
     return picking;
   }
 
   it('shows the walk and then each phase with its own count, from the first moment, and never goes backwards', async () => {
     vi.useFakeTimers();
     const { store, mock } = setup();
-    mock.jobPolls = 5;
+    mock.jobSteps = 5;
+    mock.jobStepMs = 500;
     const counts: number[] = [];
     const picking = store.chooseFolder();
     for (let i = 0; i < 8; i++) {
-      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      await pump(500);
       const s = store.finderJob()?.snapshot;
       if (s?.state === 'running') expect(s.title).toBe('Finding files');
       if (s?.state === 'running' && s.phase) counts.push(s.phase.done);
@@ -147,13 +148,12 @@ describe('ExtrasStore: the file finder as a job', () => {
     expect(store.finder().data?.large).toHaveLength(8);
   });
 
-  it('shows "still working" and keeps going far past the old 160 s limit, with no error', async () => {
+  it('shows "still working" and keeps going for minutes, with no error', async () => {
     vi.useFakeTimers();
     const { store, mock } = setup();
+    mock.jobsStalled = true;
     const picking = choose(mock, store, 6);
-    await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
-    freezeJobs(mock);
-    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    await pump(10 * 60_000);
     expect(store.finder().error).toBeNull();
     expect(store.finder().loading).toBe(true);
     expect(store.finderJob()?.stalled).toBe(true);
@@ -163,23 +163,26 @@ describe('ExtrasStore: the file finder as a job', () => {
   it('Cancel tells the engine to stop, keeps the earlier result and offers Search again', async () => {
     vi.useFakeTimers();
     const { store, mock } = setup();
-    await choose(mock, store, 1);
-    await vi.advanceTimersByTimeAsync(JOB_POLL_MS * 2);
+    const first = choose(mock, store, 1);
+    await pump(1000);
+    await first;
     const earlier = store.finder().data;
     expect(earlier).not.toBeNull();
-    mock.jobPolls = 10;
+    mock.jobSteps = 10;
     const cancel = vi.spyOn(mock, 'cancelJob');
     const searching = store.setMode('large');
-    await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+    await pump(500);
     await store.cancelSearch();
     expect(cancel).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+    await pump(0);
     await searching;
     expect(store.finderCancelled()).toBe(true);
     expect(store.finder()).toMatchObject({ loading: false, error: null, data: earlier });
     expect(store.finderJob()).toBeNull();
-    mock.jobPolls = 1;
-    await store.search();
+    mock.jobSteps = 1;
+    const again = store.search();
+    await pump(1000);
+    await again;
     expect(store.finderCancelled()).toBe(false);
     expect(store.finder().data).not.toBeNull();
   });
@@ -187,14 +190,15 @@ describe('ExtrasStore: the file finder as a job', () => {
   it('a new mode or size stops the search in progress and starts the new one; only the newer answer is shown', async () => {
     vi.useFakeTimers();
     const { store, mock } = setup();
-    mock.jobPolls = 6;
+    mock.jobSteps = 6;
+    mock.jobStepMs = 500;
     const start = vi.spyOn(mock, 'startJob');
     const cancel = vi.spyOn(mock, 'cancelJob');
     void store.chooseFolder();
-    await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
-    mock.jobPolls = 1;
+    await pump(500);
+    mock.jobSteps = 1;
     const second = store.setMode('duplicates');
-    await vi.advanceTimersByTimeAsync(JOB_POLL_MS * 4);
+    await pump(2000);
     await second;
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(start).toHaveBeenCalledTimes(2);
@@ -214,6 +218,51 @@ describe('ExtrasStore: the file finder as a job', () => {
     vi.spyOn(mock, 'pickFolder').mockResolvedValueOnce('/Users/sam/Projects');
     await store.chooseFolder();
     expect(store.finder().data?.limit?.message).toContain('Choose a smaller folder');
+  });
+});
+
+describe('ExtrasStore: the tabs that run OS tools read through jobs', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('each of the four tabs is a job of its own kind, with progress, and no timeout whatever the tool takes', async () => {
+    vi.useFakeTimers();
+    const { store, mock } = setup();
+    const started = vi.spyOn(mock, 'startJob');
+    mock.jobsStalled = true;
+    const reading = [store.ensure('sleep'), store.ensure('boot'), store.ensure('apps'), store.ensure('inventory')];
+    await pump(0);
+    expect(started.mock.calls.map((c) => c[0])).toEqual(['sleepBlockers', 'bootAnalysis', 'appUsage', 'softwareInventory']);
+    for (const key of ['sleep', 'boot', 'apps', 'software'] as const) expect(store.readJob()(key)?.snapshot.state).toBe('running');
+    await pump(30 * 60_000);
+    for (const key of ['sleep', 'boot', 'apps', 'software'] as const) {
+      expect(store.readJob()(key)?.stalled).toBe(true);
+      expect(store[key]().error).toBeNull();
+      expect(store[key]().loading).toBe(true);
+    }
+    void reading;
+  });
+
+  it('Cancel stops the read; the tab says it stopped and offers Retry, and a retry reads it', async () => {
+    vi.useFakeTimers();
+    const { store, mock } = setup();
+    mock.jobSteps = 10;
+    mock.jobStepMs = 500;
+    const cancel = vi.spyOn(mock, 'cancelJob');
+    const reading = store.ensure('boot');
+    await pump(500);
+    await store.cancelRead('boot');
+    await pump(0);
+    await reading;
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(store.boot().error?.message).toContain('Stopped');
+    expect(store.boot().loading).toBe(false);
+    expect(store.readJob()('boot')).toBeNull();
+    mock.jobSteps = 1;
+    const again = store.reload('boot');
+    await pump(1000);
+    await again;
+    expect(store.boot().data?.boots).toHaveLength(8);
+    expect(store.boot().error).toBeNull();
   });
 });
 

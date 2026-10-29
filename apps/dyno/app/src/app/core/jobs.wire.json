@@ -1,0 +1,210 @@
+{
+  "outputs": [
+    {
+      "fileHash": {
+        "bytes": 3,
+        "path": "/a",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "backup": {
+        "checkedAt": null,
+        "checking": false,
+        "loginPathUsed": false,
+        "statuses": []
+      }
+    },
+    true
+  ],
+  "requests": [
+    {
+      "startJob": {
+        "spec": {
+          "findFiles": {
+            "query": {
+              "folder": "/Users/alex/Projects",
+              "minBytes": 1048576,
+              "mode": "both"
+            }
+          }
+        }
+      }
+    },
+    {
+      "startJob": {
+        "spec": {
+          "rescanIssues": {
+            "query": {
+              "days": 14
+            }
+          }
+        }
+      }
+    },
+    {
+      "startJob": {
+        "spec": "refreshBackup"
+      }
+    },
+    {
+      "startJob": {
+        "spec": {
+          "fileHash": {
+            "source": {
+              "path": "/Applications/Slack.app/slack"
+            }
+          }
+        }
+      }
+    },
+    {
+      "startJob": {
+        "spec": {
+          "fileHash": {
+            "source": {
+              "process": {
+                "pid": 3,
+                "started": 4
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "startJob": {
+        "spec": "sleepBlockers"
+      }
+    },
+    {
+      "startJob": {
+        "spec": "bootAnalysis"
+      }
+    },
+    {
+      "startJob": {
+        "spec": "appUsage"
+      }
+    },
+    {
+      "startJob": {
+        "spec": "softwareInventory"
+      }
+    },
+    "jobs",
+    {
+      "cancelJob": {
+        "id": 3
+      }
+    },
+    {
+      "jobResult": {
+        "id": 3
+      }
+    }
+  ],
+  "snapshots": {
+    "bytes": {
+      "cancellable": false,
+      "elapsedMs": 1200,
+      "etaMs": 900,
+      "id": 4,
+      "kind": "find-files",
+      "notCancellableReason": "A system log is being read; Cancel takes effect when it has been read.",
+      "phase": {
+        "done": 1024,
+        "id": "contents",
+        "label": "Comparing contents",
+        "total": 4096,
+        "unit": "bytes"
+      },
+      "seq": 5,
+      "state": "running",
+      "subject": "/Users/alex/Projects",
+      "title": "Finding files"
+    },
+    "cancelled": {
+      "cancellable": true,
+      "elapsedMs": 1200,
+      "etaMs": null,
+      "id": 7,
+      "kind": "find-files",
+      "notCancellableReason": null,
+      "reason": "user",
+      "seq": 5,
+      "state": "cancelled",
+      "subject": "/Users/alex/Projects",
+      "title": "Finding files"
+    },
+    "counting": {
+      "cancellable": true,
+      "elapsedMs": 1200,
+      "etaMs": null,
+      "id": 3,
+      "kind": "find-files",
+      "notCancellableReason": null,
+      "phase": {
+        "done": 1200,
+        "id": "walk",
+        "label": "Listing files",
+        "total": null,
+        "unit": "items"
+      },
+      "seq": 5,
+      "state": "running",
+      "subject": "/Users/alex/Projects",
+      "title": "Finding files"
+    },
+    "done": {
+      "cancellable": true,
+      "elapsedMs": 1200,
+      "etaMs": null,
+      "id": 5,
+      "kind": "find-files",
+      "notCancellableReason": null,
+      "seq": 5,
+      "state": "done",
+      "subject": "/Users/alex/Projects",
+      "title": "Finding files"
+    },
+    "failed": {
+      "cancellable": true,
+      "elapsedMs": 1200,
+      "etaMs": null,
+      "id": 6,
+      "kind": "find-files",
+      "message": "Give the full path of the folder.",
+      "notCancellableReason": null,
+      "seq": 5,
+      "state": "failed",
+      "subject": "/Users/alex/Projects",
+      "title": "Finding files"
+    },
+    "queued": {
+      "cancellable": true,
+      "elapsedMs": 1200,
+      "etaMs": null,
+      "id": 1,
+      "kind": "find-files",
+      "notCancellableReason": null,
+      "seq": 5,
+      "state": "queued",
+      "subject": "/Users/alex/Projects",
+      "title": "Finding files"
+    },
+    "starting": {
+      "cancellable": true,
+      "elapsedMs": 1200,
+      "etaMs": null,
+      "id": 2,
+      "kind": "find-files",
+      "notCancellableReason": null,
+      "phase": null,
+      "seq": 5,
+      "state": "running",
+      "subject": "/Users/alex/Projects",
+      "title": "Finding files"
+    }
+  }
+}

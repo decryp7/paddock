@@ -2,15 +2,22 @@ import { TestBed } from '@angular/core/testing';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { renderFramed } from '@decryp7/paddock-ui/shell/testing';
 import { BACKEND } from '../../core/backend';
-import { MockBackend } from '../../core/mock-backend';
+import type { MockBackend } from '../../core/mock-backend';
+import { jobsProviders, mockWithJobs } from '../../../testing/job-test-support';
 import { provideIcons } from '../../shared/icons';
 import { HashSearchDialog } from './hash-search-dialog';
 import { Lookups } from './lookups';
 import { WebSearchDialog } from './web-search-dialog';
 
-const mock = (fail?: string) => new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000, ...(fail ? { fail: new Set([fail]) } : {}) });
+/** The mock with the shell's in-memory jobs backend it pushes into (what the dialog follows its hash job with). */
+const mocks = new WeakMap<MockBackend, ReturnType<typeof mockWithJobs>['jobs']>();
+const mock = (fail?: string): MockBackend => {
+  const m = mockWithJobs(fail ? { fail: new Set([fail]) } : {});
+  mocks.set(m.mock, m.jobs);
+  return m.mock;
+};
 const open = (component: Parameters<typeof renderFramed>[0], inputs: Record<string, unknown>, backend: MockBackend, kind: 'form' | 'viewer') =>
-  renderFramed(component, { id: 'dy.test', kind, modality: kind === 'form' ? 'modal' : 'modeless', inputs, providers: [provideIcons(), { provide: BACKEND, useValue: backend }] });
+  renderFramed(component, { id: 'dy.test', kind, modality: kind === 'form' ? 'modal' : 'modeless', inputs, providers: [provideIcons(), ...(mocks.has(backend) ? [jobsProviders(mocks.get(backend)!)] : []), { provide: BACKEND, useValue: backend }] });
 const settle = async (d: { stable(): Promise<void> }) => {
   for (let i = 0; i < 4; i++) {
     await d.stable();
@@ -99,10 +106,11 @@ describe('HashSearchDialog', () => {
 
   it('a large file shows its bytes so far with Cancel; Cancel stops it and Open VirusTotal reads again', async () => {
     const backend = mock();
-    backend.jobPolls = 40;
+    backend.jobSteps = 40;
+    backend.jobStepMs = 20;
     const cancel = vi.spyOn(backend, 'cancelJob');
     const d = await open(HashSearchDialog, inputs, backend, 'viewer');
-    for (let i = 0; i < 5 && !d.el.querySelector('pd-job'); i++) {
+    for (let i = 0; i < 10 && !d.el.querySelector('pd-job')?.textContent?.includes('Reading the file'); i++) {
       await new Promise((r) => setTimeout(r, 20));
       await settle(d);
     }
@@ -117,7 +125,8 @@ describe('HashSearchDialog', () => {
     }
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(d.el.querySelector('[role=alert]')?.textContent).toContain('stopped');
-    backend.jobPolls = 1;
+    backend.jobSteps = 1;
+    backend.jobStepMs = 0;
     await d.press('open');
     await settle(d);
     expect(backend.opened).toHaveLength(1);

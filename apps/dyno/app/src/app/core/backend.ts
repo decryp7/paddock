@@ -55,21 +55,16 @@ import type {
   ReportFormat,
   SavedReport,
   BackupReport,
-  BootReport,
   ChangeTimeline,
   ChangesQuery,
   GpuReport,
   InventoryFormat,
   MaintenanceStatus,
   SavedInventory,
-  SleepReport,
-  SoftwareInventory,
-  UsageReport,
   IssuesOverview,
   IssuesQuery,
   JobOutput,
   JobSpec,
-  JobStatus,
   SavedIssues,
   UnusualOverview,
   SearchSeed,
@@ -228,16 +223,8 @@ export interface DynoBackend {
   // Extras (read-only views) and backup health.
   /** Installs, updates, new start-up items and setting changes in a window. */
   changes(query: ChangesQuery): Promise<ChangeTimeline>;
-  /** What keeps the computer awake now and what woke it. */
-  sleepBlockers(): Promise<SleepReport>;
-  /** Recent boots and what slowed the last one. */
-  bootAnalysis(): Promise<BootReport>;
-  /** Network traffic and energy impact per app. */
-  appUsage(): Promise<UsageReport>;
   /** GPU use per process. */
   gpuProcesses(): Promise<GpuReport>;
-  /** The installed software. */
-  softwareInventory(): Promise<SoftwareInventory>;
   /** Asks where to save (the OS save dialog) and writes the hardware and software report there; `null` when they cancel. */
   saveInventoryReport(format: InventoryFormat): Promise<SavedInventory | null>;
   /** Asks for a folder (the OS folder dialog; the webview never invents a path); `null` when they cancel. */
@@ -248,14 +235,11 @@ export interface DynoBackend {
   backup(): Promise<BackupReport>;
 
   // Long operations are jobs (ER-17 to ER-19): find large and duplicate files in a folder the person chose (deletes nothing),
-  // read the OS logs now, check the backup tools now, hash a program's file. `JobRunner` drives these four calls; nothing
-  // here waits for the work, so none of them needs a long timeout.
-  /** Starts a job and resolves at once with its status. A second start of the same work answers the running job; another search or log read while one runs is refused with `busy`. */
-  startJob(spec: JobSpec): Promise<JobStatus>;
-  /** The status of every running job and of the last few that ended. */
-  jobs(): Promise<JobStatus[]>;
-  /** Asks a job to stop and resolves at once. A job that is unknown or over is left as it is. */
-  cancelJob(id: number): Promise<void>;
+  // read the OS logs now, check the backup tools now, hash a program's file, and the sleep, boot, app-usage and software reads.
+  // The shell's jobs store follows them (`paddock://jobs`) and cancels them (`job_cancel`); `JobStarter` ties these together.
+  // Nothing here waits for the work, so none of it needs a long timeout.
+  /** Starts a job and resolves at once with its id. A second start of the same work answers the running job; another search or log read while one runs is refused with `busy`. */
+  startJob(spec: JobSpec): Promise<number>;
   /** What a done job produced; `notFound` when the job is not done or too old to be kept. */
   jobResult(id: number): Promise<JobOutput>;
 

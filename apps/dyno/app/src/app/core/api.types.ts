@@ -1894,51 +1894,31 @@ export interface FinderLimitHit {
 // ------------------------------------------------------------------------------------------------------------- jobs
 
 /**
- * Long operations (find files, read the system logs, check the backups, hash a file) run as jobs in the engine: starting one
- * answers at once with its status, `jobs()` is polled for progress and Cancel stops it. Mirrors `dyno_core::jobs`.
+ * Long operations (find files, read the system logs, check the backups, hash a file, the sleep, boot, app-usage and software
+ * reads) run as jobs in the agent: starting one answers at once with its id, the shell's jobs store follows it through the
+ * `paddock://jobs` events, Cancel is the shell's `job_cancel`, and `jobResult` hands over what a done job produced. Mirrors
+ * `dyno_core::jobs`; the status itself is the shell's `SuJobSnapshot`.
  */
 export type JobSpec =
   | { findFiles: { query: FinderQuery } }
   | { rescanIssues: { query: IssuesQuery } }
   | 'refreshBackup'
-  | { fileHash: { source: HashSource } };
-
-export type JobKind = 'findFiles' | 'rescanIssues' | 'refreshBackup' | 'fileHash';
-
-export type JobUnit = 'items' | 'bytes';
-
-/** One stage of a job on its own scale; `total` is `null` while it is unknown and the count just grows. */
-export interface JobPhase {
-  id: string;
-  label: string;
-  unit: JobUnit;
-  done: number;
-  total: number | null;
-}
-
-export type JobState = 'queued' | 'done' | 'cancelled' | { running: { phase: JobPhase | null } } | { failed: { message: string } };
-
-/** One job as the engine reports it. Keep the highest `seq` per id. */
-export interface JobStatus {
-  id: number;
-  kind: JobKind;
-  title: string;
-  subject: string | null;
-  state: JobState;
-  seq: number;
-  elapsedMs: number;
-  etaMs: number | null;
-  /** False while a step that cannot be interrupted runs; Cancel still works and takes effect when that step ends. */
-  cancellable: boolean;
-  notCancellableReason: string | null;
-}
+  | { fileHash: { source: HashSource } }
+  | 'sleepBlockers'
+  | 'bootAnalysis'
+  | 'appUsage'
+  | 'softwareInventory';
 
 /** What a done job produced, tagged by the kind of job. */
 export type JobOutput =
   | { finder: FinderResult }
   | { issues: IssuesOverview }
   | { backup: BackupReport }
-  | { fileHash: FileHashInfo };
+  | { fileHash: FileHashInfo }
+  | { sleep: SleepReport }
+  | { boot: BootReport }
+  | { appUsage: UsageReport }
+  | { software: SoftwareInventory };
 
 export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 

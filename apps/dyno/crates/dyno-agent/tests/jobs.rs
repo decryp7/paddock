@@ -8,14 +8,15 @@ use dyno_agent::cli::{ask, connect, run_job};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_core::extras::files::{FinderMode, FinderQuery};
-use dyno_core::issues::{Issue, IssueKind, IssueSource, IssueSourceId, IssuesQuery};
-use dyno_core::jobs::{JobOutput, JobSpec, JobState, JobStatus};
+use dyno_core::issues::{Issue, IssueKind, IssueSource, IssueSourceId, IssuesQuery, ReadControl};
+use dyno_core::jobs::{JobOutput, JobSpec};
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{ErrorCode, Message, Reply, Request};
 use dyno_core::time::Timestamp;
 use dyno_ipc::Peer;
 use dyno_platform::fake::{process, Fake};
 use dyno_platform::issues::ToolRunner;
+use paddock_jobs::wire::{WireSnapshot, WireState};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -39,6 +40,11 @@ impl Gate {
     fn open(&self) {
         *self.open.lock().unwrap() = true;
         self.cv.notify_all();
+    }
+
+    /// Tells a waiting test that a caller got this far, without holding the caller.
+    fn arrive(&self) {
+        *self.waiting.lock().unwrap() += 1;
     }
 
     /// Returns when `n` callers have reached the gate.
@@ -113,24 +119,24 @@ impl Drop for Harness {
     }
 }
 
-fn start(peer: &Peer<Message>, spec: JobSpec) -> Result<JobStatus, String> {
+fn start(peer: &Peer<Message>, spec: JobSpec) -> Result<WireSnapshot, String> {
     match ask(peer, Request::StartJob { spec })? {
         Reply::Job(s) => Ok(*s),
         other => panic!("{other:?}"),
     }
 }
 
-fn status(peer: &Peer<Message>, id: u64) -> JobStatus {
+fn status(peer: &Peer<Message>, id: u64) -> WireSnapshot {
     let Reply::Jobs(all) = ask(peer, Request::Jobs).unwrap() else {
         panic!("jobs")
     };
     all.into_iter().find(|s| s.id == id).expect("the job is listed")
 }
 
-fn wait_final(peer: &Peer<Message>, id: u64) -> JobStatus {
+fn wait_final(peer: &Peer<Message>, id: u64) -> WireSnapshot {
     for _ in 0..2000 {
         let s = status(peer, id);
-        if s.state.is_final() {
+        if s.is_terminal() {
             return s;
         }
         std::thread::sleep(Duration::from_millis(5));
@@ -182,13 +188,14 @@ fn a_start_answers_at_once_while_the_work_is_still_going_and_the_phase_has_a_cou
         },
     )
     .unwrap();
-    assert!(!first.state.is_final(), "the start does not wait for the logs");
+    assert!(!first.is_terminal(), "the start does not wait for the logs");
     gate.wait_for_callers(1);
     let running = status(&peer, first.id);
-    let JobState::Running { phase: Some(p) } = running.state else {
+    let WireState::Running(Some(p)) = running.state else {
         panic!("{running:?}")
     };
-    assert_eq!((p.id.as_str(), p.done, p.total), ("read", 0, Some(2)));
+    // The read of the first source: a count that starts at 0 and has no total (a growing count, never a static 0 of N).
+    assert_eq!((p.id.as_str(), p.done, p.total), ("source-MacReports", 0, None));
     assert_eq!(running.title, "Reading system logs");
     // The same work asked again answers the running job; another window of the same kind is refused with a reason.
     assert_eq!(
@@ -214,7 +221,7 @@ fn a_start_answers_at_once_while_the_work_is_still_going_and_the_phase_has_a_cou
     assert!(ask(&peer, Request::JobResult { id: first.id }).unwrap_err().contains("no result"));
     gate.open();
     let done = wait_final(&peer, first.id);
-    assert_eq!(done.state, JobState::Done);
+    assert_eq!(done.state, WireState::Done);
     let Reply::JobOutput(out) = ask(&peer, Request::JobResult { id: first.id }).unwrap() else {
         panic!("output")
     };
@@ -240,7 +247,7 @@ fn cancelling_a_log_read_keeps_what_was_there_and_the_next_read_works() {
     ask(&peer, Request::CancelJob { id: job.id }).unwrap();
     gate.open();
     let end = wait_final(&peer, job.id);
-    assert_eq!(end.state, JobState::Cancelled);
+    assert!(matches!(end.state, WireState::Cancelled(_)), "{:?}", end.state);
     assert!(
         ask(&peer, Request::JobResult { id: job.id }).is_err(),
         "a cancelled job has no result"
@@ -281,7 +288,7 @@ fn cancelling_a_backup_check_between_tools_keeps_the_report_and_clears_checking(
     let peer = h.client();
     let job = start(&peer, JobSpec::RefreshBackup).unwrap();
     gate.wait_for_callers(1);
-    let JobState::Running { phase: Some(p) } = status(&peer, job.id).state else {
+    let WireState::Running(Some(p)) = status(&peer, job.id).state else {
         panic!("running")
     };
     assert_eq!(p.id, "tools");
@@ -290,7 +297,7 @@ fn cancelling_a_backup_check_between_tools_keeps_the_report_and_clears_checking(
     ask(&peer, Request::CancelJob { id: job.id }).unwrap();
     gate.open();
     let end = wait_final(&peer, job.id);
-    assert_eq!(end.state, JobState::Cancelled);
+    assert!(matches!(end.state, WireState::Cancelled(_)), "{:?}", end.state);
     assert!(s.extras.backup_report().checked_at.is_none(), "the report was not replaced");
     assert!(!s.extras.backup_report().checking, "checking came down");
     // A later check runs to the end.
@@ -371,5 +378,227 @@ fn only_the_last_few_finished_jobs_are_kept_and_an_unknown_id_is_not_found() {
         .unwrap();
     assert!(matches!(err, Message::Reply(r) if matches!(*r, Err(ref e) if e.code == ErrorCode::NotFound)));
     // Cancelling an unknown or finished job is harmless.
-    assert!(matches!(ask(&peer, Request::CancelJob { id: 9999 }).unwrap(), Reply::Ok));
+    assert!(matches!(
+        ask(&peer, Request::CancelJob { id: 9999 }).unwrap(),
+        Reply::JobCancelled(false)
+    ));
+}
+
+/// A source that streams its tool: it reports a growing count of records and, like the real one, stops at once when cancelled
+/// (the real one kills `log show`; this one has no child to kill, only the same signal).
+struct Streaming {
+    started: Arc<Gate>,
+    finished: Arc<Mutex<Option<bool>>>,
+}
+
+impl IssueSource for Streaming {
+    fn id(&self) -> IssueSourceId {
+        IssueSourceId::MacLog
+    }
+    fn read(&self, since: Timestamp, until: Timestamp) -> Result<Vec<Issue>, PlatformError> {
+        self.read_controlled(since, until, &dyno_core::issues::NoControl)
+    }
+    fn controllable(&self) -> bool {
+        true
+    }
+    fn read_controlled(&self, _since: Timestamp, _until: Timestamp, control: &dyn ReadControl) -> Result<Vec<Issue>, PlatformError> {
+        // Cancel wakes this read through the registered stop, as it kills a child process.
+        let stopped = Arc::new((Mutex::new(false), Condvar::new()));
+        let s = stopped.clone();
+        let _guard = control.on_cancel(Box::new(move || {
+            *s.0.lock().unwrap() = true;
+            s.1.notify_all();
+        }));
+        let mut records = 0u64;
+        loop {
+            records += 100;
+            control.parsed(records);
+            if records == 300 {
+                self.started.arrive();
+            }
+            let stop = stopped.0.lock().unwrap();
+            let (stop, _) = stopped.1.wait_timeout(stop, Duration::from_millis(5)).unwrap();
+            if *stop {
+                *self.finished.lock().unwrap() = Some(control.cancelled());
+                return Err(PlatformError::Failed("log was stopped.".into()));
+            }
+        }
+    }
+}
+
+#[test]
+fn cancelling_a_streaming_log_read_stops_its_tool_at_once_with_a_growing_count_and_changes_nothing() {
+    let started = Arc::new(Gate::default());
+    let finished = Arc::new(Mutex::new(None));
+    let h = Harness::start(vec![Box::new(Streaming {
+        started: started.clone(),
+        finished: finished.clone(),
+    })]);
+    let peer = h.client();
+    let job = start(
+        &peer,
+        JobSpec::RescanIssues {
+            query: IssuesQuery { days: 14 },
+        },
+    )
+    .unwrap();
+    started.wait_for_callers(1);
+    // The count grew while the tool streamed, and the read declares nothing uninterruptible.
+    let mid = status(&peer, job.id);
+    let WireState::Running(Some(p)) = mid.state.clone() else {
+        panic!("{mid:?}")
+    };
+    assert_eq!(p.id, "source-MacLog");
+    assert!(p.done >= 100 && p.total.is_none(), "{p:?}");
+    assert!(mid.cancellable, "a streamed read can be interrupted: {mid:?}");
+    // The gate was never opened: the read ends only because Cancel reached it.
+    let cancelled_at = std::time::Instant::now();
+    ask(&peer, Request::CancelJob { id: job.id }).unwrap();
+    let end = wait_final(&peer, job.id);
+    assert!(matches!(end.state, WireState::Cancelled(_)), "{:?}", end.state);
+    assert!(cancelled_at.elapsed() < Duration::from_secs(5), "Cancel did not wait for the tool");
+    assert_eq!(*finished.lock().unwrap(), Some(true));
+    assert!(
+        h.shared().issues.never_scanned(),
+        "nothing was stored and the time of the last read did not move"
+    );
+}
+
+#[test]
+fn a_rescan_waits_for_the_scheduled_read_instead_of_answering_with_the_old_state_and_cancel_wakes_the_wait() {
+    let gate = Arc::new(Gate::default());
+    let h = Harness::start(slow_issues(&gate));
+    let shared = h.shared();
+    // The scheduled read (no job) is in progress, held at the gate.
+    let scheduled = {
+        let s = shared.clone();
+        std::thread::spawn(move || s.issues.scan(&s, None))
+    };
+    gate.wait_for_callers(1);
+    let peer = h.client();
+    let waiting = start(
+        &peer,
+        JobSpec::RescanIssues {
+            query: IssuesQuery { days: 14 },
+        },
+    )
+    .unwrap();
+    for _ in 0..400 {
+        if matches!(&status(&peer, waiting.id).state, WireState::Running(Some(p)) if p.id == "waiting") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let WireState::Running(Some(p)) = status(&peer, waiting.id).state else {
+        panic!("running")
+    };
+    assert_eq!(p.id, "waiting", "the rescan says what it waits for");
+    // Cancel wakes the wait: the gate is still closed, yet the job ends.
+    ask(&peer, Request::CancelJob { id: waiting.id }).unwrap();
+    assert!(matches!(wait_final(&peer, waiting.id).state, WireState::Cancelled(_)));
+    // Another rescan waits too, and when the scheduled read ends it answers with what that read stored.
+    let again = start(
+        &peer,
+        JobSpec::RescanIssues {
+            query: IssuesQuery { days: 14 },
+        },
+    )
+    .unwrap();
+    gate.open();
+    assert!(scheduled.join().unwrap().unwrap());
+    assert_eq!(wait_final(&peer, again.id).state, WireState::Done);
+    let Reply::JobOutput(out) = ask(&peer, Request::JobResult { id: again.id }).unwrap() else {
+        panic!("output")
+    };
+    assert!(
+        matches!(*out, JobOutput::Issues(o) if o.total == 1),
+        "the scheduled read's issue is in the answer"
+    );
+}
+
+#[test]
+fn a_backup_check_waits_for_the_one_that_is_running_and_cancel_wakes_the_wait() {
+    let gate = Arc::new(Gate::default());
+    let h = Harness::start(vec![]);
+    let s = h.shared();
+    s.extras.use_os("macos");
+    s.extras.use_backup_tools(Arc::new(SlowTool(gate.clone())));
+    let scheduled = {
+        let s = s.clone();
+        std::thread::spawn(move || dyno_agent::extras::backup_check::check_now(&s))
+    };
+    gate.wait_for_callers(1);
+    let peer = h.client();
+    let job = start(&peer, JobSpec::RefreshBackup).unwrap();
+    for _ in 0..400 {
+        if matches!(&status(&peer, job.id).state, WireState::Running(Some(p)) if p.id == "waiting") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let WireState::Running(Some(p)) = status(&peer, job.id).state else {
+        panic!("running")
+    };
+    assert_eq!(p.id, "waiting");
+    ask(&peer, Request::CancelJob { id: job.id }).unwrap();
+    assert!(matches!(wait_final(&peer, job.id).state, WireState::Cancelled(_)));
+    gate.open();
+    scheduled.join().unwrap();
+    assert!(!s.extras.backup_report().checking);
+}
+
+#[test]
+fn every_status_of_a_job_is_pushed_to_a_connected_app_in_order_and_the_end_is_never_dropped() {
+    let h = Harness::start(vec![]);
+    let d = dyno_agent::discovery::Discovery::read(&h.dirs.discovery()).unwrap();
+    let conn = dyno_ipc::Client::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let peer = Peer::start(
+        conn,
+        dyno_ipc::PeerOptions::new().on_push(move |m| {
+            if let Message::Job(j) = m {
+                let _ = tx.send(*j);
+            }
+        }),
+    )
+    .unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let f = tmp.path().join("p.bin");
+    std::fs::write(&f, vec![1u8; 300_000]).unwrap();
+    let job = start(
+        &peer,
+        JobSpec::FileHash {
+            source: dyno_core::weblinks::HashSource::Path(f.to_string_lossy().into_owned()),
+        },
+    )
+    .unwrap();
+    let mut heard = Vec::new();
+    loop {
+        let j = rx.recv_timeout(Duration::from_secs(10)).expect("the end of the job was pushed");
+        if j.id != job.id {
+            continue;
+        }
+        let end = j.is_terminal();
+        heard.push(j);
+        if end {
+            break;
+        }
+    }
+    assert!(
+        heard.windows(2).all(|w| w[0].seq < w[1].seq),
+        "newest wins, in order: {:?}",
+        heard.iter().map(|j| j.seq).collect::<Vec<_>>()
+    );
+    assert_eq!(heard.last().unwrap().state, WireState::Done);
+    let counts: Vec<u64> = heard
+        .iter()
+        .filter_map(|j| {
+            if let WireState::Running(Some(p)) = &j.state {
+                Some(p.done)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(counts.windows(2).all(|w| w[0] <= w[1]), "{counts:?}");
 }

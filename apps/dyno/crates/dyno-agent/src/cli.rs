@@ -82,7 +82,7 @@ pub fn ask_within(peer: &Peer<Message>, request: Request, within: Duration) -> R
 /// Starts the job `spec`, waits until it ends and returns what it produced, or the message it ended with. For callers that
 /// want the answer and have nothing to show meanwhile (the CLI, the tests); the app shows the progress instead.
 pub fn run_job(peer: &Peer<Message>, spec: dyno_core::jobs::JobSpec, within: Duration) -> Result<dyno_core::jobs::JobOutput, String> {
-    use dyno_core::jobs::JobState;
+    use paddock_jobs::wire::WireState;
     let started = std::time::Instant::now();
     let Reply::Job(job) = ask(peer, Request::StartJob { spec })? else {
         return Err("The agent sent something unexpected.".into());
@@ -92,9 +92,9 @@ pub fn run_job(peer: &Peer<Message>, spec: dyno_core::jobs::JobSpec, within: Dur
             return Err("The agent sent something unexpected.".into());
         };
         match all.iter().find(|s| s.id == job.id).map(|s| &s.state) {
-            Some(JobState::Done) => break,
-            Some(JobState::Failed { message }) => return Err(message.clone()),
-            Some(JobState::Cancelled) => return Err("The job was cancelled.".into()),
+            Some(WireState::Done) => break,
+            Some(WireState::Failed(message)) => return Err(message.clone()),
+            Some(WireState::Cancelled(_)) => return Err("The job was cancelled.".into()),
             Some(_) => {}
             None => return Err("The agent forgot the job.".into()),
         }

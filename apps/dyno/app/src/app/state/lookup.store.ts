@@ -1,9 +1,10 @@
-import { inject } from '@angular/core';
-import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
+import { Injector, computed, inject } from '@angular/core';
+import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import type { CommandError, FileHashInfo, HashSource, SearchSeed } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
-import { JobRunner, type JobProgress, type JobRun } from '../core/job-runner';
+import { JobStarter, progressOf, type JobRun } from '../core/job-starter';
+import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
 
 interface LookupState {
   seed: SearchSeed | null;
@@ -12,10 +13,10 @@ interface LookupState {
   busy: boolean;
   error: CommandError | null;
   /** Reading the file runs as a job (a program can be large): its phase, its bytes so far, and whether it has stood still for a while. */
-  hashJob: JobProgress | null;
+  hashJobId: number | null;
 }
 
-const initial: LookupState = { seed: null, hash: null, busy: false, error: null, hashJob: null };
+const initial: LookupState = { seed: null, hash: null, busy: false, error: null, hashJobId: null };
 
 /**
  * The state of the two "look it up" dialogs: the redacted search text, and a file's SHA-256. The engine builds both and the
@@ -24,7 +25,15 @@ const initial: LookupState = { seed: null, hash: null, busy: false, error: null,
 export const LookupStore = signalStore(
   { providedIn: 'root' },
   withState(initial),
-  withMethods((store, backend = inject(BACKEND), jobs = inject(JobRunner)) => {
+  withComputed(({ hashJobId }, injector = inject(Injector)) => ({
+    /** The running read of the file: its phase, its bytes so far, and whether it has been quiet long enough to say "Still working". */
+    // The shell's jobs store is only asked for once a file is being read: the web search dialog has none and needs none.
+    hashJob: computed(() => {
+      const id = hashJobId();
+      return id === null ? null : progressOf(injector.get(JobsStore), id);
+    }),
+  })),
+  withMethods((store, backend = inject(BACKEND), starter = inject(JobStarter)) => {
     let hashing: JobRun | null = null;
     const run = async <T>(body: () => Promise<T>): Promise<T | null> => {
       patchState(store, { busy: true, error: null });
@@ -57,9 +66,9 @@ export const LookupStore = signalStore(
       },
       /** Computes the SHA-256 of the file (nothing is uploaded) as a job; a cancelled read leaves no hash and no error. */
       async loadHash(source: HashSource): Promise<void> {
-        patchState(store, { hash: null, hashJob: null });
+        patchState(store, { hash: null, hashJobId: null });
         const hash = await run(async () => {
-          const job = (hashing = jobs.run({ fileHash: { source } }, (hashJob) => patchState(store, { hashJob })));
+          const job = (hashing = starter.run({ fileHash: { source } }, (hashJobId) => patchState(store, { hashJobId })));
           try {
             const out = await job.result;
             // The dialog was closed or reopened meanwhile: this answer belongs to nobody.
@@ -69,7 +78,7 @@ export const LookupStore = signalStore(
           } finally {
             if (hashing === job) {
               hashing = null;
-              patchState(store, { hashJob: null });
+              patchState(store, { hashJobId: null });
             }
           }
         });

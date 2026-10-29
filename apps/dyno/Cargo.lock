@@ -1226,6 +1226,7 @@ dependencies = [
 name = "dyno-core"
 version = "0.1.0"
 dependencies = [
+ "paddock-jobs",
  "postcard",
  "proptest",
  "serde",

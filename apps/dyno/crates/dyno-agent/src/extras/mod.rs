@@ -59,7 +59,9 @@ pub struct ExtrasCentre {
     os: Mutex<&'static str>,
     own_folder: bool,
     software: Mutex<Option<(Instant, SoftwareInventory)>>,
-    pub(crate) backup: Mutex<backup_check::Slot>,
+    pub(crate) backup: Arc<Mutex<backup_check::Slot>>,
+    /// Signalled when a backup check ends and when a job waiting for one is cancelled.
+    pub(crate) backup_done: Arc<std::sync::Condvar>,
     counter: AtomicU64,
 }
 
@@ -73,7 +75,8 @@ impl ExtrasCentre {
             os: Mutex::new(std::env::consts::OS),
             own_folder,
             software: Mutex::new(None),
-            backup: Mutex::new(backup_check::Slot::default()),
+            backup: Arc::new(Mutex::new(backup_check::Slot::default())),
+            backup_done: Arc::new(std::sync::Condvar::new()),
             counter: AtomicU64::new(1),
         }
     }
@@ -99,11 +102,11 @@ impl ExtrasCentre {
         *lock(&self.os) = os;
     }
 
-    fn tools(&self) -> Arc<dyn ToolRunner> {
+    pub(crate) fn tools(&self) -> Arc<dyn ToolRunner> {
         lock(&self.tools).clone()
     }
 
-    fn os(&self) -> &'static str {
+    pub(crate) fn os(&self) -> &'static str {
         *lock(&self.os)
     }
 
@@ -115,17 +118,9 @@ impl ExtrasCentre {
 
 /// Answers an extras request.
 pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentError> {
-    let x = &shared.extras;
     match request {
         Request::Changes { query } => changes(shared, query).map(|t| Reply::Changes(Box::new(t))),
-        Request::SleepBlockers => Ok(Reply::Sleep(Box::new(dyno_platform::extras::sleep_report(
-            x.tools().as_ref(),
-            x.os(),
-        )))),
-        Request::BootAnalysis => boot_report(shared).map(|b| Reply::Boot(Box::new(b))),
-        Request::AppUsage => Ok(Reply::AppUsage(Box::new(app_usage(shared)))),
         Request::GpuProcesses => Ok(Reply::Gpu(Box::new(gpu(shared)))),
-        Request::SoftwareInventory => Ok(Reply::Software(Box::new(software(shared)))),
         Request::SaveInventoryReport { path, format } => save_inventory(shared, &path, format).map(Reply::InventorySaved),
         Request::Maintenance => {
             let core = lock(&shared.core);
@@ -218,7 +213,8 @@ pub fn record_changes(shared: &Shared) {
     }
 }
 
-fn boot_report(shared: &Shared) -> Result<BootReport, AgentError> {
+/// Boot history and what slowed the last start (runs OS tools).
+pub fn boot_report(shared: &Shared) -> Result<BootReport, AgentError> {
     let x = &shared.extras;
     let facts = dyno_platform::extras::boot_facts(x.tools().as_ref(), x.os());
     let t = now();
@@ -245,7 +241,8 @@ fn boot_report(shared: &Shared) -> Result<BootReport, AgentError> {
     })
 }
 
-fn app_usage(shared: &Shared) -> UsageReport {
+/// Network and energy use per app (runs OS tools).
+pub fn app_usage(shared: &Shared) -> UsageReport {
     let x = &shared.extras;
     let apps: Vec<(String, Vec<u32>)> = lock(&shared.core)
         .latest

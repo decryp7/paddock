@@ -220,6 +220,11 @@ impl Sink for Shell {
         self.emit(events::DISK_SCAN, status);
     }
 
+    fn job(&self, status: paddock_jobs::wire::WireSnapshot) {
+        // The shell's job event: its Jobs view, status item and notices read `paddock://jobs`.
+        self.emit(paddock_jobs::EVENT_NAME, paddock_jobs::JobSnapshot::from(status));
+    }
+
     fn disk_volumes(&self, volumes: Vec<dyno_core::disk::volume::Volume>) {
         self.emit(events::DISK_VOLUMES, volumes);
     }

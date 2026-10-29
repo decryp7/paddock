@@ -3,7 +3,8 @@ import { patchState, signalStore, withComputed, withMethods, withState } from '@
 import type { BackupReport, CommandError } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
-import { JobRunner, type JobProgress, type JobRun } from '../core/job-runner';
+import { JobStarter, progressOf, type JobRun } from '../core/job-starter';
+import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
 import { heroText } from '../features/backup/backup-model';
 
 /** How often the page asks again while the engine runs a check of its own (one the person did not ask for). It never gives up. */
@@ -14,8 +15,8 @@ interface BackupState {
   error: CommandError | null;
   /** The person asked for a check and the engine is running it, as a job with progress and Cancel. */
   checking: boolean;
-  /** The running check: its phase, its count, and whether it has stood still for a while. */
-  checkJob: JobProgress | null;
+  /** The running check's job id (its progress is the shell's job status). */
+  checkJobId: number | null;
   /** Why the last "Check now" failed (the earlier report stays on screen). */
   checkError: CommandError | null;
 }
@@ -23,14 +24,16 @@ interface BackupState {
 /** Backup health: the last report and a check on request. The backup settings live in the Settings page. */
 export const BackupStore = signalStore(
   { providedIn: 'root' },
-  withState<BackupState>({ report: null, error: null, checking: false, checkJob: null, checkError: null }),
-  withComputed(({ report, checking }) => ({
+  withState<BackupState>({ report: null, error: null, checking: false, checkJobId: null, checkError: null }),
+  withComputed(({ report, checking, checkJobId }, jobs = inject(JobsStore)) => ({
+    /** The running check: its phase, its count, and whether it has been quiet long enough to say "Still working". */
+    checkJob: computed(() => progressOf(jobs, checkJobId())),
     statuses: computed(() => report()?.statuses ?? []),
     /** A check is running: one the person asked for, or one the engine started on its own. */
     busy: computed(() => checking() || (report()?.checking ?? false)),
     hero: computed(() => heroText(report()?.statuses ?? [])),
   })),
-  withMethods((store, backend = inject(BACKEND), jobs = inject(JobRunner)) => {
+  withMethods((store, backend = inject(BACKEND), starter = inject(JobStarter)) => {
     let check: JobRun | null = null;
     /** Shows a report and follows the check the engine runs on its own until it says it is done. A running check is never timed out. */
     async function settle(first: BackupReport): Promise<void> {
@@ -57,8 +60,8 @@ export const BackupStore = signalStore(
      */
     async check(): Promise<void> {
       if (store.checking()) return;
-      patchState(store, { checking: true, checkJob: null, checkError: null });
-      const run = (check = jobs.run('refreshBackup', (checkJob) => patchState(store, { checkJob })));
+      patchState(store, { checking: true, checkJobId: null, checkError: null });
+      const run = (check = starter.run('refreshBackup', (checkJobId) => patchState(store, { checkJobId })));
       try {
         const out = await run.result;
         if (out && 'backup' in out) await settle(out.backup);
@@ -66,7 +69,7 @@ export const BackupStore = signalStore(
         patchState(store, { checkError: toCommandError(e) });
       } finally {
         check = null;
-        patchState(store, { checking: false, checkJob: null });
+        patchState(store, { checking: false, checkJobId: null });
       }
     },
     /** Stops the check in progress; the earlier report stays. */

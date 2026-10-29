@@ -1,15 +1,13 @@
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../core/backend';
-import { JOB_POLL_MS } from '../core/job-runner';
-import { freezeJobs } from '../../testing/job-test-support';
-import { MockBackend } from '../core/mock-backend';
+import { jobsProviders, mockWithJobs, pump } from '../../testing/job-test-support';
 import { Notifier } from '../shared/notifier';
 import { IssuesStore } from './issues.store';
 import { UnusualStore } from './unusual.store';
 
 function setup() {
-  const mock = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000 });
-  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }] });
+  const { mock, jobs } = mockWithJobs();
+  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, jobsProviders(jobs)] });
   return { mock, issues: TestBed.inject(IssuesStore), unusual: TestBed.inject(UnusualStore), notifier: TestBed.inject(Notifier) };
 }
 
@@ -64,22 +62,34 @@ describe('IssuesStore', () => {
       expect(issues.rescanning()).toBe(false);
     });
 
-    it('shows the progress, never a timeout error, and keeps the page while it reads', async () => {
+    it('shows the progress from the shell\'s job status, and the page keeps what it had while it reads', async () => {
       vi.useFakeTimers();
       const { issues, mock } = setup();
       await issues.load();
-      mock.jobPolls = 4;
+      mock.jobSteps = 4;
+      mock.jobStepMs = 500;
       const before = issues.overview();
       const done = issues.rescan();
-      await vi.advanceTimersByTimeAsync(0);
+      await pump(0);
       expect(issues.rescanning()).toBe(true);
-      expect(issues.rescanJob()?.snapshot).toMatchObject({ title: 'Reading system logs', state: 'running' });
-      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
-      expect(issues.rescanJob()?.snapshot).toMatchObject({ state: 'running', phase: { id: 'read', total: 4 } });
+      expect(issues.rescanJob()?.snapshot).toMatchObject({ title: 'Reading system logs', state: 'running', kind: 'rescan-issues' });
+      await pump(500);
+      expect(issues.rescanJob()?.snapshot).toMatchObject({ state: 'running', phase: { id: 'source-MacLog', done: 640, total: null } });
       expect(issues.overview()).toBe(before);
-      // Far longer than the old 160 s limit: still working, no error.
-      freezeJobs(mock);
-      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await pump(2000);
+      await done;
+      expect(issues.rescanning()).toBe(false);
+      expect(issues.rescanJob()).toBeNull();
+    });
+
+    it('says "still working" and keeps going for minutes, with no timeout error', async () => {
+      vi.useFakeTimers();
+      const { issues, mock } = setup();
+      mock.jobsStalled = true;
+      const done = issues.rescan();
+      await pump(0);
+      expect(issues.rescanJob()?.stalled).toBe(false);
+      await pump(5 * 60_000);
       expect(issues.error()).toBeNull();
       expect(issues.rescanning()).toBe(true);
       expect(issues.rescanJob()?.stalled).toBe(true);
@@ -90,14 +100,15 @@ describe('IssuesStore', () => {
       vi.useFakeTimers();
       const { issues, mock, notifier } = setup();
       await issues.load();
-      mock.jobPolls = 10;
+      mock.jobSteps = 10;
+      mock.jobStepMs = 500;
       const before = issues.overview();
       const cancel = vi.spyOn(mock, 'cancelJob');
       const done = issues.rescan();
-      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      await pump(500);
       await issues.cancelRescan();
       expect(cancel).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      await pump(0);
       await done;
       expect(issues.rescanning()).toBe(false);
       expect(issues.rescanJob()).toBeNull();

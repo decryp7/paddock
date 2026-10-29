@@ -66,6 +66,29 @@ impl ScanSlot {
     }
 }
 
+/// Job statuses waiting for one app: the newest of each job. A status replaces the older one of its job, so a slow app sees
+/// fewer events but always the newest, and a final state (done, failed, cancelled) is never dropped.
+#[derive(Default)]
+pub struct JobSlot(Mutex<std::collections::BTreeMap<u64, paddock_jobs::wire::WireSnapshot>>);
+
+impl JobSlot {
+    /// Keeps `status` unless a newer event of the same job is already waiting.
+    pub fn put(&self, status: paddock_jobs::wire::WireSnapshot) {
+        let mut m = lock(&self.0);
+        match m.get(&status.id) {
+            Some(old) if old.seq >= status.seq => {}
+            _ => {
+                m.insert(status.id, status);
+            }
+        }
+    }
+
+    /// Everything waiting, oldest job first; the slot is empty afterwards.
+    pub fn take(&self) -> Vec<paddock_jobs::wire::WireSnapshot> {
+        std::mem::take(&mut *lock(&self.0)).into_values().collect()
+    }
+}
+
 /// The newest volume list waiting for one app, with the ticket of the listing it came from: an older listing never replaces a
 /// newer one, and the list is never dropped for a full queue.
 #[derive(Default)]
@@ -98,6 +121,8 @@ pub struct Sub {
     pub scans: Arc<ScanSlot>,
     /// The volume list, newest only, same reason.
     pub volumes: Arc<VolumesSlot>,
+    /// Job statuses, latest per job, same reason.
+    pub jobs: Arc<JobSlot>,
 }
 
 impl Sub {
@@ -345,7 +370,7 @@ impl Shared {
             reveal,
             bench,
             netwatch: crate::netwatch::NetWatchCentre::new(),
-            jobs: crate::jobs::JobCentre::new(),
+            jobs: crate::jobs::JobCentre::new(me.clone()),
             hasher: crate::filehash::FileHasher::new(),
             counters: crate::counters::CounterCentre::new(Arc::new(dyno_platform::counters::OsCounters)),
             issues: crate::issues::IssueCentre::new(issues),
@@ -430,6 +455,15 @@ impl Shared {
             // The message only wakes the push thread; the content is in the slot. A full queue means the thread is awake
             // anyway and looks at the slot after every message.
             let _ = s.tx.try_send(Message::DiskScan(Box::new(status.clone())));
+        }
+    }
+
+    /// Hands a job's status to every connected app: it replaces the older one of the same job that has not been sent yet, and
+    /// the connection's push thread is woken. Nothing is lost but intermediate events.
+    pub fn broadcast_job(&self, status: &paddock_jobs::wire::WireSnapshot) {
+        for s in lock(&self.subs).iter() {
+            s.jobs.put(status.clone());
+            let _ = s.tx.try_send(Message::Job(Box::new(status.clone())));
         }
     }
 

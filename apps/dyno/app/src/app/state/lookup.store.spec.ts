@@ -1,13 +1,11 @@
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../core/backend';
-import { JOB_POLL_MS } from '../core/job-runner';
-import { freezeJobs } from '../../testing/job-test-support';
-import { MockBackend } from '../core/mock-backend';
+import { jobsProviders, mockWithJobs, pump } from '../../testing/job-test-support';
 import { LookupStore } from './lookup.store';
 
 function setup() {
-  const mock = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000 });
-  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }] });
+  const { mock, jobs } = mockWithJobs();
+  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, jobsProviders(jobs)] });
   return { mock, store: TestBed.inject(LookupStore) };
 }
 
@@ -55,16 +53,28 @@ describe('LookupStore', () => {
   describe('reading a file as a job', () => {
     afterEach(() => vi.useRealTimers());
 
-    it('shows the bytes read so far and never a timeout while the file is big', async () => {
+    it('shows the bytes read so far from the shell\'s job status', async () => {
       vi.useFakeTimers();
       const { store, mock } = setup();
-      mock.jobPolls = 4;
+      mock.jobSteps = 4;
+      mock.jobStepMs = 500;
       const done = store.loadHash({ path: '/a/big.bin' });
-      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      await pump(500);
       expect(store.busy()).toBe(true);
       expect(store.hashJob()?.snapshot).toMatchObject({ title: 'Hashing a file', state: 'running', phase: { id: 'hash', unit: 'bytes' } });
-      freezeJobs(mock);
-      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await pump(3000);
+      await done;
+      expect(store.hash()?.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(store.hashJob()).toBeNull();
+    });
+
+    it('never times out a big file: "still working" after the threshold, no error', async () => {
+      vi.useFakeTimers();
+      const { store, mock } = setup();
+      mock.jobsStalled = true;
+      const done = store.loadHash({ path: '/a/big.bin' });
+      await pump(0);
+      await pump(5 * 60_000);
       expect(store.error()).toBeNull();
       expect(store.hashJob()?.stalled).toBe(true);
       void done;
@@ -73,13 +83,14 @@ describe('LookupStore', () => {
     it('Cancel stops the read at the engine and leaves a message the dialog can retry from', async () => {
       vi.useFakeTimers();
       const { store, mock } = setup();
-      mock.jobPolls = 10;
+      mock.jobSteps = 10;
+      mock.jobStepMs = 500;
       const cancel = vi.spyOn(mock, 'cancelJob');
       const done = store.loadHash({ path: '/a/big.bin' });
-      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      await pump(500);
       await store.cancelHash();
       expect(cancel).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      await pump(0);
       await done;
       expect(store.hash()).toBeNull();
       expect(store.busy()).toBe(false);
@@ -90,12 +101,13 @@ describe('LookupStore', () => {
     it('closing the dialog (reset) stops a read in progress and the late answer is ignored', async () => {
       vi.useFakeTimers();
       const { store, mock } = setup();
-      mock.jobPolls = 10;
+      mock.jobSteps = 10;
+      mock.jobStepMs = 500;
       const cancel = vi.spyOn(mock, 'cancelJob');
       const done = store.loadHash({ path: '/a/big.bin' });
-      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      await pump(500);
       store.reset();
-      await vi.advanceTimersByTimeAsync(JOB_POLL_MS * 2);
+      await pump(1000);
       await done;
       expect(cancel).toHaveBeenCalledTimes(1);
       expect(store.error()).toBeNull();

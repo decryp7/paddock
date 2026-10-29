@@ -1,18 +1,20 @@
 import { readValue } from './measured';
-import type { Alert, BackupReport, FinderQuery, FinderResult, JobOutput, JobSpec, JobStatus, ProcessSample } from './api.types';
+import type { SuJobSnapshot } from '@decryp7/paddock-ui';
+import type { Alert, BackupReport, BootReport, FinderQuery, FinderResult, JobOutput, JobSpec, ProcessSample, SleepReport, SoftwareInventory, UsageReport } from './api.types';
 import { MockBackend, type MockOptions, applyMockPlatform, mockOptionsFromUrl } from './mock-backend';
 
 const NOW = 1_700_000_000_000;
 const make = (o: MockOptions = {}) => new MockBackend({ latencyMs: 0, now: () => NOW, ...o });
 
-/** Starts a job and reads it until it ends, the way the app does; a failed job rejects with its message, a cancelled one resolves `null`. */
+/** Starts a job and plays it to its end the way the shell's jobs store sees it (every status the sink hears); a failed job rejects with its message, a cancelled one resolves `null`. */
 async function runJob(b: MockBackend, spec: JobSpec): Promise<JobOutput | null> {
-  const job = await b.startJob(spec);
-  for (let i = 0; i < 50; i++) {
-    const mine = (await b.jobs()).find((j) => j.id === job.id)!;
-    if (mine.state === 'done') return b.jobResult(job.id);
-    if (mine.state === 'cancelled') return null;
-    if (typeof mine.state === 'object' && 'failed' in mine.state) throw { code: 'internal', message: mine.state.failed.message };
+  const id = await b.startJob(spec);
+  for (let i = 0; i < 200; i++) {
+    const s = b.jobStatuses().find((j) => j.id === id)!;
+    if (s.state === 'done') return b.jobResult(id);
+    if (s.state === 'cancelled') return null;
+    if (s.state === 'failed') throw { code: 'internal', message: s.message };
+    await new Promise((r) => setTimeout(r, 0));
   }
   throw new Error('the job never ended');
 }
@@ -459,17 +461,17 @@ describe('mock extras and backup health', () => {
 
   it('sleep, boot, usage, GPU and software answer realistic data', async () => {
     const b = fresh();
-    const sleep = await b.sleepBlockers();
+    const { sleep } = (await runJob(b, 'sleepBlockers')) as { sleep: SleepReport };
     expect(sleep.blockers.map((x) => x.name)).toContain('coreaudiod');
     expect(sleep.wakes.length).toBeGreaterThan(2);
-    const boot = await b.bootAnalysis();
+    const { boot } = (await runJob(b, 'bootAnalysis')) as { boot: BootReport };
     expect(boot.boots).toHaveLength(8);
     expect(boot.slowest[0]!.secs).toBeGreaterThan(boot.slowest[1]!.secs);
     expect(boot.verdict).toBeTruthy();
-    const usage = await b.appUsage();
+    const { appUsage: usage } = (await runJob(b, 'appUsage')) as { appUsage: UsageReport };
     expect(usage.apps.length).toBeGreaterThan(5);
     expect((await b.gpuProcesses()).processes[0]!.gpuPercent).toBeGreaterThan(0);
-    const sw = await b.softwareInventory();
+    const { software: sw } = (await runJob(b, 'softwareInventory')) as { software: SoftwareInventory };
     expect(sw.items.length).toBeGreaterThanOrEqual(40);
   });
 
@@ -503,65 +505,77 @@ describe('mock extras and backup health', () => {
 
   describe('jobs (ER-17 to ER-19)', () => {
     const rescan: JobSpec = { rescanIssues: { query: { days: 14 } } };
+    const statusOf = (b: MockBackend, id: number) => b.jobStatuses().find((j) => j.id === id)!;
 
-    it('a start answers at once with a running job; the same work answers the same job; another search is busy', async () => {
+    it('a start answers at once with the id of a running job; the same work answers the same job; another search is busy', async () => {
       const b = fresh();
-      b.jobPolls = 3;
+      b.jobSteps = 3;
+      b.jobStepMs = 50;
       const first = await b.startJob(rescan);
-      expect(first.state).toEqual({ running: { phase: null } });
-      expect((await b.startJob(rescan)).id).toBe(first.id);
+      expect(statusOf(b, first)).toMatchObject({ state: 'running', phase: null, kind: 'rescan-issues' });
+      expect(await b.startJob(rescan)).toBe(first);
       await expect(b.startJob({ rescanIssues: { query: { days: 7 } } })).rejects.toMatchObject({ code: 'busy' });
       // Different kinds run side by side.
-      expect((await b.startJob('refreshBackup')).id).not.toBe(first.id);
+      expect(await b.startJob('refreshBackup')).not.toBe(first);
     });
 
-    it('each read advances a phase whose count only grows, with its own total, and ends done', async () => {
-      const b = fresh();
-      b.jobPolls = 4;
-      const job = await b.startJob({ fileHash: { source: { path: '/Applications/Tool.app/tool' } } });
-      const counts: number[] = [];
-      let last: JobStatus = job;
-      for (let i = 0; i < 6 && last.state !== 'done'; i++) {
-        last = (await b.jobs()).find((j) => j.id === job.id)!;
-        if (typeof last.state === 'object' && 'running' in last.state && last.state.running.phase) {
-          expect(last.state.running.phase).toMatchObject({ id: 'hash', unit: 'bytes', total: 48_231_424 });
-          counts.push(last.state.running.phase.done);
-        }
-      }
+    it('pushes every status to the sink in order: queued, running, a phase whose count only grows, done', async () => {
+      const heard: SuJobSnapshot[] = [];
+      const b = fresh({ jobs: { emit: (j: SuJobSnapshot) => heard.push(j) } });
+      b.jobSteps = 4;
+      const id = await b.startJob({ fileHash: { source: { path: '/Applications/Tool.app/tool' } } });
+      await new Promise((r) => setTimeout(r, 30));
+      const mine = heard.filter((j) => j.id === id);
+      expect(mine.map((j) => j.state)).toEqual(['queued', 'running', 'running', 'running', 'running', 'done']);
+      expect(mine.every((j, i) => i === 0 || j.seq > mine[i - 1]!.seq)).toBe(true);
+      const counts = mine.flatMap((j) => (j.state === 'running' && j.phase ? [j.phase.done] : []));
       expect(counts).toHaveLength(3);
       expect(counts.every((c, i) => i === 0 || c >= counts[i - 1]!)).toBe(true);
-      expect(last.state).toBe('done');
-      expect(await b.jobResult(job.id)).toMatchObject({ fileHash: { bytes: 48_231_424 } });
+      expect(mine[2]).toMatchObject({ phase: { id: 'hash', unit: 'bytes', total: 48_231_424 } });
+      expect(await b.jobResult(id)).toMatchObject({ fileHash: { bytes: 48_231_424 } });
     });
 
     it('Cancel ends a job as cancelled, it has no result, and a new search can start', async () => {
       const b = fresh();
-      b.jobPolls = 5;
-      const job = await b.startJob({ findFiles: { query: { folder: '/x', mode: 'both', minBytes: 0 } } });
-      await b.cancelJob(job.id);
-      expect((await b.jobs()).find((j) => j.id === job.id)!.state).toBe('cancelled');
-      await expect(b.jobResult(job.id)).rejects.toMatchObject({ code: 'notFound' });
-      await b.cancelJob(job.id);
-      await b.cancelJob(999);
-      expect((await b.startJob({ findFiles: { query: { folder: '/y', mode: 'both', minBytes: 0 } } })).id).not.toBe(job.id);
+      b.jobSteps = 5;
+      b.jobStepMs = 50;
+      const id = await b.startJob({ findFiles: { query: { folder: '/x', mode: 'both', minBytes: 0 } } });
+      expect(b.cancelJob(id)).toBe(true);
+      expect(statusOf(b, id).state).toBe('cancelled');
+      await expect(b.jobResult(id)).rejects.toMatchObject({ code: 'notFound' });
+      expect(b.cancelJob(id)).toBe(false);
+      expect(b.cancelJob(999)).toBe(false);
+      expect(await b.startJob({ findFiles: { query: { folder: '/y', mode: 'both', minBytes: 0 } } })).not.toBe(id);
     });
 
-    it('a check of the backups sets the time of the last check only when it is done', async () => {
+    it('a stalled mock reports the first status and nothing more', async () => {
       const b = fresh();
-      b.jobPolls = 2;
+      b.jobsStalled = true;
+      const id = await b.startJob('sleepBlockers');
+      await new Promise((r) => setTimeout(r, 20));
+      expect(statusOf(b, id)).toMatchObject({ state: 'running', phase: null, seq: 2 });
+    });
+
+    it('the four tool reads and the backup check hand over their reports; a check of the backups sets the time only when done', async () => {
+      const b = fresh();
+      expect(await runJob(b, 'sleepBlockers')).toMatchObject({ sleep: { blockers: expect.any(Array) } });
+      expect(await runJob(b, 'bootAnalysis')).toMatchObject({ boot: { boots: expect.any(Array) } });
+      expect(await runJob(b, 'appUsage')).toMatchObject({ appUsage: { apps: expect.any(Array) } });
+      expect(await runJob(b, 'softwareInventory')).toMatchObject({ software: { items: expect.any(Array) } });
+      b.jobSteps = 2;
+      b.jobStepMs = 5;
       const before = (await b.backup()).checkedAt;
-      const job = await b.startJob('refreshBackup');
+      const id = await b.startJob('refreshBackup');
       expect((await b.backup()).checkedAt).toBe(before);
-      await b.jobs();
-      await b.jobs();
-      expect((await b.jobs()).find((j) => j.id === job.id)!.state).toBe('done');
+      await new Promise((r) => setTimeout(r, 40));
+      expect(statusOf(b, id).state).toBe('done');
       expect((await b.backup()).checkedAt).toBe(NOW);
     });
 
     it('only the last few finished jobs are kept', async () => {
       const b = fresh();
       for (let i = 0; i < 20; i++) await runJob(b, { fileHash: { source: { path: `/a/${i}` } } });
-      expect(await b.jobs()).toHaveLength(16);
+      expect(b.jobStatuses()).toHaveLength(16);
     });
   });
 

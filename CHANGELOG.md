@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-jobs`: the `wire` module
+- New `paddock_jobs::wire` (`WireSnapshot`, `WireState`, `WirePhase`): the postcard-safe form of a `JobSnapshot` for apps whose jobs run in an agent process and are relayed to the UI as `paddock://jobs` events (Dyno is the first). It converts both ways without loss.
+
 ### `providePaddockMaterial`: tooltips wait 500 ms
 - `providePaddockMaterial()` provides `MAT_TOOLTIP_DEFAULT_OPTIONS` with `showDelay: 500` (`PADDOCK_TOOLTIP_OPTIONS`), the design guide's delay for the tooltip every icon-only button carries. Every app that provides it gets the delay without setting it per tooltip.
 

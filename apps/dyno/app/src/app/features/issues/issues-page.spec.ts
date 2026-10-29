@@ -3,7 +3,8 @@ import { Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { BACKEND } from '../../core/backend';
-import { MockBackend } from '../../core/mock-backend';
+import type { MockBackend } from '../../core/mock-backend';
+import { jobsProviders, mockWithJobs } from '../../../testing/job-test-support';
 import { provideIcons } from '../../shared/icons';
 import { Chart } from '../../shared/chart';
 import { IssuesPage } from './issues-page';
@@ -21,9 +22,9 @@ class StubChart {
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
 function render(fail: string[] = [], prepare: (mock: MockBackend) => void = () => undefined) {
-  const mock = new MockBackend({ latencyMs: 0, now: () => NOW, fail: new Set(fail) });
+  const { mock, jobs } = mockWithJobs({ now: () => NOW, fail: new Set(fail) });
   prepare(mock);
-  TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([]), { provide: BACKEND, useValue: mock }] });
+  TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([]), jobsProviders(jobs), { provide: BACKEND, useValue: mock }] });
   TestBed.overrideComponent(IssuesView, { remove: { imports: [Chart] }, add: { imports: [StubChart] } });
   const f = TestBed.createComponent(IssuesPage);
   f.detectChanges();
@@ -32,6 +33,7 @@ function render(fail: string[] = [], prepare: (mock: MockBackend) => void = () =
 const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
   for (let i = 0; i < 6; i++) {
     await f.whenStable();
+    await new Promise((r) => setTimeout(r, 2));
     f.detectChanges();
   }
 };
@@ -126,7 +128,8 @@ describe('dy-issues-page', () => {
     const { f, el, mock } = render();
     await settle(f);
     const before = el.querySelector('[aria-label="Stability"]')?.textContent;
-    mock.jobPolls = 40;
+    mock.jobSteps = 40;
+    mock.jobStepMs = 20;
     const cancel = vi.spyOn(mock, 'cancelJob');
     (el.querySelector('[aria-label="Read the system logs now"]') as HTMLElement).click();
     for (let i = 0; i < 5 && !el.querySelector('pd-job'); i++) {

@@ -1,13 +1,27 @@
-import { vi } from 'vitest';
-import type { JobStatus } from '../app/core/api.types';
-import type { MockBackend } from '../app/core/mock-backend';
+import type { EnvironmentProviders } from '@angular/core';
+import { MemoryJobsBackend, provideShellJobs } from '@decryp7/paddock-ui/shell/jobs';
+import { MockBackend, type MockOptions } from '../app/core/mock-backend';
 
 /**
- * Test support: from now on the mock reports the job exactly as it is at the next read, forever (a step that takes a long time and
- * reports nothing new), so a spec can let minutes pass and see "still working" and no error.
+ * Test support: a mock that plays the agent and the shell's in-memory jobs backend it pushes its job statuses into (what the
+ * browser build wires too), so a spec follows a job the way the app does: through the shell's jobs store. Cancel from the
+ * store reaches the mock.
  */
-export function freezeJobs(mock: MockBackend): void {
-  const real = mock.jobs.bind(mock);
-  let frozen: JobStatus[] | null = null;
-  vi.spyOn(mock, 'jobs').mockImplementation(async () => (frozen ??= await real()));
+export function mockWithJobs(options: MockOptions = {}): { mock: MockBackend; jobs: MemoryJobsBackend } {
+  const jobs = new MemoryJobsBackend((id) => void mock.cancelJob(id));
+  const mock = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000, ...options, jobs });
+  return { mock, jobs };
+}
+
+/** The shell's jobs store, follow helper and backend over `jobs` (what `provideShellPages` and the dialog windows provide). */
+export function jobsProviders(jobs: MemoryJobsBackend, stillWorkingAfterMs = 8_000): EnvironmentProviders {
+  return provideShellJobs({ backend: () => jobs, stillWorkingAfterMs });
+}
+
+/** Lets `ms` of fake time pass and the shell's jobs store run its effects (its "Still working" clock starts in one). */
+export async function pump(ms: number): Promise<void> {
+  const { TestBed } = await import('@angular/core/testing');
+  const { vi } = await import('vitest');
+  await vi.advanceTimersByTimeAsync(ms);
+  TestBed.tick();
 }

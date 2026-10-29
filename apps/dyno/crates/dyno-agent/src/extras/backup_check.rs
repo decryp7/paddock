@@ -71,7 +71,7 @@ pub fn report(shared: &Arc<Shared>) -> BackupReport {
             let _ = run_check(&s, None);
         });
         if spawned.is_err() {
-            lock(&x.backup).checking = false;
+            end_check(x);
         }
     }
     snapshot(x)
@@ -106,19 +106,32 @@ pub fn check_now(shared: &Arc<Shared>) {
 /// replaced only when every tool was read. A check that is already running (the scheduled one) is waited for, not repeated.
 pub fn refresh(shared: &Arc<Shared>, job: &JobContext) -> Result<BackupReport, JobError> {
     let x = &shared.extras;
-    loop {
-        job.check()?;
+    {
         let mut slot = lock(&x.backup);
-        if !slot.checking {
-            slot.checking = true;
-            break;
+        if slot.checking {
+            job.phase(Phase::discovering("waiting", "Waiting for the backup check that is running"));
+            // The end of that check wakes the wait, and so does Cancel: no polling.
+            let (state, done) = (x.backup.clone(), x.backup_done.clone());
+            let _wake = job.cancel_token().on_cancel(move || {
+                let _held = lock(&state);
+                done.notify_all();
+            });
+            while slot.checking {
+                job.check()?;
+                slot = x.backup_done.wait(slot).unwrap_or_else(std::sync::PoisonError::into_inner);
+            }
+            job.check()?;
         }
-        drop(slot);
-        job.phase(Phase::discovering("waiting", "Waiting for the check that is running"));
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        slot.checking = true;
     }
     run_check(shared, Some(job))?;
     Ok(snapshot(x))
+}
+
+/// Marks the check as over without a new report (it failed to start or was cancelled) and wakes whoever waits for it.
+fn end_check(x: &ExtrasCentre) {
+    lock(&x.backup).checking = false;
+    x.backup_done.notify_all();
 }
 
 /// Reads every tool and, when that completed, swaps the report in. `checking` must be set by the caller; it is cleared
@@ -144,7 +157,7 @@ fn run_check(shared: &Arc<Shared>, job: Option<&JobContext>) -> Result<(), JobEr
     for tool in tools {
         if let Some(j) = job {
             if let Err(e) = j.check() {
-                lock(&x.backup).checking = false;
+                end_check(x);
                 return Err(e);
             }
         }
@@ -162,7 +175,7 @@ fn run_check(shared: &Arc<Shared>, job: Option<&JobContext>) -> Result<(), JobEr
     }
     if let Some(j) = job {
         if let Err(e) = j.check() {
-            lock(&x.backup).checking = false;
+            end_check(x);
             return Err(e);
         }
     }
@@ -177,6 +190,7 @@ fn run_check(shared: &Arc<Shared>, job: Option<&JobContext>) -> Result<(), JobEr
         login_path_used: resolver.login_path_used(),
     };
     slot.checking = false;
+    x.backup_done.notify_all();
     Ok(())
 }
 

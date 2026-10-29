@@ -1,9 +1,10 @@
-import { inject } from '@angular/core';
-import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
+import { computed, inject } from '@angular/core';
+import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import type { CommandError, IssuesOverview, SavedIssues } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
-import { JobRunner, type JobProgress, type JobRun } from '../core/job-runner';
+import { JobStarter, progressOf, type JobRun } from '../core/job-starter';
+import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
 import { plural } from '../shared/format';
 import { Notifier } from '../shared/notifier';
 import { fileName } from './diagnostics.store';
@@ -17,8 +18,8 @@ interface IssuesState {
   error: CommandError | null;
   /** Reading the OS logs now (can take a minute on a busy PC); it runs as a job with progress and Cancel. */
   rescanning: boolean;
-  /** The running read: its phase, its count, and whether it has stood still for a while. */
-  rescanJob: JobProgress | null;
+  /** The running read's job id (its progress is the shell's job status). */
+  rescanJobId: number | null;
   exporting: boolean;
   saved: SavedIssues | null;
   saveError: CommandError | null;
@@ -27,8 +28,12 @@ interface IssuesState {
 /** The Issues page: what the OS recorded, for the window the person chose, and the export for Debrief. */
 export const IssuesStore = signalStore(
   { providedIn: 'root' },
-  withState<IssuesState>({ days: 14, overview: null, error: null, rescanning: false, rescanJob: null, exporting: false, saved: null, saveError: null }),
-  withMethods((store, backend = inject(BACKEND), notifier = inject(Notifier), jobs = inject(JobRunner)) => {
+  withState<IssuesState>({ days: 14, overview: null, error: null, rescanning: false, rescanJobId: null, exporting: false, saved: null, saveError: null }),
+  withComputed(({ rescanJobId }, jobs = inject(JobsStore)) => ({
+    /** The running read: its phase, its count, and whether it has been quiet long enough to say "Still working". */
+    rescanJob: computed(() => progressOf(jobs, rescanJobId())),
+  })),
+  withMethods((store, backend = inject(BACKEND), notifier = inject(Notifier), starter = inject(JobStarter)) => {
     let rescan: JobRun | null = null;
     return {
     async load(): Promise<void> {
@@ -52,9 +57,9 @@ export const IssuesStore = signalStore(
      */
     async rescan(): Promise<void> {
       if (store.rescanning()) return;
-      patchState(store, { rescanning: true, rescanJob: null });
+      patchState(store, { rescanning: true, rescanJobId: null });
       const days = store.days();
-      const run = (rescan = jobs.run({ rescanIssues: { query: { days } } }, (rescanJob) => patchState(store, { rescanJob })));
+      const run = (rescan = starter.run({ rescanIssues: { query: { days } } }, (rescanJobId) => patchState(store, { rescanJobId })));
       try {
         const out = await run.result;
         if (out === null) {
@@ -69,7 +74,7 @@ export const IssuesStore = signalStore(
         patchState(store, { error: toCommandError(e) });
       } finally {
         rescan = null;
-        patchState(store, { rescanning: false, rescanJob: null });
+        patchState(store, { rescanning: false, rescanJobId: null });
       }
     },
     /** Stops the read in progress; the job ends as cancelled and the page keeps what it had. */

@@ -383,16 +383,7 @@ mod tests {
     #[test]
     fn the_extras_requests_have_the_shape_the_ui_sends() {
         use serde_json::json;
-        for name in [
-            "sleepBlockers",
-            "bootAnalysis",
-            "appUsage",
-            "gpuProcesses",
-            "softwareInventory",
-            "maintenance",
-            "backup",
-            "jobs",
-        ] {
+        for name in ["gpuProcesses", "maintenance", "backup", "jobs"] {
             assert!(parse_request(json!(name)).is_ok(), "{name}");
         }
         assert!(matches!(
