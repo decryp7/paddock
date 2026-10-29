@@ -32,20 +32,53 @@ runs:
         # kept at the stable path survives and only this commit is fetched into it, instead of a fresh clone and a checkout
         # of every file each job (a median 49 s of the Windows runner, 2026-10-29).
         incoming="$stable.incoming"
-        if ! why=$({ mkdir -p "$root" && cd "$root" && rm -rf "$incoming" && mv "$ws" "$incoming"; } 2>&1) ||
-          ! why=$({ rm -rf "$stable" && mv "$incoming" "$stable"; } 2>&1 || { mv "$incoming" "$ws" 2>/dev/null; false; }); then
+        moved=false
+        if why=$({ mkdir -p "$root" && cd "$root" && rm -rf "$incoming" && mv "$ws" "$incoming"; } 2>&1); then
+          if why=$({ rm -rf "$stable" && mv "$incoming" "$stable"; } 2>&1); then
+            moved=true
+          elif ! mv "$incoming" "$ws" 2>/dev/null; then
+            # The runner and every later step look for the checkout at the work folder, which is now empty.
+            echo "::error::stable-workspace: the checkout is at $incoming, not at $ws: it could not replace $stable (${why:-no message}) nor move back. Delete $stable and $incoming on this runner, then re-run the job."
+            exit 1
+          fi
+        fi
+        if [ "$moved" = false ]; then
           # Under act on Windows the runner keeps a handle on the work folder, so it cannot move. Keep a clone at the stable
-          # path instead and bring it to this commit (a local clone and fetch: hard links, no network), with every file
-          # that is not git's removed; ignored files (no build output lives there: the build folder is elsewhere) stay.
-          if why2=$({
-            sha=$(git -C "$ws" rev-parse HEAD) &&
-            if [ ! -d "$stable/.git" ]; then rm -rf "$stable" && git clone -q --no-checkout --no-tags "$ws" "$stable"; fi
-            # The checkout is shallow: --update-shallow lets the clone take a commit whose parents it does not have.
-            git -C "$stable" fetch -q --no-tags --update-shallow "$ws" HEAD &&
+          # path instead and bring it to this commit with a local fetch, then remove every file that is not git's, ignored
+          # ones too (an earlier job's dist/ that generate_context! would embed, binaries/, gen/; the build folder is elsewhere).
+          update() {
+            local sha alt objs had
+            sha=$(git -C "$ws" rev-parse HEAD) || return 1
+            if [ ! -d "$stable/.git" ]; then
+              rm -rf "$stable" && git clone -q --no-checkout --no-tags "$ws" "$stable" || return 1
+              # No automatic gc inside a job (it would rewrite ~360 MB at a random moment, in the background): bounded below.
+              git -C "$stable" config gc.auto 0 && git -C "$stable" config maintenance.auto false || return 1
+            fi
+            # The checkout is one commit deep and shares no commit with the clone, so a plain fetch resends the whole tree
+            # (366.8 -> 713.8 MiB per job, review of 2026-10-29). For this fetch the checkout borrows the clone's objects
+            # (an alternate) and the clone names its last commit (refs/paddock/kept): only what the new commit adds is sent.
+            alt="$ws/.git/objects/info/alternates"
+            objs="$stable/.git/objects"
+            if command -v cygpath >/dev/null; then objs=$(cygpath -m "$objs"); fi
+            had=false
+            if [ -f "$alt" ]; then had=true; cp "$alt" "$alt.paddock"; fi
+            mkdir -p "$(dirname "$alt")" && printf '%s\n' "$objs" >> "$alt" || return 1
+            # --update-shallow lets the clone take a commit whose parents it does not have.
+            local st=0
+            git -C "$stable" fetch -q --no-tags --update-shallow "$ws" HEAD || st=$?
+            if [ "$had" = true ]; then mv "$alt.paddock" "$alt"; else rm -f "$alt"; fi
+            [ "$st" = 0 ] &&
               [ "$(git -C "$stable" rev-parse FETCH_HEAD)" = "$sha" ] &&
               git -C "$stable" checkout -q -f --detach "$sha" &&
-              git -C "$stable" clean -q -ffd
-          } 2>&1); then
+              git -C "$stable" clean -q -ffdx &&
+              git -C "$stable" update-ref refs/paddock/kept "$sha" || return 1
+            # Bounded: each job adds a small pack; past 20 packs, one repack keeps only what the current commit needs.
+            if [ "$(ls "$stable/.git/objects/pack/"*.pack 2>/dev/null | wc -l)" -gt 20 ]; then
+              git -C "$stable" reflog expire --expire=now --all && git -C "$stable" repack -adq && git -C "$stable" prune --expire=now || return 1
+            fi
+          }
+          # A kept clone that cannot be brought up to date (a lock left by a killed job, a broken object) is replaced once.
+          if why2=$(update 2>&1) || why2=$({ rm -rf "$stable" && update; } 2>&1); then
             echo "stable-workspace: could not move the checkout (${why:-no message}); a clone at $stable is at $(git -C "$stable" rev-parse HEAD) instead."
             use "$stable"
           else

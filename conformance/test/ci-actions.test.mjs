@@ -553,6 +553,139 @@ test('stable-workspace keeps a clone at the stable path at the checkout\'s commi
   assert.ok(!existsSync(`${stable}.incoming`), 'no half-moved folder is left behind');
 });
 
+import { randomBytes } from 'node:crypto';
+
+// The Windows path as the runner sees it (review of ci/optimise-runs, 2026-10-29): every job gets a fresh depth-1 checkout in a
+// work folder that cannot move (act holds it), and the kept clone at the stable path is brought to that commit.
+function keptCloneFixture() {
+  const root = stableFixture();
+  const ws = join(root, 'work', 'abc', 'hostexecutor');
+  const origin = join(root, 'origin');
+  const env = { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), GIT_CONFIG_NOSYSTEM: '1' };
+  const git = (cwd, ...args) => {
+    const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'init.defaultBranch=main', '-c', 'protocol.file.allow=always', ...args], { cwd, encoding: 'utf8', env });
+    assert.equal(r.status, 0, `git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  mkdirSync(origin);
+  git(origin, 'init', '-q');
+  // 1 MiB that does not compress: a fetch that resends the tree shows up in the clone's size.
+  writeFileSync(join(origin, 'big.bin'), randomBytes(1 << 20));
+  writeFileSync(join(origin, '.gitignore'), 'dist/\n');
+  // More objects than fetch.unpackLimit (100), as in the real tree: a fetch is then kept as a pack, duplicates and all
+  // (below the limit git unpacks it and skips the objects it has, which would hide the growth).
+  mkdirSync(join(origin, 'src'));
+  for (let i = 0; i < 150; i += 1) writeFileSync(join(origin, 'src', `f${i}.rs`), randomBytes(64).toString('hex'));
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'mv'), '#!/bin/sh\necho "Device or resource busy" >&2\nexit 1\n', { mode: 0o755 });
+  let n = 0;
+  /** A new commit in origin and a fresh depth-1 checkout of it in the work folder, as actions/checkout leaves it. */
+  const checkout = () => {
+    n += 1;
+    // Two commits per job: the commit the clone has is never the parent of the new one (a direct parent hides the growth:
+    // git then counts the clone's shallow boundary as common), as on main between two jobs.
+    writeFileSync(join(origin, 'between.txt'), `${n}`);
+    git(origin, 'add', '-A');
+    git(origin, 'commit', '-qm', `between ${n}`);
+    writeFileSync(join(origin, 'Cargo.toml'), `v${n}`);
+    git(origin, 'add', '-A');
+    git(origin, 'commit', '-qm', `c${n}`);
+    // As actions/checkout does it: a new repository, the one commit fetched at depth 1, a detached checkout.
+    const sha = git(origin, 'rev-parse', 'HEAD');
+    spawnSync('rm', ['-rf', ws]);
+    mkdirSync(ws, { recursive: true });
+    git(ws, 'init', '-q');
+    git(ws, 'fetch', '-q', '--depth=1', `file://${origin}`, sha);
+    git(ws, 'checkout', '-q', sha);
+    return sha;
+  };
+  const stable = join(root, 'home', '.paddock-ci', 'src', 'decryp7_paddock-crate');
+  // No automatic gc in the clone during the test: on the runner it hides the growth only until it runs inside a job.
+  const run = (over = {}) => runStableWorkspace('macOS', root, { PATH: `${bin}:/usr/bin:/bin`, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'gc.auto', GIT_CONFIG_VALUE_0: '0', ...over });
+  /** KiB of objects in a repository (loose and packed). */
+  const kib = (repo) => {
+    const v = Object.fromEntries(git(repo, 'count-objects', '-v').split('\n').map((l) => l.split(': ')));
+    return Number(v.size) + Number(v['size-pack']);
+  };
+  return { root, ws, stable, bin, git, checkout, run, kib };
+}
+
+test('stable-workspace: the kept clone takes only what a new commit adds, so it does not grow by the whole tree each job', () => {
+  const f = keptCloneFixture();
+  f.checkout();
+  assert.equal(f.run().status, 0);
+  const tree = Number(f.git(f.stable, 'count-objects', '-v').match(/in-pack: (\d+)/)[1]);
+  assert.ok(tree > 150, `the fixture tree has more objects than fetch.unpackLimit (${tree})`);
+  let sha = '';
+  for (let i = 0; i < 5; i += 1) {
+    sha = f.checkout();
+    // What the fetch from the work folder sends: pack-objects reports the objects it wrote (trace2). Without the clone's
+    // objects in view the work folder (one commit deep) sends the whole tree every job: 366.8 -> 713.8 MiB on the real
+    // repository with git 2.56 until a gc runs inside some job (git 2.54 deduplicates on receipt, but still sends it all).
+    const trace = join(f.root, `trace-${i}.json`);
+    const r = f.run({ GIT_TRACE2_EVENT: trace });
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    const wrote = [...readFileSync(trace, 'utf8').matchAll(/"key":"write_pack_file\/wrote","value":"(\d+)"/g)].map((m) => Number(m[1]));
+    assert.ok(wrote.length > 0, 'the fetch was traced');
+    assert.ok(Math.max(...wrote) < 20, `job ${i + 2}: the fetch sends what the new commit adds, not the tree of ${tree} objects (sent ${wrote})`);
+  }
+  assert.equal(f.git(f.stable, 'rev-parse', 'HEAD'), sha);
+  assert.equal(readFileSync(join(f.stable, 'Cargo.toml'), 'utf8'), 'v6');
+  assert.ok(!existsSync(join(f.ws, '.git', 'objects', 'info', 'alternates')), 'the checkout does not keep borrowing the clone\'s objects');
+});
+
+test('stable-workspace: ignored files of an earlier job (an embedded dist/, binaries) are gone from the kept clone', () => {
+  const f = keptCloneFixture();
+  f.checkout();
+  assert.equal(f.run().status, 0);
+  mkdirSync(join(f.stable, 'dist'));
+  writeFileSync(join(f.stable, 'dist', 'index.html'), 'from another branch');
+  f.checkout();
+  assert.equal(f.run().status, 0);
+  assert.ok(!existsSync(join(f.stable, 'dist')), 'generate_context! must never embed an earlier job\'s dist/');
+});
+
+test('stable-workspace: a lock left in the kept clone by a killed job does not break it for good: a fresh clone is made', () => {
+  const f = keptCloneFixture();
+  f.checkout();
+  assert.equal(f.run().status, 0);
+  writeFileSync(join(f.stable, '.git', 'index.lock'), '');
+  const sha = f.checkout();
+  const r = f.run();
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(f.git(f.stable, 'rev-parse', 'HEAD'), sha);
+  assert.equal(readFileSync(join(f.stable, 'Cargo.toml'), 'utf8'), 'v2');
+  assert.match(readFileSync(join(f.root, 'github-env'), 'utf8'), new RegExp(`^PADDOCK_WORKSPACE=${f.stable}$`, 'm'), 'later steps build from the stable folder');
+});
+
+test('stable-workspace: a checkout that moved aside but can neither replace the stable folder nor move back fails the job with what to do', () => {
+  const root = stableFixture();
+  const ws = join(root, 'work', 'abc', 'hostexecutor');
+  const stable = join(root, 'home', '.paddock-ci', 'src', 'decryp7_paddock-crate');
+  mkdirSync(stable, { recursive: true });
+  writeFileSync(join(stable, 'Cargo.toml'), 'old');
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  // `rm -rf <stable>` fails (a file held open); the first `mv` (checkout aside) works, later ones fail.
+  writeFileSync(join(bin, 'rm'), `#!/bin/sh\nfor a in "$@"; do [ "$a" = "${stable}" ] && { echo "Permission denied" >&2; exit 1; }; done\nexec /bin/rm "$@"\n`, { mode: 0o755 });
+  writeFileSync(join(bin, 'mv'), `#!/bin/sh\nif [ ! -f "${root}/mv-once" ]; then : > "${root}/mv-once"; exec /bin/mv "$@"; fi\necho "Device or resource busy" >&2\nexit 1\n`, { mode: 0o755 });
+  const r = runStableWorkspace('macOS', root, { PATH: `${bin}:/usr/bin:/bin` });
+  assert.notEqual(r.status, 0, 'a job whose checkout is not where the runner looks must not go on');
+  assert.match(r.stdout, /::error::stable-workspace: .*\.incoming/, 'it says where the checkout is');
+  // When the move back works, the job goes on in its own folder.
+  const again = stableFixture();
+  const stable2 = join(again, 'home', '.paddock-ci', 'src', 'decryp7_paddock-crate');
+  mkdirSync(stable2, { recursive: true });
+  const bin2 = join(again, 'bin');
+  mkdirSync(bin2);
+  writeFileSync(join(bin2, 'rm'), `#!/bin/sh\nfor a in "$@"; do [ "$a" = "${stable2}" ] && exit 1; done\nexec /bin/rm "$@"\n`, { mode: 0o755 });
+  const ok = runStableWorkspace('macOS', again, { PATH: `${bin2}:/usr/bin:/bin` });
+  assert.equal(ok.status, 0, ok.stderr + ok.stdout);
+  assert.equal(readFileSync(join(again, 'work', 'abc', 'hostexecutor', 'Cargo.toml'), 'utf8'), 'x', 'the checkout is back where the runner looks');
+  assert.ok(!existsSync(`${stable2}.incoming`));
+});
+
 test('stable-workspace leaves Linux containers alone and never fails a job it cannot help', () => {
   const root = stableFixture();
   assert.equal(runStableWorkspace('Linux', root).status, 0);
