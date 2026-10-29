@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1152 984" width="1152" height="984" role="img" aria-labelledby="d1t d1d">
+  <title id="d1t">Write architectures compared</title>
+  <desc id="d1d">Three ways to write events. A, single writer: 8 parse threads queue on a channel into one Appender that writes events.duckdb; 1 Appender 200k events/s, 4 Appenders 355k in the Quack harness, a 2nd 1.0x on the writer bench (indicative). B, fan-out (Debrief today): each parse thread has its own Parquet writer and segment file; catalog.duckdb holds the segment list and a view that reads them; 8 writers 4.38M events/s in the Quack harness. C, server mode: 4 client processes send rows over a socket to a DuckDB Quack server process; 1 client 115k events/s, 4 clients 416k using 4.6 GB at a 1 GB limit, out of memory in 2 of 3 rounds at 192 MB.</desc>
+  <style>
+    /* diagrams/STYLE.md tokens, Debrief roles. Light by default, dark under prefers-color-scheme. */
+    .bg { fill: #ffffff; }
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 12px; fill: #14171C; }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace; }
+    .muted { fill: #565E6B; }
+    .title { font-size: 24px; font-weight: 600; }
+    .kind { font-size: 14px; }
+    .name { font-size: 14px; font-weight: 600; }
+    .glabel { font-weight: 600; fill: #565E6B; }
+    .foot { font-size: 12px; fill: #565E6B; }
+    .group { fill: #F8F9FA; stroke: #C4C7CD; stroke-width: 1; }
+    .group-ext { fill: #F8F9FA; stroke: #6B7380; stroke-width: 1; stroke-dasharray: 6 4; }
+    .n-own { fill: #E8EFFA; stroke: #1D5FD1; stroke-width: 1.5; }
+    .n-proc { fill: #F0F2F5; stroke: #565E6B; stroke-width: 1.5; }
+    .n-ext { fill: #F4F5F7; stroke: #6B7380; stroke-width: 1.5; stroke-dasharray: 6 4; }
+    .legend { fill: none; stroke: #C4C7CD; stroke-width: 1; }
+    .edge { stroke: #565E6B; stroke-width: 1.5; fill: none; }
+    .dash { stroke-dasharray: 6 4; }
+    .head { fill: #565E6B; }
+    .ohead { fill: none; stroke: #565E6B; stroke-width: 1.5; }
+    .t-own { fill: #1D5FD1; }
+    .b-own { fill: #1D5FD1; }
+    .b-cap { fill: #1D5FD1; fill-opacity: 0.35; stroke: #1D5FD1; stroke-width: 1.5; }
+    .b-proc { fill: #565E6B; }
+    .b-ext { fill: #6B7380; }
+    .grid { stroke: #C4C7CD; stroke-width: 1; }
+    .halo { paint-order: stroke; stroke: #ffffff; stroke-width: 4px; stroke-linejoin: round; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #15171B; }
+      text { fill: #ECEEF1; }
+      .muted, .glabel, .foot { fill: #A0A7B2; }
+      .group { fill: #121418; stroke: #353A42; }
+      .group-ext { fill: #121418; stroke: #7F8794; }
+      .n-own { fill: #202C3F; stroke: #5B9BFF; }
+      .n-proc { fill: #1B1E23; stroke: #A0A7B2; }
+      .n-ext { fill: #17191E; stroke: #7F8794; }
+      .legend { stroke: #353A42; }
+      .edge { stroke: #A0A7B2; }
+      .head { fill: #A0A7B2; }
+      .ohead { stroke: #A0A7B2; }
+      .t-own, .b-own, .b-cap { fill: #5B9BFF; }
+      .b-cap { stroke: #5B9BFF; }
+      .b-proc { fill: #A0A7B2; }
+      .b-ext { fill: #7F8794; }
+      .grid { stroke: #353A42; }
+      .halo { stroke: #15171B; }
+    }
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="head"/></marker>
+    <marker id="oh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M1,1 L9,5 L1,9" class="ohead"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="1152" height="984"/>
+    <text x="48" y="64" class="title">Write architectures compared</text>
+    <text x="48" y="88" class="kind muted">Flow · Debrief storage engine, import write path</text>
+    <text x="48" y="108" class="muted">The same 8 parse threads feed each design; the difference is where they wait. Numbers: Quack harness, same batches, Mac mini, 2026-10-28.</text>
+    <rect x="48" y="136" width="1056" height="144" rx="10" class="group"/>
+    <text x="72" y="160" class="glabel">A · Single writer into a native table</text>
+    <text x="72" y="178" class="muted">INSERT or the Appender; Debrief's import before R2b (2026-10-20)</text>
+    <rect x="72" y="200" width="144" height="56" rx="6" class="n-proc"/>
+    <text x="144.0" y="225" class="name" text-anchor="middle">Parse threads</text>
+    <text x="144.0" y="241" class="muted" text-anchor="middle">[8 threads]</text>
+    <rect x="256" y="200" width="144" height="56" rx="6" class="n-proc"/>
+    <text x="328.0" y="225" class="name" text-anchor="middle">Channel</text>
+    <text x="328.0" y="241" class="muted" text-anchor="middle">threads wait here</text>
+    <rect x="440" y="200" width="160" height="56" rx="6" class="n-proc"/>
+    <text x="520.0" y="225" class="name" text-anchor="middle">1 Appender</text>
+    <text x="520.0" y="241" class="muted" text-anchor="middle">long-lived, large batches</text>
+    <rect x="640" y="200" width="160" height="56" rx="6" class="n-proc"/>
+    <text x="720.0" y="225" class="name mono" text-anchor="middle">events.duckdb</text>
+    <text x="720.0" y="241" class="muted" text-anchor="middle">compressed as written</text>
+    <path d="M216,228 L254,228" class="edge" marker-end="url(#ah)"/>
+    <path d="M400,228 L438,228" class="edge" marker-end="url(#ah)"/>
+    <path d="M600,228 L638,228" class="edge" marker-end="url(#ah)"/>
+    <text x="832" y="212" class="name">200k ev/s, 1 Appender</text>
+    <text x="832" y="230" class="muted">4 Appenders: 1.8× at about 2× memory</text>
+    <text x="832" y="246" class="muted">2 Appenders: 1.0× on the writer bench</text>
+    <text x="832" y="262" class="muted">(indicative, unrecorded)</text>
+    <rect x="48" y="336" width="1056" height="328" rx="10" class="group"/>
+    <text x="72" y="360" class="glabel">B · Fan-out: one Parquet file per thread, a view over them</text>
+    <text x="72" y="378" class="muted">Debrief's import today (ADR 0014)</text>
+    <rect x="72" y="400" width="144" height="56" rx="6" class="n-proc"/>
+    <text x="144.0" y="425" class="name" text-anchor="middle">Parse thread</text>
+    <text x="144.0" y="441" class="muted" text-anchor="middle">[1 of 8]</text>
+    <rect x="256" y="400" width="144" height="56" rx="6" class="n-own"/>
+    <text x="328.0" y="425" class="name" text-anchor="middle">Parquet writer</text>
+    <text x="328.0" y="441" class="muted" text-anchor="middle">[ArrowWriter, zstd]</text>
+    <rect x="440" y="400" width="160" height="56" rx="6" class="n-proc"/>
+    <text x="520.0" y="425" class="name" text-anchor="middle">Segment file</text>
+    <text x="520.0" y="441" class="mono muted" text-anchor="middle">seg-*.parquet</text>
+    <path d="M216,428 L254,428" class="edge" marker-end="url(#ah)"/>
+    <path d="M400,428 L438,428" class="edge" marker-end="url(#ah)"/>
+    <rect x="72" y="480" width="144" height="56" rx="6" class="n-proc"/>
+    <text x="144.0" y="505" class="name" text-anchor="middle">Parse thread</text>
+    <text x="144.0" y="521" class="muted" text-anchor="middle">[2 of 8]</text>
+    <rect x="256" y="480" width="144" height="56" rx="6" class="n-own"/>
+    <text x="328.0" y="505" class="name" text-anchor="middle">Parquet writer</text>
+    <text x="328.0" y="521" class="muted" text-anchor="middle">[ArrowWriter, zstd]</text>
+    <rect x="440" y="480" width="160" height="56" rx="6" class="n-proc"/>
+    <text x="520.0" y="505" class="name" text-anchor="middle">Segment file</text>
+    <text x="520.0" y="521" class="mono muted" text-anchor="middle">seg-*.parquet</text>
+    <path d="M216,508 L254,508" class="edge" marker-end="url(#ah)"/>
+    <path d="M400,508 L438,508" class="edge" marker-end="url(#ah)"/>
+    <rect x="72" y="560" width="144" height="56" rx="6" class="n-proc"/>
+    <text x="144.0" y="585" class="name" text-anchor="middle">Parse thread</text>
+    <text x="144.0" y="601" class="muted" text-anchor="middle">[8 of 8]</text>
+    <rect x="256" y="560" width="144" height="56" rx="6" class="n-own"/>
+    <text x="328.0" y="585" class="name" text-anchor="middle">Parquet writer</text>
+    <text x="328.0" y="601" class="muted" text-anchor="middle">[ArrowWriter, zstd]</text>
+    <rect x="440" y="560" width="160" height="56" rx="6" class="n-proc"/>
+    <text x="520.0" y="585" class="name" text-anchor="middle">Segment file</text>
+    <text x="520.0" y="601" class="mono muted" text-anchor="middle">seg-*.parquet</text>
+    <path d="M216,588 L254,588" class="edge" marker-end="url(#ah)"/>
+    <path d="M400,588 L438,588" class="edge" marker-end="url(#ah)"/>
+    <rect x="640" y="456" width="160" height="104" rx="6" class="n-own"/>
+    <text x="720.0" y="489" class="name mono" text-anchor="middle">catalog.duckdb</text>
+    <text x="720.0" y="505" class="muted" text-anchor="middle">segment list +</text>
+    <text x="720.0" y="521" class="mono muted" text-anchor="middle">VIEW events AS</text>
+    <text x="720.0" y="537" class="mono muted" text-anchor="middle">read_parquet([...])</text>
+    <path d="M640,480 L620,480 L620,428 L602,428" class="edge dash" marker-end="url(#oh)"/>
+    <path d="M640,508 L602,508" class="edge dash" marker-end="url(#oh)"/>
+    <path d="M640,536 L620,536 L620,588 L602,588" class="edge dash" marker-end="url(#oh)"/>
+    <text x="144.0" y="553" class="muted" text-anchor="middle">…</text>
+    <text x="328.0" y="553" class="muted" text-anchor="middle">…</text>
+    <text x="520.0" y="553" class="muted" text-anchor="middle">…</text>
+    <text x="336" y="640" class="muted" text-anchor="middle">written by the parquet crate, not DuckDB; temp name, then rename</text>
+    <text x="832" y="470" class="name t-own">4.38M ev/s, 8 writers</text>
+    <text x="832" y="488" class="muted">12 writers: 4.41M (no gain)</text>
+    <text x="832" y="504" class="muted">R2b, Windows VM: 1 → 8 writers ≈ 4×</text>
+    <text x="832" y="520" class="muted">no shared lock while writing</text>
+    <rect x="48" y="720" width="1056" height="144" rx="10" class="group-ext"/>
+    <text x="72" y="744" class="glabel">C · Server mode: clients send rows over the Quack protocol</text>
+    <text x="72" y="762" class="muted">Evaluated 2026-10-28; not adopted (ADR 0010, “do not migrate”)</text>
+    <rect x="72" y="784" width="144" height="56" rx="6" class="n-proc"/>
+    <text x="144.0" y="809" class="name" text-anchor="middle">Clients</text>
+    <text x="144.0" y="825" class="muted" text-anchor="middle">[4 processes]</text>
+    <rect x="256" y="784" width="144" height="56" rx="6" class="n-ext"/>
+    <text x="328.0" y="809" class="name" text-anchor="middle">Socket</text>
+    <text x="328.0" y="825" class="muted" text-anchor="middle">encode, copy, decode</text>
+    <rect x="440" y="784" width="160" height="56" rx="6" class="n-ext"/>
+    <text x="520.0" y="809" class="name" text-anchor="middle">Quack server</text>
+    <text x="520.0" y="825" class="muted" text-anchor="middle">buffers rows per client</text>
+    <rect x="640" y="784" width="160" height="56" rx="6" class="n-proc"/>
+    <text x="720.0" y="809" class="name mono" text-anchor="middle">events.duckdb</text>
+    <text x="720.0" y="825" class="muted" text-anchor="middle">server's database</text>
+    <path d="M216,812 L254,812" class="edge" marker-end="url(#ah)"/>
+    <path d="M400,812 L438,812" class="edge" marker-end="url(#ah)"/>
+    <path d="M600,812 L638,812" class="edge" marker-end="url(#ah)"/>
+    <text x="832" y="796" class="name">115k ev/s, 1 client (Quack harness)</text>
+    <text x="832" y="814" class="muted">4 clients: 416k, 4.6 GB at a 1 GB limit</text>
+    <text x="832" y="830" class="muted">192 MB: out of memory in 2 of 3 rounds</text>
+    <rect x="48" y="896" width="744" height="40" rx="14" class="legend"/>
+    <rect x="64" y="908" width="24" height="16" rx="4" class="n-own"/>
+    <text x="96" y="920">Debrief's design</text>
+    <rect x="208" y="908" width="24" height="16" rx="4" class="n-proc"/>
+    <text x="240" y="920">process, data</text>
+    <rect x="344" y="908" width="24" height="16" rx="4" class="n-ext"/>
+    <text x="376" y="920">external (DuckDB server)</text>
+    <path d="M528,916 L568,916" class="edge" marker-end="url(#ah)"/>
+    <text x="576" y="920">rows</text>
+    <path d="M632,916 L672,916" class="edge dash" marker-end="url(#oh)"/>
+    <text x="680" y="920">view reads</text>
+    <text x="1104" y="920" class="foot" text-anchor="end">Debrief · updated 2026-10-29</text>
+</svg>

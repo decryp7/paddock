@@ -6,6 +6,7 @@
 use dyno_agent::cli::{ask, connect};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
+use dyno_core::issues::stats::day_start;
 use dyno_core::issues::{Issue, IssueKind, IssueSource, IssueSourceId, IssuesQuery, SourceState};
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{LiveDetail, Message, Reply, Request};
@@ -108,6 +109,20 @@ fn crash(minutes_ago: i64, app: &str, key: &str) -> Issue {
     )
 }
 
+/// A crash early on the current local day (the agent's default offset is 0): the day's score counts it however close to
+/// midnight the test runs, which "N minutes ago" does not.
+fn crash_today(order: i64, app: &str, key: &str) -> Issue {
+    Issue::new(
+        IssueSourceId::MacReports,
+        day_start(real_now(), 0).plus(order),
+        IssueKind::AppCrash,
+        app,
+        "t",
+        "evidence text",
+        key,
+    )
+}
+
 fn overview(peer: &Peer<Message>, rescan: bool) -> dyno_core::issues::IssuesOverview {
     let query = IssuesQuery { days: 14 };
     let req = if rescan {
@@ -125,7 +140,11 @@ fn overview(peer: &Peer<Message>, rescan: bool) -> dyno_core::issues::IssuesOver
 fn a_rescan_stores_issues_once_scores_the_day_and_says_which_source_is_unavailable() {
     let good = Scripted::new(
         IssueSourceId::MacReports,
-        Ok(vec![crash(30, "Mail", "a"), crash(200, "Mail", "b"), crash(300, "Notes", "c")]),
+        Ok(vec![
+            crash_today(1, "Mail", "a"),
+            crash_today(2, "Mail", "b"),
+            crash_today(3, "Notes", "c"),
+        ]),
     );
     let bad = Scripted::new(
         IssueSourceId::MacLog,

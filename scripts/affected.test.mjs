@@ -57,6 +57,13 @@ describe('the graph of this tree', () => {
     assert.deepEqual(r.packages['apps/shell-demo/src-tauri'], ['paddock-shell-demo', 'shell-demo-agent']);
   });
 
+  test('the e2e port and build guard (imported by relative path by every app config) mark the UI half of every app', () => {
+    for (const f of ['ui/projects/paddock-e2e/src/env.ts', 'ui/projects/paddock-e2e/src/build-guard.ts']) {
+      const r = run(f);
+      for (const a of APPS) assert.ok(r.apps.includes(a), `${f} reaches ${a}`);
+    }
+  });
+
   // Paddock 234f6911: a ui/ shell change broke the shell demo job, which has no npm or Cargo edge to ui/ (spike §2).
   test('a ui change marks the Tauri shells that embed a ui build (frontendDist), both halves', () => {
     const r = run('ui/projects/paddock-ui/shell/src/public-api.ts');
