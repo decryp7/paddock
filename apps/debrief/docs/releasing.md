@@ -22,6 +22,20 @@ always run; fuzzing runs every night (each run explores new inputs).
 The version in the tag must match `app/src-tauri/tauri.conf.json` / `Cargo.toml` (it is what Debrief compares
 against). Pre-releases are not offered to users: updaters read `latest.json` of the *latest* release.
 
+## Before tagging: one CI build with bundles on the commit to be tagged (rule 25)
+
+A push to `main` runs Debrief's checks only; the installers, the real-app smoke tests on three OS and the end-to-end
+tests in WebKit run on tags, the nightly and a manual run with `bundles: true` (main lands in batches, 2026-10-29). So
+before tagging, start `debrief.yml` by hand (*Run workflow*, `workflow_dispatch`) with **`bundles: true` on the exact
+commit you will tag**, and tag only after that run is green. A green nightly or a manual run on another commit does not
+count: the tag must point at the commit whose installers were built and smoke-tested. Then tag it with the app's tag
+(`debrief-vX.Y.Z`, never a `[skip ci]` commit) and push the tag; the tag run builds and publishes the release.
+
+```sh
+sha=$(git rev-parse HEAD)        # the commit to tag; dispatch debrief.yml with bundles: true on it and wait for green
+git tag debrief-v1.2.0 "$sha" && git push origin debrief-v1.2.0
+```
+
 ## What an installer contains
 
 Besides the app, every installer ships the helper processes Debrief starts (built by `node app/scripts/build-sidecars.mjs`,

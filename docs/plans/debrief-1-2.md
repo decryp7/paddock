@@ -274,7 +274,9 @@ All of it runs once on the combined result before the local build and the tag (r
    SmartScreen steps stay.
 5. **DuckDB 2.0** in (D-a, D-b) with the storage compatibility pin; release notes list the SQL console's changed
    semantics (`~`, `!`, `X''`, division by zero, NULL type, lambdas). 2.0.1, when it ships, is a 1.2.x patch.
-6. `cargo deny check advisories`; one CI build with bundles; the icon check; signing secrets stripped (rule 25).
+6. `cargo deny check advisories`; one CI build with bundles: dispatch `debrief.yml` with `bundles: true` on the exact
+   commit to be tagged and wait for it to be green (a push to main no longer builds installers; a nightly or a run on
+   another commit does not count, `apps/debrief/docs/releasing.md`); the icon check; signing secrets stripped (rule 25).
 7. Full suite once (section 3) on the commit to be tagged; that commit is not `[skip ci]`; tag `debrief-v1.2.0`; the
    release is built only by the tag workflow (rule 9); `debrief-latest` moves.
 8. Verify the published artefacts: `codesign --verify --deep --strict` on the published DMG; a fresh install of 1.2.0
