@@ -42,7 +42,7 @@ describe('App', () => {
 
   afterEach(() => {
     window.location.hash = '';
-    document.documentElement.classList.remove('mac', 'translucent');
+    document.documentElement.classList.remove('mac');
   });
 
   it('renders the window layout: titlebar, sidebar, main and the skip link', async () => {
@@ -113,11 +113,11 @@ describe('App', () => {
     expect(nav.stopped).toBe(true);
   });
 
-  it('marks the platform: translucent by query, mac by user agent', async () => {
+  it('marks the platform by user agent and keeps the window opaque, even when asked for ?translucent', async () => {
     window.history.replaceState(null, '', '/?translucent');
     try {
       create();
-      expect(document.documentElement.classList.contains('translucent')).toBe(true);
+      expect(document.documentElement.classList.contains('translucent')).toBe(false);
       expect(document.documentElement.classList.contains('mac')).toBe(/Mac OS X|Macintosh/.test(navigator.userAgent) && !/iPhone|iPad/.test(navigator.userAgent));
     } finally {
       window.history.replaceState(null, '', '/');

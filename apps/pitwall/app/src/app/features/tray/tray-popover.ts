@@ -104,7 +104,7 @@ import { UpdatesStore } from '../updates/updates.store';
       gap: var(--pd-space-2);
       height: 100%;
       padding: var(--pd-space-3) var(--pd-space-4) var(--pd-space-4);
-      background: var(--pw-content-bg);
+      background: var(--pd-bg);
       overflow: hidden;
     }
     .pairing {

@@ -2,7 +2,6 @@ import { ChangeDetectionStrategy, Component, DOCUMENT, DestroyRef, effect, injec
 import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
-import { isTauri } from './core/backend';
 import { JobsPanel } from './features/jobs/jobs-panel';
 import { QuitPrompt } from './features/quit/quit-prompt';
 import { ServiceNotices } from './features/service/service-notices';
@@ -58,7 +57,7 @@ import { ToastHost } from './shared/ui/toast-host';
     main {
       height: 100%;
       overflow: auto;
-      background: var(--pw-content-bg);
+      background: var(--pd-bg);
       border-left: 1px solid var(--pd-hairline);
       outline: none;
       scrollbar-gutter: stable;
@@ -96,9 +95,7 @@ export class App {
   constructor() {
     const theme = inject(ThemeService);
     const nav = this.doc.defaultView?.navigator;
-    const params = new URLSearchParams(this.doc.location?.search ?? '');
-    // In the app the window has Mica (Windows) or vibrancy (macOS) behind it; `?translucent` previews it in a browser.
-    theme.applyPlatform({ mac: isMac(nav?.userAgent ?? ''), translucent: isTauri() || params.has('translucent') });
+    theme.applyPlatform({ mac: isMac(nav?.userAgent ?? '') });
     void this.live.load();
     this.live.connect();
     // The service question belongs to the main window only, and never delays the first paint: it starts in the background.

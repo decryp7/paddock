@@ -16,7 +16,7 @@ function readStored(): ThemeChoice {
 /**
  * The colour theme: the user's choice (Settings ▸ General, remembered locally so start-up doesn't flash) resolved
  * against the system preference, applied as `[data-theme]` on <html>. Also sets the platform classes the window
- * chrome needs (`mac`, `translucent`).
+ * chrome needs (`mac`).
  */
 @Injectable({ providedIn: 'root' })
 export class ThemeService {
@@ -50,11 +50,10 @@ export class ThemeService {
     this.choice.set(choice);
   }
 
-  /** Window chrome classes: `mac` reserves the title region, `translucent` lets Mica / vibrancy show through. */
-  applyPlatform(opts: { mac: boolean; translucent: boolean }): void {
+  /** Window chrome class: `mac` reserves the title region for the traffic lights. The window is opaque (no OS material). */
+  applyPlatform(opts: { mac: boolean }): void {
     const cl = this.doc.documentElement.classList;
     cl.toggle('mac', opts.mac);
-    cl.toggle('translucent', opts.translucent);
   }
 }
 

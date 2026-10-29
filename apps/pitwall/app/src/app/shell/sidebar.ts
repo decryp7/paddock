@@ -107,7 +107,7 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
       flex-direction: column;
       height: 100%;
       padding: calc(var(--pw-titlebar-h) + var(--pd-space-3)) var(--pd-space-2) var(--pd-space-3);
-      background: var(--pw-sidebar-bg);
+      background: var(--pd-bg);
       overflow: hidden;
       user-select: none;
     }
