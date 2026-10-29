@@ -3,11 +3,12 @@
 // folder and the DHCP leases are invented.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { efiBootImages, patchNoPrompt } from './vm-win/noprompt-iso.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(join(here, p), 'utf8');
@@ -155,5 +156,71 @@ describe('ip', () => {
     const r = run('vm-win.sh', ['ip'], env(lease('192.0.2.11', '00:0c:29:aa:bb:cc')));
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /no DHCP lease/);
+  });
+});
+
+describe('noprompt-iso', () => {
+  const S = 2048;
+  const prompt = Buffer.alloc(3 * S, 0x11);
+  const noprompt = Buffer.alloc(3 * S, 0x22);
+  // A synthetic bootable image: El Torito record at sector 17, catalog at 19, the EFI image at 24, a UDF-like marker at 30.
+  const image = ({ defaultPlatform = 0xef, efiSection = false, boot = prompt } = {}) => {
+    const b = Buffer.alloc(40 * S);
+    const brvd = b.subarray(17 * S);
+    brvd[0] = 0;
+    brvd.write('CD001', 1, 'latin1');
+    brvd[6] = 1;
+    brvd.write('EL TORITO SPECIFICATION', 7, 'latin1');
+    brvd.writeUInt32LE(19, 0x47);
+    const cat = b.subarray(19 * S);
+    cat[0] = 1;
+    cat[1] = defaultPlatform;
+    cat[30] = 0x55;
+    cat[31] = 0xaa;
+    cat[32] = 0x88;
+    cat.writeUInt32LE(efiSection ? 22 : 24, 32 + 8); // a BIOS image at 22 when EFI is in a section
+    if (efiSection) {
+      cat[64] = 0x91;
+      cat[65] = 0xef;
+      cat.writeUInt16LE(1, 66);
+      cat[96] = 0x88;
+      cat.writeUInt32LE(24, 96 + 8);
+    }
+    boot.copy(b, 24 * S);
+    b.write('UDF-TREE', 30 * S, 'latin1');
+    return b;
+  };
+  const withFile = (buf, fn) => {
+    const f = join(scratch, `iso-${Math.random().toString(36).slice(2)}.iso`);
+    writeFileSync(f, buf);
+    const fd = openSync(f, 'r+');
+    try {
+      return { result: fn(fd), after: readFileSync(f) };
+    } finally {
+      closeSync(fd);
+    }
+  };
+
+  test('finds the EFI image as the default entry (Arm64 media) or in an EFI section (x64 media)', () => {
+    for (const opts of [{}, { defaultPlatform: 0, efiSection: true }]) {
+      const b = image(opts);
+      assert.deepEqual(efiBootImages((o, l) => b.subarray(o, o + l)), [24]);
+    }
+  });
+
+  test('replaces only the boot image bytes, then reports already on a second run', () => {
+    const before = image();
+    const { result, after } = withFile(before, (fd) => patchNoPrompt(fd, prompt, noprompt));
+    assert.equal(result, 'patched');
+    assert.ok(after.subarray(24 * S, 27 * S).equals(noprompt));
+    assert.ok(after.subarray(0, 24 * S).equals(before.subarray(0, 24 * S)));
+    assert.ok(after.subarray(27 * S).equals(before.subarray(27 * S)));
+    assert.equal(withFile(after, (fd) => patchNoPrompt(fd, prompt, noprompt)).result, 'already');
+  });
+
+  test('refuses an unknown boot image, different sizes, and a disc that is not bootable', () => {
+    assert.throws(() => withFile(image({ boot: Buffer.alloc(3 * S, 0x33) }), (fd) => patchNoPrompt(fd, prompt, noprompt)), /neither efisys/);
+    assert.throws(() => withFile(image(), (fd) => patchNoPrompt(fd, prompt, Buffer.alloc(S))), /differ in size/);
+    assert.throws(() => withFile(Buffer.alloc(40 * S), (fd) => patchNoPrompt(fd, prompt, noprompt)), /not a bootable ISO/);
   });
 });

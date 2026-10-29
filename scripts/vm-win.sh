@@ -8,8 +8,8 @@
 #   scripts/vm-win.sh snapshot <name>         take a snapshot
 #   scripts/vm-win.sh revert [name]           revert to a snapshot (default clean-baseline); the VM is then off
 #   scripts/vm-win.sh status | ip             running or stopped / the guest's address
-#   scripts/vm-win.sh install                 one-time: boot the installer in Fusion's window, wait for setup to power off
-#   scripts/vm-win.sh baseline                one-time: detach the install discs, take the clean-baseline snapshot
+#   scripts/vm-win.sh install                 one-time: install Windows headless, wait for setup to power off
+#   scripts/vm-win.sh baseline                one-time: check setup finished, detach the discs, take clean-baseline
 #
 # Only ever acts on the VM under PADDOCK_WIN_VM_DIR (default /Volumes/d7sst7/vms/paddock-win11-test); any other VM on
 # this Mac is never started, stopped or changed. Only if the VM is encrypted (option A, virtual TPM) is its password read
@@ -144,31 +144,37 @@ case $cmd in
   install)
     guard
     win_iso=$(sed -n 's/^sata0:0.fileName = "\(.*\)"$/\1/p' "$vmx")
-    [ -z "$win_iso" ] || [ -f "$win_iso" ] || die "Windows ISO missing at $win_iso (docs/testing/windows-test-vm.md, step 1)"
+    [ -z "$win_iso" ] || [ -f "$win_iso" ] || die "Windows ISO missing at $win_iso; run scripts/vm-win/prepare.sh (docs/testing/windows-test-vm.md)"
     [ -f "$dir/iso/paddock-setup.iso" ] || die "setup disc missing; run scripts/vm-win/prepare.sh"
     has_snapshot "$baseline" && die "the VM already has $baseline; revert to it instead of reinstalling"
     running && die "the VM is running; stop it first"
+    for dev in sata0:0 sata0:1; do "$lib/vmcli" "$vmx" ConfigParams SetEntry "$dev.present" TRUE >/dev/null; done
     load_ok
-    echo "Starting the installer in a Fusion window. Click into it and press a key at \"Press any key to boot from CD\"."
-    echo "Setup is unattended from there; the VM powers off when it is done (about 20 to 40 minutes)."
-    vmrun start gui
-    wait_off "$install_deadline" "installing Windows" || die "setup did not finish within ${install_deadline}s; look at the Fusion window"
-    echo "setup finished and the VM is off; next: scripts/vm-win.sh baseline"
+    echo "Installing Windows headless from the no-prompt ISO (no window, no key to press); the VM powers off when done."
+    started=$SECONDS
+    vmrun start nogui
+    wait_off "$install_deadline" "installing Windows" || die "setup did not finish within ${install_deadline}s; see $(dirname "$vmx")/vmware.log"
+    took=$(((SECONDS - started) / 60))
+    # Setup takes far longer than this; an earlier stop is a crash or a boot failure, never a finished install.
+    [ $took -ge "${PADDOCK_VM_MIN_INSTALL_MIN:-10}" ] || die "the VM stopped after $took min, too early for a finished setup; see $(dirname "$vmx")/vmware.log"
+    echo "the VM powered off after $took min; next: scripts/vm-win.sh baseline (it checks that setup finished)"
     ;;
   baseline)
     guard
     running && die "the VM is running; baseline is taken from a powered-off VM"
     has_snapshot "$baseline" && die "$baseline already exists"
-    for dev in sata0:0 sata0:1; do "$lib/vmcli" "$vmx" ConfigParams SetEntry "$dev.present" FALSE >/dev/null; done
     load_ok
+    # Check first, with the discs still attached: Windows Setup puts Windows Boot Manager first in the boot order, so
+    # the disk boots; if setup had not finished, nothing is lost and install can be run again.
     vmrun start nogui
     wait_ssh
     ssh_to paddock-admin 'if (-not (Test-Path C:\paddock-setup\done.marker)) { exit 3 }' ||
       die "setup did not finish (no C:\\paddock-setup\\done.marker); read C:\\paddock-setup\\setup.log in the VM"
     (ssh_to paddock-admin 'shutdown /s /t 0') >/dev/null 2>&1 || true
     wait_off 180 "shutting down" || vmrun stop hard
+    for dev in sata0:0 sata0:1; do "$lib/vmcli" "$vmx" ConfigParams SetEntry "$dev.present" FALSE >/dev/null; done
     vmrun snapshot "$baseline"
-    echo "snapshot $baseline taken; the VM is off"
+    echo "snapshot $baseline taken; the install discs are detached and the VM is off"
     ;;
   -h | --help | help) usage ;;
   *) usage >&2; exit 2 ;;

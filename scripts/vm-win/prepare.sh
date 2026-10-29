@@ -128,10 +128,34 @@ echo "  ok iso/paddock-setup.iso ($lang, keyboard $input_locale, $($no_tpm && ec
 fi
 $vm_only && { [ -f "$dir/iso/paddock-setup.iso" ] || die "--vm-only needs an existing setup disc; run without it first"; }
 
+win_iso=${PADDOCK_WIN_ISO:-$dir/iso/windows11-arm64.iso}
+noprompt_iso="${win_iso%.iso}-noprompt.iso"
+
+echo "== No-prompt Windows ISO (boots the installer without \"Press any key\", so the install is headless)"
+if [ ! -f "$win_iso" ]; then
+  echo "  skipped: no Windows ISO yet"
+elif [ -f "$noprompt_iso" ]; then
+  echo "  kept existing $noprompt_iso"
+else
+  # The original stays untouched: an APFS clone (no extra space) or a copy gets the EFI boot image swapped in place.
+  boot=$(mktemp -d "$dir/iso/.boot.XXXXXX")
+  mnt="$boot/mnt"
+  mkdir "$mnt"
+  hdiutil attach -readonly -nobrowse -mountpoint "$mnt" "$win_iso" -quiet
+  cp "$mnt/efi/microsoft/boot/efisys.bin" "$mnt/efi/microsoft/boot/efisys_noprompt.bin" "$boot/" ||
+    { hdiutil detach "$mnt" -quiet; rm -rf "$boot"; die "the Windows ISO has no efi/microsoft/boot/efisys_noprompt.bin"; }
+  hdiutil detach "$mnt" -quiet
+  cp -c "$win_iso" "$noprompt_iso.part" 2>/dev/null || cp "$win_iso" "$noprompt_iso.part"
+  node "$here/noprompt-iso.mjs" "$noprompt_iso.part" "$boot/efisys.bin" "$boot/efisys_noprompt.bin" >/dev/null ||
+    { rm -rf "$boot" "$noprompt_iso.part"; die "could not make the no-prompt ISO"; }
+  rm -rf "$boot"
+  mv "$noprompt_iso.part" "$noprompt_iso"
+  echo "  ok $noprompt_iso"
+fi
+
 echo "== VM"
 vmdir="$dir/vm/$name.vmwarevm"
 vmx="$vmdir/$name.vmx"
-win_iso=${PADDOCK_WIN_ISO:-$dir/iso/windows11-arm64.iso}
 if [ -f "$vmx" ]; then
   echo "  kept existing $vmx (delete the .vmwarevm folder to rebuild it)"
 else
@@ -176,7 +200,7 @@ nvme0:0.fileName = "$name.vmdk"
 sata0.present = "TRUE"
 sata0:0.present = "TRUE"
 sata0:0.deviceType = "cdrom-image"
-sata0:0.fileName = "$win_iso"
+sata0:0.fileName = "$noprompt_iso"
 sata0:1.present = "TRUE"
 sata0:1.deviceType = "cdrom-image"
 sata0:1.fileName = "$dir/iso/paddock-setup.iso"
@@ -197,7 +221,7 @@ fi
 echo
 [ -f "$win_iso" ] && echo "Windows ISO: found $win_iso" || echo "Windows ISO: MISSING, put it at $win_iso (see the doc, step 1)"
 if $no_tpm; then
-  echo "Next: scripts/vm-win.sh install (opens the VM once in Fusion; press a key at \"Press any key to boot from CD\")"
+  echo "Next: scripts/vm-win.sh install (headless, no window, no key to press)"
 else
   echo "Next: add the TPM in Fusion (doc, step 3), then scripts/vm-win.sh install"
 fi

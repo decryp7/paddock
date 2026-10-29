@@ -27,7 +27,8 @@ Everything lives on d7, never under `~` (ER-14). Default `PADDOCK_WIN_VM_DIR=/Vo
 ```
 keys/       paddock-test, paddock-admin (SSH key pairs), setup-passwords, known_hosts   (all private, mode 600/700)
 payload/    Git for Windows and Win32-OpenSSH installers, pinned in scripts/vm-win/payload.lock and hash-checked
-iso/        windows11-arm64.iso (the user downloads it), paddock-setup.iso (built by prepare.sh, holds the answer file)
+iso/        windows11-arm64.iso (the user downloads it), windows11-arm64-noprompt.iso (its headless-boot clone),
+            paddock-setup.iso (built by prepare.sh, holds the answer file)
 vm/         paddock-win11-test.vmwarevm
 ```
 
@@ -42,7 +43,7 @@ In the repository: `scripts/vm-win.sh` (daily use), `scripts/vm-win/prepare.sh` 
 | RAM while running | 8 GB resident, plus Fusion overhead; given back on stop. Run it only when a test needs it, and never two Windows VMs at once |
 | VM disk | grows up to 80 GB; a fresh Windows 11 install usually takes about 25 to 35 GB [unverified estimate] |
 | Snapshots | `clean-baseline` costs almost nothing when taken; each test run's changes grow a redo log until the next revert |
-| Windows ISO | 8.5 GB (the en-GB build 26300 image, measured 2026-10-29); may be deleted after `baseline` |
+| Windows ISO | 8.5 GB (the en-GB build 26300 image, measured 2026-10-29), plus the no-prompt clone (shares the original's blocks on APFS); both may be deleted after `baseline` |
 | Setup disc + payload | about 170 MB + 70 MB |
 
 Budget about 50 GB on d7 for a working VM with a baseline and a few test runs.
@@ -101,13 +102,30 @@ unencrypted VM (B) never touches the keychain, so a leftover keychain item does 
       If it fails and nobody knows the password the VM was encrypted with, the VM cannot be opened again: while nothing is
       installed yet, delete `vm/paddock-win11-test.vmwarevm`, run `scripts/vm-win/prepare.sh --vm-only` (keys and both
       ISOs stay as they are) and repeat this step.
-4. **Install**: `scripts/vm-win.sh install`. It opens the VM in a Fusion window once; click into it and press a key at
-   *Press any key to boot from CD or DVD*. Setup then runs unattended: partitions the disk, installs Windows 11 Pro,
+4. **Install**: `scripts/vm-win.sh install`. Fully headless: no Fusion window and no key to press. The VM boots
+   `windows11-arm64-noprompt.iso` (below) and Setup runs unattended: partitions the disk, installs Windows 11 Pro,
    creates both accounts, and at the first logon `firstlogon.ps1` installs OpenSSH Server and Git, sets power, the test
    folder and SSH, checks Defender, deletes the answer file copies, and powers off. The script waits ("still working")
-   until the VM is off. If the VM stays on, read `C:\paddock-setup\setup.log` in the window.
-5. **Baseline**: `scripts/vm-win.sh baseline` detaches both discs, boots headless, checks `C:\paddock-setup\done.marker`
-   over SSH, shuts down and takes the `clean-baseline` snapshot. The Windows ISO may be deleted afterwards.
+   until the VM is off. A stop within 10 minutes is a crash or boot failure, never a finished setup: the script says so
+   and points at `vmware.log`. Power-off alone does not prove success; `baseline` checks it.
+5. **Baseline**: `scripts/vm-win.sh baseline` boots headless with the discs still attached (Windows Setup puts Windows
+   Boot Manager first in the boot order, so the disk boots), checks `C:\paddock-setup\done.marker` over SSH, shuts down,
+   detaches both discs and takes the `clean-baseline` snapshot. If the marker is missing nothing has been changed; read
+   `C:\paddock-setup\setup.log`. The Windows ISOs may be deleted afterwards.
+
+Why not the Fusion window: on 2026-10-29 the Fusion app crashed three times while showing the installer (an AppKit
+exception in a display-link flush, `~/Library/Logs/DiagnosticReports/VMware Fusion-2026-10-29-*.ips`), so the key at
+*Press any key to boot from CD or DVD* could not be pressed. Every step now runs through `vmrun ... nogui`.
+
+### The no-prompt ISO
+
+Microsoft's media carry two EFI boot images of the same size: `efi/microsoft/boot/efisys.bin` (asks for a key) and
+`efisys_noprompt.bin` (boots straight into Setup). `prepare.sh` makes `iso/windows11-arm64-noprompt.iso`: an APFS clone
+of the original (no extra space until written) in which `scripts/vm-win/noprompt-iso.mjs` overwrites the bytes of the
+El Torito EFI boot image with `efisys_noprompt.bin`. It refuses unless those bytes are exactly `efisys.bin` and the two
+images have the same size. Rebuilding the ISO with xorriso was not used: xorriso writes ISO 9660 and Joliet only and
+would drop the UDF file system that Setup reads; the in-place swap keeps the UDF tree, the volume label and every other
+byte. The original ISO is never changed.
 
 ## Daily use
 
