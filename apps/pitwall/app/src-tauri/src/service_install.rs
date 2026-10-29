@@ -398,19 +398,6 @@ mod imp {
         }
     }
 
-    /// The user pressed Repair: runs the repair in the background (progress in [`REPAIR`]). Refused when the user
-    /// switched the item off in Login Items or the launch agent is missing from the app.
-    #[deprecated(note = "the UI moves to the repair job (`repair_blocking` through `start_repair_service`) in WP-3 of Pitwall 1.1")]
-    pub fn request_repair(answers: impl Fn() -> bool + Send + 'static) -> Result<(), CommandError> {
-        refuse_when_not_repairable()?;
-        if REPAIR.start(Instant::now()) {
-            std::thread::spawn(move || {
-                perform(&answers, &|| false, &|_| {});
-            });
-        }
-        Ok(())
-    }
-
     fn refuse_when_not_repairable() -> Result<(), CommandError> {
         if observe(false, true, None) == Plan::Nothing {
             return Err(CommandError::new(
@@ -422,7 +409,7 @@ mod imp {
     }
 
     /// The repair as a job body: runs it on the calling (blocking) thread. `cancel` is asked between steps and while
-    /// waiting, `phase` gets each stage. Refused like [`request_repair`] and when another repair is working.
+    /// waiting, `phase` gets each stage. Refused when the user switched the item off in Login Items or the launch agent is missing, and when another repair is working.
     pub fn repair_blocking(
         answers: &dyn Fn() -> bool,
         cancel: &dyn Fn() -> bool,
@@ -637,8 +624,7 @@ mod imp {
 pub use imp::{install, os_state, uninstall};
 
 #[cfg(target_os = "macos")]
-#[allow(deprecated)]
-pub use imp::{open_login_items, repair_blocking, repair_registration, request_repair};
+pub use imp::{open_login_items, repair_blocking, repair_registration};
 
 /// Opens System Settings > General > Login Items, where the user switches the background item on. Only macOS has one.
 #[cfg(not(target_os = "macos"))]
@@ -653,13 +639,6 @@ pub fn repair_blocking(
     _cancel: &dyn Fn() -> bool,
     _phase: &dyn Fn(RepairPhase),
 ) -> Result<RepairOutcome, CommandError> {
-    Err(CommandError::new(ErrorCode::NotAvailable, "Repair exists on macOS only"))
-}
-
-/// Repair exists on macOS only; elsewhere the service is installed or removed from the app.
-#[cfg(not(target_os = "macos"))]
-#[deprecated(note = "the UI moves to the repair job (`start_repair_service`) in WP-3 of Pitwall 1.1")]
-pub fn request_repair(_answers: impl Fn() -> bool + Send + 'static) -> Result<(), CommandError> {
     Err(CommandError::new(ErrorCode::NotAvailable, "Repair exists on macOS only"))
 }
 
@@ -732,9 +711,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn repair_exists_on_macos_only() {
-        #[allow(deprecated)]
-        let old = request_repair(|| false);
-        assert_eq!(old.unwrap_err().code, ErrorCode::NotAvailable);
         assert_eq!(
             repair_blocking(&|| false, &|| false, &|_| {}).unwrap_err().code,
             ErrorCode::NotAvailable

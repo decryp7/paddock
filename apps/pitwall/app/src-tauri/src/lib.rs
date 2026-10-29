@@ -96,8 +96,6 @@ fn tray_action(app: &AppHandle<Wry>, action: TrayAction) {
 }
 
 /// Starts the app.
-// The deprecated blocking commands stay registered until the UI has moved to the jobs (WP-3 of Pitwall 1.1).
-#[allow(deprecated)]
 pub fn run() {
     let data_dir = app_state::data_dir().unwrap_or_default();
     let keys = Arc::new(credentials::StoredAdminKey::new(
@@ -157,13 +155,11 @@ pub fn run() {
             commands::downloads,
             commands::cancel_download,
             commands::delete_model,
-            commands::load_model,
             commands::unload_model,
             commands::pin_model,
             commands::set_model_idle,
             commands::update_check_status,
             commands::update_notices,
-            commands::check_updates_now,
             commands::set_update_check,
             commands::dismiss_update,
             commands::set_model_slots,
@@ -195,20 +191,15 @@ pub fn run() {
             commands::chat,
             commands::chat_cancel,
             commands::benchmarks,
-            commands::run_benchmark,
             commands::settings,
             commands::save_settings,
             quit::quit_app,
             quit::take_quit_ask,
             app_commands::app_update_status,
             app_commands::check_app_update,
-            app_commands::install_app_update,
             app_commands::service_state,
-            app_commands::install_service,
-            app_commands::uninstall_service,
             app_commands::decline_service,
             app_commands::open_login_items,
-            app_commands::repair_service,
             app_commands::get_autostart,
             app_commands::set_autostart,
             app_commands::start_load_model,
