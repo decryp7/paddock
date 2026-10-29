@@ -1370,6 +1370,12 @@
       <trans-unit id="pd.pages.nav" datatype="html">
         <source>Pages</source>
       </trans-unit>
+      <trans-unit id="pd.pages.palette.go-to" datatype="html">
+        <source>Pages</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.palette.go-to.placeholder" datatype="html">
+        <source>Go to a page…</source>
+      </trans-unit>
       <trans-unit id="pd.pages.sidebar.collapse" datatype="html">
         <source>Collapse sidebar</source>
       </trans-unit>

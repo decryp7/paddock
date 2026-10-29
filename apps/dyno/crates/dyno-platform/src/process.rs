@@ -325,6 +325,8 @@ pub(crate) mod tests {
         parsed: std::sync::atomic::AtomicU64,
     }
 
+    // Only the Unix-only cancel tests call it.
+    #[cfg_attr(windows, allow(dead_code))]
     impl Hand {
         fn cancel(&self) {
             self.cancelled.store(true, Ordering::SeqCst);

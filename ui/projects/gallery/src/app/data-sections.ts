@@ -136,7 +136,7 @@ const COLUMNS: PdColumn<Plugin>[] = [
       </p>
       <div class="gal-sunburst-main">
         <div class="gal-box gal-pad" data-testid="sunburst-box">
-          <pd-sunburst label="Disk usage of Macintosh HD" [root]="tree" [(centre)]="burstCentre" [format]="bytes" />
+          <pd-sunburst label="Disk usage of Macintosh HD" [root]="diskTree" [(centre)]="burstCentre" [format]="bytes" />
         </div>
         <div class="gal-box gal-pad">
           <ul class="gal-key" aria-label="Folders in the centre">
@@ -152,7 +152,7 @@ const COLUMNS: PdColumn<Plugin>[] = [
         </div>
       </div>
       <div class="gal-sunburst">
-        <div class="gal-box gal-pad gal-narrow" data-testid="sunburst-narrow-box"><pd-sunburst label="Disk usage at a narrow width" [root]="tree" [format]="bytes" /></div>
+        <div class="gal-box gal-pad gal-narrow" data-testid="sunburst-narrow-box"><pd-sunburst label="Disk usage at a narrow width" [root]="diskTree" [format]="bytes" /></div>
         <div class="gal-box gal-pad" data-testid="sunburst-loading-box"><pd-sunburst label="Disk usage, loading" [root]="null" state="loading" [format]="bytes" /></div>
         <div class="gal-box gal-pad" data-testid="sunburst-empty-box"><pd-sunburst label="Disk usage, empty" [root]="null" [format]="bytes" emptyTitle="Nothing scanned yet" emptyText="Scan a volume to see where the space went."><button pdSunburstEmptyAction type="button" class="pd-btn pd-btn--primary">Scan this volume</button></pd-sunburst></div>
         <div class="gal-box gal-pad" data-testid="sunburst-error-box"><pd-sunburst label="Disk usage, error" [root]="null" state="error" errorText="The scan stopped: the volume stopped answering." [format]="bytes" /></div>
@@ -266,9 +266,9 @@ export class GalData {
   protected readonly burstCentre = signal<string | null>(null);
   protected readonly slot = slotColour;
   /** The first ring around the centre, with the slots the chart itself uses: the swatches of the list match the segments. */
-  protected readonly legend = computed(() => sunburstLayout(this.tree, this.burstCentre(), { order: branchSlots(readPaddockTokens().palette) }).arcs.filter((a) => a.depth === 1));
+  protected readonly legend = computed(() => sunburstLayout(this.diskTree, this.burstCentre(), { order: branchSlots(readPaddockTokens().palette) }).arcs.filter((a) => a.depth === 1));
   protected readonly bytes = (v: number): string => `${(v / 10).toFixed(1)} GB`;
-  protected readonly tree: PdSunburstNode = {
+  protected readonly diskTree: PdSunburstNode = {
     id: 'vol',
     label: 'Macintosh HD',
     value: 1_000,
