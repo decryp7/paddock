@@ -1,0 +1,134 @@
+### round 1
+## real_import (load 23.24)
+  import: 3000000 events in 6.7 s = 449687 events/s, peak RSS 992 MB
+## h import-null /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows (load 23.62)
+  IMPORT source_read_only rows=3000000 secs=0.48 events_per_s=6222472
+  STATS import-null peak_rss_mb=90 peak_footprint_mb=83 footprint_mb=83 rss_now_mb=90 cpu_s=0.50
+## h import-parquet /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 8 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/seg (load 23.62)
+  IMPORT parquet_8_writers rows=3000000 secs=0.69 events_per_s=4375423
+  STATS import-parquet-8 peak_rss_mb=770 peak_footprint_mb=757 footprint_mb=746 rss_now_mb=769 cpu_s=3.40
+## h import-parquet /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 12 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/seg (load 23.62)
+  IMPORT parquet_12_writers rows=3000000 secs=0.68 events_per_s=4407008
+  STATS import-parquet-12 peak_rss_mb=914 peak_footprint_mb=907 footprint_mb=781 rss_now_mb=804 cpu_s=3.74
+## h import-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 1 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/inproc.duckdb (load 23.62)
+  IMPORT inproc_appender_1 rows=3000000 secs=14.99 events_per_s=200116
+  STATS import-inproc-1 peak_rss_mb=868 peak_footprint_mb=845 footprint_mb=23 rss_now_mb=409 cpu_s=20.07
+## h import-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 4 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/inproc.duckdb (load 25.19)
+  IMPORT inproc_appender_4 rows=3000000 secs=8.29 events_per_s=361757
+  STATS import-inproc-4 peak_rss_mb=2048 peak_footprint_mb=1828 footprint_mb=30 rss_now_mb=515 cpu_s=28.47
+## server memory_limit 192MB
+serving Text("quack:127.0.0.1:31406") (start 1.6 ms)
+## h import-quack /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 1 31406 d3f48bb89b3a7e9580139e891c24eefa insert (load 23.62)
+  server events after import: 3000000
+  IMPORT quack_insert_1 rows=3000000 secs=27.36 events_per_s=109658
+  STATS import-quack-insert-1-client peak_rss_mb=1371 peak_footprint_mb=1337 footprint_mb=322 rss_now_mb=709 cpu_s=17.96
+  server: STATS quack-server peak_rss_mb=2070 peak_footprint_mb=2033 footprint_mb=78 rss_now_mb=551 cpu_s=28.38
+## server memory_limit 192MB
+serving Text("quack:127.0.0.1:31406") (start 1.3 ms)
+## h import-quack /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 4 31406 d3f48bb89b3a7e9580139e891c24eefa insert (load 26.51)
+  Error: DuckDBFailure(Error { code: Unknown, extended_code: 1 }, Some("Out of Memory Error: failed to pin block of size 256.0 KiB (183.2 MiB/183.1 MiB used)\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/current/guides/performance/how_to_tune_workloads"))
+  server: STATS quack-server peak_rss_mb=1136 peak_footprint_mb=1047 footprint_mb=166 rss_now_mb=683 cpu_s=11.07
+## server memory_limit 1GB
+serving Text("quack:127.0.0.1:31406") (start 1.3 ms)
+## h import-quack /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 4 31406 d3f48bb89b3a7e9580139e891c24eefa insert (load 25.27)
+  server events after import: 3000000
+  IMPORT quack_insert_4 rows=3000000 secs=7.61 events_per_s=394236
+  STATS import-quack-insert-4-client peak_rss_mb=2648 peak_footprint_mb=2612 footprint_mb=1085 rss_now_mb=1929 cpu_s=19.27
+  server: STATS quack-server peak_rss_mb=2971 peak_footprint_mb=2014 footprint_mb=1794 rss_now_mb=2752 cpu_s=18.54
+## server memory_limit 1GB
+serving Text("quack:127.0.0.1:31406") (start 1.3 ms)
+## h import-quack /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 8 31406 d3f48bb89b3a7e9580139e891c24eefa insert (load 23.60)
+  server events after import: 3000000
+  IMPORT quack_insert_8 rows=3000000 secs=15.15 events_per_s=198030
+  STATS import-quack-insert-8-client peak_rss_mb=4615 peak_footprint_mb=4580 footprint_mb=279 rss_now_mb=2363 cpu_s=33.80
+  server: STATS quack-server peak_rss_mb=3347 peak_footprint_mb=2456 footprint_mb=77 rss_now_mb=1779 cpu_s=30.82
+### round 2
+## real_import (load 29.59)
+  import: 3000000 events in 10.8 s = 277543 events/s, peak RSS 1051 MB
+## h import-null /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows (load 30.01)
+  IMPORT source_read_only rows=3000000 secs=0.48 events_per_s=6199111
+  STATS import-null peak_rss_mb=90 peak_footprint_mb=83 footprint_mb=83 rss_now_mb=90 cpu_s=0.50
+## h import-parquet /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 8 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/seg (load 30.01)
+  IMPORT parquet_8_writers rows=3000000 secs=0.66 events_per_s=4539575
+  STATS import-parquet-8 peak_rss_mb=742 peak_footprint_mb=734 footprint_mb=718 rss_now_mb=741 cpu_s=3.47
+## h import-parquet /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 12 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/seg (load 30.01)
+  IMPORT parquet_12_writers rows=3000000 secs=0.66 events_per_s=4559034
+  STATS import-parquet-12 peak_rss_mb=935 peak_footprint_mb=928 footprint_mb=810 rss_now_mb=833 cpu_s=3.47
+## h import-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 1 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/inproc.duckdb (load 30.01)
+  IMPORT inproc_appender_1 rows=3000000 secs=13.96 events_per_s=214864
+  STATS import-inproc-1 peak_rss_mb=881 peak_footprint_mb=858 footprint_mb=24 rss_now_mb=422 cpu_s=18.30
+## h import-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 4 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/inproc.duckdb (load 34.27)
+  IMPORT inproc_appender_4 rows=3000000 secs=8.45 events_per_s=355155
+  STATS import-inproc-4 peak_rss_mb=2029 peak_footprint_mb=1852 footprint_mb=29 rss_now_mb=491 cpu_s=29.41
+## server memory_limit 192MB
+serving Text("quack:127.0.0.1:31406") (start 3.7 ms)
+## h import-quack /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 1 31406 d3f48bb89b3a7e9580139e891c24eefa insert (load 33.22)
+  server events after import: 3000000
+  IMPORT quack_insert_1 rows=3000000 secs=24.16 events_per_s=124154
+  STATS import-quack-insert-1-client peak_rss_mb=1395 peak_footprint_mb=1362 footprint_mb=308 rss_now_mb=738 cpu_s=15.83
+  server: STATS quack-server peak_rss_mb=2073 peak_footprint_mb=2036 footprint_mb=77 rss_now_mb=563 cpu_s=24.18
+## server memory_limit 192MB
+serving Text("quack:127.0.0.1:31406") (start 1.1 ms)
+## h import-quack /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 4 31406 d3f48bb89b3a7e9580139e891c24eefa insert (load 29.50)
+  server events after import: 3000000
+  IMPORT quack_insert_4 rows=3000000 secs=8.60 events_per_s=348975
+  STATS import-quack-insert-4-client peak_rss_mb=2586 peak_footprint_mb=2551 footprint_mb=1148 rss_now_mb=1858 cpu_s=19.05
+  server: STATS quack-server peak_rss_mb=2250 peak_footprint_mb=2002 footprint_mb=1081 rss_now_mb=1664 cpu_s=26.39
+## server memory_limit 1GB
+serving Text("quack:127.0.0.1:31406") (start 1.5 ms)
+## h import-quack /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 4 31406 d3f48bb89b3a7e9580139e891c24eefa insert (load 26.94)
+  server events after import: 3000000
+  IMPORT quack_insert_4 rows=3000000 secs=6.93 events_per_s=432821
+  STATS import-quack-insert-4-client peak_rss_mb=2569 peak_footprint_mb=2534 footprint_mb=977 rss_now_mb=1850 cpu_s=16.98
+  server: STATS quack-server peak_rss_mb=2976 peak_footprint_mb=2086 footprint_mb=1896 rss_now_mb=2787 cpu_s=16.06
+## server memory_limit 1GB
+serving Text("quack:127.0.0.1:31406") (start 1.3 ms)
+## h import-quack /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 8 31406 d3f48bb89b3a7e9580139e891c24eefa insert (load 27.35)
+  server events after import: 3000000
+  IMPORT quack_insert_8 rows=3000000 secs=8.93 events_per_s=335783
+  STATS import-quack-insert-8-client peak_rss_mb=4620 peak_footprint_mb=4586 footprint_mb=284 rss_now_mb=2365 cpu_s=27.78
+  server: STATS quack-server peak_rss_mb=3150 peak_footprint_mb=2409 footprint_mb=1815 rss_now_mb=2904 cpu_s=19.83
+### round 3
+## real_import (load 26.07)
+  import: 3000000 events in 10.0 s = 301482 events/s, peak RSS 1116 MB
+## h import-null /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows (load 24.08)
+  IMPORT source_read_only rows=3000000 secs=0.49 events_per_s=6171894
+  STATS import-null peak_rss_mb=90 peak_footprint_mb=83 footprint_mb=83 rss_now_mb=90 cpu_s=0.50
+## h import-parquet /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 8 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/seg (load 24.08)
+  IMPORT parquet_8_writers rows=3000000 secs=1.36 events_per_s=2207223
+  STATS import-parquet-8 peak_rss_mb=821 peak_footprint_mb=814 footprint_mb=753 rss_now_mb=776 cpu_s=3.55
+## h import-parquet /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 12 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/seg (load 24.08)
+  IMPORT parquet_12_writers rows=3000000 secs=0.69 events_per_s=4327791
+  STATS import-parquet-12 peak_rss_mb=906 peak_footprint_mb=899 footprint_mb=798 rss_now_mb=821 cpu_s=3.63
+## h import-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 1 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/inproc.duckdb (load 24.08)
+  IMPORT inproc_appender_1 rows=3000000 secs=19.25 events_per_s=155828
+  STATS import-inproc-1 peak_rss_mb=915 peak_footprint_mb=892 footprint_mb=24 rss_now_mb=457 cpu_s=17.30
+## h import-inproc /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 4 /Volumes/d7sst7/dev-targets/target/research-quack/data/tmp/inproc.duckdb (load 36.02)
+  IMPORT inproc_appender_4 rows=3000000 secs=20.88 events_per_s=143677
+  STATS import-inproc-4 peak_rss_mb=2008 peak_footprint_mb=1838 footprint_mb=26 rss_now_mb=480 cpu_s=22.79
+## server memory_limit 192MB
+serving Text("quack:127.0.0.1:31406") (start 21.6 ms)
+## h import-quack /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 1 31406 d3f48bb89b3a7e9580139e891c24eefa insert (load 36.83)
+  server events after import: 3000000
+  IMPORT quack_insert_1 rows=3000000 secs=26.15 events_per_s=114734
+  STATS import-quack-insert-1-client peak_rss_mb=1404 peak_footprint_mb=1370 footprint_mb=313 rss_now_mb=767 cpu_s=16.80
+  server: STATS quack-server peak_rss_mb=2109 peak_footprint_mb=2071 footprint_mb=134 rss_now_mb=605 cpu_s=26.94
+## server memory_limit 192MB
+serving Text("quack:127.0.0.1:31406") (start 1.6 ms)
+## h import-quack /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 4 31406 d3f48bb89b3a7e9580139e891c24eefa insert (load 36.15)
+  Error: DuckDBFailure(Error { code: Unknown, extended_code: 1 }, Some("Out of Memory Error: failed to pin block of size 256.0 KiB (183.4 MiB/183.1 MiB used)\n\nPossible solutions:\n* Reducing the number of threads (SET threads=X)\n* Disabling insertion-order preservation (SET preserve_insertion_order=false)\n* Increasing the memory limit (SET memory_limit='...GB')\n\nSee also https://duckdb.org/docs/current/guides/performance/how_to_tune_workloads"))
+  server: STATS quack-server peak_rss_mb=1237 peak_footprint_mb=1095 footprint_mb=301 rss_now_mb=784 cpu_s=7.53
+## server memory_limit 1GB
+serving Text("quack:127.0.0.1:31406") (start 1.1 ms)
+## h import-quack /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 4 31406 d3f48bb89b3a7e9580139e891c24eefa insert (load 36.14)
+  server events after import: 3000000
+  IMPORT quack_insert_4 rows=3000000 secs=7.20 events_per_s=416446
+  STATS import-quack-insert-4-client peak_rss_mb=2610 peak_footprint_mb=2576 footprint_mb=994 rss_now_mb=1791 cpu_s=16.36
+  server: STATS quack-server peak_rss_mb=3013 peak_footprint_mb=2075 footprint_mb=2026 rss_now_mb=2964 cpu_s=15.48
+## server memory_limit 1GB
+serving Text("quack:127.0.0.1:31406") (start 1.1 ms)
+## h import-quack /Volumes/d7sst7/dev-targets/target/research-quack/data/events.arrows 8 31406 d3f48bb89b3a7e9580139e891c24eefa insert (load 32.51)
+  server events after import: 3000000
+  IMPORT quack_insert_8 rows=3000000 secs=7.42 events_per_s=404406
+  STATS import-quack-insert-8-client peak_rss_mb=4592 peak_footprint_mb=4042 footprint_mb=380 rss_now_mb=2453 cpu_s=26.04
+  server: STATS quack-server peak_rss_mb=2860 peak_footprint_mb=2301 footprint_mb=1357 rss_now_mb=2860 cpu_s=19.94

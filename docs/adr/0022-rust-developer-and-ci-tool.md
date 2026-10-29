@@ -197,15 +197,24 @@ run of `dev-tool.yml` (below) publishes for the new compiler within a day.
   - the folders of the tool's path dependencies, **normal and build dependencies only**. Dev-dependencies such as
     `paddock-testkit` are left out. They are listed in `tools/paddock-dev/inputs.txt`, and a test compares the list with
     `cargo metadata`'s resolve graph;
-  - the `.cargo/config.toml` files on the tool's path;
+  - the build environment: every non-empty `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, `CARGO_BUILD_*`, `CARGO_PROFILE_*` and
+    `CARGO_TARGET_*` variable as a `NAME=value` line in byte order (not `CARGO_TARGET_DIR`, `CARGO_BUILD_JOBS`,
+    `CARGO_BUILD_TARGET_DIR` or `CARGO_BUILD_RUSTC`);
+  - the cargo config files cargo reads for the tool: `config.toml` and `config` in every `.cargo` folder from
+    `tools/paddock-dev` up to the filesystem root, the other `*.toml` files in the tool's own `.cargo` (what `include`
+    pulls in, such as the git-ignored `ci.toml`), then `$CARGO_HOME`'s, closest first and without duplicates. Each file
+    enters the hash as a line `config-file <git blob id of its text without carriage returns>`. The files are streamed
+    into git and only the digest is held, because a config can hold registry tokens that a shell trace (`sh -x`) would
+    print; a wrapper test checks that a dummy token never appears in a trace;
   - the compiler cargo will use: the `release:` and `commit-hash:` lines of its `-vV` output, run after `setup-rust`.
-    The wrapper resolves that compiler as cargo does: `RUSTC`, then `CARGO_BUILD_RUSTC`, then `build.rustc` from the
-    `.cargo/config.toml` files on the tool's path and `$CARGO_HOME/config.toml`, else `rustc` run from
+    The wrapper resolves that compiler as cargo does: `RUSTC`, then `CARGO_BUILD_RUSTC`, then `build.rustc` (also the dotted key) from
+    those config files, else `rustc` run from
     `tools/paddock-dev`, so a rustup directory override applies. A `--config` on cargo's command line is not seen; the
     wrapper never passes one. The `host:` line is left out because it differs per machine. A stable update therefore
     gives a new hash and a rebuild.
 
-  The hash is `git hash-object --stdin` over the output of `git ls-tree HEAD -- <inputs>` followed by those two lines.
+  The hash is `git hash-object --stdin` over the output of `git ls-tree HEAD -- <inputs>` followed by those two lines and the build environment and `config-file` lines above (`./dev` and `dev self hash` build the
+  same text; a test runs both).
   `rustc -vV` takes about 35 ms here (measured, through the rustup proxy). The consumer's target triple selects the file
   inside the version (`paddock-dev-<target>[.exe]`). When `git status --porcelain --untracked-files=all -- <inputs>` is
   not empty, the wrapper always builds: a changed tracked file or a new untracked file that `.gitignore` does not exclude
@@ -481,6 +490,43 @@ The user took these decisions on 2026-10-28:
    checkpoint window.
 4. **A joint rules-model note with Pacenotes comes before the rules crate** (R8a); the user approves it.
 5. **The dialog command contract is generated from Rust** (R15), so the TypeScript analysis is deleted rather than kept.
+
+## Amendment (2026-10-28): job-isolation slots in R0
+
+R0 also holds `paddock-slots` and `dev ci slot acquire|release|status|hold`, which the review of the branch found had no home
+in this ADR. They exist because a job that needs one of N machine-wide resources (a test port range, a build folder) needs a
+claim that cannot go stale; they have no consumer inside R0, and the CI kit's job isolation (a separate ADR, on top of R0)
+is the first.
+
+- **Mechanism.** A slot is an exclusive OS file lock on `<root>/slots/sN.lock` (`File::try_lock`: `flock`, `LockFileEx`). The
+  kernel drops it when the holding process ends however it ends, so there is no stale lock and no reclaim race. A lock lives
+  as long as its process, so `acquire` starts a small detached holder (`dev ci slot hold`, the same binary) that takes the
+  slot, prints `sN <token>` and keeps it. `release` asks the holder by a marker file carrying the token (no signals: the same
+  on every OS); a holder honours only its own token.
+- **A holder always ends.** It ends when (1) the job folder given as `--owner` is gone, (2) a release with its token is
+  requested, or (3) `--max-hold-secs` has passed (default 6 hours, 0 for no limit): a job that never ends and never releases
+  cannot keep a slot for ever. It leads its own process group (Unix) or one without a console (Windows) so a runner killing
+  the step's group does not free the slot mid-job.
+- **Where the files may live.** The tool binary and the CI home (`--root`, also the holder's working folder) must be outside
+  the job folder: a process with its program or working folder inside it stops Windows deleting the folder at the end of the
+  job. `acquire` refuses both and says what to pass instead.
+- **`acquire` cannot hang.** It waits 30 seconds for the holder's first line (the slot, or `none`); after that it stops the
+  holder and fails with a message, so a holder that starts late cannot take a slot nobody knows about.
+- **Library hazard.** A lock file open in a process that forks a child is inherited until the child execs. Consumers that spawn
+  children while slots are taken must serialise the two or spawn from a process that holds none (documented in the crate; the
+  crate's own tests use a read-write gate).
+- **Open item, to verify on the Windows runner.** `CreateProcessW` inherits every inheritable handle of the parent. `acquire`
+  clears the inherit flag on its own three standard handles; handles beyond those that a runner marks inheritable are not
+  covered by that. The lifetime cap above is the backstop; verifying this needs a Windows host and is a task of the CI-kit ADR.
+- **R0b item: hash only the build-affecting keys.** R0 hashes whole config files and every `CARGO_BUILD_*`, `CARGO_PROFILE_*`
+  and `CARGO_TARGET_*` variable, which is safe but too wide: a registry or credential edit, or a runner-local setting such as
+  `rustc-wrapper` (sccache), `target-dir` or `jobs`, gives that runner its own hash, and then "download main's binary" never
+  matches. Before the download path is switched on (R0b), the hash takes only the keys that change the compiled code (`rustflags`,
+  `profile.*`, `linker`, `target`, `rustc`) from the files, parsed once with one rule for both the wrapper and the tool, and the
+  environment and config exclusions are made the same list (`target-dir`, `jobs`, `rustc-wrapper`, `build-dir` are in neither).
+  Until then the wrapper only builds locally, so the width costs cache hits, not correctness.
+- **Tests.** Test holders are started with a short `--max-hold-secs`, so one left behind by a failing test ends by itself
+  (ER-14).
 
 ## Sources
 

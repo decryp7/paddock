@@ -168,7 +168,7 @@ pub fn validate_destination(path: &str, format: InventoryFormat) -> Result<std::
     if !p.is_absolute() {
         return Err("Give the full path of the file to save.".into());
     }
-    if crate::cleanup::has_dot_segment(p) {
+    if crate::disk::has_dot_segment(p) {
         return Err("The save path may not contain \"..\".".into());
     }
     let ext = format.extension();

@@ -158,6 +158,19 @@ pub fn find_with(
         .or_else(|| candidates(os, env).into_iter().find(|b| exists(&b.path)))
 }
 
+/// Flags for the browser tests launch (with `LaunchOptions::extra_args`): the tests only talk to loopback servers by IP
+/// address, so the test browser is kept off the network. `--no-proxy-server`: the runner's proxy settings (on Windows
+/// the system's, with WPAD or PAC auto-detection) are never looked up; Chrome already sends no loopback request through
+/// a proxy (its implicit bypass rules, M71 for PAC and M72 for manual proxies, net/docs/proxy.md, read 2026-10-28), but
+/// it resolves the configuration first. The host rule: no host resolves but loopback (the rule applies to IP literals
+/// too), so the requests Chrome for Testing 156 makes on its own even with `--disable-background-networking` (measured
+/// 2026-10-28 with `--log-net-log`: www.google.com, accounts.google.com, update.googleapis.com, clients2.google.com)
+/// fail at once instead of reaching real hosts.
+pub const TEST_ISOLATION_FLAGS: [&str; 2] = [
+    "--no-proxy-server",
+    "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1",
+];
+
 /// The browser tests may launch: only `CHROMIUM_TEST_PATH` when it exists and is not one of the browsers the user
 /// installed. `None` skips the test.
 pub fn find_for_tests() -> Option<Browser> {

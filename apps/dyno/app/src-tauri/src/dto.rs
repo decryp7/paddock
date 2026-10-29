@@ -72,8 +72,6 @@ pub enum ErrorCode {
     AccessDenied,
     /// Not possible here (or not built yet).
     Unsupported,
-    /// A protected process.
-    Protected,
     /// Invalid request.
     BadRequest,
     /// Took too long.
@@ -130,7 +128,6 @@ impl From<AgentError> for CommandError {
             AgentCode::NotFound => ErrorCode::NotFound,
             AgentCode::AccessDenied => ErrorCode::AccessDenied,
             AgentCode::Unsupported => ErrorCode::Unsupported,
-            AgentCode::Protected => ErrorCode::Protected,
             AgentCode::BadRequest => ErrorCode::BadRequest,
             AgentCode::Timeout => ErrorCode::Timeout,
             AgentCode::Busy => ErrorCode::Busy,
@@ -174,7 +171,6 @@ mod tests {
             (AgentCode::NotFound, "notFound"),
             (AgentCode::AccessDenied, "accessDenied"),
             (AgentCode::Unsupported, "unsupported"),
-            (AgentCode::Protected, "protected"),
             (AgentCode::BadRequest, "badRequest"),
             (AgentCode::Timeout, "timeout"),
             (AgentCode::Busy, "busy"),

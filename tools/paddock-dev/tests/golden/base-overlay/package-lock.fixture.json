@@ -1,0 +1,43 @@
+{
+ "lockfileVersion": 3,
+ "packages": {
+  "": {
+   "workspaces": [
+    "ui",
+    "eslint",
+    "apps/x/app",
+    "apps/y/app"
+   ]
+  },
+  "ui": {
+   "name": "@f/ui",
+   "version": "1.0.0",
+   "dependencies": {
+    "left-pad": "^1"
+   }
+  },
+  "eslint": {
+   "name": "@f/eslint",
+   "version": "1.0.0"
+  },
+  "apps/x/app": {
+   "name": "x-ui",
+   "version": "1.0.0",
+   "dependencies": {
+    "@f/ui": "1"
+   }
+  },
+  "apps/y/app": {
+   "name": "y-ui",
+   "version": "1.0.0"
+  },
+  "node_modules/left-pad": {
+   "version": "1.2.0",
+   "integrity": "sha-an-older-one"
+  },
+  "node_modules/@f/ui": {
+   "resolved": "ui",
+   "link": true
+  }
+ }
+}

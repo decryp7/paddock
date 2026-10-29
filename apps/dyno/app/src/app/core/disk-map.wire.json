@@ -1,0 +1,537 @@
+{
+  "children": {
+    "children": [
+      {
+        "bytes": 500,
+        "complete": true,
+        "hasChildren": true,
+        "id": 1,
+        "items": 1,
+        "kind": "folder",
+        "logicalBytes": 480,
+        "name": "Users",
+        "newestChange": 1700000000000
+      },
+      {
+        "bytes": 100,
+        "complete": true,
+        "hasChildren": false,
+        "id": 3,
+        "items": 1,
+        "kind": "file",
+        "logicalBytes": 90,
+        "name": "vm.img",
+        "newestChange": 1650000000000
+      },
+      {
+        "bytes": 0,
+        "complete": true,
+        "hasChildren": false,
+        "id": 4,
+        "items": 0,
+        "kind": "mountPoint",
+        "logicalBytes": 0,
+        "name": "Volumes",
+        "newestChange": 0
+      },
+      {
+        "bytes": 0,
+        "complete": false,
+        "hasChildren": false,
+        "id": 5,
+        "items": 0,
+        "kind": "unreadable",
+        "logicalBytes": 0,
+        "name": "private",
+        "newestChange": 0
+      }
+    ],
+    "loose": {
+      "bytes": 4,
+      "count": 1,
+      "items": 1,
+      "logicalBytes": 4
+    },
+    "nextOffset": null,
+    "node": {
+      "bytes": 604,
+      "complete": false,
+      "hasChildren": true,
+      "id": 0,
+      "items": 6,
+      "kind": "folder",
+      "logicalBytes": 574,
+      "name": "Macintosh HD",
+      "newestChange": 1700000000000
+    },
+    "offset": 0,
+    "other": {
+      "bytes": 0,
+      "count": 0,
+      "items": 0,
+      "logicalBytes": 0
+    },
+    "shown": 4
+  },
+  "phases": [
+    "readingVolumeFacts",
+    "readingFolders"
+  ],
+  "requests": {
+    "cancel": {
+      "cancelDiskScan": {
+        "scan": 7
+      }
+    },
+    "children": {
+      "diskChildren": {
+        "limit": 48,
+        "minFraction": 0.004,
+        "node": 4,
+        "offset": 0,
+        "scan": 7
+      }
+    },
+    "childrenOfRoot": {
+      "diskChildren": {
+        "limit": 48,
+        "minFraction": 0.0,
+        "node": null,
+        "offset": 48,
+        "scan": 7
+      }
+    },
+    "diskVolumes": "diskVolumes",
+    "openFullDiskAccess": "openFullDiskAccessSettings",
+    "path": {
+      "diskPath": {
+        "node": 4,
+        "scan": 7
+      }
+    },
+    "retry": {
+      "retryDiskScan": {
+        "scan": 7
+      }
+    },
+    "reveal": {
+      "diskReveal": {
+        "node": 4,
+        "scan": 7
+      }
+    },
+    "rings": {
+      "diskRings": {
+        "maxNodes": 500,
+        "minShare": 0.01,
+        "node": 4,
+        "rings": 3,
+        "scan": 7
+      }
+    },
+    "ringsOfRoot": {
+      "diskRings": {
+        "maxNodes": 2000,
+        "minShare": 0.0,
+        "node": null,
+        "rings": 6,
+        "scan": 7
+      }
+    },
+    "scans": "diskScans",
+    "startFolder": {
+      "startDiskScan": {
+        "target": {
+          "folder": {
+            "path": "/Users/alex"
+          }
+        }
+      }
+    },
+    "startVolume": {
+      "startDiskScan": {
+        "target": {
+          "volume": {
+            "id": "Macintosh HD"
+          }
+        }
+      }
+    }
+  },
+  "rings": {
+    "capped": false,
+    "count": 4,
+    "root": {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [],
+              "loose": {
+                "bytes": 0,
+                "count": 0,
+                "items": 0,
+                "logicalBytes": 0
+              },
+              "node": {
+                "bytes": 500,
+                "complete": true,
+                "hasChildren": false,
+                "id": 2,
+                "items": 1,
+                "kind": "file",
+                "logicalBytes": 480,
+                "name": "disk-image.dmg",
+                "newestChange": 1700000000000
+              },
+              "other": {
+                "bytes": 0,
+                "count": 0,
+                "items": 0,
+                "logicalBytes": 0
+              }
+            }
+          ],
+          "loose": {
+            "bytes": 3,
+            "count": 1,
+            "items": 1,
+            "logicalBytes": 3
+          },
+          "node": {
+            "bytes": 503,
+            "complete": true,
+            "hasChildren": true,
+            "id": 1,
+            "items": 2,
+            "kind": "folder",
+            "logicalBytes": 483,
+            "name": "Users",
+            "newestChange": 1700000000000
+          },
+          "other": {
+            "bytes": 0,
+            "count": 0,
+            "items": 0,
+            "logicalBytes": 0
+          }
+        },
+        {
+          "children": [],
+          "loose": {
+            "bytes": 0,
+            "count": 0,
+            "items": 0,
+            "logicalBytes": 0
+          },
+          "node": {
+            "bytes": 0,
+            "complete": false,
+            "hasChildren": false,
+            "id": 3,
+            "items": 0,
+            "kind": "unreadable",
+            "logicalBytes": 0,
+            "name": "private",
+            "newestChange": 0
+          },
+          "other": {
+            "bytes": 0,
+            "count": 0,
+            "items": 0,
+            "logicalBytes": 0
+          }
+        }
+      ],
+      "loose": {
+        "bytes": 0,
+        "count": 0,
+        "items": 0,
+        "logicalBytes": 0
+      },
+      "node": {
+        "bytes": 503,
+        "complete": false,
+        "hasChildren": true,
+        "id": 0,
+        "items": 4,
+        "kind": "folder",
+        "logicalBytes": 483,
+        "name": "Macintosh HD",
+        "newestChange": 1700000000000
+      },
+      "other": {
+        "bytes": 0,
+        "count": 0,
+        "items": 0,
+        "logicalBytes": 0
+      }
+    }
+  },
+  "settings": {
+    "notableFileMib": 10,
+    "scanFolders": 2000000
+  },
+  "statuses": [
+    {
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
+      "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "scan": 7,
+      "scannedAt": 1700000100000,
+      "seq": 3,
+      "state": "running",
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": {
+        "capacity": 1000,
+        "free": 400,
+        "fs": "apfs",
+        "id": "Macintosh HD",
+        "location": "internal",
+        "mount": "/Volumes/Macintosh HD",
+        "name": "Macintosh HD",
+        "reachable": true,
+        "readOnly": false,
+        "rotational": false,
+        "wholeVolume": true
+      }
+    },
+    {
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
+      "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "scan": 7,
+      "scannedAt": 1700000100000,
+      "seq": 3,
+      "state": "done",
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": null
+    },
+    {
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
+      "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "scan": 7,
+      "scannedAt": 1700000100000,
+      "seq": 3,
+      "state": "cancelled",
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": null
+    },
+    {
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
+      "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "scan": 7,
+      "scannedAt": 1700000100000,
+      "seq": 3,
+      "state": {
+        "failed": {
+          "failure": {
+            "volumeUnreachable": {
+              "detail": "the share stopped answering"
+            }
+          }
+        }
+      },
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": null
+    },
+    {
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
+      "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "scan": 7,
+      "scannedAt": 1700000100000,
+      "seq": 3,
+      "state": {
+        "failed": {
+          "failure": {
+            "cannotStart": {
+              "reason": "no"
+            }
+          }
+        }
+      },
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": null
+    },
+    {
+      "etaSeconds": null,
+      "hiddenBytes": 40,
+      "itemsPerSecond": 1200,
+      "name": "Macintosh HD",
+      "needsFullDiskAccess": true,
+      "phase": "readingFolders",
+      "progress": {
+        "bytes": 600,
+        "folders": 3,
+        "items": 12,
+        "totalBytes": 600,
+        "unreadable": 1
+      },
+      "scan": 7,
+      "scannedAt": 1700000100000,
+      "seq": 3,
+      "state": {
+        "failed": {
+          "failure": {
+            "internal": {
+              "detail": "bug"
+            }
+          }
+        }
+      },
+      "target": {
+        "volume": {
+          "id": "Macintosh HD"
+        }
+      },
+      "truncated": false,
+      "unreadableFirst": [
+        "/Users/alex/Library/Mail"
+      ],
+      "volume": null
+    }
+  ],
+  "volumes": [
+    {
+      "capacity": 1000,
+      "free": 400,
+      "fs": "apfs",
+      "id": "Macintosh HD",
+      "location": "internal",
+      "mount": "/Volumes/Macintosh HD",
+      "name": "Macintosh HD",
+      "reachable": true,
+      "readOnly": false,
+      "rotational": false,
+      "wholeVolume": true
+    },
+    {
+      "capacity": 1000,
+      "free": 400,
+      "fs": "apfs",
+      "id": "Photos",
+      "location": {
+        "external": {
+          "bus": "USB"
+        }
+      },
+      "mount": "/Volumes/Photos",
+      "name": "Photos",
+      "reachable": true,
+      "readOnly": false,
+      "rotational": false,
+      "wholeVolume": true
+    },
+    {
+      "capacity": 1000,
+      "free": 400,
+      "fs": "apfs",
+      "id": "Media",
+      "location": {
+        "network": {
+          "host": "nas.local",
+          "protocol": "webDav"
+        }
+      },
+      "mount": "/Volumes/Media",
+      "name": "Media",
+      "reachable": true,
+      "readOnly": false,
+      "rotational": false,
+      "wholeVolume": false
+    }
+  ]
+}

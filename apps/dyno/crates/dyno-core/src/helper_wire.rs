@@ -2,9 +2,9 @@
 //! Pure types and decisions: the helper crate and the agent do the I/O.
 //!
 //! The wire body is [`HelperMessage`] (postcard inside `dyno-ipc` frames). The helper accepts only
-//! [`HelperRequest`]s, only from its authorised user, and only actions that need administrator rights.
+//! [`HelperRequest`]s, only from its authorised user. None of them changes a setting of the machine.
 
-use crate::helper::{HelperAction, HelperOutcome, TuningHost};
+use crate::helper::HelperHost;
 use crate::network_traffic::TrafficCounter;
 use serde::{Deserialize, Serialize};
 
@@ -22,10 +22,6 @@ const MAX_SID: usize = 184;
 pub enum HelperRequest {
     /// Who are you? (version, API, host, the agent it serves).
     Info,
-    /// Makes a change that needs administrator rights.
-    Apply(HelperAction),
-    /// Reads a setting that only an administrator can read.
-    Read(HelperAction),
     /// Per-program traffic counters (Windows: needs the TCP statistics switched on, which needs administrator rights).
     Traffic,
     /// The last audit entries (at most [`MAX_AUDIT_REPLY`]), newest first.
@@ -39,10 +35,6 @@ pub enum HelperRequest {
 pub enum HelperReply {
     /// Answer to `Info`.
     About(HelperInfo),
-    /// Answer to `Apply`.
-    Outcome(HelperOutcome),
-    /// Answer to `Read`: the setting as a short comparable text.
-    Value(String),
     /// Answer to `Traffic`.
     Counters(Vec<TrafficCounter>),
     /// Answer to `Audit`.
@@ -68,7 +60,7 @@ pub struct HelperInfo {
     /// Its [`HELPER_API`].
     pub api: u32,
     /// The system it runs on.
-    pub host: TuningHost,
+    pub host: HelperHost,
     /// The agent program it serves (full path).
     pub agent_exe: String,
 }
@@ -77,16 +69,12 @@ pub struct HelperInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AuditVerdict {
-    /// The helper began the change (written first, so a crash leaves a trace).
-    Started,
-    /// Done and read back.
-    Applied,
-    /// Not allowed (not an allowed action, invalid arguments, wrong caller).
+    /// Done: the request was answered, or the helper removed itself as asked.
+    Done,
+    /// Not allowed (wrong caller or program).
     Refused,
-    /// Allowed but it did not work (the previous value was put back where possible).
+    /// Allowed but it did not work (for example the log could not be written).
     Failed,
-    /// A `Started` without an end: the helper stopped in the middle of the change.
-    Interrupted,
 }
 
 /// One line of the helper's audit log.
@@ -101,10 +89,6 @@ pub struct AuditEntry {
     pub what: String,
     /// How it ended.
     pub verdict: AuditVerdict,
-    /// The setting before (the inverse to apply), when it could be read.
-    pub before: Option<String>,
-    /// The setting after.
-    pub after: Option<String>,
     /// Why, for refusals and failures.
     pub detail: String,
 }
@@ -162,21 +146,21 @@ pub enum Probe {
 }
 
 /// What the OS asks for on `host`, in words.
-pub fn prompt_text(host: TuningHost) -> &'static str {
+pub fn prompt_text(host: HelperHost) -> &'static str {
     match host {
-        TuningHost::Windows => "Windows asks you to allow Dyno to make changes to your device (User Account Control).",
-        TuningHost::Macos => "macOS asks for your account password to let Dyno install its helper.",
-        TuningHost::Linux => "Your desktop asks you to authenticate (polkit) so Dyno can install its helper.",
+        HelperHost::Windows => "Windows asks you to allow Dyno to make changes to your device (User Account Control).",
+        HelperHost::Macos => "macOS asks for your account password to let Dyno install its helper.",
+        HelperHost::Linux => "Your desktop asks you to authenticate (polkit) so Dyno can install its helper.",
     }
 }
 
 /// The text shown when an action needs a helper that is not there.
 pub const HELPER_MISSING: &str =
-    "This change needs Dyno's helper, which is not installed. Install it under Settings > Helper (the system asks for your \
+    "This reading needs Dyno's helper, which is not installed. Install it under Settings > Helper (the system asks for your \
      permission once); nothing else in Dyno needs it.";
 
 /// Decides what to tell the user. `supported` is `Err(reason)` when this system cannot install the helper at all.
-pub fn assess(host: TuningHost, supported: Result<(), String>, probe: Probe, our_version: &str) -> HelperStatus {
+pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our_version: &str) -> HelperStatus {
     let prompt = prompt_text(host).to_string();
     let status = |state, message: String, version: Option<String>, recent| HelperStatus {
         state,
@@ -191,7 +175,7 @@ pub fn assess(host: TuningHost, supported: Result<(), String>, probe: Probe, our
             Err(reason) => status(HelperState::Unsupported, reason, None, vec![]),
             Ok(()) => status(
                 HelperState::NotInstalled,
-                "The helper is not installed. Dyno works without it; install it to apply the changes that need administrator rights."
+                "The helper is not installed. Dyno works without it; install it to read the few things that need administrator rights (for example programs' network traffic on Windows)."
                     .into(),
                 None,
                 vec![],
@@ -214,7 +198,7 @@ pub fn assess(host: TuningHost, supported: Result<(), String>, probe: Probe, our
         ),
         Probe::Answered(info, recent) => status(
             HelperState::Ready,
-            "The helper is installed and ready. It does nothing until you approve a change.".into(),
+            "The helper is installed and ready. It only reads and changes nothing on this computer.".into(),
             Some(info.version),
             recent,
         ),
@@ -308,7 +292,7 @@ mod tests {
         HelperInfo {
             version: version.into(),
             api,
-            host: TuningHost::Linux,
+            host: HelperHost::Linux,
             agent_exe: "/x/dyno-agent".into(),
         }
     }
@@ -317,9 +301,9 @@ mod tests {
     fn the_wire_roundtrips_through_postcard() {
         let all = [
             HelperMessage::Request(HelperRequest::Info),
-            HelperMessage::Request(HelperRequest::Apply(HelperAction::SetHibernate(false))),
+            HelperMessage::Request(HelperRequest::Traffic),
+            HelperMessage::Request(HelperRequest::Uninstall),
             HelperMessage::Request(HelperRequest::Audit(5)),
-            HelperMessage::Reply(HelperReply::Outcome(HelperOutcome::Partial(vec!["a".into()]))),
             HelperMessage::Reply(HelperReply::Counters(vec![TrafficCounter {
                 pid: 4,
                 name: "x".into(),
@@ -343,13 +327,13 @@ mod tests {
 
     #[test]
     fn status_says_what_to_do_next() {
-        let w = TuningHost::Windows;
+        let w = HelperHost::Windows;
         let s = assess(w, Ok(()), Probe::Absent, "1.0.0");
         assert_eq!(s.state, HelperState::NotInstalled);
         assert!(s.message.contains("install"));
         assert!(s.prompt.contains("User Account Control"));
         let s = assess(
-            TuningHost::Linux,
+            HelperHost::Linux,
             Err("Install polkit (pkexec) first.".into()),
             Probe::Absent,
             "1.0.0",
@@ -367,8 +351,8 @@ mod tests {
         assert_eq!(s.state, HelperState::Outdated);
         let s = assess(w, Ok(()), Probe::Answered(info("1.0.0", HELPER_API), vec![]), "1.0.0");
         assert_eq!(s.state, HelperState::Ready);
-        assert!(prompt_text(TuningHost::Macos).contains("password"));
-        assert!(prompt_text(TuningHost::Linux).contains("polkit"));
+        assert!(prompt_text(HelperHost::Macos).contains("password"));
+        assert!(prompt_text(HelperHost::Linux).contains("polkit"));
     }
 
     #[test]
@@ -420,12 +404,14 @@ mod tests {
             at: 5,
             peer: Some(3),
             what: "x".into(),
-            verdict: AuditVerdict::Applied,
-            before: Some("on".into()),
-            after: None,
+            verdict: AuditVerdict::Done,
             detail: String::new(),
         };
         let line = serde_json::to_string(&e).unwrap();
+        assert!(
+            line.contains("\"verdict\":\"done\""),
+            "the wire value says done, not a change: {line}"
+        );
         assert_eq!(parse_audit_line(&format!("{line}\n")), Some(e));
         assert_eq!(parse_audit_line("{not json"), None);
         assert_eq!(parse_audit_line(""), None);

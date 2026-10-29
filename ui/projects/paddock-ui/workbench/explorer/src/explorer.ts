@@ -148,7 +148,7 @@ const INDENT = 12;
   `,
   styles: `
     :host { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; font-size: var(--pd-text-body); color: var(--pd-text); container: pd-explorer / inline-size; }
-    .pd-ex-head { display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; padding: var(--pd-space-1) var(--pd-space-2); position: sticky; top: 0; background: var(--pd-surface-1); z-index: 1; }
+    .pd-ex-head { display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; padding: var(--pd-space-1) var(--pd-space-2); position: sticky; top: 0; background: var(--pd-surface-1); z-index: var(--pd-z-table-header); }
     .pd-ex-title { flex: 1; display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; height: 24px; padding: 0 var(--pd-space-1); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-label); font-weight: var(--pd-weight-semibold); cursor: pointer; text-align: start; }
     .pd-ex-title span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-ex-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }

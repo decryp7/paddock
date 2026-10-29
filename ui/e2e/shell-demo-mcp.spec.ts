@@ -17,34 +17,36 @@ async function openPage(page: import('@playwright/test').Page, app: { settings: 
 test.describe('AI access (MCP) (plan X22)', () => {
   test('turn it on, allow an action, add a client (the key is shown once), revoke it, read and clear the log', async ({ app, page, pageErrors }) => {
     await openPage(page, app, '');
-    await expect(page.getByTestId('mcp-enabled')).not.toBeChecked();
+    await expect(page.getByTestId('mcp-enabled').getByRole('switch')).not.toBeChecked();
     await expect(page.getByText('AI access is off')).toBeVisible();
     // Tools are read-only; the action is a separate, off-by-default permission with a warning.
     await expect(page.getByTestId('mcp-tools')).not.toContainText('Export a report');
     await expect(page.getByTestId('mcp-actions-warning')).toContainText('change something');
-    await expect(page.getByTestId('mcp-action-export_report')).not.toBeChecked();
+    await expect(page.getByTestId('mcp-action-export_report').getByRole('checkbox')).not.toBeChecked();
     await expect(page.getByTestId('mcp-no-clients')).toBeVisible();
     expect(await axeViolations(page)).toEqual([]);
 
-    await page.getByTestId('mcp-enabled').check();
+    // A Material toggle updates after the click (change detection), so click, then expect (check() asserts at once).
+    await page.getByTestId('mcp-enabled').getByRole('switch').click();
+    await expect(page.getByTestId('mcp-enabled').getByRole('switch')).toBeChecked();
     await expect(page.getByText('AI access is on')).toBeVisible();
-    await page.getByTestId('mcp-tool-errors_around').uncheck();
-    await expect(page.getByTestId('mcp-tool-errors_around')).not.toBeChecked();
-    await page.getByTestId('mcp-action-export_report').check();
-    await expect(page.getByTestId('mcp-action-export_report')).toBeChecked();
+    await page.getByTestId('mcp-tool-errors_around').getByRole('checkbox').uncheck();
+    await expect(page.getByTestId('mcp-tool-errors_around').getByRole('checkbox')).not.toBeChecked();
+    await page.getByTestId('mcp-action-export_report').getByRole('checkbox').check();
+    await expect(page.getByTestId('mcp-action-export_report').getByRole('checkbox')).toBeChecked();
 
     // The key is created and shown in the key dialog's window, once.
     await page.getByTestId('mcp-add-client').click();
     const dialog = page.getByRole('dialog', { name: 'Add a client' });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByTestId('mcp-key-create')).toBeDisabled();
+    await expect(dialog.getByTestId('dialog-action-create')).toBeDisabled();
     await dialog.getByTestId('mcp-key-client').fill('Pitwall');
     await dialog.getByTestId('mcp-key-client').press('Enter');
     await expect(dialog.getByTestId('mcp-key-shown')).toContainText('only time the key is shown');
     const key = await dialog.getByTestId('mcp-key-value').inputValue();
     expect(key).toMatch(/^pmk_[0-9a-f]{64}$/);
     expect(await axeViolations(page)).toEqual([]);
-    await dialog.getByTestId('mcp-key-done').click();
+    await dialog.getByTestId('dialog-action-done').click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByTestId('mcp-keys')).toContainText('Pitwall');
     await expect(page.getByTestId('mcp-keys')).toContainText('Active');
@@ -53,13 +55,13 @@ test.describe('AI access (MCP) (plan X22)', () => {
 
     // Revoke asks first; Keep is the default and Escape keeps the key.
     await page.getByTestId('mcp-revoke').click();
-    const confirm = page.getByRole('dialog', { name: 'Revoke the key of "Pitwall"?' });
+    const confirm = page.getByRole('alertdialog', { name: 'Revoke the key of “Pitwall”?' });
     await expect(confirm.getByRole('button', { name: 'Keep' })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(confirm).toHaveCount(0);
     await expect(page.getByTestId('mcp-keys')).toContainText('Active');
     await page.getByTestId('mcp-revoke').click();
-    await page.getByRole('dialog', { name: 'Revoke the key of "Pitwall"?' }).getByRole('button', { name: 'Revoke', exact: true }).click();
+    await page.getByRole('alertdialog', { name: 'Revoke the key of “Pitwall”?' }).getByRole('button', { name: 'Revoke key', exact: true }).click();
     await expect(page.getByTestId('mcp-keys')).toContainText('Revoked');
     await expect(page.getByTestId('mcp-revoke')).toHaveCount(0);
 
@@ -99,7 +101,7 @@ test.describe('AI access (MCP) (plan X22)', () => {
     const dialog = page.getByRole('dialog', { name: 'Add a client' });
     await dialog.getByTestId('mcp-key-client').fill('A rather long client name that must wrap, not push sideways');
     await dialog.getByTestId('mcp-key-client').press('Enter');
-    await dialog.getByTestId('mcp-key-done').click();
+    await dialog.getByTestId('dialog-action-done').click();
     await page.setViewportSize({ width: 320, height: 800 });
     await expectNoHorizontalScroll(page);
     await expect(page.getByTestId('mcp-keys')).toBeVisible();

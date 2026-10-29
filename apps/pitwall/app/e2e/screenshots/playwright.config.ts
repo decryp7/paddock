@@ -1,7 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
+import { resolve } from 'node:path';
+import { appBuildGuard, reuseServer } from '../../../../../ui/projects/paddock-e2e/src/build-guard.ts';
+import { e2ePortOrCiDefault } from '../../../../../ui/projects/paddock-e2e/src/env.ts';
+
+// Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
+appBuildGuard(resolve(__dirname, '../../'), resolve(__dirname, '../../../../../ui'));
 
 // Captures every screen in dark and light into docs/screenshots (npm run screenshots): 1440x900 logical, 2x pixels, one worker.
-const PORT = Number(process.env['PW_SHOT_PORT'] ?? 4390);
+const PORT = e2ePortOrCiDefault('PW_SHOT_PORT', 4390);
 
 export default defineConfig({
   testDir: '.',
@@ -14,7 +20,7 @@ export default defineConfig({
     command: `npx ng serve --port ${PORT} --watch=false`,
     cwd: '../..',
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: true,
+    reuseExistingServer: reuseServer(),
     timeout: 180_000,
   },
 });

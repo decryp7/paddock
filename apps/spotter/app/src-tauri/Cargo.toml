@@ -11,7 +11,10 @@ publish = false
 
 [lib]
 name = "spotter_app_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# rlib only: the desktop binary links the rlib. Tauri's template also builds a staticlib (iOS) and a cdylib (Android) on
+# every build, which cost 25-38% of an incremental debug rebuild (docs/research/2026-10-29-link-time.md). Add them back
+# only for a mobile target.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.7.3", features = [] }

@@ -1,7 +1,5 @@
-import { MockWatch, mockHash, mockIsOs, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './lookups';
+import { mockHash, mockIsOs, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './lookups';
 import { demoStartup } from './data';
-
-const NOW = 1_700_000_000_000;
 
 describe('mockSearchSeed', () => {
   it('removes the home folder, names, addresses and GUIDs and says what', () => {
@@ -39,67 +37,5 @@ describe('mockStartupOverview', () => {
     const both = mockStartupOverview(all, { hideOs: true, hideSigned: true });
     expect(both.entries.length).toBe(all.length - none.osCount - none.signedCount);
     expect(both.entries.every((e) => !mockIsOs(e) && !e.publisher)).toBe(true);
-  });
-});
-
-describe('MockWatch', () => {
-  const make = () => new MockWatch(() => NOW);
-
-  it('starts with three folders, two on', () => {
-    const o = make().overview();
-    expect(o.folders.map((f) => f.folder.enabled)).toEqual([true, true, false]);
-    expect(o.templates).toHaveLength(3);
-    expect(o.folders[2]!.nextSweep).toBeNull();
-  });
-
-  it('adds a folder switched off, refuses overlaps and bad times', () => {
-    const w = make();
-    expect(() => w.add(null, 5, false)).toThrow('between 10 minutes and 10 days');
-    const o = w.add('build-output', 600, true);
-    const added = o.folders.at(-1)!.folder;
-    expect(added.path).toBe('/Users/alex/Movies/Exports');
-    expect(added).toMatchObject({ enabled: false, previewed: false, recursive: true });
-    w.add(null, 600, false);
-    w.add(null, 600, false);
-    expect(() => w.add(null, 600, false)).toThrow('already watched');
-  });
-
-  it('turning on needs the preview; a shorter time or subfolders turn it off again', () => {
-    const w = make();
-    expect(() => w.change('w-3', { enabled: true })).toThrow('preview first');
-    w.preview('w-3');
-    w.change('w-3', { enabled: true });
-    expect(w.overview().folders[2]!.folder.enabled).toBe(true);
-    w.change('w-3', { keepForSecs: 3 * 86400 });
-    expect(w.overview().folders[2]!.folder.enabled).toBe(true);
-    w.change('w-3', { keepForSecs: 86400 });
-    expect(w.overview().folders[2]!.folder).toMatchObject({ enabled: false, previewed: false });
-    w.change('w-1', { recursive: true });
-    expect(w.overview().folders[0]!.folder).toMatchObject({ enabled: false, recursive: true });
-    expect(() => w.change('w-1', { keepForSecs: 5 })).toThrow();
-    expect(() => w.change('w-nope', {})).toThrow('no longer watches');
-  });
-
-  it('previews what is older than the keep time, sweeps only after a preview and removes', () => {
-    const w = make();
-    const p = w.preview('w-1');
-    expect(p.plan.dueTotal).toBe(p.plan.due.length);
-    expect(p.plan.due.every((d) => d.path.startsWith('/Users/alex/Downloads/'))).toBe(true);
-    expect(p.plan.due.map((d) => d.arrived)).toEqual([...p.plan.due.map((d) => d.arrived)].sort((a, b) => a - b));
-    const swept = w.sweep('w-1');
-    expect(swept.folders[0]!.folder.lastSweep?.moved).toBe(p.plan.dueTotal);
-    w.change('w-3', { keepForSecs: 86400, recursive: true });
-    expect(() => w.sweep('w-3')).toThrow('preview first');
-    expect(w.remove('w-3').folders).toHaveLength(2);
-    expect(() => w.remove('w-3')).toThrow();
-  });
-
-  it('a template filter decides what is due', () => {
-    const w = new MockWatch(() => NOW);
-    const added = w.add('screenshots', 600, false).folders.at(-1)!.folder;
-    expect(added.filter.nameStarts).toContain('Screenshot');
-    // None of the demo files starts like a screenshot, so nothing in it is due.
-    expect(w.preview(added.id).plan.dueTotal).toBe(0);
-    expect(w.overview().folders.at(-1)!.filterText).toBe('Screenshot…, Screen Shot…, Screen Recording…, Capture…');
   });
 });

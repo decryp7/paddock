@@ -328,10 +328,14 @@ export function contextText(tokens: number | null): string {
     .table td.act {
       position: sticky;
       right: 0;
-      z-index: 1;
+      z-index: 2;
       width: 1%;
       background: var(--bg-card);
       box-shadow: -10px 0 8px -8px color-mix(in srgb, var(--text) 14%, transparent);
+    }
+    /* The action column's header cell sticks both ways (the corner, 4): above the header row (3) and the action cells (2). */
+    .table th.act {
+      z-index: 4;
     }
     .table tr:hover td.act {
       background: color-mix(in srgb, var(--bg-card) 94%, var(--text));

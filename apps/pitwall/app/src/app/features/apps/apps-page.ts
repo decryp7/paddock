@@ -224,6 +224,7 @@ import { PermissionsEditor } from './permissions-editor';
       align-items: start;
     }
     .list-panel {
+      /* conformance: not-a-header */
       position: sticky;
       top: var(--sp-4);
     }

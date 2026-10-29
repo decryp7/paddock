@@ -1,6 +1,5 @@
-import type { Cause, CauseKind, Diagnosis, Suggestion } from '../../core/api.types';
+import type { Cause, CauseHint, CauseKind, Diagnosis } from '../../core/api.types';
 import { formatDayTime } from '../../shared/format';
-import { actionText } from '../../shared/labels';
 import type { IconName } from '../../shared/icons';
 
 /** A page worth opening to look closer at a cause. */
@@ -13,7 +12,7 @@ export interface CauseLink {
 const PROCESSES: CauseLink = { label: 'Processes', path: '/processes', icon: 'processes' };
 const NETWORK: CauseLink = { label: 'Network', path: '/network', icon: 'network' };
 const RECORDER: CauseLink = { label: 'Flight recorder', path: '/recorder', icon: 'camera' };
-const HEALTH: CauseLink = { label: 'Health & tuning', path: '/health', icon: 'health' };
+const HEALTH: CauseLink = { label: 'Health', path: '/health', icon: 'health' };
 
 /** The pages that help to look closer at a kind of cause (navigation only; the engine did the reasoning). */
 export function causeLinks(kind: CauseKind): CauseLink[] {
@@ -37,33 +36,6 @@ export function causeLinks(kind: CauseKind): CauseLink[] {
   }
 }
 
-/** What a confirm dialog shows before a process suggestion is carried out. Null for suggestions that only navigate. */
-export interface FixPreview {
-  title: string;
-  message: string;
-  details: string[];
-  danger: boolean;
-  confirmLabel: string;
-}
-
-export function fixPreview(s: Suggestion): FixPreview | null {
-  const a = s.action;
-  if (typeof a !== 'object') return null;
-  const { name, action, target } = a.process;
-  const end = action === 'end';
-  return {
-    title: s.label,
-    message: `Dyno will change ${name}. Nothing else is touched.`,
-    details: [
-      `Change: ${actionText(action)}`,
-      `Process: ${name} (id ${target.pid})`,
-      end ? 'This cannot be undone: unsaved work in it is lost.' : 'It is logged in Activity, with an Undo where the change can be reversed.',
-    ],
-    danger: end,
-    confirmLabel: s.label,
-  };
-}
-
 /** The diagnosis as plain text for the clipboard. */
 export function diagnosisText(d: Diagnosis): string {
   const lines = [`${d.headline}`, `Checked ${formatDayTime(d.at)}, looking at the last ${d.windowSecs} s.`];
@@ -85,4 +57,9 @@ export function windowText(d: Diagnosis): string {
 export function historyLine(d: Diagnosis): string {
   const top: Cause | undefined = d.causes[0];
   return top ? `${d.headline}${d.causes.length > 1 ? ` (+${d.causes.length - 1} more)` : ''}` : d.headline;
+}
+
+/** The page a hint points at, or null for a hint that is only words. */
+export function hintPath(h: CauseHint): string | null {
+  return h.link === 'taskManager' ? '/processes' : h.link === 'startup' ? '/health' : null;
 }

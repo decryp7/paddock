@@ -11,7 +11,7 @@ import type {
   SettingsPageDef,
   StatusItemDef,
 } from './define';
-import { DIALOG_KINDS, dialogMinSize } from './define';
+import { DIALOG_KINDS } from './define';
 import { normalizeKey, toAccelerator } from './keys';
 import { isMessage, type Message } from './message';
 
@@ -58,7 +58,9 @@ export interface ManifestDialog {
   readonly modality: DialogModality;
   readonly instanced: boolean;
   readonly requiredChoice: boolean;
-  readonly minSize: { readonly width: number; readonly height: number } | null;
+  /** The width it opens at and its preferred height (`null`: measured), logical px, as the Rust contract declares them. */
+  readonly width: number;
+  readonly height: number | null;
   /** IPC commands the dialog's window may call beyond the base set (sorted; `prefix*` allowed). */
   readonly commands: readonly string[];
 }
@@ -156,7 +158,8 @@ export function buildManifest(source: ManifestSource): PaddockManifest {
             modality: d.modality,
             instanced: d.instanced === true,
             requiredChoice: d.requiredChoice === true,
-            minSize: dialogMinSize(d),
+            width: d.width,
+            height: d.height,
             commands: [...new Set(d.commands)].sort(byString),
           } satisfies ManifestDialog,
         ]),
@@ -219,7 +222,8 @@ export function parseManifest(text: string): ManifestParse {
       modality: (x) => x === 'modal' || x === 'modeless',
       instanced: bool,
       requiredChoice: bool,
-      minSize: (x) => x === null || (isRecord(x) && num(x['width']) && num(x['height']) && Object.keys(x).length === 2),
+      width: num,
+      height: (x) => x === null || num(x),
       commands: strs,
     }),
   );

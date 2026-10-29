@@ -10,20 +10,19 @@ import { Switch } from '../../shared/switch';
 import { SettingsStore } from '../../state/settings.store';
 import { LOOKUP_PRESETS, presetIdFor, templateProblem } from './ip-lookup-presets';
 import { TrayItemsEditor } from './tray-items-editor';
-import { HelperCard } from '../helper/helper-card';
 import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
 
 /** Settings: appearance, start-up, sampling and retention, the tray, alert thresholds, the observe-only posture, plugins and About. */
 @Component({
   selector: 'dy-settings-page',
-  imports: [FormsModule, Switch, AsyncState, Icon, TrayItemsEditor, HelperCard],
+  imports: [FormsModule, Switch, AsyncState, Icon, TrayItemsEditor],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page narrow">
       <header class="page-head">
         <div class="titles">
           <h1>Settings</h1>
-          <p>Dyno measures first. Everything that changes your PC is off until you turn it on.</p>
+          <p>Dyno only looks. It changes nothing on your PC.</p>
         </div>
         @if (store.saveError(); as failed) {
           <span class="save-error" role="alert">{{ failed.message }}</span>
@@ -37,7 +36,7 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
       <dy-async [loaded]="!!draft()" [error]="store.error()" what="settings" [rows]="4" (retry)="store.load()">
         @if (draft(); as d) {
           <div class="stack">
-            <p class="posture" aria-label="What Dyno changes"><dy-icon name="shield-check" /> Dyno only reads until you enable a rule or click an action; every change is logged and undoable where the OS allows. The few changes that need administrator rights use a small helper that is installed only when you approve one.</p>
+            <p class="posture" aria-label="What Dyno changes"><dy-icon name="shield-check" /> Dyno only reads and changes nothing on your computer.</p>
 
             <section class="card" aria-label="Appearance">
               <h2>Appearance</h2>
@@ -214,8 +213,6 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
           </div>
         }
       </dy-async>
-
-      <dy-helper-card />
 
       <section class="card" aria-label="Plugins">
         <h2>Plugins</h2>

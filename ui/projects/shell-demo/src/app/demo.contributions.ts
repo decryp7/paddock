@@ -22,66 +22,53 @@ import { defineStorageConfirmDialog, defineStorageSettingsPage } from '@decryp7/
 import { definePacksSettingsPage } from '@decryp7/paddock-ui/shell/packs';
 import { defineServiceSettingsPage } from '@decryp7/paddock-ui/shell/service';
 import { defineSetup } from '@decryp7/paddock-ui/shell/setup';
+import { defineConfirmDialog } from '@decryp7/paddock-ui/shell/confirm';
 import type { DemoContext } from './demo-context';
 import type { DemoStatus } from './dialogs/demo-ipc';
+import { DIALOG_CONTRACTS } from './generated/dialog-contracts';
 
 // The registration file of the shell demo: static data and loaders only (plan §9). Its lints run in
 // shell/testing/src/reference-apps.spec.ts (contributions) and e2e/shell-demo.spec.ts (lazy imports).
 
 /** A decision: modal, fitted to its content. */
-export const CONFIRM_RESET_DIALOG = defineDialog({
-  id: 'sd.confirm-reset',
-  kind: 'decision',
+export const CONFIRM_RESET_DIALOG = defineDialog(DIALOG_CONTRACTS['sd.confirm-reset'], {
   title: msg('sd.dialog.confirm-reset', 'Reset greetings?'),
-  width: 420,
   result: type<boolean>(),
-  commands: [],
   load: () => import('./dialogs/confirm-reset-dialog').then((m) => m.ConfirmResetDialog),
 });
 
 /** A form that blocks its opener. */
-export const RENAME_DIALOG = defineDialog({
-  id: 'sd.rename',
-  kind: 'form',
-  modality: 'modal',
+export const RENAME_DIALOG = defineDialog(DIALOG_CONTRACTS['sd.rename'], {
   title: msg('sd.dialog.rename', 'Rename'),
-  width: 440,
   result: type<string>(),
-  commands: [],
   load: () => import('./dialogs/rename-dialog').then((m) => m.RenameDialog),
 });
 
 /** A viewer: modeless, 680x560 at least, grows only. */
-export const ABOUT_DIALOG = defineDialog({
-  id: 'sd.about',
-  kind: 'viewer',
+export const ABOUT_DIALOG = defineDialog(DIALOG_CONTRACTS['sd.about'], {
   title: msg('sd.dialog.about', 'About the shell demo'),
-  commands: [],
   load: () => import('./dialogs/about-dialog').then((m) => m.AboutDialog),
 });
 
 /** A tool: modeless, large, remembers its size; it calls the engine, so its contract names that command. */
-export const INSPECTOR_DIALOG = defineDialog({
-  id: 'sd.inspector',
-  kind: 'tool',
+export const INSPECTOR_DIALOG = defineDialog(DIALOG_CONTRACTS['sd.inspector'], {
   title: msg('sd.dialog.inspector', 'Engine inspector'),
-  width: 720,
-  height: 480,
   result: type<DemoStatus>(),
-  commands: ['demo_status'],
   providers: () => import('./dialogs/demo-ipc').then((m) => m.INSPECTOR_PROVIDERS),
   load: () => import('./dialogs/inspector-dialog').then((m) => m.InspectorDialog),
 });
 
+/** A save prompt: Save, Don't save and Cancel, in the OS's order (ADR 0026 §2). */
+export const UNSAVED_DIALOG = defineDialog(DIALOG_CONTRACTS['sd.unsaved'], {
+  title: msg('sd.dialog.unsaved', 'Unsaved changes'),
+  result: type<'save' | 'discard'>(),
+  load: () => import('./dialogs/unsaved-dialog').then((m) => m.UnsavedDialog),
+});
+
 /** A required choice: a modal without Cancel. */
-export const CHOOSE_STYLE_DIALOG = defineDialog({
-  id: 'sd.choose-style',
-  kind: 'decision',
+export const CHOOSE_STYLE_DIALOG = defineDialog(DIALOG_CONTRACTS['sd.choose-style'], {
   title: msg('sd.dialog.choose-style', 'Choose a greeting style'),
-  width: 400,
-  requiredChoice: true,
   result: type<'casual' | 'formal'>(),
-  commands: [],
   load: () => import('./dialogs/choose-style-dialog').then((m) => m.ChooseStyleDialog),
 });
 
@@ -89,49 +76,8 @@ export const CHOOSE_STYLE_DIALOG = defineDialog({
  * The Settings window (plan S10): the shell's window as the app's own dialog, so its contract is in this registry. A tool:
  * modeless, large, remembers its size; it reads and changes settings through the settings commands only.
  */
-export const SETTINGS_DIALOG = defineDialog({
-  id: 'pd.settings',
-  kind: 'tool',
+export const SETTINGS_DIALOG = defineDialog(DIALOG_CONTRACTS['pd.settings'], {
   title: msg('pd.settings.title', 'Settings'),
-  width: 880,
-  height: 620,
-  // The settings commands, the Background service page's (it asks and repairs the service from this window) and the
-  // whole-app relaunch of the Language page, and the Notification channels page's (the secret is set in the secret dialog's window, not here).
-  commands: [
-    'settings_overview',
-    'settings_reset',
-    'settings_set',
-    'service_status',
-    'service_repair',
-    'service_install',
-    'open_login_items',
-    'setup_state',
-    'setup_act',
-    'setup_repair',
-    'setup_skip',
-    'setup_finish',
-    'packs_status',
-    'packs_reload',
-    'channels_get',
-    'channels_save',
-    'channels_clear_secret',
-    'channels_test',
-    'storage_last',
-    'storage_scan',
-    'storage_clear',
-    'storage_tree',
-    'storage_cancel',
-    'storage_reveal',
-    // The AI access page's (MCP_SETTINGS_COMMANDS; the key is issued in the key dialog's window, not here).
-    'mcp_get',
-    'mcp_save',
-    'mcp_revoke_key',
-    'mcp_audit',
-    'mcp_audit_clear',
-    // The channels page opens the secret dialog (a dialog may open another; the window then lists `dialog_open`).
-    'dialog_open',
-    'app_relaunch',
-  ],
   providers: () => import('./demo-settings-window').then((m) => m.DEMO_SETTINGS_WINDOW),
   load: () => import('@decryp7/paddock-ui/shell/settings/window').then((m) => m.PdSettingsWindow),
 });
@@ -227,7 +173,12 @@ export const SHELL_ABOUT_DIALOGS = defineAboutDialogs({ providers: () => import(
 /** Report a problem (plan X2): a decision that shows every file with its size before saving; its window boots the demo's diagnostics providers. */
 export const REPORT_PROBLEM_DIALOG = defineDiagnosticsDialog({ providers: () => import('./diagnostics.providers').then((m) => m.DIAGNOSTICS_PROVIDERS) });
 
-export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, CHANNELS_REMOVE_DIALOG, MCP_KEY_DIALOG, STORAGE_CONFIRM_DIALOG, MCP_REVOKE_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG, SETUP.dialog] as const;
+/** The shared confirmation (ADR 0026 §5): the demo asks with it before it forgets the greetings from the Dialogs page. */
+export const CONFIRM_DIALOG = defineConfirmDialog({
+  load: () => import('@decryp7/paddock-ui/shell/confirm/dialog').then((m) => m.PdConfirmDialog),
+});
+
+export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, CONFIRM_DIALOG, UNSAVED_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, CHANNELS_REMOVE_DIALOG, MCP_KEY_DIALOG, STORAGE_CONFIRM_DIALOG, MCP_REVOKE_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG, SETUP.dialog] as const;
 
 /** About's commands, Help menu items and notice kind (its dialogs are among `DEMO_DIALOGS`). */
 export const SHELL_ABOUT_CONTRIBUTIONS = aboutContributions([]);

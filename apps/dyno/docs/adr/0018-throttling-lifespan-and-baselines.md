@@ -1,6 +1,6 @@
 # 0018 Throttling, hardware life forecasts and learned baselines
 
-Status: accepted (2026-10-23). Related: 0001, 0002, 0006, 0008, 0013.
+Status: accepted (2026-10-23); amended by ADR 0021 (2026-10-28) where it describes writes.  Related: 0001, 0002, 0006, 0008, 0013.
 
 ## Context
 

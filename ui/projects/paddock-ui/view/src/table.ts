@@ -102,7 +102,7 @@ export function tableWindow(t: Table): TableWindow {
     .pd-view-table__scroll { overflow: auto; max-width: 100%; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); }
     ${SCROLL_CSS}
     .pd-view-table__table { width: 100%; border-collapse: collapse; font-size: var(--pd-text-body); line-height: var(--pd-lh-body); }
-    th { position: sticky; top: 0; z-index: 1; background: var(--pd-surface-2); text-align: start; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); white-space: nowrap; padding: 0 var(--pd-space-3); height: var(--pd-row-height); border-bottom: 1px solid var(--pd-hairline); }
+    th { position: sticky; top: 0; z-index: var(--pd-z-table-header); background: var(--pd-surface-2); text-align: start; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); white-space: nowrap; padding: 0 var(--pd-space-3); height: var(--pd-row-height); border-bottom: 1px solid var(--pd-hairline); }
     td { padding: var(--pd-space-1) var(--pd-space-3); border-bottom: 1px solid var(--pd-hairline); min-height: var(--pd-row-height); vertical-align: middle; font-variant-numeric: tabular-nums; color: var(--pd-view-tone, var(--pd-text)); }
     td.pd-view-tone-neutral { color: var(--pd-text); }
     /* A status is a short word with its mark: it stays on one line. */

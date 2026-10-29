@@ -177,7 +177,7 @@ export class Diagram {
       this.raw(`<mxCell id="legend" value="" style="rounded=1;absoluteArcSize=1;arcSize=14;strokeWidth=1;strokeColor=${ld(this.t.group.s)};fillColor=none;" vertex="1" parent="1"><mxGeometry x="48" y="${y}" width="${total}" height="40" as="geometry"/></mxCell>`);
       for (const { it, x: lx, lw, sw } of parts) {
         const cy = y + 12;
-        if (it.kind === 'line' || it.kind === 'dashline') this.line([lx, cy + 8], [lx + 28, cy + 8], { dash: it.kind === 'dashline' });
+        if (it.kind === 'line' || it.kind === 'dashline') this.line([lx, cy + 8], [lx + 28, cy + 8], { dash: it.kind === 'dashline', arrow: it.arrow ?? 'block' });
         else if (it.kind === 'tag') this.tag(lx + sw, cy - 1, 'planned', it.role); // role: the stroke of the tagged nodes
         else {
           const planned = it.kind === 'planned';

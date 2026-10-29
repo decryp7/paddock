@@ -36,3 +36,15 @@ then stop and delete the VM from a trap (success, failure, Ctrl-C, timeout). It 
 are arm64) or Windows (Tart has no Windows guests); the Windows service path stays on the Windows runner.
 `--guest linux` gives a real `systemd --user` session (`scripts/shell-demo/smoke-service-update-linux.sh`); a tray or
 notification smoke on a desktop session is not written yet.
+
+## paddock-dev (`./dev`)
+
+`tools/paddock-dev/` is the developer and CI tool of ADR 0022: a Rust binary with its own Cargo workspace and lockfile
+(ADR 0014's third kind), run through `./dev` (`dev.cmd` on Windows) at the repository root, from any subfolder. The wrapper
+names the binary by an input hash (git's hash over the tool's inputs in `tools/paddock-dev/inputs.txt` plus the compiler
+cargo will use), uses the per-user cache `~/.paddock-dev/bin/<hash>/` (`PADDOCK_DEV_HOME`), and builds into
+`tools/paddock-dev/target/` (`PADDOCK_DEV_TARGET_DIR`; agents put it outside `~`) on a miss or when an input has
+uncommitted changes. `PADDOCK_DEV_FRESH=1` builds from source in a fresh folder without a compiler wrapper (release jobs).
+The prebuilt download (the `dev-tool.yml` package) is not wired yet. Commands today: `self hash`, `ci slot
+acquire|release|status`, `graph affected`; the rest arrives with R1 and later. When a path dependency in `crates/` changes its
+dependencies, regenerate the tool's lockfile in the same change (`cd tools/paddock-dev && cargo update -w`).

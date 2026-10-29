@@ -118,8 +118,10 @@ The states of an action are part of the contract:
   `aria-busy`, and the body's controls are inert.
   - If the action is `abortable`, the dismiss action stays enabled. Dismissing aborts the signal and closes with
     `dismissed`; a late resolution is ignored.
-  - If it is not, a dismissal (button, key or OS close) waits until the work settles and then applies. The footer says
-    "Finishing…". Work that can last longer than a moment is a job (ADR 0008), not a busy action.
+  - If it is not, a dismissal (button, key or OS close) waits until the work settles. The footer says "Finishing…". If
+    the work then answers, the dialog closes as answered, because the work happened and the opener must not be told
+    otherwise (user, 2026-10-28); if it fails or was a `run`, the dismissal applies. Work that can last longer than a
+    moment is a job (ADR 0008), not a busy action.
 - **Rejected.** `answer` or `run` rejects (throws): the dialog stays open, the user's input is kept, and the frame shows
   an inline alert above the body with the error's user message (`DialogActionError.message`, else a generic sentence)
   and a **Try again** button that runs the same action again. Focus moves to Try again. The rejection is logged with the
@@ -236,9 +238,13 @@ The frame also measures and refits, as ADR 0016 decision 5 describes:
    Placement is on the parent's monitor (mixed DPI and negative coordinates included). A remembered offset is used only
    when the whole dialog stays on that monitor. A second open of the same id (or instance key) focuses the open window;
    while the first is still pending, it is a no-op that marks the window to be focused when it shows.
-2. **Ready handshake.** The dialog webview boots (rule 34). After the first layout and `document.fonts.ready`, the frame
-   sends `dialog_ready { content, minContent }`. This replaces `window_ready` for dialog windows and is also the first
-   fit.
+2. **Ready handshake.** The dialog webview boots (rule 34). The ready handshake must not wait for a frame
+   (`afterNextRender`, rAF): the frame reports `dialog_ready { content, minContent, viewportHeight }` after the content
+   and `document.fonts.ready`, from a synchronous layout read with the frame at the declared width, re-reading once if
+   the read started a font load (amended after the 1.1-0 spike, research note 2026-10-28). This replaces `window_ready`
+   for dialog windows and is also the first fit.
+   - The fit adds the viewport delta (the window's inner height minus the page's `innerHeight`, read hidden; the page
+     sends `viewportHeight`) to the content height.
    - Sizes are the dialog's own **inner** logical size. Rust sets them through `set_size`/`set_min_size` with
      `LogicalSize` (Tauri's sizes are inner sizes), converting once and rounding the physical size up.
    - The cap is checked against the work area minus the dialog window's own decorations: its outer minus inner size,
@@ -251,18 +257,18 @@ The frame also measures and refits, as ADR 0016 decision 5 describes:
    `loading`). A later `dialog_ready` fits it (one resize, accepted in this fallback only). The deadline is separate
    from `paddock-startup`'s reload watchdog: that one still reloads a page that never reports ready (about 10 s) and
    asks the user after a failed reload. The UI never times out the content itself (ER-19).
-4. **Spike first (package 1.1-0).** Whether a hidden window runs layout and resolves `fonts.ready` differs by webview.
-   WKWebView may throttle hidden windows, WebView2 may skip layout in a hidden controller, and WebKitGTK may not map the
-   surface. The spike measures all three. It compares (a) hidden, then `dialog_ready`, then show, against (b) a visible
-   window at alpha 0 (or off-screen), then show, and against (c) a synchronous layout after `fonts.ready`. It records
-   the time to ready, and whether the measured height equals the height after show, at scales 1, 1.25 and 1.5. 1.1b
-   implements the mechanism the spike picks per OS. The contract above (show on ready or at the deadline, parent
-   disabled at show) holds for any of them.
+4. **The show mechanism.** Method d on all three OS (research note 2026-10-28,
+   `docs/research/2026-10-28-dialog-hidden-windows.md`): the window is created hidden and shown on `dialog_ready`. The
+   declared width is dropped at show by a class or attribute, never by rewriting a stylesheet (rewriting the style that
+   declares the font reloaded it at show on Windows). `show_mechanism(os)` in `paddock-dialogs` is the one place that
+   chooses.
 5. **Refit.** `dialog_fit { content, minContent }` (renamed from `dialog_fit_height`) runs on the triggers in §2.
    Moving to a monitor with another scale refits.
 6. **Parent and modality.**
    - A modal is owned by its parent. The parent is disabled natively on Windows and Linux. On macOS the host draws a
-     scrim instead, because a sheet would block key focus.
+     scrim instead, because a sheet would block key focus; the scrim appears when the dialog shows.
+   - On macOS the parent is attached at show, not at create (tao orders a child window in at creation;
+     `addChildWindow:ordered:`).
    - A modal opened from a modal is owned by the top one.
    - Modeless dialogs are owned on Windows and Linux. They are independent on macOS so that they can move to another
      display.
@@ -276,6 +282,8 @@ The frame also measures and refits, as ADR 0016 decision 5 describes:
    `pd-dialog-host`). The same `DialogFrame`, `layoutActions` and contract apply.
    - The overlay stays hidden until the frame's ready signal or the same show deadline.
    - A modal blocks the page with `ModalGate` and the scrim, and focus is trapped in the dialog (CDK `FocusTrap`).
+   - A press on the backdrop of a modal is a dismissal, with the same rules as Escape (a required choice and busy work
+     keep the dialog), as a click outside a modal sheet would be.
    - Escape and the dismiss rules are identical.
    - Sizes are the overlay's inner size, clamped to the viewport by the same kind table.
    - The command recorder tags the calls with the dialog id.
@@ -316,7 +324,16 @@ answers `answered: true` or `dismissed`, and the opener acts.
 - **Lint `paddock/dialog-frame-footer`.** A registered dialog component may not contain a `.foot`, `.actions` or
   `footer` element, or a Close, Cancel or OK button, outside `dialogActions`.
 - **Rust.**
-  - The 1.1-0 spike's probe, kept as an `#[ignore]` real-window test that the full suite runs on each OS.
+  - The 1.1-0 spike's probe, kept as a real-window test (`paddock-dialogs/tests/show_probe.rs`) that opens the built
+    shell-demo's real dialog frame (`PADDOCK_PROBE_DIST`) and checks the window was shown at the frame's measured
+    height, with no scroll and the footer fully visible, and that the modal dialog's window was still hidden when its
+    page's ready arrived. It reports without waiting for animation frames. It opens real windows (ER-14) and a sleeping
+    display would stall it, so it is **off by default**: the nightly job `dialog-window-probe` runs on a manual run
+    (`workflow_dispatch`) or when the repository variable `PADDOCK_REAL_WINDOW_PROBE` is `true`, on macOS, Windows and
+    Linux (under `xvfb-run`) with `PADDOCK_REAL_WINDOWS=1`, and is not a gate of the green nightly. Never in branch CI.
+    **Results:** wired as an opt-in job (`.gitea/workflows/nightly.yml`, job `dialog-window-probe`); results to be recorded per
+    OS here, none yet. (The spike's research note, `docs/research/2026-10-28-dialog-hidden-windows.md`, lives on the
+    `spike/dialog-hidden-windows` branch until it is merged; its Results section takes the same line then.)
   - A placement property test: scale 1-3, work areas 800x600 to 7680x4320, any remembered size.
   - Compile-fail tests (`trybuild`) of `dialogs!`.
   - Staleness tests of the generated TypeScript.

@@ -15,6 +15,7 @@ import {
   input,
   signal,
 } from '@angular/core';
+import { MatTooltip } from '@angular/material/tooltip';
 import { evaluate } from '../commands';
 import { ShellContextHost } from '../context';
 import type { StatusItemDef } from '../define';
@@ -62,7 +63,7 @@ export class PdStatusMeasure {
 @Component({
   selector: 'pd-status-bar',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdPartOutlet, PdStatusMeasure, PdIcon],
+  imports: [PdPartOutlet, PdStatusMeasure, PdIcon, MatTooltip],
   host: { '[class.pd-all]': 'showAll()', '[class.pd-compact]': 'compact()' },
   providers: [{ provide: STATUS_COMPACT, useFactory: () => inject(PdStatusBar).compact }],
   template: `
@@ -80,7 +81,7 @@ export class PdStatusMeasure {
         </div>
       }
       @if (hidden().size || showAll()) {
-        <button type="button" class="pd-more" data-testid="status-more" [attr.aria-expanded]="showAll()" [attr.aria-label]="moreLabel()" [title]="moreLabel()" (click)="showAll.set(!showAll())">
+        <button type="button" class="pd-more" data-testid="status-more" [attr.aria-expanded]="showAll()" [attr.aria-label]="moreLabel()" [matTooltip]="moreLabel()" (click)="showAll.set(!showAll())">
           <pd-icon name="pd:more" />
           @if (!showAll()) {
             <span class="pd-more-count" aria-hidden="true">{{ hidden().size }}</span>
