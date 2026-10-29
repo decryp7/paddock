@@ -6,6 +6,11 @@ Tests must not leave `debrief-*` or `imt-*` folders in the OS temp directory. CI
 - **Check**: `scripts/ci/check-temp-leaks.mjs`. `--snapshot <file>` records the matching folders that exist before the
   tests; `--check <file>` exits 1 naming the ones that appeared since. Without a baseline every matching folder counts.
   `--dir <path>` scans another folder. Its test is `scripts/ci/check-temp-leaks.test.mjs`.
+- **Shared folders**: when the temp folder is too long for a socket path (96 bytes; macOS' is), an endpoint folder
+  falls back to `$XDG_RUNTIME_DIR` or `/tmp`. Without `--dir` the check also scans those two for names of exactly the
+  endpoint shape (`debrief-<prefix>-<12 hex>`, or a confined test folder `dbw` plus six characters), never other files.
+  A test that kills a host on purpose (the store worker's kill tests) confines it: `WorkerConfig::env` sets `TMPDIR` and
+  `XDG_RUNTIME_DIR` to a short folder under `/tmp` that the test owns (`confined()` in `debrief-store-worker/tests/it/worker.rs`).
 - **Rust tests**: make scratch folders with `tempfile::TempDir` (or `tempfile::Builder::new().prefix("debrief-...-")`) and
   keep the guard alive for the test, so the folder is removed on panic too. Unit tests in `debrief-core` use
   `crate::test_dirs::scratch_dir(prefix)`, which keeps the guard in a thread-local for the test's thread.

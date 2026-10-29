@@ -1,7 +1,8 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
 import { ProfileSpan, ProfileTimeRange } from '../../core/api.types';
 import { formatDateTime, formatDuration } from '../../core/format';
 import { WorkspaceStore } from '../../core/workspace.store';
+import { StripChip, TimelineChips } from '../../timeline/timeline-chips';
 import { ProfilingBackend } from '../profiling-backend';
 import { ProfileViewState } from '../profile-view-state.store';
 import { ProfilingNavigator } from '../profiling-navigator';
@@ -13,17 +14,14 @@ export interface SpanVm {
   width: number;
   /** The part of the capture inside the visible range, in ns since its start (null = all of it). */
   range: ProfileTimeRange | null;
-  /** Label row, so labels of nearby captures do not cover each other. */
-  row: number;
 }
 
 /** Estimated label width in px (monospace-ish 10px font, capped like the CSS). */
 export const labelWidth = (name: string) => Math.min(220, 12 + name.length * 6.5);
 
-/** Places spans on the visible range (dropping those outside) and stacks overlapping labels. Pure. */
-export function layoutSpans(spans: readonly ProfileSpan[], view: { from: number; to: number }, widthPx = 1000): SpanVm[] {
+/** Places spans on the visible range (dropping those outside). Pure. */
+export function layoutSpans(spans: readonly ProfileSpan[], view: { from: number; to: number }): SpanVm[] {
   const span = Math.max(1, view.to - view.from);
-  const rowEnds: number[] = [];
   return spans
     .filter((s) => s.toMs >= view.from && s.fromMs <= view.to)
     .sort((a, b) => a.fromMs - b.fromMs || a.id - b.id)
@@ -32,13 +30,8 @@ export function layoutSpans(spans: readonly ProfileSpan[], view: { from: number;
       const to = Math.min(s.toMs, view.to);
       const clipped = s.capture === 'profile' && (from > s.fromMs || to < s.toMs);
       const left = ((from - view.from) / span) * 100;
-      const x = (left / 100) * widthPx;
-      let row = rowEnds.findIndex((end) => end <= x);
-      if (row < 0) row = rowEnds.push(0) - 1;
-      rowEnds[row] = x + labelWidth(s.name) + 4;
       return {
         span: s,
-        row,
         left,
         width: ((to - from) / span) * 100,
         range: clipped ? { fromNs: Math.round((from - s.fromMs) * 1e6), toNs: Math.round((to - s.fromMs) * 1e6) } : null,
@@ -56,26 +49,12 @@ export function layoutSpans(spans: readonly ProfileSpan[], view: { from: number;
   template: `
     @for (s of items(); track s.span.id) {
       <div class="band" [class.heap]="s.span.capture === 'heap'" [style.left.%]="s.left" [style.width.%]="s.width" aria-hidden="true"></div>
-      <button
-        type="button"
-        class="chip"
-        data-testid="profile-span"
-        [style.left.%]="s.left"
-        [style.top.px]="52 + s.row * 16"
-        [title]="title(s)"
-        [attr.aria-label]="openLabel(s)"
-        (pointerdown)="$event.stopPropagation()"
-        (click)="open(s)"
-      >{{ s.span.capture === 'heap' ? '◆ ' : '▶ ' }}{{ s.span.name }}</button>
     }
   `,
   styles: `
     :host { position: absolute; inset: 0; pointer-events: none; }
-    .band { position: absolute; top: 50px; bottom: 0; min-width: 2px; background: color-mix(in srgb, var(--s4) 12%, transparent); border-left: 1px dashed var(--s4); border-right: 1px dashed var(--s4); }
+    .band { position: absolute; top: calc(var(--tl-strip-top, 50px) + var(--tl-strip-h, 0px)); bottom: 0; min-width: 2px; background: color-mix(in srgb, var(--s4) 12%, transparent); border-left: 1px dashed var(--s4); border-right: 1px dashed var(--s4); }
     .band.heap { background: none; border-right: 0; }
-    .chip { pointer-events: auto; position: absolute; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: var(--fs-2xs); line-height: 14px; padding: 0 5px; border-radius: 3px; border: 1px solid var(--s4); background: var(--bg-3); color: var(--text); cursor: pointer; z-index: 2; }
-    .chip:hover { background: var(--bg-hover); }
-    .chip:focus-visible { outline: 2px solid var(--focus-ring); }
   `,
 })
 export class ProfileSpanTrack {
@@ -87,11 +66,12 @@ export class ProfileSpanTrack {
   private readonly state = inject(ProfileViewState);
   private readonly nav = inject(ProfilingNavigator);
   private readonly workspace = inject(WorkspaceStore);
+  private readonly chips = inject(TimelineChips, { optional: true });
   private readonly spans = signal<ProfileSpan[]>([]);
 
   protected readonly items = computed(() => {
     const v = this.view();
-    return v ? layoutSpans(this.spans(), v, this.width()) : [];
+    return v ? layoutSpans(this.spans(), v) : [];
   });
 
   constructor() {
@@ -99,6 +79,25 @@ export class ProfileSpanTrack {
       this.state.capturesVersion();
       untracked(() => void this.load());
     });
+    const chips = this.chips;
+    if (chips) {
+      chips.register('profile', computed(() => this.items().map((s) => this.chip(s))));
+      inject(DestroyRef).onDestroy(() => chips.clear('profile'));
+    }
+  }
+
+  private chip(s: SpanVm): StripChip {
+    return {
+      id: `profile-${s.span.id}`,
+      x: (s.left / 100) * this.width(),
+      w: labelWidth(s.span.name),
+      text: `${s.span.capture === 'heap' ? '◆ ' : '▶ '}${s.span.name}`,
+      title: this.title(s),
+      label: this.openLabel(s),
+      testid: 'profile-span',
+      accent: 'var(--s4)',
+      open: () => this.open(s),
+    };
   }
 
   private async load(): Promise<void> {
