@@ -42,7 +42,7 @@ export {
 } from './keyboard.ts';
 export { LAYOUT_WIDTHS, WINDOW_SIZES, horizontalOverflow, expectNoHorizontalScroll, expectWithinWidth, resize } from './layout.ts';
 export { headerCovers, headerTrack, expectHeaderOnTop, isOpaqueColor, type GridParts, type HeaderCover, type HeaderFrame, type HeaderReport } from './grid.ts';
-export { coveredInteractive, expectNothingCovers, DESIGNED_OVERLAYS, formatCovered, INTERACTIVE_SELECTOR, type AllowedOverlap, type CoveredElement, type HitTestOptions } from './hit-test.ts';
+export { coveredInteractive, expectNothingCovers, DESIGNED_OVERLAYS, OVERLAY_OWNERS, formatCovered, INTERACTIVE_SELECTOR, type AllowedOverlap, type CoveredElement, type HitTestOptions } from './hit-test.ts';
 export { waitForStableFrame, captureStable, type StableFrameOptions } from './screenshot.ts';
 export { installTauriFake, TauriFake, START_REPLIES, SHELL_PLUGIN_PREFIX, type IpcCall, type TauriFakeOptions } from './ipc.ts';
 export {
