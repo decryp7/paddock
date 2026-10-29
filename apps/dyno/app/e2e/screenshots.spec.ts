@@ -15,7 +15,7 @@ async function choose(page: Page, label: string, option: string | RegExp): Promi
 
 /** Opens the shell's Settings window (Mod+, on the mock's macOS) and shows Dyno's page of it. */
 async function openSettings(page: Page): Promise<void> {
-  await page.keyboard.press('Meta+,');
+  await page.keyboard.press('ControlOrMeta+Comma');
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await dialog.getByText('Dyno', { exact: true }).click();
