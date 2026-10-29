@@ -303,7 +303,7 @@ fn many_alternates_are_refused() {
     // .git/objects -> hop1 -> hop2 -> ... -> hop10, all inside the workspace
     let mut previous = repo.dir.join(".git/objects");
     for i in 1..=10 {
-        let hop = repo.dir.join(format!("hop{i}/objects"));
+        let hop = repo.dir.join(format!(".git/hop{i}/objects"));
         std::fs::create_dir_all(hop.join("info")).unwrap();
         std::fs::create_dir_all(previous.join("info")).unwrap();
         std::fs::write(previous.join("info/alternates"), format!("{}\n", hop.display())).unwrap();
@@ -341,12 +341,12 @@ fn a_commondir_inside_the_workspace_is_allowed() {
 }
 
 #[test]
-fn an_alternate_inside_the_workspace_is_allowed() {
+fn an_alternate_inside_the_git_folder_is_allowed() {
     let repo = Repo::new();
     let a = repo.commit(1_000, "ann", &[("a.rs", "1")]);
-    let inside = repo.dir.join("spare/objects");
+    let inside = repo.dir.join(".git/spare/objects");
     std::fs::create_dir_all(inside.join("info")).unwrap();
-    std::fs::write(repo.dir.join(".git/objects/info/alternates"), "../../spare/objects\n").unwrap();
+    std::fs::write(repo.dir.join(".git/objects/info/alternates"), "../spare/objects\n").unwrap();
     let history = open(&repo.dir).unwrap();
     assert_eq!(history.read_at(&a, &p("a.rs"), 10, &live()).unwrap(), b"1");
 }
@@ -435,13 +435,13 @@ fn a_quoted_alternates_line_is_judged_by_the_parser_that_reads_it() {
 }
 
 #[test]
-fn a_quoted_alternates_line_that_stays_inside_is_allowed() {
+fn a_quoted_alternates_line_that_stays_in_the_git_folder_is_allowed() {
     let repo = Repo::new();
     let a = repo.commit(1_000, "ann", &[("a.rs", "1")]);
-    std::fs::create_dir_all(repo.dir.join("spare/objects")).unwrap();
+    std::fs::create_dir_all(repo.dir.join(".git/spare/objects")).unwrap();
     std::fs::write(
         alternates_file(&repo),
-        format!("\"{}\"\n", repo.dir.join("spare/objects").display()),
+        format!("\"{}\"\n", repo.dir.join(".git/spare/objects").display()),
     )
     .unwrap();
     assert_eq!(open(&repo.dir).unwrap().read_at(&a, &p("a.rs"), 10, &live()).unwrap(), b"1");
@@ -555,6 +555,20 @@ fn the_trap_with_extra_ways_out_is_refused() {
         "{:?}",
         r.map(|_| "opened")
     );
+    // an alternate inside the workspace but outside .git, whose pack folder is a link out
+    #[cfg(unix)]
+    {
+        let vendor = trap.workspace.join("vendor/objects");
+        std::fs::create_dir_all(vendor.join("info")).unwrap();
+        std::os::unix::fs::symlink(outside_objects.join("pack"), vendor.join("pack")).unwrap();
+        std::fs::write(
+            trap.workspace.join(".git/objects/info/alternates"),
+            format!("{}\n", vendor.display()),
+        )
+        .unwrap();
+        let r = open(&trap.workspace);
+        assert!(matches!(r, Err(OpenError::AlternateOutsideGitDir(_))), "{:?}", r.map(|_| "opened"));
+    }
     std::fs::remove_file(trap.workspace.join(".git/objects/info/alternates")).unwrap();
     #[cfg(unix)]
     {
@@ -570,11 +584,72 @@ fn the_trap_with_extra_ways_out_is_refused() {
 fn a_missing_alternate_inside_the_workspace_is_ignored_and_one_that_cannot_be_resolved_is_refused() {
     let repo = Repo::new();
     repo.commit(1_000, "ann", &[("a.rs", "1")]);
-    std::fs::write(alternates_file(&repo), format!("{}\n", repo.dir.join("no-such/objects").display())).unwrap();
+    std::fs::write(
+        alternates_file(&repo),
+        format!("{}\n", repo.dir.join(".git/no-such/objects").display()),
+    )
+    .unwrap();
     assert!(open(&repo.dir).is_ok(), "git ignores an alternate that is not there");
     std::fs::write(alternates_file(&repo), format!("{}x\n", "../".repeat(60))).unwrap();
     assert!(
         matches!(open(&repo.dir), Err(OpenError::Backend(_))),
         "a path that climbs above the root cannot be judged, so it is refused"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_alternate_in_the_workspace_but_outside_the_git_folder_is_refused() {
+    // the second review's probe: vendor/objects is inside the workspace, but its pack folder is a link to an outside pack
+    let outside = Repo::new();
+    outside.commit(1_000, "ann", &[("secret.txt", "outside content")]);
+    outside.git(&["gc", "-q"], 0);
+    let repo = Repo::new();
+    let a = repo.commit(1_000, "ann", &[("a.rs", "1")]);
+    let vendor = repo.dir.join("vendor/objects");
+    std::fs::create_dir_all(vendor.join("info")).unwrap();
+    std::os::unix::fs::symlink(outside.dir.join(".git/objects/pack"), vendor.join("pack")).unwrap();
+    std::fs::write(alternates_file(&repo), format!("{}\n", vendor.display())).unwrap();
+    let r = open(&repo.dir);
+    match r {
+        Err(OpenError::AlternateOutsideGitDir(path)) => assert!(path.ends_with("vendor/objects"), "{path:?}"),
+        other => panic!(
+            "the link-bearing alternate opened or failed otherwise: {:?}",
+            other.map(|_| "opened")
+        ),
+    }
+    // and the repository itself is still readable without that alternate
+    std::fs::remove_file(alternates_file(&repo)).unwrap();
+    assert_eq!(open(&repo.dir).unwrap().read_at(&a, &p("a.rs"), 10, &live()).unwrap(), b"1");
+}
+
+/// A measurement helper, not a test: `PN_WALK_REPO=<a repository> cargo test -p pacenotes-git --test it -- --ignored
+/// --nocapture measure_open` prints how long `open` (the git-folder walk plus gix) takes (rule 48/51; results are in
+/// docs/performance.md).
+#[test]
+#[ignore = "a measurement, run by hand with PN_WALK_REPO"]
+fn measure_open() {
+    let repo = std::env::var("PN_WALK_REPO").expect("PN_WALK_REPO names a repository");
+    let started = std::time::Instant::now();
+    let result = open(Path::new(&repo)).map(|_| ());
+    println!("open({repo}) -> {result:?} in {:?}", started.elapsed());
+}
+
+#[cfg(unix)]
+#[test]
+fn folders_gix_never_reads_are_not_walked_but_a_link_in_their_place_is_refused() {
+    let repo = Repo::new();
+    repo.commit(1_000, "ann", &[("a.rs", "1")]);
+    std::fs::create_dir_all(repo.dir.join(".git/hooks/inner")).unwrap();
+    std::os::unix::fs::symlink("/etc", repo.dir.join(".git/hooks/inner/link")).unwrap();
+    assert!(
+        open(&repo.dir).is_ok(),
+        "hooks are never opened, so a link inside them is not walked"
+    );
+    std::fs::remove_dir_all(repo.dir.join(".git/hooks")).unwrap();
+    std::os::unix::fs::symlink("/etc", repo.dir.join(".git/hooks")).unwrap();
+    assert!(
+        matches!(open(&repo.dir), Err(OpenError::SymlinkInGitDir(_))),
+        "a link named hooks is itself refused"
     );
 }

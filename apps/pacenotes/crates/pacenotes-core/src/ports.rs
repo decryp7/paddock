@@ -73,7 +73,9 @@ pub struct FileChange {
 pub struct ChangeSet {
     /// Sorted by path, at most the caller's limit.
     pub changes: Vec<FileChange>,
-    /// True when more files changed than `changes` holds.
+    /// True when more files changed than `changes` holds. A walk that was cut (it stops after `2 * limit + 2` raw changes)
+    /// may return **fewer than `limit` files** and may split a rename into an added and a deleted entry, because the other half
+    /// was not reached; `truncated` is the signal that the list is a prefix of the changes, not all of them.
     pub truncated: bool,
     /// How many changed files are not listed because their names are not valid [`RepoPath`]s (a backslash, a control
     /// character): counted, never silently dropped.

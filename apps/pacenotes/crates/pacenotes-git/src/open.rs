@@ -8,6 +8,8 @@ use crate::history::GixHistory;
 const MAX_ALTERNATES: usize = 8;
 /// How many entries of a git folder are checked for symbolic links.
 const MAX_GIT_DIR_ENTRIES: usize = 1_000_000;
+/// The top-level folders of a git folder that gix reads; the walk descends only into these.
+const READ_BY_GIX: [&str; 3] = ["objects", "refs", "info"];
 /// How deep the walk of a git folder goes (a git folder is `objects/ab/cdef...`, a few levels).
 const MAX_GIT_DIR_DEPTH: usize = 12;
 
@@ -30,6 +32,10 @@ pub enum OpenError {
     /// More alternate object folders than are followed.
     #[error("the repository borrows objects from more than {MAX_ALTERNATES} folders ({0}); it is not read")]
     AlternatesTooDeep(PathBuf),
+    /// An alternate object folder outside the git folder. It is inside the workspace but nothing checks it for symbolic links,
+    /// so it is not read; objects borrowed from another folder must live under `.git`.
+    #[error("the repository borrows objects from {0}, outside its git folder; it is not read. Keep alternates under .git.")]
+    AlternateOutsideGitDir(PathBuf),
     /// A symbolic link inside the git folder. Git never creates one there, and one can lead anywhere.
     #[error("the git folder holds a symbolic link ({0}); git never creates one there, so the repository is not read")]
     SymlinkInGitDir(PathBuf),
@@ -98,22 +104,25 @@ fn read_first_line(path: &Path) -> Option<String> {
 }
 
 /// Checks the alternates of the object folder `objects` with gix's own resolver, the code that will read them, so the check
-/// and the read agree on quoting, escapes, relative paths and nesting. Every folder it returns must lie inside `root`.
-fn check_alternates(root: &Path, objects: &Path) -> Result<(), OpenError> {
+/// and the read agree on quoting, escapes, relative paths and nesting. Every folder it returns must lie inside `root`
+/// (`OutsideWorkspace`), and under one of `git_dirs` (`AlternateOutsideGitDir`): those are the folders walked for symbolic
+/// links, and an alternate elsewhere could hold a link (to its `pack` folder) that leads out.
+fn check_alternates(root: &Path, objects: &Path, git_dirs: &[&Path]) -> Result<(), OpenError> {
     let dirs = gix::odb::alternate::resolve(objects.to_path_buf(), root).map_err(|e| OpenError::Backend(e.to_string()))?;
     if dirs.len() > MAX_ALTERNATES {
         return Err(OpenError::AlternatesTooDeep(objects.to_path_buf()));
     }
-    for dir in dirs {
-        let target = resolve(&dir);
-        if !inside(root, &target) {
-            return Err(OpenError::OutsideWorkspace {
-                what: "alternates",
-                path: target,
-            });
-        }
+    let targets: Vec<PathBuf> = dirs.iter().map(|d| resolve(d)).collect();
+    if let Some(out) = targets.iter().find(|t| !inside(root, t)) {
+        return Err(OpenError::OutsideWorkspace {
+            what: "alternates",
+            path: out.clone(),
+        });
     }
-    Ok(())
+    match targets.iter().find(|t| !git_dirs.iter().any(|g| inside(g, t))) {
+        Some(elsewhere) => Err(OpenError::AlternateOutsideGitDir(elsewhere.clone())),
+        None => Ok(()),
+    }
 }
 
 /// The entries of `folder` with what each is (from `symlink_metadata`, never following a link): `(path, is_symlink, is_dir)`.
@@ -145,7 +154,9 @@ fn check_no_symlinks(dir: &Path, max_entries: usize, max_depth: usize) -> Result
             if is_symlink {
                 return Err(OpenError::SymlinkInGitDir(path));
             }
-            if is_dir {
+            // At the top of a git folder only what gix reads is descended into: hooks, logs, worktrees and modules are never
+            // opened (the entries themselves are still checked above, so a link named `hooks` is refused).
+            if is_dir && (depth > 0 || path.file_name().is_some_and(|n| READ_BY_GIX.iter().any(|r| n == *r))) {
                 stack.push((path, depth + 1));
             }
         }
@@ -203,7 +214,7 @@ pub fn open(workspace: &Path) -> Result<GixHistory, OpenError> {
     if common != gitdir {
         check_no_symlinks(&common, MAX_GIT_DIR_ENTRIES, MAX_GIT_DIR_DEPTH)?;
     }
-    check_alternates(&root, &objects)?;
+    check_alternates(&root, &objects, &[&gitdir, &common])?;
 
     let options = gix::open::Options::isolated()
         .open_path_as_is(true)
@@ -223,7 +234,7 @@ mod tests {
     fn the_symlink_walk_is_bounded_in_entries_and_depth() {
         let scratch = paddock_testkit::Scratch::new();
         let root = scratch.path("g");
-        std::fs::create_dir_all(root.join("a/b/c")).unwrap();
+        std::fs::create_dir_all(root.join("objects/b/c")).unwrap();
         for i in 0..5 {
             std::fs::write(root.join(format!("f{i}")), "x").unwrap();
         }
