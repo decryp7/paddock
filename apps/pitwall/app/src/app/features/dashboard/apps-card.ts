@@ -32,7 +32,8 @@ export function limitsText(l: AppLimits): string {
         <a class="btn sm" routerLink="/apps">Apps & keys</a>
       </pw-empty-state>
     } @else {
-      <table class="table">
+      <table class="table fit">
+        <colgroup><col /><col class="c-n" /><col class="c-n" /><col class="c-n" /><col class="c-n" /><col class="c-lim" /><col class="c-trend" /></colgroup>
         <thead>
           <tr>
             <th scope="col">App</th>
@@ -50,7 +51,7 @@ export function limitsText(l: AppLimits): string {
               <td>
                 <span class="app">
                   <span class="avatar" [style.--c]="color(a)" aria-hidden="true">{{ a.name[0] }}</span>
-                  <span class="nm">{{ a.name }}</span>
+                  <span class="nm" [matTooltip]="a.name" matTooltipShowDelay="600">{{ a.name }}</span>
                   <span class="conn" [class.on]="a.connected" [attr.aria-label]="a.connected ? 'Connected' : 'Not connected'" [matTooltip]="a.connected ? 'Connected' : 'Not connected'"></span>
                 </span>
               </td>
@@ -70,7 +71,15 @@ export function limitsText(l: AppLimits): string {
     :host {
       display: block;
       margin: 0 calc(-1 * var(--pd-space-4)) calc(-1 * var(--pd-space-2));
-      overflow-x: auto;
+    }
+    .c-n {
+      width: 72px;
+    }
+    .c-lim {
+      width: 96px;
+    }
+    .c-trend {
+      width: 88px;
     }
     .table th:first-child,
     .table td:first-child {
@@ -82,8 +91,12 @@ export function limitsText(l: AppLimits): string {
     }
     .app {
       display: inline-flex;
+      max-width: 100%;
       align-items: center;
       gap: var(--pd-space-2);
+      > * {
+        flex: none;
+      }
     }
     .avatar {
       display: grid;
@@ -97,8 +110,12 @@ export function limitsText(l: AppLimits): string {
       box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent);
       border-radius: var(--pd-radius-tag);
     }
-    .nm {
+    .app > .nm {
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
       font-weight: var(--pd-weight-medium);
+      text-overflow: ellipsis;
     }
     .conn {
       width: 6px;
@@ -120,12 +137,8 @@ export function limitsText(l: AppLimits): string {
     }
     .lim {
       display: block;
-      max-width: 84px;
       overflow: hidden;
       text-overflow: ellipsis;
-    }
-    .trend {
-      width: 80px;
     }
   `,
 })

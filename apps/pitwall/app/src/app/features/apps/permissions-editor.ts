@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, effect, input, output, signal } from '@angular/core';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import type { AppLimits, AppPermissions, LocalModel, Priority } from '../../core/api.types';
 import { PRIORITY_LABEL } from '../../shared/labels';
@@ -49,7 +50,7 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
 /** Edits an app's permissions locally; Save emits the parsed permissions (the server validates again). */
 @Component({
   selector: 'pw-permissions-editor',
-  imports: [MatSlideToggleModule],
+  imports: [MatSlideToggleModule, MatTooltipModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form (submit)="$event.preventDefault(); submit()" [attr.aria-label]="'Permissions of ' + appName()">
@@ -68,7 +69,7 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
                 <li>
                   <label class="check">
                     <input type="checkbox" [checked]="chosen().has(m.id)" (change)="toggleModel(m.id)" />
-                    <span class="mname">{{ m.name }}</span>
+                    <span class="mname" [matTooltip]="m.name" matTooltipShowDelay="600">{{ m.name }}</span>
                     @if (m.quant) {
                       <span class="tag">{{ m.quant }}</span>
                     }
@@ -164,6 +165,7 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
     .radio,
     .check {
       display: inline-flex;
+      max-width: 100%;
       align-items: center;
       gap: var(--pd-space-2);
       cursor: default;
@@ -177,7 +179,8 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
       margin: var(--pd-space-3) 0 0;
       padding: var(--pd-space-1) var(--pd-space-3);
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      /* Two columns when there is room for a model's name, else one. */
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
       gap: 0 var(--pd-space-4);
       background: var(--pd-surface-2);
       border: 1px solid var(--pd-hairline);
@@ -187,6 +190,7 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
       }
     }
     .mname {
+      min-width: 0;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;

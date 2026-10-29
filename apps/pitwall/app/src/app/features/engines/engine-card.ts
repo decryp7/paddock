@@ -65,7 +65,8 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
         <pw-empty-state icon="engines" heading="No build installed" text="Pitwall installs the build suggested for this machine by itself. You can also install another from the catalog below." />
       } @else {
         <div class="surface">
-          <table class="table">
+          <table class="table fit">
+            <colgroup><col /><col class="c-rel" /><col class="c-size" /><col class="c-test" /><col class="c-dev" /><col class="c-act" /></colgroup>
             <thead>
               <tr>
                 <th scope="col">Build</th>
@@ -78,9 +79,9 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
             </thead>
             <tbody>
               @for (b of e.builds; track b.id + b.tag) {
-                <tr tabindex="0" [attr.aria-expanded]="capsOpen().has(b.id)" (keydown)="onRowKey(b, $event)" (contextmenu)="onRowMenu(b, $event)">
+                <tr tabindex="0" (keydown)="onRowKey(b, $event)" (contextmenu)="onRowMenu(b, $event)">
                   <td>
-                    <span class="bname">{{ b.label }}</span>
+                    <span class="bname" [matTooltip]="b.label" matTooltipShowDelay="600">{{ b.label }}</span>
                     @if (b.active) {
                       <span class="active"><mat-icon svgIcon="pw:check" aria-hidden="true" />Active</span>
                     }
@@ -233,6 +234,19 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
     .engine {
       display: grid;
       gap: var(--pd-space-3);
+    }
+    .c-rel,
+    .c-test {
+      width: 112px;
+    }
+    .c-size {
+      width: 72px;
+    }
+    .c-dev {
+      width: 22%;
+    }
+    .c-act {
+      width: 104px;
     }
     .surface {
       overflow-x: auto;

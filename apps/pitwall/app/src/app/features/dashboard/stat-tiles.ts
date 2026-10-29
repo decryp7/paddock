@@ -245,9 +245,12 @@ import { Skeleton } from '../../shared/ui/skeleton';
       font-weight: var(--pd-weight-medium);
       text-align: right;
     }
+    /* Three figures, each as wide as its own content, spread across the tile (a narrow tile at 1280 px has no room for
+       three equal columns of "1,184 tok/s"). */
     .trio {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(3, max-content);
+      justify-content: space-between;
       gap: var(--pd-space-2);
       > div {
         display: grid;

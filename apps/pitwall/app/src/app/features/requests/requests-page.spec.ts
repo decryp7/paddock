@@ -55,7 +55,8 @@ describe('request cells', () => {
     const all = layout(new Set(COLUMNS.filter((c) => c.optional).map((c) => c.id)));
     expect(all.cols.length).toBe(COLUMNS.length);
     expect(base.narrow).not.toBe(base.template);
-    expect(base.tiny).toBe('76px minmax(100px, 1fr) 148px 32px');
+    expect(base.compact).toBe('68px minmax(88px, 160px) minmax(88px, 1fr) 72px 132px 32px');
+    expect(base.tiny).toBe('68px minmax(100px, 1fr) 132px 32px');
   });
 });
 
@@ -76,7 +77,7 @@ describe('RequestsPage', () => {
 
   it('adds a column from the Columns menu', async () => {
     const { fixture, el } = await render();
-    (Array.from(el.querySelectorAll('button')).find((b) => b.textContent!.includes('Columns')) as HTMLButtonElement).click();
+    el.querySelector<HTMLButtonElement>('button[aria-label="Columns"]')!.click();
     await settle(fixture);
     const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')).find((b) => b.textContent!.includes('API'))!;
     item.click();

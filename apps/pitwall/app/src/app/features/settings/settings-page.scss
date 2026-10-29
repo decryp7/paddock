@@ -140,8 +140,10 @@
   }
 }
 
+/* The control keeps its size; the label beside it wraps. */
 .cap {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--pd-space-3);
 }

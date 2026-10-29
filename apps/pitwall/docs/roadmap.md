@@ -114,8 +114,16 @@ Pacenotes: toolsets `orient`, `code`, `review`, `diagrams`, `requirements` and `
   is checked by a Rust test (every `JobEvent` variant serialises to it) and by `jobs.spec.ts` (every entry parses).
 - **Note.** "Still working" rarely shows: a running job reports every second, so it appears only when the app stops hearing from
   the job (a stuck step), which is what it is for.
-- **Left for 1.1.** `checkAppUpdate` and `appUpdateStatus` are quick calls and keep a 30 s timeout. The shell, Material and
-  dialog-as-window move (WP-2) is not started.
+- **Left for 1.1.** `checkAppUpdate` and `appUpdateStatus` are quick calls and keep a 30 s timeout.
+
+## 1.1: on the shared shell (WP-2, plan `docs/plans/1.1-wp2.md`)
+
+- **Done (WP-2.1).** The UI uses paddock-ui's `--pd-*` tokens and Material theme (`data-accent="pitwall"`); Pitwall's own
+  scale is gone; the chart colours are derived from the shared tokens (`scripts/ci/tokens.test.mjs`).
+- **Done (WP-2.2).** No layout problem at 900, 1024 and 1280 px in Chromium and WebKit (`e2e/layout.baseline.json` is
+  empty): tables fit their panel, the detail panel lies over a list too narrow for both, forms and toolbars step down.
+- **Next.** WP-2.3 (Material and paddock-ui components), WP-2.4 (the app crate on `paddock-shell`) and WP-2.7 (About and
+  notices) can run in parallel; then WP-2.5, 2.6, 2.8, 2.9.
 
 ## Next (hand-off, 2026-10-22)
 

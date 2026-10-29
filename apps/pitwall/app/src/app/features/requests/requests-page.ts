@@ -40,10 +40,10 @@ export interface Column {
 }
 
 export const COLUMNS: readonly Column[] = [
-  { id: 'time', label: 'Time', header: 'Time', width: '76px' },
-  { id: 'app', label: 'App', header: 'App', width: 'minmax(120px, 160px)' },
-  { id: 'model', label: 'Model', header: 'Model', width: 'minmax(120px, 1fr)' },
-  { id: 'endpoint', label: 'Endpoint', header: 'Endpoint', width: 'minmax(150px, 1.2fr)' },
+  { id: 'time', label: 'Time', header: 'Time', width: '68px' },
+  { id: 'app', label: 'App', header: 'App', width: 'minmax(88px, 160px)' },
+  { id: 'model', label: 'Model', header: 'Model', width: 'minmax(88px, 1fr)' },
+  { id: 'endpoint', label: 'Endpoint', header: 'Endpoint', width: 'minmax(120px, 1.2fr)' },
   { id: 'api', label: 'API', header: 'API', width: '84px', optional: true },
   { id: 'chosen', label: 'Chosen by', header: 'Chosen by', width: '96px', optional: true },
   { id: 'queued', label: 'Queued', header: 'Queued ms', width: '84px', right: true, optional: true },
@@ -51,18 +51,28 @@ export const COLUMNS: readonly Column[] = [
   { id: 'cold', label: 'Cold start', header: 'Cold start s', width: '92px', right: true, optional: true },
   { id: 'total', label: 'Total', header: 'Total s', width: '68px', right: true },
   { id: 'tokens', label: 'Tokens', header: 'Tokens in / out', width: '110px', right: true },
-  { id: 'status', label: 'Status', header: 'Status', width: '148px' },
+  { id: 'status', label: 'Status', header: 'Status', width: '132px' },
 ];
 
 /** What a narrow list (the details are open, or the window is small) drops: the panel shows these. */
 export const NARROW_HIDDEN: ReadonlySet<Column['id']> = new Set(['endpoint', 'tokens', 'api', 'chosen', 'queued', 'cold']);
 
-/** The columns shown, the grid template that lays them out (the action column is always last) and the narrow one. */
-export function layout(extra: ReadonlySet<Column['id']>): { cols: Column[]; template: string; narrow: string; tiny: string } {
+/** What a compact list (a 900 px window) also drops: the total time, which the detail panel shows. */
+export const COMPACT_HIDDEN: ReadonlySet<Column['id']> = new Set([...NARROW_HIDDEN, 'total']);
+
+/** The columns shown and the grid templates that lay them out as the list narrows (the action column is always last):
+ * every column, narrow (≤ 900 px), compact (≤ 680 px) and tiny (≤ 560 px). */
+export function layout(extra: ReadonlySet<Column['id']>): { cols: Column[]; template: string; narrow: string; compact: string; tiny: string } {
   const cols = COLUMNS.filter((c) => !c.optional || extra.has(c.id));
   const grid = (list: readonly Column[]) => [...list.map((c) => c.width), '32px'].join(' ');
   const tiny = cols.filter((c) => TINY_SHOWN.has(c.id)).map((c) => (c.id === 'app' ? 'minmax(100px, 1fr)' : c.width));
-  return { cols, template: grid(cols), narrow: grid(cols.filter((c) => !NARROW_HIDDEN.has(c.id))), tiny: [...tiny, '32px'].join(' ') };
+  return {
+    cols,
+    template: grid(cols),
+    narrow: grid(cols.filter((c) => !NARROW_HIDDEN.has(c.id))),
+    compact: grid(cols.filter((c) => !COMPACT_HIDDEN.has(c.id))),
+    tiny: [...tiny, '32px'].join(' '),
+  };
 }
 
 /** The few columns left when the list is squeezed beside the details: when, who, and the one that matters, an error. */
@@ -92,7 +102,7 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
           <label class="sr-only" for="pw-req-search">Search endpoint or model</label>
           <input id="pw-req-search" class="input" type="search" placeholder="Search endpoint or model" autocomplete="off" [value]="store.filter().text" (input)="store.setFilter({ text: $any($event.target).value })" />
         </div>
-        <pw-select class="select" inputId="pw-req-app" label="App" [options]="appSelectOptions()" [value]="store.filter().app" (changed)="store.setFilter({ app: $event })" />
+        <pw-select class="app-filter" inputId="pw-req-app" label="App" [options]="appSelectOptions()" [value]="store.filter().app" (changed)="store.setFilter({ app: $event })" />
         <div class="seg" role="radiogroup" aria-label="Status">
           @for (s of statuses; track s.value) {
             <button type="button" role="radio" [attr.aria-checked]="store.filter().status === s.value" (click)="store.setFilter({ status: s.value })">
@@ -106,14 +116,16 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
         <span class="shown faint num" aria-live="polite">{{ shownText() }}</span>
         <button
           type="button"
-          class="btn ghost sm"
+          class="btn ghost icon"
           cdkOverlayOrigin
           #colsOrigin="cdkOverlayOrigin"
+          aria-label="Columns"
+          matTooltip="Columns"
           aria-haspopup="menu"
           [attr.aria-expanded]="colsOpen()"
           (click)="colsOpen.set(!colsOpen())"
         >
-          <mat-icon svgIcon="pw:sliders" aria-hidden="true" />Columns
+          <mat-icon svgIcon="pw:sliders" aria-hidden="true" />
         </button>
         <ng-template cdkConnectedOverlay [cdkConnectedOverlayOrigin]="colsOrigin" [cdkConnectedOverlayOpen]="colsOpen()" (overlayOutsideClick)="colsOpen.set(false)" (detach)="colsOpen.set(false)">
           <div class="pop" role="menu" tabindex="-1" aria-label="Columns" (keydown.escape)="colsOpen.set(false)">
@@ -128,7 +140,7 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
 
       <div class="with-panel fill body">
         <pw-panel class="table-panel" [flush]="true" [loading]="store.loading()" [ready]="store.loaded()" [error]="store.error()" [skeletonLines]="10" (retry)="store.load()">
-          <div class="tbl" role="table" aria-label="Requests" [attr.aria-rowcount]="store.visible().length + 1" [style.--cols]="grid().template" [style.--cols-narrow]="grid().narrow" [style.--cols-tiny]="grid().tiny">
+          <div class="tbl" role="table" aria-label="Requests" [attr.aria-rowcount]="store.visible().length + 1" [style.--cols]="grid().template" [style.--cols-narrow]="grid().narrow" [style.--cols-compact]="grid().compact" [style.--cols-tiny]="grid().tiny">
             <div class="sheet">
               <div class="row head" role="row">
                 @for (c of grid().cols; track c.id) {
@@ -139,7 +151,7 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
               @if (store.visible().length === 0) {
                 <pw-empty-state icon="requests" [heading]="store.records().length ? 'No request matches' : 'No requests yet'" [text]="store.records().length ? 'Change the filter to see more.' : 'Requests from your apps appear here.'" />
               } @else {
-                <cdk-virtual-scroll-viewport class="vp" [itemSize]="rowHeight" minBufferPx="400" maxBufferPx="800" role="rowgroup">
+                <cdk-virtual-scroll-viewport class="vp fit" [itemSize]="rowHeight" minBufferPx="400" maxBufferPx="800" role="rowgroup">
                   <div
                     *cdkVirtualFor="let r of store.visible(); trackBy: trackId"
                     class="row"
@@ -234,9 +246,11 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       gap: var(--pd-space-2);
       min-height: 44px;
     }
+    /* One toolbar row at every supported width: the search gives way first, then the count. */
     .search {
       position: relative;
-      width: 280px;
+      flex: 0 1 280px;
+      min-width: 160px;
       mat-icon {
         position: absolute;
         left: 9px;
@@ -252,8 +266,9 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
         padding-left: 30px;
       }
     }
-    .select {
-      min-width: 140px;
+    .app-filter {
+      flex: 0 1 160px;
+      min-width: 120px;
     }
     .seg {
       display: inline-flex;
@@ -285,6 +300,21 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       margin-left: auto;
       font-size: var(--pd-text-label);
       white-space: nowrap;
+    }
+    /* A toolbar too narrow for everything drops the count first (the list shows the rows anyway). */
+    .filters {
+      container: req-filters / inline-size;
+    }
+    @container req-filters (max-width: 700px) {
+      .shown {
+        display: none;
+      }
+      .filters > .btn {
+        margin-left: auto;
+      }
+    }
+    .filters > .btn {
+      flex: none;
     }
     .pop {
       display: flex;
@@ -339,11 +369,6 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       display: flex;
       flex-direction: column;
     }
-    @container (min-width: 901px) {
-      .sheet {
-        min-width: 980px;
-      }
-    }
     @container (max-width: 900px) {
       .row {
         grid-template-columns: var(--cols-narrow);
@@ -354,6 +379,14 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
       .c-chosen,
       .c-queued,
       .c-cold {
+        display: none;
+      }
+    }
+    @container (max-width: 680px) {
+      .row {
+        grid-template-columns: var(--cols-compact);
+      }
+      .c-total {
         display: none;
       }
     }
