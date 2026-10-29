@@ -39,6 +39,8 @@ members = [
     "paddock-plugin-package",
     "paddock-plugin-test",
     "paddock-proc",
+    "paddock-repo-files",
+    "paddock-repo-graph",
     "paddock-runtime",
     "paddock-secrets",
     "paddock-service",
@@ -46,6 +48,7 @@ members = [
     "paddock-shell",
     "paddock-storage",
     "paddock-siblings",
+    "paddock-slots",
     "paddock-startup",
     "paddock-testkit",
     "paddock-testplan",
@@ -108,6 +111,8 @@ paddock-plugin-host = { path = "paddock-plugin-host", version = "0.1.0", registr
 paddock-plugin-package = { path = "paddock-plugin-package", version = "0.1.0", registry = "decryp7" }
 paddock-plugin-test = { path = "paddock-plugin-test", version = "0.1.0", registry = "decryp7" }
 paddock-proc = { path = "paddock-proc", version = "0.1.0", registry = "decryp7" }
+paddock-repo-files = { path = "paddock-repo-files", version = "0.1.0", registry = "decryp7" }
+paddock-repo-graph = { path = "paddock-repo-graph", version = "0.1.0", registry = "decryp7" }
 paddock-runtime = { path = "paddock-runtime", version = "0.1.0", registry = "decryp7" }
 paddock-secrets = { path = "paddock-secrets", version = "0.1.0", registry = "decryp7" }
 paddock-service = { path = "paddock-service", version = "0.1.0", registry = "decryp7" }
@@ -115,6 +120,7 @@ paddock-settings = { path = "paddock-settings", version = "0.2.0", registry = "d
 paddock-shell = { path = "paddock-shell", version = "0.3.0", registry = "decryp7" }
 paddock-storage = { path = "paddock-storage", version = "0.1.0", registry = "decryp7" }
 paddock-siblings = { path = "paddock-siblings", version = "0.1.0", registry = "decryp7" }
+paddock-slots = { path = "paddock-slots", version = "0.1.0", registry = "decryp7" }
 paddock-startup = { path = "paddock-startup", version = "0.2.0", registry = "decryp7" }
 paddock-testkit = { path = "paddock-testkit", version = "0.1.0", registry = "decryp7" }
 paddock-testplan = { path = "paddock-testplan", version = "0.1.0", registry = "decryp7" }
