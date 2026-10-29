@@ -4,7 +4,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
-import { PERMISSIVE } from './licences.mjs';
+import { allowedFor } from './licences.mjs';
 
 const LICENCE_FILE = /^(licen[cs]e|licen[cs]ing|copying|notice|unlicense)([-_.].*)?$/i;
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -181,7 +181,52 @@ export function render(rust, npm, appName = 'This application') {
   return { markdown: `${out.join('\n').replace(/\n+$/, '')}\n`, counts: { rust: rust.length, npm: npm.length, texts: texts.length, tally } };
 }
 
-/** Packages none of whose licence options is permissive (the deprecated "MPL-2.0+" spelling counts as MPL-2.0): ["rust x@1: GPL-3.0-only"]. */
+/**
+ * Whether an SPDX expression is acceptable under `allowed`: AND needs every term, OR at least one (AND binds tighter),
+ * parentheses group, `X WITH exception` is allowed when the whole phrase is listed or X is (an exception only widens what
+ * X permits). A trailing `+` (the deprecated "or later" spelling) is dropped. An expression that does not parse is refused.
+ */
+export function expressionAllowed(expr, allowed) {
+  const tokens = expr.replace(/\(/g, ' ( ').replace(/\)/g, ' ) ').split(/\s+/).filter(Boolean);
+  let i = 0;
+  const peek = () => tokens[i];
+  const isOp = (t, op) => t !== undefined && t.toUpperCase() === op;
+  const id = (t) => allowed.has(t.replace(/\+$/, ''));
+  function term() {
+    const t = tokens[i++];
+    if (t === undefined || t === ')' || isOp(t, 'AND') || isOp(t, 'OR') || isOp(t, 'WITH')) throw new Error('bad expression');
+    if (t === '(') {
+      const v = or();
+      if (tokens[i++] !== ')') throw new Error('unbalanced');
+      return v;
+    }
+    if (isOp(peek(), 'WITH')) {
+      i++;
+      const exc = tokens[i++];
+      if (exc === undefined || exc === '(' || exc === ')') throw new Error('bad exception');
+      return allowed.has(`${t} WITH ${exc}`) || id(t);
+    }
+    return id(t);
+  }
+  function and() {
+    let v = term();
+    while (isOp(peek(), 'AND')) { i++; const r = term(); v = v && r; }
+    return v;
+  }
+  function or() {
+    let v = and();
+    while (isOp(peek(), 'OR')) { i++; const r = and(); v = v || r; }
+    return v;
+  }
+  try {
+    const v = or();
+    return i === tokens.length && v;
+  } catch {
+    return false;
+  }
+}
+
+/** Packages whose licence expression is not acceptable for their ecosystem ("rust x@1: GPL-3.0-only"). A package with no declared licence is not judged here (it gets a "no licence" warning). */
 export function nonPermissive(pkgs) {
-  return pkgs.filter((p) => p.spdx.length && !p.spdx.some((id) => PERMISSIVE.has(id.replace(/\+$/, '')))).map((p) => `${p.kind} ${p.name}@${p.version}: ${p.license}`);
+  return pkgs.filter((p) => p.license && p.license.trim() && !expressionAllowed(p.license, allowedFor(p.kind))).map((p) => `${p.kind} ${p.name}@${p.version}: ${p.license}`);
 }
