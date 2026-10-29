@@ -185,11 +185,12 @@ pub fn run() {
     };
     let cwd = std::env::current_dir().ok();
     let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
-    let shell = shell.setup(move |app| {
-        paddock_window::tauri::start(app, &launch)?;
-        Ok(())
-    });
     let app = tauri::Builder::default()
+        // The main window after every plugin is set up: a window built in a plugin's set-up deadlocks.
+        .setup(move |app| {
+            paddock_window::tauri::start(app.handle(), &launch)?;
+            Ok(())
+        })
         .plugin(shell.build())
         .plugin(workbench.build())
         .invoke_handler(invoke_handler())

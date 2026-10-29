@@ -361,12 +361,13 @@ pub fn run() {
         Ok(startup) => shell = shell.startup(startup),
         Err(e) => log::error!("The relaunch hook is not installed: {e}"),
     }
-    let shell = shell.setup(move |app| {
-        tray::create(app);
-        paddock_window::tauri::start(app, &launch)?;
-        Ok(())
-    });
     let builder = tauri::Builder::default()
+        // The tray and the main window after every plugin is set up: a window built in a plugin's set-up deadlocks.
+        .setup(move |app| {
+            tray::create(app.handle());
+            paddock_window::tauri::start(app.handle(), &launch)?;
+            Ok(())
+        })
         // The native save dialog of Report a Problem (the shell's `native-dialogs`).
         .plugin(tauri_plugin_dialog::init())
         // The OS notification plugin behind the shell's `PluginToaster`.

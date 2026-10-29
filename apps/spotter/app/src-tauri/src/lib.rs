@@ -294,6 +294,22 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         .wrap(handler!())
 }
 
+/// The tray, then the main window (none when started at log-in with `--hidden` and a tray to come back from). Runs in
+/// `tauri::Builder::setup`, never in the shell's `setup`: Tauri runs plugin set-ups while it holds its plugin store, and
+/// building a webview there waits for that store forever (Spotter started with no window).
+pub fn open_at_start<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    launch: &paddock_window::launch::LaunchArgs,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !tray::create(app) {
+        applog::write("no tray icon; closing the window will quit the app");
+    }
+    paddock_window::tauri::start(app, launch).map_err(|e| {
+        applog::write(&format!("Spotter could not open its window: {}", e.message));
+        e.message.into()
+    })
+}
+
 /// Starts the app.
 pub fn run() {
     let cwd = std::env::current_dir().ok();
@@ -308,14 +324,11 @@ pub fn run() {
             e
         })?;
         app.manage(state);
-        if !tray::create(app) {
-            applog::write("no tray icon; closing the window will quit the app");
-        }
-        // Started at log-in (`--hidden`): stay in the tray without a window (only when there is a tray to come back from).
-        paddock_window::tauri::start(app, &launch)?;
         Ok(())
     });
     let builder = tauri::Builder::default()
+        // The tray and the main window: after every plugin is set up (a window built in a plugin's set-up deadlocks).
+        .setup(move |app| open_at_start(app.handle(), &launch))
         // First: a second launch shows the running app's window instead of starting another engine.
         .plugin(tauri_plugin_single_instance::init(paddock_window::tauri::second_instance))
         .plugin(tauri_plugin_notification::init())

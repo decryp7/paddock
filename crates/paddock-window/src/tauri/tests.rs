@@ -1287,3 +1287,30 @@ fn a_bounds_save_that_fails_after_a_window_closed_is_logged() {
     // The save runs on a thread of its own; the exit teardown saves (and fails) once more, synchronously.
     exit(app.handle());
 }
+
+/// Inside a plugin hook (where Tauri holds its plugin store) a window is refused instead of deadlocking; the same work
+/// handed to `after_plugin_hook` runs outside the hook and opens the window.
+#[test]
+fn a_plugin_hook_refuses_windows_and_after_plugin_hook_opens_them() {
+    let app = app_with(windows(multi(), &calls()).build());
+    let h = app.handle();
+    let (tx, rx) = std::sync::mpsc::channel();
+    {
+        let _scope = plugin_hook_scope();
+        let e = start(h, &LaunchArgs::default()).unwrap_err();
+        assert!(e.message.contains("tauri::Builder::setup"), "{}", e.message);
+        assert!(app.get_webview_window("main").is_none());
+        after_plugin_hook(h, move |app| {
+            let _ = tx.send((
+                in_plugin_hook(),
+                create_main(app).map(|w| w.label().to_string()),
+            ));
+        });
+    }
+    // A hang guard only a lost task reaches.
+    let (in_hook, built) = rx
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the deferred work ran");
+    assert!(!in_hook, "the deferred work runs outside the hook");
+    assert_eq!(built.unwrap(), "main");
+}

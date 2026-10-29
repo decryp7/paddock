@@ -680,3 +680,19 @@ Results: [Debrief](../apps/debrief/docs/performance.md#2026-10-29-incremental-re
 [Dyno](../apps/dyno/docs/performance.md#2026-10-29-incremental-rebuild-and-link-time-docslink-time),
 [Dyno release identity](../apps/dyno/docs/performance.md#2026-10-29-release-identity-of-the-rlib-only-crate-type-docslink-time);
 details: [research/2026-10-29-link-time.md](research/2026-10-29-link-time.md).
+
+## 2026-10-29: a window built inside a plugin hook deadlocks the main thread (Spotter, Dyno, the demos)
+
+Spotter 1.0's release build never opened a window: the process kept running, `sample` showed the main thread waiting
+on a mutex and nothing reached the log. Symbolised (a debug build in a throwaway Tart VM), the main thread was in
+`tauri::Builder::build` → `AppManager::initialize_plugins` → the shell plugin's `setup` → the app's set-up closure →
+`paddock_window::tauri::start` → `create_main` → `WebviewManager::prepare_pending_webview` →
+`Mutex<PluginStore>::lock`. Tauri 2 runs every plugin's `setup` and `on_event` while it holds its plugin store, and
+building a webview locks that store again on the same thread. Not VM-specific: the same deadlock reproduces on Tauri's
+mock runtime. It came with the move to the shared shell, whose `Builder::setup` runs the app's closure inside the
+plugin's set-up; the shell's run-event hook (macOS Dock click with no window, Finder "Open with") had the same trap.
+**Rule (guidance):** windows (and the tray) are opened from `tauri::Builder::setup`, never from the shell's `setup` or a
+plugin hook; window work a plugin hook triggers runs after the hook (`paddock_window::tauri::after_plugin_hook`). The
+shell marks its hooks with `plugin_hook_scope`, so a window built there fails the start with that advice instead of
+hanging; `paddock-shell`'s test `a_window_opened_from_the_shells_setup_fails_the_start_instead_of_deadlocking` keeps it.
+Also: a start-up hang with an empty log is checked first with a symbolised stack, not by guessing at the VM.
