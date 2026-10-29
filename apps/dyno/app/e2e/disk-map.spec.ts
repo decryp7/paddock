@@ -129,7 +129,7 @@ test.describe('disk map', () => {
             }
             const txt = foot.querySelector<HTMLElement>('.txt');
             const cell = foot.querySelector('td');
-            if (txt && cell && (txt.scrollWidth > txt.clientWidth + 1 || right(txt) > right(cell) - 8)) out.push('footer text is cut by its cell');
+            if (txt && cell && (txt.scrollWidth > txt.clientWidth + 1 || right(txt) > right(cell) - 8)) out.push(`footer text is cut by its cell: text ${txt.scrollWidth}/${txt.clientWidth}, text right ${right(txt)}, cell right ${right(cell)}`);
           }
           if (document.documentElement.scrollWidth > window.innerWidth) out.push(`the page scrolls sideways: ${document.documentElement.scrollWidth} > ${window.innerWidth}`);
           return out;

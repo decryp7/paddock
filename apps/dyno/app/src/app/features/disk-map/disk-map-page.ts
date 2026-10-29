@@ -524,9 +524,9 @@ import {
     table { width: 100%; table-layout: fixed; }
     .mat-column-bytes { width: 76px; }
     .mat-column-items { width: 64px; }
-    .mat-column-newestChange { width: 104px; }
+    .mat-column-newestChange { width: 92px; }
     .mat-column-share { width: 100px; }
-    .mat-column-actions { width: 72px; }
+    .mat-column-actions { width: 64px; }
     th, td { white-space: nowrap; }
     th.mat-mdc-header-cell, td.mat-mdc-cell, td.mat-mdc-footer-cell { padding-inline: var(--sp-2); }
     td.mat-mdc-footer-cell { font: inherit; color: var(--text-1); }

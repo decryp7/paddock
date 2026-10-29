@@ -178,7 +178,7 @@ interface LabelView {
             @if (customCentre(); as tpl) {
               <ng-container [ngTemplateOutlet]="tpl.template" [ngTemplateOutletContext]="{ $implicit: centrePoint() }" />
             } @else {
-              <span class="pd-centre-name" data-testid="sunburst-centre-name">{{ centrePoint().node.label }}</span>
+              <span class="pd-centre-name" data-testid="sunburst-centre-name" [attr.title]="centrePoint().node.label">{{ centrePoint().node.label }}</span>
               <span class="pd-centre-value">{{ valueParts().number }}@if (valueParts().unit) {<span class="pd-centre-unit"> {{ valueParts().unit }}</span>}</span>
               @if (shareText()) {
                 <span class="pd-centre-line">{{ shareText() }}</span>
@@ -218,7 +218,7 @@ interface LabelView {
     .pd-centre-circle { fill: transparent; stroke: none; }
     .pd-centre-circle--up { cursor: pointer; }
     .pd-centre { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; pointer-events: none; color: var(--pd-text); }
-    .pd-centre-name { font-size: min(var(--pd-text-body), 4.2cqw); font-weight: var(--pd-weight-semibold); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pd-centre-name { font-size: min(var(--pd-text-body), 3.4cqw); font-weight: var(--pd-weight-semibold); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-centre-value { font-size: min(var(--pd-text-display), 6cqw); line-height: 1.15; font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; }
     .pd-centre-unit { font-size: var(--pd-text-body); font-weight: var(--pd-weight-regular, 400); color: var(--pd-text-muted); }
     .pd-centre-line { font-size: var(--pd-text-label); color: var(--pd-text-muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
