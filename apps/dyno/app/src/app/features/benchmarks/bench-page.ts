@@ -236,7 +236,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     .took { display: block; margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-xs); }
     .why { margin: 0; display: flex; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); }
     .table { margin: 0 var(--sp-4) var(--sp-3); width: calc(100% - 2 * var(--sp-4)); }
-    .table td:nth-child(2), .table td:nth-child(5) { white-space: normal; overflow-wrap: anywhere; }
+    .table td:nth-child(2), .table td:nth-child(5) { white-space: normal; overflow-wrap: break-word; }
     .faint { color: var(--text-3); }
     small { color: var(--text-3); }
     .badge.outline { margin-left: var(--sp-2); }

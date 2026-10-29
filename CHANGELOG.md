@@ -4,7 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Tab nav bars: links size to their label
+- `@decryp7/paddock-ui` scss (`_material.scss`): `mat-tab-link` in a `mat-tab-nav-bar` has no 160 px minimum and `--pd-space-3` side padding, so eight tabs fit a 900 px window. Tab rows in apps that used the minimum get narrower tabs.
+
 ### Dyno: pages no longer clip at 900 and 1024 px
+- Network's Listening table keeps the exposure badge whole at 900 px; truncated names in the dashboard feed, widgets and the Network service column show their full text in a tooltip. The layout e2e now also measures every state (detail panels, tabs, second views), every Settings page (with the advanced fields) and every dialog, and accepts an ellipsis only on the clipping element when it has a tooltip or a label and is not a control, a tab or a number.
 - Benchmarks, Health, Extras (tabs and Maintenance) and Network wrap or shrink to the page instead of being cut by `.pd-page`'s `overflow-x: hidden`; the primary "Run benchmarks" button is always whole. `e2e/layout.spec.ts` now fails on any page content wider than the page, and on text cut without an ellipsis, at 900, 1024 and 1280 px, for every page and every Settings page.
 
 ### `providePaddockMaterial`: tooltips wait 500 ms

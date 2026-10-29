@@ -736,11 +736,3 @@ kbd,
   --mat-button-text-container-height: var(--control-h);
   --mat-button-tonal-container-height: var(--control-h);
 }
-
-/* Material's tab links are 160 px wide at least: eight of them do not fit the page at the 900 px window minimum, and the header then
-   cuts the last ones. Let them size to their label, so the row fits and only a really narrow page paginates. */
-.mat-mdc-tab-nav-bar .mat-mdc-tab-link.mdc-tab {
-  min-width: 0;
-  padding-inline: var(--sp-3);
-  flex-grow: 0;
-}
