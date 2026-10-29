@@ -48,7 +48,7 @@ test('helpers: spdx, line endings, production-only lock entries, permissive chec
   assert.equal(normalise('a  \r\nb\r\n\r\n'), 'a\nb');
   assert.deepEqual(lockProduction({ packages: { '': {}, 'node_modules/a': { version: '1' }, 'node_modules/b': { dev: true }, 'node_modules/c': { devOptional: true } } }).map((p) => p.name), ['a']);
   const pk = (license) => ({ kind: 'rust', name: 'x', version: '1', license, spdx: spdxIds(license) });
-  assert.deepEqual(nonPermissive([pk('MIT OR LGPL-2.1-or-later'), pk('GPL-3.0-only'), pk('OFL-1.1')]), ['rust x@1: GPL-3.0-only']);
+  assert.deepEqual(nonPermissive([pk('MIT OR LGPL-2.1-or-later'), pk('GPL-3.0-only'), pk('OFL-1.1')]), ['rust x@1: GPL-3.0-only', 'rust x@1: OFL-1.1']);
 });
 
 test('render is deterministic, deduplicates texts and does not depend on input order', () => {
@@ -200,7 +200,32 @@ test('cli: the shared about.toml is the default when the app has none', () => {
   assert.equal(about, join(PADDOCK, 'templates', 'repo', 'about.toml'));
 });
 
-test('nonPermissive: the deprecated "MPL-2.0+" spelling is MPL-2.0; CC-BY-4.0 data is accepted for npm packages', () => {
+test('nonPermissive: the deprecated "MPL-2.0+" spelling is MPL-2.0; CC-BY-4.0 is refused for a Rust crate', () => {
   const pk = (license) => ({ kind: 'rust', name: 'x', version: '1', license, spdx: spdxIds(license) });
-  assert.deepEqual(nonPermissive([pk('MPL-2.0+'), pk('CC-BY-4.0'), pk('GPL-2.0+')]), ['rust x@1: GPL-2.0+']);
+  assert.deepEqual(nonPermissive([pk('MPL-2.0+'), pk('CC-BY-4.0'), pk('GPL-2.0+')]), ['rust x@1: CC-BY-4.0', 'rust x@1: GPL-2.0+']);
+});
+
+test('nonPermissive evaluates the SPDX expression: AND needs every term allowed, OR at least one, parentheses and WITH respected', () => {
+  const bad = (kind, license) => nonPermissive([{ kind, name: 'x', version: '1', license, spdx: spdxIds(license) }]).length === 1;
+  assert.ok(bad('rust', 'MIT AND GPL-3.0-only'));
+  assert.ok(bad('npm', '(MIT OR Apache-2.0) AND AGPL-3.0-only'));
+  assert.ok(!bad('rust', 'MIT OR GPL-3.0-only'));
+  assert.ok(!bad('rust', '(MIT OR GPL-3.0-only) AND Apache-2.0'));
+  assert.ok(!bad('rust', 'MIT AND (Apache-2.0 OR GPL-3.0-only)'));
+  assert.ok(bad('rust', 'GPL-3.0-only OR AGPL-3.0-only'));
+  assert.ok(!bad('rust', 'Apache-2.0 WITH LLVM-exception'));
+  assert.ok(!bad('rust', 'MIT AND Apache-2.0 WITH LLVM-exception'));
+  assert.ok(bad('rust', 'GPL-2.0-only WITH Classpath-exception-2.0'));
+  assert.ok(bad('rust', 'MIT AND'), 'an expression that does not parse is refused');
+  assert.ok(bad('rust', '(MIT OR Apache-2.0'), 'unbalanced parentheses are refused');
+  assert.ok(!bad('rust', 'mit or apache-2.0'.replace('mit', 'MIT').replace('apache-2.0', 'Apache-2.0')), 'operators are case-insensitive');
+  assert.ok(bad('npm', 'UNKNOWN'));
+});
+
+test('nonPermissive scopes the exceptions by ecosystem: CC-BY-4.0 and OFL-1.1 are for npm packages only', () => {
+  const bad = (kind, license) => nonPermissive([{ kind, name: 'x', version: '1', license, spdx: spdxIds(license) }]).length === 1;
+  assert.ok(bad('rust', 'CC-BY-4.0'));
+  assert.ok(!bad('npm', 'CC-BY-4.0'));
+  assert.ok(bad('rust', 'MIT AND OFL-1.1'));
+  assert.ok(!bad('npm', 'MIT AND OFL-1.1'));
 });
