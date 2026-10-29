@@ -73,12 +73,14 @@ describe('dy-alarms-page, Active', () => {
   it('acknowledges everything that waits with the section action, the only primary button', async () => {
     const { f, el } = render();
     await settle(f);
-    const primaries = [...el.querySelectorAll('button[matButton="filled"]')];
+    // A rendered Material filled button, not only the attribute: without MatButton in the imports the button stayed a native
+    // one, grey in WebKit's dark theme (contrast 1.56, CI run 7134).
+    const primaries = [...el.querySelectorAll('button.mdc-button--unelevated')];
     expect(primaries).toHaveLength(1);
     expect(text(primaries[0]!)).toBe('Acknowledge all (4)');
     (primaries[0] as HTMLButtonElement).click();
     await settle(f);
-    expect(el.querySelector('button[matButton="filled"]')).toBeNull();
+    expect(el.querySelector('button.mdc-button--unelevated')).toBeNull();
     expect(el.querySelectorAll('.unread')).toHaveLength(0);
     expect(text(el)).toContain('0 not acknowledged');
   });
