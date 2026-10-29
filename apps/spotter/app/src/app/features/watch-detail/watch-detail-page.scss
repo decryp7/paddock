@@ -170,6 +170,7 @@
     height: 44px;
     padding: 0 var(--pd-space-3);
     overflow: hidden;
+    text-overflow: ellipsis;
   }
   th.num {
     text-align: right;
