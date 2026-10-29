@@ -106,21 +106,28 @@ pub fn check_now(shared: &Arc<Shared>) {
 /// replaced only when every tool was read. A check that is already running (the scheduled one) is waited for, not repeated.
 pub fn refresh(shared: &Arc<Shared>, job: &JobContext) -> Result<BackupReport, JobError> {
     let x = &shared.extras;
+    if lock(&x.backup).checking {
+        job.phase(Phase::discovering("waiting", "Waiting for the backup check that is running"));
+        // The waker goes in BEFORE the lock is taken: a token that is already cancelled runs it on the spot, and it takes this
+        // same lock. The end of that check wakes the wait, and so does Cancel: no polling.
+        let (state, done) = (x.backup.clone(), x.backup_done.clone());
+        let _wake = job.cancel_token().on_cancel(move || {
+            let _held = lock(&state);
+            done.notify_all();
+        });
+        let mut slot = lock(&x.backup);
+        while slot.checking {
+            job.check()?;
+            slot = x.backup_done.wait(slot).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        job.check()?;
+    }
     {
         let mut slot = lock(&x.backup);
         if slot.checking {
-            job.phase(Phase::discovering("waiting", "Waiting for the backup check that is running"));
-            // The end of that check wakes the wait, and so does Cancel: no polling.
-            let (state, done) = (x.backup.clone(), x.backup_done.clone());
-            let _wake = job.cancel_token().on_cancel(move || {
-                let _held = lock(&state);
-                done.notify_all();
-            });
-            while slot.checking {
-                job.check()?;
-                slot = x.backup_done.wait(slot).unwrap_or_else(std::sync::PoisonError::into_inner);
-            }
-            job.check()?;
+            // Another check started in between: wait for it as well rather than run two.
+            drop(slot);
+            return refresh(shared, job);
         }
         slot.checking = true;
     }

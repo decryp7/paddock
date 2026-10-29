@@ -68,22 +68,29 @@ impl IssueCentre {
     /// repeated and not answered with the old state: this returns `false` once that read has ended, `true` after its own read.
     /// Without a job and with a read running it returns `false` at once.
     pub fn scan(&self, shared: &Shared, job: Option<&JobContext>) -> Result<bool, JobError> {
-        let since = {
-            let mut st = lock(&self.state);
-            if st.scanning {
-                let Some(j) = job else { return Ok(false) };
+        // A read is already running: wait for it (a job) or leave it (the schedule).
+        if let Some(j) = job {
+            if lock(&self.state).scanning {
                 j.phase(Phase::discovering("waiting", "Waiting for the system log read that is running"));
-                // Cancel wakes the wait; the end of the running read does too. No polling.
+                // The waker goes in BEFORE the lock is taken: a token that is already cancelled runs it on the spot, and it
+                // takes this same lock. Cancel wakes the wait and so does the end of the running read; no polling.
                 let (state, ended) = (self.state.clone(), self.ended.clone());
                 let _wake = j.cancel_token().on_cancel(move || {
                     let _held = lock(&state);
                     ended.notify_all();
                 });
+                let mut st = lock(&self.state);
                 while st.scanning {
                     j.check()?;
                     st = self.ended.wait(st).unwrap_or_else(std::sync::PoisonError::into_inner);
                 }
                 j.check()?;
+                return Ok(false);
+            }
+        }
+        let since = {
+            let mut st = lock(&self.state);
+            if st.scanning {
                 return Ok(false);
             }
             st.scanning = true;

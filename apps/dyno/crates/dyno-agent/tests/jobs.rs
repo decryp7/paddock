@@ -602,3 +602,63 @@ fn every_status_of_a_job_is_pushed_to_a_connected_app_in_order_and_the_end_is_ne
         .collect();
     assert!(counts.windows(2).all(|w| w[0] <= w[1]), "{counts:?}");
 }
+
+/// Runs `f` and fails (instead of hanging the run) when it does not return within a few seconds.
+fn within<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(Duration::from_secs(5))
+        .unwrap_or_else(|_| panic!("{what} did not return: it is waiting on itself"))
+}
+
+/// A job whose token was cancelled before it began (the user pressed Cancel while it was still queued behind a long read).
+fn cancelled_job() -> paddock_jobs::JobContext {
+    struct Quiet;
+    impl paddock_jobs::EventSink for Quiet {
+        fn emit(&self, _: &paddock_jobs::JobSnapshot) {}
+    }
+    let ctx = paddock_jobs::JobRegistry::new(Arc::new(Quiet)).register("rescan-issues", "Reading system logs", None);
+    ctx.cancel_token().cancel();
+    ctx
+}
+
+#[test]
+fn a_rescan_cancelled_before_it_waits_for_the_running_read_returns_cancelled_instead_of_blocking_on_itself() {
+    let gate = Arc::new(Gate::default());
+    let h = Harness::start(slow_issues(&gate));
+    let shared = h.shared();
+    let scheduled = {
+        let s = shared.clone();
+        std::thread::spawn(move || s.issues.scan(&s, None))
+    };
+    gate.wait_for_callers(1);
+    let s = shared.clone();
+    let out = within("a cancelled rescan", move || s.issues.scan(&s, Some(&cancelled_job())));
+    assert!(matches!(out, Err(paddock_jobs::JobError::Cancelled(_))), "{out:?}");
+    gate.open();
+    assert!(scheduled.join().unwrap().unwrap());
+}
+
+#[test]
+fn a_backup_check_cancelled_before_it_waits_for_the_running_one_returns_cancelled_instead_of_blocking_on_itself() {
+    let gate = Arc::new(Gate::default());
+    let h = Harness::start(vec![]);
+    let s = h.shared();
+    s.extras.use_os("macos");
+    s.extras.use_backup_tools(Arc::new(SlowTool(gate.clone())));
+    let scheduled = {
+        let s = s.clone();
+        std::thread::spawn(move || dyno_agent::extras::backup_check::check_now(&s))
+    };
+    gate.wait_for_callers(1);
+    let s2 = s.clone();
+    let out = within("a cancelled backup check", move || {
+        dyno_agent::extras::backup_check::refresh(&s2, &cancelled_job())
+    });
+    assert!(matches!(out, Err(paddock_jobs::JobError::Cancelled(_))), "{out:?}");
+    gate.open();
+    scheduled.join().unwrap();
+    assert!(!s.extras.backup_report().checking, "checking came down");
+}
