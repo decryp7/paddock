@@ -48,12 +48,21 @@ export function flush(ms = 0): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Runs change detection and waits for the mock's async work until the view stops changing. */
-export async function settle(fixture: ComponentFixture<unknown>, rounds = 4): Promise<void> {
-  for (let i = 0; i < rounds; i++) {
+/**
+ * Runs change detection and waits for the mock's async work until the view stops changing (no fixed number of rounds: a
+ * round that leaves the markup as it was ends the wait; at most `MAX_ROUNDS`, so a view that never settles fails loudly in
+ * the caller's assertion instead of hanging).
+ */
+export async function settle(fixture: ComponentFixture<unknown>): Promise<void> {
+  const MAX_ROUNDS = 40;
+  let last: string | null = null;
+  for (let i = 0; i < MAX_ROUNDS; i++) {
     fixture.detectChanges();
     await fixture.whenStable();
     await flush();
+    const now = (fixture.nativeElement as HTMLElement).innerHTML;
+    if (now === last) break;
+    last = now;
   }
   fixture.detectChanges();
 }

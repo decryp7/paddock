@@ -85,7 +85,7 @@ for (const scheme of ['dark', 'light'] as const) {
       ['updates', 'pd.updates', { width: 560, height: 480 }, {}],
       ['about', 'pd.about', { width: 680, height: 560 }, {}],
       ['whats-new', 'pd.whats-new', { width: 680, height: 560 }, {}],
-      ['confirm', 'sp.confirm', { width: 420, height: 160 }, { title: 'Delete watch', message: 'Delete "Lumen CLI"? Its history is deleted with it.', confirmLabel: 'Delete watch', danger: true }],
+      ['confirm', 'pd.confirm', { width: 420, height: 160 }, { heading: 'Delete "Lumen CLI"?', message: 'Spotter stops watching it and forgets its history. Downloaded files stay where they are.', confirm: { label: 'Delete watch', destructive: true } }],
     ];
     for (const [name, id, size, input] of windows) {
       test(`${name} window`, async ({ page, app }) => {
