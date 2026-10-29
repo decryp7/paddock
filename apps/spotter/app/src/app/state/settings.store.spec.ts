@@ -166,5 +166,7 @@ describe('SettingsStore', () => {
     await store.installRenderer();
     expect(store.rendererBusy()).toBe(false);
     expect(notices().at(-1)).toMatchObject({ level: 'info', message: 'Installation cancelled. Nothing was installed.' });
+    // The Settings window has no toast area: the page shows it too.
+    expect(store.rendererNote()).toEqual({ tone: 'info', text: 'Installation cancelled. Nothing was installed.' });
   });
 });

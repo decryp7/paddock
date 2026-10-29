@@ -14,7 +14,13 @@
   min-height: 44px;
   align-items: center;
   justify-content: space-between;
-  gap: var(--pd-space-4);
+  flex-wrap: wrap;
+  gap: var(--pd-space-2) var(--pd-space-4);
+  /* The text takes what is left and the control wraps under it when the window is narrow, never clipped. */
+  > :first-child {
+    flex: 1 1 240px;
+    min-width: 0;
+  }
 }
 .l {
   font-weight: var(--pd-weight-medium);

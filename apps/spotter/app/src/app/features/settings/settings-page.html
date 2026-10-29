@@ -30,9 +30,9 @@
             </div>
           </div>
           <mat-button-toggle-group aria-label="Pause notifications" [value]="pauseValue()" (change)="onPause($event.value)">
-            <mat-button-toggle value="on">On</mat-button-toggle>
-            <mat-button-toggle value="1h">Pause 1 hour</mat-button-toggle>
-            <mat-button-toggle value="1d">Pause 1 day</mat-button-toggle>
+            <mat-button-toggle value="on" (click)="onPauseClick('on')">On</mat-button-toggle>
+            <mat-button-toggle value="1h" (click)="onPauseClick('1h')">Pause 1 hour</mat-button-toggle>
+            <mat-button-toggle value="1d" (click)="onPauseClick('1d')">Pause 1 day</mat-button-toggle>
           </mat-button-toggle-group>
         </div>
         <div class="row">
@@ -93,6 +93,9 @@
                 <button type="button" class="btn sm" (click)="store.installRenderer()" [disabled]="store.rendererBusy()">{{ store.rendererBusy() ? 'Installing…' : 'Install Chromium' }}</button>
               }
             </div>
+            @if (store.rendererNote(); as note) {
+              <p class="note" [class.warn]="note.tone === 'error'" [attr.role]="note.tone === 'error' ? 'alert' : 'status'">{{ note.text }}</p>
+            }
             @if (install(); as j) {
               <div class="install" role="group" aria-label="Installing Chromium">
                 <div class="install-head">

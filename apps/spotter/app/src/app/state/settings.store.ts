@@ -12,6 +12,8 @@ interface SettingsState {
   info: Loadable<AppInfo>;
   renderer: Loadable<RendererStatus>;
   rendererBusy: boolean;
+  /** What the last browser install ended with, shown in the page (the Settings window has no toast area of its own); null before one ran or while one runs. */
+  rendererNote: { tone: 'info' | 'error'; text: string } | null;
   /** Problems the last save reported. */
   problems: string[];
   /** Whether e-mail can be sent (the password itself is never held here). */
@@ -32,6 +34,7 @@ export const SettingsStore = signalStore(
     info: idle<AppInfo>(),
     renderer: idle<RendererStatus>(),
     rendererBusy: false,
+    rendererNote: null,
     problems: [],
     mail: null,
     mailBusy: false,
@@ -162,14 +165,19 @@ export const SettingsStore = signalStore(
         if (folder) await this.change({ downloadsFolder: folder });
       },
       async installRenderer(): Promise<void> {
-        patchState(store, { rendererBusy: true });
+        patchState(store, { rendererBusy: true, rendererNote: null });
         try {
           const status = await backend.installRenderer();
           patchState(store, { renderer: { value: status, loading: false, error: null } });
           toast.success('Chromium installed');
         } catch (e) {
-          if (isCancelled(e)) toast.info('Installation cancelled', 'Nothing was installed.');
-          else fail('The browser could not be installed', e);
+          if (isCancelled(e)) {
+            patchState(store, { rendererNote: { tone: 'info', text: 'Installation cancelled. Nothing was installed.' } });
+            toast.info('Installation cancelled', 'Nothing was installed.');
+          } else {
+            patchState(store, { rendererNote: { tone: 'error', text: `Chromium could not be installed: ${toCommandError(e).message}` } });
+            fail('The browser could not be installed', e);
+          }
         } finally {
           patchState(store, { rendererBusy: false });
         }

@@ -79,6 +79,11 @@ export class SettingsPage {
     return (e.target as HTMLInputElement | HTMLSelectElement).value;
   }
 
+  /** Material does not report a click on the option that is already selected: for a pause it restarts it (the full time again). */
+  protected onPauseClick(value: 'on' | '1h' | '1d'): void {
+    if (value !== 'on' && value === this.pauseValue()) this.onPause(value);
+  }
+
   protected onPause(value: 'on' | '1h' | '1d'): void {
     void this.store.pauseNotifications(value === 'on' ? null : value === '1h' ? 60 : 24 * 60);
   }

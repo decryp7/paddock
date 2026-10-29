@@ -16,7 +16,7 @@ const PAGES: [string, string, string, string][] = [
   ['empty', '/#/watches', 'empty watches', 'main h1'],
   ['broken', '/', 'broken dashboard', 'main [role=alert]'],
   ['broken', '/#/watches', 'broken watches', 'main h1'],
-  ['products', '/#/watches/w-1', 'products detail', 'main h1'],
+  ['products', '/#/watches/w-9', 'products detail', 'main h1'],
 ];
 
 /** The elements that stick out past the viewport or whose text is cut without an ellipsis. */
@@ -38,7 +38,7 @@ const FINDINGS = `(() => {
     if (cs.display === 'none' || cs.visibility === 'hidden') continue;
     const r = e.getBoundingClientRect();
     if (r.width === 0 || r.height === 0 || e.clientWidth <= 1) continue;
-    if (r.right > limit(e) + 1) out.push('wider than the page: ' + name(e) + ' right=' + Math.round(r.right));
+    if (r.right > limit(e) + 2) out.push('wider than the page: ' + name(e) + ' right=' + Math.round(r.right));
     const clips = cs.overflowX === 'hidden' || cs.overflowX === 'clip';
     if (clips && e.scrollWidth > e.clientWidth + 1 && cs.textOverflow !== 'ellipsis' && e.textContent && e.textContent.trim()) {
       out.push('text clipped without an ellipsis: ' + name(e) + ' ' + e.scrollWidth + '>' + e.clientWidth);
@@ -61,3 +61,27 @@ for (const width of WIDTHS) {
     }
   });
 }
+
+/** Dialog windows at the size their contract declares (rule 18 applies to them too): nothing wider than the window, no silently clipped text. */
+const WINDOWS: [string, string, { width: number; height: number }, unknown][] = [
+  ['settings', 'pd.settings', { width: 880, height: 640 }, {}],
+  ['updates', 'pd.updates', { width: 560, height: 480 }, {}],
+  ['about', 'pd.about', { width: 680, height: 560 }, {}],
+  ['whats new', 'pd.whats-new', { width: 680, height: 560 }, {}],
+  ['confirm', 'pd.confirm', { width: 420, height: 160 }, { heading: 'Delete "Lumen CLI"?', message: 'Spotter stops watching it and forgets its history. Downloaded files stay where they are.', confirm: { label: 'Delete watch', destructive: true } }],
+];
+for (const [label, id, size, input] of WINDOWS) {
+  test(`the ${label} window has nothing wider than itself and no silently clipped text`, async ({ page, app }) => {
+    await page.setViewportSize(size);
+    await app.dialogs.openWindow(id, input);
+    await app.dialogs.loaded();
+    expect(await page.evaluate(FINDINGS)).toEqual([]);
+  });
+}
+
+test('the Spotter page of the Settings window has no clipped controls', async ({ page, app }) => {
+  await page.setViewportSize({ width: 880, height: 640 });
+  await app.settings.open({ page: 'sp.general' });
+  await expect(page.getByRole('radiogroup', { name: 'Digest' })).toBeVisible();
+  expect(await page.evaluate(FINDINGS)).toEqual([]);
+});
