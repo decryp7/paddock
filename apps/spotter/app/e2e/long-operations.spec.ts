@@ -27,11 +27,30 @@ test.describe('long operations show what they are doing and can be cancelled', (
     await expect(page.getByText('Download finished')).toBeVisible({ timeout: 20_000 });
   });
 
-  test('installing the browser goes through Downloading, Unpacking and Testing', async ({ app, page }) => {
-    await app.settings.open({ page: 'sp.general', });
-    await page.getByRole('button', { name: 'Download Chromium' }).click();
-    // The Jobs list is the main window’s; the settings page shows the outcome.
-    await expect(page.getByText('Chromium downloaded')).toBeVisible({ timeout: 30_000 });
+  test('installing the browser goes through Downloading, Unpacking and Testing, shown inline with its count', async ({ app, page }) => {
+    await page.goto('/?jobStepMs=400');
+    await app.settings.open({ page: 'sp.general' });
+    await page.getByRole('button', { name: 'Install Chromium' }).click();
+    const phase = page.getByTestId('install-phase');
+    // Every phase the job names, in the order it runs them; the first two count bytes.
+    await expect(phase).toHaveText('Downloading');
+    await expect(page.getByTestId('install-count')).toContainText(/MB of 149 MB/);
+    await expect(phase).toHaveText('Unpacking');
+    await expect(page.getByTestId('install-count')).toContainText(/MB of 584 MB/);
+    await expect(phase).toHaveText('Testing');
+    await expect(page.getByText('Chromium installed by Spotter')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('install-phase')).toHaveCount(0);
+  });
+
+  test('the browser install can be cancelled from the settings page', async ({ app, page }) => {
+    await page.goto('/?jobStepMs=400');
+    await app.settings.open({ page: 'sp.general' });
+    await page.getByRole('button', { name: 'Install Chromium' }).click();
+    await expect(page.getByTestId('install-phase')).toHaveText('Downloading');
+    await page.getByRole('group', { name: 'Installing Chromium' }).getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.getByTestId('install-phase')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Install Chromium' })).toBeEnabled();
+    await expect(page.getByText('No browser available')).toBeVisible();
   });
 
   test('checking every watch shows n of m and can be cancelled', async ({ page, app }) => {

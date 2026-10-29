@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { MemoryJobsBackend, provideShellJobs } from '@decryp7/paddock-ui/shell/jobs';
 import { shellPorts } from '@decryp7/paddock-ui/shell/testing';
 import { SettingsPage } from './settings-page';
 import { ClockService } from '../../core/clock.service';
@@ -15,12 +16,14 @@ async function make(backend = makeMock()) {
 }
 const el = <T extends Element>(f: { nativeElement: HTMLElement }, sel: string) => f.nativeElement.querySelector(sel) as T;
 const tab = (f: { nativeElement: HTMLElement }, group: string, label: string) =>
-  Array.from(f.nativeElement.querySelectorAll<HTMLButtonElement>(`.seg-tabs[aria-label="${group}"] button`)).find((b) => text(b) === label)!;
+  Array.from(f.nativeElement.querySelectorAll<HTMLButtonElement>(`mat-button-toggle-group[aria-label="${group}"] button`)).find((b) => text(b) === label)!;
 const pressed = (f: { nativeElement: HTMLElement }, group: string) =>
-  Array.from(f.nativeElement.querySelectorAll<HTMLButtonElement>(`.seg-tabs[aria-label="${group}"] button`)).filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => text(b));
-const toggle = async (f: Parameters<typeof settle>[0], input: HTMLInputElement, on: boolean) => {
-  input.checked = on;
-  input.dispatchEvent(new Event('change', { bubbles: true }));
+  Array.from(f.nativeElement.querySelectorAll<HTMLElement>(`mat-button-toggle-group[aria-label="${group}"] mat-button-toggle.mat-button-toggle-checked`)).map((b) => text(b));
+/** The switch's button of a `mat-slide-toggle` by its id. */
+const sw = (f: { nativeElement: HTMLElement }, id: string) => el<HTMLButtonElement>(f, `mat-slide-toggle#${id} button[role=switch]`);
+const isOn = (f: { nativeElement: HTMLElement }, id: string) => sw(f, id).getAttribute('aria-checked') === 'true';
+const toggle = async (f: Parameters<typeof settle>[0], id: string, on: boolean) => {
+  if (isOn(f, id) !== on) sw(f, id).click();
   await settle(f);
 };
 
@@ -38,21 +41,21 @@ describe('SettingsPage', () => {
   it('shows what the engine reports', async () => {
     const { f } = await make();
     const t = text(f.nativeElement);
-    expect(t).toContain('Spotter watches for new releases anywhere');
+    expect(t).not.toContain('Spotter watches for new releases anywhere'); // the About dialog says it
     expect(t).toContain('/Users/demo/Library/Application Support/Spotter/spotter.toml');
     expect(t).toContain('Notifications are on.');
     expect(t).toContain('No browser available');
     expect(text(el(f, '.note.warn'))).toContain('Old mirror');
-    expect(el<HTMLInputElement>(f, '#autostart').checked).toBe(false);
+    expect(isOn(f, 'autostart')).toBe(false);
     expect(pressed(f, 'Default check interval')).toEqual(['6 hours']);
     expect(pressed(f, 'Digest')).toEqual(['At once']);
     expect(pressed(f, 'Pause notifications')).toEqual(['On']);
-    expect(el<HTMLInputElement>(f, '#notif').checked).toBe(true);
+    expect(isOn(f, 'notif')).toBe(true);
   });
 
   it('saves a toggle and a select through the store', async () => {
     const { f, backend } = await make();
-    await toggle(f, el(f, '#notif'), false);
+    await toggle(f, 'notif', false);
     expect((await backend.getSettings()).notifications).toBe(false);
     tab(f, 'Digest', 'Daily').click();
     await settle(f);
@@ -68,21 +71,21 @@ describe('SettingsPage', () => {
     await settle(f);
     expect((await backend.getSettings()).defaultIntervalSecs).toBe(900);
     expect(pressed(f, 'Default check interval')).toEqual(['15 minutes']);
-    await toggle(f, el(f, '#osweb'), true);
+    await toggle(f, 'osweb', true);
     expect((await backend.getSettings()).allowOsWebview).toBe(true);
-    await toggle(f, el(f, '#autostart'), true);
-    expect(el<HTMLInputElement>(f, '#autostart').checked).toBe(true);
+    await toggle(f, 'autostart', true);
+    expect(isOn(f, 'autostart')).toBe(true);
   });
 
   it('turns quiet hours on with defaults, edits a time, and turns them off', async () => {
     const { f, backend } = await make();
     expect(el(f, 'input[aria-label="Quiet hours start"]')).toBeNull();
-    await toggle(f, el(f, '#quiet'), true);
+    await toggle(f, 'quiet', true);
     expect((await backend.getSettings()).quietHours).toEqual({ start: '22:00', end: '07:00' });
     typeInto(el(f, 'input[aria-label="Quiet hours end"]'), '06:30', 'change');
     await settle(f);
     expect((await backend.getSettings()).quietHours).toEqual({ start: '22:00', end: '06:30' });
-    await toggle(f, el(f, '#quiet'), false);
+    await toggle(f, 'quiet', false);
     expect((await backend.getSettings()).quietHours).toBeNull();
     f.componentInstance['setQuietTime']('start', '01:00'); // no window: nothing to edit
     await settle(f);
@@ -108,11 +111,11 @@ describe('SettingsPage', () => {
 
   it('downloads Chromium once and then hides the button', async () => {
     const { f } = await make();
-    (byText(f.nativeElement, 'button', 'Download Chromium') as HTMLButtonElement).click();
+    (byText(f.nativeElement, 'button', 'Install Chromium') as HTMLButtonElement).click();
     await settle(f);
-    expect(text(f.nativeElement)).toContain('Chromium downloaded');
-    expect(byText(f.nativeElement, 'button', 'Download Chromium')).toBeNull();
-    expect(shellPorts().messages().at(-1)).toBe('Browser installed');
+    expect(text(f.nativeElement)).toContain('Chromium installed by Spotter');
+    expect(byText(f.nativeElement, 'button', 'Install Chromium')).toBeNull();
+    expect(shellPorts().messages().at(-1)).toBe('Chromium installed');
   });
 
   it.each([
@@ -131,10 +134,10 @@ describe('SettingsPage', () => {
 
   it('opens folders and chooses the downloads folder', async () => {
     const { f, backend } = await make();
-    for (const label of ['Open folder', 'Open']) {
+    for (const label of ['Open folder']) {
       for (const b of Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('button')).filter((x) => text(x) === label)) (b as HTMLButtonElement).click();
     }
-    (byText(f.nativeElement, 'button', 'Choose…') as HTMLButtonElement).click();
+    (byText(f.nativeElement, 'button', 'Choose folder…') as HTMLButtonElement).click();
     await settle(f);
     expect(backend.calls).toEqual(expect.arrayContaining(['open:config', 'open:logs', 'open:downloads', 'chooseFolder', 'saveSettings']));
     expect(text(f.nativeElement)).toContain('/Users/demo/Downloads/Spotter');
@@ -143,9 +146,9 @@ describe('SettingsPage', () => {
   it('keeps the page and lists the engine problems when a save is refused', async () => {
     const { f, backend } = await make();
     vi.spyOn(backend, 'saveSettings').mockRejectedValue({ code: 'invalid', message: 'No.', problems: ['Use at least one minute.'] });
-    await toggle(f, el(f, '#notif'), false);
+    await toggle(f, 'notif', false);
     expect(text(el(f, '.problems'))).toBe('Use at least one minute.');
-    expect(el<HTMLInputElement>(f, '#notif').checked).toBe(true);
+    expect(isOn(f, 'notif')).toBe(true);
   });
 
   it('shows the failure with Retry when settings cannot be read', async () => {
@@ -157,6 +160,39 @@ describe('SettingsPage', () => {
     (byText(f.nativeElement, 'button', /retry/i) as HTMLButtonElement).click();
     await settle(f);
     expect(text(f.nativeElement)).toContain('Notifications');
+  });
+});
+
+describe('SettingsPage: the browser install shows its job', () => {
+  it('shows the phase and progress inline with Cancel while the install job runs, and nothing when it is not running', async () => {
+    const cancelled: number[] = [];
+    const engine = new MemoryJobsBackend((id) => void cancelled.push(id));
+    localStorage.clear();
+    TestBed.configureTestingModule({ providers: [...appProviders(makeMock()), provideShellJobs({ backend: () => engine })] });
+    TestBed.inject(ClockService).set(NOW);
+    const f = TestBed.createComponent(SettingsPage);
+    await settle(f);
+    expect(el(f, '[data-testid=install-phase]')).toBeNull();
+    engine.emit({
+      id: 7,
+      kind: 'sp.install-renderer',
+      title: 'Installing Chromium',
+      seq: 1,
+      elapsedMs: 0,
+      cancellable: true,
+      state: 'running',
+      phase: { id: 'download', label: 'Downloading', unit: 'bytes', total: 156_237_824, done: 52_000_000 },
+    });
+    await settle(f);
+    expect(text(el(f, '[data-testid=install-phase]'))).toBe('Downloading');
+    expect(text(el(f, '[data-testid=install-count]'))).toMatch(/of/);
+    expect(el(f, 'mat-progress-bar').getAttribute('aria-valuenow')).not.toBeNull();
+    (byText(f.nativeElement, 'button', 'Cancel') as HTMLButtonElement).click();
+    await settle(f);
+    expect(cancelled).toEqual([7]);
+    engine.emit({ id: 7, kind: 'sp.install-renderer', title: 'Installing Chromium', seq: 2, elapsedMs: 5, cancellable: false, state: 'done' });
+    await settle(f);
+    expect(el(f, '[data-testid=install-phase]')).toBeNull();
   });
 });
 
