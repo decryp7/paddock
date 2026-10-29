@@ -18,6 +18,7 @@ fn snapshot(state: JobState) -> JobSnapshot {
         eta_ms: Some(300),
         cancellable: false,
         not_cancellable_reason: Some("reading".into()),
+        quiet_on_success: false,
     }
 }
 
