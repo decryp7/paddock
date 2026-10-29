@@ -192,4 +192,6 @@ Apply these deliberately. They are not decoration:
 - Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
+- Work a person waits for never runs in macOS QoS `BACKGROUND` (rule 52): lowered work uses `QOS_CLASS_UTILITY`;
+  `BACKGROUND` only for work nobody waits on, with `// conformance: background-qos — <why>` (C52).
 - Spawn subagents by role: implementer (Sonnet, mechanical), designer, reviewer, researcher (Opus); see `.claude/agents/`.
