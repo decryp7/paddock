@@ -4,6 +4,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod bench;
 pub mod chain;
 pub mod detect;
 pub mod geometry;
