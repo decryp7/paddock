@@ -28,19 +28,28 @@ pub fn workers() -> ParseWorkers {
 }
 
 /// A probe that reports what the test says, whatever the process does.
-pub struct FixedProbe(pub Mutex<ProcSample>);
+pub struct FixedProbe(pub Mutex<ProcSample>, pub std::sync::atomic::AtomicUsize);
 
 impl FixedProbe {
     pub fn stopped() -> FixedProbe {
-        FixedProbe(Mutex::new(ProcSample {
-            state: RunState::Stopped,
-            cpu_micros: 0,
-        }))
+        FixedProbe(
+            Mutex::new(ProcSample {
+                state: RunState::Stopped,
+                cpu_micros: 0,
+            }),
+            std::sync::atomic::AtomicUsize::new(0),
+        )
+    }
+
+    /// How many times the probe was asked.
+    pub fn count(&self) -> usize {
+        self.1.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
 impl ProcessProbe for FixedProbe {
     fn sample(&self, _pid: u32) -> Option<ProcSample> {
+        self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Some(*self.0.lock().unwrap())
     }
 }

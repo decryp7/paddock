@@ -227,15 +227,20 @@ impl ParseWorkers {
     /// is cancelled; the blocked call then returns a closed-connection error.
     fn monitor(&self, child: &Child, pid: u32, cancel: &CancelToken, watch: &(Mutex<Watch>, Condvar)) {
         let mut judge = StallJudge::new(self.settings.stall);
-        let mut last_cpu = self.probe.sample(pid).map_or(0, |s| s.cpu_micros);
+        // the first sample only sets the baseline: a call that ends before its first beat never asks the probe (on macOS a sample
+        // is a `ps` process)
+        let mut last_cpu: Option<u64> = None;
         let (state, wake) = watch;
         let mut guard = lock(state);
         loop {
-            // one wake-up is one tick, however late it comes
-            guard = wake
-                .wait_timeout(guard, self.settings.beat)
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .0;
+            // one wake-up is one tick, however late it comes; a call that already ended is not waited for (the notify may have come
+            // before this thread first took the lock)
+            if !guard.done {
+                guard = wake
+                    .wait_timeout(guard, self.settings.beat)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .0;
+            }
             if guard.done {
                 return;
             }
@@ -243,9 +248,13 @@ impl ParseWorkers {
                 child.kill();
                 return;
             }
-            let Some(sample) = self.probe.sample(pid) else { continue };
-            let grew = sample.cpu_micros.saturating_sub(last_cpu);
-            last_cpu = sample.cpu_micros;
+            // the lock is not held while the probe runs (a `ps` process on macOS), so a call that ends meanwhile is not delayed by it
+            drop(guard);
+            let sampled = self.probe.sample(pid);
+            guard = lock(state);
+            let Some(sample) = sampled else { continue };
+            let grew = last_cpu.map_or(0, |last| sample.cpu_micros.saturating_sub(last));
+            last_cpu = Some(sample.cpu_micros);
             match judge.observe(Tick {
                 state: sample.state,
                 cpu_grew_micros: grew,

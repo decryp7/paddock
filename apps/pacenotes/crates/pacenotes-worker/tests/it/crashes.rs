@@ -116,3 +116,31 @@ fn a_program_that_does_not_exist_is_a_failure_of_the_file_not_a_panic() {
         other => panic!("{other:?}"),
     }
 }
+
+/// Regression (found by measuring, rule 48): a call that finished at once waited for the monitor's first beat, because the monitor
+/// sampled the worker before it looked at `done`, so each file cost a beat (a second by default) and a `ps` run. The beat here is
+/// an hour: only a call that does not wait for the monitor can return. The guard thread is a hang guard, not a measured time.
+#[test]
+fn a_call_that_finishes_does_not_wait_for_the_monitor() {
+    let samples = Arc::new(FixedProbe::stopped());
+    let w = ParseWorkers::new(
+        pacenotes_worker::WorkerSettings {
+            beat: Duration::from_secs(3600),
+            ..settings()
+        },
+        samples.clone(),
+    );
+    let (tx, rx) = std::sync::mpsc::channel();
+    let hung = std::thread::spawn(move || {
+        for _ in 0..3 {
+            assert!(extract(&w, "src/lib.rs", GOOD).unwrap().is_some());
+        }
+        tx.send(()).unwrap();
+    });
+    assert!(
+        rx.recv_timeout(Duration::from_secs(60)).is_ok(),
+        "a finished call is waiting for the monitor's beat"
+    );
+    hung.join().unwrap();
+    assert_eq!(samples.count(), 0, "a call that ends before the first beat asks the probe nothing");
+}

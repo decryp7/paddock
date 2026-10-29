@@ -4,4 +4,5 @@
 
 mod crashes;
 mod index_run;
+mod measure;
 mod support;
