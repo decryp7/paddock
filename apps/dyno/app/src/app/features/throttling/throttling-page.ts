@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject
 import { MatButton } from '@angular/material/button';
 import { PdCell, PdTable, type PdColumn, type PdSort } from '@decryp7/paddock-ui/table';
 import type { ThrottleEpisode } from '../../core/api.types';
+import { FullTextTip } from '../../shared/full-text-tip';
 import { AsyncState } from '../../shared/async-state';
 import { formatDuration, formatStamp } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -15,7 +16,7 @@ import { CAUSE_LABEL, CAUSE_TONE, confidenceText, episodeSeconds, verdictTone } 
  */
 @Component({
   selector: 'dy-throttling-page',
-  imports: [MatButton, AsyncState, Icon, PdTable, PdCell],
+  imports: [FullTextTip, MatButton, AsyncState, Icon, PdTable, PdCell],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -58,7 +59,7 @@ import { CAUSE_LABEL, CAUSE_TONE, confidenceText, episodeSeconds, verdictTone } 
               @if (d.episodes.length) {
                 <div class="scroll">
                   <pd-table [toolbar]="false" label="Times the CPU was slowed down in the last 30 days" [rows]="d.episodes" [columns]="columns" [rowKey]="rowKey" [filterable]="false" [maxHeight]="420" [(sort)]="sort">
-                    <ng-template pdCell="cause" let-e><span class="dot" [attr.data-tone]="causeToneOf(e)" aria-hidden="true"></span>{{ causeLabelOf(e) }}</ng-template>
+                    <ng-template pdCell="cause" let-e><span class="dot" [attr.data-tone]="causeToneOf(e)" aria-hidden="true"></span><span class="ell" [dyFullText]="causeLabelOf(e)">{{ causeLabelOf(e) }}</span></ng-template>
                   </pd-table>
                 </div>
               } @else {
@@ -109,6 +110,7 @@ import { CAUSE_LABEL, CAUSE_TONE, confidenceText, episodeSeconds, verdictTone } 
     .kv dd { margin: 2px 0 0; font-weight: var(--fw-medium); }
     .card-head .summary { margin-left: auto; color: var(--text-3); font-size: var(--fs-sm); }
     .scroll { margin: 0 var(--sp-4) var(--sp-3); }
+    .ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: var(--sp-2); background: var(--border-strong); flex: none; }
     .dot[data-tone='ok'] { background: var(--ok); }
     .dot[data-tone='warn'] { background: var(--warn); }
@@ -136,11 +138,11 @@ export class ThrottlingPage implements OnInit, OnDestroy {
   protected readonly sort = signal<PdSort | null>({ key: 'start', direction: 'desc' });
   protected readonly rowKey = (e: ThrottleEpisode): string => e.id;
   protected readonly columns: PdColumn<ThrottleEpisode>[] = [
-    { key: 'start', header: 'Started', value: (e) => e.start, text: (e) => this.stamp(e.start), width: '170px' },
-    { key: 'duration', header: 'Duration', value: (e) => episodeSeconds(e, this.overview()?.at ?? e.start), text: (e) => this.duration(e), align: 'end', width: '90px' },
-    { key: 'cause', header: 'Cause', value: (e) => CAUSE_LABEL[e.cause], width: 'minmax(0, 1fr)' },
-    { key: 'lost', header: 'Speed lost, average (%)', value: (e) => e.avgLostPercent, align: 'end', width: '170px' },
-    { key: 'peak', header: 'Peak temperature (°C)', value: (e) => e.peakTemperatureC, text: (e) => (e.peakTemperatureC === null ? '—' : String(e.peakTemperatureC)), align: 'end', width: '170px' },
+    { key: 'start', header: 'Started', value: (e) => e.start, text: (e) => this.stamp(e.start), width: '150px' },
+    { key: 'duration', header: 'Duration', value: (e) => episodeSeconds(e, this.overview()?.at ?? e.start), text: (e) => this.duration(e), align: 'end', width: '80px' },
+    { key: 'cause', header: 'Cause', value: (e) => CAUSE_LABEL[e.cause], width: 'minmax(120px, 1fr)' },
+    { key: 'lost', header: 'Speed lost, average (%)', value: (e) => e.avgLostPercent, align: 'end', width: '150px' },
+    { key: 'peak', header: 'Peak temperature (°C)', value: (e) => e.peakTemperatureC, text: (e) => (e.peakTemperatureC === null ? '—' : String(e.peakTemperatureC)), align: 'end', width: '150px' },
   ];
   protected readonly userOpen = signal<boolean | null>(null);
 
