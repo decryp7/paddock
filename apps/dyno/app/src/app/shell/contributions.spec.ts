@@ -1,7 +1,7 @@
 import { Injector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { AppearanceStore, BrowserAppearanceBackend, buildManifest, CommandService, ContributionRegistry, manifestDrift, provideAppearance, serializeManifest, SHELL_COMMANDS } from '@decryp7/paddock-ui/shell';
+import { AppearanceStore, BrowserAppearanceBackend, buildManifest, CommandService, ContributionRegistry, manifestDrift, ShellContextHost, provideAppearance, serializeManifest, SHELL_COMMANDS } from '@decryp7/paddock-ui/shell';
 import { provideMenus, provideSubmenus } from '@decryp7/paddock-ui/shell/menu';
 import { SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { assertContributionsValid, dialogTableProblems, provideShellTesting } from '@decryp7/paddock-ui/shell/testing';
@@ -13,6 +13,15 @@ import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS, DIALOGS } from './contributions';
 import { dynoContext } from './context';
 import { DIALOG_BASE_COMMANDS } from './dialog-base';
 import { NAV } from './nav';
+import { ReportsStore } from '../state/reports.store';
+import { DiagnosticsStore } from '../state/diagnostics.store';
+import { SettingsStore } from '../state/settings.store';
+import { ShellPages } from '@decryp7/paddock-ui/shell/pages';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
+import { BackupStore } from '../state/backup.store';
+import { DiagnosisStore } from '../state/diagnosis.store';
+import { HistoryStore } from '../state/history.store';
+import { IssuesStore } from '../state/issues.store';
 
 /** Node's `fs`, loaded at run time (the spec programme has no Node types). */
 interface NodeFs {
@@ -56,6 +65,88 @@ describe('Dyno contributions', () => {
 
   it('give the capture command a working handler against the context', async () => {
     await expect(TestBed.inject(CommandService).run('dy.capture')).resolves.toBe(true);
+  });
+
+  it('run every palette command on its page: show the page, then do what the page’s button does', async () => {
+    const commands = TestBed.inject(CommandService);
+    const go = vi.spyOn(TestBed.inject(ShellPages), 'go').mockResolvedValue(true);
+    const history = vi.spyOn(TestBed.inject(HistoryStore), 'load');
+    const rescan = vi.spyOn(TestBed.inject(IssuesStore), 'rescan');
+    const exportIssues = vi.spyOn(TestBed.inject(IssuesStore), 'exportForDebrief');
+    const check = vi.spyOn(TestBed.inject(BackupStore), 'check');
+    const run = vi.spyOn(TestBed.inject(DiagnosisStore), 'run');
+    const exportReport = vi.spyOn(TestBed.inject(ReportsStore), 'export');
+    const save = vi.spyOn(TestBed.inject(DiagnosticsStore), 'save');
+    await TestBed.inject(ShellContextHost).load();
+    const cases: [string, string, { mock: { calls: unknown[][] } }][] = [
+      ['dy.refresh-history', 'dy.dashboard', history],
+      ['dy.rescan-issues', 'dy.issues', rescan],
+      ['dy.export-issues', 'dy.issues', exportIssues],
+      ['dy.check-backup', 'dy.backup', check],
+      ['dy.run-why-slow', 'dy.why-slow', run],
+      ['dy.export-report', 'dy.reports', exportReport],
+      ['dy.save-diagnostics', 'dy.diagnostics', save],
+    ];
+    for (const [command, page, action] of cases) {
+      go.mockClear();
+      const before = action.mock.calls.length;
+      expect(await commands.run(command), command).toBe(true);
+      expect(go, command).toHaveBeenCalledWith(page);
+      expect(action.mock.calls.length, command).toBeGreaterThan(before);
+    }
+    expect(exportReport).toHaveBeenCalledWith('markdown');
+  });
+
+  it('open the new-rule window on the alarms page, reading the settings first when they are missing', async () => {
+    const commands = TestBed.inject(CommandService);
+    const go = vi.spyOn(TestBed.inject(ShellPages), 'go').mockResolvedValue(true);
+    const open = vi.spyOn(TestBed.inject(DialogService), 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'dismissed' }) } as never);
+    const settings = TestBed.inject(SettingsStore);
+    const load = vi.spyOn(settings, 'load');
+    await TestBed.inject(ShellContextHost).load();
+    expect(settings.settings()).toBeNull();
+    expect(await commands.run('dy.add-alarm-rule')).toBe(true);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(go).toHaveBeenCalledWith('dy.alarms');
+    expect(open).toHaveBeenCalledWith('dy.alert-rule', expect.objectContaining({ inputs: expect.objectContaining({ rule: null }) }));
+    // Loaded already: it is not read again.
+    expect(await commands.run('dy.add-alarm-rule')).toBe(true);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('leave the focus on the page when the page was already shown (no navigation moves it)', async () => {
+    const main = document.createElement('main');
+    main.id = 'pd-main';
+    main.tabIndex = -1;
+    document.body.append(main);
+    vi.spyOn(TestBed.inject(ShellPages), 'go').mockResolvedValue(true);
+    await TestBed.inject(ShellContextHost).load();
+    expect(await TestBed.inject(CommandService).run('dy.run-why-slow')).toBe(true);
+    expect(document.activeElement).toBe(main);
+    main.remove();
+  });
+
+  it('turn a command off while its page’s button would be off (no second run of a running check)', async () => {
+    const commands = TestBed.inject(CommandService);
+    await TestBed.inject(ShellContextHost).load();
+    const running = TestBed.inject(DiagnosisStore).run();
+    expect(commands.isEnabled(commands.find('dy.run-why-slow')!)).toBe(false);
+    await running;
+    expect(commands.isEnabled(commands.find('dy.run-why-slow')!)).toBe(true);
+    const rescan = TestBed.inject(IssuesStore).rescan();
+    expect(commands.isEnabled(commands.find('dy.rescan-issues')!)).toBe(false);
+    await rescan;
+  });
+
+  it('title every palette command in sentence case, under a category', () => {
+    const own = TestBed.inject(ContributionRegistry).commands().filter((c) => c.id.startsWith('dy.'));
+    expect(own.map((c) => c.id)).toEqual([
+      'dy.capture', 'dy.refresh-history', 'dy.rescan-issues', 'dy.export-issues', 'dy.check-backup', 'dy.run-why-slow', 'dy.export-report', 'dy.save-diagnostics', 'dy.add-alarm-rule',
+    ]);
+    for (const c of own) {
+      expect(c.category).toBeDefined();
+      expect(c.title.text).toMatch(/^[A-Z][a-z]/);
+    }
   });
 
   it('keep the appearance the shell’s', () => {

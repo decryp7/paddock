@@ -1,5 +1,7 @@
 import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
+import { FullTextTip } from '../../shared/full-text-tip';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal, viewChild } from '@angular/core';
 import type { BackupStatus } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatClock, formatDate } from '../../shared/format';
@@ -11,9 +13,7 @@ import { BackupStore } from '../../state/backup.store';
 import { BACKUP_STATE_LABEL, type DotTone, checkedText, heroTone, hue, initial, lastBackupText, stateTone } from './backup-model';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatTooltip } from '@angular/material/tooltip';
-import { FullTextTip } from '../../shared/full-text-tip';
 import { MatMenuModule } from '@angular/material/menu';
-import { RowMenu } from '../../shared/row-menu';
 
 /**
  * Backup health: whether the backups of the tools Dyno can read (Time Machine, Windows Backup, File History, restic, Borg,
@@ -22,9 +22,8 @@ import { RowMenu } from '../../shared/row-menu';
  */
 @Component({
   selector: 'dy-backup-page',
-  imports: [RowMenu, MatMenuModule, MatIconButton, FullTextTip, MatTooltip, MatButton, AsyncState, Icon, JobProgressCard],
+  imports: [FullTextTip, AsyncState, Icon, PdTable, PdCell, MatMenuModule, MatIconButton, MatTooltip, MatButton, JobProgressCard],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(keydown)': 'key($event)' },
   template: `
     <div class="page">
       <header class="page-head">
@@ -61,27 +60,11 @@ import { RowMenu } from '../../shared/row-menu';
             </section>
 
             <div class="layout" [class.with-detail]="!!selected()">
-              <div class="tablewrap">
-                <table class="table backups" aria-label="Backup tools">
-                  <thead>
-                    <tr><th class="tool">Tool</th><th class="state">Status</th><th class="when">Last backup</th><th>Summary</th><th class="acts"><span class="visually-hidden">Actions</span></th></tr>
-                  </thead>
-                  <tbody>
-                    @for (s of store.statuses(); track s.tool) {
-                      <tr class="row" tabindex="0" [attr.data-tool]="s.tool" [class.sel]="selectedTool() === s.tool" (click)="select(s)" (keydown.enter)="select(s)" (keydown.shift.f10)="select(s)" (contextmenu)="select(s)" dyRowMenu [matContextMenuTriggerFor]="menu" [matContextMenuTriggerData]="{ status: s }">
-                        <td class="tool"><span class="tile" aria-hidden="true" [style.background]="tile(s.name)">{{ initial(s.name) }}</span><strong>{{ s.name }}</strong></td>
-                        <td class="state">
-                          <span class="dot" [attr.data-tone]="dot(s)" aria-hidden="true"></span>
-                          {{ label(s) }}
-                        </td>
-                        <td class="when num muted" [matTooltip]="fullDate(s)">{{ last(s) }}</td>
-                        <td class="muted"><span class="ell" [dyFullText]="s.summary">{{ s.summary }}</span></td>
-                        <td class="acts"><button type="button" matIconButton [attr.aria-label]="'Details of ' + s.name" matTooltipPosition="left" [matTooltip]="'Details of ' + s.name" (click)="select(s); $event.stopPropagation()"><dy-icon name="info" /></button></td>
-                      </tr>
-                    }
-                  </tbody>
-                </table>
-              </div>
+              <pd-table [toolbar]="false" label="Backup tools" [rows]="store.statuses()" [columns]="columns" [rowKey]="toolKey" [filterable]="false" [rowHeight]="36" [rowActions]="actions" [selectedKey]="selectedTool()" (rowActivate)="select($event)" (action)="run($event)" (keydown.escape)="escape($event)">
+                <ng-template pdCell="tool" let-s><span class="tool"><span class="tile" aria-hidden="true" [style.background]="tile(s.name)">{{ initial(s.name) }}</span><strong class="nm" [dyFullText]="s.name">{{ s.name }}</strong></span></ng-template>
+                <ng-template pdCell="state" let-s><span class="dot" [attr.data-tone]="dot(s)" aria-hidden="true"></span>{{ label(s) }}</ng-template>
+                <ng-template pdCell="when" let-s><span class="num muted" [attr.title]="fullDate(s)">{{ last(s) }}</span></ng-template>
+              </pd-table>
 
               @if (selected(); as s) {
                 <aside class="detail" tabindex="-1" aria-label="Backup details" >
@@ -109,13 +92,6 @@ import { RowMenu } from '../../shared/row-menu';
         }
       </dy-async>
     </div>
-
-    <mat-menu #menu="matMenu" aria-label="Backup actions">
-      <ng-template matMenuContent let-status="status">
-        <button mat-menu-item (click)="select(status)"><dy-icon name="info" /> Details</button>
-        <button mat-menu-item (click)="copy(status)"><dy-icon name="copy" /> Copy summary</button>
-      </ng-template>
-    </mat-menu>
   `,
   styles: `
     :host { display: block; }
@@ -131,25 +107,19 @@ import { RowMenu } from '../../shared/row-menu';
     .lead p { margin: 0; color: var(--text-3); font-size: var(--fs-sm); }
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 340px; }
-    .tablewrap { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); overflow: auto; min-width: 0; }
-    .backups { table-layout: fixed; }
-    .backups td { height: 48px; overflow: hidden; text-overflow: ellipsis; }
-    .backups th.tool, .backups td.tool { width: 220px; }
-    .backups th.state, .backups td.state { width: 150px; }
-    .backups th.when, .backups td.when { width: 120px; }
-    .backups th.acts, .backups td.acts { width: 44px; padding: 0 4px; text-align: right; }
-    td.tool { display: table-cell; }
-    .tile { display: inline-grid; place-items: center; width: 28px; height: 28px; margin-right: var(--sp-3); border-radius: var(--r-md); color: #fff; font-size: var(--fs-sm); font-weight: var(--fw-semibold); vertical-align: middle; }
-    td.tool strong { font-weight: var(--fw-medium); vertical-align: middle; }
-    td.state .dot { margin-right: var(--sp-2); vertical-align: 1px; }
+    .tool { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+    .tool strong { font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tile { flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-md); color: #fff; font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: var(--sp-2); flex: none; background: var(--border-strong); }
+    .dot[data-tone='ok'] { background: var(--ok); }
+    .dot[data-tone='warn'] { background: var(--warn); }
+    .dot[data-tone='bad'] { background: var(--bad); }
+    .muted { color: var(--text-2); }
+    .num { font-variant-numeric: tabular-nums; }
     .ell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    tr.row { cursor: default; }
-    tr.row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-    tr.row.sel td { background: var(--accent-soft); }
-    tr.row.sel td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
-    tbody tr:last-child td { border-bottom: 0; }
-    td.acts { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
-    tr.row:hover td.acts, tr.row:focus-within td.acts, tr.row.sel td.acts { opacity: 1; }
+    .ib { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer; }
+    .ib:hover { background: var(--surface-active); color: var(--text-1); }
+    .ib dy-icon { --icon-size: 15px; }
     .none { display: grid; justify-items: center; gap: var(--sp-2); padding: var(--sp-8) var(--sp-5); text-align: center; color: var(--text-3); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); }
     .none dy-icon { --icon-size: 32px; }
     .none strong { color: var(--text-1); font-size: 15px; font-weight: var(--fw-semibold); }
@@ -175,6 +145,7 @@ export class BackupPage implements OnInit {
   private readonly notifier = inject(Notifier);
   private readonly ports = inject(SHELL_PORTS);
   private readonly now = injectNow();
+  private readonly grid = viewChild(PdTable);
   protected readonly selectedTool = signal<string | null>(null);
   protected readonly initial = initial;
 
@@ -204,21 +175,30 @@ export class BackupPage implements OnInit {
     this.selectedTool.set(null);
   }
 
-  /** Up and Down move between rows; Escape closes the details and puts focus back on the row. */
-  protected key(e: KeyboardEvent): void {
-    if (e.key === 'Escape' && this.selectedTool()) {
-      const tool = this.selectedTool();
-      this.close();
-      (e.currentTarget as HTMLElement).querySelector<HTMLElement>(`tr.row[data-tool="${tool}"]`)?.focus();
-      return;
-    }
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-    const rows = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('tr.row')];
-    const next = rows[rows.indexOf(document.activeElement as HTMLElement) + (e.key === 'ArrowDown' ? 1 : -1)];
-    if (next) {
-      e.preventDefault();
-      next.focus();
-    }
+  protected readonly toolKey = (s: BackupStatus): string => s.tool;
+  protected readonly columns: PdColumn<BackupStatus>[] = [
+    { key: 'tool', header: 'Tool', value: (s) => s.name, required: true, width: 'minmax(0, 220px)' },
+    { key: 'state', header: 'Status', value: (s) => BACKUP_STATE_LABEL[s.state], width: '150px' },
+    { key: 'when', header: 'Last backup', value: (s) => s.lastBackup, text: (s) => lastBackupText(s.lastBackup, this.now()), width: '120px' },
+    { key: 'summary', header: 'Summary', value: (s) => s.summary, width: 'minmax(0, 2fr)', hideBelow: 640 },
+  ];
+  protected readonly actions = (): PdRowAction[] => [
+    { id: 'details', label: 'Details', icon: 'info', inline: true },
+    { id: 'copy', label: 'Copy summary', icon: 'copy' },
+  ];
+
+  protected run({ id, row }: PdRowActionEvent<BackupStatus>): void {
+    if (id === 'copy') void this.copy(row);
+    else this.select(row);
+  }
+
+  /** Escape closes the details and puts the focus back on the tool's row. */
+  protected escape(e: Event): void {
+    const tool = this.selectedTool();
+    if (!tool) return;
+    e.preventDefault();
+    this.close();
+    this.grid()?.focusRow(tool);
   }
 
   protected async copy(s: BackupStatus): Promise<void> {

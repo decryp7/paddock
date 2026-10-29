@@ -2207,8 +2207,14 @@
       <trans-unit id="pd.table.count" datatype="html">
         <source><x id="PH"/> rows</source>
       </trans-unit>
+      <trans-unit id="pd.table.count1" datatype="html">
+        <source>1 row</source>
+      </trans-unit>
       <trans-unit id="pd.table.countOf" datatype="html">
         <source><x id="PH"/> of <x id="PH_1"/> rows</source>
+      </trans-unit>
+      <trans-unit id="pd.table.countOf1" datatype="html">
+        <source><x id="PH"/> of 1 row</source>
       </trans-unit>
       <trans-unit id="pd.table.empty" datatype="html">
         <source>Nothing to show yet.</source>

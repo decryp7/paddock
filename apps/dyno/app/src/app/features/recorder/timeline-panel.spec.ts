@@ -2,6 +2,7 @@ import { Component, input, output } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { recorderSamples } from '../../core/mock/alarms';
 import { Chart } from '../../shared/chart';
+import { nextFrame } from '../../testing/frame';
 import { TimelinePanel } from './timeline-panel';
 
 
@@ -24,10 +25,14 @@ function make(moment = 3) {
 
 describe('dy-timeline-panel', () => {
   beforeEach(() => stubChart());
-  it('reads out the picked moment and its top processes', () => {
-    const el = make().nativeElement as HTMLElement;
+  it('reads out the picked moment and its top processes', async () => {
+    const f = make();
+    const el = f.nativeElement as HTMLElement;
+    await f.whenStable();
+    await nextFrame();
+    f.detectChanges();
     expect(el.querySelectorAll('.heading')).toHaveLength(5);
-    expect(el.querySelectorAll('tbody tr')).toHaveLength(3);
+    expect(el.querySelectorAll('pd-table [role="row"][data-key]')).toHaveLength(3);
     expect(el.querySelector('.at')?.textContent).toContain('CPU');
   });
 

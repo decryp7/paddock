@@ -42,12 +42,14 @@ const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown>
     await f.whenStable();
     // A job the mock runs steps on a timer, like the agent's pushes.
     await new Promise((r) => setTimeout(r, 2));
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
     f.detectChanges();
   }
 };
 const btn = (el: HTMLElement, text: string) => [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes(text))!;
 const tabBtn = (el: HTMLElement, text: string) => [...el.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((b) => b.textContent === text)!;
-const rowsOf = (el: HTMLElement, label: string) => el.querySelectorAll(`table[aria-label="${label}"] tbody tr`);
+const rowsOf = (el: HTMLElement, label: string) => el.querySelectorAll(`[role$="grid"][aria-label="${label}"] [role="row"][data-key]`);
+const groupsOf = (el: HTMLElement, label: string) => [...el.querySelectorAll(`[role$="grid"][aria-label="${label}"] .pd-group`)];
 const clickTab = async (f: Parameters<typeof settle>[0], el: HTMLElement, text: string) => {
   tabBtn(el, text).click();
   await settle(f);
@@ -89,10 +91,10 @@ describe('dy-extras-page', () => {
   it('What changed: one table grouped by day, the window control and the watching note', async () => {
     const { f, el, store } = render();
     await settle(f);
-    const table = el.querySelector('table[aria-label="What changed"]')!;
-    expect(table.querySelectorAll('thead')).toHaveLength(1);
-    expect(table.querySelectorAll('tr.day').length).toBeGreaterThanOrEqual(3);
-    expect(table.querySelector('tr.day')!.textContent).toContain('Today');
+    const table = el.querySelector('[role$="grid"][aria-label="What changed"]')!;
+    expect(table.querySelectorAll('[role="columnheader"]').length).toBeGreaterThan(3);
+    expect(groupsOf(el, 'What changed').length).toBeGreaterThanOrEqual(3);
+    expect(groupsOf(el, 'What changed')[0]!.textContent).toContain('Today');
     expect(table.textContent).toContain('Updated Visual Studio Code');
     expect(el.textContent).toContain('Dyno has been watching since');
     const before = rowsOf(el, 'What changed').length;
@@ -164,17 +166,20 @@ describe('dy-extras-page', () => {
     const { f, el, mock, store } = render('apps');
     await settle(f);
     const names = () => [...rowsOf(el, 'Network and energy per app')].map((r) => r.querySelector('.nm')!.textContent);
+    const header = (name: string) => [...el.querySelectorAll<HTMLElement>('[role="columnheader"]')].find((h) => h.textContent!.trim() === name)!;
+    const sortBy = (name: string) => (header(name).querySelector('.mat-sort-header-container') as HTMLElement).click();
     expect(names()[0]).toBe('Google Chrome');
     expect(el.textContent).toContain('4.8 GB');
-    btn(el, 'Sent').click();
+    sortBy('Sent');
+    await settle(f);
+    expect(header('Sent').getAttribute('aria-sort')).toBe('ascending');
+    sortBy('Sent');
     await settle(f);
     expect(names()[0]).toBe('Dropbox');
-    expect(el.querySelector('th[aria-sort="descending"]')!.textContent).toContain('Sent');
-    btn(el, 'Sent').click();
+    expect(header('Sent').getAttribute('aria-sort')).toBe('descending');
+    sortBy('App');
     await settle(f);
-    expect(el.querySelector('th[aria-sort="ascending"]')).not.toBeNull();
-    [...el.querySelectorAll<HTMLButtonElement>('.sort')].find((b) => b.textContent!.startsWith('App'))!.click();
-    await settle(f);
+    expect(header('App').getAttribute('aria-sort')).toBe('ascending');
     expect(names()[0]).toBe('Docker Desktop');
     const real = mockUsage();
     returns(mock, { appUsage: { ...real, networkUnavailable: 'Needs nettop.', energyUnavailable: 'No energy data.' } });
@@ -182,7 +187,7 @@ describe('dy-extras-page', () => {
     await settle(f);
     expect(el.textContent).toContain('Needs nettop.');
     expect(el.textContent).toContain('No energy data.');
-    expect(btn(el, 'Received')).toBeUndefined();
+    expect(header('Received')).toBeUndefined();
     returns(mock, { appUsage: { apps: [], networkUnavailable: null, energyUnavailable: null } });
     await store.reload('apps');
     await settle(f);
@@ -268,11 +273,11 @@ describe('dy-extras-page', () => {
     btn(el, 'Choose a folder').click();
     await settle(f);
     expect(mock.pickedFolders).toBe(1);
-    const table = el.querySelector('table[aria-label="Large and duplicate files"]')!;
-    expect(table.querySelectorAll('thead')).toHaveLength(1);
-    expect([...table.querySelectorAll('tr.day strong')].map((s) => s.textContent)).toEqual(['Large files', '3 copies of site-redesign.psd', '2 copies of resnet50.onnx']);
+    const table = el.querySelector('[role$="grid"][aria-label="Large and duplicate files"]')!;
+    expect(table.querySelectorAll('[role="columnheader"]')).toHaveLength(3);
+    expect(groupsOf(el, 'Large and duplicate files').map((g) => g.querySelector('.pd-group-name')!.textContent)).toEqual(['Large files', '3 copies of site-redesign.psd', '2 copies of resnet50.onnx']);
     expect(table.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
-    expect(table.querySelectorAll('tbody tr:not(.day)')).toHaveLength(8 + 5);
+    expect(rowsOf(el, 'Large and duplicate files')).toHaveLength(8 + 5);
     expect(el.textContent).toContain('Copies are listed oldest first.');
     expect(btn(el, 'Choose another folder')).toBeTruthy();
   });
@@ -282,9 +287,9 @@ describe('dy-extras-page', () => {
     await settle(f);
     btn(el, 'Choose a folder').click();
     await settle(f);
-    (el.querySelector('[aria-label="Collapse Large files"]') as HTMLElement).click();
+    (groupsOf(el, 'Large and duplicate files')[0] as HTMLElement).click();
     await settle(f);
-    expect(el.querySelectorAll('table[aria-label="Large and duplicate files"] tbody tr:not(.day)').length).toBe(5);
+    expect(rowsOf(el, 'Large and duplicate files').length).toBe(5);
     btn(el, 'Duplicates').click();
     await settle(f);
     expect(store.mode()).toBe('duplicates');

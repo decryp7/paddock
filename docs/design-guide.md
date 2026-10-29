@@ -58,6 +58,11 @@ product-reference points come from established knowledge (marked "[k]" in Source
   Subtitle 15/22/600; Title 18/26/600 (page title); Display 28/32/600 tabular (tile hero); Hero 40/44/600 (tray/health
   score only). Weights used: 400, 500, 600. No 700, no italics for emphasis.
 - Max line length 80 characters in prose; truncate with ellipsis plus tooltip, never wrap table cells to 3 lines.
+- A truncation is a decision that says so: `text-overflow: ellipsis` and the full text in a tooltip, title or aria-label (the app's
+  `dyFullText` sets `data-full-text`). Controls, tabs, links and numbers are never truncated: they wrap, or the layout gives them room.
+- Tab nav bars: a link is as wide as its label (`--pd-space-3` side padding, no 160 px minimum), so eight tabs fit a 900 px window; a
+  narrower page paginates. `mat-tab-group` (content tabs, a few of them) keeps Material's own sizing: it paginates by itself and no app
+  has a row of tabs that needs the rule.
 - Sentence case everywhere. Units are a smaller sibling of the number (`17.1` 28 px + `GB` 13 px muted).
 
 ## 4. Colour
@@ -253,6 +258,7 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   right-aligned tabular with units in header, first column strong, hover surface-2, selected = accent 12% tint plus
   2 px left bar, truncation with tooltip (a path is cut at segment boundaries and keeps the trailing segments, `…/Debrief/plugins/viewer/plugin-1.bin`, because the shared head is the part rows have in common), row actions appear on hover/focus but remain keyboard reachable (the "..."
   button stays visible in `--pd-row-action-rest`, subtle text at 75% (65% measured 2.75:1 in light), 3:1 or better; 100% text colour on hover, focus and open). Sort affordance visible. Never clip the last column: use sticky action column.
+  - **Tree grid** (`pd-table` with `order="source"` and `tree`): for a list the app orders itself as a tree (processes under their parent, connections under their program). The app lists the visible rows in display order and owns the fold state; each row has `aria-level`, `aria-expanded` (null for a leaf) and its place among siblings, and the first cell is indented `--pd-tree-indent` per level. Right unfolds a folded row and on an unfolded one moves to its first child; Left folds an unfolded row, and on a leaf or a folded row goes to its parent. A tree has no filter field (the rows are the app's list). One row action cluster per row shares one tooltip, to the left of the cluster (`PdActionTip`).
 - **Toolbars**: 44 px, ghost buttons by default (no border until hover), one primary (filled accent) at the far right,
   groups separated by a 1 px divider, segmented controls for 2-4 mutually exclusive options (time range).
 - **Buttons**: primary (accent fill), secondary (surface-2 + border-strong), ghost, danger (danger fill only in

@@ -368,3 +368,29 @@ test('table: folding a group from the keyboard keeps the focus on its row after 
     await expect(focusedGroup, `after ${key}`).toHaveAttribute('aria-expanded', expanded);
   }
 });
+
+test('table: a tree grid has levels, and Right and Left unfold, enter and fold the rows', async ({ page }) => {
+  await open(page);
+  const tree = page.locator('[data-testid="table-tree"] [role=treegrid]');
+  await expect(tree).toBeVisible();
+  const row = (name: string) => tree.getByRole('row', { name: new RegExp(name) });
+  // "Report builder" starts folded: its renderer is not there; the other tops show their levels.
+  await expect(row('Report builder')).toHaveAttribute('aria-expanded', 'false');
+  await expect(row('Renderer')).toHaveCount(0);
+  await expect(row('Syslog service')).toHaveAttribute('aria-level', '1');
+  await expect(row('Collector')).toHaveAttribute('aria-level', '2');
+  await expect(row('Parser worker')).toHaveAttribute('aria-level', '3');
+  // Right unfolds the folded row, and on the unfolded row moves to its first child.
+  await row('Report builder').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(row('Report builder')).toHaveAttribute('aria-expanded', 'true');
+  await expect(row('Renderer')).toHaveAttribute('aria-level', '2');
+  await page.keyboard.press('ArrowRight');
+  await expect(row('Renderer')).toBeFocused();
+  // Left from a leaf goes up to its parent, and Left on an unfolded parent folds it.
+  await page.keyboard.press('ArrowLeft');
+  await expect(row('Report builder')).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(row('Report builder')).toHaveAttribute('aria-expanded', 'false');
+  await expect(row('Renderer')).toHaveCount(0);
+});

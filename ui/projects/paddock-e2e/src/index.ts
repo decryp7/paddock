@@ -41,7 +41,7 @@ export {
   type TabWalkOptions,
   type WalkOutcome,
 } from './keyboard.ts';
-export { LAYOUT_WIDTHS, WINDOW_SIZES, horizontalOverflow, expectNoHorizontalScroll, expectWithinWidth, resize } from './layout.ts';
+export { LAYOUT_WIDTHS, WINDOW_SIZES, horizontalOverflow, expectNoHorizontalScroll, expectWithinWidth, resize, isSilentlyClipped, isAcceptedEllipsis, unacceptedTextClips, ELLIPSIS_NEVER_WITHIN, ELLIPSIS_NEVER_SELF, textClippedWithoutEllipsis, textCutOffWithoutTooltip, type TextClip, expectNoSilentClipping, type ClipProbe } from './layout.ts';
 export { headerCovers, headerTrack, expectHeaderOnTop, isOpaqueColor, type GridParts, type HeaderCover, type HeaderFrame, type HeaderReport } from './grid.ts';
 export { waitForStableFrame, captureStable, type StableFrameOptions } from './screenshot.ts';
 export { installTauriFake, TauriFake, START_REPLIES, SHELL_PLUGIN_PREFIX, type IpcCall, type TauriFakeOptions } from './ipc.ts';
