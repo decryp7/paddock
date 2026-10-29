@@ -764,8 +764,12 @@ each named cause on purpose (ADR 0030). Diagnostics land before a fix that would
 those pids were free, and Windows hands a freed pid on at once: with four real-browser tests in parallel, the next owner was
 likely another test's Chrome helper, and killing its network service gives exactly ADR 0030's `ERR_ABORTED` trace. The sweep
 found the same mistake in four shapes across the family: a snapshot killed later, a tree built from parent pids (which outlive
-their processes on Windows), a `killpg(child.id())` after `try_wait` had reaped the child, and a pid trusted from a file.
-**Rule (ADR 0033):** a process is a `paddock_proc::ProcessId` (pid plus start time), checked before every kill (one handle on
-Windows); a child counts as a child only if it started after its parent; supervised Windows trees end through their job
-object; check C53 fails any other kill by pid. **Also:** when a flaky test fails right after another test in the same binary
-ended something, suspect the ending before the failing test.
+their processes on Windows; an "explorer orphan" then joins a browser's tree and its memory cap), a `killpg(child.id())`
+after `try_wait` had reaped the child, and a pid trusted from a file. The first fix had a gap of its own: macOS's
+`proc_pidinfo` refuses a setuid child (EPERM), so such a child had no identity and ran unsupervised; the start time comes
+from `sysctl(KERN_PROC_PID)` instead, which answers for every process.
+**Rule 53 (ADR 0033):** never act on a reusable OS name (pid, port, temp path) read earlier: hold it (handle, job, listener)
+or verify its identity (`paddock_proc::ProcessId`, pid plus start time) right before acting; trees follow parents by age or
+job membership. Clippy's `disallowed-methods` and check C53 enforce it. **Also:** when a flaky test fails right after
+another test in the same binary ended something, suspect the ending before the failing test; and test an identity source
+with a process of another user, not only your own.
