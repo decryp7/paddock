@@ -33,7 +33,7 @@ test.describe('screens', () => {
       ['Health', 'Health'],
       ['Backup health', 'Backup health'],
       ['Extras', 'Extras'],
-      ['Lifespan', 'Disk and battery life'],
+      ['Lifespan', 'Lifespan'],
       ['Diagnostics', 'Diagnostics bundle'],
       ['Dashboard', 'Dashboard'],
     ] as const) {
@@ -496,7 +496,7 @@ test.describe('network', () => {
 
   test('lifespan: a disk and a battery forecast with ranges, confidence and what they stand on', async ({ page }) => {
     await page.goto(url('/lifespan'));
-    await expect(page.getByRole('heading', { level: 1, name: 'Disk and battery life' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Lifespan' })).toBeVisible();
     await expect(page.getByText('Replace in about 23 months (17 to 31 months)')).toBeVisible();
     await expect(page.getByText('Confidence: medium')).toHaveCount(2);
     await expect(page.getByRole('img', { name: /Soonest 17 months, expected 23 months/ })).toBeVisible();
