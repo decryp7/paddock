@@ -13,11 +13,26 @@ mod common;
 static GLOBAL: debrief_alloc::MiMalloc = debrief_alloc::MiMalloc;
 
 use common::rss::Sampler;
-use debrief_core::ports::Ingest;
+use debrief_core::ports::{Ingest, Search, SearchRequest};
 use debrief_core::{PluginRegistry, Profile};
 use debrief_store_duck::DuckStore;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+/// `DEBRIEF_READY_LOG=1`: the store's log (debug and up) on stderr with the seconds since the start, so phases show.
+struct Log(Instant);
+
+impl log::Log for Log {
+    fn enabled(&self, m: &log::Metadata) -> bool {
+        m.level() <= log::Level::Debug && m.target().starts_with("debrief")
+    }
+    fn log(&self, r: &log::Record) {
+        if self.enabled(r.metadata()) {
+            eprintln!("[{:7.1} s] {} {}: {}", self.0.elapsed().as_secs_f64(), r.level(), r.target(), r.args());
+        }
+    }
+    fn flush(&self) {}
+}
 
 fn dir_mb(p: &Path) -> f64 {
     fn size(p: &Path) -> u64 {
@@ -45,6 +60,9 @@ fn import_until_search_is_ready() {
     assert!(!store_dir.join("data.duckdb").exists(), "DEBRIEF_READY_STORE must be a new folder");
     let sampler = Sampler::start();
     let started = Instant::now();
+    if std::env::var_os("DEBRIEF_READY_LOG").is_some() {
+        let _ = log::set_boxed_logger(Box::new(Log(started))).map(|()| log::set_max_level(log::LevelFilter::Debug));
+    }
     let secs = || started.elapsed().as_secs_f64();
     // Knobs: `DEBRIEF_READY_THREADS` (parse threads), `DEBRIEF_READY_INDEX=threads,heap_mb` (the index writer's budget),
     // `DEBRIEF_READY_WAIT=import|index` (stop after the import or after the index; default: both background builds).
@@ -65,10 +83,12 @@ fn import_until_search_is_ready() {
     if let Some(n) = std::env::var("DEBRIEF_READY_DUCK").ok().and_then(|v| v.parse().ok()) {
         options.duck_threads = n;
     }
+    // `DEBRIEF_READY_OVERLAP=1`: the index and the catalogue beside the import (off by default).
+    options.index_beside_import = std::env::var_os("DEBRIEF_READY_OVERLAP").is_some();
     let wait = std::env::var("DEBRIEF_READY_WAIT").unwrap_or_default();
     eprintln!(
-        "ready: parse threads {}, index writer {:?}, catalogue workers {}, DuckDB threads {}",
-        options.parse_threads, options.index, options.catalogue_workers, options.duck_threads
+        "ready: parse threads {}, index writer {:?}, catalogue workers {}, DuckDB threads {}, index beside the import {}",
+        options.parse_threads, options.index, options.catalogue_workers, options.duck_threads, options.index_beside_import
     );
     let store = DuckStore::create_with(&store_dir, Profile::default_profile(), PluginRegistry::new(), options).unwrap();
     let r = store.open(std::slice::from_ref(&corpus)).unwrap().wait().unwrap();
@@ -91,6 +111,23 @@ fn import_until_search_is_ready() {
             sampler.take_peak_mb(),
             dir_mb(&store_dir.join("index")),
         );
+        // What more writer threads cost the reads: the index's segments (Tantivy merges them in the background) and
+        // word searches (p50 / p95 of 20 each) right after it is ready.
+        let meta = std::fs::read_to_string(store_dir.join("index").join("meta.json")).unwrap_or_default();
+        eprintln!("ready: index segments {}", meta.matches("\"segment_id\"").count());
+        for word in ["timeout", "declined", "cap_a0565ebc64cb", "contoso orders"] {
+            let mut ms: Vec<f64> = (0..20)
+                .map(|_| {
+                    let t = Instant::now();
+                    let r = store.search(&SearchRequest { text: word.into(), limit: 0 }).unwrap();
+                    std::hint::black_box(r.total);
+                    t.elapsed().as_secs_f64() * 1000.0
+                })
+                .collect();
+            ms.sort_by(f64::total_cmp);
+            let hits = store.search(&SearchRequest { text: word.into(), limit: 0 }).unwrap().total;
+            eprintln!("ready: search {word:?}: {hits} hits, p50 {:.1} ms, p95 {:.1} ms", ms[10], ms[18]);
+        }
     }
     if wait == "import" || wait == "index" {
         drop(store);

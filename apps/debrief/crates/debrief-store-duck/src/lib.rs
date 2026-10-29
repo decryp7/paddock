@@ -82,6 +82,9 @@ pub struct StoreOptions {
     pub index: fts::WriterBudget,
     /// Threads building the catalogue of names after an import (see [`catalogue::default_workers`]).
     pub catalogue_workers: usize,
+    /// The full-text index and the catalogue are built while an import appends (`gate`'s window), not after it. Off:
+    /// with it the import of a large folder was 4 to 5 times slower (performance.md); kept for the investigation.
+    pub index_beside_import: bool,
     /// Where DuckDB spills beyond its memory limit: a folder per store below this one (see [`spill_folder`]);
     /// `None`: the store folder's `tmp` (applies when the store opens).
     pub spill_dir: Option<PathBuf>,
@@ -102,6 +105,7 @@ impl Default for StoreOptions {
             memory_limit: MEMORY_LIMIT.to_string(),
             index: fts::WriterBudget::default(),
             catalogue_workers: catalogue::default_workers(),
+            index_beside_import: false,
             spill_dir: None,
             max_spill: None,
             allocator_flush: ALLOCATOR_FLUSH.to_string(),
@@ -586,7 +590,7 @@ impl Inner {
         .map_err(|e| engine(format!("{e:#}")))?;
         sink.keep_ids(keep);
         // Until the last segment is listed the import only appends: the index and the catalogue build beside it.
-        let window = self.gate.open_window();
+        let window = read_lock(&self.options).index_beside_import.then(|| self.gate.open_window());
         let t0 = std::time::Instant::now();
         let spec = StreamSpec {
             paths,

@@ -403,6 +403,7 @@ fn tuned(base: StoreOptions, tuning: &StoreTuning) -> StoreOptions {
         }
         .floored(),
         catalogue_workers: base.catalogue_workers,
+        index_beside_import: base.index_beside_import,
         spill_dir: tuning.spill_dir.clone().or(base.spill_dir),
         max_spill: tuning.max_spill_mb.map(mb).or(base.max_spill),
         allocator_flush: tuning.allocator_flush_mb.map(|m| format!("{m}MiB")).unwrap_or(base.allocator_flush),
