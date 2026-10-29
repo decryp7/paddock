@@ -280,6 +280,81 @@ fn the_user_closing_the_window_ends_the_page_while_the_process_runs() {
     assert!(!p.exists().unwrap());
 }
 
+/// Regression (Spotter, Windows CI runs 6473 and 6563): a `Page.navigate` sent right after the tab was created, while its
+/// own first navigation (`about:blank`) still ran, came back `net::ERR_ABORTED`. The fake keeps that navigation running
+/// until told otherwise and cancels any load sent meanwhile, as Chrome can; the first load now waits for it instead.
+#[test]
+fn the_first_load_waits_until_the_tabs_own_first_navigation_has_settled() {
+    let f = Fixture::new(Mode::Obey, 1);
+    let b = f.launch();
+    f.fake.act(UserAction::SlowStartPage).unwrap();
+    let p = b.new_page().unwrap();
+    // While it runs, the load is not even sent (the driver before the fix sent it and got ERR_ABORTED back at once).
+    let e = p.navigate("https://a.test/", Duration::from_millis(200));
+    assert!(matches!(e, Err(Error::Timeout(_))), "{e:?}");
+    assert!(!f.fake.calls().iter().any(|c| c == "Page.navigate"));
+    std::thread::scope(|s| {
+        let load = s.spawn(|| p.navigate("https://a.test/", Duration::from_secs(20)));
+        f.fake.act(UserAction::FinishStartPage).unwrap();
+        load.join().unwrap().unwrap();
+    });
+    assert!(f.fake.calls().iter().any(|c| c == "Page.navigate"));
+    // Settled once is settled: later loads do not wait for it again.
+    p.navigate("https://b.test/", Duration::from_secs(10))
+        .unwrap();
+}
+
+/// The events that would show the first navigation settled can leave the bounded event log (a busy page sends more than
+/// it keeps); the page then counts it as settled instead of waiting out the caller's whole timeout for an event it can no
+/// longer see.
+#[test]
+fn a_first_navigation_whose_events_left_the_log_counts_as_settled() {
+    let f = Fixture::new(Mode::Obey, 1);
+    let b = f.launch();
+    f.fake.act(UserAction::SlowStartPage).unwrap();
+    let p = b.new_page().unwrap();
+    p.call("Debug.flood", json!({})).unwrap();
+    // The load is sent (the fake, still on its first navigation, cancels it), not held until the 20 s run out.
+    let e = p.navigate("https://a.test/", Duration::from_secs(20));
+    assert!(
+        matches!(&e, Err(Error::Protocol(m)) if m.contains("net::ERR_ABORTED")),
+        "{e:?}"
+    );
+    assert!(f.fake.calls().iter().any(|c| c == "Page.navigate"));
+}
+
+/// Without a frame tree the main frame is the target id (as in Chrome): the running navigation is still found and
+/// waited for. (With a frame tree the fake's main frame `F` differs from every target id, so the other tests show the
+/// frame tree's id is the one used.)
+#[test]
+fn without_a_frame_tree_the_target_id_names_the_main_frame() {
+    let f = Fixture::new(Mode::Obey, 1);
+    let b = f.launch();
+    f.fake.act(UserAction::SlowStartPage).unwrap();
+    f.fake.act(UserAction::NoFrameTree).unwrap();
+    let p = b.new_page().unwrap();
+    let e = p.navigate("https://a.test/", Duration::from_millis(200));
+    assert!(matches!(e, Err(Error::Timeout(_))), "{e:?}");
+    assert!(!f.fake.calls().iter().any(|c| c == "Page.navigate"));
+    f.fake.act(UserAction::FinishStartPage).unwrap();
+    p.navigate("https://a.test/", Duration::from_secs(20))
+        .unwrap();
+}
+
+#[test]
+fn closing_the_window_ends_the_wait_for_the_tabs_first_navigation() {
+    let f = Fixture::new(Mode::Obey, 1);
+    let b = f.launch();
+    f.fake.act(UserAction::SlowStartPage).unwrap();
+    let p = b.new_page().unwrap();
+    std::thread::scope(|s| {
+        let load = s.spawn(|| p.navigate("https://a.test/", Duration::from_secs(20)));
+        f.fake.act(UserAction::CloseWindow).unwrap();
+        let _ = b.page_count();
+        assert!(matches!(load.join().unwrap(), Err(Error::Closed)));
+    });
+}
+
 #[test]
 fn a_load_in_progress_ends_at_once_when_the_window_is_closed() {
     let f = Fixture::new(Mode::Obey, 1);
