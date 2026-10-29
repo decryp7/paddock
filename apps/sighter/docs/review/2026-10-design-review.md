@@ -700,3 +700,7 @@ coverage), full visual-regression match levels, and the C++ client (generated la
 ## Decisions (user, 2026-10-24)
 
 All six recommendations in §5 accepted: v1 targets VM console, RDP and Local with a Windows-only controller and VM snapshot pools; a Lab release before the training studio; a lab-only guest helper for training labels, never at test time; IronRDP after a spike (FreeRDP out-of-process fallback) and Sighter's own VNC client; one stop hotkey Ctrl+Alt+Shift+F12, the HUD as a separate video track, the on-screen overlay only where it can be hidden from capture; models promoted for unattended suites only after per-slice gates and shadow mode.
+
+**Superseded, 2026-10-30 (user):** the "Lab release before the training studio" cut and the lab-only guest helper (UIA
+labels) no longer stand. Sighter ships one release with the detector, and it is pixels only
+([ADR 0001](../adr/0001-object-detector.md) decision 9). See [stage-2.md](../plans/stage-2.md).
