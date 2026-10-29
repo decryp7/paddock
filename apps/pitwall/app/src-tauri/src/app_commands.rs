@@ -44,44 +44,6 @@ pub async fn service_state(client: State<'_, SharedClient>) -> Result<ServiceIns
     Ok(compose_state(client.inner()).await)
 }
 
-/// Registers and starts the service (the user said yes).
-#[deprecated(note = "use start_install_service (a job with Cancel); the UI moves over in WP-3 of Pitwall 1.1")]
-#[tauri::command]
-pub async fn install_service(client: State<'_, SharedClient>) -> Result<ServiceInstall, CommandError> {
-    tauri::async_runtime::spawn_blocking(service_install::install)
-        .await
-        .map_err(|e| internal(format!("installing the service stopped unexpectedly: {e}")))??;
-    mark_offered();
-    Ok(compose_state(client.inner()).await)
-}
-
-/// Stops and removes the service.
-#[deprecated(note = "use start_uninstall_service (a job with Cancel); the UI moves over in WP-3 of Pitwall 1.1")]
-#[tauri::command]
-pub async fn uninstall_service(client: State<'_, SharedClient>) -> Result<ServiceInstall, CommandError> {
-    tauri::async_runtime::spawn_blocking(service_install::uninstall)
-        .await
-        .map_err(|e| internal(format!("removing the service stopped unexpectedly: {e}")))??;
-    Ok(compose_state(client.inner()).await)
-}
-
-/// Repairs the background service (macOS): removes the registration launchd refuses, waits until launchd dropped it and
-/// registers again. Runs in the background; the state it returns shows the progress. This is the app's own business and
-/// does not need the server.
-// WP-3 moves the UI to `start_repair_service`; this goes then.
-#[deprecated(note = "use start_repair_service (a job with phases and Cancel); the UI moves over in WP-3 of Pitwall 1.1")]
-#[tauri::command]
-pub async fn repair_service(client: State<'_, SharedClient>) -> Result<ServiceInstall, CommandError> {
-    let c = client.inner().clone();
-    let answers = move || tauri::async_runtime::block_on(forward(c.as_ref(), "overview", Value::Null)).is_ok();
-    #[allow(deprecated)]
-    let started = tauri::async_runtime::spawn_blocking(move || service_install::request_repair(answers));
-    started
-        .await
-        .map_err(|e| internal(format!("repairing the service stopped unexpectedly: {e}")))??;
-    Ok(compose_state(client.inner()).await)
-}
-
 /// Opens System Settings > General > Login Items (macOS); the user switches the item, Pitwall never does.
 #[tauri::command]
 pub async fn open_login_items() -> Result<(), CommandError> {
@@ -145,21 +107,8 @@ pub async fn check_app_update(
     updater::check(&app).await
 }
 
-/// Installs the update found by the last check, then restarts the app.
-#[deprecated(note = "use start_app_update (a job with Cancel); the UI moves over in WP-3 of Pitwall 1.1")]
-#[tauri::command]
-pub async fn install_app_update(
-    app: AppHandle,
-    client: State<'_, SharedClient>,
-    known: State<'_, Arc<OfflineKnown>>,
-) -> Result<(), CommandError> {
-    updater::refuse_when_offline(client.as_ref(), &known).await?;
-    let (c, k) = (client.inner().clone(), known.inner().clone());
-    updater::install(&app, |_| {}, || async move { updater::refuse_when_offline(c.as_ref(), &k).await }).await
-}
-
 // Long operations as jobs (ER-17..19) on the shared executor. Each `start_*` returns the job id at once and reports on
-// the channel; `job_cancel` stops one. The blocking commands above stay until the UI has moved over.
+// the channel; `job_cancel` stops one.
 
 fn channel_sink(channel: Channel<JobEvent>) -> JobSink {
     Arc::new(move |event| {

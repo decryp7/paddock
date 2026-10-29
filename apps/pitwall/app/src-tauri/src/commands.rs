@@ -178,10 +178,6 @@ rpc!(
     /// The model updates on offer (newer revisions, better quantisations), not dismissed.
     update_notices => "update_notices");
 rpc!(
-    /// Asks Hugging Face now (repository ids of downloaded models only; refused in offline mode).
-    #[deprecated(note = "use start_check_updates (a job with Cancel); the UI moves over in WP-3 of Pitwall 1.1")]
-    check_updates_now => "check_updates_now");
-rpc!(
     /// Turns the scheduled update check on or off and sets how often it runs.
     set_update_check => "set_update_check", enabled: bool = "enabled", schedule: UpdateSchedule = "schedule");
 rpc!(
@@ -244,10 +240,6 @@ rpc!(
 rpc!(
     /// Deletes a model from disk.
     delete_model => "delete_model", id: String = "id");
-rpc!(
-    /// Loads a model now.
-    #[deprecated(note = "use the start_load_model job; the UI moves over in WP-3 of Pitwall 1.1")]
-    load_model => "load_model", id: String = "id");
 rpc!(
     /// Unloads a model.
     unload_model => "unload_model", id: String = "id");
@@ -338,10 +330,6 @@ rpc!(
 rpc!(
     /// Past benchmark results.
     benchmarks => "benchmarks");
-rpc!(
-    /// Runs a benchmark.
-    #[deprecated(note = "use start_benchmark (a job with Cancel); the UI moves over in WP-3 of Pitwall 1.1")]
-    run_benchmark => "run_benchmark", model_id: String = "modelId");
 rpc!(
     /// The settings.
     settings => "settings");
