@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, ciRuns, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, ciRuns, isGreenCiPush, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
@@ -556,6 +556,27 @@ describe('ciRuns (the green runs of main a push diffs from)', () => {
     const warnings = [];
     assert.equal(await ciRuns(env, (w) => warnings.push(w), async () => json({ message: 'forbidden' }, 403)), null);
     assert.match(warnings.join('\n'), /::warning::the CI runs of main could not be read \(HTTP 403\)/);
+  });
+
+  test('one predicate decides what a green ci.yml push run of main is, for the lookup and for the base', async () => {
+    assert.equal(isGreenCiPush(run_(1)), true);
+    for (const [what, over] of [
+      ['failed', { conclusion: 'failure' }],
+      ['a dispatch', { event: 'workflow_dispatch' }],
+      ['another branch', { head_branch: 'feature' }],
+      ['another workflow', { path: 'nightly.yml@refs/heads/main' }],
+      ['no path', { path: undefined }],
+    ]) {
+      assert.equal(isGreenCiPush(run_(1, over)), false, what);
+      assert.equal(chooseBase({ event: 'push', ref: 'refs/heads/main', runs: [run_(1, over)], contains: () => true, mergeBase: () => null }).base, null, `chooseBase: ${what}`);
+    }
+    // A per-workflow list holding only a green dispatch run is no answer: the lookup falls back and finds the push run.
+    const notes = [];
+    const runs = await ciRuns(env, (w) => notes.push(w), async (url) =>
+      url.includes('/actions/workflows/') ? json({ workflow_runs: [run_(9, { event: 'workflow_dispatch' })] }) : json({ workflow_runs: [run_(8)] }),
+    );
+    assert.equal(chooseBase({ event: 'push', ref: 'refs/heads/main', runs, contains: () => true, mergeBase: () => null }).base, 'sha8');
+    assert.match(notes.join('\n'), /::notice::/);
   });
 
   test('only a green ci.yml push run of main counts, whatever stands before it in the per-workflow list', async () => {

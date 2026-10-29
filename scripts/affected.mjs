@@ -796,6 +796,14 @@ export function onlyApp(plan, app) {
 // ------------------------------------------------------------------------------------------------------------- base
 
 /**
+ * Whether a run (Gitea API) is a green ci.yml push run of main: the one test of both the lookup (`ciRuns`) and the base
+ * (`chooseBase`), so they never disagree. A run without `path` does not count (it cannot be told from another workflow's).
+ */
+export function isGreenCiPush(r, mainBranch = 'main') {
+  return r?.conclusion === 'success' && r.event === 'push' && r.head_branch === mainBranch && /^ci\.ya?ml@/.test(r.path ?? '');
+}
+
+/**
  * The base of a CI run, or null for everything. `runs` is the newest-first list of ci.yml runs from the Gitea API (only
  * read for a push to main); `contains(sha)` says whether HEAD contains a commit; `mergeBase(ref)` gives a pull request's.
  * Returns { base, reason }.
@@ -808,7 +816,7 @@ export function chooseBase({ event, ref, inputBase, baseRef, mainRef = 'refs/hea
   if (event === 'workflow_dispatch') return inputBase ? { base: inputBase, reason: `the base input ${inputBase}` } : { base: null, reason: 'a manual run without a base: everything' };
   if (event === 'push' && ref === mainRef) {
     if (!runs) return { base: null, reason: 'the CI runs could not be read: everything' };
-    const green = runs.find((r) => r.conclusion === 'success' && r.event === 'push' && r.head_branch === 'main' && /^ci\.ya?ml@/.test(r.path ?? 'ci.yml@') && contains(r.head_sha));
+    const green = runs.find((r) => isGreenCiPush(r, mainRef.replace(/^refs\/heads\//, '')) && contains(r.head_sha));
     return green ? { base: green.head_sha, reason: `the last green ci run on main (${green.head_sha.slice(0, 10)}, run ${green.id})` } : { base: null, reason: 'no green ci run on main that HEAD contains: everything' };
   }
   return { base: null, reason: `${event} ${ref}: everything` };
@@ -836,7 +844,7 @@ export async function ciRuns(env, warn, fetchImpl = fetch) {
     if (!res.ok) why = `HTTP ${res.status}`;
     else {
       const runs = (await res.json()).workflow_runs;
-      if (Array.isArray(runs) && runs.some((r) => r.conclusion === 'success' && /^ci\.ya?ml@/.test(r.path ?? ''))) return runs;
+      if (Array.isArray(runs) && runs.some((r) => isGreenCiPush(r))) return runs;
       why = 'no green run in it';
     }
   } catch (e) {
@@ -850,7 +858,7 @@ export async function ciRuns(env, warn, fetchImpl = fetch) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const runs = (await res.json()).workflow_runs ?? [];
       out.push(...runs);
-      if (runs.length < 50 || out.some((r) => r.conclusion === 'success' && /^ci\.ya?ml@/.test(r.path ?? ''))) break;
+      if (runs.length < 50 || out.some((r) => isGreenCiPush(r))) break;
     }
     return out;
   } catch (e) {
