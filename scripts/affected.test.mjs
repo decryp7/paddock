@@ -20,7 +20,7 @@ describe('the graph of this tree', () => {
     const r = run('crates/paddock-jobs/src/lib.rs');
     assert.ok(r.crates && !r.ui);
     // Debrief's store worker depends on paddock-proc by path (the macOS memory footprint), so the shared crates reach Debrief too; Dyno takes the shell crates by path.
-    assert.deepEqual(r.apps, ['debrief', 'dyno', 'shell-demo', 'workbench-demo']);
+    assert.deepEqual(r.apps, ['debrief', 'dyno', 'pacenotes', 'shell-demo', 'workbench-demo']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust']);
     assert.deepEqual(r.kinds.debrief, ['rust']);
     assert.ok(r.packages.crates.includes('paddock-jobs'));
@@ -842,8 +842,16 @@ describe('contracts', () => {
     assert.deepEqual(run('apps/debrief/docs/adr/0001-x.md').apps, []);
   });
 
-  test('a docs-only app (Pacenotes, Sighter) is no leg, and its docs mark only the link check', () => {
-    for (const a of ['pacenotes', 'sighter']) {
+  test('Pacenotes has a Linux Rust leg: its crates mark it, its docs mark only the link check', () => {
+    const legs = matrix(run('apps/pacenotes/crates/pacenotes-core/src/lib.rs'), graph).filter((l) => l.app === 'pacenotes');
+    assert.deepEqual(legs.map((l) => [l.os, l.rust, l.ui_checks, l.e2e_checks]), [['ubuntu-latest', true, '', '']], 'one Linux leg, Rust only: no UI commands yet');
+    assert.deepEqual(run('apps/pacenotes/crates/pacenotes-core/src/lib.rs').apps, ['pacenotes']);
+    const d = run('apps/pacenotes/docs/x.md');
+    assert.deepEqual([d.apps, d.docs], [[], true]);
+  });
+
+  test('a docs-only app (Sighter) is no leg, and its docs mark only the link check', () => {
+    for (const a of ['sighter']) {
       assert.ok(graph.apps.has(a), `${a} has its paddock.ci.json`);
       assert.ok(!matrix(affected([], graph, { all: true }), graph).some((l) => l.app === a));
       const d = run(`apps/${a}/docs/x.md`);
