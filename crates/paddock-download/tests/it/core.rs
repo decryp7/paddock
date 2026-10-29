@@ -11,7 +11,7 @@ use paddock_download::{
 use paddock_jobs::{CancelReason, JobError};
 use std::io::{self, Cursor, Read};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime};
 use support::{blob, job, sha256_hex};
 
@@ -520,6 +520,25 @@ fn a_tls_failure_is_not_retried() {
 }
 
 #[test]
+fn a_cancel_during_the_backoff_after_a_failure_ends_the_download_as_cancelled() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ctx, _) = job();
+    let token = ctx.cancel_token().clone();
+    let t = Arc::new(Script::new(move |_, _| {
+        // The request fails while the user cancels: the back-off before the next attempt notices and does not try again.
+        token.cancel();
+        Err(TransportError::new(TransportErrorKind::Timeout, "slow"))
+    }));
+    let d = Downloader::new(t.clone()).with_config(quick());
+    let got = d.download(&ctx, &req_in(&dir, Integrity::Unpinned));
+    assert!(
+        matches!(got, Err(DownloadError::Cancelled(CancelReason::User))),
+        "{got:?}"
+    );
+    assert_eq!(t.calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn a_panicking_transport_is_contained() {
     let dir = tempfile::tempdir().unwrap();
     let (got, _) = run(
@@ -668,16 +687,25 @@ fn a_destination_that_cannot_be_created_is_an_io_error() {
 
 #[test]
 fn a_slow_range_is_split_so_neither_the_tail_nor_the_hash_waits_on_it() {
+    // The fake decides what is slow, not the clock (ADR 0031): the first range is held open until another connection takes
+    // over part of it, and the other ranges are answered only once the first one was asked for, so no connection can finish
+    // and split the first range before its request is sent (CI 7110: a late first worker found its range already split
+    // down to below `2 * min_block`, so nothing was left to split while it was slow).
     let data = blob(2 * 1024 * 1024);
     let d2 = data.clone();
+    let gate = Arc::new(Gate::default());
+    let g2 = gate.clone();
     let t = Script::new(move |g, _| {
         let r = g.range.unwrap();
-        let mut a = ranged(&d2, g).unwrap();
+        let mut a = ranged(&d2, g)?;
         if r.start == 0 && r.end != Some(0) {
-            // The first range trickles: 4 KiB every 5 ms.
-            let mut v = Vec::new();
-            a.body.read_to_end(&mut v).unwrap();
-            a.body = Box::new(Trickle(Cursor::new(v)));
+            g2.slow_asked(r.end.unwrap());
+            a.body = Box::new(Held {
+                gate: g2.clone(),
+                body: a.body,
+            });
+        } else if r.start > 0 {
+            g2.other_asked(r.start);
         }
         Ok(a)
     });
@@ -709,18 +737,60 @@ fn a_slow_range_is_split_so_neither_the_tail_nor_the_hash_waits_on_it() {
         .and_then(|r| r.end)
         .unwrap();
     assert!(
+        first_end + 1 >= 2 * 8 * 1024,
+        "the first range was split before it was asked for: {ranges:?}"
+    );
+    assert!(
         ranges.iter().any(|r| r.start > 0 && r.start <= first_end),
         "the slow first range was not split: {ranges:?}"
     );
 }
 
-struct Trickle(Cursor<Vec<u8>>);
+/// What the scripted server has seen: the end of the slow first range once asked for, and whether another range started
+/// inside it since.
+#[derive(Default)]
+struct Gate {
+    seen: Mutex<(Option<u64>, bool)>,
+    moved: Condvar,
+}
 
-impl Read for Trickle {
+impl Gate {
+    fn slow_asked(&self, end: u64) {
+        self.seen.lock().unwrap().0 = Some(end);
+        self.moved.notify_all();
+    }
+
+    /// Waits until the slow range was asked for, then notes whether `start` lies inside it.
+    fn other_asked(&self, start: u64) {
+        let mut s = self
+            .moved
+            .wait_while(self.seen.lock().unwrap(), |s| s.0.is_none())
+            .unwrap();
+        if s.0.is_some_and(|end| start <= end) {
+            s.1 = true;
+            self.moved.notify_all();
+        }
+    }
+
+    fn wait_for_split(&self) {
+        drop(
+            self.moved
+                .wait_while(self.seen.lock().unwrap(), |s| !s.1)
+                .unwrap(),
+        );
+    }
+}
+
+/// The slow range's body: no byte until another connection took over part of the range.
+struct Held {
+    gate: Arc<Gate>,
+    body: Box<dyn Read + Send>,
+}
+
+impl Read for Held {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        std::thread::sleep(Duration::from_millis(5));
-        let n = buf.len().min(4096);
-        self.0.read(&mut buf[..n])
+        self.gate.wait_for_split();
+        self.body.read(buf)
     }
 }
 
