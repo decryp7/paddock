@@ -619,6 +619,21 @@ impl FtsService {
         })
     }
 
+    /// Deletes the documents of the id blocks `first .. end` (rows rewritten into new segments, indexed again from
+    /// those): a range query on the `id` fast field, so it does not depend on which file held the rows.
+    pub fn delete_blocks(&self, blocks: &[(u64, u64)]) -> Result<()> {
+        let field = self.shared.fts.f.id;
+        self.with_writer(|w| {
+            for (first, end) in blocks {
+                w.delete_query(Box::new(tantivy::query::RangeQuery::new(
+                    std::ops::Bound::Included(Term::from_field_u64(field, *first)),
+                    std::ops::Bound::Excluded(Term::from_field_u64(field, *end)),
+                )))?;
+            }
+            Ok(())
+        })
+    }
+
     /// Deletes every document (the store was cleared).
     pub fn clear(&self) -> Result<()> {
         self.with_writer(|w| {
