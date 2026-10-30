@@ -102,6 +102,35 @@ export function peakCounts(snapshots, config, bundleDir) {
   return peak;
 }
 
+/**
+ * How many distinct processes of each spec existed over a whole step: identity is the pid plus the start time (the snapshot time
+ * minus the age, merged within 10 s), so a duplicate that exits before the app is ready, or an agent that dies and is replaced, is
+ * counted although no single snapshot shows two.
+ * @param {{at:number, procs:ReturnType<typeof parsePs>}[]} trace snapshots with their time in ms
+ */
+export function distinctCounts(trace, config, bundleDir) {
+  const out = {};
+  for (const spec of config.processes) {
+    const seen = new Map(); // pid -> start times (ms)
+    for (const { at, procs } of trace) {
+      for (const p of instancesOf(procs, spec, bundleDir)) {
+        const start = at - (Number.isNaN(p.ageSec) ? 0 : p.ageSec * 1000);
+        const starts = seen.get(p.pid) ?? [];
+        if (!starts.some((t) => Math.abs(t - start) <= 10_000)) starts.push(start);
+        seen.set(p.pid, starts);
+      }
+    }
+    out[spec.name] = [...seen.values()].reduce((n, starts) => n + starts.length, 0);
+  }
+  return out;
+}
+
+/** The checks for `distinctCounts`: more distinct processes than `max` over the step fails. */
+export function judgeDistinct(trace, config, bundleDir) {
+  const d = distinctCounts(trace, config, bundleDir);
+  return config.processes.map((s) => ({ id: `distinct:${s.name}`, ok: d[s.name] <= (s.max ?? 1), detail: `${s.name}: ${d[s.name]} distinct process(es) (pid and start time) seen from launch to the end of the window (allowed ${s.max ?? 1})` }));
+}
+
 /** Judges an observation window: no snapshot exceeded any spec's `max`, and every judged snapshot had a legal parent. */
 export function judgeWindow(snapshots, config, bundleDir, want) {
   const peak = peakCounts(snapshots, config, bundleDir);

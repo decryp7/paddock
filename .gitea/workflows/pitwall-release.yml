@@ -2,12 +2,12 @@
 # of ci.yml (apps/pitwall/paddock.ci.json: Rust on Linux, Windows and macOS, the frontend with the Chromium and WebKit e2e), and its bundles, the macOS seal check,
 # the sidecar start and the release are the shared app-release.yml. This file is only the triggers and the app's facts.
 #
-#   push to main      installers on three OS and the real-app smoke when the change reaches Pitwall (the same plan as ci.yml)
+#   push to main      installers on three OS and the real-app smoke when the change reaches Pitwall (the same plan as ci.yml); no gates
 #   a pitwall-v* tag  the gates (ci.yml, only Pitwall's legs, WebKit e2e included), then installers, then the Gitea release with latest.json on
 #                     the release and on the moving pitwall-latest release, which installed copies update from
 #   nightly           no longer here: nightly.yml builds the installers (installers-pitwall), see the verdict job below
 #   manual            installers without a release (the "one CI build with bundles" before a tag, rule 25); `gates: true`
-#                     also runs Pitwall's ci.yml legs first. Rule 54: a run whose installers job did not run FAILS (verdict job).
+#                     also runs Pitwall's ci.yml legs beside them (not before). Rule 54: a run whose installers job did not run FAILS (verdict job).
 #
 # Runner labels: ubuntu-latest (the paddock-ci image), windows-latest and macos-latest (host runners; they install nothing
 # system-wide and leave no processes or launch agents behind). Secrets: the family's updater key
@@ -67,10 +67,47 @@ jobs:
       # A manual run with gates is the "one CI build with bundles" before a tag: WebKit included.
       webkit: ${{ github.event_name == 'workflow_dispatch' }}
 
+  # Installers for every run that is not a tag (push to main that reaches Pitwall, manual run): they need only the plan, never `gates`.
+  # Gitea 28.2 skips a reusable-workflow job whose need was skipped, whatever its `if` says (125 of 133 green release runs
+  # built nothing), so a job that waits on the optional `gates` job can not be the one that builds on a push or a dispatch.
+  # A manual run with `gates: true` runs the gates beside the installers; both must be green for the run to be.
+  installers:
+    name: installers
+    needs: [plan]
+    if: ${{ needs.plan.outputs.run == 'true' && !startsWith(github.ref, 'refs/tags/') }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: pitwall
+      app-name: Pitwall
+      app-dir: apps/pitwall/app
+      cargo-dir: apps/pitwall
+      tag-prefix: pitwall-
+      latest-tag: pitwall-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Pitwall now updates from the Paddock releases, which a copy installed before this version does not look at."
+      cliff-config: apps/pitwall/cliff.toml
+      cliff-paths: |
+        apps/pitwall/**
+        crates/**
+        ui/**
+      # --version: pitwall-server has no --self-test; its --version starts the binary from the built app and exits 0 (the old
+      # macos-verify-bundle.sh ran the same).
+      sidecars: pitwall-server:--version
+      setup-node: false
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+  # A tag: the gates first (ER-15: no release past red gates), then the same installers and the Gitea release. Only a tag run has
+  # the gates, so this job never waits on a skipped need.
   release:
     name: installers + release
     needs: [plan, gates]
-    if: ${{ !cancelled() && needs.plan.outputs.run == 'true' && (needs.gates.result == 'success' || (needs.gates.result == 'skipped' && !startsWith(github.ref, 'refs/tags/'))) }}
+    if: ${{ needs.plan.outputs.run == 'true' && startsWith(github.ref, 'refs/tags/pitwall-v') && needs.gates.result == 'success' }}
     uses: ./.gitea/workflows/app-release.yml
     with:
       paddock-ref: ${{ github.sha }}
@@ -99,10 +136,10 @@ jobs:
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 
   # What this run proves about the installers (rule 54): "installers: built" or "installers: not built (why)" in the summary, and a
-  # red run when a manual run or a tag was meant to build them and did not. A job with `if: always()` is not skipped with its needs.
+  # red run when a manual run or a tag was meant to build them and did not. The verdict reads whichever of the two installer jobs ran.
   verdict:
     name: installers verdict
-    needs: [plan, release]
+    needs: [plan, installers, release]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     container:
@@ -113,4 +150,4 @@ jobs:
         with:
           app: pitwall
           plan-run: ${{ needs.plan.outputs.run }}
-          release-result: ${{ needs.release.result }}
+          release-result: ${{ needs.release.result != 'skipped' && needs.release.result || needs.installers.result }}

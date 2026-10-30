@@ -1,7 +1,7 @@
 // The start check itself, against a `guest` (the Tart VM in run.mjs, a fake in checks.test.mjs). Every wait is a poll on state with a
 // guard for a truly stuck step; the verdicts come from judge.mjs. The guest is a throw-away clone: the only processes the check ends
 // are the app's own leftovers, and only after re-checking their identity in the same guest command (rule 53).
-import { describeTree, instancesOf, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs } from './judge.mjs';
+import { describeTree, instancesOf, judgeDistinct, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs } from './judge.mjs';
 
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
@@ -19,6 +19,7 @@ export class Check {
     this.log = log;
     this.interval = intervalMs;
     this.home = null;
+    this.trace = [];
   }
 
   async home_() {
@@ -32,7 +33,9 @@ export class Check {
 
   async snapshot() {
     const r = await this.g.exec('ps -axww -o pid=,ppid=,etime=,command=');
-    return parsePs(r.stdout);
+    const procs = parsePs(r.stdout);
+    this.trace.push({ at: this.g.now(), procs });
+    return procs;
   }
 
   async readFile(p) {
@@ -51,11 +54,18 @@ export class Check {
     }
   }
 
-  /** Ends the app's own leftover processes, each re-checked by command line in the same guest command as the kill. */
+  /**
+   * Ends the app's own leftover processes. Each is ended only if its pid, its start time (`ps -o lstart=`) and its command line
+   * still match in the same guest command (rule 53). Returns what could not be cleaned: a step that starts from a dirty guest is
+   * not trustworthy, so the callers fail on it.
+   */
   async reset() {
     const procs = await this.snapshot();
     const left = this.config.processes.flatMap((s) => instancesOf(procs, s, this.bundle));
-    for (const p of left) await this.g.exec(`ps -p ${p.pid} -o command= | grep -qxF -- ${sq(p.command)} && kill ${p.pid}`);
+    for (const p of left) {
+      const lstart = (await this.g.exec(`ps -o lstart= -p ${p.pid}`)).stdout.trim();
+      await this.g.exec(`[ "$(ps -o lstart= -p ${p.pid})" = ${sq(lstart)} ] && ps -p ${p.pid} -o command= | grep -qxF -- ${sq(p.command)} && kill ${p.pid}`);
+    }
     const gone = await this.until(async () => (await this.snapshot()).every((q) => !left.some((p) => p.pid === q.pid && p.command === q.command)), 20_000);
     for (const f of this.config.stateFiles ?? []) await this.g.exec(`rm -f ${sq(await this.path(f.path))}`);
     return { ended: left.length, gone: gone.ok };
@@ -97,20 +107,24 @@ export class Check {
   /** Start, wait for ready (guarded), then observe: the common body of the cold start, relaunch and login-service steps. */
   async startAndJudge({ hidden = false, loginService = false, title, pre } = {}) {
     this.loginOn = loginService;
-    await this.reset();
+    const cleaned = await this.reset();
     if (pre) await pre();
+    this.trace = [];
     const opened = await this.start({ hidden });
     if (opened.code !== 0) return { title, status: 'fail', summary: `open failed (exit ${opened.code})`, checks: [{ ok: false, detail: opened.stderr.trim() || 'open printed nothing' }] };
     const ready = await this.until(() => this.isReady(), this.config.readyTimeoutSec * 1000);
     const after = await this.observe({ running: true, loginService });
     const procs = after.snaps.at(-1);
-    const checks = [{ ok: ready.ok, detail: ready.ok ? `ready after ${(ready.tookMs / 1000).toFixed(0)} s (all processes up, discovery file names the live helper, ready command answers)` : `not ready within the ${this.config.readyTimeoutSec} s guard` }, ...after.checks];
+    // Every snapshot since the launch (the readiness polls included) is judged, and the distinct processes are counted over all of it.
+    const whole = judgeWindow(this.trace.map((t) => t.procs), this.config, this.bundle, { running: true, loginService });
+    const checks = [{ ok: cleaned.gone, detail: `guest clean before the start (${cleaned.ended} leftover(s) of an earlier step ended${cleaned.gone ? '' : ', but some did not go away'})` },
+      { ok: ready.ok, detail: ready.ok ? `ready after ${(ready.tookMs / 1000).toFixed(0)} s (all processes up, discovery file names the live helper, ready command answers)` : `not ready within the ${this.config.readyTimeoutSec} s guard` }, ...whole.checks.filter((x) => x.id.startsWith('peak:') || x.id.startsWith('parent:')), ...judgeDistinct(this.trace, this.config, this.bundle)];
     for (const f of this.config.stateFiles ?? []) {
       const s = judgeStateFile(await this.readFile(f.path), procs, f, this.bundle);
       checks.push({ ok: s.present && s.live, detail: `${f.path}: ${s.present ? `names pid ${s.pid}, ${s.live ? 'a live ' + f.helper : 'NOT a live ' + f.helper + ' (stale)'}` : 'absent'}` });
     }
     const ok = checks.every((c) => c.ok);
-    return { title, status: ok ? 'pass' : 'fail', summary: ok ? `one of each, peak ${JSON.stringify(after.peak)}` : checks.filter((c) => !c.ok).map((c) => c.detail).join('; ').slice(0, 200), checks, evidence: describeTree(procs, this.config, this.bundle) };
+    return { title, status: ok ? 'pass' : 'fail', summary: ok ? `one of each, peak ${JSON.stringify(whole.peak)}, no replacement or early duplicate` : checks.filter((c) => !c.ok).map((c) => c.detail).join('; ').slice(0, 200), checks, evidence: describeTree(procs, this.config, this.bundle) };
   }
 
   async quit(title) {
@@ -176,7 +190,7 @@ export class Check {
   async loginHandover() {
     const title = 'Launch at login on, off, on';
     const svc = this.config.loginService;
-    if (!svc?.on) return { title, status: 'skip', summary: 'no scripted toggle for this app (the row is manual: Settings > Launch at login, three times)' };
+    if (!svc?.on) return { title, status: 'skip', summary: `no scripted toggle: ${svc?.manualReason ?? 'the app registers its login item itself'}. Manual row: Settings > Launch at login, on, off, on, then count the helper processes` };
     const run = (argv) => this.g.exec(`${sq(`${this.bundle}/${argv[0]}`)} ${argv.slice(1).map(sq).join(' ')} 2>&1`, { timeoutMs: 60_000 });
     const checks = [];
     const evidence = [];
@@ -210,23 +224,45 @@ export class Check {
     return { title, status, summary, checks, evidence };
   }
 
-  /** The update host black-holed (a listener that accepts and never answers): a cold start must still reach ready within the guard. */
+  /**
+   * The update host black-holed: it resolves to loopback (IPv4 and ::1) where a listener accepts every connection, logs it and never
+   * answers. A cold start must still reach ready. The step says whether anything connected: a build that never checks for updates on
+   * start did not exercise the path, and that is reported as such, not as a pass.
+   */
   async updateCheckDoesNotHangStart() {
     const title = 'Start with the update host black-holed';
     const host = this.config.updateHost;
     if (!host) return { title, status: 'skip', summary: 'no update host configured' };
     const tag = '# vm-smoke-blackhole';
-    const setup = await this.g.exec(`sudo sh -c ${sq(`echo "127.0.0.1 ${host} ${tag}" >> /etc/hosts; (nc -lk 127.0.0.1 443 >/dev/null 2>&1 & echo $!)`)}`);
-    const ncPid = Number(setup.stdout.trim().split('\n').at(-1));
+    const log = '/tmp/vmsmoke-blackhole.log';
+    const perl = [
+      'use IO::Socket::IP; use IO::Select;',
+      "my @l = grep { $_ } map { IO::Socket::IP->new(LocalAddr => $_, LocalPort => 443, Listen => 16, ReuseAddr => 1) } ('127.0.0.1', '::1');",
+      'my $sel = IO::Select->new(@l); my @held;',
+      `open(my $log, '>>', '${log}'); select((select($log), $| = 1)[0]);`,
+      'print $log "listening " . scalar(@l) . "\\n";',
+      'while (1) { for my $s ($sel->can_read(1)) { my $c = $s->accept or next; print $log "contact " . $s->sockhost . "\\n"; push @held, $c; } }',
+    ].join('\n');
+    const setup = await this.g.exec(`rm -f ${log}; printf %s ${sq(perl)} > /tmp/vmsmoke-blackhole.pl; sudo sh -c ${sq(`printf '127.0.0.1 ${host} ${tag}\\n::1 ${host} ${tag}\\n' >> /etc/hosts; (perl /tmp/vmsmoke-blackhole.pl >/dev/null 2>&1 & echo $!)`)}`);
+    const lpid = Number(setup.stdout.trim().split('\n').at(-1));
     let step;
+    let contacts = [];
+    let listening = '';
     try {
       step = await this.startAndJudge({ title, pre: async () => { await this.g.exec('sudo purge'); } });
+      const l = (await this.g.exec(`cat ${log} 2>/dev/null`)).stdout.split('\n').filter(Boolean);
+      contacts = l.filter((x) => x.startsWith('contact'));
+      listening = l.find((x) => x.startsWith('listening')) ?? '';
     } finally {
       await this.g.exec(`sudo sed -i '' '/${tag}/d' /etc/hosts`);
-      if (Number.isInteger(ncPid)) await this.g.exec(`ps -p ${ncPid} -o command= | grep -q 'nc -lk 127.0.0.1 443' && sudo kill ${ncPid}`);
+      if (Number.isInteger(lpid)) await this.g.exec(`ps -p ${lpid} -o command= | grep -q 'vmsmoke-blackhole.pl' && sudo kill ${lpid}`);
     }
-    step.checks.unshift({ ok: setup.code === 0 && Number.isInteger(ncPid), detail: `${host} points at a local listener that accepts and never answers (pid ${ncPid})` });
-    step.summary += step.status === 'pass' ? ' (whether update checks are switched on in this build is not read; the start did not wait on the host either way)' : '';
+    step.checks.unshift({ ok: setup.code === 0 && listening !== '', detail: `${host} points at loopback (IPv4 and ::1) with a listener that accepts and never answers (${listening || 'listener did not start'})` });
+    step.checks.push({ ok: true, detail: contacts.length ? `the app connected to the black hole ${contacts.length} time(s) (${[...new Set(contacts)].join(', ')}) and still became ready` : 'nothing connected to the black hole during the start' });
+    if (step.status === 'pass' && !contacts.length) {
+      step.status = 'skip';
+      step.summary = 'NOT EXERCISED: the app never contacted the update host during the start (update checks are off in this build or not on start), so a hung check could not be observed';
+    } else if (step.status === 'pass') step.summary += `; contacted the black hole ${contacts.length}x`;
     return step;
   }
 
@@ -246,7 +282,7 @@ export async function runAll(check, { stagedDmg, manual }) {
   const push = (s) => { steps.push(s); check.log(`${s.status.toUpperCase()}  ${s.title}: ${s.summary}`); return s; };
   const install = push(await check.install(stagedDmg));
   if (install.status === 'fail') return { steps, version: check.version };
-  push(await check.startAndJudge({ title: 'Cold start (disk cache dropped), window shown', pre: async () => { await check.g.exec('sudo purge'); } }));
+  push(await check.startAndJudge({ title: 'Cold start (disk cache dropped)', pre: async () => { await check.g.exec('sudo purge'); } }));
   push(await check.secondLaunch());
   push(await check.quit('Quit with a window open'));
   push(await check.startAndJudge({ title: 'Start without a window (--hidden)', hidden: true }));

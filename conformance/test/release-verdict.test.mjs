@@ -29,7 +29,7 @@ test('a push the change does not reach may build nothing and says "installers: n
 
 test('a nightly, a manual run and a tag that built nothing fail, whatever the plan said', () => {
   for (const [event, ref, why] of [['schedule', 'refs/heads/main', /nightly run builds them/], ['workflow_dispatch', 'refs/heads/x', /manual run builds them/], ['push', 'refs/tags/dyno-v1.0.0', /tag builds them/]]) {
-    for (const planRun of ['true', 'false', '']) {
+    for (const planRun of event === 'schedule' ? ['true', ''] : ['true', 'false', '']) {
       const v = verdict({ app: 'dyno', event, ref, planRun, releaseResult: 'skipped' });
       assert.equal(v.ok, false, `${event} plan=${planRun}`);
       assert.match(v.line, /^installers: not built \(dyno\) although/);
@@ -37,6 +37,12 @@ test('a nightly, a manual run and a tag that built nothing fail, whatever the pl
     }
   }
   assert.equal(verdict({ app: 'dyno', event: 'schedule', releaseResult: '' }).ok, false, 'a missing job is not a pass');
+});
+
+test('a nightly the change gate skipped (main and the image unchanged) says so and passes', () => {
+  const v = verdict({ app: 'dyno', event: 'schedule', ref: 'refs/heads/main', planRun: 'false', releaseResult: 'skipped' });
+  assert.deepEqual([v.ok, v.level], [true, 'notice']);
+  assert.match(v.line, /^installers: not built \(dyno\): main and the toolchain image are unchanged/);
 });
 
 test('a push the plan said to build, with no installers, is a warning that says the run proves nothing', () => {
@@ -49,9 +55,9 @@ test('every app release workflow ends in a verdict job that always runs and read
   for (const app of APPS) {
     const wf = read('.gitea', 'workflows', `${app}-release.yml`);
     const job = wf.slice(wf.indexOf('\n  verdict:'));
-    assert.match(job, /needs: \[plan, release\]/, app);
+    assert.match(job, /needs: \[plan, installers, release\]/, app);
     assert.match(job, /if: \$\{\{ always\(\) \}\}/, app);
-    assert.match(job, new RegExp(`uses: \\./\\.gitea/actions/release-verdict\\n\\s+with:\\n\\s+app: ${app}\\n\\s+plan-run: \\$\\{\\{ needs\\.plan\\.outputs\\.run \\}\\}\\n\\s+release-result: \\$\\{\\{ needs\\.release\\.result \\}\\}`), app);
+    assert.match(job, new RegExp(`uses: \\./\\.gitea/actions/release-verdict\\n\\s+with:\\n\\s+app: ${app}\\n\\s+plan-run: \\$\\{\\{ needs\\.plan\\.outputs\\.run \\}\\}\\n\\s+release-result: \\$\\{\\{ needs\\.release\\.result != 'skipped' && needs\\.release\\.result \\|\\| needs\\.installers\\.result \\}\\}`), app);
     assert.doesNotMatch(wf, /^\s+schedule:/m, `${app}: the nightly installers are nightly.yml's (a scheduled run here skipped them)`);
   }
 });
@@ -71,15 +77,18 @@ test('the nightly builds every app\'s installers with the app\'s own release inp
   const nightly = read('.gitea', 'workflows', 'nightly.yml');
   for (const app of APPS) {
     const own = read('.gitea', 'workflows', `${app}-release.yml`);
-    assert.equal(withBlock(nightly, `installers-${app}`), withBlock(own, 'release'), `${app}: the nightly's inputs equal ${app}-release.yml's`);
+    assert.equal(withBlock(nightly, `installers-${app}`), withBlock(own, 'installers'), `${app}: the nightly's inputs equal ${app}-release.yml's`);
     const secrets = (wf, job) => { const s = wf.slice(wf.indexOf(`\n  ${job}:`)); return s.slice(s.indexOf('    secrets:'), s.indexOf('    secrets:') + 600).split('\n').slice(0, 6).join('\n'); };
-    assert.equal(secrets(nightly, `installers-${app}`), secrets(own, 'release'), `${app}: the same secrets`);
+    assert.equal(secrets(nightly, `installers-${app}`), secrets(own, 'installers'), `${app}: the same secrets`);
     const job = nightly.slice(nightly.indexOf(`\n  installers-${app}:`));
-    assert.doesNotMatch(job.slice(0, job.indexOf('    with:')), /needs:|\n    if:/, `${app}: nothing that can skip it`);
+    assert.match(job.slice(0, job.indexOf('    with:')), /needs: \[installers-gate\]\n    if: \$\{\{ needs\.installers-gate\.outputs\.run == 'true' \}\}/, `${app}: only the gate, a job that always runs`);
   }
   const verdictJob = nightly.slice(nightly.indexOf('\n  installers-verdict:'));
   for (const app of APPS) assert.match(verdictJob.slice(0, verdictJob.indexOf('steps:')), new RegExp(`installers-${app}`), `${app}: in the verdict's needs`);
   assert.match(verdictJob, /if: \$\{\{ always\(\) \}\}/);
+  for (const app of APPS) assert.match(verdictJob, new RegExp(`app: ${app}\\n\\s+plan-run: \\$\\{\\{ needs\\.installers-gate\\.outputs\\.run \\}\\}`), `${app}: the verdict knows the gate's answer`);
+  assert.match(nightly, /\n  installers-gate:\n(?:.*\n)*?.*nightly-installers-\$\{\{ github\.sha \}\}-\$\{\{ hashFiles\('ci-image\/\*\*'\) \}\}/, 'the gate keys on the commit and the toolchain image');
+  assert.match(nightly, /\n  installers-mark:\n(?:.*\n)*?    needs: \[installers-dyno, installers-spotter, installers-pitcrew, installers-pitwall\]/, 'the marker is saved only after every build');
 });
 
 test('the release-verdict action is documented and runs the script', () => {
