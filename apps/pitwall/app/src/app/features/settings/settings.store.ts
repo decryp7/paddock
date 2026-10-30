@@ -97,6 +97,17 @@ export function undoText(r: Refusal): string {
   return `Undo ${lowerFirst(r.field.label)} change`;
 }
 
+/**
+ * What a close waits for, as the Settings window's "Saving …" and "Still saving …" name it: "port", "port and request
+ * timeout", "3 settings", or "your settings" while only a preset is on its way.
+ */
+export function savingLabel(labels: readonly string[]): string {
+  const names = [...new Set(labels)].map(lowerFirst);
+  if (names.length === 0) return 'your settings';
+  if (names.length > 2) return `${names.length} settings`;
+  return names.join(' and ');
+}
+
 /** The first letter in lower case, unless the word is an abbreviation ("LAN port" stays). */
 function lowerFirst(text: string): string {
   return /^[A-Z][A-Z]/.test(text) ? text : text.charAt(0).toLowerCase() + text.slice(1);
@@ -416,7 +427,10 @@ export const SettingsStore = signalStore(
 
       /** What the Settings window's close hook hears: wait for a save, say what was refused and why, or close. */
       closeVerdict(): SettingsCloseVerdict {
-        if (timers.size > 0 || pending.size > 0 || queued > 0) return { kind: 'wait', done: flush() };
+        if (timers.size > 0 || pending.size > 0 || queued > 0) {
+          const label = savingLabel([...(sending ? [sending] : []), ...pending.values()].map((e) => e.field.label));
+          return { kind: 'wait', done: flush(), label };
+        }
         const refusals = store.refusals();
         if (refusals.length === 0) return { kind: 'close' };
         return { kind: 'warn', message: refusals.map((r) => `${r.field.label} was not saved: ${r.error.message}`).join(' ') };
