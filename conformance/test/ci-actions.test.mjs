@@ -1542,3 +1542,85 @@ test('every release workflow whose app imports @decryp7/paddock-ui builds the sh
     assert.match(prepare, /build -w ui/, `${f}: ${appDir} imports @decryp7/paddock-ui, which resolves from ui/dist, so the bundle job needs prepare: npm run build -w ui`);
   }
 });
+
+// Build parallelism (docs/benchmarks.md, 2026-10-30): the agents' local cap of two rustc (ER-24) once leaked into CI scripts, and
+// the Mac and Windows legs each spelled their own number. CI sets CARGO_BUILD_JOBS in one place, conformance/ci/build-jobs.sh:
+// the runner's share of its host's cores.
+const buildJobs = (env) =>
+  spawnSync('bash', [join(PADDOCK, 'conformance/ci/build-jobs.sh')], {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, ...env },
+  });
+const jobsOf = (r) => /^CARGO_BUILD_JOBS=(\d+)$/m.exec(r.stdout)?.[1];
+
+test('build-jobs gives each runner class its share of the host: cores / jobs per host, never the agents\' cap of two', () => {
+  // The runner layout of 2026-10-30: Linux d-gtr9 runs 4 jobs at once, Windows 2 (16 cores), the Mac 1 (14 cores).
+  assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'macOS', PADDOCK_CI_CORES: '14' })), '14');
+  assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '16' })), '8');
+  assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '32' })), '8');
+  // A runner's own settings win: the jobs its host runs at once, or an exact number.
+  assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'macOS', PADDOCK_CI_CORES: '14', PADDOCK_CI_JOBS_PER_HOST: '3' })), '4');
+  assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '32', PADDOCK_CI_BUILD_JOBS: '12' })), '12');
+  // Never below one; nonsense fails the step with the variable's name.
+  assert.equal(jobsOf(buildJobs({ RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '2' })), '1');
+  for (const env of [{ PADDOCK_CI_BUILD_JOBS: '0' }, { PADDOCK_CI_JOBS_PER_HOST: 'two' }]) {
+    const r = buildJobs({ RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '8', ...env });
+    assert.notEqual(r.status, 0, JSON.stringify(env));
+    assert.match(r.stdout, /::error::PADDOCK_CI_(BUILD_JOBS|JOBS_PER_HOST) must be a whole number/);
+  }
+  // Without a count of cores the variable stays unset (cargo's own default), and the step stays green.
+  const unknown = buildJobs({ RUNNER_OS: 'Linux', PADDOCK_CI_CORES: 'many' });
+  assert.equal(unknown.status, 0);
+  assert.equal(jobsOf(unknown), undefined);
+  // The real probe on this machine counts something.
+  assert.match(buildJobs({ RUNNER_OS: 'Linux' }).stdout, /^CARGO_BUILD_JOBS=[1-9]\d*$/m);
+  // GITHUB_ENV gets the line.
+  const dir = mkdtempSync(join(tmpdir(), 'build-jobs-'));
+  const envFile = join(dir, 'env');
+  writeFileSync(envFile, '');
+  assert.equal(buildJobs({ RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '16', GITHUB_ENV: envFile }).status, 0);
+  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=8\n');
+});
+
+test('CI never pins the build jobs: only build-jobs sets CARGO_BUILD_JOBS, and no cargo command passes a fixed -j', () => {
+  const files = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(join(PADDOCK, dir), { withFileTypes: true })) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory()) walk(p);
+      else if (/\.(ya?ml|sh|mjs)$/.test(e.name)) files.push(p);
+    }
+  };
+  walk('.gitea');
+  walk('conformance/ci');
+  // The repo scripts the workflows run.
+  for (const f of readdirSync(WORKFLOWS)) {
+    for (const m of read(join(WORKFLOWS, f)).matchAll(/\b(scripts\/[\w./-]+\.(?:sh|mjs))\b/g)) if (existsSync(join(PADDOCK, m[1]))) files.push(m[1]);
+  }
+  const offenders = [];
+  for (const f of [...new Set(files)]) {
+    if (f === 'conformance/ci/build-jobs.sh') continue;
+    read(join(PADDOCK, f)).split('\n').forEach((line, i) => {
+      const code = line.replace(/^\s*(#|\/\/|rem\b).*$/i, '');
+      // A number (or a number as the fallback) for CARGO_BUILD_JOBS, in bash, cmd or YAML.
+      if (/CARGO_BUILD_JOBS["']?\s*(=|:)\s*["']?\d|CARGO_BUILD_JOBS:-\d/.test(code)) offenders.push(`${f}:${i + 1}: ${line.trim()}`);
+      // A fixed -j/--jobs on a cargo build or test. `cargo mutants --jobs` is the number of mutants built at once, not rustc
+      // processes (https://mutants.rs/parallelism.html recommends 2 or 3).
+      if (/\bcargo\b(?!\s+mutants)[^\n]*\s(-j\s*|--jobs[ =])\d/.test(code)) offenders.push(`${f}:${i + 1}: ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(offenders, [], 'set build jobs with the build-jobs action (conformance/ci/build-jobs.sh) only');
+});
+
+test('every job that takes a host slot sets its build jobs first, and setup-rust sets them when no step did', () => {
+  for (const file of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
+    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+      const iso = job.text.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/job-isolation\s*\n/);
+      if (iso < 0 || !/runs-on:[^\n]*(macos|windows|\$\{\{)/.test(job.text)) continue;
+      const bj = job.text.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/build-jobs\b/);
+      assert.ok(bj >= 0 && bj < iso, `${file} ${job.id}: build-jobs before job-isolation (which builds paddock-dev with cargo)`);
+    }
+  }
+  const setup = read(join(ACTIONS, 'setup-rust', 'action.yml'));
+  assert.match(setup, /if \[ -z "\$\{CARGO_BUILD_JOBS:-\}" \]; then bash "\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\.\/conformance\/ci\/build-jobs\.sh"/);
+});

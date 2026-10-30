@@ -1,0 +1,8 @@
+name: build-jobs
+description: "CARGO_BUILD_JOBS for the job: the host's cores divided by the jobs the host runs at once (runner.envs PADDOCK_CI_JOBS_PER_HOST, else the runner class's known layout), or the runner's PADDOCK_CI_BUILD_JOBS (conformance/ci/build-jobs.sh, the one implementation). An early step of a host job (after Git bash on Windows, before job-isolation, which builds paddock-dev); setup-rust runs it too when no earlier step set CARGO_BUILD_JOBS."
+runs:
+  using: composite
+  steps:
+    - name: Build jobs for this runner
+      shell: bash
+      run: bash "${{ github.action_path }}/../../../conformance/ci/build-jobs.sh"

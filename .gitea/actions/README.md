@@ -25,6 +25,7 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `sccache-stats` | `sccache --show-stats` in the job log (last step, `if: always()`; composite actions have no post step) | new |
 | `setup-node` | Node from `app/.nvmrc`, npm cache | `actions/setup-node` blocks |
 | `strip-signing-keys` | whitespace out of the Tauri keys for the following steps (rule 25, C06) | inline `tr -d` |
+| `build-jobs` | `CARGO_BUILD_JOBS` = the host's cores / the jobs the host runs at once (`PADDOCK_CI_JOBS_PER_HOST` in the runner's `runner.envs`, else the runner class's layout: Linux 4, Windows 2, macOS 1), or the runner's `PADDOCK_CI_BUILD_JOBS`; one implementation, `conformance/ci/build-jobs.sh`. An early step of a host job (before `job-isolation`, which builds paddock-dev); `setup-rust` runs it when no step did. Nothing else sets `CARGO_BUILD_JOBS` or a fixed cargo `-j` (a conformance test) | `CARGO_BUILD_JOBS=4` (macOS) and `=8` (Windows) in each workflow; the agents' local cap of 2 (ER-24) never applies on CI |
 | `build-env` | `PADDOCK_BUILD_COMMIT` and `PADDOCK_BUILD_DATE` for the About page (`option_env!`) | nothing set them before |
 | `tauri-bundle` | `tauri build` with or without updater signing (hardened runtime on only with a real Apple identity), `npm ci` at `root`, installers in `dist/`, version check; for NSIS, no shipped .exe or .dll imports the VC++ runtime (ADR 0032) | Pitwall `scripts/ci/tauri-bundle.sh`, Pitcrew's bundle step |
 | `macos-verify` | `codesign --verify --deep --strict` on the .app and the DMG, sidecars with `--self-test` (rule 23) | `macos-verify-bundle.sh` copies |
@@ -145,7 +146,8 @@ Every runner of a host uses the same CI home (same user, or the same `PADDOCK_CI
 
 **Adding runners to a host:** merge the change that adds this; set `PADDOCK_CI_SLOTS` in every runner's `runner.envs` to
 the pool's maximum (only above 4); then register the extra runners (Pitcrew, capacity 1 each). Keep each runner's
-`capacity: 1`.
+`capacity: 1`. Set `PADDOCK_CI_JOBS_PER_HOST` in every runner's `runner.envs` to the number of jobs the host now runs
+at once, so `build-jobs` divides the cores between them.
 
 **How disk is bounded.** A slot's kept folders are deleted only under `./dev ci slot idle-run`, which holds that slot's
 lock for the whole deletion, so no job can take the slot meanwhile and a held slot is never touched. At every acquire and

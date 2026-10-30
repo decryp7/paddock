@@ -99,13 +99,14 @@ jobs:
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
 
       - name: Build folder of the job (macOS)
         if: runner.os == 'macOS'
         run: |
           echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/../.paddock-ci-target-shell-demo" >> "$GITHUB_ENV"
-          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
 
       # A slot of the host (job isolation; after Git bash on Windows); on Windows the build folder is the slot's kept one.
       - uses: ./.gitea/actions/job-isolation

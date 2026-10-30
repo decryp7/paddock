@@ -183,6 +183,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
+
       # A slot of the host (job isolation): its own Angular cache and ports, so two runs of this job can share the Mac.
       - uses: ./.gitea/actions/job-isolation
 
@@ -397,8 +400,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs (the runner runs two jobs
-      # at once).
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it).
       - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
         shell: cmd
@@ -406,12 +408,9 @@ jobs:
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
 
-      # The Mac host runner: four build jobs; the host toolchain as installed.
-      - name: Build jobs (macOS)
-        if: runner.os == 'macOS'
-        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
 
       # A slot of the host (job isolation; after Git bash on Windows): the job's kept folders end in its slot and its temp
       # folders are the runner's per-job folder, so concurrent jobs on one host never share either.
@@ -568,18 +567,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs.
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it).
       - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
         shell: cmd
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
 
-      - name: Build jobs (macOS)
-        if: runner.os == 'macOS'
-        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
 
       # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
       - uses: ./.gitea/actions/job-isolation
@@ -726,11 +723,9 @@ jobs:
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
 
-      - name: Build jobs (macOS)
-        if: runner.os == 'macOS'
-        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
 
       # A slot of the host (job isolation; after Git bash on Windows): its kept folders and ports are this job's alone.
       - uses: ./.gitea/actions/job-isolation

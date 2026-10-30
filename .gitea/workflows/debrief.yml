@@ -254,6 +254,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
+
       # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
       - uses: ./.gitea/actions/job-isolation
 
@@ -271,11 +274,9 @@ jobs:
           workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
           name: debrief-${{ github.job }}
 
-      # The Mac runner is shared with other jobs: four rustc at a time, as Paddock's crate job.
-      - name: Build jobs and the test browser's folder
+      - name: The test browser's folder
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
-          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
           # Outside the checkout, which stable-workspace moves: the job slot's kept folder (the installer stamps the pinned
           # version in it).
           dir="$(bash ../../conformance/ci/job-isolation.sh path browser debrief)"
@@ -588,14 +589,9 @@ jobs:
           echo npm_config_prefer_offline=true>>"%GITHUB_ENV%"
           echo npm_config_audit=false>>"%GITHUB_ENV%"
           echo npm_config_fund=false>>"%GITHUB_ENV%"
-          rem The Windows runner is a developer PC (16 cores, 32 GB) that runs two jobs at once: a debug and a release
-          rem build with 16 rustc processes each exhausted its memory. Eight each keeps both inside it.
-          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
 
-      - name: Build jobs (macOS)
-        if: runner.os == 'macOS'
-        working-directory: .
-        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
 
       # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
       - uses: ./.gitea/actions/job-isolation
@@ -851,13 +847,9 @@ jobs:
           echo npm_config_prefer_offline=true>>"%GITHUB_ENV%"
           echo npm_config_audit=false>>"%GITHUB_ENV%"
           echo npm_config_fund=false>>"%GITHUB_ENV%"
-          rem Two jobs at once on the 16-core, 32 GB developer PC: eight rustc each keeps both inside its memory.
-          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
 
-      - name: Build jobs (macOS)
-        if: runner.os == 'macOS'
-        working-directory: .
-        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
 
       # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
       - uses: ./.gitea/actions/job-isolation
