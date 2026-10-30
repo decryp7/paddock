@@ -1,7 +1,7 @@
 # 3. Moving Debrief onto the platform, and who uses what
 
-- Status: Accepted (2026-10-31), after an independent review and a confirmation review. Proposed 2026-10-23; revised
-  2026-10-31 with the user's decisions of that day: no legacy support at all (no binary legacy mode, no source shim;
+- Status: Accepted (2026-10-30), after an independent review and a confirmation review. Proposed 2026-10-23; revised
+  2026-10-30 with the user's decisions of that day: no legacy support at all (no binary legacy mode, no source shim;
   old plugins are removed), grants reset, trusted keys migrated.
 - Related: ADRs 0001 (the platform), 0002 (views), 0014 (monorepo); Debrief ADRs 0003 (scoped by this move), 0017, 0027;
   plan [debrief-1-2.md](../plans/debrief-1-2.md) packages PH1 to PH4, 2.6a to 2.6d, 0.5 (D1: move in 1.2)
@@ -12,7 +12,7 @@ Debrief has the mature implementation, 11 first-party plugin crates (`debrief-pl
 `-native`, `-otel`, `-profiling`, `-registry`, `-syslog`, `-tools`, `-web`, `-windows`) served by the `debrief-plugins` bundle,
 and a published SDK (Debrief ADR 0027). The move must not break those plugins or Debrief's release. Under the "no backward
 compatibility before v1" rule there is no compatibility promise, and no third-party plugins are known. The user decided on
-2026-10-31: "no need to keep legacy plugins. Just remove them." So there is neither a binary legacy mode nor a source
+2026-10-30: "no need to keep legacy plugins. Just remove them." So there is neither a binary legacy mode nor a source
 shim.
 
 ## Decision
@@ -121,5 +121,5 @@ small copy and adopts the platform when tier 3 is built.
 ## Decided questions
 
 - Is anything of 1.1's plugin contract kept (a source shim for ADR 0027 SDK plugins, a binary legacy mode, old installed
-  plugins)? **No** (user decision, 2026-10-31: "no need to keep legacy plugins. Just remove them."). Kept from 1.1's plugin
+  plugins)? **No** (user decision, 2026-10-30: "no need to keep legacy plugins. Just remove them."). Kept from 1.1's plugin
   state are only the trusted keys, developer mode and the built-in plugins' enabled flags.

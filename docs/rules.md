@@ -232,7 +232,7 @@ changes here, every app's copy is updated in the same change.
     test's Chrome helper; the same mistake was in four shapes in five apps. (It was suspected of causing the Windows
     `ERR_ABORTED` failures; the suspected cause was disproved by run 7158; the flake has another cause, ADR 0033 WP-4.)
 
-## Release path (user, 2026-10-31)
+## Release path (user, 2026-10-30)
 54. **Every change that touches an app's release path builds that app's installers before it lands on main.** The release
     path is the release workflow, the shared app-release workflow, the bundle and prepare steps, the Tauri config and the
     app's imports of shared packages.
