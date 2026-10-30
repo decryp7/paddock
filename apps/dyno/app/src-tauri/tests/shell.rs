@@ -234,7 +234,15 @@ fn the_start_opens_the_tray_and_the_main_window() {
             tray: true
         })
     );
-    assert!(dir.path().join("data").is_dir(), "the agent link started, in the test's folder");
+    // The link thread creates its folder after the start returns; wait on that, with a hang guard only a lost thread reaches.
+    let began = std::time::Instant::now();
+    while !dir.path().join("data").is_dir() {
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(30),
+            "the agent link never started, in the test's folder"
+        );
+        std::thread::yield_now();
+    }
 }
 
 /// Started at log-in (`--hidden`) with a tray: Dyno stays in the tray without a window.
