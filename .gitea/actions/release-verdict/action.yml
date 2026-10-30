@@ -1,0 +1,24 @@
+name: release-verdict
+description: "Says in the job summary whether a release workflow run built installers ('installers: built' or 'installers: not built (why)') and fails a run that was asked to build them (nightly, manual, tag) and did not. Use it in a last job with if: always() that needs the plan and the release job."
+inputs:
+  app:
+    description: The app id (dyno).
+    required: true
+  plan-run:
+    description: "needs.plan.outputs.run ('true' or 'false'); empty when the workflow has no plan job."
+    default: ""
+  release-result:
+    description: needs.<release job>.result.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Installers built?
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+        EVENT: ${{ github.event_name }}
+        REF: ${{ github.ref }}
+        PLAN_RUN: ${{ inputs.plan-run }}
+        RELEASE_RESULT: ${{ inputs.release-result }}
+      run: node "${{ github.action_path }}/../../../conformance/ci/release-verdict.mjs"

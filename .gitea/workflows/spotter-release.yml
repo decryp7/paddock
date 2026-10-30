@@ -5,9 +5,9 @@
 #   push to main      installers on three OS and the real-app smoke when the change reaches Spotter (the same plan as ci.yml)
 #   a spotter-v* tag  the gates (ci.yml, only Spotter's legs), then installers, then the Gitea release with latest.json on
 #                     the release and on the moving spotter-latest release, which installed copies update from
-#   nightly           installers again, so a toolchain or runner change shows up the night it happens
+#   nightly           no longer here: nightly.yml builds the installers (installers-spotter), see the verdict job below
 #   manual            installers without a release (the "one CI build with bundles" before a tag, rule 25); `gates: true`
-#                     also runs Spotter's ci.yml legs first
+#                     also runs Spotter's ci.yml legs first. Rule 54: a run whose installers job did not run FAILS (verdict job).
 #
 # Runner labels: ubuntu-latest (the paddock-ci image), windows-latest and macos-latest (host runners; they install nothing
 # system-wide and leave no processes or launch agents behind). Secrets: the family's updater key
@@ -20,8 +20,6 @@ on:
   push:
     branches: [main]
     tags: ["spotter-v*"]
-  schedule:
-    - cron: "5 1 * * *"
   workflow_dispatch:
     inputs:
       gates:
@@ -100,3 +98,20 @@ jobs:
       TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+  # What this run proves about the installers (rule 54): "installers: built" or "installers: not built (why)" in the summary, and a
+  # red run when a manual run or a tag was meant to build them and did not. A job with `if: always()` is not skipped with its needs.
+  verdict:
+    name: installers verdict
+    needs: [plan, release]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.gitea/actions/release-verdict
+        with:
+          app: spotter
+          plan-run: ${{ needs.plan.outputs.run }}
+          release-result: ${{ needs.release.result }}

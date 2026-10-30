@@ -1,0 +1,39 @@
+{
+  "$comment": "The processes Pitwall may start, for scripts/vm-smoke (see apps/dyno/vm-smoke.json for the field list). min 0: a helper that is started on demand.",
+  "id": "pitwall",
+  "app": "Pitwall",
+  "bundle": "Pitwall.app",
+  "dataDir": "~/Library/Application Support/Pitwall",
+  "logs": [
+    "~/Library/Application Support/Pitwall/logs/app.log"
+  ],
+  "quit": {
+    "appleScriptName": "Pitwall"
+  },
+  "updateHost": "dev.decryptology.net",
+  "readyTimeoutSec": 180,
+  "settleSec": 20,
+  "processes": [
+    {
+      "name": "pitwall-app",
+      "role": "app",
+      "max": 1
+    },
+    {
+      "name": "pitwall-server",
+      "role": "helper",
+      "max": 1,
+      "parents": [
+        "app",
+        "launchd"
+      ]
+    }
+  ],
+  "loginService": {
+    "label": "net.decryptology.pitwall.service",
+    "on": null,
+    "off": null,
+    "status": null,
+    "approval": "The app registers the service with SMAppService from its Settings; no scripted toggle yet, so the Launch at login handover is a manual row."
+  }
+}
