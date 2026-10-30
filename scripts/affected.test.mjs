@@ -53,8 +53,9 @@ describe('the graph of this tree', () => {
   test('a ui change marks the Tauri shells that embed a ui build (frontendDist), both halves', () => {
     const r = run('ui/projects/paddock-ui/shell/src/public-api.ts');
     assert.ok(r.ui);
-    // Spotter and Dyno map @decryp7/paddock-ui to ui/dist in their tsconfig (a path edge, no npm edge).
-    assert.deepEqual(r.apps, ['dyno', 'shell-demo', 'spotter', 'workbench-demo']);
+    // Spotter and Dyno map @decryp7/paddock-ui to ui/dist in their tsconfig (a path edge, no npm edge); Pitwall loads its CSS.
+    assert.deepEqual(r.apps, ['dyno', 'pitwall', 'shell-demo', 'spotter', 'workbench-demo']);
+    assert.deepEqual(r.kinds.pitwall, ['ui']);
     assert.deepEqual(r.kinds.spotter, ['ui']);
     assert.deepEqual(r.kinds.dyno, ['ui']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust', 'ui']);
@@ -662,14 +663,16 @@ describe('contracts', () => {
     }
     const pitwall = graph.apps.get('pitwall');
     const legsOf = () => matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph).filter((l) => l.app === 'pitwall');
-    assert.ok(legsOf().every((l) => l.notices === 'false'), 'no block, no check');
-    pitwall.notices = { name: 'Pitwall', manifests: [] };
+    assert.ok(pitwall.notices, 'Pitwall has a notices block (1.1)');
+    const legs = legsOf();
+    assert.ok(legs.length > 1, 'Pitwall has host legs too');
+    for (const l of legs) assert.equal(l.notices, l.os === LINUX ? 'true' : 'false', l.os);
+    const block = pitwall.notices;
+    delete pitwall.notices;
     try {
-      const legs = legsOf();
-      assert.ok(legs.length > 1, 'Pitwall has host legs too');
-      for (const l of legs) assert.equal(l.notices, l.os === LINUX ? 'true' : 'false', l.os);
+      assert.ok(legsOf().every((l) => l.notices === 'false'), 'no block, no check');
     } finally {
-      delete pitwall.notices;
+      pitwall.notices = block;
     }
     assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /scripts\/notices\.sh" "\$APP" --check/, 'app-gates runs the shared check');
   });
