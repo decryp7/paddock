@@ -770,3 +770,55 @@ pub struct RuleRun {
     /// Set when the result is partial.
     pub truncated: Option<Truncated>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A step count cannot see a copy. This does: binding a run stores a handle to the parent's sibling list and a range, never a new
+    /// `Vec`, so the list's reference count goes up and the pointer is the same.
+    #[test]
+    fn binding_a_run_shares_the_sibling_list_instead_of_copying_it() {
+        let mut parser = Parser::new();
+        parser.set_language(&ParseLanguage::Rust.grammar().unwrap()).unwrap();
+        let src = "fn g() { f(1, 2, 3, 4); }";
+        let tree = parser.parse(src, None).unwrap();
+        let args = tree
+            .root_node()
+            .descendant_for_byte_range(src.find("(1").unwrap(), src.find("4)").unwrap() + 1)
+            .unwrap();
+        let siblings: Rc<Vec<Node<'_>>> = Rc::new({
+            let mut c = args.walk();
+            args.children(&mut c).collect()
+        });
+        assert!(siblings.len() >= 4);
+        let (vars, mut total, cancel) = (BTreeMap::new(), 0usize, CancelToken::new());
+        let mut m = Matcher {
+            pat: "",
+            tgt: src,
+            vars: &vars,
+            caps: Vec::new(),
+            steps: 0,
+            total: &mut total,
+            total_max: 1_000,
+            cancel: &cancel,
+            exhausted: false,
+            cancelled: false,
+        };
+        assert_eq!(Rc::strong_count(&siblings), 1);
+        assert!(m.bind("A", Cap::Run(siblings.clone(), 1, 3)));
+        assert!(m.bind("B", Cap::Run(siblings.clone(), 2, 4)));
+        assert_eq!(Rc::strong_count(&siblings), 3, "each binding holds a handle to the one list");
+        for (_, cap) in &m.caps {
+            let Cap::Run(list, _, _) = cap else { panic!("a run was bound") };
+            assert!(
+                Rc::ptr_eq(list, &siblings),
+                "the capture points at the parent's list, not at a copy"
+            );
+        }
+        // comparing a bound name again clones the handle, never the nodes
+        let before = Rc::strong_count(&siblings);
+        let _ = m.bind("A", Cap::Run(siblings.clone(), 1, 3));
+        assert_eq!(Rc::strong_count(&siblings), before, "the temporary handle was dropped again");
+    }
+}
