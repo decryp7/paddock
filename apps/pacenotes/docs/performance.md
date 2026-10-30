@@ -95,3 +95,12 @@ ends (7.5 s for 120,000 files on the reviewer's machine), so the engine runs it 
 counting walk (`par_walk`, 4 workers) feeds the live count; a cancel returns at once and abandons the shared walk. On the 20,780-file
 tree: shared walk alone 80 to 85 ms, shared walk plus counting walk 92 to 98 ms wall, that is 8 to 13 ms for the live count and the
 cancel. Run it with `-p pacenotes-engine ... measure_ignore_walk`.
+
+**Three walks per run.** A run walks the tree three times, and only the third is the index's own: (1) the shared
+`paddock_repo_files::walk` for the `.gitignore` rules, single-threaded, on a thread of its own (80 to 85 ms on 20,780 files); (2) a
+parallel counting walk beside it, for the live count and the cancel (about 8 to 13 ms more wall time; it ends before (1) does);
+(3) the index's own walk, which applies the denylist, counts links and bounds depth and entries (110 to 130 ms with the ignore rules,
+220 to 230 ms without them, because it then enters the 9,300 ignored files). Together about 200 to 230 ms on 20,780 files, against
+220 to 230 ms for the one walk without ignore rules, so the three cost the same as one unfiltered walk and keep 9,300 files from
+being read. At most one (1) runs at a time. Walks (1) and (2) become one, and walk (1) cancellable, when the shared walker is
+unfrozen (ADR 0006).

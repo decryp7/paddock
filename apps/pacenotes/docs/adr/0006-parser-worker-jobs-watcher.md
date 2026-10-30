@@ -66,8 +66,10 @@ cap of 10 minutes, not a liveness bound.
 ### The index job (ER-17 to ER-19)
 
 `IndexService::start` runs the indexer on the shared job pool (`paddock-jobs`), so the call returns at once and progress comes as job events.
-Phases, each on its own scale, none restarting (`JobProgress` ignores a repeat of the phase it is in): **Finding files** (growing
-count, total unknown; it starts before the first file is looked at, `.gitignore` included), **Reading files** (known total: the
+Phases, each on its own scale, none restarting (`JobProgress` ignores a repeat of the phase it is in, and raises a total whenever the
+count passes it, so a bar never shows more done than the whole): **Scanning the folder** (growing count of the files found, total
+the same count at the end; it starts before the first file is looked at and covers the `.gitignore` walk, see below), **Finding
+files** (the index's own walk, with its own count), **Reading files** (known total: the
 files to fingerprint), **Reading code** (known total: the added and modified files), **Saving the index** (an uncancellable step,
 declared with `uncancellable` and lifted at the next phase, because the commit is the swap). A job cancelled while it is still
 queued never starts. Progress never goes backwards (a count only grows within a phase;
@@ -111,20 +113,23 @@ second walk of the tree (measured in `docs/performance.md`; it is repaid by the 
 **Cancel and progress in this phase.** The shared walk takes no cancel token and reports no count, and on a large tree it runs for
 seconds (7.5 s for 120,000 files). `RepoFilesIgnore::scan_cancellable` therefore runs it on a thread of its own and, on the job
 thread, runs `paddock_jobs::par_walk` (cancellable, parallel) as a counting walk that feeds "Finding files" with the files found so
-far and ends with the total. The wait for the shared walk is woken by the job's cancel token (`on_cancel`), not by ticks. **On cancel
-the shared walk is abandoned**: the job returns Cancelled at once, the walk finishes by itself in the background holding only its
+far and ends with the total. The wait for the shared walk is woken by the job's cancel token (`on_cancel`), not by ticks. **At most one shared walk runs at a
+time**, an abandoned one included (`WalkSlot`): a scan that starts while one still runs waits for the slot, and the wait ends at once on
+cancel, so cancelling and starting again cannot pile up walks of a very large tree. **On cancel the shared walk is abandoned**: the job returns Cancelled at once, the walk finishes by itself in the background holding only its
 own data, and its result is dropped. The count ignores `.gitignore` (an upper bound) and costs one extra parallel walk, 8 to 13 ms
 on a 20,000-file tree. **TODO (after the shared-code freeze):** give `paddock_repo_files::walk` a cancel token and a progress
 counter, and make this one walk again; the abandoned thread and the counting walk then go away.
 
 **Reuse of the walk (rule 51), not done.** Skipping the shared walk when no `.gitignore` changed cannot be done safely here: a new
 file still has to be judged against the ignore rules, and the rules are only reachable through the walk (the shared crate has no
-matcher API). Cost per run on a 20,000-file tree is about 85 ms, and the index's own walk is the dearer half. A cached matcher needs
+matcher API). **Three walks per run** (see `docs/performance.md`): the shared `.gitignore` walk, the counting walk beside it, and the index's own walk. Cost per run on a 20,000-file tree is about 85 ms, and the index's own walk is the dearer half. A cached matcher needs
 the same shared change as the TODO above.
 
 **The index file is never inside the repository.** `IndexService::start` and `watch` refuse a `store_path` whose canonical parent
 lies inside the canonical root (`EngineError::StoreInsideWorkspace`, with the message "keep the index outside the repository"):
-the file would be one of the repository's own files, every run would change it and the watcher would never stop. **The denylist is checked
+the file would be one of the repository's own files, every run would change it and the watcher would never stop. The check fails
+closed: a repository folder or index place that cannot be resolved is refused too (`RootUnresolvable`, `StoreUnresolvable`), never
+let through. **The denylist is checked
 first and still wins**: a secret that `.gitignore` also lists is counted as withheld, never merely ignored, and an `!allow` line in
 `.gitignore` cannot make a denied file readable. The shared walk stops with an error at its file cap; the run then fails with that
 message instead of indexing a partial set.

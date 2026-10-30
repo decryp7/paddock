@@ -95,6 +95,16 @@ impl SymbolSource for NoLanguages {
     }
 }
 
+/// Cancels the run it is asked to extract for.
+pub struct CancelsOnExtract;
+
+impl SymbolSource for CancelsOnExtract {
+    fn extract(&self, _: &RepoPath, _: &[u8], cancel: &CancelToken) -> Result<Option<FileFacts>, SourceError> {
+        cancel.cancel();
+        Err(SourceError::Cancelled)
+    }
+}
+
 pub struct Rig {
     pub scratch: Scratch,
     pub sink: Arc<Sink>,
@@ -105,6 +115,10 @@ pub struct Rig {
 }
 
 pub fn rig(files: &[(&str, &str)]) -> Rig {
+    rig_with(files, Arc::new(NoLanguages))
+}
+
+pub fn rig_with(files: &[(&str, &str)], source: Arc<dyn SymbolSource>) -> Rig {
     let scratch = Scratch::new();
     for (name, content) in files {
         scratch.write(&format!("ws/{name}"), content).unwrap();
@@ -116,7 +130,7 @@ pub fn rig(files: &[(&str, &str)]) -> Rig {
     let setup = Arc::new(IndexSetup {
         root: scratch.path("ws"),
         store_path: scratch.path("index/index.db"),
-        source: Arc::new(NoLanguages),
+        source,
         denylist: Arc::new(Denylist::new()),
         limits: IndexLimits::default(),
         read_workers: Workers::new(2),
@@ -130,5 +144,21 @@ pub fn rig(files: &[(&str, &str)]) -> Rig {
         service,
         clock,
         pool,
+    }
+}
+
+impl Rig {
+    /// The same service with the index file somewhere else.
+    pub fn with_store(&mut self, store: std::path::PathBuf) {
+        let setup = IndexSetup {
+            root: self.scratch.path("ws"),
+            store_path: store,
+            source: Arc::new(NoLanguages),
+            denylist: Arc::new(Denylist::new()),
+            limits: IndexLimits::default(),
+            read_workers: Workers::new(2),
+            parse_workers: Workers::one(),
+        };
+        self.service = IndexService::new(self.registry.clone(), self.pool.clone(), Arc::new(setup));
     }
 }

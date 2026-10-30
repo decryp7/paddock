@@ -171,3 +171,33 @@ fn cancel_wakes_the_monitor_instead_of_waiting_for_the_next_beat() {
         .expect("the cancel waited for the monitor's beat");
     assert_eq!(result, Err(SourceError::Cancelled));
 }
+
+#[test]
+fn imports_come_back_and_a_file_the_parser_refuses_or_the_wire_cannot_carry_fails_that_file_only() {
+    let w = workers();
+    let facts = extract(&w, "src/lib.rs", b"use std::fmt;\n\npub fn a() {}\n").unwrap().unwrap();
+    assert!(facts.imports.iter().any(|i| i.target.contains("std")), "{:?}", facts.imports);
+
+    // over the parser's own size limit: a typed answer, the worker stays
+    let over = vec![b'a'; 3 * 1024 * 1024];
+    match extract(&w, "big.rs", &over) {
+        Err(SourceError::Failed(why)) => assert!(why.contains("at most"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    // over what one message can carry: the file fails, the worker stays
+    // (a long beat: the host spends a while turning the file into a message, and that is not the worker being stuck)
+    let w = ParseWorkers::new(
+        pacenotes_worker::WorkerSettings {
+            beat: Duration::from_secs(3600),
+            ..settings()
+        },
+        Arc::new(OsProbe),
+    );
+    let huge = vec![b'a'; 20 * 1024 * 1024];
+    match extract(&w, "huge.rs", &huge) {
+        Err(SourceError::Failed(why)) => assert!(why.contains("does not fit"), "{why}"),
+        other => panic!("{:?}", other.map(|_| ())),
+    }
+    assert!(extract(&w, "src/ok.rs", GOOD).unwrap().is_some());
+    assert_eq!(w.started(), 1, "none of this cost a process");
+}

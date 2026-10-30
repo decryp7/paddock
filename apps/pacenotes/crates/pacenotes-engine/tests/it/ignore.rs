@@ -120,6 +120,8 @@ impl pacenotes_index::Progress for Count {
 fn finding_files_shows_a_growing_count_and_ends_with_the_total() {
     let r = rig(&[
         (".gitignore", "target/\n"),
+        (".git/HEAD", "ref: x\n"),
+        (".git/objects/aa", "x"),
         ("a.rs", "x"),
         ("src/b.rs", "x"),
         ("src/c.rs", "x"),
@@ -253,8 +255,14 @@ fn an_abandoned_walk_holds_the_slot_and_the_next_scan_waits_for_it_cancellably()
             RepoFilesIgnore::scan_with(&slot, || Ok(vec!["a.rs".to_owned()]), || Ok(()), &paddock_jobs::CancelToken::new())
         })
     };
+    // a caller that only waits for the slot to be free
+    let waiter = {
+        let slot = slot.clone();
+        std::thread::spawn(move || slot.wait_free())
+    };
     drop(release_tx);
     let ignore = third.join().unwrap().unwrap();
+    waiter.join().unwrap();
     assert!(ignore.visible_file(&p("a.rs")));
     slot.wait_free();
     assert!(!slot.is_busy());

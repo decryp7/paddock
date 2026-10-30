@@ -163,3 +163,63 @@ fn a_store_beside_the_workspace_is_fine_and_a_run_with_no_changes_writes_nothing
         .collect();
     assert_eq!(folder_before.len(), folder_after.len());
 }
+
+#[test]
+fn a_cancel_inside_the_index_run_ends_the_job_as_cancelled() {
+    let r = crate::support::rig_with(&[("a.rs", "fn a() {}\n")], std::sync::Arc::new(crate::support::CancelsOnExtract));
+    let err = r.service.start().unwrap().join().unwrap_err();
+    assert!(matches!(err, paddock_jobs::JobError::Cancelled(_)), "{err:?}");
+    let seen = r.sink.wait_for(|s| ended(s, 1));
+    assert!(matches!(seen.last().unwrap().state, JobState::Cancelled { .. }));
+}
+
+#[test]
+fn a_shut_down_pool_and_an_index_that_cannot_be_created_or_opened_fail_with_messages() {
+    let r = rig(&[("a.rs", "x")]);
+    r.pool.shutdown();
+    let err = r.service.start().err().unwrap();
+    assert!(matches!(err, pacenotes_engine::EngineError::PoolClosed), "{err:?}");
+    assert!(err.to_string().contains("shutting down"));
+
+    // the folder for the index is a file
+    let mut r = rig(&[("a.rs", "x")]);
+    r.scratch.write("a-file", "x").unwrap();
+    r.with_store(r.scratch.path("a-file/index.db"));
+    let err = r.service.start().unwrap().join().unwrap_err();
+    assert!(
+        matches!(&err, paddock_jobs::JobError::Failed(m) if m.contains("could not create the index folder")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn an_index_file_that_is_a_folder_is_moved_aside_and_reported_as_rebuilt() {
+    let mut r = rig(&[("a.rs", "x")]);
+    std::fs::create_dir_all(r.scratch.path("a-folder/inner")).unwrap();
+    r.with_store(r.scratch.path("a-folder"));
+    let outcome = r.service.start().unwrap().join().unwrap();
+    assert!(
+        matches!(outcome.rebuilt, Some(pacenotes_index::RebuildReason::Damaged(_))),
+        "{:?}",
+        outcome.rebuilt
+    );
+    assert_eq!(outcome.report.added, 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_index_folder_that_cannot_be_written_fails_the_job_with_the_store_message() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut r = rig(&[("a.rs", "x")]);
+    let folder = r.scratch.path("locked");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o500)).unwrap();
+    r.with_store(folder.join("index.db"));
+    let result = r.service.start().unwrap().join();
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let err = result.unwrap_err();
+    assert!(
+        matches!(&err, paddock_jobs::JobError::Failed(m) if m.starts_with("index store")),
+        "{err:?}"
+    );
+}

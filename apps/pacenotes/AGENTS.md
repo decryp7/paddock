@@ -121,7 +121,8 @@ development and UI tests only; features are not done until they work against the
   cargo test --workspace
   cargo llvm-cov nextest -p pacenotes-core -p pacenotes-function-api -p pacenotes-git --profile ci --summary-only \
     --ignore-filename-regex 'contract\.rs|wire_tests\.rs' --fail-under-lines 99   # product code only; CI runs it on main and the nightly
-  # pacenotes-parse, -index, -worker and -engine: the same command with those packages, --fail-under-lines 95 and 'src/bin/|worker/src/hooks\.rs' added to the ignore regex (see paddock.ci.json for the reasons)
+  # pacenotes-parse, -index, -worker and -engine: the same command once per package, --fail-under-lines 95 and
+  # 'pacenotes-worker/src/bin/|pacenotes-worker/src/hooks\.rs' added to the ignore regex (see paddock.ci.json for the reasons)
   cargo deny --workspace check
   node --test scripts/release/publish.test.mjs
   (cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && npx ng test --watch=false)
