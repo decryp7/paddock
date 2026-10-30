@@ -99,8 +99,10 @@
     },
     "loginStart": {
       "log": "~/Library/Application Support/Dyno/logs/app.log",
-      "hidden": "started hidden \\(flag or login item\\)",
-      "shown": "started with a window"
+      "hidden": "started hidden",
+      "shown": "started with a window",
+      "restore": null,
+      "restoreWhy": "How Dyno should start when loginwindow restores it (the Mac restarted with Dyno running, \"Reopen windows\") is a product decision not taken yet (handoff dyno-login-blockers.md recommends hidden); until then the GUI run reports what happened."
     }
   }
 }

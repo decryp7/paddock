@@ -59,6 +59,12 @@ export function parseArgs(argv) {
   return o;
 }
 
+/** The guest's default gateway from `route -n get default`, which is the host's address on the VM bridge; null otherwise. */
+export function parseGateway(text) {
+  const g = /^\s*gateway: (\d+\.\d+\.\d+\.\d+)\s*$/m.exec(String(text ?? ''))?.[1];
+  return g && /^192\.168\.\d+\.1$/.test(g) ? g : null;
+}
+
 /** The VNC URL `tart run --no-graphics --vnc-experimental` prints ("VNC server is running at vnc://:<pw>@127.0.0.1:<port>"). */
 export function parseVncUrl(text) {
   const m = /vnc:\/\/:?([^@\s]*)@(127\.0\.0\.1|localhost):(\d+)/.exec(String(text ?? ''));
@@ -262,8 +268,8 @@ async function main(argv) {
       const vnc = parseVncUrl(runOut);
       if (!vnc) throw new Error('tart did not report the VM\'s VNC server');
       // The installer over http from the host, bound to the VM bridge only (the guest's default gateway), one file.
-      const gw = /gateway: (\S+)/.exec((await exec('route -n get default')).stdout)?.[1];
-      if (!gw || !/^192\.168\.\d+\.1$/.test(gw)) throw new Error(`unexpected guest gateway ${gw}: not serving the installer`);
+      const gw = parseGateway((await exec('/sbin/route -n get default')).stdout); // /sbin is not on tart exec's PATH
+      if (!gw) throw new Error('the guest has no default gateway on the VM bridge (192.168.x.1): not serving the installer');
       const file = basename(dmg);
       server = createServer((req, res) => {
         if (req.url !== `/${encodeURIComponent(file)}`) { res.writeHead(404).end(); return; }

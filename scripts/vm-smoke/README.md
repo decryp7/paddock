@@ -69,7 +69,8 @@ scripts/vm-smoke/vm-smoke.sh --app dyno --run <id> --gui
 | Gatekeeper first launch | Finder opens the app; "Not Opened" > Done > System Settings > Privacy & Security > Open Anyway > "Open?" > Open Anyway > the administrator sheet (the image's public `admin` password); then a window with content; the app must not run translocated, and the quarantine flags must carry the user-approved bit (0x40) |
 | Launch at login on | the app's own Settings switch through AX (`gui.launchAtLogin`); launchd has the job, BTM (`sfltool dumpbtm`, inside the guest) says enabled and allowed, and Login Items shows exactly the expected rows (`rows`), no other row of the app (an "Item from unidentified developer" fails) |
 | Login Items approval | the item switched off in Login Items (a user who once refused it), then on again in the app: the app must say it needs approval (`needsApprovalText`) and open Login Items; the switch there is turned on and judged by its own value (pressed at most 3 times: the pane rebuilds right after it opens) |
-| Reboot | a reboot inside the guest; the image logs in again. The app's log since the reboot must have the hidden-start line and not the window line (`gui.loginStart`), no window may be shown, and the helper must run once with the parent `helperParentAfterLogin`, judged over the settle window |
+| Reboot as a login item | the app is **quit first** (a running app is restored by loginwindow instead, with a different open event: the next row), then a reboot inside the guest; the image logs in again. The app's log since the reboot must have the hidden-start line and not the window line (`gui.loginStart`), no window may be shown, and the helper must run once with the parent `helperParentAfterLogin`, judged over the settle window |
+| Reboot with the app running | the case people meet (restart with a tray app running, "Reopen windows"): judged against `gui.loginStart.restore` (`hidden` or `window`); `null` while the product decision is open, and the step then reports (INFO) what happened |
 | Finder double-click | from the app running without a window (after the login start, else the `--hidden` tray start, else not running): a double-click on the app in Applications through VNC must show the window with its content, one app process |
 | Launch at login off, Quit | the job goes, the helper is the app's child again; then Quit leaves nothing |
 
@@ -104,7 +105,7 @@ In `apps/<app>/vm-smoke.json`: `windowOwner` (the CGWindowList owner), `contentR
 blank webview fails), `hiddenStart` (the app has the `--hidden` tray start), `guardSec`, and `launchAtLogin`: `label` (launchd),
 `open` (AX actions until the switch is there, `["press", app, regex, role]`), `switch`, `save` (or null), `rows`
 (`openAtLogin`, `background`: the exact Login Items rows), `needsApprovalText`, `helperParentAfterLogin` (`launchd` or `app`); and
-`loginStart` (`log`, `hidden`, `shown`: the log lines that record how the app started). `launchAtLogin: null` skips the login
+`loginStart` (`log`, `hidden`, `shown`: the log lines that record how the app started; `restore`: how it must start when restored at login, or null). `launchAtLogin: null` skips the login
 rows; only Dyno has them today, the others wait for a first `--gui` run with their installer and a decision on their expected rows.
 `gui.test.mjs` checks every app's block.
 
