@@ -65,6 +65,17 @@ pub fn run_with_timeout(cmd: Command, timeout: Duration) -> Result<ToolOutput, E
     run_until(cmd, timeout.as_secs(), |_| started.elapsed() >= timeout)
 }
 
+/// Starts `cmd` and returns at once, so a caller that must not wait (the supervisor thread asking a Windows runner to
+/// stop) is never blocked by a slow helper. A thread of its own runs it as [`run_with_timeout`] does (ended after
+/// `timeout`, with everything it started) and hands the outcome to `done`. Only a failure to start the thread is
+/// returned here.
+pub fn run_detached(cmd: Command, timeout: Duration, done: impl FnOnce(Result<ToolOutput, Error>) + Send + 'static) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("tool-detached".into())
+        .spawn(move || done(run_with_timeout(cmd, timeout)))
+        .map(|_| ())
+}
+
 /// Runs `cmd` to completion unless `give_up(pid)` says to stop first; then the tool and every program it started are
 /// ended and `TimedOut` (naming `secs`) is returned. The tool runs in a session of its own on Unix (it leads its process
 /// group and has no controlling terminal, so an interactive login shell started from a terminal is not stopped by
@@ -290,6 +301,24 @@ pub(crate) mod tests {
         assert_eq!(out.code, Some(0));
         assert!(out.stdout.contains("v5.2.0"), "{out:?}");
         assert!(out.stderr.contains("oops"), "{out:?}");
+    }
+
+    /// B1: the caller of a slow tool is not held up by it. The tool waits for a file the test makes only after
+    /// `run_detached` returned, so a call that waited for the tool could not return at all.
+    #[cfg(unix)]
+    #[test]
+    fn a_detached_tool_does_not_hold_up_its_caller() {
+        let dir = std::env::temp_dir().join(format!("pitcrew-detached-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let go = dir.join("go");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let script = format!("while [ ! -e '{}' ]; do read -t 1 _ </dev/null; done; echo released", go.display());
+        run_detached(shell(&script), Duration::from_secs(60), move |r| tx.send(r).unwrap()).unwrap();
+        assert!(rx.try_recv().is_err(), "the tool cannot have finished: it waits for the file");
+        std::fs::write(&go, "").unwrap();
+        let out = rx.recv_timeout(Duration::from_secs(30)).unwrap().unwrap();
+        assert!(out.success && out.stdout.contains("released"), "{out:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
