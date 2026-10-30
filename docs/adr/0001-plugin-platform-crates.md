@@ -220,10 +220,32 @@ count as writing. Whatever the flags say, the OS sandbox still bounds what a plu
 - The plugin's `PLATFORM_PROTOCOL` major must equal the host's, and its minor must be one the host knows (the host runs
   older minors). Each `Extension` namespace carries its own major (in the name) and minor under the same rule. The rule
   exists once, in `paddock_ipc::ProtocolVersion` (`accepts`, `skew`, `introduced_in`, `mismatch`).
+- **What is a minor change on this wire.** Postcard bodies carry no field names and no field count
+  ([ipc-wire.md](../ipc-wire.md) §5, measured). **Only appending a variant at the end of an enum is a minor change**, and
+  only while nobody sends the new variant to a reader of the older minor (the host checks a request against the peer's
+  minor; IPC hardening package of the 1.2 plan). **Appending a field to a struct is a major change:** it fails in both
+  directions ("trailing bytes", "Hit the end of buffer", even with `#[serde(default)]`), and in a nested struct it can
+  be misread silently. New fields travel in a new variant appended at the end that carries them. The one exception is a
+  type that crosses as `Json` (`Described`, settings, view documents): a new field there is minor if it is an `Option` or
+  has `#[serde(default)]`. The same rules hold inside every `Extension` namespace. The doc comments that still say a field
+  may be appended (`crates/paddock-plugin-api/src/protocol.rs:18`, `apps/debrief/crates/debrief-plugin-api/src/protocol.rs:24`)
+  are corrected in the IPC hardening package.
 - **The protocol stays 2.0 for this revision** (decided 2026-10-31). `HostCall::Extension` is appended at the end of
   `HostCall`, and `PLATFORM_PROTOCOL` stays 2.0: no app has shipped protocol 2.0, and there is no compatibility promise
   before v1. The minor rule above applies from the first release that ships protocol 2.0; the same holds for the
   `Progress` frames of package 2.6d.
+- **Capabilities in the handshake: frame version 3** (decided 2026-10-31, before package 2.6d; amends ADR 0031 §9). A
+  field appended to `Hello` would break the handshake both ways (an older host fails the decode with "trailing bytes" and
+  the plugin host counts it as a crash; [ipc-wire.md](../ipc-wire.md) §16). Instead:
+  - `paddock_ipc::frame::VERSION` becomes 3. In version 3, `Hello` and `Welcome` end with `caps: u32`, a bit set; bit 0
+    is `progress` (ADR 0031 §9). Later capabilities are new bits in the same field, never a layout change.
+  - The host already reads the two version numbers before the rest of a `Hello` (`handshake_versions`), so a version-3
+    host accepts a version-2 `Hello` (no capabilities) and answers it with a version-2 `Welcome`.
+  - A version-3 client that a version-2 host refuses with `version` reconnects once with a version-2 `Hello` and no
+    capabilities. A refusal is never counted as a fault.
+  - No app on `main` links `paddock-ipc` yet, so the fallback matters only for peers that update separately (ADR 0031
+    §9 names Pitwall's service, Dyno's agent and Pitcrew's service). Package 2.6d builds it, with a test for each of the
+    four pairings of versions 2 and 3.
 - **No compatibility across a major, binary or source.** A plugin built for an older major is refused
   (`Refusal::PluginTooOld`), and Debrief's protocol 1 is refused as no longer supported (`Refusal::Legacy`). There is no
   binary legacy mode and no source shim (user decision, 2026-10-31: "no need to keep legacy plugins. Just remove them."),
@@ -248,7 +270,10 @@ count as writing. Whatever the flags say, the OS sandbox still bounds what a plu
   no pool of its own.
 - **Stream credits.** A streamed call has at most `credit` items in flight. Debrief uses 4 today (`CREDIT` in
   `debrief-plugin-host/src/process.rs`, `OUTPUT_CREDIT` in the protocol). Each item is at most one frame (16 MiB default
-  `FrameLimit`) and by convention about 64 KiB of events, so a stream holds about `credit x item size` in flight. The default
+  `FrameLimit`). **The item bound for 1.2 is Debrief's existing one: at most 8,192 events or about 4 MiB per item,
+  whichever comes first** (`MAX_EVENTS_PER_ITEM`, `ITEM_BYTES` in `debrief-plugin-api/src/protocol.rs`, carried into
+  `debrief-plugin-ext`), so a credit-4 stream holds at most about 16 MiB in flight. Package 2.6b's benchmark may lower it;
+  changing it needs a recorded result. The default
   is a `HostConfig` value behind an "Auto" setting; changing it needs a recorded benchmark.
 - **Parse threads.** A plugin that parses in parallel sizes its pool with `paddock_proc::threads(kind, class)` (ADR 0024
   §1; to be built, ADR 0024 rollout step 1). CPU-bound work gets cores minus one **in total**, so the app limits concurrent bulk calls across plugins; each
@@ -264,7 +289,7 @@ count as writing. Whatever the flags say, the OS sandbox still bounds what a plu
   per item, not one per frame. Sniffing is declarative where it can be (extensions and magic in the manifest, so no process
   starts; plan 2.6a). Contract bodies are postcard, not JSON.
 - **Benchmark to record (rule 48).** Per-call overhead on each OS: an empty unary `Extension` round trip, and a streamed call
-  of N 64 KiB items at credits 1, 4 and 16, in-process fake against a real child. Package 2.6b records it in
+  of N items at the 1.2 bound (and at 64 KiB and 1 MiB for comparison), at credits 1, 4 and 16, in-process fake against a real child. Package 2.6b records it in
   `docs/benchmarks.md` (shared code) before any number is quoted, and the default credit is chosen from it.
 
 ## Consequences
@@ -281,15 +306,19 @@ count as writing. Whatever the flags say, the OS sandbox still bounds what a plu
   - *Weight:* gRPC brings an HTTP/2 stack, an async runtime and code generation (`protoc` or `tonic-build`) into every
     plugin and host, for a link between two local processes. FlatBuffers adds a schema compiler and generated code.
   - *Sandbox:* gRPC over TCP needs sockets that `paddock-sandbox` would then have to allow; a plugin with no network grant
-    should open none. The platform's endpoint is a private Unix socket or owner-only named pipe, inherited at launch.
-  - *Local first:* apps open no listener (offline by default; every network feature is opt-in), and a gRPC server is one.
-  - *Speed:* items are small (64 KiB batches of events, 1 MiB file pieces), so postcard over length-prefixed frames is
+    should open none. The platform's endpoint is a private Unix socket in a 0700 folder or an owner-only named pipe; the
+    child receives its name and a per-launch token in its bootstrap (one JSON line on stdin) and connects to it. Nothing
+    is inherited but stdin, which stays open as the child's lifeline.
+  - *Local first:* apps open no network listener (offline by default; every network feature is opt-in), and a gRPC
+    server is one. The private endpoint is not reachable from the network.
+  - *Speed:* items are bounded (at most 8,192 events or about 4 MiB per batch, 1 MiB file pieces), so postcard over
+    length-prefixed frames is
     fast enough and FlatBuffers' zero-copy reads gain little. Package 2.6b's per-call benchmark (rule 48) confirms or
     refutes this.
   - *Languages:* plugins are Rust only (Debrief ADR 0017 dropped the polyglot SDK), so a language-neutral schema buys
     nothing today. If non-Rust plugins are ever supported, a language-neutral schema such as protobuf can travel inside
     the same frames (`Extension` bodies are opaque bytes), without HTTP/2.
-- **An async runtime in `paddock-ipc`.** Not chosen: a synchronous core on threads, with bounded queues, as built.
+- **An async runtime in `paddock-ipc`.** Not chosen: a synchronous core on threads, as built (its writer queue becomes bounded in the IPC hardening package).
 
 ## Implementation notes (plan X51, 2026-10-25)
 

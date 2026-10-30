@@ -46,7 +46,10 @@ phase 4's rebuilt first-party plugins, so a release never pairs a protocol-2 hos
 
 ### Protocol 1 to protocol 2 mapping
 
-Protocol 1 is `apps/debrief/crates/debrief-plugin-api/src/protocol.rs` (`PROTOCOL` 1.1). Every namespace starts at minor 0.
+Protocol 1 is `apps/debrief/crates/debrief-plugin-api/src/protocol.rs` (`PROTOCOL` 1.1). Every namespace starts at minor 0 and evolves by family ADR 0001's rule: only a variant appended at the
+end of a request or reply enum is minor; a field appended to a struct is a new major (a new `.v2` namespace), because
+postcard has no field count. Where a 1.1 request gained fields over time, the namespace's first version takes the
+fields as they are in 1.1.
 "Stream" means `Remote::stream` (ADR 0001); "Bulk" and "Live" are the `Contract::role` of the request (ADR 0001,
 parallelism and cost).
 
@@ -58,7 +61,7 @@ parallelism and cost).
 | `StopTask { tool, task, data_dir }` | `PlatformRequest::Stop { task }` | unary | task ids are unique per plugin (`ToolTask::id`) |
 | `PullOutput { stream }` | removed: the plugin pushes `HostCall::Output` pieces | | see `SaveOutput` |
 | `Sniff { importer, file, head }` | `debrief.import.v1` `Sniff` | unary, Live | skipped when the manifest's declarative sniff decides (plan 2.6a) |
-| `Import { importer, file, content }` | `debrief.import.v1` `Import` | stream of `Vec<WireEvent>`, Bulk; reply `ImportDone` | `content` stays a lent host file |
+| `Import { importer, file, content }` | `debrief.import.v1` `Import` | stream of `Vec<WireEvent>` (at most 8,192 events or about 4 MiB per item, ADR 0001), Bulk; reply `ImportDone` | `content` stays a lent host file |
 | `ImportTail { importer, file, head, tail }` | `debrief.import.v1` `Tail` | stream, Live; reply `TailDone` | |
 | `SniffConfig`, `ParseConfig` | `debrief.config.v1` `Sniff`, `Parse` | unary; Live, Bulk | `Limits` carried in the body |
 | `Annotate { annotator, ticket, since }` | `debrief.annotate.v1` `Annotate` | unary, Bulk | reads events through the host side below |

@@ -425,3 +425,12 @@ applies to Debrief's old plugins: plugins built for protocol 1 are removed and r
 protocol-2.0 plugin is built with the `Progress` frames. The plan counts the work as 2.6c, 2.6d and LV1-LV3, about
 13 days, against about 14 for phase A (9.5), WP-B1 (1.5), WP-B2 (2) and WP-B4 (1) done separately; part of WP-B3 is in
 2.6d.
+
+**Correction to §9 (2026-10-31).** §9 says a capability bit in `Hello` needs no frame version bump. That is wrong on this
+wire: postcard has no field count, so a field appended to `Hello` fails the handshake both ways (an older host reports
+"trailing bytes" and counts a crash; a newer host reading an older `Hello` reports "Hit the end of buffer";
+[ipc-wire.md](../ipc-wire.md) §16, measured). The capability is carried as decided in family ADR 0001 ("Versioning and
+compatibility"): frame version 3, whose `Hello` and `Welcome` end with a `caps: u32` bit set (bit 0 `progress`); a
+version-3 host accepts version-2 peers without capabilities, and a version-3 client refused with `version` reconnects
+once as version 2. The rest of §9 stands: a peer without the bit is never refused and is judged on CPU time and run
+state. Package 2.6d builds it.
