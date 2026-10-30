@@ -14,20 +14,30 @@
 //   - a Spotter renderer without its browser: `ChromiumRenderer::new(..)` in a statement without `.with_browser(` (it
 //     falls through to the installed browser);
 //   - starting a browser or app by name: `Command::new("google-chrome" | "chrome" | "chromium" | "msedge" | "open" ..)`;
+//   - the self-tests and the status that start a browser to ask its version: `renderer_status(`, `install::self_test(`,
+//     `discover::candidates(`, and a test fn that both names installed candidates and calls `self_test(` (the drivers'
+//     self-tests ask the launch gate in test builds; this names a test that would start the user's browser);
+//   - the user's default browser: `open::that*(`, a call of `open_url(` (not a method of a fake: `f.open_url(`),
+//     `Command::new("xdg-open")`, `Command::new("cmd")` with `start`;
 //   - a hard-coded installed browser: a literal path into `/Applications/{Google Chrome,Chromium,Microsoft Edge}*.app`, `Google\Chrome\Application`,
 //     `/usr/bin/google-chrome*` or `/usr/bin/chromium*` (a bare `chrome.exe` is a process name in many tests' data);
 //   - in a file that gets a test browser (`find_for_tests(`, `test_browser(`), a test fn that launches a window
 //     (`Mode::`/`Window::OffScreen`/`OnScreen`, or default options) after asking the finder for none (the gate then never
 //     checked for the virtual display). Helper fns are not followed: the launch-time check refuses a real browser outside
 //     a throwaway session whatever the helper did, so this rule only names the mismatch early.
-// A deliberate case carries `// conformance: no-launch — <reason>` on the line or the line above.
+// A deliberate case carries `// conformance: no-launch — <reason>` on the line or the line above, or anywhere in the test fn
+// it is in.
 import { error } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
 
 const DIRECT = /"(?:CHROMIUM_TEST_PATH|[A-Z][A-Z0-9]*_TEST_BROWSER(?:_DIR)?)"|\bTEST_BROWSER_ENV\b|\bfind_for_tests_with\s*\(|\bconcat!\s*\([^)]*"(?:CHROMIUM_?|[A-Z0-9_]*TEST_?BROWSER|[A-Z0-9_]*TEST_?PATH)/g;
 const PRODUCT_SEARCH = /\b(?:discover|chromium_driver)::find\s*\(|\bfind_installed(?:_with)?\s*\(|\bfind_downloaded\s*\(|\bruntime::installed\s*\(|\buse\s+[\w:]*(?:discover|chromium_driver)::(?:\{[^}]*\bfind\b[^}]*\}|find\b)/g;
-const COMMAND = /\bCommand::new\s*\(\s*"(?:[^"]*[\\/])?(?:google-chrome(?:-stable)?|chrome|chromium(?:-browser)?|msedge|microsoft-edge|Google Chrome|Microsoft Edge|Chromium|open)(?:\.exe)?"/g;
+const COMMAND = /\bCommand::new\s*\(\s*"(?:[^"]*[\\/])?(?:google-chrome(?:-stable)?|chrome|chromium(?:-browser)?|msedge|microsoft-edge|Google Chrome|Microsoft Edge|Chromium|open|xdg-open)(?:\.exe)?"/g;
 const INSTALLED_PATH = /"[^"\n]*(?:\/Applications\/(?:Google Chrome|Chromium|Microsoft Edge)[^"\n\/]*\.app|Google\\{1,2}Chrome\\{1,2}Application|\/usr\/bin\/(?:google-chrome|chromium))[^"\n]*"/g;
+const SELF_TEST = /\brenderer_status\s*\(|\binstall::self_test\s*\(|\bdiscover::candidates\s*\(/g;
+const BARE_SELF_TEST = /\bself_test\s*\(/;
+const NAMES_INSTALLED = /(?<![.\w])(?:[\w:]*::)?candidates\s*\(|\bfind_installed/;
+const OPENER = /\bopen::that\w*\s*\(|(?<![.\w])(?:[\w:]*::)?open_url\s*\(|\bCommand::new\s*\(\s*"cmd(?:\.exe)?"\s*\)[^;]*"start"/g;
 const RENDERER = /\bChromiumRenderer::new\s*\(/g;
 const FINDER = /\b(?:find_for_tests|test_browser)\s*\(/;
 const HEADFUL = /\b(?:Mode|Window)::(?:OffScreen|OnScreen)\b|\bChromiumRenderer::new\s*\(|\bLaunchOptions::(?:new|default)\s*\(|\bLaunchOptions\s*\{|\bChromium::launch\s*\(/;
@@ -82,17 +92,32 @@ export function windowedTestFindings(path, text) {
   const masked = maskRust(text);
   const lines = text.split('\n');
   const lineOf = (i) => code.slice(0, i).split('\n').length;
-  const waived = (line) => WAIVER.test(lines[line - 1] ?? '') || WAIVER.test(lines[line - 2] ?? '');
+  const ranges = testRanges(path, masked);
+  // The test fns (not whole modules or files) a waiver anywhere inside covers.
+  const fnRanges = [...masked.matchAll(/#\[(?:[\w]+::)*test(?:\([^)]*\))?\]/g)].map((t) => {
+    const fn = /\bfn\s+\w+[^{;]*\{/.exec(masked.slice(t.index));
+    const open = fn ? t.index + fn.index + fn[0].length - 1 : -1;
+    return [t.index, open < 0 ? -1 : closing(masked, open)];
+  });
+  const waived = (line, index) =>
+    WAIVER.test(lines[line - 1] ?? '') ||
+    WAIVER.test(lines[line - 2] ?? '') ||
+    fnRanges.some(([a, b]) => index >= a && index < b && WAIVER.test(text.slice(a, b)));
   const out = [];
   const push = (index, kind, name) => {
     const line = lineOf(index);
-    if (!waived(line)) out.push({ line, kind, ...(name ? { name } : {}) });
+    if (!waived(line, index)) out.push({ line, kind, ...(name ? { name } : {}) });
   };
   for (const m of code.matchAll(DIRECT)) push(m.index, 'direct');
-  const ranges = testRanges(path, masked);
   const inTest = (i) => ranges.some(([a, b]) => i >= a && i < b);
-  for (const [re, kind] of [[PRODUCT_SEARCH, 'search'], [COMMAND, 'command'], [INSTALLED_PATH, 'path']]) {
+  for (const [re, kind] of [[PRODUCT_SEARCH, 'search'], [COMMAND, 'command'], [INSTALLED_PATH, 'path'], [SELF_TEST, 'selftest'], [OPENER, 'opener']]) {
     for (const m of code.matchAll(re)) if (inTest(m.index)) push(m.index, kind);
+  }
+  // A test fn that self-tests what it took from the installed candidates.
+  for (const [a, b] of fnRanges) {
+    if (b < 0) continue;
+    const body = masked.slice(a, b);
+    if (NAMES_INSTALLED.test(body) && BARE_SELF_TEST.test(body)) push(a + body.search(BARE_SELF_TEST), 'selftest');
   }
   for (const m of masked.matchAll(RENDERER)) {
     if (!inTest(m.index)) continue;
@@ -121,6 +146,8 @@ const MESSAGES = {
   search: ['a test uses the product\'s browser search, which finds the browser the user installed', 'Use the pinned test browser from `discover::find_for_tests(mode)`; a test never starts an installed browser.'],
   renderer: ['a test builds a renderer without `.with_browser(..)`: it falls through to the installed browser', 'Give it the test browser: `.with_browser(find_for_tests(mode)?)`, or a fake.'],
   command: ['a test starts a browser or an app by name', 'Start the pinned test browser through the driver, only where the gate allows it; never `open` an app from a test.'],
+  selftest: ['a test asks a browser for its version by starting it (a self-test or the renderer status), or lists the installed candidates', 'Self-test the pinned test browser or a fake; the drivers refuse an installed browser in test builds, and a test that checks that refusal says so with the waiver.'],
+  opener: ['a test opens the user\'s default browser', 'Short-circuit the opener in test builds (`if cfg!(test) { return Ok(()) }`) and assert the call, never open a page from a test.'],
   path: ['a test names an installed browser\'s path', 'Use the pinned test browser from the driver\'s finder, never a path into the user\'s installed apps.'],
 };
 

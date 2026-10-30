@@ -785,8 +785,14 @@ app leg and Debrief's lint job. Two more jobs put windows on the host desktops (
 nightly real-window probe on macOS and Windows): both now run in the Linux container, and a CI test fails any host job
 that runs Playwright, the real-window probe, the real-app smoke or a real-browser test binary. The macOS and Windows
 coverage moved to the local test VMs: `PADDOCK_LIVE_BROWSER=vm` is honoured only where the VM marker is
-(`kern.hv_vmm_present` on macOS, `%ProgramData%\Paddock\test-vm` on Windows), and each release records
-"VM smoke: <date> <version> pass". Rule 7 now says so.
+(`kern.hv_vmm_present` on macOS, the administrator-only value `HKLM\SOFTWARE\Paddock` `TestVM` on Windows), and each
+release records "VM smoke: <date> <version> pass". Rule 7 now says so. A third review found the last holes: the drivers'
+self-tests (Spotter's renderer status self-tests the installed browser) started programs ungated, a fake was recognised by
+its `#!` line although Chrome's and Edge's Linux launchers are scripts too, and Debrief's `open_url` opened the default
+browser from tests. The self-tests ask the gate, fakes carry `# paddock-fake-browser`, installed paths compare
+canonically, `open_url` is a no-op in tests, and C55 names self-tests, the status and default-browser openers in test
+code. The pattern behind all three rounds: a gate on one entry point is a check, not a structure; put it at every place
+that starts a program, and recognise the allowed case positively.
 
 Considered and rejected: a test-only headless or off-screen launch option for Debrief's live tests, to keep them on the
 Mac. Headless tests a mode the product never runs (the challenge test is about the window coming to the front), the option

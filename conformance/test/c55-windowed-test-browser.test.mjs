@@ -117,3 +117,38 @@ test('C55 good: the product\'s own search and launch outside test code, a render
   // Process names in data are not paths to an installed browser.
   assert.deepEqual(kinds('crates/x/tests/it/a.rs', '#[test]\nfn it() { let p = proc(10, "chrome.exe"); let q = "/Applications/Utilities/Terminal.app"; }\n'), []);
 });
+
+// Re-review P1 and P2-2: the self-tests and the status started browsers, and openers opened the default browser.
+test('C55 bad: self-tests, the renderer status, installed candidates and default-browser openers in test code', () => {
+  for (const [kind, body] of [
+    ['selftest', '        let s = spotter_render::renderer_status(d.path());'],
+    ['selftest', '        let v = spotter_render::install::self_test(&exe).unwrap();'],
+    ['selftest', '        let all = discover::candidates(Os::CURRENT, &env);'],
+    ['selftest', '        for b in candidates(os, &env) {\n            let _ = self_test(&b.path);\n        }'],
+    ['selftest', '        let b = find_installed().unwrap();\n        let _ = ChromeForTesting::new(os).self_test(&b.path, "1");'],
+    ['opener', '        open::that("https://example.org").unwrap();'],
+    ['opener', '        open::that_detached(url).unwrap();'],
+    ['opener', '        crate::opener::open_url("https://example.org").unwrap();'],
+    ['opener', '        open_url(&url)?;'],
+    ['command', '        Command::new("xdg-open").arg(url).spawn().unwrap();'],
+    ['opener', '        Command::new("cmd").args(["/C", "start", url]).spawn().unwrap();'],
+  ]) {
+    const got = kinds('crates/x/src/lib.rs', inTestMod(body));
+    assert.ok(got.length >= 1 && got.every((k) => k === kind || k === 'search'), `${body}: ${got}`);
+    assert.ok(got.includes(kind), `${body}: ${got}`);
+  }
+});
+
+test('C55 good: a fake\'s open_url, candidates() of another type, an asserted program name, a fake\'s self-test, a waived fn', () => {
+  for (const body of [
+    '        assert!(f.open_url("https://example.org").is_err());',
+    '        let c = pass.candidates(&info, &mut |_| {}).unwrap();',
+    '        assert_eq!(cmd.get_program(), "xdg-open");',
+    '        let r = self_test(&tools, &scratch, &cancel).unwrap();',
+    '        // conformance: no-launch — the gate under test refuses each candidate first\n        for b in crate::discover::candidates(os, &env) {\n            let e = self_test(&b.path).unwrap_err();\n        }',
+  ]) {
+    assert.deepEqual(kinds('crates/x/src/lib.rs', inTestMod(body)), [], body);
+  }
+  // Outside test code the product calls them freely.
+  assert.deepEqual(kinds('crates/x/src/status.rs', 'pub fn renderer_status(d: &Path) -> S { let v = crate::install::self_test(&p); open_url(u); S }\n'), []);
+});

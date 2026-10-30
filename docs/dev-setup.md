@@ -133,16 +133,18 @@ Tests never start a real browser or the real app on a desktop someone uses (rule
   windows on it: set it only under `xvfb-run` or in a VM.
 - **Local test VMs, never in CI:** `PADDOCK_LIVE_BROWSER=vm`, honoured only in a VM (`paddock_testkit::live_browser`;
   anywhere else it fails the test instead of starting anything). A macOS VM (Tart) is recognised by
-  `kern.hv_vmm_present = 1`. A Windows test VM by the marker file `%ProgramData%\Paddock\test-vm`, which the VM's set-up
-  creates once and no desktop has:
+  `kern.hv_vmm_present = 1`. A Windows test VM by the machine-wide registry value `HKLM\SOFTWARE\Paddock` `TestVM` = 1,
+  which only an administrator can write; the VM's set-up writes it once, and it never goes on a desktop someone uses:
 
   ```powershell
-  New-Item -ItemType File -Force "$env:ProgramData\Paddock\test-vm"
+  reg add HKLM\SOFTWARE\Paddock /v TestVM /t REG_DWORD /d 1 /f   # elevated, in the test VM only
   ```
 
-Outside those places a real-browser test prints where it runs and returns. In test builds each driver's launch also
-refuses an installed browser, and any real program outside those places, however a test found it (conformance C55 is
-the backstop). The macOS and Windows real-browser runs, in the VMs, before a release that touches the browser code:
+Outside those places a real-browser test prints where it runs and returns. In test builds each driver's launch and
+self-test also refuse an installed browser (paths compared canonically), and any real program outside those places,
+however a test found it: only a test's fakes pass, which carry the line `# paddock-fake-browser`
+(`paddock_testkit::live_browser::fake_script`); a `#!` line alone proves nothing, since Chrome's and Edge's Linux
+launchers are scripts too. Conformance C55 is the backstop. The macOS and Windows real-browser runs, in the VMs, before a release that touches the browser code:
 
 ```sh
 # shared crates (paddock-chromium), Spotter, Debrief: from each Cargo workspace, in the VM

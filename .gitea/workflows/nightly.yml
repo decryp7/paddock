@@ -113,6 +113,7 @@ jobs:
         working-directory: crates
         env:
           PADDOCK_REAL_WINDOWS: "1"
+          PADDOCK_LIVE_BROWSER: "1"
           PADDOCK_PROBE_DIST: ${{ github.workspace }}/ui/dist/shell-demo/browser
         run: xvfb-run -a cargo test -p paddock-dialogs --features tauri --test show_probe -- --nocapture
 
