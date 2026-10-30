@@ -4,7 +4,7 @@ import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { Toasts } from '../../core/toasts';
 import { demoSettings } from '../../core/mock-data';
-import { SETTINGS_JOURNAL, SETTINGS_JOURNAL_KEY, SETTINGS_JOURNAL_TTL_MS, SETTINGS_SAVE_DELAY, SettingsStore, editSettings, refusalText, shownValue, undoText, unsentText } from './settings.store';
+import { SETTINGS_JOURNAL, SETTINGS_JOURNAL_KEY, SETTINGS_JOURNAL_TTL_MS, SETTINGS_SAVE_DELAY, SettingsStore, editSettings, refusalText, savingLabel, shownValue, undoText, unsentText } from './settings.store';
 
 describe('editSettings', () => {
   it('merges values into one section and leaves the others alone', () => {
@@ -113,7 +113,7 @@ describe('SettingsStore', () => {
     await store.load();
     store.edit(CONC, 'server', { maxConcurrent: 12 }, 'typed');
     const verdict = store.closeVerdict();
-    expect(verdict.kind).toBe('wait');
+    expect(verdict).toMatchObject({ kind: 'wait', label: 'requests at once' });
     await (verdict as { done: Promise<unknown> }).done;
     expect((await backend.settings()).server.maxConcurrent).toBe(12);
     expect(store.closeVerdict()).toEqual({ kind: 'close' });
@@ -378,6 +378,21 @@ describe('SettingsStore', () => {
       expect(save).not.toHaveBeenCalled();
       expect(store.unsent()).toEqual([]);
     });
+  });
+
+  it('names what a close waits for', () => {
+    expect(savingLabel([])).toBe('your settings');
+    expect(savingLabel(['Port', 'Port'])).toBe('port');
+    expect(savingLabel(['LAN port', 'Request timeout'])).toBe('LAN port and request timeout');
+    expect(savingLabel(['Port', 'Request timeout', 'Offline mode'])).toBe('3 settings');
+  });
+
+  it('a close while only a preset is on its way waits for "your settings"', async () => {
+    const { store } = setup();
+    await store.load();
+    const applied = store.applyPreset('performance');
+    expect(store.closeVerdict()).toMatchObject({ kind: 'wait', label: 'your settings' });
+    await applied;
   });
 
   it('shows an unsent value the way the page does', () => {
