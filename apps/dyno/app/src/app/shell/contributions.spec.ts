@@ -2,7 +2,7 @@ import { Injector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { AppearanceStore, BrowserAppearanceBackend, buildManifest, CommandService, ContributionRegistry, manifestDrift, ShellContextHost, provideAppearance, serializeManifest, SHELL_COMMANDS } from '@decryp7/paddock-ui/shell';
-import { AppMenu, MENU_MODE, type MenuMode, provideMenus, provideSubmenus, QUIT_CONTRIBUTIONS, toNativeModel } from '@decryp7/paddock-ui/shell/menu';
+import { AppMenu, MENU_MODE, type MenuMode, provideMenus, provideNativeMenu, provideSubmenus, toNativeModel } from '@decryp7/paddock-ui/shell/menu';
 import { SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { assertContributionsValid, dialogTableProblems, provideShellTesting } from '@decryp7/paddock-ui/shell/testing';
 import { BACKEND } from '../core/backend';
@@ -35,6 +35,9 @@ const env = (name: string): string | undefined => (globalThis as { process?: { e
 /** Rust reads this file (`paddock_shell::Builder::problems`, `app/src-tauri/tests/shell.rs`). */
 const MANIFEST = 'paddock-manifest.json';
 
+/** The desktop build's native menu port (what the frames get from `tauriNativeMenuPort(ipc)`): it can quit, so the frame adds Quit. */
+const QUITTING_PORT = { setAppMenu: () => Promise.resolve(), onMenu: () => Promise.resolve(() => undefined), quitApp: () => Promise.resolve() };
+
 function configure(contributions = [CONTRIBUTIONS], menuMode: MenuMode = 'in-app'): MockBackend {
   const { mock: backend, jobs } = mockWithJobs({ now: () => new Date(2026, 9, 22, 12).getTime() });
   TestBed.configureTestingModule({
@@ -46,7 +49,7 @@ function configure(contributions = [CONTRIBUTIONS], menuMode: MenuMode = 'in-app
       ...provideShellTesting({
         contributions,
         context: () => Promise.resolve(dynoContext),
-        providers: [provideMenus({ appName: 'Dyno' }), provideSubmenus(), provideAppearance({ accent: 'dyno', backend: () => new BrowserAppearanceBackend({ storage: null, channel: null }) })],
+        providers: [provideMenus({ appName: 'Dyno' }), provideSubmenus(), provideNativeMenu({ port: QUITTING_PORT }), provideAppearance({ accent: 'dyno', backend: () => new BrowserAppearanceBackend({ storage: null, channel: null }) })],
       }),
     ],
   });
@@ -169,7 +172,7 @@ describe('Dyno dialogs', () => {
 
 describe('Dyno menus', () => {
   it('send the native menu bar Quit with Mod+Q, last in the app menu (Cmd+Q works with no window: paddock-menu)', async () => {
-    configure([CONTRIBUTIONS, ABOUT_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS, QUIT_CONTRIBUTIONS] as never, 'native');
+    configure([CONTRIBUTIONS, ABOUT_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS] as never, 'native');
     await TestBed.inject(ShellContextHost).load();
     const app = toNativeModel(TestBed.inject(AppMenu).menus()).menus.find((m) => m.id === 'app');
     const items = (app?.items ?? []).filter((e) => e.kind === 'item');
@@ -179,7 +182,7 @@ describe('Dyno menus', () => {
 
 describe('Dyno manifest', () => {
   it('keeps paddock-manifest.json equal to the main window’s contributions', async () => {
-    configure([CONTRIBUTIONS, ABOUT_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS, QUIT_CONTRIBUTIONS] as never);
+    configure([CONTRIBUTIONS, ABOUT_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS] as never);
     const manifest = buildManifest(TestBed.inject(ContributionRegistry));
     expect([...manifest.healthServices].sort()).toEqual(['dy.agent']);
     const fs = await nodeFs();

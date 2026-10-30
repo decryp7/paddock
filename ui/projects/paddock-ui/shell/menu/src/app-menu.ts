@@ -12,7 +12,7 @@ import {
   type ShellMenu,
 } from '@decryp7/paddock-ui/shell';
 import { QUIT_COMMAND } from '../generated/menu';
-import { currentPlatform } from './keys';
+import { currentOs, currentPlatform, type MenuOs } from './keys';
 import { Keymap } from './keymap';
 import { buildMenu, buildMenus, foldAppMenu, type MenuNode, type MenuSource, type TopMenu } from './menu-model';
 import { SUBMENUS, type SubmenuDef } from './submenus';
@@ -47,9 +47,9 @@ export interface MenuConfig {
 }
 
 /** The operating system, as far as menu wording goes: Windows calls the last item of the app menu "Exit". */
-export const MENU_OS = new InjectionToken<'windows' | 'other'>('PADDOCK_MENU_OS', {
+export const MENU_OS = new InjectionToken<MenuOs>('PADDOCK_MENU_OS', {
   providedIn: 'root',
-  factory: () => (typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent) ? 'windows' : 'other'),
+  factory: () => currentOs(),
 });
 
 export const MENU_CONFIG = new InjectionToken<MenuConfig>('PADDOCK_MENU_CONFIG', { providedIn: 'root', factory: () => ({ appName: 'App' }) });

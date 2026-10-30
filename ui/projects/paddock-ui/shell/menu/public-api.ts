@@ -15,6 +15,7 @@
  */
 export {
   currentPlatform,
+  currentOs,
   eventKey,
   eventPressed,
   matchesKey,
@@ -24,6 +25,7 @@ export {
   isTextEntry,
   textFieldKeeps,
   type KeyPlatform,
+  type MenuOs,
   type KeyInput,
   type Recorded,
 } from './src/keys';

@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { AppMenu, MENU_MODE, MENU_OS, provideMenus } from './app-menu';
 import { APP_QUIT, provideContributions, ContributionRegistry, provideShellContext, provideShellCore, ShellContextHost } from '@decryp7/paddock-ui/shell';
 import { QUIT_COMMAND } from '../generated/menu';
+import { currentOs, currentPlatform } from './keys';
 import { provideNativeMenu, tauriNativeMenuPort } from './native-menu';
 import { QUIT_CONTRIBUTIONS } from './quit';
 
@@ -52,6 +53,17 @@ describe('Quit', () => {
     await ctx.quitApp();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('APP_QUIT'));
     warn.mockRestore();
+  });
+});
+
+describe('currentOs', () => {
+  it('tells macOS, Windows and the rest apart; the key platform follows', () => {
+    expect(currentOs({ platform: 'MacIntel' })).toBe('mac');
+    expect(currentOs({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })).toBe('windows');
+    expect(currentOs({ platform: 'Linux x86_64' })).toBe('other');
+    expect(currentOs(undefined)).toBeDefined();
+    expect(currentPlatform({ platform: 'Win32' })).toBe('other');
+    expect(currentPlatform({ platform: 'MacIntel' })).toBe('mac');
   });
 });
 
