@@ -24,7 +24,7 @@ scripts/vm-smoke/vm-smoke.sh --app debrief  --run <debrief.yml run id>
 Options: `--out <dir>` (result files; default `$PADDOCK_VM_SMOKE_OUT`, else `./vm-smoke-results/`, which is git-ignored), `--base
 <tart vm>` (clone this local VM instead of the pinned `macos-tahoe-base` image; it must have the guest agent, `admin`/`admin`),
 `--artifact <name>` (default `<app>-macOS`), `--keep-vm` (do not delete the clone; for debugging only). Environment: `TART_HOME`
-(default `/Volumes/d7sst7/dev-targets/tart-home`, where the images are), `PADDOCK_VM_MAX_LOAD` (30). Exit code 0: no step failed;
+(default `$HOME/.tart`, as in `tools/macos-vm-smoke.sh`; the images here live on d7, so `export TART_HOME=/Volumes/d7sst7/dev-targets/tart-home`), `PADDOCK_VM_MAX_LOAD` (16), `PADDOCK_VM_MIN_FREE_GB` (60), `PADDOCK_VM_MAX` (VMs at once, 1 or 2), `PADDOCK_VM_SLOT_WAIT`, `PADDOCK_VM_LOAD_WAIT`. Exit code 0: no step failed;
 1: a step failed; 2: the check could not run (no Tart, load too high, download failed).
 
 To find the run: the last `<app>-release` run of the commit you will tag that **built bundles** (its job list has three
@@ -36,13 +36,13 @@ lists them. A run without bundles has no artifact and the check says so.
 | Step | Evidence |
 |---|---|
 | Install | `hdiutil` attach, copy to `/Applications`, version from `Info.plist`, `codesign --verify --deep --strict` |
-| Cold start, window shown | `sudo purge` first (cold disk cache), then `open`. Polls until every process in the config runs, the discovery file names the live helper and the `ready` command answers (guard: `readyTimeoutSec`). Then watches `settleSec` seconds of `ps` snapshots: the peak count of the app and of each helper must not exceed `max` (a respawn ten seconds late is seen), every helper's parent must be the app (or launchd while Launch at login is on) |
+| Cold start | `sudo purge` first (cold disk cache), then `open`. Polls until every process in the config runs, the discovery file names the live helper and the `ready` command answers (guard: `readyTimeoutSec`). Then watches `settleSec` seconds of `ps` snapshots (30 s for Dyno, derived from its 5 s + 8 s spawn timers; each config records why). Every snapshot from the launch on, the readiness polls included, is judged: the peak count of the app and of each helper must not exceed `max`, every helper's parent must be the app (or launchd while Launch at login is on), and the number of distinct processes (pid plus start time) per spec over the whole step must not exceed `max`, so a duplicate that exits before ready, or an agent that dies and is replaced, fails too. It does not check that a window is shown (headless) |
 | Second launch while running | `open` again: the same pids, no second app or helper (single instance) |
-| Quit with a window open | `osascript quit`; polls until nothing of the app runs; any leftover is listed with its parent (parent 1 = an orphan of launchd); discovery files that must go are gone. A leftover is then ended, after re-checking its command line in the same guest command (rule 53) |
+| Quit with a window open | `osascript quit`; polls until nothing of the app runs; any leftover is listed with its parent (parent 1 = an orphan of launchd); discovery files that must go are gone. A leftover is then ended, after re-checking its pid, start time and command line in the same guest command (rule 53); a leftover that will not go fails the next step |
 | Start without a window | `open --args --hidden` (the shared tray start), same judgement, then Quit |
 | Relaunch after Quit | start, judge, Quit |
-| Launch at login on, off, on | for apps whose config has `loginService.on/off` (Dyno: `dyno-agent service install/uninstall`): after each switch the window sees no duplicate and only legal parents; `launchctl print` state is recorded. Apps without a scripted toggle report SKIP (a manual row) |
-| Start with the update host black-holed | `/etc/hosts` points the update host at a local listener that accepts and never answers, `purge`, cold start: must still reach ready. It does not read whether update checks are on in the build |
+| Launch at login on, off, on | only for an app whose config has a scripted `loginService.on/off`: after each switch no duplicate and only legal parents, and the launchd job must load, else the step is SKIP ("not proven"). **Dyno has none**: the app registers with SMAppService from the Aqua session, which `tart exec` does not have, and `dyno-agent service install` is a different (legacy LaunchAgents) route. So for every app this is a manual row today |
+| Start with the update host black-holed | `/etc/hosts` points the update host at IPv4 and ::1 loopback, where a perl listener accepts, logs and never answers; `purge`, cold start: must still reach ready. The step passes only if the listener was contacted; otherwise it reports SKIP, "NOT EXERCISED" (update checks are off or not on start in this build) |
 | Logs | the last lines of each log in the config, for reading |
 
 A step is judged by state (processes, files, exit codes). The only clocks are guards for a stuck step and the observation
@@ -57,8 +57,7 @@ window; no check is "sleep, then look".
 
 ## Hard rules it keeps
 
-- A fresh `tart clone` per run, deleted afterwards (also on failure, Ctrl-C and timeout). One VM at a time (the same lock as
-  `tools/macos-vm-smoke.sh`), load below 30 and disk checked first, `nice -n 10`.
+- A fresh `tart clone` per run, deleted afterwards (also on failure, Ctrl-C and SIGTERM, which also ends in-flight `tart` children). The same VM slot as `tools/macos-vm-smoke.sh` (`./dev ci slot acquire`, an OS lock the kernel frees with its holder), at least 60 GB free under `TART_HOME`, 1-minute load at most 16 (it waits), `nice -n 10`.
 - Nothing of the host is touched: no host app, not the personal Windows Fusion VM. The only host files written are the result
   file and a scratch folder (removed). The VM gets the installer through a read-only share. No signing keys: the installer is
   the CI build, the VM never sees `PADDOCK_TAURI_*`.

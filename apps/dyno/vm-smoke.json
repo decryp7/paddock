@@ -13,7 +13,7 @@
   },
   "updateHost": "dev.decryptology.net",
   "readyTimeoutSec": 180,
-  "settleSec": 20,
+  "settleSec": 30,
   "processes": [
     {
       "name": "dyno-app",
@@ -47,21 +47,11 @@
   },
   "loginService": {
     "label": "net.decryptology.dyno.agent",
-    "on": [
-      "Contents/MacOS/dyno-agent",
-      "service",
-      "install"
-    ],
-    "off": [
-      "Contents/MacOS/dyno-agent",
-      "service",
-      "uninstall"
-    ],
-    "status": [
-      "Contents/MacOS/dyno-agent",
-      "service",
-      "status"
-    ],
+    "on": null,
+    "off": null,
+    "status": null,
+    "manualReason": "the app registers its login item with SMAppService from the Aqua session; `dyno-agent service install` writes a legacy LaunchAgents plist and bootstraps it with launchctl, a different route that is not what users run, and tart exec has no Aqua session to run SMAppService in",
     "approval": "System Settings > General > Login Items & Extensions may ask to allow the item (manual)."
-  }
+  },
+  "settleWhy": "The app waits SPAWN_WAIT 5 s then CONNECT_GRACE 8 s (app/src-tauri/src/link.rs) before it spawns another agent; round 2 saw the duplicate 10 s after the first. 30 s covers two such rounds plus the 2 s polling."
 }

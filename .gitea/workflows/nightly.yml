@@ -149,12 +149,40 @@ jobs:
           mode: release
 
   # Rule 54, "green that proves something": the installers of every released app, built every night with nothing published (the
-  # release job of app-release.yml runs only for a tag). These jobs have no `needs`: a skipped need skipped the whole release job in
-  # the apps' own workflows (every scheduled run there built nothing), so the nightly does not depend on anything that can skip.
-  # The inputs are copied from each app's <app>-release.yml; conformance/test/ci-actions.test.mjs fails when they drift apart.
+  # release job of app-release.yml runs only for a tag). They need only installers-gate, a job that always runs: a skipped need
+  # skips a reusable-workflow job on this Gitea whatever its `if` says, so nothing here waits on a job that can be skipped.
+  # The gate skips the night while main and the toolchain image (ci-image/) are unchanged since the last nightly that built every
+  # installer (rule 50); installers-mark records that. The inputs are copied from each app's installers job in <app>-release.yml;
+  # conformance/test/release-verdict.test.mjs fails when they drift apart.
   # Debrief builds its installers in debrief.yml (its schedule has `full`), the demos have manual releases only.
+  installers-gate:
+    name: installers gate (main or the toolchain image changed since the last nightly build?)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: built
+        if: github.event_name == 'schedule'
+        uses: actions/cache/restore@v4
+        with:
+          path: .nightly-installers
+          key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**') }}
+          lookup-only: true
+      - id: decide
+        shell: bash
+        env:
+          HIT: ${{ steps.built.outputs.cache-hit }}
+        run: |
+          if [ "$HIT" = true ]; then echo "run=false" >> "$GITHUB_OUTPUT"; echo "::notice::main and the toolchain image are unchanged since the last nightly that built the installers; skipping."
+          else echo "run=true" >> "$GITHUB_OUTPUT"; fi
+
   installers-dyno:
     name: installers (Dyno, no publish)
+    needs: [installers-gate]
+    if: ${{ needs.installers-gate.outputs.run == 'true' }}
     uses: ./.gitea/workflows/app-release.yml
     with:
       paddock-ref: ${{ github.sha }}
@@ -194,6 +222,8 @@ jobs:
 
   installers-spotter:
     name: installers (Spotter, no publish)
+    needs: [installers-gate]
+    if: ${{ needs.installers-gate.outputs.run == 'true' }}
     uses: ./.gitea/workflows/app-release.yml
     with:
       paddock-ref: ${{ github.sha }}
@@ -224,6 +254,8 @@ jobs:
 
   installers-pitcrew:
     name: installers (Pitcrew, no publish)
+    needs: [installers-gate]
+    if: ${{ needs.installers-gate.outputs.run == 'true' }}
     uses: ./.gitea/workflows/app-release.yml
     with:
       paddock-ref: ${{ github.sha }}
@@ -252,6 +284,8 @@ jobs:
 
   installers-pitwall:
     name: installers (Pitwall, no publish)
+    needs: [installers-gate]
+    if: ${{ needs.installers-gate.outputs.run == 'true' }}
     uses: ./.gitea/workflows/app-release.yml
     with:
       paddock-ref: ${{ github.sha }}
@@ -281,7 +315,7 @@ jobs:
 
   installers-verdict:
     name: installers verdict (the nightly built them, or it fails)
-    needs: [installers-dyno, installers-spotter, installers-pitcrew, installers-pitwall]
+    needs: [installers-gate, installers-dyno, installers-spotter, installers-pitcrew, installers-pitwall]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     container:
@@ -291,19 +325,39 @@ jobs:
       - uses: ./.gitea/actions/release-verdict
         with:
           app: dyno
+          plan-run: ${{ needs.installers-gate.outputs.run }}
           release-result: ${{ needs.installers-dyno.result }}
       - uses: ./.gitea/actions/release-verdict
         with:
           app: spotter
+          plan-run: ${{ needs.installers-gate.outputs.run }}
           release-result: ${{ needs.installers-spotter.result }}
       - uses: ./.gitea/actions/release-verdict
         with:
           app: pitcrew
+          plan-run: ${{ needs.installers-gate.outputs.run }}
           release-result: ${{ needs.installers-pitcrew.result }}
       - uses: ./.gitea/actions/release-verdict
         with:
           app: pitwall
+          plan-run: ${{ needs.installers-gate.outputs.run }}
           release-result: ${{ needs.installers-pitwall.result }}
+
+  installers-mark:
+    name: mark the nightly that built every installer
+    needs: [installers-dyno, installers-spotter, installers-pitcrew, installers-pitwall]
+    if: ${{ github.event_name == 'schedule' && success() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir -p .nightly-installers && echo "${{ github.sha }}" > .nightly-installers/sha
+        shell: bash
+      - uses: actions/cache/save@v4
+        with:
+          path: .nightly-installers
+          key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**') }}
 
   mark:
     name: mark the green nightly
