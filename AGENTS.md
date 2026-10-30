@@ -189,6 +189,8 @@ Apply these deliberately. They are not decoration:
   `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
 - Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
   branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.
+- A change that touches an app's release path builds that app's installers before it lands on main (rule 54): the batch
+  dispatches `<app>-release.yml` with gates on and the bundle built; passing tests alone is not enough.
 - Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.

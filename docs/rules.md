@@ -220,6 +220,18 @@ changes here, every app's copy is updated in the same change.
     *Why:* Windows hands a freed pid on at once. `kill_tree` killed the pids of a stale snapshot, which can end another
     test's Chrome helper; the same mistake was in four shapes in five apps. (It was suspected of causing the Windows
     `ERR_ABORTED` failures; the suspected cause was disproved by run 7158; the flake has another cause, ADR 0033 WP-4.)
+
+## Release path (user, 2026-10-31)
+54. **Every change that touches an app's release path builds that app's installers before it lands on main.** The release
+    path is the release workflow, the shared app-release workflow, the bundle and prepare steps, the Tauri config and the
+    app's imports of shared packages.
+    (a) The batch dispatches `<app>-release.yml` with gates on and the installers (bundle) built; passing tests alone is
+    not enough.
+    (b) Partly enforced: the ci-actions test (added on fix/dyno-bundle-ui) checks that every release workflow whose app
+    imports `@decryp7/paddock-ui` builds the UI.
+    *Why:* Dyno's release workflow had no `prepare: npm run build -w ui`. Tests passed, but every installer build failed
+    on a clean runner; a leftover `ui/dist` had hidden it.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:

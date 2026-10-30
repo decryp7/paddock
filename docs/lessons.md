@@ -961,3 +961,11 @@ out (debrief.yml run 7175, at load 40; fixed in b935d03a6). This is the second i
 a count of a queue's contents is a reservation taken before the send and given back after the take, never a separate copy
 updated after; then it stays between what the queue holds and its capacity by construction, needs no clamp, and doubles
 as the back-pressure. Test such a race by stalling one thread at the hand-over point (a probe or barrier), never by load.
+
+## An unbuilt UI hid a broken installer build because tests passed (2026-10-30, Dyno)
+Dyno's release workflow had no `prepare: npm run build -w ui`. Every test passed, but every installer build failed on a
+clean runner; a leftover `ui/dist` in the working trees had hidden it. **Rule:** a change to an app's release path
+(release workflow, shared app-release workflow, bundle and prepare steps, Tauri config, imports of shared packages) is
+proved by building that app's installers (`<app>-release.yml` with gates on and the bundle built) before it lands on
+main (rule 54). The ci-actions test now checks that every release workflow whose app imports `@decryp7/paddock-ui`
+builds the UI.
