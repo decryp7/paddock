@@ -152,7 +152,10 @@ mod tests {
         std::fs::write(&log, big()).unwrap();
         note(&dirs, "first after rotation");
         assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), "first after rotation");
-        assert!(std::fs::metadata(&older).unwrap().len() > LOG_MAX_BYTES, "the older generation was replaced");
+        assert!(
+            std::fs::metadata(&older).unwrap().len() > LOG_MAX_BYTES,
+            "the older generation was replaced"
+        );
         // The move fails (the target is a folder here; on Windows a scanner holding the file does the same): no write.
         std::fs::remove_file(&older).unwrap();
         std::fs::create_dir(&older).unwrap();

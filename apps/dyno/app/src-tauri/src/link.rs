@@ -25,10 +25,10 @@ use dyno_agent::paths::Dirs;
 use dyno_core::protocol::{LiveDetail, LiveUpdate, Message, Reply, Request, PROTOCOL_VERSION};
 use dyno_core::{activity::ActivityEntry, alerts::Alert};
 use dyno_ipc::{Client, IpcError, Peer, PeerOptions};
+use paddock_proc::{Cpu, ExitInfo, Liveness, Patience, Reading, StallCause, StartJudge, StartState};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use paddock_proc::{Cpu, ExitInfo, Liveness, Patience, Reading, StallCause, StartJudge, StartState};
 use std::time::{Duration, Instant};
 
 /// Every request fails after this long.
@@ -740,9 +740,7 @@ impl AgentLink {
                     return Err(message);
                 }
             }
-            if let StartState::Stalled(report) = state
-                && !noted
-            {
+            if let (StartState::Stalled(report), false) = (state, noted) {
                 noted = true;
                 self.show_stall(Stall::from(report.cause), &report.message);
             }
