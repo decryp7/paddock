@@ -394,7 +394,11 @@ mod tests {
         let e = check(&over, 16);
         assert_eq!(e.len(), 1);
         assert_eq!(e[0].key, "indexWriterThreads");
-        assert!(e[0].message.contains("832 MB") && e[0].message.contains("768 MB"), "{}", e[0].message);
+        assert!(
+            e[0].message.contains("832 MB") && e[0].message.contains("768 MB"),
+            "{}",
+            e[0].message
+        );
         // Auto never refuses: it takes as many threads as fit, at least one.
         let auto = PerformanceSettings {
             index_heap_per_thread_mb: 1024,

@@ -798,22 +798,45 @@ mod tests {
         };
         let indexing = options.get_indexing_options().expect("indexed");
         assert_eq!(indexing.index_option(), IndexRecordOption::Basic);
-        assert!(!schema.fields().any(|(_, e)| e.is_stored()), "nothing is stored: DuckDB has the rows");
+        assert!(
+            !schema.fields().any(|(_, e)| e.is_stored()),
+            "nothing is stored: DuckDB has the rows"
+        );
     }
 
     #[test]
     fn the_writer_runs_the_configured_threads_each_with_its_share_of_the_heap() {
         let mb = 1 << 20;
-        assert_eq!(writer_shape(WriterBudget { heap: 6 * 64 * mb, threads: 6 }), (6, 64 * mb));
+        assert_eq!(
+            writer_shape(WriterBudget {
+                heap: 6 * 64 * mb,
+                threads: 6
+            }),
+            (6, 64 * mb)
+        );
         // More than Tantivy's 8-thread convenience constructor allows.
-        assert_eq!(writer_shape(WriterBudget { heap: 13 * 32 * mb, threads: 13 }), (13, 32 * mb));
+        assert_eq!(
+            writer_shape(WriterBudget {
+                heap: 13 * 32 * mb,
+                threads: 13
+            }),
+            (13, 32 * mb)
+        );
         // Tantivy's floor of 15 MB a thread; at least one thread.
         assert_eq!(writer_shape(WriterBudget { heap: mb, threads: 4 }), (4, 15 * mb));
         assert_eq!(writer_shape(WriterBudget { heap: 0, threads: 0 }), (1, 15 * mb));
         // The writer is built with that shape.
         let dir = std::env::temp_dir().join(format!("debrief-fts-shape-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let (fts, _) = Fts::open_or_create(&dir, 1, WriterBudget { heap: 10 * 16 * mb, threads: 10 }).unwrap();
+        let (fts, _) = Fts::open_or_create(
+            &dir,
+            1,
+            WriterBudget {
+                heap: 10 * 16 * mb,
+                threads: 10,
+            },
+        )
+        .unwrap();
         let w = fts.writer().expect("10 threads of 16 MB");
         drop(w);
         let _ = std::fs::remove_dir_all(&dir);

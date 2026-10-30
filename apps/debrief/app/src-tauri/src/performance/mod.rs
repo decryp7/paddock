@@ -186,15 +186,31 @@ mod tests {
     #[test]
     fn an_older_file_with_the_old_index_threads_gets_the_automatic_writer() {
         let d = temp("index-threads");
-        std::fs::write(d.join(FILE), json!({"version": 2, "indexThreads": 2, "queryThreads": 8}).to_string()).unwrap();
+        std::fs::write(
+            d.join(FILE),
+            json!({"version": 2, "indexThreads": 2, "queryThreads": 8}).to_string(),
+        )
+        .unwrap();
         let s = load(Some(&d));
-        assert_eq!((s.index_writer_threads, s.query_threads), (0, 8), "the old key is dropped, the others kept");
+        assert_eq!(
+            (s.index_writer_threads, s.query_threads),
+            (0, 8),
+            "the old key is dropped, the others kept"
+        );
         assert_eq!(s.index_heap_per_thread_mb, section::DEFAULT_INDEX_HEAP_PER_THREAD_MB);
-        std::fs::write(d.join(FILE), json!({"version": 2, "indexWriterThreads": 6, "indexHeapPerThreadMb": 128}).to_string()).unwrap();
+        std::fs::write(
+            d.join(FILE),
+            json!({"version": 2, "indexWriterThreads": 6, "indexHeapPerThreadMb": 128}).to_string(),
+        )
+        .unwrap();
         let s = load(Some(&d));
         assert_eq!((s.index_writer_threads, s.index_heap_per_thread_mb), (6, 128));
         std::fs::write(d.join(FILE), json!({"version": 2, "indexHeapPerThreadMb": 4}).to_string()).unwrap();
-        assert_eq!(load(Some(&d)).index_heap_per_thread_mb, section::DEFAULT_INDEX_HEAP_PER_THREAD_MB, "below Tantivy's floor");
+        assert_eq!(
+            load(Some(&d)).index_heap_per_thread_mb,
+            section::DEFAULT_INDEX_HEAP_PER_THREAD_MB,
+            "below Tantivy's floor"
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 
