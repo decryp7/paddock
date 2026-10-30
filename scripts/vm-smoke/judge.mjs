@@ -3,16 +3,16 @@
 // snapshots and the tests here feed it text. Process identity is pid plus start time (rule 53), never a bare pid.
 
 /**
- * Parses `ps -axww -o pid=,ppid=,etime=,command=` (macOS). etime is [[dd-]hh:]mm:ss; `startedSec` is the age in seconds, which with
- * the pid identifies a process for the length of one run.
- * @returns {{pid:number, ppid:number, etime:string, ageSec:number, command:string}[]}
+ * Parses `ps -axww -o pid=,ppid=,etime=,lstart=,command=` (macOS). etime is [[dd-]hh:]mm:ss; `lstart` is the process's start time as
+ * ps prints it ("Fri Oct 30 14:25:12 2026", absent in older captures), which with the pid identifies a process (rule 53).
+ * @returns {{pid:number, ppid:number, etime:string, ageSec:number, lstart:string|null, command:string}[]}
  */
 export function parsePs(text) {
   const out = [];
   for (const line of String(text ?? '').split('\n')) {
-    const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*\S)\s*$/.exec(line);
+    const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(?:([A-Z][a-z]{2} [A-Z][a-z]{2}\s+\d+ \d\d:\d\d:\d\d \d{4})\s+)?(.*\S)\s*$/.exec(line);
     if (!m) continue;
-    out.push({ pid: Number(m[1]), ppid: Number(m[2]), etime: m[3], ageSec: etimeSeconds(m[3]), command: m[4] });
+    out.push({ pid: Number(m[1]), ppid: Number(m[2]), etime: m[3], ageSec: etimeSeconds(m[3]), lstart: m[4] ?? null, command: m[5] });
   }
   return out;
 }
@@ -103,24 +103,17 @@ export function peakCounts(snapshots, config, bundleDir) {
 }
 
 /**
- * How many distinct processes of each spec existed over a whole step: identity is the pid plus the start time (the snapshot time
- * minus the age, merged within 10 s), so a duplicate that exits before the app is ready, or an agent that dies and is replaced, is
- * counted although no single snapshot shows two.
- * @param {{at:number, procs:ReturnType<typeof parsePs>}[]} trace snapshots with their time in ms
+ * How many distinct processes of each spec existed over a whole step: identity is the pid plus the start time ps printed
+ * (`lstart`, taken from the guest, never host time minus an age), so a duplicate that exits before the app is ready, or an agent that
+ * dies and is replaced, is counted although no single snapshot shows two. Without `lstart` (an old capture) the pid alone counts.
+ * @param {{at:number, procs:ReturnType<typeof parsePs>}[]} trace snapshots
  */
 export function distinctCounts(trace, config, bundleDir) {
   const out = {};
   for (const spec of config.processes) {
-    const seen = new Map(); // pid -> start times (ms)
-    for (const { at, procs } of trace) {
-      for (const p of instancesOf(procs, spec, bundleDir)) {
-        const start = at - (Number.isNaN(p.ageSec) ? 0 : p.ageSec * 1000);
-        const starts = seen.get(p.pid) ?? [];
-        if (!starts.some((t) => Math.abs(t - start) <= 10_000)) starts.push(start);
-        seen.set(p.pid, starts);
-      }
-    }
-    out[spec.name] = [...seen.values()].reduce((n, starts) => n + starts.length, 0);
+    const seen = new Set();
+    for (const { procs } of trace) for (const p of instancesOf(procs, spec, bundleDir)) seen.add(`${p.pid}|${p.lstart ?? ''}`);
+    out[spec.name] = seen.size;
   }
   return out;
 }

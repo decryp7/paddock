@@ -151,10 +151,12 @@ jobs:
   # Rule 54, "green that proves something": the installers of every released app, built every night with nothing published (the
   # release job of app-release.yml runs only for a tag). They need only installers-gate, a job that always runs: a skipped need
   # skips a reusable-workflow job on this Gitea whatever its `if` says, so nothing here waits on a job that can be skipped.
-  # The gate skips the night while main and the toolchain image (ci-image/) are unchanged since the last nightly that built every
-  # installer (rule 50); installers-mark records that. The inputs are copied from each app's installers job in <app>-release.yml;
-  # conformance/test/release-verdict.test.mjs fails when they drift apart.
-  # Debrief builds its installers in debrief.yml (its schedule has `full`), the demos have manual releases only.
+  # The gate skips the night while main, the toolchain image (ci-image/) and the pinned Rust and Node (rust-toolchain, .nvmrc) are
+  # unchanged since the last nightly that built every installer (rule 50); installers-mark records that. The host runners' own Xcode,
+  # MSVC and rustc are not visible from this Linux job, so a change of those alone does not wake the night: run the nightly by hand
+  # after upgrading a host. Pushes to main build no installers (the nightly does), the cheaper way to keep one marker honest.
+  # The inputs are copied from each app's installers job in <app>-release.yml; conformance/test/release-verdict.test.mjs fails when
+  # they drift apart. Debrief builds its installers in debrief.yml (its schedule has `full`), the demos have manual releases only.
   installers-gate:
     name: installers gate (main or the toolchain image changed since the last nightly build?)
     runs-on: ubuntu-latest
@@ -169,7 +171,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .nightly-installers
-          key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**') }}
+          key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**', 'rust-toolchain*', '.nvmrc') }}
           lookup-only: true
       - id: decide
         shell: bash
@@ -357,7 +359,7 @@ jobs:
       - uses: actions/cache/save@v4
         with:
           path: .nightly-installers
-          key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**') }}
+          key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**', 'rust-toolchain*', '.nvmrc') }}
 
   mark:
     name: mark the green nightly

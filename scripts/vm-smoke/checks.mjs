@@ -32,7 +32,7 @@ export class Check {
   }
 
   async snapshot() {
-    const r = await this.g.exec('ps -axww -o pid=,ppid=,etime=,command=');
+    const r = await this.g.exec('ps -axww -o pid=,ppid=,etime=,lstart=,command=');
     const procs = parsePs(r.stdout);
     this.trace.push({ at: this.g.now(), procs });
     return procs;
@@ -176,12 +176,13 @@ export class Check {
 
   async secondLaunch() {
     const title = 'Second launch while running keeps one instance';
+    this.trace = [];
     const before = await this.snapshot();
     const pids = (procs) => this.config.processes.flatMap((s) => instancesOf(procs, s, this.bundle).map((p) => `${s.name}:${p.pid}`)).sort();
     const r = await this.start();
     const after = await this.observe({ running: true, loginService: this.loginOn ?? false });
     const same = JSON.stringify(pids(before)) === JSON.stringify(pids(after.snaps.at(-1)));
-    const checks = [{ ok: r.code === 0, detail: `open exit ${r.code}` }, ...after.checks, { ok: same, detail: `same processes as before (${pids(before).join(', ')}) vs after (${pids(after.snaps.at(-1)).join(', ')})` }];
+    const checks = [{ ok: r.code === 0, detail: `open exit ${r.code}` }, ...after.checks, ...judgeDistinct(this.trace, this.config, this.bundle), { ok: same, detail: `same processes as before (${pids(before).join(', ')}) vs after (${pids(after.snaps.at(-1)).join(', ')})` }];
     const ok = checks.every((c) => c.ok);
     return { title, status: ok ? 'pass' : 'fail', summary: ok ? 'the running instance took the launch; no second app or helper' : checks.filter((c) => !c.ok).map((c) => c.detail).join('; ').slice(0, 200), checks, evidence: describeTree(after.snaps.at(-1), this.config, this.bundle) };
   }

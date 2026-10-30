@@ -5,7 +5,7 @@ A `pitcrew-v*` tag on `main` runs `.gitea/workflows/pitcrew-release.yml` (repo r
 (Windows NSIS, the macOS `.dmg` sealed ad hoc and verified, Linux `.deb` and AppImage) and publishes a Gitea release with the
 installers, release notes (`RELEASE_NOTES.md`, from git-cliff) and `latest.json`, the release information Pitcrew's
 updater reads. It also puts `latest.json` on the moving `pitcrew-latest` release, which installed copies read. Installers
-are also built for pushes to `main` that reach Pitcrew, the nightly run and manual runs (`workflow_dispatch`, no release).
+are also built by the nightly run (`nightly.yml`) and by manual runs (`workflow_dispatch`, no release).
 
 ```sh
 git tag pitcrew-v0.2.0 && git push origin pitcrew-v0.2.0
