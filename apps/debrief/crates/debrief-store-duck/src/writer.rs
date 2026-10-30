@@ -118,15 +118,37 @@ pub(crate) fn insert_segments(conn: &Connection, segs: &[Segment], state: impl F
     Ok(())
 }
 
-/// Unlists a segment and its catalog rows (inside the caller's transaction).
+/// Unlists a segment and its catalog rows, its id blocks included (inside the caller's transaction; a rewrite
+/// first moves the blocks to the new file with [`move_blocks`]).
 pub(crate) fn delete_segment(conn: &Connection, file: &str) -> Result<()> {
     for sql in [
         "DELETE FROM segments WHERE file = ?",
         "DELETE FROM segment_fields WHERE file = ?",
         "DELETE FROM histogram WHERE file = ?",
+        "DELETE FROM segment_blocks WHERE file = ?",
     ] {
         conn.execute(sql, params![file])?;
     }
+    Ok(())
+}
+
+/// Records the id block of each new segment (`first_id .. end_id`; inside the caller's transaction).
+fn insert_blocks(conn: &Connection, segs: &[Segment]) -> Result<()> {
+    if segs.is_empty() {
+        return Ok(());
+    }
+    let mut app = conn.appender("segment_blocks")?;
+    for seg in segs {
+        app.append_row(params![seg.file, seg.first_id, seg.end_id])?;
+    }
+    app.flush()?;
+    Ok(())
+}
+
+/// Moves the id blocks of a replaced segment file to the file that now holds its rows (compaction and the clock-skew
+/// rewrite; inside the caller's transaction, before the old file is unlisted).
+pub(crate) fn move_blocks(conn: &Connection, from: &str, to: &str) -> Result<()> {
+    conn.execute("UPDATE segment_blocks SET file = ? WHERE file = ?", params![to, from])?;
     Ok(())
 }
 
@@ -391,6 +413,7 @@ impl SegmentSink {
         conn.execute_batch("BEGIN TRANSACTION")?;
         let done = (|| -> Result<()> {
             insert_segments(conn, &segs, |seg| (seg.rows, false))?;
+            insert_blocks(conn, &segs)?;
             write_ready(conn, &ready)?;
             let (event, source) = {
                 let ids = lock(&self.ids);

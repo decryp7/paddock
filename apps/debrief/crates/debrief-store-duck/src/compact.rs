@@ -6,7 +6,7 @@
 
 use crate::schema::{canonical_columns, parquet_from, READY};
 use crate::segments::{Segment, SegmentWriter, SEGMENTS_DIR, SEGMENT_ROWS};
-use crate::writer::{delete_segment, insert_segment, meta_u64, refresh_view, segment_files, set_meta};
+use crate::writer::{delete_segment, insert_segment, meta_u64, move_blocks, refresh_view, segment_files, set_meta};
 use anyhow::Result;
 use debrief_core::batch::{EventBatch, EventSchema, BATCH_ROWS};
 use duckdb::arrow::array::{RecordBatch, StructArray};
@@ -234,7 +234,12 @@ pub(crate) fn compact_with(conn: &Connection, dir: &Path, schema: &Arc<EventSche
         };
         conn.execute_batch("BEGIN TRANSACTION")?;
         let swapped = (|| -> Result<()> {
+            // The id blocks go with the rows (all of them: ids of dropped rows are never reused); a group with nothing
+            // live drops its blocks with its segments.
             for l in &group {
+                if let Some(seg) = &new {
+                    move_blocks(conn, &l.file, &seg.file)?;
+                }
                 delete_segment(conn, &l.file)?;
             }
             if let Some(seg) = &new {

@@ -922,6 +922,7 @@ impl DuckStore {
         conn.execute_batch(schema::CACHE_DDL).map_err(engine)?;
         conn.execute_batch(lanes::DDL).map_err(engine)?;
         conn.execute_batch(schema::ADDED_DDL).map_err(engine)?;
+        conn.execute_batch(schema::BLOCKS_BACKFILL).map_err(engine)?;
         // Positions a failed ordering left stale (pos::STALE) or that are missing are not rebuilt here, inside the
         // open call: the app sees `positioned() < total` and runs MaintenanceAction::OrderEvents as a job.
         if pos::is_stale(&conn) {

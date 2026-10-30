@@ -11,7 +11,7 @@ use crate::compact::delete_or_trash;
 use crate::schema::{parquet_from, READY};
 use crate::segments::{Segment, SegmentWriter, SEGMENTS_DIR};
 use crate::sql::ident;
-use crate::writer::{self, delete_segment, insert_segment, meta_u64, refresh_view, set_meta};
+use crate::writer::{self, delete_segment, insert_segment, meta_u64, move_blocks, refresh_view, set_meta};
 use crate::{engine, lock, DuckStore};
 use anyhow::Result;
 use debrief_core::batch::{EventBatch, EventId, EventSchema, BATCH_ROWS};
@@ -167,6 +167,7 @@ impl DuckStore {
         conn.execute_batch("BEGIN TRANSACTION").map_err(engine)?;
         let swapped = (|| -> Result<()> {
             for (l, seg) in affected.iter().zip(&written) {
+                move_blocks(&conn, &l.file, &seg.file)?;
                 delete_segment(&conn, &l.file)?;
                 insert_segment(&conn, seg, seg.rows, l.indexed)?;
             }
