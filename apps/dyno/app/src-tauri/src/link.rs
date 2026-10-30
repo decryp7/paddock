@@ -8,6 +8,13 @@
 //! discovery file, it is starting (a cold, slow disk can take a minute); when it exits first, the exit says why. Quitting
 //! ends exactly the process this app started, through the handle it holds (rule 53).
 //!
+//! The login service: while launchd or systemd supervises the agent (it starts it and restarts it), the app starts no
+//! agent of its own and waits for the service's. When the service is turned on while the app's own agent runs, the app
+//! hands over: it asks its agent to exit and ends that process, and the service's agent, refused until then, takes the
+//! data folder. When it is turned off, the app asks the former service's agent to exit over its connection (never a
+//! kill: it did not start it) and starts its own again. A Windows `Run` entry starts nothing until the next logon, so
+//! there the app keeps its own agent.
+//!
 //! The decisions (what to do about the discovery file, how long to wait, which window wants which detail, whether to
 //! stop the agent on quit) are pure functions with unit tests; the thread around them is thin.
 
@@ -42,6 +49,8 @@ pub fn timeout_for(request: &Request) -> Duration {
 const START_POLL: Duration = Duration::from_millis(100);
 /// After this many looks at a still-starting agent (about 5 s) the status says it is still starting. A hint, not a limit.
 const STILL_STARTING_AFTER: u32 = 50;
+/// While waiting for the service's agent, the service is asked again every this many looks (about 5 s).
+const SERVICE_RECHECK: u32 = 50;
 /// A request made before the first connection waits this long for it (the window asks for data the moment it opens,
 /// usually before the agent has answered; after a first connection, requests fail fast instead).
 pub const CONNECT_GRACE: Duration = Duration::from_secs(8);
@@ -100,6 +109,20 @@ pub trait Launcher: Send + Sync {
     /// Waits briefly for the process this launcher started to exit (after `Shutdown`), ending it when it does not.
     fn finish(&self, wait: Duration);
 }
+
+/// What the OS service manager says about the agent's login service.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ServiceState {
+    /// A service is registered (Quit then leaves the agent running).
+    pub installed: bool,
+    /// The service manager starts the agent now and restarts it when it exits (launchd `KeepAlive`, systemd
+    /// `Restart=always`), so the app must not run an agent of its own beside it. A Windows `Run` entry only starts it
+    /// at the next logon: installed, not supervising.
+    pub supervises: bool,
+}
+
+/// Asks the OS about the service (it may be slow: only the link's own thread and background threads call it).
+pub type ServiceProbe = Arc<dyn Fn() -> ServiceState + Send + Sync>;
 
 /// What to do about the discovery file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,6 +214,9 @@ pub struct AgentLink {
     ever_connected: AtomicBool,
     quit_done: AtomicBool,
     service_installed: AtomicBool,
+    /// The login service starts and restarts the agent (the last answer of the probe).
+    supervised: AtomicBool,
+    probe: Mutex<Option<ServiceProbe>>,
     stopping: Mutex<bool>,
     wake: Condvar,
 }
@@ -211,6 +237,8 @@ impl AgentLink {
             ever_connected: AtomicBool::new(false),
             quit_done: AtomicBool::new(false),
             service_installed: AtomicBool::new(false),
+            supervised: AtomicBool::new(false),
+            probe: Mutex::new(None),
             stopping: Mutex::new(false),
             wake: Condvar::new(),
         })
@@ -221,6 +249,62 @@ impl AgentLink {
         let me = self.clone();
         self.running.store(true, Ordering::SeqCst);
         std::thread::Builder::new().name("dyno-link".into()).spawn(move || me.run())
+    }
+
+    /// How to ask the OS about the login service. Without one, no service supervises the agent.
+    pub fn set_service_probe(&self, probe: ServiceProbe) {
+        *lock(&self.probe) = Some(probe);
+    }
+
+    /// Asks the OS about the login service and records the answer.
+    fn probe_service(&self) -> Option<ServiceState> {
+        let probe = lock(&self.probe).clone()?;
+        let state = probe();
+        self.service_installed.store(state.installed, Ordering::SeqCst);
+        self.supervised.store(state.supervises, Ordering::SeqCst);
+        Some(state)
+    }
+
+    /// The login service may have changed (the switch was turned, or a connection was made): asks the OS, then hands
+    /// the agent over to the service, or takes it back from a service that was removed. Blocking (it may wait a few
+    /// seconds for the app's own agent to exit): call it off the UI thread.
+    pub fn refresh_service(&self) {
+        let was_supervised = self.supervised.load(Ordering::SeqCst);
+        let Some(state) = self.probe_service() else { return };
+        if state.supervises {
+            self.hand_over();
+        } else if was_supervised && !state.installed {
+            self.take_back();
+        }
+    }
+
+    /// The service supervises the agent: ends the app's own agent (only the process this app started, rule 53), so the
+    /// service's, refused while ours held the data folder, takes over. The loop then waits for it.
+    fn hand_over(&self) {
+        if !matches!(self.launcher.child(), Child::Running { .. }) {
+            return;
+        }
+        logging::info("the login service runs the agent now; stopping the app's own agent");
+        let peer = lock(&self.peer).clone().filter(|p| !p.is_closed());
+        if let Some(p) = peer.filter(|_| self.started_by_this_app()) {
+            let _ = p.call(Message::Request(Box::new(Request::Shutdown)), REQUEST_TIMEOUT);
+        }
+        // shutdown: the process this app started gets a few seconds to exit, then it is ended through its handle.
+        self.launcher.finish(Duration::from_secs(3));
+        self.started_by_us.store(false, Ordering::SeqCst);
+    }
+
+    /// The service was removed but its agent still answers: asks it to exit over its connection (it was not started by
+    /// this app, so it is never killed); the loop then starts the app's own.
+    fn take_back(&self) {
+        if self.started_by_this_app() {
+            return;
+        }
+        let Some(p) = lock(&self.peer).clone().filter(|p| !p.is_closed()) else {
+            return;
+        };
+        logging::info("the login service was removed; asking its agent to exit and starting the app's own");
+        let _ = p.call(Message::Request(Box::new(Request::Shutdown)), REQUEST_TIMEOUT);
     }
 
     /// Records whether a service keeps the agent alive (decides what quitting does).
@@ -482,6 +566,8 @@ impl AgentLink {
         }
         if matches!(self.launcher.child(), Child::Running { .. }) {
             logging::info("the agent this app started is still starting; waiting for it");
+        } else if self.probe_service().is_some_and(|s| s.supervises) {
+            return self.wait_for_service();
         } else {
             logging::info("starting the agent");
             self.launcher.launch()?;
@@ -507,6 +593,30 @@ impl AgentLink {
             }
             self.pause(START_POLL);
         }
+    }
+
+    /// The login service supervises the agent: waits for its discovery file, however long its start takes, and looks at
+    /// the service again now and then (turned off meanwhile: the next pass starts the app's own).
+    fn wait_for_service(&self) -> Result<(), String> {
+        logging::info("the login service runs the agent; waiting for it");
+        let mut looks = 0u32;
+        while !self.is_stopping() {
+            if Discovery::read(&self.dirs.discovery()).is_some() {
+                return Ok(());
+            }
+            looks += 1;
+            if looks == STILL_STARTING_AFTER {
+                self.sink.agent(AgentStatus::new(
+                    AgentState::Starting,
+                    Some("Waiting for the Dyno agent that your system starts at login.".into()),
+                ));
+            }
+            if looks.is_multiple_of(SERVICE_RECHECK) && !self.probe_service().is_some_and(|s| s.supervises) {
+                return Ok(());
+            }
+            self.pause(START_POLL);
+        }
+        Ok(())
     }
 
     /// The agent this app started exited because another one holds the data folder (the login service's, or one that
@@ -649,19 +759,22 @@ impl Launcher for ProcessLauncher {
     }
 
     fn finish(&self, wait: Duration) {
+        // Held throughout: nothing is launched while the process this launcher started is being ended.
         let mut slot = lock(&self.slot);
-        slot.closed = true;
-        let Some(mut child) = slot.child.take() else { return };
-        drop(slot);
+        let Some(child) = slot.child.as_mut() else { return };
         let end = Instant::now() + wait;
-        while Instant::now() < end {
-            if matches!(child.try_wait(), Ok(Some(_))) {
-                return;
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                _ if Instant::now() >= end => {
+                    let _ = child.kill();
+                    break child.wait().ok();
+                }
+                _ => std::thread::sleep(Duration::from_millis(50)),
             }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        let _ = child.kill();
-        let _ = child.wait();
+        };
+        slot.child = None;
+        slot.exited = Some(status.and_then(|s| s.code()));
     }
 }
 
@@ -1236,6 +1349,160 @@ mod tests {
             "the starting agent was left behind as an orphan"
         );
         launcher.stop_all();
+    }
+
+    /// The OS service manager (launchd, systemd) over the fake platform: what it reports, and its agent, which it starts
+    /// itself (never through the app's launcher) and starts again while another agent holds the data folder, as
+    /// `KeepAlive` and `Restart=always` do with an agent that exits with code 3.
+    struct FakeServiceManager {
+        dirs: Dirs,
+        state: Mutex<ServiceState>,
+        agent: Mutex<Option<Running>>,
+        refused: AtomicUsize,
+        done: AtomicBool,
+        thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+    }
+
+    impl FakeServiceManager {
+        fn new(dirs: Dirs, installed: bool, supervises: bool) -> Arc<FakeServiceManager> {
+            Arc::new(FakeServiceManager {
+                dirs,
+                state: Mutex::new(ServiceState { installed, supervises }),
+                agent: Mutex::new(None),
+                refused: AtomicUsize::new(0),
+                done: AtomicBool::new(false),
+                thread: Mutex::new(None),
+            })
+        }
+
+        fn probe(self: &Arc<Self>) -> ServiceProbe {
+            let me = self.clone();
+            Arc::new(move || *lock(&me.state))
+        }
+
+        fn set(&self, installed: bool, supervises: bool) {
+            *lock(&self.state) = ServiceState { installed, supervises };
+        }
+
+        /// Runs its job: starts the agent, again and again while it is refused; when the agent exits (asked to), its
+        /// "process" ends (the lock is freed) and, while the service still supervises, it is started again.
+        fn start_job(self: &Arc<Self>) {
+            let me = self.clone();
+            *lock(&self.thread) = Some(std::thread::spawn(move || {
+                while !me.done.load(Ordering::SeqCst) {
+                    let fake = Fake::new();
+                    match Running::start(me.dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))) {
+                        Ok(r) => {
+                            *lock(&me.agent) = Some(r);
+                            while !me.done.load(Ordering::SeqCst) && me.agent_running() {
+                                // pace: how often the fake looks at its agent.
+                                std::thread::sleep(Duration::from_millis(20));
+                            }
+                            if let Some(r) = lock(&me.agent).take() {
+                                r.stop();
+                            }
+                            if !lock(&me.state).supervises {
+                                return;
+                            }
+                        }
+                        Err(_) => {
+                            me.refused.fetch_add(1, Ordering::SeqCst);
+                            // pace: the service manager's restart interval, shortened for the test.
+                            std::thread::sleep(Duration::from_millis(20));
+                        }
+                    }
+                }
+            }));
+        }
+
+        fn agent_running(&self) -> bool {
+            lock(&self.agent).as_ref().is_some_and(|r| !r.stopped())
+        }
+
+        fn stop(&self) {
+            self.done.store(true, Ordering::SeqCst);
+            if let Some(t) = lock(&self.thread).take() {
+                let _ = t.join();
+            }
+            if let Some(r) = lock(&self.agent).take() {
+                r.stop();
+            }
+        }
+    }
+
+    #[test]
+    fn with_the_service_supervising_the_app_never_starts_an_agent_of_its_own() {
+        let r = rig(false);
+        let manager = FakeServiceManager::new(r.link.dirs.clone(), true, true);
+        r.link.set_service_probe(manager.probe());
+        let handle = r.link.spawn().unwrap();
+        // The service's agent comes up after the app (a login with a slow disk): the app waits for it.
+        manager.start_job();
+        wait_for(&r.statuses, AgentState::Running);
+        assert_eq!(
+            r.launcher.launches.load(Ordering::SeqCst),
+            0,
+            "the app started an agent beside the service's"
+        );
+        assert!(!r.link.started_by_this_app());
+        // Rule 53: a refresh with the service supervising ends nothing this app did not start.
+        r.link.refresh_service();
+        assert!(manager.agent_running() && r.link.connected());
+        assert!(!r.link.quit(), "the service's agent stays");
+        handle.join().unwrap();
+        assert!(manager.agent_running());
+        manager.stop();
+    }
+
+    #[test]
+    fn turning_launch_at_login_on_hands_the_agent_over_to_the_service() {
+        let r = rig(false);
+        let manager = FakeServiceManager::new(r.link.dirs.clone(), false, false);
+        r.link.set_service_probe(manager.probe());
+        let handle = r.link.spawn().unwrap();
+        wait_for(&r.statuses, AgentState::Running);
+        assert!(r.link.started_by_this_app());
+        // The switch: the service is registered and its manager starts its agent at once (refused while ours runs).
+        manager.set(true, true);
+        manager.start_job();
+        r.link.refresh_service();
+        assert!(
+            until(Duration::from_secs(20), || manager.agent_running()
+                && r.link.connected()
+                && !r.link.started_by_this_app()),
+            "the service's agent did not take over (refused {} times)",
+            manager.refused.load(Ordering::SeqCst)
+        );
+        assert_eq!(r.launcher.child(), Child::Exited { code: Some(0) }, "the app's own agent was ended");
+        assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 1, "no agent of the app's own again");
+        assert!(!r.link.quit(), "the service's agent stays");
+        handle.join().unwrap();
+        assert!(manager.agent_running());
+        manager.stop();
+    }
+
+    #[test]
+    fn turning_launch_at_login_off_brings_back_an_agent_of_the_apps_own() {
+        let r = rig(false);
+        let manager = FakeServiceManager::new(r.link.dirs.clone(), true, true);
+        r.link.set_service_probe(manager.probe());
+        manager.start_job();
+        let handle = r.link.spawn().unwrap();
+        wait_for(&r.statuses, AgentState::Running);
+        assert!(!r.link.started_by_this_app());
+        // The switch: the service is removed. This manager leaves its agent running (as an unregister that does not
+        // stop the job would): the app asks it to exit over its connection and starts its own.
+        manager.set(false, false);
+        r.link.refresh_service();
+        assert!(
+            until(Duration::from_secs(20), || r.link.connected() && r.link.started_by_this_app()),
+            "no agent of the app's own after the service was removed"
+        );
+        assert!(!manager.agent_running(), "the former service's agent was asked to exit");
+        assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 1);
+        assert!(r.link.quit(), "the app's own agent is stopped on quit");
+        handle.join().unwrap();
+        manager.stop();
     }
 
     #[test]

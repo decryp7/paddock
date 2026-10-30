@@ -19,6 +19,11 @@ pub trait AgentService: Send {
     fn install(&mut self) -> Result<(), String>;
     /// Stops and removes it.
     fn uninstall(&mut self) -> Result<(), String>;
+    /// Whether the OS starts the agent now and restarts it when it exits (launchd, systemd), so the app must hand over
+    /// to it instead of running its own; a Windows `Run` entry only starts it at the next logon.
+    fn supervises(&mut self) -> bool {
+        false
+    }
     /// Registers it again when the OS cannot start what is registered, and on macOS once after every version change
     /// (an update). `agent_answers` asks whether the agent answers now. Returns whether it registered again.
     fn repair(&mut self, agent_answers: &dyn Fn() -> bool) -> Result<bool, String>;
@@ -93,6 +98,10 @@ impl AgentService for CliService {
 
     fn uninstall(&mut self) -> Result<(), String> {
         self.service()?.uninstall()
+    }
+
+    fn supervises(&mut self) -> bool {
+        self.service().is_ok_and(|mut s| s.supervised())
     }
 
     fn repair(&mut self, _agent_answers: &dyn Fn() -> bool) -> Result<bool, String> {
@@ -279,6 +288,11 @@ mod mac {
             matches!(status(), SMAppServiceStatus::Enabled | SMAppServiceStatus::RequiresApproval)
         }
 
+        /// Enabled: launchd runs the job (`RunAtLoad`, `KeepAlive`). Waiting for approval, it runs nothing.
+        fn supervises(&mut self) -> bool {
+            status() == SMAppServiceStatus::Enabled
+        }
+
         fn install(&mut self) -> Result<(), String> {
             register(true).map_err(|e| match e {
                 RegisterError::NeedsApproval => {
@@ -331,6 +345,17 @@ pub fn platform_service() -> Box<dyn AgentService> {
 #[cfg(not(target_os = "macos"))]
 pub fn platform_service() -> Box<dyn AgentService> {
     Box::new(CliService)
+}
+
+/// The probe the agent link asks before it starts an agent of its own (see [`crate::link::ServiceState`]).
+pub fn service_probe() -> crate::link::ServiceProbe {
+    std::sync::Arc::new(|| {
+        let mut service = platform_service();
+        crate::link::ServiceState {
+            installed: service.installed(),
+            supervises: service.supervises(),
+        }
+    })
 }
 
 /// The app's own login item (`tauri-plugin-autostart`).

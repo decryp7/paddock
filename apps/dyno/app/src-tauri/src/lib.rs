@@ -221,6 +221,10 @@ fn agent_setup<R: Runtime>(
         Box::new(NoAgent)
     };
     let link = AgentLink::new(dirs, VERSION, events.clone(), launcher);
+    if installed {
+        // Asked before the link starts an agent of its own: none beside one the login service supervises.
+        link.set_service_probe(login::service_probe());
+    }
     app.manage(events.clone());
     app.manage(link.clone());
     app.manage(commands::PickedFolders::default());

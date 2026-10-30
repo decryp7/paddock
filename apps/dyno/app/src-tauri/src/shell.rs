@@ -176,7 +176,8 @@ impl<R: Runtime> ShellOf<R> {
             Some(_) => {
                 let mut service = login::platform_service();
                 let result = login::apply_launch_at_login(wanted, service.as_mut(), &mut AppAutostart(self.app.clone()));
-                link.set_service_installed(service.installed());
+                // Hand the agent over to the service just registered, or take it back from the one just removed.
+                link.refresh_service();
                 if result.is_ok() {
                     *self.launch_at_login.lock().unwrap_or_else(|e| e.into_inner()) = Some(wanted);
                     logging::info(&format!("start at login is now {}", if wanted { "on" } else { "off" }));
@@ -293,11 +294,9 @@ impl<R: Runtime> Sink for ShellOf<R> {
             Ok(_) => {}
             Err(e) => logging::info(&format!("could not read the settings: {}", e.message)),
         }
-        // Is a service keeping the agent alive? (decides what Quit does). Off this thread: the OS may be slow.
+        // Is a service keeping the agent alive? (decides what Quit does; a supervising one takes the agent over). Off this
+        // thread: the OS may be slow, and a hand-over waits for the app's own agent to exit.
         let link = link.clone();
-        std::thread::spawn(move || {
-            let mut service = login::platform_service();
-            link.set_service_installed(service.installed());
-        });
+        std::thread::spawn(move || link.refresh_service());
     }
 }

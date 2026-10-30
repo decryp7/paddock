@@ -219,3 +219,39 @@ fn macos_bootstraps_only_after_launchd_dropped_the_old_job_and_the_wait_is_bound
     assert_eq!(*waited.lock().unwrap(), GONE_WAIT);
     assert!(s.calls().last().unwrap().contains("bootstrap"));
 }
+
+#[test]
+fn launchd_and_systemd_supervise_the_agent_and_a_windows_run_entry_does_not() {
+    // macOS: a bootstrapped launch agent (KeepAlive) is started and restarted by launchd.
+    let dir = tempfile::tempdir().unwrap();
+    let s = Script::default();
+    let mut mac = service(Os::Mac, dir.path(), &s);
+    assert!(!mac.supervised());
+    mac.install().unwrap();
+    assert!(mac.supervised());
+    mac.uninstall().unwrap();
+    assert!(!mac.supervised());
+
+    // Linux: what systemd has enabled (Restart=always); a unit file systemd never enabled is not.
+    let dir = tempfile::tempdir().unwrap();
+    let s = Script::default();
+    let mut linux = service(Os::Linux, dir.path(), &s);
+    s.answer("is-enabled", false, "disabled\n");
+    assert!(!linux.supervised());
+    s.answers.lock().unwrap().clear();
+    s.answer("is-enabled", true, "enabled\n");
+    assert!(linux.supervised());
+    assert!(
+        s.calls().iter().any(|c| c == "systemctl --user is-enabled dyno-agent.service"),
+        "{:?}",
+        s.calls()
+    );
+
+    // Windows: the Run entry starts the agent at the next logon only; nothing restarts it now.
+    let dir = tempfile::tempdir().unwrap();
+    let s = Script::default();
+    s.answer("query", true, "Dyno    REG_SZ    \"/opt/dyno/dyno-agent\" run");
+    let mut win = service(Os::Windows, dir.path(), &s);
+    assert!(matches!(win.status(), Status::Installed { .. }));
+    assert!(!win.supervised());
+}

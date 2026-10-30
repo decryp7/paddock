@@ -67,6 +67,14 @@ choice on Windows (a service) is the wrong one for Dyno.
 10. **Where files live.** `%LOCALAPPDATA%\Dyno`, `~/Library/Application Support/Dyno`, `$XDG_DATA_HOME/dyno`
     (`~/.local/share/dyno`); process-control state under `%LOCALAPPDATA%\Dyno`, `~/Library/Application Support/Dyno`,
     `$XDG_STATE_HOME/dyno`. `DYNO_DATA_DIR` overrides the data folder (tests use it, so none touches a real profile).
+11. **One agent, and who runs it (amended 2026-10-30).** The agent holds an OS lock on `agent.lock` in its data folder;
+    a second one exits at once with code 3. While launchd (`KeepAlive`) or systemd (`Restart=always`) supervises the
+    agent, the app starts none of its own and waits for the service's. Turning Launch at login on while the app's own
+    agent runs hands over: the app asks its agent to exit and ends that process (only the one it started, rule 53), and
+    the service's agent, refused until then, takes over at its next restart (launchd's `ThrottleInterval` 10 s,
+    systemd's `RestartSec` 5 s). Turning it off: the app asks the former service's agent to exit over its connection
+    (never a kill) and starts its own. A Windows `Run` entry starts the agent only at the next logon, so it supervises
+    nothing now and the app keeps its own agent (which Quit then leaves running, as before).
 
 ## Consequences
 

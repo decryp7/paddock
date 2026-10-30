@@ -80,7 +80,9 @@ and the **link** to the agent: it reads `agent.json`, starts an agent when none 
 forwards the webview's requests with a 15 s timeout, fans pushes out to the windows, reconnects with backoff and
 replaces an agent of another build. It never starts a second agent while the one it started is running: it waits for a
 starting agent on its process (alive: still starting, however slow the disk; exited: the exit code says why), not on a
-clock (family ADR 0031), and Quit ends exactly the process it started, through the handle it holds (rule 53). The UI never calls `invoke` directly: it uses the `BACKEND` token, whose real
+clock (family ADR 0031), and Quit ends exactly the process it started, through the handle it holds (rule 53). While the
+login service supervises the agent (launchd, systemd) it starts none of its own, and it hands over to the service or
+takes the agent back when Launch at login is switched (ADR 0010 §11). The UI never calls `invoke` directly: it uses the `BACKEND` token, whose real
 implementation calls the shell's one `dyno` command and whose mock serves the browser build. State lives in SignalStores
 (`live`, `history`, `processes`, `alerts`, `diagnosis`, `health`, `settings`).
 
