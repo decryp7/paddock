@@ -231,6 +231,9 @@ jobs:
       # Spotter's UI imports the shared library from ui/dist, which the app build needs.
       prepare: npm run build -w ui
       cliff-config: apps/spotter/cliff.toml
+      # The first release has no earlier spotter-v* tag, and crates/** and ui/** reach back through the whole monorepo: its notes
+      # are the CHANGELOG's [1.0.0] section. From spotter-v1.0.1 on git-cliff lists the commits since the previous tag.
+      first-release-changelog: apps/spotter/CHANGELOG.md
       cliff-paths: |
         apps/spotter/**
         crates/**

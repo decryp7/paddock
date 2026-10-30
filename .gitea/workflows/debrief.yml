@@ -575,42 +575,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Host-mode Windows runners may not have Git's bash on PATH; actions and `shell: bash` need it. The npm cache lives in
-      # a host folder that outlives the job (npm ci then installs from disk).
-      - name: Git bash on PATH (Windows)
-        if: runner.os == 'Windows'
-        # cmd, not PowerShell: runners with a restricted execution policy refuse the .ps1 act writes for a step.
-        shell: cmd
-        working-directory: .
-        run: |
-          rem Which account runs the job: WebView2 smoke tests cannot run as SYSTEM (its temp is C:\Windows\SystemTemp).
-          whoami
-          echo the job temp folder is %TEMP%
-          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner: no bash.exe in "%ProgramFiles%\Git\bin" & exit /b 1)
-          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo npm_config_prefer_offline=true>>"%GITHUB_ENV%"
-          echo npm_config_audit=false>>"%GITHUB_ENV%"
-          echo npm_config_fund=false>>"%GITHUB_ENV%"
-
       # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
       - uses: ./.gitea/actions/build-jobs
 
-      # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
+      # A slot of the host (job isolation), before every kept folder.
       - uses: ./.gitea/actions/job-isolation
-
-      # npm's download cache on the Windows host (node-caches keeps it elsewhere): the job slot's kept folder npm-s<n>.
-      - name: npm cache (Windows)
-        if: runner.os == 'Windows'
-        working-directory: .
-        run: |
-          dir="$(bash conformance/ci/job-isolation.sh path npm)"
-          echo "npm_config_cache=$(cygpath -w "$dir")" >> "$GITHUB_ENV"
-
-      # Host runners: the same checkout path every run, so sccache hits the workspace crates.
-      - uses: ./.gitea/actions/stable-workspace
-        if: runner.os != 'Linux'
-        with:
-          name: debrief-${{ github.job }}-${{ runner.os }}
 
       - uses: ./.gitea/actions/setup-rust
 
